@@ -64,13 +64,6 @@ jobs:
           name: project
           path: .
 
-      - name: SonarScanner Setup
-        run: |
-          wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
-          unzip sonar-scanner-cli-5.0.1.3006-linux.zip
-          mv sonar-scanner-5.0.1.3006-linux /opt/sonar-scanner
-          ln -s /opt/sonar-scanner/bin/sonar-scanner /usr/local/bin/sonar-scanner
-
       - name: What is next version?
         id: semver
         uses: ietf-tools/semver-action@v1
@@ -82,20 +75,14 @@ jobs:
           noNewCommitBehavior: current
           patchList: 'vendor, update, fix, bugfix, perf, refactor, test, tests, chore, ci, docs, improve, style, build, revert, improvement, enhancement, coverage, clean'
 
-      - name: SonarScanner Analyze
-        run: sonar-scanner -Dsonar.projectVersion=${{ steps.semver.outputs.next }} -Dsonar.login=${{ secrets.SONAR_TOKEN }} -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} -Dsonar.qualitygate.wait=true || echo "EXIT_STATUS=$?" >> $GITHUB_ENV
-
-      - name: Fail under specific conditions
-        if: github.event_name != 'push'
-        run: |
-          if [ "${{ env.EXIT_STATUS }}" != "" ]; then
-            exit 1
-          fi
-
-      - name: SonarQube Comment
-        if: always() && github.event_name == 'pull_request'
-        uses: ibex-code/sonarqube-pull-request-comment@v1
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
         with:
-          sonar_token: ${{ secrets.SONAR_TOKEN }}
-          sonar_host_url: ${{ secrets.SONAR_HOST_URL }}
-          github_token: ${{ secrets.GITHUB_TOKEN }} 
+          projectBaseDir: .
+          args: >
+            -Dsonar.projectVersion=${{ steps.semver.outputs.next }}
+            -Dsonar.organization=${{ secrets.ORGANIZATION_NAME }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }}
+            -Dsonar.qualitygate.wait=true
