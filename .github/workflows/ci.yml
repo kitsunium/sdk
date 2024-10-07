@@ -87,3 +87,5 @@ jobs:
             -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }}
             -Dsonar.qualitygate.wait=true
+            -Dsonar.test.inclusions=**/*_test.go
+            -Dsonar.go.coverage.reportPaths=coverage.out
