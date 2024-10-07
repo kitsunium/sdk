@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    
+permissions:
+  pull-requests: write
+  contents: write
+  packages: write
+
+jobs:
+  Tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.x
+          cache-dependency-path: api/go.sum
+
+      - name: Setup Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup dependencies
+        run: go install gotest.tools/gotestsum@latest
+
+      - name: Run all the tests
+        run: task tests
+
+      - name: Upload project to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          if-no-files-found: error
+          name: project
+          path: .
+
+  Analyze:
+    name: Analyze
+    needs: Tests
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.next }}
+      prev_version: ${{ steps.semver.outputs.current }}
+    steps:
+      - name: Download project from Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: project
+          path: .
+
+      - name: What is next version?
+        id: semver
+        uses: ietf-tools/semver-action@v1
+        with:
+          token: ${{ github.token }}
+          branch: main
+          skipInvalidTags: true
+          noVersionBumpBehavior: patch
+          noNewCommitBehavior: current
+          patchList: 'vendor, update, fix, bugfix, perf, refactor, test, tests, chore, ci, docs, improve, style, build, revert, improvement, enhancement, coverage, clean'
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectBaseDir: .
+          args: >
+            -Dsonar.projectVersion=${{ steps.semver.outputs.next }}
+            -Dsonar.organization=${{ secrets.ORGANIZATION_NAME }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }}
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.test.inclusions=**/*_test.go
+            -Dsonar.go.coverage.reportPaths=coverage.out
