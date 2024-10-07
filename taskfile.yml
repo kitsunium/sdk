@@ -1,0 +1,16 @@
+version: '3'
+silent: true
+tasks:
+  default:
+    cmds:
+      - task -l
+  update:
+    desc: Update the go modules
+    cmds:
+      - go get -u ./...
+      - go mod vendor
+      - go mod tidy
+  tests:
+    desc: Run the tests
+    cmds: 
+      - gotestsum -f github-actions -- -v $(go list ./... | grep -vE "vendor") -coverprofile={{.TASKFILE_DIR}}/coverage_api.out -covermode=atomic

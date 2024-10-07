@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    
+permissions:
+  pull-requests: write
+  contents: write
+  packages: write
+
+jobs:
+  Tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+          cache-dependency-path: api/go.sum
+
+      - name: Setup Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup dependencies
+        run: go install gotest.tools/gotestsum@latest
+
+      - name: Run all the tests
+        run: task tests
+
+      - name: Upload project to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          if-no-files-found: error
+          name: project
+          path: .
+
+  Analyze:
+    name: Analyze
+    needs: Tests
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.next }}
+      prev_version: ${{ steps.semver.outputs.current }}
+    steps:
+      - name: Download project from Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: project
+          path: .
+
+      - name: SonarScanner Setup
+        run: |
+          wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+          unzip sonar-scanner-cli-5.0.1.3006-linux.zip
+          mv sonar-scanner-5.0.1.3006-linux /opt/sonar-scanner
+          ln -s /opt/sonar-scanner/bin/sonar-scanner /usr/local/bin/sonar-scanner
+
+      - name: What is next version?
+        id: semver
+        uses: ietf-tools/semver-action@v1
+        with:
+          token: ${{ github.token }}
+          branch: main
+          skipInvalidTags: true
+          noVersionBumpBehavior: patch
+          noNewCommitBehavior: current
+          patchList: 'vendor, update, fix, bugfix, perf, refactor, test, tests, chore, ci, docs, improve, style, build, revert, improvement, enhancement, coverage, clean'
+
+      - name: SonarScanner Analyze
+        run: sonar-scanner -Dsonar.projectVersion=${{ steps.semver.outputs.next }} -Dsonar.login=${{ secrets.SONAR_TOKEN }} -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} -Dsonar.qualitygate.wait=true || echo "EXIT_STATUS=$?" >> $GITHUB_ENV
+
+      - name: Fail under specific conditions
+        if: github.event_name != 'push'
+        run: |
+          if [ "${{ env.EXIT_STATUS }}" != "" ]; then
+            exit 1
+          fi
+
+      - name: SonarQube Comment
+        if: always() && github.event_name == 'pull_request'
+        uses: ibex-code/sonarqube-pull-request-comment@v1
+        with:
+          sonar_token: ${{ secrets.SONAR_TOKEN }}
+          sonar_host_url: ${{ secrets.SONAR_HOST_URL }}
+          github_token: ${{ secrets.GITHUB_TOKEN }} 

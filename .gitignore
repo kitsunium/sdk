@@ -1,0 +1,12 @@
+vendor
+.build
+terraform*
+.terraform*
+token.env
+.DS_Store
+*.out
+tfplan
+*.db
+config.yml
+*.lcov
+*.sqlite
