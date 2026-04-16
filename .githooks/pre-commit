@@ -1,0 +1,19 @@
+#!/bin/bash
+# ============================================================================
+# pre-commit hook - Project-level pre-commit checks
+# ============================================================================
+
+WORKSPACE="${CLAUDE_PROJECT_DIR:-/workspace}"
+SCRIPT="$HOME/.claude/scripts/pre-commit-checks.sh"
+
+# Fallback to workspace scripts if home not available
+if [ ! -f "$SCRIPT" ]; then
+    SCRIPT="$WORKSPACE/.devcontainer/images/.claude/scripts/pre-commit-checks.sh"
+fi
+
+if [ -f "$SCRIPT" ]; then
+    bash "$SCRIPT" "$WORKSPACE"
+    exit $?
+fi
+
+exit 0
