@@ -1,0 +1,83 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-03-20",
+  "total_agents": 81,
+  "categories": {
+    "orchestrators": {
+      "model": "opus",
+      "count": 2,
+      "agents": ["developer-orchestrator", "devops-orchestrator"],
+      "role": "Coordinate multi-agent workflows, delegate to specialists"
+    },
+    "lang-specialists": {
+      "model": "sonnet",
+      "count": 25,
+      "prefix": "developer-specialist-",
+      "role": "Language-specific code generation, review, and linting"
+    },
+    "dev-executors": {
+      "model": "varies",
+      "count": 6,
+      "prefix": "developer-executor-",
+      "agents": ["developer-specialist-review", "developer-executor-correctness", "developer-executor-security", "developer-executor-design", "developer-executor-quality", "developer-executor-shell"],
+      "role": "Focused analysis axes dispatched by review orchestrator"
+    },
+    "devops-specialists": {
+      "model": "sonnet",
+      "count": 9,
+      "prefix": "devops-specialist-",
+      "role": "Cloud, infrastructure, security, and cost analysis"
+    },
+    "devops-executors": {
+      "model": "haiku",
+      "count": 6,
+      "prefix": "devops-executor-",
+      "role": "OS detection and routing to appropriate OS specialist"
+    },
+    "os-specialists": {
+      "model": "haiku",
+      "count": 22,
+      "prefix": "os-specialist-",
+      "role": "OS-specific package management, init systems, security"
+    },
+    "docs-analyzers": {
+      "model": "haiku",
+      "count": 9,
+      "prefix": "docs-analyzer-",
+      "role": "Project documentation analysis and generation"
+    },
+    "meta": {
+      "model": "varies",
+      "count": 2,
+      "agents": ["developer-commentator", "developer-commentator-worker"],
+      "role": "Cross-cutting concerns (comment auditing, documentation)"
+    }
+  },
+  "routing": {
+    "code_review": {
+      "entry": "/review",
+      "chain": "developer-specialist-review (sonnet) → {developer-executor-correctness (sonnet), developer-executor-security (opus), developer-executor-design (sonnet), developer-executor-quality (haiku), developer-executor-shell (haiku)}"
+    },
+    "language_task": {
+      "entry": "/do, /plan",
+      "chain": "developer-orchestrator (opus) → developer-specialist-{lang} (sonnet)"
+    },
+    "infrastructure": {
+      "entry": "/infra",
+      "chain": "devops-orchestrator (opus) → devops-specialist-{domain} (sonnet) → devops-executor-{platform} (haiku) → os-specialist-{distro} (haiku)"
+    },
+    "documentation": {
+      "entry": "/docs",
+      "chain": "docs-analyzer-structure (haiku) → docs-analyzer-{aspect} (haiku)"
+    },
+    "comment_audit": {
+      "entry": "/comment",
+      "chain": "developer-commentator (opus) → developer-commentator-worker (haiku) × N"
+    }
+  },
+  "model_distribution": {
+    "opus": 3,
+    "sonnet": 32,
+    "haiku": 46
+  }
+}
