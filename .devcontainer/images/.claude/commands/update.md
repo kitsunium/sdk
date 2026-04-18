@@ -56,6 +56,7 @@ Updates the DevContainer environment from the official template.
 - **Config** - p10k, settings.json
 - **Compose** - docker-compose.yml (update devcontainer, preserve custom)
 - **Grepai** - Optimized grepai configuration
+- **VSCode** - `.vscode/settings.json` (file nesting + editor defaults)
 
 **Updated components (infrastructure - if profile detected):**
 
@@ -101,6 +102,7 @@ Updates the DevContainer environment from the official template.
 | `templates` | `.../images/.claude/templates/` | Project/docs templates |
 | `devcontainer` | `.devcontainer/devcontainer.json` | Feature refs (GHCR) |
 | `dockerfile` | `.devcontainer/Dockerfile` | Image FROM reference |
+| `vscode` | `.vscode/settings.json` | File nesting, editor defaults |
 
 ### Available components (infrastructure - auto-detected)
 
@@ -146,6 +148,7 @@ Components:
   templates    Project/docs/terraform templates
   devcontainer devcontainer.json (feature refs)
   dockerfile   Dockerfile (image FROM)
+  vscode       .vscode/settings.json (file nesting)
 
 Infrastructure (auto-detected):
   modules      Terraform modules (cloud, services)
