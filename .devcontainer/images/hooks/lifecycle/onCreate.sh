@@ -42,4 +42,10 @@ if [ -f "$CLAUDE_FEATURE_DIR/CLAUDE.md" ]; then
     fi
 fi
 
+# Sync toolchains from image to volume (fast if already synced)
+if [ -f "$SCRIPT_DIR/sync-toolchains.sh" ]; then
+    log_info "Syncing toolchains to volume..."
+    bash "$SCRIPT_DIR/sync-toolchains.sh" || log_warn "Toolchain sync had warnings"
+fi
+
 log_success "onCreate: Initial container setup complete"

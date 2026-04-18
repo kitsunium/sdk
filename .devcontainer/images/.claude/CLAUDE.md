@@ -1,4 +1,4 @@
-<!-- updated: 2026-03-14T12:00:00Z -->
+<!-- updated: 2026-04-18T21:18:33Z -->
 # Claude Code Core Rules
 
 ## 1.0 MCP-FIRST (MANDATORY)

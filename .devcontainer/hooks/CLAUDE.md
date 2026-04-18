@@ -1,4 +1,4 @@
-<!-- updated: 2026-03-26T18:00:00Z -->
+<!-- updated: 2026-04-18T21:18:33Z -->
 # DevContainer Hooks
 
 ## Purpose

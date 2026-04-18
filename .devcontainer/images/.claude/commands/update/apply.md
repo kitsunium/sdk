@@ -170,6 +170,13 @@ apply_devcontainer_tarball() {
         echo "  ✓ Dockerfile"
     fi
 
+    # .vscode/settings.json (file nesting + editor defaults — force overwrite)
+    if [ -f "$src/.vscode/settings.json" ]; then
+        mkdir -p ".vscode"
+        cp -f "$src/.vscode/settings.json" ".vscode/settings.json"
+        echo "  ✓ vscode (settings.json)"
+    fi
+
     # docker-compose.yml (container only, preserve custom services)
     if [ "$CONTEXT" = "container" ]; then
         update_compose_from_tarball "$src"
@@ -433,6 +440,7 @@ echo "  ✓ .template-version updated ($DC_COMMIT)"
     ✓ templates      (project/docs templates)
     ✓ devcontainer   (feature refs)
     ✓ Dockerfile     (image FROM)
+    ✓ vscode         (.vscode/settings.json)
 
 ═══════════════════════════════════════════════
 ```
