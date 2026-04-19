@@ -83,7 +83,7 @@ uniqueness across the SDK.
 | 4200-4299 | `pkg/v1/codec` + `pkg/v1/codec/baseenc` | emitter | `CodeUnknownFormat=4201`, `CodeCodecUnavailable=4202`, `CodeStreamingUnsupported=4203`, `CodeInvalidEncoding=4251`, `CodeDecodeFailed=4252` |
 | ≥ 10000 | `pkg/v2+` | future | — |
 
-### Codec service subranges (3200-3299)
+### Codec service subranges (3200-3399)
 
 | Range | Package | Codes in M1 |
 |---|---|---|
@@ -101,7 +101,7 @@ uniqueness across the SDK.
 | 3300-3309 | `internal/service/codec/ndjson` | `CodeMarshalFailed=3301`, `CodeUnmarshalFailed=3302`, `CodeValueInvalid=3303` |
 | 3310-3319 | `internal/service/codec/hcl` (M5, optional) | reserved |
 | 3320-3329 | `internal/service/codec/bson` (M5, optional) | reserved |
-| 3330+     | schema-based codecs (protobuf / capnp / fb / avro) — deferred | reserved |
+| 3330-3399 | schema-based codecs (protobuf / capnp / fb / avro) — each will carve a dedicated subrange inside 3330-3399 in its own ADR | reserved |
 
 ## Enforcement
 

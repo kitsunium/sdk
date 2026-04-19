@@ -39,18 +39,47 @@ func Register(c Codec) (ok bool) {
 		//: surface the doc code for grep-friendly panic messages.
 		panic(fmt.Sprintf("codec.Register [%d DUPLICATE_REGISTRATION]: duplicate Name %q", CodeDuplicateRegistration, name))
 	}
-	//: index every declared MIME type against the canonical Format.
-	for _, mime := range c.MIMETypes() {
-		//: normalise to lowercase so MIME lookups are case-insensitive.
-		mimeIndex.Store(strings.ToLower(mime), name)
-	}
-	//: index every declared extension against the canonical Format.
-	for _, ext := range c.Extensions() {
-		//: normalise to lowercase so extension lookups are case-insensitive.
-		extIndex.Store(strings.ToLower(ext), name)
-	}
+	//: delegate MIME + extension indexing to helpers to keep Register below
+	//: the KTN-FUNC-CYCLO ceiling (8) — the conflict-detection branches would
+	//: otherwise push Register's cyclomatic complexity to 9.
+	indexAliases(&mimeIndex, c.MIMETypes(), name, "MIME")
+	//: extensions share the same shape.
+	indexAliases(&extIndex, c.Extensions(), name, "extension")
 	//: conventional true return lets Register sit in a var initialiser.
 	return true
+}
+
+// indexAliases stores every alias (MIME or extension) in dst, panicking
+// when a distinct codec already claims the same key.
+//
+// Params:
+//   - dst: the sync.Map to index into (mimeIndex or extIndex).
+//   - aliases: the alias list returned by the codec.
+//   - name: canonical Format of the codec being registered.
+//   - kind: human-readable category for the panic message ("MIME" / "extension").
+//
+// Returns: nothing; panics on conflict.
+func indexAliases(dst *sync.Map, aliases []string, name Format, kind string) {
+	//: iterate over every alias and publish it atomically.
+	for _, alias := range aliases {
+		//: normalise so lookups are case-insensitive.
+		key := strings.ToLower(alias)
+		//: LoadOrStore is atomic — returns the previous value on a hit.
+		prev, loaded := dst.LoadOrStore(key, name)
+		//: absence path — brand new alias.
+		if !loaded {
+			//: move on to the next alias.
+			continue
+		}
+		//: idempotent re-registration by the same codec is accepted.
+		if prev == name {
+			//: nothing to do.
+			continue
+		}
+		//: distinct codec conflict — loud failure at boot.
+		panic(fmt.Sprintf("codec.Register [%d DUPLICATE_REGISTRATION]: %s %q already registered by %q (requested by %q)",
+			CodeDuplicateRegistration, kind, alias, prev, name))
+	}
 }
 
 // Lookup returns the codec registered under f.

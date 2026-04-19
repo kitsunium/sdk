@@ -79,7 +79,12 @@ func (*asn1Codec) Marshal(v any) (data []byte, err error) {
 	})
 }
 
-// Unmarshal parses data as ASN.1 BER/DER into v.
+// Unmarshal parses data as ASN.1 BER/DER into v. Trailing bytes past the
+// first decoded structure are accepted silently — this matches
+// encoding/asn1's own lenient contract and preserves compatibility with
+// callers that feed a known-sized prefix of a larger buffer. If strict
+// trailing-byte rejection becomes a requirement, add a dedicated
+// UnmarshalStrict helper rather than tightening this default.
 //
 // Params:
 //   - data: ASN.1-encoded bytes.
@@ -88,7 +93,8 @@ func (*asn1Codec) Marshal(v any) (data []byte, err error) {
 // Returns:
 //   - error: UnmarshalFailed wrapping the stdlib cause on failure.
 func (*asn1Codec) Unmarshal(data []byte, v any) (err error) {
-	//: encoding/asn1.Unmarshal returns the remaining bytes; we ignore them.
+	//: encoding/asn1.Unmarshal returns the remaining bytes; we ignore them
+	//: per the contract documented on the function comment.
 	_, uerr := stdasn1.Unmarshal(data, v)
 	//: success fast-path.
 	if uerr == nil {

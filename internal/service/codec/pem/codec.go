@@ -4,9 +4,9 @@
 package pem
 
 import (
-	"slices"
 	"bytes"
 	stdpem "encoding/pem"
+	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -78,14 +78,14 @@ func (*pemCodec) Extensions() (exts []string) {
 func (*pemCodec) Marshal(v any) (data []byte, err error) {
 	//: type-gate: PEM only accepts a typed block.
 	block, ok := v.(*stdpem.Block)
-	//: loud failure when the caller passed the wrong type.
-	if !ok {
+	//: loud failure when the caller passed the wrong type OR a nil block.
+	if !ok || block == nil {
 		//: shape-the-input rejection uses the VALUE_INVALID sentinel.
 		return nil, errs.Wrap(nil, errs.WrapParams{
 			Code:    CodePEMValueInvalid,
 			Reason:  "VALUE_INVALID",
-			Public:  "PEM codec requires a *pem.Block value",
-			Private: "service/codec/pem.Marshal: argument is not *pem.Block",
+			Public:  "PEM codec requires a non-nil *pem.Block value",
+			Private: "service/codec/pem.Marshal: argument is not a non-nil *pem.Block",
 		})
 	}
 	//: encode into a buffer so the caller gets []byte.
@@ -115,14 +115,14 @@ func (*pemCodec) Marshal(v any) (data []byte, err error) {
 func (*pemCodec) Unmarshal(data []byte, v any) (err error) {
 	//: target must be **pem.Block so we can populate it.
 	dst, ok := v.(**stdpem.Block)
-	//: shape-the-target rejection.
-	if !ok {
+	//: shape-the-target rejection — wrong type or nil outer pointer panics later.
+	if !ok || dst == nil {
 		//: loud failure when the caller passed the wrong type.
 		return errs.Wrap(nil, errs.WrapParams{
 			Code:    CodePEMValueInvalid,
 			Reason:  "VALUE_INVALID",
-			Public:  "PEM codec requires a **pem.Block target",
-			Private: "service/codec/pem.Unmarshal: target is not **pem.Block",
+			Public:  "PEM codec requires a non-nil **pem.Block target",
+			Private: "service/codec/pem.Unmarshal: target is not a non-nil **pem.Block",
 		})
 	}
 	//: Decode returns the first block and any trailing bytes.
