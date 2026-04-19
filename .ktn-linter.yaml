@@ -87,36 +87,17 @@ rules:
   # map storage) do not fire on concrete methods that simply delegate to
   # `encoding/json`, `encoding/xml`, etc.
   #
-  # We disable the rule ONLY inside codec trees. Every other Go package in
-  # the SDK must still avoid `any` except where the Codec contract requires it.
+  # Disable ONLY inside the codec tree. Every other Go package in the SDK
+  # must still avoid `any` except where the Codec contract requires it.
   KTN-INTERFACE-ANYUSE:
-    enabled: true
     exclude:
       - "**/internal/core/codec/**"
       - "**/internal/service/codec/**"
       - "**/pkg/v1/codec/**"
 
-  # KTN-FUNC-NOINIT (warning) — "init() is discouraged".
-  #
-  # Scoped exception: the codec registry uses the canonical Go pattern
-  # `import _ "…/service/codec/json"` which relies on the subpackage's
-  # init() calling codec.Register. There is no clean workaround without
-  # forcing every consumer to manually call a Register function.
-  #
-  # Same scope as above — the rule stays active everywhere else.
-  KTN-FUNC-NOINIT:
-    enabled: true
-    exclude:
-      - "**/internal/service/codec/**"
-      - "**/pkg/v1/codec/**"
-
-  # KTN-TEST-DECISION (info) — "exercise all decision outcomes".
-  #
-  # This rule's static analyser frequently fails to detect branch coverage
-  # when tests use a runCase helper or table-driven subtests. The rule is
-  # still useful as guidance; we just don't want it to block commits.
-  # Downgrade by leaving it enabled but allowing the hook (phase 8) to run
-  # it non-blocking via max_phase above — KTN-TEST-DECISION is in Phase 8,
-  # which we already cap out of blocking territory.
-  KTN-TEST-DECISION:
-    enabled: true
+  # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
+  # Go 1.26 convention is to avoid init() in favour of explicit constructors,
+  # sync.Once for lazy init, or package-level var initialisers. The codec
+  # registry will follow that: each codec subpackage registers itself via
+  # `var _ = codec.Register(New())` (var initialiser, not init()), or via
+  # an explicit constructor the facade invokes.
