@@ -18,6 +18,7 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/codec/ndjson"
 	_ "github.com/kitsunium/sdk/internal/service/codec/pem"
 	_ "github.com/kitsunium/sdk/internal/service/codec/xml"
+	_ "github.com/kitsunium/sdk/internal/service/codec/yaml"
 )
 
 // Format re-exports core/codec.Format so consumers only depend on pkg/v1.
@@ -46,6 +47,8 @@ const (
 	ASN1DER Format = "asn1-der"
 	// PEM denotes the stdlib encoding/pem block format.
 	PEM Format = "pem"
+	// YAML denotes the gopkg.in/yaml.v3 wire format.
+	YAML Format = "yaml"
 )
 
 // Marshal serialises v using the codec registered under f.
