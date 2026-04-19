@@ -13,8 +13,10 @@ import (
 
 	//: blank imports drive each codec's self-registration side-effect.
 	_ "github.com/kitsunium/sdk/internal/service/codec/asn1"
+	_ "github.com/kitsunium/sdk/internal/service/codec/cbor"
 	_ "github.com/kitsunium/sdk/internal/service/codec/csv"
 	_ "github.com/kitsunium/sdk/internal/service/codec/json"
+	_ "github.com/kitsunium/sdk/internal/service/codec/msgpack"
 	_ "github.com/kitsunium/sdk/internal/service/codec/ndjson"
 	_ "github.com/kitsunium/sdk/internal/service/codec/pem"
 	_ "github.com/kitsunium/sdk/internal/service/codec/toml"
@@ -52,6 +54,10 @@ const (
 	YAML Format = "yaml"
 	// TOML denotes the pelletier/go-toml/v2 wire format.
 	TOML Format = "toml"
+	// CBOR denotes the fxamacker/cbor/v2 wire format (RFC 8949).
+	CBOR Format = "cbor"
+	// MsgPack denotes the vmihailenco/msgpack/v5 wire format.
+	MsgPack Format = "msgpack"
 )
 
 // Marshal serialises v using the codec registered under f.
