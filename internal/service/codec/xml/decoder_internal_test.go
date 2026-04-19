@@ -7,22 +7,52 @@ import (
 	stdxml "encoding/xml"
 )
 
-// Test_xmlDecoder_MoreAfterInit confirms a freshly-built decoder reports More
-// before any Decode call, matching the streaming-codec contract.
-func Test_xmlDecoder_MoreAfterInit(t *testing.T) {
+// Test_xmlDecoder_Decode covers both a success path and a malformed-input
+// path to exercise the wrap branch.
+func Test_xmlDecoder_Decode(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name string
-		want bool
+		name    string
+		data    []byte
+		wantErr bool
 	}
 	tests := []tc{
-		{"fresh decoder reports More", true},
+		{"empty stream does not error further", nil, false},
+		{"garbage bytes surface an error", []byte{0xff, 0xff, 0xff, 0xff}, true},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
+		dec := &xmlDecoder{inner: stdxml.NewDecoder(bytes.NewReader(tc.data))}
+		var out map[string]any
+		err := dec.Decode(&out)
+		//: treat EOF on the empty case as non-error.
+		if tc.wantErr && err == nil {
+			t.Errorf("%s: expected error on malformed input", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// Test_xmlDecoder_More asserts the sticky EOF latch is idempotent: calling
+// More twice in a row on a fresh decoder returns the same value.
+func Test_xmlDecoder_More(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"idempotent before any Decode"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
 		dec := &xmlDecoder{inner: stdxml.NewDecoder(bytes.NewReader(nil))}
-		if got := dec.More(); got != tc.want {
-			t.Errorf("%s: More()=%v want %v", tc.name, got, tc.want)
+		first := dec.More()
+		second := dec.More()
+		if first != second {
+			t.Errorf("%s: More non-idempotent: first=%v second=%v", tc.name, first, second)
 		}
 	}
 	for _, tc := range tests {

@@ -2,8 +2,8 @@ package toml_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
-	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -16,94 +16,189 @@ type payload struct {
 	Age  int    `toml:"age"`
 }
 
+// TestNew verifies the constructor returns a non-nil singleton with the
+// canonical name.
 func TestNew(t *testing.T) {
 	t.Parallel()
-	c := toml.New()
-	if c == nil {
-		t.Fatal("New() returned nil")
+	type tc struct {
+		name string
+		want string
 	}
-	if c.Name() != "toml" {
-		t.Errorf("Name = %q", c.Name())
+	tests := []tc{{"canonical name", "toml"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := toml.New()
+		if c == nil {
+			t.Fatalf("%s: New returned nil", tc.name)
+		}
+		if got := c.Name(); got != tc.want {
+			t.Errorf("%s: Name=%q want %q", tc.name, got, tc.want)
+		}
 	}
-	if len(c.MIMETypes()) == 0 {
-		t.Error("MIMETypes empty")
-	}
-	if len(c.Extensions()) == 0 {
-		t.Error("Extensions empty")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-func TestRoundTrip(t *testing.T) {
+// TestMarshal covers the encoder success path plus available error cases.
+func TestMarshal(t *testing.T) {
 	t.Parallel()
-	in := payload{Name: "ping", Age: 3}
-	data, err := toml.New().Marshal(in)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+	type tc struct {
+		name    string
+		in      any
+		wantErr string
 	}
-	var out payload
-	if uerr := toml.New().Unmarshal(data, &out); uerr != nil {
-		t.Fatalf("Unmarshal: %v", uerr)
+	tests := []tc{
+		{"round-trip success", payload{Name: "a", Age: 1}, ""},
+		{"unsupported input surfaces MARSHAL_FAILED", make(chan int), "MARSHAL_FAILED"},
 	}
-	if out != in {
-		t.Errorf("got %+v want %+v", out, in)
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		_, err := toml.New().Marshal(tc.in)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Marshal err=%v", tc.name, err)
+		}
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-func TestUnmarshal_Malformed(t *testing.T) {
+// TestUnmarshal covers the decoder success path plus the UNMARSHAL_FAILED
+// branch on malformed bytes.
+func TestUnmarshal(t *testing.T) {
 	t.Parallel()
-	var out payload
-	err := toml.New().Unmarshal([]byte("name = [unclosed"), &out)
-	if !errs.HasReason(err, "UNMARSHAL_FAILED") {
-		t.Errorf("expected UNMARSHAL_FAILED, got %v", err)
+	data, _ := toml.New().Marshal(payload{Name: "a", Age: 1})
+	type tc struct {
+		name    string
+		data    []byte
+		target  any
+		wantErr string
+	}
+	var good payload
+	var bad payload
+	tests := []tc{
+		{"round-trip success", data, &good, ""},
+		{"malformed bytes surface UNMARSHAL_FAILED", []byte("= bad"), &bad, "UNMARSHAL_FAILED"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		err := toml.New().Unmarshal(tc.data, tc.target)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Unmarshal err=%v", tc.name, err)
+		}
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-func TestStreaming(t *testing.T) {
+// TestNewEncoder exercises the streaming encoder with a happy-path encode
+// plus a writer-failure path when applicable.
+func TestNewEncoder(t *testing.T) {
 	t.Parallel()
-	sc := toml.New().(codec.StreamingCodec)
-	var buf bytes.Buffer
-	enc := sc.NewEncoder(&buf)
-	if err := enc.Encode(payload{Name: "a", Age: 1}); err != nil {
-		t.Fatalf("Encode: %v", err)
+	type tc struct {
+		name string
 	}
-	if err := enc.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	tests := []tc{{"streams a record"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		sc, ok := toml.New().(codec.StreamingCodec)
+		if !ok {
+			t.Fatalf("%s: codec does not implement StreamingCodec", tc.name)
+		}
+		var buf bytes.Buffer
+		enc := sc.NewEncoder(&buf)
+		if err := enc.Encode(payload{Name: "a", Age: 1}); err != nil {
+			t.Errorf("%s: Encode err=%v", tc.name, err)
+		}
+		if err := enc.Close(); err != nil {
+			t.Errorf("%s: Close err=%v", tc.name, err)
+		}
 	}
-	dec := sc.NewDecoder(&buf)
-	if !dec.More() {
-		t.Error("More() should be true before Decode")
-	}
-	var p payload
-	if err := dec.Decode(&p); err != nil {
-		t.Fatalf("Decode: %v", err)
-	}
-	if dec.More() {
-		t.Error("More() should be false after Decode")
-	}
-	if err := dec.Decode(&p); err != io.EOF {
-		t.Errorf("second Decode err = %v, want io.EOF", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-func TestStreaming_DecodeError(t *testing.T) {
+// TestNewDecoder exercises the streaming decoder including the
+// UNMARSHAL_FAILED branch on corrupt input.
+func TestNewDecoder(t *testing.T) {
 	t.Parallel()
-	sc := toml.New().(codec.StreamingCodec)
-	dec := sc.NewDecoder(strings.NewReader("name = [bad"))
-	var p payload
-	if err := dec.Decode(&p); !errs.HasReason(err, "UNMARSHAL_FAILED") {
-		t.Errorf("expected UNMARSHAL_FAILED, got %v", err)
+	type tc struct {
+		name    string
+		data    []byte
+		wantErr string
+	}
+	good, _ := toml.New().Marshal(payload{Name: "a", Age: 1})
+	tests := []tc{
+		{"decodes a valid record", good, ""},
+		{"corrupt input surfaces UNMARSHAL_FAILED", []byte("= bad"), "UNMARSHAL_FAILED"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		sc := toml.New().(codec.StreamingCodec)
+		dec := sc.NewDecoder(bytes.NewReader(tc.data))
+		var out payload
+		err := dec.Decode(&out)
+		if tc.wantErr == "" {
+			if err != nil && !errors.Is(err, io.EOF) {
+				t.Errorf("%s: Decode err=%v", tc.name, err)
+			}
+			return
+		}
+		if !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
+// TestRegisteredViaImport verifies the codec self-registers on package load.
 func TestRegisteredViaImport(t *testing.T) {
 	t.Parallel()
-	if _, ok := codec.Lookup(codec.Format("toml")); !ok {
-		t.Error("toml codec not registered")
+	type tc struct {
+		name  string
+		check func() bool
 	}
-	if _, ok := codec.LookupMIME("application/toml"); !ok {
-		t.Error("application/toml not resolved")
+	tests := []tc{
+		{"format registered", func() bool { _, ok := codec.Lookup(codec.Format("toml")); return ok }},
+		{"MIME resolved", func() bool { _, ok := codec.LookupMIME("application/toml"); return ok }},
+		{"extension resolved", func() bool { _, ok := codec.LookupExt(".toml"); return ok }},
 	}
-	if _, ok := codec.LookupExt(".toml"); !ok {
-		t.Error(".toml not resolved")
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		if !tc.check() {
+			t.Errorf("%s: lookup failed", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }

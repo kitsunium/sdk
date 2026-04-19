@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// Test_indexAliases_Conflict verifies the helper panics with the expected
-// marker when two distinct codecs claim the same alias, and stays silent
-// when the same codec re-registers the same alias (idempotent path).
-func Test_indexAliases_Conflict(t *testing.T) {
+// Test_indexAliases covers fresh-alias, idempotent, and conflict paths of
+// the helper. Panic inspection is performed via callRecoverAliases.
+func Test_indexAliases(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name      string

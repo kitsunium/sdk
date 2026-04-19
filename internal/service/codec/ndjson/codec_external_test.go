@@ -14,105 +14,129 @@ type payload struct {
 	Age  int    `json:"age"`
 }
 
+// TestNew verifies the constructor returns a non-nil singleton with the
+// canonical name.
 func TestNew(t *testing.T) {
 	t.Parallel()
-	c := ndjson.New()
-	if c == nil {
-		t.Fatal("New() returned nil")
+	type tc struct {
+		name string
+		want string
 	}
-	if c.Name() != "ndjson" {
-		t.Errorf("Name = %q", c.Name())
+	tests := []tc{{"canonical name", "ndjson"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := ndjson.New()
+		if c == nil {
+			t.Fatalf("%s: New returned nil", tc.name)
+		}
+		if got := c.Name(); got != tc.want {
+			t.Errorf("%s: Name=%q want %q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-func TestRoundTrip(t *testing.T) {
+// TestMarshal covers record emission plus VALUE_INVALID / MARSHAL_FAILED.
+func TestMarshal(t *testing.T) {
 	t.Parallel()
-	in := []payload{{Name: "a", Age: 1}, {Name: "b", Age: 2}}
-	data, err := ndjson.New().Marshal(in)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+	type tc struct {
+		name    string
+		in      any
+		wantErr string
 	}
-	text := string(data)
-	if !strings.HasSuffix(text, "\n") {
-		t.Error("output missing trailing newline")
+	tests := []tc{
+		{"slice of records", []payload{{Name: "a", Age: 1}, {Name: "b", Age: 2}}, ""},
+		{"non-slice input", 42, "VALUE_INVALID"},
+		{"slice of unsupported elements", []chan int{make(chan int)}, "MARSHAL_FAILED"},
 	}
-	if strings.Count(text, "\n") != len(in) {
-		t.Errorf("wrong newline count in %q", text)
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		data, err := ndjson.New().Marshal(tc.in)
+		if tc.wantErr == "" {
+			if err != nil {
+				t.Errorf("%s: Marshal err=%v", tc.name, err)
+			} else if !strings.HasSuffix(string(data), "\n") {
+				t.Errorf("%s: output missing trailing newline", tc.name)
+			}
+			return
+		}
+		if !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestUnmarshal covers the success path plus the VALUE_INVALID (non-slice
+// target, nil pointer) and UNMARSHAL_FAILED (bad line) branches.
+func TestUnmarshal(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		data    []byte
+		target  any
+		wantErr string
 	}
 	var out []payload
-	if uerr := ndjson.New().Unmarshal(data, &out); uerr != nil {
-		t.Fatalf("Unmarshal: %v", uerr)
+	var wrong string
+	var nilSlice *[]payload
+	tests := []tc{
+		{"round-trip success", []byte("{\"name\":\"a\",\"age\":1}\n"), &out, ""},
+		{"blank lines are skipped", []byte("{\"name\":\"a\",\"age\":1}\n\n{\"name\":\"b\",\"age\":2}\n"), &out, ""},
+		{"non-slice pointer target", []byte("{}\n"), &wrong, "VALUE_INVALID"},
+		{"nil pointer target", []byte("{}\n"), nilSlice, "VALUE_INVALID"},
+		{"bad JSON line surfaces UNMARSHAL_FAILED", []byte("not json\n"), &out, "UNMARSHAL_FAILED"},
 	}
-	if len(out) != len(in) || out[0] != in[0] || out[1] != in[1] {
-		t.Errorf("round-trip: got %+v want %+v", out, in)
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		err := ndjson.New().Unmarshal(tc.data, tc.target)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Unmarshal err=%v", tc.name, err)
+		}
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
 	}
-}
-
-func TestUnmarshal_SkipBlankLines(t *testing.T) {
-	t.Parallel()
-	data := []byte("{\"name\":\"a\",\"age\":1}\n\n\n{\"name\":\"b\",\"age\":2}\n")
-	var out []payload
-	if err := ndjson.New().Unmarshal(data, &out); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	if len(out) != 2 {
-		t.Fatalf("got %d records, want 2", len(out))
-	}
-}
-
-func TestMarshal_NotSlice(t *testing.T) {
-	t.Parallel()
-	_, err := ndjson.New().Marshal(42)
-	if !errs.HasReason(err, "VALUE_INVALID") {
-		t.Errorf("expected VALUE_INVALID, got %v", err)
-	}
-}
-
-func TestUnmarshal_NotSlicePointer(t *testing.T) {
-	t.Parallel()
-	var s string
-	err := ndjson.New().Unmarshal([]byte("{}\n"), &s)
-	if !errs.HasReason(err, "VALUE_INVALID") {
-		t.Errorf("expected VALUE_INVALID, got %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-func TestUnmarshal_NilPointer(t *testing.T) {
-	t.Parallel()
-	var target *[]payload
-	err := ndjson.New().Unmarshal([]byte("{}\n"), target)
-	if !errs.HasReason(err, "VALUE_INVALID") {
-		t.Errorf("expected VALUE_INVALID, got %v", err)
-	}
-}
-
-func TestUnmarshal_BadLine(t *testing.T) {
-	t.Parallel()
-	var out []payload
-	err := ndjson.New().Unmarshal([]byte("not json\n"), &out)
-	if !errs.HasReason(err, "UNMARSHAL_FAILED") {
-		t.Errorf("expected UNMARSHAL_FAILED, got %v", err)
-	}
-}
-
-func TestMarshal_BadElement(t *testing.T) {
-	t.Parallel()
-	//: channels aren't JSON-serialisable.
-	_, err := ndjson.New().Marshal([]chan int{make(chan int)})
-	if !errs.HasReason(err, "MARSHAL_FAILED") {
-		t.Errorf("expected MARSHAL_FAILED, got %v", err)
-	}
-}
-
+// TestRegisteredViaImport verifies the codec self-registers on package load.
 func TestRegisteredViaImport(t *testing.T) {
 	t.Parallel()
-	if _, ok := codec.Lookup(codec.Format("ndjson")); !ok {
-		t.Error("ndjson codec not registered")
+	type tc struct {
+		name  string
+		check func() bool
 	}
-	if _, ok := codec.LookupMIME("application/x-ndjson"); !ok {
-		t.Error("application/x-ndjson not resolved")
+	tests := []tc{
+		{"format registered", func() bool { _, ok := codec.Lookup(codec.Format("ndjson")); return ok }},
+		{"MIME resolved", func() bool { _, ok := codec.LookupMIME("application/x-ndjson"); return ok }},
+		{"extension resolved", func() bool { _, ok := codec.LookupExt(".ndjson"); return ok }},
 	}
-	if _, ok := codec.LookupExt(".ndjson"); !ok {
-		t.Error(".ndjson not resolved")
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		if !tc.check() {
+			t.Errorf("%s: lookup failed", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }

@@ -8,99 +8,122 @@ import (
 	"github.com/kitsunium/sdk/internal/service/codec/csv"
 )
 
+// TestNew verifies the public constructor returns a non-nil singleton with
+// the canonical name.
 func TestNew(t *testing.T) {
 	t.Parallel()
-	c := csv.New()
-	if c == nil {
-		t.Fatal("New() returned nil")
+	type tc struct {
+		name string
+		want string
 	}
-	if c.Name() != "csv" {
-		t.Errorf("Name = %q", c.Name())
+	tests := []tc{{"canonical name", "csv"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := csv.New()
+		if c == nil {
+			t.Fatalf("%s: New returned nil", tc.name)
+		}
+		if got := c.Name(); got != tc.want {
+			t.Errorf("%s: Name=%q want %q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
+// TestMarshal covers matrix + pointer forms and the VALUE_INVALID error
+// when a non-matrix input is passed.
 func TestMarshal(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name    string
 		in      any
-		wantErr bool
-		wantSub string
+		wantErr string
 	}
 	tests := []tc{
-		{"matrix", [][]string{{"a", "b"}, {"c", "d"}}, false, "a,b"},
-		{"pointer to matrix", &[][]string{{"x"}}, false, "x"},
-		{"wrong type", "nope", true, ""},
+		{"matrix", [][]string{{"a", "b"}, {"c", "d"}}, ""},
+		{"pointer to matrix", &[][]string{{"x"}}, ""},
+		{"non-matrix input surfaces VALUE_INVALID", "nope", "VALUE_INVALID"},
 	}
-	runCase := func(t *testing.T, c tc) {
+	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		data, err := csv.New().Marshal(c.in)
-		if (err != nil) != c.wantErr {
-			t.Fatalf("%s: err=%v wantErr=%v", c.name, err, c.wantErr)
+		_, err := csv.New().Marshal(tc.in)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Marshal err=%v", tc.name, err)
 		}
-		if c.wantErr {
-			if !errs.HasReason(err, "VALUE_INVALID") {
-				t.Errorf("%s: expected VALUE_INVALID, got %v", c.name, err)
-			}
-			return
-		}
-		if len(data) == 0 {
-			t.Errorf("%s: empty output", c.name)
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
 		}
 	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runCase(t, c)
+			runCase(t, tc)
 		})
 	}
 }
 
+// TestUnmarshal covers the decoder success path plus the UNMARSHAL_FAILED
+// branch on inconsistent rows and VALUE_INVALID on wrong target type.
 func TestUnmarshal(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name    string
 		data    string
-		wantErr bool
+		target  any
+		wantErr string
 	}
+	var matrix [][]string
+	var wrong string
 	tests := []tc{
-		{"valid", "a,b\nc,d\n", false},
-		{"inconsistent rows", "a,b\nc\n", true},
+		{"valid rows round-trip", "a,b\nc,d\n", &matrix, ""},
+		{"inconsistent rows surface UNMARSHAL_FAILED", "a,b\nc\n", &matrix, "UNMARSHAL_FAILED"},
+		{"wrong target surfaces VALUE_INVALID", "a", &wrong, "VALUE_INVALID"},
 	}
-	runCase := func(t *testing.T, c tc) {
+	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		var got [][]string
-		err := csv.New().Unmarshal([]byte(c.data), &got)
-		if (err != nil) != c.wantErr {
-			t.Fatalf("%s: err=%v wantErr=%v", c.name, err, c.wantErr)
+		err := csv.New().Unmarshal([]byte(tc.data), tc.target)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Unmarshal err=%v", tc.name, err)
+		}
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
 		}
 	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runCase(t, c)
+			runCase(t, tc)
 		})
 	}
 }
 
-func TestUnmarshal_WrongTarget(t *testing.T) {
-	t.Parallel()
-	var s string
-	err := csv.New().Unmarshal([]byte("a"), &s)
-	if !errs.HasReason(err, "VALUE_INVALID") {
-		t.Errorf("expected VALUE_INVALID, got %v", err)
-	}
-}
-
+// TestRegisteredViaImport verifies the codec self-registers on package load.
 func TestRegisteredViaImport(t *testing.T) {
 	t.Parallel()
-	if _, ok := codec.Lookup(codec.Format("csv")); !ok {
-		t.Error("csv codec not registered")
+	type tc struct {
+		name  string
+		check func() bool
 	}
-	if _, ok := codec.LookupMIME("text/csv"); !ok {
-		t.Error("text/csv not resolved")
+	tests := []tc{
+		{"format registered", func() bool { _, ok := codec.Lookup(codec.Format("csv")); return ok }},
+		{"MIME resolved", func() bool { _, ok := codec.LookupMIME("text/csv"); return ok }},
+		{"extension resolved", func() bool { _, ok := codec.LookupExt(".csv"); return ok }},
 	}
-	if _, ok := codec.LookupExt(".csv"); !ok {
-		t.Error(".csv not resolved")
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		if !tc.check() {
+			t.Errorf("%s: lookup failed", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }

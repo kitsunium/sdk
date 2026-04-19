@@ -161,11 +161,26 @@ func TestLookupExt(t *testing.T) {
 
 func TestAvailable(t *testing.T) {
 	t.Parallel()
-	got := codec.Available()
-	for i := 1; i < len(got); i++ {
-		if got[i-1] > got[i] {
-			t.Errorf("Available() not sorted: %v", got)
-			return
+	type tc struct {
+		name string
+	}
+	tests := []tc{
+		{"list is sorted ascending"},
+	}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		got := codec.Available()
+		for i := 1; i < len(got); i++ {
+			if got[i-1] > got[i] {
+				t.Errorf("Available() not sorted: %v", got)
+				return
+			}
 		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }

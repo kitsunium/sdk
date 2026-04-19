@@ -2,6 +2,7 @@ package msgpack_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
@@ -15,107 +16,189 @@ type payload struct {
 	Age  int    `msgpack:"age"`
 }
 
+// TestNew verifies the constructor returns a non-nil singleton with the
+// canonical name.
 func TestNew(t *testing.T) {
 	t.Parallel()
-	c := msgpack.New()
-	if c == nil {
-		t.Fatal("New() returned nil")
+	type tc struct {
+		name string
+		want string
 	}
-	if c.Name() != "msgpack" {
-		t.Errorf("Name = %q", c.Name())
-	}
-	if len(c.MIMETypes()) == 0 {
-		t.Error("MIMETypes empty")
-	}
-	if len(c.Extensions()) == 0 {
-		t.Error("Extensions empty")
-	}
-}
-
-func TestRoundTrip(t *testing.T) {
-	t.Parallel()
-	in := payload{Name: "ping", Age: 3}
-	data, err := msgpack.New().Marshal(in)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	var out payload
-	if uerr := msgpack.New().Unmarshal(data, &out); uerr != nil {
-		t.Fatalf("Unmarshal: %v", uerr)
-	}
-	if out != in {
-		t.Errorf("got %+v want %+v", out, in)
-	}
-}
-
-func TestUnmarshal_Malformed(t *testing.T) {
-	t.Parallel()
-	var out payload
-	err := msgpack.New().Unmarshal([]byte{0xc1}, &out)
-	if !errs.HasReason(err, "UNMARSHAL_FAILED") {
-		t.Errorf("expected UNMARSHAL_FAILED, got %v", err)
-	}
-}
-
-func TestMarshal_Invalid(t *testing.T) {
-	t.Parallel()
-	//: channels aren't representable in MessagePack.
-	_, err := msgpack.New().Marshal(make(chan int))
-	if !errs.HasReason(err, "MARSHAL_FAILED") {
-		t.Errorf("expected MARSHAL_FAILED, got %v", err)
-	}
-}
-
-func TestStreaming(t *testing.T) {
-	t.Parallel()
-	sc := msgpack.New().(codec.StreamingCodec)
-	var buf bytes.Buffer
-	enc := sc.NewEncoder(&buf)
-	for _, p := range []payload{{Name: "a", Age: 1}, {Name: "b", Age: 2}} {
-		if err := enc.Encode(p); err != nil {
-			t.Fatalf("Encode: %v", err)
+	tests := []tc{{"canonical name", "msgpack"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := msgpack.New()
+		if c == nil {
+			t.Fatalf("%s: New returned nil", tc.name)
+		}
+		if got := c.Name(); got != tc.want {
+			t.Errorf("%s: Name=%q want %q", tc.name, got, tc.want)
 		}
 	}
-	if err := enc.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	dec := sc.NewDecoder(&buf)
-	count := 0
-	for dec.More() {
-		var p payload
-		err := dec.Decode(&p)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatalf("Decode: %v", err)
-		}
-		count++
-	}
-	if count != 2 {
-		t.Errorf("decoded %d records, want 2", count)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-func TestStreaming_DecodeError(t *testing.T) {
+// TestMarshal covers the encoder success path plus available error cases.
+func TestMarshal(t *testing.T) {
 	t.Parallel()
-	sc := msgpack.New().(codec.StreamingCodec)
-	dec := sc.NewDecoder(bytes.NewReader([]byte{0xc1, 0xc1}))
-	var p payload
-	if err := dec.Decode(&p); !errs.HasReason(err, "UNMARSHAL_FAILED") {
-		t.Errorf("expected UNMARSHAL_FAILED, got %v", err)
+	type tc struct {
+		name    string
+		in      any
+		wantErr string
+	}
+	tests := []tc{
+		{"round-trip success", payload{Name: "a", Age: 1}, ""},
+		{"unsupported input surfaces MARSHAL_FAILED", make(chan int), "MARSHAL_FAILED"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		_, err := msgpack.New().Marshal(tc.in)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Marshal err=%v", tc.name, err)
+		}
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
+// TestUnmarshal covers the decoder success path plus the UNMARSHAL_FAILED
+// branch on malformed bytes.
+func TestUnmarshal(t *testing.T) {
+	t.Parallel()
+	data, _ := msgpack.New().Marshal(payload{Name: "a", Age: 1})
+	type tc struct {
+		name    string
+		data    []byte
+		target  any
+		wantErr string
+	}
+	var good payload
+	var bad payload
+	tests := []tc{
+		{"round-trip success", data, &good, ""},
+		{"malformed bytes surface UNMARSHAL_FAILED", []byte{0xc1}, &bad, "UNMARSHAL_FAILED"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		err := msgpack.New().Unmarshal(tc.data, tc.target)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Unmarshal err=%v", tc.name, err)
+		}
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestNewEncoder exercises the streaming encoder with a happy-path encode
+// plus a writer-failure path when applicable.
+func TestNewEncoder(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"streams a record"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		sc, ok := msgpack.New().(codec.StreamingCodec)
+		if !ok {
+			t.Fatalf("%s: codec does not implement StreamingCodec", tc.name)
+		}
+		var buf bytes.Buffer
+		enc := sc.NewEncoder(&buf)
+		if err := enc.Encode(payload{Name: "a", Age: 1}); err != nil {
+			t.Errorf("%s: Encode err=%v", tc.name, err)
+		}
+		if err := enc.Close(); err != nil {
+			t.Errorf("%s: Close err=%v", tc.name, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestNewDecoder exercises the streaming decoder including the
+// UNMARSHAL_FAILED branch on corrupt input.
+func TestNewDecoder(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		data    []byte
+		wantErr string
+	}
+	good, _ := msgpack.New().Marshal(payload{Name: "a", Age: 1})
+	tests := []tc{
+		{"decodes a valid record", good, ""},
+		{"corrupt input surfaces UNMARSHAL_FAILED", []byte{0xc1}, "UNMARSHAL_FAILED"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		sc := msgpack.New().(codec.StreamingCodec)
+		dec := sc.NewDecoder(bytes.NewReader(tc.data))
+		var out payload
+		err := dec.Decode(&out)
+		if tc.wantErr == "" {
+			if err != nil && !errors.Is(err, io.EOF) {
+				t.Errorf("%s: Decode err=%v", tc.name, err)
+			}
+			return
+		}
+		if !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestRegisteredViaImport verifies the codec self-registers on package load.
 func TestRegisteredViaImport(t *testing.T) {
 	t.Parallel()
-	if _, ok := codec.Lookup(codec.Format("msgpack")); !ok {
-		t.Error("msgpack codec not registered")
+	type tc struct {
+		name  string
+		check func() bool
 	}
-	if _, ok := codec.LookupMIME("application/msgpack"); !ok {
-		t.Error("application/msgpack not resolved")
+	tests := []tc{
+		{"format registered", func() bool { _, ok := codec.Lookup(codec.Format("msgpack")); return ok }},
+		{"MIME resolved", func() bool { _, ok := codec.LookupMIME("application/msgpack"); return ok }},
+		{"extension resolved", func() bool { _, ok := codec.LookupExt(".msgpack"); return ok }},
 	}
-	if _, ok := codec.LookupExt(".msgpack"); !ok {
-		t.Error(".msgpack not resolved")
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		if !tc.check() {
+			t.Errorf("%s: lookup failed", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }

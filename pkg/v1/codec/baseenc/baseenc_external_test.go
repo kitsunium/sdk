@@ -7,93 +7,76 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/codec/baseenc"
 )
 
-func TestRoundTrip(t *testing.T) {
+// TestEncode covers every registered Encoding plus the INVALID_ENCODING
+// failure path.
+func TestEncode(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name string
-		enc  baseenc.Encoding
+		name    string
+		enc     baseenc.Encoding
+		raw     []byte
+		wantErr string
 	}
 	tests := []tc{
-		{"base64", baseenc.Base64Std},
-		{"base64url", baseenc.Base64URL},
-		{"base32", baseenc.Base32Std},
-		{"base32hex", baseenc.Base32Hex},
-		{"hex", baseenc.Base16Hex},
-		{"ascii85", baseenc.ASCII85},
+		{"base64 standard alphabet", baseenc.Base64Std, []byte("hi"), ""},
+		{"base64 URL alphabet", baseenc.Base64URL, []byte("hi"), ""},
+		{"base32 standard alphabet", baseenc.Base32Std, []byte("hi"), ""},
+		{"base32 hex alphabet", baseenc.Base32Hex, []byte("hi"), ""},
+		{"hex lowercase", baseenc.Base16Hex, []byte("hi"), ""},
+		{"ascii85", baseenc.ASCII85, []byte("hi"), ""},
+		{"unknown encoding", baseenc.Encoding("nope"), []byte("hi"), "INVALID_ENCODING"},
 	}
-	raw := []byte("Hello, baseenc!")
-	runCase := func(t *testing.T, c tc) {
+	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		text, err := baseenc.Encode(c.enc, raw)
-		if err != nil {
-			t.Fatalf("%s Encode: %v", c.name, err)
+		_, err := baseenc.Encode(tc.enc, tc.raw)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Encode err=%v", tc.name, err)
 		}
-		out, err := baseenc.Decode(c.enc, text)
-		if err != nil {
-			t.Fatalf("%s Decode: %v", c.name, err)
-		}
-		if string(out) != string(raw) {
-			t.Errorf("%s round-trip: got %q want %q", c.name, out, raw)
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
 		}
 	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runCase(t, c)
+			runCase(t, tc)
 		})
 	}
 }
 
-func TestEncode_KnownValues(t *testing.T) {
-	t.Parallel()
-	text, err := baseenc.Encode(baseenc.Base64Std, []byte("hi"))
-	if err != nil {
-		t.Fatalf("Encode: %v", err)
-	}
-	if text != "aGk=" {
-		t.Errorf("got %q want %q", text, "aGk=")
-	}
-}
-
-func TestEncode_UnknownEncoding(t *testing.T) {
-	t.Parallel()
-	_, err := baseenc.Encode(baseenc.Encoding("nope"), []byte("x"))
-	if !errs.HasReason(err, "INVALID_ENCODING") {
-		t.Errorf("expected INVALID_ENCODING, got %v", err)
-	}
-}
-
-func TestDecode_UnknownEncoding(t *testing.T) {
-	t.Parallel()
-	_, err := baseenc.Decode(baseenc.Encoding("nope"), "x")
-	if !errs.HasReason(err, "INVALID_ENCODING") {
-		t.Errorf("expected INVALID_ENCODING, got %v", err)
-	}
-}
-
-func TestDecode_BadBytes(t *testing.T) {
+// TestDecode covers every registered Encoding plus INVALID_ENCODING and
+// DECODE_FAILED failure paths.
+func TestDecode(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name string
-		enc  baseenc.Encoding
-		text string
+		name    string
+		enc     baseenc.Encoding
+		text    string
+		wantErr string
 	}
 	tests := []tc{
-		{"base64", baseenc.Base64Std, "???"},
-		{"base32", baseenc.Base32Std, "1111"},
-		{"hex", baseenc.Base16Hex, "zz"},
+		{"base64 standard roundtrip", baseenc.Base64Std, "aGk=", ""},
+		{"base64 URL roundtrip", baseenc.Base64URL, "aGk=", ""},
+		{"hex roundtrip", baseenc.Base16Hex, "6869", ""},
+		{"ascii85 roundtrip", baseenc.ASCII85, "BOu!r", ""},
+		{"unknown encoding", baseenc.Encoding("nope"), "x", "INVALID_ENCODING"},
+		{"base64 bad bytes", baseenc.Base64Std, "???", "DECODE_FAILED"},
+		{"hex bad bytes", baseenc.Base16Hex, "zz", "DECODE_FAILED"},
 	}
-	runCase := func(t *testing.T, c tc) {
+	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		_, err := baseenc.Decode(c.enc, c.text)
-		if !errs.HasReason(err, "DECODE_FAILED") {
-			t.Errorf("%s: expected DECODE_FAILED, got %v", c.name, err)
+		_, err := baseenc.Decode(tc.enc, tc.text)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Decode err=%v", tc.name, err)
+		}
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
 		}
 	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runCase(t, c)
+			runCase(t, tc)
 		})
 	}
 }

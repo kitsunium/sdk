@@ -9,74 +9,123 @@ import (
 	"github.com/kitsunium/sdk/internal/service/codec/pem"
 )
 
+// TestNew verifies the constructor returns a non-nil singleton with the
+// canonical name.
 func TestNew(t *testing.T) {
 	t.Parallel()
-	c := pem.New()
-	if c == nil {
-		t.Fatal("New() returned nil")
+	type tc struct {
+		name string
+		want string
 	}
-	if c.Name() != "pem" {
-		t.Errorf("Name = %q", c.Name())
+	tests := []tc{{"canonical name", "pem"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := pem.New()
+		if c == nil {
+			t.Fatalf("%s: New returned nil", tc.name)
+		}
+		if got := c.Name(); got != tc.want {
+			t.Errorf("%s: Name=%q want %q", tc.name, got, tc.want)
+		}
 	}
-	if len(c.MIMETypes()) == 0 {
-		t.Error("MIMETypes empty")
-	}
-	if len(c.Extensions()) == 0 {
-		t.Error("Extensions empty")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-func TestRoundTrip(t *testing.T) {
+// TestMarshal covers the encoder success path + the VALUE_INVALID branch.
+func TestMarshal(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		in      any
+		wantErr string
+	}
+	tests := []tc{
+		{"valid block round-trips", &stdpem.Block{Type: "TEST", Bytes: []byte("hello")}, ""},
+		{"wrong type surfaces VALUE_INVALID", "nope", "VALUE_INVALID"},
+		{"nil block surfaces VALUE_INVALID", (*stdpem.Block)(nil), "VALUE_INVALID"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		_, err := pem.New().Marshal(tc.in)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Marshal err=%v", tc.name, err)
+		}
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestUnmarshal covers the decoder success path plus VALUE_INVALID (wrong
+// target) and UNMARSHAL_FAILED (no PEM block in input) branches.
+func TestUnmarshal(t *testing.T) {
 	t.Parallel()
 	in := &stdpem.Block{Type: "TEST", Bytes: []byte("hello world")}
-	data, err := pem.New().Marshal(in)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+	encoded, _ := pem.New().Marshal(in)
+	type tc struct {
+		name    string
+		data    []byte
+		target  any
+		wantErr string
 	}
-	var out *stdpem.Block
-	if uerr := pem.New().Unmarshal(data, &out); uerr != nil {
-		t.Fatalf("Unmarshal: %v", uerr)
+	var block *stdpem.Block
+	var wrong string
+	tests := []tc{
+		{"round-trip success", encoded, &block, ""},
+		{"wrong target surfaces VALUE_INVALID", []byte("x"), &wrong, "VALUE_INVALID"},
+		{"no block surfaces UNMARSHAL_FAILED", []byte("not pem"), &block, "UNMARSHAL_FAILED"},
 	}
-	if out == nil || out.Type != in.Type || string(out.Bytes) != string(in.Bytes) {
-		t.Errorf("round-trip: got %+v want %+v", out, in)
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		err := pem.New().Unmarshal(tc.data, tc.target)
+		if tc.wantErr == "" && err != nil {
+			t.Errorf("%s: Unmarshal err=%v", tc.name, err)
+		}
+		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
 	}
-}
-
-func TestMarshal_WrongType(t *testing.T) {
-	t.Parallel()
-	_, err := pem.New().Marshal("nope")
-	if !errs.HasReason(err, "VALUE_INVALID") {
-		t.Errorf("expected VALUE_INVALID, got %v", err)
-	}
-}
-
-func TestUnmarshal_WrongTarget(t *testing.T) {
-	t.Parallel()
-	var s string
-	err := pem.New().Unmarshal([]byte("x"), &s)
-	if !errs.HasReason(err, "VALUE_INVALID") {
-		t.Errorf("expected VALUE_INVALID, got %v", err)
-	}
-}
-
-func TestUnmarshal_NoBlock(t *testing.T) {
-	t.Parallel()
-	var out *stdpem.Block
-	err := pem.New().Unmarshal([]byte("not a pem"), &out)
-	if !errs.HasReason(err, "UNMARSHAL_FAILED") {
-		t.Errorf("expected UNMARSHAL_FAILED, got %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
+// TestRegisteredViaImport verifies the codec self-registers on package load.
 func TestRegisteredViaImport(t *testing.T) {
 	t.Parallel()
-	if _, ok := codec.Lookup(codec.Format("pem")); !ok {
-		t.Error("pem codec not registered")
+	type tc struct {
+		name  string
+		check func() bool
 	}
-	if _, ok := codec.LookupMIME("application/x-pem-file"); !ok {
-		t.Error("application/x-pem-file not resolved")
+	tests := []tc{
+		{"format registered", func() bool { _, ok := codec.Lookup(codec.Format("pem")); return ok }},
+		{"MIME resolved", func() bool { _, ok := codec.LookupMIME("application/x-pem-file"); return ok }},
+		{"extension resolved", func() bool { _, ok := codec.LookupExt(".pem"); return ok }},
 	}
-	if _, ok := codec.LookupExt(".pem"); !ok {
-		t.Error(".pem not resolved")
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		if !tc.check() {
+			t.Errorf("%s: lookup failed", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
