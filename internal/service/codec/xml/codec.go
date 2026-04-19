@@ -12,11 +12,13 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Package-level state: registers the XML codec at package load time and
-// caches the MIME / extension tables to avoid per-call allocations.
-var (
-	_ = codec.Register(&xmlCodec{})
+// Codec is the XML singleton, registered with core/codec at package load.
+// Binding the registration result to a named var is more idiomatic than
+// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
+var Codec codec.Codec = codec.Register(&xmlCodec{})
 
+// Package-level lookup tables, hoisted to satisfy KTN-VAR-CONSTSLICE.
+var (
 	//: the canonical IETF-registered type is application/xml.
 	mimeTypes = []string{"application/xml", "text/xml"}
 
@@ -32,8 +34,8 @@ type xmlCodec struct{}
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
 func New() (c codec.Codec) {
-	//: stateless singleton.
-	return &xmlCodec{}
+	//: stateless — one singleton is enough for the whole process.
+	return Codec
 }
 
 // Name implements codec.Codec.

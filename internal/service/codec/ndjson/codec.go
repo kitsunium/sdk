@@ -24,10 +24,13 @@ const scannerInitialCapacity int = 64 * 1024
 // record likely represents a consumer bug or a corrupt stream.
 const scannerMaxCapacity int = 10 * 1024 * 1024
 
-// Package-level state: registers the NDJSON codec at package load time.
-var (
-	_ = codec.Register(&ndjsonCodec{})
+// Codec is the NDJSON singleton, registered with core/codec at package load.
+// Binding the registration result to a named var is more idiomatic than
+// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
+var Codec codec.Codec = codec.Register(&ndjsonCodec{})
 
+// Package-level lookup tables, hoisted to satisfy KTN-VAR-CONSTSLICE.
+var (
 	//: MIME table hoisted to satisfy KTN-VAR-CONSTSLICE.
 	mimeTypes = []string{"application/x-ndjson", "application/jsonl"}
 
@@ -43,8 +46,8 @@ type ndjsonCodec struct{}
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
 func New() (c codec.Codec) {
-	//: stateless singleton.
-	return &ndjsonCodec{}
+	//: stateless — one singleton is enough for the whole process.
+	return Codec
 }
 
 // Name implements codec.Codec.

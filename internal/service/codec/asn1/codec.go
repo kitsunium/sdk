@@ -10,10 +10,10 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Package-level state: registers the ASN.1 codec at package load time.
-var (
-	_ = codec.Register(&asn1Codec{})
-)
+// Codec is the ASN.1 DER singleton, registered with core/codec at package load.
+// Binding the registration result to a named var is more idiomatic than
+// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
+var Codec codec.Codec = codec.Register(&asn1Codec{})
 
 // asn1Codec is the concrete Codec implementation for ASN.1 DER.
 type asn1Codec struct{}
@@ -23,8 +23,8 @@ type asn1Codec struct{}
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
 func New() (c codec.Codec) {
-	//: stateless — a fresh value is equivalent to a shared one.
-	return &asn1Codec{}
+	//: stateless — one singleton is enough for the whole process.
+	return Codec
 }
 
 // Name implements codec.Codec.

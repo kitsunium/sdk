@@ -11,10 +11,10 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Package-level state: registers the CSV codec at package load time.
-var (
-	_ = codec.Register(&csvCodec{})
-)
+// Codec is the CSV singleton, registered with core/codec at package load.
+// Binding the registration result to a named var is more idiomatic than
+// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
+var Codec codec.Codec = codec.Register(&csvCodec{})
 
 // csvCodec is the concrete Codec implementation for CSV.
 type csvCodec struct{}
@@ -24,8 +24,8 @@ type csvCodec struct{}
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
 func New() (c codec.Codec) {
-	//: stateless singleton.
-	return &csvCodec{}
+	//: stateless — one singleton is enough for the whole process.
+	return Codec
 }
 
 // Name implements codec.Codec.

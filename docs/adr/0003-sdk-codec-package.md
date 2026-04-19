@@ -31,7 +31,7 @@ Consumer expectations:
 | Layer | Path | Role |
 |---|---|---|
 | Core | `internal/core/codec/` | `Codec` / `StreamingCodec` / `Encoder` / `Decoder` interfaces, `Format` type, process-wide registry |
-| Service | `internal/service/codec/<format>/` | Concrete codec per format. Each package registers itself on import via a package-level `var _ = codec.Register(&fooCodec{})` initialiser — no `init()` (KTN-FUNC-NOINIT) |
+| Service | `internal/service/codec/<format>/` | Concrete codec per format. Each package registers itself on import via `var Codec codec.Codec = codec.Register(&fooCodec{})` — named singleton, no `init()` (KTN-FUNC-NOINIT). `New()` returns `Codec`. |
 | Public | `pkg/v1/codec/` | Facade: Format constants, `Marshal`/`Unmarshal`/`NewEncoder`/`NewDecoder` dispatchers, `FromMIME`/`FromExtension`/`Available`. Blank-imports every M1 codec so a single import enables the full stdlib surface |
 | Public | `pkg/v1/codec/baseenc/` | Separate sub-API for byte-only encodings — not Codec-shaped |
 
@@ -63,7 +63,7 @@ type Decoder interface { Decode(v any) (err error); More() (ok bool) }
 ### Format registry
 
 - Package-level `sync.Map`s in `internal/core/codec/registry.go` keyed by `Format` → `Codec`, plus MIME + extension indexes (lowercased).
-- `Register(c Codec) (ok bool)` returns true so callers can write `var _ = codec.Register(&fooCodec{})` — this keeps M1 compliant with `KTN-FUNC-NOINIT` (Go 1.26 discourages `init`).
+- `Register(c Codec) Codec` returns the registered codec so callers can write `var Codec codec.Codec = codec.Register(&fooCodec{})` — the named singleton binding is idiomatic Go and keeps M1 compliant with `KTN-FUNC-NOINIT` (Go 1.26 discourages `init`).
 - `Lookup` / `LookupMIME` / `LookupExt` / `Available` expose read access. `Register` panics on nil or duplicate `Name()`.
 
 ### M1 scope

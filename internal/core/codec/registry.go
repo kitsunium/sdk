@@ -18,15 +18,17 @@ var (
 	extIndex  sync.Map
 )
 
-// Register inserts c into the registry. Panics on nil or duplicate Name.
+// Register inserts c into the registry and returns it so callers can bind
+// the singleton to a typed package-level variable like
+// `var Codec codec.Codec = codec.Register(&jsonCodec{})`. Panics on nil
+// argument or duplicate Name / MIME / extension.
 //
 // Params:
 //   - c: a fully constructed Codec instance.
 //
 // Returns:
-//   - bool: always true; the return value lets callers use Register in a
-//     package-level var initialiser (e.g. `var _ = Register(New())`).
-func Register(c Codec) (ok bool) {
+//   - registered: the same Codec instance, ready to be bound to a var.
+func Register(c Codec) (registered Codec) {
 	//: nil registration is always a programming error.
 	if c == nil {
 		//: panic so the offender is visible at boot.
@@ -45,8 +47,8 @@ func Register(c Codec) (ok bool) {
 	indexAliases(&mimeIndex, c.MIMETypes(), name, "MIME")
 	//: extensions share the same shape.
 	indexAliases(&extIndex, c.Extensions(), name, "extension")
-	//: conventional true return lets Register sit in a var initialiser.
-	return true
+	//: returning the codec lets callers bind it to a typed singleton var.
+	return c
 }
 
 // indexAliases stores every alias (MIME or extension) in dst, panicking

@@ -12,11 +12,13 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Package-level state: registers the PEM codec at package load time and
-// caches the MIME / extension tables to satisfy KTN-VAR-CONSTSLICE.
-var (
-	_ = codec.Register(&pemCodec{})
+// Codec is the PEM singleton, registered with core/codec at package load.
+// Binding the registration result to a named var is more idiomatic than
+// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
+var Codec codec.Codec = codec.Register(&pemCodec{})
 
+// Package-level lookup tables, hoisted to satisfy KTN-VAR-CONSTSLICE.
+var (
 	//: no official IANA type exists; the de facto value is application/x-pem-file.
 	mimeTypes = []string{"application/x-pem-file"}
 
@@ -36,8 +38,8 @@ type Block = stdpem.Block
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
 func New() (c codec.Codec) {
-	//: stateless singleton.
-	return &pemCodec{}
+	//: stateless — one singleton is enough for the whole process.
+	return Codec
 }
 
 // Name implements codec.Codec.

@@ -13,10 +13,13 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Package-level state: registers the MessagePack codec at package load time.
-var (
-	_ = codec.Register(&msgpackCodec{})
+// Codec is the MessagePack singleton, registered with core/codec at package load.
+// Binding the registration result to a named var is more idiomatic than
+// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
+var Codec codec.Codec = codec.Register(&msgpackCodec{})
 
+// Package-level lookup tables, hoisted to satisfy KTN-VAR-CONSTSLICE.
+var (
 	//: MIME table hoisted to satisfy KTN-VAR-CONSTSLICE.
 	mimeTypes = []string{"application/msgpack", "application/x-msgpack"}
 
@@ -32,8 +35,8 @@ type msgpackCodec struct{}
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
 func New() (c codec.Codec) {
-	//: stateless singleton.
-	return &msgpackCodec{}
+	//: stateless — one singleton is enough for the whole process.
+	return Codec
 }
 
 // Name implements codec.Codec.
