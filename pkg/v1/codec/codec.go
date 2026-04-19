@@ -17,6 +17,7 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/codec/json"
 	_ "github.com/kitsunium/sdk/internal/service/codec/ndjson"
 	_ "github.com/kitsunium/sdk/internal/service/codec/pem"
+	_ "github.com/kitsunium/sdk/internal/service/codec/toml"
 	_ "github.com/kitsunium/sdk/internal/service/codec/xml"
 	_ "github.com/kitsunium/sdk/internal/service/codec/yaml"
 )
@@ -49,6 +50,8 @@ const (
 	PEM Format = "pem"
 	// YAML denotes the gopkg.in/yaml.v3 wire format.
 	YAML Format = "yaml"
+	// TOML denotes the pelletier/go-toml/v2 wire format.
+	TOML Format = "toml"
 )
 
 // Marshal serialises v using the codec registered under f.

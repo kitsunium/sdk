@@ -8,7 +8,10 @@ require (
 	github.com/kitsunium/sdk/internal/service v0.0.0-00010101000000-000000000000
 )
 
-require gopkg.in/yaml.v3 v3.0.1 // indirect
+require (
+	github.com/pelletier/go-toml/v2 v2.3.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
 
 replace (
 	github.com/kitsunium/sdk/internal/core => ../../internal/core
