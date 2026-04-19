@@ -1,0 +1,103 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# KTN-Linter configuration — kitsunium/sdk
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# The defaults are strict (see `ktn-linter config --generate` for the full
+# reference). This file only overrides what conflicts with the SDK's design
+# choices; every other rule runs with its default behaviour.
+#
+# Every override below has a brief justification so future readers (and
+# code reviewers) can challenge the exception instead of rubber-stamping it.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+version: 1
+
+# ── Global options ────────────────────────────────────────────────────────────
+
+# Full strict mode stays off so test files / testdata keep their ergonomic
+# exemptions (mocks, table-driven assertions, etc.).
+strict_mode: false
+
+# Phase 8 is cosmetic / opt-in; we never block on it.
+max_phase: 7
+
+# Respect `// Code generated …` markers so generated files are skipped.
+skip_generated: true
+
+# Tags recognised by KTN-STRUCT-JSONTAG. Extend as we ship more codecs so the
+# audit keeps recognising legitimate struct-tag annotations.
+serialization_tags:
+  - json
+  - xml
+  - yaml
+  - toml
+  - protobuf
+  - msgpack
+  - cbor
+  - bson
+
+# ── Global file exclusions ────────────────────────────────────────────────────
+# Skip any path that matches one of the glob patterns below, for every rule.
+# Use this list for third-party / generated / non-source trees only.
+exclude:
+  # Vendored third-party code — never our convention to enforce.
+  - "vendor/**"
+  # Go module cache occasionally shows up in IDE-driven scans.
+  - "**/.cache/**"
+  # Protocol Buffers and gRPC generated code.
+  - "**/*.pb.go"
+  - "**/*.pb.gw.go"
+  - "**/*_grpc.pb.go"
+  # FlatBuffers / Cap'n Proto generated code.
+  - "**/*.capnp.go"
+  - "**/*_generated.go"
+  # Generic `*.gen.go` / `*_gen.go` marker used by stringer, mockgen, etc.
+  - "**/*.gen.go"
+  - "**/*_gen.go"
+  # Mock files produced by mockgen / moq / counterfeiter.
+  - "**/mocks/**"
+  - "**/*_mock.go"
+  - "**/mock_*.go"
+  # Stringer output.
+  - "**/*_string.go"
+  # Jennifer / go-jet / go-swagger generated trees.
+  - "**/generated/**"
+  - "**/gen/**"
+  # WebAssembly / CGO stubs we don't audit.
+  - "**/*.wasm.go"
+  # Test coverage artifacts and profile output.
+  - "**/coverage.out"
+  - "**/*.test"
+  - "**/*.prof"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RULE OVERRIDES
+# ═══════════════════════════════════════════════════════════════════════════════
+# Keep this list small on purpose — every entry here is a design choice we
+# committed to, not "this warning is annoying".
+# ═══════════════════════════════════════════════════════════════════════════════
+
+rules:
+  # KTN-INTERFACE-ANYUSE (info) — "prefer specific interface".
+  #
+  # Scoped exception: the codec packages implement a universal Codec
+  # interface whose Marshal/Unmarshal signatures REQUIRE `any` (the whole
+  # point of a universal codec is that the user's struct type is not known
+  # to the codec). The auto-exemptions documented in the rule (type switch,
+  # map storage) do not fire on concrete methods that simply delegate to
+  # `encoding/json`, `encoding/xml`, etc.
+  #
+  # Disable ONLY inside the codec tree. Every other Go package in the SDK
+  # must still avoid `any` except where the Codec contract requires it.
+  KTN-INTERFACE-ANYUSE:
+    exclude:
+      - "**/internal/core/codec/**"
+      - "**/internal/service/codec/**"
+      - "**/pkg/v1/codec/**"
+
+  # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
+  # Go 1.26 convention is to avoid init() in favour of explicit constructors,
+  # sync.Once for lazy init, or package-level var initialisers. The codec
+  # registry will follow that: each codec subpackage registers itself via
+  # `var _ = codec.Register(New())` (var initialiser, not init()), or via
+  # an explicit constructor the facade invokes.
