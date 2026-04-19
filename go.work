@@ -1,0 +1,9 @@
+go 1.26
+
+use (
+	.
+	./internal/kernel
+	./internal/core
+	./internal/service
+	./pkg/v1
+)
