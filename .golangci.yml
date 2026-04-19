@@ -1,0 +1,59 @@
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.26"
+
+linters:
+  default: none
+  enable:
+    - depguard
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - gosec
+
+  settings:
+    depguard:
+      rules:
+        kernel-stdlib-only:
+          list-mode: strict
+          files:
+            - "**/internal/kernel/**/*.go"
+            - "!**/*_test.go"
+          allow:
+            - $gostd
+        core-deps:
+          list-mode: strict
+          files:
+            - "**/internal/core/**/*.go"
+            - "!**/*_test.go"
+          allow:
+            - $gostd
+            - github.com/kitsunium/sdk/internal/kernel
+        service-deps:
+          list-mode: strict
+          files:
+            - "**/internal/service/**/*.go"
+            - "!**/*_test.go"
+          allow:
+            - $gostd
+            - github.com/kitsunium/sdk/internal/kernel
+            - github.com/kitsunium/sdk/internal/core
+        pkg-deps:
+          list-mode: strict
+          files:
+            - "**/pkg/**/*.go"
+            - "!**/*_test.go"
+          allow:
+            - $gostd
+            - github.com/kitsunium/sdk/internal/kernel
+            - github.com/kitsunium/sdk/internal/core
+            - github.com/kitsunium/sdk/internal/service
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

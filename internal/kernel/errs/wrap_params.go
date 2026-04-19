@@ -1,0 +1,17 @@
+// Package errs: wrap_params.go hosts WrapParams so error.go keeps a
+// single exported struct (ktn-linter KTN-STRUCT-ONEFILE convention).
+package errs
+
+// WrapParams groups the extra metadata Wrap needs when the cause is NOT
+// already an *Error. Keeping them in a struct stays below the SDK's
+// 5-parameter ceiling for Wrap and gives call sites named fields.
+type WrapParams struct {
+	// Code is the numeric identifier assigned to the wrapping Error.
+	Code int
+	// Reason is the SCREAMING_SNAKE stable identifier of the wrapping Error.
+	Reason string
+	// Public is the wire-safe message (string literal at source level).
+	Public string
+	// Private is the log-only detailed message.
+	Private string
+}

@@ -1,0 +1,15 @@
+module github.com/kitsunium/sdk/pkg/v1
+
+go 1.26
+
+require (
+	github.com/kitsunium/sdk/internal/core v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal/service v0.0.0-00010101000000-000000000000
+)
+
+replace (
+	github.com/kitsunium/sdk/internal/core => ../../internal/core
+	github.com/kitsunium/sdk/internal/kernel => ../../internal/kernel
+	github.com/kitsunium/sdk/internal/service => ../../internal/service
+)
