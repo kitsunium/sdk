@@ -1,0 +1,26 @@
+# Bzlmod is the default in Bazel 9; pin it explicitly for future-proofing.
+common --enable_bzlmod
+
+# Reproducibility.
+build --incompatible_strict_action_env
+build --verbose_failures
+test  --test_output=errors
+test  --test_summary=terse
+
+# Named configs ────────────────────────────────────────────────────────
+# Race — mirrors `go test -race`. Requires cgo; mutually exclusive with pure.
+build:race --@rules_go//go/config:race=true
+test:race  --@rules_go//go/config:race=true
+
+# Pure — no cgo; mirrors CGO_ENABLED=0.
+build:pure --@rules_go//go/config:pure=true
+
+# Coverage — LCOV is the rules_go default and integrates with Codacy / Codecov.
+coverage --@rules_go//go/config:cover_format=lcov
+coverage --combined_report=lcov
+
+# CI profile — consumed by .github/workflows/bazel-ci.yml.
+build:ci --config=race
+test:ci  --config=race
+test:ci  --test_output=errors
+test:ci  --flaky_test_attempts=1

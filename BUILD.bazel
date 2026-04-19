@@ -1,0 +1,9 @@
+load("@gazelle//:def.bzl", "gazelle")
+
+# ── Gazelle directives ─────────────────────────────────────────────────
+# Repo-wide Go import prefix; each layer root re-declares its own prefix
+# so multi-module detection works correctly.
+# gazelle:prefix github.com/kitsunium/sdk
+# gazelle:go_naming_convention import_alias
+
+gazelle(name = "gazelle")

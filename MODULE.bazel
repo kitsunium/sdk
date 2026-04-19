@@ -1,0 +1,36 @@
+"""Bzlmod configuration for kitsunium/sdk.
+
+Bazel 9 dropped WORKSPACE; this file is the single source of truth for
+external dependencies. rules_go + gazelle read Go deps directly from the
+workspace's go.work file so the 4 module-local go.mod files stay the
+authoritative list for gopls / IDE tooling.
+"""
+
+module(
+    name = "kitsunium_sdk",
+    version = "0.0.0",
+    compatibility_level = 1,
+)
+
+bazel_dep(name = "rules_go", version = "0.60.0")
+bazel_dep(name = "gazelle",  version = "0.50.0")
+
+# ── Go SDK ─────────────────────────────────────────────────────────────
+# `from_file(go_work=...)` reads the Go toolchain directive out of go.work
+# so the SDK version stays in sync with the module declarations.
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.from_file(go_mod = "//:go.mod")
+
+# ── Go dependencies ────────────────────────────────────────────────────
+# `go_deps.from_file(go_work=...)` imports every direct + indirect
+# dependency across all 4 go.mod files referenced by the workspace.
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_work = "//:go.work")
+
+# `bazel mod tidy` populates the use_repo block below with every direct
+# import seen in the Go sources. Rerun after adding / removing a direct
+# dependency; the drift check in bazel-ci.yml fails if this list goes
+# out of sync with the sources.
+use_repo(
+    go_deps,
+)
