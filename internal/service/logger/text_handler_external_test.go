@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/level"
+	"github.com/kitsunium/sdk/internal/core/logger/level"
 	svclogger "github.com/kitsunium/sdk/internal/service/logger"
 )
 

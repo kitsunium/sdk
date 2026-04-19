@@ -36,7 +36,7 @@ Every record renders as a single line:
 ```
 
 - Timestamp in RFC3339 with millisecond precision.
-- Level as uppercase label via `kernel/level.Level.String()`.
+- Level as uppercase label via `core/logger/level.Level.String()`.
 - Attrs serialised `key=value`, with strings quoted, numerics / booleans / floats unquoted, unknown types rendered as `?`.
 - Handler-bound attrs (via `WithAttrs`) come BEFORE record-attached attrs.
 

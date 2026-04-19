@@ -72,7 +72,7 @@ uniqueness across the SDK.
 | Range | Package | State | Codes used in this MR |
 |---|---|---|---|
 | 1000-1099 | `internal/kernel/errs` (emitter infrastructure package; the 1000-1099 range is documentary meta-codes only — no exported sentinels) | documentary | `CodeInvalidCode=1001`, `CodeInvalidReason=1002`, `CodeInvalidPublic=1003` (cited in panic messages, not exposed as runtime `*Error` sentinels) |
-| 1100-1199 | `internal/kernel/level` | reserved | — |
+| 1100-1199 | `internal/core/logger/level` | reserved | — |
 | 1200-1299 | `internal/kernel/buffer` | reserved | — |
 | 1300-1399 | `internal/kernel/clock` | reserved | — |
 | 2100-2199 | `internal/core/logger` | reserved | — |

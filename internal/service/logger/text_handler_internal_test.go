@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/level"
+	"github.com/kitsunium/sdk/internal/core/logger/level"
 )
 
 // failingWriter returns a canned error from Write so writeLine can exercise

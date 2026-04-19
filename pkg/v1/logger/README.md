@@ -46,7 +46,7 @@ type Attr    = corelogger.AttrValue    // key/value pair
 type Level   = level.Level             // int8
 ```
 
-### Levels (aliases onto `internal/kernel/level`)
+### Levels (aliases onto `internal/core/logger/level`)
 
 ```go
 const (

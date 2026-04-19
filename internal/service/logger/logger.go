@@ -7,7 +7,7 @@ import (
 	"context"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/level"
+	"github.com/kitsunium/sdk/internal/core/logger/level"
 )
 
 // loggerImpl is the default core.Logger wrapper over a core.Handler. It

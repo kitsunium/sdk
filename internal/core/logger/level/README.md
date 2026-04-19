@@ -1,8 +1,8 @@
-# `internal/kernel/level`
+# `internal/core/logger/level`
 
-**Layer**: kernel · **Code range**: 1100-1199 (reserved, no emissions today)
+**Layer**: core (logger subpackage) · **Code range**: 1100-1199 (reserved, no emissions today)
 
-Severity levels for log records. Stdlib-only. Signatures mirror `log/slog` for ergonomic familiarity while staying inside the kernel's no-external-deps rule.
+Severity levels for log records. Stdlib-only. Signatures mirror `log/slog` for ergonomic familiarity. Lives under `core/logger/` (not `kernel/`) because `Debug / Info / Warn / Error` are logger-domain vocabulary — the kernel is reserved for generic primitives that any future domain could reach for.
 
 ## Surface
 
@@ -28,7 +28,7 @@ func (l Level) String() (label string)  // "DEBUG" | "INFO" | "WARN" | "ERROR"
 ## Typical use
 
 ```go
-import "github.com/kitsunium/sdk/internal/kernel/level"
+import "github.com/kitsunium/sdk/internal/core/logger/level"  // short alias: `level`
 
 if record.Level >= level.Warn {
     // emit
@@ -37,8 +37,9 @@ if record.Level >= level.Warn {
 
 ## Do NOT
 
-- Add a `Parse(string) (Level, error)` helper in the kernel — keep parsing at the service or public-facing layer.
+- Add a `Parse(string) (Level, error)` helper here — keep parsing at the service or public-facing layer.
 - Import `log/slog` here — `level` is the one package this SDK does not want coupled to the stdlib slog API.
+- Bring logger-unrelated concepts into this package; if a second domain needs severity-like values, declare its own.
 
 ## Tests
 

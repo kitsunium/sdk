@@ -4,6 +4,8 @@
 
 Interfaces-only layer: defines the contract between a `Logger` (caller-facing API) and a `Handler` (the sink that renders and writes). No concrete implementation lives here — implementations sit in `internal/service/logger`.
 
+Severity levels live in the [`level/`](./level/) subpackage — imported as `level` via the short alias, exposing `level.Level`, `level.Debug`, `level.Info`, `level.Warn`, `level.Error`.
+
 ## Surface
 
 ```go

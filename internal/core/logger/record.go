@@ -6,7 +6,7 @@ package logger
 import (
 	"time"
 
-	"github.com/kitsunium/sdk/internal/kernel/level"
+	"github.com/kitsunium/sdk/internal/core/logger/level"
 )
 
 // RecordEvent captures a single log event; handlers are responsible for writing

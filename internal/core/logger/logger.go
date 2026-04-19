@@ -6,7 +6,7 @@ package logger
 import (
 	"context"
 
-	"github.com/kitsunium/sdk/internal/kernel/level"
+	"github.com/kitsunium/sdk/internal/core/logger/level"
 )
 
 // Logger is the primary logging interface. Implementations MUST be safe for

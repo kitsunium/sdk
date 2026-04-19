@@ -3,7 +3,7 @@ package level_test
 import (
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/kernel/level"
+	"github.com/kitsunium/sdk/internal/core/logger/level"
 )
 
 func TestLevel_String(t *testing.T) {
