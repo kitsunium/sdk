@@ -70,7 +70,7 @@ func (*csvCodec) Marshal(v any) (data []byte, err error) {
 	if !ok {
 		//: caller passed something that is not [][]string — loud failure.
 		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeValueInvalid,
+			Code:    CodeCSVValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "CSV codec requires a [][]string value",
 			Private: "service/codec/csv.Marshal: argument is not [][]string",
@@ -83,7 +83,7 @@ func (*csvCodec) Marshal(v any) (data []byte, err error) {
 	if werr := w.WriteAll(records); werr != nil {
 		//: wrap the stdlib error.
 		return nil, errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeMarshalFailed,
+			Code:    CodeCSVMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "CSV encoding failed",
 			Private: "service/codec/csv.Marshal: WriteAll returned an error",
@@ -108,7 +108,7 @@ func (*csvCodec) Unmarshal(data []byte, v any) (err error) {
 	if !ok {
 		//: caller passed something that is not *[][]string — loud failure.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeValueInvalid,
+			Code:    CodeCSVValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "CSV codec requires a [][]string value",
 			Private: "service/codec/csv.Unmarshal: target is not *[][]string",
@@ -126,7 +126,7 @@ func (*csvCodec) Unmarshal(data []byte, v any) (err error) {
 	}
 	//: wrap the stdlib error.
 	return errs.Wrap(rerr, errs.WrapParams{
-		Code:    CodeUnmarshalFailed,
+		Code:    CodeCSVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "CSV decoding failed",
 		Private: "service/codec/csv.Unmarshal: ReadAll returned an error",

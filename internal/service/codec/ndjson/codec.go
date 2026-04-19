@@ -88,7 +88,7 @@ func (*ndjsonCodec) Marshal(v any) (data []byte, err error) {
 	if !ok {
 		//: loud failure — caller passed a non-slice.
 		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeValueInvalid,
+			Code:    CodeNDJSONValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "NDJSON codec requires a slice value",
 			Private: "service/codec/ndjson.Marshal: argument is not a slice",
@@ -104,7 +104,7 @@ func (*ndjsonCodec) Marshal(v any) (data []byte, err error) {
 		if merr != nil {
 			//: wrap the stdlib error for reason-based matching.
 			return nil, errs.Wrap(merr, errs.WrapParams{
-				Code:    CodeMarshalFailed,
+				Code:    CodeNDJSONMarshalFailed,
 				Reason:  "MARSHAL_FAILED",
 				Public:  "NDJSON encoding failed",
 				Private: "service/codec/ndjson.Marshal: encoding/json returned an error",
@@ -134,7 +134,7 @@ func (*ndjsonCodec) Unmarshal(data []byte, v any) (err error) {
 	if !ok {
 		//: loud failure — caller passed a non-slice pointer.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeValueInvalid,
+			Code:    CodeNDJSONValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "NDJSON codec requires a slice pointer target",
 			Private: "service/codec/ndjson.Unmarshal: target is not a pointer to a slice",
@@ -186,7 +186,7 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 		if uerr := stdjson.Unmarshal(line, elem.Interface()); uerr != nil {
 			//: wrap the stdlib error.
 			return reflect.Value{}, errs.Wrap(uerr, errs.WrapParams{
-				Code:    CodeUnmarshalFailed,
+				Code:    CodeNDJSONUnmarshalFailed,
 				Reason:  "UNMARSHAL_FAILED",
 				Public:  "NDJSON decoding failed",
 				Private: "service/codec/ndjson.Unmarshal: encoding/json returned an error",
@@ -199,7 +199,7 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 	if serr := scanner.Err(); serr != nil {
 		//: wrap defensively even though this is effectively unreachable.
 		return reflect.Value{}, errs.Wrap(serr, errs.WrapParams{
-			Code:    CodeUnmarshalFailed,
+			Code:    CodeNDJSONUnmarshalFailed,
 			Reason:  "UNMARSHAL_FAILED",
 			Public:  "NDJSON decoding failed",
 			Private: "service/codec/ndjson.Unmarshal: bufio.Scanner returned an error",

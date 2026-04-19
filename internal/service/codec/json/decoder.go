@@ -29,7 +29,7 @@ func (d *jsonDecoder) Decode(v any) (err error) {
 	}
 	//: wrap the stdlib error.
 	return errs.Wrap(jerr, errs.WrapParams{
-		Code:    CodeUnmarshalFailed,
+		Code:    CodeJSONUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "JSON decoding failed",
 		Private: "service/codec/json.Decoder.Decode: encoding/json returned an error",

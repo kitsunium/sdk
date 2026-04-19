@@ -81,7 +81,7 @@ func (*pemCodec) Marshal(v any) (data []byte, err error) {
 	if !ok {
 		//: shape-the-input rejection uses the VALUE_INVALID sentinel.
 		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeValueInvalid,
+			Code:    CodePEMValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "PEM codec requires a *pem.Block value",
 			Private: "service/codec/pem.Marshal: argument is not *pem.Block",
@@ -93,7 +93,7 @@ func (*pemCodec) Marshal(v any) (data []byte, err error) {
 	if werr := stdpem.Encode(&buf, block); werr != nil {
 		//: wrap the stdlib error.
 		return nil, errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeMarshalFailed,
+			Code:    CodePEMMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "PEM encoding failed",
 			Private: "service/codec/pem.Marshal: encoding/pem.Encode returned an error",
@@ -118,7 +118,7 @@ func (*pemCodec) Unmarshal(data []byte, v any) (err error) {
 	if !ok {
 		//: loud failure when the caller passed the wrong type.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeValueInvalid,
+			Code:    CodePEMValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "PEM codec requires a **pem.Block target",
 			Private: "service/codec/pem.Unmarshal: target is not **pem.Block",
@@ -130,7 +130,7 @@ func (*pemCodec) Unmarshal(data []byte, v any) (err error) {
 	if block == nil {
 		//: loud failure — caller must be notified.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeUnmarshalFailed,
+			Code:    CodePEMUnmarshalFailed,
 			Reason:  "UNMARSHAL_FAILED",
 			Public:  "PEM decoding failed",
 			Private: "service/codec/pem.Unmarshal: encoding/pem.Decode returned no block",

@@ -73,7 +73,7 @@ func (*xmlCodec) Marshal(v any) (data []byte, err error) {
 	}
 	//: wrap for reason-based matching.
 	return nil, errs.Wrap(xerr, errs.WrapParams{
-		Code:    CodeMarshalFailed,
+		Code:    CodeXMLMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "XML encoding failed",
 		Private: "service/codec/xml.Marshal: encoding/xml returned an error",
@@ -98,7 +98,7 @@ func (*xmlCodec) Unmarshal(data []byte, v any) (err error) {
 	}
 	//: wrap.
 	return errs.Wrap(xerr, errs.WrapParams{
-		Code:    CodeUnmarshalFailed,
+		Code:    CodeXMLUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "XML decoding failed",
 		Private: "service/codec/xml.Unmarshal: encoding/xml returned an error",

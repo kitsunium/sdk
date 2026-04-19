@@ -29,7 +29,7 @@ func (d *xmlDecoder) Decode(v any) (err error) {
 	}
 	//: wrap.
 	return errs.Wrap(xerr, errs.WrapParams{
-		Code:    CodeUnmarshalFailed,
+		Code:    CodeXMLUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "XML decoding failed",
 		Private: "service/codec/xml.Decoder.Decode: encoding/xml returned an error",

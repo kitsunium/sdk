@@ -74,7 +74,7 @@ func (*jsonCodec) Marshal(v any) (data []byte, err error) {
 	}
 	//: wrap the stdlib error for reason-based matching.
 	return nil, errs.Wrap(jerr, errs.WrapParams{
-		Code:    CodeMarshalFailed,
+		Code:    CodeJSONMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "JSON encoding failed",
 		Private: "service/codec/json.Marshal: encoding/json returned an error",
@@ -99,7 +99,7 @@ func (*jsonCodec) Unmarshal(data []byte, v any) (err error) {
 	}
 	//: wrap the stdlib error.
 	return errs.Wrap(jerr, errs.WrapParams{
-		Code:    CodeUnmarshalFailed,
+		Code:    CodeJSONUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "JSON decoding failed",
 		Private: "service/codec/json.Unmarshal: encoding/json returned an error",

@@ -3,12 +3,12 @@ package csv
 
 // range: 3270-3279
 
-// CodeMarshalFailed identifies a failure inside encoding/csv.Writer.
-const CodeMarshalFailed int = 3271
+// CodeCSVMarshalFailed identifies a failure inside encoding/csv.Writer.
+const CodeCSVMarshalFailed int = 3271
 
-// CodeUnmarshalFailed identifies a failure inside encoding/csv.Reader.
-const CodeUnmarshalFailed int = 3272
+// CodeCSVUnmarshalFailed identifies a failure inside encoding/csv.Reader.
+const CodeCSVUnmarshalFailed int = 3272
 
-// CodeValueInvalid identifies a Marshal / Unmarshal call whose target is
+// CodeCSVValueInvalid identifies a Marshal / Unmarshal call whose target is
 // not a *[][]string (CSV only serialises a records matrix).
-const CodeValueInvalid int = 3273
+const CodeCSVValueInvalid int = 3273

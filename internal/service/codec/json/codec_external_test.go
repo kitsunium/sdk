@@ -107,6 +107,55 @@ func TestStreaming(t *testing.T) {
 	}
 }
 
+func TestMarshal_Invalid(t *testing.T) {
+	t.Parallel()
+	//: channels aren't JSON-serialisable.
+	_, err := json.New().Marshal(make(chan int))
+	if !errs.HasReason(err, "MARSHAL_FAILED") {
+		t.Errorf("expected MARSHAL_FAILED, got %v", err)
+	}
+}
+
+func TestMIMEAndExtensions(t *testing.T) {
+	t.Parallel()
+	c := json.New()
+	if len(c.MIMETypes()) == 0 {
+		t.Error("MIMETypes empty")
+	}
+	if len(c.Extensions()) == 0 {
+		t.Error("Extensions empty")
+	}
+}
+
+func TestStreaming_EncodeError(t *testing.T) {
+	t.Parallel()
+	sc := json.New().(codec.StreamingCodec)
+	var buf bytes.Buffer
+	enc := sc.NewEncoder(&buf)
+	if err := enc.Encode(make(chan int)); !errs.HasReason(err, "MARSHAL_FAILED") {
+		t.Errorf("expected MARSHAL_FAILED, got %v", err)
+	}
+}
+
+func TestStreaming_DecodeError(t *testing.T) {
+	t.Parallel()
+	sc := json.New().(codec.StreamingCodec)
+	dec := sc.NewDecoder(bytes.NewReader([]byte("{bad")))
+	var v sampleEvent
+	if err := dec.Decode(&v); !errs.HasReason(err, "UNMARSHAL_FAILED") {
+		t.Errorf("expected UNMARSHAL_FAILED, got %v", err)
+	}
+}
+
+func TestStreaming_MoreEmpty(t *testing.T) {
+	t.Parallel()
+	sc := json.New().(codec.StreamingCodec)
+	dec := sc.NewDecoder(bytes.NewReader(nil))
+	if dec.More() {
+		t.Error("More should be false on empty reader")
+	}
+}
+
 func TestRegisteredViaImport(t *testing.T) {
 	t.Parallel()
 	if _, ok := codec.Lookup(codec.Format("json")); !ok {

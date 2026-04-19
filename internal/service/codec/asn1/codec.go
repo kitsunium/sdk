@@ -72,7 +72,7 @@ func (*asn1Codec) Marshal(v any) (data []byte, err error) {
 	}
 	//: wrap the stdlib error for reason-based matching.
 	return nil, errs.Wrap(merr, errs.WrapParams{
-		Code:    CodeMarshalFailed,
+		Code:    CodeASN1MarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "ASN.1 DER encoding failed",
 		Private: "service/codec/asn1.Marshal: encoding/asn1 returned an error",
@@ -97,7 +97,7 @@ func (*asn1Codec) Unmarshal(data []byte, v any) (err error) {
 	}
 	//: wrap the stdlib error.
 	return errs.Wrap(uerr, errs.WrapParams{
-		Code:    CodeUnmarshalFailed,
+		Code:    CodeASN1UnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "ASN.1 DER decoding failed",
 		Private: "service/codec/asn1.Unmarshal: encoding/asn1 returned an error",

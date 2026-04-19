@@ -29,7 +29,7 @@ func (e *xmlEncoder) Encode(v any) (err error) {
 	}
 	//: wrap.
 	return errs.Wrap(xerr, errs.WrapParams{
-		Code:    CodeMarshalFailed,
+		Code:    CodeXMLMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "XML encoding failed",
 		Private: "service/codec/xml.Encoder.Encode: encoding/xml returned an error",
@@ -50,7 +50,7 @@ func (e *xmlEncoder) Close() (err error) {
 	}
 	//: wrap.
 	return errs.Wrap(xerr, errs.WrapParams{
-		Code:    CodeMarshalFailed,
+		Code:    CodeXMLMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "XML encoding failed",
 		Private: "service/codec/xml.Encoder.Close: Flush returned an error",

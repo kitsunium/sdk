@@ -1,6 +1,8 @@
 package xml_test
 
 import (
+	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -79,6 +81,79 @@ func TestUnmarshal(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+func TestMarshal_Invalid(t *testing.T) {
+	t.Parallel()
+	//: channels aren't XML-serialisable.
+	_, err := xml.New().Marshal(make(chan int))
+	if !errs.HasReason(err, "MARSHAL_FAILED") {
+		t.Errorf("expected MARSHAL_FAILED, got %v", err)
+	}
+}
+
+func TestMIMEAndExtensions(t *testing.T) {
+	t.Parallel()
+	c := xml.New()
+	if len(c.MIMETypes()) == 0 {
+		t.Error("MIMETypes empty")
+	}
+	if len(c.Extensions()) == 0 {
+		t.Error("Extensions empty")
+	}
+}
+
+func TestStreaming(t *testing.T) {
+	t.Parallel()
+	c := xml.New()
+	sc, ok := c.(codec.StreamingCodec)
+	if !ok {
+		t.Fatal("xml codec does not implement StreamingCodec")
+	}
+	var buf bytes.Buffer
+	enc := sc.NewEncoder(&buf)
+	for _, d := range []sampleDoc{{ID: "a"}, {ID: "b"}} {
+		if err := enc.Encode(d); err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+	}
+	if cerr := enc.Close(); cerr != nil {
+		t.Fatalf("Close: %v", cerr)
+	}
+	dec := sc.NewDecoder(&buf)
+	count := 0
+	for dec.More() {
+		var d sampleDoc
+		if err := dec.Decode(&d); err != nil && err != io.EOF {
+			t.Fatalf("Decode: %v", err)
+		}
+		count++
+		if count > 4 {
+			break
+		}
+	}
+	if count == 0 {
+		t.Error("no decoded records")
+	}
+}
+
+func TestStreaming_EncodeError(t *testing.T) {
+	t.Parallel()
+	sc := xml.New().(codec.StreamingCodec)
+	enc := sc.NewEncoder(io.Discard)
+	if err := enc.Encode(make(chan int)); !errs.HasReason(err, "MARSHAL_FAILED") {
+		t.Errorf("expected MARSHAL_FAILED, got %v", err)
+	}
+}
+
+func TestStreaming_DecodeError(t *testing.T) {
+	t.Parallel()
+	sc := xml.New().(codec.StreamingCodec)
+	dec := sc.NewDecoder(strings.NewReader("<bad"))
+	var d sampleDoc
+	if err := dec.Decode(&d); !errs.HasReason(err, "UNMARSHAL_FAILED") {
+		t.Errorf("expected UNMARSHAL_FAILED, got %v", err)
 	}
 }
 

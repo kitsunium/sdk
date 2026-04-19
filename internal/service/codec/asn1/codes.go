@@ -3,8 +3,8 @@ package asn1
 
 // range: 3280-3284
 
-// CodeMarshalFailed identifies a failure inside encoding/asn1.Marshal.
-const CodeMarshalFailed int = 3281
+// CodeASN1MarshalFailed identifies a failure inside encoding/asn1.Marshal.
+const CodeASN1MarshalFailed int = 3281
 
-// CodeUnmarshalFailed identifies a failure inside encoding/asn1.Unmarshal.
-const CodeUnmarshalFailed int = 3282
+// CodeASN1UnmarshalFailed identifies a failure inside encoding/asn1.Unmarshal.
+const CodeASN1UnmarshalFailed int = 3282
