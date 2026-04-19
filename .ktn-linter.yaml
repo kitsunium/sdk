@@ -99,5 +99,5 @@ rules:
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,
   # sync.Once for lazy init, or package-level var initialisers. The codec
   # registry will follow that: each codec subpackage registers itself via
-  # `var _ = codec.Register(New())` (var initialiser, not init()), or via
-  # an explicit constructor the facade invokes.
+  # `var Codec codec.Codec = codec.Register(&fooCodec{})` (named singleton,
+  # not init()), or via an explicit constructor the facade invokes.

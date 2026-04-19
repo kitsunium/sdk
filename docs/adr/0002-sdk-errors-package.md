@@ -76,9 +76,32 @@ uniqueness across the SDK.
 | 1200-1299 | `internal/kernel/buffer` | reserved | — |
 | 1300-1399 | `internal/kernel/clock` | reserved | — |
 | 2100-2199 | `internal/core/logger` | reserved | — |
+| 2200-2299 | `internal/core/codec` | emitter | `CodeDuplicateRegistration=2201`, `CodeEmptyInput=2202`, `CodeTargetInvalid=2203`, `CodeValueInvalid=2204` |
 | 3100-3199 | `internal/service/logger` | emitter | `CodeWriterNil=3101`, `CodeHandlerNil=3102`, `CodeCtxCancelled=3110`, `CodeWriteFailed=3120` |
+| 3200-3399 | `internal/service/codec/<format>` | emitter | see codec subrange table below |
 | 4100-4199 | `pkg/v1/logger` | emitter | `CodeWriterRequired=4101` |
+| 4200-4299 | `pkg/v1/codec` + `pkg/v1/codec/baseenc` | emitter | `CodeUnknownFormat=4201`, `CodeCodecUnavailable=4202`, `CodeStreamingUnsupported=4203`, `CodeInvalidEncoding=4251`, `CodeDecodeFailed=4252` |
 | ≥ 10000 | `pkg/v2+` | future | — |
+
+### Codec service subranges (3200-3399)
+
+| Range | Package | Codes in M1 |
+|---|---|---|
+| 3200-3209 | reserved for internal plumbing | — |
+| 3210-3219 | `internal/service/codec/json` | `CodeMarshalFailed=3211`, `CodeUnmarshalFailed=3212` |
+| 3220-3229 | `internal/service/codec/xml` | `CodeMarshalFailed=3221`, `CodeUnmarshalFailed=3222` |
+| 3230-3239 | `internal/service/codec/yaml` | `CodeYAMLMarshalFailed=3231`, `CodeYAMLUnmarshalFailed=3232` |
+| 3240-3249 | `internal/service/codec/toml` | `CodeTOMLMarshalFailed=3241`, `CodeTOMLUnmarshalFailed=3242` |
+| 3250-3259 | `internal/service/codec/cbor` | `CodeCBORMarshalFailed=3251`, `CodeCBORUnmarshalFailed=3252` |
+| 3260-3269 | `internal/service/codec/msgpack` | `CodeMsgPackMarshalFailed=3261`, `CodeMsgPackUnmarshalFailed=3262` |
+| 3270-3279 | `internal/service/codec/csv` | `CodeMarshalFailed=3271`, `CodeUnmarshalFailed=3272`, `CodeValueInvalid=3273` |
+| 3280-3284 | `internal/service/codec/asn1` | `CodeMarshalFailed=3281`, `CodeUnmarshalFailed=3282` |
+| 3285-3289 | `internal/service/codec/pem` | `CodeMarshalFailed=3286`, `CodeUnmarshalFailed=3287`, `CodeValueInvalid=3288` |
+| 3290-3299 | reserved for future baseenc-style service codecs | — |
+| 3300-3309 | `internal/service/codec/ndjson` | `CodeMarshalFailed=3301`, `CodeUnmarshalFailed=3302`, `CodeValueInvalid=3303` |
+| 3310-3319 | `internal/service/codec/hcl` (M5, optional) | reserved |
+| 3320-3329 | `internal/service/codec/bson` (M5, optional) | reserved |
+| 3330-3399 | schema-based codecs (protobuf / capnp / fb / avro) — each will carve a dedicated subrange inside 3330-3399 in its own ADR | reserved |
 
 ## Enforcement
 
