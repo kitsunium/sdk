@@ -1,6 +1,6 @@
 # ADR 0003 — SDK `codec` Package (Universal Encode/Decode Surface)
 
-**Status**: Accepted (M1)
+**Status**: Accepted (M1+M2+M3+M4 shipped)
 **Date**: 2026-04-19
 **Deciders**: @kodflow
 **Supersedes**: none
@@ -82,11 +82,11 @@ type Decoder interface { Decode(v any) (err error); More() (ok bool) }
 
 ### Later milestones (non-binding)
 
-- **M2** — YAML (`gopkg.in/yaml.v3`).
-- **M3** — TOML (`github.com/pelletier/go-toml/v2`).
-- **M4** — CBOR + MessagePack. Decision on per-codec module split taken during this MR.
-- **M5** — Optional exotics: HCL, BSON, `baseenc.Base58/62/45`.
-- **M6** — Schema-based codecs (Protobuf, FlatBuffers, Cap'n Proto, Avro, Parquet, Arrow). Likely a sibling `pkg/v1/schema/` family — separate ADR per addition.
+- **M2** ✅ SHIPPED — YAML (`gopkg.in/yaml.v3`). Streaming supported. Coverage 90.0%.
+- **M3** ✅ SHIPPED — TOML (`github.com/pelletier/go-toml/v2`). Streaming supported. Coverage 86.7%.
+- **M4** ✅ SHIPPED — CBOR (`github.com/fxamacker/cbor/v2`) + MessagePack (`github.com/vmihailenco/msgpack/v5`). Both implement StreamingCodec. Coverage 96.3% each. Module-split decision: **single `internal/service` module retained** — total transitive deps remain well below the 30-dep soft ceiling.
+- **M5** (deferred, optional) — HCL, BSON, `baseenc.Base58/62/45`.
+- **M6** (deferred) — Schema-based codecs (Protobuf, FlatBuffers, Cap'n Proto, Avro, Parquet, Arrow). Likely a sibling `pkg/v1/schema/` family — separate ADR per addition.
 
 ### Error codes
 

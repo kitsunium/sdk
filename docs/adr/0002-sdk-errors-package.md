@@ -90,10 +90,10 @@ uniqueness across the SDK.
 | 3200-3209 | reserved for internal plumbing | — |
 | 3210-3219 | `internal/service/codec/json` | `CodeMarshalFailed=3211`, `CodeUnmarshalFailed=3212` |
 | 3220-3229 | `internal/service/codec/xml` | `CodeMarshalFailed=3221`, `CodeUnmarshalFailed=3222` |
-| 3230-3239 | `internal/service/codec/yaml` (M2) | reserved |
-| 3240-3249 | `internal/service/codec/toml` (M3) | reserved |
-| 3250-3259 | `internal/service/codec/cbor` (M4) | reserved |
-| 3260-3269 | `internal/service/codec/msgpack` (M4) | reserved |
+| 3230-3239 | `internal/service/codec/yaml` | `CodeYAMLMarshalFailed=3231`, `CodeYAMLUnmarshalFailed=3232` |
+| 3240-3249 | `internal/service/codec/toml` | `CodeTOMLMarshalFailed=3241`, `CodeTOMLUnmarshalFailed=3242` |
+| 3250-3259 | `internal/service/codec/cbor` | `CodeCBORMarshalFailed=3251`, `CodeCBORUnmarshalFailed=3252` |
+| 3260-3269 | `internal/service/codec/msgpack` | `CodeMsgPackMarshalFailed=3261`, `CodeMsgPackUnmarshalFailed=3262` |
 | 3270-3279 | `internal/service/codec/csv` | `CodeMarshalFailed=3271`, `CodeUnmarshalFailed=3272`, `CodeValueInvalid=3273` |
 | 3280-3284 | `internal/service/codec/asn1` | `CodeMarshalFailed=3281`, `CodeUnmarshalFailed=3282` |
 | 3285-3289 | `internal/service/codec/pem` | `CodeMarshalFailed=3286`, `CodeUnmarshalFailed=3287`, `CodeValueInvalid=3288` |
