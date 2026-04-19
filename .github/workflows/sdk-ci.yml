@@ -59,9 +59,14 @@ jobs:
           go test -race -cover -coverprofile=coverage.out
           -ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=ci-${{ github.sha }}"
           ./...
+      - name: sanitize module name for artifact
+        id: artifact-name
+        run: echo "slug=coverage-${MOD//\//-}" >> "$GITHUB_OUTPUT"
+        env:
+          MOD: ${{ matrix.module }}
       - uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.module }}
+          name: ${{ steps.artifact-name.outputs.slug }}
           path: ${{ matrix.module }}/coverage.out
 
   lint:
@@ -71,9 +76,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.62
+          version: v2.11
           args: --timeout=5m
 
   vulncheck:
