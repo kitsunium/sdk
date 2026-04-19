@@ -3,16 +3,20 @@
 
 ## Purpose
 
-CI/CD automation for the devcontainer template.
+CI/CD automation. Primary workflow is `sdk-ci.yml` (Go tests + lint +
+vulncheck). The remaining workflows (`docker-images.yml`,
+`publish-features.yml`, `release.yml`) are inherited from the
+devcontainer-template parent repo and are path-gated on `.devcontainer/**`
+so they do not fire on SDK PRs.
 
 ## Workflows
 
 | File | Description |
 |------|-------------|
-| `docker-images.yml` | Build and push devcontainer images |
-| `publish-features.yml` | Publish Dev Container Features as OCI artifacts to GHCR |
-| `release.yml` | Create GitHub Release with claude-assets.tar.gz |
-| `tests.yml` | Run unit tests for hooks and scripts |
+| `sdk-ci.yml` | Primary CI for this repo — Go tests, lint, govulncheck across all 4 SDK modules |
+| `docker-images.yml` | Build and push devcontainer images (path-gated on `.devcontainer/images/**`) |
+| `publish-features.yml` | Publish Dev Container Features as OCI artifacts (path-gated on `.devcontainer/features/**`) |
+| `release.yml` | Create GitHub Release with claude-assets.tar.gz (path-gated on `.devcontainer/**`) |
 
 ## docker-images.yml (Two-Tier Build)
 
@@ -43,11 +47,14 @@ CI/CD automation for the devcontainer template.
 - **Tag format**: `vYYYY.MM.DD-<sha7>`
 - **Latest**: Always marks as latest release (used by `install.sh`)
 
-## tests.yml
+## sdk-ci.yml
 
-- **Trigger**: Push to main, PRs
-- **Action**: Runs unit tests for hooks and scripts
-- **Uses**: `bats-core/bats-action@v3`
+- **Trigger**: Push to main, PRs — path-gated on `internal/**`, `pkg/**`, `go.work`, `go.mod`, `.golangci.yml`, `Makefile`
+- **Jobs**:
+  - `test`: `go test -race -cover` per module (matrix: kernel, core, service, pkg/v1)
+  - `lint`: `golangci-lint run` with depguard layer firewall
+  - `vulncheck`: `govulncheck ./...` per module
+- **Runs with** `GOWORK=off` so each module is tested as an external consumer via its own `go.mod` + `replace` directives.
 
 ## Conventions
 
