@@ -8,25 +8,26 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // sdkRoot resolves the repository root by walking up from the test's CWD
-// until a go.work file is found; skips the test gracefully when run outside
-// the workspace layout.
-func sdkRoot(tb testing.TB) (root string, ok bool) {
+// until a go.work file is found. Fails (not skips) if the workspace layout
+// is missing, since audits must always run against a real tree.
+func sdkRoot(tb testing.TB) (root string) {
 	tb.Helper()
 	cwd, err := os.Getwd()
 	if err != nil {
-		tb.Skipf("cwd lookup failed: %v", err)
-		return "", false
+		tb.Fatalf("cwd lookup failed: %v", err)
 	}
 	for dir := cwd; dir != "/" && dir != ""; dir = filepath.Dir(dir) {
 		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
-			return dir, true
+			return dir
 		}
 	}
-	tb.Skip("go.work not found above test CWD; skipping SDK-wide audit")
-	return "", false
+	tb.Fatalf("go.work not found above %s; audit requires the workspace layout", cwd)
+	return ""
 }
 
 // collectDefineCalls walks every non-test .go file under root/internal and
@@ -98,10 +99,7 @@ func TestAuditPublicIsStringLiteral(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			root, ok := sdkRoot(t)
-			if !ok {
-				return
-			}
+			root := sdkRoot(t)
 			for _, dc := range collectDefineCalls(t, root) {
 				if len(dc.call.Args) < 3 {
 					t.Errorf("%s: Define call has %d args", dc.pos, len(dc.call.Args))
@@ -126,10 +124,7 @@ func TestAuditReasonMatchesVarName(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			root, ok := sdkRoot(t)
-			if !ok {
-				return
-			}
+			root := sdkRoot(t)
 			for _, dc := range collectDefineCalls(t, root) {
 				if len(dc.call.Args) < 2 {
 					continue
@@ -159,10 +154,7 @@ func TestAuditCodeUniqueness(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			root, ok := sdkRoot(t)
-			if !ok {
-				return
-			}
+			root := sdkRoot(t)
 			seen := map[string]string{}
 			for _, dc := range collectDefineCalls(t, root) {
 				if len(dc.call.Args) < 1 {
@@ -212,4 +204,27 @@ func camelToScreamingSnake(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func TestRegistryMarker(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		want string
+	}
+	tests := []tc{
+		{"marker is non-empty", "sdk-registry-audit-v1"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := errs.RegistryMarker(); got != c.want {
+			t.Errorf("RegistryMarker() = %q, want %q", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
 }

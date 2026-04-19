@@ -65,12 +65,13 @@ func Test_constants(t *testing.T) {
 
 func TestTextHandler_renderLine(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name     string
 		minLevel level.Level
 		record   corelogger.RecordEvent
 		wantSub  []string
-	}{
+	}
+	tests := []tc{
 		{
 			name:     "includes level and message",
 			minLevel: level.Debug,
@@ -94,19 +95,23 @@ func TestTextHandler_renderLine(t *testing.T) {
 			wantSub: []string{"ERROR", "attrs", `k="v"`},
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		h, err := NewTextHandler(io.Discard, c.minLevel)
+		if err != nil {
+			t.Fatalf("NewTextHandler err = %v", err)
+		}
+		got := string(h.renderLine(nil, c.record))
+		for _, needle := range c.wantSub {
+			if !strings.Contains(got, needle) {
+				t.Errorf("renderLine output missing %q: %q", needle, got)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			h, err := NewTextHandler(io.Discard, tc.minLevel)
-			if err != nil {
-				t.Fatalf("NewTextHandler err = %v", err)
-			}
-			got := string(h.renderLine(nil, tc.record))
-			for _, needle := range tc.wantSub {
-				if !strings.Contains(got, needle) {
-					t.Errorf("renderLine output missing %q: %q", needle, got)
-				}
-			}
+			runCase(t, c)
 		})
 	}
 }

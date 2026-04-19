@@ -9,14 +9,15 @@ import (
 func Test_validateDefineArgs(t *testing.T) {
 	t.Parallel()
 	longPublic := strings.Repeat("x", maxPublicRunes+1)
-	tests := []struct {
+	type tc struct {
 		name            string
 		code            int
 		reason          string
 		public          string
 		private         string
 		wantErrSentinel error
-	}{
+	}
+	tests := []tc{
 		{"all valid", 3101, "WRITER_NIL", "writer is nil", "ctx/logger nil writer", nil},
 		{"zero code", 0, "X", "y", "z", errInvalidCode},
 		{"too small code", 999, "X", "y", "z", errInvalidCode},
@@ -28,41 +29,50 @@ func Test_validateDefineArgs(t *testing.T) {
 		{"public with newline", 1100, "GOOD", "a\nb", "z", errInvalidPublic},
 		{"empty private", 1100, "GOOD", "pub", "", errInvalidPrivate},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := validateDefineArgs(c.code, c.reason, c.public, c.private)
+		if c.wantErrSentinel == nil {
+			if got != nil {
+				t.Errorf("expected nil, got %v", got)
+			}
+			return
+		}
+		if !errors.Is(got, c.wantErrSentinel) {
+			t.Errorf("errors.Is(%v, %v) = false", got, c.wantErrSentinel)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got := validateDefineArgs(tc.code, tc.reason, tc.public, tc.private)
-			if tc.wantErrSentinel == nil {
-				if got != nil {
-					t.Errorf("expected nil, got %v", got)
-				}
-				return
-			}
-			if !errors.Is(got, tc.wantErrSentinel) {
-				t.Errorf("errors.Is(%v, %v) = false", got, tc.wantErrSentinel)
-			}
+			runCase(t, c)
 		})
 	}
 }
 
 func Test_validateCode(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name    string
 		code    int
 		wantErr bool
-	}{
+	}
+	tests := []tc{
 		{"ok", 3101, false},
 		{"zero", 0, true},
 		{"below min", 999, true},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := validateCode(c.code)
+		if (got != nil) != c.wantErr {
+			t.Errorf("validateCode(%d) err=%v, wantErr=%v", c.code, got, c.wantErr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got := validateCode(tc.code)
-			if (got != nil) != tc.wantErr {
-				t.Errorf("validateCode(%d) err=%v, wantErr=%v", tc.code, got, tc.wantErr)
-			}
+			runCase(t, c)
 		})
 	}
 }
@@ -92,23 +102,28 @@ func Test_validateReason(t *testing.T) {
 func Test_validatePublic(t *testing.T) {
 	t.Parallel()
 	tooLong := strings.Repeat("x", maxPublicRunes+1)
-	tests := []struct {
+	type tc struct {
 		name    string
 		public  string
 		wantErr bool
-	}{
+	}
+	tests := []tc{
 		{"ok", "a public message", false},
 		{"empty", "", true},
 		{"too long", tooLong, true},
 		{"newline", "a\nb", true},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := validatePublic(c.public)
+		if (got != nil) != c.wantErr {
+			t.Errorf("validatePublic(%q) err=%v", c.public, got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got := validatePublic(tc.public)
-			if (got != nil) != tc.wantErr {
-				t.Errorf("validatePublic(%q) err=%v", tc.public, got)
-			}
+			runCase(t, c)
 		})
 	}
 }
@@ -136,11 +151,12 @@ func Test_validatePrivate(t *testing.T) {
 
 func Test_isScreamingSnake(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name string
 		in   string
 		want bool
-	}{
+	}
+	tests := []tc{
 		{"empty", "", false},
 		{"single upper", "A", true},
 		{"upper snake", "HELLO_WORLD", true},
@@ -151,34 +167,45 @@ func Test_isScreamingSnake(t *testing.T) {
 		{"dash", "A-B", false},
 		{"space", "A B", false},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := isScreamingSnake(c.in)
+		if got != c.want {
+			t.Errorf("isScreamingSnake(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if got := isScreamingSnake(tc.in); got != tc.want {
-				t.Errorf("isScreamingSnake(%q) = %v, want %v", tc.in, got, tc.want)
-			}
+			runCase(t, c)
 		})
 	}
 }
 
 func Test_containsNewline(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name string
 		in   string
 		want bool
-	}{
+	}
+	tests := []tc{
 		{"empty", "", false},
 		{"plain", "hello", false},
 		{"with LF", "a\nb", true},
 		{"with CR", "a\rb", true},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := containsNewline(c.in)
+		if got != c.want {
+			t.Errorf("containsNewline(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if got := containsNewline(tc.in); got != tc.want {
-				t.Errorf("containsNewline(%q) = %v, want %v", tc.in, got, tc.want)
-			}
+			runCase(t, c)
 		})
 	}
 }
