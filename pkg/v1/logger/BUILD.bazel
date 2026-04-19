@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "logger",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "logger.go",
+        "version.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/logger",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/errs",
+        "//internal/service/logger",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":logger",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "logger_test",
+    srcs = [
+        "logger_external_test.go",
+        "version_external_test.go",
+    ],
+    deps = [
+        ":logger",
+        "//internal/kernel/errs",
+    ],
+)

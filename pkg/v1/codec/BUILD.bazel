@@ -1,0 +1,42 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "codec",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/codec",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+        "//internal/service/codec/asn1",
+        "//internal/service/codec/cbor",
+        "//internal/service/codec/csv",
+        "//internal/service/codec/json",
+        "//internal/service/codec/msgpack",
+        "//internal/service/codec/ndjson",
+        "//internal/service/codec/pem",
+        "//internal/service/codec/toml",
+        "//internal/service/codec/xml",
+        "//internal/service/codec/yaml",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":codec",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "codec_test",
+    srcs = [
+        "codec_external_test.go",
+        "codec_internal_test.go",
+    ],
+    embed = [":codec"],
+    deps = ["//internal/kernel/errs"],
+)

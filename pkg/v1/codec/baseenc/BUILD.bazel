@@ -1,0 +1,29 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "baseenc",
+    srcs = [
+        "baseenc.go",
+        "codes.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/codec/baseenc",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":baseenc",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "baseenc_test",
+    srcs = [
+        "baseenc_external_test.go",
+        "baseenc_internal_test.go",
+    ],
+    embed = [":baseenc"],
+    deps = ["//internal/kernel/errs"],
+)

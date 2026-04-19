@@ -1,0 +1,9 @@
+# gazelle:prefix github.com/kitsunium/sdk/pkg/v1
+# gazelle:default_visibility //visibility:public
+
+# pkg/v1 is the SDK's public surface — every go_library under this tree
+# is publicly visible. Consumers import these packages; nothing in the
+# SDK depends on pkg/v1 (that would invert the dependency direction and
+# would be caught by the kernel/core/service package_groups anyway).
+
+package(default_visibility = ["//visibility:public"])

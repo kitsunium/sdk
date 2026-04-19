@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "pem",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/codec/pem",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":pem",
+    visibility = ["//:__subpackages__"],
+)
+
+go_test(
+    name = "pem_test",
+    srcs = [
+        "codec_external_test.go",
+        "codec_internal_test.go",
+    ],
+    embed = [":pem"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+    ],
+)

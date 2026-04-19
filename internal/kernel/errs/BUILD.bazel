@@ -1,0 +1,36 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "errs",
+    srcs = [
+        "accessors.go",
+        "codes.go",
+        "error.go",
+        "field.go",
+        "registry.go",
+        "validate.go",
+        "wrap_params.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/errs",
+    visibility = ["//:__subpackages__"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":errs",
+    visibility = ["//:__subpackages__"],
+)
+
+go_test(
+    name = "errs_test",
+    srcs = [
+        "accessors_external_test.go",
+        "accessors_internal_test.go",
+        "error_external_test.go",
+        "field_external_test.go",
+        "field_internal_test.go",
+        "registry_external_test.go",
+        "validate_internal_test.go",
+    ],
+    embed = [":errs"],
+)

@@ -1,0 +1,24 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "errs",
+    srcs = ["accessors.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/errs",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":errs",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "errs_test",
+    srcs = ["accessors_external_test.go"],
+    deps = [
+        ":errs",
+        "//pkg/v1/logger",
+    ],
+)

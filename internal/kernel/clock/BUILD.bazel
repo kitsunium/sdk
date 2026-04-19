@@ -1,0 +1,23 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "clock",
+    srcs = ["clock.go"],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/clock",
+    visibility = ["//:__subpackages__"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":clock",
+    visibility = ["//:__subpackages__"],
+)
+
+go_test(
+    name = "clock_test",
+    srcs = [
+        "clock_external_test.go",
+        "clock_internal_test.go",
+    ],
+    embed = [":clock"],
+)

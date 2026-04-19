@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "level",
+    srcs = ["level.go"],
+    importpath = "github.com/kitsunium/sdk/internal/core/logger/level",
+    visibility = ["//:__subpackages__"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":level",
+    visibility = ["//:__subpackages__"],
+)
+
+go_test(
+    name = "level_test",
+    srcs = ["level_external_test.go"],
+    deps = [":level"],
+)

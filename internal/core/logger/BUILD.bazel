@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "logger",
+    srcs = [
+        "attr.go",
+        "handler.go",
+        "logger.go",
+        "record.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/logger",
+    visibility = ["//:__subpackages__"],
+    deps = ["//internal/core/logger/level"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":logger",
+    visibility = ["//:__subpackages__"],
+)
