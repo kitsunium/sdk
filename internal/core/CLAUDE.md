@@ -52,6 +52,10 @@ See `.claude/contexts/sdk-layer-placement-audit.md`. Summary:
 ## Verification
 
 ```
+# Primary (Bazel)
+bazel test --config=race //internal/core/...
+
+# Fallback (go test)
 cd internal/core
 GOWORK=off go test -race -cover ./...
 # expected: logger has no tests (interfaces only), logger/level 100%

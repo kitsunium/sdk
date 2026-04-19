@@ -46,6 +46,10 @@ All four are declared in `logger/codes.go` + `logger/errors.go`. The AST audit (
 ## Verification
 
 ```
+# Primary (Bazel)
+bazel test --config=race //internal/service/...
+
+# Fallback (go test)
 cd internal/service
 GOWORK=off go test -race -cover ./...
 # expected: logger 100%

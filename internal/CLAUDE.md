@@ -68,6 +68,10 @@ Each layer directory is its own Go module (for release independence):
 ## Verification
 
 ```
+# Primary (Bazel — the source of truth for CI)
+bazel test --config=race //internal/...
+
+# Fallback (go test — still works for quick local iteration)
 GOWORK=off
 for m in internal/kernel internal/core internal/service; do
   (cd $m && go test -race -cover ./...)
