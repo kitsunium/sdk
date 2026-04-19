@@ -2,8 +2,8 @@ go 1.26
 
 use (
 	.
-	./internal/kernel
 	./internal/core
+	./internal/kernel
 	./internal/service
 	./pkg/v1
 )
