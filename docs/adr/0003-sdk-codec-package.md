@@ -73,7 +73,7 @@ type Decoder interface { Decode(v any) (err error); More() (ok bool) }
 | `internal/core/codec` | interfaces + registry | n/a | core unit tests |
 | `internal/service/codec/json` | JSON (stdlib `encoding/json`) | yes | 83.3% |
 | `internal/service/codec/ndjson` | Newline-delimited JSON | no (slice-shaped) | 92.0% |
-| `internal/service/codec/xml` | XML (stdlib `encoding/xml`) | yes | 39.3% |
+| `internal/service/codec/xml` | XML (stdlib `encoding/xml`) | yes | 93.8% |
 | `internal/service/codec/csv` | CSV (stdlib `encoding/csv`, `[][]string`) | no | 96.2% |
 | `internal/service/codec/asn1` | ASN.1 DER (stdlib `encoding/asn1`) | no | 100% |
 | `internal/service/codec/pem` | PEM block (stdlib `encoding/pem`, `*pem.Block`) | no | 94.7% |

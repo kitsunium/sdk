@@ -39,6 +39,8 @@ func (d *cborDecoder) Decode(v any) (err error) {
 		//: nothing to wrap.
 		return nil
 	}
+	//: mark drained so More() stops a dec.More()/Decode() loop on error.
+	d.done = true
 	//: wrap the library error for reason-based matching.
 	return errs.Wrap(derr, errs.WrapParams{
 		Code:    CodeCBORUnmarshalFailed,

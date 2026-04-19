@@ -5,6 +5,7 @@ package msgpack
 
 import (
 	"io"
+	"slices"
 
 	gomsgpack "github.com/vmihailenco/msgpack/v5"
 
@@ -50,7 +51,7 @@ func (*msgpackCodec) Name() (name string) {
 //   - []string: canonical MIME first.
 func (*msgpackCodec) MIMETypes() (mimes []string) {
 	//: hand back the package-level slice.
-	return mimeTypes
+	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
@@ -59,7 +60,7 @@ func (*msgpackCodec) MIMETypes() (mimes []string) {
 //   - []string: canonical extension first.
 func (*msgpackCodec) Extensions() (exts []string) {
 	//: hand back the package-level slice.
-	return extensions
+	return slices.Clone(extensions)
 }
 
 // Marshal serialises v as MessagePack bytes.

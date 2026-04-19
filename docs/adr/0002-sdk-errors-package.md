@@ -78,7 +78,7 @@ uniqueness across the SDK.
 | 2100-2199 | `internal/core/logger` | reserved | — |
 | 2200-2299 | `internal/core/codec` | emitter | `CodeDuplicateRegistration=2201`, `CodeEmptyInput=2202`, `CodeTargetInvalid=2203`, `CodeValueInvalid=2204` |
 | 3100-3199 | `internal/service/logger` | emitter | `CodeWriterNil=3101`, `CodeHandlerNil=3102`, `CodeCtxCancelled=3110`, `CodeWriteFailed=3120` |
-| 3200-3299 | `internal/service/codec/<format>` | emitter | see codec subrange table below |
+| 3200-3399 | `internal/service/codec/<format>` | emitter | see codec subrange table below |
 | 4100-4199 | `pkg/v1/logger` | emitter | `CodeWriterRequired=4101` |
 | 4200-4299 | `pkg/v1/codec` + `pkg/v1/codec/baseenc` | emitter | `CodeUnknownFormat=4201`, `CodeCodecUnavailable=4202`, `CodeStreamingUnsupported=4203`, `CodeInvalidEncoding=4251`, `CodeDecodeFailed=4252` |
 | ≥ 10000 | `pkg/v2+` | future | — |

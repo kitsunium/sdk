@@ -6,14 +6,22 @@ package xml
 import (
 	stdxml "encoding/xml"
 	"io"
+	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Package-level state: registers the XML codec at package load time.
+// Package-level state: registers the XML codec at package load time and
+// caches the MIME / extension tables to avoid per-call allocations.
 var (
 	_ = codec.Register(&xmlCodec{})
+
+	//: the canonical IETF-registered type is application/xml.
+	mimeTypes = []string{"application/xml", "text/xml"}
+
+	//: canonical extension.
+	extensions = []string{".xml"}
 )
 
 // xmlCodec is the concrete Codec implementation for XML.
@@ -42,8 +50,8 @@ func (*xmlCodec) Name() (name string) {
 // Returns:
 //   - []string: canonical MIME first.
 func (*xmlCodec) MIMETypes() (mimes []string) {
-	//: the canonical IETF-registered type is application/xml.
-	return []string{"application/xml", "text/xml"}
+	//: return a copy so callers cannot mutate the shared slice.
+	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
@@ -51,8 +59,8 @@ func (*xmlCodec) MIMETypes() (mimes []string) {
 // Returns:
 //   - []string: canonical extension first.
 func (*xmlCodec) Extensions() (exts []string) {
-	//: canonical extension.
-	return []string{".xml"}
+	//: return a copy so callers cannot mutate the shared slice.
+	return slices.Clone(extensions)
 }
 
 // Marshal serialises v as XML bytes.

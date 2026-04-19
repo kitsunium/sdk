@@ -3,13 +3,20 @@ package xml
 
 import (
 	stdxml "encoding/xml"
+	"errors"
+	"io"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // xmlDecoder wraps *encoding/xml.Decoder so it satisfies codec.Decoder.
+// A sticky done latch mirrors the contract of the other streaming codecs:
+// More() returns false once Decode has surfaced io.EOF, without consuming
+// any additional tokens from the underlying stream.
 type xmlDecoder struct {
 	inner *stdxml.Decoder
+	//: sticky EOF flag so More() returns false after the stream drains.
+	done bool
 }
 
 // Decode reads the next value from the wrapped stdlib decoder.
@@ -18,10 +25,23 @@ type xmlDecoder struct {
 //   - v: pointer to the destination value.
 //
 // Returns:
-//   - error: UnmarshalFailed wrapping the stdlib cause on failure; nil otherwise.
+//   - error: UnmarshalFailed wrapping the stdlib cause on failure; io.EOF
+//     (unwrapped) once the stream is drained; nil otherwise.
 func (d *xmlDecoder) Decode(v any) (err error) {
+	//: drained latch short-circuits additional reads.
+	if d.done {
+		//: mirror stdlib stream semantics.
+		return io.EOF
+	}
 	//: delegate.
 	xerr := d.inner.Decode(v)
+	//: EOF latch toggles the done flag for subsequent More() calls.
+	if errors.Is(xerr, io.EOF) {
+		//: remember that we reached the stream end.
+		d.done = true
+		//: return io.EOF untouched.
+		return io.EOF
+	}
 	//: success fast-path.
 	if xerr == nil {
 		//: nothing to wrap.
@@ -37,17 +57,10 @@ func (d *xmlDecoder) Decode(v any) (err error) {
 }
 
 // More reports whether another XML element can be decoded.
-// The stdlib decoder has no More method; we approximate by checking if the
-// next token is EOF.
 //
 // Returns:
-//   - bool: true when a further Decode call is likely to succeed.
+//   - bool: false once Decode has returned io.EOF.
 func (d *xmlDecoder) More() (ok bool) {
-	//: peek at the next token — returning any token (or a skip-able one)
-	//: means content remains. The stdlib consumes the token so we cannot
-	//: push it back; callers that want a reliable More use their own token
-	//: accounting.
-	_, terr := d.inner.Token()
-	//: any successful token read signals content remains.
-	return terr == nil
+	//: reflect the sticky EOF latch — no token consumed.
+	return !d.done
 }

@@ -122,19 +122,20 @@ func TestStreaming(t *testing.T) {
 		t.Fatalf("Close: %v", cerr)
 	}
 	dec := sc.NewDecoder(&buf)
-	count := 0
+	var decoded []sampleDoc
 	for dec.More() {
 		var d sampleDoc
-		if err := dec.Decode(&d); err != nil && err != io.EOF {
-			t.Fatalf("Decode: %v", err)
-		}
-		count++
-		if count > 4 {
+		err := dec.Decode(&d)
+		if err == io.EOF {
 			break
 		}
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		decoded = append(decoded, d)
 	}
-	if count == 0 {
-		t.Error("no decoded records")
+	if len(decoded) != 2 || decoded[0].ID != "a" || decoded[1].ID != "b" {
+		t.Errorf("decoded %+v, want [{a} {b}]", decoded)
 	}
 }
 

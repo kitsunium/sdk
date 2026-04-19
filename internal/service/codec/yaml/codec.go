@@ -5,6 +5,7 @@ package yaml
 
 import (
 	"io"
+	"slices"
 
 	goyaml "gopkg.in/yaml.v3"
 
@@ -50,7 +51,7 @@ func (*yamlCodec) Name() (name string) {
 //   - []string: canonical MIME first.
 func (*yamlCodec) MIMETypes() (mimes []string) {
 	//: hand back the package-level slice.
-	return mimeTypes
+	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
@@ -59,7 +60,7 @@ func (*yamlCodec) MIMETypes() (mimes []string) {
 //   - []string: canonical extension first.
 func (*yamlCodec) Extensions() (exts []string) {
 	//: hand back the package-level slice.
-	return extensions
+	return slices.Clone(extensions)
 }
 
 // Marshal serialises v as YAML bytes.

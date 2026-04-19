@@ -7,6 +7,7 @@
 package ndjson
 
 import (
+	"slices"
 	"bufio"
 	"bytes"
 	stdjson "encoding/json"
@@ -61,7 +62,7 @@ func (*ndjsonCodec) Name() (name string) {
 //   - []string: canonical MIME first.
 func (*ndjsonCodec) MIMETypes() (mimes []string) {
 	//: hand back the package-level slice.
-	return mimeTypes
+	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
@@ -70,7 +71,7 @@ func (*ndjsonCodec) MIMETypes() (mimes []string) {
 //   - []string: canonical extension first.
 func (*ndjsonCodec) Extensions() (exts []string) {
 	//: hand back the package-level slice.
-	return extensions
+	return slices.Clone(extensions)
 }
 
 // Marshal encodes a slice v as NDJSON bytes.

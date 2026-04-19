@@ -4,6 +4,7 @@
 package pem
 
 import (
+	"slices"
 	"bytes"
 	stdpem "encoding/pem"
 
@@ -54,7 +55,7 @@ func (*pemCodec) Name() (name string) {
 //   - []string: canonical MIME first.
 func (*pemCodec) MIMETypes() (mimes []string) {
 	//: hand back the package-level slice.
-	return mimeTypes
+	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
@@ -63,7 +64,7 @@ func (*pemCodec) MIMETypes() (mimes []string) {
 //   - []string: canonical extension first.
 func (*pemCodec) Extensions() (exts []string) {
 	//: hand back the package-level slice.
-	return extensions
+	return slices.Clone(extensions)
 }
 
 // Marshal encodes a *pem.Block into PEM bytes.

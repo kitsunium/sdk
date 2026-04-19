@@ -158,20 +158,21 @@ func encodeASCII85(raw []byte) (text string, err error) {
 	return buf.String(), nil
 }
 
-// wrapASCII85Encode wraps an encoder-side failure with the DECODE_FAILED
-// reason reused for the encode path (same sentinel).
+// wrapASCII85Encode wraps an encoder-side failure with the ENCODE_FAILED
+// reason so callers can distinguish encode from decode errors via
+// errs.HasReason.
 //
 // Params:
 //   - cause: stdlib error returned by Write or Close.
 //
 // Returns:
-//   - error: DecodeFailed-wrapped error.
+//   - error: EncodeFailed-wrapped error.
 func wrapASCII85Encode(cause error) (err error) {
 	//: single construction site keeps the Private message aligned.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeDecodeFailed,
-		Reason:  "DECODE_FAILED",
-		Public:  "baseenc decoding failed",
+		Code:    CodeEncodeFailed,
+		Reason:  "ENCODE_FAILED",
+		Public:  "baseenc encoding failed",
 		Private: "pkg/v1/codec/baseenc: ascii85 encoder returned an error",
 	})
 }

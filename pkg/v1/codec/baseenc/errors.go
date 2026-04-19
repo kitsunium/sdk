@@ -13,4 +13,9 @@ var (
 	DecodeFailed = errs.Define(CodeDecodeFailed, "DECODE_FAILED",
 		"baseenc decoding failed",
 		"pkg/v1/codec/baseenc: stdlib decoder returned an error")
+
+	// EncodeFailed wraps a failure from the underlying stdlib encoder.
+	EncodeFailed = errs.Define(CodeEncodeFailed, "ENCODE_FAILED",
+		"baseenc encoding failed",
+		"pkg/v1/codec/baseenc: stdlib encoder returned an error")
 )

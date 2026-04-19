@@ -128,6 +128,35 @@ func TestFromMIME(t *testing.T) {
 	}
 }
 
+func TestFromMIME_WithParameters(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		in   string
+		want codec.Format
+	}
+	tests := []tc{
+		{"charset param", "application/json; charset=utf-8", codec.JSON},
+		{"uppercase header", "APPLICATION/JSON", codec.JSON},
+		{"trailing whitespace", "application/xml ", codec.XML},
+		{"multiple params", "application/cbor; boundary=xyz; q=0.9", codec.CBOR},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got, ok := codec.FromMIME(c.in)
+		if !ok || got != c.want {
+			t.Errorf("%s: FromMIME(%q) = (%q, %v), want (%q, true)",
+				c.name, c.in, got, ok, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func TestFromExtension(t *testing.T) {
 	t.Parallel()
 	f, ok := codec.FromExtension(".xml")

@@ -50,8 +50,8 @@ func TestRegister(t *testing.T) {
 		}
 	}
 	for _, tc := range tests {
+		//: sequential — Register mutates the process-wide registry.
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runCase(t, tc.arg)
 		})
 	}

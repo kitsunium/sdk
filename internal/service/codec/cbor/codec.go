@@ -5,6 +5,7 @@ package cbor
 
 import (
 	"io"
+	"slices"
 
 	gocbor "github.com/fxamacker/cbor/v2"
 
@@ -50,7 +51,7 @@ func (*cborCodec) Name() (name string) {
 //   - []string: canonical MIME first.
 func (*cborCodec) MIMETypes() (mimes []string) {
 	//: hand back the package-level slice.
-	return mimeTypes
+	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
@@ -59,7 +60,7 @@ func (*cborCodec) MIMETypes() (mimes []string) {
 //   - []string: canonical extension first.
 func (*cborCodec) Extensions() (exts []string) {
 	//: hand back the package-level slice.
-	return extensions
+	return slices.Clone(extensions)
 }
 
 // Marshal serialises v as CBOR bytes.

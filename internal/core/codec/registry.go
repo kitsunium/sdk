@@ -5,6 +5,7 @@ package codec
 
 import (
 	"fmt"
+	"mime"
 	"slices"
 	"strings"
 	"sync"
@@ -74,29 +75,40 @@ func Lookup(f Format) (c Codec, ok bool) {
 	return codec, true
 }
 
-// LookupMIME returns the codec whose MIME list matches.
+// LookupMIME returns the codec whose MIME list matches. MIME parameters
+// (e.g. "; charset=utf-8") are stripped before the index lookup so that
+// "application/json; charset=utf-8" resolves like "application/json".
 //
 // Params:
-//   - mime: the MIME type (case-insensitive).
+//   - raw: the MIME header value (case-insensitive).
 //
 // Returns:
-//   - Codec: the codec registered for the MIME, or nil if none.
-//   - bool: true iff the MIME resolves to a codec.
-func LookupMIME(mime string) (c Codec, ok bool) {
+//   - c: the codec registered for the MIME, or nil if none.
+//   - ok: true iff the MIME resolves to a codec.
+func LookupMIME(raw string) (c Codec, ok bool) {
 	//: empty MIME always misses.
-	if mime == "" {
+	if raw == "" {
 		//: caller supplied nothing to match.
 		return nil, false
 	}
-	//: normalise and look up the index.
-	raw, found := mimeIndex.Load(strings.ToLower(mime))
+	//: parse parameters away; ParseMediaType lowercases the media type itself.
+	mediaType, _, perr := mime.ParseMediaType(raw)
+	//: fall back to a manual strip when the header is malformed.
+	if perr != nil {
+		//: strings.Cut returns the part before the first ';' (or the full string).
+		before, _, _ := strings.Cut(raw, ";")
+		//: normalise to lowercase trimmed form for index lookup.
+		mediaType = strings.ToLower(strings.TrimSpace(before))
+	}
+	//: index keys are already lowercased.
+	entry, found := mimeIndex.Load(mediaType)
 	//: absence path.
 	if !found {
 		//: MIME unrecognised.
 		return nil, false
 	}
 	//: resolve the Format to the concrete codec.
-	name, _ := raw.(Format)
+	name, _ := entry.(Format)
 	//: delegate to Lookup.
 	return Lookup(name)
 }

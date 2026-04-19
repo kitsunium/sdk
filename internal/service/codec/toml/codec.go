@@ -5,6 +5,7 @@ package toml
 
 import (
 	"io"
+	"slices"
 
 	gotoml "github.com/pelletier/go-toml/v2"
 
@@ -50,7 +51,7 @@ func (*tomlCodec) Name() (name string) {
 //   - []string: canonical MIME first.
 func (*tomlCodec) MIMETypes() (mimes []string) {
 	//: hand back the package-level slice.
-	return mimeTypes
+	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
@@ -59,7 +60,7 @@ func (*tomlCodec) MIMETypes() (mimes []string) {
 //   - []string: canonical extension first.
 func (*tomlCodec) Extensions() (exts []string) {
 	//: hand back the package-level slice.
-	return extensions
+	return slices.Clone(extensions)
 }
 
 // Marshal serialises v as TOML bytes.
