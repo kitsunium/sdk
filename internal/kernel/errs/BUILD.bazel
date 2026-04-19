@@ -32,5 +32,12 @@ go_test(
         "registry_external_test.go",
         "validate_internal_test.go",
     ],
+    data = ["//:audit_sources"],
     embed = [":errs"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
 )

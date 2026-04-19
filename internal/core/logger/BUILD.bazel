@@ -18,3 +18,9 @@ alias(
     actual = ":logger",
     visibility = ["//:__subpackages__"],
 )
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

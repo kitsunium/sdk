@@ -39,3 +39,9 @@ go_test(
         "@in_gopkg_yaml_v3//:yaml_v3",
     ],
 )
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

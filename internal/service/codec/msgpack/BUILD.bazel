@@ -39,3 +39,9 @@ go_test(
         "@com_github_vmihailenco_msgpack_v5//:msgpack",
     ],
 )
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

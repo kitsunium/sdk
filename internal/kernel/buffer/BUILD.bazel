@@ -21,3 +21,9 @@ go_test(
     ],
     embed = [":buffer"],
 )
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

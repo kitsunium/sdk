@@ -22,3 +22,9 @@ go_test(
         "//pkg/v1/logger",
     ],
 )
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

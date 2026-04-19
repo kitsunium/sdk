@@ -39,3 +39,9 @@ go_test(
         "@com_github_fxamacker_cbor_v2//:cbor",
     ],
 )
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

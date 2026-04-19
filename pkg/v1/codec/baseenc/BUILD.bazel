@@ -27,3 +27,9 @@ go_test(
     embed = [":baseenc"],
     deps = ["//internal/kernel/errs"],
 )
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
