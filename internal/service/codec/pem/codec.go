@@ -12,13 +12,12 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Codec is the PEM singleton, registered with core/codec at package load.
-// Binding the registration result to a named var is more idiomatic than
-// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
-var Codec codec.Codec = codec.Register(&pemCodec{})
-
-// Package-level lookup tables, hoisted to satisfy KTN-VAR-CONSTSLICE.
+// Package-level state: the codec singleton plus the hoisted MIME /
+// extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
 var (
+	//: register the singleton and expose it as a typed package var.
+	Codec codec.Codec = codec.Register(&pemCodec{})
+
 	//: no official IANA type exists; the de facto value is application/x-pem-file.
 	mimeTypes = []string{"application/x-pem-file"}
 

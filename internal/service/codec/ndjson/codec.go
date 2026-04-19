@@ -7,11 +7,11 @@
 package ndjson
 
 import (
-	"slices"
 	"bufio"
 	"bytes"
 	stdjson "encoding/json"
 	"reflect"
+	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -24,13 +24,12 @@ const scannerInitialCapacity int = 64 * 1024
 // record likely represents a consumer bug or a corrupt stream.
 const scannerMaxCapacity int = 10 * 1024 * 1024
 
-// Codec is the NDJSON singleton, registered with core/codec at package load.
-// Binding the registration result to a named var is more idiomatic than
-// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
-var Codec codec.Codec = codec.Register(&ndjsonCodec{})
-
-// Package-level lookup tables, hoisted to satisfy KTN-VAR-CONSTSLICE.
+// Package-level state: the codec singleton plus the hoisted MIME /
+// extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
 var (
+	//: register the singleton and expose it as a typed package var.
+	Codec codec.Codec = codec.Register(&ndjsonCodec{})
+
 	//: MIME table hoisted to satisfy KTN-VAR-CONSTSLICE.
 	mimeTypes = []string{"application/x-ndjson", "application/jsonl"}
 
