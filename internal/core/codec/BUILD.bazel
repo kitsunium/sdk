@@ -22,6 +22,7 @@ alias(
 
 go_test(
     name = "codec_test",
+    size = "small",
     srcs = [
         "format_external_test.go",
         "registry_external_test.go",

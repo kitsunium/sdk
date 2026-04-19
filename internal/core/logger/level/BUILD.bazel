@@ -17,6 +17,7 @@ alias(
 
 go_test(
     name = "level_test",
+    size = "small",
     srcs = ["level_external_test.go"],
     deps = [":level"],
 )

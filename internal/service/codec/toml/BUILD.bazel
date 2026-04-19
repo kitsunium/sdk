@@ -28,6 +28,7 @@ alias(
 
 go_test(
     name = "toml_test",
+    size = "small",
     srcs = [
         "codec_external_test.go",
         "codec_internal_test.go",

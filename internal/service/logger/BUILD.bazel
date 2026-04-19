@@ -29,6 +29,7 @@ alias(
 
 go_test(
     name = "logger_test",
+    size = "small",
     srcs = [
         "logger_external_test.go",
         "logger_internal_test.go",

@@ -35,6 +35,7 @@ alias(
 
 go_test(
     name = "codec_test",
+    size = "small",
     srcs = [
         "codec_external_test.go",
         "codec_internal_test.go",

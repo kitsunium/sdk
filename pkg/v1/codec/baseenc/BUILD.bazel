@@ -22,6 +22,7 @@ alias(
 
 go_test(
     name = "baseenc_test",
+    size = "small",
     srcs = [
         "baseenc_external_test.go",
         "baseenc_internal_test.go",

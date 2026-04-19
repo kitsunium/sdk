@@ -25,6 +25,7 @@ alias(
 
 go_test(
     name = "errs_test",
+    size = "small",
     srcs = [
         "accessors_external_test.go",
         "accessors_internal_test.go",

@@ -81,25 +81,42 @@ func TestMarshal(t *testing.T) {
 // target, nil pointer) and UNMARSHAL_FAILED (bad line) branches.
 func TestUnmarshal(t *testing.T) {
 	t.Parallel()
+	//: targetKind lets each subtest allocate its own fresh destination
+	//: so parallel runs don't race on a shared buffer.
+	type targetKind int
+	const (
+		kindSlice targetKind = iota
+		kindString
+		kindNilSlice
+	)
 	type tc struct {
 		name    string
 		data    []byte
-		target  any
+		kind    targetKind
 		wantErr string
 	}
-	var out []payload
-	var wrong string
-	var nilSlice *[]payload
 	tests := []tc{
-		{"round-trip success", []byte("{\"name\":\"a\",\"age\":1}\n"), &out, ""},
-		{"blank lines are skipped", []byte("{\"name\":\"a\",\"age\":1}\n\n{\"name\":\"b\",\"age\":2}\n"), &out, ""},
-		{"non-slice pointer target", []byte("{}\n"), &wrong, "VALUE_INVALID"},
-		{"nil pointer target", []byte("{}\n"), nilSlice, "VALUE_INVALID"},
-		{"bad JSON line surfaces UNMARSHAL_FAILED", []byte("not json\n"), &out, "UNMARSHAL_FAILED"},
+		{"round-trip success", []byte("{\"name\":\"a\",\"age\":1}\n"), kindSlice, ""},
+		{"blank lines are skipped", []byte("{\"name\":\"a\",\"age\":1}\n\n{\"name\":\"b\",\"age\":2}\n"), kindSlice, ""},
+		{"non-slice pointer target", []byte("{}\n"), kindString, "VALUE_INVALID"},
+		{"nil pointer target", []byte("{}\n"), kindNilSlice, "VALUE_INVALID"},
+		{"bad JSON line surfaces UNMARSHAL_FAILED", []byte("not json\n"), kindSlice, "UNMARSHAL_FAILED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		err := ndjson.New().Unmarshal(tc.data, tc.target)
+		//: allocate a per-subtest target so parallel runs don't race.
+		var target any
+		switch tc.kind {
+		case kindSlice:
+			target = &[]payload{}
+		case kindString:
+			s := ""
+			target = &s
+		case kindNilSlice:
+			var nilSlice *[]payload
+			target = nilSlice
+		}
+		err := ndjson.New().Unmarshal(tc.data, target)
 		if tc.wantErr == "" && err != nil {
 			t.Errorf("%s: Unmarshal err=%v", tc.name, err)
 		}

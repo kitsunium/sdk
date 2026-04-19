@@ -17,6 +17,7 @@ alias(
 
 go_test(
     name = "clock_test",
+    size = "small",
     srcs = [
         "clock_external_test.go",
         "clock_internal_test.go",

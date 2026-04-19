@@ -4,20 +4,34 @@ common --enable_bzlmod
 # Reproducibility.
 build --incompatible_strict_action_env
 build --verbose_failures
-test  --test_output=errors
-test  --test_summary=terse
 
-# Named configs ────────────────────────────────────────────────────────
-# Race — mirrors `go test -race`. Requires cgo; mutually exclusive with pure.
+# ── Race detection — always on ────────────────────────────────────────
+# Mirrors `go test -race`; cgo-required. Setting this at the top-level
+# (instead of behind `--config=race`) keeps the Bazel analysis cache
+# stable: toggling the flag between `bazel run //:gazelle` and `bazel
+# test …` otherwise invalidates every rules_go analysis node.
+build --@rules_go//go/config:race=true
+
+# ── Test ergonomics ───────────────────────────────────────────────────
+test --test_output=errors
+test --test_summary=terse
+# Cap default test timeout at 60 s (matches the `small` size contract).
+# The whole suite runs in <3 s per target — anything longer is a red flag.
+test --test_timeout=60
+
+# ── Coverage ──────────────────────────────────────────────────────────
+coverage --@rules_go//go/config:cover_format=lcov
+coverage --combined_report=lcov
+
+# ── Named configs (opt-in profiles) ───────────────────────────────────
+# Race is the default, but the alias is kept so Makefile / CI keep
+# working without a refactor.
 build:race --@rules_go//go/config:race=true
 test:race  --@rules_go//go/config:race=true
 
-# Pure — no cgo; mirrors CGO_ENABLED=0.
+# Pure — no cgo; mirrors CGO_ENABLED=0. Mutually exclusive with race.
+build:pure --@rules_go//go/config:race=false
 build:pure --@rules_go//go/config:pure=true
-
-# Coverage — LCOV is the rules_go default and integrates with Codacy / Codecov.
-coverage --@rules_go//go/config:cover_format=lcov
-coverage --combined_report=lcov
 
 # CI profile — consumed by .github/workflows/bazel-ci.yml.
 build:ci --config=race
