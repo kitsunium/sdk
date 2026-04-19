@@ -1,4 +1,8 @@
-.PHONY: sdk-sync sdk-tidy sdk-test sdk-lint sdk-cover sdk-errs-audit sdk-all sdk-release-check
+.PHONY: sdk-sync sdk-tidy sdk-test sdk-lint sdk-cover sdk-errs-audit sdk-all sdk-release-check \
+        test build lint cover tidy
+
+# `make` with no args runs the full pipeline (sync → lint → errs-audit → test).
+.DEFAULT_GOAL := sdk-all
 
 # ── Bazel wrappers ─────────────────────────────────────────────────────
 # Every sdk-* target below shells to `bazel`; the source of truth is
@@ -31,3 +35,12 @@ sdk-all: sdk-sync sdk-lint sdk-errs-audit sdk-test
 sdk-release-check:
 	@echo "Tags format: internal/<layer>/vX.Y.Z  pkg/vN/vX.Y.Z"
 	@git tag --list 'internal/*/v*' 'pkg/*/v*' | sort
+
+# ── Short aliases (map to sdk-* targets for ergonomic local use) ───────
+test:  sdk-test
+lint:  sdk-lint
+cover: sdk-cover
+tidy:  sdk-tidy
+
+build:
+	bazel build //...
