@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "multi",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "multi.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/multi",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":multi",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "multi_test",
+    srcs = ["multi_external_test.go"],
+    deps = [
+        ":multi",
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/errs",
+    ],
+)
