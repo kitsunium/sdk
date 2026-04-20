@@ -11,13 +11,13 @@ go_library(
         "registry.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/codec",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/core:core_consumers"],
 )
 
 alias(
     name = "go_default_library",
     actual = ":codec",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/core:core_consumers"],
 )
 
 go_test(

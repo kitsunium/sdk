@@ -6,13 +6,13 @@ go_library(
     name = "clock",
     srcs = ["clock.go"],
     importpath = "github.com/kitsunium/sdk/internal/kernel/clock",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/kernel:kernel_consumers"],
 )
 
 alias(
     name = "go_default_library",
     actual = ":clock",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/kernel:kernel_consumers"],
 )
 
 go_test(

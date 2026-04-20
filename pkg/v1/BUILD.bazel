@@ -1,4 +1,5 @@
 # gazelle:prefix github.com/kitsunium/sdk/pkg/v1
+# gazelle:go_visibility //visibility:public
 # gazelle:default_visibility //visibility:public
 
 # pkg/v1 is the SDK's public surface — every go_library under this tree

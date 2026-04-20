@@ -11,7 +11,7 @@ go_library(
         "text_handler.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/logger",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
@@ -24,7 +24,7 @@ go_library(
 alias(
     name = "go_default_library",
     actual = ":logger",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/service:service_consumers"],
 )
 
 go_test(

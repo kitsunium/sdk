@@ -11,14 +11,14 @@ go_library(
         "record.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/logger",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/core:core_consumers"],
     deps = ["//internal/core/logger/level"],
 )
 
 alias(
     name = "go_default_library",
     actual = ":logger",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/core:core_consumers"],
 )
 
 filegroup(

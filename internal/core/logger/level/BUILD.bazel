@@ -6,13 +6,13 @@ go_library(
     name = "level",
     srcs = ["level.go"],
     importpath = "github.com/kitsunium/sdk/internal/core/logger/level",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/core:core_consumers"],
 )
 
 alias(
     name = "go_default_library",
     actual = ":level",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/core:core_consumers"],
 )
 
 go_test(

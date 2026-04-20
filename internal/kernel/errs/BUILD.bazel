@@ -14,13 +14,13 @@ go_library(
         "wrap_params.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/errs",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/kernel:kernel_consumers"],
 )
 
 alias(
     name = "go_default_library",
     actual = ":errs",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/kernel:kernel_consumers"],
 )
 
 go_test(

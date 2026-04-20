@@ -6,13 +6,13 @@ go_library(
     name = "buffer",
     srcs = ["buffer.go"],
     importpath = "github.com/kitsunium/sdk/internal/kernel/buffer",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/kernel:kernel_consumers"],
 )
 
 alias(
     name = "go_default_library",
     actual = ":buffer",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/kernel:kernel_consumers"],
 )
 
 go_test(

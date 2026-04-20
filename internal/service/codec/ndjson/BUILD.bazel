@@ -10,7 +10,7 @@ go_library(
         "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/codec/ndjson",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/codec",
         "//internal/kernel/errs",
@@ -20,7 +20,7 @@ go_library(
 alias(
     name = "go_default_library",
     actual = ":ndjson",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/service:service_consumers"],
 )
 
 go_test(

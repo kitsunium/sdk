@@ -12,6 +12,10 @@ go_library(
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/logger",
     visibility = ["//visibility:public"],
+    # keep
+    x_defs = {
+        "github.com/kitsunium/sdk/pkg/v1/logger.Version": "{STABLE_VERSION}",
+    },
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",

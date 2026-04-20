@@ -5,6 +5,14 @@ common --enable_bzlmod
 build --incompatible_strict_action_env
 build --verbose_failures
 
+# ── Workspace stamping ────────────────────────────────────────────────
+# `--stamp` + workspace_status_command emits STABLE_VERSION into the build
+# graph. rules_go substitutes `{STABLE_VERSION}` placeholders inside any
+# go_library x_defs map at link time — this is the Bazel equivalent of
+# the previous `go build -ldflags "-X github.com/.../logger.Version=<sha>"`.
+build --stamp
+build --workspace_status_command=tools/workspace_status.sh
+
 # ── Race detection — always on ────────────────────────────────────────
 # Mirrors `go test -race`; cgo-required. Setting this at the top-level
 # (instead of behind `--config=race`) keeps the Bazel analysis cache

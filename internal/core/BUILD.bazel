@@ -1,4 +1,5 @@
 # gazelle:prefix github.com/kitsunium/sdk/internal/core
+# gazelle:go_visibility //internal/core:core_consumers
 # gazelle:default_visibility //internal/core:core_consumers
 
 package(default_visibility = ["//internal/core:core_consumers"])
