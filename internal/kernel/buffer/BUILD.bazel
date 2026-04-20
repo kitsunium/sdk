@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 
 go_library(
     name = "buffer",
-    srcs = ["buffer.go"],
+    srcs = [
+        "buffer.go",
+        "pool.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/buffer",
     visibility = ["//internal/kernel:kernel_consumers"],
 )
@@ -21,6 +24,8 @@ go_test(
     srcs = [
         "buffer_external_test.go",
         "buffer_internal_test.go",
+        "pool_external_test.go",
+        "pool_internal_test.go",
     ],
     embed = [":buffer"],
 )
