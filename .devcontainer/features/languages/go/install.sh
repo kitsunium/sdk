@@ -232,11 +232,7 @@ install_go_tool "ktn-linter" \
     "" \
     "binary" &
 
-# ── Bazel tooling — formatter + scripted BUILD editor ────────────────
-# buildifier: gofmt for BUILD.bazel / WORKSPACE / *.bzl
-# buildozer : programmatic edits on BUILD targets
-# Both ship as prebuilt binaries from the same bazelbuild/buildtools
-# release so one version lookup feeds both.
+# Bazel tooling — same release ships both binaries.
 if [[ -n "$BUILDTOOLS_VERSION" ]]; then
     install_go_tool "buildifier" \
         "https://github.com/bazelbuild/buildtools/releases/download/v${BUILDTOOLS_VERSION}/buildifier-linux-${GO_ARCH}" \
