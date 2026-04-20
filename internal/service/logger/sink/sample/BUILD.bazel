@@ -1,15 +1,13 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
-package(default_visibility = ["//internal/service:service_consumers"])
-
 go_library(
-    name = "failover",
+    name = "sample",
     srcs = [
         "codes.go",
         "errors.go",
-        "failover_sink.go",
+        "sample_sink.go",
     ],
-    importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/failover",
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/sample",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
@@ -22,7 +20,7 @@ go_library(
 
 alias(
     name = "go_default_library",
-    actual = ":failover",
+    actual = ":sample",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
@@ -30,12 +28,12 @@ alias(
 )
 
 go_test(
-    name = "failover_test",
+    name = "sample_test",
     srcs = [
-        "failover_sink_external_test.go",
-        "failover_sink_internal_test.go",
+        "sample_sink_external_test.go",
+        "sample_sink_internal_test.go",
     ],
-    embed = [":failover"],
+    embed = [":sample"],
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
