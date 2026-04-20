@@ -80,7 +80,7 @@ func Test_loggerImpl_With(t *testing.T) {
 		attrs  []corelogger.AttrValue
 		expect string
 	}{
-		{"binds a string attr", []corelogger.AttrValue{{Key: "k", Value: "v"}}, `k="v"`},
+		{"binds a string attr", []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}}, `k="v"`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

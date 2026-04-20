@@ -118,7 +118,7 @@ func TestTextHandler_Handle(t *testing.T) {
 			record: corelogger.RecordEvent{
 				Level:   level.Warn,
 				Message: "audit",
-				Attrs:   []corelogger.AttrValue{{Key: "user", Value: "alice bob"}},
+				Attrs:   []corelogger.AttrValue{{Key: "user", Value: corelogger.StringValue("alice bob")}},
 			},
 			wantInLine: []string{"WARN", "audit", `user="alice bob"`},
 		},
@@ -129,10 +129,10 @@ func TestTextHandler_Handle(t *testing.T) {
 				Level:   level.Debug,
 				Message: "metrics",
 				Attrs: []corelogger.AttrValue{
-					{Key: "count", Value: 7},
-					{Key: "big", Value: int64(42)},
-					{Key: "ok", Value: true},
-					{Key: "ratio", Value: 0.5},
+					{Key: "count", Value: corelogger.IntValue(7)},
+					{Key: "big", Value: corelogger.Int64Value(42)},
+					{Key: "ok", Value: corelogger.BoolValue(true)},
+					{Key: "ratio", Value: corelogger.Float64Value(0.5)},
 				},
 			},
 			wantInLine: []string{"count=7", "big=42", "ok=true", "ratio=0.5"},
@@ -143,7 +143,7 @@ func TestTextHandler_Handle(t *testing.T) {
 			record: corelogger.RecordEvent{
 				Level:   level.Info,
 				Message: "oops",
-				Attrs:   []corelogger.AttrValue{{Key: "x", Value: struct{}{}}},
+				Attrs:   []corelogger.AttrValue{{Key: "x", Value: corelogger.AnyValue(struct{}{})}},
 			},
 			wantInLine: []string{"x=?"},
 		},
@@ -206,8 +206,8 @@ func TestTextHandler_WithAttrs(t *testing.T) {
 			t.Parallel()
 			var buf bytes.Buffer
 			parent := mustNewText(t, &buf, level.Debug)
-			parentWith := parent.WithAttrs([]corelogger.AttrValue{{Key: "p", Value: "P"}})
-			childWith := parentWith.WithAttrs([]corelogger.AttrValue{{Key: "c", Value: "C"}})
+			parentWith := parent.WithAttrs([]corelogger.AttrValue{{Key: "p", Value: corelogger.StringValue("P")}})
+			childWith := parentWith.WithAttrs([]corelogger.AttrValue{{Key: "c", Value: corelogger.StringValue("C")}})
 			if err := childWith.Handle(t.Context(), corelogger.RecordEvent{Level: level.Info, Message: "m"}); err != nil {
 				t.Fatalf("Handle err = %v", err)
 			}

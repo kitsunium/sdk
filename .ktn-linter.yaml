@@ -87,13 +87,18 @@ rules:
   # map storage) do not fire on concrete methods that simply delegate to
   # `encoding/json`, `encoding/xml`, etc.
   #
-  # Disable ONLY inside the codec tree. Every other Go package in the SDK
-  # must still avoid `any` except where the Codec contract requires it.
+  # Disable ONLY inside the codec tree AND the logger Value union. Every
+  # other Go package in the SDK must still avoid `any` except where the
+  # Codec contract requires it (codec) or the slog-style discriminated
+  # Value union demands it for Time / Group / Any payloads (logger).
   KTN-INTERFACE-ANYUSE:
     exclude:
       - "**/internal/core/codec/**"
       - "**/internal/service/codec/**"
       - "**/pkg/v1/codec/**"
+      - "**/internal/core/logger/**"
+      - "**/internal/service/logger/**"
+      - "**/pkg/v1/logger/**"
 
   # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,
