@@ -100,6 +100,21 @@ rules:
       - "**/internal/service/logger/**"
       - "**/pkg/v1/logger/**"
 
+  # KTN-VAR-MAKEAPPEND + KTN-VAR-SLICECAP false-positive on generic
+  # fixed-length storage. The ring buffer (and other future generic
+  # primitives) allocate their slot array via `make([]T, n)` and only
+  # use indexed access (no append ever runs against the slice). The
+  # linter heuristic cannot prove the absence of append for a generic
+  # type parameter and conservatively flags every such call. We scope
+  # the exclusion to the kernel/ring tree so the rule still catches
+  # genuine append-as-storage misuse everywhere else.
+  KTN-VAR-MAKEAPPEND:
+    exclude:
+      - "**/internal/kernel/ring/**"
+  KTN-VAR-SLICECAP:
+    exclude:
+      - "**/internal/kernel/ring/**"
+
   # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,
   # sync.Once for lazy init, or package-level var initialisers. The codec

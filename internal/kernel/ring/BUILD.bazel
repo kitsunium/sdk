@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "ring",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "ring.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/ring",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ring",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "ring_test",
+    srcs = [
+        "ring_external_test.go",
+        "ring_internal_test.go",
+    ],
+    embed = [":ring"],
+    deps = ["//internal/kernel/errs"],
+)
