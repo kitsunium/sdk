@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
 )
@@ -216,8 +217,9 @@ func TestString(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			attr := logger.String(tc.key, tc.val)
-			if attr.Value != tc.val {
-				t.Errorf("Value = %v, want %q", attr.Value, tc.val)
+			if attr.Value.Kind() != corelogger.KindString || attr.Value.String() != tc.val {
+				t.Errorf("Value = %v (kind=%s), want %q (KindString)",
+					attr.Value, attr.Value.Kind(), tc.val)
 			}
 		})
 	}
@@ -236,8 +238,9 @@ func TestInt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			attr := logger.Int("k", tc.val)
-			if attr.Value != tc.val {
-				t.Errorf("Value = %v, want %d", attr.Value, tc.val)
+			if attr.Value.Kind() != corelogger.KindInt64 || attr.Value.Int64() != int64(tc.val) {
+				t.Errorf("Value = %v (kind=%s), want %d (KindInt64)",
+					attr.Value, attr.Value.Kind(), tc.val)
 			}
 		})
 	}

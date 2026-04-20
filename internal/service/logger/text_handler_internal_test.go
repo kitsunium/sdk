@@ -24,12 +24,12 @@ func Test_appendAttr(t *testing.T) {
 		attr corelogger.AttrValue
 		want string
 	}{
-		{"string is quoted", corelogger.AttrValue{Key: "k", Value: "v"}, ` k="v"`},
-		{"int renders decimal unquoted", corelogger.AttrValue{Key: "n", Value: 42}, " n=42"},
-		{"int64 renders decimal unquoted", corelogger.AttrValue{Key: "big", Value: int64(9001)}, " big=9001"},
-		{"bool renders literal", corelogger.AttrValue{Key: "ok", Value: true}, " ok=true"},
-		{"float renders shortest round-trip", corelogger.AttrValue{Key: "r", Value: 0.25}, " r=0.25"},
-		{"unknown value type marked with ?", corelogger.AttrValue{Key: "x", Value: []int{1, 2}}, " x=?"},
+		{"string is quoted", corelogger.AttrValue{Key: "k", Value: corelogger.StringValue("v")}, ` k="v"`},
+		{"int renders decimal unquoted", corelogger.AttrValue{Key: "n", Value: corelogger.IntValue(42)}, " n=42"},
+		{"int64 renders decimal unquoted", corelogger.AttrValue{Key: "big", Value: corelogger.Int64Value(9001)}, " big=9001"},
+		{"bool renders literal", corelogger.AttrValue{Key: "ok", Value: corelogger.BoolValue(true)}, " ok=true"},
+		{"float renders shortest round-trip", corelogger.AttrValue{Key: "r", Value: corelogger.Float64Value(0.25)}, " r=0.25"},
+		{"unknown value type marked with ?", corelogger.AttrValue{Key: "x", Value: corelogger.AnyValue([]int{1, 2})}, " x=?"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,7 +90,7 @@ func TestTextHandler_renderLine(t *testing.T) {
 			record: corelogger.RecordEvent{
 				Level:   level.Error,
 				Message: "attrs",
-				Attrs:   []corelogger.AttrValue{{Key: "k", Value: "v"}},
+				Attrs:   []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}},
 			},
 			wantSub: []string{"ERROR", "attrs", `k="v"`},
 		},

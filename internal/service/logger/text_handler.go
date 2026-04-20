@@ -210,24 +210,22 @@ func appendAttr(dst []byte, a corelogger.AttrValue) (out []byte) {
 	dst = append(dst, ' ')
 	dst = append(dst, a.Key...)
 	dst = append(dst, '=')
-	//: dispatch on the concrete value type so numbers stay bare and strings quote.
-	switch v := a.Value.(type) {
+	//: dispatch on the typed Kind discriminant — no boxing on the hot path.
+	switch a.Value.Kind() {
 	//: strings are quoted so whitespace in values remains visible.
-	case string:
-		dst = strconv.AppendQuote(dst, v)
-	//: plain ints are rendered base-10.
-	case int:
-		dst = strconv.AppendInt(dst, int64(v), decimalBase)
-	//: already 64-bit ints skip the widening cast.
-	case int64:
-		dst = strconv.AppendInt(dst, v, decimalBase)
+	case corelogger.KindString:
+		dst = strconv.AppendQuote(dst, a.Value.String())
+	//: int64 (also covers int / int32 widened by IntValue) renders base-10.
+	case corelogger.KindInt64:
+		dst = strconv.AppendInt(dst, a.Value.Int64(), decimalBase)
 	//: booleans render as "true" or "false".
-	case bool:
-		dst = strconv.AppendBool(dst, v)
+	case corelogger.KindBool:
+		dst = strconv.AppendBool(dst, a.Value.Bool())
 	//: floats use Go's default shortest round-trip format.
-	case float64:
-		dst = strconv.AppendFloat(dst, v, floatFormat, floatPrec, floatBitSize)
-	//: unknown types mark the value so users notice missing format support.
+	case corelogger.KindFloat64:
+		dst = strconv.AppendFloat(dst, a.Value.Float64(), floatFormat, floatPrec, floatBitSize)
+	//: every other Kind (Any, Time, Duration, Uint64, Group) maps to '?' for now —
+	//: richer rendering ships with the Encoder split in commit 7.
 	default:
 		dst = append(dst, '?')
 	}
