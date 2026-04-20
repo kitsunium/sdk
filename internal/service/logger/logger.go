@@ -5,10 +5,17 @@ package logger
 
 import (
 	"context"
+	"runtime"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 )
+
+// callerSkipDepth is the number of stack frames to skip when capturing the
+// program counter from runtime.Callers: the runtime.Callers frame itself plus
+// the loggerImpl.Log frame, so the captured PC points to the application
+// caller rather than the logger plumbing.
+const callerSkipDepth int = 2
 
 // loggerImpl is the default core.Logger wrapper over a core.Handler. It
 // performs no buffering of its own — every Log call delegates to the Handler.
@@ -58,8 +65,11 @@ func (l *loggerImpl) Enabled(ctx context.Context, lv level.Level) (enabled bool)
 //   - msg: human-readable message.
 //   - attrs: optional attributes attached to the record.
 func (l *loggerImpl) Log(ctx context.Context, lv level.Level, msg string, attrs ...corelogger.AttrValue) {
+	//: capture the application caller PC for handlers that resolve frames lazily.
+	var pcs [1]uintptr
+	runtime.Callers(callerSkipDepth, pcs[:])
 	//: build the RecordEvent once so we can pass it to Enabled and Handle.
-	r := corelogger.RecordEvent{Level: lv, Message: msg, Attrs: attrs}
+	r := corelogger.RecordEvent{Level: lv, Message: msg, PC: pcs[0], Attrs: attrs}
 	//: short-circuit when the handler reports disabled — avoids formatting work.
 	if !l.h.Enabled(ctx, r) {
 		//: nothing to emit at this level.
@@ -79,4 +89,22 @@ func (l *loggerImpl) Log(ctx context.Context, lv level.Level, msg string, attrs 
 func (l *loggerImpl) With(attrs ...corelogger.AttrValue) (child corelogger.Logger) {
 	//: delegate attr accumulation to the Handler's WithAttrs contract.
 	return &loggerImpl{h: l.h.WithAttrs(attrs)}
+}
+
+// WithGroup returns a derived Logger whose subsequent attributes are
+// namespaced under the given group name.
+//
+// Params:
+//   - name: group prefix; empty value yields the receiver unchanged.
+//
+// Returns:
+//   - corelogger.Logger: a new Logger sharing the Handler's downstream state.
+func (l *loggerImpl) WithGroup(name string) (child corelogger.Logger) {
+	//: empty group is a documented no-op so callers can pass user input.
+	if name == "" {
+		//: return the receiver unchanged — no extra wrapping.
+		return l
+	}
+	//: delegate group accumulation to the Handler's WithGroup contract.
+	return &loggerImpl{h: l.h.WithGroup(name)}
 }
