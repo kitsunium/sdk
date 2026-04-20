@@ -11,4 +11,4 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // branch via errors.Is.
 var FanoutWriteFailed = errs.Define(CodeFanoutWriteFailed, "FANOUT_WRITE_FAILED",
 	"One or more fan-out sinks failed",
-	"service/logger/sink/multi.Write aggregated per-sink errors via errors.Join")
+	"service/logger/middleware/multi.Write aggregated per-sink errors via errors.Join")

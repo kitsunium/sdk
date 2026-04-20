@@ -9,7 +9,7 @@ go_library(
         "errors.go",
         "multi.go",
     ],
-    importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/multi",
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/middleware/multi",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",

@@ -5,7 +5,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
-	"github.com/kitsunium/sdk/internal/service/logger/sink/route"
+	"github.com/kitsunium/sdk/internal/service/logger/middleware/route"
 )
 
 func TestLevelAtLeast(t *testing.T) {

@@ -10,11 +10,11 @@ var (
 	// goroutine. Subsequent Write calls drop the payload immediately.
 	Stopped = errs.Define(CodeAsyncStopped, "ASYNC_STOPPED",
 		"Async sink is stopped",
-		"service/logger/sink/async.Write called after Close")
+		"service/logger/middleware/async.Write called after Close")
 
 	// BufferFull is returned by Write under the DropNewest policy when the
 	// ring is saturated; the entry is dropped and the OnDrop callback fires.
 	BufferFull = errs.Define(CodeAsyncBufferFull, "ASYNC_BUFFER_FULL",
 		"Async sink ring buffer is full",
-		"service/logger/sink/async.Write saw a saturated ring under DropNewest policy")
+		"service/logger/middleware/async.Write saw a saturated ring under DropNewest policy")
 )

@@ -81,7 +81,7 @@ func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p 
 		Code:    CodeFailoverExhausted,
 		Reason:  "FAILOVER_EXHAUSTED",
 		Public:  "All failover sinks returned an error",
-		Private: "service/logger/sink/failover.Write exhausted the chain",
+		Private: "service/logger/middleware/failover.Write exhausted the chain",
 	}, errs.Int("attempts", int64(len(s.chain))), errs.Int("level", int64(rec.Level)))
 }
 

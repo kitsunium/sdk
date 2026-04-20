@@ -10,10 +10,10 @@ var (
 	// failover chain has tried every downstream Sink without success.
 	Exhausted = errs.Define(CodeFailoverExhausted, "FAILOVER_EXHAUSTED",
 		"All failover sinks returned an error",
-		"service/logger/sink/failover.Write tried every downstream sink and aggregated their errors")
+		"service/logger/middleware/failover.Write tried every downstream sink and aggregated their errors")
 
 	// Empty is returned when New is invoked without any downstream sinks.
 	Empty = errs.Define(CodeFailoverEmpty, "FAILOVER_EMPTY",
 		"Failover requires at least one downstream sink",
-		"service/logger/sink/failover.New called with zero sinks")
+		"service/logger/middleware/failover.New called with zero sinks")
 )

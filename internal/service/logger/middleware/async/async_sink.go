@@ -110,7 +110,7 @@ func mustNewRing(size int) (out ring.Queue[*recordEntry]) {
 	//: the documented unreachable branch surfaces a panic if the contract slips.
 	if err != nil {
 		//: reaching here means a kernel-level invariant broke; fail loudly.
-		panic("internal/service/logger/sink/async: ring.New failed despite positive size: " + err.Error())
+		panic("internal/service/logger/middleware/async: ring.New failed despite positive size: " + err.Error())
 	}
 	//: hand back the validated ring.
 	return queue

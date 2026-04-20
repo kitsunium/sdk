@@ -10,8 +10,8 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	svclogger "github.com/kitsunium/sdk/internal/service/logger"
 	"github.com/kitsunium/sdk/internal/service/logger/encoder"
+	"github.com/kitsunium/sdk/internal/service/logger/middleware/multi"
 	"github.com/kitsunium/sdk/internal/service/logger/sink/console"
-	"github.com/kitsunium/sdk/internal/service/logger/sink/multi"
 )
 
 // Sink is the stable alias for the internal core.Sink port. Consumers
