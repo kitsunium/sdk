@@ -166,6 +166,8 @@ GOLANGCI_VERSION=$(get_github_latest_version_or_empty "golangci/golangci-lint")
 GOSEC_VERSION=$(get_github_latest_version_or_empty "securego/gosec")
 GOFUMPT_VERSION=$(get_github_latest_version_or_empty "mvdan/gofumpt")
 GOTESTSUM_VERSION=$(get_github_latest_version_or_empty "gotestyourself/gotestsum")
+# buildifier + buildozer ship from the same bazelbuild/buildtools release.
+BUILDTOOLS_VERSION=$(get_github_latest_version_or_empty "bazelbuild/buildtools")
 
 # gofumpt uses 'v' prefix in URLs
 [[ -n "$GOFUMPT_VERSION" && "$GOFUMPT_VERSION" != v* ]] && GOFUMPT_VERSION="v${GOFUMPT_VERSION}"
@@ -229,6 +231,28 @@ install_go_tool "ktn-linter" \
     "https://github.com/kodflow/ktn-linter/releases/latest/download/ktn-linter-linux-${GO_ARCH}" \
     "" \
     "binary" &
+
+# ── Bazel tooling — formatter + scripted BUILD editor ────────────────
+# buildifier: gofmt for BUILD.bazel / WORKSPACE / *.bzl
+# buildozer : programmatic edits on BUILD targets
+# Both ship as prebuilt binaries from the same bazelbuild/buildtools
+# release so one version lookup feeds both.
+if [[ -n "$BUILDTOOLS_VERSION" ]]; then
+    install_go_tool "buildifier" \
+        "https://github.com/bazelbuild/buildtools/releases/download/v${BUILDTOOLS_VERSION}/buildifier-linux-${GO_ARCH}" \
+        "github.com/bazelbuild/buildtools/buildifier" \
+        "binary" &
+    install_go_tool "buildozer" \
+        "https://github.com/bazelbuild/buildtools/releases/download/v${BUILDTOOLS_VERSION}/buildozer-linux-${GO_ARCH}" \
+        "github.com/bazelbuild/buildtools/buildozer" \
+        "binary" &
+else
+    (echo -e "${YELLOW}buildifier/buildozer: version unavailable, building from source...${NC}" && \
+     go install github.com/bazelbuild/buildtools/buildifier@latest && \
+     go install github.com/bazelbuild/buildtools/buildozer@latest && \
+     echo -e "${GREEN}✓ buildifier + buildozer installed (from source)${NC}" || \
+     echo -e "${YELLOW}⚠ buildifier/buildozer: source build failed, skipping${NC}") &
+fi
 
 wait
 echo -e "${GREEN}✓ All Go tools installed${NC}"
@@ -297,7 +321,7 @@ echo "  - ${GO_INSTALLED}"
 echo "  - Go Modules (package manager)"
 echo ""
 echo "Development tools:"
-for _tool in golangci-lint gosec gofumpt goimports gotestsum ktn-linter; do
+for _tool in golangci-lint gosec gofumpt goimports gotestsum ktn-linter buildifier buildozer; do
     if command -v "$_tool" &>/dev/null; then
         echo "  - $_tool (installed)"
     else
