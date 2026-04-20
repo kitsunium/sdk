@@ -1,37 +1,46 @@
-SDK_MODULES := internal/kernel internal/core internal/service pkg/v1
-GO ?= go
+.PHONY: sdk-sync sdk-tidy sdk-test sdk-lint sdk-cover sdk-errs-audit sdk-all sdk-release-check \
+        test build lint cover tidy
 
-.PHONY: sdk-test sdk-lint sdk-tidy sdk-sync sdk-cover sdk-all sdk-release-check sdk-errs-audit
+# `make` with no args runs the full pipeline (sync → lint → errs-audit → test).
+.DEFAULT_GOAL := sdk-all
+
+# ── Bazel wrappers ─────────────────────────────────────────────────────
+# Every sdk-* target below shells to `bazel`; the source of truth is
+# .bazelrc (named configs: race / pure / coverage / ci) + MODULE.bazel.
+# Keep the wrappers minimal — complex pipelines belong in .bazelrc.
 
 sdk-sync:
-	$(GO) work sync
+	bazel mod tidy
+	bazel run //:gazelle
 
-sdk-tidy:
-	@for m in $(SDK_MODULES); do \
-		echo "→ tidy $$m"; \
-		(cd $$m && $(GO) mod tidy) || exit 1; \
-	done
+sdk-tidy: sdk-sync
 
 sdk-test:
-	@for m in $(SDK_MODULES); do \
-		echo "→ test $$m"; \
-		(cd $$m && GOWORK=off $(GO) test -race -cover ./...) || exit 1; \
-	done
+	bazel test --config=race //...
 
 sdk-lint:
-	golangci-lint run ./...
+	bazel mod tidy
+	bazel run //:gazelle -- -mode=diff
+	@git diff --exit-code MODULE.bazel **/BUILD.bazel
 
 sdk-cover:
-	@for m in $(SDK_MODULES); do \
-		echo "→ cover $$m"; \
-		(cd $$m && GOWORK=off $(GO) test -coverprofile=coverage.out ./... && $(GO) tool cover -func=coverage.out | tail -1) || exit 1; \
-	done
+	bazel coverage --combined_report=lcov //...
+	@echo "LCOV report: $$(bazel info output_path)/_coverage/_coverage_report.dat"
 
 sdk-errs-audit:
-	cd internal/kernel && GOWORK=off $(GO) test -run TestAudit ./errs/... -v
+	bazel test --config=race //internal/kernel/errs:errs_test
 
-sdk-all: sdk-sync sdk-tidy sdk-lint sdk-errs-audit sdk-test
+sdk-all: sdk-sync sdk-lint sdk-errs-audit sdk-test
 
 sdk-release-check:
 	@echo "Tags format: internal/<layer>/vX.Y.Z  pkg/vN/vX.Y.Z"
 	@git tag --list 'internal/*/v*' 'pkg/*/v*' | sort
+
+# ── Short aliases (map to sdk-* targets for ergonomic local use) ───────
+test:  sdk-test
+lint:  sdk-lint
+cover: sdk-cover
+tidy:  sdk-tidy
+
+build:
+	bazel build //...

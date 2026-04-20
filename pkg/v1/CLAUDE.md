@@ -38,6 +38,10 @@ Single module `github.com/kitsunium/sdk/pkg/v1` — one `go.mod`, one `go.sum`.
 ## Verification
 
 ```
+# Primary (Bazel)
+bazel test --config=race //pkg/v1/...
+
+# Fallback (go test)
 cd pkg/v1
 GOWORK=off go test -race -cover ./...
 # expected: logger 84.2%, errs [no statements] (accessors are re-exports)

@@ -1,0 +1,38 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "codec",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "format.go",
+        "registry.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/codec",
+    visibility = ["//internal/core:core_consumers"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":codec",
+    visibility = ["//internal/core:core_consumers"],
+)
+
+go_test(
+    name = "codec_test",
+    size = "small",
+    srcs = [
+        "format_external_test.go",
+        "registry_external_test.go",
+        "registry_internal_test.go",
+    ],
+    embed = [":codec"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

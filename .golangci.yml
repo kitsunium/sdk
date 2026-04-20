@@ -4,10 +4,14 @@ run:
   timeout: 5m
   go: "1.26"
 
+# The layer dependency firewall (kernel → core → service → pkg/v1) is now
+# enforced by Bazel visibility rules in the per-layer BUILD.bazel files.
+# golangci-lint keeps running the remaining code-quality checks below —
+# it stays useful as a second-opinion lint even though Bazel is the
+# primary build/test system.
 linters:
   default: none
   enable:
-    - depguard
     - errcheck
     - govet
     - ineffassign
@@ -15,44 +19,6 @@ linters:
     - unused
     - revive
     - gosec
-
-  settings:
-    depguard:
-      rules:
-        kernel-stdlib-only:
-          list-mode: strict
-          files:
-            - "**/internal/kernel/**/*.go"
-            - "!**/*_test.go"
-          allow:
-            - $gostd
-        core-deps:
-          list-mode: strict
-          files:
-            - "**/internal/core/**/*.go"
-            - "!**/*_test.go"
-          allow:
-            - $gostd
-            - github.com/kitsunium/sdk/internal/kernel
-        service-deps:
-          list-mode: strict
-          files:
-            - "**/internal/service/**/*.go"
-            - "!**/*_test.go"
-          allow:
-            - $gostd
-            - github.com/kitsunium/sdk/internal/kernel
-            - github.com/kitsunium/sdk/internal/core
-        pkg-deps:
-          list-mode: strict
-          files:
-            - "**/pkg/**/*.go"
-            - "!**/*_test.go"
-          allow:
-            - $gostd
-            - github.com/kitsunium/sdk/internal/kernel
-            - github.com/kitsunium/sdk/internal/core
-            - github.com/kitsunium/sdk/internal/service
 
 issues:
   max-issues-per-linter: 0
