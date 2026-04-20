@@ -212,6 +212,53 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 	return out, nil
 }
 
+// Append encodes the slice v as NDJSON and appends the bytes to dst.
+// Implements the optional codec.Appender interface so hot-path callers
+// can stream records into a recycled buffer (one '\n'-terminated line per
+// element).
+//
+// Params:
+//   - dst: caller-supplied buffer; encoded bytes are appended onto it.
+//   - v: slice value; each element becomes one NDJSON record.
+//
+// Returns:
+//   - []byte: the (possibly re-allocated) buffer with encoded NDJSON.
+//   - error: ValueInvalid when v is not a slice; MarshalFailed otherwise.
+func (*ndjsonCodec) Append(dst []byte, v any) (out []byte, err error) {
+	//: resolve v to a reflect.Value that is a slice or array.
+	slice, ok := asSlice(v)
+	//: shape-the-input rejection — same sentinel as Marshal for parity.
+	if !ok {
+		//: leave dst untouched and surface the documented sentinel.
+		return dst, errs.Wrap(nil, errs.WrapParams{
+			Code:    CodeNDJSONValueInvalid,
+			Reason:  "VALUE_INVALID",
+			Public:  "NDJSON codec requires a slice value",
+			Private: "service/codec/ndjson.Append: argument is not a slice",
+		})
+	}
+	//: encode record-by-record; one '\n' per element appended in place.
+	for i := range slice.Len() {
+		//: delegate per-record JSON encoding to the stdlib.
+		line, merr := stdjson.Marshal(slice.Index(i).Interface())
+		//: surface any per-record failure without further mutating dst.
+		if merr != nil {
+			//: wrap the stdlib error for reason-based matching.
+			return dst, errs.Wrap(merr, errs.WrapParams{
+				Code:    CodeNDJSONMarshalFailed,
+				Reason:  "MARSHAL_FAILED",
+				Public:  "NDJSON encoding failed",
+				Private: "service/codec/ndjson.Append: encoding/json returned an error",
+			})
+		}
+		//: append the record and the mandatory newline.
+		dst = append(dst, line...)
+		dst = append(dst, '\n')
+	}
+	//: hand back the (possibly re-allocated) buffer.
+	return dst, nil
+}
+
 // asSlice reports whether v resolves to a slice or array reflect.Value.
 //
 // Params:

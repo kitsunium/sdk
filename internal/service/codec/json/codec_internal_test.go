@@ -170,3 +170,39 @@ func Test_jsonCodec_NewDecoder(t *testing.T) {
 		})
 	}
 }
+
+func Test_jsonCodec_Append(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		dst       []byte
+		v         any
+		wantBytes []byte
+		wantErr   bool
+	}
+	tests := []tc{
+		{"appends to empty buffer", nil, map[string]int{"k": 1}, []byte(`{"k":1}`), false},
+		{"appends to non-empty buffer", []byte("prefix:"), 7, []byte("prefix:7"), false},
+		{"unsupported value yields error", nil, make(chan int), nil, true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &jsonCodec{}
+		got, err := c.Append(tc.dst, tc.v)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("Append err = %v, wantErr = %v", err, tc.wantErr)
+		}
+		if tc.wantErr {
+			return
+		}
+		if !bytes.Equal(got, tc.wantBytes) {
+			t.Errorf("Append bytes = %q, want %q", got, tc.wantBytes)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}

@@ -105,6 +105,29 @@ func (*jsonCodec) Unmarshal(data []byte, v any) (err error) {
 	})
 }
 
+// Append encodes v as JSON and appends the bytes to dst. Implements the
+// optional codec.Appender interface so hot-path callers (logger encoder,
+// batch sinks) can write into a recycled buffer.
+//
+// Params:
+//   - dst: caller-supplied buffer; encoded bytes are appended onto it.
+//   - v: any value encoding/json supports.
+//
+// Returns:
+//   - []byte: the (possibly re-allocated) buffer with encoded JSON.
+//   - error: MarshalFailed wrapping the stdlib cause on failure.
+func (c *jsonCodec) Append(dst []byte, v any) (out []byte, err error) {
+	//: delegate to Marshal so the wrap/error contract has a single source.
+	encoded, merr := c.Marshal(v)
+	//: surface any encoding failure without touching dst.
+	if merr != nil {
+		//: return the untouched buffer plus the wrapped error.
+		return dst, merr
+	}
+	//: append the encoded bytes onto the caller's buffer.
+	return append(dst, encoded...), nil
+}
+
 // NewEncoder wraps w in a streaming codec.Encoder.
 //
 // Params:
