@@ -1,0 +1,42 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "file",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "file.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/file",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":file",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "file_test",
+    srcs = [
+        "file_external_test.go",
+        "file_internal_test.go",
+    ],
+    embed = [":file"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/errs",
+    ],
+)
