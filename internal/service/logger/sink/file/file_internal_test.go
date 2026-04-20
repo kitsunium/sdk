@@ -54,25 +54,42 @@ func Test_fileSink_Write(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
+		nilCtx    bool
 		ctxCancel bool
+		closed    bool
 		wantBytes int
+		wantErr   bool
 	}{
-		{"happy path writes bytes", false, 5},
-		{"cancelled context returns 0 bytes", true, 0},
+		{"happy path writes bytes", false, false, false, 5, false},
+		{"nil ctx is treated as live and writes", true, false, false, 5, false},
+		{"cancelled context returns 0 bytes", false, true, false, 0, true},
+		{"closed file surfaces WriteFailed", false, false, true, 0, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s, _ := mustOpenSink(t)
-			ctx := t.Context()
-			if tc.ctxCancel {
-				cancelled, cancel := context.WithCancel(ctx)
-				cancel()
-				ctx = cancelled
+			if tc.closed {
+				//: pre-close so Write hits the underlying *os.File error path.
+				swallowSinkClose(s.Close())
 			}
-			n, _ := s.Write(ctx, corelogger.RecordEvent{Level: level.Info}, []byte("hello"))
+			var ctx context.Context
+			if tc.nilCtx {
+				ctx = nil
+			} else {
+				ctx = t.Context()
+				if tc.ctxCancel {
+					cancelled, cancel := context.WithCancel(ctx)
+					cancel()
+					ctx = cancelled
+				}
+			}
+			n, err := s.Write(ctx, corelogger.RecordEvent{Level: level.Info}, []byte("hello"))
 			if n != tc.wantBytes {
 				t.Errorf("Write n = %d, want %d", n, tc.wantBytes)
+			}
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Write err = %v, wantErr = %v", err, tc.wantErr)
 			}
 		})
 	}
@@ -82,21 +99,34 @@ func Test_fileSink_Flush(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
+		nilCtx    bool
 		ctxCancel bool
+		closed    bool
 		wantErr   bool
 	}{
-		{"flush with live ctx is nil", false, false},
-		{"flush with cancelled ctx surfaces error", true, true},
+		{"flush with live ctx is nil", false, false, false, false},
+		{"flush with nil ctx is nil", true, false, false, false},
+		{"flush with cancelled ctx surfaces error", false, true, false, true},
+		{"flush on closed file surfaces SyncFailed", false, false, true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s, _ := mustOpenSink(t)
-			ctx := t.Context()
-			if tc.ctxCancel {
-				cancelled, cancel := context.WithCancel(ctx)
-				cancel()
-				ctx = cancelled
+			if tc.closed {
+				//: pre-close so Sync hits the underlying *os.File error path.
+				swallowSinkClose(s.Close())
+			}
+			var ctx context.Context
+			if tc.nilCtx {
+				ctx = nil
+			} else {
+				ctx = t.Context()
+				if tc.ctxCancel {
+					cancelled, cancel := context.WithCancel(ctx)
+					cancel()
+					ctx = cancelled
+				}
 			}
 			err := s.Flush(ctx)
 			if (err != nil) != tc.wantErr {

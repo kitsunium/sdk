@@ -17,27 +17,34 @@ func Test_genericHandler_Enabled(t *testing.T) {
 		name    string
 		min     level.Level
 		query   level.Level
+		nilCtx  bool
 		ctxDone bool
 		want    bool
 	}{
-		{"above min is enabled", level.Info, level.Warn, false, true},
-		{"at min is enabled", level.Info, level.Info, false, true},
-		{"below min is disabled", level.Info, level.Debug, false, false},
-		{"cancelled ctx disables", level.Debug, level.Error, true, false},
+		{"above min with live ctx is enabled", level.Info, level.Warn, false, false, true},
+		{"at min with live ctx is enabled", level.Info, level.Info, false, false, true},
+		{"below min with live ctx is disabled", level.Info, level.Debug, false, false, false},
+		{"nil ctx is treated as live", level.Info, level.Info, true, false, true},
+		{"cancelled ctx disables regardless of level", level.Debug, level.Error, false, true, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			h := mustNewGeneric(t, tc.min)
-			ctx := t.Context()
-			if tc.ctxDone {
-				cancelled, cancel := context.WithCancel(ctx)
-				cancel()
-				ctx = cancelled
+			var ctx context.Context
+			if tc.nilCtx {
+				ctx = nil
+			} else {
+				ctx = t.Context()
+				if tc.ctxDone {
+					cancelled, cancel := context.WithCancel(ctx)
+					cancel()
+					ctx = cancelled
+				}
 			}
 			rec := corelogger.RecordEvent{Level: tc.query}
 			if got := h.Enabled(ctx, rec); got != tc.want {
-				t.Errorf("Enabled(%v, ctxDone=%v) = %v, want %v", tc.query, tc.ctxDone, got, tc.want)
+				t.Errorf("Enabled(%v) = %v, want %v", tc.query, got, tc.want)
 			}
 		})
 	}
@@ -46,24 +53,36 @@ func Test_genericHandler_Enabled(t *testing.T) {
 func Test_genericHandler_Handle(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		ctxDone bool
-		wantErr bool
+		name        string
+		nilCtx      bool
+		ctxDone     bool
+		boundAttrs  []corelogger.AttrValue
+		recordAttrs []corelogger.AttrValue
+		wantErr     bool
 	}{
-		{"happy path returns nil", false, false},
-		{"cancelled ctx returns error", true, true},
+		{"happy path with no attrs returns nil", false, false, nil, nil, false},
+		{"happy path with handler-bound attrs returns nil", false, false, []corelogger.AttrValue{{Key: "svc"}}, nil, false},
+		{"happy path with record + bound attrs returns nil", false, false, []corelogger.AttrValue{{Key: "svc"}}, []corelogger.AttrValue{{Key: "k"}}, false},
+		{"nil ctx is treated as live and writes", true, false, nil, nil, false},
+		{"cancelled ctx returns wrapped error", false, true, nil, nil, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			h := mustNewGeneric(t, level.Debug)
-			ctx := t.Context()
-			if tc.ctxDone {
-				cancelled, cancel := context.WithCancel(ctx)
-				cancel()
-				ctx = cancelled
+			h.attrs = tc.boundAttrs
+			var ctx context.Context
+			if tc.nilCtx {
+				ctx = nil
+			} else {
+				ctx = t.Context()
+				if tc.ctxDone {
+					cancelled, cancel := context.WithCancel(ctx)
+					cancel()
+					ctx = cancelled
+				}
 			}
-			err := h.Handle(ctx, corelogger.RecordEvent{Level: level.Info, Message: "m"})
+			err := h.Handle(ctx, corelogger.RecordEvent{Level: level.Info, Message: "m", Attrs: tc.recordAttrs})
 			if (err != nil) != tc.wantErr {
 				t.Errorf("Handle err = %v, wantErr = %v", err, tc.wantErr)
 			}

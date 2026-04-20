@@ -2,6 +2,7 @@ package encoder
 
 import (
 	"testing"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
@@ -29,25 +30,42 @@ func Test_textEncoder_Name(t *testing.T) {
 
 func Test_textEncoder_Append(t *testing.T) {
 	t.Parallel()
+	fixed := time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name   string
-		groups []string
-		rec    corelogger.RecordEvent
+		name         string
+		groups       []string
+		rec          corelogger.RecordEvent
+		wantContains string
 	}{
-		{"no groups, no attrs, zero time", nil, corelogger.RecordEvent{Level: level.Info, Message: "m"}},
-		{"groups but no attrs leave header intact", []string{"g"}, corelogger.RecordEvent{Level: level.Warn, Message: "x"}},
-		{"attrs without groups render bare", nil, corelogger.RecordEvent{Level: level.Debug, Message: "y", Attrs: []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}}}},
+		{"zero time + no attrs triggers clock fallback", nil, corelogger.RecordEvent{Level: level.Info, Message: "m"}, " INFO m"},
+		{"zero time + groups + no attrs leaves header intact", []string{"g"}, corelogger.RecordEvent{Level: level.Warn, Message: "x"}, " WARN x"},
+		{"zero time + attrs renders key=value pair", nil, corelogger.RecordEvent{Level: level.Debug, Message: "y", Attrs: []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}}}, "k=\"v\""},
+		{"non-zero time skips clock fallback and uses fixed timestamp", nil, corelogger.RecordEvent{Time: fixed, Level: level.Info, Message: "z"}, "2026-04-20"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			e := &textEncoder{clk: clock.System}
-			line := e.Append(nil, tc.groups, tc.rec)
-			if len(line) == 0 || line[len(line)-1] != '\n' {
+			line := string(e.Append(nil, tc.groups, tc.rec))
+			if line == "" || line[len(line)-1] != '\n' {
 				t.Errorf("Append produced %q, want non-empty trailing-newline output", line)
+			}
+			if !containsSubstr(line, tc.wantContains) {
+				t.Errorf("Append output %q missing %q", line, tc.wantContains)
 			}
 		})
 	}
+}
+
+// containsSubstr is a tiny strings.Contains shim kept local so the test stays
+// dependency-light against the external package import surface.
+func containsSubstr(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func Test_appendHeader(t *testing.T) {
