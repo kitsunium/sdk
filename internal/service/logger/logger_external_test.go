@@ -47,3 +47,39 @@ func TestNew(t *testing.T) {
 		})
 	}
 }
+
+func TestBuild(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		nilLg   bool
+		wantNil bool
+	}{
+		{"Build on nil Logger returns nil", true, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b := svclogger.Build(nil, level.Info)
+			if (b == nil) != tc.wantNil {
+				t.Errorf("Build = %v, wantNil = %v", b, tc.wantNil)
+			}
+		})
+	}
+}
+
+func TestLogAttrs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"LogAttrs on nil Logger silently drops"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: by contract this never panics — just confirm execution completes.
+			svclogger.LogAttrs(t.Context(), nil, level.Info, "msg", nil)
+		})
+	}
+}
