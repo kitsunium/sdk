@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "codes.go",
         "errors.go",
+        "handler.go",
         "logger.go",
         "text_handler.go",
     ],
@@ -18,6 +19,7 @@ go_library(
         "//internal/kernel/buffer",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/logger/encoder",
     ],
 )
 
@@ -31,6 +33,8 @@ go_test(
     name = "logger_test",
     size = "small",
     srcs = [
+        "handler_external_test.go",
+        "handler_internal_test.go",
         "logger_external_test.go",
         "logger_internal_test.go",
         "text_handler_external_test.go",
@@ -40,7 +44,10 @@ go_test(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/logger/encoder",
+        "//internal/service/logger/sink/console",
     ],
 )
 
