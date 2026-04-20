@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "codec",
     srcs = [
+        "appender.go",
         "codec.go",
         "codes.go",
         "format.go",
@@ -24,6 +25,7 @@ go_test(
     name = "codec_test",
     size = "small",
     srcs = [
+        "appender_external_test.go",
         "format_external_test.go",
         "registry_external_test.go",
         "registry_internal_test.go",
