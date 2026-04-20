@@ -9,7 +9,7 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/logger/sink/failover"
+	"github.com/kitsunium/sdk/internal/service/logger/middleware/failover"
 )
 
 type controlledSink struct {

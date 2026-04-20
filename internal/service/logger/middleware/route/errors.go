@@ -10,4 +10,4 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // pass a default sink to New so writes never silently disappear.
 var NoMatch = errs.Define(CodeRouteNoMatch, "ROUTE_NO_MATCH",
 	"No route predicate matched the record",
-	"service/logger/sink/route.Write found no matching predicate and no default sink")
+	"service/logger/middleware/route.Write found no matching predicate and no default sink")

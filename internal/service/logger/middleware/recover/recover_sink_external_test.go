@@ -7,7 +7,7 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	recoversink "github.com/kitsunium/sdk/internal/service/logger/sink/recover"
+	recoversink "github.com/kitsunium/sdk/internal/service/logger/middleware/recover"
 )
 
 // panickingSink panics on every method to exercise the recovery branches.

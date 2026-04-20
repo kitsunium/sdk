@@ -25,8 +25,8 @@ go_library(
         "//internal/kernel/errs",
         "//internal/service/logger",
         "//internal/service/logger/encoder",
+        "//internal/service/logger/middleware/multi",
         "//internal/service/logger/sink/console",
-        "//internal/service/logger/sink/multi",
     ],
 )
 

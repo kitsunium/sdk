@@ -60,7 +60,7 @@ func (s *recoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p [
 				Code:    CodeRecoverPanicked,
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
-				Private: "service/logger/sink/recover.Write caught a panic from the downstream sink",
+				Private: "service/logger/middleware/recover.Write caught a panic from the downstream sink",
 			}, errs.Int("level", int64(rec.Level)))
 		}
 	}()
@@ -85,7 +85,7 @@ func (s *recoverSink) Flush(ctx context.Context) (err error) {
 				Code:    CodeRecoverPanicked,
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
-				Private: "service/logger/sink/recover.Flush caught a panic from the downstream sink",
+				Private: "service/logger/middleware/recover.Flush caught a panic from the downstream sink",
 			})
 		}
 	}()
@@ -107,7 +107,7 @@ func (s *recoverSink) Close() (err error) {
 				Code:    CodeRecoverPanicked,
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
-				Private: "service/logger/sink/recover.Close caught a panic from the downstream sink",
+				Private: "service/logger/middleware/recover.Close caught a panic from the downstream sink",
 			})
 		}
 	}()

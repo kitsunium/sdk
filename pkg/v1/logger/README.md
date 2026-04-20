@@ -50,6 +50,7 @@ func wire() (logger.Logger, error) {
     fan := logger.Multi(
         logger.ConsoleStderr(),                                  // text on stderr
         // file.New("/var/log/app.log") — see internal/service/logger/sink/file
+        // async.New(syslog.New(...)) — middleware wrapping a transport
         // syslog.New("udp", "127.0.0.1:514") — RFC5424 envelope
     )
 
@@ -129,7 +130,10 @@ func ConsoleStdout()         Sink    // console.NewStdout()
 func TextEncoder()           Encoder // canonical text encoder bound to the system clock
 ```
 
-For richer sinks (file, async, route, failover, sample, recover, syslog) consumers reach into `internal/service/logger/sink/<name>` directly today; v1 will surface re-exports as the contracts stabilise.
+For richer outputs consumers reach into the internal packages directly today; v1 will surface re-exports as the contracts stabilise:
+
+- **Transports** (leaf sinks, adapter to the outside world): `internal/service/logger/sink/{console,file,syslog}`
+- **Middleware** (Sink combinators, pure Go): `internal/service/logger/middleware/{async,failover,multi,recover,route,sample}`
 
 ### Emission helpers
 

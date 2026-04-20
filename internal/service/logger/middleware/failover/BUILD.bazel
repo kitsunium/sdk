@@ -3,14 +3,13 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
-    name = "recover",
+    name = "failover",
     srcs = [
         "codes.go",
         "errors.go",
-        "panic_value.go",
-        "recover_sink.go",
+        "failover_sink.go",
     ],
-    importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/recover",
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/middleware/failover",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
@@ -23,7 +22,7 @@ go_library(
 
 alias(
     name = "go_default_library",
-    actual = ":recover",
+    actual = ":failover",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
@@ -31,13 +30,12 @@ alias(
 )
 
 go_test(
-    name = "recover_test",
+    name = "failover_test",
     srcs = [
-        "panic_value_internal_test.go",
-        "recover_sink_external_test.go",
-        "recover_sink_internal_test.go",
+        "failover_sink_external_test.go",
+        "failover_sink_internal_test.go",
     ],
-    embed = [":recover"],
+    embed = [":failover"],
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",

@@ -11,10 +11,10 @@ var (
 	// error's Fields metadata for downstream introspection.
 	Panicked = errs.Define(CodeRecoverPanicked, "RECOVER_PANICKED",
 		"Wrapped sink panicked",
-		"service/logger/sink/recover caught a panic from the downstream sink")
+		"service/logger/middleware/recover caught a panic from the downstream sink")
 
 	// DownstreamNil is returned when New receives a nil downstream sink.
 	DownstreamNil = errs.Define(CodeRecoverDownstreamNil, "RECOVER_DOWNSTREAM_NIL",
 		"Recover sink requires a non-nil downstream",
-		"service/logger/sink/recover.New called with nil downstream")
+		"service/logger/middleware/recover.New called with nil downstream")
 )

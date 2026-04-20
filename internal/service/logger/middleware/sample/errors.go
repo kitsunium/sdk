@@ -9,10 +9,10 @@ var (
 	// RateInvalid is returned when New receives a non-positive rate.
 	RateInvalid = errs.Define(CodeSampleRateInvalid, "SAMPLE_RATE_INVALID",
 		"Sample rate must be a positive integer",
-		"service/logger/sink/sample.New called with rate <= 0")
+		"service/logger/middleware/sample.New called with rate <= 0")
 
 	// DownstreamNil is returned when New receives a nil downstream sink.
 	DownstreamNil = errs.Define(CodeSampleDownstreamNil, "SAMPLE_DOWNSTREAM_NIL",
 		"Sample sink requires a non-nil downstream",
-		"service/logger/sink/sample.New called with nil downstream")
+		"service/logger/middleware/sample.New called with nil downstream")
 )
