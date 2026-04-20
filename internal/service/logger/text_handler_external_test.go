@@ -262,3 +262,36 @@ func TestTextHandler_HandleIsConcurrentSafe(t *testing.T) {
 		})
 	}
 }
+
+func TestTextHandler_WithGroup(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		groups    []string
+		wantInfix string
+	}{
+		{"no groups renders bare key", nil, ` k="v"`},
+		{"empty group is a no-op", []string{""}, ` k="v"`},
+		{"single group prefixes the key", []string{"http"}, ` http.k="v"`},
+		{"nested groups chain with dots", []string{"req", "http"}, ` req.http.k="v"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var buf bytes.Buffer
+			var current corelogger.Handler = mustNewText(t, &buf, level.Debug)
+			//: walk the tc.groups list to exercise WithGroup chaining.
+			for _, g := range tc.groups {
+				current = current.WithGroup(g)
+			}
+			rec := corelogger.RecordEvent{Level: level.Info, Message: "m",
+				Attrs: []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}}}
+			if err := current.Handle(t.Context(), rec); err != nil {
+				t.Fatalf("Handle err = %v", err)
+			}
+			if !strings.Contains(buf.String(), tc.wantInfix) {
+				t.Errorf("WithGroup output missing %q: %q", tc.wantInfix, buf.String())
+			}
+		})
+	}
+}

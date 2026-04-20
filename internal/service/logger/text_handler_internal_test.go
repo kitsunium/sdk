@@ -42,6 +42,59 @@ func Test_appendAttr(t *testing.T) {
 	}
 }
 
+func Test_appendAttrWithGroups(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		groups []string
+		attr   corelogger.AttrValue
+		want   string
+	}{
+		{"no groups falls back to bare appendAttr", nil,
+			corelogger.AttrValue{Key: "k", Value: corelogger.StringValue("v")}, ` k="v"`},
+		{"empty groups slice still falls back to bare appendAttr", []string{},
+			corelogger.AttrValue{Key: "k", Value: corelogger.BoolValue(true)}, ` k=true`},
+		{"single group prefixes the key", []string{"http"},
+			corelogger.AttrValue{Key: "method", Value: corelogger.StringValue("GET")}, ` http.method="GET"`},
+		{"nested groups chain with dots", []string{"req", "http"},
+			corelogger.AttrValue{Key: "status", Value: corelogger.IntValue(200)}, ` req.http.status=200`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := string(appendAttrWithGroups(nil, tc.groups, tc.attr))
+			if got != tc.want {
+				t.Errorf("appendAttrWithGroups(%v, %#v) = %q, want %q",
+					tc.groups, tc.attr, got, tc.want)
+			}
+		})
+	}
+}
+
+func Test_appendValueOnly(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		attr corelogger.AttrValue
+		want string
+	}{
+		{"string is quoted", corelogger.AttrValue{Value: corelogger.StringValue("v")}, `"v"`},
+		{"int64 renders decimal", corelogger.AttrValue{Value: corelogger.Int64Value(42)}, "42"},
+		{"bool renders literal", corelogger.AttrValue{Value: corelogger.BoolValue(true)}, "true"},
+		{"float renders shortest", corelogger.AttrValue{Value: corelogger.Float64Value(0.5)}, "0.5"},
+		{"unknown kind degrades to ?", corelogger.AttrValue{Value: corelogger.AnyValue(struct{}{})}, "?"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := string(appendValueOnly(nil, tc.attr))
+			if got != tc.want {
+				t.Errorf("appendValueOnly(%#v) = %q, want %q", tc.attr, got, tc.want)
+			}
+		})
+	}
+}
+
 func Test_constants(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

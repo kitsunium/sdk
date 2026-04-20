@@ -17,4 +17,10 @@ type Handler interface {
 	// WithAttrs returns a derived Handler that prepends the given attrs to
 	// every subsequent RecordEvent. The receiver MUST NOT be mutated.
 	WithAttrs(attrs []AttrValue) (child Handler)
+	// WithGroup returns a derived Handler that namespaces every subsequent
+	// attribute key under the given group name (rendered as "group.key"
+	// for text handlers, or as a nested object for structured handlers).
+	// An empty name MUST be treated as a no-op so callers can pass user
+	// input without guarding it.
+	WithGroup(name string) (child Handler)
 }
