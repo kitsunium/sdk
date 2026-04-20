@@ -10,6 +10,7 @@ go_library(
         "kind.go",
         "logger.go",
         "record.go",
+        "sink.go",
         "value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/logger",
