@@ -21,6 +21,16 @@ var (
 		"Logger requires a non-nil handler",
 		"service/logger.New called with nil Handler")
 
+	// EncoderNil is returned when NewHandler receives a nil Encoder.
+	EncoderNil = errs.Define(CodeEncoderNil, "ENCODER_NIL",
+		"Logger handler requires a non-nil encoder",
+		"service/logger.NewHandler called with nil Encoder")
+
+	// SinkRequired is returned when NewHandler receives a nil Sink.
+	SinkRequired = errs.Define(CodeSinkRequired, "SINK_REQUIRED",
+		"Logger handler requires a non-nil sink",
+		"service/logger.NewHandler called with nil Sink")
+
 	// CtxCancelled wraps a cancelled context at Handle time.
 	CtxCancelled = errs.Define(CodeCtxCancelled, "CTX_CANCELLED",
 		"Logging aborted due to cancellation",

@@ -15,4 +15,10 @@ const CodeCtxCancelled = 0x00_03_01_0A // 0.3.1.10 (serial 10)
 
 // CodeWriteFailed identifies a Handle call whose underlying writer returned
 // a non-nil error; ExitCode defaults to 74 (EX_IOERR) for this case.
-const CodeWriteFailed = 0x00_03_01_14 // 0.3.1.20 (serial 20)
+const CodeWriteFailed int = 3120
+
+// CodeEncoderNil identifies a NewHandler call made with a nil Encoder.
+const CodeEncoderNil int = 3103
+
+// CodeSinkRequired identifies a NewHandler call made with a nil Sink.
+const CodeSinkRequired int = 3104
