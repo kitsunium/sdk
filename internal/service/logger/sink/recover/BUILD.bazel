@@ -3,13 +3,14 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
-    name = "sample",
+    name = "recover",
     srcs = [
         "codes.go",
         "errors.go",
-        "sample_sink.go",
+        "panic_value.go",
+        "recover_sink.go",
     ],
-    importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/sample",
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/recover",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
@@ -22,7 +23,7 @@ go_library(
 
 alias(
     name = "go_default_library",
-    actual = ":sample",
+    actual = ":recover",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
@@ -30,12 +31,12 @@ alias(
 )
 
 go_test(
-    name = "sample_test",
+    name = "recover_test",
     srcs = [
-        "sample_sink_external_test.go",
-        "sample_sink_internal_test.go",
+        "recover_sink_external_test.go",
+        "recover_sink_internal_test.go",
     ],
-    embed = [":sample"],
+    embed = [":recover"],
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
