@@ -75,11 +75,21 @@ uniqueness across the SDK.
 | 1100-1199 | `internal/core/logger/level` | reserved | — |
 | 1200-1299 | `internal/kernel/buffer` | reserved | — |
 | 1300-1399 | `internal/kernel/clock` | reserved | — |
+| 1400-1499 | `internal/kernel/ring` | emitter | `CodeRingFull=1401`, `CodeRingEmpty=1402`, `CodeRingCapZero=1403` |
 | 2100-2199 | `internal/core/logger` | reserved | — |
 | 2200-2299 | `internal/core/codec` | emitter | `CodeDuplicateRegistration=2201`, `CodeEmptyInput=2202`, `CodeTargetInvalid=2203`, `CodeValueInvalid=2204` |
-| 3100-3199 | `internal/service/logger` | emitter | `CodeWriterNil=3101`, `CodeHandlerNil=3102`, `CodeCtxCancelled=3110`, `CodeWriteFailed=3120` |
+| 3100-3199 | `internal/service/logger` | emitter | `CodeWriterNil=3101`, `CodeHandlerNil=3102`, `CodeEncoderNil=3103`, `CodeSinkRequired=3104`, `CodeCtxCancelled=3110`, `CodeWriteFailed=3120` |
 | 3200-3399 | `internal/service/codec/<format>` | emitter | see codec subrange table below |
-| 4100-4199 | `pkg/v1/logger` | emitter | `CodeWriterRequired=4101` |
+| 3400-3499 | `internal/service/logger/sink/console` | emitter | `CodeWriterNil=3401`, `CodeCtxCancelled=3410`, `CodeWriteFailed=3420` |
+| 3500-3599 | `internal/service/logger/sink/file` | emitter | `CodePathEmpty=3501`, `CodeOpenFailed=3502`, `CodeCtxCancelled=3510`, `CodeWriteFailed=3520`, `CodeSyncFailed=3530`, `CodeCloseFailed=3540` |
+| 3600-3699 | `internal/service/logger/sink/multi` | emitter | `CodeFanoutWriteFailed=3601` |
+| 3700-3799 | `internal/service/logger/sink/async` | emitter | `CodeAsyncStopped=3701`, `CodeAsyncBufferFull=3702` |
+| 3800-3899 | `internal/service/logger/sink/route` | emitter | `CodeRouteNoMatch=3801` |
+| 3900-3999 | `internal/service/logger/sink/failover` | emitter | `CodeFailoverExhausted=3901`, `CodeFailoverEmpty=3902` |
+| 5100-5199 | `internal/service/logger/sink/sample` | emitter | `CodeSampleRateInvalid=5101`, `CodeSampleDownstreamNil=5102` |
+| 5200-5299 | `internal/service/logger/sink/recover` | emitter | `CodeRecoverPanicked=5201`, `CodeRecoverDownstreamNil=5202` |
+| 5300-5399 | `internal/service/logger/sink/syslog` | emitter | `CodeSyslogAddrEmpty=5301`, `CodeSyslogDialFailed=5302`, `CodeSyslogWriteFailed=5303`, `CodeSyslogCloseFailed=5304`, `CodeSyslogProtoInvalid=5305` |
+| 4100-4199 | `pkg/v1/logger` | emitter | `CodeWriterRequired=4101`, `CodeSinkConfigRequired=4102` |
 | 4200-4299 | `pkg/v1/codec` + `pkg/v1/codec/baseenc` | emitter | `CodeUnknownFormat=4201`, `CodeCodecUnavailable=4202`, `CodeStreamingUnsupported=4203`, `CodeInvalidEncoding=4251`, `CodeDecodeFailed=4252` |
 | ≥ 10000 | `pkg/v2+` | future | — |
 
