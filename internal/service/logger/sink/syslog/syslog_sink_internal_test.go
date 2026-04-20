@@ -11,8 +11,8 @@ import (
 )
 
 // localUDPSink dials a free local UDP socket and returns a syslogSink ready
-// for white-box assertions. The corresponding listener is registered for
-// cleanup by t.Cleanup.
+// for white-box assertions. The corresponding listener and dial conn are
+// registered for cleanup by t.Cleanup.
 func localUDPSink(t testing.TB) *syslogSink {
 	t.Helper()
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -40,36 +40,59 @@ func localUDPSink(t testing.TB) *syslogSink {
 	return &syslogSink{conn: conn}
 }
 
+// closedSyslogSink returns a syslog sink whose underlying conn was already
+// closed, so subsequent Write / Close calls hit the net.Conn error paths
+// and exercise the WriteFailed / CloseFailed wrap branches.
+func closedSyslogSink(t testing.TB) *syslogSink {
+	t.Helper()
+	s := localUDPSink(t)
+	//: pre-close the conn so subsequent operations hit the error path.
+	if cerr := s.conn.Close(); cerr != nil {
+		t.Fatalf("pre-close conn err = %v", cerr)
+	}
+	return s
+}
+
 func Test_syslogSink_Write(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
+		nilCtx    bool
 		ctxCancel bool
+		closed    bool
+		wantErr   bool
+		wantBytes bool
 	}{
-		{"happy path returns bytes accepted", false},
-		{"cancelled ctx surfaces ctx.Err", true},
+		{"happy path returns bytes accepted", false, false, false, false, true},
+		{"nil ctx is treated as live and writes", true, false, false, false, true},
+		{"cancelled ctx surfaces ctx.Err", false, true, false, true, false},
+		{"closed conn surfaces WriteFailed", false, false, true, true, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			s := localUDPSink(t)
-			ctx := t.Context()
-			if tc.ctxCancel {
-				cancelled, cancel := context.WithCancel(ctx)
-				cancel()
-				ctx = cancelled
+			var s *syslogSink
+			if tc.closed {
+				s = closedSyslogSink(t)
+			} else {
+				s = localUDPSink(t)
+			}
+			var ctx context.Context
+			if tc.nilCtx {
+				ctx = nil
+			} else {
+				ctx = t.Context()
+				if tc.ctxCancel {
+					cancelled, cancel := context.WithCancel(ctx)
+					cancel()
+					ctx = cancelled
+				}
 			}
 			n, err := s.Write(ctx, corelogger.RecordEvent{Level: level.Info}, []byte("payload"))
-			if tc.ctxCancel {
-				if err == nil {
-					t.Error("cancelled ctx Write err = nil, want non-nil")
-				}
-				return
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Write err = %v, wantErr = %v", err, tc.wantErr)
 			}
-			if err != nil {
-				t.Errorf("Write err = %v", err)
-			}
-			if n == 0 {
+			if tc.wantBytes && n == 0 {
 				t.Errorf("Write n = 0, want >0")
 			}
 		})
@@ -79,17 +102,33 @@ func Test_syslogSink_Write(t *testing.T) {
 func Test_syslogSink_Flush(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		name      string
+		nilCtx    bool
+		ctxCancel bool
+		wantErr   bool
 	}{
-		{"Flush is a no-op returning nil"},
-		{"Flush honours cancellation as a courtesy"},
+		{"Flush with live ctx returns nil", false, false, false},
+		{"Flush with nil ctx returns nil", true, false, false},
+		{"Flush with cancelled ctx surfaces ctx.Err", false, true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s := localUDPSink(t)
-			if err := s.Flush(t.Context()); err != nil {
-				t.Errorf("Flush err = %v, want nil", err)
+			var ctx context.Context
+			if tc.nilCtx {
+				ctx = nil
+			} else {
+				ctx = t.Context()
+				if tc.ctxCancel {
+					cancelled, cancel := context.WithCancel(ctx)
+					cancel()
+					ctx = cancelled
+				}
+			}
+			err := s.Flush(ctx)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Flush err = %v, wantErr = %v", err, tc.wantErr)
 			}
 		})
 	}
@@ -98,16 +137,25 @@ func Test_syslogSink_Flush(t *testing.T) {
 func Test_syslogSink_Close(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		name    string
+		closed  bool
+		wantErr bool
 	}{
-		{"Close releases the net.Conn without error"},
+		{"Close releases the net.Conn without error", false, false},
+		{"Close on already-closed conn surfaces CloseFailed", true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			s := localUDPSink(t)
-			if err := s.Close(); err != nil {
-				t.Errorf("Close err = %v", err)
+			var s *syslogSink
+			if tc.closed {
+				s = closedSyslogSink(t)
+			} else {
+				s = localUDPSink(t)
+			}
+			err := s.Close()
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Close err = %v, wantErr = %v", err, tc.wantErr)
 			}
 		})
 	}
@@ -149,7 +197,18 @@ func Test_swallowDialClose(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			swallowDialClose(tc.err)
+			panicked := false
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						panicked = true
+					}
+				}()
+				swallowDialClose(tc.err)
+			}()
+			if panicked {
+				t.Errorf("swallowDialClose panicked, want silent drop")
+			}
 		})
 	}
 }

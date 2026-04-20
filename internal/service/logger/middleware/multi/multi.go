@@ -28,8 +28,7 @@ type fanoutSink struct {
 // returns nil and Flush / Close are no-ops.
 //
 // Params:
-//   - branches: downstream sinks; nil entries are silently skipped at Write
-//     time so callers can pass a partial slate without guarding it.
+//   - branches: downstream sinks; nil entries are silently skipped at Write time.
 //
 // Returns:
 //   - sink: the fanout Sink behind the public corelogger.Sink interface.
