@@ -164,6 +164,10 @@ func appendValueOnly(dst []byte, a corelogger.AttrValue) (out []byte) {
 	case corelogger.KindInt64:
 		//: strconv.AppendInt is the canonical alloc-free integer renderer.
 		return strconv.AppendInt(dst, a.Value.Int64(), decimalBase)
+	//: uint64 renders base-10 unquoted.
+	case corelogger.KindUint64:
+		//: strconv.AppendUint is the alloc-free unsigned integer renderer.
+		return strconv.AppendUint(dst, a.Value.Uint64(), decimalBase)
 	//: booleans render as "true" or "false".
 	case corelogger.KindBool:
 		//: strconv.AppendBool emits the canonical Go spelling.
