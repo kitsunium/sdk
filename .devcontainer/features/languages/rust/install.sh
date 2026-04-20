@@ -118,9 +118,12 @@ CORE_TOOLS=(
     cargo-watch       # Auto-rebuild on file changes
     cargo-nextest     # Fast test runner
     cargo-deny        # Dependency security + license checker
-    cargo-outdated    # Dependency update checker
-    cargo-tarpaulin   # Code coverage tool
-    wasm-bindgen-cli  # JS bindings generator for WASM
+)
+
+BINSTALL_ONLY_TOOLS=(
+    cargo-outdated    # Dependency update checker (skip if no binary — 3min compile)
+    cargo-tarpaulin   # Code coverage tool (skip if no binary — 5min compile)
+    wasm-bindgen-cli  # JS bindings generator (skip if no binary — 3min compile)
 )
 
 # Phase 1: Parallel binstall (fast binary downloads)
@@ -148,7 +151,7 @@ for i in "${!BINSTALL_PIDS[@]}"; do
     fi
 done
 
-# Phase 2: Sequential fallback for failures (cargo install)
+# Phase 2: Sequential fallback for CORE tools only (cargo install)
 for tool in "${TOOLS_TO_RETRY[@]}"; do
     echo -e "${YELLOW}Compiling ${tool} (no binary available)...${NC}"
     if cargo install --locked "$tool" 2>/dev/null; then
@@ -156,6 +159,19 @@ for tool in "${TOOLS_TO_RETRY[@]}"; do
     else
         warn "${tool} failed"
         FAILED_TOOLS+=("$tool")
+    fi
+done
+
+# Phase 3: Binary-only tools (skip compilation — too slow for devcontainer builds)
+for tool in "${BINSTALL_ONLY_TOOLS[@]}"; do
+    if command -v "${tool}" &>/dev/null 2>&1; then
+        ok "${tool} (cached)"
+        continue
+    fi
+    if cargo binstall --no-confirm --disable-strategies compile "$tool" 2>/dev/null; then
+        ok "${tool} (binary)"
+    else
+        warn "${tool}: no pre-built binary, install with: cargo install ${tool}"
     fi
 done
 
@@ -267,6 +283,10 @@ echo "  - RUSTUP_HOME: $RUSTUP_HOME"
 echo ""
 echo "Note: WebKitGTK/Tauri libs are pre-installed in base image"
 echo ""
+
+# Write version marker for volume sync (Phase 2 acceleration)
+sudo mkdir -p /opt/devcontainer-versions
+{ rustc --version 2>/dev/null; cargo --version 2>/dev/null; } | sudo tee /opt/devcontainer-versions/rust >/dev/null
 
 # Install MCP fragment (rust-analyzer MCP server)
 # JSON is inlined because OCI feature artifacts don't include mcp.json files
