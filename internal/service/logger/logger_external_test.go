@@ -52,10 +52,9 @@ func TestBuild(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		nilLg   bool
 		wantNil bool
 	}{
-		{"Build on nil Logger returns nil", true, true},
+		{"Build on nil Logger returns nil", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,13 +72,23 @@ func TestLogAttrs(t *testing.T) {
 	tests := []struct {
 		name string
 	}{
-		{"LogAttrs on nil Logger silently drops"},
+		{"LogAttrs on nil Logger silently drops without panicking"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			//: by contract this never panics — just confirm execution completes.
-			svclogger.LogAttrs(t.Context(), nil, level.Info, "msg", nil)
+			panicked := false
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						panicked = true
+					}
+				}()
+				svclogger.LogAttrs(t.Context(), nil, level.Info, "msg", nil)
+			}()
+			if panicked {
+				t.Error("LogAttrs panicked on nil Logger; contract requires silent drop")
+			}
 		})
 	}
 }

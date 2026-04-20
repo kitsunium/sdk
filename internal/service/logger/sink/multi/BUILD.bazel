@@ -1,5 +1,7 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
+package(default_visibility = ["//internal/service:service_consumers"])
+
 go_library(
     name = "multi",
     srcs = [
@@ -29,9 +31,12 @@ alias(
 
 go_test(
     name = "multi_test",
-    srcs = ["multi_external_test.go"],
+    srcs = [
+        "multi_external_test.go",
+        "multi_internal_test.go",
+    ],
+    embed = [":multi"],
     deps = [
-        ":multi",
         "//internal/core/logger",
         "//internal/core/logger/level",
         "//internal/kernel/errs",
