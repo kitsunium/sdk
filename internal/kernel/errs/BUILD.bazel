@@ -1,0 +1,46 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "errs",
+    srcs = [
+        "accessors.go",
+        "codes.go",
+        "error.go",
+        "field.go",
+        "registry.go",
+        "validate.go",
+        "wrap_params.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/errs",
+    visibility = ["//internal/kernel:kernel_consumers"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":errs",
+    visibility = ["//internal/kernel:kernel_consumers"],
+)
+
+go_test(
+    name = "errs_test",
+    size = "small",
+    srcs = [
+        "accessors_external_test.go",
+        "accessors_internal_test.go",
+        "error_external_test.go",
+        "field_external_test.go",
+        "field_internal_test.go",
+        "registry_external_test.go",
+        "validate_internal_test.go",
+    ],
+    data = ["//:audit_sources"],
+    embed = [":errs"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -12,11 +12,27 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// sdkRoot resolves the repository root by walking up from the test's CWD
-// until a go.work file is found. Fails (not skips) if the workspace layout
-// is missing, since audits must always run against a real tree.
+// sdkRoot resolves the repository root. Under `go test` it walks up from
+// the test's CWD until a go.work file is found. Under `bazel test` it
+// reads TEST_SRCDIR + TEST_WORKSPACE (runfiles root) since the sandbox
+// strips the CWD relationship with the source tree. The Bazel test target
+// ships //:audit_sources as runfiles so go.work and every *.go file live
+// under that root.
+//
+// Fails (not skips) if neither path resolves, because audits must always
+// run against a real tree.
 func sdkRoot(tb testing.TB) (root string) {
 	tb.Helper()
+	//: Bazel test runner sets TEST_SRCDIR + TEST_WORKSPACE; prefer them
+	//: when present so the audit works inside bazel's sandbox.
+	if srcdir := os.Getenv("TEST_SRCDIR"); srcdir != "" {
+		if wks := os.Getenv("TEST_WORKSPACE"); wks != "" {
+			bazelRoot := filepath.Join(srcdir, wks)
+			if _, err := os.Stat(filepath.Join(bazelRoot, "go.work")); err == nil {
+				return bazelRoot
+			}
+		}
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		tb.Fatalf("cwd lookup failed: %v", err)

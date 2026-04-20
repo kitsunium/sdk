@@ -1,0 +1,50 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "msgpack",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "decoder.go",
+        "encoder.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/codec/msgpack",
+    visibility = ["//internal/service:service_consumers"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+        "@com_github_vmihailenco_msgpack_v5//:msgpack",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":msgpack",
+    visibility = ["//internal/service:service_consumers"],
+)
+
+go_test(
+    name = "msgpack_test",
+    size = "small",
+    srcs = [
+        "codec_external_test.go",
+        "codec_internal_test.go",
+        "decoder_internal_test.go",
+        "encoder_internal_test.go",
+    ],
+    embed = [":msgpack"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+        "@com_github_vmihailenco_msgpack_v5//:msgpack",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

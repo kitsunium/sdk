@@ -1,0 +1,47 @@
+name: SDK CI (Bazel)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  bazel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: bazel-contrib/setup-bazel@0.15.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}-${{ hashFiles('.bazelrc', 'MODULE.bazel', '**/go.mod', '**/go.sum') }}
+          repository-cache: true
+
+      - name: drift check — bazel mod tidy + gazelle
+        run: |
+          bazel mod tidy
+          bazel run //:gazelle
+          git diff --exit-code || {
+            echo "::error::Run 'bazel mod tidy && bazel run //:gazelle' locally and commit."
+            exit 1
+          }
+
+      - name: build
+        run: bazel build --config=ci //...
+
+      - name: test
+        run: bazel test --config=ci //...
+
+      - name: coverage
+        run: |
+          bazel coverage --combined_report=lcov //...
+          cp "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage.lcov
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.lcov
+          if-no-files-found: warn

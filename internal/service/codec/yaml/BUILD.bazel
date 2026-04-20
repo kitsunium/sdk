@@ -1,0 +1,50 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "yaml",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "decoder.go",
+        "encoder.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/codec/yaml",
+    visibility = ["//internal/service:service_consumers"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+        "@in_gopkg_yaml_v3//:yaml_v3",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":yaml",
+    visibility = ["//internal/service:service_consumers"],
+)
+
+go_test(
+    name = "yaml_test",
+    size = "small",
+    srcs = [
+        "codec_external_test.go",
+        "codec_internal_test.go",
+        "decoder_internal_test.go",
+        "encoder_internal_test.go",
+    ],
+    embed = [":yaml"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+        "@in_gopkg_yaml_v3//:yaml_v3",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

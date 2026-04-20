@@ -1,0 +1,15 @@
+# gazelle:prefix github.com/kitsunium/sdk/internal/service
+# gazelle:go_visibility //internal/service:service_consumers
+# gazelle:default_visibility //internal/service:service_consumers
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+# Layer firewall — service may depend on stdlib + kernel + core and is
+# visible only to pkg/v1 (plus its own subpackages).
+package_group(
+    name = "service_consumers",
+    packages = [
+        "//internal/service/...",
+        "//pkg/v1/...",
+    ],
+)

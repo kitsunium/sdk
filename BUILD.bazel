@@ -1,0 +1,45 @@
+load("@gazelle//:def.bzl", "gazelle")
+
+# ── Gazelle directives ─────────────────────────────────────────────────
+# Repo-wide Go import prefix; each layer root re-declares its own prefix
+# so multi-module detection works correctly.
+# gazelle:prefix github.com/kitsunium/sdk
+# gazelle:go_naming_convention import_alias
+
+gazelle(name = "gazelle")
+
+# audit_sources lists every file the internal/kernel/errs AST audit reads
+# at runtime. The audit walks internal/ and pkg/ looking for errs.Define
+# call sites + reads go.work for the workspace sentinel. Under Bazel the
+# test sandbox strips the source-tree relationship, so the test target
+# ships this filegroup as runfiles and resolves the root via TEST_SRCDIR
+# + TEST_WORKSPACE. Filegroup stays in the root BUILD so all layers can
+# reuse it if future audits land elsewhere.
+filegroup(
+    name = "audit_sources",
+    srcs = [
+        "go.work",
+        "//internal/core/codec:audit_srcs",
+        "//internal/core/logger:audit_srcs",
+        "//internal/core/logger/level:audit_srcs",
+        "//internal/kernel/buffer:audit_srcs",
+        "//internal/kernel/clock:audit_srcs",
+        "//internal/kernel/errs:audit_srcs",
+        "//internal/service/codec/asn1:audit_srcs",
+        "//internal/service/codec/cbor:audit_srcs",
+        "//internal/service/codec/csv:audit_srcs",
+        "//internal/service/codec/json:audit_srcs",
+        "//internal/service/codec/msgpack:audit_srcs",
+        "//internal/service/codec/ndjson:audit_srcs",
+        "//internal/service/codec/pem:audit_srcs",
+        "//internal/service/codec/toml:audit_srcs",
+        "//internal/service/codec/xml:audit_srcs",
+        "//internal/service/codec/yaml:audit_srcs",
+        "//internal/service/logger:audit_srcs",
+        "//pkg/v1/codec:audit_srcs",
+        "//pkg/v1/codec/baseenc:audit_srcs",
+        "//pkg/v1/errs:audit_srcs",
+        "//pkg/v1/logger:audit_srcs",
+    ],
+    visibility = ["//visibility:public"],
+)

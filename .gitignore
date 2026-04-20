@@ -150,3 +150,10 @@ plans/
 docs/site/
 core.*
 .taskmaster/
+
+# Bazel symlinks
+/bazel-bin
+/bazel-out
+/bazel-testlogs
+/bazel-workspace
+/bazel-sdk
