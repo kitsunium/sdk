@@ -783,3 +783,56 @@ fi
 echo "  Version: $DC_COMMIT"
 echo "═══════════════════════════════════════════════"
 ```
+
+---
+
+## Phase 7.5: Feature Staleness Re-verification
+
+**Confirms Phase 4.5 actually closed the gap. Silent on success; loud on
+persistent drift so a forgotten PR or broken push surfaces immediately.**
+
+```yaml
+staleness_reverification:
+  trigger: "Always when STALE_FEATURES was non-empty at Phase 2.5"
+
+  template_mode_rules:
+    - "Expect the bump branch to exist locally and all bumps to be committed"
+    - "Exit 1 if the staleness set did NOT shrink to zero (bump script crashed)"
+
+  downstream_mode_rules:
+    - "Re-run the GHCR digest check — if the local pin uses a floating tag (:1),
+      the digest should now match the just-pulled one. Mismatch → warn but do
+      not fail (BuildKit prune is best-effort)."
+
+  implementation:
+    - "Re-source detect_feature_staleness from detect.md Phase 2.5"
+    - "Compare before/after set sizes"
+    - "Append one line to the consolidated report"
+```
+
+**Implementation:**
+
+```bash
+reverify_feature_staleness() {
+    [ -z "${STALE_FEATURES_BEFORE:-${STALE_FEATURES:-}}" ] && return 0
+    local before
+    before=$(echo "${STALE_FEATURES_BEFORE:-${STALE_FEATURES}}" | grep -c . || true)
+    detect_feature_staleness
+    local after
+    after=$(echo "${STALE_FEATURES:-}" | grep -c . || true)
+
+    if [ "$after" -eq 0 ]; then
+        echo "  Staleness re-check: PASS (${before} → 0)"
+    else
+        case "${REPO_MODE:-downstream}" in
+          template)
+            echo "  Staleness re-check: FAIL (${before} → ${after}) — bump or push likely broken"
+            return 1
+            ;;
+          *)
+            echo "  Staleness re-check: WARN (${before} → ${after}) — rebuild may still be needed"
+            ;;
+        esac
+    fi
+}
+```
