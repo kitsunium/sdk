@@ -599,6 +599,26 @@ step_mcp_configuration() {
     # ALWAYS merge MCP fragments from /etc/mcp/fragments/ (image-level) and /etc/mcp/features/ (feature-level)
     # This runs even when template is cached, so new features/binaries are picked up on restart
     if [ -f "$MCP_OUTPUT" ] && command -v jq >/dev/null 2>&1; then
+        # Expected fragments: when the trigger binary is present we assume the
+        # corresponding feature was enabled, so its fragment MUST exist.
+        # A missing fragment here is the exact regression from issue #324
+        # (Go feature silently failed, MCP server absent). Surfacing it as a
+        # warning is the last line of defense before the user spots it
+        # themselves.
+        declare -A expected_fragments=(
+            [go]=go
+        )
+
+        for trigger in "${!expected_fragments[@]}"; do
+            if command -v "$trigger" >/dev/null 2>&1; then
+                local expected_name="${expected_fragments[$trigger]}"
+                if [ ! -f "/etc/mcp/features/${expected_name}.mcp.json" ]; then
+                    log_warning "Feature trigger '$trigger' is installed but MCP fragment '${expected_name}.mcp.json' is missing — the feature's install.sh may have failed. Check the devcontainer build log for '[INSTALL-${trigger^^}]' markers."
+                fi
+            fi
+        done
+
+        local added=() skipped=()
         local fragment
         for fragment in /etc/mcp/fragments/*.mcp.json /etc/mcp/features/*.mcp.json; do
             [ -f "$fragment" ] || continue
@@ -610,7 +630,7 @@ step_mcp_configuration() {
 
             local server_name
             for server_name in $servers; do
-                # Skip if already present in mcp.json
+                # Skip if already present in mcp.json (idempotent re-run)
                 if jq -e --arg name "$server_name" '.mcpServers[$name]' "$MCP_OUTPUT" >/dev/null 2>&1; then
                     continue
                 fi
@@ -619,10 +639,24 @@ step_mcp_configuration() {
                 requires=$(jq -r --arg s "$server_name" '.servers[$s].requires_binary // empty' "$fragment")
 
                 if [ -n "$requires" ]; then
+                    local requires_ok=true
                     if [ "${requires#/}" != "$requires" ]; then
-                        [ -x "$requires" ] || { log_info "Skipping $server_name MCP ($requires not found)"; continue; }
+                        [ -x "$requires" ] || requires_ok=false
                     else
-                        command -v "$requires" &>/dev/null || { log_info "Skipping $server_name MCP ($requires not found)"; continue; }
+                        command -v "$requires" &>/dev/null || requires_ok=false
+                    fi
+                    if [ "$requires_ok" = "false" ]; then
+                        skipped+=("$server_name ($requires missing)")
+                        # Warn (not info) when the fragment came from a feature
+                        # that is supposed to ship its own trigger binary —
+                        # the feature is the canonical installer for that
+                        # binary, so its absence is a real regression.
+                        if [[ "$fragment" == /etc/mcp/features/* ]]; then
+                            log_warning "Skipping $server_name MCP: required binary '$requires' not found (from $feature_name feature)"
+                        else
+                            log_info "Skipping $server_name MCP ($requires not found)"
+                        fi
+                        continue
                     fi
                 fi
 
@@ -637,6 +671,7 @@ step_mcp_configuration() {
                     mv "$tmp_file" "$MCP_OUTPUT"
                     chown "$(id -u):$(id -g)" "$MCP_OUTPUT" 2>/dev/null || true
                     chmod 600 "$MCP_OUTPUT" 2>/dev/null || true
+                    added+=("$server_name")
                     log_info "Added $server_name MCP (from $feature_name feature)"
                 else
                     log_warning "Failed to add $server_name MCP, keeping original"
@@ -644,6 +679,15 @@ step_mcp_configuration() {
                 fi
             done
         done
+
+        # Summary — makes the final state obvious in the startup log so users
+        # don't have to diff mcp.json manually to spot a missing server.
+        local active
+        active=$(jq -r '.mcpServers | keys | join(", ")' "$MCP_OUTPUT" 2>/dev/null || echo "?")
+        log_info "MCP merge summary: active=[${active}] newly_added=${#added[@]} skipped=${#skipped[@]}"
+        if (( ${#skipped[@]} > 0 )); then
+            log_info "  skipped: ${skipped[*]}"
+        fi
     fi
 }
 
