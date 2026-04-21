@@ -1,6 +1,6 @@
 {
   "id": "browser",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "name": "Browser Automation (Playwright)",
   "description": "Installs Playwright with Chromium for browser automation, E2E testing, and the Playwright MCP server",
   "documentationURL": "https://playwright.dev/",

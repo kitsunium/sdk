@@ -1,6 +1,6 @@
 {
   "id": "fortran",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Fortran Development Environment",
   "description": "Installs gfortran, fprettify, and Fortran Package Manager (fpm)",
   "options": {},

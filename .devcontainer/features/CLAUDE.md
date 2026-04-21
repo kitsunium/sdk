@@ -79,6 +79,11 @@ Rules for every `install.sh`:
    Otherwise any later failure silently drops the fragment.
 5. **Structured step markers** (e.g. `[INSTALL-GO] step=X status=ok|fail`)
    so users can grep the devcontainer build log.
+6. **Bump `version`** in `devcontainer-feature.json` on every non-docs change.
+   `devcontainers/cli` skips republish when the version string already exists
+   on GHCR ([devcontainers/cli#814](https://github.com/devcontainers/cli/issues/814)) —
+   forgetting the bump silently ships stale code to every downstream consumer.
+   Enforced by `.github/workflows/version-gate.yml`.
 
 Reference implementation: `.devcontainer/features/languages/go/install.sh`.
 Static regression guards: `tests/scripts/go-install.bats`.

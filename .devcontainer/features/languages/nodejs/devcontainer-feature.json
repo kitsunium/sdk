@@ -1,6 +1,6 @@
 {
   "id": "nodejs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Node.js Development Environment",
   "description": "Installs Node.js via NVM, npm, yarn, pnpm and common development tools",
   "options": {
