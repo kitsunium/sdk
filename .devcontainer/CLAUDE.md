@@ -1,4 +1,4 @@
-<!-- updated: 2026-04-21T18:46:02Z -->
+<!-- updated: 2026-04-18T00:00:00Z -->
 # DevContainer Configuration
 
 ## Purpose
@@ -9,11 +9,12 @@ Development container setup for consistent dev environments across languages.
 
 ```text
 .devcontainer/
-├── devcontainer.json    # Main config
-├── docker-compose.yml   # Multi-service setup
-├── Dockerfile           # Extends images/ base
-├── install.sh           # Standalone Claude installer
-├── scripts/             # Build utilities
+├── devcontainer.json         # Main config (synced from template on /update)
+├── devcontainer.local.json   # Optional per-project overrides (preserved across /update)
+├── docker-compose.yml        # Multi-service setup
+├── Dockerfile                # Extends images/ base
+├── install.sh                # Standalone Claude installer
+├── scripts/                  # Build utilities
 │   └── generate-assets-archive.sh
 ├── features/            # Language & tool features
 │   ├── languages/       # 25 languages + shared/
@@ -45,3 +46,33 @@ Development container setup for consistent dev environments across languages.
 
 Features are enabled in `devcontainer.json` under `features`.
 Language conventions are enforced by specialist agents (e.g., `developer-specialist-go`).
+
+## Local Overrides (`devcontainer.local.json`)
+
+`/update` re-syncs `devcontainer.json` from the template on every run. To persist
+per-project adjustments (enabled features, extra extensions, custom env vars),
+create `.devcontainer/devcontainer.local.json` — a strict JSON file with only the
+keys you want to override or add. The update flow deep-merges template + override
+(override wins) and writes the result to `devcontainer.json`.
+
+- No override file → template copied verbatim (JSONC comments preserved)
+- Override file present → merged JSON written (comments stripped)
+- Arrays are replaced wholesale (not concatenated) — copy template defaults if you need them
+- Commit `devcontainer.local.json` so teammates get the same toolchain
+
+Example (`.devcontainer/devcontainer.local.json`):
+
+```json
+{
+  "features": {
+    "ghcr.io/kodflow/devcontainer-features/go:1": {},
+    "ghcr.io/kodflow/devcontainer-features/python:1": { "version": "3.12" }
+  },
+  "customizations": {
+    "vscode": { "extensions": ["golang.go", "ms-python.python"] }
+  }
+}
+```
+
+Merge logic lives in `images/scripts/merge-devcontainer-json.mjs`, wired from
+`images/.claude/commands/update/apply.md` (`update_devcontainer_json_from_tarball`).

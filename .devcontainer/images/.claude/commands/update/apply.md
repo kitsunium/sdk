@@ -246,6 +246,127 @@ apply_infra_tarball() {
 
 ---
 
+## Phase 4.5: Auto-Fix Stale Features
+
+**Closes the gap between "content updated" and "binaries actually reach the
+running container". Dispatches on REPO_MODE exported in Phase 2.5.**
+
+In **template mode** the stale set is bumped + committed + pushed + a PR is
+opened. GHCR's `publish-features.yml` then republishes on merge. In
+**downstream mode** GHCR manifests are force-refreshed, the BuildKit layer
+cache is pruned, the devcontainer CLI feature cache is wiped, and a
+`/tmp/claude-rebuild-request.json` CTA file is written. Either path produces
+a terminal output block so the user knows exactly what to do next.
+
+```yaml
+auto_fix_stale_features:
+  trigger: "STALE_FEATURES is non-empty OR MCP_DROPS contains entries"
+  guardrail: "Skip entirely when both are empty — keep /update silent on fresh projects"
+
+  template_mode:
+    1_bump:
+      action: "Bump each stale feature's version via update-feature-bump.sh"
+      command: 'printf "%s\n" "${stale_names[@]}" | "$HOME/.claude/scripts/update-feature-bump.sh"'
+      output: "feature|old|new|kind lines for the final report"
+    2_commit:
+      action: "Stage bumps + commit on chore/bump-stale-features-<date>"
+      note: "A single consolidated commit, never --amend, always a new branch"
+    3_pr:
+      action: "Open PR via mcp__github__create_pull_request (or `gh pr create`)"
+      body: |
+        Auto-bump triggered by /update. N features had content changes since
+        their last version bump, so GHCR was still serving pre-change code.
+        See https://github.com/devcontainers/cli/issues/814 for the skip-on-
+        existing-version behaviour this works around.
+
+  downstream_mode:
+    1_refresh:
+      action: "Force GHCR manifest refresh + BuildKit prune + CLI cache wipe"
+      command: 'printf "%s\n" "${stale_refs[@]}" | "$HOME/.claude/scripts/update-feature-refresh.sh"'
+    2_cta:
+      action: "Ensure user runs 'Rebuild Without Cache' — plain Rebuild reuses BuildKit layers"
+      output: "CTA block + /tmp/claude-rebuild-request.json"
+```
+
+**Implementation:**
+
+```bash
+auto_fix_stale_features() {
+    if [ -z "${STALE_FEATURES:-}" ] && [ "$(echo "${MCP_DROPS:-[]}" | jq 'length')" -eq 0 ]; then
+        return 0    # Nothing to do — stay silent
+    fi
+
+    case "${REPO_MODE:-downstream}" in
+      template)
+        local bump_report=""
+        if [ -n "${STALE_FEATURES:-}" ]; then
+            # Extract short names (go, kubernetes, …) from refs.
+            local names
+            names=$(echo "$STALE_FEATURES" \
+                    | sed -E 's|.*/devcontainer-features/||; s|:.*||' \
+                    | sort -u)
+            bump_report=$(echo "$names" | "$HOME/.claude/scripts/update-feature-bump.sh")
+        fi
+        if [ -n "$bump_report" ]; then
+            local branch="chore/bump-stale-features-$(date +%Y%m%d-%H%M)"
+            git checkout -b "$branch" >/dev/null 2>&1 || git checkout "$branch" >/dev/null 2>&1
+            git commit -m "chore(features): bump stale versions to force GHCR republish" >/dev/null 2>&1 || true
+            git push -u origin "$branch" >/dev/null 2>&1 || true
+            # PR creation delegated to the caller (MCP-first: mcp__github__create_pull_request).
+            export AUTO_FIX_REPORT="$bump_report"
+            export AUTO_FIX_BRANCH="$branch"
+        fi
+        ;;
+      downstream|*)
+        if [ -n "${STALE_FEATURES:-}" ]; then
+            export AUTO_FIX_REPORT=$(echo "$STALE_FEATURES" \
+                                     | "$HOME/.claude/scripts/update-feature-refresh.sh")
+        fi
+        ;;
+    esac
+}
+```
+
+**Output Phase 4.5 (template mode, 2 stale):**
+
+```
+═══════════════════════════════════════════════
+  /update - Stale Feature Auto-Fix (template)
+═══════════════════════════════════════════════
+
+  Stale         : 2 features
+    ├─ go          1.0.1 → 1.1.0 (minor)
+    └─ kubernetes  1.1.0 → 1.2.0 (minor)
+
+  Branch        : chore/bump-stale-features-20260421-1510
+  PR            : opened via mcp__github__create_pull_request
+  Next step     : merge the PR; publish-features.yml will push fresh tags to GHCR (~2min)
+
+═══════════════════════════════════════════════
+```
+
+**Output Phase 4.5 (downstream mode, 1 stale):**
+
+```
+═══════════════════════════════════════════════
+  /update - Stale Feature Auto-Fix (downstream)
+═══════════════════════════════════════════════
+
+  Stale         : 1 feature
+    └─ ghcr.io/kodflow/devcontainer-features/go:1
+
+  Actions       : GHCR manifest refreshed, BuildKit cache pruned,
+                  devcontainer CLI feature cache wiped
+  CTA           : /tmp/claude-rebuild-request.json
+
+  Next step     : Command Palette → "Dev Containers: Rebuild Without Cache"
+                  (plain Rebuild keeps the stale layer — you need the no-cache variant)
+
+═══════════════════════════════════════════════
+```
+
+---
+
 ## Phase 5.0: Synthesize (Tarball Orchestration)
 
 **Orchestrates the full update using tarball downloads.**

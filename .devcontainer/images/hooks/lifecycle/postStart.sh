@@ -653,6 +653,22 @@ step_mcp_configuration() {
                         # binary, so its absence is a real regression.
                         if [[ "$fragment" == /etc/mcp/features/* ]]; then
                             log_warning "Skipping $server_name MCP: required binary '$requires' not found (from $feature_name feature)"
+                            # Structured drop record — /update reads this to
+                            # surface silent-skip regressions to the user.
+                            local drop_log="${WORKSPACE_FOLDER:-/workspace}/.claude/logs/mcp-skipped.json"
+                            mkdir -p "$(dirname "$drop_log")" 2>/dev/null || true
+                            local ts
+                            ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                            local entry
+                            entry=$(jq -cn --arg f "$feature_name" --arg s "$server_name" \
+                                           --arg b "$requires" --arg t "$ts" \
+                                '{feature:$f,server:$s,binary:$b,timestamp:$t}')
+                            if [ -f "$drop_log" ]; then
+                                jq --argjson e "$entry" '. + [$e]' "$drop_log" > "${drop_log}.tmp" \
+                                   && mv "${drop_log}.tmp" "$drop_log"
+                            else
+                                echo "[$entry]" > "$drop_log"
+                            fi
                         else
                             log_info "Skipping $server_name MCP ($requires not found)"
                         fi
@@ -687,6 +703,17 @@ step_mcp_configuration() {
         log_info "MCP merge summary: active=[${active}] newly_added=${#added[@]} skipped=${#skipped[@]}"
         if (( ${#skipped[@]} > 0 )); then
             log_info "  skipped: ${skipped[*]}"
+            # Final, user-visible nag for feature-level drops — these indicate
+            # a feature shipped to GHCR without its trigger binary making it
+            # into $PATH. /update can diagnose and auto-fix.
+            local drop_log="${WORKSPACE_FOLDER:-/workspace}/.claude/logs/mcp-skipped.json"
+            if [ -f "$drop_log" ] && [ -s "$drop_log" ]; then
+                local n
+                n=$(jq 'length' "$drop_log" 2>/dev/null || echo 0)
+                if [ "$n" -gt 0 ]; then
+                    printf '\033[1;31m⚠ %s MCP server(s) dropped due to missing binaries. Run /update to diagnose.\033[0m\n' "$n" >&2
+                fi
+            fi
         fi
     fi
 }
