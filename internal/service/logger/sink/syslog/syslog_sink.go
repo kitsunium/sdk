@@ -126,8 +126,14 @@ func swallowDialClose(err error) {
 func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: honour cancellation so a doomed request does not waste a packet.
 	if ctx != nil && ctx.Err() != nil {
-		//: surface the cancellation cause verbatim.
-		return 0, ctx.Err()
+		//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved
+		//: and consumers can HasCode / errors.Is against the cancellation.
+		return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
+			Code:    CodeSyslogCtxCancelled,
+			Reason:  "SYSLOG_CTX_CANCELLED",
+			Public:  "Syslog sink write aborted due to cancellation",
+			Private: "service/logger/sink/syslog.Write saw a cancelled context",
+		}, errs.Int("level", int64(rec.Level)))
 	}
 	//: build the RFC5424 frame: <PRI>1 - - - - - - <payload>.
 	frame := makeFrame(priorityFor(rec.Level), p)
@@ -160,8 +166,13 @@ func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 func (s *syslogSink) Flush(ctx context.Context) (err error) {
 	//: honour cancellation even though there is nothing buffered to flush.
 	if ctx != nil && ctx.Err() != nil {
-		//: caller already gave up; surface the cancellation cause.
-		return ctx.Err()
+		//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved.
+		return errs.Wrap(ctx.Err(), errs.WrapParams{
+			Code:    CodeSyslogCtxCancelled,
+			Reason:  "SYSLOG_CTX_CANCELLED",
+			Public:  "Syslog sink flush aborted due to cancellation",
+			Private: "service/logger/sink/syslog.Flush saw a cancelled context",
+		})
 	}
 	//: net.Conn writes settle synchronously — nothing buffered on our side.
 	return nil

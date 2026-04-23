@@ -19,6 +19,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/buffer"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/ring"
 )
 
@@ -144,8 +145,14 @@ func noopOnDrop(missed int) {
 func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, payload []byte) (n int, err error) {
 	//: honour cancellation so a doomed request does not waste a queue slot.
 	if ctx != nil && ctx.Err() != nil {
-		//: surface the cancellation cause verbatim.
-		return 0, ctx.Err()
+		//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved
+		//: and consumers can HasCode / errors.Is against the cancellation.
+		return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
+			Code:    CodeAsyncCtxCancelled,
+			Reason:  "ASYNC_CTX_CANCELLED",
+			Public:  "Async sink write aborted due to cancellation",
+			Private: "service/logger/middleware/async.Write saw a cancelled context",
+		}, errs.Int("level", int64(rec.Level)))
 	}
 	//: refuse work after Close — the drainer is gone.
 	if isClosed(s.stop) {
@@ -208,8 +215,13 @@ func (s *asyncSink) Flush(ctx context.Context) (err error) {
 	for s.queue.Len() > 0 {
 		//: bail out cleanly when the caller cancels mid-wait.
 		if ctx != nil && ctx.Err() != nil {
-			//: surface the cancellation cause verbatim.
-			return ctx.Err()
+			//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved.
+			return errs.Wrap(ctx.Err(), errs.WrapParams{
+				Code:    CodeAsyncCtxCancelled,
+				Reason:  "ASYNC_CTX_CANCELLED",
+				Public:  "Async sink flush aborted due to cancellation",
+				Private: "service/logger/middleware/async.Flush saw a cancelled context",
+			})
 		}
 		//: yield so the drainer goroutine can progress.
 		yieldOnce()
