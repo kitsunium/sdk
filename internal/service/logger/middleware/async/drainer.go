@@ -59,8 +59,10 @@ func (s *asyncSink) drain() {
 // Params:
 //   - ent: the entry pulled out of the ring by the drainer.
 func (s *asyncSink) forward(ent *recordEntry) {
-	//: the downstream sink owns its own concurrency model and error handling.
-	swallowDownstreamError(s.downstream.Write(asyncCtx(), ent.rec, ent.data))
+	//: the downstream sink owns its own concurrency model; surface errors
+	//: through the configured OnError callback (or no-op default).
+	n, err := s.downstream.Write(asyncCtx(), ent.rec, ent.data)
+	s.forwardDownstreamError(n, err)
 	//: clear the entry's payload before recycling so leaked references release.
 	ent.rec = corelogger.RecordEvent{}
 	//: drop the backing array when it grew pathologically large (attacker-

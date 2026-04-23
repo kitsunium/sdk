@@ -220,7 +220,7 @@ func TestWithGroup(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewWithSink err = %v", err)
 			}
-			child := logger.WithGroup(lg, "http")
+			child := lg.WithGroup("http")
 			logger.Info(t.Context(), child, "req", logger.String("method", "GET"))
 			if !strings.Contains(sink.Snapshot(), "http.method=\"GET\"") {
 				t.Errorf("WithGroup prefix missing: %q", sink.Snapshot())

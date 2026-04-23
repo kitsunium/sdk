@@ -40,6 +40,11 @@ type asyncSink struct {
 	policy DropPolicy
 	// onDrop fires for every entry discarded by the policy; never nil.
 	onDrop func(missed int)
+	// onError fires for every downstream Write failure seen by the drainer;
+	// never nil — noopOnError is substituted when Config.OnError is unset.
+	// Surfaces errors that would otherwise be silently swallowed by the
+	// drainer (finding #24).
+	onError func(err error)
 	// stop signals the drainer goroutine to exit after Close.
 	stop chan struct{}
 	// stopOnce guards close(stop) so concurrent Close calls never panic.
@@ -95,6 +100,14 @@ func New(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink) {
 		//: fall back to the documented no-op.
 		callback = noopOnDrop
 	}
+	//: same treatment for the error callback so the drainer can fire it
+	//: unconditionally without a nil check on the hot path.
+	errCallback := cfg.OnError
+	//: nil callback degrades to a no-op so the drainer can call it unconditionally.
+	if errCallback == nil {
+		//: fall back to the documented no-op.
+		errCallback = noopOnError
+	}
 	//: recycler keeps per-entry allocation off the hot path.
 	pool := buffer.NewRecycler[*recordEntry](newRecordEntry)
 	//: build the sink with channels primed for the drainer lifecycle.
@@ -104,6 +117,7 @@ func New(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink) {
 		pool:       pool,
 		policy:     cfg.Policy,
 		onDrop:     callback,
+		onError:    errCallback,
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
 	}
@@ -132,6 +146,19 @@ func mustNewRing(size int) (out ring.Queue[*recordEntry]) {
 	}
 	//: hand back the validated ring.
 	return queue
+}
+
+// noopOnError is the documented sink for the OnError callback when the
+// caller does not supply one. Keeps the drainer's call path branch-free.
+//
+// Params:
+//   - err: error to discard; intentionally unused by the no-op.
+func noopOnError(err error) {
+	//: defensive guard so the parameter is observed by the audit.
+	if err == nil {
+		//: nothing to discard on the happy path.
+		return
+	}
 }
 
 // noopOnDrop is the documented sink for the OnDrop callback when the caller
