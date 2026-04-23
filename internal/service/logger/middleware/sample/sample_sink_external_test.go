@@ -125,8 +125,8 @@ func TestSampleSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"RateInvalid carries 5101", sample.RateInvalid, sample.CodeSampleRateInvalid},
-		{"DownstreamNil carries 5102", sample.DownstreamNil, sample.CodeSampleDownstreamNil},
+		{"RateInvalid carries 0.3.20.1", sample.RateInvalid, sample.CodeSampleRateInvalid},
+		{"DownstreamNil carries 0.3.20.2", sample.DownstreamNil, sample.CodeSampleDownstreamNil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

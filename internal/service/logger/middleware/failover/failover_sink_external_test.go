@@ -171,8 +171,8 @@ func TestFailoverSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"Exhausted carries 3901", failover.Exhausted, failover.CodeFailoverExhausted},
-		{"Empty carries 3902", failover.Empty, failover.CodeFailoverEmpty},
+		{"Exhausted carries 0.3.19.1", failover.Exhausted, failover.CodeFailoverExhausted},
+		{"Empty carries 0.3.19.2", failover.Empty, failover.CodeFailoverEmpty},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

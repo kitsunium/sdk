@@ -157,12 +157,12 @@ func TestFileSinkSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"PathEmpty carries 3501", file.PathEmpty, file.CodePathEmpty},
-		{"OpenFailed carries 3502", file.OpenFailed, file.CodeOpenFailed},
-		{"CtxCancelled carries 3510", file.CtxCancelled, file.CodeCtxCancelled},
-		{"WriteFailed carries 3520", file.WriteFailed, file.CodeWriteFailed},
-		{"SyncFailed carries 3530", file.SyncFailed, file.CodeSyncFailed},
-		{"CloseFailed carries 3540", file.CloseFailed, file.CodeCloseFailed},
+		{"PathEmpty carries 0.3.14.1", file.PathEmpty, file.CodePathEmpty},
+		{"OpenFailed carries 0.3.14.2", file.OpenFailed, file.CodeOpenFailed},
+		{"CtxCancelled carries 0.3.14.10", file.CtxCancelled, file.CodeCtxCancelled},
+		{"WriteFailed carries 0.3.14.20", file.WriteFailed, file.CodeWriteFailed},
+		{"SyncFailed carries 0.3.14.30", file.SyncFailed, file.CodeSyncFailed},
+		{"CloseFailed carries 0.3.14.40", file.CloseFailed, file.CodeCloseFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -135,7 +135,7 @@ func TestFanoutWriteFailedSentinel(t *testing.T) {
 	tests := []struct {
 		name string
 	}{
-		{"FanoutWriteFailed carries 3601"},
+		{"FanoutWriteFailed carries 0.3.16.1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

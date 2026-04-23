@@ -349,8 +349,8 @@ func TestAsyncSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"Stopped carries 3701", async.Stopped, async.CodeAsyncStopped},
-		{"BufferFull carries 3702", async.BufferFull, async.CodeAsyncBufferFull},
+		{"Stopped carries 0.3.17.1", async.Stopped, async.CodeAsyncStopped},
+		{"BufferFull carries 0.3.17.2", async.BufferFull, async.CodeAsyncBufferFull},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

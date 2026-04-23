@@ -229,9 +229,9 @@ func TestErrorsCarryConsoleCodes(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"WriterNil carries 3401", console.WriterNil, console.CodeWriterNil},
-		{"CtxCancelled carries 3410", console.CtxCancelled, console.CodeCtxCancelled},
-		{"WriteFailed carries 3420", console.WriteFailed, console.CodeWriteFailed},
+		{"WriterNil carries 0.3.13.1", console.WriterNil, console.CodeWriterNil},
+		{"CtxCancelled carries 0.3.13.10", console.CtxCancelled, console.CodeCtxCancelled},
+		{"WriteFailed carries 0.3.13.20", console.WriteFailed, console.CodeWriteFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
