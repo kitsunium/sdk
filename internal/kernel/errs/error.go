@@ -334,9 +334,18 @@ func (e *Error) Layer() (layer int) {
 	return int(e.code.Layer())
 }
 
-// Is implements the errors.Is protocol. When target is a *PrefixMatcher
-// this walks e.code AND every trail entry against the prefix/mask; for
-// any other target, falls back to pointer equality (the stdlib default).
+// Is implements the errors.Is protocol. Three matching modes:
+//
+//  1. target is *PrefixMatcher → match if origin code OR any trail entry
+//     satisfies the CIDR-style mask (ADR 0005 prefix routing).
+//  2. target is *Error with non-zero Code → match when the two share the
+//     same (Code, Reason). This lets errors.Is(err, sentinel) succeed
+//     even when err is a freshly-constructed Wrap result — the typed
+//     sentinel and the wire sentinel have identical Code+Reason by
+//     construction, and semantic equivalence is what callers expect.
+//     The Reason check defuses a hypothetical Code-collision (the
+//     registry audit is the primary guard; this is belt-and-suspenders).
+//  3. anything else → pointer equality (stdlib default).
 //
 // Params:
 //   - target: the error being compared against.
@@ -356,8 +365,21 @@ func (e *Error) Is(target error) (ok bool) {
 		}
 		return false
 	}
-	//: default path — the stdlib convention is pointer equality for *Error
-	//: sentinels; this short-circuits the outer errors.Is helper safely.
+	//: sentinel-by-Code path — two *Error instances with matching Code
+	//: and Reason are semantically the same error, even at different
+	//: pointer identities (fresh Wrap result vs package-level Define).
+	if te, tok := target.(*Error); tok {
+		//: zero code defuses the "both uninitialised" edge case.
+		if te.code != 0 && e.code == te.code && e.reason == te.reason {
+			return true
+		}
+		//: Code match failed — fall through to pointer equality so
+		//: callers deliberately comparing pointers still get stdlib
+		//: semantics. Rare but preserves backward compat.
+		return e == target
+	}
+	//: default path — the stdlib convention is pointer equality for any
+	//: other target type; this short-circuits the outer errors.Is helper safely.
 	return e == target
 }
 
