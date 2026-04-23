@@ -1,10 +1,10 @@
-// Package msgpack: codes.go — range 3260-3269 for MessagePack codec errors.
+// Package msgpack: codes.go — range 0.3.7.* (ADR 0005 service/codec/msgpack block).
 package msgpack
 
-// range: 3260-3269
+// range: 0.3.7.0 - 0.3.7.255
 
 // CodeMsgPackMarshalFailed identifies a failure inside vmihailenco/msgpack/v5.Marshal.
-const CodeMsgPackMarshalFailed int = 3261
+const CodeMsgPackMarshalFailed = 0x00_03_07_01 // 0.3.7.1
 
 // CodeMsgPackUnmarshalFailed identifies a failure inside vmihailenco/msgpack/v5.Unmarshal.
-const CodeMsgPackUnmarshalFailed int = 3262
+const CodeMsgPackUnmarshalFailed = 0x00_03_07_02 // 0.3.7.2

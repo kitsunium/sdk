@@ -29,15 +29,27 @@ func NewPrefixMatcher(prefix, mask Code) (m *PrefixMatcher) {
 	return &PrefixMatcher{prefix: prefix, mask: mask}
 }
 
-// String returns a diagnostic representation of the matcher. Not used in
-// the matching logic itself; provided so log output or panic messages can
-// render the matcher without reflection.
+// String returns a diagnostic representation of the matcher.
 //
 // Returns:
 //   - string: human-readable "PrefixMatcher{prefix=…, mask=…}" form.
 func (p *PrefixMatcher) String() (s string) {
 	//: rely on Code.String() for each component — canonical dotted form.
 	return "PrefixMatcher{prefix=" + p.prefix.String() + ", mask=" + p.mask.String() + "}"
+}
+
+// Error implements the `error` interface so PrefixMatcher is usable as a
+// target for `errors.Is`. Returning an error-looking string is the ONLY
+// way Go's errors.Is can accept a non-sentinel target; callers MUST never
+// return a *PrefixMatcher from a function as an error. A follow-up linter
+// rule (KTN-ERRS-PREFIXMATCHER-RETURN) will catch accidental escapes.
+//
+// Returns:
+//   - string: identical to String() — same diagnostic form.
+func (p *PrefixMatcher) Error() (s string) {
+	//: identical to String() — the `error` conformance is a stdlib-protocol
+	//: concession, not a claim that a PrefixMatcher represents a failure.
+	return p.String()
 }
 
 // Prefix exposes the matcher's prefix for internal callers (e.g., the

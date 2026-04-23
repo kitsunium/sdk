@@ -1,10 +1,10 @@
-// Package xml: codes.go — range 3220-3229 for XML codec errors.
+// Package xml: codes.go — range 0.3.3.* (ADR 0005 service/codec/xml block).
 package xml
 
-// range: 3220-3229
+// range: 0.3.3.0 - 0.3.3.255
 
 // CodeXMLMarshalFailed identifies a failure inside encoding/xml.Marshal.
-const CodeXMLMarshalFailed int = 3221
+const CodeXMLMarshalFailed = 0x00_03_03_01 // 0.3.3.1
 
 // CodeXMLUnmarshalFailed identifies a failure inside encoding/xml.Unmarshal.
-const CodeXMLUnmarshalFailed int = 3222
+const CodeXMLUnmarshalFailed = 0x00_03_03_02 // 0.3.3.2

@@ -1,10 +1,10 @@
-// Package yaml: codes.go — range 3230-3239 for YAML codec errors.
+// Package yaml: codes.go — range 0.3.4.* (ADR 0005 service/codec/yaml block).
 package yaml
 
-// range: 3230-3239
+// range: 0.3.4.0 - 0.3.4.255
 
 // CodeYAMLMarshalFailed identifies a failure inside gopkg.in/yaml.v3.Marshal.
-const CodeYAMLMarshalFailed int = 3231
+const CodeYAMLMarshalFailed = 0x00_03_04_01 // 0.3.4.1
 
 // CodeYAMLUnmarshalFailed identifies a failure inside gopkg.in/yaml.v3.Unmarshal.
-const CodeYAMLUnmarshalFailed int = 3232
+const CodeYAMLUnmarshalFailed = 0x00_03_04_02 // 0.3.4.2

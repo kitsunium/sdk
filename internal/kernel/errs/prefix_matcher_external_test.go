@@ -6,13 +6,18 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-func TestPrefixMatcher_NotAnError(t *testing.T) {
+func TestPrefixMatcher_ImplementsErrorForErrorsIs(t *testing.T) {
 	t.Parallel()
 	pm := errs.NewPrefixMatcher(0x01_00_00_00, errs.MaskByMajor)
-	//: critical invariant — PrefixMatcher MUST NOT satisfy the error interface,
-	//: so it cannot accidentally escape as a function return value.
-	if _, ok := any(pm).(error); ok {
-		t.Fatalf("PrefixMatcher must NOT implement error; it did")
+	//: PrefixMatcher MUST implement error so it is usable as an errors.Is
+	//: target. Escape-as-return-value is discouraged by convention +
+	//: follow-up linter rule, not by type system.
+	if _, ok := any(pm).(error); !ok {
+		t.Fatalf("PrefixMatcher must implement error for errors.Is protocol")
+	}
+	//: Error() is diagnostic — same string as String().
+	if got := pm.Error(); got != pm.String() {
+		t.Fatalf("Error() should return String(): got %q vs %q", got, pm.String())
 	}
 }
 

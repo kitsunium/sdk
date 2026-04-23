@@ -1,15 +1,15 @@
-// Package pem: codes.go — range 3285-3289 for PEM codec errors.
+// Package pem: codes.go — range 0.3.10.* (ADR 0005 service/codec/pem block).
 package pem
 
-// range: 3285-3289
+// range: 0.3.10.0 - 0.3.10.255
 
 // CodePEMMarshalFailed identifies a failure inside encoding/pem.Encode.
-const CodePEMMarshalFailed int = 3286
+const CodePEMMarshalFailed = 0x00_03_0A_01 // 0.3.10.1
 
 // CodePEMUnmarshalFailed identifies a failure inside encoding/pem.Decode
 // (no PEM block found in input).
-const CodePEMUnmarshalFailed int = 3287
+const CodePEMUnmarshalFailed = 0x00_03_0A_02 // 0.3.10.2
 
 // CodePEMValueInvalid identifies a Marshal call that did not receive a *pem.Block
 // or an Unmarshal call whose target is not a **pem.Block.
-const CodePEMValueInvalid int = 3288
+const CodePEMValueInvalid = 0x00_03_0A_03 // 0.3.10.3
