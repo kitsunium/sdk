@@ -1,6 +1,6 @@
 {
   "id": "r",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "R Development Environment",
   "description": "Installs R, r-base-dev, and common development packages (lintr, styler, testthat)",
   "options": {},

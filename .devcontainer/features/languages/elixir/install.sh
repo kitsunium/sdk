@@ -17,8 +17,8 @@ print_banner "Elixir Development Environment" 2>/dev/null || {
 }
 
 # Environment variables (can be overridden)
-export ERLANG_VERSION="${ERLANG_VERSION:-27}"
-export ELIXIR_VERSION="${ELIXIR_VERSION:-1.17.3}"
+export ERLANG_VERSION="${ERLANG_VERSION:-28}"
+export ELIXIR_VERSION="${ELIXIR_VERSION:-1.19.5}"
 export MIX_HOME="${MIX_HOME:-/home/vscode/.cache/mix}"
 export HEX_HOME="${HEX_HOME:-/home/vscode/.cache/hex}"
 export ASDF_DATA_DIR="${ASDF_DATA_DIR:-/home/vscode/.cache/asdf}"

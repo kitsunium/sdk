@@ -175,3 +175,70 @@ detect_profile() {
 
 ═══════════════════════════════════════════════
 ```
+
+## Phase 2.5: Feature Staleness Scan
+
+**Detect OCI feature drift so Phase 4.5 can auto-fix without prompting.**
+
+The scan runs after the template tarball has been downloaded (Phase 3 /diff.md).
+It compares each `ghcr.io/kodflow/devcontainer-features/*` ref pinned in
+`devcontainer.json` / `devcontainer.local.json` against:
+
+1. the upstream `devcontainer-feature.json` version shipped in the tarball;
+2. the GHCR manifest digest currently served by the referenced tag.
+
+When the upstream version is strictly greater than the pinned version, the
+feature is marked **stale**. When the feature exists upstream but isn't
+referenced downstream (or vice-versa), it is flagged for the apply phase to
+surface in the final report.
+
+```yaml
+feature_staleness_scan:
+  trigger: "Always — runs silently; emits no output when everything is fresh"
+
+  1_repo_mode:
+    action: "Detect whether we are in the template repo or a downstream consumer"
+    script: "$HOME/.claude/scripts/update-repo-mode.sh"
+    exports: "REPO_MODE ∈ {template, downstream}"
+
+  2_scan:
+    action: "Enumerate and classify referenced features"
+    script: "$HOME/.claude/scripts/update-feature-scan.sh --template-root \"$TEMPLATE_ROOT\""
+    output: |
+      One line per feature:
+        <ref>|<pinned_version>|<ghcr_digest>|<upstream_install_sha>|<state>
+      state ∈ {fresh, stale, missing, unknown}
+    exports: "STALE_FEATURES (newline-separated list of refs with state == stale)"
+
+  3_read_mcp_skip_log:
+    action: "Ingest /workspace/.claude/logs/mcp-skipped.json (written by postStart.sh) if present"
+    note: |
+      Drops recorded by postStart when a feature's trigger binary isn't on
+      PATH — strong signal that either the feature's install.sh silently
+      failed or the feature isn't bumped.
+    exports: "MCP_DROPS (JSON array, possibly empty)"
+```
+
+**Implementation:**
+
+```bash
+detect_feature_staleness() {
+    export REPO_MODE=$("$HOME/.claude/scripts/update-repo-mode.sh")
+    STALE_FEATURES=""
+    if [ -n "${TEMPLATE_ROOT:-}" ]; then
+        while IFS='|' read -r ref _ver _digest _sha state; do
+            [ "$state" = "stale" ] && STALE_FEATURES+="$ref"$'\n'
+        done < <(UPDATE_TEMPLATE_ROOT="$TEMPLATE_ROOT" \
+                 "$HOME/.claude/scripts/update-feature-scan.sh" 2>/dev/null || true)
+        export STALE_FEATURES
+    fi
+    local mcp_log="${WORKSPACE_FOLDER:-/workspace}/.claude/logs/mcp-skipped.json"
+    if [ -f "$mcp_log" ]; then
+        export MCP_DROPS=$(cat "$mcp_log")
+    else
+        export MCP_DROPS="[]"
+    fi
+}
+```
+
+No user-facing output at this phase — results feed Phase 4.5 (apply.md).

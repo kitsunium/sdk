@@ -7,7 +7,7 @@
 # Claude Code, grepai, rtk, kubectl, helm, CodeRabbit, Qodo, etc.
 #
 # Base image (devcontainer-base) contains: system deps, Cloud CLIs, PPA tools,
-# MkDocs, Oh My Zsh. It is rebuilt weekly via Dockerfile.base.
+# Oh My Zsh. It is rebuilt weekly via Dockerfile.base.
 #
 # Build:
 #   docker buildx build --platform linux/amd64,linux/arm64 \
@@ -71,6 +71,16 @@ COPY --chown=root:root scripts/vpn/ /tmp/vpn/
 # Image-level fragments live in /etc/mcp/fragments/ (always available)
 COPY --chown=vscode:vscode mcp.json.tpl /etc/mcp/mcp.json.tpl
 COPY --chown=vscode:vscode mcp-fragments/ /etc/mcp/fragments/
+
+# Template features source — force-synced into /workspace/.devcontainer/features/
+# at every postStart (see hooks/lifecycle/postStart.sh step_sync_features).
+# The features/ directory and image-template-version.json are staged into the
+# build context by CI before build; for local builds run:
+#   cp -r .devcontainer/features .devcontainer/images/features
+#   printf '{"commit":"local","updated":"1970-01-01T00:00:00Z"}\n' > .devcontainer/images/image-template-version.json
+# The version marker lets postStart skip sync when repo is ahead of image.
+COPY --chown=root:root features/ /etc/devcontainer-template/features/
+COPY --chown=root:root image-template-version.json /etc/devcontainer-template/.template-version
 
 # GrepAI config template (optimized for 12 languages)
 COPY --chown=vscode:vscode grepai.config.yaml /etc/grepai/config.yaml

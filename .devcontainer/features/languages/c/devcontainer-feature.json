@@ -1,6 +1,6 @@
 {
   "id": "c",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "C Development Environment",
   "description": "Installs C compilers and common development tools",
   "options": {

@@ -71,6 +71,27 @@ Updates the DevContainer environment from the official template.
 - `github.com/kodflow/devcontainer-template` (always)
 - `github.com/kodflow/infrastructure-template` (infrastructure profile only)
 
+**OCI feature staleness handling (auto, no flags needed):**
+
+`/update` now reconciles the GHCR publish state with the local pin, so a
+single `/update` is enough whether you are working on the template repo or a
+downstream project:
+
+- **Template mode** (`origin` = `kodflow/devcontainer-template`): detects any
+  feature whose `install.sh` or non-docs content changed since the last
+  `devcontainer-feature.json` version bump, bumps it, opens a PR. The
+  existing `publish-features.yml` then republishes fresh tags on merge.
+- **Downstream mode**: force-refreshes GHCR manifests for every pinned
+  `ghcr.io/kodflow/devcontainer-features/*` ref, prunes the BuildKit layer
+  cache, wipes the devcontainer CLI feature cache, writes a
+  `/tmp/claude-rebuild-request.json` CTA, and tells you to run
+  **"Dev Containers: Rebuild Without Cache"** (plain Rebuild reuses the
+  stale BuildKit layer).
+
+Runs silently when everything is fresh. Background: `devcontainers/cli` skips
+republish on an existing version string ([#814](https://github.com/devcontainers/cli/issues/814))
+— forgetting to bump silently ships stale code.
+
 ---
 
 ## Arguments

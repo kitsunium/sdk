@@ -1,5 +1,21 @@
 #!/bin/bash
-set -e
+# =============================================================================
+# Go Development Environment — DevContainer Feature
+# =============================================================================
+# Strict mode: a silent failure here breaks downstream MCP tooling (ktn-linter)
+# and lint hooks. We'd rather fail loud and visible than ship a half-installed
+# container. See GitHub issue #324 for the original silent-skip regression.
+# =============================================================================
+set -Eeuo pipefail
+
+# Global error trap — surfaces the exact line + command that failed so the
+# devcontainer build log pinpoints the regression instead of dying silently.
+on_error() {
+    local code=$1 line=$2 cmd=$3
+    echo -e "\033[0;31m✗ install.sh (go feature) FAILED at line ${line} (exit=${code}): ${cmd}\033[0m" >&2
+    exit "$code"
+}
+trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
 
 FEATURE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../shared/feature-utils.sh
@@ -32,6 +48,11 @@ source "${FEATURE_DIR}/../shared/feature-utils.sh" 2>/dev/null || {
     }
 }
 
+# Structured step marker — lets users grep the devcontainer build log to see
+# exactly where installation stopped. Keeping the format machine-parseable
+# intentionally (space-delimited key=value).
+step() { echo "[INSTALL-GO] step=$1 status=$2${3:+ detail=$3}"; }
+
 print_banner "Go Development Environment" 2>/dev/null || {
     echo "========================================="
     echo "Installing Go Development Environment"
@@ -48,6 +69,7 @@ export PATH="$GOROOT/bin:$GOPATH/bin:$PATH"
 
 # Install dependencies
 # Includes Wails/WebKitGTK dependencies for Linux desktop apps
+step apt-deps begin
 echo -e "${YELLOW}Installing dependencies...${NC}"
 sudo apt-get update && sudo apt-get install -y \
     curl \
@@ -59,6 +81,7 @@ sudo apt-get update && sudo apt-get install -y \
     libgtk-3-dev \
     libwebkit2gtk-4.1-dev \
     libglib2.0-dev
+step apt-deps ok
 
 # Detect architecture
 ARCH=$(uname -m)
@@ -80,11 +103,19 @@ esac
 
 # Get latest Go version if requested
 if [ "$GO_VERSION" = "latest" ]; then
+    step go-version-resolve begin
     echo -e "${YELLOW}Fetching latest Go version...${NC}"
-    GO_VERSION=$(curl -s https://go.dev/VERSION?m=text | head -n 1 | sed 's/go//')
+    GO_VERSION=$(curl -fsS --connect-timeout 5 --max-time 15 --retry 3 --retry-delay 2 \
+        https://go.dev/VERSION?m=text | head -n 1 | sed 's/go//')
+    if [[ -z "$GO_VERSION" ]]; then
+        err "Failed to resolve latest Go version from go.dev — network or upstream issue."
+        exit 1
+    fi
+    step go-version-resolve ok "$GO_VERSION"
 fi
 
 # Download and install Go
+step go-toolchain begin "$GO_VERSION/$GO_ARCH"
 echo -e "${YELLOW}Installing Go ${GO_VERSION} for ${GO_ARCH}...${NC}"
 GO_TARBALL="go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
 GO_URL="https://dl.google.com/go/${GO_TARBALL}"
@@ -106,6 +137,7 @@ rm "/tmp/${GO_TARBALL}"
 
 GO_INSTALLED=$(go version)
 echo -e "${GREEN}✓ ${GO_INSTALLED} installed${NC}"
+step go-toolchain ok
 
 # Create necessary directories
 mkdir -p "$GOPATH/bin"
@@ -120,7 +152,8 @@ mkdir -p "$GOMODCACHE"
 echo -e "${YELLOW}Installing Go development tools...${NC}"
 mkdir -p "$HOME/.local/bin"
 
-# Helper function: download from GitHub Releases, fallback to go install
+# Helper function: download from GitHub Releases, fallback to go install.
+# Returns non-zero on failure so the caller's wait <pid> can detect it.
 install_go_tool() {
     local name=$1
     local url=$2
@@ -130,38 +163,69 @@ install_go_tool() {
     echo -e "${YELLOW}Installing ${name}...${NC}"
 
     local tmp_file="/tmp/${name}-download"
+    local installed=0
 
     if curl -fsSL --connect-timeout 10 --max-time 120 "$url" -o "$tmp_file" 2>/dev/null; then
         case "$extract_type" in
             tar.gz)
-                tar -xzf "$tmp_file" -C "$GOPATH/bin/" "$name" 2>/dev/null || \
-                tar -xzf "$tmp_file" --wildcards --strip-components=1 -C "$GOPATH/bin/" "*/$name" 2>/dev/null || \
-                tar -xzf "$tmp_file" -C "/tmp/" && mv "/tmp/$name" "$GOPATH/bin/" 2>/dev/null
+                if tar -xzf "$tmp_file" -C "$GOPATH/bin/" "$name" 2>/dev/null || \
+                   tar -xzf "$tmp_file" --wildcards --strip-components=1 -C "$GOPATH/bin/" "*/$name" 2>/dev/null || \
+                   { tar -xzf "$tmp_file" -C "/tmp/" && mv "/tmp/$name" "$GOPATH/bin/" 2>/dev/null; }; then
+                    installed=1
+                fi
                 ;;
             zip)
-                unzip -o "$tmp_file" "$name" -d "$GOPATH/bin/" 2>/dev/null || \
-                unzip -o "$tmp_file" -d "/tmp/${name}-extracted" && mv "/tmp/${name}-extracted/$name" "$GOPATH/bin/" 2>/dev/null
+                if unzip -o "$tmp_file" "$name" -d "$GOPATH/bin/" 2>/dev/null || \
+                   { unzip -o "$tmp_file" -d "/tmp/${name}-extracted" 2>/dev/null && mv "/tmp/${name}-extracted/$name" "$GOPATH/bin/" 2>/dev/null; }; then
+                    installed=1
+                fi
                 ;;
             binary)
-                mv "$tmp_file" "$GOPATH/bin/$name"
+                if mv "$tmp_file" "$GOPATH/bin/$name" 2>/dev/null; then
+                    installed=1
+                fi
                 ;;
         esac
-        chmod +x "$GOPATH/bin/$name"
-        rm -f "$tmp_file" "/tmp/${name}-extracted" 2>/dev/null
-        echo -e "${GREEN}✓ ${name} installed (binary)${NC}"
-    elif [ -n "$go_pkg" ]; then
-        echo -e "${YELLOW}  Fallback to go install...${NC}"
-        if go install "${go_pkg}@latest" 2>/dev/null; then
-            echo -e "${GREEN}✓ ${name} installed (compiled)${NC}"
-        else
-            echo -e "${YELLOW}⚠ ${name} failed to install${NC}"
+        if [[ "$installed" == "1" ]]; then
+            chmod +x "$GOPATH/bin/$name"
         fi
-    else
-        echo -e "${YELLOW}⚠ ${name} download failed${NC}"
+        rm -f "$tmp_file" "/tmp/${name}-extracted" 2>/dev/null || true
     fi
+
+    if [[ "$installed" == "1" ]]; then
+        echo -e "${GREEN}✓ ${name} installed (binary)${NC}"
+        return 0
+    fi
+
+    if [ -n "$go_pkg" ]; then
+        echo -e "${YELLOW}  ${name}: binary download failed, falling back to go install...${NC}"
+        if go install "${go_pkg}@latest"; then
+            echo -e "${GREEN}✓ ${name} installed (compiled)${NC}"
+            return 0
+        fi
+        err "${name}: both binary download and 'go install' failed"
+        return 1
+    fi
+
+    err "${name}: binary download failed and no 'go install' fallback configured"
+    return 1
+}
+
+# Parallel-install helper: runs install_go_tool in a subshell that MUST exit
+# non-zero on failure. Our ERR trap is suppressed inside these subshells (the
+# caller's `wait <pid>` is what surfaces the failure).
+spawn_tool() {
+    local name=$1; shift
+    # Subshell disables the inherited ERR trap so failures of individual tools
+    # don't crash the whole script before we had a chance to collect them.
+    set +e
+    ( trap - ERR; install_go_tool "$name" "$@" ) &
+    TOOL_PIDS[$name]=$!
+    set -e
 }
 
 # Fetch latest versions (non-fatal: empty string on rate-limit/timeout, retries 3x)
+step fetch-tool-versions begin
 GOLANGCI_VERSION=$(get_github_latest_version_or_empty "golangci/golangci-lint")
 GOSEC_VERSION=$(get_github_latest_version_or_empty "securego/gosec")
 GOFUMPT_VERSION=$(get_github_latest_version_or_empty "mvdan/gofumpt")
@@ -171,94 +235,182 @@ BUILDTOOLS_VERSION=$(get_github_latest_version_or_empty "bazelbuild/buildtools")
 
 # gofumpt uses 'v' prefix in URLs
 [[ -n "$GOFUMPT_VERSION" && "$GOFUMPT_VERSION" != v* ]] && GOFUMPT_VERSION="v${GOFUMPT_VERSION}"
+step fetch-tool-versions ok
 
-# Install all tools in parallel (binary release preferred, go install @latest as fallback)
+# Track each parallel install so we can collect individual exit codes. Without
+# per-PID tracking a silent `&`+`wait` loses failures — the original bug.
+declare -A TOOL_PIDS=()
+declare -A TOOL_STATUS=()
+
+step install-tools begin
 if [[ -n "$GOLANGCI_VERSION" ]]; then
-    install_go_tool "golangci-lint" \
+    spawn_tool "golangci-lint" \
         "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_VERSION}/golangci-lint-${GOLANGCI_VERSION}-linux-${GO_ARCH}.tar.gz" \
         "github.com/golangci/golangci-lint/v2/cmd/golangci-lint" \
-        "tar.gz" &
+        "tar.gz"
 else
-    (echo -e "${YELLOW}golangci-lint: version unavailable, building from source...${NC}" && \
-     go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest && \
-     echo -e "${GREEN}✓ golangci-lint installed (from source)${NC}" || \
-     echo -e "${YELLOW}⚠ golangci-lint: source build failed, skipping${NC}") &
+    set +e
+    ( trap - ERR; \
+      echo -e "${YELLOW}golangci-lint: version unavailable, building from source...${NC}" && \
+      go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest && \
+      echo -e "${GREEN}✓ golangci-lint installed (from source)${NC}" ) &
+    TOOL_PIDS[golangci-lint]=$!
+    set -e
 fi
 
 if [[ -n "$GOSEC_VERSION" ]]; then
-    install_go_tool "gosec" \
+    spawn_tool "gosec" \
         "https://github.com/securego/gosec/releases/download/v${GOSEC_VERSION}/gosec_${GOSEC_VERSION}_linux_${GO_ARCH}.tar.gz" \
         "github.com/securego/gosec/v2/cmd/gosec" \
-        "tar.gz" &
+        "tar.gz"
 else
-    (echo -e "${YELLOW}gosec: version unavailable, building from source...${NC}" && \
-     go install github.com/securego/gosec/v2/cmd/gosec@latest && \
-     echo -e "${GREEN}✓ gosec installed (from source)${NC}" || \
-     echo -e "${YELLOW}⚠ gosec: source build failed, skipping${NC}") &
+    set +e
+    ( trap - ERR; \
+      echo -e "${YELLOW}gosec: version unavailable, building from source...${NC}" && \
+      go install github.com/securego/gosec/v2/cmd/gosec@latest && \
+      echo -e "${GREEN}✓ gosec installed (from source)${NC}" ) &
+    TOOL_PIDS[gosec]=$!
+    set -e
 fi
 
 if [[ -n "$GOFUMPT_VERSION" ]]; then
-    install_go_tool "gofumpt" \
+    spawn_tool "gofumpt" \
         "https://github.com/mvdan/gofumpt/releases/download/${GOFUMPT_VERSION}/gofumpt_${GOFUMPT_VERSION}_linux_${GO_ARCH}" \
         "mvdan.cc/gofumpt" \
-        "binary" &
+        "binary"
 else
-    (echo -e "${YELLOW}gofumpt: version unavailable, building from source...${NC}" && \
-     go install mvdan.cc/gofumpt@latest && \
-     echo -e "${GREEN}✓ gofumpt installed (from source)${NC}" || \
-     echo -e "${YELLOW}⚠ gofumpt: source build failed, skipping${NC}") &
+    set +e
+    ( trap - ERR; \
+      echo -e "${YELLOW}gofumpt: version unavailable, building from source...${NC}" && \
+      go install mvdan.cc/gofumpt@latest && \
+      echo -e "${GREEN}✓ gofumpt installed (from source)${NC}" ) &
+    TOOL_PIDS[gofumpt]=$!
+    set -e
 fi
 
 if [[ -n "$GOTESTSUM_VERSION" ]]; then
-    install_go_tool "gotestsum" \
+    spawn_tool "gotestsum" \
         "https://github.com/gotestyourself/gotestsum/releases/download/v${GOTESTSUM_VERSION}/gotestsum_${GOTESTSUM_VERSION}_linux_${GO_ARCH}.tar.gz" \
         "gotest.tools/gotestsum" \
-        "tar.gz" &
+        "tar.gz"
 else
-    (echo -e "${YELLOW}gotestsum: version unavailable, building from source...${NC}" && \
-     go install gotest.tools/gotestsum@latest && \
-     echo -e "${GREEN}✓ gotestsum installed (from source)${NC}" || \
-     echo -e "${YELLOW}⚠ gotestsum: source build failed, skipping${NC}") &
+    set +e
+    ( trap - ERR; \
+      echo -e "${YELLOW}gotestsum: version unavailable, building from source...${NC}" && \
+      go install gotest.tools/gotestsum@latest && \
+      echo -e "${GREEN}✓ gotestsum installed (from source)${NC}" ) &
+    TOOL_PIDS[gotestsum]=$!
+    set -e
 fi
 
-(
-    echo -e "${YELLOW}Installing goimports...${NC}"
-    go install golang.org/x/tools/cmd/goimports@latest
-    echo -e "${GREEN}✓ goimports installed${NC}"
-) &
+# goimports has no GitHub release — always compile from source.
+set +e
+( trap - ERR; \
+  echo -e "${YELLOW}Installing goimports...${NC}" && \
+  go install golang.org/x/tools/cmd/goimports@latest && \
+  echo -e "${GREEN}✓ goimports installed${NC}" ) &
+TOOL_PIDS[goimports]=$!
+set -e
 
-install_go_tool "ktn-linter" \
+spawn_tool "ktn-linter" \
     "https://github.com/kodflow/ktn-linter/releases/latest/download/ktn-linter-linux-${GO_ARCH}" \
     "" \
-    "binary" &
+    "binary"
 
 # Bazel tooling — same release ships both binaries.
 if [[ -n "$BUILDTOOLS_VERSION" ]]; then
-    install_go_tool "buildifier" \
+    spawn_tool "buildifier" \
         "https://github.com/bazelbuild/buildtools/releases/download/v${BUILDTOOLS_VERSION}/buildifier-linux-${GO_ARCH}" \
         "github.com/bazelbuild/buildtools/buildifier" \
-        "binary" &
-    install_go_tool "buildozer" \
+        "binary"
+    spawn_tool "buildozer" \
         "https://github.com/bazelbuild/buildtools/releases/download/v${BUILDTOOLS_VERSION}/buildozer-linux-${GO_ARCH}" \
         "github.com/bazelbuild/buildtools/buildozer" \
-        "binary" &
+        "binary"
 else
-    (echo -e "${YELLOW}buildifier/buildozer: version unavailable, building from source...${NC}" && \
-     go install github.com/bazelbuild/buildtools/buildifier@latest && \
-     go install github.com/bazelbuild/buildtools/buildozer@latest && \
-     echo -e "${GREEN}✓ buildifier + buildozer installed (from source)${NC}" || \
-     echo -e "${YELLOW}⚠ buildifier/buildozer: source build failed, skipping${NC}") &
+    set +e
+    ( trap - ERR; \
+      echo -e "${YELLOW}buildifier/buildozer: version unavailable, building from source...${NC}" && \
+      go install github.com/bazelbuild/buildtools/buildifier@latest && \
+      go install github.com/bazelbuild/buildtools/buildozer@latest && \
+      echo -e "${GREEN}✓ buildifier + buildozer installed (from source)${NC}" ) &
+    TOOL_PIDS[buildifier]=$!
+    TOOL_PIDS[buildozer]=$!
+    set -e
 fi
 
-wait
-echo -e "${GREEN}✓ All Go tools installed${NC}"
+# Collect exit codes per tool. `wait <pid>` is the ONLY reliable way to get
+# the child's real exit code after `&`; the bare `wait` returns 0 always.
+for tool in "${!TOOL_PIDS[@]}"; do
+    if wait "${TOOL_PIDS[$tool]}" 2>/dev/null; then
+        TOOL_STATUS[$tool]="ok"
+    else
+        TOOL_STATUS[$tool]="fail"
+    fi
+done
+
+# Classify tools. Critical tools are those the rest of the stack depends on —
+# the Claude Code lint hooks (golangci-lint, gofumpt, goimports) and the MCP
+# server binary (ktn-linter). A missing critical tool is a hard error: ship a
+# broken container and we reproduce exactly issue #324.
+CRITICAL_TOOLS=("golangci-lint" "gofumpt" "goimports" "ktn-linter")
+OPTIONAL_TOOLS=("gosec" "gotestsum" "buildifier" "buildozer")
+
+missing_critical=()
+for tool in "${CRITICAL_TOOLS[@]}"; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        missing_critical+=("$tool")
+    fi
+done
+
+missing_optional=()
+for tool in "${OPTIONAL_TOOLS[@]}"; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        missing_optional+=("$tool")
+    fi
+done
+
+if (( ${#missing_optional[@]} > 0 )); then
+    warn "Optional Go tools missing (non-blocking): ${missing_optional[*]}"
+fi
+
+if (( ${#missing_critical[@]} > 0 )); then
+    err "CRITICAL Go tools missing: ${missing_critical[*]}"
+    err "Per-tool install status:"
+    for tool in "${!TOOL_STATUS[@]}"; do
+        err "  - $tool: ${TOOL_STATUS[$tool]}"
+    done
+    err "Feature installation INCOMPLETE — refusing to ship a half-installed Go toolchain."
+    err "Fix the underlying install failure (network? GitHub rate limit? permissions?) and re-run."
+    exit 1
+fi
+step install-tools ok
+
+# Install ktn-linter MCP fragment IMMEDIATELY after the binary check passes.
+# Previously this was at the very end of the script, so any later failure
+# (e.g. Wails/TinyGo download) would leave /etc/mcp/features/ empty and the
+# MCP server silently absent from the merged mcp.json — the root cause of #324.
+step mcp-fragment begin
+install_mcp_fragment "go" '{
+  "servers": {
+    "ktn-linter": {
+      "command": "ktn-linter",
+      "args": ["serve"],
+      "requires_binary": "ktn-linter"
+    }
+  }
+}'
+step mcp-fragment ok
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Install Wails v2 + TinyGo in parallel
+# Install Wails v2 + TinyGo in parallel (optional — desktop/WASM toolchain)
 # ─────────────────────────────────────────────────────────────────────────────
+step optional-tools begin
 
 # Wails v2 (Desktop GUI Framework) — binary from GitHub Releases, fallback go install
+set +e
 (
+    trap - ERR
     echo -e "${YELLOW}Installing Wails v2 (desktop GUI framework)...${NC}"
     WAILS_VERSION=$(get_github_latest_version_or_empty "wailsapp/wails")
     WAILS_INSTALLED=false
@@ -275,24 +427,27 @@ echo -e "${GREEN}✓ All Go tools installed${NC}"
         if go install github.com/wailsapp/wails/v2/cmd/wails@latest; then
             echo -e "${GREEN}✓ Wails installed (compiled)${NC}"
         else
-            echo -e "${YELLOW}⚠ Wails installation failed${NC}"
+            warn "Wails installation failed (non-blocking)"
         fi
     fi
 ) &
 WAILS_PID=$!
+set -e
 
 # TinyGo (WebAssembly Compiler)
+set +e
 (
+    trap - ERR
     echo -e "${YELLOW}Installing TinyGo (WASM/embedded compiler)...${NC}"
     TINYGO_VERSION=$(get_github_latest_version_or_empty "tinygo-org/tinygo")
     if [[ -z "$TINYGO_VERSION" ]]; then
-        echo -e "${YELLOW}⚠ TinyGo version resolution failed, skipping${NC}"
+        warn "TinyGo version resolution failed (non-blocking)"
         exit 0
     fi
     case "$GO_ARCH" in
         amd64) TINYGO_PKG="tinygo_${TINYGO_VERSION}_amd64.deb" ;;
         arm64) TINYGO_PKG="tinygo_${TINYGO_VERSION}_arm64.deb" ;;
-        *)     echo -e "${YELLOW}⚠ TinyGo not available for ${GO_ARCH}${NC}"; exit 0 ;;
+        *)     warn "TinyGo not available for ${GO_ARCH} (non-blocking)"; exit 0 ;;
     esac
     TINYGO_URL="https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/${TINYGO_PKG}"
     if curl -fsSL --connect-timeout 10 --max-time 120 -o "/tmp/${TINYGO_PKG}" "$TINYGO_URL" 2>/dev/null; then
@@ -305,13 +460,15 @@ WAILS_PID=$!
             echo -e "${GREEN}✓ TinyGo ${TINYGO_VERSION} installed${NC}"
         fi
     else
-        echo -e "${YELLOW}⚠ TinyGo download failed, skipping${NC}"
+        warn "TinyGo download failed (non-blocking)"
     fi
 ) &
 TINYGO_PID=$!
+set -e
 
-wait "$WAILS_PID" 2>/dev/null || true
-wait "$TINYGO_PID" 2>/dev/null || true
+wait "$WAILS_PID" 2>/dev/null || warn "Wails subshell exit code non-zero (non-blocking)"
+wait "$TINYGO_PID" 2>/dev/null || warn "TinyGo subshell exit code non-zero (non-blocking)"
+step optional-tools ok
 
 print_success_banner "Go environment" 2>/dev/null || {
     echo ""
@@ -347,14 +504,4 @@ echo ""
 sudo mkdir -p /opt/devcontainer-versions
 go version 2>/dev/null | sudo tee /opt/devcontainer-versions/go >/dev/null
 
-# Install ktn-linter MCP fragment (feature-level, only when Go is enabled)
-# JSON is inlined because OCI feature artifacts don't include mcp.json files
-install_mcp_fragment "go" '{
-  "servers": {
-    "ktn-linter": {
-      "command": "ktn-linter",
-      "args": ["serve"],
-      "requires_binary": "ktn-linter"
-    }
-  }
-}'
+step finish ok

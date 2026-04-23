@@ -1,12 +1,12 @@
 {
   "id": "python",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Python Development Environment",
   "description": "Installs Python via pyenv, pip, poetry, and common development tools",
   "options": {
     "version": {
       "type": "string",
-      "default": "3.13",
+      "default": "3.14",
       "description": "Python version to install"
     }
   },
