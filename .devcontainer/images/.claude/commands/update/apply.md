@@ -144,6 +144,23 @@ apply_devcontainer_tarball() {
         echo "  ✓ mcp-fragments"
     fi
 
+    # DevContainer features (container only) — mirror from tarball.
+    # postStart also force-syncs from the image's embedded copy; /update brings
+    # them current immediately without waiting for the next image rebuild.
+    # The updated .template-version written in §5.7 tells postStart to yield
+    # when the repo is ahead of the image.
+    if [ "$CONTEXT" = "container" ] && [ -d "$src/.devcontainer/features" ]; then
+        mkdir -p ".devcontainer/features"
+        if command -v rsync &>/dev/null; then
+            rsync -a --delete "$src/.devcontainer/features/" ".devcontainer/features/"
+        else
+            rm -rf ".devcontainer/features"
+            mkdir -p ".devcontainer/features"
+            cp -rf "$src/.devcontainer/features/." ".devcontainer/features/"
+        fi
+        echo "  ✓ features"
+    fi
+
     # Design patterns docs
     if [ -d "$src/.devcontainer/images/.claude/docs" ]; then
         mkdir -p "$UPDATE_TARGET/docs"
@@ -158,10 +175,9 @@ apply_devcontainer_tarball() {
         echo "  ✓ templates"
     fi
 
-    # devcontainer.json (container only - update feature refs)
+    # devcontainer.json (container only - merge template + local override)
     if [ "$CONTEXT" = "container" ] && [ -f "$src/.devcontainer/devcontainer.json" ]; then
-        cp -f "$src/.devcontainer/devcontainer.json" ".devcontainer/devcontainer.json"
-        echo "  ✓ devcontainer.json"
+        update_devcontainer_json_from_tarball "$src"
     fi
 
     # Dockerfile (container only - update FROM reference)
@@ -333,6 +349,55 @@ update_compose_from_tarball() {
 }
 ```
 
+### 5.3.1: devcontainer.json merge (from tarball)
+
+```bash
+# Merge template devcontainer.json with local override
+# - Template: structure, feature refs (GHCR URLs), lifecycle commands → always updated
+# - devcontainer.local.json (optional, project-managed): enabled features with options,
+#   custom extensions, env vars, mounts → always preserved across /update runs
+#
+# No override file → template copied as-is (preserves JSONC comments for discovery)
+# Override file exists → deep merge written as strict JSON (comments stripped)
+update_devcontainer_json_from_tarball() {
+    local src="$1"
+    local template_file="$src/.devcontainer/devcontainer.json"
+    local target_file=".devcontainer/devcontainer.json"
+    local override_file=".devcontainer/devcontainer.local.json"
+    local merge_script="$src/.devcontainer/images/scripts/merge-devcontainer-json.mjs"
+
+    if [ ! -f "$override_file" ]; then
+        # Advisory: warn if local diverges from template — user likely needs a local override
+        if [ -f "$target_file" ] && ! cmp -s "$target_file" "$template_file"; then
+            echo "  ⚠ devcontainer.json differs from template and no devcontainer.local.json found"
+            echo "    Local customizations will be overwritten. To preserve them, create"
+            echo "    .devcontainer/devcontainer.local.json with your overrides (see .devcontainer/CLAUDE.md)."
+        fi
+        cp -f "$template_file" "$target_file"
+        echo "  ✓ devcontainer.json (template, no override)"
+        return 0
+    fi
+
+    if ! command -v node >/dev/null 2>&1 || [ ! -f "$merge_script" ]; then
+        echo "  ⚠ devcontainer.json merge skipped (node or merge script missing); copying template"
+        cp -f "$template_file" "$target_file"
+        return 0
+    fi
+
+    local backup_file="${target_file}.backup"
+    [ -f "$target_file" ] && cp "$target_file" "$backup_file"
+
+    if node "$merge_script" "$template_file" "$override_file" "$target_file" 2>/dev/null; then
+        rm -f "$backup_file"
+        echo "  ✓ devcontainer.json (template + devcontainer.local.json merged)"
+    else
+        [ -f "$backup_file" ] && mv "$backup_file" "$target_file"
+        echo "  ✗ devcontainer.json merge failed, restored backup"
+        return 1
+    fi
+}
+```
+
 ### 5.4: Apply infrastructure components
 
 ```bash
@@ -436,6 +501,7 @@ echo "  ✓ .template-version updated ($DC_COMMIT)"
     ✓ grepai         (bge-m3 config)
     ✓ mcp-template   (mcp.json.tpl)
     ✓ mcp-fragments  (context7, ktn-linter)
+    ✓ features       (devcontainer features, 25 languages)
     ✓ docs           (design patterns KB)
     ✓ templates      (project/docs templates)
     ✓ devcontainer   (feature refs)

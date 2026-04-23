@@ -166,6 +166,8 @@ GOLANGCI_VERSION=$(get_github_latest_version_or_empty "golangci/golangci-lint")
 GOSEC_VERSION=$(get_github_latest_version_or_empty "securego/gosec")
 GOFUMPT_VERSION=$(get_github_latest_version_or_empty "mvdan/gofumpt")
 GOTESTSUM_VERSION=$(get_github_latest_version_or_empty "gotestyourself/gotestsum")
+# buildifier + buildozer ship from the same bazelbuild/buildtools release.
+BUILDTOOLS_VERSION=$(get_github_latest_version_or_empty "bazelbuild/buildtools")
 
 # gofumpt uses 'v' prefix in URLs
 [[ -n "$GOFUMPT_VERSION" && "$GOFUMPT_VERSION" != v* ]] && GOFUMPT_VERSION="v${GOFUMPT_VERSION}"
@@ -230,6 +232,24 @@ install_go_tool "ktn-linter" \
     "" \
     "binary" &
 
+# Bazel tooling — same release ships both binaries.
+if [[ -n "$BUILDTOOLS_VERSION" ]]; then
+    install_go_tool "buildifier" \
+        "https://github.com/bazelbuild/buildtools/releases/download/v${BUILDTOOLS_VERSION}/buildifier-linux-${GO_ARCH}" \
+        "github.com/bazelbuild/buildtools/buildifier" \
+        "binary" &
+    install_go_tool "buildozer" \
+        "https://github.com/bazelbuild/buildtools/releases/download/v${BUILDTOOLS_VERSION}/buildozer-linux-${GO_ARCH}" \
+        "github.com/bazelbuild/buildtools/buildozer" \
+        "binary" &
+else
+    (echo -e "${YELLOW}buildifier/buildozer: version unavailable, building from source...${NC}" && \
+     go install github.com/bazelbuild/buildtools/buildifier@latest && \
+     go install github.com/bazelbuild/buildtools/buildozer@latest && \
+     echo -e "${GREEN}✓ buildifier + buildozer installed (from source)${NC}" || \
+     echo -e "${YELLOW}⚠ buildifier/buildozer: source build failed, skipping${NC}") &
+fi
+
 wait
 echo -e "${GREEN}✓ All Go tools installed${NC}"
 
@@ -237,18 +257,26 @@ echo -e "${GREEN}✓ All Go tools installed${NC}"
 # Install Wails v2 + TinyGo in parallel
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Wails v2 (Desktop GUI Framework)
+# Wails v2 (Desktop GUI Framework) — binary from GitHub Releases, fallback go install
 (
     echo -e "${YELLOW}Installing Wails v2 (desktop GUI framework)...${NC}"
-    if go install github.com/wailsapp/wails/v2/cmd/wails@latest; then
-        if command -v wails &> /dev/null; then
-            WAILS_VERSION=$(wails version 2>/dev/null | head -n 1 || echo "installed")
-            echo -e "${GREEN}✓ Wails ${WAILS_VERSION}${NC}"
-        else
-            echo -e "${YELLOW}⚠ Wails installed but not in PATH yet${NC}"
+    WAILS_VERSION=$(get_github_latest_version_or_empty "wailsapp/wails")
+    WAILS_INSTALLED=false
+    if [[ -n "$WAILS_VERSION" ]]; then
+        WAILS_URL="https://github.com/wailsapp/wails/releases/download/v${WAILS_VERSION}/wails-linux-${GO_ARCH}"
+        if curl -fsSL --connect-timeout 10 --max-time 60 -o "$GOPATH/bin/wails" "$WAILS_URL" 2>/dev/null; then
+            chmod +x "$GOPATH/bin/wails"
+            echo -e "${GREEN}✓ Wails v${WAILS_VERSION} (binary)${NC}"
+            WAILS_INSTALLED=true
         fi
-    else
-        echo -e "${YELLOW}⚠ Wails installation failed${NC}"
+    fi
+    if [[ "$WAILS_INSTALLED" != "true" ]]; then
+        echo -e "${YELLOW}  Fallback to go install...${NC}"
+        if go install github.com/wailsapp/wails/v2/cmd/wails@latest; then
+            echo -e "${GREEN}✓ Wails installed (compiled)${NC}"
+        else
+            echo -e "${YELLOW}⚠ Wails installation failed${NC}"
+        fi
     fi
 ) &
 WAILS_PID=$!
@@ -297,7 +325,7 @@ echo "  - ${GO_INSTALLED}"
 echo "  - Go Modules (package manager)"
 echo ""
 echo "Development tools:"
-for _tool in golangci-lint gosec gofumpt goimports gotestsum ktn-linter; do
+for _tool in golangci-lint gosec gofumpt goimports gotestsum ktn-linter buildifier buildozer; do
     if command -v "$_tool" &>/dev/null; then
         echo "  - $_tool (installed)"
     else
@@ -314,6 +342,10 @@ echo "  - GOPATH: $GOPATH"
 echo "  - GOCACHE: $GOCACHE"
 echo "  - GOMODCACHE: $GOMODCACHE"
 echo ""
+
+# Write version marker for volume sync (Phase 2 acceleration)
+sudo mkdir -p /opt/devcontainer-versions
+go version 2>/dev/null | sudo tee /opt/devcontainer-versions/go >/dev/null
 
 # Install ktn-linter MCP fragment (feature-level, only when Go is enabled)
 # JSON is inlined because OCI feature artifacts don't include mcp.json files
