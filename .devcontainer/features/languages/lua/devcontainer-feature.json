@@ -1,6 +1,6 @@
 {
   "id": "lua",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Lua Development Environment",
   "description": "Installs Lua 5.4, LuaRocks, StyLua, and Luacheck",
   "options": {},

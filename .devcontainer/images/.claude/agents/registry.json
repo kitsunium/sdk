@@ -19,7 +19,14 @@
       "model": "varies",
       "count": 6,
       "prefix": "developer-executor-",
-      "agents": ["developer-specialist-review", "developer-executor-correctness", "developer-executor-security", "developer-executor-design", "developer-executor-quality", "developer-executor-shell"],
+      "agents": [
+        "developer-specialist-review",
+        "developer-executor-correctness",
+        "developer-executor-security",
+        "developer-executor-design",
+        "developer-executor-quality",
+        "developer-executor-shell"
+      ],
       "role": "Focused analysis axes dispatched by review orchestrator"
     },
     "devops-specialists": {
@@ -65,10 +72,6 @@
     "infrastructure": {
       "entry": "/infra",
       "chain": "devops-orchestrator (opus) → devops-specialist-{domain} (sonnet) → devops-executor-{platform} (haiku) → os-specialist-{distro} (haiku)"
-    },
-    "documentation": {
-      "entry": "/docs",
-      "chain": "docs-analyzer-structure (haiku) → docs-analyzer-{aspect} (haiku)"
     },
     "comment_audit": {
       "entry": "/comment",

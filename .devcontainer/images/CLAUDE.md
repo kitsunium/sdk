@@ -1,4 +1,4 @@
-<!-- updated: 2026-04-20T09:28:02Z -->
+<!-- updated: 2026-03-14T12:00:00Z -->
 # DevContainer Images
 
 ## Purpose
@@ -43,9 +43,13 @@ Claude Code and MCP servers are included; languages added via features.
 | `.claude/docs/` | `~/.claude/docs/` | `/etc/claude-defaults/docs/` |
 | `mcp.json.tpl` | `/etc/mcp/mcp.json.tpl` | - |
 | `hooks/` | `/etc/devcontainer-hooks/` | - |
+| `features/` (CI-staged) | `/etc/devcontainer-template/features/` | Force-synced to `.devcontainer/features/` |
 
 **Note:** Claude files restored from `/etc/claude-defaults/` at each start via `postStart.sh`.
 Lifecycle hooks called directly from `devcontainer.json` → `/etc/devcontainer-hooks/` (no stubs).
+`.devcontainer/features/` is rsync-mirrored from `/etc/devcontainer-template/features/` at every
+`postStart` in consumer projects (step `step_sync_features`). Template repo self-skips via
+`.devcontainer/.template-version` commit match.
 
 ## Design Patterns Knowledge Base
 

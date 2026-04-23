@@ -38,9 +38,9 @@ if [ -z "${SWIFT_VERSION:-}" ] || [ "${SWIFT_VERSION}" = "latest" ]; then
         [[ $_attempt -lt 3 ]] && sleep $((2 ** _attempt))
     done
     if [ -z "$SWIFT_VERSION" ]; then
-        echo -e "${YELLOW}⚠ Failed to resolve latest Swift version from GitHub, using fallback 6.0.3${NC}"
+        echo -e "${YELLOW}⚠ Failed to resolve latest Swift version from GitHub, using fallback 6.3.1${NC}"
     fi
-    SWIFT_VERSION="${SWIFT_VERSION:-6.0.3}"
+    SWIFT_VERSION="${SWIFT_VERSION:-6.3.1}"
 fi
 export SWIFT_VERSION
 export SWIFT_HOME="${SWIFT_HOME:-/usr/share/swift}"

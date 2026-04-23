@@ -38,7 +38,7 @@
     // "ghcr.io/kodflow/devcontainer-features/browser:1": {},
     // ========== KUBERNETES ==========
     // Local Kubernetes development with kind (requires docker-outside-of-docker)
-    "ghcr.io/kodflow/devcontainer-features/kubernetes:1": {},
+    // "ghcr.io/kodflow/devcontainer-features/kubernetes:1": {},
     // ========== INFRASTRUCTURE ==========
     // Infra tools: terragrunt, tflint, infracost, cfssl, ansible-lint, molecule
     // Recommended companions: python (for ansible-lint/molecule), go (for Terratest)
@@ -70,7 +70,8 @@
         "files.trimTrailingWhitespace": true,
         "files.exclude": {
           "**/.grepai": true,
-          "**/.git": true
+          "**/.git": true,
+          "bazel-*": true
         }
       },
       "extensions": [

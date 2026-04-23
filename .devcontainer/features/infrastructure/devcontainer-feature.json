@@ -1,6 +1,6 @@
 {
   "id": "infrastructure",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Infrastructure Development Tools",
   "description": "Terragrunt, TFLint, Infracost, cfssl, and Python infra tools (ansible-lint, molecule)",
   "documentationURL": "https://terragrunt.gruntwork.io/",
