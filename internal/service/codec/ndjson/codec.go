@@ -237,14 +237,18 @@ func (*ndjsonCodec) Append(dst []byte, v any) (out []byte, err error) {
 			Private: "service/codec/ndjson.Append: argument is not a slice",
 		})
 	}
+	//: snapshot dst's prior length so a mid-slice failure can roll back and
+	//: honour the Appender contract's "return prior contents on error" rule.
+	origLen := len(dst)
 	//: encode record-by-record; one '\n' per element appended in place.
 	for i := range slice.Len() {
 		//: delegate per-record JSON encoding to the stdlib.
 		line, merr := stdjson.Marshal(slice.Index(i).Interface())
-		//: surface any per-record failure without further mutating dst.
+		//: surface any per-record failure with dst restored to its prior length.
 		if merr != nil {
-			//: wrap the stdlib error for reason-based matching.
-			return dst, errs.Wrap(merr, errs.WrapParams{
+			//: wrap the stdlib error for reason-based matching; slice off any
+			//: partially-written records so callers never see a torn buffer.
+			return dst[:origLen], errs.Wrap(merr, errs.WrapParams{
 				Code:    CodeNDJSONMarshalFailed,
 				Reason:  "MARSHAL_FAILED",
 				Public:  "NDJSON encoding failed",
