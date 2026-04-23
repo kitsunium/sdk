@@ -19,6 +19,9 @@ type Logger interface {
 	// With returns a derived Logger whose emitted records always include the
 	// supplied attrs. The receiver MUST NOT be mutated.
 	With(attrs ...AttrValue) (child Logger)
+	// WithGroup returns a derived Logger whose subsequent attributes are
+	// namespaced under the given group name. Empty names MUST be a no-op.
+	WithGroup(name string) (child Logger)
 	// Enabled reports whether a record at the given level would be emitted.
 	Enabled(ctx context.Context, lv level.Level) (enabled bool)
 }

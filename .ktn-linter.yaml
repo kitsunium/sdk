@@ -87,13 +87,33 @@ rules:
   # map storage) do not fire on concrete methods that simply delegate to
   # `encoding/json`, `encoding/xml`, etc.
   #
-  # Disable ONLY inside the codec tree. Every other Go package in the SDK
-  # must still avoid `any` except where the Codec contract requires it.
+  # Disable ONLY inside the codec tree AND the logger Value union. Every
+  # other Go package in the SDK must still avoid `any` except where the
+  # Codec contract requires it (codec) or the slog-style discriminated
+  # Value union demands it for Time / Group / Any payloads (logger).
   KTN-INTERFACE-ANYUSE:
     exclude:
       - "**/internal/core/codec/**"
       - "**/internal/service/codec/**"
       - "**/pkg/v1/codec/**"
+      - "**/internal/core/logger/**"
+      - "**/internal/service/logger/**"
+      - "**/pkg/v1/logger/**"
+
+  # KTN-VAR-MAKEAPPEND + KTN-VAR-SLICECAP false-positive on generic
+  # fixed-length storage. The ring buffer (and other future generic
+  # primitives) allocate their slot array via `make([]T, n)` and only
+  # use indexed access (no append ever runs against the slice). The
+  # linter heuristic cannot prove the absence of append for a generic
+  # type parameter and conservatively flags every such call. We scope
+  # the exclusion to the kernel/ring tree so the rule still catches
+  # genuine append-as-storage misuse everywhere else.
+  KTN-VAR-MAKEAPPEND:
+    exclude:
+      - "**/internal/kernel/ring/**"
+  KTN-VAR-SLICECAP:
+    exclude:
+      - "**/internal/kernel/ring/**"
 
   # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,

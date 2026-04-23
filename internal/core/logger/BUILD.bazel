@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//internal/core:core_consumers"])
 
@@ -7,8 +7,11 @@ go_library(
     srcs = [
         "attr.go",
         "handler.go",
+        "kind.go",
         "logger.go",
         "record.go",
+        "sink.go",
+        "value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/logger",
     visibility = ["//internal/core:core_consumers"],
@@ -25,4 +28,15 @@ filegroup(
     name = "audit_srcs",
     srcs = glob(["*.go"]),
     visibility = ["//:__pkg__"],
+)
+
+go_test(
+    name = "logger_test",
+    srcs = [
+        "kind_external_test.go",
+        "kind_internal_test.go",
+        "value_external_test.go",
+        "value_internal_test.go",
+    ],
+    embed = [":logger"],
 )

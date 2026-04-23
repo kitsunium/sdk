@@ -1,0 +1,46 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "recover",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "panic_value.go",
+        "recover_sink.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/middleware/recover",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":recover",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "recover_test",
+    srcs = [
+        "panic_value_internal_test.go",
+        "recover_sink_external_test.go",
+        "recover_sink_internal_test.go",
+    ],
+    embed = [":recover"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/errs",
+    ],
+)

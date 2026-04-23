@@ -1,0 +1,47 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "route",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "route_entry.go",
+        "router_sink.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/middleware/route",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":route",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "route_test",
+    srcs = [
+        "route_entry_external_test.go",
+        "router_sink_external_test.go",
+        "router_sink_internal_test.go",
+    ],
+    embed = [":route"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/errs",
+    ],
+)

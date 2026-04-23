@@ -5,9 +5,12 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "logger",
     srcs = [
+        "builder.go",
         "codes.go",
         "errors.go",
+        "handler.go",
         "logger.go",
+        "pool.go",
         "text_handler.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/logger",
@@ -18,6 +21,7 @@ go_library(
         "//internal/kernel/buffer",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/logger/encoder",
     ],
 )
 
@@ -31,8 +35,13 @@ go_test(
     name = "logger_test",
     size = "small",
     srcs = [
+        "builder_external_test.go",
+        "builder_internal_test.go",
+        "handler_external_test.go",
+        "handler_internal_test.go",
         "logger_external_test.go",
         "logger_internal_test.go",
+        "pool_internal_test.go",
         "text_handler_external_test.go",
         "text_handler_internal_test.go",
     ],
@@ -40,7 +49,10 @@ go_test(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/logger/encoder",
+        "//internal/service/logger/sink/console",
     ],
 )
 

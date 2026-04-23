@@ -1,0 +1,55 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "async",
+    srcs = [
+        "async_sink.go",
+        "codes.go",
+        "config.go",
+        "drainer.go",
+        "entry.go",
+        "errors.go",
+        "policy.go",
+        "runtime.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/middleware/async",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/kernel/buffer",
+        "//internal/kernel/errs",
+        "//internal/kernel/ring",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":async",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "async_test",
+    srcs = [
+        "async_sink_external_test.go",
+        "async_sink_internal_test.go",
+        "drainer_internal_test.go",
+        "entry_internal_test.go",
+        "runtime_internal_test.go",
+    ],
+    embed = [":async"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/buffer",
+        "//internal/kernel/errs",
+    ],
+)

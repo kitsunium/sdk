@@ -41,8 +41,53 @@ func TestNew(t *testing.T) {
 			if !errors.Is(err, tc.wantErrIs) {
 				t.Errorf("errors.Is(%v, HandlerNil) = false", err)
 			}
-			if code, _ := errs.CodeOf(err); code != svclogger.CodeHandlerNil {
-				t.Errorf("CodeOf err = %d, want %d", code, svclogger.CodeHandlerNil)
+			if code, _ := errs.CodeValueOf(err); code != svclogger.CodeHandlerNil {
+				t.Errorf("CodeValueOf err = %v, want %v", code, svclogger.CodeHandlerNil)
+			}
+		})
+	}
+}
+
+func TestBuild(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		wantNil bool
+	}{
+		{"Build on nil Logger returns nil", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b := svclogger.Build(nil, level.Info)
+			if (b == nil) != tc.wantNil {
+				t.Errorf("Build = %v, wantNil = %v", b, tc.wantNil)
+			}
+		})
+	}
+}
+
+func TestLogAttrs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"LogAttrs on nil Logger silently drops without panicking"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			panicked := false
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						panicked = true
+					}
+				}()
+				svclogger.LogAttrs(t.Context(), nil, level.Info, "msg", nil)
+			}()
+			if panicked {
+				t.Error("LogAttrs panicked on nil Logger; contract requires silent drop")
 			}
 		})
 	}

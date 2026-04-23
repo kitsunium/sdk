@@ -24,12 +24,12 @@ func Test_appendAttr(t *testing.T) {
 		attr corelogger.AttrValue
 		want string
 	}{
-		{"string is quoted", corelogger.AttrValue{Key: "k", Value: "v"}, ` k="v"`},
-		{"int renders decimal unquoted", corelogger.AttrValue{Key: "n", Value: 42}, " n=42"},
-		{"int64 renders decimal unquoted", corelogger.AttrValue{Key: "big", Value: int64(9001)}, " big=9001"},
-		{"bool renders literal", corelogger.AttrValue{Key: "ok", Value: true}, " ok=true"},
-		{"float renders shortest round-trip", corelogger.AttrValue{Key: "r", Value: 0.25}, " r=0.25"},
-		{"unknown value type marked with ?", corelogger.AttrValue{Key: "x", Value: []int{1, 2}}, " x=?"},
+		{"string is quoted", corelogger.AttrValue{Key: "k", Value: corelogger.StringValue("v")}, ` k="v"`},
+		{"int renders decimal unquoted", corelogger.AttrValue{Key: "n", Value: corelogger.IntValue(42)}, " n=42"},
+		{"int64 renders decimal unquoted", corelogger.AttrValue{Key: "big", Value: corelogger.Int64Value(9001)}, " big=9001"},
+		{"bool renders literal", corelogger.AttrValue{Key: "ok", Value: corelogger.BoolValue(true)}, " ok=true"},
+		{"float renders shortest round-trip", corelogger.AttrValue{Key: "r", Value: corelogger.Float64Value(0.25)}, " r=0.25"},
+		{"unknown value type marked with ?", corelogger.AttrValue{Key: "x", Value: corelogger.AnyValue([]int{1, 2})}, " x=?"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -37,6 +37,59 @@ func Test_appendAttr(t *testing.T) {
 			got := string(appendAttr(nil, tc.attr))
 			if got != tc.want {
 				t.Errorf("appendAttr(%#v) = %q, want %q", tc.attr, got, tc.want)
+			}
+		})
+	}
+}
+
+func Test_appendAttrWithGroups(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		groups []string
+		attr   corelogger.AttrValue
+		want   string
+	}{
+		{"no groups falls back to bare appendAttr", nil,
+			corelogger.AttrValue{Key: "k", Value: corelogger.StringValue("v")}, ` k="v"`},
+		{"empty groups slice still falls back to bare appendAttr", []string{},
+			corelogger.AttrValue{Key: "k", Value: corelogger.BoolValue(true)}, ` k=true`},
+		{"single group prefixes the key", []string{"http"},
+			corelogger.AttrValue{Key: "method", Value: corelogger.StringValue("GET")}, ` http.method="GET"`},
+		{"nested groups chain with dots", []string{"req", "http"},
+			corelogger.AttrValue{Key: "status", Value: corelogger.IntValue(200)}, ` req.http.status=200`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := string(appendAttrWithGroups(nil, tc.groups, tc.attr))
+			if got != tc.want {
+				t.Errorf("appendAttrWithGroups(%v, %#v) = %q, want %q",
+					tc.groups, tc.attr, got, tc.want)
+			}
+		})
+	}
+}
+
+func Test_appendValueOnly(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		attr corelogger.AttrValue
+		want string
+	}{
+		{"string is quoted", corelogger.AttrValue{Value: corelogger.StringValue("v")}, `"v"`},
+		{"int64 renders decimal", corelogger.AttrValue{Value: corelogger.Int64Value(42)}, "42"},
+		{"bool renders literal", corelogger.AttrValue{Value: corelogger.BoolValue(true)}, "true"},
+		{"float renders shortest", corelogger.AttrValue{Value: corelogger.Float64Value(0.5)}, "0.5"},
+		{"unknown kind degrades to ?", corelogger.AttrValue{Value: corelogger.AnyValue(struct{}{})}, "?"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := string(appendValueOnly(nil, tc.attr))
+			if got != tc.want {
+				t.Errorf("appendValueOnly(%#v) = %q, want %q", tc.attr, got, tc.want)
 			}
 		})
 	}
@@ -90,7 +143,7 @@ func TestTextHandler_renderLine(t *testing.T) {
 			record: corelogger.RecordEvent{
 				Level:   level.Error,
 				Message: "attrs",
-				Attrs:   []corelogger.AttrValue{{Key: "k", Value: "v"}},
+				Attrs:   []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}},
 			},
 			wantSub: []string{"ERROR", "attrs", `k="v"`},
 		},
