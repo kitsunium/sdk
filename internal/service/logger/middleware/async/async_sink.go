@@ -49,6 +49,23 @@ type asyncSink struct {
 	// doneOnce guards close(done) — the drainer is the sole closer in
 	// practice but the lint heuristic requires an explicit sync.Once guard.
 	doneOnce sync.Once
+	// ringMu serialises every access to queue so the SPSC ring's single-
+	// producer / single-consumer contract is not violated by concurrent
+	// goroutines. Held by:
+	//   - Write (producer TryWrite, and TryRead + TryWrite under DropOldest)
+	//   - Close (as a join point — blocks until every in-flight Write is
+	//     past its TryWrite; new Writes then see isClosed under the lock)
+	//   - drainer forward() (TryRead from the consumer side)
+	//
+	// Rationale over sync.WaitGroup (which races on Add/Wait), over
+	// sync.RWMutex (RLock allows concurrent producers — still SPSC-unsafe),
+	// and over leaving the ring lock-free (async has two producers and two
+	// consumers in practice: Write vs drainer, DropOldest TryRead from
+	// producer vs drainer TryRead from consumer). With a single mutex the
+	// ring is effectively a locked queue; the atomic operations inside are
+	// cheap enough that wrapping them loses little while restoring
+	// correctness. Finding #1 from the post-audit review.
+	ringMu sync.Mutex
 }
 
 // New wraps downstream with a ring + drainer goroutine. cfg is consulted
@@ -154,7 +171,13 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 			Private: "service/logger/middleware/async.Write saw a cancelled context",
 		}, errs.Int("level", int64(rec.Level)))
 	}
-	//: refuse work after Close — the drainer is gone.
+	//: hold the ring mutex for the whole [isClosed .. TryWrite] span. Close
+	//: takes the same mutex so an in-flight Write cannot race drainRemaining
+	//: and the SPSC ring never sees concurrent producers (finding #1).
+	s.ringMu.Lock()
+	defer s.ringMu.Unlock()
+	//: refuse work after Close — the drainer is gone. Checked under the
+	//: mutex so Close cannot transition between the check and TryWrite.
 	if isClosed(s.stop) {
 		//: documented sentinel — caller knows Close has happened.
 		return 0, Stopped
@@ -163,7 +186,7 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 	ent := s.pool.Get()
 	ent.rec = rec
 	ent.data = append(ent.data[:0], payload...)
-	//: ring saturation triggers the configured drop policy.
+	//: TryWrite runs inside ringMu — SPSC contract honoured.
 	if werr := s.queue.TryWrite(ent); werr != nil {
 		//: ring is full — apply the configured drop policy.
 		return s.handleFull(ent)
@@ -237,11 +260,20 @@ func (s *asyncSink) Flush(ctx context.Context) (err error) {
 // Returns:
 //   - err: downstream Close error; nil on unanimous success.
 func (s *asyncSink) Close() (err error) {
+	//: acquire ringMu: hard join point with every in-flight Write. When
+	//: Lock returns, no Write is mid-[isClosed .. TryWrite]; subsequent
+	//: Writes observe isClosed(stop) under ringMu after our close(stop)
+	//: below, so drainRemaining sees every record that Write accepted
+	//: (finding #1's TOCTOU race closes here).
+	s.ringMu.Lock()
 	//: sync.Once guards close(stop) so concurrent Close calls never panic.
 	s.stopOnce.Do(func() {
 		//: signal the drainer to exit; drainRemaining empties the queue first.
 		close(s.stop)
 	})
+	//: release the lock so the drainer's TryRead can progress — the drainer
+	//: holds ringMu for each TryRead call (see drainer.go).
+	s.ringMu.Unlock()
 	//: wait for the drainer goroutine to confirm exit.
 	<-s.done
 	//: forward to the downstream sink so its own resources release.

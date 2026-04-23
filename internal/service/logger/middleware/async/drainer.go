@@ -15,8 +15,13 @@ func (s *asyncSink) drain() {
 	})
 	//: spin-loop drains the ring; sleeps when empty until a stop signal arrives.
 	for {
-		//: try to read an entry; on Empty, fall back to a select wait.
+		//: read under ringMu so the SPSC ring never sees a concurrent
+		//: producer (async.Write under DropOldest also reads). Held for
+		//: the TryRead only — forward runs outside the lock to avoid
+		//: holding it across the downstream Write.
+		s.ringMu.Lock()
 		ent, err := s.queue.TryRead()
+		s.ringMu.Unlock()
 		//: empty queue → fall through to the stop-channel select.
 		if err == nil {
 			//: forward the entry to the downstream sink and recycle it.
@@ -56,8 +61,11 @@ func (s *asyncSink) forward(ent *recordEntry) {
 func (s *asyncSink) drainRemaining() {
 	//: keep reading until TryRead reports Empty.
 	for {
-		//: pull the next entry without blocking.
+		//: pull the next entry without blocking, under ringMu for SPSC
+		//: safety (DropOldest's producer-side TryRead shares the ring).
+		s.ringMu.Lock()
 		ent, err := s.queue.TryRead()
+		s.ringMu.Unlock()
 		//: empty queue ends the close-time flush.
 		if err != nil {
 			//: queue is empty — close-time flush is complete.
