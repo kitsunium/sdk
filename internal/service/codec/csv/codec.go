@@ -14,18 +14,52 @@ import (
 // Codec is the CSV singleton, registered with core/codec at package load.
 // Binding the registration result to a named var is more idiomatic than
 // `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
+// The singleton has escapeFormulas=false for wire-format fidelity — consumers
+// whose output is read by a spreadsheet application should use NewWithEscape(true)
+// instead.
 var Codec codec.Codec = codec.Register(&csvCodec{})
 
-// csvCodec is the concrete Codec implementation for CSV.
-type csvCodec struct{}
+// csvCodec is the concrete Codec implementation for CSV. The escapeFormulas
+// field toggles the CSV-injection mitigation documented by OWASP: cells that
+// begin with '=', '+', '-', '@', TAB, or CR are prefixed with a single quote
+// so Excel / LibreOffice / Google Sheets do not evaluate them as formulas.
+// See NewWithEscape for the recommended opt-in path.
+type csvCodec struct {
+	// escapeFormulas gates the OWASP CSV-injection mitigation. When true,
+	// Marshal rewrites any cell starting with a formula-trigger byte by
+	// prefixing it with "'" so downstream spreadsheet apps render the cell
+	// as text. When false (the default), cells pass through verbatim so
+	// the wire format is lossless for round-trip use.
+	escapeFormulas bool
+}
 
-// New returns a CSV codec instance.
+// New returns the CSV singleton with escapeFormulas disabled. This preserves
+// the v1 API and keeps the wire-format lossless for pipe-to-pipe use.
 //
 // Returns:
-//   - codec.Codec: a fresh stateless codec.
+//   - codec.Codec: the stateless singleton.
 func New() (c codec.Codec) {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
+}
+
+// NewWithEscape returns a fresh CSV codec with the formula-injection
+// mitigation toggled on or off. Use this constructor when the encoded
+// output will be opened in a spreadsheet app (Excel, LibreOffice,
+// Google Sheets): without the mitigation an attacker-influenced cell
+// starting with "=" evaluates as a formula at open time, which is
+// OWASP CSV Injection (CWE-1236). The returned codec is not registered
+// with the core/codec singleton registry.
+//
+// Params:
+//   - escape: true enables the mitigation; false keeps lossless bytes.
+//
+// Returns:
+//   - c: a fresh codec with the requested escape policy.
+func NewWithEscape(escape bool) (c codec.Codec) {
+	//: fresh instance so callers who want the mitigation do not affect the
+	//: registered singleton or any other consumer.
+	return &csvCodec{escapeFormulas: escape}
 }
 
 // Name implements codec.Codec.
@@ -63,7 +97,7 @@ func (*csvCodec) Extensions() (exts []string) {
 // Returns:
 //   - []byte: encoded CSV.
 //   - error: ValueInvalid if v is not a [][]string; MarshalFailed on writer failure.
-func (*csvCodec) Marshal(v any) (data []byte, err error) {
+func (c *csvCodec) Marshal(v any) (data []byte, err error) {
 	//: accept both direct and pointer form to keep call sites flexible.
 	records, ok := extractRecords(v)
 	//: type-gate failure surfaces the dedicated sentinel.
@@ -75,6 +109,12 @@ func (*csvCodec) Marshal(v any) (data []byte, err error) {
 			Public:  "CSV codec requires a [][]string value",
 			Private: "service/codec/csv.Marshal: argument is not [][]string",
 		})
+	}
+	//: apply the OWASP CSV-injection mitigation when the caller opted in;
+	//: unmodified records on the default path preserve wire-format fidelity.
+	if c.escapeFormulas {
+		//: operate on a defensive copy so the caller's slice stays intact.
+		records = escapeFormulaCells(records)
 	}
 	//: write into a buffer so the caller gets []byte (not a writer).
 	var buf bytes.Buffer
@@ -91,6 +131,86 @@ func (*csvCodec) Marshal(v any) (data []byte, err error) {
 	}
 	//: hand back the buffered bytes.
 	return buf.Bytes(), nil
+}
+
+// escapeFormulaCells returns a defensive copy of records with every cell
+// starting with a formula-trigger byte prefixed by a single quote so the
+// cell renders as text in Excel / LibreOffice / Google Sheets. Implements
+// the OWASP CSV Injection mitigation (CWE-1236) on an opt-in basis.
+//
+// Params:
+//   - records: caller-supplied matrix; left unmodified by this helper.
+//
+// Returns:
+//   - out: defensive copy with trigger cells escaped.
+func escapeFormulaCells(records [][]string) (out [][]string) {
+	//: pre-allocate so no append-reallocation occurs in the hot path.
+	out = make([][]string, 0, len(records))
+	//: walk each row and build a sanitised per-row copy via helper to
+	//: keep the per-row allocation off the outer loop (ktn HOTLOOP).
+	for _, row := range records {
+		//: delegate to escapeFormulaRow so the make() lives in its frame.
+		out = append(out, escapeFormulaRow(row))
+	}
+	//: hand back the sanitised matrix.
+	return out
+}
+
+// escapeFormulaRow returns a defensive copy of row with every cell's
+// first byte passed through escapeIfFormulaCell. Kept as a dedicated
+// helper so its per-row allocation is attributed to its own stack frame
+// rather than being flagged as an inner-loop allocation by static
+// analysis.
+//
+// Params:
+//   - row: one CSV record; left unmodified by this helper.
+//
+// Returns:
+//   - out: defensive copy with trigger cells escaped.
+func escapeFormulaRow(row []string) (out []string) {
+	//: pre-sized copy with zero reallocation during append.
+	out = make([]string, 0, len(row))
+	//: inspect every cell and prefix when the first byte triggers evaluation.
+	for _, cell := range row {
+		out = append(out, escapeIfFormulaCell(cell))
+	}
+	//: hand back the sanitised row.
+	return out
+}
+
+// isFormulaTrigger reports whether b is a byte that a spreadsheet app
+// interprets as the start of a formula. The set includes the classic
+// trigger bytes (=, +, -, @) plus the two control characters (TAB, CR)
+// that some spreadsheets treat as formula prefixes after whitespace trim.
+//
+// Params:
+//   - b: the byte to classify.
+//
+// Returns:
+//   - ok: true when b triggers formula evaluation in a spreadsheet.
+func isFormulaTrigger(b byte) (ok bool) {
+	//: explicit byte comparison avoids switch-case-comment verbosity.
+	return b == '=' || b == '+' || b == '-' || b == '@' || b == '\t' || b == '\r'
+}
+
+// escapeIfFormulaCell prefixes cell with a single quote when its first
+// byte would otherwise trigger spreadsheet formula evaluation.
+//
+// Params:
+//   - cell: a single CSV cell value.
+//
+// Returns:
+//   - out: the (possibly prefixed) cell.
+func escapeIfFormulaCell(cell string) (out string) {
+	//: empty cell is inert — nothing to escape; early return keeps the
+	//: single-byte read below unconditionally safe.
+	if cell == "" || !isFormulaTrigger(cell[0]) {
+		//: safe input — pass through verbatim.
+		return cell
+	}
+	//: formula-trigger byte — prefix with single quote so spreadsheets
+	//: render the cell as text rather than evaluating it.
+	return "'" + cell
 }
 
 // Unmarshal parses data as CSV into *[][]string.

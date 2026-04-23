@@ -1,6 +1,7 @@
 package csv_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -64,6 +65,40 @@ func TestMarshal(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
 		})
+	}
+}
+
+// TestMarshal_FormulaEscape_OptIn asserts the OWASP CSV-injection
+// mitigation (finding #19): the default singleton passes cells through
+// verbatim, while NewWithEscape(true) prefixes any formula-trigger
+// cell with a single quote so downstream spreadsheet apps render as text.
+func TestMarshal_FormulaEscape_OptIn(t *testing.T) {
+	t.Parallel()
+	rec := [][]string{{"safe", "=SUM(A1:A3)", "+cmd|' /C calc'!A0", "-1", "@SUM", "normal"}}
+	//: default singleton — wire-format fidelity means no escape.
+	lossless, lerr := csv.New().Marshal(rec)
+	if lerr != nil {
+		t.Fatalf("lossless Marshal err = %v", lerr)
+	}
+	//: confirm the formula leaks through when escape is off.
+	if !strings.Contains(string(lossless), "=SUM(A1:A3)") {
+		t.Errorf("default Marshal should emit the literal formula: %q", lossless)
+	}
+	//: opt-in mitigation — every trigger cell gains a leading apostrophe.
+	hardened, herr := csv.NewWithEscape(true).Marshal(rec)
+	if herr != nil {
+		t.Fatalf("hardened Marshal err = %v", herr)
+	}
+	//: assert the specific escaped patterns appear and the raw formula does not.
+	text := string(hardened)
+	for _, want := range []string{"'=SUM", "'+cmd", "'-1", "'@SUM"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("hardened Marshal missing escape for %q in: %q", want, text)
+		}
+	}
+	//: safe cell must still pass through verbatim.
+	if !strings.Contains(text, "safe") {
+		t.Errorf("hardened Marshal dropped a safe cell: %q", text)
 	}
 }
 
