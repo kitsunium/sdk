@@ -83,7 +83,7 @@ func (s *fanoutSink) Write(ctx context.Context, r corelogger.RecordEvent, p []by
 			Reason:  "FANOUT_WRITE_FAILED",
 			Public:  "One or more fan-out sinks failed",
 			Private: "service/logger/middleware/multi.Write aggregated per-sink errors",
-		}, errs.Int("failed", int64(len(errs2))), errs.Int("level", int64(r.Level)))
+		}, errs.Int("failed", len(errs2)), errs.Int("level", int(r.Level)))
 	}
 	//: happy path — every branch accepted the payload.
 	return n, nil

@@ -202,7 +202,7 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 			Reason:  "ASYNC_CTX_CANCELLED",
 			Public:  "Async sink write aborted due to cancellation",
 			Private: "service/logger/middleware/async.Write saw a cancelled context",
-		}, errs.Int("level", int64(rec.Level)))
+		}, errs.Int("level", int(rec.Level)))
 	}
 	//: hold the ring mutex for the whole [isClosed .. TryWrite] span. Close
 	//: takes the same mutex so an in-flight Write cannot race drainRemaining

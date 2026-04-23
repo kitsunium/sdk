@@ -62,7 +62,7 @@ func (s *recoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p [
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
 				Private: "service/logger/middleware/recover.Write caught panic: " + safeString(rv),
-			}, errs.Int("level", int64(rec.Level)), errs.String("panic_type", safeTypeName(rv)))
+			}, errs.Int("level", int(rec.Level)), errs.String("panic_type", safeTypeName(rv)))
 		}
 	}()
 	//: delegate to the downstream sink — its panic (if any) is caught above.

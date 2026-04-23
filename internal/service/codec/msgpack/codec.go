@@ -117,7 +117,7 @@ func (*msgpackCodec) Unmarshal(data []byte, v any) (err error) {
 			Reason:  "UNMARSHAL_FAILED",
 			Public:  "MessagePack input exceeds size limit",
 			Private: "service/codec/msgpack.Unmarshal: len(data) exceeds maxMsgPackBytes",
-		}, errs.Int("len", int64(len(data))), errs.Int("cap", int64(maxMsgPackBytes)))
+		}, errs.Int("len", len(data)), errs.Int("cap", maxMsgPackBytes))
 	}
 	//: delegate to the library for the actual decoding.
 	uerr := gomsgpack.Unmarshal(data, v)

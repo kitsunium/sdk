@@ -162,7 +162,7 @@ func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 			Reason:  "SYSLOG_CTX_CANCELLED",
 			Public:  "Syslog sink write aborted due to cancellation",
 			Private: "service/logger/sink/syslog.Write saw a cancelled context",
-		}, errs.Int("level", int64(rec.Level)))
+		}, errs.Int("level", int(rec.Level)))
 	}
 	//: build the RFC5424 frame: <PRI>1 - - - - - - <payload>.
 	frame := makeFrame(priorityFor(rec.Level), p)
@@ -178,7 +178,7 @@ func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 			Reason:  "SYSLOG_WRITE_FAILED",
 			Public:  "Syslog write failed",
 			Private: "service/logger/sink/syslog.Write underlying net.Conn returned an error",
-		}, errs.Int("bytes", int64(len(frame))), errs.Int("level", int64(rec.Level)))
+		}, errs.Int("bytes", len(frame)), errs.Int("level", int(rec.Level)))
 	}
 	//: happy path — return the byte count.
 	return written, nil

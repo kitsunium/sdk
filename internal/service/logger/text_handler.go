@@ -220,7 +220,7 @@ func (h *TextHandler) writeLine(line []byte) (err error) {
 			Reason:  "WRITE_FAILED",
 			Public:  "Log write failed",
 			Private: "service/logger.TextHandler.Handle underlying writer returned an error",
-		}, errs.Int("bytes", int64(len(line))))
+		}, errs.Int("bytes", len(line)))
 	}
 	//: happy path — nothing to report.
 	return nil

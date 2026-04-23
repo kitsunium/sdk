@@ -119,7 +119,7 @@ func (*yamlCodec) Unmarshal(data []byte, v any) (err error) {
 			Reason:  "UNMARSHAL_FAILED",
 			Public:  "YAML input exceeds size limit",
 			Private: "service/codec/yaml.Unmarshal: len(data) exceeds maxYAMLBytes",
-		}, errs.Int("len", int64(len(data))), errs.Int("cap", int64(maxYAMLBytes)))
+		}, errs.Int("len", len(data)), errs.Int("cap", maxYAMLBytes))
 	}
 	//: delegate to yaml.v3 for the actual decoding.
 	uerr := goyaml.Unmarshal(data, v)

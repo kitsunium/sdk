@@ -146,7 +146,7 @@ func (s *fileSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 			Reason:  "CTX_CANCELLED",
 			Public:  "Logging aborted due to cancellation",
 			Private: "service/logger/sink/file.Write saw a cancelled context",
-		}, errs.Int("level", int64(r.Level)))
+		}, errs.Int("level", int(r.Level)))
 	}
 	//: serialise writes for payloads above PIPE_BUF; under PIPE_BUF the kernel
 	//: already guarantees atomicity but the mutex is cheap and uniform.
@@ -161,7 +161,7 @@ func (s *fileSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 			Reason:  "WRITE_FAILED",
 			Public:  "File write failed",
 			Private: "service/logger/sink/file.Write underlying *os.File returned an error",
-		}, errs.Int("bytes", int64(len(p))), errs.Int("level", int64(r.Level)))
+		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
 	}
 	//: happy path — return the byte count.
 	return written, nil
