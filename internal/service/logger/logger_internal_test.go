@@ -73,6 +73,35 @@ func Test_loggerImpl_Log(t *testing.T) {
 	}
 }
 
+func Test_loggerImpl_WithGroup(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		group     string
+		wantInfix string
+	}{
+		{"empty group is a no-op", "", ` k="v"`},
+		{"named group prefixes the key", "http", ` http.k="v"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var buf bytes.Buffer
+			base := &loggerImpl{h: mustNewTextHandler(t, &buf, level.Debug)}
+			child := base.WithGroup(tc.group)
+			if child == nil {
+				t.Fatal("WithGroup returned nil")
+				return
+			}
+			child.Log(t.Context(), level.Info, "m",
+				corelogger.AttrValue{Key: "k", Value: corelogger.StringValue("v")})
+			if !strings.Contains(buf.String(), tc.wantInfix) {
+				t.Errorf("WithGroup output missing %q: %q", tc.wantInfix, buf.String())
+			}
+		})
+	}
+}
+
 func Test_loggerImpl_With(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -80,7 +109,7 @@ func Test_loggerImpl_With(t *testing.T) {
 		attrs  []corelogger.AttrValue
 		expect string
 	}{
-		{"binds a string attr", []corelogger.AttrValue{{Key: "k", Value: "v"}}, `k="v"`},
+		{"binds a string attr", []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}}, `k="v"`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

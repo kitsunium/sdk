@@ -19,6 +19,10 @@ type RecordEvent struct {
 	Level level.Level
 	// Message is the human-readable description of the event.
 	Message string
+	// PC is the program counter captured at the Log call site (via
+	// runtime.Callers). Zero means "no caller information available";
+	// handlers SHOULD resolve PC into a frame lazily at format time.
+	PC uintptr
 	// Attrs carries the structured key/value pairs attached to this event.
 	Attrs []AttrValue
 }

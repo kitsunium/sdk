@@ -36,6 +36,10 @@ const floatBitSize int = 64
 // mode for float64 rendering.
 const floatFormat byte = 'g'
 
+// groupSeparator is the rune inserted between successive group names AND
+// between a group prefix and an attribute key in textual output ("a.b.k=v").
+const groupSeparator byte = '.'
+
 // TextHandler is a core.Handler that renders records as a single plain-text
 // line per event. It is safe for concurrent use via an internal mutex.
 type TextHandler struct {
@@ -45,6 +49,9 @@ type TextHandler struct {
 	mu sync.Mutex
 	// attrs are prepended to every RecordEvent emitted through this handler.
 	attrs []corelogger.AttrValue
+	// groups carries the active group prefix stack (outermost first); each
+	// emitted attribute key is rendered as "g1.g2.….key" in the line.
+	groups []string
 	// min is the minimum level the handler emits; records below are dropped.
 	min level.Level
 	// clk sources the timestamp when RecordEvent.Time is the zero value.
@@ -105,7 +112,29 @@ func (h *TextHandler) WithAttrs(attrs []corelogger.AttrValue) (child corelogger.
 	copy(cp, h.attrs)
 	copy(cp[len(h.attrs):], attrs)
 	//: share the writer and clock, but own a private attrs slice and mutex.
-	return &TextHandler{w: h.w, attrs: cp, min: h.min, clk: h.clk}
+	return &TextHandler{w: h.w, attrs: cp, groups: h.groups, min: h.min, clk: h.clk}
+}
+
+// WithGroup returns a derived TextHandler that namespaces every subsequent
+// attribute key under the given group name (rendered as "name.key").
+//
+// Params:
+//   - name: group prefix; empty string yields the receiver unchanged.
+//
+// Returns:
+//   - corelogger.Handler: a new handler carrying the appended group.
+func (h *TextHandler) WithGroup(name string) (child corelogger.Handler) {
+	//: empty group is a documented no-op so callers can pass user input.
+	if name == "" {
+		//: return the receiver unchanged — no extra wrapping.
+		return h
+	}
+	//: copy-on-write — child must not alias the parent's groups slice.
+	cp := make([]string, len(h.groups)+1)
+	copy(cp, h.groups)
+	cp[len(h.groups)] = name
+	//: share the writer/clock/attrs, own a private groups slice and mutex.
+	return &TextHandler{w: h.w, attrs: h.attrs, groups: cp, min: h.min, clk: h.clk}
 }
 
 // Handle formats and writes a RecordEvent to the underlying io.Writer.
@@ -160,12 +189,12 @@ func (h *TextHandler) renderLine(b []byte, r corelogger.RecordEvent) (out []byte
 	//: handler-bound attrs precede record-bound attrs for consistent output.
 	for _, a := range h.attrs {
 		//: render each handler attr next to the previous byte contents.
-		b = appendAttr(b, a)
+		b = appendAttrWithGroups(b, h.groups, a)
 	}
 	//: then append any attrs attached directly to the RecordEvent.
 	for _, a := range r.Attrs {
 		//: render each record-local attr using the same encoding rules.
-		b = appendAttr(b, a)
+		b = appendAttrWithGroups(b, h.groups, a)
 	}
 	//: terminate the line so downstream consumers can split on '\n'.
 	return append(b, '\n')
@@ -197,6 +226,73 @@ func (h *TextHandler) writeLine(line []byte) (err error) {
 	return nil
 }
 
+// appendAttrWithGroups prepends the active group prefix stack ("g1.g2.…")
+// to the attribute key before delegating the value-rendering to appendAttr.
+//
+// Params:
+//   - dst: buffer to append to; returned grown.
+//   - groups: active group prefix stack (outermost first).
+//   - a: attribute whose Key and Value are rendered.
+//
+// Returns:
+//   - []byte: the potentially re-sliced buffer after append operations.
+func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) (out []byte) {
+	//: no groups → fall back to the bare appendAttr behaviour.
+	if len(groups) == 0 {
+		//: skip the prefix construction entirely.
+		return appendAttr(dst, a)
+	}
+	//: write the leading separator + group chain into the buffer.
+	dst = append(dst, ' ')
+	//: walk the group stack to emit "g1.g2.…" before the attribute key.
+	for _, g := range groups {
+		//: append each group name followed by the canonical separator.
+		dst = append(dst, g...)
+		dst = append(dst, groupSeparator)
+	}
+	//: now append the bare key=value (without the leading space appendAttr writes).
+	dst = append(dst, a.Key...)
+	dst = append(dst, '=')
+	dst = appendValueOnly(dst, a)
+	//: hand the (possibly re-allocated) buffer back to the caller.
+	return dst
+}
+
+// appendValueOnly renders only the value part of an AttrValue; shared by the
+// grouped and ungrouped paths so the encoding contract has a single source.
+//
+// Params:
+//   - dst: buffer to append to; returned grown.
+//   - a: attribute whose Value is rendered.
+//
+// Returns:
+//   - []byte: the potentially re-sliced buffer after append operations.
+func appendValueOnly(dst []byte, a corelogger.AttrValue) (out []byte) {
+	//: dispatch on the typed Kind discriminant — same table as appendAttr.
+	switch a.Value.Kind() {
+	//: strings are quoted so whitespace in values remains visible.
+	case corelogger.KindString:
+		//: strconv.AppendQuote handles escaping consistently with the bare path.
+		return strconv.AppendQuote(dst, a.Value.String())
+	//: int64 (also covers int / int32 widened by IntValue) renders base-10.
+	case corelogger.KindInt64:
+		//: strconv.AppendInt is the canonical alloc-free integer renderer.
+		return strconv.AppendInt(dst, a.Value.Int64(), decimalBase)
+	//: booleans render as "true" or "false".
+	case corelogger.KindBool:
+		//: strconv.AppendBool emits the canonical Go spelling.
+		return strconv.AppendBool(dst, a.Value.Bool())
+	//: floats use Go's default shortest round-trip format.
+	case corelogger.KindFloat64:
+		//: 'g' format with -1 precision matches Go's default fmt.Print rendering.
+		return strconv.AppendFloat(dst, a.Value.Float64(), floatFormat, floatPrec, floatBitSize)
+	//: every other Kind degrades to '?' until commit 7's encoder split.
+	default:
+		//: '?' is the documented placeholder for unsupported variants.
+		return append(dst, '?')
+	}
+}
+
 // appendAttr serialises a single AttrValue onto dst in "key=value" form.
 //
 // Params:
@@ -210,24 +306,22 @@ func appendAttr(dst []byte, a corelogger.AttrValue) (out []byte) {
 	dst = append(dst, ' ')
 	dst = append(dst, a.Key...)
 	dst = append(dst, '=')
-	//: dispatch on the concrete value type so numbers stay bare and strings quote.
-	switch v := a.Value.(type) {
+	//: dispatch on the typed Kind discriminant — no boxing on the hot path.
+	switch a.Value.Kind() {
 	//: strings are quoted so whitespace in values remains visible.
-	case string:
-		dst = strconv.AppendQuote(dst, v)
-	//: plain ints are rendered base-10.
-	case int:
-		dst = strconv.AppendInt(dst, int64(v), decimalBase)
-	//: already 64-bit ints skip the widening cast.
-	case int64:
-		dst = strconv.AppendInt(dst, v, decimalBase)
+	case corelogger.KindString:
+		dst = strconv.AppendQuote(dst, a.Value.String())
+	//: int64 (also covers int / int32 widened by IntValue) renders base-10.
+	case corelogger.KindInt64:
+		dst = strconv.AppendInt(dst, a.Value.Int64(), decimalBase)
 	//: booleans render as "true" or "false".
-	case bool:
-		dst = strconv.AppendBool(dst, v)
+	case corelogger.KindBool:
+		dst = strconv.AppendBool(dst, a.Value.Bool())
 	//: floats use Go's default shortest round-trip format.
-	case float64:
-		dst = strconv.AppendFloat(dst, v, floatFormat, floatPrec, floatBitSize)
-	//: unknown types mark the value so users notice missing format support.
+	case corelogger.KindFloat64:
+		dst = strconv.AppendFloat(dst, a.Value.Float64(), floatFormat, floatPrec, floatBitSize)
+	//: every other Kind (Any, Time, Duration, Uint64, Group) maps to '?' for now —
+	//: richer rendering ships with the Encoder split in commit 7.
 	default:
 		dst = append(dst, '?')
 	}

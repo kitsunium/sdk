@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
@@ -78,7 +79,7 @@ func NewText(cfg Config) (lg Logger, err error) {
 		return nil, lErr
 	}
 	//: decorate every emitted record with the SDK version for observability.
-	return base.With(corelogger.AttrValue{Key: "framework_version", Value: FrameworkVersion()}), nil
+	return base.With(corelogger.AttrValue{Key: "framework_version", Value: corelogger.StringValue(FrameworkVersion())}), nil
 }
 
 // Default returns a Logger writing INFO-and-above records to os.Stderr.
@@ -150,8 +151,8 @@ func Error(ctx context.Context, lg Logger, msg string, attrs ...Attr) {
 // Returns:
 //   - Attr: an Attr with the given key and string value.
 func String(key, val string) (a Attr) {
-	//: wrap into the shared AttrValue shape.
-	return Attr{Key: key, Value: val}
+	//: wrap into the shared AttrValue shape via the typed constructor.
+	return Attr{Key: key, Value: corelogger.StringValue(val)}
 }
 
 // Int builds an Attr carrying an int value.
@@ -163,6 +164,98 @@ func String(key, val string) (a Attr) {
 // Returns:
 //   - Attr: an Attr with the given key and int value.
 func Int(key string, val int) (a Attr) {
-	//: wrap into the shared AttrValue shape.
-	return Attr{Key: key, Value: val}
+	//: wrap into the shared AttrValue shape via the typed constructor.
+	return Attr{Key: key, Value: corelogger.IntValue(val)}
+}
+
+// Bool builds an Attr carrying a boolean value.
+//
+// Params:
+//   - key: attribute key rendered in the output line.
+//   - val: attribute boolean value; renders as "true" or "false".
+//
+// Returns:
+//   - Attr: an Attr with the given key and boolean value.
+func Bool(key string, val bool) (a Attr) {
+	//: wrap into the shared AttrValue shape via the typed constructor.
+	return Attr{Key: key, Value: corelogger.BoolValue(val)}
+}
+
+// Float64 builds an Attr carrying a float64 value.
+//
+// Params:
+//   - key: attribute key rendered in the output line.
+//   - val: attribute float64 value; renders with the shortest round-trip format.
+//
+// Returns:
+//   - Attr: an Attr with the given key and float64 value.
+func Float64(key string, val float64) (a Attr) {
+	//: wrap into the shared AttrValue shape via the typed constructor.
+	return Attr{Key: key, Value: corelogger.Float64Value(val)}
+}
+
+// Int64 builds an Attr carrying an int64 value.
+//
+// Params:
+//   - key: attribute key rendered in the output line.
+//   - val: attribute int64 value; renders base-10 unquoted.
+//
+// Returns:
+//   - Attr: an Attr with the given key and int64 value.
+func Int64(key string, val int64) (a Attr) {
+	//: wrap into the shared AttrValue shape via the typed constructor.
+	return Attr{Key: key, Value: corelogger.Int64Value(val)}
+}
+
+// Uint64 builds an Attr carrying a uint64 value.
+//
+// Params:
+//   - key: attribute key rendered in the output line.
+//   - val: attribute uint64 value; renders base-10 unquoted.
+//
+// Returns:
+//   - Attr: an Attr with the given key and uint64 value.
+func Uint64(key string, val uint64) (a Attr) {
+	//: wrap into the shared AttrValue shape via the typed constructor.
+	return Attr{Key: key, Value: corelogger.Uint64Value(val)}
+}
+
+// Duration builds an Attr carrying a time.Duration value.
+//
+// Params:
+//   - key: attribute key rendered in the output line.
+//   - val: attribute time.Duration value rendered as nanos.
+//
+// Returns:
+//   - Attr: an Attr with the given key and duration value.
+func Duration(key string, val time.Duration) (a Attr) {
+	//: wrap into the shared AttrValue shape via the typed constructor.
+	return Attr{Key: key, Value: corelogger.DurationValue(val)}
+}
+
+// Time builds an Attr carrying a time.Time value.
+//
+// Params:
+//   - key: attribute key rendered in the output line.
+//   - val: attribute time.Time value rendered as RFC3339-with-millis.
+//
+// Returns:
+//   - Attr: an Attr with the given key and time value.
+func Time(key string, val time.Time) (a Attr) {
+	//: wrap into the shared AttrValue shape via the typed constructor.
+	return Attr{Key: key, Value: corelogger.TimeValue(val)}
+}
+
+// Any builds an Attr carrying an opaque payload. Use the typed helpers when
+// possible — Any disables type-aware rendering.
+//
+// Params:
+//   - key: attribute key rendered in the output line.
+//   - val: opaque payload; handlers degrade unrecognised types to "?".
+//
+// Returns:
+//   - Attr: an Attr with the given key and opaque value.
+func Any(key string, val any) (a Attr) {
+	//: wrap into the shared AttrValue shape via the typed constructor.
+	return Attr{Key: key, Value: corelogger.AnyValue(val)}
 }
