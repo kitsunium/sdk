@@ -1,7 +1,6 @@
 package errs
 
 import (
-	"errors"
 	"strings"
 	"testing"
 )
@@ -9,40 +8,49 @@ import (
 func Test_validateDefineArgs(t *testing.T) {
 	t.Parallel()
 	longPublic := strings.Repeat("x", maxPublicRunes+1)
+	//: valid dotted-quad codes under ADR 0005:
+	//:   0x00_03_01_01 = 0.3.1.1 (service/logger CodeWriterNil equivalent)
+	//:   0x00_02_02_01 = 0.2.2.1 (core/codec CodeDuplicateRegistration equivalent)
 	type tc struct {
-		name            string
-		code            int
-		reason          string
-		public          string
-		private         string
-		wantErrSentinel error
+		name       string
+		code       Code
+		reason     string
+		public     string
+		private    string
+		wantReason string // reason of the returned *Error on failure; "" = expect nil
 	}
 	tests := []tc{
-		{"all valid", 3101, "WRITER_NIL", "writer is nil", "ctx/logger nil writer", nil},
-		{"zero code", 0, "X", "y", "z", errInvalidCode},
-		{"too small code", 999, "X", "y", "z", errInvalidCode},
-		{"empty reason", 1100, "", "y", "z", errInvalidReason},
-		{"lowercase reason", 1100, "bad_reason", "y", "z", errInvalidReason},
-		{"digit leading reason", 1100, "1BAD", "y", "z", errInvalidReason},
-		{"empty public", 1100, "GOOD", "", "z", errInvalidPublic},
-		{"too long public", 1100, "GOOD", longPublic, "z", errInvalidPublic},
-		{"public with newline", 1100, "GOOD", "a\nb", "z", errInvalidPublic},
-		{"empty private", 1100, "GOOD", "pub", "", errInvalidPrivate},
+		{"all valid", 0x00_03_01_01, "WRITER_NIL", "writer is nil", "ctx/logger nil writer", ""},
+		{"zero code", 0, "X", "y", "z", "INVALID_CODE"},
+		{"layer 0 non-meta rejected", 0x00_00_01_01, "X", "y", "z", "INVALID_CODE"},
+		{"layer 0 meta ok", CodeInvalidCode, "INVALID_CODE", "y", "z", ""},
+		{"empty reason", 0x00_02_02_01, "", "y", "z", "INVALID_REASON"},
+		{"lowercase reason", 0x00_02_02_01, "bad_reason", "y", "z", "INVALID_REASON"},
+		{"digit leading reason", 0x00_02_02_01, "1BAD", "y", "z", "INVALID_REASON"},
+		{"empty public", 0x00_02_02_01, "GOOD", "", "z", "INVALID_PUBLIC"},
+		{"too long public", 0x00_02_02_01, "GOOD", longPublic, "z", "INVALID_PUBLIC"},
+		{"public with newline", 0x00_02_02_01, "GOOD", "a\nb", "z", "INVALID_PUBLIC"},
+		//: v5 FIX — private failure now cites INVALID_PRIVATE (not INVALID_PUBLIC).
+		{"empty private cites INVALID_PRIVATE", 0x00_02_02_01, "GOOD", "pub", "", "INVALID_PRIVATE"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := validateDefineArgs(c.code, c.reason, c.public, c.private)
-		if c.wantErrSentinel == nil {
+		if c.wantReason == "" {
 			if got != nil {
 				t.Errorf("expected nil, got %v", got)
 			}
 			return
 		}
-		if !errors.Is(got, c.wantErrSentinel) {
-			t.Errorf("errors.Is(%v, %v) = false", got, c.wantErrSentinel)
+		if got == nil {
+			t.Fatalf("expected failure with reason %s, got nil", c.wantReason)
+		}
+		if got.Reason() != c.wantReason {
+			t.Errorf("want reason %q, got %q (full error: %v)", c.wantReason, got.Reason(), got)
 		}
 	}
 	for _, c := range tests {
+		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
@@ -54,22 +62,27 @@ func Test_validateCode(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name    string
-		code    int
+		code    Code
 		wantErr bool
 	}
 	tests := []tc{
-		{"ok", 3101, false},
+		{"ok layer 1", 0x00_01_01_01, false},
+		{"ok layer 3", 0x00_03_02_01, false},
+		{"ok pkg v1", 0x01_01_00_01, false},
 		{"zero", 0, true},
-		{"below min", 999, true},
+		{"layer 0 non-meta", 0x00_00_05_01, true},
+		{"layer 0 meta", CodeInvalidCode, false},
+		{"int32 overflow", 0x80_00_00_01, true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := validateCode(c.code)
 		if (got != nil) != c.wantErr {
-			t.Errorf("validateCode(%d) err=%v, wantErr=%v", c.code, got, c.wantErr)
+			t.Errorf("validateCode(%#08x) err=%v, wantErr=%v", uint32(c.code), got, c.wantErr)
 		}
 	}
 	for _, c := range tests {
+		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)

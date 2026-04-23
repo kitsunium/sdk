@@ -5,23 +5,41 @@ package errs
 
 import "errors"
 
-// CodeOf walks the Unwrap chain and returns the deepest *Error.Code.
+// CodeOf walks the Unwrap chain and returns the deepest *Error.Code as int.
+//
+// Deprecated: use CodeValueOf for typed access. Kept at v1 for back-compat.
 //
 // Params:
-//   - err: any error value; the chain is walked via errors.As.
+//   - err: any error value; the chain is walked via errors.AsType.
 //
 // Returns:
-//   - int: the deepest *Error.Code, or 0 if no *Error is found.
+//   - int: the deepest *Error.Code cast to int, or 0 if no *Error is found.
 //   - bool: true iff an *Error was found anywhere in the chain.
 func CodeOf(err error) (code int, ok bool) {
 	//: walk the chain and keep the deepest *Error we see.
 	deepest := deepestError(err)
 	//: absence path → zero pair by contract.
 	if deepest == nil {
-		//: signal "no *Error in the chain" to callers.
 		return 0, false
 	}
-	//: hand back the deepest code.
+	//: cast through uint32 — Code is uint32-backed; on 64-bit (enforced by
+	//: build tag) int is 8 bytes so the conversion is lossless.
+	return int(uint32(deepest.code)), true
+}
+
+// CodeValueOf walks the chain and returns the deepest *Error's typed Code.
+//
+// Params:
+//   - err: any error value.
+//
+// Returns:
+//   - Code: the deepest Code, or zero if no *Error is found.
+//   - bool: true iff an *Error was found.
+func CodeValueOf(err error) (c Code, ok bool) {
+	deepest := deepestError(err)
+	if deepest == nil {
+		return 0, false
+	}
 	return deepest.code, true
 }
 
@@ -163,36 +181,21 @@ func ExitCodeOf(err error) (code int) {
 	return deepest.ExitCode()
 }
 
-// HasCode walks the chain and reports whether ANY *Error carries the code.
+// HasCodeInt is the DEPRECATED int-typed variant of HasCode. The modern
+// HasCode(err, Code) lives in error.go and walks both single-error and
+// multi-error wrappers (errors.Join) per ADR 0005 §3.10.
+//
+// Deprecated: use HasCode with a typed Code. Removed before v1.0.0.
 //
 // Params:
 //   - err: any error value.
-//   - code: numeric identifier to look for.
+//   - code: numeric identifier to look for (cast to Code internally).
 //
 // Returns:
 //   - bool: true iff an *Error with a matching code is found.
-func HasCode(err error, code int) (found bool) {
-	//: walk every *Error layer checking the code.
-	cursor := err
-	//: iterate the chain until exhausted or a match is found.
-	for cursor != nil {
-		//: extract the nearest *Error.
-		layer, ok := errors.AsType[*Error](cursor)
-		//: if no further *Error exists below, stop without a match.
-		if !ok {
-			//: exhausted chain — no *Error left to check.
-			return false
-		}
-		//: first match wins; early-return true.
-		if layer.code == code {
-			//: found it — short-circuit the walk.
-			return true
-		}
-		//: descend into the cause to keep searching deeper.
-		cursor = layer.source
-	}
-	//: exhausted the chain without a match.
-	return false
+func HasCodeInt(err error, code int) (found bool) {
+	//: delegate to the typed implementation for consistent chain semantics.
+	return HasCode(err, Code(uint32(code)))
 }
 
 // HasReason walks the chain and reports whether ANY *Error carries reason.

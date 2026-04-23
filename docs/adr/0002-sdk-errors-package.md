@@ -1,10 +1,11 @@
 # ADR 0002 — SDK `errs` Package (Layered Typed Errors)
 
-**Status**: Accepted
-**Date**: 2026-04-19
+**Status**: Superseded (§Registry only — all other sections remain authoritative)
+**Date**: 2026-04-19 (updated 2026-04-23 on ADR 0005 acceptance)
 **Deciders**: @kodflow
 **Supersedes**: none
-**Related**: ADR 0001 (multi-module layout), plan `sdk-errs-package-migration`
+**Superseded by**: ADR 0005 (§Registry — dotted-quad codes replace the flat 1xxx-4xxx scheme)
+**Related**: ADR 0001 (multi-module layout), ADR 0005 (dotted-quad error codes), plan `sdk-errs-package-migration`
 
 ## Context
 

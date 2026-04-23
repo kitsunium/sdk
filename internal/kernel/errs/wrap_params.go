@@ -6,8 +6,8 @@ package errs
 // already an *Error. Keeping them in a struct stays below the SDK's
 // 5-parameter ceiling for Wrap and gives call sites named fields.
 type WrapParams struct {
-	// Code is the numeric identifier assigned to the wrapping Error.
-	Code int
+	// Code is the dotted-quad identifier assigned to the wrapping Error.
+	Code Code
 	// Reason is the SCREAMING_SNAKE stable identifier of the wrapping Error.
 	Reason string
 	// Public is the wire-safe message (string literal at source level).
