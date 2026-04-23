@@ -54,6 +54,11 @@ type asyncSink struct {
 	// doneOnce guards close(done) — the drainer is the sole closer in
 	// practice but the lint heuristic requires an explicit sync.Once guard.
 	doneOnce sync.Once
+	// flushSignal fires once after every drainer forward() so Flush can
+	// wait on progress instead of Gosched-spinning. Buffered by 1 so the
+	// drainer never blocks when nobody is flushing; Flush selects on it
+	// + ctx.Done for cancellation (finding #22).
+	flushSignal chan struct{}
 	// ringMu serialises every access to queue so the SPSC ring's single-
 	// producer / single-consumer contract is not violated by concurrent
 	// goroutines. Held by:
@@ -112,14 +117,15 @@ func New(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink) {
 	pool := buffer.NewRecycler[*recordEntry](newRecordEntry)
 	//: build the sink with channels primed for the drainer lifecycle.
 	out := &asyncSink{
-		downstream: downstream,
-		queue:      queue,
-		pool:       pool,
-		policy:     cfg.Policy,
-		onDrop:     callback,
-		onError:    errCallback,
-		stop:       make(chan struct{}),
-		done:       make(chan struct{}),
+		downstream:  downstream,
+		queue:       queue,
+		pool:        pool,
+		policy:      cfg.Policy,
+		onDrop:      callback,
+		onError:     errCallback,
+		flushSignal: make(chan struct{}, 1),
+		stop:        make(chan struct{}),
+		done:        make(chan struct{}),
 	}
 	//: drainer runs for the lifetime of the sink; Close terminates it.
 	go out.drain()
@@ -261,9 +267,20 @@ func (s *asyncSink) handleFull(ent *recordEntry) (n int, err error) {
 // Returns:
 //   - err: ctx.Err() on cancellation; nil once the queue is empty.
 func (s *asyncSink) Flush(ctx context.Context) (err error) {
-	//: spin until empty or ctx done; tests typically use a short timeout.
-	for s.queue.Len() > 0 {
-		//: bail out cleanly when the caller cancels mid-wait.
+	//: wait for the drainer to signal progress instead of Gosched-spinning
+	//: (finding #22). Each forward() wakes us via flushSignal; we re-check
+	//: queue.Len() under ringMu and either exit or wait again.
+	for {
+		//: snapshot queue length under ringMu so SPSC safety holds.
+		s.ringMu.Lock()
+		remaining := s.queue.Len()
+		s.ringMu.Unlock()
+		//: done when the ring is empty — forward to downstream.
+		if remaining == 0 {
+			//: also flush the downstream sink so its own buffers settle.
+			return s.downstream.Flush(ctx)
+		}
+		//: bail cleanly when the caller cancels before the ring drains.
 		if ctx != nil && ctx.Err() != nil {
 			//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved.
 			return errs.Wrap(ctx.Err(), errs.WrapParams{
@@ -273,11 +290,22 @@ func (s *asyncSink) Flush(ctx context.Context) (err error) {
 				Private: "service/logger/middleware/async.Flush saw a cancelled context",
 			})
 		}
-		//: yield so the drainer goroutine can progress.
-		yieldOnce()
+		//: block until the drainer processes another entry — OR ctx is
+		//: cancelled. A nil ctx means the caller has opted into an
+		//: indefinite wait (legacy semantics); the plain receive blocks.
+		if ctx == nil {
+			//: no cancellation channel — block on the drainer signal alone.
+			<-s.flushSignal
+			continue
+		}
+		//: cancellation-aware wait — whichever channel fires first wins.
+		select {
+		case <-s.flushSignal:
+			//: drainer processed an entry; loop to re-check the queue.
+		case <-ctx.Done():
+			//: next iteration picks up ctx.Err() and returns the wrap.
+		}
 	}
-	//: also flush the downstream sink so its own buffers settle.
-	return s.downstream.Flush(ctx)
 }
 
 // Close stops the drainer goroutine and closes the downstream sink. After

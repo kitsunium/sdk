@@ -19,7 +19,10 @@ alias(
 go_test(
     name = "errs_test",
     size = "small",
-    srcs = ["accessors_external_test.go"],
+    srcs = [
+        "accessors_external_test.go",
+        "removal_gate_external_test.go",
+    ],
     deps = [
         ":errs",
         "//pkg/v1/logger",

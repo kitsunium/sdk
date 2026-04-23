@@ -63,6 +63,14 @@ func (s *asyncSink) forward(ent *recordEntry) {
 	//: through the configured OnError callback (or no-op default).
 	n, err := s.downstream.Write(asyncCtx(), ent.rec, ent.data)
 	s.forwardDownstreamError(n, err)
+	//: signal any Flush waiter that progress was made — non-blocking send
+	//: so an idle-Flush-less sink never stalls the drainer.
+	select {
+	case s.flushSignal <- struct{}{}:
+		//: Flush (if waiting) wakes up and re-checks queue.Len().
+	default:
+		//: no Flush waiting (or its slot is already full) — drop the signal.
+	}
 	//: clear the entry's payload before recycling so leaked references release.
 	ent.rec = corelogger.RecordEvent{}
 	//: drop the backing array when it grew pathologically large (attacker-
