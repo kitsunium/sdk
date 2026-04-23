@@ -6,6 +6,7 @@ go_library(
     name = "errs",
     srcs = [
         "accessors.go",
+        "code.go",
         "codes.go",
         "error.go",
         "field.go",
@@ -29,6 +30,8 @@ go_test(
     srcs = [
         "accessors_external_test.go",
         "accessors_internal_test.go",
+        "code_external_test.go",
+        "code_internal_test.go",
         "error_external_test.go",
         "field_external_test.go",
         "field_internal_test.go",
