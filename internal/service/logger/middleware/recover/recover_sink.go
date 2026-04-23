@@ -55,13 +55,14 @@ func (s *recoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p [
 	defer func() {
 		//: capture the recover() return value as a Panicked error.
 		if rv := recover(); rv != nil {
-			//: build the documented sentinel using the panic's stringified value.
+			//: rich rendering stays in Private (log-only); Source() chain
+			//: carries only the type via panicValue.Error() to prevent leak.
 			err = errs.Wrap(panicValue{v: rv}, errs.WrapParams{
 				Code:    CodeRecoverPanicked,
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
-				Private: "service/logger/middleware/recover.Write caught a panic from the downstream sink",
-			}, errs.Int("level", int64(rec.Level)))
+				Private: "service/logger/middleware/recover.Write caught panic: " + safeString(rv),
+			}, errs.Int("level", int(rec.Level)), errs.String("panic_type", safeTypeName(rv)))
 		}
 	}()
 	//: delegate to the downstream sink — its panic (if any) is caught above.
@@ -80,13 +81,14 @@ func (s *recoverSink) Flush(ctx context.Context) (err error) {
 	defer func() {
 		//: capture the recover() return value as a Panicked error.
 		if rv := recover(); rv != nil {
-			//: build the documented sentinel using the panic's stringified value.
+			//: rich rendering stays in Private (log-only); Source() chain
+			//: carries only the type via panicValue.Error() to prevent leak.
 			err = errs.Wrap(panicValue{v: rv}, errs.WrapParams{
 				Code:    CodeRecoverPanicked,
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
-				Private: "service/logger/middleware/recover.Flush caught a panic from the downstream sink",
-			})
+				Private: "service/logger/middleware/recover.Flush caught panic: " + safeString(rv),
+			}, errs.String("panic_type", safeTypeName(rv)))
 		}
 	}()
 	//: delegate to the downstream sink — its panic (if any) is caught above.
@@ -102,13 +104,14 @@ func (s *recoverSink) Close() (err error) {
 	defer func() {
 		//: capture the recover() return value as a Panicked error.
 		if rv := recover(); rv != nil {
-			//: build the documented sentinel using the panic's stringified value.
+			//: rich rendering stays in Private (log-only); Source() chain
+			//: carries only the type via panicValue.Error() to prevent leak.
 			err = errs.Wrap(panicValue{v: rv}, errs.WrapParams{
 				Code:    CodeRecoverPanicked,
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
-				Private: "service/logger/middleware/recover.Close caught a panic from the downstream sink",
-			})
+				Private: "service/logger/middleware/recover.Close caught panic: " + safeString(rv),
+			}, errs.String("panic_type", safeTypeName(rv)))
 		}
 	}()
 	//: delegate to the downstream sink — its panic (if any) is caught above.

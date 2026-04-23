@@ -45,18 +45,3 @@ func LogAttrs(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr
 	//: delegate to the internal LogAttrs entry point.
 	svclogger.LogAttrs(ctx, lg, lv, msg, attrs)
 }
-
-// WithGroup returns a derived Logger whose subsequent attributes are
-// namespaced under name (rendered as "name.key=value"). Empty names are a
-// documented no-op so callers can pass user input.
-//
-// Params:
-//   - lg: a Logger previously built by NewText / NewWithSink / Default.
-//   - name: group prefix; empty value yields lg unchanged.
-//
-// Returns:
-//   - child: a derived Logger sharing the underlying Handler.
-func WithGroup(lg Logger, name string) (child Logger) {
-	//: forward to the Logger contract which already validates the empty case.
-	return lg.WithGroup(name)
-}

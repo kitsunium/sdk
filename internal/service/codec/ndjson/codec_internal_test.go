@@ -256,3 +256,24 @@ func Test_ndjsonCodec_Append(t *testing.T) {
 		})
 	}
 }
+
+// Test_ndjsonCodec_Append_RollbackOnMidSliceError asserts the Appender
+// contract: on error the returned buffer equals the caller-supplied dst,
+// never the partially-written mid-slice intermediate. Regresses a real
+// contract violation caught by the post-#12 audit (finding #6).
+func Test_ndjsonCodec_Append_RollbackOnMidSliceError(t *testing.T) {
+	t.Parallel()
+	c := &ndjsonCodec{}
+	prefix := []byte("prefix:")
+	//: mix a valid record with an unmarshalable channel at index 1 so the
+	//: inner loop reaches the error branch AFTER it has appended the first
+	//: record's bytes + newline onto dst.
+	got, err := c.Append(prefix, []any{42, make(chan int)})
+	if err == nil {
+		t.Fatal("Append expected an error on mid-slice marshal failure")
+	}
+	//: contract: the returned buffer MUST equal dst's prior contents.
+	if string(got) != string(prefix) {
+		t.Errorf("Append rolled back to %q, want %q (prior dst)", got, prefix)
+	}
+}

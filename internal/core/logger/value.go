@@ -140,8 +140,26 @@ func BoolValue(v bool) (out Value) {
 // Returns:
 //   - Value: a well-formed Value of KindDuration.
 func DurationValue(v time.Duration) (out Value) {
-	//: time.Duration is int64 under the hood — same two's complement trick.
-	return Value{kind: KindDuration, bits: packedBits(uint64(int64(v)))}
+	//: delegate the double-cast to durationBits so the intent is named.
+	return Value{kind: KindDuration, bits: packedBits(durationBits(v))}
+}
+
+// durationBits reinterprets a time.Duration as the uint64 bit pattern used
+// to back Value.bits. Isolates the mandatory two-step conversion
+// (time.Duration → int64 → uint64) to one named helper so call sites stop
+// carrying the chained cast and the "why two casts?" comment lives here.
+//
+// Params:
+//   - d: time.Duration whose nanosecond count is reinterpreted.
+//
+// Returns:
+//   - bits: uint64 bit pattern; zero for a zero Duration.
+func durationBits(d time.Duration) (bits uint64) {
+	//: time.Duration is int64 under the hood; the int64 trip is required
+	//: because Go's conversion rules do NOT permit named-type-to-unsigned
+	//: without the intermediate unnamed-type step. Two's-complement layout
+	//: guarantees the Int64()/Duration() roundtrip is lossless.
+	return uint64(int64(d))
 }
 
 // TimeValue builds a Value of kind time. The time.Time payload lives in the

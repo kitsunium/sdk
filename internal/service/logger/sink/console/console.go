@@ -83,7 +83,7 @@ func (s *consoleSink) Write(ctx context.Context, r corelogger.RecordEvent, p []b
 			Reason:  "CTX_CANCELLED",
 			Public:  "Logging aborted due to cancellation",
 			Private: "service/logger/sink/console.Write saw a cancelled context",
-		}, errs.Int("level", int64(r.Level)))
+		}, errs.Int("level", int(r.Level)))
 	}
 	//: serialise writes so concurrent goroutines never interleave lines.
 	s.mu.Lock()
@@ -98,7 +98,7 @@ func (s *consoleSink) Write(ctx context.Context, r corelogger.RecordEvent, p []b
 			Reason:  "WRITE_FAILED",
 			Public:  "Console write failed",
 			Private: "service/logger/sink/console.Write underlying writer returned an error",
-		}, errs.Int("bytes", int64(len(p))), errs.Int("level", int64(r.Level)))
+		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
 	}
 	//: happy path — return the byte count.
 	return written, nil

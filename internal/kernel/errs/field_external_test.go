@@ -36,7 +36,7 @@ func TestInt(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		val  int64
+		val  int
 		want string
 	}{
 		{"zero", 0, "0"},
@@ -47,6 +47,29 @@ func TestInt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := errs.Int("k", tc.val).StringValue()
+			if got != tc.want {
+				t.Errorf("StringValue() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestInt64 covers the explicit int64 constructor added alongside Int.
+func TestInt64(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		val  int64
+		want string
+	}{
+		{"zero", 0, "0"},
+		{"max int64", 9_223_372_036_854_775_807, "9223372036854775807"},
+		{"min int64", -9_223_372_036_854_775_808, "-9223372036854775808"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := errs.Int64("k", tc.val).StringValue()
 			if got != tc.want {
 				t.Errorf("StringValue() = %q, want %q", got, tc.want)
 			}

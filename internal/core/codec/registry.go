@@ -12,6 +12,14 @@ import (
 )
 
 // Package-level indexes — grouped so KTN-VAR-GROUP stays quiet.
+//
+// sync.Map is the deliberate choice here over sync.RWMutex + map: codec
+// packages register themselves exactly ONCE at package import time
+// (their package-level var initializer calls Register), and every other
+// access is a read (Lookup / LookupMIME / LookupExt). That matches the
+// stdlib sync.Map docs' documented "append-once, read-many" sweet spot
+// and yields lock-free reads on the hot path. Reverting to RWMutex+map
+// would regress Lookup latency on contended workloads for no benefit.
 var (
 	registry  sync.Map
 	mimeIndex sync.Map

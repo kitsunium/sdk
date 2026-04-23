@@ -95,3 +95,30 @@ func TestTextEncoder_Append(t *testing.T) {
 		})
 	}
 }
+
+// TestTextEncoder_Append_StripsFramingSensitiveBytes asserts that Message
+// bytes CR, LF, and NUL never reach the encoded line — otherwise a syslog
+// or line-tailed-file sink could see attacker-injected frame boundaries.
+// Regresses finding #2 from the post-#12 audit.
+func TestTextEncoder_Append_StripsFramingSensitiveBytes(t *testing.T) {
+	t.Parallel()
+	enc := encoder.NewText(clock.System)
+	rec := corelogger.RecordEvent{
+		Level: level.Info,
+		//: this message contains every framing-sensitive byte the sanitizer
+		//: must replace; a naive append would spray newlines into the frame.
+		Message: "before\nmid\rend\x00tail",
+	}
+	line := string(enc.Append(nil, nil, rec))
+	//: the trailing record-terminator newline is expected; strip it for
+	//: the check so a newline from the Message would be caught.
+	payload := strings.TrimSuffix(line, "\n")
+	if strings.ContainsAny(payload, "\n\r\x00") {
+		t.Errorf("sanitizer leaked a framing byte: %q", payload)
+	}
+	//: each scrubbed byte must become a single space so the Message stays
+	//: recoverable in the line ordering; no collapse / no deletion.
+	if !strings.Contains(payload, "before mid end tail") {
+		t.Errorf("sanitizer did not replace framing bytes with space: %q", payload)
+	}
+}

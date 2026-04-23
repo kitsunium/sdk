@@ -13,6 +13,21 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// Security caps for hardened decoding. The library's default Unmarshal
+// uses package defaults that allow up to INT32_MAX array elements —
+// attacker-controlled input can trigger memory exhaustion before any
+// sanity check. Values here match the library's own "security tips"
+// README section.
+const (
+	// maxCBORArrayElements caps the slot count in any single CBOR array.
+	maxCBORArrayElements int = 1 << 20
+	// maxCBORMapPairs caps the key/value pair count in any single CBOR map.
+	maxCBORMapPairs int = 1 << 20
+	// maxCBORNestedLevels caps CBOR container nesting depth to defuse
+	// deeply-nested-structure DoS attempts.
+	maxCBORNestedLevels int = 32
+)
+
 // Package-level state: the codec singleton plus the hoisted MIME /
 // extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
 var (
@@ -24,7 +39,38 @@ var (
 
 	//: extension table hoisted for the same reason.
 	extensions = []string{".cbor"}
+
+	//: decMode is the reusable hardened decoder used by every Unmarshal
+	//: call; built eagerly via mustHardenedDecMode so a mis-configuration
+	//: crashes at package load rather than silently passing through.
+	decMode gocbor.DecMode = mustHardenedDecMode()
 )
+
+// mustHardenedDecMode builds the reusable DecMode with security caps and
+// panics on the defensive error path. DecOptions.DecMode() only fails when
+// the options themselves are self-contradictory — caps here are within the
+// library's accepted range so the panic is practically unreachable, but
+// guards a future library upgrade that tightens validation.
+//
+// Returns:
+//   - mode: the hardened decoder used by every cborCodec.Unmarshal call.
+func mustHardenedDecMode() (mode gocbor.DecMode) {
+	//: caps chosen per the fxamacker/cbor README Security Tips section.
+	opts := gocbor.DecOptions{
+		MaxArrayElements: maxCBORArrayElements,
+		MaxMapPairs:      maxCBORMapPairs,
+		MaxNestedLevels:  maxCBORNestedLevels,
+	}
+	//: build the reusable decoder; panic on the defensive error branch.
+	m, err := opts.DecMode()
+	//: DecMode only fails on self-contradictory options — fail loud.
+	if err != nil {
+		//: crash at package load so a misconfigured default never reaches runtime.
+		panic("service/codec/cbor: hardened DecMode construction failed: " + err.Error())
+	}
+	//: publish the hardened decoder for cborCodec.Unmarshal.
+	return m
+}
 
 // cborCodec is the concrete Codec implementation for CBOR.
 type cborCodec struct{}
@@ -99,8 +145,10 @@ func (*cborCodec) Marshal(v any) (data []byte, err error) {
 // Returns:
 //   - error: UnmarshalFailed wrapping the library cause on failure.
 func (*cborCodec) Unmarshal(data []byte, v any) (err error) {
-	//: delegate to the library for the actual decoding.
-	uerr := gocbor.Unmarshal(data, v)
+	//: route through the hardened DecMode so attacker-controlled input
+	//: cannot trigger memory exhaustion via huge arrays, huge maps, or
+	//: deeply-nested structures (finding #16).
+	uerr := decMode.Unmarshal(data, v)
 	//: success fast-path.
 	if uerr == nil {
 		//: nothing to wrap.

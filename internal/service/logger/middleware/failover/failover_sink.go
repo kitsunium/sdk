@@ -82,7 +82,7 @@ func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p 
 		Reason:  "FAILOVER_EXHAUSTED",
 		Public:  "All failover sinks returned an error",
 		Private: "service/logger/middleware/failover.Write exhausted the chain",
-	}, errs.Int("attempts", int64(len(s.chain))), errs.Int("level", int64(rec.Level)))
+	}, errs.Int("attempts", len(s.chain)), errs.Int("level", int(rec.Level)))
 }
 
 // Flush forwards to every branch and aggregates per-branch errors via

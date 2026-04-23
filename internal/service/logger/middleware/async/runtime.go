@@ -48,21 +48,22 @@ func asyncCtx() (ctx context.Context) {
 	return context.Background()
 }
 
-// swallowDownstreamError is the documented sink for downstream Write errors.
-// The async sink cannot propagate errors back to the original producer, so
-// the failure is silently dropped. Future commits may swap this for a
-// configurable callback wired into Config.
+// forwardDownstreamError surfaces a downstream Write error to the OnError
+// callback so operators have a hook for metrics / fallback logging. Replaces
+// the previous silent-drop behaviour (finding #24 from post-audit review).
 //
 // Params:
+//   - s: async sink holding the configured onError callback.
 //   - bytes: byte count returned by the downstream sink; informational only.
-//   - err: downstream error to discard.
-func swallowDownstreamError(bytes int, err error) {
-	//: defensive guards so both parameters are observed by the audit.
+//   - err: downstream error to surface; nil is a no-op fast-path.
+func (s *asyncSink) forwardDownstreamError(bytes int, err error) {
+	//: defensive guard so bogus bytes do not trigger the callback.
 	if bytes < 0 || err == nil {
-		//: nothing to discard on the happy path or on bogus byte counts.
+		//: nothing to surface on the happy path or on bogus byte counts.
 		return
 	}
-	//: documented drop — async sink contract forbids propagating errors.
+	//: hand the error to the caller-supplied callback (or the no-op default).
+	s.onError(err)
 }
 
 // swallowRingError documents the test-only pattern of dropping a Queue error

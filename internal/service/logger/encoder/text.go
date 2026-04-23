@@ -115,8 +115,40 @@ func appendHeader(dst []byte, r corelogger.RecordEvent) (out []byte) {
 	dst = append(dst, ' ')
 	dst = append(dst, r.Level.String()...)
 	dst = append(dst, ' ')
-	//: hand back the buffer with the header complete.
-	return append(dst, r.Message...)
+	//: strip framing-sensitive bytes from the Message so downstream sinks
+	//: that use line-oriented framing (syslog RFC5424, plain file tail) do
+	//: not see attacker-influenced CR/LF/NUL produce spoofed frames. This
+	//: is defence-in-depth: sinks that need richer escaping still can.
+	return appendSanitizedMessage(dst, r.Message)
+}
+
+// appendSanitizedMessage copies msg onto dst replacing '\n', '\r', and NUL
+// with a single space so Message content can never inject a new frame in a
+// line-framed downstream sink. Other control characters are preserved to
+// keep the rendering faithful; only framing-sensitive bytes are stripped.
+//
+// Params:
+//   - dst: caller-supplied buffer; sanitized bytes are appended onto it.
+//   - msg: the Record.Message string to sanitize.
+//
+// Returns:
+//   - []byte: the (possibly re-allocated) buffer with msg appended.
+func appendSanitizedMessage(dst []byte, msg string) (out []byte) {
+	//: walk msg byte-by-byte; ASCII control-char check is cheap and the
+	//: allocation cost matches the existing append pattern in this file.
+	for i := range len(msg) {
+		b := msg[i]
+		//: framing-sensitive bytes collapse to a single space per occurrence.
+		if b == '\n' || b == '\r' || b == 0 {
+			dst = append(dst, ' ')
+			continue
+		}
+		//: every other byte passes through verbatim (UTF-8 multi-byte runes
+		//: never contain bytes in 0x00..0x1F, so byte-level scan is safe).
+		dst = append(dst, b)
+	}
+	//: hand back the sanitized buffer with framing-sensitive bytes scrubbed.
+	return dst
 }
 
 // appendAttrWithGroups prepends the active group prefix stack to the

@@ -288,6 +288,60 @@ func TestAsync_CloseIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestAsync_CloseWaitsForInFlightWrites regresses finding #1 — a producer
+// goroutine that passed the isClosed check must not have its entry dropped
+// by a concurrent Close that reaches drainRemaining first. Close MUST
+// wait on the inFlight WaitGroup so drainRemaining observes every entry
+// whose Write is already past the stop-channel check.
+//
+// Under the race detector with -count=N the old code (without inFlight
+// WaitGroup) reliably dropped records; with the fix, every accepted Write
+// must reach the downstream sink.
+func TestAsync_CloseWaitsForInFlightWrites(t *testing.T) {
+	t.Parallel()
+	const producers int = 64
+	down := &recordingSink{}
+	//: oversized ring so TryWrite is virtually guaranteed to succeed; the
+	//: race we care about is between isClosed and TryWrite, not saturation.
+	s := async.New(down, async.Config{BufferSize: 256})
+	rec := corelogger.RecordEvent{Level: level.Info}
+	//: launch N producers that all race against a concurrent Close.
+	ready := make(chan struct{})
+	done := make(chan struct{})
+	acceptedByWrite := atomic.Int64{}
+	for range producers {
+		go func() {
+			//: synchronise start so producers pile into Write together with Close.
+			<-ready
+			n, err := s.Write(t.Context(), rec, []byte("x"))
+			//: count only writes that Write itself accepted (n>0, err=nil).
+			if err == nil && n > 0 {
+				acceptedByWrite.Add(1)
+			}
+			done <- struct{}{}
+		}()
+	}
+	//: release every producer, then Close concurrently.
+	close(ready)
+	//: brief yield so a fraction of producers enter Write before Close fires.
+	time.Sleep(100 * time.Microsecond)
+	if cerr := s.Close(); cerr != nil {
+		t.Errorf("Close err = %v", cerr)
+	}
+	//: wait for every producer to finish reporting back.
+	for range producers {
+		<-done
+	}
+	//: invariant: every write that Write() accepted MUST have reached the
+	//: downstream sink. drainRemaining runs after inFlight.Wait so no
+	//: entry whose Write returned nil can be orphaned in a dead ring.
+	got := down.writes.Load()
+	accepted := acceptedByWrite.Load()
+	if got < accepted {
+		t.Errorf("Close lost records: downstream received %d, Write accepted %d", got, accepted)
+	}
+}
+
 func TestAsyncSentinels(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -295,8 +349,8 @@ func TestAsyncSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"Stopped carries 3701", async.Stopped, async.CodeAsyncStopped},
-		{"BufferFull carries 3702", async.BufferFull, async.CodeAsyncBufferFull},
+		{"Stopped carries 0.3.17.1", async.Stopped, async.CodeAsyncStopped},
+		{"BufferFull carries 0.3.17.2", async.BufferFull, async.CodeAsyncBufferFull},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

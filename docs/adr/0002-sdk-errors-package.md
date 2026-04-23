@@ -87,9 +87,16 @@ uniqueness across the SDK.
 | 3700-3799 | `internal/service/logger/middleware/async` | emitter | `CodeAsyncStopped=3701`, `CodeAsyncBufferFull=3702` |
 | 3800-3899 | `internal/service/logger/middleware/route` | emitter | `CodeRouteNoMatch=3801` |
 | 3900-3999 | `internal/service/logger/middleware/failover` | emitter | `CodeFailoverExhausted=3901`, `CodeFailoverEmpty=3902` |
-| 5100-5199 | `internal/service/logger/middleware/sample` | emitter | `CodeSampleRateInvalid=5101`, `CodeSampleDownstreamNil=5102` |
-| 5200-5299 | `internal/service/logger/middleware/recover` | emitter | `CodeRecoverPanicked=5201`, `CodeRecoverDownstreamNil=5202` |
-| 5300-5399 | `internal/service/logger/sink/syslog` | emitter | `CodeSyslogAddrEmpty=5301`, `CodeSyslogDialFailed=5302`, `CodeSyslogWriteFailed=5303`, `CodeSyslogCloseFailed=5304`, `CodeSyslogProtoInvalid=5305` |
+| 5100-5199 | `internal/service/logger/middleware/sample` | emitter | `CodeSampleRateInvalid=5101`, `CodeSampleDownstreamNil=5102` (**legacy**; canonical `0.3.20.*` — see ADR 0006) |
+| 5200-5299 | `internal/service/logger/middleware/recover` | emitter | `CodeRecoverPanicked=5201`, `CodeRecoverDownstreamNil=5202` (**legacy**; canonical `0.3.21.*` — see ADR 0006) |
+| 5300-5399 | `internal/service/logger/sink/syslog` | emitter | `CodeSyslogAddrEmpty=5301`, `CodeSyslogDialFailed=5302`, `CodeSyslogWriteFailed=5303`, `CodeSyslogCloseFailed=5304`, `CodeSyslogProtoInvalid=5305` (**legacy**; canonical `0.3.15.*` — see ADR 0006) |
+
+> **Legacy shorthand**: the 5xxx rows above were allocated ad-hoc before
+> ADR 0005 introduced dotted-quad codes, and they violate ADR 0002's own
+> declared scheme (1xxx kernel / 2xxx core / 3xxx service / 4xxx pkg).
+> Their canonical identifiers are the dotted-quad forms shown in the
+> parenthesised ADR 0006 cross-references. New packages allocate
+> dotted-quad ranges only — do not add new 5xxx rows.
 | 4100-4199 | `pkg/v1/logger` | emitter | `CodeWriterRequired=4101`, `CodeSinkConfigRequired=4102` |
 | 4200-4299 | `pkg/v1/codec` + `pkg/v1/codec/baseenc` | emitter | `CodeUnknownFormat=4201`, `CodeCodecUnavailable=4202`, `CodeStreamingUnsupported=4203`, `CodeInvalidEncoding=4251`, `CodeDecodeFailed=4252` |
 | ≥ 10000 | `pkg/v2+` | future | — |

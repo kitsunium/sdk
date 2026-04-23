@@ -110,7 +110,7 @@ func TestNoMatchSentinel(t *testing.T) {
 	tests := []struct {
 		name string
 	}{
-		{"NoMatch carries 3801"},
+		{"NoMatch carries 0.3.18.1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

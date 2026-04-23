@@ -119,7 +119,7 @@ func TestWithGroupOnRealLogger(t *testing.T) {
 			t.Parallel()
 			sink := &builderSink{}
 			lg := mustNewWithSink(t, sink)
-			child := logger.WithGroup(lg, "http")
+			child := lg.WithGroup("http")
 			logger.Build(child, logger.LevelInfo).Str("method", "GET").Send(t.Context(), "req")
 			if !strings.Contains(string(sink.captured), "http.method=\"GET\"") {
 				t.Errorf("missing namespaced key: %q", sink.captured)

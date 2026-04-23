@@ -6,6 +6,7 @@ go_library(
     name = "logger",
     srcs = [
         "attr.go",
+        "encoder.go",
         "handler.go",
         "kind.go",
         "logger.go",
