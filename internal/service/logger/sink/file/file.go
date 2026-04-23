@@ -19,9 +19,45 @@ import (
 )
 
 // defaultFilePerm is the permission bitmask passed to os.OpenFile when the
-// destination file does not yet exist. 0644 mirrors the conventional log
-// file permission shipped by syslog and journald.
-const defaultFilePerm os.FileMode = 0o644
+// destination file does not yet exist. 0600 restricts reads to the owning
+// UID so diagnostic content (attr values, wrapped Private fields bubbled
+// in by consumers that log the Source chain) is never world-readable.
+// Operators that need group or other-reader access chmod explicitly.
+const defaultFilePerm os.FileMode = 0o600
+
+// refuseSymlink returns a typed error when path refers to a symbolic link.
+// Pre-opening the file through Lstat lets us reject attacker-planted links
+// (CWE-59) before OpenFile follows them. os.Lstat does NOT traverse the
+// final component, so the test is TOCTOU-safe relative to OpenFile only
+// if the directory itself is not attacker-writable — a precondition the
+// godoc on New documents.
+//
+// Params:
+//   - path: filesystem path supplied to New; already non-empty.
+//
+// Returns:
+//   - err: OpenFailed when path is a symlink; nil when it is absent or a
+//     regular file. Lstat failures other than "not a symlink" are swallowed
+//     here — the subsequent OpenFile will surface them uniformly.
+func refuseSymlink(path string) (err error) {
+	//: Lstat does NOT follow the final component, so a symlink is caught
+	//: before OpenFile can follow it. Absent paths / stat errors fall
+	//: through: OpenFile will surface the real diagnostic uniformly.
+	fi, lerr := os.Lstat(path)
+	//: pass through when stat fails OR the target is a regular file.
+	//: (Go's short-circuit evaluation makes fi.Mode() safe when lerr==nil.)
+	if lerr != nil || fi.Mode()&os.ModeSymlink == 0 {
+		//: happy path — not a symlink, hand control back to OpenFile.
+		return nil
+	}
+	//: path resolved to a symlink → reject by policy.
+	return errs.Wrap(nil, errs.WrapParams{
+		Code:    CodeOpenFailed,
+		Reason:  "OPEN_FAILED",
+		Public:  "File sink refuses to open a symlink",
+		Private: "service/logger/sink/file.New: path is a symlink; refusing per hardening policy",
+	}, errs.String("path", path))
+}
 
 // fileSink wraps *os.File behind a mutex so concurrent goroutines emit
 // atomic Write calls. Process-level atomicity for payloads under PIPE_BUF
@@ -48,8 +84,16 @@ func New(path string) (sink corelogger.Sink, err error) {
 		//: documented sentinel — caller must supply a path.
 		return nil, PathEmpty
 	}
-	//: open in append mode so concurrent writers from any process interleave atomically.
-	f, oerr := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, defaultFilePerm)
+	//: reject pre-existing symlinks (CWE-59); O_NOFOLLOW on Linux closes
+	//: the remaining TOCTOU window between this check and OpenFile.
+	if serr := refuseSymlink(path); serr != nil {
+		//: surface the hardening sentinel so HasCode introspection works.
+		return nil, serr
+	}
+	//: open with O_NOFOLLOW on POSIX (Linux) so even a symlink planted
+	//: between Lstat and OpenFile causes open to fail rather than silently
+	//: redirect. openFlags is platform-scoped in open_flags_{linux,other}.go.
+	f, oerr := os.OpenFile(path, openFlags, defaultFilePerm)
 	//: surface os errors via errs.Wrap so errors.Is still catches the cause.
 	if oerr != nil {
 		//: wrap with the documented sentinel for HasCode-style introspection.

@@ -46,6 +46,57 @@ func TestNew(t *testing.T) {
 	}
 }
 
+// TestNew_RejectsSymlink regresses finding #3 — a pre-planted symlink at
+// the destination path would otherwise cause os.OpenFile to follow it and
+// redirect writes to an attacker-chosen target. file.New must reject the
+// symlink via Lstat + CodeOpenFailed.
+func TestNew_RejectsSymlink(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.log")
+	link := filepath.Join(dir, "attacker.log")
+	//: create a harmless target so the symlink resolves; the hardening
+	//: policy rejects the symlink regardless of whether the target is
+	//: safe — we never follow it.
+	if ferr := os.WriteFile(target, []byte("pre-existing"), 0o600); ferr != nil {
+		t.Fatalf("setup write target: %v", ferr)
+	}
+	if lerr := os.Symlink(target, link); lerr != nil {
+		t.Fatalf("setup symlink: %v", lerr)
+	}
+	s, err := file.New(link)
+	if s != nil {
+		t.Errorf("New returned a non-nil sink through a symlink")
+		//: best-effort cleanup so the test never leaks descriptors.
+		s.Close()
+	}
+	if !errs.HasCode(err, file.CodeOpenFailed) {
+		t.Errorf("HasCode(err, CodeOpenFailed) = false; err = %v", err)
+	}
+}
+
+// TestNew_DefaultFilePermIs0600 regresses finding #3 — freshly-created log
+// files must be owner-read/write only. World-readable logs (0644) would
+// leak diagnostic content including attr values and wrapped Private
+// fields that consumers may include in their own log lines.
+func TestNew_DefaultFilePermIs0600(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "perm.log")
+	s, err := file.New(path)
+	if err != nil {
+		t.Fatalf("New err = %v", err)
+	}
+	defer func() { s.Close() }()
+	fi, serr := os.Stat(path)
+	if serr != nil {
+		t.Fatalf("Stat err = %v", serr)
+	}
+	//: 0600 = owner rw only; any group/other bit indicates a regression.
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Errorf("file perm = %o, want 0600", got)
+	}
+}
+
 func TestFileSink_WriteFlushClose(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
