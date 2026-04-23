@@ -10,7 +10,8 @@ import (
 
 func newAccessorsSentinel(tb testing.TB) *errs.Error {
 	tb.Helper()
-	return errs.Define(3101, "WRITER_NIL_ACC",
+	//: 0x00_03_01_01 = 0.3.1.1 (service/logger WriterNil dotted-quad).
+	return errs.Define(0x00_03_01_01, "WRITER_NIL_ACC",
 		"Log handler requires a non-nil writer",
 		"service/logger.NewTextHandler called with nil io.Writer (accessors test)")
 }
@@ -23,11 +24,12 @@ func TestCodeOf(t *testing.T) {
 		wantCode int
 		wantOK   bool
 	}{
-		{"sdk error", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 3101, true},
+		{"sdk error", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 0x00_03_01_01, true},
 		{"stdlib", func(tb testing.TB) error { return errors.New("plain") }, 0, false},
 		{"nil", func(tb testing.TB) error { return nil }, 0, false},
 	}
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := errs.CodeOf(tc.in(t))
 			if got != tc.wantCode || ok != tc.wantOK {
@@ -108,8 +110,9 @@ func TestFieldsOf(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			//: 0x00_03_01_0A = 0.3.1.10 (CtxCancelled dotted-quad).
 			inner := errs.Wrap(context.Canceled, errs.WrapParams{
-				Code: 3110, Reason: "CTX_CANCELLED_FOF", Public: "Operation aborted due to cancellation",
+				Code: 0x00_03_01_0A, Reason: "CTX_CANCELLED_FOF", Public: "Operation aborted due to cancellation",
 				Private: "inner debug",
 			}, errs.String("inner", "i"))
 			outer := errs.Wrap(inner, errs.WrapParams{}, errs.String("outer", "o"))
@@ -186,21 +189,23 @@ func TestExitCodeOf(t *testing.T) {
 
 func TestHasCode(t *testing.T) {
 	t.Parallel()
+	//: the accessors sentinel is built with CodeWriterNil = 0x00_03_01_01.
 	tests := []struct {
 		name string
 		in   func(tb testing.TB) error
-		code int
+		code errs.Code
 		want bool
 	}{
-		{"direct match", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 3101, true},
-		{"miss", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 3102, false},
-		{"nil", func(tb testing.TB) error { return nil }, 3101, false},
-		{"stdlib", func(tb testing.TB) error { return errors.New("plain") }, 3101, false},
+		{"direct match", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 0x00_03_01_01, true},
+		{"miss", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 0x00_03_01_02, false},
+		{"nil", func(tb testing.TB) error { return nil }, 0x00_03_01_01, false},
+		{"stdlib", func(tb testing.TB) error { return errors.New("plain") }, 0x00_03_01_01, false},
 	}
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if got := errs.HasCode(tc.in(t), tc.code); got != tc.want {
-				t.Errorf("HasCode(%d) = %v, want %v", tc.code, got, tc.want)
+				t.Errorf("HasCode(%s) = %v, want %v", tc.code, got, tc.want)
 			}
 		})
 	}
