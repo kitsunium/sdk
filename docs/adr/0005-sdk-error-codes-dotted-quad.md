@@ -75,6 +75,12 @@ rather than poisoned.
 ### Registry (partial — full YAML at `docs/adr/0005-error-codes.yaml` in
 a follow-up CI wave; this MR ships prose)
 
+> **Post-PR extensions**: see ADR 0006 for the 10 additional packages
+> introduced by PR #12 (logger v2 + kernel/ring) — ranges `0.1.3.*`,
+> `0.3.13.*` through `0.3.21.*`, and the `1.1.0.*` extension with
+> `CodeSinkConfigRequired=1.1.0.2`.
+
+
 | Package | Dotted range | Used in this MR |
 |---|---|---|
 | `internal/kernel/errs` (meta) | `0.0.0.*` | `CodeInvalidCode=0.0.0.1`, `CodeInvalidReason=0.0.0.2`, `CodeInvalidPublic=0.0.0.3`, `CodeInvalidPrivate=0.0.0.4` NEW, `CodeInvalidCodeString=0.0.0.5` NEW, `CodeInvalidWrapParams=0.0.0.6` NEW |
