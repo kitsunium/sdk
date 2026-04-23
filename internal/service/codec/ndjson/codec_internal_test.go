@@ -219,3 +219,40 @@ func Test_decodeLines(t *testing.T) {
 // reflectTypeOf returns reflect.TypeOf as a local alias to keep the helper
 // import list obvious at the call site.
 func reflectTypeOf(v any) reflect.Type { return reflect.TypeOf(v) }
+
+func Test_ndjsonCodec_Append(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		dst       []byte
+		v         any
+		wantBytes []byte
+		wantErr   bool
+	}
+	tests := []tc{
+		{"appends one record per slice element", nil, []int{1, 2}, []byte("1\n2\n"), false},
+		{"appends to non-empty buffer", []byte("prefix:"), []int{3}, []byte("prefix:3\n"), false},
+		{"non-slice value yields error", nil, 7, nil, true},
+		{"per-record marshal failure surfaces error", nil, []any{make(chan int)}, nil, true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &ndjsonCodec{}
+		got, err := c.Append(tc.dst, tc.v)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("Append err = %v, wantErr = %v", err, tc.wantErr)
+		}
+		if tc.wantErr {
+			return
+		}
+		if string(got) != string(tc.wantBytes) {
+			t.Errorf("Append bytes = %q, want %q", got, tc.wantBytes)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
