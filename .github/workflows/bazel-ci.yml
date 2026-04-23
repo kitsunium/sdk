@@ -5,29 +5,48 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel in-progress runs when a newer commit on the same ref arrives so
+# rapid re-pushes do not spawn parallel builds that corrupt bazel caches
+# or upload duplicate artifacts. Matches docker-images.yml policy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   bazel:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v5
+      # SHA-pinned per the .github/workflows/CLAUDE.md policy — version
+      # comments track the resolved human-readable tag.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - uses: bazel-contrib/setup-bazel@0.19.0
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           bazelisk-cache: true
-          disk-cache: ${{ github.workflow }}-${{ hashFiles('.bazelrc', 'MODULE.bazel', '**/go.mod', '**/go.sum') }}
+          # .bazelversion included so a Bazel version bump invalidates the
+          # disk-cache (otherwise stale objects could survive the upgrade).
+          disk-cache: ${{ github.workflow }}-${{ hashFiles('.bazelrc', '.bazelversion', 'MODULE.bazel', '**/go.mod', '**/go.sum') }}
           repository-cache: true
 
       - name: drift check — bazel mod tidy + gazelle
         run: |
           bazel mod tidy
           bazel run //:gazelle
+          # Catch both modifications to tracked files AND new untracked BUILD/go
+          # files that gazelle created — `git diff --exit-code` alone misses
+          # the untracked case (finding #11 from post-audit review).
           git diff --exit-code || {
             echo "::error::Run 'bazel mod tidy && bazel run //:gazelle' locally and commit."
             exit 1
           }
+          if git ls-files --others --exclude-standard | grep -E '(BUILD\.bazel|go\.sum|go\.mod)$'; then
+            echo "::error::Gazelle created untracked BUILD.bazel/go.mod/go.sum files — commit them."
+            exit 1
+          fi
 
       - name: build
         run: bazel build --config=ci //...
@@ -40,8 +59,11 @@ jobs:
           bazel coverage --combined_report=lcov //...
           cp "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage.lcov
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: coverage
+          # Unique per-run artifact name so concurrent runs never silently
+          # deduplicate coverage reports (finding #28).
+          name: coverage-${{ github.run_number }}
           path: coverage.lcov
+          retention-days: 30
           if-no-files-found: warn
