@@ -54,7 +54,14 @@ func ParseCode(s string) (c Code, err error) {
 	if segIdx != 4 {
 		return 0, parseFailure(s, "expected 4 segments")
 	}
-	return Pack(Major(octets[0]), Layer(octets[1]), PkgCode(octets[2]), Serial(octets[3])), nil
+	c = Pack(Major(octets[0]), Layer(octets[1]), PkgCode(octets[2]), Serial(octets[3]))
+	//: reject the zero Code — "0.0.0.0" roundtrips from Code(0).String() but is
+	//: the reserved "no code" sentinel; Define/Wrap refuse it so parsing it
+	//: would yield a value that cannot be used in any sentinel match.
+	if c == 0 {
+		return 0, parseFailure(s, "0.0.0.0 is the reserved zero sentinel")
+	}
+	return c, nil
 }
 
 // parseOctet validates and returns a single octet per ParseCode rules.

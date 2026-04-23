@@ -14,7 +14,6 @@ func TestParseCode_ValidCanonical(t *testing.T) {
 		want errs.Code
 	}
 	tests := []tc{
-		{"0.0.0.0", 0x00_00_00_00},
 		{"0.0.0.1", 0x00_00_00_01},
 		{"1.2.3.4", 0x01_02_03_04},
 		{"255.255.255.255", 0xFF_FF_FF_FF},
@@ -43,22 +42,23 @@ func TestParseCode_ValidCanonical(t *testing.T) {
 func TestParseCode_RejectsBadInputs(t *testing.T) {
 	t.Parallel()
 	bad := []string{
-		"",                         // empty
-		"1.1.1",                    // too few segments
-		"1.1.1.1.1",                // too many segments
-		"256.0.0.0",                // octet overflow
+		"",          // empty
+		"1.1.1",     // too few segments
+		"1.1.1.1.1", // too many segments
+		"256.0.0.0", // octet overflow
 		"1.256.0.0",
 		"1.1.1.256",
-		"0001.0.0.0",               // segment too long
-		"01.1.1.1",                 // leading zero (padded form)
-		"001.001.001.001",          // full padded form
-		" 1.1.1.1",                 // leading whitespace
-		"1.1.1.1 ",                 // trailing whitespace
-		"-1.0.0.0",                 // negative
-		"+1.0.0.0",                 // plus sign
-		"1..1.1",                   // empty segment
-		"a.b.c.d",                  // non-digit
-		"1.1.1.1a",                 // trailing junk
+		"0001.0.0.0",      // segment too long
+		"01.1.1.1",        // leading zero (padded form)
+		"001.001.001.001", // full padded form
+		" 1.1.1.1",        // leading whitespace
+		"1.1.1.1 ",        // trailing whitespace
+		"-1.0.0.0",        // negative
+		"+1.0.0.0",        // plus sign
+		"1..1.1",          // empty segment
+		"a.b.c.d",         // non-digit
+		"1.1.1.1a",        // trailing junk
+		"0.0.0.0",         // reserved zero sentinel — rejected by ADR 0005 rule
 	}
 	for _, s := range bad {
 		s := s
