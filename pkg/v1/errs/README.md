@@ -44,6 +44,21 @@ fmt.Println("HTTP status:", errs.HTTPStatusOf(err))
 - **`PublicOf`** returns the wire-safe message (≤120 runes, literal, no interpolation). Send it in HTTP/gRPC responses, error pages, user-facing surfaces.
 - **`PrivateOf`** returns the detailed log-only message. **DIAGNOSTIC ONLY.** Never put it in a response, an error page, or anything the end user can see. It exists so observability tooling can correlate a request-id with a detailed server-side explanation in the log backend without re-logging the entire chain.
 
+## HTTP status policy
+
+- `HTTPStatusOf` defaults to **500** when the error does not carry an
+  explicit override. That default is deliberate for internal failures but
+  it is a leak-by-default anti-pattern for domain errors that are really
+  4xx (validation, not-found, conflict, authorisation). Those errors
+  MUST pass `errs.WithHTTPStatus(4xx)` at `Define` time so the accessor
+  surfaces the correct status.
+- Code review is the only enforcement today. A linter rule that flags
+  `Define(...)` calls whose Reason looks 4xx-shaped but whose options
+  omit `WithHTTPStatus` is tracked for a follow-up (post-audit plan).
+- Until then: when you write a new sentinel that represents a user-
+  facing 4xx, do not rely on the 500 default — name the status
+  explicitly.
+
 ## Semantics reminders
 
 - **Origin wins on wrap.** An error born in `service/logger` (code `31xx`) and observed through `pkg/v1/logger` keeps its `31xx` code — the Code describes the origin, never the observation surface.

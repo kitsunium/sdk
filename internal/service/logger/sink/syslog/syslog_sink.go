@@ -51,8 +51,12 @@ type syslogSink struct {
 	mu sync.Mutex
 }
 
-// New dials addr over network (udp / tcp) and returns a syslog Sink. The
-// connection lifetime is owned by the sink — Close releases it.
+// New dials addr over network (udp / tcp) using net.Dial and returns a
+// syslog Sink. The connection lifetime is owned by the sink — Close
+// releases it. SECURITY: addr is passed straight to net.Dial. When addr
+// is consumer-controlled (env var, config, API input), prefer
+// NewWithConfig with a Dialer that enforces an allowlist so an attacker
+// cannot target internal services (169.254.169.254, localhost, etc.).
 //
 // Params:
 //   - network: "udp" or "tcp"; anything else yields ProtoInvalid.
@@ -62,6 +66,24 @@ type syslogSink struct {
 //   - corelogger.Sink: a ready-to-use syslog Sink.
 //   - error: AddrEmpty / ProtoInvalid / DialFailed wrapping the cause.
 func New(network, addr string) (sink corelogger.Sink, err error) {
+	//: thin wrapper around NewWithConfig with the default net.Dial dialer.
+	return NewWithConfig(network, addr, Config{})
+}
+
+// NewWithConfig dials addr over network (udp / tcp) using cfg.Dialer (or
+// net.Dial when cfg.Dialer is nil) and returns a syslog Sink. Recommended
+// constructor when addr might be consumer-controlled — plug an allowlist
+// dialer to defuse SSRF.
+//
+// Params:
+//   - network: "udp" or "tcp"; anything else yields ProtoInvalid.
+//   - addr: host:port pair forwarded to the dialer; empty yields AddrEmpty.
+//   - cfg: tuning knobs; zero-value falls back to net.Dial.
+//
+// Returns:
+//   - corelogger.Sink: a ready-to-use syslog Sink.
+//   - error: AddrEmpty / ProtoInvalid / DialFailed wrapping the cause.
+func NewWithConfig(network, addr string, cfg Config) (sink corelogger.Sink, err error) {
 	//: refuse an empty address early — net.Dial would surface a confusing error.
 	if addr == "" {
 		//: documented sentinel — caller must supply an address.
@@ -72,8 +94,15 @@ func New(network, addr string) (sink corelogger.Sink, err error) {
 		//: documented sentinel — caller must supply udp or tcp.
 		return nil, ProtoInvalid
 	}
+	//: nil dialer falls back to stdlib net.Dial (legacy behaviour of New).
+	dial := cfg.Dialer
+	//: fallback is outside the hot path — single branch keeps call costs flat.
+	if dial == nil {
+		//: default dialer preserves zero-config usage.
+		dial = net.Dial
+	}
 	//: dial the syslog target; failure is wrapped for HasCode introspection.
-	conn, derr := net.Dial(network, addr)
+	conn, derr := dial(network, addr)
 	//: surface dial errors via errs.Wrap so errors.Is still catches the cause.
 	if derr != nil {
 		//: wrap with the documented sentinel for HasCode introspection.
