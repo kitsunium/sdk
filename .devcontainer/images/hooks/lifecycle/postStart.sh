@@ -1642,6 +1642,72 @@ init_vpn() {
     return 0
 }
 
+# Force-sync .devcontainer/features/ from image-embedded copy (always overwrites).
+# Consumer projects get upstream template features at every container start.
+# Auto-skips when running inside the template repo itself (detected via
+# .devcontainer/.template-version matching git HEAD).
+step_sync_features() {
+    local src="/etc/devcontainer-template/features"
+    local dst="${WORKSPACE_FOLDER:-/workspace}/.devcontainer/features"
+    local marker="${WORKSPACE_FOLDER:-/workspace}/.devcontainer/.template-version"
+
+    if [ ! -d "$src" ]; then
+        log_info "No embedded features dir in image, skipping sync"
+        return 0
+    fi
+
+    if [ ! -d "${WORKSPACE_FOLDER:-/workspace}/.devcontainer" ]; then
+        log_warn "No .devcontainer/ in workspace, skipping features sync"
+        return 0
+    fi
+
+    # Self-exclusion: skip if we ARE the template repo (git HEAD matches marker commit).
+    if [ -f "$marker" ] && command -v jq &>/dev/null; then
+        local marker_commit current_commit
+        marker_commit=$(jq -r '.commit // empty' "$marker" 2>/dev/null || true)
+        current_commit=$(git -C "${WORKSPACE_FOLDER:-/workspace}" rev-parse --short HEAD 2>/dev/null || true)
+        if [ -n "$marker_commit" ] && [ -n "$current_commit" ] && \
+           { [[ "$current_commit" == "$marker_commit"* ]] || [[ "$marker_commit" == "$current_commit"* ]]; }; then
+            log_info "Template repo detected (template-version matches HEAD), skipping features sync"
+            return 0
+        fi
+    fi
+
+    # /update harmony: skip sync when consumer's .template-version is newer than
+    # the image's embedded version (consumer ran /update on a fresher template).
+    # Syncing would silently regress /update's work.
+    local image_version="/etc/devcontainer-template/.template-version"
+    if [ -f "$marker" ] && [ -f "$image_version" ] && command -v jq &>/dev/null; then
+        local repo_updated image_updated
+        repo_updated=$(jq -r '.updated // empty' "$marker" 2>/dev/null || true)
+        image_updated=$(jq -r '.updated // empty' "$image_version" 2>/dev/null || true)
+        if [ -n "$repo_updated" ] && [ -n "$image_updated" ] && \
+           [[ "$repo_updated" > "$image_updated" ]]; then
+            log_info "Repo template-version ($repo_updated) newer than image ($image_updated), skipping features sync"
+            return 0
+        fi
+    fi
+
+    log_info "Force-syncing .devcontainer/features/ from template image..."
+    if command -v rsync &>/dev/null; then
+        if rsync -a --delete --checksum "$src/" "$dst/"; then
+            log_success ".devcontainer/features/ synced ($(find "$dst" -type f 2>/dev/null | wc -l) files)"
+        else
+            log_error "rsync failed; features dir may be in inconsistent state"
+            return 1
+        fi
+    else
+        rm -rf "$dst"
+        mkdir -p "$dst"
+        if cp -a "$src/." "$dst/"; then
+            log_success ".devcontainer/features/ synced via cp ($(find "$dst" -type f 2>/dev/null | wc -l) files)"
+        else
+            log_error "cp fallback failed"
+            return 1
+        fi
+    fi
+}
+
 # Clean up legacy workspace hook stubs (replaced by direct /etc/devcontainer-hooks/ calls)
 step_cleanup_legacy_stubs() {
     local dc_dir="${WORKSPACE_FOLDER:-/workspace}/.devcontainer"
@@ -1663,6 +1729,7 @@ step_cleanup_legacy_stubs() {
 # Execution
 # ============================================================================
 
+run_step "Sync features dir"        step_sync_features
 run_step "Cleanup legacy stubs"     step_cleanup_legacy_stubs
 run_step "Restore Claude config"    step_restore_claude_config
 run_step "Init Claude dirs"         step_init_claude_dirs

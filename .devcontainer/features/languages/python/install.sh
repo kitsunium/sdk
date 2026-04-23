@@ -154,10 +154,6 @@ pip_install() {
 # Quality, linting, type checking, security, testing — single batch
 pip_install ruff pylint mypy bandit pytest pytest-cov
 
-# Documentation Tools (MkDocs Material) — single batch
-echo -e "${YELLOW}Installing documentation tools...${NC}"
-pip_install mkdocs mkdocs-material mkdocs-minify-plugin mkdocs-awesome-pages-plugin
-
 echo -e "${GREEN}✓ Python development tools installed${NC}"
 
 # Setup shell integration for pyenv (if installed)
@@ -194,10 +190,6 @@ echo "  - pylint (linter)"
 echo "  - mypy (type checker)"
 echo "  - bandit (security scanner)"
 echo "  - pytest + pytest-cov (testing)"
-echo ""
-echo "Documentation tools:"
-echo "  - mkdocs + mkdocs-material (static site generator)"
-echo "  - mkdocs-material includes native Mermaid support"
 echo ""
 echo "Cache directory:"
 echo "  - pip: $PIP_CACHE_DIR"
