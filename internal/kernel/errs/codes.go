@@ -20,3 +20,18 @@ const CodeInvalidReason int = 1002
 // empty, exceeds 120 runes, or contains a newline. Literal-ness of the
 // argument is enforced separately by the AST audit, not at runtime.
 const CodeInvalidPublic int = 1003
+
+// CodeInvalidPrivate identifies a Define call whose Private message is
+// empty. Introduced by ADR 0005 to close the validate.go:154 bug where
+// CodeInvalidPublic was erroneously cited for Private-field failures.
+const CodeInvalidPrivate int = 1004
+
+// CodeInvalidCodeString identifies a ParseCode failure (malformed input).
+// The code is runtime-only: it never appears as a sentinel returned from
+// an emitter, just from ParseCode on bad input.
+const CodeInvalidCodeString int = 1005
+
+// CodeInvalidWrapParams identifies a Wrap-time validation failure on
+// caller-supplied WrapParams. Wrap returns an *Error carrying this code
+// instead of panicking (runtime path, not init).
+const CodeInvalidWrapParams int = 1006

@@ -34,14 +34,16 @@ const maxValidLayer int = 9
 // in github.com/kitsunium/sdk/pkg/v1/errs. Instances are immutable after
 // construction: Wrap returns a new *Error, never mutates the input.
 type Error struct {
-	code         int
-	reason       string
-	public       string
-	private      string
-	fields       []FieldValue
-	httpOverride int
-	exitOverride int
-	source       error
+	code           int
+	reason         string
+	public         string
+	private        string
+	fields         []FieldValue
+	trail          []Code
+	trailTruncated bool
+	httpOverride   int
+	exitOverride   int
+	source         error
 }
 
 // DefineOption tunes an Error at Define time. Options compose left-to-right.
