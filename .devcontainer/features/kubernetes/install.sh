@@ -5,6 +5,7 @@ set -euo pipefail
 FEATURE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../languages/shared/feature-utils.sh
+source "${FEATURE_DIR}/feature-utils.sh" 2>/dev/null || \
 source "${FEATURE_DIR}/../languages/shared/feature-utils.sh" 2>/dev/null || {
     RED='\033[0;31m'
     GREEN='\033[0;32m'
@@ -284,11 +285,18 @@ else
             sleep $((attempt * 2))
         done
         if [[ -z "$KUBECTL_VERSION" ]]; then
-            echo -e "${RED}✗ Failed to resolve latest kubectl version${NC}"
-            echo -e "${RED}  dl.k8s.io may be rate-limited. Try setting an explicit kubectlVersion.${NC}"
-            exit 1
+            if [[ "$KUBECTL_PREINSTALLED" == "true" ]]; then
+                echo -e "${YELLOW}⚠ Could not resolve latest kubectl version, keeping preinstalled version${NC}"
+            else
+                echo -e "${RED}✗ Failed to resolve latest kubectl version${NC}"
+                echo -e "${RED}  dl.k8s.io may be rate-limited. Try setting an explicit kubectlVersion.${NC}"
+                exit 1
+            fi
         fi
     fi
+
+    # Only proceed with download if we resolved a version
+    if [[ -n "$KUBECTL_VERSION" ]]; then
     [[ "$KUBECTL_VERSION" != v* ]] && KUBECTL_VERSION="v${KUBECTL_VERSION}"
 
     KUBECTL_URL="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH_KUBECTL}/kubectl"
@@ -305,6 +313,7 @@ else
     else
         echo -e "${RED}✗ kubectl installation failed${NC}"
         exit 1
+    fi
     fi
 fi
 

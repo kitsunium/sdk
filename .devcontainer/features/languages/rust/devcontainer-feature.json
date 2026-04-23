@@ -1,6 +1,6 @@
 {
   "id": "rust",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "name": "Rust Development Environment",
   "description": "Installs Rust via rustup, cargo, and common development tools",
   "options": {},

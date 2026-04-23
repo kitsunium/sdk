@@ -1,6 +1,6 @@
 {
   "id": "assembly",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Assembly Development Environment",
   "description": "Installs NASM assembler, GNU binutils, and GDB debugger",
   "options": {},

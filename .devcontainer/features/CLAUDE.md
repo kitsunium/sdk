@@ -1,4 +1,4 @@
-<!-- updated: 2026-04-10T12:00:00Z -->
+<!-- updated: 2026-04-21T15:27:23Z -->
 # DevContainer Features
 
 ## Purpose
@@ -56,3 +56,34 @@ Fragment format:
 2. Add `devcontainer-feature.json` for metadata
 3. Add `install.sh` sourcing `shared/feature-utils.sh`
 4. (Optional) Add `mcp.json` if the language provides an MCP server
+
+## Failure Modes — Fail Loud, Not Silent
+
+Features have ONE job: install the toolchain. A silently-half-installed
+feature produces downstream breakage that is hard to diagnose (issue #324).
+
+Rules for every `install.sh`:
+
+1. **Strict mode** at top of script:
+   ```bash
+   set -Eeuo pipefail
+   trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
+   ```
+2. **Per-PID tracking** for parallel installs — `wait <pid>` is the only
+   reliable way to surface a subshell failure. A bare `wait` returns 0.
+3. **Critical vs optional** — declare which tools are load-bearing
+   (hooks / MCP depend on them) and `exit 1` when a critical one fails
+   to install.
+4. **Write MCP fragments early** — call `install_mcp_fragment` immediately
+   after the trigger binary is verified, NOT at the end of the script.
+   Otherwise any later failure silently drops the fragment.
+5. **Structured step markers** (e.g. `[INSTALL-GO] step=X status=ok|fail`)
+   so users can grep the devcontainer build log.
+6. **Bump `version`** in `devcontainer-feature.json` on every non-docs change.
+   `devcontainers/cli` skips republish when the version string already exists
+   on GHCR ([devcontainers/cli#814](https://github.com/devcontainers/cli/issues/814)) —
+   forgetting the bump silently ships stale code to every downstream consumer.
+   Enforced by `.github/workflows/version-gate.yml`.
+
+Reference implementation: `.devcontainer/features/languages/go/install.sh`.
+Static regression guards: `tests/scripts/go-install.bats`.
