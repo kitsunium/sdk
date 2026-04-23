@@ -29,7 +29,7 @@ func TestNew(t *testing.T) {
 		name     string
 		rate     int
 		nilDown  bool
-		wantCode int
+		wantCode errs.Code
 	}{
 		{"valid rate + downstream succeeds", 10, false, 0},
 		{"zero rate yields RateInvalid", 0, false, sample.CodeSampleRateInvalid},
@@ -123,7 +123,7 @@ func TestSampleSentinels(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		code int
+		code errs.Code
 	}{
 		{"RateInvalid carries 5101", sample.RateInvalid, sample.CodeSampleRateInvalid},
 		{"DownstreamNil carries 5102", sample.DownstreamNil, sample.CodeSampleDownstreamNil},

@@ -97,7 +97,7 @@ func TestConsoleSink_Write(t *testing.T) {
 		ctxCancel bool
 		writer    string
 		want      string
-		wantCode  int
+		wantCode  errs.Code
 	}{
 		{"happy path writes verbatim", false, "ok", "hello", 0},
 		{"cancelled context wraps CtxCancelled", true, "ok", "", console.CodeCtxCancelled},
@@ -227,7 +227,7 @@ func TestErrorsCarryConsoleCodes(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		code int
+		code errs.Code
 	}{
 		{"WriterNil carries 3401", console.WriterNil, console.CodeWriterNil},
 		{"CtxCancelled carries 3410", console.CtxCancelled, console.CodeCtxCancelled},

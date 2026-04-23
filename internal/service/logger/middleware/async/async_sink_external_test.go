@@ -293,7 +293,7 @@ func TestAsyncSentinels(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		code int
+		code errs.Code
 	}{
 		{"Stopped carries 3701", async.Stopped, async.CodeAsyncStopped},
 		{"BufferFull carries 3702", async.BufferFull, async.CodeAsyncBufferFull},

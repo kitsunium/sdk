@@ -18,7 +18,7 @@ func TestNew(t *testing.T) {
 	tests := []struct {
 		name     string
 		path     string
-		wantCode int
+		wantCode errs.Code
 	}{
 		{"empty path is rejected", "", file.CodePathEmpty},
 		{"valid path opens the file", filepath.Join(t.TempDir(), "ok.log"), 0},
@@ -104,7 +104,7 @@ func TestFileSinkSentinels(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		code int
+		code errs.Code
 	}{
 		{"PathEmpty carries 3501", file.PathEmpty, file.CodePathEmpty},
 		{"OpenFailed carries 3502", file.OpenFailed, file.CodeOpenFailed},

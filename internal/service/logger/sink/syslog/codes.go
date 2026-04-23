@@ -1,24 +1,24 @@
-// Package syslog: codes.go — range 5300-5399 reserved for the syslog Sink.
-// Codes are declared at source as typed constants; the errs registry audit
-// verifies uniqueness and range membership.
+// Package syslog: codes.go — range 0.3.15.* (ADR 0005 service/logger/sink/syslog block).
 package syslog
 
-// range: 5300-5399
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+// range: 0.3.15.0 - 0.3.15.255
 
 // CodeSyslogAddrEmpty identifies a New call made with an empty address.
-const CodeSyslogAddrEmpty int = 5301
+const CodeSyslogAddrEmpty errs.Code = 0x00_03_0F_01 // 0.3.15.1
 
 // CodeSyslogDialFailed identifies a New call whose net.Dial failed.
-const CodeSyslogDialFailed int = 5302
+const CodeSyslogDialFailed errs.Code = 0x00_03_0F_02 // 0.3.15.2
 
 // CodeSyslogWriteFailed identifies a Write call whose underlying net.Conn
 // returned a non-nil error; ExitCode defaults to 74 (EX_IOERR) for this case.
-const CodeSyslogWriteFailed int = 5303
+const CodeSyslogWriteFailed errs.Code = 0x00_03_0F_03 // 0.3.15.3
 
 // CodeSyslogCloseFailed identifies a Close call whose net.Conn.Close returned
 // an error; surfaces network teardown failures so callers can react.
-const CodeSyslogCloseFailed int = 5304
+const CodeSyslogCloseFailed errs.Code = 0x00_03_0F_04 // 0.3.15.4
 
 // CodeSyslogProtoInvalid identifies a New call with an unsupported network.
 // Only "udp" and "tcp" are accepted today.
-const CodeSyslogProtoInvalid int = 5305
+const CodeSyslogProtoInvalid errs.Code = 0x00_03_0F_05 // 0.3.15.5

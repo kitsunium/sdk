@@ -41,8 +41,8 @@ func TestNew(t *testing.T) {
 			if !errors.Is(err, tc.wantErrIs) {
 				t.Errorf("errors.Is(%v, HandlerNil) = false", err)
 			}
-			if code, _ := errs.CodeOf(err); code != svclogger.CodeHandlerNil {
-				t.Errorf("CodeOf err = %d, want %d", code, svclogger.CodeHandlerNil)
+			if code, _ := errs.CodeValueOf(err); code != svclogger.CodeHandlerNil {
+				t.Errorf("CodeValueOf err = %v, want %v", code, svclogger.CodeHandlerNil)
 			}
 		})
 	}

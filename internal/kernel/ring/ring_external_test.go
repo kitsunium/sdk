@@ -14,7 +14,7 @@ func TestNew(t *testing.T) {
 	tests := []struct {
 		name     string
 		capacity int
-		wantCode int
+		wantCode errs.Code
 	}{
 		{"positive capacity succeeds", 4, 0},
 		{"capacity of one succeeds", 1, 0},
@@ -158,11 +158,11 @@ func TestRingSentinels(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		code int
+		code errs.Code
 	}{
-		{"Full carries 1401", ring.Full, ring.CodeRingFull},
-		{"Empty carries 1402", ring.Empty, ring.CodeRingEmpty},
-		{"CapZero carries 1403", ring.CapZero, ring.CodeRingCapZero},
+		{"Full carries 0.1.3.1", ring.Full, ring.CodeRingFull},
+		{"Empty carries 0.1.3.2", ring.Empty, ring.CodeRingEmpty},
+		{"CapZero carries 0.1.3.3", ring.CapZero, ring.CodeRingCapZero},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

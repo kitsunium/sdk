@@ -115,8 +115,8 @@ func TestNewWithSinkRejectsNilSink(t *testing.T) {
 			if !errors.Is(err, logger.SinkConfigRequired) {
 				t.Errorf("errors.Is(err, SinkRequired) = false: %v", err)
 			}
-			if code, _ := errs.CodeOf(err); code != logger.CodeSinkConfigRequired {
-				t.Errorf("CodeOf = %d, want %d", code, logger.CodeSinkConfigRequired)
+			if code, _ := errs.CodeValueOf(err); code != logger.CodeSinkConfigRequired {
+				t.Errorf("CodeValueOf = %v, want %v", code, logger.CodeSinkConfigRequired)
 			}
 		})
 	}

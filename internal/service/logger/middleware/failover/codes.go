@@ -1,14 +1,14 @@
-// Package failover: codes.go — range 3900-3999 reserved for the failover
-// Sink. Codes are declared at source as typed constants; the errs registry
-// audit verifies uniqueness and range membership.
+// Package failover: codes.go — range 0.3.19.* (ADR 0005 service/logger/middleware/failover block).
 package failover
 
-// range: 3900-3999
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+// range: 0.3.19.0 - 0.3.19.255
 
 // CodeFailoverExhausted identifies a Write call where every downstream
 // sink in the failover chain returned a non-nil error. The sentinel wraps
 // errors.Join of the per-sink failures so callers can inspect each cause.
-const CodeFailoverExhausted int = 3901
+const CodeFailoverExhausted errs.Code = 0x00_03_13_01 // 0.3.19.1
 
 // CodeFailoverEmpty identifies a New call made with zero downstream sinks.
-const CodeFailoverEmpty int = 3902
+const CodeFailoverEmpty errs.Code = 0x00_03_13_02 // 0.3.19.2

@@ -169,7 +169,7 @@ func TestFailoverSentinels(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		code int
+		code errs.Code
 	}{
 		{"Exhausted carries 3901", failover.Exhausted, failover.CodeFailoverExhausted},
 		{"Empty carries 3902", failover.Empty, failover.CodeFailoverEmpty},

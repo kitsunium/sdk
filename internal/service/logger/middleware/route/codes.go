@@ -1,11 +1,11 @@
-// Package route: codes.go — range 3800-3899 reserved for the route Sink.
-// Codes are declared at source as typed constants; the errs registry audit
-// verifies uniqueness and range membership.
+// Package route: codes.go — range 0.3.18.* (ADR 0005 service/logger/middleware/route block).
 package route
 
-// range: 3800-3899
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+// range: 0.3.18.0 - 0.3.18.255
 
 // CodeRouteNoMatch identifies a Write call whose record matched none of
 // the registered predicates. The default sink (when configured) handles
 // this case; without a default the Write returns this sentinel.
-const CodeRouteNoMatch int = 3801
+const CodeRouteNoMatch errs.Code = 0x00_03_12_01 // 0.3.18.1

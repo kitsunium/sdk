@@ -1,12 +1,12 @@
-// Package sample: codes.go — range 5100-5199 reserved for the sample Sink.
-// Codes are declared at source as typed constants; the errs registry audit
-// verifies uniqueness and range membership.
+// Package sample: codes.go — range 0.3.20.* (ADR 0005 service/logger/middleware/sample block).
 package sample
 
-// range: 5100-5199
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+// range: 0.3.20.0 - 0.3.20.255
 
 // CodeSampleRateInvalid identifies a New call with a non-positive rate.
-const CodeSampleRateInvalid int = 5101
+const CodeSampleRateInvalid errs.Code = 0x00_03_14_01 // 0.3.20.1
 
 // CodeSampleDownstreamNil identifies a New call made with a nil downstream.
-const CodeSampleDownstreamNil int = 5102
+const CodeSampleDownstreamNil errs.Code = 0x00_03_14_02 // 0.3.20.2

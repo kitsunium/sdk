@@ -33,7 +33,7 @@ func TestNew(t *testing.T) {
 	tests := []struct {
 		name     string
 		nilDown  bool
-		wantCode int
+		wantCode errs.Code
 	}{
 		{"non-nil downstream succeeds", false, 0},
 		{"nil downstream yields DownstreamNil", true, recoversink.CodeRecoverDownstreamNil},
@@ -67,7 +67,7 @@ func TestRecover_Write(t *testing.T) {
 	tests := []struct {
 		name     string
 		panic    bool
-		wantCode int
+		wantCode errs.Code
 	}{
 		{"happy path delegates to downstream", false, 0},
 		{"panic surfaces as Panicked", true, recoversink.CodeRecoverPanicked},
@@ -102,7 +102,7 @@ func TestRecover_Flush(t *testing.T) {
 	tests := []struct {
 		name     string
 		panic    bool
-		wantCode int
+		wantCode errs.Code
 	}{
 		{"happy path delegates to downstream", false, 0},
 		{"panic surfaces as Panicked", true, recoversink.CodeRecoverPanicked},
@@ -137,7 +137,7 @@ func TestRecover_Close(t *testing.T) {
 	tests := []struct {
 		name     string
 		panic    bool
-		wantCode int
+		wantCode errs.Code
 	}{
 		{"happy path delegates to downstream", false, 0},
 		{"panic surfaces as Panicked", true, recoversink.CodeRecoverPanicked},
@@ -172,7 +172,7 @@ func TestRecoverSentinels(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		code int
+		code errs.Code
 	}{
 		{"Panicked carries 5201", recoversink.Panicked, recoversink.CodeRecoverPanicked},
 		{"DownstreamNil carries 5202", recoversink.DownstreamNil, recoversink.CodeRecoverDownstreamNil},

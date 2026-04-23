@@ -73,7 +73,7 @@ func TestNew(t *testing.T) {
 		name     string
 		network  string
 		addr     string
-		wantCode int
+		wantCode errs.Code
 	}{
 		{"empty addr yields AddrEmpty", "udp", "", syslog.CodeSyslogAddrEmpty},
 		{"unsupported proto yields ProtoInvalid", "icmp", "127.0.0.1:1", syslog.CodeSyslogProtoInvalid},
@@ -176,7 +176,7 @@ func TestSyslogSentinels(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		code int
+		code errs.Code
 	}{
 		{"AddrEmpty carries 5301", syslog.AddrEmpty, syslog.CodeSyslogAddrEmpty},
 		{"DialFailed carries 5302", syslog.DialFailed, syslog.CodeSyslogDialFailed},
