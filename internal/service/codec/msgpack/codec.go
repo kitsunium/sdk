@@ -13,6 +13,15 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// maxMsgPackBytes caps the Unmarshal input size for untrusted payloads.
+// vmihailenco/msgpack v5 does not expose per-decoder caps for array /
+// map / nesting depth; a MessagePack value with a huge declared length
+// field can pre-allocate that many slots before any consistency check,
+// so size-limiting the buffer is the primary defence against memory-
+// exhaustion DoS (CWE-400 / CWE-1284). 10 MiB comfortably covers every
+// realistic configuration or event-stream document.
+const maxMsgPackBytes int = 10 << 20
+
 // Package-level state: the codec singleton plus the hoisted MIME /
 // extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
 var (
@@ -99,6 +108,17 @@ func (*msgpackCodec) Marshal(v any) (data []byte, err error) {
 // Returns:
 //   - error: UnmarshalFailed wrapping the library cause on failure.
 func (*msgpackCodec) Unmarshal(data []byte, v any) (err error) {
+	//: cap input size so attacker-controlled payloads cannot exhaust RAM
+	//: during pre-allocation from huge declared length fields (finding #17).
+	if len(data) > maxMsgPackBytes {
+		//: surface an UNMARSHAL_FAILED with a diagnostic Private message.
+		return errs.Wrap(nil, errs.WrapParams{
+			Code:    CodeMsgPackUnmarshalFailed,
+			Reason:  "UNMARSHAL_FAILED",
+			Public:  "MessagePack input exceeds size limit",
+			Private: "service/codec/msgpack.Unmarshal: len(data) exceeds maxMsgPackBytes",
+		}, errs.Int("len", len(data)), errs.Int("cap", maxMsgPackBytes))
+	}
 	//: delegate to the library for the actual decoding.
 	uerr := gomsgpack.Unmarshal(data, v)
 	//: success fast-path.

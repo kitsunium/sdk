@@ -1,18 +1,20 @@
 // Package ring provides a lock-free single-producer / single-consumer (SPSC)
-// ring buffer built on sync/atomic. Designed to back the async logger sink
-// (commit 12) and any future hot-path component that needs a fixed-capacity
-// FIFO with non-blocking try-write / try-read semantics.
+// ring buffer built on sync/atomic. The SPSC constraint gives the maximum
+// throughput for any hot-path producer that serialises enqueues — metrics
+// batch writers, streaming codec pipelines, event-bus accumulators, or any
+// other fixed-capacity non-blocking FIFO use case. Domain-neutral by design
+// per the internal/kernel/ package rule (stdlib-only AND generic).
 //
 // SPSC means EXACTLY ONE goroutine calls TryWrite at a time AND EXACTLY ONE
 // goroutine calls TryRead at a time. Concurrent producers or concurrent
 // consumers are NOT safe — those callers should serialise upstream or wrap
-// this primitive with a mutex.
+// this primitive with a mutex. The logger async sink takes the mutex-
+// serialisation route (see internal/service/logger/middleware/async); other
+// domains pick whichever coordination fits their topology.
 package ring
 
 import (
 	"sync/atomic"
-
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Queue is the lock-free SPSC ring contract. Producer threads call TryWrite;
@@ -116,13 +118,10 @@ func (b *queueRing[T]) TryWrite(item T) (err error) {
 	next := (tail + 1) % (b.cap + 1)
 	//: refuse the write when the ring is saturated.
 	if next == head {
-		//: documented sentinel — caller decides drop / retry / block policy.
-		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeRingFull,
-			Reason:  "RING_FULL",
-			Public:  "Ring buffer is at capacity",
-			Private: "internal/kernel/ring.TryWrite saw a full ring",
-		})
+		//: return the pre-allocated sentinel directly so the hot path
+		//: allocates nothing — errors.Is(err, ring.Full) works the same
+		//: against the identity-stable pointer (finding #13).
+		return Full
 	}
 	//: publish the item and bump the tail; consumer reads tail with Acquire.
 	b.slots[tail] = item
@@ -142,15 +141,12 @@ func (b *queueRing[T]) TryRead() (item T, err error) {
 	tail := b.tail.Load()
 	//: empty when the cursors meet — no item to return.
 	if head == tail {
-		//: documented sentinel — caller decides spin / sleep / block policy.
+		//: return the pre-allocated sentinel directly so the hot path
+		//: allocates nothing (finding #13). errors.Is(err, ring.Empty)
+		//: still works because the sentinel is a stable package-level var.
 		var zero T
-		//: the empty-ring path returns the zero T plus the documented Empty sentinel.
-		return zero, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeRingEmpty,
-			Reason:  "RING_EMPTY",
-			Public:  "Ring buffer is empty",
-			Private: "internal/kernel/ring.TryRead saw an empty ring",
-		})
+		//: hand back the zero value plus the pre-allocated Empty sentinel.
+		return zero, Empty
 	}
 	//: read the item, clear the slot for GC, and bump the head cursor.
 	item = b.slots[head]

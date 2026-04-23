@@ -38,4 +38,11 @@ var (
 		"Syslog close failed",
 		"service/logger/sink/syslog.Close underlying net.Conn.Close returned an error",
 		errs.WithExitCode(exitIOErr))
+
+	// CtxCancelled wraps a context that was already done when Write or
+	// Flush was entered. Provided as a typed sentinel so consumers match
+	// via HasCode / errors.Is without reaching for stdlib context errors.
+	CtxCancelled = errs.Define(CodeSyslogCtxCancelled, "SYSLOG_CTX_CANCELLED",
+		"Syslog sink aborted due to cancellation",
+		"service/logger/sink/syslog.Write or Flush saw a cancelled context")
 )

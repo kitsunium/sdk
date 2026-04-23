@@ -21,12 +21,16 @@ type (
 	// See ADR 0005 for the registry and layout.
 	Code = kerrs.Code
 
-	// Major, Layer, PkgCode, Serial are the four octet types used by Pack.
-	// Named so callers cannot swap arguments by accident.
-	Major   = kerrs.Major
-	Layer   = kerrs.Layer
+	// Major is the top octet of Code — SemVer major version (0 = internal,
+	// 1 = v1, ...). See ADR 0005.
+	Major = kerrs.Major
+	// Layer is the second octet of Code — SDK layer (0 = meta, 1 = kernel,
+	// 2 = core, 3 = service, ...). See ADR 0005.
+	Layer = kerrs.Layer
+	// PkgCode is the third octet of Code — per-layer package slot. See ADR 0005 / 0006.
 	PkgCode = kerrs.PkgCode
-	Serial  = kerrs.Serial
+	// Serial is the low octet of Code — per-package serial. See ADR 0005.
+	Serial = kerrs.Serial
 
 	// PrefixMatcher is the errors.Is target for CIDR-style Code matching.
 	// Construct via NewPrefixMatcher.
@@ -36,13 +40,13 @@ type (
 // CIDR-style mask constants re-exported for use with NewPrefixMatcher.
 const (
 	// MaskByMajor matches all codes sharing the Major octet (/8 equivalent).
-	MaskByMajor = kerrs.MaskByMajor
+	MaskByMajor Code = kerrs.MaskByMajor
 	// MaskByLayer matches all codes sharing Major+Layer (/16 equivalent).
-	MaskByLayer = kerrs.MaskByLayer
+	MaskByLayer Code = kerrs.MaskByLayer
 	// MaskByPackage matches all codes sharing Major+Layer+Package (/24 equivalent).
-	MaskByPackage = kerrs.MaskByPackage
+	MaskByPackage Code = kerrs.MaskByPackage
 	// MaskExact matches a single exact code (/32 equivalent).
-	MaskExact = kerrs.MaskExact
+	MaskExact Code = kerrs.MaskExact
 )
 
 // Re-exports of the internal accessors. Grouped to satisfy the repo-wide

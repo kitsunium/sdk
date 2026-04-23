@@ -82,16 +82,35 @@ func String(key, val string) (f FieldValue) {
 	return FieldValue{key: key, kind: fieldString, str: val}
 }
 
-// Int builds a FieldValue holding an int64 value.
+// Int builds a FieldValue from a plain int. Matches the slog / zap
+// convention (both expose Int(key, int) that widens internally) so
+// callers do not write int64(…) at every site. For pre-widened int64
+// payloads use Int64.
 //
 // Params:
 //   - key: attribute identifier.
-//   - val: int64 payload rendered base-10 by StringValue.
+//   - val: int payload; widened to int64 internally for storage.
 //
 // Returns:
 //   - FieldValue: a well-formed FieldValue of kind int.
-func Int(key string, val int64) (f FieldValue) {
-	//: store the 64-bit value so int and int64 callers share the same path.
+func Int(key string, val int) (f FieldValue) {
+	//: widen to int64 so the underlying storage is width-stable.
+	return FieldValue{key: key, kind: fieldInt, num: int64(val)}
+}
+
+// Int64 builds a FieldValue from a 64-bit integer. Provided explicitly
+// because Go does not support function overloading — callers that hold
+// an int64 already (no upcast needed) reach for this constructor, while
+// the common int case stays on Int.
+//
+// Params:
+//   - key: attribute identifier.
+//   - val: int64 payload stored verbatim.
+//
+// Returns:
+//   - FieldValue: a well-formed FieldValue of kind int.
+func Int64(key string, val int64) (f FieldValue) {
+	//: store the caller-supplied int64 verbatim.
 	return FieldValue{key: key, kind: fieldInt, num: val}
 }
 

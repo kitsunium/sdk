@@ -471,3 +471,35 @@ func TestError_ExitCode(t *testing.T) {
 		})
 	}
 }
+
+// TestError_Is_MatchesByCode regresses the Qodo finding on PR #15 — a
+// Wrap result and the package-level sentinel built by Define share the
+// same (Code, Reason) and MUST satisfy errors.Is even though they are
+// different pointers. The original (*Error).Is fell through to pointer
+// equality, which silently broke every "errors.Is(err, SomeSentinel)"
+// call site at the wrap boundary.
+func TestError_Is_MatchesByCode(t *testing.T) {
+	t.Parallel()
+	//: build a package-level-style sentinel.
+	sentinel := newSampleSentinel(t)
+	//: build a freshly-wrapped error that carries the same Code + Reason.
+	//: WrapParams are ignored for *errs.Error causes (origin wins) so we
+	//: wrap a stdlib error to exercise the wrap path that inflates Code.
+	wrapped := errs.Wrap(errors.New("stdlib cause"), errs.WrapParams{
+		Code:    sentinel.CodeValue(),
+		Reason:  sentinel.Reason(),
+		Public:  sentinel.Public(),
+		Private: sentinel.Private(),
+	})
+	//: invariant: errors.Is must succeed on (wrapped, sentinel).
+	if !errors.Is(wrapped, sentinel) {
+		t.Errorf("errors.Is(wrapped, sentinel) = false; Code+Reason match must imply Is true")
+	}
+	//: defensive counter-test: a sentinel with a different Code must NOT match.
+	other := errs.Define(errs.Code(0x01_01_00_0F), "OTHER",
+		"other sentinel",
+		"test: different Code must not collide")
+	if errors.Is(wrapped, other) {
+		t.Errorf("errors.Is(wrapped, other) = true; different Codes must not match")
+	}
+}

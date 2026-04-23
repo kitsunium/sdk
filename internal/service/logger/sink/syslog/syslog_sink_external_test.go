@@ -178,11 +178,11 @@ func TestSyslogSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"AddrEmpty carries 5301", syslog.AddrEmpty, syslog.CodeSyslogAddrEmpty},
-		{"DialFailed carries 5302", syslog.DialFailed, syslog.CodeSyslogDialFailed},
-		{"WriteFailed carries 5303", syslog.WriteFailed, syslog.CodeSyslogWriteFailed},
-		{"CloseFailed carries 5304", syslog.CloseFailed, syslog.CodeSyslogCloseFailed},
-		{"ProtoInvalid carries 5305", syslog.ProtoInvalid, syslog.CodeSyslogProtoInvalid},
+		{"AddrEmpty carries 0.3.15.1", syslog.AddrEmpty, syslog.CodeSyslogAddrEmpty},
+		{"DialFailed carries 0.3.15.2", syslog.DialFailed, syslog.CodeSyslogDialFailed},
+		{"WriteFailed carries 0.3.15.3", syslog.WriteFailed, syslog.CodeSyslogWriteFailed},
+		{"CloseFailed carries 0.3.15.4", syslog.CloseFailed, syslog.CodeSyslogCloseFailed},
+		{"ProtoInvalid carries 0.3.15.5", syslog.ProtoInvalid, syslog.CodeSyslogProtoInvalid},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

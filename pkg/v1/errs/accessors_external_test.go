@@ -25,7 +25,7 @@ func TestV1ErrsEndToEnd(t *testing.T) {
 				t.Fatal("expected NewText error, got nil")
 			}
 			//: 0x01_01_00_01 = 1.1.0.1 (pkg/v1/logger WriterRequired under ADR 0005).
-			const writerRequired = 0x01_01_00_01
+			const writerRequired errs.Code = 0x01_01_00_01
 			if !errs.HasCode(err, writerRequired) {
 				t.Errorf("HasCode(err, 1.1.0.1) = false")
 			}

@@ -80,21 +80,29 @@ func Test_asyncCtx(t *testing.T) {
 	}
 }
 
-func Test_swallowDownstreamError(t *testing.T) {
+func Test_forwardDownstreamError(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		bytes int
-		err   error
+		name        string
+		bytes       int
+		err         error
+		wantInvoked bool
 	}{
-		{"happy path is a no-op", 5, nil},
-		{"non-nil error is silently dropped", 5, errBoom{}},
-		{"negative bytes is defensively ignored", -1, errBoom{}},
+		{"happy path is a no-op", 5, nil, false},
+		{"non-nil error is surfaced to onError", 5, errBoom{}, true},
+		{"negative bytes is defensively ignored", -1, errBoom{}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			swallowDownstreamError(tc.bytes, tc.err)
+			var invoked bool
+			//: drive a minimal sink with a recording callback so we can
+			//: assert the no-op and fire branches deterministically.
+			s := &asyncSink{onError: func(error) { invoked = true }}
+			s.forwardDownstreamError(tc.bytes, tc.err)
+			if invoked != tc.wantInvoked {
+				t.Errorf("onError invoked=%v, want %v", invoked, tc.wantInvoked)
+			}
 		})
 	}
 }

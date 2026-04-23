@@ -17,4 +17,11 @@ var (
 	BufferFull = errs.Define(CodeAsyncBufferFull, "ASYNC_BUFFER_FULL",
 		"Async sink ring buffer is full",
 		"service/logger/middleware/async.Write saw a saturated ring under DropNewest policy")
+
+	// CtxCancelled wraps a context that was already done when Write or
+	// Flush was entered. Provided as a typed sentinel so consumers match
+	// via HasCode / errors.Is without reaching for stdlib context errors.
+	CtxCancelled = errs.Define(CodeAsyncCtxCancelled, "ASYNC_CTX_CANCELLED",
+		"Async sink aborted due to cancellation",
+		"service/logger/middleware/async.Write or Flush saw a cancelled context")
 )

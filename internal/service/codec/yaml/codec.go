@@ -13,6 +13,16 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// maxYAMLBytes caps the byte size Unmarshal accepts from untrusted input.
+// gopkg.in/yaml.v3 caps alias-expansion internally (since v3.0.0), but a
+// single very large YAML document still forces the whole buffer into
+// memory before any structural check. 10 MiB comfortably covers every
+// realistic configuration document while preventing memory-exhaustion
+// DoS on attacker-controlled payloads (CWE-400 / CWE-776). Streaming
+// callers that legitimately need larger inputs use NewDecoder with
+// their own io.LimitReader sizing.
+const maxYAMLBytes int = 10 << 20
+
 // Package-level state: the codec singleton plus the hoisted MIME /
 // extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
 var (
@@ -99,6 +109,18 @@ func (*yamlCodec) Marshal(v any) (data []byte, err error) {
 // Returns:
 //   - error: UnmarshalFailed wrapping the yaml.v3 cause on failure.
 func (*yamlCodec) Unmarshal(data []byte, v any) (err error) {
+	//: cap input size so attacker-controlled payloads cannot exhaust RAM
+	//: during parsing (finding #15 — yaml.v3 alias bomb is library-capped
+	//: but there is no upstream size limit; 10 MiB is the safe default).
+	if len(data) > maxYAMLBytes {
+		//: surface an UNMARSHAL_FAILED with a diagnostic Private message.
+		return errs.Wrap(nil, errs.WrapParams{
+			Code:    CodeYAMLUnmarshalFailed,
+			Reason:  "UNMARSHAL_FAILED",
+			Public:  "YAML input exceeds size limit",
+			Private: "service/codec/yaml.Unmarshal: len(data) exceeds maxYAMLBytes",
+		}, errs.Int("len", len(data)), errs.Int("cap", maxYAMLBytes))
+	}
 	//: delegate to yaml.v3 for the actual decoding.
 	uerr := goyaml.Unmarshal(data, v)
 	//: success fast-path.

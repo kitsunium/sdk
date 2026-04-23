@@ -174,8 +174,8 @@ func TestRecoverSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"Panicked carries 5201", recoversink.Panicked, recoversink.CodeRecoverPanicked},
-		{"DownstreamNil carries 5202", recoversink.DownstreamNil, recoversink.CodeRecoverDownstreamNil},
+		{"Panicked carries 0.3.21.1", recoversink.Panicked, recoversink.CodeRecoverPanicked},
+		{"DownstreamNil carries 0.3.21.2", recoversink.DownstreamNil, recoversink.CodeRecoverDownstreamNil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
