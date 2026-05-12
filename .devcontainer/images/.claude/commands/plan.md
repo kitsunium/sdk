@@ -8,7 +8,6 @@ allowed-tools:
   - "Read(**/*)"
   - "Glob(**/*)"
   - "Grep(**/*)"
-  - "mcp__grepai__*"
   - "mcp__context7__*"
   - "Task(*)"
   - "WebFetch(*)"
@@ -22,14 +21,6 @@ allowed-tools:
 # /plan - Claude Code Planning Mode (RLM Architecture)
 
 $ARGUMENTS
-
-## GREPAI-FIRST (MANDATORY)
-
-Use `grepai_search` for ALL semantic/meaning-based queries BEFORE Grep.
-Use `grepai_trace_callers`/`grepai_trace_callees` for impact analysis.
-Fallback to Grep ONLY for exact string matches or regex patterns.
-
----
 
 ## Overview
 

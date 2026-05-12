@@ -20,7 +20,6 @@ allowed-tools:
   - "WebFetch(*)"
   - "Glob(**/*)"
   - "Grep(**/*)"
-  - "mcp__grepai__*"
   - "mcp__context7__*"
   - "Task(*)"
 ---
@@ -28,13 +27,6 @@ allowed-tools:
 # Update - DevContainer Environment Update
 
 $ARGUMENTS
-
-## GREPAI-FIRST (MANDATORY)
-
-Use `grepai_search` for ALL semantic/meaning-based queries BEFORE Grep.
-Fallback to Grep ONLY for exact string matches or regex patterns.
-
----
 
 ## Description
 
@@ -55,7 +47,6 @@ Updates the DevContainer environment from the official template.
 - **Shared-utils** - Shared utilities (utils.sh)
 - **Config** - p10k, settings.json
 - **Compose** - docker-compose.yml (update devcontainer, preserve custom)
-- **Grepai** - Optimized grepai configuration
 - **VSCode** - `.vscode/settings.json` (file nesting + editor defaults)
 
 **Updated components (infrastructure - if profile detected):**
@@ -116,7 +107,6 @@ republish on an existing version string ([#814](https://github.com/devcontainers
 | `p10k` | `.devcontainer/images/.p10k.zsh` | Powerlevel10k config |
 | `settings` | `.../images/.claude/settings.json` | Claude config |
 | `compose` | `.devcontainer/docker-compose.yml` | Update devcontainer service |
-| `grepai` | `.devcontainer/images/grepai.config.yaml` | grepai config |
 | `mcp-template` | `.devcontainer/images/mcp.json.tpl` | MCP server template |
 | `mcp-fragments` | `.devcontainer/images/mcp-fragments/` | MCP server fragments |
 | `docs` | `.../images/.claude/docs/` | Design patterns KB (170+) |
@@ -162,7 +152,6 @@ Components:
   p10k         Powerlevel10k config
   settings     Claude settings.json
   compose      docker-compose.yml (devcontainer service)
-  grepai       grepai config (provider, model)
   mcp-template MCP server template (mcp.json.tpl)
   mcp-fragments MCP server fragments (context7, ktn-linter)
   docs         Design patterns knowledge base (170+)

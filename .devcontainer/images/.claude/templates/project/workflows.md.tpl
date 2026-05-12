@@ -50,6 +50,6 @@ Prefer MCP tools over CLI:
 
 ## Search Strategy
 
-1. **Semantic search**: `grepai_search` for meaning-based queries
-2. **Call graphs**: `grepai_trace_*` for impact analysis
-3. **Fallback**: Grep for exact strings/regex
+1. **Exact strings / regex**: Grep (primary)
+2. **File discovery**: Glob
+3. **Read-then-understand**: Read full files; agents reason from there

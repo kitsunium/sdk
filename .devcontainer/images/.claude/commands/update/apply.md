@@ -39,7 +39,9 @@ is_protected() {
 }
 
 # Copy devcontainer components from extracted tarball
-# Safe glob copy: copies matching files or silently skips if no match
+# Safe glob copy: copies matching files or silently skips if no match.
+# Always skips *.local.sh — those are consumer-authored override seams that must
+# survive /update (issue #352). The override pattern mirrors devcontainer.local.json.
 # Usage: safe_glob_copy <pattern> <dest_dir> [+x]
 safe_glob_copy() {
     local pattern="$1" dest="$2" make_exec="${3:-}"
@@ -48,6 +50,10 @@ safe_glob_copy() {
     local dir=$(dirname "$pattern")
     local glob=$(basename "$pattern")
     while IFS= read -r -d '' f; do
+        # Skip consumer override files — never overwritten by /update
+        case "$(basename "$f")" in
+            *.local.sh) continue ;;
+        esac
         cp -f "$f" "$dest/"
         [ "$make_exec" = "+x" ] && chmod +x "$dest/$(basename "$f")"
         found=1
@@ -99,9 +105,8 @@ apply_devcontainer_tarball() {
     # Image-embedded hooks (container only)
     if [ "$CONTEXT" = "container" ] && [ -d "$src/.devcontainer/images/hooks" ]; then
         mkdir -p ".devcontainer/images/hooks/shared" ".devcontainer/images/hooks/lifecycle"
-        [ -f "$src/.devcontainer/images/hooks/shared/utils.sh" ] && \
-            cp -f "$src/.devcontainer/images/hooks/shared/utils.sh" ".devcontainer/images/hooks/shared/utils.sh" && \
-            chmod +x ".devcontainer/images/hooks/shared/utils.sh"
+        # All shared helpers (utils.sh, sync-features.sh, …)
+        safe_glob_copy "$src/.devcontainer/images/hooks/shared/*.sh" ".devcontainer/images/hooks/shared" "+x"
         safe_glob_copy "$src/.devcontainer/images/hooks/lifecycle/*.sh" ".devcontainer/images/hooks/lifecycle" "+x"
         echo "  ✓ image-hooks"
     fi
@@ -124,12 +129,6 @@ apply_devcontainer_tarball() {
         echo "  ✓ settings"
     fi
 
-    # grepai config (container only)
-    if [ "$CONTEXT" = "container" ] && [ -f "$src/.devcontainer/images/grepai.config.yaml" ]; then
-        cp -f "$src/.devcontainer/images/grepai.config.yaml" ".devcontainer/images/grepai.config.yaml"
-        echo "  ✓ grepai"
-    fi
-
     # MCP template (container only)
     if [ "$CONTEXT" = "container" ] && [ -f "$src/.devcontainer/images/mcp.json.tpl" ]; then
         mkdir -p ".devcontainer/images"
@@ -144,19 +143,37 @@ apply_devcontainer_tarball() {
         echo "  ✓ mcp-fragments"
     fi
 
-    # DevContainer features (container only) — mirror from tarball.
+    # DevContainer features (container only) — mirror from tarball using the
+    # 3-way safe sync helper (same code path as postStart's step_sync_features).
     # postStart also force-syncs from the image's embedded copy; /update brings
     # them current immediately without waiting for the next image rebuild.
     # The updated .template-version written in §5.7 tells postStart to yield
     # when the repo is ahead of the image.
+    # Bug ref: kodflow/devcontainer-template#334 — silent overwrite of
+    # consumer-modified files. Phase 1 protection: per-file git-dirty guard.
     if [ "$CONTEXT" = "container" ] && [ -d "$src/.devcontainer/features" ]; then
-        mkdir -p ".devcontainer/features"
-        if command -v rsync &>/dev/null; then
-            rsync -a --delete "$src/.devcontainer/features/" ".devcontainer/features/"
-        else
-            rm -rf ".devcontainer/features"
+        local helper="$src/.devcontainer/images/hooks/shared/sync-features.sh"
+        local utils="$src/.devcontainer/images/hooks/shared/utils.sh"
+        if [ -f "$helper" ] && [ -f "$utils" ]; then
+            # shellcheck source=/dev/null
+            source "$utils"
+            # shellcheck source=/dev/null
+            source "$helper"
             mkdir -p ".devcontainer/features"
-            cp -rf "$src/.devcontainer/features/." ".devcontainer/features/"
+            sync_features_tree "$src/.devcontainer/features" \
+                "$(pwd)/.devcontainer/features" "$(pwd)"
+        else
+            # Fallback: tarball missing the helper (older template) — keep the
+            # legacy behaviour but warn the user to re-run /update afterwards.
+            echo "  ⚠ sync-features.sh missing in tarball; falling back to rsync (#334)"
+            mkdir -p ".devcontainer/features"
+            if command -v rsync &>/dev/null; then
+                rsync -a --delete "$src/.devcontainer/features/" ".devcontainer/features/"
+            else
+                rm -rf ".devcontainer/features"
+                mkdir -p ".devcontainer/features"
+                cp -rf "$src/.devcontainer/features/." ".devcontainer/features/"
+            fi
         fi
         echo "  ✓ features"
     fi
@@ -356,7 +373,11 @@ auto_fix_stale_features() {
     └─ ghcr.io/kodflow/devcontainer-features/go:1
 
   Actions       : GHCR manifest refreshed, BuildKit cache pruned,
-                  devcontainer CLI feature cache wiped
+                  devcontainer CLI feature cache wiped,
+                  sync-toolchains.sh re-run (repopulates $GOPATH/bin on the
+                  package-cache volume — catches binaries that the feature's
+                  install.sh put under a volume-mounted path and which get
+                  masked at container start)
   CTA           : /tmp/claude-rebuild-request.json
 
   Next step     : Command Palette → "Dev Containers: Rebuild Without Cache"
@@ -558,9 +579,32 @@ done
 ```bash
 [ -f ".coderabbit.yaml" ] && rm -f ".coderabbit.yaml" && echo "  Removed deprecated .coderabbit.yaml"
 
+# Migration (#341/#349): rewrite stale rtk-rewrite.sh references in
+# ~/.claude/settings.json. The legacy hook script was removed in favour of
+# the native `rtk hook claude` invocation (with rtk-hook-claude.sh as the
+# fail-open wrapper from #348). Consumers whose settings.json predates the
+# change still see "PreToolUse:Bash hook error: rtk-rewrite.sh: not found"
+# on every Bash call. postStart.sh runs the same migration on container
+# start; doing it here lets `/update` fix the file immediately without
+# waiting for the next session start.
+_legacy_rtk="$HOME/.claude/scripts/rtk-rewrite.sh"
+_wrapper_rtk="$HOME/.claude/scripts/rtk-hook-claude.sh"
+if [ -f "$HOME/.claude/settings.json" ] && \
+   grep -qF "$_legacy_rtk" "$HOME/.claude/settings.json" 2>/dev/null && \
+   [ -x "$_wrapper_rtk" ]; then
+    _tmp_settings=$(mktemp) && \
+        sed "s|${_legacy_rtk}|${_wrapper_rtk}|g" \
+            "$HOME/.claude/settings.json" > "$_tmp_settings" && \
+        ! cmp -s "$HOME/.claude/settings.json" "$_tmp_settings" && \
+        mv "$_tmp_settings" "$HOME/.claude/settings.json" && \
+        echo "  Migrated rtk-rewrite.sh → rtk-hook-claude.sh in settings.json"
+    rm -f "$_tmp_settings" 2>/dev/null
+fi
+unset _legacy_rtk _wrapper_rtk _tmp_settings
+
 # Migration: remove deprecated MCP servers from runtime mcp.json
 if [ -f "$HOME/.claude/mcp.json" ] && command -v jq &>/dev/null; then
-    for server in codacy taskmaster; do
+    for server in codacy taskmaster grepai; do
         if jq -e ".mcpServers.$server" "$HOME/.claude/mcp.json" &>/dev/null; then
             jq "del(.mcpServers.$server)" "$HOME/.claude/mcp.json" > "$HOME/.claude/mcp.json.tmp" && \
                 mv "$HOME/.claude/mcp.json.tmp" "$HOME/.claude/mcp.json"
@@ -571,6 +615,20 @@ fi
 
 # Migration: remove .taskmaster/ directory
 [ -d ".taskmaster" ] && rm -rf ".taskmaster" && echo "  Removed deprecated .taskmaster/"
+
+# Migration (v2026.04): legacy grepai/ollama removal — high CPU/RAM cost, replaced by RTK
+if [ -f ".devcontainer/images/grepai.config.yaml" ]; then
+    rm -f ".devcontainer/images/grepai.config.yaml"
+    echo "  Removed deprecated grepai.config.yaml"
+fi
+if [ -d ".grepai" ]; then
+    rm -rf ".grepai"
+    echo "  Removed deprecated .grepai/ workspace index"
+fi
+# Kill any leftover grepai daemon (transitive — image rebuild also handles this)
+pkill -f 'grepai watch' 2>/dev/null || true
+pkill -f 'grepai mcp-serve' 2>/dev/null || true
+rm -f /tmp/.grepai-init.pid /tmp/grepai-watchdog.pid 2>/dev/null || true
 ```
 
 ### 5.7: Update devcontainer version file
@@ -619,7 +677,6 @@ echo "  ✓ .template-version updated ($DC_COMMIT)"
     ✓ p10k           (powerlevel10k)
     ✓ settings       (settings.json)
     ✓ compose        (devcontainer service)
-    ✓ grepai         (bge-m3 config)
     ✓ mcp-template   (mcp.json.tpl)
     ✓ mcp-fragments  (context7, ktn-linter)
     ✓ features       (devcontainer features, 25 languages)
@@ -648,7 +705,7 @@ echo "  ✓ .template-version updated ($DC_COMMIT)"
   DevContainer components:
     ✓ hooks, commands, agents, lifecycle
     ✓ image-hooks, shared-utils, p10k, settings
-    ✓ compose, grepai
+    ✓ compose
 
   Infrastructure components:
     ✓ modules/ (12 files)

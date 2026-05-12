@@ -11,7 +11,6 @@ allowed-tools:
   - "Read(**/*)"
   - "Write(**/*)"
   - "Glob(**/*)"
-  - "mcp__grepai__*"
   - "mcp__context7__*"
   - "Grep(**/*)"
   - "Task(*)"
@@ -20,12 +19,6 @@ allowed-tools:
 # /test - E2E & Frontend Testing (RLM Architecture)
 
 $ARGUMENTS
-
-## GREPAI-FIRST (MANDATORY)
-
-Use `grepai_search` for ALL semantic/meaning-based queries BEFORE Grep.
-Use `grepai_trace_callers`/`grepai_trace_callees` for impact analysis.
-Fallback to Grep ONLY for exact string matches or regex patterns.
 
 ## CONTEXT7 (RECOMMENDED)
 

@@ -18,7 +18,6 @@ allowed-tools:
   - "Read(**/*)"
   - "Edit(**/.env)"
   - "Glob(**/*)"
-  - "mcp__grepai__*"
   - "Grep(**/*)"
   - "AskUserQuestion(*)"
   - "Task(*)"
@@ -27,14 +26,6 @@ allowed-tools:
 # /vpn - Multi-Protocol VPN Management (1Password)
 
 $ARGUMENTS
-
-## GREPAI-FIRST (MANDATORY)
-
-Use `grepai_search` for ALL semantic/meaning-based queries BEFORE Grep.
-Use `grepai_trace_callers`/`grepai_trace_callees` for impact analysis.
-Fallback to Grep ONLY for exact string matches or regex patterns.
-
----
 
 ## Overview
 

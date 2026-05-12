@@ -10,7 +10,6 @@ allowed-tools:
   - "Bash(git:*)"
   - "Read(**/*)"
   - "Glob(**/*)"
-  - "mcp__grepai__*"
   - "Grep(**/*)"
   - "AskUserQuestion(*)"
 ---
@@ -18,13 +17,6 @@ allowed-tools:
 # /secret - Secure Secret Management (1Password + Vault-like Paths)
 
 $ARGUMENTS
-
-## GREPAI-FIRST (MANDATORY)
-
-Use `grepai_search` for ALL semantic/meaning-based queries BEFORE Grep.
-Fallback to Grep ONLY for exact string matches or regex patterns.
-
----
 
 ## Overview
 

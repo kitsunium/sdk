@@ -10,11 +10,6 @@ tools:
   - Read
   - Glob
   - Grep
-  - mcp__grepai__grepai_search
-  - mcp__grepai__grepai_trace_callers
-  - mcp__grepai__grepai_trace_callees
-  - mcp__grepai__grepai_trace_graph
-  - mcp__grepai__grepai_index_status
   - Bash
   - WebFetch
 model: sonnet
@@ -137,7 +132,6 @@ from typing import Protocol, TypeVar
 
 T = TypeVar("T")
 
-
 class Repository(Protocol[T]):
     """Protocol for repository pattern."""
 
@@ -148,7 +142,6 @@ class Repository(Protocol[T]):
     def save(self, entity: T) -> None:
         """Save entity."""
         ...
-
 
 class UserService:
     """Service for user operations.
@@ -194,13 +187,11 @@ from typing import Generic, TypeVar
 T = TypeVar("T")
 E = TypeVar("E", bound=Exception)
 
-
 @dataclass(frozen=True, slots=True)
 class Ok(Generic[T]):
     """Success result."""
 
     value: T
-
 
 @dataclass(frozen=True, slots=True)
 class Err(Generic[E]):
@@ -208,9 +199,7 @@ class Err(Generic[E]):
 
     error: E
 
-
 type Result[T, E] = Ok[T] | Err[E]
-
 
 def divide(a: float, b: float) -> Result[float, ValueError]:
     """Divide two numbers safely."""

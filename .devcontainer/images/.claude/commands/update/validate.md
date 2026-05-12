@@ -181,7 +181,6 @@ validate_hook_scripts() {
 │   └── shared/utils.sh          # Shared utilities (host)
 ├── images/
 │   ├── .p10k.zsh
-│   ├── grepai.config.yaml       # grepai config (provider, model)
 │   ├── hooks/                    # Image-embedded hooks (real logic)
 │   │   ├── shared/utils.sh
 │   │   └── lifecycle/*.sh
@@ -423,12 +422,6 @@ apply_devcontainer_tarball() {
     if [ -f "$src/.devcontainer/images/.claude/settings.json" ]; then
         cp -f "$src/.devcontainer/images/.claude/settings.json" "$UPDATE_TARGET/settings.json"
         echo "  ✓ settings"
-    fi
-
-    # grepai config (container only)
-    if [ "$CONTEXT" = "container" ] && [ -f "$src/.devcontainer/images/grepai.config.yaml" ]; then
-        cp -f "$src/.devcontainer/images/grepai.config.yaml" ".devcontainer/images/grepai.config.yaml"
-        echo "  ✓ grepai"
     fi
 
     # MCP template (container only)

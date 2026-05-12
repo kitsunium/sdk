@@ -48,12 +48,18 @@ if has_makefile_target "test" "$PROJECT_ROOT"; then
     exit 0
 fi
 
+# Override seam: source ~/.claude/scripts/test.local.sh if present.
+# Loaded after the Makefile fast-path (which already exited) so consumer
+# overrides can pre-empt the per-extension case dispatch — e.g. handle
+# Bazel-purist projects without a Makefile, or short-circuit with `exit 0`.
+load_local_override "${BASH_SOURCE[0]}"
+
 # === Fallback: Direct test runners ===
 
 # Check if this is a test file
 IS_TEST=0
 case "$BASENAME" in
-    *.test.*|*.spec.*|*_test.*|test_*|*Test.java|*Tests.java|*Test.scala|*Spec.scala|*Test.cpp|*Test.cc|*Test.cs|*Tests.cs|*Test.kt|*Tests.swift|*_test.c|*.t|*_spec.lua|*_test.lua|*_test.f90|*_test.adb|*_test.pas|*Test.vb|test_*.m)
+    *.test.*|*.spec.*|*_test.*|test_*|*Test.java|*Tests.java|*Test.scala|*Spec.scala|*Test.cpp|*Test.cc|*Test.cs|*Tests.cs|*Test.kt|*Tests.swift|*.t|*Test.vb)
         IS_TEST=1
         ;;
 esac
@@ -63,7 +69,7 @@ case "$EXT" in
     js|jsx|ts|tsx)
         if [ $IS_TEST -eq 1 ]; then
             if [ -f "$PROJECT_ROOT/package.json" ]; then
-                cd "$PROJECT_ROOT"
+                cd "$PROJECT_ROOT" || return 1
                 # Check for test script in package.json
                 if grep -q '"test"' package.json 2>/dev/null; then
                     npm test -- "$FILE" 2>/dev/null || \
@@ -81,7 +87,7 @@ case "$EXT" in
     # Python
     py)
         if [ $IS_TEST -eq 1 ]; then
-            cd "$PROJECT_ROOT"
+            cd "$PROJECT_ROOT" || return 1
             if command -v pytest &>/dev/null; then
                 pytest "$FILE" -v 2>/dev/null || true
             elif command -v python &>/dev/null; then
@@ -90,10 +96,20 @@ case "$EXT" in
         fi
         ;;
 
-    # Go - tests alongside source files
+    # Go - tests alongside source files. Bazel-aware (issue #351):
+    # Bazel-driven projects without a Makefile shadow `go test` with their
+    # action cache; falling through to raw `go test` on those projects
+    # produces minutes-long false negatives. Both branches keep `|| true`
+    # so a PostToolUse failure never blocks the agent.
     go)
         if [[ "$BASENAME" == *"_test.go" ]]; then
-            if command -v go &>/dev/null; then
+            if has_bazel_workspace "$PROJECT_ROOT"; then
+                BAZEL_CMD=""
+                if BAZEL_CMD="$(bazel_bin)"; then
+                    BAZEL_LABEL="$(bazel_label_for_dir "$DIR" "$PROJECT_ROOT")"
+                    (cd "$PROJECT_ROOT" && "$BAZEL_CMD" test --test_output=errors "$BAZEL_LABEL" 2>/dev/null) || true
+                fi
+            elif command -v go &>/dev/null; then
                 (cd "$DIR" && go test -v -run . 2>/dev/null) || true
             fi
         fi
@@ -121,7 +137,7 @@ case "$EXT" in
     # Ruby
     rb)
         if [[ "$BASENAME" == *"_spec.rb" ]] || [[ "$BASENAME" == *"_test.rb" ]]; then
-            cd "$PROJECT_ROOT"
+            cd "$PROJECT_ROOT" || return 1
             if command -v rspec &>/dev/null && [[ "$BASENAME" == *"_spec.rb" ]]; then
                 rspec "$FILE" 2>/dev/null || true
             elif command -v ruby &>/dev/null; then
@@ -144,7 +160,7 @@ case "$EXT" in
     # Java - Maven or Gradle
     java)
         if [[ "$BASENAME" == *"Test.java" ]] || [[ "$BASENAME" == *"Tests.java" ]]; then
-            cd "$PROJECT_ROOT"
+            cd "$PROJECT_ROOT" || return 1
             CLASS_NAME="${BASENAME%.java}"
             if [ -f "$PROJECT_ROOT/pom.xml" ]; then
                 mvn test -Dtest="$CLASS_NAME" -q 2>/dev/null || true
@@ -168,7 +184,7 @@ case "$EXT" in
     # Dart - dart test or flutter test
     dart)
         if [[ "$BASENAME" == *"_test.dart" ]]; then
-            cd "$PROJECT_ROOT"
+            cd "$PROJECT_ROOT" || return 1
             if [ -f "$PROJECT_ROOT/pubspec.yaml" ]; then
                 if command -v flutter &>/dev/null && grep -q "flutter:" "$PROJECT_ROOT/pubspec.yaml" 2>/dev/null; then
                     flutter test "$FILE" 2>/dev/null || true
@@ -207,7 +223,7 @@ case "$EXT" in
     # Kotlin - gradle test
     kt|kts)
         if [[ "$BASENAME" == *"Test.kt" ]] || [[ "$BASENAME" == *"Test.kts" ]]; then
-            cd "$PROJECT_ROOT"
+            cd "$PROJECT_ROOT" || return 1
             CLASS_NAME="${BASENAME%.kt}"
             CLASS_NAME="${CLASS_NAME%.kts}"
             if [ -f "$PROJECT_ROOT/build.gradle" ] || [ -f "$PROJECT_ROOT/build.gradle.kts" ]; then

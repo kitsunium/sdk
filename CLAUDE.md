@@ -1,9 +1,9 @@
-<!-- updated: 2026-04-19T10:18:42Z -->
+<!-- updated: 2026-05-12T09:29:19Z -->
 # kitsunium/sdk
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. The first tool shipped is a structured logger; more domains land in the same 4-layer shape.
+Go SDK providing a normed, performant toolbox for downstream applications. Two domains ship today — a structured **logger** (zero-alloc, multi-sink) and a universal **codec** (10 wire formats behind a single `Marshal/Unmarshal` dispatch). New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.26
 
@@ -11,13 +11,22 @@ Go SDK providing a normed, performant toolbox for downstream applications. The f
 
 ```
 internal/
-├── kernel/        stdlib-only AND generic primitives  (errs, clock, buffer)
-├── core/          domain interfaces + domain values   (logger, logger/level)
-└── service/       concrete implementations            (logger/text handler)
+├── kernel/        stdlib-only AND generic primitives
+│                  errs, clock, buffer, ring
+├── core/          domain interfaces + domain values
+│                  logger, logger/level, codec
+└── service/       concrete implementations
+                   logger (+ encoder, sink/{console,file,syslog},
+                             middleware/{multi,async,route,
+                                         failover,sample,recover})
+                   codec  (asn1, cbor, csv, json, msgpack,
+                           ndjson, pem, toml, xml, yaml)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
-    ├── logger/
-    └── errs/
+    ├── logger/    (+ ldflags-injected Version)
+    ├── errs/      (read-only introspection: CodeOf, ReasonOf, …)
+    └── codec/     (blank-imports all 10 registrations)
+        └── baseenc/   (base16/32/64 wrappers, not a codec)
 ```
 
 - Every directory is an independent Go module (see `go.work`); each is individually buildable with `GOWORK=off` (useful when debugging outside Bazel).
@@ -43,10 +52,11 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 
 1. **Kernel gate.** A kernel package MUST be stdlib-only AND generic (no domain vocabulary). `level` was moved OUT of kernel because it fails the second half — see ADR 0002 / the layer-placement audit in `.claude/contexts/sdk-layer-placement-audit.md`.
 2. **Typed errors only.** Every error returned from SDK code goes through `errs.Define` or `errs.Wrap` (`internal/kernel/errs`). `fmt.Errorf` / `errors.New` are banned in production code. The AST audit (`make sdk-errs-audit`) fails the build on violations.
-3. **Public/Private split.** Every SDK error carries a wire-safe `Public` (string literal ≤120 runes) and a log-only `Private`. `err.Error()` returns `"[<code> <REASON>] <public>"` — never Private, never Fields.
-4. **No empty stub files / dirs.** If a file or directory only carries a placeholder, inline its content into an existing file or delete it. Enforced by convention and by the "feedback_no_empty_stub_files" rule in the agent's memory.
-5. **Origin wins on wrap.** When `errs.Wrap` receives an `*errs.Error` cause, it inherits the cause's Code/Reason/Public/Private. Wrappers can only add `Fields`. To relabel, define a fresh sentinel.
-6. **`Version` via ldflags.** `pkg/v1/logger.Version` is injected at build time via `-ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=…"`; every emitted record carries `framework_version` automatically.
+3. **Dotted-quad error codes.** `Code` is a `uint32` laid out `MM.LL.PP.SS` (Major / Layer / Package / Serial) — see ADR 0005. Each package owns a `PP` slot; ADR 0005 §Registry + the ADR 0006 extension are the authoritative allocation table, mirrored by the AST audit in `internal/kernel/errs/registry_external_test.go`. Match codes with `errs.HasCode(err, CodeX)` (walks `Unwrap() error` *and* `Unwrap() []error`) or `errors.Is(err, errs.NewPrefixMatcher(...))` for subnet-style routing.
+4. **Public/Private split.** Every SDK error carries a wire-safe `Public` (string literal ≤120 runes) and a log-only `Private`. `err.Error()` returns `"[<code> <REASON>] <public>"` — never Private, never Fields.
+5. **No empty stub files / dirs.** If a file or directory only carries a placeholder, inline its content into an existing file or delete it.
+6. **Origin wins on wrap.** When `errs.Wrap` receives an `*errs.Error` cause, it inherits the cause's Code/Reason/Public/Private. Wrappers can only add `Fields` (and extend the intrinsic wrap trail). To relabel, define a fresh sentinel.
+7. **`Version` via build-time injection.** `pkg/v1/logger.Version` is stamped at link time — under Bazel via `x_defs` + `--stamp` + `tools/workspace_status.sh` (`STABLE_VERSION`); under raw `go build` via `-ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=…"`. Every emitted log record carries `framework_version` automatically.
 
 ## Layout
 
@@ -63,9 +73,11 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 ├── .bazelrc               named configs: race / pure / coverage / ci
 ├── .bazelversion          pins Bazel to 9.0.2
 ├── Makefile               SDK targets: wrappers over bazel mod tidy / run //:gazelle / test / coverage
+├── tools/workspace_status.sh  prints STABLE_VERSION (consumed by --stamp + x_defs)
 ├── .golangci.yml          code-quality second-opinion linters (layer firewall is now Bazel visibility)
 ├── AGENTS.md, agent.toml  devcontainer agent specs (not SDK)
-└── README.md              SDK quickstart + public API entry point
+└── README.md              devcontainer-template readme; NOT the SDK quickstart
+                           (SDK package docs live next to their code)
 ```
 
 ## Verification
@@ -73,9 +85,9 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 | Command | Expected |
 |---|---|
 | `ktn-linter lint ./...` | No issues found |
-| `bazel build //...` | 63+ targets, all pass |
-| `bazel test --config=race //...` | 20/20 tests pass (race on) |
-| `bazel coverage --combined_report=lcov //...` | LCOV at `bazel-out/_coverage/_coverage_report.dat` |
+| `bazel build //...` | all targets pass |
+| `bazel test --config=race //...` | every `*_test` target green (race on by default — see `.bazelrc`) |
+| `bazel coverage --combined_report=lcov //...` | LCOV at `$(bazel info output_path)/_coverage/_coverage_report.dat` |
 | `bazel query 'kind("go_library", deps(//internal/kernel/...)) except //internal/kernel/...'` | empty — kernel has zero outgoing go_library edges |
 | `make sdk-all` | wraps `bazel mod tidy` + `bazel run //:gazelle` + `bazel test --config=race //...` |
 | `make sdk-errs-audit` | AST audit passes (runs under Bazel via `//internal/kernel/errs:errs_test`) |
@@ -83,8 +95,10 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 ## Reference
 
 - ADR 0001 — multi-module layout — `docs/adr/0001-sdk-go-multimodule-layout.md`
-- ADR 0002 — layered `errs` package — `docs/adr/0002-sdk-errors-package.md`
+- ADR 0002 — layered `errs` package — `docs/adr/0002-sdk-errors-package.md` (Registry section superseded by ADR 0005)
 - ADR 0003 — universal codec package — `docs/adr/0003-sdk-codec-package.md`
 - ADR 0004 — Bazel 9 build system — `docs/adr/0004-sdk-bazel-build-system.md`
+- ADR 0005 — dotted-quad error codes + wrap trail — `docs/adr/0005-sdk-error-codes-dotted-quad.md`
+- ADR 0006 — error code registry extension (logger v2 + ring) — `docs/adr/0006-sdk-error-code-registry-extension.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`
