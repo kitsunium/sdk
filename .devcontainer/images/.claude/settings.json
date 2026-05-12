@@ -1,6 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "cleanupPeriodDays": 30,
+  "skillListingBudgetFraction": 0.05,
   "env": {
     "BASH_DEFAULT_TIMEOUT_MS": "60000",
     "MAX_THINKING_TOKENS": "10000",
@@ -69,7 +70,6 @@
       "Bash(date:*)",
       "Bash(env:*)",
       "Bash(printenv:*)",
-      "Bash(grepai:*)",
       "Bash(ruff:*)",
       "Bash(black:*)",
       "Bash(isort:*)",
@@ -131,18 +131,15 @@
       "Read(**/*)",
       "Glob(**/*)",
       "Grep(**/*)",
-      "mcp__grepai__*",
       "mcp__context7__*",
       "Write(.claude/**)",
       "Write(.devcontainer/**)",
       "Write(.github/**)",
       "Write(.githooks/**)",
-      "Write(.grepai/**)",
       "Edit(.claude/**)",
       "Edit(.devcontainer/**)",
       "Edit(.github/**)",
-      "Edit(.githooks/**)",
-      "Edit(.grepai/**)"
+      "Edit(.githooks/**)"
     ],
     "deny": [],
     "defaultMode": "bypassPermissions",
@@ -208,7 +205,7 @@
           },
           {
             "type": "command",
-            "command": "/home/vscode/.claude/scripts/rtk-rewrite.sh",
+            "command": "/home/vscode/.claude/scripts/rtk-hook-claude.sh",
             "timeout": 5
           },
           {

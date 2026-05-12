@@ -130,6 +130,48 @@ step_restore_claude_config() {
     log_success "Claude configuration restored from image defaults"
 }
 
+# Migrate stale ~/.claude/settings.json references to the legacy
+# rtk-rewrite.sh hook (removed in #341/#349 in favor of the native
+# `rtk hook claude` invocation, with rtk-hook-claude.sh as the fail-open
+# wrapper from #348). Existing consumers whose settings.json predates the
+# change still point at the deleted script, producing a noisy
+# `PreToolUse:Bash hook error: rtk-rewrite.sh: not found` on every Bash call.
+#
+# The migration is in-place and minimal: only the offending command path is
+# rewritten. JSON shape, comments, and other entries are left untouched.
+# Idempotent: re-running on an already-migrated file is a no-op.
+step_rtk_settings_migration() {
+    local settings="$HOME/.claude/settings.json"
+    local wrapper="$HOME/.claude/scripts/rtk-hook-claude.sh"
+    local legacy="$HOME/.claude/scripts/rtk-rewrite.sh"
+
+    [ -f "$settings" ] || return 0
+    # Fixed-string match against the full $HOME-derived legacy path so the
+    # gate doesn't trigger for unrelated `rtk-rewrite.sh` mentions or for a
+    # different user's path that we wouldn't actually substitute.
+    grep -qF "$legacy" "$settings" 2>/dev/null || return 0
+
+    if [ ! -x "$wrapper" ]; then
+        log_warning "rtk settings migration: $wrapper missing; leaving stale rtk-rewrite.sh reference (will retry next start)"
+        return 0
+    fi
+
+    # Linux GNU sed and macOS BSD sed disagree on `sed -i` arity. Use a
+    # tempfile + mv to stay portable across both. Only log success after the
+    # rewrite actually changed bytes — otherwise we report a migration that
+    # didn't happen (e.g., when paths diverge across users).
+    local tmp
+    tmp=$(mktemp) || return 0
+    if sed "s|${legacy}|${wrapper}|g" "$settings" > "$tmp" \
+        && ! cmp -s "$settings" "$tmp" \
+        && mv "$tmp" "$settings"; then
+        log_success "rtk settings migration: rtk-rewrite.sh → rtk-hook-claude.sh in $settings"
+    else
+        rm -f "$tmp"
+        log_warning "rtk settings migration: sed failed or no change in $settings; leaving file untouched"
+    fi
+}
+
 # Ensure Claude directories exist (volume mount point)
 step_init_claude_dirs() {
     mkdir -p "$HOME/.claude/sessions" "$HOME/.claude/plans" "$HOME/.claude/contexts"
@@ -549,7 +591,7 @@ step_mcp_configuration() {
         [ -z "$GITHUB_TOKEN" ] && log_warning "GitHub token not available"
         [ -z "$GITLAB_TOKEN" ] && log_info "GitLab token not configured (optional)"
 
-        # Always render template (grepai needs no token), then prune tokenless servers
+        # Render the MCP template, then prune any servers whose tokens are missing
         local escaped_github escaped_gitlab escaped_gitlab_api mcp_tmp
         escaped_github=$(escape_for_sed "${GITHUB_TOKEN}")
         escaped_gitlab=$(escape_for_sed "${GITLAB_TOKEN}")
@@ -992,377 +1034,18 @@ step_auto_init_check() {
 }
 
 # ============================================================================
-# Ollama + grepai Initialization (for semantic code search MCP)
+# Legacy grepai/ollama cleanup (transitive — runs once after migration v2026.04)
 # ============================================================================
-GREPAI_BIN="/usr/local/bin/grepai"
-GREPAI_CONFIG_TPL="/etc/grepai/config.yaml"
-OLLAMA_HOST_ENDPOINT="${OLLAMA_HOST:-host.docker.internal:11434}"
-
-detect_ollama_endpoint() {
-    local endpoint=""
-    local source=""
-
-    if [ -n "${OLLAMA_HOST:-}" ]; then
-        endpoint="$OLLAMA_HOST"
-        source="OLLAMA_HOST env var"
-        if curl -sf --connect-timeout 3 "http://${endpoint}/api/tags" >/dev/null 2>&1; then
-            echo "$endpoint|$source"
-            return 0
-        else
-            log_warning "OLLAMA_HOST=$endpoint not responding"
-        fi
-    fi
-
-    endpoint="$OLLAMA_HOST_ENDPOINT"
-    if curl -sf --connect-timeout 3 "http://${endpoint}/api/tags" >/dev/null 2>&1; then
-        source="host (GPU-accelerated)"
-        echo "$endpoint|$source"
-        return 0
-    fi
-
-    echo ""
-    return 1
-}
-
-check_model_available() {
-    local endpoint="$1"
-    local model="$2"
-    curl -sf "http://${endpoint}/api/tags" 2>/dev/null | grep -q "$model"
-}
-
-show_ollama_instructions() {
-    log_warning "==============================================================================="
-    log_warning "  Ollama not running - Semantic search (grepai) will be disabled"
-    log_warning "==============================================================================="
-    log_info ""
-    log_info "Ollama should be installed automatically via initialize.sh"
-    log_info "If not running, start it manually on your host machine:"
-    log_info ""
-    log_info "  macOS:"
-    log_info "    brew services start ollama"
-    log_info "    # or: ollama serve"
-    log_info ""
-    log_info "  Linux:"
-    log_info "    sudo systemctl start ollama"
-    log_info "    # or: ollama serve"
-    log_info ""
-    log_info "  Then restart the DevContainer or run: /init"
-    log_info ""
-    log_warning "==============================================================================="
-}
-
-# --- Health stamp helpers ---
-# The health stamp tracks 3 invalidation factors: model, binary version, config hash.
-# If any factor changes between container starts, the index is purged and rebuilt.
-
-compute_config_hash() {
-    # Hash the config EXCLUDING the endpoint line (which changes per environment)
-    grep -v '^\s*endpoint:' "$1" 2>/dev/null | md5sum | awk '{print $1}'
-}
-
-get_grepai_version() {
-    "$GREPAI_BIN" version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown"
-}
-
-read_health_stamp() {
-    # Reads .health-stamp into STAMP_* variables in the caller's scope
-    # Returns 1 if stamp doesn't exist
-    local stamp_file="$1"
-    STAMP_MODEL=""
-    STAMP_GREPAI_VERSION=""
-    STAMP_CONFIG_HASH=""
-    STAMP_DAEMON_PID=""
-    STAMP_LAST_HEALTHY=""
-
-    [ -f "$stamp_file" ] || return 1
-
-    STAMP_MODEL=$(grep '^MODEL=' "$stamp_file" 2>/dev/null | cut -d= -f2-)
-    STAMP_GREPAI_VERSION=$(grep '^GREPAI_VERSION=' "$stamp_file" 2>/dev/null | cut -d= -f2-)
-    STAMP_CONFIG_HASH=$(grep '^CONFIG_HASH=' "$stamp_file" 2>/dev/null | cut -d= -f2-)
-    # shellcheck disable=SC2034  # STAMP_DAEMON_PID used by grepai_watchdog via read_health_stamp
-    STAMP_DAEMON_PID=$(grep '^DAEMON_PID=' "$stamp_file" 2>/dev/null | cut -d= -f2-)
-    # shellcheck disable=SC2034  # STAMP_LAST_HEALTHY used by write_health_stamp
-    STAMP_LAST_HEALTHY=$(grep '^LAST_HEALTHY=' "$stamp_file" 2>/dev/null | cut -d= -f2-)
-    return 0
-}
-
-write_health_stamp() {
-    local stamp_file="$1"
-    local model="$2"
-    local version="$3"
-    local config_hash="$4"
-    local daemon_pid="$5"
-
-    cat > "$stamp_file" <<STAMP_EOF
-MODEL=$model
-GREPAI_VERSION=$version
-CONFIG_HASH=$config_hash
-DAEMON_PID=$daemon_pid
-LAST_HEALTHY=$(date +%s)
-STAMP_EOF
-    chmod 644 "$stamp_file"
-}
-
-stop_grepai_daemon() {
-    local pid
-    pid=$(pgrep -f "$GREPAI_BIN watch" 2>/dev/null || true)
-    if [ -n "$pid" ]; then
-        log_info "Stopping grepai daemon (PID: $pid)..."
-        kill "$pid" 2>/dev/null || true
-        sleep 2
-        # Force kill if still alive
-        if kill -0 "$pid" 2>/dev/null; then
-            kill -9 "$pid" 2>/dev/null || true
-            sleep 1
-        fi
-    fi
-    # Clean stale lock (daemon may have held it when killed)
-    rm -f "${WORKSPACE_FOLDER:-/workspace}/.grepai/index.gob.lock"
-}
-
-_grepai_init_core() {
-    local quiet="${1:-false}"
-    local grepai_dir="${WORKSPACE_FOLDER:-/workspace}/.grepai"
-    local grepai_config="${grepai_dir}/config.yaml"
-    local health_stamp="${grepai_dir}/.health-stamp"
-    local grepai_log="/tmp/grepai.log"
-    local detected_result=""
-    local ollama_endpoint=""
-    local ollama_source=""
-
-    # --- Step 1: Detect Ollama endpoint ---
-    [ "$quiet" = "false" ] && log_info "Checking Ollama on host ($OLLAMA_HOST_ENDPOINT)..."
-    detected_result=$(detect_ollama_endpoint)
-
-    if [ -n "$detected_result" ]; then
-        ollama_endpoint=$(echo "$detected_result" | cut -d'|' -f1)
-        ollama_source=$(echo "$detected_result" | cut -d'|' -f2)
-        log_success "Ollama connected: $ollama_endpoint ($ollama_source)"
-    else
-        [ "$quiet" = "false" ] && show_ollama_instructions
-        # Pre-initialize config for when Ollama becomes available
-        if [ -x "$GREPAI_BIN" ] && [ -f "$GREPAI_CONFIG_TPL" ]; then
-            mkdir -p "$grepai_dir"
-            cp "$GREPAI_CONFIG_TPL" "$grepai_config" 2>/dev/null || true
-            sed -i -E "s|(endpoint: http://)[^[:space:]]+|\1${OLLAMA_HOST_ENDPOINT}|" "$grepai_config" 2>/dev/null || true
-            [ "$quiet" = "false" ] && log_info "grepai config initialized (waiting for Ollama)"
-        fi
-        return 1
-    fi
-
-    # --- Step 2: Verify grepai binary ---
-    if [ ! -x "$GREPAI_BIN" ]; then
-        [ "$quiet" = "false" ] && log_warning "grepai binary not found at $GREPAI_BIN"
-        return 2
-    fi
-
-    # --- Step 3: Sync config from template (always, to prevent drift) ---
-    mkdir -p "$grepai_dir"
-
-    if [ -f "$GREPAI_CONFIG_TPL" ]; then
-        cp "$GREPAI_CONFIG_TPL" "$grepai_config"
-        sed -i -E "s|(endpoint: http://)[^[:space:]]+|\1${ollama_endpoint}|" "$grepai_config"
-        log_success "grepai config synced from template (endpoint: http://$ollama_endpoint)"
-    else
-        log_warning "Config template not found at $GREPAI_CONFIG_TPL, using grepai init..."
-        (cd "${WORKSPACE_FOLDER:-/workspace}" && "$GREPAI_BIN" init --provider ollama --backend gob --yes 2>/dev/null) || true
-        if [ -f "$grepai_config" ]; then
-            sed -i -E "s|(endpoint: http://)[^[:space:]]+|\1${ollama_endpoint}|" "$grepai_config"
-        fi
-    fi
-
-    # --- Step 4: Compute current state ---
-    local current_model current_version current_config_hash
-    current_model=$(grep -E '^\s+model:' "$grepai_config" 2>/dev/null | awk '{print $2}' | head -1)
-    current_version=$(get_grepai_version)
-    current_config_hash=$(compute_config_hash "$grepai_config")
-
-    [ "$quiet" = "false" ] && log_info "grepai state: model=$current_model version=$current_version config=$current_config_hash"
-
-    # --- Step 5-6: Multi-factor invalidation detection ---
-    local need_rebuild=false
-    local rebuild_reasons=""
-
-    if read_health_stamp "$health_stamp"; then
-        # Factor 1: model change (embeddings become incompatible)
-        if [ -n "$current_model" ] && [ "$STAMP_MODEL" != "$current_model" ]; then
-            log_warning "Model changed: ${STAMP_MODEL:-unknown} -> $current_model"
-            need_rebuild=true
-            rebuild_reasons="${rebuild_reasons}model_change "
-        fi
-
-        # Factor 2: grepai binary version change (index format may change)
-        if [ "$STAMP_GREPAI_VERSION" != "$current_version" ]; then
-            log_warning "grepai version changed: ${STAMP_GREPAI_VERSION:-unknown} -> $current_version"
-            need_rebuild=true
-            rebuild_reasons="${rebuild_reasons}version_change "
-        fi
-
-        # Factor 3: config change (chunk size, ignore patterns, etc.)
-        if [ "$STAMP_CONFIG_HASH" != "$current_config_hash" ]; then
-            log_warning "Config changed: ${STAMP_CONFIG_HASH:-unknown} -> $current_config_hash"
-            need_rebuild=true
-            rebuild_reasons="${rebuild_reasons}config_change "
-        fi
-    else
-        # No health stamp = fresh install or first run after migration
-        [ "$quiet" = "false" ] && log_info "No health stamp found (fresh install or first run)"
-
-        # Migrate from legacy .model-stamp if present
-        local legacy_stamp="${grepai_dir}/.model-stamp"
-        if [ -f "$legacy_stamp" ]; then
-            local legacy_model
-            legacy_model=$(cat "$legacy_stamp" 2>/dev/null || echo "")
-            if [ -n "$legacy_model" ] && [ "$legacy_model" != "$current_model" ]; then
-                log_warning "Legacy stamp model mismatch: $legacy_model -> $current_model"
-                need_rebuild=true
-                rebuild_reasons="${rebuild_reasons}legacy_model_change "
-            fi
-            rm -f "$legacy_stamp"
-            log_info "Migrated from legacy .model-stamp"
-        fi
-
-        # If index exists but no stamp, we can't trust it — rebuild
-        if [ -f "${grepai_dir}/index.gob" ] && [ "$need_rebuild" = "false" ]; then
-            log_warning "Index exists but no health stamp — cannot verify integrity"
-            need_rebuild=true
-            rebuild_reasons="${rebuild_reasons}missing_stamp "
-        fi
-    fi
-
-    # --- Step 7: Handle invalidation ---
-    if [ "$need_rebuild" = "true" ]; then
-        log_warning "Index rebuild required: ${rebuild_reasons}"
-        stop_grepai_daemon
-        rm -f "${grepai_dir}/index.gob" "${grepai_dir}/symbols.gob" "${grepai_dir}/index.gob.lock"
-        log_success "Index cleared — will rebuild from scratch"
-    fi
-
-    # --- Step 8: Verify model is available before starting daemon ---
-    if [ -n "$current_model" ]; then
-        if check_model_available "$ollama_endpoint" "$current_model"; then
-            log_success "Model $current_model available on Ollama"
-        else
-            log_warning "Model $current_model not found on Ollama"
-            [ "$quiet" = "false" ] && log_info "Pull the model on your host: ollama pull $current_model"
-            [ "$quiet" = "false" ] && log_warning "Skipping daemon start until model is available"
-            return 2
-        fi
-    fi
-
-    # --- Step 9: Start or verify daemon ---
-    local grepai_pid
-    grepai_pid=$(pgrep -f "$GREPAI_BIN watch" 2>/dev/null || true)
-
-    if [ -z "$grepai_pid" ]; then
-        # Clean stale lock from previous crashed daemon (no process = lock is stale)
-        rm -f "${grepai_dir}/index.gob.lock"
-        log_info "Starting grepai watch daemon..."
-        : > "$grepai_log"
-        (cd "${WORKSPACE_FOLDER:-/workspace}" && nohup "$GREPAI_BIN" watch > "$grepai_log" 2>&1 &)
-
-        # Retry loop: wait up to 5 seconds for daemon to start
-        local retries=10
-        while [ $retries -gt 0 ]; do
-            grepai_pid=$(pgrep -f "$GREPAI_BIN watch" 2>/dev/null || true)
-            [ -n "$grepai_pid" ] && break
-            retries=$((retries - 1))
-            sleep 0.5
-        done
-
-        if [ -n "$grepai_pid" ]; then
-            log_success "grepai watch daemon started (PID: $grepai_pid)"
-        else
-            log_warning "grepai daemon failed to start (check $grepai_log)"
-            return 2
-        fi
-    else
-        log_info "grepai watch daemon already running (PID: $grepai_pid)"
-    fi
-
-    # --- Step 10: Save health stamp ---
-    write_health_stamp "$health_stamp" \
-        "$current_model" "$current_version" "$current_config_hash" "$grepai_pid"
-    log_success "Health stamp saved (model=$current_model ver=$current_version)"
-}
-
-init_semantic_search() {
-    _grepai_init_core "false"
-    # Always launch watchdog (handles both daemon monitoring AND deferred init)
-    grepai_watchdog &
-}
-
-# Watchdog: monitors grepai daemon and handles deferred initialization.
-# When health stamp exists: restarts crashed daemon.
-# When no health stamp: retries init when Ollama becomes available.
-# Runs in background for the lifetime of the container.
-grepai_watchdog() {
-    local grepai_dir="${WORKSPACE_FOLDER:-/workspace}/.grepai"
-    local health_stamp="${grepai_dir}/.health-stamp"
-    local grepai_log="/tmp/grepai.log"
-    local deferred_attempts=0
-
-    # Write PID file for discoverability (shell functions are invisible to pgrep)
-    echo $$ > /tmp/grepai-watchdog.pid
-
-    # Let the container finish starting before first check
-    sleep 30
-
-    while true; do
-        sleep 60
-
-        if [ ! -f "$health_stamp" ]; then
-            # Deferred init: Ollama may have become available since startup
-            if detect_ollama_endpoint >/dev/null 2>&1; then
-                deferred_attempts=$((deferred_attempts + 1))
-                if [ "$deferred_attempts" -eq 1 ]; then
-                    log_info "[WATCHDOG] Ollama now available — initializing semantic search"
-                elif [ $((deferred_attempts % 5)) -eq 0 ]; then
-                    log_warning "[WATCHDOG] Deferred init retry #${deferred_attempts}"
-                fi
-
-                if _grepai_init_core "true"; then
-                    log_success "[WATCHDOG] Deferred initialization complete"
-                    deferred_attempts=0
-                fi
-            fi
-            continue
-        fi
-
-        # Reset counter once healthy
-        deferred_attempts=0
-
-        local current_pid
-        current_pid=$(pgrep -f "$GREPAI_BIN watch" 2>/dev/null || true)
-
-        if [ -z "$current_pid" ]; then
-            log_warning "[WATCHDOG] grepai daemon not running — restarting..."
-
-            # Verify Ollama is still reachable before restarting
-            if ! detect_ollama_endpoint >/dev/null 2>&1; then
-                log_warning "[WATCHDOG] Ollama not reachable, skipping restart"
-                continue
-            fi
-
-            # Clean stale lock from crashed daemon before restart
-            rm -f "${grepai_dir}/index.gob.lock"
-            (cd "${WORKSPACE_FOLDER:-/workspace}" && nohup "$GREPAI_BIN" watch >> "$grepai_log" 2>&1 &)
-            sleep 3
-
-            current_pid=$(pgrep -f "$GREPAI_BIN watch" 2>/dev/null || true)
-            if [ -n "$current_pid" ]; then
-                log_success "[WATCHDOG] Daemon restarted (PID: $current_pid)"
-                # Update stamp with new PID
-                if read_health_stamp "$health_stamp"; then
-                    write_health_stamp "$health_stamp" \
-                        "$STAMP_MODEL" "$STAMP_GREPAI_VERSION" \
-                        "$STAMP_CONFIG_HASH" "$current_pid"
-                fi
-            else
-                log_warning "[WATCHDOG] Failed to restart daemon (check $grepai_log)"
-            fi
-        fi
-    done
+# Removed in 2026-04: grepai+ollama dropped (high CPU/RAM cost, marginal benefit).
+# Replaced by RTK auto-rewrite (PreToolUse hook) + targeted Grep in agents.
+# This step kills any leftover daemon and removes index/config artifacts.
+cleanup_legacy_grepai() {
+    pkill -f 'grepai watch' 2>/dev/null || true
+    pkill -f 'grepai mcp-serve' 2>/dev/null || true
+    rm -f /tmp/.grepai-init.pid /tmp/grepai-watchdog.pid \
+          /tmp/grepai.log /tmp/grepai-init.log 2>/dev/null || true
+    rm -rf "${WORKSPACE_FOLDER:-/workspace}/.grepai" 2>/dev/null || true
+    [ -d /etc/grepai ] && rm -rf /etc/grepai 2>/dev/null || true
 }
 
 # ============================================================================
@@ -1572,18 +1255,69 @@ connect_pptp() {
 }
 
 # --- RTK CLI proxy initialization ---
+#
+# Runtime is fail-OPEN by design (the build path in install.sh + Dockerfile
+# is fail-closed; once a container ships, we never brick it on RTK loss).
+# Every failure path here:
+#   1) returns 0 (non-blocking),
+#   2) writes ~/.claude/logs/<branch>/rtk-mode.json with mode=degraded + reason
+#      so /audit and session-init.sh's probe can surface the deviation,
+#   3) emits log_warning so the operator sees the deviation in postStart logs.
+#
+# CLAUDE_HOOKS_BOOTSTRAP=1 is exported around the curl/tar/jq calls so
+# session-init.sh's probe_rtk_mode skips its own emission during boot
+# (avoids confusing transient state with steady-state degradation).
 init_rtk() {
+    # Helper: write the rtk-mode.json snapshot consumed by /audit + probe.
+    # Resolves the branch-scoped log dir lazily (postStart's GH_BRANCH may
+    # not be exported yet at this stage).
+    _rtk_write_mode() {
+        local mode="$1" reason="$2"
+        local branch_safe log_dir
+        # The previous `git ... | tr ... || echo default` chain didn't fall back
+        # when git rev-parse produced empty output (e.g., unborn repo): tr saw
+        # empty stdin, exited 0, and branch_safe ended up as "" — landing the
+        # snapshot directly under .claude/logs/ instead of a branch dir.
+        # Use symbolic-ref (fails cleanly on unborn repos) and explicitly fall
+        # back to "default" on empty output OR git failure.
+        local raw
+        raw=$(git -C "${CLAUDE_PROJECT_DIR:-/workspace}" symbolic-ref --short HEAD 2>/dev/null \
+              || git -C "${CLAUDE_PROJECT_DIR:-/workspace}" rev-parse --abbrev-ref HEAD 2>/dev/null \
+              || true)
+        [ -z "$raw" ] || [ "$raw" = "HEAD" ] && raw="default"
+        branch_safe=$(printf '%s' "$raw" | tr '/ ' '__')
+        log_dir="${CLAUDE_PROJECT_DIR:-/workspace}/.claude/logs/$branch_safe"
+        mkdir -p "$log_dir" 2>/dev/null || return 0
+        if command -v jq >/dev/null 2>&1; then
+            jq -n -c \
+                --arg mode "$mode" \
+                --arg reason "$reason" \
+                --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{mode:$mode,reason:$reason,version:"",timestamp:$ts}' \
+                > "$log_dir/rtk-mode.json" 2>/dev/null || true
+        fi
+    }
+
+    export CLAUDE_HOOKS_BOOTSTRAP=1
+
     if ! command -v rtk &>/dev/null; then
         log_info "RTK not found, installing latest from GitHub..."
         if ! command -v jq >/dev/null 2>&1; then
             log_warning "RTK: jq not available, skipping installation"
+            _rtk_write_mode degraded no-binary
+            unset CLAUDE_HOOKS_BOOTSTRAP
             return 0
         fi
         local rtk_arch
         case "$(uname -m)" in
             x86_64)  rtk_arch="x86_64-unknown-linux-musl" ;;
             aarch64) rtk_arch="aarch64-unknown-linux-musl" ;;
-            *)       log_warning "RTK: unsupported architecture $(uname -m)"; return 0 ;;
+            *)
+                log_warning "RTK: unsupported architecture $(uname -m)"
+                _rtk_write_mode degraded no-binary
+                unset CLAUDE_HOOKS_BOOTSTRAP
+                return 0
+                ;;
         esac
         local curl_auth_args=()
         if [ -n "${GITHUB_API_TOKEN:-}" ]; then
@@ -1594,18 +1328,22 @@ init_rtk() {
             "https://api.github.com/repos/rtk-ai/rtk/releases/latest" 2>/dev/null | jq -r '.tag_name // empty')
         if [ -z "$rtk_tag" ] || ! [[ "$rtk_tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             log_warning "RTK: failed to fetch valid release tag"
+            _rtk_write_mode degraded no-binary
+            unset CLAUDE_HOOKS_BOOTSTRAP
             return 0
         fi
         if curl -fsSL --connect-timeout 5 --max-time 60 "https://github.com/rtk-ai/rtk/releases/download/${rtk_tag}/rtk-${rtk_arch}.tar.gz" \
             | sudo tar xz -C /usr/local/bin rtk 2>/dev/null; then
             log_success "RTK ${rtk_tag} installed to /usr/local/bin/rtk"
         else
-            log_warning "RTK: installation failed (non-blocking)"
+            log_warning "RTK: installation failed (non-blocking; build-time install.sh is the canonical mandatory gate)"
+            _rtk_write_mode degraded no-binary
+            unset CLAUDE_HOOKS_BOOTSTRAP
             return 0
         fi
     fi
 
-    # Sync config from template (with hash tracking for updates)
+    # Sync config from template (with hash tracking for updates).
     local RTK_CONFIG_DIR="$HOME/.config/rtk"
     local RTK_CONFIG_SRC="/etc/rtk/config.toml"
     if [ -f "$RTK_CONFIG_SRC" ]; then
@@ -1630,9 +1368,126 @@ init_rtk() {
         fi
     fi
 
-    local RTK_VER
-    RTK_VER=$(rtk --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    log_success "RTK ${RTK_VER:-unknown} ready (token savings active)"
+    # Verify the synced config actually parses under current rtk; if not,
+    # snapshot the failure for /audit but stay non-blocking. Track the degraded
+    # state locally so the closing log line below reflects reality (the
+    # previous unconditional "RTK ready" message contradicted the warning).
+    local rtk_degraded=false
+    if command -v rtk >/dev/null 2>&1 && ! rtk config &>/dev/null; then
+        log_warning "RTK: ~/.config/rtk/config.toml is invalid (rtk config exits non-zero)"
+        _rtk_write_mode degraded config-invalid
+        rtk_degraded=true
+    fi
+
+    if $rtk_degraded; then
+        log_warning "RTK degraded — see ~/.claude/logs/<branch>/rtk-mode.json for reason; runtime is non-blocking"
+    else
+        local RTK_VER
+        RTK_VER=$(rtk --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        log_success "RTK ${RTK_VER:-unknown} ready (token savings active)"
+    fi
+
+    unset CLAUDE_HOOKS_BOOTSTRAP
+}
+
+# --- Bootstrap canonical Claude memory via upstream `rtk init` ---
+#
+# `rtk init -g --auto-patch` (rtk >= 0.38) is upstream-supported and provably
+# byte-safe against arbitrary user content in ~/.claude/CLAUDE.md (only adds
+# `@RTK.md` if absent). We run it unconditionally and let upstream handle the
+# no-op when nothing needs touching. Format-stable shell-side: we never parse
+# the `--show` output (only display it for log/debug).
+#
+# Side effect: ensures the PreToolUse `rtk hook claude` entry is present in
+# ~/.claude/settings.json (the --auto-patch behavior). Our settings.json
+# source-of-truth wires the fail-open wrapper `rtk-hook-claude.sh` instead
+# of the raw `rtk hook claude` invocation (issue #348 — non-zero rc here
+# blocks every Bash call). `--auto-patch` is upstream-oblivious to that
+# wrapper and re-injects the raw entry on every start, producing a duplicate
+# that runs rtk twice per Bash tool use. We strip the raw duplicate after
+# the patch so the wrapper remains the sole rtk gateway.
+step_rtk_claude_init() {
+    if ! command -v rtk >/dev/null 2>&1; then
+        log_warning "rtk-init: skipping (rtk not on PATH; init_rtk will retry next start)"
+        return 0
+    fi
+    export CLAUDE_HOOKS_BOOTSTRAP=1
+    log_info "RTK claude init: pre-state ↓"
+    rtk init -g --show 2>&1 | sed 's/^/    /' || true
+    rtk init -g --auto-patch 2>&1 | sed 's/^/    /' || true
+    log_info "RTK claude init: post-state ↓"
+    rtk init -g --show 2>&1 | sed 's/^/    /' || true
+    unset CLAUDE_HOOKS_BOOTSTRAP
+
+    # Dedupe: drop any single-hook PreToolUse Bash entry whose only command is
+    # the raw `rtk hook claude` — the wrapper script `rtk-hook-claude.sh` is
+    # the supported gateway and is already present from settings.json
+    # source-of-truth. Leaving both wired makes rtk run twice per Bash call
+    # and breaks the wrapper's fail-open guarantee (the raw entry has no
+    # JSON-validation fallback). Idempotent.
+    local settings="$HOME/.claude/settings.json"
+    if [ -f "$settings" ] && command -v jq >/dev/null 2>&1; then
+        local tmp
+        tmp=$(mktemp) || return 0
+        if jq '
+            if (.hooks.PreToolUse | type) == "array" then
+                .hooks.PreToolUse |= map(
+                    select(
+                        ((.matcher // "") != "Bash")
+                        or
+                        ((.hooks // []) | length != 1)
+                        or
+                        ((.hooks // [])[0].command != "rtk hook claude")
+                    )
+                )
+            else . end
+        ' "$settings" > "$tmp" 2>/dev/null && jq empty "$tmp" 2>/dev/null; then
+            if ! cmp -s "$settings" "$tmp"; then
+                mv "$tmp" "$settings"
+                log_success "RTK claude init: removed duplicate raw 'rtk hook claude' (wrapper kept)"
+            else
+                rm -f "$tmp"
+            fi
+        else
+            rm -f "$tmp"
+            log_warning "RTK claude init: dedupe pass failed (jq error); leaving settings untouched"
+        fi
+    fi
+}
+
+# Safety net for the ktn-linter MCP fragment. The Go feature's install.sh is
+# the canonical writer of /etc/mcp/features/go.mcp.json, but the feature
+# only runs at image-build time. If the published GHCR feature predates the
+# fragment-writing line, or if its install.sh aborted between the binary
+# spawn and `install_mcp_fragment` (line ~315→~413), the fragment is absent
+# from the rebuilt image — and step_mcp_configuration silently leaves
+# ktn-linter out of /workspace/mcp.json. That's the regression behind the
+# "rebuilt and nothing works" report.
+#
+# When the binary is present at runtime, we know the user wants ktn-linter
+# wired; synthesizing the fragment is byte-equivalent to what install.sh
+# would have written. Idempotent: bails out when the file already exists.
+step_ensure_go_mcp_fragment() {
+    local fragment="/etc/mcp/features/go.mcp.json"
+    [ -f "$fragment" ] && return 0
+    command -v ktn-linter >/dev/null 2>&1 || return 0
+
+    mkdir -p /etc/mcp/features 2>/dev/null || {
+        log_warning "Go MCP fragment: cannot create /etc/mcp/features (permission denied)"
+        return 0
+    }
+    cat > "$fragment" <<'EOF_FRAGMENT'
+{
+  "servers": {
+    "ktn-linter": {
+      "command": "ktn-linter",
+      "args": ["serve"],
+      "requires_binary": "ktn-linter"
+    }
+  }
+}
+EOF_FRAGMENT
+    log_success "Go MCP fragment synthesized at $fragment (Go feature did not provide it)"
 }
 
 # --- Main VPN auto-connect orchestrator ---
@@ -1713,22 +1568,34 @@ init_vpn() {
     return 0
 }
 
-# Force-sync .devcontainer/features/ from image-embedded copy (always overwrites).
-# Consumer projects get upstream template features at every container start.
-# Auto-skips when running inside the template repo itself (detected via
-# .devcontainer/.template-version matching git HEAD).
+# Sync .devcontainer/features/ from image-embedded copy with consumer-edit
+# protection (3-way safe). Consumer projects get upstream template features at
+# every container start without clobbering their own edits.
+#
+# Skip layers (in order):
+#   1. Self-exclusion when running inside the template repo itself.
+#   2. /update harmony when consumer ran /update on a fresher template.
+#   3. Per-file: see shared/sync-features.sh (_sync_file_safely):
+#      - byte-identical → noop
+#      - tracked + git-dirty → preserve consumer WIP, log warning
+#      - manifest-known + dst==prev_hash → safe overwrite (Phase 2)
+#      - otherwise → overwrite (narrowed by Phase 2 manifest)
+#
+# Bug ref: kodflow/devcontainer-template#334 (silent overwrite of edited
+# CLAUDE.md / consumer files when global .template-version lagged image).
 step_sync_features() {
     local src="/etc/devcontainer-template/features"
     local dst="${WORKSPACE_FOLDER:-/workspace}/.devcontainer/features"
-    local marker="${WORKSPACE_FOLDER:-/workspace}/.devcontainer/.template-version"
+    local ws="${WORKSPACE_FOLDER:-/workspace}"
+    local marker="$ws/.devcontainer/.template-version"
 
     if [ ! -d "$src" ]; then
         log_info "No embedded features dir in image, skipping sync"
         return 0
     fi
 
-    if [ ! -d "${WORKSPACE_FOLDER:-/workspace}/.devcontainer" ]; then
-        log_warn "No .devcontainer/ in workspace, skipping features sync"
+    if [ ! -d "$ws/.devcontainer" ]; then
+        log_warning "No .devcontainer/ in workspace, skipping features sync"
         return 0
     fi
 
@@ -1736,7 +1603,7 @@ step_sync_features() {
     if [ -f "$marker" ] && command -v jq &>/dev/null; then
         local marker_commit current_commit
         marker_commit=$(jq -r '.commit // empty' "$marker" 2>/dev/null || true)
-        current_commit=$(git -C "${WORKSPACE_FOLDER:-/workspace}" rev-parse --short HEAD 2>/dev/null || true)
+        current_commit=$(git -C "$ws" rev-parse --short HEAD 2>/dev/null || true)
         if [ -n "$marker_commit" ] && [ -n "$current_commit" ] && \
            { [[ "$current_commit" == "$marker_commit"* ]] || [[ "$marker_commit" == "$current_commit"* ]]; }; then
             log_info "Template repo detected (template-version matches HEAD), skipping features sync"
@@ -1759,24 +1626,17 @@ step_sync_features() {
         fi
     fi
 
-    log_info "Force-syncing .devcontainer/features/ from template image..."
-    if command -v rsync &>/dev/null; then
-        if rsync -a --delete --checksum "$src/" "$dst/"; then
-            log_success ".devcontainer/features/ synced ($(find "$dst" -type f 2>/dev/null | wc -l) files)"
-        else
-            log_error "rsync failed; features dir may be in inconsistent state"
-            return 1
-        fi
-    else
-        rm -rf "$dst"
-        mkdir -p "$dst"
-        if cp -a "$src/." "$dst/"; then
-            log_success ".devcontainer/features/ synced via cp ($(find "$dst" -type f 2>/dev/null | wc -l) files)"
-        else
-            log_error "cp fallback failed"
-            return 1
-        fi
+    # Per-file 3-way safe sync (replaces previous rsync -a --delete --checksum).
+    local helper="$SCRIPT_DIR/../shared/sync-features.sh"
+    if [ ! -f "$helper" ]; then
+        log_error "sync-features.sh helper missing at $helper; cannot sync safely"
+        return 1
     fi
+    # shellcheck source=../shared/sync-features.sh
+    source "$helper"
+
+    log_info "Syncing .devcontainer/features/ from template image (3-way safe)…"
+    sync_features_tree "$src" "$dst" "$ws"
 }
 
 # Clean up legacy workspace hook stubs (replaced by direct /etc/devcontainer-hooks/ calls)
@@ -1803,6 +1663,7 @@ step_cleanup_legacy_stubs() {
 run_step "Sync features dir"        step_sync_features
 run_step "Cleanup legacy stubs"     step_cleanup_legacy_stubs
 run_step "Restore Claude config"    step_restore_claude_config
+run_step "RTK settings migration"   step_rtk_settings_migration
 run_step "Init Claude dirs"         step_init_claude_dirs
 run_step "Shell env repair"         step_shell_env_repair
 run_step "Cache completions"        step_cache_completions
@@ -1823,17 +1684,19 @@ else
 fi
 run_step "1Password permissions"    step_1password_permissions
 run_step "npm cache permissions"    step_npm_cache_permissions
+run_step "Ensure Go MCP fragment"   step_ensure_go_mcp_fragment
 run_step "MCP configuration"        step_mcp_configuration
 run_step "CodeRabbit auth"           step_coderabbit_auth
 run_step "Qodo auth"               step_qodo_auth
 run_step "Git credential cleanup"   step_git_credential_cleanup
 
+run_step "Legacy grepai/ollama cleanup" cleanup_legacy_grepai
+
 # Background tasks (tracked via PID files for diagnostics)
-init_semantic_search >> /tmp/grepai-init.log 2>&1 &
-echo $! > /tmp/.grepai-init.pid
 init_vpn >> /tmp/vpn-init.log 2>&1 &
 echo $! > /tmp/.vpn-init.pid
 run_step "RTK init" init_rtk
+run_step "RTK claude init" step_rtk_claude_init
 
 # Export dynamic environment variables (appended to ~/.devcontainer-env.sh)
 # Note: ~/.devcontainer-env.sh is created by postCreate.sh with static content

@@ -93,70 +93,7 @@ if [ ! -f "$TARGET/CLAUDE.md" ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. Install grepai (semantic code search MCP) — skip if pre-installed
-# ─────────────────────────────────────────────────────────────────────────────
-if command -v grepai &>/dev/null; then
-    echo "  ✓ grepai already installed: $(grepai --version 2>/dev/null || echo 'pre-installed')"
-else
-echo "→ Installing grepai..."
-mkdir -p "$HOME/.local/bin"
-
-# Detect OS
-case "$(uname -s)" in
-    Linux*)  GREPAI_OS="linux" ;;
-    Darwin*) GREPAI_OS="darwin" ;;
-    MINGW*|MSYS*|CYGWIN*) GREPAI_OS="windows" ;;
-    *)       GREPAI_OS="linux" ;;
-esac
-
-# Detect architecture
-case "$(uname -m)" in
-    x86_64|amd64) GREPAI_ARCH="amd64" ;;
-    aarch64|arm64) GREPAI_ARCH="arm64" ;;
-    *)            GREPAI_ARCH="amd64" ;;
-esac
-
-# Extension for Windows
-GREPAI_EXT=""
-[ "$GREPAI_OS" = "windows" ] && GREPAI_EXT=".exe"
-
-# Fetch latest version and download correct tar.gz asset
-GREPAI_LATEST=$(curl -fsSL "https://api.github.com/repos/yoanbernabeu/grepai/releases/latest" 2>/dev/null | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)
-GREPAI_URL=""
-if [ -n "$GREPAI_LATEST" ]; then
-    GREPAI_URL="https://github.com/yoanbernabeu/grepai/releases/download/${GREPAI_LATEST}/grepai_${GREPAI_LATEST#v}_${GREPAI_OS}_${GREPAI_ARCH}.tar.gz"
-fi
-grepai_tmp="$(mktemp)"
-grepai_extract="$(mktemp -d)"
-if curl -fsL --retry 3 --retry-delay 1 --proto '=https' --tlsv1.2 "$GREPAI_URL" -o "$grepai_tmp" 2>/dev/null && \
-   tar -xzf "$grepai_tmp" -C "$grepai_extract" grepai 2>/dev/null; then
-    install -m 0755 "$grepai_extract/grepai" "$HOME/.local/bin/grepai${GREPAI_EXT}"
-    echo "  ✓ grepai ${GREPAI_LATEST} (${GREPAI_OS}/${GREPAI_ARCH})"
-else
-    # Fallback: try go install with binary discovery
-    if command -v go &>/dev/null; then
-        if go install github.com/yoanbernabeu/grepai/cmd/grepai@latest 2>/dev/null; then
-            # Ensure binary is in expected location
-            GREPAI_BIN_PATH="$(go env GOBIN 2>/dev/null || true)"
-            [ -z "${GREPAI_BIN_PATH}" ] && GREPAI_BIN_PATH="$(go env GOPATH 2>/dev/null)/bin"
-            if [ -x "${GREPAI_BIN_PATH}/grepai${GREPAI_EXT}" ]; then
-                cp -f "${GREPAI_BIN_PATH}/grepai${GREPAI_EXT}" "$HOME/.local/bin/grepai${GREPAI_EXT}"
-                chmod +x "$HOME/.local/bin/grepai${GREPAI_EXT}"
-            fi
-            echo "  ✓ grepai (go install)"
-        else
-            echo "  ⚠ grepai install failed (optional)"
-        fi
-    else
-        echo "  ⚠ grepai download failed (optional)"
-    fi
-fi
-rm -f "$grepai_tmp"
-rm -rf "$grepai_extract"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 8. Install status-line (official binary) - controlled by statusline option
+# 7. Install status-line (official binary) - controlled by statusline option
 # ─────────────────────────────────────────────────────────────────────────────
 if [ "$INSTALL_STATUSLINE" != "true" ]; then
     echo "→ Skipping status-line installation (statusline=false)"

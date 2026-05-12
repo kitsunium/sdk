@@ -384,6 +384,25 @@ if (( ${#missing_critical[@]} > 0 )); then
     err "Fix the underlying install failure (network? GitHub rate limit? permissions?) and re-run."
     exit 1
 fi
+
+# Smoke test (issue #329): refuse to ship a v1 golangci-lint. v1 is EOL since
+# 2025-03 and cannot parse `.golangci.yml` `version: "2"` configs. The build-
+# time install resolves `latest` from the GitHub API at THIS moment — if that
+# returns something other than v2.x for any reason (cache, rate-limited fallback
+# to a stale tag, future major bump that needs a wiring update), fail loud here
+# rather than ship a broken container. The runtime path (sync-toolchains.sh)
+# auto-corrects on every onCreate, but that's the safety net, not the gate.
+if command -v golangci-lint >/dev/null 2>&1; then
+    GOLANGCI_INSTALLED_MAJOR=$(golangci-lint version 2>&1 \
+        | sed -n 's/.*has version v\?\([0-9]\+\).*/\1/p' | head -n 1)
+    if [[ "$GOLANGCI_INSTALLED_MAJOR" != "2" ]]; then
+        err "golangci-lint v${GOLANGCI_INSTALLED_MAJOR:-?}.x detected — v2.x required (issue #329)."
+        err "  v1 is EOL since 2025-03 and cannot parse 'version: \"2\"' configs."
+        err "  This usually means the GitHub API returned a stale 'latest' at build time."
+        err "  Re-run the build; if the error persists, wire the v2 module path explicitly."
+        exit 1
+    fi
+fi
 step install-tools ok
 
 # Install ktn-linter MCP fragment IMMEDIATELY after the binary check passes.

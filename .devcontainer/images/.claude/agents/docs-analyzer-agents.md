@@ -11,7 +11,6 @@ tools:
   - Glob
   - Grep
   - Bash
-  - mcp__grepai__grepai_search
   - SendMessage
   - TaskCreate
   - TaskUpdate

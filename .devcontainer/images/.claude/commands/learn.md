@@ -7,12 +7,6 @@ model: sonnet
 
 # /learn — Extract Reusable Patterns
 
-## GREPAI-FIRST (MANDATORY)
-
-Use `grepai_search` for semantic queries BEFORE Grep fallback.
-
----
-
 ## Overview
 
 Analyze the current session to identify and save reusable patterns to `~/.claude/docs/learned/`.

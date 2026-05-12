@@ -39,7 +39,7 @@ checkup_workflow:
           Parent audit result: {parent_result_json or "N/A (root)"}
 
           TASKS:
-          1. Search codebase (grepai_search) for files in workdirs related to this feature
+          1. Search codebase (Grep) for files in workdirs related to this feature
           2. Verify implementation matches description
           3. Identify gaps (described but not implemented)
           4. Identify possible improvements

@@ -1,4 +1,7 @@
 #!/bin/bash
+# HAS_CPP/HAS_SCALA/HAS_KOTLIN/HAS_SWIFT below are populated for future
+# language checkers not yet wired into lint/test — file-wide disable here.
+# shellcheck disable=SC2034
 # ============================================================================
 # pre-commit-quality.sh - Incremental quality gate for /git --commit
 # Runs lint + test in PARALLEL, scoped to changed files/packages only.
@@ -38,7 +41,9 @@ CHANGED_FILES=$(
 [ -z "$CHANGED_FILES" ] && exit 0
 
 # === Detect which languages have changes ===
-# shellcheck disable=SC2034  # Variables reserved for future language checkers
+# HAS_CPP/HAS_SCALA/HAS_KOTLIN/HAS_SWIFT are populated for future language
+# checkers that aren't wired into the lint/test pipelines yet. The
+# file-wide SC2034 disable above (line 12-ish) covers them.
 HAS_GO=false HAS_RUST=false HAS_NODE=false HAS_PYTHON=false HAS_SHELL=false
 HAS_JAVA=false HAS_CPP=false HAS_RUBY=false HAS_PHP=false HAS_ELIXIR=false
 HAS_DART=false HAS_SCALA=false HAS_KOTLIN=false HAS_SWIFT=false
@@ -81,38 +86,55 @@ run_lint() {
     # SCOPED-FIRST: Always lint only changed files for incremental speed.
     # Makefile targets run on the entire project → too slow for pre-commit.
     if $HAS_GO && command -v golangci-lint &>/dev/null; then
-        local go_pkgs
-        go_pkgs=$(echo "$CHANGED_FILES" | grep '\.go$' | xargs -I{} dirname {} | sort -u | sed 's|^|./|' | paste -sd' ')
-        # shellcheck disable=SC2086 -- intentional word splitting on go_pkgs
-        golangci-lint run $go_pkgs >> "$out" 2>&1 || exit_code=1
+        local cfg
+        cfg=$(find_golangci_config "$PROJECT_ROOT") || cfg=""
+        if [ -n "$cfg" ]; then
+            local go_pkgs
+            go_pkgs=$(echo "$CHANGED_FILES" | grep '\.go$' | xargs -I{} dirname {} | sort -u | sed 's|^|./|' | paste -sd' ')
+            # shellcheck disable=SC2086
+            # Intentional word splitting on go_pkgs (space-separated list of dirs).
+            golangci-lint run --config "$cfg" $go_pkgs >> "$out" 2>&1 || exit_code=1
+        else
+            # Emit on stderr so the skip reason is visible on the success path:
+            # "$out" is only printed back when lint fails, hiding the message otherwise.
+            echo "[pre-commit-quality] golangci-lint skipped (no .golangci.{yml,yaml,toml})" >&2
+        fi
     fi
     if $HAS_RUST && command -v cargo &>/dev/null; then
         cargo clippy -- -D warnings >> "$out" 2>&1 || exit_code=1
     fi
     if $HAS_NODE; then
         if [ -f "$PROJECT_ROOT/package.json" ] && command -v npx &>/dev/null; then
+            # shellcheck disable=SC2046  # intentional word splitting on file list
             npx eslint $(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' | tr '\n' ' ') >> "$out" 2>&1 || exit_code=1
         fi
     fi
     if $HAS_PYTHON && command -v ruff &>/dev/null; then
+        # shellcheck disable=SC2046  # intentional word splitting on file list
         ruff check $(echo "$CHANGED_FILES" | grep '\.py$' | tr '\n' ' ') >> "$out" 2>&1 || exit_code=1
     fi
     if $HAS_SHELL && command -v shellcheck &>/dev/null; then
-        shellcheck -x $(echo "$CHANGED_FILES" | grep -E '\.(sh|bash)$' | tr '\n' ' ') >> "$out" 2>&1 || exit_code=1
+        # Only block on warning/error; SC1091 "not following" info-level
+        # noise on sourced files that exist at runtime should not gate commits.
+        # shellcheck disable=SC2046  # intentional word splitting on file list
+        shellcheck --severity=warning -x $(echo "$CHANGED_FILES" | grep -E '\.(sh|bash)$' | tr '\n' ' ') >> "$out" 2>&1 || exit_code=1
     fi
     if $HAS_JAVA && has_makefile_target "lint" "$PROJECT_ROOT"; then
         make lint >> "$out" 2>&1 || exit_code=1
     fi
     if $HAS_RUBY && command -v rubocop &>/dev/null; then
+        # shellcheck disable=SC2046  # intentional word splitting on file list
         rubocop $(echo "$CHANGED_FILES" | grep '\.rb$' | tr '\n' ' ') >> "$out" 2>&1 || exit_code=1
     fi
     if $HAS_PHP && command -v phpstan &>/dev/null; then
+        # shellcheck disable=SC2046  # intentional word splitting on file list
         phpstan analyse $(echo "$CHANGED_FILES" | grep '\.php$' | tr '\n' ' ') >> "$out" 2>&1 || exit_code=1
     fi
     if $HAS_ELIXIR && command -v mix &>/dev/null; then
         mix credo --strict >> "$out" 2>&1 || exit_code=1
     fi
     if $HAS_DART && command -v dart &>/dev/null; then
+        # shellcheck disable=SC2046  # intentional word splitting on file list
         dart analyze $(echo "$CHANGED_FILES" | grep '\.dart$' | tr '\n' ' ') >> "$out" 2>&1 || exit_code=1
     fi
 
@@ -124,13 +146,49 @@ run_test() {
     local out="$1"
 
     # SCOPED-FIRST: Run tests only for changed packages/files.
-    # Makefile targets run full test suites → too slow for pre-commit.
+    # Cascade for Go: Makefile → Bazel → `go test`. Honours consumer intent
+    # and avoids the false-negative timeout on Bazel-driven repos (issue #350).
     local exit_code=0
-    if $HAS_GO && command -v go &>/dev/null; then
+    if $HAS_GO; then
         local go_pkgs
         go_pkgs=$(echo "$CHANGED_FILES" | grep '\.go$' | xargs -I{} dirname {} | sort -u | sed 's|^|./|' | paste -sd' ')
-        # shellcheck disable=SC2086 -- intentional word splitting on go_pkgs
-        go test -race -count=1 $go_pkgs >> "$out" 2>&1 || exit_code=1
+
+        if has_makefile_target "test" "$PROJECT_ROOT"; then
+            # Makefile-first: lets the project decide (bazel test, gotestsum, ...).
+            (cd "$PROJECT_ROOT" && make test) >> "$out" 2>&1 || exit_code=1
+        elif has_bazel_workspace "$PROJECT_ROOT"; then
+            # Bazel-direct (when no Makefile but the project ships Bazel).
+            local bazel_cmd
+            if bazel_cmd="$(bazel_bin)"; then
+                # Build labels via bazel_label_for_dir so root-level Go files
+                # produce //... (canonical) instead of //./... (broken). The
+                # helper also normalises symlinks and falls back gracefully.
+                local bazel_labels=""
+                local _dir _label
+                while IFS= read -r _dir; do
+                    [ -z "$_dir" ] && continue
+                    _label="$(bazel_label_for_dir "$PROJECT_ROOT/$_dir" "$PROJECT_ROOT")"
+                    bazel_labels+="${_label}"$'\n'
+                done < <(echo "$CHANGED_FILES" | grep '\.go$' | xargs -I{} dirname {} | sort -u)
+                bazel_labels=$(printf '%s' "$bazel_labels" | sort -u | paste -sd' ')
+                [ -z "$bazel_labels" ] && bazel_labels="//..."
+                # shellcheck disable=SC2086
+                (cd "$PROJECT_ROOT" && "$bazel_cmd" test --test_output=errors $bazel_labels) >> "$out" 2>&1 || exit_code=1
+            elif command -v go &>/dev/null; then
+                # Bazel workspace detected but neither bazelisk nor bazel is
+                # installed — fall through to `go test` rather than silently
+                # passing the gate (false-positive). Same flags as the bare
+                # `go test` last-resort below.
+                # shellcheck disable=SC2086
+                (cd "$PROJECT_ROOT" && go test -race -timeout 180s $go_pkgs) >> "$out" 2>&1 || exit_code=1
+            fi
+        elif command -v go &>/dev/null; then
+            # Last resort: drop -count=1 so Go's own test cache stays warm;
+            # -timeout 180s keeps the watchdog without pegging at 60s.
+            # shellcheck disable=SC2086
+            # Intentional word splitting on go_pkgs (space-separated list of dirs).
+            (cd "$PROJECT_ROOT" && go test -race -timeout 180s $go_pkgs) >> "$out" 2>&1 || exit_code=1
+        fi
     fi
     if $HAS_RUST && command -v cargo &>/dev/null; then
         cargo test >> "$out" 2>&1 || exit_code=1
@@ -157,6 +215,10 @@ run_test() {
 
     return $exit_code
 }
+
+# Override seam: source ~/.claude/scripts/pre-commit-quality.local.sh if present.
+# Loaded after run_lint/run_test definitions so consumer overrides win.
+load_local_override "${BASH_SOURCE[0]}"
 
 # === Run lint + test in PARALLEL ===
 run_lint "$LINT_OUT" &

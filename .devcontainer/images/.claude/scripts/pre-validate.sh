@@ -118,13 +118,26 @@ fi
 # === ktn-linter: package context before edit ===
 # Calls ktn-linter HTTP endpoint to surface existing issues in the package
 # being modified. Graceful degradation if ktn-linter is not running.
+# Pre-edit fast check: only structural/signature breaks block before the edit;
+# logic/perf/style/comment categories are deferred to post-edit.sh.
 KTN_PORT="${KTN_LINTER_PORT:-7717}"
 if command -v curl &>/dev/null && [[ "$FILE" != *.md ]] && [[ "$FILE" != *.json ]] && \
    [[ "$FILE" != *.yaml ]] && [[ "$FILE" != *.yml ]] && [[ "$FILE" != *.toml ]] && \
    [[ "$FILE" != /tmp/* ]] && [[ "$FILE" != *".claude/"* ]]; then
+    # Per-hook phase scope (override via KTN_PRE_PHASES env var, comma-separated).
+    # Servers pre-#190 ignore the unknown field and fall back to YAML config.
+    KTN_PHASES_CSV="${KTN_PRE_PHASES:-structural,signatures}"
+    KTN_PHASES_CSV="${KTN_PHASES_CSV// /}"
+    KTN_BODY="${INPUT:-}"
+    [ -z "$KTN_BODY" ] && KTN_BODY="{}"
+    if command -v jq &>/dev/null; then
+        KTN_TRY=$(printf '%s' "$KTN_BODY" | jq -c --arg p "$KTN_PHASES_CSV" \
+            '. + {phases: ($p | split(","))}' 2>/dev/null) \
+            && KTN_BODY="$KTN_TRY"
+    fi
     KTN_RESP=$(curl -sf --max-time 4 \
         -H "Content-Type: application/json" \
-        -d "${INPUT:-{\}}" \
+        -d "$KTN_BODY" \
         "http://localhost:${KTN_PORT}/hooks/pre-tool-use" 2>/dev/null) || true
     if [ -n "$KTN_RESP" ] && [ "$KTN_RESP" != "{}" ] && [ "$KTN_RESP" != "null" ]; then
         if printf '%s' "$KTN_RESP" | jq -e '.hookSpecificOutput' &>/dev/null; then

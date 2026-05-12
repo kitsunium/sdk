@@ -130,7 +130,7 @@ incremental_quality:
     3_scoped_first: "Language-specific tools scoped to changed files/packages"
 
   supported_languages:
-    go: { lint: "golangci-lint run <changed_pkgs>", test: "go test -race <changed_pkgs>" }
+     go: { lint: "golangci-lint run <changed_pkgs>", test: "make test → bazel test //... → go test -race -timeout 180s <changed_pkgs>" }
     rust: { lint: "cargo clippy -- -D warnings", test: "cargo test" }
     node: { lint: "npx eslint <changed_files>", test: "npx vitest run" }
     python: { lint: "ruff check <changed_files>", test: "pytest" }
@@ -386,7 +386,7 @@ execute_workflow:
     rules:
       - "ALWAYS use git add -A (never selective staging by filename)"
       - "git add -A automatically includes: CLAUDE.md, .devcontainer/, .claude/commands/"
-      - "git add -A automatically excludes: .env, mcp.json, .grepai/, .claude/* (except gitignore exceptions)"
+      - "git add -A automatically excludes: .env, mcp.json, .claude/* (except gitignore exceptions)"
       - "Check git diff --name-only after staging — if non-empty, there is a problem"
       - "If a tracked file should NOT be committed → git restore <file> BEFORE staging, not after"
 

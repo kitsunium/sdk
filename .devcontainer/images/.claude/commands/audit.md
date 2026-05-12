@@ -2,7 +2,7 @@
 name: audit
 description: |
   Audit configuration health of the devcontainer-template project.
-  Scores 7 dimensions: Agents, Hooks, MCP, Settings, Security, Documentation, Agent Teams.
+  Scores 8 dimensions: Agents, Hooks, MCP, Settings, Security, Documentation, Agent Teams, RTK savings.
   Displays an ASCII dashboard with per-dimension scores and actionable issues.
 model: haiku
 allowed-tools:
@@ -17,13 +17,14 @@ allowed-tools:
   - "Bash(bash:*)"
   - "Bash(command:*)"
   - "Bash(claude:*)"
+  - "Bash(rtk:*)"
 ---
 
 # /audit — Configuration Health Scan
 
 Run ALL checks below, compute scores, then display the dashboard. No arguments needed.
 
-## Dimensions (score each 0-100)
+## Dimensions (score each 0-100, 8 total)
 
 ### 1. Agents (weight: equal)
 
@@ -44,7 +45,7 @@ Checks:
 Checks:
 - Verify `/workspace/mcp.json` exists. If missing: score 0, skip rest.
 - Count top-level keys in `mcpServers` object via jq. Expect >= 5. Score: `min(count/7*100, 100)`.
-- Check that `grepai` key exists in mcpServers. If missing: -20 points.
+- Check that `grepai` key is ABSENT from mcpServers (deprecated since 2026-04). If present: -20 points.
 
 ### 4. Settings
 
@@ -87,9 +88,51 @@ Cap at 100. Status notes in the dashboard row should include:
 
 Example: `Agent Teams    80/100  IN_PROCESS, 19 agents migrated`
 
+### 8. RTK savings
+
+**Mode resolution (read first).** Read the live probe snapshot:
+`jq -r '.mode + ":" + .reason' ~/.claude/logs/<branch>/rtk-mode.json` where
+`<branch>` is the current `git rev-parse --abbrev-ref HEAD` with `/` and
+spaces replaced by `_`. The file is written by `session-init.sh probe_rtk_mode`
+and `postStart.sh init_rtk` (see `tests/scripts/rtk-config-toml.bats` for the
+canonical schema). If the file is absent, fall back to running the probe
+inline (same checks as `session-init.sh`).
+
+Surface the mode at the **top** of this dimension's section:
+`RTK mode: <enforcing|advisory|degraded> (reason=<reason>)`
+
+**Sub-scores (3, sum capped at 100):**
+
+- **binary** (`+30`): `command -v rtk` succeeds.
+- **hook** (`+30`): `grep -qE '"(rtk hook claude|[^"]*rtk-hook-claude\.sh)"' ~/.claude/settings.json` — accept either the legacy direct invocation OR the fail-open wrapper path shipped in issue #348.
+- **claude-md** (`+20`): `[ -f ~/.claude/RTK.md ]` AND `grep -qE '^@RTK\.md' ~/.claude/CLAUDE.md`.
+
+Plus a **rewrite-evidence** bonus (`+20`): `rtk gain --history` returns at
+least one row (proof rewrites are actually firing in recent sessions).
+
+**Mode-aware status note.** The status note carries the mode + reason and a
+one-line savings figure if available (e.g. `rtk 0.38.0, ~78% avg over 7d`).
+Examples:
+
+- `OK (enforcing, rtk 0.38.0, ~78% avg over 7d)`
+- `OK (advisory: session-bypass)` — explicit user choice, NOT a deduction.
+- `WARN (advisory: hook-missing)` — fix: `rtk init -g --auto-patch`.
+- `WARN (degraded: no-binary)` — fix: re-run postStart `init_rtk` step.
+- `WARN (degraded: config-invalid)` — fix: check `~/.config/rtk/config.toml`.
+- `WARN (degraded: marker-missing)` — fix: `rtk init -g --auto-patch`.
+
+**Bypass is NEVER a deduction.** When `mode=advisory reason=session-bypass`,
+the score must reflect only the binary/hook/claude-md sub-scores (the user
+explicitly opted out of rewrites for this session — that's a feature, not a
+fault). Mark status `OK` even if `rtk gain --history` is empty.
+
+Recommendation block: if score < 80 AND mode is not `advisory:session-bypass`,
+suggest the fix command from the mode/reason mapping above. Always suggest
+`rtk discover` when `rtk gain --history` shows fewer rewrites than expected.
+
 ## Output Format
 
-After computing all 7 scores, display EXACTLY this format (replace values):
+After computing all 8 scores, display EXACTLY this format (replace values):
 
 ```
 ═══════════════════════════════════════════════
@@ -105,6 +148,9 @@ After computing all 7 scores, display EXACTLY this format (replace values):
   Security       XX/100  {OK|WARN (N issues)}
   Documentation  XX/100  {OK|WARN (N issues)}
   Agent Teams    XX/100  {capability, N agents migrated}
+  RTK savings    XX/100  RTK mode: {enforcing|advisory|degraded} (reason={reason})
+                          binary +30/+30  hook +30/+30  claude-md +20/+20
+                          rewrite-evidence +20/+20  ({rtk version, avg savings})
 
   Overall: XX/100
 
@@ -117,13 +163,13 @@ After computing all 7 scores, display EXACTLY this format (replace values):
 
 Rules:
 - Status is `OK` when score >= 90, otherwise `WARN (N issues)` where N = count of deductions.
-- Overall = average of all 7 scores, rounded to nearest integer.
+- Overall = average of all 8 scores, rounded to nearest integer.
 - List ALL issues found (one bullet per deduction). If none, print `(none)`.
 - Include scan timestamp: `date -u +"%Y-%m-%dT%H:%M:%SZ"`.
 
 ## Execution
 
-1. Run all 7 dimension checks in order.
+1. Run all 8 dimension checks in order.
 2. Collect scores and issues.
 3. Print the dashboard.
-4. Do NOT suggest fixes — only report findings.
+4. Do NOT suggest fixes — only report findings (except the RTK `rtk discover` hint).
