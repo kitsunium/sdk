@@ -41,6 +41,10 @@ Thumbs.db
 .env.*.local
 **/.env
 /mcp.json
+/mcp.json.bak.*
+
+# Devcontainer auto-generated lockfile (regenerated on every devcontainer build)
+.devcontainer/devcontainer-lock.json
 
 # VPN configs and credentials (never commit)
 *.ovpn

@@ -25,7 +25,7 @@ if [ -n "$INPUT" ] && command -v jq &>/dev/null; then
 fi
 
 # Clean up orphaned worktrees FIRST (from crashed/interrupted sessions)
-# This prevents grepai from indexing duplicate copies of the project
+# Avoids leaving stale worktree directories around between sessions.
 # Must run before any early-exit so cleanup always happens
 WORKTREE_BASE="$HOME/.claude/worktrees"
 BUILTIN_BASE="$PROJECT_DIR/.claude/worktrees"
@@ -98,5 +98,74 @@ if command -v jq &>/dev/null; then
         '{timestamp:$ts,source:$src,model:$mdl,branch:$branch,event:"SessionStart"}' \
         >> "$LOG_DIR/session.jsonl" 2>/dev/null || true
 fi
+
+# ============================================================================
+# probe_rtk_mode — emit a single [rtk] mode=… reason=… line per session.
+#
+# Modes (canonical, see plan 2026-05-06-rtk-mandatory-install-and-claude-memory.md):
+#   enforcing  binary + RTK.md + @RTK.md import + hook + no bypass + config valid
+#   advisory   reason=session-bypass    when RTK_BYPASS=1 (and everything else OK)
+#   advisory   reason=hook-missing      when settings.json absent or no rtk hook entry
+#                                        (binary + doctrine still present)
+#   degraded   reason=no-binary         command -v rtk fails
+#   degraded   reason=config-invalid    rtk config exits non-zero
+#   degraded   reason=marker-missing    RTK.md missing OR @RTK.md import absent
+#
+# Bypass and degradation are NEVER conflated. RTK_BYPASS=1 always advisory.
+# Skipped during postStart bootstrap (CLAUDE_HOOKS_BOOTSTRAP=1) to avoid spam.
+# ============================================================================
+probe_rtk_mode() {
+    local mode reason version
+    mode=""; reason=""; version=""
+
+    # Skip during bootstrap: postStart's init_rtk runs curl/tar/jq before this
+    # script's hook would be useful, and we don't want to flag transient state.
+    if [ "${CLAUDE_HOOKS_BOOTSTRAP:-0}" = "1" ]; then
+        return 0
+    fi
+
+    if ! command -v rtk &>/dev/null; then
+        mode="degraded"; reason="no-binary"
+    elif ! rtk config &>/dev/null; then
+        mode="degraded"; reason="config-invalid"
+    elif [ ! -f "$HOME/.claude/RTK.md" ] || ! grep -qE '^@RTK\.md' "$HOME/.claude/CLAUDE.md" 2>/dev/null; then
+        # Anchor on line start so user prose mentioning @RTK.md in passing
+        # (e.g. "no @RTK.md import here") doesn't trigger a false match.
+        mode="degraded"; reason="marker-missing"
+    elif [ "${RTK_BYPASS:-0}" = "1" ]; then
+        mode="advisory"; reason="session-bypass"
+    elif [ ! -f "$HOME/.claude/settings.json" ] || \
+         ! grep -qE '"(rtk hook claude|[^"]*rtk-hook-claude\.sh)"' "$HOME/.claude/settings.json" 2>/dev/null; then
+        # Accept either form: legacy direct invocation OR the fail-open wrapper
+        # path (issue #348). Anchored on the closing `"` to avoid matching the
+        # string in a comment or in commented-out template lines.
+        mode="advisory"; reason="hook-missing"
+    else
+        mode="enforcing"
+        version=$(rtk --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    fi
+
+    # Emit one stderr line. Format-stable so /audit and tests can match it.
+    if [ "$mode" = "enforcing" ]; then
+        printf '[rtk] mode=%s version=%s\n' "$mode" "${version:-unknown}" >&2
+    else
+        printf '[rtk] mode=%s reason=%s\n' "$mode" "$reason" >&2
+    fi
+
+    # Persist snapshot for /audit (non-fatal if log dir is unwritable).
+    if [ -n "$LOG_DIR" ] && command -v jq &>/dev/null; then
+        local ts
+        ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        jq -n -c \
+            --arg mode "$mode" \
+            --arg reason "$reason" \
+            --arg version "${version:-}" \
+            --arg ts "$ts" \
+            '{mode:$mode,reason:$reason,version:$version,timestamp:$ts}' \
+            > "$LOG_DIR/rtk-mode.json" 2>/dev/null || true
+    fi
+}
+
+probe_rtk_mode
 
 exit 0

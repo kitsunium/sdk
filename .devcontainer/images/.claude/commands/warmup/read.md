@@ -144,7 +144,7 @@ synthesize_workflow:
 
   Key Rules Loaded:
     OK MCP-FIRST: Always use MCP before CLI
-    OK GREPAI-FIRST: Semantic search before Grep
+    OK RTK-FIRST: PreToolUse hook compresses Bash output (60-90% token savings)
     OK Code in /src: All code MUST be in /src
     OK SAFEGUARDS: Never delete .claude/ or .devcontainer/
 

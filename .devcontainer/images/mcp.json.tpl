@@ -1,11 +1,5 @@
 {
   "mcpServers": {
-    "grepai": {
-      "command": "/usr/local/bin/grepai",
-      "args": [
-        "mcp-serve"
-      ]
-    },
     "github": {
       "command": "docker",
       "args": [

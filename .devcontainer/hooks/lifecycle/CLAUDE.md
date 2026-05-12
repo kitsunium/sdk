@@ -1,16 +1,18 @@
-<!-- updated: 2026-03-26T18:00:00Z -->
+<!-- updated: 2026-05-12T09:29:19Z -->
 # Lifecycle Hooks
 
 ## Purpose
 
-Only `initialize.sh` lives here — runs on the **host machine** before container build.
+`initialize.sh` runs on the **host machine** before container build.
 All other lifecycle hooks are image-embedded at `/etc/devcontainer-hooks/lifecycle/`.
+`post-poststart-fixup.sh` is a temporary consumer-side patch — see below.
 
 ## Scripts
 
 | Script | Event | Runs on | Description |
 |--------|-------|---------|-------------|
 | `initialize.sh` | initializeCommand | Host | .env setup, Ollama install, feature validation |
+| `post-poststart-fixup.sh` | postStartCommand (chained) | Container | Idempotent patches for rtk hook duplicate + missing Go MCP fragment. Remove once upstream ships the fixes. |
 
 ## initialize.sh
 

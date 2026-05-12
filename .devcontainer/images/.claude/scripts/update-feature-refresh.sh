@@ -57,6 +57,15 @@ docker buildx prune --filter type=regular --force >/dev/null 2>&1 \
 rm -rf "${HOME}/.devcontainer/features" 2>/dev/null || true
 rm -rf "${HOME}/.cache/devcontainer-cli/features" 2>/dev/null || true
 
+# Re-run sync-toolchains in-place so volume-resident tools (Go CLI tools that
+# live under $GOPATH/bin on the package-cache volume) are repopulated IMMEDIATELY
+# without waiting for the next container start. Covers the volume-masking
+# class of issues where install.sh build-time writes are hidden by the volume.
+if [ -x /etc/devcontainer-hooks/lifecycle/sync-toolchains.sh ]; then
+    echo "Re-syncing toolchains (volume-resident binaries)..."
+    /etc/devcontainer-hooks/lifecycle/sync-toolchains.sh >/dev/null 2>&1 || true
+fi
+
 # CTA file — a VS Code extension (or an attentive human) can pick this up.
 mkdir -p /tmp
 cat > /tmp/claude-rebuild-request.json <<JSON

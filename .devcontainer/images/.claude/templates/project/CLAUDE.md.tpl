@@ -22,7 +22,7 @@
 ## Key Principles
 
 - MCP-first for integrations
-- Semantic search with grepai
+- RTK auto-rewrites Bash output for token savings
 - Specialist agents for {{PRIMARY_LANGUAGE}}
 
 ## Verification

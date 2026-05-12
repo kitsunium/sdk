@@ -7,7 +7,6 @@ description: |
 allowed-tools:
   - "Read(**/*)"
   - "Glob(**/*)"
-  - "mcp__grepai__*"
   - "mcp__context7__*"
   - "Grep(**/*)"
   - "Write(**/*)"
@@ -23,11 +22,6 @@ allowed-tools:
 # /warmup - Project Context Pre-loading (RLM Architecture)
 
 $ARGUMENTS
-
-## GREPAI-FIRST (MANDATORY)
-
-Use `grepai_search` for ALL semantic/meaning-based queries BEFORE Grep.
-Fallback to Grep ONLY for exact string matches or regex patterns.
 
 ## CONTEXT7 (RECOMMENDED)
 
@@ -130,7 +124,6 @@ Workflow:
 | 3.0 | Obsolescence detection | Read ~/.claude/commands/warmup/update.md |
 | 4.0 | Generate updates | Read ~/.claude/commands/warmup/update.md |
 | 5.0 | Apply changes (interactive or dry-run) | Read ~/.claude/commands/warmup/update.md |
-| 6.0 | GrepAI config update | Read ~/.claude/commands/warmup/update.md |
 | 7.0 | Learn (extract conventions) | Read ~/.claude/commands/warmup/update.md |
 
 **To execute a phase**, read the corresponding module file for full instructions.

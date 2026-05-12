@@ -21,7 +21,6 @@ allowed-tools:
   - "TaskList(*)"
   - "TaskGet(*)"
   - "AskUserQuestion(*)"
-  - "mcp__grepai__*"
 ---
 
 # /feature - Feature Tracking RTM (Requirements Traceability Matrix)

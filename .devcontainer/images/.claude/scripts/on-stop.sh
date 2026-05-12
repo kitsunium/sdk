@@ -73,6 +73,38 @@ printf '\a'
 # Project directory used by ktn-linter and session summary
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-/workspace}"
 
+# === ktn-linter HTTP /hooks/stop: session-end validation report ===
+# Forwards the full hook input JSON (with session_id) to the server, with an
+# explicit per-request phase scope. Phases 1..8 — includes 'tests' since the
+# agent has finished writing, but excludes 'health' (project-wide check that
+# is too noisy for an interactive stop).
+# Servers pre-#190 ignore 'phases' and use YAML config — back-compat safe.
+KTN_PORT="${KTN_LINTER_PORT:-7717}"
+if command -v curl &>/dev/null; then
+    KTN_PHASES_CSV="${KTN_STOP_PHASES:-structural,signatures,logic,performance,modern,style,comment,tests}"
+    KTN_PHASES_CSV="${KTN_PHASES_CSV// /}"
+    KTN_BODY="${INPUT:-}"
+    [ -z "$KTN_BODY" ] && KTN_BODY="{}"
+    if command -v jq &>/dev/null; then
+        KTN_TRY=$(printf '%s' "$KTN_BODY" | jq -c --arg p "$KTN_PHASES_CSV" \
+            '. + {phases: ($p | split(","))}' 2>/dev/null) \
+            && KTN_BODY="$KTN_TRY"
+    fi
+    KTN_RESP=$(curl -sf --max-time 28 \
+        -H "Content-Type: application/json" \
+        -d "$KTN_BODY" \
+        "http://localhost:${KTN_PORT}/hooks/stop" 2>/dev/null) || true
+    if [ -n "$KTN_RESP" ] && [ "$KTN_RESP" != "{}" ] && [ "$KTN_RESP" != "null" ] && command -v jq &>/dev/null; then
+        if printf '%s' "$KTN_RESP" | jq -e '.hookSpecificOutput' &>/dev/null; then
+            printf '%s' "$KTN_RESP"
+        else
+            jq -n -c --arg ctx "$(printf '%s' "$KTN_RESP" | head -c 1000)" \
+                '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}' \
+                2>/dev/null || true
+        fi
+    fi
+fi
+
 # === ktn-linter: scoped to THIS SESSION's edits only ===
 # Uses the per-session tracker populated by post-edit.sh (Write/Edit hooks).
 # If this session did no edits (e.g., /search), skip entirely.

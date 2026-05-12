@@ -39,7 +39,7 @@ fi
 # Inject context for subagent
 CONTEXT="## Subagent Context Injection
 Branch: $BRANCH | Agent: $AGENT_TYPE
-Rules: (1) MCP-FIRST: mcp__grepai__*, mcp__github__*, mcp__context7__* before CLI (2) NO AI IN COMMITS (3) ZSH-FIRST: avoid 'for x in \$VAR' (4) Never commit to main directly"
+Rules: (1) MCP-FIRST: mcp__github__*, mcp__context7__* before CLI (2) RTK-FIRST: rtk hook compresses Bash output (3) NO AI IN COMMITS (4) ZSH-FIRST: avoid 'for x in \$VAR' (5) Never commit to main directly"
 
 if command -v jq &>/dev/null; then
     jq -n -c \

@@ -1,6 +1,6 @@
 {
   "id": "claude",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "name": "Claude Code Integration",
   "description": "Claude Code configuration with commands, hooks, MCP and marketplace",
   "documentationURL": "https://github.com/kodflow/devcontainer-template",
@@ -12,11 +12,7 @@
     },
     "bundle": {
       "type": "string",
-      "enum": [
-        "minimal",
-        "standard",
-        "full"
-      ],
+      "enum": ["minimal", "standard", "full"],
       "default": "full",
       "description": "Configuration bundle to install"
     },
@@ -26,7 +22,5 @@
       "description": "Enable custom statusline"
     }
   },
-  "installsAfter": [
-    "ghcr.io/devcontainers/features/common-utils"
-  ]
+  "installsAfter": ["ghcr.io/devcontainers/features/common-utils"]
 }

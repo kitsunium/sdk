@@ -148,7 +148,7 @@ obsolete_detection:
   api_changes:
     description: "APIs/functions renamed or removed"
     action: |
-      use grepai to search for references
+      use Grep to search for references
       if 0 results → possibly obsolete
 
   deprecated_patterns:
@@ -248,68 +248,6 @@ apply_workflow:
 
 ---
 
-## Phase 6.0: GrepAI Config Update (Project-Specific Exclusions)
-
-**Updates the grepai configuration with project-specific exclusions.**
-
-```yaml
-grepai_config_update:
-  trigger: "Always executed with --update"
-  config_path: "/workspace/.grepai/config.yaml"
-  template_path: "/etc/grepai/config.yaml"
-
-  workflow:
-    1_detect_project_patterns:
-      action: "Analyze project-specific patterns"
-      checks:
-        - ".gitignore patterns not covered by template"
-        - "Dynamically generated directories (logs, cache)"
-        - "Framework-specific directories (Next.js .next/, Nuxt .nuxt/)"
-
-    2_compare_with_template:
-      action: "Compare current config vs template"
-      detect:
-        - "New exclusions to add"
-        - "Obsolete exclusions to remove"
-
-    3_merge_exclusions:
-      action: "Merge exclusions"
-      rules:
-        - "Keep all template exclusions"
-        - "Add project-specific exclusions"
-        - "Mark additions with comment # Project-specific"
-
-    4_apply_config:
-      action: "Write the updated config"
-      tool: Write
-      backup: true
-
-  project_detection:
-    nextjs:
-      detect: "next.config.{js,ts,mjs}"
-      add: [".next", ".vercel"]
-    nuxt:
-      detect: "nuxt.config.{js,ts}"
-      add: [".nuxt", ".output"]
-    vite:
-      detect: "vite.config.{js,ts}"
-      add: [".vite"]
-    turbo:
-      detect: "turbo.json"
-      add: [".turbo"]
-    nx:
-      detect: "nx.json"
-      add: [".nx", "nx-cloud.env"]
-    docker:
-      detect: "docker-compose*.{yml,yaml}"
-      add: [".docker"]
-    terraform:
-      detect: "*.tf"
-      add: [".terraform", "*.tfstate*"]
-```
-
----
-
 ## Phase 7.0: Learn (Extract Conventions)
 
 **Extract non-obvious conventions from code into CLAUDE.md files.**
@@ -321,7 +259,7 @@ learn_workflow:
 
   1_analyze_patterns:
     action: "Scan codebase for implicit conventions not yet documented"
-    tools: [Grep, Glob, grepai_search]
+    tools: [Grep, Glob]
     targets:
       - "Naming conventions (files, functions, variables)"
       - "Error handling patterns (try/catch, Result, early return)"

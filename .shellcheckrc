@@ -1,0 +1,11 @@
+# Disable info-level checks that fire on intentional upstream-template
+# patterns. shellcheck 0.9.0 .shellcheckrc only supports `disable=`,
+# not `severity=`, so we list the specific codes.
+#
+# SC2016 — sed patterns must keep `\$` literal inside single quotes
+#          (we generate sed/zshrc edits, not shell expansions).
+# SC2317 — false-positive "unreachable" on dynamically-dispatched
+#          `step_*` functions in lifecycle hooks.
+# SC2015 — `A && B || C` with `|| true` tail is an accepted noop guard.
+disable=SC2016,SC2317,SC2015
+external-sources=true

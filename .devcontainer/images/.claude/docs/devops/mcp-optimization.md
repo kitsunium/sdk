@@ -30,8 +30,8 @@ For this project, keep these tools immediately available:
 
 | Server | Tool | Reason |
 |--------|------|--------|
-| **grepai** | `grepai_search` | Primary semantic search |
 | **context7** | `resolve-library-id`, `query-docs` | Documentation lookup |
+| **github** | `pull_request_read`, `add_issue_comment` | PR/issue workflow |
 
 All other tools are discovered via `MCPSearch` when needed.
 
@@ -72,16 +72,6 @@ MCPSearch(query="create pull request")
 ```
 
 ## Server-Specific Guidelines
-
-### grepai (Semantic Code Search)
-
-**Primary tools:**
-- `grepai_search` - Semantic code search (ALWAYS prefer over Grep)
-- `grepai_trace_callers` - Find function callers
-- `grepai_trace_callees` - Find called functions
-- `grepai_trace_graph` - Build call graph
-
-**Recommendation:** grepai is lightweight, keep all tools loaded.
 
 ### context7 (Documentation)
 
@@ -141,7 +131,7 @@ MCPSearch(query="create pull request")
 | Component | Budget | Notes |
 |-----------|--------|-------|
 | System prompt | 3,000 | Fixed overhead |
-| Critical MCP tools | 2,000 | grepai + context7 |
+| Critical MCP tools | 2,000 | context7 + github |
 | Discovered tools | 3,000 | Per task, dynamic |
 | Skills/Commands | 2,000 | Loaded on demand |
 | Conversation | 190,000 | Available for work |
