@@ -1,4 +1,4 @@
-// Package xml: codes.go — range 0.3.3.* (ADR 0005 service/codec/xml block).
+// Package xml — range 0.3.3.* (ADR 0005 service/codec/xml block).
 package xml
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

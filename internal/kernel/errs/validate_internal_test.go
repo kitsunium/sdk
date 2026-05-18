@@ -9,8 +9,8 @@ func Test_validateDefineArgs(t *testing.T) {
 	t.Parallel()
 	longPublic := strings.Repeat("x", maxPublicRunes+1)
 	//: valid dotted-quad codes under ADR 0005:
-	//:   0x00_03_01_01 = 0.3.1.1 (service/logger CodeWriterNil equivalent)
-	//:   0x00_02_02_01 = 0.2.2.1 (core/codec CodeDuplicateRegistration equivalent)
+	//: 0x00_03_01_01 = 0.3.1.1 (service/logger CodeWriterNil equivalent)
+	//: 0x00_02_02_01 = 0.2.2.1 (core/codec CodeDuplicateRegistration equivalent)
 	type tc struct {
 		name       string
 		code       Code

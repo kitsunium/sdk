@@ -14,12 +14,12 @@ import (
 )
 
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
+// extension tables (hoisted).
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&tomlCodec{})
 
-	//: MIME table hoisted to satisfy KTN-VAR-CONSTSLICE.
+	//: MIME table hoisted.
 	mimeTypes = []string{"application/toml"}
 
 	//: extension table hoisted for the same reason.
@@ -30,49 +30,30 @@ var (
 type tomlCodec struct{}
 
 // New returns a TOML codec instance.
-//
-// Returns:
-//   - codec.Codec: a fresh stateless codec.
 func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
 
 // Name implements codec.Codec.
-//
-// Returns:
-//   - string: always "toml".
 func (*tomlCodec) Name() string {
 	//: canonical identifier.
 	return "toml"
 }
 
 // MIMETypes lists every MIME alias.
-//
-// Returns:
-//   - []string: canonical MIME first.
 func (*tomlCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
-//
-// Returns:
-//   - []string: canonical extension first.
 func (*tomlCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
 
 // Marshal serialises v as TOML bytes.
-//
-// Params:
-//   - v: value pelletier/go-toml/v2 supports (struct, map).
-//
-// Returns:
-//   - []byte: the encoded TOML document.
-//   - error: MarshalFailed wrapping the library cause on failure.
 func (*tomlCodec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to the library for the actual encoding.
 	out, merr := gotoml.Marshal(v)
@@ -91,13 +72,6 @@ func (*tomlCodec) Marshal(v any) (encoded []byte, err error) {
 }
 
 // Unmarshal parses data as TOML into v.
-//
-// Params:
-//   - data: TOML bytes.
-//   - v: pointer to the destination value.
-//
-// Returns:
-//   - error: UnmarshalFailed wrapping the library cause on failure.
 func (*tomlCodec) Unmarshal(data []byte, v any) error {
 	//: delegate to the library for the actual decoding.
 	uerr := gotoml.Unmarshal(data, v)
@@ -116,24 +90,12 @@ func (*tomlCodec) Unmarshal(data []byte, v any) error {
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.
-//
-// Params:
-//   - w: destination writer.
-//
-// Returns:
-//   - codec.Encoder: a streaming TOML encoder bound to w.
 func (*tomlCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the pelletier encoder.
 	return &tomlEncoder{inner: gotoml.NewEncoder(w)}
 }
 
 // NewDecoder wraps r in a streaming codec.Decoder.
-//
-// Params:
-//   - r: source reader.
-//
-// Returns:
-//   - codec.Decoder: a streaming TOML decoder bound to r.
 func (*tomlCodec) NewDecoder(r io.Reader) codec.Decoder {
 	//: wrap the pelletier decoder.
 	return &tomlDecoder{inner: gotoml.NewDecoder(r)}

@@ -96,9 +96,6 @@ func Test_safeTypeName(t *testing.T) {
 type evilStringer struct{}
 
 // String panics to simulate a pathological type reaching the recover sink.
-//
-// Returns:
-//   - s: never returned; always panics.
 func (evilStringer) String() (s string) {
 	//: deliberately panic to probe the inner recover in safeString.
 	panic("evil: String() panic")
@@ -106,7 +103,6 @@ func (evilStringer) String() (s string) {
 
 // Test_safeString_GuardsAgainstPanickingStringer asserts the meta-panic
 // invariant: even when v.String() panics, safeString returns gracefully.
-// Regresses finding #25 from post-audit review.
 //
 // Two acceptable degraded renderings:
 //   - fmt.Sprintf's own "%!v(PANIC=...)" marker (fmt catches Stringer panics

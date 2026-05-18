@@ -61,14 +61,6 @@ const (
 )
 
 // Marshal serialises v using the codec registered under f.
-//
-// Params:
-//   - f: codec identifier.
-//   - v: value to encode; codec-specific constraints apply.
-//
-// Returns:
-//   - []byte: the encoded bytes.
-//   - error: UnknownFormat when f is not registered; codec-specific errors otherwise.
 func Marshal(f Format, v any) (encoded []byte, err error) {
 	//: resolve the codec before delegating.
 	c, ok := corecodec.Lookup(f)
@@ -82,14 +74,6 @@ func Marshal(f Format, v any) (encoded []byte, err error) {
 }
 
 // Unmarshal parses data into v using the codec registered under f.
-//
-// Params:
-//   - f: codec identifier.
-//   - data: encoded bytes.
-//   - v: pointer destination; codec-specific constraints apply.
-//
-// Returns:
-//   - error: UnknownFormat when f is not registered; codec-specific errors otherwise.
 func Unmarshal(f Format, data []byte, v any) error {
 	//: resolve the codec before delegating.
 	c, ok := corecodec.Lookup(f)
@@ -103,14 +87,6 @@ func Unmarshal(f Format, data []byte, v any) error {
 }
 
 // NewEncoder returns a streaming encoder for the codec registered under f.
-//
-// Params:
-//   - f: codec identifier.
-//   - w: destination writer.
-//
-// Returns:
-//   - Encoder: the streaming encoder when the codec supports streaming.
-//   - error: UnknownFormat or StreamingUnsupported.
 func NewEncoder(f Format, w io.Writer) (enc Encoder, err error) {
 	//: resolve + type-assert the streaming extension.
 	sc, rerr := resolveStreaming(f)
@@ -124,14 +100,6 @@ func NewEncoder(f Format, w io.Writer) (enc Encoder, err error) {
 }
 
 // NewDecoder returns a streaming decoder for the codec registered under f.
-//
-// Params:
-//   - f: codec identifier.
-//   - r: source reader.
-//
-// Returns:
-//   - Decoder: the streaming decoder when the codec supports streaming.
-//   - error: UnknownFormat or StreamingUnsupported.
 func NewDecoder(f Format, r io.Reader) (dec Decoder, err error) {
 	//: resolve + type-assert the streaming extension.
 	sc, rerr := resolveStreaming(f)
@@ -145,22 +113,12 @@ func NewDecoder(f Format, r io.Reader) (dec Decoder, err error) {
 }
 
 // Available returns the sorted list of registered formats.
-//
-// Returns:
-//   - []Format: registered Formats (deterministic ordering).
 func Available() []Format {
 	//: delegate to the core registry.
 	return corecodec.Available()
 }
 
 // FromMIME resolves a MIME string to its registered Format.
-//
-// Params:
-//   - mime: MIME identifier (case-insensitive).
-//
-// Returns:
-//   - Format: the resolved Format when ok.
-//   - bool: true iff the MIME is registered.
 func FromMIME(mime string) (f Format, ok bool) {
 	//: delegate to the core registry; unwrap the Codec into its Format.
 	c, found := corecodec.LookupMIME(mime)
@@ -174,13 +132,6 @@ func FromMIME(mime string) (f Format, ok bool) {
 }
 
 // FromExtension resolves a file extension to its registered Format.
-//
-// Params:
-//   - ext: file extension including the leading dot (case-insensitive).
-//
-// Returns:
-//   - Format: the resolved Format when ok.
-//   - bool: true iff the extension is registered.
 func FromExtension(ext string) (f Format, ok bool) {
 	//: delegate to the core registry; unwrap the Codec into its Format.
 	c, found := corecodec.LookupExt(ext)
@@ -195,13 +146,6 @@ func FromExtension(ext string) (f Format, ok bool) {
 
 // resolveStreaming resolves f and returns its StreamingCodec shape, or a
 // typed facade error explaining why it could not.
-//
-// Params:
-//   - f: codec identifier.
-//
-// Returns:
-//   - corecodec.StreamingCodec: the streaming-capable codec when err is nil.
-//   - error: UnknownFormat when f is missing, StreamingUnsupported otherwise.
 func resolveStreaming(f Format) (sc corecodec.StreamingCodec, err error) {
 	//: resolve the codec.
 	c, found := corecodec.Lookup(f)
@@ -227,12 +171,6 @@ func resolveStreaming(f Format) (sc corecodec.StreamingCodec, err error) {
 }
 
 // unknownFormat builds the typed UnknownFormat error for f.
-//
-// Params:
-//   - f: the Format the caller requested.
-//
-// Returns:
-//   - error: the facade-level UnknownFormat sentinel.
 func unknownFormat(f Format) error {
 	//: construct the error with an f-specific private diagnostic.
 	return errs.Wrap(nil, errs.WrapParams{

@@ -1,5 +1,5 @@
-// Package errs: wrap_params.go hosts WrapParams so error.go keeps a
-// single exported struct (ktn-linter KTN-STRUCT-ONEFILE convention).
+// Package errs — hosts WrapParams in its own file so error.go keeps a
+// single exported struct (one-struct-per-file convention).
 package errs
 
 // WrapParams groups the extra metadata Wrap needs when the cause is NOT

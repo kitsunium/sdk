@@ -1,4 +1,4 @@
-// Package codec: format.go declares the typed Format string and its helpers.
+// Package codec — declares the typed Format string and its helpers.
 // The zero Format ("") is invalid — consumers obtain a Format via the
 // pkg/v1/codec constants or via the FromMIME / FromExtension helpers.
 package codec
@@ -7,9 +7,6 @@ package codec
 type Format string
 
 // Known reports whether f has been registered in the codec registry.
-//
-// Returns:
-//   - bool: true iff a codec with this Format is registered.
 func (f Format) Known() bool {
 	//: empty Formats are reserved as the invalid zero value.
 	if f == "" {
@@ -23,9 +20,6 @@ func (f Format) Known() bool {
 }
 
 // String implements fmt.Stringer and returns the raw identifier.
-//
-// Returns:
-//   - string: the Format value unchanged.
 func (f Format) String() string {
 	//: direct cast from the typed string back to a plain string.
 	return string(f)

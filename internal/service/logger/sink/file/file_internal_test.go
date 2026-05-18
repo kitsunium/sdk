@@ -39,9 +39,6 @@ func mustOpenSink(tb testing.TB) (sink *fileSink, path string) {
 
 // swallowSinkClose is the test-only counterpart of swallowHandlerError —
 // it documents the intent of dropping a Close error from cleanup paths.
-//
-// Params:
-//   - err: close error to discard; non-nil values are intentionally dropped.
 func swallowSinkClose(err error) {
 	//: the test is already past its assertion phase; close errors are noise.
 	if err == nil {

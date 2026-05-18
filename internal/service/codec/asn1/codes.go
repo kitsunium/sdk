@@ -1,4 +1,4 @@
-// Package asn1: codes.go — range 0.3.9.* (ADR 0005 service/codec/asn1 block).
+// Package asn1 — range 0.3.9.* (ADR 0005 service/codec/asn1 block).
 package asn1
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

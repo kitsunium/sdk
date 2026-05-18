@@ -57,14 +57,6 @@ type syslogSink struct {
 // is consumer-controlled (env var, config, API input), prefer
 // NewWithConfig with a Dialer that enforces an allowlist so an attacker
 // cannot target internal services (169.254.169.254, localhost, etc.).
-//
-// Params:
-//   - network: "udp" or "tcp"; anything else yields ProtoInvalid.
-//   - addr: host:port pair forwarded to net.Dial; empty yields AddrEmpty.
-//
-// Returns:
-//   - corelogger.Sink: a ready-to-use syslog Sink.
-//   - error: AddrEmpty / ProtoInvalid / DialFailed wrapping the cause.
 func New(network, addr string) (sink corelogger.Sink, err error) {
 	//: thin wrapper around NewWithConfig with the default net.Dial dialer.
 	return NewWithConfig(network, addr, Config{})
@@ -74,15 +66,6 @@ func New(network, addr string) (sink corelogger.Sink, err error) {
 // net.Dial when cfg.Dialer is nil) and returns a syslog Sink. Recommended
 // constructor when addr might be consumer-controlled — plug an allowlist
 // dialer to defuse SSRF.
-//
-// Params:
-//   - network: "udp" or "tcp"; anything else yields ProtoInvalid.
-//   - addr: host:port pair forwarded to the dialer; empty yields AddrEmpty.
-//   - cfg: tuning knobs; zero-value falls back to net.Dial.
-//
-// Returns:
-//   - corelogger.Sink: a ready-to-use syslog Sink.
-//   - error: AddrEmpty / ProtoInvalid / DialFailed wrapping the cause.
 func NewWithConfig(network, addr string, cfg Config) (sink corelogger.Sink, err error) {
 	//: refuse an empty address early — net.Dial would surface a confusing error.
 	if addr == "" {
@@ -131,11 +114,8 @@ func NewWithConfig(network, addr string, cfg Config) (sink corelogger.Sink, err 
 // swallowDialClose drops a Close error from the constructor's defer path.
 // The original construction error (if any) carries the meaningful failure;
 // stacking the close error on top would obscure it.
-//
-// Params:
-//   - err: close error to discard.
 func swallowDialClose(err error) {
-	//: defensive guard so err is observed by the audit.
+	//: read the parameter so the unused-param audit treats this no-op as intentional.
 	if err == nil {
 		//: nothing to discard on the happy path.
 		return
@@ -143,15 +123,6 @@ func swallowDialClose(err error) {
 }
 
 // Write frames p as RFC5424 and ships it over the network connection.
-//
-// Params:
-//   - ctx: request-scoped context; cancelled contexts skip the write.
-//   - rec: originating record; level drives the RFC5424 PRI value.
-//   - p: formatted bytes from the upstream encoder; appended verbatim.
-//
-// Returns:
-//   - n: bytes accepted by the network connection.
-//   - err: WriteFailed wrapping the cause; ctx.Err on cancellation.
 func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: honour cancellation so a doomed request does not waste a packet.
 	if ctx != nil && ctx.Err() != nil {
@@ -186,12 +157,6 @@ func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 
 // Flush is a no-op for the syslog sink (UDP datagrams settle on send;
 // TCP delegates to the kernel buffer).
-//
-// Params:
-//   - ctx: request-scoped context observed for cancellation parity.
-//
-// Returns:
-//   - err: ctx.Err on cancellation; nil otherwise.
 func (s *syslogSink) Flush(ctx context.Context) error {
 	//: honour cancellation even though there is nothing buffered to flush.
 	if ctx != nil && ctx.Err() != nil {
@@ -210,9 +175,6 @@ func (s *syslogSink) Flush(ctx context.Context) error {
 // Close releases the underlying network connection. Subsequent Writes will
 // fail with the kernel's "use of closed network connection" error wrapped
 // as WriteFailed.
-//
-// Returns:
-//   - err: CloseFailed wrapping the cause; nil on success.
 func (s *syslogSink) Close() error {
 	//: serialise the close against in-flight writes via the same mutex.
 	s.mu.Lock()
@@ -233,13 +195,6 @@ func (s *syslogSink) Close() error {
 }
 
 // makeFrame builds the RFC5424 envelope around p.
-//
-// Params:
-//   - pri: the PRI value computed from the record's level.
-//   - p: payload bytes from the upstream encoder.
-//
-// Returns:
-//   - out: the framed bytes ready for the network connection.
 func makeFrame(pri int, p []byte) []byte {
 	//: build the frame in a single allocation sized for header + payload.
 	frame := make([]byte, 0, len(p)+frameHeaderHint)

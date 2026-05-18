@@ -46,7 +46,7 @@ func sdkRoot(tb testing.TB) (root string) {
 	return ""
 }
 
-// collectDefineCalls walks every non-test .go file under root/internal and
+// collectDefineCalls walks every non-test.go file under root/internal and
 // root/pkg, returning each (file:line, call) pair whose callee resolves to
 // errs.Define. Used by the audits below.
 func collectDefineCalls(tb testing.TB, root string) (out []defineCall) {

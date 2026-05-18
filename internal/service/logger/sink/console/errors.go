@@ -1,4 +1,4 @@
-// Package console: errors.go declares the sentinels returned by this
+// Package console — declares the sentinels returned by this
 // package's constructor and Write method. Each var's name equals its
 // errs.Define Reason in SCREAMING_SNAKE form.
 package console

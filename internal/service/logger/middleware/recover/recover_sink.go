@@ -23,13 +23,6 @@ type recoverSink struct {
 
 // New wraps downstream with panic recovery. Panics in Write / Flush /
 // Close are converted into Panicked sentinels so the caller stays alive.
-//
-// Params:
-//   - downstream: the wrapped sink whose panics are caught; nil rejects.
-//
-// Returns:
-//   - corelogger.Sink: the recover Sink behind the public interface.
-//   - error: DownstreamNil when downstream is nil.
 func New(downstream corelogger.Sink) (sink corelogger.Sink, err error) {
 	//: refuse a nil downstream — there would be nothing to wrap.
 	if downstream == nil {
@@ -41,15 +34,6 @@ func New(downstream corelogger.Sink) (sink corelogger.Sink, err error) {
 }
 
 // Write forwards p to the downstream sink under panic recovery.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the downstream sink.
-//   - rec: originating record forwarded to the downstream sink.
-//   - p: formatted bytes forwarded to the downstream sink.
-//
-// Returns:
-//   - n: bytes accepted by the downstream sink (0 on panic).
-//   - err: downstream's error or Panicked wrapping the recovered value.
 func (s *recoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: defer the recovery so any panic in the downstream call lands here.
 	defer func() {
@@ -70,12 +54,6 @@ func (s *recoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p [
 }
 
 // Flush forwards to the downstream sink under panic recovery.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the downstream sink.
-//
-// Returns:
-//   - err: downstream's error or Panicked wrapping the recovered value.
 func (s *recoverSink) Flush(ctx context.Context) (err error) {
 	//: defer the recovery so any panic in the downstream call lands here.
 	defer func() {
@@ -96,9 +74,6 @@ func (s *recoverSink) Flush(ctx context.Context) (err error) {
 }
 
 // Close forwards to the downstream sink under panic recovery.
-//
-// Returns:
-//   - err: downstream's error or Panicked wrapping the recovered value.
 func (s *recoverSink) Close() (err error) {
 	//: defer the recovery so any panic in the downstream call lands here.
 	defer func() {

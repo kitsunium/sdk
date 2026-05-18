@@ -31,14 +31,6 @@ const defaultFilePerm os.FileMode = 0o600
 // final component, so the test is TOCTOU-safe relative to OpenFile only
 // if the directory itself is not attacker-writable — a precondition the
 // godoc on New documents.
-//
-// Params:
-//   - path: filesystem path supplied to New; already non-empty.
-//
-// Returns:
-//   - err: OpenFailed when path is a symlink; nil when it is absent or a
-//     regular file. Lstat failures other than "not a symlink" are swallowed
-//     here — the subsequent OpenFile will surface them uniformly.
 func refuseSymlink(path string) error {
 	//: Lstat does NOT follow the final component, so a symlink is caught
 	//: before OpenFile can follow it. Absent paths / stat errors fall
@@ -71,13 +63,6 @@ type fileSink struct {
 }
 
 // New opens path in append mode and wraps the resulting *os.File as a Sink.
-//
-// Params:
-//   - path: filesystem path; empty string rejects the call.
-//
-// Returns:
-//   - corelogger.Sink: a ready-to-use file Sink.
-//   - error: PathEmpty when path is empty; OpenFailed wrapping the os error.
 func New(path string) (sink corelogger.Sink, err error) {
 	//: refuse an empty path so callers detect the misconfiguration immediately.
 	if path == "" {
@@ -128,15 +113,6 @@ func New(path string) (sink corelogger.Sink, err error) {
 }
 
 // Write appends p onto the underlying file under the local mutex.
-//
-// Params:
-//   - ctx: request-scoped context; cancelled contexts skip the write.
-//   - r: originating record; r.Level is attached to error metadata.
-//   - p: formatted bytes produced by the upstream encoder.
-//
-// Returns:
-//   - n: number of bytes accepted by the file.
-//   - err: CtxCancelled / WriteFailed wrapping the cause; nil on success.
 func (s *fileSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: honour context cancellation: cancelled contexts skip the write entirely.
 	if ctx != nil && ctx.Err() != nil {
@@ -169,12 +145,6 @@ func (s *fileSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 
 // Flush calls fsync on the underlying file so kernel page cache contents
 // reach durable storage.
-//
-// Params:
-//   - ctx: request-scoped context; cancelled contexts skip the sync.
-//
-// Returns:
-//   - err: SyncFailed wrapping the os error; nil on success.
 func (s *fileSink) Flush(ctx context.Context) error {
 	//: honour cancellation early — fsync is not cheap on slow disks.
 	if ctx != nil && ctx.Err() != nil {
@@ -201,9 +171,6 @@ func (s *fileSink) Flush(ctx context.Context) error {
 
 // Close closes the underlying file. Subsequent Writes will fail with the
 // kernel's "file already closed" error (which we wrap as WriteFailed).
-//
-// Returns:
-//   - err: CloseFailed wrapping the os error; nil on success.
 func (s *fileSink) Close() error {
 	//: serialise the close against in-flight writes via the same mutex.
 	s.mu.Lock()

@@ -1,4 +1,4 @@
-// Package logger: version.go exposes the SDK version to the rest of the
+// Package logger — exposes the SDK version to the rest of the
 // logger package. The ldflags pipeline injects the real value at build
 // time; local development runs fall back to the "dev" sentinel.
 package logger
@@ -15,9 +15,6 @@ const devVersion string = "dev"
 var Version string
 
 // FrameworkVersion returns the linked-in SDK version, or "dev" if unset.
-//
-// Returns:
-//   - string: the ldflags-injected Version, or "dev" fallback.
 func FrameworkVersion() string {
 	//: empty means no -ldflags override — return the dev sentinel.
 	if Version == "" {

@@ -15,13 +15,6 @@ type errWriter struct{}
 
 // Write returns a synthetic failure so the Encoder wrapper propagates the
 // MARSHAL_FAILED wrap.
-//
-// Params:
-//   - _: payload bytes, ignored.
-//
-// Returns:
-//   - n: always 0.
-//   - err: always non-nil.
 func (errWriter) Write(_ []byte) (n int, err error) {
 	//: predictable failure for the encoder wrapper to propagate.
 	return 0, errors.New("synthetic writer failure")

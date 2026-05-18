@@ -1,4 +1,4 @@
-// Package logger: codes.go — range 0.3.1.* (ADR 0005 service/logger block).
+// Package logger — range 0.3.1.* (ADR 0005 service/logger block).
 package logger
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

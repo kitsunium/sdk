@@ -19,9 +19,6 @@ const Warn Level = 4
 const Error Level = 8
 
 // String returns the uppercase textual label associated with the Level receiver.
-//
-// Returns:
-//   - string: one of "DEBUG", "INFO", "WARN", or "ERROR".
 func (l Level) String() string {
 	//: classify the numeric level into one of four named severity windows.
 	switch {

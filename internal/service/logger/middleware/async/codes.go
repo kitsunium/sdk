@@ -1,4 +1,4 @@
-// Package async: codes.go — range 0.3.17.* (ADR 0005 service/logger/middleware/async block).
+// Package async — range 0.3.17.* (ADR 0005 service/logger/middleware/async block).
 package async
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

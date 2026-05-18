@@ -7,7 +7,6 @@ import (
 )
 
 // mockCodec is a minimal Codec impl used only by the registry tests.
-// KTN-INTERFACE-ANYUSE is excluded for this tree in .ktn-linter.yaml.
 type mockCodec struct {
 	name string
 	mime []string

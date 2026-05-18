@@ -25,12 +25,12 @@ const scannerInitialCapacity int = 64 * 1024
 const scannerMaxCapacity int = 10 * 1024 * 1024
 
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
+// extension tables (hoisted).
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&ndjsonCodec{})
 
-	//: MIME table hoisted to satisfy KTN-VAR-CONSTSLICE.
+	//: MIME table hoisted.
 	mimeTypes = []string{"application/x-ndjson", "application/jsonl"}
 
 	//: extension table hoisted for the same reason.
@@ -41,49 +41,30 @@ var (
 type ndjsonCodec struct{}
 
 // New returns an NDJSON codec instance.
-//
-// Returns:
-//   - codec.Codec: a fresh stateless codec.
 func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
 
 // Name implements codec.Codec.
-//
-// Returns:
-//   - string: always "ndjson".
 func (*ndjsonCodec) Name() string {
 	//: canonical identifier.
 	return "ndjson"
 }
 
 // MIMETypes lists every MIME alias.
-//
-// Returns:
-//   - []string: canonical MIME first.
 func (*ndjsonCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
-//
-// Returns:
-//   - []string: canonical extension first.
 func (*ndjsonCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
 
 // Marshal encodes a slice v as NDJSON bytes.
-//
-// Params:
-//   - v: slice or pointer-to-slice value; each element becomes one record.
-//
-// Returns:
-//   - []byte: the NDJSON-encoded bytes (trailing newline included).
-//   - error: ValueInvalid when v is not a slice; MarshalFailed on encode failure.
 func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 	//: resolve v to a reflect.Value that is a slice or array.
 	slice, ok := asSlice(v)
@@ -123,13 +104,6 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 }
 
 // Unmarshal parses NDJSON data into v, which must be a pointer to a slice.
-//
-// Params:
-//   - data: NDJSON bytes.
-//   - v: pointer to a slice — each non-empty line decodes into a new element.
-//
-// Returns:
-//   - error: ValueInvalid when v is not a *slice; UnmarshalFailed on decode failure.
 func (*ndjsonCodec) Unmarshal(data []byte, v any) error {
 	//: target must be a pointer to a slice.
 	slicePtr, ok := asSlicePointer(v)
@@ -158,14 +132,6 @@ func (*ndjsonCodec) Unmarshal(data []byte, v any) error {
 
 // decodeLines reads data line-by-line and decodes each non-empty line into
 // a freshly-allocated element of sliceType.
-//
-// Params:
-//   - data: raw NDJSON bytes.
-//   - sliceType: reflect.Type of the destination slice (e.g. []Event).
-//
-// Returns:
-//   - reflect.Value: a slice of sliceType containing the decoded elements.
-//   - error: UnmarshalFailed wrapping the stdlib cause on a per-record failure.
 func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err error) {
 	//: split on '\n'; bufio.Scanner ignores the trailing empty line for us.
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -216,14 +182,6 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 // Implements the optional codec.Appender interface so hot-path callers
 // can stream records into a recycled buffer (one '\n'-terminated line per
 // element).
-//
-// Params:
-//   - dst: caller-supplied buffer; encoded bytes are appended onto it.
-//   - v: slice value; each element becomes one NDJSON record.
-//
-// Returns:
-//   - []byte: the (possibly re-allocated) buffer with encoded NDJSON.
-//   - error: ValueInvalid when v is not a slice; MarshalFailed otherwise.
 func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: resolve v to a reflect.Value that is a slice or array.
 	slice, ok := asSlice(v)
@@ -264,13 +222,6 @@ func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 }
 
 // asSlice reports whether v resolves to a slice or array reflect.Value.
-//
-// Params:
-//   - v: candidate value.
-//
-// Returns:
-//   - reflect.Value: the underlying slice/array value when ok.
-//   - bool: true iff v is (a pointer to) a slice or array.
 func asSlice(v any) (slice reflect.Value, ok bool) {
 	//: obtain the reflect.Value; pointers get dereferenced once.
 	rv := reflect.ValueOf(v)
@@ -294,13 +245,6 @@ func asSlice(v any) (slice reflect.Value, ok bool) {
 }
 
 // asSlicePointer reports whether v is a non-nil *[]T.
-//
-// Params:
-//   - v: candidate value.
-//
-// Returns:
-//   - reflect.Value: the pointer's reflect.Value when ok.
-//   - bool: true iff v is a non-nil pointer to a slice.
 func asSlicePointer(v any) (ptr reflect.Value, ok bool) {
 	//: obtain the reflect.Value without dereferencing.
 	rv := reflect.ValueOf(v)

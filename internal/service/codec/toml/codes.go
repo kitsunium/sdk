@@ -1,4 +1,4 @@
-// Package toml: codes.go — range 0.3.5.* (ADR 0005 service/codec/toml block).
+// Package toml — range 0.3.5.* (ADR 0005 service/codec/toml block).
 package toml
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

@@ -1,8 +1,7 @@
-// Package encoder: text.go implements TextEncoder — the default
-// human-readable encoder that renders a record as
-// "TIME LEVEL msg key=val key=val …\n". Extracted from the original
-// service/logger.TextHandler in commit 7 so the format and the transport
-// (Sink) live in separate packages.
+// Package encoder — implements TextEncoder, the default human-readable
+// encoder that renders a record as "TIME LEVEL msg key=val key=val …\n".
+// Lives in its own package so the format and the transport (Sink) can
+// evolve independently.
 package encoder
 
 import (
@@ -48,13 +47,6 @@ type textEncoder struct {
 // NewText builds an Encoder bound to the supplied clock. Pass clock.System
 // for production use; tests inject a fake clock. A nil clock falls back to
 // the real wall clock so callers can pass clock.System or nil interchangeably.
-//
-// Params:
-//   - clk: clock used as a fallback when the record carries a zero Time.
-//
-// Returns:
-//   - Encoder: a ready-to-use text Encoder.
-//
 // IFACE-PLUGIN: returns the Encoder contract so callers depend on the
 // public surface; the concrete textEncoder is intentionally hidden.
 func NewText(clk clock.Clock) Encoder {
@@ -68,9 +60,6 @@ func NewText(clk clock.Clock) Encoder {
 }
 
 // Name returns the canonical encoder identifier.
-//
-// Returns:
-//   - string: always "text".
 func (e *textEncoder) Name() string {
 	//: identifier is stable across the public API.
 	return textEncoderName
@@ -79,14 +68,6 @@ func (e *textEncoder) Name() string {
 // Append serialises r onto dst, prefixing every attribute key with the
 // active group stack ("g1.g2.key=val"). Returns the (possibly re-allocated)
 // buffer with the encoded line including the trailing newline.
-//
-// Params:
-//   - dst: caller-supplied buffer (typically borrowed from kernel/buffer).
-//   - groups: active group prefix stack (outermost first); may be empty.
-//   - r: record to render.
-//
-// Returns:
-//   - []byte: the (possibly re-allocated) buffer with the encoded line.
 func (e *textEncoder) Append(dst []byte, groups []string, r corelogger.RecordEvent) []byte {
 	//: fall back to the encoder clock when the caller did not timestamp.
 	if r.Time.IsZero() {
@@ -105,13 +86,6 @@ func (e *textEncoder) Append(dst []byte, groups []string, r corelogger.RecordEve
 }
 
 // appendHeader writes the leading "TIME LEVEL msg" prefix into dst.
-//
-// Params:
-//   - dst: caller-supplied buffer; header bytes are appended onto it.
-//   - r: record providing time / level / message.
-//
-// Returns:
-//   - []byte: the (possibly re-allocated) buffer with the header bytes.
 func appendHeader(dst []byte, r corelogger.RecordEvent) []byte {
 	//: render the header in the documented "TIME LEVEL msg" order.
 	dst = r.Time.AppendFormat(dst, timestampLayout)
@@ -129,13 +103,6 @@ func appendHeader(dst []byte, r corelogger.RecordEvent) []byte {
 // with a single space so Message content can never inject a new frame in a
 // line-framed downstream sink. Other control characters are preserved to
 // keep the rendering faithful; only framing-sensitive bytes are stripped.
-//
-// Params:
-//   - dst: caller-supplied buffer; sanitized bytes are appended onto it.
-//   - msg: the Record.Message string to sanitize.
-//
-// Returns:
-//   - []byte: the (possibly re-allocated) buffer with msg appended.
 func appendSanitizedMessage(dst []byte, msg string) []byte {
 	//: walk msg byte-by-byte; ASCII control-char check is cheap and the
 	//: allocation cost matches the existing append pattern in this file.
@@ -156,14 +123,6 @@ func appendSanitizedMessage(dst []byte, msg string) []byte {
 
 // appendAttrWithGroups prepends the active group prefix stack to the
 // attribute key before delegating value rendering to appendValueOnly.
-//
-// Params:
-//   - dst: caller-supplied buffer; encoded bytes are appended onto it.
-//   - groups: active group prefix stack (outermost first); may be empty.
-//   - a: attribute whose Key and Value are rendered.
-//
-// Returns:
-//   - []byte: the (possibly re-allocated) buffer after append operations.
 func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) []byte {
 	//: separator between message and first attr, and between consecutive attrs.
 	dst = append(dst, ' ')
@@ -181,13 +140,6 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) [
 }
 
 // appendValueOnly renders only the value part of an AttrValue.
-//
-// Params:
-//   - dst: buffer to append to; returned grown.
-//   - a: attribute whose Value is rendered.
-//
-// Returns:
-//   - []byte: the potentially re-sliced buffer after append operations.
 func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 	//: dispatch on the typed Kind discriminant — no boxing on the hot path.
 	switch a.Value.Kind() {

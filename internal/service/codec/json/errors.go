@@ -1,4 +1,4 @@
-// Package json: errors.go declares the sentinel *errs.Error values used
+// Package json — declares the sentinel *errs.Error values used
 // to wrap failures from encoding/json.
 package json
 

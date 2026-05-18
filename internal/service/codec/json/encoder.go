@@ -1,4 +1,4 @@
-// Package json: encoder.go adapts *encoding/json.Encoder to codec.Encoder.
+// Package json — adapts *encoding/json.Encoder to codec.Encoder.
 package json
 
 import (
@@ -13,12 +13,6 @@ type jsonEncoder struct {
 }
 
 // Encode serialises v through the wrapped stdlib encoder.
-//
-// Params:
-//   - v: value to encode.
-//
-// Returns:
-//   - error: MarshalFailed wrapping the stdlib cause on failure; nil otherwise.
 func (e *jsonEncoder) Encode(v any) error {
 	//: delegate to the stdlib then wrap on error.
 	jerr := e.inner.Encode(v)
@@ -37,9 +31,6 @@ func (e *jsonEncoder) Encode(v any) error {
 }
 
 // Close is a no-op because the stdlib encoder does not own the writer.
-//
-// Returns:
-//   - error: always nil.
 func (*jsonEncoder) Close() error {
 	//: stdlib encoder owns no writer-level state.
 	return nil

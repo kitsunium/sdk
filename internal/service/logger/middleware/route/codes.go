@@ -1,4 +1,4 @@
-// Package route: codes.go — range 0.3.18.* (ADR 0005 service/logger/middleware/route block).
+// Package route — range 0.3.18.* (ADR 0005 service/logger/middleware/route block).
 package route
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

@@ -1,4 +1,4 @@
-// Package multi: codes.go — range 0.3.16.* (ADR 0005 service/logger/middleware/multi block).
+// Package multi — range 0.3.16.* (ADR 0005 service/logger/middleware/multi block).
 package multi
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

@@ -1,8 +1,6 @@
-// Package async: async_sink_policy.go declares the DropPolicy enum used
-// by the async Sink to decide what happens when the ring buffer saturates.
-// Held as a parent-prefixed sibling of async_sink.go so the sink file stays
-// focused on the Sink contract while preserving the KTN-STRUCT-COLOCATE
-// convention.
+// Package async — declares the DropPolicy enum used by the async Sink to
+// decide what happens when the ring buffer saturates. Held as a sibling of
+// async_sink.go so the sink file stays focused on the Sink contract.
 package async
 
 // DropPolicy selects how a saturated ring buffer behaves on Write.

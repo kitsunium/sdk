@@ -1,4 +1,4 @@
-// Package logger: logger.go declares the Logger interface — the primary entry
+// Package logger — declares the Logger interface — the primary entry
 // point consumers interact with. A Logger binds a Handler and exposes
 // ergonomic Log / With / Enabled operations over it.
 package logger

@@ -1,4 +1,4 @@
-// Package logger: logger.go wires a core.Handler into a core.Logger. It
+// Package logger — wires a core.Handler into a core.Logger. It
 // provides the thin loggerImpl that routes Log calls through the Handler's
 // Enabled fast-path and honours With-derived attrs via copy-on-write.
 package logger
@@ -25,13 +25,6 @@ type loggerImpl struct {
 }
 
 // New wraps a core.Handler inside a core.Logger.
-//
-// Params:
-//   - h: handler that will receive every RecordEvent emitted by the Logger.
-//
-// Returns:
-//   - corelogger.Logger: a Logger forwarding to h; nil on rejection.
-//   - error: HandlerNil when h is nil; nil on success.
 func New(h corelogger.Handler) (lg corelogger.Logger, err error) {
 	//: reject nil handlers so callers cannot accidentally construct a dead Logger.
 	if h == nil {
@@ -44,13 +37,6 @@ func New(h corelogger.Handler) (lg corelogger.Logger, err error) {
 
 // Enabled delegates to the underlying Handler using a zero RecordEvent whose
 // Level field is lv, so callers can gate expensive attribute construction.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the Handler.
-//   - lv: the level being tested.
-//
-// Returns:
-//   - bool: whatever the Handler returns for that level.
 func (l *loggerImpl) Enabled(ctx context.Context, lv level.Level) bool {
 	//: delegate the decision to the Handler using a minimal RecordEvent probe.
 	return l.h.Enabled(ctx, corelogger.RecordEvent{Level: lv})
@@ -58,12 +44,6 @@ func (l *loggerImpl) Enabled(ctx context.Context, lv level.Level) bool {
 
 // Log builds a RecordEvent at level lv and hands it to the Handler. Records
 // below the Handler's threshold are dropped before any formatting happens.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the Handler.
-//   - lv: level of the record.
-//   - msg: human-readable message.
-//   - attrs: optional attributes attached to the record.
 func (l *loggerImpl) Log(ctx context.Context, lv level.Level, msg string, attrs ...corelogger.AttrValue) {
 	//: capture the application caller PC for handlers that resolve frames lazily.
 	var pcs [1]uintptr
@@ -80,12 +60,6 @@ func (l *loggerImpl) Log(ctx context.Context, lv level.Level, msg string, attrs 
 }
 
 // With returns a derived Logger whose emitted records carry the given attrs.
-//
-// Params:
-//   - attrs: attributes bound to every subsequent RecordEvent.
-//
-// Returns:
-//   - corelogger.Logger: a new Logger sharing the Handler's downstream state.
 func (l *loggerImpl) With(attrs ...corelogger.AttrValue) corelogger.Logger {
 	//: delegate attr accumulation to the Handler's WithAttrs contract.
 	return &loggerImpl{h: l.h.WithAttrs(attrs)}
@@ -95,14 +69,6 @@ func (l *loggerImpl) With(attrs ...corelogger.AttrValue) corelogger.Logger {
 // bound to lg at the supplied level. It type-asserts lg to the concrete
 // loggerImpl created by New; foreign Logger implementations get nil so
 // callers detect the misconfiguration immediately.
-//
-// Params:
-//   - lg: a Logger previously built by service/logger.New.
-//   - lv: severity level forwarded to the eventual Send.
-//
-// Returns:
-//   - Builder: a recycled chain Builder, or nil when lg is foreign.
-//
 // IFACE-PLUGIN: returns the chainable Builder contract so callers depend on
 // the fluent API surface rather than the recycled concrete type.
 func Build(lg corelogger.Logger, lv level.Level) Builder {
@@ -119,13 +85,6 @@ func Build(lg corelogger.Logger, lv level.Level) Builder {
 
 // LogAttrs is the package-level entry point for the slice-overload of Log.
 // It mirrors Build by routing through the concrete loggerImpl.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the Handler.
-//   - lg: a Logger previously built by service/logger.New.
-//   - lv: level of the record.
-//   - msg: human-readable message.
-//   - attrs: pre-built attribute slice attached to the record.
 func LogAttrs(ctx context.Context, lg corelogger.Logger, lv level.Level, msg string, attrs []corelogger.AttrValue) {
 	//: only loggers built by service/logger.New expose the LogAttrs path.
 	impl, ok := lg.(*loggerImpl)
@@ -145,11 +104,8 @@ func LogAttrs(ctx context.Context, lg corelogger.Logger, lv level.Level, msg str
 // helper. Future commits may swap this for a configurable OnError callback;
 // for now the helper exists so the discard intent is explicit at the call
 // site and so a future hook has one canonical interception point.
-//
-// Params:
-//   - err: handler error to discard; non-nil values are intentionally dropped.
 func swallowHandlerError(err error) {
-	//: explicit early-return so the err parameter is observed by the audit.
+	//: explicit early-return on nil — the read satisfies the unused-param audit.
 	if err == nil {
 		//: nothing to discard on the happy path.
 		return
@@ -160,13 +116,6 @@ func swallowHandlerError(err error) {
 // Build returns a chainable Builder bound to this Logger at the supplied
 // level. The Builder is recycled through a sync.Pool so the steady-state
 // per-call cost is zero heap allocations once the pool is warm.
-//
-// Params:
-//   - lv: severity level forwarded to the eventual Send.
-//
-// Returns:
-//   - Builder: a recycled chain Builder ready for typed attribute calls.
-//
 // IFACE-PLUGIN: returns the chainable Builder contract so callers depend on
 // the fluent API surface rather than the recycled concrete type.
 func (l *loggerImpl) Build(lv level.Level) Builder {
@@ -182,12 +131,6 @@ func (l *loggerImpl) Build(lv level.Level) Builder {
 // allocation imposed by Log(... AttrValue). Pre-built attribute slices
 // (typically from a caller-managed pool) flow through this entry point
 // without the per-call boxing cost.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the Handler.
-//   - lv: level of the record.
-//   - msg: human-readable message.
-//   - attrs: pre-built attribute slice attached to the record.
 func (l *loggerImpl) LogAttrs(ctx context.Context, lv level.Level, msg string, attrs []corelogger.AttrValue) {
 	//: capture the application caller PC for handlers that resolve frames lazily.
 	var pcs [1]uintptr
@@ -205,12 +148,6 @@ func (l *loggerImpl) LogAttrs(ctx context.Context, lv level.Level, msg string, a
 
 // WithGroup returns a derived Logger whose subsequent attributes are
 // namespaced under the given group name.
-//
-// Params:
-//   - name: group prefix; empty value yields the receiver unchanged.
-//
-// Returns:
-//   - corelogger.Logger: a new Logger sharing the Handler's downstream state.
 func (l *loggerImpl) WithGroup(name string) corelogger.Logger {
 	//: empty group is a documented no-op so callers can pass user input.
 	if name == "" {

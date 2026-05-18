@@ -1,4 +1,4 @@
-// Package sample: codes.go — range 0.3.20.* (ADR 0005 service/logger/middleware/sample block).
+// Package sample — range 0.3.20.* (ADR 0005 service/logger/middleware/sample block).
 package sample
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

@@ -1,4 +1,4 @@
-// Package recover: codes.go — range 0.3.21.* (ADR 0005 service/logger/middleware/recover block).
+// Package recover — range 0.3.21.* (ADR 0005 service/logger/middleware/recover block).
 package recover
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

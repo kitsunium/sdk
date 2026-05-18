@@ -1,4 +1,4 @@
-// Package csv: codes.go — range 0.3.8.* (ADR 0005 service/codec/csv block).
+// Package csv — range 0.3.8.* (ADR 0005 service/codec/csv block).
 package csv
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

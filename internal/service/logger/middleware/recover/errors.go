@@ -1,4 +1,4 @@
-// Package recover: errors.go declares the sentinels returned by the
+// Package recover — declares the sentinels returned by the
 // recover Sink. Each var's name equals its errs.Define Reason in
 // SCREAMING_SNAKE form.
 package recover

@@ -9,8 +9,8 @@ import (
 func Test_deepestError(t *testing.T) {
 	t.Parallel()
 	//: valid dotted-quad codes:
-	//:   0x00_03_01_64 = 0.3.1.100 (service/logger, deep-test serial)
-	//:   0x00_03_01_65 = 0.3.1.101 (wrapped stdlib cause)
+	//: 0x00_03_01_64 = 0.3.1.100 (service/logger, deep-test serial)
+	//: 0x00_03_01_65 = 0.3.1.101 (wrapped stdlib cause)
 	sample := Define(0x00_03_01_64, "DEEP_TEST", "Deep test public", "deep test private")
 	wrappedStdlib := Wrap(context.Canceled, WrapParams{
 		Code: 0x00_03_01_65, Reason: "CTX_DEEP", Public: "Context cancelled in deep test", Private: "debug",

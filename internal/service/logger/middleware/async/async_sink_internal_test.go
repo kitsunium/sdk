@@ -277,9 +277,6 @@ func Test_noopOnError(t *testing.T) {
 type errNoopBoom struct{}
 
 // Error renders the diagnostic marker used by the noopOnError test.
-//
-// Returns:
-//   - msg: a static marker; the test does not assert on its content.
 func (errNoopBoom) Error() (msg string) {
 	//: static marker — content is not asserted.
 	return "boom"

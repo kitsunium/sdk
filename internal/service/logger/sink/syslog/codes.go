@@ -1,4 +1,4 @@
-// Package syslog: codes.go — range 0.3.15.* (ADR 0005 service/logger/sink/syslog block).
+// Package syslog — range 0.3.15.* (ADR 0005 service/logger/sink/syslog block).
 package syslog
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

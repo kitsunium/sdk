@@ -1,4 +1,4 @@
-// Package logger: sink.go exposes the Sink port and the multi-sink helper
+// Package logger — exposes the Sink port and the multi-sink helper
 // alongside the encoder-aware constructor NewWithSink. Together they let
 // consumers replace the default text-on-stderr wiring (NewText / Default)
 // with arbitrary fan-out / async / file / syslog topologies — without
@@ -46,13 +46,6 @@ type SinkConfig struct {
 // formatting them with cfg.Encoder. It is the port-and-adapter entry point
 // for callers that want full control over both the format (Encoder) and
 // the transport (Sink); use NewText for the default text-on-stderr wiring.
-//
-// Params:
-//   - cfg: construction parameters; Sink is mandatory.
-//
-// Returns:
-//   - Logger: the version-decorated logger, or nil on error.
-//   - error: SinkConfigRequired when cfg.Sink is nil; forwarded service errors otherwise.
 func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 	//: refuse a nil sink so callers get a typed sentinel rather than a nil panic.
 	if cfg.Sink == nil {
@@ -87,12 +80,6 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 // Multi is a thin wrapper around the internal multi (fan-out) sink. It
 // broadcasts every record to each branch in order and aggregates per-sink
 // failures via errors.Join under the FANOUT_WRITE_FAILED sentinel.
-//
-// Params:
-//   - branches: downstream Sinks; nil entries are silently skipped.
-//
-// Returns:
-//   - Sink: the fan-out Sink behind the public Sink interface.
 func Multi(branches ...Sink) Sink {
 	//: delegate to the internal fan-out implementation.
 	return multi.New(branches...)
@@ -101,9 +88,6 @@ func Multi(branches ...Sink) Sink {
 // ConsoleStderr returns the stderr console Sink used by Default. Exposed
 // so callers building a Multi() topology can wire stderr alongside richer
 // transports without re-implementing the convenience constructor.
-//
-// Returns:
-//   - Sink: a console Sink writing to os.Stderr.
 func ConsoleStderr() Sink {
 	//: reuse the canonical convenience constructor from the console sink.
 	return console.NewStderr()
@@ -111,9 +95,6 @@ func ConsoleStderr() Sink {
 
 // ConsoleStdout returns the stdout console Sink. Same rationale as
 // ConsoleStderr — exposed for Multi() compositions.
-//
-// Returns:
-//   - Sink: a console Sink writing to os.Stdout.
 func ConsoleStdout() Sink {
 	//: reuse the canonical convenience constructor from the console sink.
 	return console.NewStdout()
@@ -122,9 +103,6 @@ func ConsoleStdout() Sink {
 // TextEncoder returns a fresh text Encoder bound to the real system clock.
 // Callers passing a custom Encoder to NewWithSink usually want this as a
 // starting point — it is the same encoder NewText / Default rely on.
-//
-// Returns:
-//   - Encoder: a ready-to-use text Encoder.
 func TextEncoder() Encoder {
 	//: reuse the canonical text encoder constructor with the system clock.
 	return encoder.NewText(clock.System)
