@@ -19,7 +19,7 @@ type jsonDecoder struct {
 //
 // Returns:
 //   - error: UnmarshalFailed wrapping the stdlib cause on failure; nil otherwise.
-func (d *jsonDecoder) Decode(v any) (err error) {
+func (d *jsonDecoder) Decode(v any) error {
 	//: delegate to stdlib then wrap on error.
 	jerr := d.inner.Decode(v)
 	//: success fast-path.
@@ -40,7 +40,7 @@ func (d *jsonDecoder) Decode(v any) (err error) {
 //
 // Returns:
 //   - bool: stdlib Decoder.More value.
-func (d *jsonDecoder) More() (ok bool) {
+func (d *jsonDecoder) More() bool {
 	//: delegate to the stdlib bool.
 	return d.inner.More()
 }

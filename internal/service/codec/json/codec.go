@@ -22,8 +22,8 @@ type jsonCodec struct{}
 // New returns the JSON codec singleton.
 //
 // Returns:
-//   - c: the shared stateless codec.
-func New() (c codec.Codec) {
+//   - codec.Codec: the shared stateless codec.
+func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
@@ -32,7 +32,7 @@ func New() (c codec.Codec) {
 //
 // Returns:
 //   - string: always "json".
-func (*jsonCodec) Name() (name string) {
+func (*jsonCodec) Name() string {
 	//: canonical identifier.
 	return "json"
 }
@@ -41,7 +41,7 @@ func (*jsonCodec) Name() (name string) {
 //
 // Returns:
 //   - []string: canonical MIME first.
-func (*jsonCodec) MIMETypes() (mimes []string) {
+func (*jsonCodec) MIMETypes() []string {
 	//: canonical type first so producers pick it by default.
 	return []string{"application/json", "text/json"}
 }
@@ -50,7 +50,7 @@ func (*jsonCodec) MIMETypes() (mimes []string) {
 //
 // Returns:
 //   - []string: canonical extension first.
-func (*jsonCodec) Extensions() (exts []string) {
+func (*jsonCodec) Extensions() []string {
 	//: canonical extension for JSON files.
 	return []string{".json"}
 }
@@ -61,9 +61,9 @@ func (*jsonCodec) Extensions() (exts []string) {
 //   - v: any value encoding/json supports.
 //
 // Returns:
-//   - []byte: the encoded JSON.
-//   - error: MarshalFailed wrapping the stdlib cause on failure.
-func (*jsonCodec) Marshal(v any) (data []byte, err error) {
+//   - encoded: the encoded JSON.
+//   - err: MarshalFailed wrapping the stdlib cause on failure.
+func (*jsonCodec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to the stdlib for the actual encoding.
 	out, jerr := stdjson.Marshal(v)
 	//: success fast-path.
@@ -88,7 +88,7 @@ func (*jsonCodec) Marshal(v any) (data []byte, err error) {
 //
 // Returns:
 //   - error: UnmarshalFailed wrapping the stdlib cause on failure.
-func (*jsonCodec) Unmarshal(data []byte, v any) (err error) {
+func (*jsonCodec) Unmarshal(data []byte, v any) error {
 	//: delegate to the stdlib for the actual decoding.
 	jerr := stdjson.Unmarshal(data, v)
 	//: success fast-path.
@@ -114,9 +114,9 @@ func (*jsonCodec) Unmarshal(data []byte, v any) (err error) {
 //   - v: any value encoding/json supports.
 //
 // Returns:
-//   - []byte: the (possibly re-allocated) buffer with encoded JSON.
-//   - error: MarshalFailed wrapping the stdlib cause on failure.
-func (c *jsonCodec) Append(dst []byte, v any) (out []byte, err error) {
+//   - appended: the (possibly re-allocated) buffer with encoded JSON.
+//   - err: MarshalFailed wrapping the stdlib cause on failure.
+func (c *jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: delegate to Marshal so the wrap/error contract has a single source.
 	encoded, merr := c.Marshal(v)
 	//: surface any encoding failure without touching dst.
@@ -135,7 +135,7 @@ func (c *jsonCodec) Append(dst []byte, v any) (out []byte, err error) {
 //
 // Returns:
 //   - codec.Encoder: a streaming encoder bound to w.
-func (*jsonCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
+func (*jsonCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the stdlib encoder to provide our Close contract.
 	return &jsonEncoder{inner: stdjson.NewEncoder(w)}
 }
@@ -147,7 +147,7 @@ func (*jsonCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
 //
 // Returns:
 //   - codec.Decoder: a streaming decoder bound to r.
-func (*jsonCodec) NewDecoder(r io.Reader) (dec codec.Decoder) {
+func (*jsonCodec) NewDecoder(r io.Reader) codec.Decoder {
 	//: wrap the stdlib decoder to expose More on our interface.
 	return &jsonDecoder{inner: stdjson.NewDecoder(r)}
 }

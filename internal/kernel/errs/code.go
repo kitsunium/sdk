@@ -11,20 +11,6 @@ import (
 	"unsafe"
 )
 
-// Code packs a 4-byte dotted identifier (MM.LL.PP.SS) as uint32.
-// See ADR 0005 for the registry.
-type Code uint32
-
-// Named octet types prevent positional-argument footguns in Pack.
-// PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
-// variable name without shadowing.
-type (
-	Major   uint8
-	Layer   uint8
-	PkgCode uint8
-	Serial  uint8
-)
-
 // Shift values are WIRE-STABLE. Changing them breaks every persisted Code.
 // A future layout (e.g. 4/8/8/12) MUST introduce a new Code type, never
 // mutate these constants.
@@ -42,33 +28,60 @@ const (
 	MaskExact     Code = 0xFF_FF_FF_FF // /32 — exact match only
 )
 
-// Compile-time guard — int must be 8 bytes so Code()/Layer() int accessors
-// never lose information via int(uint32) casting. The build tag above
-// enforces 64-bit GOARCH; this static assertion is belt-and-braces for
-// exotic build configurations that might bypass the tag.
-var _ = [1]struct{}{}[8-unsafe.Sizeof(int(0))]
+// requiredIntSize is the expected size of `int` in bytes on supported
+// 64-bit GOARCH targets. Used by the compile-time guard below so the
+// magic number "8" stays named at its single point of use.
+const requiredIntSize uintptr = 8
+
+// padThreshold10 is the cutoff below which itoaPadded3 must emit two
+// leading zeros ("00X"). Named to avoid a bare magic literal.
+const padThreshold10 uint8 = 10
+
+// padThreshold100 is the cutoff below which itoaPadded3 must emit one
+// leading zero ("0XX"). Named to avoid a bare magic literal.
+const padThreshold100 uint8 = 100
+
+// Code packs a 4-byte dotted identifier (MM.LL.PP.SS) as uint32.
+// See ADR 0005 for the registry.
+type Code uint32
+
+// Named octet types prevent positional-argument footguns in Pack.
+// PkgCode is spelled out (not `Pkg`) so callers keep `pkg` as an ordinary
+// variable name without shadowing.
+type (
+	Major   uint8
+	Layer   uint8
+	PkgCode uint8
+	Serial  uint8
+)
+
+// Compile-time guard — int must be `requiredIntSize` bytes so Code()/Layer()
+// int accessors never lose information via int(uint32) casting. The build
+// tag above enforces 64-bit GOARCH; this static assertion is belt-and-braces
+// for exotic build configurations that might bypass the tag.
+var _ [requiredIntSize - unsafe.Sizeof(int(0))]struct{}
 
 // Pack constructs a Code from its four octets. RUNTIME only — sentinel
 // constants MUST use hex literals so they stay const-expressible.
 //
 // Params:
-//   - m: Major octet (SemVer major: 0=internal, 1=v1, 2=v2, ...)
-//   - l: Layer octet within the major.
-//   - p: Package octet within the layer.
-//   - s: Serial octet within the package.
+//   - mm: Major octet (SemVer major: 0=internal, 1=v1, 2=v2, ...)
+//   - ll: Layer octet within the major.
+//   - pp: Package octet within the layer.
+//   - ss: Serial octet within the package.
 //
 // Returns:
 //   - Code: the packed 32-bit identifier.
-func Pack(m Major, l Layer, p PkgCode, s Serial) (c Code) {
+func Pack(mm Major, ll Layer, pp PkgCode, ss Serial) Code {
 	//: shift each octet into place — bitwise OR is branch-free.
-	return Code(m)<<shiftMajor | Code(l)<<shiftLayer | Code(p)<<shiftPackage | Code(s)
+	return Code(mm)<<shiftMajor | Code(ll)<<shiftLayer | Code(pp)<<shiftPackage | Code(ss)
 }
 
 // Major returns the top octet (SemVer major byte).
 //
 // Returns:
 //   - Major: bits 24..31 of the Code.
-func (c Code) Major() (m Major) {
+func (c Code) Major() Major {
 	//: unsigned shift is safe and drops the lower 24 bits.
 	return Major(c >> shiftMajor)
 }
@@ -77,7 +90,7 @@ func (c Code) Major() (m Major) {
 //
 // Returns:
 //   - Layer: bits 16..23 of the Code.
-func (c Code) Layer() (l Layer) {
+func (c Code) Layer() Layer {
 	//: cast to uint8 truncates after the shift.
 	return Layer(c >> shiftLayer)
 }
@@ -86,7 +99,7 @@ func (c Code) Layer() (l Layer) {
 //
 // Returns:
 //   - PkgCode: bits 8..15 of the Code.
-func (c Code) Package() (p PkgCode) {
+func (c Code) Package() PkgCode {
 	//: same shift-and-truncate pattern as the other accessors.
 	return PkgCode(c >> shiftPackage)
 }
@@ -95,7 +108,7 @@ func (c Code) Package() (p PkgCode) {
 //
 // Returns:
 //   - Serial: bits 0..7 of the Code.
-func (c Code) Serial() (s Serial) {
+func (c Code) Serial() Serial {
 	//: casting a uint32 to uint8 keeps only the low byte.
 	return Serial(c)
 }
@@ -105,7 +118,7 @@ func (c Code) Serial() (s Serial) {
 //
 // Returns:
 //   - string: canonical dotted-quad representation.
-func (c Code) String() (s string) {
+func (c Code) String() string {
 	//: manual concat avoids the fmt import and keeps the kernel package's
 	//: zero-alloc discipline (strconv.Itoa is the only helper we need).
 	return itoaDecimal(uint8(c.Major())) + "." +
@@ -119,7 +132,7 @@ func (c Code) String() (s string) {
 //
 // Returns:
 //   - string: zero-padded dotted-quad representation.
-func (c Code) Padded() (s string) {
+func (c Code) Padded() string {
 	//: matches the width any dashboard or aligned-table consumer wants.
 	return itoaPadded3(uint8(c.Major())) + "." +
 		itoaPadded3(uint8(c.Layer())) + "." +
@@ -131,33 +144,36 @@ func (c Code) Padded() (s string) {
 // Internal helper — exported sibling is Code.String().
 //
 // Params:
-//   - n: the byte to stringify.
+//   - octet: the byte to stringify.
 //
 // Returns:
 //   - string: decimal form, 1 to 3 characters.
-func itoaDecimal(n uint8) (s string) {
+func itoaDecimal(octet uint8) string {
 	//: strconv.Itoa is the single stdlib call; no fmt required.
-	return strconv.Itoa(int(n))
+	return strconv.Itoa(int(octet))
 }
 
 // itoaPadded3 returns the zero-padded 3-digit decimal form ("000" .. "255").
 //
 // Params:
-//   - n: the byte to stringify.
+//   - octet: the byte to stringify.
 //
 // Returns:
 //   - string: always exactly 3 characters long.
-func itoaPadded3(n uint8) (s string) {
+func itoaPadded3(octet uint8) string {
 	//: single switch keeps each branch at constant work; no fmt verbs.
 	switch {
-	case n < 10:
-		//: single-digit input — prepend two zeros.
-		return "00" + strconv.Itoa(int(n))
-	case n < 100:
-		//: double-digit input — prepend one zero.
-		return "0" + strconv.Itoa(int(n))
+	//: single-digit input — prepend two zeros to reach 3-char width.
+	case octet < padThreshold10:
+		//: emit the "00X" form using a leading two-zero prefix.
+		return "00" + strconv.Itoa(int(octet))
+	//: double-digit input — prepend one zero to reach 3-char width.
+	case octet < padThreshold100:
+		//: emit the "0XX" form using a single leading zero.
+		return "0" + strconv.Itoa(int(octet))
+	//: triple-digit input — already the right width, emit as-is.
 	default:
-		//: triple-digit input — already the right width.
-		return strconv.Itoa(int(n))
+		//: forward the 3-digit decimal directly with no padding.
+		return strconv.Itoa(int(octet))
 	}
 }

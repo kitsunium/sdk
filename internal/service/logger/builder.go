@@ -21,23 +21,23 @@ import (
 // builder to the recycler — callers MUST NOT use the builder after Send.
 type Builder interface {
 	// Str appends a string attribute.
-	Str(key, val string) (out Builder)
+	Str(key, val string) Builder
 	// Int appends an int attribute (widened to int64 internally).
-	Int(key string, val int) (out Builder)
+	Int(key string, val int) Builder
 	// Int64 appends an int64 attribute.
-	Int64(key string, val int64) (out Builder)
+	Int64(key string, val int64) Builder
 	// Uint64 appends a uint64 attribute.
-	Uint64(key string, val uint64) (out Builder)
+	Uint64(key string, val uint64) Builder
 	// Bool appends a boolean attribute.
-	Bool(key string, val bool) (out Builder)
+	Bool(key string, val bool) Builder
 	// Float64 appends a float64 attribute.
-	Float64(key string, val float64) (out Builder)
+	Float64(key string, val float64) Builder
 	// Duration appends a time.Duration attribute.
-	Duration(key string, val time.Duration) (out Builder)
+	Duration(key string, val time.Duration) Builder
 	// Time appends a time.Time attribute.
-	Time(key string, val time.Time) (out Builder)
+	Time(key string, val time.Time) Builder
 	// Any appends an opaque attribute; handlers degrade unrecognised types to "?".
-	Any(key string, val any) (out Builder)
+	Any(key string, val any) Builder
 	// Send terminates the chain by emitting the accumulated record.
 	Send(ctx context.Context, msg string)
 }
@@ -63,8 +63,11 @@ type chainBuilder struct {
 //   - val: string payload encoded by the typed Value constructor.
 //
 // Returns:
-//   - out: the receiver to enable method chaining.
-func (b *chainBuilder) Str(key, val string) (out Builder) {
+//   - Builder: the receiver to enable method chaining.
+//
+// IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+// concrete type is intentionally hidden so callers depend on the contract.
+func (b *chainBuilder) Str(key, val string) Builder {
 	//: append the typed attribute onto the recycled scratchpad.
 	b.attrs = append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.StringValue(val)})
 	//: return the receiver so callers can chain further attribute calls.
@@ -78,8 +81,11 @@ func (b *chainBuilder) Str(key, val string) (out Builder) {
 //   - val: int payload widened to int64 by the typed Value constructor.
 //
 // Returns:
-//   - out: the receiver to enable method chaining.
-func (b *chainBuilder) Int(key string, val int) (out Builder) {
+//   - Builder: the receiver to enable method chaining.
+//
+// IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+// concrete type is intentionally hidden so callers depend on the contract.
+func (b *chainBuilder) Int(key string, val int) Builder {
 	//: append the typed attribute onto the recycled scratchpad.
 	b.attrs = append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.IntValue(val)})
 	//: return the receiver so callers can chain further attribute calls.
@@ -93,8 +99,11 @@ func (b *chainBuilder) Int(key string, val int) (out Builder) {
 //   - val: int64 payload encoded by the typed Value constructor.
 //
 // Returns:
-//   - out: the receiver to enable method chaining.
-func (b *chainBuilder) Int64(key string, val int64) (out Builder) {
+//   - Builder: the receiver to enable method chaining.
+//
+// IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+// concrete type is intentionally hidden so callers depend on the contract.
+func (b *chainBuilder) Int64(key string, val int64) Builder {
 	//: append the typed attribute onto the recycled scratchpad.
 	b.attrs = append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.Int64Value(val)})
 	//: return the receiver so callers can chain further attribute calls.
@@ -108,8 +117,11 @@ func (b *chainBuilder) Int64(key string, val int64) (out Builder) {
 //   - val: uint64 payload encoded by the typed Value constructor.
 //
 // Returns:
-//   - out: the receiver to enable method chaining.
-func (b *chainBuilder) Uint64(key string, val uint64) (out Builder) {
+//   - Builder: the receiver to enable method chaining.
+//
+// IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+// concrete type is intentionally hidden so callers depend on the contract.
+func (b *chainBuilder) Uint64(key string, val uint64) Builder {
 	//: append the typed attribute onto the recycled scratchpad.
 	b.attrs = append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.Uint64Value(val)})
 	//: return the receiver so callers can chain further attribute calls.
@@ -123,8 +135,11 @@ func (b *chainBuilder) Uint64(key string, val uint64) (out Builder) {
 //   - val: boolean payload encoded by the typed Value constructor.
 //
 // Returns:
-//   - out: the receiver to enable method chaining.
-func (b *chainBuilder) Bool(key string, val bool) (out Builder) {
+//   - Builder: the receiver to enable method chaining.
+//
+// IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+// concrete type is intentionally hidden so callers depend on the contract.
+func (b *chainBuilder) Bool(key string, val bool) Builder {
 	//: append the typed attribute onto the recycled scratchpad.
 	b.attrs = append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.BoolValue(val)})
 	//: return the receiver so callers can chain further attribute calls.
@@ -138,8 +153,11 @@ func (b *chainBuilder) Bool(key string, val bool) (out Builder) {
 //   - val: float64 payload encoded by the typed Value constructor.
 //
 // Returns:
-//   - out: the receiver to enable method chaining.
-func (b *chainBuilder) Float64(key string, val float64) (out Builder) {
+//   - Builder: the receiver to enable method chaining.
+//
+// IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+// concrete type is intentionally hidden so callers depend on the contract.
+func (b *chainBuilder) Float64(key string, val float64) Builder {
 	//: append the typed attribute onto the recycled scratchpad.
 	b.attrs = append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.Float64Value(val)})
 	//: return the receiver so callers can chain further attribute calls.
@@ -153,8 +171,11 @@ func (b *chainBuilder) Float64(key string, val float64) (out Builder) {
 //   - val: time.Duration payload encoded by the typed Value constructor.
 //
 // Returns:
-//   - out: the receiver to enable method chaining.
-func (b *chainBuilder) Duration(key string, val time.Duration) (out Builder) {
+//   - Builder: the receiver to enable method chaining.
+//
+// IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+// concrete type is intentionally hidden so callers depend on the contract.
+func (b *chainBuilder) Duration(key string, val time.Duration) Builder {
 	//: append the typed attribute onto the recycled scratchpad.
 	b.attrs = append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.DurationValue(val)})
 	//: return the receiver so callers can chain further attribute calls.
@@ -168,8 +189,11 @@ func (b *chainBuilder) Duration(key string, val time.Duration) (out Builder) {
 //   - val: time.Time payload encoded by the typed Value constructor.
 //
 // Returns:
-//   - out: the receiver to enable method chaining.
-func (b *chainBuilder) Time(key string, val time.Time) (out Builder) {
+//   - Builder: the receiver to enable method chaining.
+//
+// IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+// concrete type is intentionally hidden so callers depend on the contract.
+func (b *chainBuilder) Time(key string, val time.Time) Builder {
 	//: append the typed attribute onto the recycled scratchpad.
 	b.attrs = append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.TimeValue(val)})
 	//: return the receiver so callers can chain further attribute calls.
@@ -183,8 +207,11 @@ func (b *chainBuilder) Time(key string, val time.Time) (out Builder) {
 //   - val: opaque payload; handlers degrade unrecognised types to "?".
 //
 // Returns:
-//   - out: the receiver to enable method chaining.
-func (b *chainBuilder) Any(key string, val any) (out Builder) {
+//   - Builder: the receiver to enable method chaining.
+//
+// IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
+// concrete type is intentionally hidden so callers depend on the contract.
+func (b *chainBuilder) Any(key string, val any) Builder {
 	//: append the typed attribute onto the recycled scratchpad.
 	b.attrs = append(b.attrs, corelogger.AttrValue{Key: key, Value: corelogger.AnyValue(val)})
 	//: return the receiver so callers can chain further attribute calls.

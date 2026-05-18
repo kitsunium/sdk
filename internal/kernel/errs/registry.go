@@ -16,7 +16,7 @@ const registrySentinel string = "sdk-registry-audit-v1"
 //
 // Returns:
 //   - string: the registrySentinel constant.
-func RegistryMarker() (marker string) {
+func RegistryMarker() string {
 	//: return the constant unchanged — purely documentary.
 	return registrySentinel
 }

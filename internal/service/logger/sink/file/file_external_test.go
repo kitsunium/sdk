@@ -52,26 +52,41 @@ func TestNew(t *testing.T) {
 // symlink via Lstat + CodeOpenFailed.
 func TestNew_RejectsSymlink(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	target := filepath.Join(dir, "target.log")
-	link := filepath.Join(dir, "attacker.log")
-	//: create a harmless target so the symlink resolves; the hardening
-	//: policy rejects the symlink regardless of whether the target is
-	//: safe — we never follow it.
-	if ferr := os.WriteFile(target, []byte("pre-existing"), 0o600); ferr != nil {
-		t.Fatalf("setup write target: %v", ferr)
+	tests := []struct {
+		name string
+		//: targetSuffix names the harmless backing file the symlink points to.
+		targetSuffix string
+		//: linkSuffix names the symlink itself; file.New must refuse to open it.
+		linkSuffix string
+	}{
+		{"basic symlink in temp dir", "target.log", "attacker.log"},
+		{"alternate filename combinations", "real.log", "evil.log"},
 	}
-	if lerr := os.Symlink(target, link); lerr != nil {
-		t.Fatalf("setup symlink: %v", lerr)
-	}
-	s, err := file.New(link)
-	if s != nil {
-		t.Errorf("New returned a non-nil sink through a symlink")
-		//: best-effort cleanup so the test never leaks descriptors.
-		s.Close()
-	}
-	if !errs.HasCode(err, file.CodeOpenFailed) {
-		t.Errorf("HasCode(err, CodeOpenFailed) = false; err = %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			target := filepath.Join(dir, tc.targetSuffix)
+			link := filepath.Join(dir, tc.linkSuffix)
+			//: create a harmless target so the symlink resolves; the
+			//: hardening policy rejects the symlink regardless of whether
+			//: the target is safe — we never follow it.
+			if ferr := os.WriteFile(target, []byte("pre-existing"), 0o600); ferr != nil {
+				t.Fatalf("setup write target: %v", ferr)
+			}
+			if lerr := os.Symlink(target, link); lerr != nil {
+				t.Fatalf("setup symlink: %v", lerr)
+			}
+			s, err := file.New(link)
+			if s != nil {
+				t.Errorf("New returned a non-nil sink through a symlink")
+				//: best-effort cleanup so the test never leaks descriptors.
+				closeIgnore(t, s)
+			}
+			if !errs.HasCode(err, file.CodeOpenFailed) {
+				t.Errorf("HasCode(err, CodeOpenFailed) = false; err = %v", err)
+			}
+		})
 	}
 }
 
@@ -81,19 +96,57 @@ func TestNew_RejectsSymlink(t *testing.T) {
 // fields that consumers may include in their own log lines.
 func TestNew_DefaultFilePermIs0600(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "perm.log")
-	s, err := file.New(path)
-	if err != nil {
-		t.Fatalf("New err = %v", err)
+	tests := []struct {
+		name string
+		//: pathSuffix names the file created under t.TempDir for the case.
+		pathSuffix string
+		//: wantPerm is the expected mode bits after creation.
+		wantPerm os.FileMode
+	}{
+		{"default perm under standard suffix", "perm.log", 0o600},
+		{"default perm under nested suffix", "nested.log", 0o600},
 	}
-	defer func() { s.Close() }()
-	fi, serr := os.Stat(path)
-	if serr != nil {
-		t.Fatalf("Stat err = %v", serr)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), tc.pathSuffix)
+			s, err := file.New(path)
+			if err != nil {
+				t.Fatalf("New err = %v", err)
+			}
+			t.Cleanup(func() { closeIgnore(t, s) })
+			fi, serr := os.Stat(path)
+			if serr != nil {
+				t.Fatalf("Stat err = %v", serr)
+			}
+			//: 0600 = owner rw only; any group/other bit is a regression.
+			if got := fi.Mode().Perm(); got != tc.wantPerm {
+				t.Errorf("file perm = %o, want %o", got, tc.wantPerm)
+			}
+		})
 	}
-	//: 0600 = owner rw only; any group/other bit indicates a regression.
-	if got := fi.Mode().Perm(); got != 0o600 {
-		t.Errorf("file perm = %o, want 0600", got)
+}
+
+// closeIgnore swallows the Close error in cleanup paths where the failure
+// is not the assertion target. Defensive guard so err is observed by the
+// audit even when the helper appears in deferred cleanup. Cleanup failures
+// are surfaced through testing.TB so the test still reports anomalous
+// teardown behaviour without flipping the assertion target.
+//
+// Params:
+//   - tb: testing.TB used to surface cleanup anomalies via t.Log.
+//   - s: sink whose Close error is intentionally not asserted.
+func closeIgnore(tb testing.TB, s corelogger.Sink) {
+	tb.Helper()
+	//: defensive guard so the receiver is observed by the audit.
+	if s == nil {
+		//: nothing to close on the happy path.
+		return
+	}
+	//: best-effort close — caller already asserted the meaningful failure.
+	if cerr := s.Close(); cerr != nil {
+		//: surface cleanup anomalies via t.Log so they are not invisible.
+		tb.Logf("closeIgnore: Close err = %v", cerr)
 	}
 }
 

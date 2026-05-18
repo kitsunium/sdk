@@ -36,7 +36,7 @@ type Block = stdpem.Block
 //
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
-func New() (c codec.Codec) {
+func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
@@ -45,7 +45,7 @@ func New() (c codec.Codec) {
 //
 // Returns:
 //   - string: always "pem".
-func (*pemCodec) Name() (name string) {
+func (*pemCodec) Name() string {
 	//: canonical identifier.
 	return "pem"
 }
@@ -54,7 +54,7 @@ func (*pemCodec) Name() (name string) {
 //
 // Returns:
 //   - []string: canonical MIME first.
-func (*pemCodec) MIMETypes() (mimes []string) {
+func (*pemCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
@@ -63,7 +63,7 @@ func (*pemCodec) MIMETypes() (mimes []string) {
 //
 // Returns:
 //   - []string: canonical extension first.
-func (*pemCodec) Extensions() (exts []string) {
+func (*pemCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
@@ -76,7 +76,7 @@ func (*pemCodec) Extensions() (exts []string) {
 // Returns:
 //   - []byte: the PEM-encoded bytes.
 //   - error: ValueInvalid if v is not *pem.Block; MarshalFailed on writer failure.
-func (*pemCodec) Marshal(v any) (data []byte, err error) {
+func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 	//: type-gate: PEM only accepts a typed block.
 	block, ok := v.(*stdpem.Block)
 	//: loud failure when the caller passed the wrong type OR a nil block.
@@ -113,7 +113,7 @@ func (*pemCodec) Marshal(v any) (data []byte, err error) {
 //
 // Returns:
 //   - error: ValueInvalid if target is not **pem.Block; UnmarshalFailed if no block found.
-func (*pemCodec) Unmarshal(data []byte, v any) (err error) {
+func (*pemCodec) Unmarshal(data []byte, v any) error {
 	//: target must be **pem.Block so we can populate it.
 	dst, ok := v.(**stdpem.Block)
 	//: shape-the-target rejection — wrong type or nil outer pointer panics later.

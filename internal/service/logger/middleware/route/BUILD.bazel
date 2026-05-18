@@ -7,8 +7,8 @@ go_library(
     srcs = [
         "codes.go",
         "errors.go",
-        "route_entry.go",
         "router_sink.go",
+        "router_sink_params.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/logger/middleware/route",
     visibility = [
@@ -34,9 +34,9 @@ alias(
 go_test(
     name = "route_test",
     srcs = [
-        "route_entry_external_test.go",
         "router_sink_external_test.go",
         "router_sink_internal_test.go",
+        "router_sink_params_external_test.go",
     ],
     embed = [":route"],
     deps = [

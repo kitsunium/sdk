@@ -94,7 +94,11 @@ func Test_fanoutSink_Write_NoShortCircuit(t *testing.T) {
 			a := &stubSink{writeErr: errors.New("a-failed")}
 			b := &stubSink{}
 			s := &fanoutSink{branches: []corelogger.Sink{a, b}}
-			_, _ = s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
+			//: the joined error MUST surface — both branches were tried.
+			_, werr := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
+			if werr == nil {
+				t.Error("Write returned nil err despite branch[0] failure")
+			}
 			if a.writes != 1 || b.writes != 1 {
 				t.Errorf("writes a=%d b=%d, want 1/1", a.writes, b.writes)
 			}

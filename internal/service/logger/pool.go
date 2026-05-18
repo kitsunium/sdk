@@ -25,7 +25,7 @@ var recordPool = buffer.NewRecycler[*chainBuilder](newChainBuilder)
 //
 // Returns:
 //   - *chainBuilder: a zero-state chainBuilder with a clean attrs scratchpad.
-func newChainBuilder() (b *chainBuilder) {
+func newChainBuilder() *chainBuilder {
 	//: pre-allocate the attrs slice to skip the first append's growth.
 	return &chainBuilder{attrs: make([]corelogger.AttrValue, 0, initialAttrCap)}
 }

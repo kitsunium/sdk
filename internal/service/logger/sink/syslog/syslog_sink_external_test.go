@@ -171,6 +171,100 @@ func TestSyslog_FlushAndClose(t *testing.T) {
 	}
 }
 
+func TestNewWithConfig(t *testing.T) {
+	t.Parallel()
+	addr, _ := startUDPListener(t)
+	tests := []struct {
+		name        string
+		network     string
+		addr        string
+		useDialer   bool
+		dialErr     error
+		wantCode    errs.Code
+		wantSuccess bool
+	}{
+		{
+			name: "happy path with explicit dialer",
+			//: explicit dialer that delegates to net.Dial proves the
+			//: cfg.Dialer branch is wired through NewWithConfig.
+			network:     "udp",
+			addr:        addr,
+			useDialer:   true,
+			wantSuccess: true,
+		},
+		{
+			name: "happy path with nil dialer falls back to net.Dial",
+			//: nil dialer exercises the documented default branch.
+			network:     "udp",
+			addr:        addr,
+			useDialer:   false,
+			wantSuccess: true,
+		},
+		{
+			name:     "empty addr yields AddrEmpty",
+			network:  "udp",
+			addr:     "",
+			wantCode: syslog.CodeSyslogAddrEmpty,
+		},
+		{
+			name:     "unsupported proto yields ProtoInvalid",
+			network:  "sctp",
+			addr:     addr,
+			wantCode: syslog.CodeSyslogProtoInvalid,
+		},
+		{
+			name:      "dialer error surfaces as DialFailed",
+			network:   "udp",
+			addr:      "127.0.0.1:1",
+			useDialer: true,
+			dialErr:   errDialerBoom{},
+			wantCode:  syslog.CodeSyslogDialFailed,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var cfg syslog.Config
+			if tc.useDialer {
+				dialErr := tc.dialErr
+				cfg.Dialer = func(network, address string) (net.Conn, error) {
+					if dialErr != nil {
+						return nil, dialErr
+					}
+					return net.Dial(network, address)
+				}
+			}
+			s, err := syslog.NewWithConfig(tc.network, tc.addr, cfg)
+			if tc.wantSuccess {
+				if err != nil {
+					t.Fatalf("NewWithConfig err = %v, want nil", err)
+				}
+				if s == nil {
+					t.Fatal("NewWithConfig returned nil sink on happy path")
+				}
+				t.Cleanup(func() { swallowSyslogClose(s.Close()) })
+				return
+			}
+			if !errs.HasCode(err, tc.wantCode) {
+				t.Errorf("HasCode(%v, %d) = false", err, tc.wantCode)
+			}
+		})
+	}
+}
+
+// errDialerBoom is a minimal error used to make NewWithConfig's custom
+// dialer fail so the DialFailed branch is exercised.
+type errDialerBoom struct{}
+
+// Error renders a static marker; content is not asserted by the test.
+//
+// Returns:
+//   - msg: a static marker.
+func (errDialerBoom) Error() (msg string) {
+	//: static marker — content is not asserted.
+	return "dialer boom"
+}
+
 func TestSyslogSentinels(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

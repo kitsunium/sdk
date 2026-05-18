@@ -38,7 +38,7 @@ type csvCodec struct {
 //
 // Returns:
 //   - codec.Codec: the stateless singleton.
-func New() (c codec.Codec) {
+func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
@@ -55,8 +55,8 @@ func New() (c codec.Codec) {
 //   - escape: true enables the mitigation; false keeps lossless bytes.
 //
 // Returns:
-//   - c: a fresh codec with the requested escape policy.
-func NewWithEscape(escape bool) (c codec.Codec) {
+//   - codec.Codec: a fresh codec with the requested escape policy.
+func NewWithEscape(escape bool) codec.Codec {
 	//: fresh instance so callers who want the mitigation do not affect the
 	//: registered singleton or any other consumer.
 	return &csvCodec{escapeFormulas: escape}
@@ -66,7 +66,7 @@ func NewWithEscape(escape bool) (c codec.Codec) {
 //
 // Returns:
 //   - string: always "csv".
-func (*csvCodec) Name() (name string) {
+func (*csvCodec) Name() string {
 	//: canonical identifier.
 	return "csv"
 }
@@ -75,7 +75,7 @@ func (*csvCodec) Name() (name string) {
 //
 // Returns:
 //   - []string: canonical MIME first.
-func (*csvCodec) MIMETypes() (mimes []string) {
+func (*csvCodec) MIMETypes() []string {
 	//: RFC 4180 registers text/csv.
 	return []string{"text/csv"}
 }
@@ -84,7 +84,7 @@ func (*csvCodec) MIMETypes() (mimes []string) {
 //
 // Returns:
 //   - []string: canonical extension first.
-func (*csvCodec) Extensions() (exts []string) {
+func (*csvCodec) Extensions() []string {
 	//: canonical extension.
 	return []string{".csv"}
 }
@@ -95,9 +95,9 @@ func (*csvCodec) Extensions() (exts []string) {
 //   - v: must be a [][]string (or pointer to one) — CSV serialises a matrix.
 //
 // Returns:
-//   - []byte: encoded CSV.
-//   - error: ValueInvalid if v is not a [][]string; MarshalFailed on writer failure.
-func (c *csvCodec) Marshal(v any) (data []byte, err error) {
+//   - encoded: encoded CSV.
+//   - err: ValueInvalid if v is not a [][]string; MarshalFailed on writer failure.
+func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 	//: accept both direct and pointer form to keep call sites flexible.
 	records, ok := extractRecords(v)
 	//: type-gate failure surfaces the dedicated sentinel.
@@ -142,10 +142,10 @@ func (c *csvCodec) Marshal(v any) (data []byte, err error) {
 //   - records: caller-supplied matrix; left unmodified by this helper.
 //
 // Returns:
-//   - out: defensive copy with trigger cells escaped.
-func escapeFormulaCells(records [][]string) (out [][]string) {
+//   - [][]string: defensive copy with trigger cells escaped.
+func escapeFormulaCells(records [][]string) [][]string {
 	//: pre-allocate so no append-reallocation occurs in the hot path.
-	out = make([][]string, 0, len(records))
+	out := make([][]string, 0, len(records))
 	//: walk each row and build a sanitised per-row copy via helper to
 	//: keep the per-row allocation off the outer loop (ktn HOTLOOP).
 	for _, row := range records {
@@ -166,10 +166,10 @@ func escapeFormulaCells(records [][]string) (out [][]string) {
 //   - row: one CSV record; left unmodified by this helper.
 //
 // Returns:
-//   - out: defensive copy with trigger cells escaped.
-func escapeFormulaRow(row []string) (out []string) {
+//   - []string: defensive copy with trigger cells escaped.
+func escapeFormulaRow(row []string) []string {
 	//: pre-sized copy with zero reallocation during append.
-	out = make([]string, 0, len(row))
+	out := make([]string, 0, len(row))
 	//: inspect every cell and prefix when the first byte triggers evaluation.
 	for _, cell := range row {
 		out = append(out, escapeIfFormulaCell(cell))
@@ -187,8 +187,8 @@ func escapeFormulaRow(row []string) (out []string) {
 //   - b: the byte to classify.
 //
 // Returns:
-//   - ok: true when b triggers formula evaluation in a spreadsheet.
-func isFormulaTrigger(b byte) (ok bool) {
+//   - bool: true when b triggers formula evaluation in a spreadsheet.
+func isFormulaTrigger(b byte) bool {
 	//: explicit byte comparison avoids switch-case-comment verbosity.
 	return b == '=' || b == '+' || b == '-' || b == '@' || b == '\t' || b == '\r'
 }
@@ -200,8 +200,8 @@ func isFormulaTrigger(b byte) (ok bool) {
 //   - cell: a single CSV cell value.
 //
 // Returns:
-//   - out: the (possibly prefixed) cell.
-func escapeIfFormulaCell(cell string) (out string) {
+//   - string: the (possibly prefixed) cell.
+func escapeIfFormulaCell(cell string) string {
 	//: empty cell is inert — nothing to escape; early return keeps the
 	//: single-byte read below unconditionally safe.
 	if cell == "" || !isFormulaTrigger(cell[0]) {
@@ -221,7 +221,7 @@ func escapeIfFormulaCell(cell string) (out string) {
 //
 // Returns:
 //   - error: ValueInvalid if target is not *[][]string; UnmarshalFailed on reader failure.
-func (*csvCodec) Unmarshal(data []byte, v any) (err error) {
+func (*csvCodec) Unmarshal(data []byte, v any) error {
 	//: target must be *[][]string so we can populate it.
 	dst, ok := v.(*[][]string)
 	//: type-gate failure surfaces the dedicated sentinel.

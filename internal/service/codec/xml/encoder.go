@@ -19,7 +19,7 @@ type xmlEncoder struct {
 //
 // Returns:
 //   - error: MarshalFailed wrapping the stdlib cause on failure; nil otherwise.
-func (e *xmlEncoder) Encode(v any) (err error) {
+func (e *xmlEncoder) Encode(v any) error {
 	//: delegate then wrap.
 	xerr := e.inner.Encode(v)
 	//: success fast-path.
@@ -40,7 +40,7 @@ func (e *xmlEncoder) Encode(v any) (err error) {
 //
 // Returns:
 //   - error: MarshalFailed wrapping the stdlib cause on failure; nil otherwise.
-func (e *xmlEncoder) Close() (err error) {
+func (e *xmlEncoder) Close() error {
 	//: stdlib encoder requires Flush to emit trailing data.
 	xerr := e.inner.Flush()
 	//: success fast-path.

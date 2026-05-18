@@ -18,8 +18,10 @@ version: 1
 # exemptions (mocks, table-driven assertions, etc.).
 strict_mode: false
 
-# Phase 8 is cosmetic / opt-in; we never block on it.
-max_phase: 7
+# Phase 8 (`tests`) is opt-in; the default active set is {1..7}.
+# Use `phases.enabled` / `phases.disabled` to override (mutually exclusive).
+# phases:
+#   enabled: [1, 2, 3, 4, 5, 6, 7]
 
 # Respect `// Code generated …` markers so generated files are skipped.
 skip_generated: true

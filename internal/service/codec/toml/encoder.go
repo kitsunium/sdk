@@ -19,7 +19,7 @@ type tomlEncoder struct {
 //
 // Returns:
 //   - error: MarshalFailed wrapping the library cause on failure.
-func (e *tomlEncoder) Encode(v any) (err error) {
+func (e *tomlEncoder) Encode(v any) error {
 	//: delegate and wrap on error.
 	terr := e.inner.Encode(v)
 	//: success fast-path.
@@ -40,7 +40,7 @@ func (e *tomlEncoder) Encode(v any) (err error) {
 //
 // Returns:
 //   - error: always nil.
-func (*tomlEncoder) Close() (err error) {
+func (*tomlEncoder) Close() error {
 	//: pelletier's encoder owns no writer-level state.
 	return nil
 }

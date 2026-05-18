@@ -192,7 +192,7 @@ func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 //
 // Returns:
 //   - err: ctx.Err on cancellation; nil otherwise.
-func (s *syslogSink) Flush(ctx context.Context) (err error) {
+func (s *syslogSink) Flush(ctx context.Context) error {
 	//: honour cancellation even though there is nothing buffered to flush.
 	if ctx != nil && ctx.Err() != nil {
 		//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved.
@@ -213,7 +213,7 @@ func (s *syslogSink) Flush(ctx context.Context) (err error) {
 //
 // Returns:
 //   - err: CloseFailed wrapping the cause; nil on success.
-func (s *syslogSink) Close() (err error) {
+func (s *syslogSink) Close() error {
 	//: serialise the close against in-flight writes via the same mutex.
 	s.mu.Lock()
 	cerr := s.conn.Close()
@@ -240,7 +240,7 @@ func (s *syslogSink) Close() (err error) {
 //
 // Returns:
 //   - out: the framed bytes ready for the network connection.
-func makeFrame(pri int, p []byte) (out []byte) {
+func makeFrame(pri int, p []byte) []byte {
 	//: build the frame in a single allocation sized for header + payload.
 	frame := make([]byte, 0, len(p)+frameHeaderHint)
 	//: prefix with the RFC5424 PRI token "<N>".

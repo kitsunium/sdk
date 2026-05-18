@@ -24,7 +24,7 @@ func yieldOnce() {
 //
 // Returns:
 //   - closed: true when the channel is closed; false otherwise.
-func isClosed(ch chan struct{}) (closed bool) {
+func isClosed(ch chan struct{}) bool {
 	//: a closed receive returns immediately with !ok; an open one falls through.
 	select {
 	case <-ch:
@@ -43,7 +43,7 @@ func isClosed(ch chan struct{}) (closed bool) {
 //
 // Returns:
 //   - ctx: background context for the drainer's downstream calls.
-func asyncCtx() (ctx context.Context) {
+func asyncCtx() context.Context {
 	//: background context decouples drainer lifetime from producer lifetime.
 	return context.Background()
 }

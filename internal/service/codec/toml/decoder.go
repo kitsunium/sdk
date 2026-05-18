@@ -27,7 +27,7 @@ type tomlDecoder struct {
 //
 // Returns:
 //   - error: UnmarshalFailed on failure, io.EOF on stream end.
-func (d *tomlDecoder) Decode(v any) (err error) {
+func (d *tomlDecoder) Decode(v any) error {
 	//: drained latch short-circuits the stdlib-style stream contract.
 	if d.done {
 		//: stream already consumed.
@@ -64,7 +64,7 @@ func (d *tomlDecoder) Decode(v any) (err error) {
 //
 // Returns:
 //   - bool: false once Decode has run to completion.
-func (d *tomlDecoder) More() (ok bool) {
+func (d *tomlDecoder) More() bool {
 	//: reflect the drained latch.
 	return !d.done
 }

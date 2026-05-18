@@ -40,7 +40,6 @@ func Test_deepestError(t *testing.T) {
 		}
 	}
 	for _, c := range tests {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)

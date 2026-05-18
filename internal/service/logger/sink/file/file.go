@@ -39,7 +39,7 @@ const defaultFilePerm os.FileMode = 0o600
 //   - err: OpenFailed when path is a symlink; nil when it is absent or a
 //     regular file. Lstat failures other than "not a symlink" are swallowed
 //     here — the subsequent OpenFile will surface them uniformly.
-func refuseSymlink(path string) (err error) {
+func refuseSymlink(path string) error {
 	//: Lstat does NOT follow the final component, so a symlink is caught
 	//: before OpenFile can follow it. Absent paths / stat errors fall
 	//: through: OpenFile will surface the real diagnostic uniformly.
@@ -175,7 +175,7 @@ func (s *fileSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 //
 // Returns:
 //   - err: SyncFailed wrapping the os error; nil on success.
-func (s *fileSink) Flush(ctx context.Context) (err error) {
+func (s *fileSink) Flush(ctx context.Context) error {
 	//: honour cancellation early — fsync is not cheap on slow disks.
 	if ctx != nil && ctx.Err() != nil {
 		//: caller already gave up; surface the cancellation cause.
@@ -204,7 +204,7 @@ func (s *fileSink) Flush(ctx context.Context) (err error) {
 //
 // Returns:
 //   - err: CloseFailed wrapping the os error; nil on success.
-func (s *fileSink) Close() (err error) {
+func (s *fileSink) Close() error {
 	//: serialise the close against in-flight writes via the same mutex.
 	s.mu.Lock()
 	cerr := s.f.Close()

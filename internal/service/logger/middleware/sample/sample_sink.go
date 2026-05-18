@@ -80,7 +80,7 @@ func (s *sampleSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 //
 // Returns:
 //   - err: downstream's Flush error; nil on success.
-func (s *sampleSink) Flush(ctx context.Context) (err error) {
+func (s *sampleSink) Flush(ctx context.Context) error {
 	//: delegate to the downstream sink — the sample wrapper has no buffers.
 	return s.downstream.Flush(ctx)
 }
@@ -89,7 +89,7 @@ func (s *sampleSink) Flush(ctx context.Context) (err error) {
 //
 // Returns:
 //   - err: downstream's Close error; nil on success.
-func (s *sampleSink) Close() (err error) {
+func (s *sampleSink) Close() error {
 	//: delegate to the downstream sink — the sample wrapper has no resources.
 	return s.downstream.Close()
 }

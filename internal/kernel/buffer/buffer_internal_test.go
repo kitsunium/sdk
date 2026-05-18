@@ -23,6 +23,7 @@ func TestInternalConstants(t *testing.T) {
 }
 
 func TestInternalPoolAllocatesFreshBuffer(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 	}{
@@ -30,6 +31,7 @@ func TestInternalPoolAllocatesFreshBuffer(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			raw := pool.New()
 			ptr, ok := raw.(*[]byte)
 			if !ok {

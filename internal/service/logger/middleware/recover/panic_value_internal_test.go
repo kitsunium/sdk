@@ -44,11 +44,49 @@ func Test_panicValue_Error(t *testing.T) {
 // Test_safeString_RendersValue covers the happy path of safeString.
 func Test_safeString_RendersValue(t *testing.T) {
 	t.Parallel()
-	if got := safeString("hello"); got != "hello" {
-		t.Errorf("safeString(\"hello\") = %q, want \"hello\"", got)
+	tests := []struct {
+		name string
+		val  any
+		want string
+	}{
+		{"string value renders verbatim", "hello", "hello"},
+		{"int value renders as decimal", 42, "42"},
+		{"boolean value renders as keyword", true, "true"},
+		{"nil value renders as <nil>", nil, "<nil>"},
 	}
-	if got := safeString(42); got != "42" {
-		t.Errorf("safeString(42) = %q, want \"42\"", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := safeString(tc.val); got != tc.want {
+				t.Errorf("safeString(%v) = %q, want %q", tc.val, got, tc.want)
+			}
+		})
+	}
+}
+
+// Test_safeTypeName asserts the type-renderer contract: %T renders the Go
+// type without invoking user code, so it cannot panic even on pathological
+// values (panicking String / Error methods).
+func Test_safeTypeName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		val           any
+		wantSubstring string
+	}{
+		{"string value renders as string", "hello", "string"},
+		{"int value renders as int", 42, "int"},
+		{"nil value renders as <nil>", nil, "<nil>"},
+		{"evil stringer renders its type, not its String()", evilStringer{}, "evilStringer"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := safeTypeName(tc.val)
+			if !strings.Contains(got, tc.wantSubstring) {
+				t.Errorf("safeTypeName(%v) = %q, want substring %q", tc.val, got, tc.wantSubstring)
+			}
+		})
 	}
 }
 
@@ -77,17 +115,36 @@ func (evilStringer) String() (s string) {
 //     non-Stringer path inside fmt leaks a panic — defence-in-depth).
 func Test_safeString_GuardsAgainstPanickingStringer(t *testing.T) {
 	t.Parallel()
-	defer func() {
-		//: the outer test must not observe a panic — safeString must absorb it.
-		if r := recover(); r != nil {
-			t.Fatalf("safeString allowed a meta-panic to escape: %v", r)
-		}
-	}()
-	got := safeString(evilStringer{})
-	//: accept either degraded marker — both prove the producer survives.
-	okFmt := strings.Contains(got, "PANIC=")
-	okInner := strings.Contains(got, "panic in String()")
-	if !okFmt && !okInner {
-		t.Errorf("safeString on evilStringer = %q, want a degraded-rendering marker", got)
+	tests := []struct {
+		name string
+		//: val is the input to safeString; the panicking variant exercises the
+		//: meta-panic guard while normal values prove the happy path.
+		val any
+		//: degradedMarker is true when the result MUST include one of the
+		//: known degraded markers ("PANIC=" or "panic in String()").
+		//: false cases assert the happy-path rendering (no degraded marker).
+		degradedMarker bool
+	}{
+		{"evil stringer triggers a degraded marker", evilStringer{}, true},
+		{"benign string does not surface a degraded marker", "hello", false},
+		{"benign int does not surface a degraded marker", 42, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			defer func() {
+				//: outer test must not observe a panic — safeString absorbs it.
+				if r := recover(); r != nil {
+					t.Fatalf("safeString allowed a meta-panic to escape: %v", r)
+				}
+			}()
+			got := safeString(tc.val)
+			okFmt := strings.Contains(got, "PANIC=")
+			okInner := strings.Contains(got, "panic in String()")
+			gotDegraded := okFmt || okInner
+			if gotDegraded != tc.degradedMarker {
+				t.Errorf("safeString(%v) = %q, gotDegraded=%v want %v", tc.val, got, gotDegraded, tc.degradedMarker)
+			}
+		})
 	}
 }

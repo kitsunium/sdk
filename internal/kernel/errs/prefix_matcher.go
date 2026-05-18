@@ -24,7 +24,7 @@ type PrefixMatcher struct {
 //
 // Returns:
 //   - *PrefixMatcher: opaque target for errors.Is.
-func NewPrefixMatcher(prefix, mask Code) (m *PrefixMatcher) {
+func NewPrefixMatcher(prefix, mask Code) *PrefixMatcher {
 	//: single struct literal — no allocation optimisation needed at this scale.
 	return &PrefixMatcher{prefix: prefix, mask: mask}
 }
@@ -33,7 +33,7 @@ func NewPrefixMatcher(prefix, mask Code) (m *PrefixMatcher) {
 //
 // Returns:
 //   - string: human-readable "PrefixMatcher{prefix=…, mask=…}" form.
-func (p *PrefixMatcher) String() (s string) {
+func (p *PrefixMatcher) String() string {
 	//: rely on Code.String() for each component — canonical dotted form.
 	return "PrefixMatcher{prefix=" + p.prefix.String() + ", mask=" + p.mask.String() + "}"
 }
@@ -46,7 +46,7 @@ func (p *PrefixMatcher) String() (s string) {
 //
 // Returns:
 //   - string: identical to String() — same diagnostic form.
-func (p *PrefixMatcher) Error() (s string) {
+func (p *PrefixMatcher) Error() string {
 	//: identical to String() — the `error` conformance is a stdlib-protocol
 	//: concession, not a claim that a PrefixMatcher represents a failure.
 	return p.String()
@@ -57,7 +57,7 @@ func (p *PrefixMatcher) Error() (s string) {
 //
 // Returns:
 //   - Code: the prefix value supplied at construction.
-func (p *PrefixMatcher) Prefix() (c Code) {
+func (p *PrefixMatcher) Prefix() Code {
 	//: direct read — PrefixMatcher is immutable after construction.
 	return p.prefix
 }
@@ -66,7 +66,7 @@ func (p *PrefixMatcher) Prefix() (c Code) {
 //
 // Returns:
 //   - Code: the mask value supplied at construction.
-func (p *PrefixMatcher) Mask() (c Code) {
+func (p *PrefixMatcher) Mask() Code {
 	//: direct read — see Prefix.
 	return p.mask
 }

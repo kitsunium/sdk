@@ -2,6 +2,7 @@ package syslog
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -20,10 +21,10 @@ func localUDPSink(t testing.TB) *syslogSink {
 		t.Fatalf("ListenPacket err = %v", err)
 	}
 	t.Cleanup(func() {
-		//: best-effort close — the test cleanup is past assertion time.
-		if cerr := pc.Close(); cerr != nil {
-			//: nothing to do; cleanup errors are noise.
-			_ = cerr
+		//: best-effort close — the test cleanup is past assertion time, but
+		//: an unexpected error here would still mask a leak; surface via t.Log.
+		if cerr := pc.Close(); cerr != nil && !isClosedNetErr(cerr) {
+			t.Logf("ListenPacket cleanup Close err = %v", cerr)
 		}
 	})
 	conn, err := net.Dial("udp", pc.LocalAddr().String())
@@ -31,10 +32,10 @@ func localUDPSink(t testing.TB) *syslogSink {
 		t.Fatalf("Dial err = %v", err)
 	}
 	t.Cleanup(func() {
-		//: best-effort close — Close test already closed it; ignore the second error.
-		if cerr := conn.Close(); cerr != nil {
-			//: nothing to do; cleanup errors are noise.
-			_ = cerr
+		//: best-effort close — Close test may have closed the conn already;
+		//: surface unexpected errors via t.Log without failing the test.
+		if cerr := conn.Close(); cerr != nil && !isClosedNetErr(cerr) {
+			t.Logf("Dial cleanup Close err = %v", cerr)
 		}
 	})
 	return &syslogSink{conn: conn}
@@ -234,3 +235,22 @@ func Test_exitIOErr(t *testing.T) {
 type errSyslogBoom struct{}
 
 func (errSyslogBoom) Error() string { return "boom" }
+
+// isClosedNetErr reports whether err is a "use of closed network
+// connection" error returned by net.Conn.Close on an already-closed conn.
+// Used by cleanup paths to avoid t.Log spam when the test under
+// assertion intentionally closed the connection.
+//
+// Params:
+//   - err: cleanup-time close error to classify.
+//
+// Returns:
+//   - closed: true when err signals an already-closed connection.
+func isClosedNetErr(err error) (closed bool) {
+	//: nil errors do not represent any close failure.
+	if err == nil {
+		return false
+	}
+	//: net.ErrClosed surfaces on closed PacketConn/Conn since Go 1.16.
+	return errors.Is(err, net.ErrClosed)
+}

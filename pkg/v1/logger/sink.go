@@ -92,8 +92,8 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 //   - branches: downstream Sinks; nil entries are silently skipped.
 //
 // Returns:
-//   - sink: the fan-out Sink behind the public Sink interface.
-func Multi(branches ...Sink) (sink Sink) {
+//   - Sink: the fan-out Sink behind the public Sink interface.
+func Multi(branches ...Sink) Sink {
 	//: delegate to the internal fan-out implementation.
 	return multi.New(branches...)
 }
@@ -103,8 +103,8 @@ func Multi(branches ...Sink) (sink Sink) {
 // transports without re-implementing the convenience constructor.
 //
 // Returns:
-//   - sink: a console Sink writing to os.Stderr.
-func ConsoleStderr() (sink Sink) {
+//   - Sink: a console Sink writing to os.Stderr.
+func ConsoleStderr() Sink {
 	//: reuse the canonical convenience constructor from the console sink.
 	return console.NewStderr()
 }
@@ -113,8 +113,8 @@ func ConsoleStderr() (sink Sink) {
 // ConsoleStderr — exposed for Multi() compositions.
 //
 // Returns:
-//   - sink: a console Sink writing to os.Stdout.
-func ConsoleStdout() (sink Sink) {
+//   - Sink: a console Sink writing to os.Stdout.
+func ConsoleStdout() Sink {
 	//: reuse the canonical convenience constructor from the console sink.
 	return console.NewStdout()
 }
@@ -124,8 +124,8 @@ func ConsoleStdout() (sink Sink) {
 // starting point — it is the same encoder NewText / Default rely on.
 //
 // Returns:
-//   - enc: a ready-to-use text Encoder.
-func TextEncoder() (enc Encoder) {
+//   - Encoder: a ready-to-use text Encoder.
+func TextEncoder() Encoder {
 	//: reuse the canonical text encoder constructor with the system clock.
 	return encoder.NewText(clock.System)
 }

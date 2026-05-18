@@ -19,7 +19,7 @@ type yamlEncoder struct {
 //
 // Returns:
 //   - error: MarshalFailed wrapping the library cause on failure.
-func (e *yamlEncoder) Encode(v any) (err error) {
+func (e *yamlEncoder) Encode(v any) error {
 	//: delegate and wrap on error.
 	yerr := e.inner.Encode(v)
 	//: success fast-path.
@@ -40,7 +40,7 @@ func (e *yamlEncoder) Encode(v any) (err error) {
 //
 // Returns:
 //   - error: MarshalFailed wrapping the library cause on failure.
-func (e *yamlEncoder) Close() (err error) {
+func (e *yamlEncoder) Close() error {
 	//: delegate to the library; terminal '---' is emitted on flush.
 	cerr := e.inner.Close()
 	//: success fast-path.

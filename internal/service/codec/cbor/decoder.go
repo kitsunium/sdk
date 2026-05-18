@@ -24,7 +24,7 @@ type cborDecoder struct {
 //
 // Returns:
 //   - error: UnmarshalFailed on failure, io.EOF when the stream is drained.
-func (d *cborDecoder) Decode(v any) (err error) {
+func (d *cborDecoder) Decode(v any) error {
 	//: delegate to the library.
 	derr := d.inner.Decode(v)
 	//: EOF latch toggles the done flag.
@@ -54,7 +54,7 @@ func (d *cborDecoder) Decode(v any) (err error) {
 //
 // Returns:
 //   - bool: false once Decode has returned io.EOF.
-func (d *cborDecoder) More() (ok bool) {
+func (d *cborDecoder) More() bool {
 	//: reflect the sticky EOF latch.
 	return !d.done
 }

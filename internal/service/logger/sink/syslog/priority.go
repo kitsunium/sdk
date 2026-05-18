@@ -35,7 +35,7 @@ const severityDebug int = 7
 //
 // Returns:
 //   - sev: the matching RFC5424 severity in [0, 7].
-func severityFor(lv level.Level) (sev int) {
+func severityFor(lv level.Level) int {
 	//: dispatch on the four documented levels; everything else maps to warning.
 	switch {
 	//: error → RFC5424 severity 3 (Error).
@@ -65,7 +65,7 @@ func severityFor(lv level.Level) (sev int) {
 //
 // Returns:
 //   - pri: the RFC5424 PRI value (facility * 8 + severity).
-func priorityFor(lv level.Level) (pri int) {
+func priorityFor(lv level.Level) int {
 	//: combine facility + severity per the RFC5424 PRI formula.
 	return facilityUser*facilityShift + severityFor(lv)
 }

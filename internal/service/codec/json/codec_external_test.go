@@ -148,7 +148,10 @@ func TestNewDecoder(t *testing.T) {
 		data    []byte
 		wantErr string
 	}
-	good, _ := json.New().Marshal(sampleEvent{ID: "x", Severity: 1})
+	good, gerr := json.New().Marshal(sampleEvent{ID: "x", Severity: 1})
+	if gerr != nil {
+		t.Fatalf("seed Marshal err=%v", gerr)
+	}
 	tests := []tc{
 		{"decodes a valid record", good, ""},
 		{"corrupt input surfaces UNMARSHAL_FAILED", []byte("{bad"), "UNMARSHAL_FAILED"},
