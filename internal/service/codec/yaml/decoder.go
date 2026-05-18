@@ -24,7 +24,7 @@ type yamlDecoder struct {
 //
 // Returns:
 //   - error: UnmarshalFailed on failure, io.EOF when the stream is drained.
-func (d *yamlDecoder) Decode(v any) (err error) {
+func (d *yamlDecoder) Decode(v any) error {
 	//: stream-end sentinel bubbles up verbatim so callers can exit loops.
 	derr := d.inner.Decode(v)
 	//: EOF latch toggles the done flag for subsequent More() calls.
@@ -54,7 +54,7 @@ func (d *yamlDecoder) Decode(v any) (err error) {
 //
 // Returns:
 //   - bool: false once Decode has returned io.EOF.
-func (d *yamlDecoder) More() (ok bool) {
+func (d *yamlDecoder) More() bool {
 	//: reflect the sticky EOF latch.
 	return !d.done
 }

@@ -36,21 +36,24 @@ func Test_validateDefineArgs(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := validateDefineArgs(c.code, c.reason, c.public, c.private)
+		//: empty wantReason means the row exercises the happy path.
 		if c.wantReason == "" {
+			//: surface unexpected failures verbatim so the diff is obvious.
 			if got != nil {
 				t.Errorf("expected nil, got %v", got)
 			}
 			return
 		}
+		//: failure rows MUST yield a non-nil *Error.
 		if got == nil {
 			t.Fatalf("expected failure with reason %s, got nil", c.wantReason)
 		}
+		//: assert on Reason so the test pins the meta-code mapping.
 		if got.Reason() != c.wantReason {
 			t.Errorf("want reason %q, got %q (full error: %v)", c.wantReason, got.Reason(), got)
 		}
 	}
 	for _, c := range tests {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
@@ -77,12 +80,12 @@ func Test_validateCode(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := validateCode(c.code)
+		//: comparison reduces (got != nil) to a bool so we can match wantErr.
 		if (got != nil) != c.wantErr {
 			t.Errorf("validateCode(%#08x) err=%v, wantErr=%v", uint32(c.code), got, c.wantErr)
 		}
 	}
 	for _, c := range tests {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
@@ -105,6 +108,7 @@ func Test_validateReason(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := validateReason(tc.reason)
+			//: compare nil-ness against the expected wantErr flag.
 			if (got != nil) != tc.wantErr {
 				t.Errorf("validateReason(%q) err=%v", tc.reason, got)
 			}
@@ -129,6 +133,7 @@ func Test_validatePublic(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := validatePublic(c.public)
+		//: compare nil-ness against the expected wantErr flag.
 		if (got != nil) != c.wantErr {
 			t.Errorf("validatePublic(%q) err=%v", c.public, got)
 		}
@@ -155,6 +160,7 @@ func Test_validatePrivate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := validatePrivate(tc.private)
+			//: compare nil-ness against the expected wantErr flag.
 			if (got != nil) != tc.wantErr {
 				t.Errorf("validatePrivate(%q) err=%v", tc.private, got)
 			}
@@ -183,6 +189,7 @@ func Test_isScreamingSnake(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := isScreamingSnake(c.in)
+		//: direct equality is enough — function returns bool.
 		if got != c.want {
 			t.Errorf("isScreamingSnake(%q) = %v, want %v", c.in, got, c.want)
 		}
@@ -211,6 +218,7 @@ func Test_containsNewline(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := containsNewline(c.in)
+		//: direct equality is enough — function returns bool.
 		if got != c.want {
 			t.Errorf("containsNewline(%q) = %v, want %v", c.in, got, c.want)
 		}
@@ -243,6 +251,7 @@ func Test_isValidReasonRune(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: assert per-position rune acceptance against the want flag.
 			if got := isValidReasonRune(tc.idx, tc.r); got != tc.want {
 				t.Errorf("isValidReasonRune(%d, %q) = %v, want %v", tc.idx, tc.r, got, tc.want)
 			}
@@ -265,6 +274,7 @@ func Test_isUpperLetter(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: assert uppercase-ASCII recognition against the want flag.
 			if got := isUpperLetter(tc.r); got != tc.want {
 				t.Errorf("isUpperLetter(%q) = %v", tc.r, got)
 			}
@@ -287,6 +297,7 @@ func Test_isDigit(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: assert ASCII-digit recognition against the want flag.
 			if got := isDigit(tc.r); got != tc.want {
 				t.Errorf("isDigit(%q) = %v", tc.r, got)
 			}

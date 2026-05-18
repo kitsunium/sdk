@@ -263,17 +263,33 @@ func Test_ndjsonCodec_Append(t *testing.T) {
 // contract violation caught by the post-#12 audit (finding #6).
 func Test_ndjsonCodec_Append_RollbackOnMidSliceError(t *testing.T) {
 	t.Parallel()
-	c := &ndjsonCodec{}
-	prefix := []byte("prefix:")
-	//: mix a valid record with an unmarshalable channel at index 1 so the
-	//: inner loop reaches the error branch AFTER it has appended the first
-	//: record's bytes + newline onto dst.
-	got, err := c.Append(prefix, []any{42, make(chan int)})
-	if err == nil {
-		t.Fatal("Append expected an error on mid-slice marshal failure")
+	type tc struct {
+		name   string
+		prefix []byte
+		input  []any
 	}
-	//: contract: the returned buffer MUST equal dst's prior contents.
-	if string(got) != string(prefix) {
-		t.Errorf("Append rolled back to %q, want %q (prior dst)", got, prefix)
+	tests := []tc{
+		//: mix a valid record with an unmarshalable channel at index 1 so the
+		//: inner loop reaches the error branch AFTER it has appended the first
+		//: record's bytes + newline onto dst.
+		{"mid-slice marshal failure rolls back to prior dst", []byte("prefix:"), []any{42, make(chan int)}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &ndjsonCodec{}
+		got, err := c.Append(tc.prefix, tc.input)
+		if err == nil {
+			t.Fatalf("%s: Append expected an error on mid-slice marshal failure", tc.name)
+		}
+		//: contract: the returned buffer MUST equal dst's prior contents.
+		if string(got) != string(tc.prefix) {
+			t.Errorf("%s: Append rolled back to %q, want %q (prior dst)", tc.name, got, tc.prefix)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }

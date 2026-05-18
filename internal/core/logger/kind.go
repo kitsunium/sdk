@@ -63,7 +63,7 @@ type Kind int8
 // Returns:
 //   - string: one of "any", "bool", "duration", "float64", "int64",
 //     "string", "time", "uint64", "group" — or "unknown" for future variants.
-func (k Kind) String() (label string) {
+func (k Kind) String() string {
 	//: bounds-check before indexing so unknown variants degrade gracefully.
 	if k < 0 || int(k) >= len(kindLabels) {
 		//: stable label that signals "discriminant added after this build".

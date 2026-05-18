@@ -156,7 +156,7 @@ Le template intègre `ktn-linter` comme serveur MCP **et** fournisseur de hooks 
 which ktn-linter && curl -sf http://localhost:7717/health && echo "OK"
 ```
 
-Voir [docs/ktn-linter-integration.md](docs/ktn-linter-integration.md) pour le contrat complet.
+Le contrat complet (hooks, ports, fichiers déclencheurs) est décrit dans la skill `/lint` (`~/.claude/commands/lint.md`).
 
 ## Structure
 

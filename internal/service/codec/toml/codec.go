@@ -33,7 +33,7 @@ type tomlCodec struct{}
 //
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
-func New() (c codec.Codec) {
+func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
@@ -42,7 +42,7 @@ func New() (c codec.Codec) {
 //
 // Returns:
 //   - string: always "toml".
-func (*tomlCodec) Name() (name string) {
+func (*tomlCodec) Name() string {
 	//: canonical identifier.
 	return "toml"
 }
@@ -51,7 +51,7 @@ func (*tomlCodec) Name() (name string) {
 //
 // Returns:
 //   - []string: canonical MIME first.
-func (*tomlCodec) MIMETypes() (mimes []string) {
+func (*tomlCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
@@ -60,7 +60,7 @@ func (*tomlCodec) MIMETypes() (mimes []string) {
 //
 // Returns:
 //   - []string: canonical extension first.
-func (*tomlCodec) Extensions() (exts []string) {
+func (*tomlCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
@@ -73,7 +73,7 @@ func (*tomlCodec) Extensions() (exts []string) {
 // Returns:
 //   - []byte: the encoded TOML document.
 //   - error: MarshalFailed wrapping the library cause on failure.
-func (*tomlCodec) Marshal(v any) (data []byte, err error) {
+func (*tomlCodec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to the library for the actual encoding.
 	out, merr := gotoml.Marshal(v)
 	//: success fast-path.
@@ -98,7 +98,7 @@ func (*tomlCodec) Marshal(v any) (data []byte, err error) {
 //
 // Returns:
 //   - error: UnmarshalFailed wrapping the library cause on failure.
-func (*tomlCodec) Unmarshal(data []byte, v any) (err error) {
+func (*tomlCodec) Unmarshal(data []byte, v any) error {
 	//: delegate to the library for the actual decoding.
 	uerr := gotoml.Unmarshal(data, v)
 	//: success fast-path.
@@ -122,7 +122,7 @@ func (*tomlCodec) Unmarshal(data []byte, v any) (err error) {
 //
 // Returns:
 //   - codec.Encoder: a streaming TOML encoder bound to w.
-func (*tomlCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
+func (*tomlCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the pelletier encoder.
 	return &tomlEncoder{inner: gotoml.NewEncoder(w)}
 }
@@ -134,7 +134,7 @@ func (*tomlCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
 //
 // Returns:
 //   - codec.Decoder: a streaming TOML decoder bound to r.
-func (*tomlCodec) NewDecoder(r io.Reader) (dec codec.Decoder) {
+func (*tomlCodec) NewDecoder(r io.Reader) codec.Decoder {
 	//: wrap the pelletier decoder.
 	return &tomlDecoder{inner: gotoml.NewDecoder(r)}
 }

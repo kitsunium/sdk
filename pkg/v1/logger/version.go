@@ -18,7 +18,7 @@ var Version string
 //
 // Returns:
 //   - string: the ldflags-injected Version, or "dev" fallback.
-func FrameworkVersion() (v string) {
+func FrameworkVersion() string {
 	//: empty means no -ldflags override — return the dev sentinel.
 	if Version == "" {
 		//: keep the sentinel stable so tests can pin expectations.

@@ -93,7 +93,7 @@ func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p 
 //
 // Returns:
 //   - err: errors.Join of per-branch failures; nil on unanimous success.
-func (s *failoverSink) Flush(ctx context.Context) (err error) {
+func (s *failoverSink) Flush(ctx context.Context) error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.chain))
 	//: walk every branch in order; failures are captured but never short-circuit.
@@ -118,7 +118,7 @@ func (s *failoverSink) Flush(ctx context.Context) (err error) {
 //
 // Returns:
 //   - err: errors.Join of per-branch failures; nil on unanimous success.
-func (s *failoverSink) Close() (err error) {
+func (s *failoverSink) Close() error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.chain))
 	//: walk every branch in order; failures are captured but never short-circuit.

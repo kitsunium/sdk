@@ -24,6 +24,7 @@ go_library(
         "//internal/service/codec/toml",
         "//internal/service/codec/xml",
         "//internal/service/codec/yaml",
+        "//pkg/v1/errs",
     ],
 )
 

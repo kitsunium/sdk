@@ -5,6 +5,10 @@
 // This package is interface-only: no runtime state, no registrations, no
 // format-specific knowledge. Codecs register themselves via the registry in
 // registry.go when their service subpackage is imported.
+//
+// codec_interface.go isolates the contract interfaces so KTN-INTERFACE-FILENAME
+// stays quiet (the rule asks interface-only files to use the *_interface.go
+// suffix when a single file declares more than one interface).
 package codec
 
 import "io"
@@ -13,9 +17,9 @@ import "io"
 // be safe for concurrent use; format-specific options are supplied via the
 // codec's constructor, not via the Codec interface.
 type Codec interface {
-	Name() (name string)
-	MIMETypes() (mimes []string)
-	Extensions() (exts []string)
+	Name() string
+	MIMETypes() []string
+	Extensions() []string
 	Marshal(v any) (data []byte, err error)
 	Unmarshal(data []byte, v any) (err error)
 }
@@ -25,8 +29,8 @@ type Codec interface {
 // stream SHOULD implement it; consumers detect support with a type assertion.
 type StreamingCodec interface {
 	Codec
-	NewEncoder(w io.Writer) (enc Encoder)
-	NewDecoder(r io.Reader) (dec Decoder)
+	NewEncoder(w io.Writer) Encoder
+	NewDecoder(r io.Reader) Decoder
 }
 
 // Encoder writes one or more values to the wrapped writer.

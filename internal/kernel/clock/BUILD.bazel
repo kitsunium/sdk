@@ -4,7 +4,10 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 
 go_library(
     name = "clock",
-    srcs = ["clock.go"],
+    srcs = [
+        "clock.go",
+        "clock_compliance.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/clock",
     visibility = ["//internal/kernel:kernel_consumers"],
 )

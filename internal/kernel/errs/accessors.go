@@ -20,6 +20,7 @@ func CodeOf(err error) (code int, ok bool) {
 	deepest := deepestError(err)
 	//: absence path → zero pair by contract.
 	if deepest == nil {
+		//: no *Error in the chain; hand back the documented zero pair.
 		return 0, false
 	}
 	//: cast through uint32 — Code is uint32-backed; on 64-bit (enforced by
@@ -36,10 +37,14 @@ func CodeOf(err error) (code int, ok bool) {
 //   - Code: the deepest Code, or zero if no *Error is found.
 //   - bool: true iff an *Error was found.
 func CodeValueOf(err error) (c Code, ok bool) {
+	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
+	//: absence path → zero pair by contract.
 	if deepest == nil {
+		//: no *Error in the chain; surface the documented zero pair.
 		return 0, false
 	}
+	//: hand back the deepest Code value.
 	return deepest.code, true
 }
 
@@ -70,7 +75,7 @@ func ReasonOf(err error) (reason string, ok bool) {
 //
 // Returns:
 //   - string: the Public message, or "" if no *Error is found.
-func PublicOf(err error) (public string) {
+func PublicOf(err error) string {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
 	//: absence path → empty wire-safe default.
@@ -91,7 +96,7 @@ func PublicOf(err error) (public string) {
 //
 // Returns:
 //   - string: the Private message, or "" if no *Error is found.
-func PrivateOf(err error) (private string) {
+func PrivateOf(err error) string {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
 	//: absence path → empty string.
@@ -112,7 +117,7 @@ func PrivateOf(err error) (private string) {
 //
 // Returns:
 //   - []FieldValue: the accumulated fields; empty when no *Error is found.
-func FieldsOf(err error) (out []FieldValue) {
+func FieldsOf(err error) []FieldValue {
 	//: pull the outermost *Error via errors.AsType; Wrap already merged fields inner-first.
 	layer, ok := errors.AsType[*Error](err)
 	//: absence branch — no *Error present in the chain.
@@ -131,7 +136,7 @@ func FieldsOf(err error) (out []FieldValue) {
 //
 // Returns:
 //   - int: 1..9 when an *Error with a valid layered code is found, 0 otherwise.
-func LayerOf(err error) (layer int) {
+func LayerOf(err error) int {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
 	//: absence path → unclassified (0).
@@ -150,7 +155,7 @@ func LayerOf(err error) (layer int) {
 //
 // Returns:
 //   - int: the HTTP status mapped from the deepest *Error, or 500 if none.
-func HTTPStatusOf(err error) (status int) {
+func HTTPStatusOf(err error) int {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
 	//: absence path → safe default 500.
@@ -169,7 +174,7 @@ func HTTPStatusOf(err error) (status int) {
 //
 // Returns:
 //   - int: the exit code mapped from the deepest *Error, or 70 if none.
-func ExitCodeOf(err error) (code int) {
+func ExitCodeOf(err error) int {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
 	//: absence path → default 70 (EX_SOFTWARE).
@@ -193,7 +198,7 @@ func ExitCodeOf(err error) (code int) {
 //
 // Returns:
 //   - bool: true iff an *Error with a matching code is found.
-func HasCodeInt(err error, code int) (found bool) {
+func HasCodeInt(err error, code int) bool {
 	//: delegate to the typed implementation for consistent chain semantics.
 	return HasCode(err, Code(uint32(code)))
 }
@@ -206,7 +211,7 @@ func HasCodeInt(err error, code int) (found bool) {
 //
 // Returns:
 //   - bool: true iff an *Error with a matching Reason is found.
-func HasReason(err error, reason string) (found bool) {
+func HasReason(err error, reason string) bool {
 	//: mirror the code-walk using Reason.
 	cursor := err
 	//: iterate the chain until exhausted or a match is found.
@@ -238,7 +243,8 @@ func HasReason(err error, reason string) (found bool) {
 //
 // Returns:
 //   - *Error: the deepest *Error in the chain, or nil if none.
-func deepestError(err error) (deepest *Error) {
+func deepestError(err error) *Error {
+	var deepest *Error
 	//: walk by unwrapping, remembering the most recent *Error we saw.
 	cursor := err
 	//: iterate every level of the chain.

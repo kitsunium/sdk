@@ -75,30 +75,53 @@ func TestMarshal(t *testing.T) {
 func TestMarshal_FormulaEscape_OptIn(t *testing.T) {
 	t.Parallel()
 	rec := [][]string{{"safe", "=SUM(A1:A3)", "+cmd|' /C calc'!A0", "-1", "@SUM", "normal"}}
-	//: default singleton — wire-format fidelity means no escape.
-	lossless, lerr := csv.New().Marshal(rec)
-	if lerr != nil {
-		t.Fatalf("lossless Marshal err = %v", lerr)
+	type tc struct {
+		name     string
+		codec    codec.Codec
+		mustHave []string
+		mustMiss []string
 	}
-	//: confirm the formula leaks through when escape is off.
-	if !strings.Contains(string(lossless), "=SUM(A1:A3)") {
-		t.Errorf("default Marshal should emit the literal formula: %q", lossless)
+	tests := []tc{
+		{
+			name:     "default codec leaks the formula verbatim",
+			codec:    csv.New(),
+			mustHave: []string{"=SUM(A1:A3)", "safe"},
+		},
+		{
+			name:     "hardened codec escapes every trigger byte",
+			codec:    csv.NewWithEscape(true),
+			mustHave: []string{"'=SUM", "'+cmd", "'-1", "'@SUM", "safe"},
+		},
+		{
+			name:     "explicit escape=false matches the default singleton",
+			codec:    csv.NewWithEscape(false),
+			mustHave: []string{"=SUM(A1:A3)", "safe"},
+			mustMiss: []string{"'=SUM"},
+		},
 	}
-	//: opt-in mitigation — every trigger cell gains a leading apostrophe.
-	hardened, herr := csv.NewWithEscape(true).Marshal(rec)
-	if herr != nil {
-		t.Fatalf("hardened Marshal err = %v", herr)
-	}
-	//: assert the specific escaped patterns appear and the raw formula does not.
-	text := string(hardened)
-	for _, want := range []string{"'=SUM", "'+cmd", "'-1", "'@SUM"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("hardened Marshal missing escape for %q in: %q", want, text)
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		out, err := tc.codec.Marshal(rec)
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		text := string(out)
+		for _, want := range tc.mustHave {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s: missing %q in %q", tc.name, want, text)
+			}
+		}
+		for _, miss := range tc.mustMiss {
+			if strings.Contains(text, miss) {
+				t.Errorf("%s: unexpected %q in %q", tc.name, miss, text)
+			}
 		}
 	}
-	//: safe cell must still pass through verbatim.
-	if !strings.Contains(text, "safe") {
-		t.Errorf("hardened Marshal dropped a safe cell: %q", text)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
@@ -127,6 +150,47 @@ func TestUnmarshal(t *testing.T) {
 		}
 		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
 			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestNewWithEscape covers the public constructor that toggles the
+// OWASP CSV-injection mitigation. Asserts both the escape=true and
+// escape=false paths produce a non-nil codec with the canonical name
+// and that the toggle flips the on-wire output for a trigger cell.
+func TestNewWithEscape(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		escape    bool
+		wantQuote bool
+	}
+	tests := []tc{
+		{"escape=true escapes a trigger cell", true, true},
+		{"escape=false leaves cells verbatim", false, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := csv.NewWithEscape(tc.escape)
+		if c == nil {
+			t.Fatalf("%s: NewWithEscape returned nil", tc.name)
+		}
+		if got := c.Name(); got != "csv" {
+			t.Errorf("%s: Name=%q want %q", tc.name, got, "csv")
+		}
+		out, err := c.Marshal([][]string{{"=SUM"}})
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		hasQuote := len(out) > 0 && out[0] == '\''
+		if hasQuote != tc.wantQuote {
+			t.Errorf("%s: hasQuote=%v want %v (out=%q)", tc.name, hasQuote, tc.wantQuote, out)
 		}
 	}
 	for _, tc := range tests {

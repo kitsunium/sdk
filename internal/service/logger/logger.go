@@ -51,7 +51,7 @@ func New(h corelogger.Handler) (lg corelogger.Logger, err error) {
 //
 // Returns:
 //   - bool: whatever the Handler returns for that level.
-func (l *loggerImpl) Enabled(ctx context.Context, lv level.Level) (enabled bool) {
+func (l *loggerImpl) Enabled(ctx context.Context, lv level.Level) bool {
 	//: delegate the decision to the Handler using a minimal RecordEvent probe.
 	return l.h.Enabled(ctx, corelogger.RecordEvent{Level: lv})
 }
@@ -86,7 +86,7 @@ func (l *loggerImpl) Log(ctx context.Context, lv level.Level, msg string, attrs 
 //
 // Returns:
 //   - corelogger.Logger: a new Logger sharing the Handler's downstream state.
-func (l *loggerImpl) With(attrs ...corelogger.AttrValue) (child corelogger.Logger) {
+func (l *loggerImpl) With(attrs ...corelogger.AttrValue) corelogger.Logger {
 	//: delegate attr accumulation to the Handler's WithAttrs contract.
 	return &loggerImpl{h: l.h.WithAttrs(attrs)}
 }
@@ -102,7 +102,10 @@ func (l *loggerImpl) With(attrs ...corelogger.AttrValue) (child corelogger.Logge
 //
 // Returns:
 //   - Builder: a recycled chain Builder, or nil when lg is foreign.
-func Build(lg corelogger.Logger, lv level.Level) (b Builder) {
+//
+// IFACE-PLUGIN: returns the chainable Builder contract so callers depend on
+// the fluent API surface rather than the recycled concrete type.
+func Build(lg corelogger.Logger, lv level.Level) Builder {
 	//: only loggers built by service/logger.New carry the Builder pool.
 	impl, ok := lg.(*loggerImpl)
 	//: refuse foreign Logger implementations so callers fail fast on misuse.
@@ -163,7 +166,10 @@ func swallowHandlerError(err error) {
 //
 // Returns:
 //   - Builder: a recycled chain Builder ready for typed attribute calls.
-func (l *loggerImpl) Build(lv level.Level) (b Builder) {
+//
+// IFACE-PLUGIN: returns the chainable Builder contract so callers depend on
+// the fluent API surface rather than the recycled concrete type.
+func (l *loggerImpl) Build(lv level.Level) Builder {
 	//: borrow a recycled builder and bind it to this logger + level.
 	cb := recordPool.Get()
 	cb.owner = l
@@ -205,7 +211,7 @@ func (l *loggerImpl) LogAttrs(ctx context.Context, lv level.Level, msg string, a
 //
 // Returns:
 //   - corelogger.Logger: a new Logger sharing the Handler's downstream state.
-func (l *loggerImpl) WithGroup(name string) (child corelogger.Logger) {
+func (l *loggerImpl) WithGroup(name string) corelogger.Logger {
 	//: empty group is a documented no-op so callers can pass user input.
 	if name == "" {
 		//: return the receiver unchanged — no extra wrapping.

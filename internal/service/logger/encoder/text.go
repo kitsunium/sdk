@@ -53,8 +53,11 @@ type textEncoder struct {
 //   - clk: clock used as a fallback when the record carries a zero Time.
 //
 // Returns:
-//   - e: a ready-to-use text Encoder.
-func NewText(clk clock.Clock) (e Encoder) {
+//   - Encoder: a ready-to-use text Encoder.
+//
+// IFACE-PLUGIN: returns the Encoder contract so callers depend on the
+// public surface; the concrete textEncoder is intentionally hidden.
+func NewText(clk clock.Clock) Encoder {
 	//: clock is mandatory — fall back to the real wall clock on nil.
 	if clk == nil {
 		//: defensive default avoids a nil-pointer panic in Append.
@@ -68,7 +71,7 @@ func NewText(clk clock.Clock) (e Encoder) {
 //
 // Returns:
 //   - string: always "text".
-func (e *textEncoder) Name() (name string) {
+func (e *textEncoder) Name() string {
 	//: identifier is stable across the public API.
 	return textEncoderName
 }
@@ -84,7 +87,7 @@ func (e *textEncoder) Name() (name string) {
 //
 // Returns:
 //   - []byte: the (possibly re-allocated) buffer with the encoded line.
-func (e *textEncoder) Append(dst []byte, groups []string, r corelogger.RecordEvent) (out []byte) {
+func (e *textEncoder) Append(dst []byte, groups []string, r corelogger.RecordEvent) []byte {
 	//: fall back to the encoder clock when the caller did not timestamp.
 	if r.Time.IsZero() {
 		//: use injected clock so tests can freeze time deterministically.
@@ -109,7 +112,7 @@ func (e *textEncoder) Append(dst []byte, groups []string, r corelogger.RecordEve
 //
 // Returns:
 //   - []byte: the (possibly re-allocated) buffer with the header bytes.
-func appendHeader(dst []byte, r corelogger.RecordEvent) (out []byte) {
+func appendHeader(dst []byte, r corelogger.RecordEvent) []byte {
 	//: render the header in the documented "TIME LEVEL msg" order.
 	dst = r.Time.AppendFormat(dst, timestampLayout)
 	dst = append(dst, ' ')
@@ -133,7 +136,7 @@ func appendHeader(dst []byte, r corelogger.RecordEvent) (out []byte) {
 //
 // Returns:
 //   - []byte: the (possibly re-allocated) buffer with msg appended.
-func appendSanitizedMessage(dst []byte, msg string) (out []byte) {
+func appendSanitizedMessage(dst []byte, msg string) []byte {
 	//: walk msg byte-by-byte; ASCII control-char check is cheap and the
 	//: allocation cost matches the existing append pattern in this file.
 	for i := range len(msg) {
@@ -161,7 +164,7 @@ func appendSanitizedMessage(dst []byte, msg string) (out []byte) {
 //
 // Returns:
 //   - []byte: the (possibly re-allocated) buffer after append operations.
-func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) (out []byte) {
+func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) []byte {
 	//: separator between message and first attr, and between consecutive attrs.
 	dst = append(dst, ' ')
 	//: walk the group stack to emit "g1.g2.…" before the attribute key.
@@ -185,7 +188,7 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) (
 //
 // Returns:
 //   - []byte: the potentially re-sliced buffer after append operations.
-func appendValueOnly(dst []byte, a corelogger.AttrValue) (out []byte) {
+func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 	//: dispatch on the typed Kind discriminant — no boxing on the hot path.
 	switch a.Value.Kind() {
 	//: strings are quoted so whitespace in values remains visible.

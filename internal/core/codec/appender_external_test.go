@@ -17,7 +17,7 @@ type fakeAppendCodec struct {
 func (f *fakeAppendCodec) Name() (name string)         { return "fake" }
 func (f *fakeAppendCodec) MIMETypes() (mimes []string) { return []string{"x/fake"} }
 func (f *fakeAppendCodec) Extensions() (exts []string) { return []string{".fake"} }
-func (f *fakeAppendCodec) Marshal(_ any) (data []byte, err error) {
+func (f *fakeAppendCodec) Marshal(_ any) (encoded []byte, err error) {
 	//: Marshal is not exercised by this test — the Appender path is the focus.
 	return nil, f.err
 }
@@ -25,7 +25,7 @@ func (f *fakeAppendCodec) Unmarshal(_ []byte, _ any) (err error) {
 	//: Unmarshal is not exercised by this test — the Appender path is the focus.
 	return f.err
 }
-func (f *fakeAppendCodec) Append(dst []byte, _ any) (out []byte, err error) {
+func (f *fakeAppendCodec) Append(dst []byte, _ any) (appended []byte, err error) {
 	//: shortcut error path so callers can exercise the failure branch.
 	if f.err != nil {
 		//: surface the canned error so consumers can errors.Is against it.

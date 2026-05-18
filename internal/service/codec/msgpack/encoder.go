@@ -19,7 +19,7 @@ type msgpackEncoder struct {
 //
 // Returns:
 //   - error: MarshalFailed wrapping the library cause on failure.
-func (e *msgpackEncoder) Encode(v any) (err error) {
+func (e *msgpackEncoder) Encode(v any) error {
 	//: delegate and wrap on error.
 	merr := e.inner.Encode(v)
 	//: success fast-path.
@@ -40,7 +40,7 @@ func (e *msgpackEncoder) Encode(v any) (err error) {
 //
 // Returns:
 //   - error: always nil.
-func (*msgpackEncoder) Close() (err error) {
+func (*msgpackEncoder) Close() error {
 	//: vmihailenco's encoder owns no writer-level state.
 	return nil
 }

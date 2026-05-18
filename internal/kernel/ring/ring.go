@@ -48,6 +48,10 @@ type queueRing[T any] struct {
 
 // New constructs a Queue with the supplied logical capacity.
 //
+// IFACE-PLUGIN: callers receive a Queue[T] handle so the kernel can swap
+// the backing implementation (single-buffer today, sharded SPMC tomorrow)
+// without breaking call-site code; the concrete struct is unexported.
+//
 // Params:
 //   - capacity: number of items the ring can hold; must be > 0.
 //
@@ -75,7 +79,7 @@ func New[T any](capacity int) (q Queue[T], err error) {
 //
 // Returns:
 //   - []T: a slice of length n with zero-valued elements.
-func allocateSlots[T any](n int) (out []T) {
+func allocateSlots[T any](n int) []T {
 	//: pure indexed-access storage — no append ever touches this slice.
 	return make([]T, n)
 }
@@ -84,7 +88,7 @@ func allocateSlots[T any](n int) (out []T) {
 //
 // Returns:
 //   - int: the logical capacity supplied at construction time.
-func (b *queueRing[T]) Capacity() (n int) {
+func (b *queueRing[T]) Capacity() int {
 	//: cap is stored as uint64 internally; widen back to int for the API.
 	return int(b.cap)
 }
@@ -95,7 +99,7 @@ func (b *queueRing[T]) Capacity() (n int) {
 //
 // Returns:
 //   - int: count of items in [0, Capacity()].
-func (b *queueRing[T]) Len() (n int) {
+func (b *queueRing[T]) Len() int {
 	//: load both cursors atomically; the snapshot may shift before we return.
 	head := b.head.Load()
 	tail := b.tail.Load()
@@ -110,7 +114,7 @@ func (b *queueRing[T]) Len() (n int) {
 //
 // Returns:
 //   - error: Full when the ring has no available slot; nil on success.
-func (b *queueRing[T]) TryWrite(item T) (err error) {
+func (b *queueRing[T]) TryWrite(item T) error {
 	//: load both cursors with relaxed semantics; the producer is single.
 	tail := b.tail.Load()
 	head := b.head.Load()
@@ -133,9 +137,9 @@ func (b *queueRing[T]) TryWrite(item T) (err error) {
 // TryRead removes and returns the next item without blocking.
 //
 // Returns:
-//   - item: the dequeued value (zero T when ring is empty).
+//   - value: the dequeued value (zero T when ring is empty).
 //   - err: Empty when no item is available; nil on success.
-func (b *queueRing[T]) TryRead() (item T, err error) {
+func (b *queueRing[T]) TryRead() (value T, err error) {
 	//: load both cursors with relaxed semantics; the consumer is single.
 	head := b.head.Load()
 	tail := b.tail.Load()
@@ -149,10 +153,10 @@ func (b *queueRing[T]) TryRead() (item T, err error) {
 		return zero, Empty
 	}
 	//: read the item, clear the slot for GC, and bump the head cursor.
-	item = b.slots[head]
+	value = b.slots[head]
 	var zero T
 	b.slots[head] = zero
 	b.head.Store((head + 1) % (b.cap + 1))
 	//: happy path — return the item to the caller.
-	return item, nil
+	return value, nil
 }

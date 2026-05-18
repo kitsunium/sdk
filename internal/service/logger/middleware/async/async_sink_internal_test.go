@@ -132,6 +132,59 @@ func Test_asyncSink_Flush(t *testing.T) {
 	}
 }
 
+func Test_asyncSink_waitForDrainerProgress(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		//: signal selects the wake-up source for the helper:
+		//: "drainer" feeds flushSignal once (steady-state path),
+		//: "cancel" cancels ctx (cancellation path),
+		//: "closed" closes flushSignal (misuse path).
+		signal string
+		//: nilCtx exercises the indefinite-wait branch with ctx==nil.
+		nilCtx bool
+		wantOK bool
+	}{
+		{"drainer signal wakes the wait", "drainer", false, true},
+		{"cancelled ctx wakes the wait", "cancel", false, true},
+		{"closed flushSignal returns ok=false", "closed", false, false},
+		{"nil ctx blocks on flushSignal", "drainer", true, true},
+		{"nil ctx surfaces closed flushSignal", "closed", true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := freshSink(t, DropNewest)
+			//: equip the helper with a dedicated flushSignal so the test
+			//: can drive the wake-up source deterministically.
+			s.flushSignal = make(chan struct{}, 1)
+			var ctx context.Context
+			cancel := func() {}
+			if !tc.nilCtx {
+				var c context.Context
+				c, cancel = context.WithCancel(t.Context())
+				ctx = c
+				t.Cleanup(cancel)
+			}
+			switch tc.signal {
+			case "drainer":
+				//: feed flushSignal so the helper wakes immediately.
+				s.flushSignal <- struct{}{}
+			case "cancel":
+				//: cancellation wakes the select arm; helper returns true.
+				cancel()
+			case "closed":
+				//: closed channel surfaces ok=false to the caller.
+				close(s.flushSignal)
+			}
+			got := s.waitForDrainerProgress(ctx)
+			if got != tc.wantOK {
+				t.Errorf("waitForDrainerProgress = %v, want %v", got, tc.wantOK)
+			}
+		})
+	}
+}
+
 func Test_asyncSink_Close(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -189,6 +242,47 @@ func Test_mustNewRing(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_noopOnError(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"nil error is silently dropped", nil},
+		{"non-nil error is silently dropped", errNoopBoom{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			panicked := false
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						panicked = true
+					}
+				}()
+				noopOnError(tc.err)
+			}()
+			if panicked {
+				t.Errorf("noopOnError(%v) panicked; contract requires silent no-op", tc.err)
+			}
+		})
+	}
+}
+
+// errNoopBoom is a minimal error used to feed noopOnError with a non-nil
+// value; the test only asserts that the call returns without panicking.
+type errNoopBoom struct{}
+
+// Error renders the diagnostic marker used by the noopOnError test.
+//
+// Returns:
+//   - msg: a static marker; the test does not assert on its content.
+func (errNoopBoom) Error() (msg string) {
+	//: static marker — content is not asserted.
+	return "boom"
 }
 
 func Test_noopOnDrop(t *testing.T) {

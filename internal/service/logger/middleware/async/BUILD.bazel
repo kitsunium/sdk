@@ -6,12 +6,12 @@ go_library(
     name = "async",
     srcs = [
         "async_sink.go",
+        "async_sink_policy.go",
         "codes.go",
         "config.go",
         "drainer.go",
         "entry.go",
         "errors.go",
-        "policy.go",
         "runtime.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/logger/middleware/async",

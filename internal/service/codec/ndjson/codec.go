@@ -44,7 +44,7 @@ type ndjsonCodec struct{}
 //
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
-func New() (c codec.Codec) {
+func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
@@ -53,7 +53,7 @@ func New() (c codec.Codec) {
 //
 // Returns:
 //   - string: always "ndjson".
-func (*ndjsonCodec) Name() (name string) {
+func (*ndjsonCodec) Name() string {
 	//: canonical identifier.
 	return "ndjson"
 }
@@ -62,7 +62,7 @@ func (*ndjsonCodec) Name() (name string) {
 //
 // Returns:
 //   - []string: canonical MIME first.
-func (*ndjsonCodec) MIMETypes() (mimes []string) {
+func (*ndjsonCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
@@ -71,7 +71,7 @@ func (*ndjsonCodec) MIMETypes() (mimes []string) {
 //
 // Returns:
 //   - []string: canonical extension first.
-func (*ndjsonCodec) Extensions() (exts []string) {
+func (*ndjsonCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
@@ -84,7 +84,7 @@ func (*ndjsonCodec) Extensions() (exts []string) {
 // Returns:
 //   - []byte: the NDJSON-encoded bytes (trailing newline included).
 //   - error: ValueInvalid when v is not a slice; MarshalFailed on encode failure.
-func (*ndjsonCodec) Marshal(v any) (data []byte, err error) {
+func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 	//: resolve v to a reflect.Value that is a slice or array.
 	slice, ok := asSlice(v)
 	//: shape-the-input rejection.
@@ -130,7 +130,7 @@ func (*ndjsonCodec) Marshal(v any) (data []byte, err error) {
 //
 // Returns:
 //   - error: ValueInvalid when v is not a *slice; UnmarshalFailed on decode failure.
-func (*ndjsonCodec) Unmarshal(data []byte, v any) (err error) {
+func (*ndjsonCodec) Unmarshal(data []byte, v any) error {
 	//: target must be a pointer to a slice.
 	slicePtr, ok := asSlicePointer(v)
 	//: shape-the-target rejection.
@@ -224,7 +224,7 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 // Returns:
 //   - []byte: the (possibly re-allocated) buffer with encoded NDJSON.
 //   - error: ValueInvalid when v is not a slice; MarshalFailed otherwise.
-func (*ndjsonCodec) Append(dst []byte, v any) (out []byte, err error) {
+func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: resolve v to a reflect.Value that is a slice or array.
 	slice, ok := asSlice(v)
 	//: shape-the-input rejection — same sentinel as Marshal for parity.

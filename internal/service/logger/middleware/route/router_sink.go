@@ -17,7 +17,7 @@ import (
 // routerSink dispatches each Write to the first matching route entry.
 type routerSink struct {
 	// entries is the ordered table evaluated on every Write.
-	entries []RouteParams
+	entries []Params
 	// fallback receives writes that match no predicate; nil triggers NoMatch.
 	fallback corelogger.Sink
 }
@@ -32,9 +32,9 @@ type routerSink struct {
 //
 // Returns:
 //   - corelogger.Sink: the router Sink behind the public interface.
-func New(fallback corelogger.Sink, entries ...RouteParams) (sink corelogger.Sink) {
+func New(fallback corelogger.Sink, entries ...Params) corelogger.Sink {
 	//: defensive copy — the router owns its entries table.
-	cp := make([]RouteParams, 0, len(entries))
+	cp := make([]Params, 0, len(entries))
 	//: walk the supplied list once, dropping invalid entries on the way.
 	for _, entry := range entries {
 		//: skip nil predicates / sinks so callers can pass partial entries.
@@ -83,7 +83,7 @@ func (s *routerSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 //
 // Returns:
 //   - err: errors.Join of per-sink failures; nil on unanimous success.
-func (s *routerSink) Flush(ctx context.Context) (err error) {
+func (s *routerSink) Flush(ctx context.Context) error {
 	//: collect per-sink errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.entries)+1)
 	//: walk every entry in order; failures are captured but never short-circuit.
@@ -115,7 +115,7 @@ func (s *routerSink) Flush(ctx context.Context) (err error) {
 //
 // Returns:
 //   - err: errors.Join of per-sink failures; nil on unanimous success.
-func (s *routerSink) Close() (err error) {
+func (s *routerSink) Close() error {
 	//: collect per-sink errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.entries)+1)
 	//: walk every entry in order; failures are captured but never short-circuit.

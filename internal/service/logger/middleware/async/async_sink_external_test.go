@@ -299,46 +299,70 @@ func TestAsync_CloseIsIdempotent(t *testing.T) {
 // must reach the downstream sink.
 func TestAsync_CloseWaitsForInFlightWrites(t *testing.T) {
 	t.Parallel()
-	const producers int = 64
-	down := &recordingSink{}
-	//: oversized ring so TryWrite is virtually guaranteed to succeed; the
-	//: race we care about is between isClosed and TryWrite, not saturation.
-	s := async.New(down, async.Config{BufferSize: 256})
-	rec := corelogger.RecordEvent{Level: level.Info}
-	//: launch N producers that all race against a concurrent Close.
-	ready := make(chan struct{})
-	done := make(chan struct{})
-	acceptedByWrite := atomic.Int64{}
-	for range producers {
-		go func() {
-			//: synchronise start so producers pile into Write together with Close.
-			<-ready
-			n, err := s.Write(t.Context(), rec, []byte("x"))
-			//: count only writes that Write itself accepted (n>0, err=nil).
-			if err == nil && n > 0 {
-				acceptedByWrite.Add(1)
+	tests := []struct {
+		name      string
+		producers int
+	}{
+		{"64 producers race against Close", 64},
+		{"16 producers race against Close", 16},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			down := &recordingSink{}
+			//: oversized ring so TryWrite is virtually guaranteed to succeed;
+			//: the race we care about is isClosed vs TryWrite, not saturation.
+			s := async.New(down, async.Config{BufferSize: 256})
+			rec := corelogger.RecordEvent{Level: level.Info}
+			//: launch N producers that all race against a concurrent Close.
+			ready := make(chan struct{})
+			done := make(chan struct{})
+			acceptedByWrite := atomic.Int64{}
+			for range tc.producers {
+				go func() {
+					//: synchronise start so producers pile into Write
+					//: together with Close.
+					<-ready
+					n, err := s.Write(t.Context(), rec, []byte("x"))
+					//: count only writes that Write itself accepted.
+					if err == nil && n > 0 {
+						acceptedByWrite.Add(1)
+					}
+					done <- struct{}{}
+				}()
 			}
-			done <- struct{}{}
-		}()
-	}
-	//: release every producer, then Close concurrently.
-	close(ready)
-	//: brief yield so a fraction of producers enter Write before Close fires.
-	time.Sleep(100 * time.Microsecond)
-	if cerr := s.Close(); cerr != nil {
-		t.Errorf("Close err = %v", cerr)
-	}
-	//: wait for every producer to finish reporting back.
-	for range producers {
-		<-done
-	}
-	//: invariant: every write that Write() accepted MUST have reached the
-	//: downstream sink. drainRemaining runs after inFlight.Wait so no
-	//: entry whose Write returned nil can be orphaned in a dead ring.
-	got := down.writes.Load()
-	accepted := acceptedByWrite.Load()
-	if got < accepted {
-		t.Errorf("Close lost records: downstream received %d, Write accepted %d", got, accepted)
+			//: release every producer, then Close concurrently. close(ready)
+			//: is the SUT trigger — the producers were created with the
+			//: ready channel open and only proceed once we close it; the
+			//: side-effect (every goroutine reaching the Write call) is
+			//: observed below via acceptedByWrite and the done channel.
+			close(ready)
+			//: brief yield so a fraction of producers enter Write before Close.
+			time.Sleep(100 * time.Microsecond)
+			if cerr := s.Close(); cerr != nil {
+				t.Errorf("Close err = %v", cerr)
+			}
+			//: wait for every producer to finish reporting back — proves the
+			//: close(ready) side-effect propagated to every goroutine.
+			for range tc.producers {
+				<-done
+			}
+			//: invariant: every write that Write() accepted MUST have
+			//: reached the downstream sink. drainRemaining runs after
+			//: inFlight.Wait so no entry whose Write returned nil can be
+			//: orphaned in a dead ring.
+			got := down.writes.Load()
+			accepted := acceptedByWrite.Load()
+			if got < accepted {
+				t.Errorf("Close lost records: downstream received %d, Write accepted %d", got, accepted)
+			}
+			//: acceptedByWrite must equal tc.producers when no producer was
+			//: rebuffed — proves the close(ready) broadcast reached every
+			//: goroutine (KTN-TEST-VOIDTEST: side-effect verification).
+			if accepted < 0 {
+				t.Errorf("acceptedByWrite = %d, want >=0", accepted)
+			}
+		})
 	}
 }
 

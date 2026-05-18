@@ -66,8 +66,8 @@ func NewHandler(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h c
 //   - r: candidate record.
 //
 // Returns:
-//   - enabled: true when r.Level is at or above the configured minimum.
-func (h *genericHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) (enabled bool) {
+//   - bool: true when r.Level is at or above the configured minimum.
+func (h *genericHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) bool {
 	//: honour context cancellation: cancelled contexts short-circuit to disabled.
 	if ctx != nil && ctx.Err() != nil {
 		//: caller's context is already done; skip emission entirely.
@@ -86,8 +86,8 @@ func (h *genericHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) 
 //   - r: record to encode and emit.
 //
 // Returns:
-//   - err: ctx.Err() if cancelled (wrapped); otherwise the sink's error.
-func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) (err error) {
+//   - error: ctx.Err() if cancelled (wrapped); otherwise the sink's error.
+func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) error {
 	//: honour context cancellation early so the encoder step never runs.
 	if ctx != nil && ctx.Err() != nil {
 		//: wrap ctx.Err() so consumers get both our reason and stdlib Is().
@@ -120,8 +120,8 @@ func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) (
 //   - attrs: attributes to prepend on each emitted RecordEvent.
 //
 // Returns:
-//   - child: a new handler carrying the combined attrs.
-func (h *genericHandler) WithAttrs(attrs []corelogger.AttrValue) (child corelogger.Handler) {
+//   - corelogger.Handler: a new handler carrying the combined attrs.
+func (h *genericHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler {
 	//: copy-on-write — child must not alias the parent's attrs slice.
 	cp := mergeAttrs(h.attrs, attrs)
 	//: share encoder/sink/min/groups, own a private attrs slice.
@@ -135,8 +135,8 @@ func (h *genericHandler) WithAttrs(attrs []corelogger.AttrValue) (child corelogg
 //   - name: group prefix; empty value yields the receiver unchanged.
 //
 // Returns:
-//   - child: a new handler carrying the appended group.
-func (h *genericHandler) WithGroup(name string) (child corelogger.Handler) {
+//   - corelogger.Handler: a new handler carrying the appended group.
+func (h *genericHandler) WithGroup(name string) corelogger.Handler {
 	//: empty group is a documented no-op so callers can pass user input.
 	if name == "" {
 		//: return the receiver unchanged — no extra wrapping.
@@ -159,8 +159,8 @@ func (h *genericHandler) WithGroup(name string) (child corelogger.Handler) {
 //   - child: attribute slice to append onto the parent prefix.
 //
 // Returns:
-//   - out: a fresh slice owning a copy of both inputs; never nil aliasing.
-func mergeAttrs(parent, child []corelogger.AttrValue) (out []corelogger.AttrValue) {
+//   - []corelogger.AttrValue: a fresh slice owning a copy of both inputs; never nil aliasing.
+func mergeAttrs(parent, child []corelogger.AttrValue) []corelogger.AttrValue {
 	//: short-circuit when the parent prefix is empty — clone child verbatim.
 	if len(parent) == 0 {
 		//: defensive copy of child so the caller cannot mutate handler state.

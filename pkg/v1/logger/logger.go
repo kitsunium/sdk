@@ -150,7 +150,7 @@ func Error(ctx context.Context, lg Logger, msg string, attrs ...Attr) {
 //
 // Returns:
 //   - Attr: an Attr with the given key and string value.
-func String(key, val string) (a Attr) {
+func String(key, val string) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.StringValue(val)}
 }
@@ -163,7 +163,7 @@ func String(key, val string) (a Attr) {
 //
 // Returns:
 //   - Attr: an Attr with the given key and int value.
-func Int(key string, val int) (a Attr) {
+func Int(key string, val int) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.IntValue(val)}
 }
@@ -176,7 +176,7 @@ func Int(key string, val int) (a Attr) {
 //
 // Returns:
 //   - Attr: an Attr with the given key and boolean value.
-func Bool(key string, val bool) (a Attr) {
+func Bool(key string, val bool) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.BoolValue(val)}
 }
@@ -189,7 +189,7 @@ func Bool(key string, val bool) (a Attr) {
 //
 // Returns:
 //   - Attr: an Attr with the given key and float64 value.
-func Float64(key string, val float64) (a Attr) {
+func Float64(key string, val float64) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.Float64Value(val)}
 }
@@ -202,7 +202,7 @@ func Float64(key string, val float64) (a Attr) {
 //
 // Returns:
 //   - Attr: an Attr with the given key and int64 value.
-func Int64(key string, val int64) (a Attr) {
+func Int64(key string, val int64) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.Int64Value(val)}
 }
@@ -215,7 +215,7 @@ func Int64(key string, val int64) (a Attr) {
 //
 // Returns:
 //   - Attr: an Attr with the given key and uint64 value.
-func Uint64(key string, val uint64) (a Attr) {
+func Uint64(key string, val uint64) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.Uint64Value(val)}
 }
@@ -228,7 +228,7 @@ func Uint64(key string, val uint64) (a Attr) {
 //
 // Returns:
 //   - Attr: an Attr with the given key and duration value.
-func Duration(key string, val time.Duration) (a Attr) {
+func Duration(key string, val time.Duration) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.DurationValue(val)}
 }
@@ -241,7 +241,7 @@ func Duration(key string, val time.Duration) (a Attr) {
 //
 // Returns:
 //   - Attr: an Attr with the given key and time value.
-func Time(key string, val time.Time) (a Attr) {
+func Time(key string, val time.Time) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.TimeValue(val)}
 }
@@ -255,7 +255,7 @@ func Time(key string, val time.Time) (a Attr) {
 //
 // Returns:
 //   - Attr: an Attr with the given key and opaque value.
-func Any(key string, val any) (a Attr) {
+func Any(key string, val any) Attr {
 	//: wrap into the shared AttrValue shape via the typed constructor.
 	return Attr{Key: key, Value: corelogger.AnyValue(val)}
 }

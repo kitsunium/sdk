@@ -53,7 +53,10 @@ func TestUnmarshal(t *testing.T) {
 		data    []byte
 		wantErr bool
 	}
-	good, _ := asn1.New().Marshal(asn1Payload{N: 1, S: "a"})
+	good, gerr := asn1.New().Marshal(asn1Payload{N: 1, S: "a"})
+	if gerr != nil {
+		t.Fatalf("seed Marshal err=%v", gerr)
+	}
 	tests := []tc{
 		{"round-trip success", good, false},
 		{"malformed bytes surface UNMARSHAL_FAILED", []byte{0xff, 0x00}, true},

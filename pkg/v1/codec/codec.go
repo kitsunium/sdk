@@ -69,7 +69,7 @@ const (
 // Returns:
 //   - []byte: the encoded bytes.
 //   - error: UnknownFormat when f is not registered; codec-specific errors otherwise.
-func Marshal(f Format, v any) (data []byte, err error) {
+func Marshal(f Format, v any) (encoded []byte, err error) {
 	//: resolve the codec before delegating.
 	c, ok := corecodec.Lookup(f)
 	//: dispatch miss returns a facade-level error.
@@ -90,7 +90,7 @@ func Marshal(f Format, v any) (data []byte, err error) {
 //
 // Returns:
 //   - error: UnknownFormat when f is not registered; codec-specific errors otherwise.
-func Unmarshal(f Format, data []byte, v any) (err error) {
+func Unmarshal(f Format, data []byte, v any) error {
 	//: resolve the codec before delegating.
 	c, ok := corecodec.Lookup(f)
 	//: dispatch miss returns a facade-level error.
@@ -148,7 +148,7 @@ func NewDecoder(f Format, r io.Reader) (dec Decoder, err error) {
 //
 // Returns:
 //   - []Format: registered Formats (deterministic ordering).
-func Available() (formats []Format) {
+func Available() []Format {
 	//: delegate to the core registry.
 	return corecodec.Available()
 }
@@ -233,7 +233,7 @@ func resolveStreaming(f Format) (sc corecodec.StreamingCodec, err error) {
 //
 // Returns:
 //   - error: the facade-level UnknownFormat sentinel.
-func unknownFormat(f Format) (err error) {
+func unknownFormat(f Format) error {
 	//: construct the error with an f-specific private diagnostic.
 	return errs.Wrap(nil, errs.WrapParams{
 		Code:    CodeUnknownFormat,

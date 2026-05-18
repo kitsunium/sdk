@@ -27,7 +27,7 @@ var pool = sync.Pool{
 //
 // Returns:
 //   - *[]byte: a pointer to a zero-length slice ready for append-based writes.
-func Get() (b *[]byte) {
+func Get() *[]byte {
 	//: fetch any available buffer from the pool; New guarantees a non-nil fallback.
 	raw := pool.Get()
 	//: comma-ok assertion — defensive even though New always returns *[]byte.

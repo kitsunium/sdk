@@ -47,7 +47,7 @@ type Value struct {
 //
 // Returns:
 //   - Value: a well-formed Value of KindAny.
-func NewValue(v any) (out Value) {
+func NewValue(v any) Value {
 	//: single source of truth lives in AnyValue.
 	return AnyValue(v)
 }
@@ -59,7 +59,7 @@ func NewValue(v any) (out Value) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindString.
-func StringValue(v string) (out Value) {
+func StringValue(v string) Value {
 	//: store the payload in the string field; bits is unused for this kind.
 	return Value{kind: KindString, str: v}
 }
@@ -72,7 +72,7 @@ func StringValue(v string) (out Value) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindInt64.
-func Int64Value(v int64) (out Value) {
+func Int64Value(v int64) Value {
 	//: two's complement reinterpretation lets num hold any int64 without loss.
 	return Value{kind: KindInt64, bits: packedBits(uint64(v))}
 }
@@ -85,7 +85,7 @@ func Int64Value(v int64) (out Value) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindInt64.
-func IntValue(v int) (out Value) {
+func IntValue(v int) Value {
 	//: delegate to Int64Value so the encoding contract has a single source.
 	return Int64Value(int64(v))
 }
@@ -97,7 +97,7 @@ func IntValue(v int) (out Value) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindUint64.
-func Uint64Value(v uint64) (out Value) {
+func Uint64Value(v uint64) Value {
 	//: direct copy — uint64 already fits the bits field after alias conversion.
 	return Value{kind: KindUint64, bits: packedBits(v)}
 }
@@ -109,7 +109,7 @@ func Uint64Value(v uint64) (out Value) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindFloat64.
-func Float64Value(v float64) (out Value) {
+func Float64Value(v float64) Value {
 	//: bit-cast preserves NaN/Inf round-trip semantics.
 	return Value{kind: KindFloat64, bits: packedBits(math.Float64bits(v))}
 }
@@ -121,7 +121,7 @@ func Float64Value(v float64) (out Value) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindBool.
-func BoolValue(v bool) (out Value) {
+func BoolValue(v bool) Value {
 	//: avoid a branch per conversion via bool→uint64 lookup.
 	if v {
 		//: true encodes as boolOne so handlers can compare against the constant.
@@ -139,7 +139,7 @@ func BoolValue(v bool) (out Value) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindDuration.
-func DurationValue(v time.Duration) (out Value) {
+func DurationValue(v time.Duration) Value {
 	//: delegate the double-cast to durationBits so the intent is named.
 	return Value{kind: KindDuration, bits: packedBits(durationBits(v))}
 }
@@ -154,7 +154,7 @@ func DurationValue(v time.Duration) (out Value) {
 //
 // Returns:
 //   - bits: uint64 bit pattern; zero for a zero Duration.
-func durationBits(d time.Duration) (bits uint64) {
+func durationBits(d time.Duration) uint64 {
 	//: time.Duration is int64 under the hood; the int64 trip is required
 	//: because Go's conversion rules do NOT permit named-type-to-unsigned
 	//: without the intermediate unnamed-type step. Two's-complement layout
@@ -171,7 +171,7 @@ func durationBits(d time.Duration) (bits uint64) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindTime.
-func TimeValue(v time.Time) (out Value) {
+func TimeValue(v time.Time) Value {
 	//: keep the time payload boxed for now; allocation-free packing is future work.
 	return Value{kind: KindTime, any: v}
 }
@@ -185,7 +185,7 @@ func TimeValue(v time.Time) (out Value) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindGroup.
-func GroupValue(attrs ...AttrValue) (out Value) {
+func GroupValue(attrs ...AttrValue) Value {
 	//: store the slice verbatim — handlers iterate it as needed.
 	return Value{kind: KindGroup, any: attrs}
 }
@@ -199,7 +199,7 @@ func GroupValue(attrs ...AttrValue) (out Value) {
 //
 // Returns:
 //   - Value: a well-formed Value of KindAny.
-func AnyValue(v any) (out Value) {
+func AnyValue(v any) Value {
 	//: store the opaque payload verbatim so handlers can type-switch on it.
 	return Value{kind: KindAny, any: v}
 }
@@ -209,7 +209,7 @@ func AnyValue(v any) (out Value) {
 //
 // Returns:
 //   - Kind: the discriminator chosen at construction time.
-func (v Value) Kind() (k Kind) {
+func (v Value) Kind() Kind {
 	//: direct read — the discriminator is part of the API contract.
 	return v.kind
 }
@@ -220,7 +220,7 @@ func (v Value) Kind() (k Kind) {
 //
 // Returns:
 //   - string: the stored string for KindString; "" otherwise.
-func (v Value) String() (s string) {
+func (v Value) String() string {
 	//: contract: only KindString returns content; other Kinds degrade to "".
 	if v.kind != KindString {
 		//: callers SHOULD switch on Kind before calling typed accessors.
@@ -235,7 +235,7 @@ func (v Value) String() (s string) {
 //
 // Returns:
 //   - int64: the stored int64 payload.
-func (v Value) Int64() (n int64) {
+func (v Value) Int64() int64 {
 	//: reverse the two's complement reinterpretation done by Int64Value.
 	return int64(uint64(v.bits))
 }
@@ -247,7 +247,7 @@ func (v Value) Int64() (n int64) {
 //
 // Returns:
 //   - packedBits: the raw packed bits as stored at construction time.
-func (v Value) Bits() (raw packedBits) {
+func (v Value) Bits() packedBits {
 	//: direct read of the packed storage; meaningful only with Kind context.
 	return v.bits
 }
@@ -257,7 +257,7 @@ func (v Value) Bits() (raw packedBits) {
 //
 // Returns:
 //   - uint64: the stored uint64 payload.
-func (v Value) Uint64() (n uint64) {
+func (v Value) Uint64() uint64 {
 	//: cast back to uint64 — bits is the packedBits alias underneath.
 	return uint64(v.bits)
 }
@@ -268,7 +268,7 @@ func (v Value) Uint64() (n uint64) {
 //
 // Returns:
 //   - float64: the stored float64 payload.
-func (v Value) Float64() (f float64) {
+func (v Value) Float64() float64 {
 	//: undo the bit-cast performed by Float64Value.
 	return math.Float64frombits(uint64(v.bits))
 }
@@ -278,7 +278,7 @@ func (v Value) Float64() (f float64) {
 //
 // Returns:
 //   - bool: true when bits is non-zero, false otherwise.
-func (v Value) Bool() (b bool) {
+func (v Value) Bool() bool {
 	//: any non-zero bits decodes as true (BoolValue stores boolOne for true).
 	return v.bits != 0
 }
@@ -289,7 +289,7 @@ func (v Value) Bool() (b bool) {
 //
 // Returns:
 //   - time.Duration: the stored duration in nanoseconds.
-func (v Value) Duration() (d time.Duration) {
+func (v Value) Duration() time.Duration {
 	//: reverse the two's complement reinterpretation done by DurationValue.
 	return time.Duration(int64(uint64(v.bits)))
 }
@@ -300,16 +300,16 @@ func (v Value) Duration() (d time.Duration) {
 //
 // Returns:
 //   - time.Time: the stored timestamp.
-func (v Value) Time() (t time.Time) {
+func (v Value) Time() time.Time {
 	//: comma-ok defends against the (impossible-by-contract) wrong any payload.
-	out, ok := v.any.(time.Time)
+	parsed, ok := v.any.(time.Time)
 	//: guard so callers never observe a non-Time value of any kind.
 	if !ok {
 		//: zero time is the documented degraded result.
 		return time.Time{}
 	}
 	//: hand back the stored timestamp.
-	return out
+	return parsed
 }
 
 // Group returns the nested AttrValue slice. The result is undefined when
@@ -318,16 +318,16 @@ func (v Value) Time() (t time.Time) {
 //
 // Returns:
 //   - []AttrValue: the stored group payload.
-func (v Value) Group() (attrs []AttrValue) {
+func (v Value) Group() []AttrValue {
 	//: comma-ok defends against the (impossible-by-contract) wrong any payload.
-	out, ok := v.any.([]AttrValue)
+	attrs, ok := v.any.([]AttrValue)
 	//: guard so callers never observe a non-slice payload of any kind.
 	if !ok {
 		//: nil slice is the documented degraded result.
 		return nil
 	}
 	//: hand back the stored attribute list.
-	return out
+	return attrs
 }
 
 // Any returns the opaque payload for KindAny. For typed Kinds the return is
@@ -335,7 +335,7 @@ func (v Value) Group() (attrs []AttrValue) {
 //
 // Returns:
 //   - any: the stored opaque payload, or nil when Kind is typed.
-func (v Value) Any() (out any) {
+func (v Value) Any() any {
 	//: only KindAny exposes its payload through Any to avoid double accessors.
 	if v.kind != KindAny {
 		//: typed Kinds expose their payload via the typed accessor.

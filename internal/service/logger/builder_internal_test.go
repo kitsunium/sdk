@@ -9,6 +9,11 @@ import (
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 )
 
+// compile-time assertion: chainBuilder must satisfy Builder so the pool's
+// recycled pointer can flow through the interface without a runtime check.
+// Kept in the test file per KTN-IFACE-ASSERT-PLACEMENT.
+var _ Builder = (*chainBuilder)(nil)
+
 // builderForTest returns a fresh chainBuilder bound to a discard-style
 // loggerImpl backed by a captured bytes.Buffer.
 func builderForTest(tb testing.TB) (*chainBuilder, *bytes.Buffer) {

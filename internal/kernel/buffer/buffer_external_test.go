@@ -22,7 +22,7 @@ func TestGet(t *testing.T) {
 				t.Fatal("Get returned nil pointer")
 				return
 			}
-			defer buffer.Put(b)
+			t.Cleanup(func() { buffer.Put(b) })
 			if len(*b) != 0 {
 				t.Errorf("fresh buffer length = %d, want 0", len(*b))
 			}
