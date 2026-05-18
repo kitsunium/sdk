@@ -1,0 +1,74 @@
+# internal/service/codec/baseenc/
+
+## Purpose
+
+Family of `core/codec.Codec` implementations that wrap the stdlib byte
+encodings (`encoding/base64`, `encoding/base32`, `encoding/hex`,
+`encoding/ascii85`) behind the universal Marshal/Unmarshal dispatch.
+Six variants, six distinct registered Formats — the discriminator is the
+registered Name, not a tagged enum.
+
+## Surface
+
+| Variant | Name | MIME types | Extensions | Streaming | Appender |
+|---|---|---|---|---|---|
+| Base64 (std) | `"base64"` | `application/base64`, `text/base64` | `.b64`, `.base64` | yes | yes |
+| Base64URL | `"base64url"` | `application/base64url`, `application/base64;url=true` | `.b64url` | yes | yes |
+| Base32 (std) | `"base32"` | `application/base32` | `.b32` | yes | yes |
+| Base16 (upper) | `"base16"` | `application/base16` | `.b16` | yes (buffered) | yes |
+| Hex (lower) | `"hex"` | `application/hex` | `.hex` | yes | yes |
+| Ascii85 | `"ascii85"` | `application/ascii85` | `.a85` | yes | yes |
+
+Six singletons exported (`Base64`, `Base64URL`, `Base32`, `Base16`,
+`Hex`, `Ascii85`) — registered via package-level var initialisers, no
+`init()` function.
+
+## Marshal/Unmarshal pipeline
+
+The codec is **JSON-mediated**. `Marshal(v)` runs `encoding/json.Marshal`
+then base-N encodes the JSON bytes; `Unmarshal(data, v)` reverses the
+pipeline. Even `[]byte` values flow through JSON first — encoding/json's
+`[]byte`→base64-string convention applies inside the JSON payload, then
+the outer base-N step wraps the JSON.
+
+## Error codes (range `0.3.24.*`)
+
+| Code         | Var                     | Trigger |
+|---|---|---|
+| `0.3.24.1`   | `BaseEncMarshalFailed`  | `encoding/json.Marshal` failed before the base-N step |
+| `0.3.24.2`   | `BaseEncUnmarshalFailed`| `encoding/json.Unmarshal` failed after the base-N step |
+| `0.3.24.3`   | `BaseEncDecodeFailed`   | stdlib base-N decoder rejected the input bytes |
+| `0.3.24.4`   | `BaseEncSizeExceeded`   | `len(data)` exceeds `maxBaseEncBytes` (10 MiB) — CWE-400 |
+
+## Conventions
+
+- **Hard cap on Unmarshal**: 10 MiB (`maxBaseEncBytes`) — CWE-400 defence
+  before the base-N decoder allocates.
+- **Append uses stdlib `AppendEncode`** (Go 1.22+) for base64/base32/hex.
+  Ascii85 has no `AppendEncode`, so the buffer is encoded into a sized
+  scratch slice then `append`ed onto `dst`. The JSON pre-step always
+  allocates; base-N Append is "encoding-step zero-alloc" only.
+- **Streaming** wraps the stdlib base-N reader/writer in a json.Encoder /
+  json.Decoder. Base16 (uppercase) has no streaming form in stdlib so
+  the encoder buffers all writes and runs `encodeBytes` at Close.
+- **Stateless singletons** — `baseencCodec.variant` is the only state;
+  the package-level `variantSpecs` table drives `Name`/`MIMETypes`/
+  `Extensions`. `MIMETypes` and `Extensions` return `slices.Clone` copies.
+- **Append rollback**: a JSON-side failure returns `dst[:origLen]` so the
+  caller's buffer is restored exactly as passed in (Appender contract).
+
+## Do NOT
+
+- Add a new variant without claiming a fresh slot in the `variantSpecs`
+  array AND extending the `variant` iota — the spec index must equal
+  the variant value.
+- Bypass the JSON wrap layer in Marshal/Unmarshal — the universal "flatten
+  to JSON, then base-N" semantic is intentional. For raw-byte base-N
+  encoding without the JSON envelope, use `pkg/v1/codec/baseenc` (legacy
+  byte-level API).
+
+## Verification
+
+```
+bazel test --config=race //internal/service/codec/baseenc:baseenc_test
+```

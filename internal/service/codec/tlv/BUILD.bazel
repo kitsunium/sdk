@@ -1,0 +1,49 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "tlv",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "decoder.go",
+        "encoder.go",
+        "errors.go",
+        "types.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/codec/tlv",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":tlv",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "tlv_test",
+    srcs = [
+        "codec_external_test.go",
+        "codec_internal_test.go",
+        "decoder_internal_test.go",
+        "encoder_internal_test.go",
+        "helpers_internal_test.go",
+    ],
+    embed = [":tlv"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+    ],
+)

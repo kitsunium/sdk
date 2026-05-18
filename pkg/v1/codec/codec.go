@@ -13,12 +13,15 @@ import (
 
 	//: blank imports drive each codec's self-registration side-effect.
 	_ "github.com/kitsunium/sdk/internal/service/codec/asn1"
+	_ "github.com/kitsunium/sdk/internal/service/codec/baseenc"
 	_ "github.com/kitsunium/sdk/internal/service/codec/cbor"
 	_ "github.com/kitsunium/sdk/internal/service/codec/csv"
+	_ "github.com/kitsunium/sdk/internal/service/codec/flatbuffers"
 	_ "github.com/kitsunium/sdk/internal/service/codec/json"
 	_ "github.com/kitsunium/sdk/internal/service/codec/msgpack"
 	_ "github.com/kitsunium/sdk/internal/service/codec/ndjson"
 	_ "github.com/kitsunium/sdk/internal/service/codec/pem"
+	_ "github.com/kitsunium/sdk/internal/service/codec/tlv"
 	_ "github.com/kitsunium/sdk/internal/service/codec/toml"
 	_ "github.com/kitsunium/sdk/internal/service/codec/xml"
 	_ "github.com/kitsunium/sdk/internal/service/codec/yaml"

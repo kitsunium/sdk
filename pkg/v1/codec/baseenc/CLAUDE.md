@@ -3,7 +3,27 @@
 
 ## Purpose
 
-Uniform `Encoding`-tagged wrapper over Go's byte-encoding stdlibs (`encoding/hex`, `encoding/base32`, `encoding/base64`, `encoding/ascii85`). **NOT a codec** in the universal `Marshal`/`Unmarshal` sense — these transform raw bytes to/from a textual alphabet (no structure, no type info), so they intentionally sit outside the `core/codec` Codec registry and provide their own `Encode` / `Decode` entry points.
+Uniform `Encoding`-tagged wrapper over Go's byte-encoding stdlibs (`encoding/hex`, `encoding/base32`, `encoding/base64`, `encoding/ascii85`). This package is the **byte-level API** — raw bytes in, raw text out, no JSON envelope, no codec registry.
+
+### Dual surface (since 2026-05-18)
+
+There are now two ways to base-N encode in the SDK:
+
+1. **This package (`pkg/v1/codec/baseenc`)** — the legacy byte-level API. `baseenc.Encode(Base64Std, raw)` / `baseenc.Decode(Base64Std, text)`. No JSON envelope. Use when you have raw bytes and need a textual alphabet.
+2. **`internal/service/codec/baseenc`** — six `core/codec.Codec` implementations (`base64`, `base64url`, `base32`, `base16`, `hex`, `ascii85`) registered under the universal Marshal/Unmarshal dispatch. Pipeline is JSON-mediated: `Marshal(v)` runs `encoding/json.Marshal` first, then base-N encodes the JSON bytes. Activated automatically when `pkg/v1/codec` is blank-imported.
+
+```go
+// Byte-level (this package):
+text, _ := baseenc.Encode(baseenc.Base64Std, []byte("hello"))
+// → "aGVsbG8="
+
+// Codec-shaped (universal dispatch):
+import _ "github.com/kitsunium/sdk/pkg/v1/codec"
+enc, _ := codec.Marshal("base64", map[string]int{"k": 1})
+// → base64-encoded `{"k":1}`
+```
+
+Both surfaces coexist by design — the byte-level form is preserved for back-compat per the pkg/v1 freeze policy.
 
 ## Contents
 

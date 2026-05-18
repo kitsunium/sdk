@@ -43,6 +43,9 @@ resolves the documentary drift flagged by the post-#12 audit (findings
 | `internal/service/logger/middleware/sample` | `0.3.20.*` | `CodeSampleRateInvalid=0.3.20.1`, `CodeSampleDownstreamNil=0.3.20.2` |
 | `internal/service/logger/middleware/recover` | `0.3.21.*` | `CodeRecoverPanicked=0.3.21.1`, `CodeRecoverDownstreamNil=0.3.21.2` |
 | `pkg/v1/logger` (extension) | `1.1.0.*` | `CodeWriterRequired=1.1.0.1` (ADR 0005), `CodeSinkConfigRequired=1.1.0.2` (added PR #12) |
+| `internal/service/codec/tlv` | `0.3.22.*` | `CodeTLVMarshalFailed=0.3.22.1`, `CodeTLVUnmarshalFailed=0.3.22.2`, `CodeTLVUnsupportedType=0.3.22.3`, `CodeTLVDepthExceeded=0.3.22.4`, `CodeTLVSizeExceeded=0.3.22.5`, `CodeTLVTruncated=0.3.22.6` |
+| `internal/service/codec/flatbuffers` | `0.3.23.*` | `CodeFlatbuffersUnsupportedType=0.3.23.1`, `CodeFlatbuffersUnsupportedTarget=0.3.23.2`, `CodeFlatbuffersTruncated=0.3.23.3` |
+| `internal/service/codec/baseenc` | `0.3.24.*` | `CodeBaseEncMarshalFailed=0.3.24.1`, `CodeBaseEncUnmarshalFailed=0.3.24.2`, `CodeBaseEncDecodeFailed=0.3.24.3`, `CodeBaseEncSizeExceeded=0.3.24.4` |
 
 Total new assignments: **10 packages, 26 codes**. The 3-digit registry
 audit (`internal/kernel/errs/registry_external_test.go`) verifies

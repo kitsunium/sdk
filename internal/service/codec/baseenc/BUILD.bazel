@@ -1,0 +1,48 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "baseenc",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "decoder.go",
+        "encoder.go",
+        "errors.go",
+        "helpers.go",
+        "spec.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/codec/baseenc",
+    visibility = ["//internal/service:service_consumers"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":baseenc",
+    visibility = ["//internal/service:service_consumers"],
+)
+
+go_test(
+    name = "baseenc_test",
+    size = "small",
+    srcs = [
+        "codec_external_test.go",
+        "codec_internal_test.go",
+    ],
+    embed = [":baseenc"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
