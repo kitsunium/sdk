@@ -1,0 +1,60 @@
+language: en-US
+early_access: false
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  sequence_diagrams: false
+
+  path_filters:
+    - "!**/BUILD.bazel"
+    - "!**/MODULE.bazel"
+    - "!**/MODULE.bazel.lock"
+    - "!**/go.sum"
+    - "!**/*.pb.go"
+    - "!.bazel-cache/**"
+    - "!bazel-*/**"
+
+  path_instructions:
+    - path: "internal/kernel/**"
+      instructions: |
+        Kernel layer: MUST be stdlib-only AND generic (no domain vocabulary).
+        See internal/kernel/CLAUDE.md. Flag any non-stdlib import or domain-
+        specific naming (User, Request, Log, …) in this tree.
+    - path: "internal/core/**"
+      instructions: |
+        Core layer: domain interfaces + value types. May import stdlib +
+        internal/kernel only. Must NOT import internal/service or pkg/*.
+    - path: "internal/service/**"
+      instructions: |
+        Service layer: concrete implementations. May import stdlib +
+        internal/kernel + internal/core. Must NOT import pkg/*.
+    - path: "pkg/v1/**"
+      instructions: |
+        Public stable v1 API. Frozen post-v1.0.0. Type aliases onto
+        internal/* are allowed. errs.Define / errs.Wrap are intentionally
+        NOT re-exported (see pkg/v1/CLAUDE.md "No constructors for internal
+        types"). Flag any new exported identifier without godoc.
+    - path: "**/*_test.go"
+      instructions: |
+        Tests are table-driven via a runCase helper so ktn-linter's static
+        analyser can credit branches. Each subtest must call t.Parallel()
+        when the parent does. Production errors flow through errs.Define /
+        errs.Wrap; tests may use t.Fatal / t.Errorf directly.
+    - path: "docs/adr/**"
+      instructions: |
+        ADRs are authoritative for the decisions they cover. If an ADR and
+        CLAUDE.md disagree, prefer the ADR and flag the CLAUDE.md mismatch.
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+
+chat:
+  auto_reply: true
