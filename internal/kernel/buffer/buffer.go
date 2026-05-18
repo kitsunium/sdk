@@ -24,9 +24,6 @@ var pool = sync.Pool{
 }
 
 // Get borrows a reusable byte buffer with zero length and capacity >= initialCap.
-//
-// Returns:
-//   - *[]byte: a pointer to a zero-length slice ready for append-based writes.
 func Get() *[]byte {
 	//: fetch any available buffer from the pool; New guarantees a non-nil fallback.
 	raw := pool.Get()
@@ -44,9 +41,6 @@ func Get() *[]byte {
 // Put returns a buffer to the pool after use, resetting its length to zero.
 // Buffers that grew beyond maxRetain are dropped to keep pool memory bounded.
 // A nil argument is a safe no-op so call sites can always defer Put.
-//
-// Params:
-//   - b: pointer to the buffer previously obtained from Get; may be nil.
 func Put(b *[]byte) {
 	//: short-circuit when the buffer is nil or oversized — both drop the entry.
 	if b == nil || cap(*b) > maxRetain {

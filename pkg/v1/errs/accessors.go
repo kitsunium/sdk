@@ -22,10 +22,10 @@ type (
 	Code = kerrs.Code
 
 	// Major is the top octet of Code — SemVer major version (0 = internal,
-	// 1 = v1, ...). See ADR 0005.
+	// 1 = v1,...). See ADR 0005.
 	Major = kerrs.Major
 	// Layer is the second octet of Code — SDK layer (0 = meta, 1 = kernel,
-	// 2 = core, 3 = service, ...). See ADR 0005.
+	// 2 = core, 3 = service,...). See ADR 0005.
 	Layer = kerrs.Layer
 	// PkgCode is the third octet of Code — per-layer package slot. See ADR 0005 / 0006.
 	PkgCode = kerrs.PkgCode

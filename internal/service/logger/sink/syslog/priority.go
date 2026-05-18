@@ -1,4 +1,4 @@
-// Package syslog: priority.go computes the RFC5424 priority value
+// Package syslog — computes the RFC5424 priority value
 // (facility * 8 + severity) consumed by the framing layer. Pulled into
 // its own file so syslog_sink.go stays focused on the Sink contract.
 package syslog
@@ -29,12 +29,6 @@ const severityInfo int = 6
 const severityDebug int = 7
 
 // severityFor maps a corelogger.Level to its RFC5424 severity number.
-//
-// Params:
-//   - lv: corelogger severity from the originating record.
-//
-// Returns:
-//   - sev: the matching RFC5424 severity in [0, 7].
 func severityFor(lv level.Level) int {
 	//: dispatch on the four documented levels; everything else maps to warning.
 	switch {
@@ -59,12 +53,6 @@ func severityFor(lv level.Level) int {
 
 // priorityFor returns the RFC5424 PRI value for the supplied level using
 // the default USER facility.
-//
-// Params:
-//   - lv: corelogger severity from the originating record.
-//
-// Returns:
-//   - pri: the RFC5424 PRI value (facility * 8 + severity).
 func priorityFor(lv level.Level) int {
 	//: combine facility + severity per the RFC5424 PRI formula.
 	return facilityUser*facilityShift + severityFor(lv)

@@ -259,8 +259,7 @@ func Test_ndjsonCodec_Append(t *testing.T) {
 
 // Test_ndjsonCodec_Append_RollbackOnMidSliceError asserts the Appender
 // contract: on error the returned buffer equals the caller-supplied dst,
-// never the partially-written mid-slice intermediate. Regresses a real
-// contract violation caught by the post-#12 audit (finding #6).
+// never the partially-written mid-slice intermediate.
 func Test_ndjsonCodec_Append_RollbackOnMidSliceError(t *testing.T) {
 	t.Parallel()
 	type tc struct {

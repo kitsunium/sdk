@@ -1,4 +1,4 @@
-// Package logger: handler.go declares genericHandler — the corelogger.Handler
+// Package logger — declares genericHandler — the corelogger.Handler
 // implementation that composes an Encoder (format) with a Sink (transport).
 // It replaces the legacy TextHandler that fused both responsibilities into
 // one struct, and ships as the single Handler the service layer offers.
@@ -34,15 +34,6 @@ type genericHandler struct {
 // NewHandler composes enc with sink and gates emission on the supplied
 // minimum level. A nil enc OR sink is rejected so callers cannot
 // accidentally construct a dead handler.
-//
-// Params:
-//   - enc: encoder converting records to bytes; nil rejects the call.
-//   - sink: transport receiving the encoder's bytes; nil rejects the call.
-//   - min: minimum level to emit.
-//
-// Returns:
-//   - corelogger.Handler: a ready-to-use Handler, or nil on rejection.
-//   - error: EncoderNil / SinkRequired when enc or sink is nil; nil on success.
 func NewHandler(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h corelogger.Handler, err error) {
 	//: reject nil encoder so the format step never panics on the hot path.
 	if enc == nil {
@@ -60,13 +51,6 @@ func NewHandler(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h c
 
 // Enabled reports whether the handler would emit a record at r.Level, taking
 // context cancellation into account.
-//
-// Params:
-//   - ctx: request-scoped context; cancelled contexts short-circuit to false.
-//   - r: candidate record.
-//
-// Returns:
-//   - bool: true when r.Level is at or above the configured minimum.
 func (h *genericHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) bool {
 	//: honour context cancellation: cancelled contexts short-circuit to disabled.
 	if ctx != nil && ctx.Err() != nil {
@@ -80,13 +64,6 @@ func (h *genericHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) 
 // Handle encodes r through the configured encoder and forwards the bytes to
 // the configured sink. Borrows a scratch buffer from kernel/buffer so the
 // hot path stays allocation-free.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the sink.
-//   - r: record to encode and emit.
-//
-// Returns:
-//   - error: ctx.Err() if cancelled (wrapped); otherwise the sink's error.
 func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) error {
 	//: honour context cancellation early so the encoder step never runs.
 	if ctx != nil && ctx.Err() != nil {
@@ -115,12 +92,6 @@ func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) e
 
 // WithAttrs returns a derived genericHandler with the supplied attributes
 // prepended onto every subsequent RecordEvent.
-//
-// Params:
-//   - attrs: attributes to prepend on each emitted RecordEvent.
-//
-// Returns:
-//   - corelogger.Handler: a new handler carrying the combined attrs.
 func (h *genericHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler {
 	//: copy-on-write — child must not alias the parent's attrs slice.
 	cp := mergeAttrs(h.attrs, attrs)
@@ -130,12 +101,6 @@ func (h *genericHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Hand
 
 // WithGroup returns a derived genericHandler with the supplied group name
 // appended onto the active group prefix stack.
-//
-// Params:
-//   - name: group prefix; empty value yields the receiver unchanged.
-//
-// Returns:
-//   - corelogger.Handler: a new handler carrying the appended group.
 func (h *genericHandler) WithGroup(name string) corelogger.Handler {
 	//: empty group is a documented no-op so callers can pass user input.
 	if name == "" {
@@ -153,13 +118,6 @@ func (h *genericHandler) WithGroup(name string) corelogger.Handler {
 // mergeAttrs returns a fresh slice combining parent and child attributes
 // in order (parent first). Extracted so WithAttrs and Handle share a
 // single allocation contract.
-//
-// Params:
-//   - parent: handler-bound attribute prefix.
-//   - child: attribute slice to append onto the parent prefix.
-//
-// Returns:
-//   - []corelogger.AttrValue: a fresh slice owning a copy of both inputs; never nil aliasing.
 func mergeAttrs(parent, child []corelogger.AttrValue) []corelogger.AttrValue {
 	//: short-circuit when the parent prefix is empty — clone child verbatim.
 	if len(parent) == 0 {

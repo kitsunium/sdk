@@ -1,4 +1,4 @@
-// Package xml: encoder.go adapts *encoding/xml.Encoder to codec.Encoder.
+// Package xml — adapts *encoding/xml.Encoder to codec.Encoder.
 package xml
 
 import (
@@ -13,12 +13,6 @@ type xmlEncoder struct {
 }
 
 // Encode serialises v through the wrapped stdlib encoder.
-//
-// Params:
-//   - v: value to encode.
-//
-// Returns:
-//   - error: MarshalFailed wrapping the stdlib cause on failure; nil otherwise.
 func (e *xmlEncoder) Encode(v any) error {
 	//: delegate then wrap.
 	xerr := e.inner.Encode(v)
@@ -37,9 +31,6 @@ func (e *xmlEncoder) Encode(v any) error {
 }
 
 // Close flushes the buffered stdlib encoder state.
-//
-// Returns:
-//   - error: MarshalFailed wrapping the stdlib cause on failure; nil otherwise.
 func (e *xmlEncoder) Close() error {
 	//: stdlib encoder requires Flush to emit trailing data.
 	xerr := e.inner.Flush()

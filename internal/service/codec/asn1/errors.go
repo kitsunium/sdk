@@ -1,4 +1,4 @@
-// Package asn1: errors.go declares the sentinel *errs.Error values for DER.
+// Package asn1 — declares the sentinel *errs.Error values for DER.
 package asn1
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

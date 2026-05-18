@@ -1,4 +1,4 @@
-// Package errs: field.go defines the closed FieldValue union used to
+// Package errs — defines the closed FieldValue union used to
 // attach structured metadata to an Error without opening an `any` back
 // door. FieldValue is a transport + textual-restitution contract, NOT a
 // vehicle for strongly-typed reconstruction on the consumer side —
@@ -57,26 +57,12 @@ type FieldValue struct {
 // NewFieldValue builds a string-typed FieldValue. Provided as a generic
 // constructor for tooling that expects a New-prefixed factory; for common
 // cases prefer the dedicated String/Int/Bool/Float helpers.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: string payload rendered verbatim by StringValue.
-//
-// Returns:
-//   - FieldValue: a well-formed FieldValue of kind string.
 func NewFieldValue(key, val string) FieldValue {
 	//: delegate to String so the canonical path owns the invariant.
 	return String(key, val)
 }
 
 // String builds a FieldValue holding a string value.
-//
-// Params:
-//   - key: attribute identifier shown next to the value in logs.
-//   - val: string payload rendered verbatim by StringValue.
-//
-// Returns:
-//   - FieldValue: a well-formed FieldValue of kind string.
 func String(key, val string) FieldValue {
 	//: FieldValues are immutable after construction.
 	return FieldValue{key: key, kind: fieldString, str: val}
@@ -86,13 +72,6 @@ func String(key, val string) FieldValue {
 // convention (both expose Int(key, int) that widens internally) so
 // callers do not write int64(…) at every site. For pre-widened int64
 // payloads use Int64.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: int payload; widened to int64 internally for storage.
-//
-// Returns:
-//   - FieldValue: a well-formed FieldValue of kind int.
 func Int(key string, val int) FieldValue {
 	//: widen to int64 so the underlying storage is width-stable.
 	return FieldValue{key: key, kind: fieldInt, num: int64(val)}
@@ -102,48 +81,24 @@ func Int(key string, val int) FieldValue {
 // because Go does not support function overloading — callers that hold
 // an int64 already (no upcast needed) reach for this constructor, while
 // the common int case stays on Int.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: int64 payload stored verbatim.
-//
-// Returns:
-//   - FieldValue: a well-formed FieldValue of kind int.
 func Int64(key string, val int64) FieldValue {
 	//: store the caller-supplied int64 verbatim.
 	return FieldValue{key: key, kind: fieldInt, num: val}
 }
 
 // Bool builds a FieldValue holding a boolean value.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: boolean payload rendered as "true" / "false".
-//
-// Returns:
-//   - FieldValue: a well-formed FieldValue of kind bool.
 func Bool(key string, val bool) FieldValue {
 	//: bool has no base to configure — direct assignment.
 	return FieldValue{key: key, kind: fieldBool, bl: val}
 }
 
 // Float builds a FieldValue holding a float64 value.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: float64 payload rendered with the shortest round-trip format.
-//
-// Returns:
-//   - FieldValue: a well-formed FieldValue of kind float.
 func Float(key string, val float64) FieldValue {
 	//: 64-bit only — callers of float32 widen on call.
 	return FieldValue{key: key, kind: fieldFloat, fl: val}
 }
 
 // Key returns the identifier under which this FieldValue was recorded.
-//
-// Returns:
-//   - string: the key chosen at construction time.
 func (f FieldValue) Key() string {
 	//: direct read of the immutable struct member.
 	return f.key
@@ -153,9 +108,6 @@ func (f FieldValue) Key() string {
 // suitable for log lines and error dumps. Not guaranteed to be machine-
 // parseable back into the original type — by design the consumer contract
 // stops at textual observation.
-//
-// Returns:
-//   - string: stable rendering; empty string when the FieldValue is invalid.
 func (f FieldValue) StringValue() string {
 	//: dispatch on the private kind so unknown kinds degrade gracefully.
 	switch f.kind {

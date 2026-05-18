@@ -13,7 +13,7 @@ import (
 
 // Codec is the CSV singleton, registered with core/codec at package load.
 // Binding the registration result to a named var is more idiomatic than
-// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
+// `var _ = codec.Register(...)` and keeps us clear of init().
 // The singleton has escapeFormulas=false for wire-format fidelity — consumers
 // whose output is read by a spreadsheet application should use NewWithEscape(true)
 // instead.
@@ -35,9 +35,6 @@ type csvCodec struct {
 
 // New returns the CSV singleton with escapeFormulas disabled. This preserves
 // the v1 API and keeps the wire-format lossless for pipe-to-pipe use.
-//
-// Returns:
-//   - codec.Codec: the stateless singleton.
 func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
@@ -50,12 +47,6 @@ func New() codec.Codec {
 // starting with "=" evaluates as a formula at open time, which is
 // OWASP CSV Injection (CWE-1236). The returned codec is not registered
 // with the core/codec singleton registry.
-//
-// Params:
-//   - escape: true enables the mitigation; false keeps lossless bytes.
-//
-// Returns:
-//   - codec.Codec: a fresh codec with the requested escape policy.
 func NewWithEscape(escape bool) codec.Codec {
 	//: fresh instance so callers who want the mitigation do not affect the
 	//: registered singleton or any other consumer.
@@ -63,40 +54,24 @@ func NewWithEscape(escape bool) codec.Codec {
 }
 
 // Name implements codec.Codec.
-//
-// Returns:
-//   - string: always "csv".
 func (*csvCodec) Name() string {
 	//: canonical identifier.
 	return "csv"
 }
 
 // MIMETypes lists every MIME alias.
-//
-// Returns:
-//   - []string: canonical MIME first.
 func (*csvCodec) MIMETypes() []string {
 	//: RFC 4180 registers text/csv.
 	return []string{"text/csv"}
 }
 
 // Extensions lists every file extension.
-//
-// Returns:
-//   - []string: canonical extension first.
 func (*csvCodec) Extensions() []string {
 	//: canonical extension.
 	return []string{".csv"}
 }
 
 // Marshal serialises a [][]string into RFC 4180 CSV bytes.
-//
-// Params:
-//   - v: must be a [][]string (or pointer to one) — CSV serialises a matrix.
-//
-// Returns:
-//   - encoded: encoded CSV.
-//   - err: ValueInvalid if v is not a [][]string; MarshalFailed on writer failure.
 func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 	//: accept both direct and pointer form to keep call sites flexible.
 	records, ok := extractRecords(v)
@@ -137,12 +112,6 @@ func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 // starting with a formula-trigger byte prefixed by a single quote so the
 // cell renders as text in Excel / LibreOffice / Google Sheets. Implements
 // the OWASP CSV Injection mitigation (CWE-1236) on an opt-in basis.
-//
-// Params:
-//   - records: caller-supplied matrix; left unmodified by this helper.
-//
-// Returns:
-//   - [][]string: defensive copy with trigger cells escaped.
 func escapeFormulaCells(records [][]string) [][]string {
 	//: pre-allocate so no append-reallocation occurs in the hot path.
 	out := make([][]string, 0, len(records))
@@ -161,12 +130,6 @@ func escapeFormulaCells(records [][]string) [][]string {
 // helper so its per-row allocation is attributed to its own stack frame
 // rather than being flagged as an inner-loop allocation by static
 // analysis.
-//
-// Params:
-//   - row: one CSV record; left unmodified by this helper.
-//
-// Returns:
-//   - []string: defensive copy with trigger cells escaped.
 func escapeFormulaRow(row []string) []string {
 	//: pre-sized copy with zero reallocation during append.
 	out := make([]string, 0, len(row))
@@ -182,12 +145,6 @@ func escapeFormulaRow(row []string) []string {
 // interprets as the start of a formula. The set includes the classic
 // trigger bytes (=, +, -, @) plus the two control characters (TAB, CR)
 // that some spreadsheets treat as formula prefixes after whitespace trim.
-//
-// Params:
-//   - b: the byte to classify.
-//
-// Returns:
-//   - bool: true when b triggers formula evaluation in a spreadsheet.
 func isFormulaTrigger(b byte) bool {
 	//: explicit byte comparison avoids switch-case-comment verbosity.
 	return b == '=' || b == '+' || b == '-' || b == '@' || b == '\t' || b == '\r'
@@ -195,12 +152,6 @@ func isFormulaTrigger(b byte) bool {
 
 // escapeIfFormulaCell prefixes cell with a single quote when its first
 // byte would otherwise trigger spreadsheet formula evaluation.
-//
-// Params:
-//   - cell: a single CSV cell value.
-//
-// Returns:
-//   - string: the (possibly prefixed) cell.
 func escapeIfFormulaCell(cell string) string {
 	//: empty cell is inert — nothing to escape; early return keeps the
 	//: single-byte read below unconditionally safe.
@@ -214,13 +165,6 @@ func escapeIfFormulaCell(cell string) string {
 }
 
 // Unmarshal parses data as CSV into *[][]string.
-//
-// Params:
-//   - data: CSV bytes.
-//   - v: pointer destination — must be *[][]string.
-//
-// Returns:
-//   - error: ValueInvalid if target is not *[][]string; UnmarshalFailed on reader failure.
 func (*csvCodec) Unmarshal(data []byte, v any) error {
 	//: target must be *[][]string so we can populate it.
 	dst, ok := v.(*[][]string)
@@ -255,13 +199,6 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 
 // extractRecords coerces v into a [][]string, accepting both direct and
 // pointer forms.
-//
-// Params:
-//   - v: candidate value.
-//
-// Returns:
-//   - [][]string: the extracted matrix when available.
-//   - bool: true iff v is a [][]string or *[][]string.
 func extractRecords(v any) (records [][]string, ok bool) {
 	//: direct form is the common case.
 	if direct, directOk := v.([][]string); directOk {

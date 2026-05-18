@@ -26,12 +26,6 @@ type fanoutSink struct {
 // New constructs a fanout Sink that broadcasts to every sink in branches.
 // A nil or empty branches slice is treated as a no-op sink — every Write
 // returns nil and Flush / Close are no-ops.
-//
-// Params:
-//   - branches: downstream sinks; nil entries are silently skipped at Write time.
-//
-// Returns:
-//   - sink: the fanout Sink behind the public corelogger.Sink interface.
 func New(branches ...corelogger.Sink) corelogger.Sink {
 	//: defensive copy so post-construction mutation by the caller is harmless.
 	cp := make([]corelogger.Sink, 0, len(branches))
@@ -50,16 +44,6 @@ func New(branches ...corelogger.Sink) corelogger.Sink {
 // Write dispatches p to every branch sink in order and aggregates any
 // per-sink failures via errors.Join wrapped in the FanoutWriteFailed
 // sentinel.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to every branch.
-//   - r: originating record forwarded to every branch.
-//   - p: formatted bytes forwarded to every branch.
-//
-// Returns:
-//   - n: bytes accepted by the LAST successful branch; informational only.
-//   - err: FanoutWriteFailed wrapping the joined per-sink errors; nil on
-//     unanimous success.
 func (s *fanoutSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	errs2 := make([]error, 0, len(s.branches))
@@ -90,12 +74,6 @@ func (s *fanoutSink) Write(ctx context.Context, r corelogger.RecordEvent, p []by
 }
 
 // Flush forwards the call to every branch and aggregates per-branch errors.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to every branch.
-//
-// Returns:
-//   - err: errors.Join of the per-branch failures; nil on unanimous success.
 func (s *fanoutSink) Flush(ctx context.Context) error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	errs2 := make([]error, 0, len(s.branches))
@@ -117,9 +95,6 @@ func (s *fanoutSink) Flush(ctx context.Context) error {
 }
 
 // Close forwards the call to every branch and aggregates per-branch errors.
-//
-// Returns:
-//   - err: errors.Join of the per-branch failures; nil on unanimous success.
 func (s *fanoutSink) Close() error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	errs2 := make([]error, 0, len(s.branches))

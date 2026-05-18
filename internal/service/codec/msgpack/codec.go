@@ -23,12 +23,12 @@ import (
 const maxMsgPackBytes int = 10 << 20
 
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
+// extension tables (hoisted).
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&msgpackCodec{})
 
-	//: MIME table hoisted to satisfy KTN-VAR-CONSTSLICE.
+	//: MIME table hoisted.
 	mimeTypes = []string{"application/msgpack", "application/x-msgpack"}
 
 	//: extension table hoisted for the same reason.
@@ -39,49 +39,30 @@ var (
 type msgpackCodec struct{}
 
 // New returns a MessagePack codec instance.
-//
-// Returns:
-//   - codec.Codec: a fresh stateless codec.
 func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
 
 // Name implements codec.Codec.
-//
-// Returns:
-//   - string: always "msgpack".
 func (*msgpackCodec) Name() string {
 	//: canonical identifier.
 	return "msgpack"
 }
 
 // MIMETypes lists every MIME alias.
-//
-// Returns:
-//   - []string: canonical MIME first.
 func (*msgpackCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
-//
-// Returns:
-//   - []string: canonical extension first.
 func (*msgpackCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
 
 // Marshal serialises v as MessagePack bytes.
-//
-// Params:
-//   - v: value vmihailenco/msgpack/v5 supports.
-//
-// Returns:
-//   - encoded: the encoded MessagePack bytes.
-//   - err: MarshalFailed wrapping the library cause on failure.
 func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to the library for the actual encoding.
 	out, merr := gomsgpack.Marshal(v)
@@ -100,16 +81,9 @@ func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
 }
 
 // Unmarshal parses data as MessagePack into v.
-//
-// Params:
-//   - data: MessagePack bytes.
-//   - v: pointer to the destination value.
-//
-// Returns:
-//   - error: UnmarshalFailed wrapping the library cause on failure.
 func (*msgpackCodec) Unmarshal(data []byte, v any) error {
 	//: cap input size so attacker-controlled payloads cannot exhaust RAM
-	//: during pre-allocation from huge declared length fields (finding #17).
+	//: during pre-allocation from huge declared length fields.
 	if len(data) > maxMsgPackBytes {
 		//: surface an UNMARSHAL_FAILED with a diagnostic Private message.
 		return errs.Wrap(nil, errs.WrapParams{
@@ -136,24 +110,12 @@ func (*msgpackCodec) Unmarshal(data []byte, v any) error {
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.
-//
-// Params:
-//   - w: destination writer.
-//
-// Returns:
-//   - codec.Encoder: a streaming MessagePack encoder bound to w.
 func (*msgpackCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the vmihailenco encoder.
 	return &msgpackEncoder{inner: gomsgpack.NewEncoder(w)}
 }
 
 // NewDecoder wraps r in a streaming codec.Decoder.
-//
-// Params:
-//   - r: source reader.
-//
-// Returns:
-//   - codec.Decoder: a streaming MessagePack decoder bound to r.
 func (*msgpackCodec) NewDecoder(r io.Reader) codec.Decoder {
 	//: wrap the vmihailenco decoder.
 	return &msgpackDecoder{inner: gomsgpack.NewDecoder(r)}

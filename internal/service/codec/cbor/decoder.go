@@ -1,4 +1,4 @@
-// Package cbor: decoder.go adapts fxamacker's *Decoder to codec.Decoder.
+// Package cbor — adapts fxamacker's *Decoder to codec.Decoder.
 package cbor
 
 import (
@@ -18,12 +18,6 @@ type cborDecoder struct {
 }
 
 // Decode reads the next CBOR item into v.
-//
-// Params:
-//   - v: pointer destination.
-//
-// Returns:
-//   - error: UnmarshalFailed on failure, io.EOF when the stream is drained.
 func (d *cborDecoder) Decode(v any) error {
 	//: delegate to the library.
 	derr := d.inner.Decode(v)
@@ -51,9 +45,6 @@ func (d *cborDecoder) Decode(v any) error {
 }
 
 // More reports whether additional items are still available.
-//
-// Returns:
-//   - bool: false once Decode has returned io.EOF.
 func (d *cborDecoder) More() bool {
 	//: reflect the sticky EOF latch.
 	return !d.done

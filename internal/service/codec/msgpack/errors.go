@@ -1,4 +1,4 @@
-// Package msgpack: errors.go declares the sentinel *errs.Error values for MessagePack.
+// Package msgpack — declares the sentinel *errs.Error values for MessagePack.
 package msgpack
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

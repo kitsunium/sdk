@@ -1,4 +1,4 @@
-// Package logger: handler.go declares the Handler interface that concrete
+// Package logger — declares the Handler interface that concrete
 // implementations in sdk/internal/service satisfy. Handlers format
 // RecordEvent values and write them to the backing sink.
 package logger

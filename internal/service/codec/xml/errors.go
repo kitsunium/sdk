@@ -1,4 +1,4 @@
-// Package xml: errors.go declares the sentinel *errs.Error values for XML.
+// Package xml — declares the sentinel *errs.Error values for XML.
 package xml
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

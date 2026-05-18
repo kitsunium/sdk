@@ -24,12 +24,12 @@ import (
 const maxYAMLBytes int = 10 << 20
 
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
+// extension tables (hoisted).
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&yamlCodec{})
 
-	//: MIME table hoisted to satisfy KTN-VAR-CONSTSLICE.
+	//: MIME table hoisted.
 	mimeTypes = []string{"application/yaml", "text/yaml", "application/x-yaml"}
 
 	//: extension table hoisted for the same reason.
@@ -40,49 +40,30 @@ var (
 type yamlCodec struct{}
 
 // New returns a YAML codec instance.
-//
-// Returns:
-//   - codec.Codec: a fresh stateless codec.
 func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
 
 // Name implements codec.Codec.
-//
-// Returns:
-//   - string: always "yaml".
 func (*yamlCodec) Name() string {
 	//: canonical identifier.
 	return "yaml"
 }
 
 // MIMETypes lists every MIME alias.
-//
-// Returns:
-//   - []string: canonical MIME first.
 func (*yamlCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
-//
-// Returns:
-//   - []string: canonical extension first.
 func (*yamlCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
 
 // Marshal serialises v as YAML bytes.
-//
-// Params:
-//   - v: value yaml.v3 supports (struct, map, slice, primitive).
-//
-// Returns:
-//   - []byte: the encoded YAML document.
-//   - error: MarshalFailed wrapping the yaml.v3 cause on failure.
 func (*yamlCodec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to yaml.v3 for the actual encoding.
 	out, merr := goyaml.Marshal(v)
@@ -101,17 +82,9 @@ func (*yamlCodec) Marshal(v any) (encoded []byte, err error) {
 }
 
 // Unmarshal parses data as YAML into v.
-//
-// Params:
-//   - data: YAML bytes.
-//   - v: pointer to the destination value.
-//
-// Returns:
-//   - error: UnmarshalFailed wrapping the yaml.v3 cause on failure.
 func (*yamlCodec) Unmarshal(data []byte, v any) error {
-	//: cap input size so attacker-controlled payloads cannot exhaust RAM
-	//: during parsing (finding #15 — yaml.v3 alias bomb is library-capped
-	//: but there is no upstream size limit; 10 MiB is the safe default).
+	//: cap input size so attacker-controlled payloads cannot exhaust RAM; yaml.v3 caps alias expansion internally but has no upstream byte
+	//: budget, so 10 MiB is the project-wide safe default.
 	if len(data) > maxYAMLBytes {
 		//: surface an UNMARSHAL_FAILED with a diagnostic Private message.
 		return errs.Wrap(nil, errs.WrapParams{
@@ -138,24 +111,12 @@ func (*yamlCodec) Unmarshal(data []byte, v any) error {
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.
-//
-// Params:
-//   - w: destination writer.
-//
-// Returns:
-//   - codec.Encoder: a streaming YAML encoder bound to w.
 func (*yamlCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the yaml.v3 encoder to expose our Close contract.
 	return &yamlEncoder{inner: goyaml.NewEncoder(w)}
 }
 
 // NewDecoder wraps r in a streaming codec.Decoder.
-//
-// Params:
-//   - r: source reader.
-//
-// Returns:
-//   - codec.Decoder: a streaming YAML decoder bound to r.
 func (*yamlCodec) NewDecoder(r io.Reader) codec.Decoder {
 	//: wrap the yaml.v3 decoder to expose More on our interface.
 	return &yamlDecoder{inner: goyaml.NewDecoder(r)}

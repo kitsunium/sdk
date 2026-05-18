@@ -1,4 +1,4 @@
-// Package logger: pool.go declares the recycled event-record bucket consumed
+// Package logger — declares the recycled event-record bucket consumed
 // by the Builder API. Pulling RecordEvent values from a buffer.Recycler
 // keeps the hot path allocation-free in steady state — combined with the
 // kind-discriminated Value union the per-call cost is dominated by the
@@ -22,9 +22,6 @@ var recordPool = buffer.NewRecycler[*chainBuilder](newChainBuilder)
 
 // newChainBuilder returns a fresh *chainBuilder with a pre-allocated attrs
 // slice.
-//
-// Returns:
-//   - *chainBuilder: a zero-state chainBuilder with a clean attrs scratchpad.
 func newChainBuilder() *chainBuilder {
 	//: pre-allocate the attrs slice to skip the first append's growth.
 	return &chainBuilder{attrs: make([]corelogger.AttrValue, 0, initialAttrCap)}

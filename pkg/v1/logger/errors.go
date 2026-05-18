@@ -1,4 +1,4 @@
-// Package logger: errors.go declares pkg/v1/logger's sentinels. Each var's
+// Package logger — declares pkg/v1/logger's sentinels. Each var's
 // name equals its errs.Define Reason in SCREAMING_SNAKE form.
 package logger
 

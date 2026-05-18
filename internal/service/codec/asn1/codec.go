@@ -12,56 +12,37 @@ import (
 
 // Codec is the ASN.1 DER singleton, registered with core/codec at package load.
 // Binding the registration result to a named var is more idiomatic than
-// `var _ = codec.Register(...)` and keeps us clear of init() (KTN-FUNC-NOINIT).
+// `var _ = codec.Register(...)` and keeps us clear of init().
 var Codec codec.Codec = codec.Register(&asn1Codec{})
 
 // asn1Codec is the concrete Codec implementation for ASN.1 DER.
 type asn1Codec struct{}
 
 // New returns an ASN.1 DER codec instance.
-//
-// Returns:
-//   - codec.Codec: a fresh stateless codec.
 func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
 
 // Name implements codec.Codec.
-//
-// Returns:
-//   - string: always "asn1-der".
 func (*asn1Codec) Name() string {
 	//: canonical identifier — "-der" disambiguates from BER/CER peers.
 	return "asn1-der"
 }
 
 // MIMETypes lists every MIME alias.
-//
-// Returns:
-//   - []string: canonical MIME first.
 func (*asn1Codec) MIMETypes() []string {
 	//: x.509 authorities registered application/pkix-* for DER bytes.
 	return []string{"application/pkix-cert"}
 }
 
 // Extensions lists every file extension.
-//
-// Returns:
-//   - []string: canonical extension first.
 func (*asn1Codec) Extensions() []string {
-	//: .der for raw bytes; .cer accepted as a historical alias.
+	//: .der is the canonical DER extension; .cer is accepted as a historical alias.
 	return []string{".der", ".cer"}
 }
 
 // Marshal encodes v into ASN.1 DER bytes.
-//
-// Params:
-//   - v: any value encoding/asn1 supports (typed struct, primitive).
-//
-// Returns:
-//   - encoded: the DER-encoded bytes.
-//   - err: MarshalFailed wrapping the stdlib cause on failure.
 func (*asn1Codec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to the stdlib for the actual encoding.
 	out, merr := stdasn1.Marshal(v)
@@ -85,13 +66,6 @@ func (*asn1Codec) Marshal(v any) (encoded []byte, err error) {
 // callers that feed a known-sized prefix of a larger buffer. If strict
 // trailing-byte rejection becomes a requirement, add a dedicated
 // UnmarshalStrict helper rather than tightening this default.
-//
-// Params:
-//   - data: ASN.1-encoded bytes.
-//   - v: pointer to the destination value.
-//
-// Returns:
-//   - error: UnmarshalFailed wrapping the stdlib cause on failure.
 func (*asn1Codec) Unmarshal(data []byte, v any) error {
 	//: encoding/asn1.Unmarshal returns the remaining bytes; we ignore them
 	//: per the contract documented on the function comment.

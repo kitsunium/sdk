@@ -1,4 +1,4 @@
-// Package logger: attr.go defines the AttrValue type — an immutable key/value
+// Package logger — defines the AttrValue type — an immutable key/value
 // pair attached to a RecordEvent. The Value field is now a kind-discriminated
 // union (see value.go) instead of an open `any`, so handlers dispatch on the
 // Kind enum and pay no boxing cost on the hot path.

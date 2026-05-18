@@ -1,4 +1,4 @@
-// Package msgpack: codes.go — range 0.3.7.* (ADR 0005 service/codec/msgpack block).
+// Package msgpack — range 0.3.7.* (ADR 0005 service/codec/msgpack block).
 package msgpack
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

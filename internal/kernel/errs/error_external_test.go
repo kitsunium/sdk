@@ -12,12 +12,6 @@ import (
 
 // newSampleSentinel builds the shared sentinel used across multiple tests.
 // Centralised so any future code-range change touches one place.
-//
-// Params:
-//   - tb: the surrounding test/benchmark — used only for tb.Helper().
-//
-// Returns:
-//   - *errs.Error: a freshly constructed sentinel at code 0.3.1.1.
 func newSampleSentinel(tb testing.TB) *errs.Error {
 	tb.Helper()
 	//: 0.3.1.1 = service/logger WriterNil (ADR 0005).
@@ -137,8 +131,8 @@ func TestNewError(t *testing.T) {
 	}
 }
 
-// TestNewErrorInt covers the deprecated int-typed alias so KTN-TEST-COVERAGE
-// stays satisfied even after the function ships in the public API surface.
+// TestNewErrorInt covers the deprecated int-typed alias so the back-compat
+// surface keeps a direct test even after callers migrate to the typed Code.
 func TestNewErrorInt(t *testing.T) {
 	t.Parallel()
 	//: 0x00_02_00_02 = 0.2.0.2 — second core slot reserved for the int alias.
@@ -334,7 +328,7 @@ func TestError_Code(t *testing.T) {
 }
 
 // TestError_CodeValue covers the typed accessor that the deprecated Code()
-// wraps. KTN-TEST-COVERAGE wants direct test exposure for CodeValue.
+// wraps; CodeValue is the long-lived API and deserves its own direct test.
 func TestError_CodeValue(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -519,9 +513,9 @@ func TestError_TrailTruncated(t *testing.T) {
 func TestError_Layer(t *testing.T) {
 	t.Parallel()
 	//: Layer extracts the second byte (byte 2). ADR 0005 dotted-quad codes:
-	//:   0x00_01_01_00 = 0.1.1.0 (kernel)  → Layer 1
-	//:   0x00_03_01_01 = 0.3.1.1 (service) → Layer 3
-	//:   0x01_01_00_01 = 1.1.0.1 (pkg v1)  → Layer 1 (under v1 major)
+	//: 0x00_01_01_00 = 0.1.1.0 (kernel) → Layer 1
+	//: 0x00_03_01_01 = 0.3.1.1 (service) → Layer 3
+	//: 0x01_01_00_01 = 1.1.0.1 (pkg v1) → Layer 1 (under v1 major)
 	tests := []struct {
 		name   string
 		code   errs.Code
@@ -646,15 +640,15 @@ func TestError_ExitCode(t *testing.T) {
 	}
 }
 
-// TestError_Is_MatchesByCode regresses the Qodo finding on PR #15 — a
-// Wrap result and the package-level sentinel built by Define share the
+// TestError_Is_MatchesByCode locks in the contract that a wrap result
+// and the package-level sentinel built by Define share the
 // same (Code, Reason) and MUST satisfy errors.Is even though they are
 // different pointers. The original (*Error).Is fell through to pointer
 // equality, which silently broke every "errors.Is(err, SomeSentinel)"
 // call site at the wrap boundary.
 //
-// Table-driven so KTN-TEST-TABLE is satisfied and so future cases (e.g.
-// trail-match cases) can be appended without forking the test.
+// Table-driven so future cases (e.g. trail-match cases) can be appended
+// without forking the test.
 func TestError_Is_MatchesByCode(t *testing.T) {
 	t.Parallel()
 	//: build a package-level-style sentinel once; reused across cases.
@@ -690,9 +684,9 @@ func TestError_Is_MatchesByCode(t *testing.T) {
 	}
 }
 
-// TestError_Is exercises the three matching modes of (*Error).Is so
-// KTN-TEST-SYNC for the Is method is satisfied (the matchesByCode test
-// above only covers the *Error → *Error path; this table covers all three).
+// TestError_Is exercises the three matching modes of (*Error).Is in one
+// table; the matchesByCode test above only covers the *Error → *Error path,
+// so this table backstops the pointer-equality and prefix-matcher legs.
 func TestError_Is(t *testing.T) {
 	t.Parallel()
 	//: 0x00_03_0F_80 = 0.3.15.128 — Is-test slot (unused production code).

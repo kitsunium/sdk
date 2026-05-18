@@ -1,4 +1,4 @@
-// Package async: config.go holds the Config struct consumed by New. Pulled
+// Package async — holds the Config struct consumed by New. Pulled
 // into its own file so async_sink.go stays focused on the Sink contract.
 package async
 

@@ -48,16 +48,6 @@ func Test_indexAliases(t *testing.T) {
 // subtests can assert panic behaviour without using defer — t.Cleanup is
 // not usable here because we want the panic-recovery to happen before the
 // assertion runs.
-//
-// Params:
-//   - dst: the sync.Map indexAliases would populate.
-//   - aliases: the alias list to register.
-//   - name: canonical Format of the codec being registered.
-//   - kind: human-readable category ("MIME" / "extension").
-//
-// Returns:
-//   - panicked: true iff indexAliases panicked.
-//   - recovered: the recover() value (nil when no panic).
 func callRecoverAliases(dst *sync.Map, aliases []string, name Format, kind string) (panicked bool, recovered any) {
 	//: classic recover pattern isolated in a helper so the caller stays flat.
 	defer func() {

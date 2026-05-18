@@ -1,4 +1,4 @@
-// Package logger: builder.go declares the chainable Builder API — the
+// Package logger — declares the chainable Builder API — the
 // zero-allocation hot path for callers that care about per-call cost.
 // Pulled from a buffer.Recycler[*chainBuilder], the builder accumulates
 // attrs without allocating beyond the pre-sized scratchpad and returns to
@@ -57,14 +57,6 @@ type chainBuilder struct {
 }
 
 // Str appends a string attribute and returns the receiver for chaining.
-//
-// Params:
-//   - key: attribute identifier rendered verbatim by handlers.
-//   - val: string payload encoded by the typed Value constructor.
-//
-// Returns:
-//   - Builder: the receiver to enable method chaining.
-//
 // IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
 // concrete type is intentionally hidden so callers depend on the contract.
 func (b *chainBuilder) Str(key, val string) Builder {
@@ -75,14 +67,6 @@ func (b *chainBuilder) Str(key, val string) Builder {
 }
 
 // Int appends an int attribute and returns the receiver for chaining.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: int payload widened to int64 by the typed Value constructor.
-//
-// Returns:
-//   - Builder: the receiver to enable method chaining.
-//
 // IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
 // concrete type is intentionally hidden so callers depend on the contract.
 func (b *chainBuilder) Int(key string, val int) Builder {
@@ -93,14 +77,6 @@ func (b *chainBuilder) Int(key string, val int) Builder {
 }
 
 // Int64 appends an int64 attribute.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: int64 payload encoded by the typed Value constructor.
-//
-// Returns:
-//   - Builder: the receiver to enable method chaining.
-//
 // IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
 // concrete type is intentionally hidden so callers depend on the contract.
 func (b *chainBuilder) Int64(key string, val int64) Builder {
@@ -111,14 +87,6 @@ func (b *chainBuilder) Int64(key string, val int64) Builder {
 }
 
 // Uint64 appends a uint64 attribute.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: uint64 payload encoded by the typed Value constructor.
-//
-// Returns:
-//   - Builder: the receiver to enable method chaining.
-//
 // IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
 // concrete type is intentionally hidden so callers depend on the contract.
 func (b *chainBuilder) Uint64(key string, val uint64) Builder {
@@ -129,14 +97,6 @@ func (b *chainBuilder) Uint64(key string, val uint64) Builder {
 }
 
 // Bool appends a boolean attribute.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: boolean payload encoded by the typed Value constructor.
-//
-// Returns:
-//   - Builder: the receiver to enable method chaining.
-//
 // IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
 // concrete type is intentionally hidden so callers depend on the contract.
 func (b *chainBuilder) Bool(key string, val bool) Builder {
@@ -147,14 +107,6 @@ func (b *chainBuilder) Bool(key string, val bool) Builder {
 }
 
 // Float64 appends a float64 attribute.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: float64 payload encoded by the typed Value constructor.
-//
-// Returns:
-//   - Builder: the receiver to enable method chaining.
-//
 // IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
 // concrete type is intentionally hidden so callers depend on the contract.
 func (b *chainBuilder) Float64(key string, val float64) Builder {
@@ -165,14 +117,6 @@ func (b *chainBuilder) Float64(key string, val float64) Builder {
 }
 
 // Duration appends a time.Duration attribute.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: time.Duration payload encoded by the typed Value constructor.
-//
-// Returns:
-//   - Builder: the receiver to enable method chaining.
-//
 // IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
 // concrete type is intentionally hidden so callers depend on the contract.
 func (b *chainBuilder) Duration(key string, val time.Duration) Builder {
@@ -183,14 +127,6 @@ func (b *chainBuilder) Duration(key string, val time.Duration) Builder {
 }
 
 // Time appends a time.Time attribute.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: time.Time payload encoded by the typed Value constructor.
-//
-// Returns:
-//   - Builder: the receiver to enable method chaining.
-//
 // IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
 // concrete type is intentionally hidden so callers depend on the contract.
 func (b *chainBuilder) Time(key string, val time.Time) Builder {
@@ -201,14 +137,6 @@ func (b *chainBuilder) Time(key string, val time.Time) Builder {
 }
 
 // Any appends an opaque attribute. Use the typed helpers when possible.
-//
-// Params:
-//   - key: attribute identifier.
-//   - val: opaque payload; handlers degrade unrecognised types to "?".
-//
-// Returns:
-//   - Builder: the receiver to enable method chaining.
-//
 // IFACE-PLUGIN: chain builder returns the next link in the fluent API; the
 // concrete type is intentionally hidden so callers depend on the contract.
 func (b *chainBuilder) Any(key string, val any) Builder {
@@ -221,10 +149,6 @@ func (b *chainBuilder) Any(key string, val any) Builder {
 // Send terminates the chain by emitting a RecordEvent through the owning
 // Logger and returns the builder to the recycler. Callers MUST NOT use
 // the builder after Send returns.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the Handler.
-//   - msg: human-readable message attached to the record.
 func (b *chainBuilder) Send(ctx context.Context, msg string) {
 	//: capture the application caller PC so handlers can render frames lazily.
 	var pcs [1]uintptr

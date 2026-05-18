@@ -1,4 +1,4 @@
-// Package multi: errors.go declares the sentinels returned by the fanout
+// Package multi — declares the sentinels returned by the fanout
 // Sink. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
 // form.
 package multi

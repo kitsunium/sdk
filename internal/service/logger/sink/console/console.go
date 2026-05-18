@@ -28,13 +28,6 @@ type consoleSink struct {
 
 // New constructs a Sink that writes to w. Every Write call acquires the
 // internal mutex so concurrent goroutines emit atomic lines.
-//
-// Params:
-//   - w: destination writer; nil rejects the construction.
-//
-// Returns:
-//   - sink: a ready-to-use console Sink.
-//   - err: WriterNil when w is nil; nil on success.
 func New(w io.Writer) (sink corelogger.Sink, err error) {
 	//: reject nil writers early rather than panic at first Write.
 	if w == nil {
@@ -46,34 +39,18 @@ func New(w io.Writer) (sink corelogger.Sink, err error) {
 }
 
 // NewStderr is a convenience constructor binding the sink to os.Stderr.
-//
-// Returns:
-//   - sink: a ready-to-use console Sink writing to os.Stderr.
 func NewStderr() corelogger.Sink {
 	//: os.Stderr is non-nil by construction — bypass the validation entirely.
 	return &consoleSink{w: os.Stderr}
 }
 
 // NewStdout is a convenience constructor binding the sink to os.Stdout.
-//
-// Returns:
-//   - sink: a ready-to-use console Sink writing to os.Stdout.
 func NewStdout() corelogger.Sink {
 	//: os.Stdout is non-nil by construction — bypass the validation entirely.
 	return &consoleSink{w: os.Stdout}
 }
 
 // Write streams p onto the underlying io.Writer under the local mutex.
-//
-// Params:
-//   - ctx: request-scoped context; cancelled contexts skip the write entirely.
-//   - r: originating record (ignored by the console sink).
-//   - p: formatted bytes produced by the upstream encoder.
-//
-// Returns:
-//   - n: number of bytes accepted by the writer.
-//   - err: CtxCancelled when ctx is done; WriteFailed wrapping the writer's
-//     cause; nil on success.
 func (s *consoleSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: honour context cancellation: cancelled contexts skip the write entirely.
 	if ctx != nil && ctx.Err() != nil {
@@ -105,12 +82,6 @@ func (s *consoleSink) Write(ctx context.Context, r corelogger.RecordEvent, p []b
 }
 
 // Flush is a no-op for the console sink (writes are already synchronous).
-//
-// Params:
-//   - ctx: request-scoped context (ignored).
-//
-// Returns:
-//   - err: always nil.
 func (s *consoleSink) Flush(ctx context.Context) error {
 	//: honour cancellation even though there is nothing buffered to flush.
 	if ctx != nil && ctx.Err() != nil {
@@ -123,9 +94,6 @@ func (s *consoleSink) Flush(ctx context.Context) error {
 
 // Close is a no-op for the console sink — the caller owns os.Stdout/Stderr
 // and is responsible for closing custom io.Writers.
-//
-// Returns:
-//   - err: always nil.
 func (s *consoleSink) Close() error {
 	//: caller owns the underlying writer; we never close stdout/stderr.
 	return nil

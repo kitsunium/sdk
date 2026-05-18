@@ -1,4 +1,4 @@
-// Package console: codes.go — range 0.3.13.* (ADR 0005 service/logger/sink/console block).
+// Package console — range 0.3.13.* (ADR 0005 service/logger/sink/console block).
 package console
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

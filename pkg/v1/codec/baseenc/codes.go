@@ -1,4 +1,4 @@
-// Package baseenc: codes.go — range 1.2.1.* (ADR 0005 pkg/v1/codec/baseenc block).
+// Package baseenc — range 1.2.1.* (ADR 0005 pkg/v1/codec/baseenc block).
 package baseenc
 
 import "github.com/kitsunium/sdk/pkg/v1/errs"

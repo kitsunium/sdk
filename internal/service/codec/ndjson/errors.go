@@ -1,4 +1,4 @@
-// Package ndjson: errors.go declares the sentinel *errs.Error values for NDJSON.
+// Package ndjson — declares the sentinel *errs.Error values for NDJSON.
 package ndjson
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

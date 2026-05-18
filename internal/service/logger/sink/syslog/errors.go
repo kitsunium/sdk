@@ -1,4 +1,4 @@
-// Package syslog: errors.go declares the sentinels returned by the syslog
+// Package syslog — declares the sentinels returned by the syslog
 // Sink. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
 // form.
 package syslog

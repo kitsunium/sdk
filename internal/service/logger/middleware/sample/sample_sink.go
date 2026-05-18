@@ -27,14 +27,6 @@ type sampleSink struct {
 
 // New constructs a sample Sink that forwards every Nth Write to the
 // downstream sink.
-//
-// Params:
-//   - downstream: the wrapped sink that receives the kept records.
-//   - rate: keep 1 of every N writes; rate <= 0 is rejected.
-//
-// Returns:
-//   - corelogger.Sink: the sample Sink behind the public interface.
-//   - error: RateInvalid when rate <= 0; DownstreamNil when downstream is nil.
 func New(downstream corelogger.Sink, rate int) (sink corelogger.Sink, err error) {
 	//: refuse a non-positive rate — the modulo would panic.
 	if rate <= 0 {
@@ -52,15 +44,6 @@ func New(downstream corelogger.Sink, rate int) (sink corelogger.Sink, err error)
 
 // Write forwards every Nth call to the downstream sink. Dropped calls
 // return (0, nil) so callers cannot tell the difference.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the downstream sink.
-//   - rec: originating record forwarded to the downstream sink.
-//   - p: formatted bytes forwarded to the downstream sink.
-//
-// Returns:
-//   - n: bytes accepted by the downstream sink (0 on dropped writes).
-//   - err: downstream's error on kept writes; nil on dropped writes.
 func (s *sampleSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: atomic increment so concurrent producers stay correct without a mutex.
 	count := s.counter.Add(1)
@@ -74,21 +57,12 @@ func (s *sampleSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 }
 
 // Flush forwards to the downstream sink so its own buffers settle.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the downstream sink.
-//
-// Returns:
-//   - err: downstream's Flush error; nil on success.
 func (s *sampleSink) Flush(ctx context.Context) error {
 	//: delegate to the downstream sink — the sample wrapper has no buffers.
 	return s.downstream.Flush(ctx)
 }
 
 // Close forwards to the downstream sink so its own resources release.
-//
-// Returns:
-//   - err: downstream's Close error; nil on success.
 func (s *sampleSink) Close() error {
 	//: delegate to the downstream sink — the sample wrapper has no resources.
 	return s.downstream.Close()

@@ -1,4 +1,4 @@
-// Package sample: errors.go declares the sentinels returned by the sample
+// Package sample — declares the sentinels returned by the sample
 // Sink. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
 // form.
 package sample

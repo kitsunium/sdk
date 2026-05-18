@@ -1,4 +1,4 @@
-// Package yaml: encoder.go adapts yaml.v3's *Encoder to codec.Encoder.
+// Package yaml — adapts yaml.v3's *Encoder to codec.Encoder.
 package yaml
 
 import (
@@ -13,12 +13,6 @@ type yamlEncoder struct {
 }
 
 // Encode serialises v through the wrapped yaml.v3 encoder.
-//
-// Params:
-//   - v: value to encode.
-//
-// Returns:
-//   - error: MarshalFailed wrapping the library cause on failure.
 func (e *yamlEncoder) Encode(v any) error {
 	//: delegate and wrap on error.
 	yerr := e.inner.Encode(v)
@@ -37,9 +31,6 @@ func (e *yamlEncoder) Encode(v any) error {
 }
 
 // Close flushes the underlying encoder; yaml.v3 requires it for stream output.
-//
-// Returns:
-//   - error: MarshalFailed wrapping the library cause on failure.
 func (e *yamlEncoder) Close() error {
 	//: delegate to the library; terminal '---' is emitted on flush.
 	cerr := e.inner.Close()

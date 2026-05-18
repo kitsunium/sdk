@@ -1,4 +1,4 @@
-// Package toml: encoder.go adapts pelletier's *Encoder to codec.Encoder.
+// Package toml — adapts pelletier's *Encoder to codec.Encoder.
 package toml
 
 import (
@@ -13,12 +13,6 @@ type tomlEncoder struct {
 }
 
 // Encode serialises v through the wrapped encoder.
-//
-// Params:
-//   - v: value to encode.
-//
-// Returns:
-//   - error: MarshalFailed wrapping the library cause on failure.
 func (e *tomlEncoder) Encode(v any) error {
 	//: delegate and wrap on error.
 	terr := e.inner.Encode(v)
@@ -37,9 +31,6 @@ func (e *tomlEncoder) Encode(v any) error {
 }
 
 // Close is a no-op because the pelletier encoder does not own the writer.
-//
-// Returns:
-//   - error: always nil.
 func (*tomlEncoder) Close() error {
 	//: pelletier's encoder owns no writer-level state.
 	return nil

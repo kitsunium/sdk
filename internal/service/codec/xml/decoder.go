@@ -1,4 +1,4 @@
-// Package xml: decoder.go adapts *encoding/xml.Decoder to codec.Decoder.
+// Package xml — adapts *encoding/xml.Decoder to codec.Decoder.
 package xml
 
 import (
@@ -20,13 +20,7 @@ type xmlDecoder struct {
 }
 
 // Decode reads the next value from the wrapped stdlib decoder.
-//
-// Params:
-//   - v: pointer to the destination value.
-//
-// Returns:
-//   - error: UnmarshalFailed wrapping the stdlib cause on failure; io.EOF
-//     (unwrapped) once the stream is drained; nil otherwise.
+// (unwrapped) once the stream is drained; nil otherwise.
 func (d *xmlDecoder) Decode(v any) error {
 	//: drained latch short-circuits additional reads.
 	if d.done {
@@ -57,9 +51,6 @@ func (d *xmlDecoder) Decode(v any) error {
 }
 
 // More reports whether another XML element can be decoded.
-//
-// Returns:
-//   - bool: false once Decode has returned io.EOF.
 func (d *xmlDecoder) More() bool {
 	//: reflect the sticky EOF latch — no token consumed.
 	return !d.done

@@ -1,4 +1,4 @@
-// Package yaml: errors.go declares the sentinel *errs.Error values for YAML.
+// Package yaml — declares the sentinel *errs.Error values for YAML.
 package yaml
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

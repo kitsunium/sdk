@@ -1,4 +1,4 @@
-// Package pem: codes.go — range 0.3.10.* (ADR 0005 service/codec/pem block).
+// Package pem — range 0.3.10.* (ADR 0005 service/codec/pem block).
 package pem
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

@@ -1,4 +1,4 @@
-// Package toml: decoder.go adapts pelletier's *Decoder to codec.Decoder.
+// Package toml — adapts pelletier's *Decoder to codec.Decoder.
 package toml
 
 import (
@@ -21,12 +21,6 @@ type tomlDecoder struct {
 }
 
 // Decode reads the entire TOML document into v.
-//
-// Params:
-//   - v: pointer destination.
-//
-// Returns:
-//   - error: UnmarshalFailed on failure, io.EOF on stream end.
 func (d *tomlDecoder) Decode(v any) error {
 	//: drained latch short-circuits the stdlib-style stream contract.
 	if d.done {
@@ -61,9 +55,6 @@ func (d *tomlDecoder) Decode(v any) error {
 }
 
 // More reports whether a Decode call would produce another document.
-//
-// Returns:
-//   - bool: false once Decode has run to completion.
 func (d *tomlDecoder) More() bool {
 	//: reflect the drained latch.
 	return !d.done

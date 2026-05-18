@@ -1,4 +1,4 @@
-// Package logger: record.go defines the RecordEvent value carried between
+// Package logger — defines the RecordEvent value carried between
 // Logger and Handler. It is an immutable snapshot of a single log event at
 // the core boundary.
 package logger

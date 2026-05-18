@@ -1,4 +1,4 @@
-// Package pem: errors.go declares the sentinel *errs.Error values for PEM.
+// Package pem — declares the sentinel *errs.Error values for PEM.
 package pem
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

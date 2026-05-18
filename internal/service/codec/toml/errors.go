@@ -1,4 +1,4 @@
-// Package toml: errors.go declares the sentinel *errs.Error values for TOML.
+// Package toml — declares the sentinel *errs.Error values for TOML.
 package toml
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

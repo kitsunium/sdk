@@ -1,4 +1,4 @@
-// Package logger: errors.go declares the sentinels returned by this
+// Package logger — declares the sentinels returned by this
 // package's constructors and Handle methods. Each var's name equals its
 // errs.Define Reason in SCREAMING_SNAKE form.
 package logger

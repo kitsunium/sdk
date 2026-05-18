@@ -1,4 +1,4 @@
-// Package async: errors.go declares the sentinels returned by the async
+// Package async — declares the sentinels returned by the async
 // Sink. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
 // form.
 package async

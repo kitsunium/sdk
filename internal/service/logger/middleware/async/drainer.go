@@ -1,4 +1,4 @@
-// Package async: drainer.go declares the goroutine loop that consumes the
+// Package async — declares the goroutine loop that consumes the
 // ring buffer and forwards entries to the downstream sink. Pulled into its
 // own file so async_sink.go stays focused on the Sink contract.
 package async
@@ -55,9 +55,6 @@ func (s *asyncSink) drain() {
 
 // forward delivers ent to the downstream sink and returns the entry to the
 // recycler.
-//
-// Params:
-//   - ent: the entry pulled out of the ring by the drainer.
 func (s *asyncSink) forward(ent *recordEntry) {
 	//: the downstream sink owns its own concurrency model; surface errors
 	//: through the configured OnError callback (or no-op default).
@@ -75,7 +72,7 @@ func (s *asyncSink) forward(ent *recordEntry) {
 	ent.rec = corelogger.RecordEvent{}
 	//: drop the backing array when it grew pathologically large (attacker-
 	//: influenced payload) so the pool never retains unbounded memory.
-	//: next Get() allocates a fresh small slice (finding #20).
+	//: next Get() allocates a fresh small slice.
 	if cap(ent.data) > maxSaneCap {
 		//: release the oversized backing array for the GC to reclaim.
 		ent.data = nil

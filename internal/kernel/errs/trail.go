@@ -1,4 +1,4 @@
-// Package errs: trail.go holds the wrap-trail mechanism introduced by
+// Package errs — holds the wrap-trail mechanism introduced by
 // ADR 0005. Trail carries the sites a *Error was wrapped through; origin
 // wins on Code() per ADR 0002, but Trail() / HasCode() traverse the full
 // list of wrap sites to help observability and matching.
@@ -29,14 +29,6 @@ const trailReserveTail int = 2
 //   - under cap → append, inherit cause.trailTruncated (monotonic OR).
 //   - overflow → keep origin + (maxTrailLen-2) most recent entries + next;
 //     trailTruncated transitions to true and stays true.
-//
-// Params:
-//   - cause: the *Error being wrapped (may be nil for stdlib-cause path).
-//   - next: the Code to append to the trail.
-//
-// Returns:
-//   - trail: fresh slice (never aliases the cause's internal storage).
-//   - truncated: monotonic truncation flag for the returned trail.
 func appendTrail(cause *Error, next Code) (trail []Code, truncated bool) {
 	//: snapshot the cause's trail (if any) and its truncation flag.
 	var existing []Code
@@ -47,9 +39,8 @@ func appendTrail(cause *Error, next Code) (trail []Code, truncated bool) {
 		inheritedTrunc = cause.trailTruncated
 	}
 
-	//: v5 guard — a zero Code is meaningless and would poison later
-	//: HasCode / PrefixMatcher lookups. Silently preserve the existing
-	//: trail; the audit (A8) or the linter can flag the caller separately.
+	//: a zero Code is meaningless and would poison later HasCode / PrefixMatcher lookups, so we silently preserve the existing trail and let
+	//: the AST audit flag the offending caller separately.
 	if next == 0 {
 		//: empty cause + zero next → nil trail (nothing to clone).
 		if len(existing) == 0 {

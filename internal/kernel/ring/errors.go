@@ -1,4 +1,4 @@
-// Package ring: errors.go declares the sentinels returned by this package's
+// Package ring — declares the sentinels returned by this package's
 // constructor and TryWrite / TryRead operations. Each var's name equals its
 // errs.Define Reason in SCREAMING_SNAKE form.
 package ring

@@ -1,6 +1,6 @@
 //go:build amd64 || arm64 || riscv64 || ppc64 || ppc64le || s390x
 
-// Package errs: code.go defines the dotted-quad Code type introduced by
+// Package errs — defines the dotted-quad Code type introduced by
 // ADR 0005. Layout: MM.LL.PP.SS over uint32 — Major.Layer.Package.Serial.
 // Codes are comparable, ordered, map-keyable, and const-expressible via
 // hex literals (Pack is a runtime constructor only).
@@ -63,51 +63,30 @@ var _ [requiredIntSize - unsafe.Sizeof(int(0))]struct{}
 
 // Pack constructs a Code from its four octets. RUNTIME only — sentinel
 // constants MUST use hex literals so they stay const-expressible.
-//
-// Params:
-//   - mm: Major octet (SemVer major: 0=internal, 1=v1, 2=v2, ...)
-//   - ll: Layer octet within the major.
-//   - pp: Package octet within the layer.
-//   - ss: Serial octet within the package.
-//
-// Returns:
-//   - Code: the packed 32-bit identifier.
 func Pack(mm Major, ll Layer, pp PkgCode, ss Serial) Code {
 	//: shift each octet into place — bitwise OR is branch-free.
 	return Code(mm)<<shiftMajor | Code(ll)<<shiftLayer | Code(pp)<<shiftPackage | Code(ss)
 }
 
 // Major returns the top octet (SemVer major byte).
-//
-// Returns:
-//   - Major: bits 24..31 of the Code.
 func (c Code) Major() Major {
 	//: unsigned shift is safe and drops the lower 24 bits.
 	return Major(c >> shiftMajor)
 }
 
 // Layer returns the second-highest octet.
-//
-// Returns:
-//   - Layer: bits 16..23 of the Code.
 func (c Code) Layer() Layer {
 	//: cast to uint8 truncates after the shift.
 	return Layer(c >> shiftLayer)
 }
 
 // Package returns the third octet.
-//
-// Returns:
-//   - PkgCode: bits 8..15 of the Code.
 func (c Code) Package() PkgCode {
 	//: same shift-and-truncate pattern as the other accessors.
 	return PkgCode(c >> shiftPackage)
 }
 
 // Serial returns the bottom octet.
-//
-// Returns:
-//   - Serial: bits 0..7 of the Code.
 func (c Code) Serial() Serial {
 	//: casting a uint32 to uint8 keeps only the low byte.
 	return Serial(c)
@@ -115,9 +94,6 @@ func (c Code) Serial() Serial {
 
 // String returns the CANONICAL dotted form "M.L.P.S" (unpadded).
 // This form is used for storage, logs, fixtures, and lookup keys.
-//
-// Returns:
-//   - string: canonical dotted-quad representation.
 func (c Code) String() string {
 	//: manual concat avoids the fmt import and keeps the kernel package's
 	//: zero-alloc discipline (strconv.Itoa is the only helper we need).
@@ -129,9 +105,6 @@ func (c Code) String() string {
 
 // Padded returns the zero-padded "MMM.LLL.PPP.SSS" form. DISPLAY ONLY —
 // must never be used as a lookup key; the canonical form is String().
-//
-// Returns:
-//   - string: zero-padded dotted-quad representation.
 func (c Code) Padded() string {
 	//: matches the width any dashboard or aligned-table consumer wants.
 	return itoaPadded3(uint8(c.Major())) + "." +
@@ -142,24 +115,12 @@ func (c Code) Padded() string {
 
 // itoaDecimal returns the decimal representation of a uint8 (0-255) UNPADDED.
 // Internal helper — exported sibling is Code.String().
-//
-// Params:
-//   - octet: the byte to stringify.
-//
-// Returns:
-//   - string: decimal form, 1 to 3 characters.
 func itoaDecimal(octet uint8) string {
 	//: strconv.Itoa is the single stdlib call; no fmt required.
 	return strconv.Itoa(int(octet))
 }
 
-// itoaPadded3 returns the zero-padded 3-digit decimal form ("000" .. "255").
-//
-// Params:
-//   - octet: the byte to stringify.
-//
-// Returns:
-//   - string: always exactly 3 characters long.
+// itoaPadded3 returns the zero-padded 3-digit decimal form ("000".. "255").
 func itoaPadded3(octet uint8) string {
 	//: single switch keeps each branch at constant work; no fmt verbs.
 	switch {

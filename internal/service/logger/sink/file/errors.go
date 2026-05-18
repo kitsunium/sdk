@@ -1,4 +1,4 @@
-// Package file: errors.go declares the sentinels returned by this package's
+// Package file — declares the sentinels returned by this package's
 // constructor and Write / Flush / Close methods. Each var's name equals its
 // errs.Define Reason in SCREAMING_SNAKE form.
 package file

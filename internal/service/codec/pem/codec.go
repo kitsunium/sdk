@@ -13,7 +13,7 @@ import (
 )
 
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
+// extension tables (hoisted).
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&pemCodec{})
@@ -21,7 +21,7 @@ var (
 	//: no official IANA type exists; the de facto value is application/x-pem-file.
 	mimeTypes = []string{"application/x-pem-file"}
 
-	//: .pem is canonical; .crt/.key accepted as historical aliases.
+	//: .pem is the canonical extension; .crt and .key are historical aliases.
 	extensions = []string{".pem", ".crt", ".key"}
 )
 
@@ -33,49 +33,30 @@ type pemCodec struct{}
 type Block = stdpem.Block
 
 // New returns a PEM codec instance.
-//
-// Returns:
-//   - codec.Codec: a fresh stateless codec.
 func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
 
 // Name implements codec.Codec.
-//
-// Returns:
-//   - string: always "pem".
 func (*pemCodec) Name() string {
 	//: canonical identifier.
 	return "pem"
 }
 
 // MIMETypes lists every MIME alias.
-//
-// Returns:
-//   - []string: canonical MIME first.
 func (*pemCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
-//
-// Returns:
-//   - []string: canonical extension first.
 func (*pemCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
 
 // Marshal encodes a *pem.Block into PEM bytes.
-//
-// Params:
-//   - v: must be *pem.Block (Block alias accepted via the type identity).
-//
-// Returns:
-//   - []byte: the PEM-encoded bytes.
-//   - error: ValueInvalid if v is not *pem.Block; MarshalFailed on writer failure.
 func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 	//: type-gate: PEM only accepts a typed block.
 	block, ok := v.(*stdpem.Block)
@@ -106,13 +87,6 @@ func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 }
 
 // Unmarshal parses the first PEM block from data into v.
-//
-// Params:
-//   - data: PEM bytes.
-//   - v: pointer destination — must be **pem.Block.
-//
-// Returns:
-//   - error: ValueInvalid if target is not **pem.Block; UnmarshalFailed if no block found.
 func (*pemCodec) Unmarshal(data []byte, v any) error {
 	//: target must be **pem.Block so we can populate it.
 	dst, ok := v.(**stdpem.Block)

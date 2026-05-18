@@ -46,7 +46,7 @@ func TestNew(t *testing.T) {
 	}
 }
 
-// TestNew_RejectsSymlink regresses finding #3 — a pre-planted symlink at
+// TestNew_RejectsSymlink — a pre-planted symlink at
 // the destination path would otherwise cause os.OpenFile to follow it and
 // redirect writes to an attacker-chosen target. file.New must reject the
 // symlink via Lstat + CodeOpenFailed.
@@ -90,7 +90,7 @@ func TestNew_RejectsSymlink(t *testing.T) {
 	}
 }
 
-// TestNew_DefaultFilePermIs0600 regresses finding #3 — freshly-created log
+// TestNew_DefaultFilePermIs0600 — freshly-created log
 // files must be owner-read/write only. World-readable logs (0644) would
 // leak diagnostic content including attr values and wrapped Private
 // fields that consumers may include in their own log lines.
@@ -132,13 +132,9 @@ func TestNew_DefaultFilePermIs0600(t *testing.T) {
 // audit even when the helper appears in deferred cleanup. Cleanup failures
 // are surfaced through testing.TB so the test still reports anomalous
 // teardown behaviour without flipping the assertion target.
-//
-// Params:
-//   - tb: testing.TB used to surface cleanup anomalies via t.Log.
-//   - s: sink whose Close error is intentionally not asserted.
 func closeIgnore(tb testing.TB, s corelogger.Sink) {
 	tb.Helper()
-	//: defensive guard so the receiver is observed by the audit.
+	//: touch the receiver so the unused-param audit treats this no-op as intentional.
 	if s == nil {
 		//: nothing to close on the happy path.
 		return

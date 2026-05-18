@@ -1,4 +1,4 @@
-// Package logger: value.go declares the Value type — a discriminated union
+// Package logger — declares the Value type — a discriminated union
 // carrying the payload of an AttrValue without forcing every concrete type
 // through `any`. Handlers switch on Value.Kind() to select a typed accessor
 // (Int64, Float64, String, …) and skip the cost of reflection at format time.
@@ -18,9 +18,9 @@ import (
 // represents false. Stored in bits via the pack/unpack helpers.
 const boolOne packedBits = 1
 
-// packedBits is the named uint64 alias used for the bits field so the typed
-// accessors (Uint64 / Int64 / Float64 / …) do not auto-map to a single field
-// the linter can name canonically.
+// packedBits is the named uint64 alias backing the bit-packed Kinds; the
+// typed accessors (Uint64 / Int64 / Float64 / …) read it under different
+// reinterpretations rather than each owning its own field.
 type packedBits uint64
 
 // Value is an immutable discriminated payload attached to an AttrValue. Use
@@ -41,24 +41,12 @@ type Value struct {
 // NewValue is a generic alias of AnyValue, exposed for tooling that expects a
 // New-prefixed constructor on every exported type. Prefer the typed
 // constructors (StringValue, Int64Value, …) at call sites.
-//
-// Params:
-//   - v: opaque payload; nil is permitted and yields KindAny with nil any.
-//
-// Returns:
-//   - Value: a well-formed Value of KindAny.
 func NewValue(v any) Value {
 	//: single source of truth lives in AnyValue.
 	return AnyValue(v)
 }
 
 // StringValue builds a Value of kind string.
-//
-// Params:
-//   - v: string payload rendered verbatim by handlers.
-//
-// Returns:
-//   - Value: a well-formed Value of KindString.
 func StringValue(v string) Value {
 	//: store the payload in the string field; bits is unused for this kind.
 	return Value{kind: KindString, str: v}
@@ -66,12 +54,6 @@ func StringValue(v string) Value {
 
 // Int64Value builds a Value of kind int64. int and int32 callers should widen
 // to int64 at the call site.
-//
-// Params:
-//   - v: int64 payload packed as raw bits in bits.
-//
-// Returns:
-//   - Value: a well-formed Value of KindInt64.
 func Int64Value(v int64) Value {
 	//: two's complement reinterpretation lets num hold any int64 without loss.
 	return Value{kind: KindInt64, bits: packedBits(uint64(v))}
@@ -79,48 +61,24 @@ func Int64Value(v int64) Value {
 
 // IntValue builds a Value of kind int64 from a plain int. Provided for caller
 // ergonomy so the most common integer type does not need an explicit cast.
-//
-// Params:
-//   - v: int payload widened to int64 before packing into num.
-//
-// Returns:
-//   - Value: a well-formed Value of KindInt64.
 func IntValue(v int) Value {
 	//: delegate to Int64Value so the encoding contract has a single source.
 	return Int64Value(int64(v))
 }
 
 // Uint64Value builds a Value of kind uint64.
-//
-// Params:
-//   - v: uint64 payload stored verbatim in bits.
-//
-// Returns:
-//   - Value: a well-formed Value of KindUint64.
 func Uint64Value(v uint64) Value {
 	//: direct copy — uint64 already fits the bits field after alias conversion.
 	return Value{kind: KindUint64, bits: packedBits(v)}
 }
 
 // Float64Value builds a Value of kind float64.
-//
-// Params:
-//   - v: float64 payload packed via math.Float64bits into num.
-//
-// Returns:
-//   - Value: a well-formed Value of KindFloat64.
 func Float64Value(v float64) Value {
 	//: bit-cast preserves NaN/Inf round-trip semantics.
 	return Value{kind: KindFloat64, bits: packedBits(math.Float64bits(v))}
 }
 
 // BoolValue builds a Value of kind bool.
-//
-// Params:
-//   - v: boolean payload encoded as 1 for true, 0 for false in bits.
-//
-// Returns:
-//   - Value: a well-formed Value of KindBool.
 func BoolValue(v bool) Value {
 	//: avoid a branch per conversion via bool→uint64 lookup.
 	if v {
@@ -133,12 +91,6 @@ func BoolValue(v bool) Value {
 
 // DurationValue builds a Value of kind duration. Storing the int64 nanosecond
 // count in bits keeps the hot path allocation-free.
-//
-// Params:
-//   - v: time.Duration payload reinterpreted as int64 nanos in bits.
-//
-// Returns:
-//   - Value: a well-formed Value of KindDuration.
 func DurationValue(v time.Duration) Value {
 	//: delegate the double-cast to durationBits so the intent is named.
 	return Value{kind: KindDuration, bits: packedBits(durationBits(v))}
@@ -148,12 +100,6 @@ func DurationValue(v time.Duration) Value {
 // to back Value.bits. Isolates the mandatory two-step conversion
 // (time.Duration → int64 → uint64) to one named helper so call sites stop
 // carrying the chained cast and the "why two casts?" comment lives here.
-//
-// Params:
-//   - d: time.Duration whose nanosecond count is reinterpreted.
-//
-// Returns:
-//   - bits: uint64 bit pattern; zero for a zero Duration.
 func durationBits(d time.Duration) uint64 {
 	//: time.Duration is int64 under the hood; the int64 trip is required
 	//: because Go's conversion rules do NOT permit named-type-to-unsigned
@@ -165,12 +111,6 @@ func durationBits(d time.Duration) uint64 {
 // TimeValue builds a Value of kind time. The time.Time payload lives in the
 // any field because its locale + monotonic representation does not fit into
 // num without additional storage.
-//
-// Params:
-//   - v: time.Time payload stored verbatim.
-//
-// Returns:
-//   - Value: a well-formed Value of KindTime.
 func TimeValue(v time.Time) Value {
 	//: keep the time payload boxed for now; allocation-free packing is future work.
 	return Value{kind: KindTime, any: v}
@@ -179,12 +119,6 @@ func TimeValue(v time.Time) Value {
 // GroupValue builds a Value whose payload is a slice of AttrValue, modelling
 // a nested attribute group. The slice is stored verbatim — callers MUST NOT
 // mutate it after the Value is constructed.
-//
-// Params:
-//   - attrs: variadic AttrValue list bundled into one nested group payload.
-//
-// Returns:
-//   - Value: a well-formed Value of KindGroup.
 func GroupValue(attrs ...AttrValue) Value {
 	//: store the slice verbatim — handlers iterate it as needed.
 	return Value{kind: KindGroup, any: attrs}
@@ -193,12 +127,6 @@ func GroupValue(attrs ...AttrValue) Value {
 // AnyValue builds a Value of KindAny carrying an arbitrary payload. Handlers
 // inspect the concrete type via type assertion and fall back to "?" when the
 // type is not in their format table.
-//
-// Params:
-//   - v: opaque payload; nil is permitted and yields KindAny with nil any.
-//
-// Returns:
-//   - Value: a well-formed Value of KindAny.
 func AnyValue(v any) Value {
 	//: store the opaque payload verbatim so handlers can type-switch on it.
 	return Value{kind: KindAny, any: v}
@@ -206,9 +134,6 @@ func AnyValue(v any) Value {
 
 // Kind returns the discriminator for this Value, indicating which typed
 // accessor (String / Int64 / Float64 / …) handlers should call.
-//
-// Returns:
-//   - Kind: the discriminator chosen at construction time.
 func (v Value) Kind() Kind {
 	//: direct read — the discriminator is part of the API contract.
 	return v.kind
@@ -217,9 +142,6 @@ func (v Value) Kind() Kind {
 // String returns the textual payload when the Value carries KindString; for
 // any other Kind it returns an empty string. Handlers that need a stringified
 // rendering of non-string Kinds MUST format from the typed accessor instead.
-//
-// Returns:
-//   - string: the stored string for KindString; "" otherwise.
 func (v Value) String() string {
 	//: contract: only KindString returns content; other Kinds degrade to "".
 	if v.kind != KindString {
@@ -232,9 +154,6 @@ func (v Value) String() string {
 
 // Int64 returns the int64 payload. The result is undefined when Kind is not
 // KindInt64; callers MUST guard with Kind() before calling this accessor.
-//
-// Returns:
-//   - int64: the stored int64 payload.
 func (v Value) Int64() int64 {
 	//: reverse the two's complement reinterpretation done by Int64Value.
 	return int64(uint64(v.bits))
@@ -242,11 +161,8 @@ func (v Value) Int64() int64 {
 
 // Bits returns the raw uint64 storage that backs all bit-packed Kinds
 // (KindBool / KindInt64 / KindUint64 / KindFloat64 / KindDuration). Callers
-// SHOULD prefer the typed accessors; Bits is exposed only so the linter has a
-// canonical getter for the bits field.
-//
-// Returns:
-//   - packedBits: the raw packed bits as stored at construction time.
+// SHOULD prefer the typed accessors; Bits exists for tooling and tests that
+// need direct access to the packed storage.
 func (v Value) Bits() packedBits {
 	//: direct read of the packed storage; meaningful only with Kind context.
 	return v.bits
@@ -254,9 +170,6 @@ func (v Value) Bits() packedBits {
 
 // Uint64 returns the uint64 payload. The result is undefined when Kind is not
 // KindUint64; callers MUST guard with Kind() before calling this accessor.
-//
-// Returns:
-//   - uint64: the stored uint64 payload.
 func (v Value) Uint64() uint64 {
 	//: cast back to uint64 — bits is the packedBits alias underneath.
 	return uint64(v.bits)
@@ -265,9 +178,6 @@ func (v Value) Uint64() uint64 {
 // Float64 returns the float64 payload. The result is undefined when Kind is
 // not KindFloat64; callers MUST guard with Kind() before calling this
 // accessor.
-//
-// Returns:
-//   - float64: the stored float64 payload.
 func (v Value) Float64() float64 {
 	//: undo the bit-cast performed by Float64Value.
 	return math.Float64frombits(uint64(v.bits))
@@ -275,9 +185,6 @@ func (v Value) Float64() float64 {
 
 // Bool returns the boolean payload. The result is undefined when Kind is not
 // KindBool; callers MUST guard with Kind() before calling this accessor.
-//
-// Returns:
-//   - bool: true when bits is non-zero, false otherwise.
 func (v Value) Bool() bool {
 	//: any non-zero bits decodes as true (BoolValue stores boolOne for true).
 	return v.bits != 0
@@ -286,9 +193,6 @@ func (v Value) Bool() bool {
 // Duration returns the time.Duration payload. The result is undefined when
 // Kind is not KindDuration; callers MUST guard with Kind() before calling
 // this accessor.
-//
-// Returns:
-//   - time.Duration: the stored duration in nanoseconds.
 func (v Value) Duration() time.Duration {
 	//: reverse the two's complement reinterpretation done by DurationValue.
 	return time.Duration(int64(uint64(v.bits)))
@@ -297,9 +201,6 @@ func (v Value) Duration() time.Duration {
 // Time returns the time.Time payload. The result is undefined when Kind is
 // not KindTime; callers MUST guard with Kind() before calling this accessor.
 // A nil any field decodes as the zero time.Time.
-//
-// Returns:
-//   - time.Time: the stored timestamp.
 func (v Value) Time() time.Time {
 	//: comma-ok defends against the (impossible-by-contract) wrong any payload.
 	parsed, ok := v.any.(time.Time)
@@ -315,9 +216,6 @@ func (v Value) Time() time.Time {
 // Group returns the nested AttrValue slice. The result is undefined when
 // Kind is not KindGroup; callers MUST guard with Kind() before calling this
 // accessor. A nil any field decodes as a nil slice.
-//
-// Returns:
-//   - []AttrValue: the stored group payload.
 func (v Value) Group() []AttrValue {
 	//: comma-ok defends against the (impossible-by-contract) wrong any payload.
 	attrs, ok := v.any.([]AttrValue)
@@ -332,9 +230,6 @@ func (v Value) Group() []AttrValue {
 
 // Any returns the opaque payload for KindAny. For typed Kinds the return is
 // nil — callers should call the typed accessor instead.
-//
-// Returns:
-//   - any: the stored opaque payload, or nil when Kind is typed.
 func (v Value) Any() any {
 	//: only KindAny exposes its payload through Any to avoid double accessors.
 	if v.kind != KindAny {

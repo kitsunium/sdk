@@ -1,6 +1,6 @@
 //go:build !linux
 
-// Package file: open_flags_other.go supplies openFlags for non-Linux
+// Package file — supplies openFlags for non-Linux
 // builds where syscall.O_NOFOLLOW is not reliably portable. The Lstat
 // pre-check in refuseSymlink still rejects symlinks; this build path
 // simply omits the kernel-level TOCTOU reinforcement available on Linux.

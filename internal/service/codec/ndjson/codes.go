@@ -1,4 +1,4 @@
-// Package ndjson: codes.go — range 0.3.11.* (ADR 0005 service/codec/ndjson block).
+// Package ndjson — range 0.3.11.* (ADR 0005 service/codec/ndjson block).
 package ndjson
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
