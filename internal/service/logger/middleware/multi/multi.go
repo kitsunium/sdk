@@ -32,7 +32,7 @@ type fanoutSink struct {
 //
 // Returns:
 //   - sink: the fanout Sink behind the public corelogger.Sink interface.
-func New(branches ...corelogger.Sink) (sink corelogger.Sink) {
+func New(branches ...corelogger.Sink) corelogger.Sink {
 	//: defensive copy so post-construction mutation by the caller is harmless.
 	cp := make([]corelogger.Sink, 0, len(branches))
 	//: walk the supplied list once, dropping nil entries on the way through.
@@ -96,7 +96,7 @@ func (s *fanoutSink) Write(ctx context.Context, r corelogger.RecordEvent, p []by
 //
 // Returns:
 //   - err: errors.Join of the per-branch failures; nil on unanimous success.
-func (s *fanoutSink) Flush(ctx context.Context) (err error) {
+func (s *fanoutSink) Flush(ctx context.Context) error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	errs2 := make([]error, 0, len(s.branches))
 	//: walk every branch in order; failures are captured but never short-circuit.
@@ -120,7 +120,7 @@ func (s *fanoutSink) Flush(ctx context.Context) (err error) {
 //
 // Returns:
 //   - err: errors.Join of the per-branch failures; nil on unanimous success.
-func (s *fanoutSink) Close() (err error) {
+func (s *fanoutSink) Close() error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	errs2 := make([]error, 0, len(s.branches))
 	//: walk every branch in order; failures are captured but never short-circuit.

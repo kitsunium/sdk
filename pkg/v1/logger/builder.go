@@ -26,7 +26,7 @@ type Builder = svclogger.Builder
 //
 // Returns:
 //   - Builder: a recycled chain Builder, or nil when lg is foreign.
-func Build(lg Logger, lv Level) (b Builder) {
+func Build(lg Logger, lv Level) Builder {
 	//: delegate to the internal Build entry point that owns the recycler.
 	return svclogger.Build(lg, lv)
 }

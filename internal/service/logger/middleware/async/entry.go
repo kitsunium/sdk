@@ -21,7 +21,7 @@ type recordEntry struct {
 //
 // Returns:
 //   - *recordEntry: a zero-state entry ready for the recycler.
-func newRecordEntry() (out *recordEntry) {
+func newRecordEntry() *recordEntry {
 	//: zero-state entry; payload is set by the producer at Write time.
 	return &recordEntry{}
 }

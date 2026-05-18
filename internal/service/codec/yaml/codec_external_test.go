@@ -76,7 +76,10 @@ func TestMarshal(t *testing.T) {
 // branch on malformed bytes.
 func TestUnmarshal(t *testing.T) {
 	t.Parallel()
-	data, _ := yaml.New().Marshal(payload{Name: "a", Age: 1})
+	data, merr := yaml.New().Marshal(payload{Name: "a", Age: 1})
+	if merr != nil {
+		t.Fatalf("Marshal setup err=%v", merr)
+	}
 	type tc struct {
 		name    string
 		data    []byte
@@ -147,7 +150,10 @@ func TestNewDecoder(t *testing.T) {
 		data    []byte
 		wantErr string
 	}
-	good, _ := yaml.New().Marshal(payload{Name: "a", Age: 1})
+	good, merr := yaml.New().Marshal(payload{Name: "a", Age: 1})
+	if merr != nil {
+		t.Fatalf("Marshal setup err=%v", merr)
+	}
 	tests := []tc{
 		{"decodes a valid record", good, ""},
 		{"corrupt input surfaces UNMARSHAL_FAILED", []byte("[unclosed"), "UNMARSHAL_FAILED"},

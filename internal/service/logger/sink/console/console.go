@@ -49,7 +49,7 @@ func New(w io.Writer) (sink corelogger.Sink, err error) {
 //
 // Returns:
 //   - sink: a ready-to-use console Sink writing to os.Stderr.
-func NewStderr() (sink corelogger.Sink) {
+func NewStderr() corelogger.Sink {
 	//: os.Stderr is non-nil by construction — bypass the validation entirely.
 	return &consoleSink{w: os.Stderr}
 }
@@ -58,7 +58,7 @@ func NewStderr() (sink corelogger.Sink) {
 //
 // Returns:
 //   - sink: a ready-to-use console Sink writing to os.Stdout.
-func NewStdout() (sink corelogger.Sink) {
+func NewStdout() corelogger.Sink {
 	//: os.Stdout is non-nil by construction — bypass the validation entirely.
 	return &consoleSink{w: os.Stdout}
 }
@@ -111,7 +111,7 @@ func (s *consoleSink) Write(ctx context.Context, r corelogger.RecordEvent, p []b
 //
 // Returns:
 //   - err: always nil.
-func (s *consoleSink) Flush(ctx context.Context) (err error) {
+func (s *consoleSink) Flush(ctx context.Context) error {
 	//: honour cancellation even though there is nothing buffered to flush.
 	if ctx != nil && ctx.Err() != nil {
 		//: caller already gave up; surface the cancellation cause.
@@ -126,7 +126,7 @@ func (s *consoleSink) Flush(ctx context.Context) (err error) {
 //
 // Returns:
 //   - err: always nil.
-func (s *consoleSink) Close() (err error) {
+func (s *consoleSink) Close() error {
 	//: caller owns the underlying writer; we never close stdout/stderr.
 	return nil
 }

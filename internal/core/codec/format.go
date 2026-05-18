@@ -10,7 +10,7 @@ type Format string
 //
 // Returns:
 //   - bool: true iff a codec with this Format is registered.
-func (f Format) Known() (ok bool) {
+func (f Format) Known() bool {
 	//: empty Formats are reserved as the invalid zero value.
 	if f == "" {
 		//: nothing can match the empty Format.
@@ -26,7 +26,7 @@ func (f Format) Known() (ok bool) {
 //
 // Returns:
 //   - string: the Format value unchanged.
-func (f Format) String() (s string) {
+func (f Format) String() string {
 	//: direct cast from the typed string back to a plain string.
 	return string(f)
 }

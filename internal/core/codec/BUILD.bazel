@@ -6,7 +6,7 @@ go_library(
     name = "codec",
     srcs = [
         "appender.go",
-        "codec.go",
+        "codec_interface.go",
         "codes.go",
         "format.go",
         "registry.go",

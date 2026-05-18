@@ -19,7 +19,7 @@ type jsonEncoder struct {
 //
 // Returns:
 //   - error: MarshalFailed wrapping the stdlib cause on failure; nil otherwise.
-func (e *jsonEncoder) Encode(v any) (err error) {
+func (e *jsonEncoder) Encode(v any) error {
 	//: delegate to the stdlib then wrap on error.
 	jerr := e.inner.Encode(v)
 	//: success fast-path.
@@ -40,7 +40,7 @@ func (e *jsonEncoder) Encode(v any) (err error) {
 //
 // Returns:
 //   - error: always nil.
-func (*jsonEncoder) Close() (err error) {
+func (*jsonEncoder) Close() error {
 	//: stdlib encoder owns no writer-level state.
 	return nil
 }

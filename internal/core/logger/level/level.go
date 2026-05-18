@@ -22,7 +22,7 @@ const Error Level = 8
 //
 // Returns:
 //   - string: one of "DEBUG", "INFO", "WARN", or "ERROR".
-func (l Level) String() (label string) {
+func (l Level) String() string {
 	//: classify the numeric level into one of four named severity windows.
 	switch {
 	//: strictly below Info → Debug window.

@@ -64,7 +64,7 @@ type FieldValue struct {
 //
 // Returns:
 //   - FieldValue: a well-formed FieldValue of kind string.
-func NewFieldValue(key, val string) (f FieldValue) {
+func NewFieldValue(key, val string) FieldValue {
 	//: delegate to String so the canonical path owns the invariant.
 	return String(key, val)
 }
@@ -77,7 +77,7 @@ func NewFieldValue(key, val string) (f FieldValue) {
 //
 // Returns:
 //   - FieldValue: a well-formed FieldValue of kind string.
-func String(key, val string) (f FieldValue) {
+func String(key, val string) FieldValue {
 	//: FieldValues are immutable after construction.
 	return FieldValue{key: key, kind: fieldString, str: val}
 }
@@ -93,7 +93,7 @@ func String(key, val string) (f FieldValue) {
 //
 // Returns:
 //   - FieldValue: a well-formed FieldValue of kind int.
-func Int(key string, val int) (f FieldValue) {
+func Int(key string, val int) FieldValue {
 	//: widen to int64 so the underlying storage is width-stable.
 	return FieldValue{key: key, kind: fieldInt, num: int64(val)}
 }
@@ -109,7 +109,7 @@ func Int(key string, val int) (f FieldValue) {
 //
 // Returns:
 //   - FieldValue: a well-formed FieldValue of kind int.
-func Int64(key string, val int64) (f FieldValue) {
+func Int64(key string, val int64) FieldValue {
 	//: store the caller-supplied int64 verbatim.
 	return FieldValue{key: key, kind: fieldInt, num: val}
 }
@@ -122,7 +122,7 @@ func Int64(key string, val int64) (f FieldValue) {
 //
 // Returns:
 //   - FieldValue: a well-formed FieldValue of kind bool.
-func Bool(key string, val bool) (f FieldValue) {
+func Bool(key string, val bool) FieldValue {
 	//: bool has no base to configure — direct assignment.
 	return FieldValue{key: key, kind: fieldBool, bl: val}
 }
@@ -135,7 +135,7 @@ func Bool(key string, val bool) (f FieldValue) {
 //
 // Returns:
 //   - FieldValue: a well-formed FieldValue of kind float.
-func Float(key string, val float64) (f FieldValue) {
+func Float(key string, val float64) FieldValue {
 	//: 64-bit only — callers of float32 widen on call.
 	return FieldValue{key: key, kind: fieldFloat, fl: val}
 }
@@ -144,7 +144,7 @@ func Float(key string, val float64) (f FieldValue) {
 //
 // Returns:
 //   - string: the key chosen at construction time.
-func (f FieldValue) Key() (key string) {
+func (f FieldValue) Key() string {
 	//: direct read of the immutable struct member.
 	return f.key
 }
@@ -156,7 +156,7 @@ func (f FieldValue) Key() (key string) {
 //
 // Returns:
 //   - string: stable rendering; empty string when the FieldValue is invalid.
-func (f FieldValue) StringValue() (out string) {
+func (f FieldValue) StringValue() string {
 	//: dispatch on the private kind so unknown kinds degrade gracefully.
 	switch f.kind {
 	//: zero-value branch — Field was not built through a constructor.

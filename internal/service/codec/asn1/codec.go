@@ -22,7 +22,7 @@ type asn1Codec struct{}
 //
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
-func New() (c codec.Codec) {
+func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
@@ -31,7 +31,7 @@ func New() (c codec.Codec) {
 //
 // Returns:
 //   - string: always "asn1-der".
-func (*asn1Codec) Name() (name string) {
+func (*asn1Codec) Name() string {
 	//: canonical identifier — "-der" disambiguates from BER/CER peers.
 	return "asn1-der"
 }
@@ -40,7 +40,7 @@ func (*asn1Codec) Name() (name string) {
 //
 // Returns:
 //   - []string: canonical MIME first.
-func (*asn1Codec) MIMETypes() (mimes []string) {
+func (*asn1Codec) MIMETypes() []string {
 	//: x.509 authorities registered application/pkix-* for DER bytes.
 	return []string{"application/pkix-cert"}
 }
@@ -49,7 +49,7 @@ func (*asn1Codec) MIMETypes() (mimes []string) {
 //
 // Returns:
 //   - []string: canonical extension first.
-func (*asn1Codec) Extensions() (exts []string) {
+func (*asn1Codec) Extensions() []string {
 	//: .der for raw bytes; .cer accepted as a historical alias.
 	return []string{".der", ".cer"}
 }
@@ -60,9 +60,9 @@ func (*asn1Codec) Extensions() (exts []string) {
 //   - v: any value encoding/asn1 supports (typed struct, primitive).
 //
 // Returns:
-//   - []byte: the DER-encoded bytes.
-//   - error: MarshalFailed wrapping the stdlib cause on failure.
-func (*asn1Codec) Marshal(v any) (data []byte, err error) {
+//   - encoded: the DER-encoded bytes.
+//   - err: MarshalFailed wrapping the stdlib cause on failure.
+func (*asn1Codec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to the stdlib for the actual encoding.
 	out, merr := stdasn1.Marshal(v)
 	//: success fast-path.
@@ -92,7 +92,7 @@ func (*asn1Codec) Marshal(v any) (data []byte, err error) {
 //
 // Returns:
 //   - error: UnmarshalFailed wrapping the stdlib cause on failure.
-func (*asn1Codec) Unmarshal(data []byte, v any) (err error) {
+func (*asn1Codec) Unmarshal(data []byte, v any) error {
 	//: encoding/asn1.Unmarshal returns the remaining bytes; we ignore them
 	//: per the contract documented on the function comment.
 	_, uerr := stdasn1.Unmarshal(data, v)

@@ -22,7 +22,7 @@ type panicValue struct {
 //
 // Returns:
 //   - msg: a "panic of type <T>" rendering where T is the Go type of v.
-func (p panicValue) Error() (msg string) {
+func (p panicValue) Error() string {
 	//: expose only the Go type — the full Stringer rendering lives in Private.
 	return fmt.Sprintf("panic of type %T", p.v)
 }
@@ -60,7 +60,7 @@ func safeString(v any) (s string) {
 //
 // Returns:
 //   - name: the Go type name (e.g. "*errors.errorString", "main.myErr").
-func safeTypeName(v any) (name string) {
+func safeTypeName(v any) string {
 	//: reflection on dynamic type never invokes user code, cannot panic.
 	return fmt.Sprintf("%T", v)
 }

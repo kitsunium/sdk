@@ -31,12 +31,16 @@ var (
 // `var Codec codec.Codec = codec.Register(&jsonCodec{})`. Panics on nil
 // argument or duplicate Name / MIME / extension.
 //
+// IFACE-PLUGIN: the registry hands plug-in codec instances back to callers
+// so each domain can keep its concrete codec type unexported; the only
+// stable contract is the Codec interface itself.
+//
 // Params:
 //   - c: a fully constructed Codec instance.
 //
 // Returns:
-//   - registered: the same Codec instance, ready to be bound to a var.
-func Register(c Codec) (registered Codec) {
+//   - Codec: the same Codec instance, ready to be bound to a var.
+func Register(c Codec) Codec {
 	//: nil registration is always a programming error.
 	if c == nil {
 		//: panic so the offender is visible at boot.
@@ -94,6 +98,9 @@ func indexAliases(dst *sync.Map, aliases []string, name Format, kind string) {
 
 // Lookup returns the codec registered under f.
 //
+// IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
+// interface — concrete types are intentionally unexported per-format.
+//
 // Params:
 //   - f: the Format identifier.
 //
@@ -117,6 +124,9 @@ func Lookup(f Format) (c Codec, ok bool) {
 // LookupMIME returns the codec whose MIME list matches. MIME parameters
 // (e.g. "; charset=utf-8") are stripped before the index lookup so that
 // "application/json; charset=utf-8" resolves like "application/json".
+//
+// IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
+// interface — concrete types are intentionally unexported per-format.
 //
 // Params:
 //   - raw: the MIME header value (case-insensitive).
@@ -154,6 +164,9 @@ func LookupMIME(raw string) (c Codec, ok bool) {
 
 // LookupExt returns the codec whose extension list contains ext.
 //
+// IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
+// interface — concrete types are intentionally unexported per-format.
+//
 // Params:
 //   - ext: the file extension with its leading dot.
 //
@@ -183,9 +196,10 @@ func LookupExt(ext string) (c Codec, ok bool) {
 //
 // Returns:
 //   - []Format: sorted ascending; empty when no codec is registered.
-func Available() (formats []Format) {
+func Available() []Format {
 	//: collect every key via sync.Map.Range.
-	registry.Range(func(key, _ any) (keepGoing bool) {
+	var formats []Format
+	registry.Range(func(key, _ any) bool {
 		//: keys are always Format by construction.
 		name, _ := key.(Format)
 		formats = append(formats, name)

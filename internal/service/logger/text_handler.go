@@ -87,7 +87,7 @@ func NewTextHandler(w io.Writer, min level.Level) (h *TextHandler, err error) {
 //
 // Returns:
 //   - bool: true when r.Level is at or above the configured minimum and ctx is live.
-func (h *TextHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) (enabled bool) {
+func (h *TextHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) bool {
 	//: honour context cancellation: cancelled contexts short-circuit to disabled.
 	if ctx != nil && ctx.Err() != nil {
 		//: caller's context is already done; skip emission entirely.
@@ -105,7 +105,7 @@ func (h *TextHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) (en
 //
 // Returns:
 //   - corelogger.Handler: a new handler carrying the combined attrs.
-func (h *TextHandler) WithAttrs(attrs []corelogger.AttrValue) (child corelogger.Handler) {
+func (h *TextHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler {
 	//: copy-on-write — child must not alias the parent's attrs slice.
 	cp := make([]corelogger.AttrValue, len(h.attrs)+len(attrs))
 	//: preserve ordering: parent attrs first, then the freshly bound ones.
@@ -123,7 +123,7 @@ func (h *TextHandler) WithAttrs(attrs []corelogger.AttrValue) (child corelogger.
 //
 // Returns:
 //   - corelogger.Handler: a new handler carrying the appended group.
-func (h *TextHandler) WithGroup(name string) (child corelogger.Handler) {
+func (h *TextHandler) WithGroup(name string) corelogger.Handler {
 	//: empty group is a documented no-op so callers can pass user input.
 	if name == "" {
 		//: return the receiver unchanged — no extra wrapping.
@@ -145,7 +145,7 @@ func (h *TextHandler) WithGroup(name string) (child corelogger.Handler) {
 //
 // Returns:
 //   - error: ctx.Err() if cancelled, otherwise whatever the writer returned.
-func (h *TextHandler) Handle(ctx context.Context, r corelogger.RecordEvent) (err error) {
+func (h *TextHandler) Handle(ctx context.Context, r corelogger.RecordEvent) error {
 	//: honour context cancellation: cancelled contexts skip the write entirely.
 	if ctx != nil && ctx.Err() != nil {
 		//: wrap ctx.Err() so consumers get both our reason and stdlib Is().
@@ -174,7 +174,7 @@ func (h *TextHandler) Handle(ctx context.Context, r corelogger.RecordEvent) (err
 //
 // Returns:
 //   - []byte: the fully formatted line including the trailing newline.
-func (h *TextHandler) renderLine(b []byte, r corelogger.RecordEvent) (out []byte) {
+func (h *TextHandler) renderLine(b []byte, r corelogger.RecordEvent) []byte {
 	//: fall back to the handler clock when the caller did not timestamp.
 	if r.Time.IsZero() {
 		//: use injected clock so tests can freeze time deterministically.
@@ -207,7 +207,7 @@ func (h *TextHandler) renderLine(b []byte, r corelogger.RecordEvent) (out []byte
 //
 // Returns:
 //   - error: nil on success; WriteFailed wrapping the writer's error otherwise.
-func (h *TextHandler) writeLine(line []byte) (err error) {
+func (h *TextHandler) writeLine(line []byte) error {
 	//: serialise writes so concurrent goroutines never interleave lines.
 	h.mu.Lock()
 	_, werr := h.w.Write(line)
@@ -236,7 +236,7 @@ func (h *TextHandler) writeLine(line []byte) (err error) {
 //
 // Returns:
 //   - []byte: the potentially re-sliced buffer after append operations.
-func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) (out []byte) {
+func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) []byte {
 	//: no groups → fall back to the bare appendAttr behaviour.
 	if len(groups) == 0 {
 		//: skip the prefix construction entirely.
@@ -267,7 +267,7 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) (
 //
 // Returns:
 //   - []byte: the potentially re-sliced buffer after append operations.
-func appendValueOnly(dst []byte, a corelogger.AttrValue) (out []byte) {
+func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 	//: dispatch on the typed Kind discriminant — same table as appendAttr.
 	switch a.Value.Kind() {
 	//: strings are quoted so whitespace in values remains visible.
@@ -301,7 +301,7 @@ func appendValueOnly(dst []byte, a corelogger.AttrValue) (out []byte) {
 //
 // Returns:
 //   - []byte: the potentially re-sliced buffer after append operations.
-func appendAttr(dst []byte, a corelogger.AttrValue) (out []byte) {
+func appendAttr(dst []byte, a corelogger.AttrValue) []byte {
 	//: separator between message and first attr, and between consecutive attrs.
 	dst = append(dst, ' ')
 	dst = append(dst, a.Key...)

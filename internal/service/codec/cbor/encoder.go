@@ -19,7 +19,7 @@ type cborEncoder struct {
 //
 // Returns:
 //   - error: MarshalFailed wrapping the library cause on failure.
-func (e *cborEncoder) Encode(v any) (err error) {
+func (e *cborEncoder) Encode(v any) error {
 	//: delegate and wrap on error.
 	cerr := e.inner.Encode(v)
 	//: success fast-path.
@@ -40,7 +40,7 @@ func (e *cborEncoder) Encode(v any) (err error) {
 //
 // Returns:
 //   - error: always nil.
-func (*cborEncoder) Close() (err error) {
+func (*cborEncoder) Close() error {
 	//: fxamacker's encoder owns no writer-level state.
 	return nil
 }

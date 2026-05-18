@@ -43,7 +43,7 @@ type yamlCodec struct{}
 //
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
-func New() (c codec.Codec) {
+func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
@@ -52,7 +52,7 @@ func New() (c codec.Codec) {
 //
 // Returns:
 //   - string: always "yaml".
-func (*yamlCodec) Name() (name string) {
+func (*yamlCodec) Name() string {
 	//: canonical identifier.
 	return "yaml"
 }
@@ -61,7 +61,7 @@ func (*yamlCodec) Name() (name string) {
 //
 // Returns:
 //   - []string: canonical MIME first.
-func (*yamlCodec) MIMETypes() (mimes []string) {
+func (*yamlCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
@@ -70,7 +70,7 @@ func (*yamlCodec) MIMETypes() (mimes []string) {
 //
 // Returns:
 //   - []string: canonical extension first.
-func (*yamlCodec) Extensions() (exts []string) {
+func (*yamlCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
@@ -83,7 +83,7 @@ func (*yamlCodec) Extensions() (exts []string) {
 // Returns:
 //   - []byte: the encoded YAML document.
 //   - error: MarshalFailed wrapping the yaml.v3 cause on failure.
-func (*yamlCodec) Marshal(v any) (data []byte, err error) {
+func (*yamlCodec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to yaml.v3 for the actual encoding.
 	out, merr := goyaml.Marshal(v)
 	//: success fast-path.
@@ -108,7 +108,7 @@ func (*yamlCodec) Marshal(v any) (data []byte, err error) {
 //
 // Returns:
 //   - error: UnmarshalFailed wrapping the yaml.v3 cause on failure.
-func (*yamlCodec) Unmarshal(data []byte, v any) (err error) {
+func (*yamlCodec) Unmarshal(data []byte, v any) error {
 	//: cap input size so attacker-controlled payloads cannot exhaust RAM
 	//: during parsing (finding #15 — yaml.v3 alias bomb is library-capped
 	//: but there is no upstream size limit; 10 MiB is the safe default).
@@ -144,7 +144,7 @@ func (*yamlCodec) Unmarshal(data []byte, v any) (err error) {
 //
 // Returns:
 //   - codec.Encoder: a streaming YAML encoder bound to w.
-func (*yamlCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
+func (*yamlCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the yaml.v3 encoder to expose our Close contract.
 	return &yamlEncoder{inner: goyaml.NewEncoder(w)}
 }
@@ -156,7 +156,7 @@ func (*yamlCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
 //
 // Returns:
 //   - codec.Decoder: a streaming YAML decoder bound to r.
-func (*yamlCodec) NewDecoder(r io.Reader) (dec codec.Decoder) {
+func (*yamlCodec) NewDecoder(r io.Reader) codec.Decoder {
 	//: wrap the yaml.v3 decoder to expose More on our interface.
 	return &yamlDecoder{inner: goyaml.NewDecoder(r)}
 }

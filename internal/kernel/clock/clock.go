@@ -20,7 +20,7 @@ type systemClock struct{}
 //
 // Returns:
 //   - time.Time: the current time as reported by time.Now.
-func (systemClock) Now() (now time.Time) {
+func (systemClock) Now() time.Time {
 	//: delegate to the standard library so the OS provides the timestamp.
 	return time.Now()
 }
@@ -32,10 +32,12 @@ func (systemClock) Now() (now time.Time) {
 //
 // Returns:
 //   - time.Duration: Now().Sub(t).
-func (systemClock) Since(t time.Time) (d time.Duration) {
+func (systemClock) Since(t time.Time) time.Duration {
 	//: delegate to the standard library for monotonic-aware subtraction.
 	return time.Since(t)
 }
 
-// System is the default Clock using the package time wall clock.
-var System Clock = systemClock{}
+var (
+	// System is the default Clock using the package time wall clock.
+	System Clock = systemClock{}
+)

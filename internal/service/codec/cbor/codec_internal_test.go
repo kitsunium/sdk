@@ -149,6 +149,31 @@ func Test_cborCodec_NewEncoder(t *testing.T) {
 	}
 }
 
+// Test_mustHardenedDecMode covers the hardened DecMode constructor: the
+// returned mode must be non-nil so every cborCodec.Unmarshal call has a
+// usable decoder. The defensive panic branch is not exercised here
+// because DecOptions.DecMode() does not fail for the caps we set.
+func Test_mustHardenedDecMode(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"returns non-nil hardened DecMode"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		mode := mustHardenedDecMode()
+		if mode == nil {
+			t.Errorf("%s: mustHardenedDecMode returned nil", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // Test_cborCodec_NewDecoder covers the streaming decoder constructor.
 func Test_cborCodec_NewDecoder(t *testing.T) {
 	t.Parallel()

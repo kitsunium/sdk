@@ -16,24 +16,70 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Encoding identifies one of the supported byte encodings.
-type Encoding string
+// Encoding identifies one of the supported byte encodings. Encoded as a
+// typed int with iota (KTN-CONST-STRENUM) so consumers compare by identity
+// rather than by string, and the compiler catches typos at call sites.
+type Encoding int
 
-// Known encodings. String values are part of the public contract.
+// Known encodings. The numeric values are stable across releases — new
+// encodings MUST be appended at the end of the iota block.
 const (
+	// EncodingUnknown is the zero value; reserved as the invalid sentinel.
+	EncodingUnknown Encoding = iota
 	// Base64Std uses the RFC 4648 standard alphabet with padding.
-	Base64Std Encoding = "base64"
+	Base64Std
 	// Base64URL uses the RFC 4648 URL-safe alphabet with padding.
-	Base64URL Encoding = "base64url"
+	Base64URL
 	// Base32Std uses the RFC 4648 standard alphabet with padding.
-	Base32Std Encoding = "base32"
+	Base32Std
 	// Base32Hex uses the RFC 4648 "extended hex" alphabet with padding.
-	Base32Hex Encoding = "base32hex"
+	Base32Hex
 	// Base16Hex uses lowercase hexadecimal encoding.
-	Base16Hex Encoding = "hex"
+	Base16Hex
 	// ASCII85 uses Adobe's Ascii85 encoding.
-	ASCII85 Encoding = "ascii85"
+	ASCII85
 )
+
+// String implements fmt.Stringer for Encoding, returning the canonical
+// short name used in diagnostics.
+//
+// Returns:
+//   - string: the canonical name ("base64", "base64url", ...), or "unknown".
+func (e Encoding) String() string {
+	//: dispatch on the enum value so the textual form stays stable.
+	switch e {
+	//: zero value sentinel — explicit so KTN-SWITCH-EXHAUSTIVE stays quiet.
+	case EncodingUnknown:
+		//: documented "unknown" form mirrors the out-of-range fallback.
+		return "unknown"
+	//: standard base64 with padding.
+	case Base64Std:
+		//: canonical short name.
+		return "base64"
+	//: URL-safe base64.
+	case Base64URL:
+		//: canonical short name.
+		return "base64url"
+	//: standard base32.
+	case Base32Std:
+		//: canonical short name.
+		return "base32"
+	//: extended-hex base32.
+	case Base32Hex:
+		//: canonical short name.
+		return "base32hex"
+	//: lowercase hex.
+	case Base16Hex:
+		//: canonical short name.
+		return "hex"
+	//: ASCII85.
+	case ASCII85:
+		//: canonical short name.
+		return "ascii85"
+	}
+	//: out-of-range Encoding values fall through to the "unknown" form.
+	return "unknown"
+}
 
 // Encode encodes raw into text using the given Encoding.
 //
@@ -47,6 +93,10 @@ const (
 func Encode(e Encoding, raw []byte) (text string, err error) {
 	//: branch on the encoding identifier.
 	switch e {
+	//: zero value sentinel — explicit so KTN-SWITCH-EXHAUSTIVE stays quiet
+	//: while still funnelling into the INVALID_ENCODING failure path.
+	case EncodingUnknown:
+		//: fall through to the typed facade error below.
 	//: standard base64 with padding.
 	case Base64Std:
 		//: delegate to the stdlib.
@@ -77,7 +127,7 @@ func Encode(e Encoding, raw []byte) (text string, err error) {
 		Code:    CodeInvalidEncoding,
 		Reason:  "INVALID_ENCODING",
 		Public:  "baseenc encoding is not supported",
-		Private: "pkg/v1/codec/baseenc.Encode: unknown Encoding " + string(e),
+		Private: "pkg/v1/codec/baseenc.Encode: unknown Encoding " + e.String(),
 	})
 }
 
@@ -94,6 +144,10 @@ func Encode(e Encoding, raw []byte) (text string, err error) {
 func Decode(e Encoding, text string) (raw []byte, err error) {
 	//: branch on the encoding identifier.
 	switch e {
+	//: zero value sentinel — explicit so KTN-SWITCH-EXHAUSTIVE stays quiet
+	//: while still funnelling into the INVALID_ENCODING failure path.
+	case EncodingUnknown:
+		//: fall through to the typed facade error below.
 	//: standard base64 with padding.
 	case Base64Std:
 		//: delegate and wrap stdlib errors.
@@ -124,7 +178,7 @@ func Decode(e Encoding, text string) (raw []byte, err error) {
 		Code:    CodeInvalidEncoding,
 		Reason:  "INVALID_ENCODING",
 		Public:  "baseenc encoding is not supported",
-		Private: "pkg/v1/codec/baseenc.Decode: unknown Encoding " + string(e),
+		Private: "pkg/v1/codec/baseenc.Decode: unknown Encoding " + e.String(),
 	})
 }
 
@@ -167,7 +221,7 @@ func encodeASCII85(raw []byte) (text string, err error) {
 //
 // Returns:
 //   - error: EncodeFailed-wrapped error.
-func wrapASCII85Encode(cause error) (err error) {
+func wrapASCII85Encode(cause error) error {
 	//: single construction site keeps the Private message aligned.
 	return errs.Wrap(cause, errs.WrapParams{
 		Code:    CodeEncodeFailed,

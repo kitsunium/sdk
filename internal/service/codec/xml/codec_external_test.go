@@ -147,7 +147,10 @@ func TestNewDecoder(t *testing.T) {
 		data    []byte
 		wantErr string
 	}
-	good, _ := xml.New().Marshal(sampleDoc{ID: "x"})
+	good, merr := xml.New().Marshal(sampleDoc{ID: "x"})
+	if merr != nil {
+		t.Fatalf("Marshal setup err=%v", merr)
+	}
 	tests := []tc{
 		{"decodes a valid record", good, ""},
 		{"corrupt input surfaces UNMARSHAL_FAILED", []byte("<sampleDoc"), "UNMARSHAL_FAILED"},
@@ -197,19 +200,40 @@ func TestUnmarshal_BillionLaughsBounded(t *testing.T) {
 		`<!ENTITY lol5 "&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;">` +
 		`]>` +
 		`<sampleDoc id="&lol5;"/>`)
-	var v sampleDoc
-	//: Go 1.21+ refuses external DTD and bounds internal entity expansion;
-	//: either an error OR a bounded (non-explosive) parse is acceptable.
-	//: What MUST NOT happen is OOM / hang — that's the regression guard.
-	err := xml.New().Unmarshal(bomb, &v)
-	//: stdlib behaviour on Go 1.21+: entity expansion caps at ~64 KiB per
-	//: token; this particular shape errors with "XML syntax error" or
-	//: returns with v.ID truncated. Both are acceptable; we only assert
-	//: the parse terminated without panic / OOM, signalled by reaching here.
-	_ = err
-	//: double-check: if it did succeed, the result must not be astronomical.
-	if len(v.ID) > 1<<20 {
-		t.Errorf("entity expansion produced a %d-byte ID; cap expected ~64KiB", len(v.ID))
+	//: maxExpandedBytes caps the acceptable size of any expanded attribute —
+	//: well above stdlib's ~64 KiB internal cap so a legitimate hardened
+	//: parse passes, but far below the ~10^9 explosion a vulnerable parser
+	//: would produce. The boundary is the actual regression guard.
+	const maxExpandedBytes int = 1 << 20
+	type tc struct {
+		name    string
+		payload []byte
+	}
+	tests := []tc{
+		{"billion-laughs entity bomb is bounded", bomb},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		var v sampleDoc
+		//: Go 1.21+ refuses external DTD and bounds internal entity expansion;
+		//: either an error OR a bounded (non-explosive) parse is acceptable.
+		//: What MUST NOT happen is OOM / hang — reaching here proves both.
+		err := xml.New().Unmarshal(tc.payload, &v)
+		//: structural contract: a successful parse MUST yield bounded output.
+		//: an erroring parse MUST yield the zero value for ID (stdlib never
+		//: partially populates on failure).
+		if err == nil && len(v.ID) > maxExpandedBytes {
+			t.Errorf("%s: expansion produced %d-byte ID; cap %d", tc.name, len(v.ID), maxExpandedBytes)
+		}
+		if err != nil && v.ID != "" {
+			t.Errorf("%s: error path leaked partial ID=%q", tc.name, v.ID)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 

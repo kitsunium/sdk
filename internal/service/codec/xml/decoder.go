@@ -27,7 +27,7 @@ type xmlDecoder struct {
 // Returns:
 //   - error: UnmarshalFailed wrapping the stdlib cause on failure; io.EOF
 //     (unwrapped) once the stream is drained; nil otherwise.
-func (d *xmlDecoder) Decode(v any) (err error) {
+func (d *xmlDecoder) Decode(v any) error {
 	//: drained latch short-circuits additional reads.
 	if d.done {
 		//: mirror stdlib stream semantics.
@@ -60,7 +60,7 @@ func (d *xmlDecoder) Decode(v any) (err error) {
 //
 // Returns:
 //   - bool: false once Decode has returned io.EOF.
-func (d *xmlDecoder) More() (ok bool) {
+func (d *xmlDecoder) More() bool {
 	//: reflect the sticky EOF latch — no token consumed.
 	return !d.done
 }

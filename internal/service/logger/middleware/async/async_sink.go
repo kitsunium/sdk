@@ -88,7 +88,7 @@ type asyncSink struct {
 //
 // Returns:
 //   - corelogger.Sink: a ready-to-use async Sink behind the public interface.
-func New(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink) {
+func New(downstream corelogger.Sink, cfg Config) corelogger.Sink {
 	//: pre-validate the buffer size; non-positive falls back to the default.
 	size := cfg.BufferSize
 	//: documented default keeps callers from having to think about sizing.
@@ -142,7 +142,7 @@ func New(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink) {
 //
 // Returns:
 //   - ring.Queue[*recordEntry]: a ready-to-use ring of the requested capacity.
-func mustNewRing(size int) (out ring.Queue[*recordEntry]) {
+func mustNewRing(size int) ring.Queue[*recordEntry] {
 	//: positive size never fails ring.New per its documented contract.
 	queue, err := ring.New[*recordEntry](size)
 	//: the documented unreachable branch surfaces a panic if the contract slips.
@@ -266,7 +266,7 @@ func (s *asyncSink) handleFull(ent *recordEntry) (n int, err error) {
 //
 // Returns:
 //   - err: ctx.Err() on cancellation; nil once the queue is empty.
-func (s *asyncSink) Flush(ctx context.Context) (err error) {
+func (s *asyncSink) Flush(ctx context.Context) error {
 	//: wait for the drainer to signal progress instead of Gosched-spinning
 	//: (finding #22). Each forward() wakes us via flushSignal; we re-check
 	//: queue.Len() under ringMu and either exit or wait again.
@@ -290,21 +290,50 @@ func (s *asyncSink) Flush(ctx context.Context) (err error) {
 				Private: "service/logger/middleware/async.Flush saw a cancelled context",
 			})
 		}
-		//: block until the drainer processes another entry — OR ctx is
-		//: cancelled. A nil ctx means the caller has opted into an
-		//: indefinite wait (legacy semantics); the plain receive blocks.
-		if ctx == nil {
-			//: no cancellation channel — block on the drainer signal alone.
-			<-s.flushSignal
-			continue
+		//: wait for drainer progress or cancellation; helper returns false
+		//: when the flushSignal was closed so the loop can surface a typed
+		//: error instead of busy-spinning (KTN-GOROUTINE-CHANRECV-OK).
+		if !s.waitForDrainerProgress(ctx) {
+			//: flushSignal closed — surface a typed cancellation wrap so
+			//: callers do not silently observe an indefinite spin.
+			return errs.Wrap(ctx.Err(), errs.WrapParams{
+				Code:    CodeAsyncCtxCancelled,
+				Reason:  "ASYNC_CTX_CANCELLED",
+				Public:  "Async sink flush aborted due to channel close",
+				Private: "service/logger/middleware/async.Flush observed flushSignal closed",
+			})
 		}
-		//: cancellation-aware wait — whichever channel fires first wins.
-		select {
-		case <-s.flushSignal:
-			//: drainer processed an entry; loop to re-check the queue.
-		case <-ctx.Done():
-			//: next iteration picks up ctx.Err() and returns the wrap.
-		}
+	}
+}
+
+// waitForDrainerProgress blocks until the drainer signals progress on
+// flushSignal OR ctx is cancelled. Returns false when flushSignal was
+// reported closed (a misuse signal the caller surfaces as a typed wrap)
+// so Flush cannot loop forever on a closed channel.
+//
+// Params:
+//   - ctx: request-scoped context; cancellation breaks the wait.
+//
+// Returns:
+//   - ok: false when flushSignal was closed; true otherwise.
+func (s *asyncSink) waitForDrainerProgress(ctx context.Context) bool {
+	//: a nil ctx means the caller has opted into an indefinite wait — block
+	//: on the drainer signal alone with comma-ok so a closed channel does
+	//: not turn into a CPU hot-spin (KTN-GOROUTINE-CHANRECV-OK).
+	if ctx == nil {
+		//: pure flushSignal wait — comma-ok form documents the contract.
+		_, sigOK := <-s.flushSignal
+		//: propagate the closed-channel signal to the caller.
+		return sigOK
+	}
+	//: cancellation-aware wait — whichever channel fires first wins.
+	select {
+	case _, sigOK := <-s.flushSignal:
+		//: drainer signal observed; closed channel surfaces via ok=false.
+		return sigOK
+	case <-ctx.Done():
+		//: cancellation — loop body picks up ctx.Err() and returns wrap.
+		return true
 	}
 }
 
@@ -314,7 +343,7 @@ func (s *asyncSink) Flush(ctx context.Context) (err error) {
 //
 // Returns:
 //   - err: downstream Close error; nil on unanimous success.
-func (s *asyncSink) Close() (err error) {
+func (s *asyncSink) Close() error {
 	//: acquire ringMu: hard join point with every in-flight Write. When
 	//: Lock returns, no Write is mid-[isClosed .. TryWrite]; subsequent
 	//: Writes observe isClosed(stop) under ringMu after our close(stop)

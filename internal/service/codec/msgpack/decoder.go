@@ -24,7 +24,7 @@ type msgpackDecoder struct {
 //
 // Returns:
 //   - error: UnmarshalFailed on failure, io.EOF when the stream is drained.
-func (d *msgpackDecoder) Decode(v any) (err error) {
+func (d *msgpackDecoder) Decode(v any) error {
 	//: delegate to the library.
 	derr := d.inner.Decode(v)
 	//: EOF latch toggles the done flag.
@@ -54,7 +54,7 @@ func (d *msgpackDecoder) Decode(v any) (err error) {
 //
 // Returns:
 //   - bool: false once Decode has returned io.EOF.
-func (d *msgpackDecoder) More() (ok bool) {
+func (d *msgpackDecoder) More() bool {
 	//: reflect the sticky EOF latch.
 	return !d.done
 }

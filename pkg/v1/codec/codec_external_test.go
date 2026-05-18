@@ -65,7 +65,10 @@ func TestUnmarshal(t *testing.T) {
 		wantErr string
 	}
 	//: produce a JSON payload we can successfully decode in the happy case.
-	jsonPayload, _ := codec.Marshal(codec.JSON, event{Name: "ping", Count: 3})
+	jsonPayload, mErr := codec.Marshal(codec.JSON, event{Name: "ping", Count: 3})
+	if mErr != nil {
+		t.Fatalf("seed Marshal err = %v", mErr)
+	}
 	tests := []tc{
 		{"json success", codec.JSON, jsonPayload, ""},
 		{"unknown format", codec.Format("nope"), []byte("1"), "UNKNOWN_FORMAT"},

@@ -32,7 +32,7 @@ type xmlCodec struct{}
 //
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
-func New() (c codec.Codec) {
+func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
@@ -41,7 +41,7 @@ func New() (c codec.Codec) {
 //
 // Returns:
 //   - string: always "xml".
-func (*xmlCodec) Name() (name string) {
+func (*xmlCodec) Name() string {
 	//: canonical identifier.
 	return "xml"
 }
@@ -50,7 +50,7 @@ func (*xmlCodec) Name() (name string) {
 //
 // Returns:
 //   - []string: canonical MIME first.
-func (*xmlCodec) MIMETypes() (mimes []string) {
+func (*xmlCodec) MIMETypes() []string {
 	//: return a copy so callers cannot mutate the shared slice.
 	return slices.Clone(mimeTypes)
 }
@@ -59,7 +59,7 @@ func (*xmlCodec) MIMETypes() (mimes []string) {
 //
 // Returns:
 //   - []string: canonical extension first.
-func (*xmlCodec) Extensions() (exts []string) {
+func (*xmlCodec) Extensions() []string {
 	//: return a copy so callers cannot mutate the shared slice.
 	return slices.Clone(extensions)
 }
@@ -72,7 +72,7 @@ func (*xmlCodec) Extensions() (exts []string) {
 // Returns:
 //   - []byte: encoded XML.
 //   - error: MarshalFailed wrapping the stdlib cause on failure.
-func (*xmlCodec) Marshal(v any) (data []byte, err error) {
+func (*xmlCodec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate.
 	out, xerr := stdxml.Marshal(v)
 	//: success fast-path.
@@ -97,7 +97,7 @@ func (*xmlCodec) Marshal(v any) (data []byte, err error) {
 //
 // Returns:
 //   - error: UnmarshalFailed wrapping the stdlib cause on failure.
-func (*xmlCodec) Unmarshal(data []byte, v any) (err error) {
+func (*xmlCodec) Unmarshal(data []byte, v any) error {
 	//: delegate.
 	xerr := stdxml.Unmarshal(data, v)
 	//: success fast-path.
@@ -121,7 +121,7 @@ func (*xmlCodec) Unmarshal(data []byte, v any) (err error) {
 //
 // Returns:
 //   - codec.Encoder: a streaming XML encoder bound to w.
-func (*xmlCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
+func (*xmlCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the stdlib encoder.
 	return &xmlEncoder{inner: stdxml.NewEncoder(w)}
 }
@@ -133,7 +133,7 @@ func (*xmlCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
 //
 // Returns:
 //   - codec.Decoder: a streaming XML decoder bound to r.
-func (*xmlCodec) NewDecoder(r io.Reader) (dec codec.Decoder) {
+func (*xmlCodec) NewDecoder(r io.Reader) codec.Decoder {
 	//: wrap the stdlib decoder.
 	return &xmlDecoder{inner: stdxml.NewDecoder(r)}
 }

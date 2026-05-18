@@ -72,7 +72,10 @@ func TestMarshal(t *testing.T) {
 func TestUnmarshal(t *testing.T) {
 	t.Parallel()
 	in := &stdpem.Block{Type: "TEST", Bytes: []byte("hello world")}
-	encoded, _ := pem.New().Marshal(in)
+	encoded, merr := pem.New().Marshal(in)
+	if merr != nil {
+		t.Fatalf("Marshal setup err=%v", merr)
+	}
 	type tc struct {
 		name    string
 		data    []byte

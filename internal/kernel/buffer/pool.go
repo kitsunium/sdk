@@ -35,12 +35,16 @@ type objectBucket[T any] struct {
 // invoked exactly once per cache miss; its result is stored back in the pool
 // when Put is called for the corresponding Get.
 //
+// IFACE-PLUGIN: callers receive a Recycler[T] handle so the kernel can swap
+// the backing implementation (sync.Pool today, sharded buckets tomorrow)
+// without breaking call-site code; the concrete bucket type is unexported.
+//
 // Params:
 //   - newFn: factory called on a cache miss; nil rejects the construction.
 //
 // Returns:
 //   - Recycler[T]: a ready-to-use typed pool, or nil when newFn is nil.
-func NewRecycler[T any](newFn func() T) (out Recycler[T]) {
+func NewRecycler[T any](newFn func() T) Recycler[T] {
 	//: refuse a nil factory — sync.Pool.Get would panic on cache miss otherwise.
 	if newFn == nil {
 		//: documented contract: caller must supply a factory.
@@ -62,7 +66,7 @@ func NewRecycler[T any](newFn func() T) (out Recycler[T]) {
 //
 // Returns:
 //   - T: a value previously Put into the bucket, or freshly created via newFn.
-func (b *objectBucket[T]) Get() (v T) {
+func (b *objectBucket[T]) Get() T {
 	//: ask sync.Pool for any cached value; New fires on miss to satisfy the call.
 	raw := b.p.Get()
 	//: comma-ok defends against the (impossible-by-contract) wrong-type case.

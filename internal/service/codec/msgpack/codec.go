@@ -42,7 +42,7 @@ type msgpackCodec struct{}
 //
 // Returns:
 //   - codec.Codec: a fresh stateless codec.
-func New() (c codec.Codec) {
+func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
@@ -51,7 +51,7 @@ func New() (c codec.Codec) {
 //
 // Returns:
 //   - string: always "msgpack".
-func (*msgpackCodec) Name() (name string) {
+func (*msgpackCodec) Name() string {
 	//: canonical identifier.
 	return "msgpack"
 }
@@ -60,7 +60,7 @@ func (*msgpackCodec) Name() (name string) {
 //
 // Returns:
 //   - []string: canonical MIME first.
-func (*msgpackCodec) MIMETypes() (mimes []string) {
+func (*msgpackCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
@@ -69,7 +69,7 @@ func (*msgpackCodec) MIMETypes() (mimes []string) {
 //
 // Returns:
 //   - []string: canonical extension first.
-func (*msgpackCodec) Extensions() (exts []string) {
+func (*msgpackCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
@@ -80,9 +80,9 @@ func (*msgpackCodec) Extensions() (exts []string) {
 //   - v: value vmihailenco/msgpack/v5 supports.
 //
 // Returns:
-//   - []byte: the encoded MessagePack bytes.
-//   - error: MarshalFailed wrapping the library cause on failure.
-func (*msgpackCodec) Marshal(v any) (data []byte, err error) {
+//   - encoded: the encoded MessagePack bytes.
+//   - err: MarshalFailed wrapping the library cause on failure.
+func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to the library for the actual encoding.
 	out, merr := gomsgpack.Marshal(v)
 	//: success fast-path.
@@ -107,7 +107,7 @@ func (*msgpackCodec) Marshal(v any) (data []byte, err error) {
 //
 // Returns:
 //   - error: UnmarshalFailed wrapping the library cause on failure.
-func (*msgpackCodec) Unmarshal(data []byte, v any) (err error) {
+func (*msgpackCodec) Unmarshal(data []byte, v any) error {
 	//: cap input size so attacker-controlled payloads cannot exhaust RAM
 	//: during pre-allocation from huge declared length fields (finding #17).
 	if len(data) > maxMsgPackBytes {
@@ -142,7 +142,7 @@ func (*msgpackCodec) Unmarshal(data []byte, v any) (err error) {
 //
 // Returns:
 //   - codec.Encoder: a streaming MessagePack encoder bound to w.
-func (*msgpackCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
+func (*msgpackCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the vmihailenco encoder.
 	return &msgpackEncoder{inner: gomsgpack.NewEncoder(w)}
 }
@@ -154,7 +154,7 @@ func (*msgpackCodec) NewEncoder(w io.Writer) (enc codec.Encoder) {
 //
 // Returns:
 //   - codec.Decoder: a streaming MessagePack decoder bound to r.
-func (*msgpackCodec) NewDecoder(r io.Reader) (dec codec.Decoder) {
+func (*msgpackCodec) NewDecoder(r io.Reader) codec.Decoder {
 	//: wrap the vmihailenco decoder.
 	return &msgpackDecoder{inner: gomsgpack.NewDecoder(r)}
 }

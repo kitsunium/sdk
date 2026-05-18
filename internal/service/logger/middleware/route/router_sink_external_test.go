@@ -38,13 +38,25 @@ func TestNew(t *testing.T) {
 			t.Parallel()
 			warnSink := &recordingSink{}
 			fallback := &recordingSink{}
-			r := route.New(fallback, route.RouteParams{
+			r := route.New(fallback, route.Params{
 				When: route.LevelAtLeast(level.Warn),
 				Sink: warnSink,
 			})
-			//: skip nil entries via incomplete RouteParams — exercises the drop branch.
-			r2 := route.New(fallback, route.RouteParams{When: nil, Sink: warnSink})
-			_ = r2
+			//: incomplete Params is silently skipped — asserting via the
+			//: fallback hit count proves the entry was dropped (no match
+			//: ⇒ fallback receives the write).
+			incompleteSink := &recordingSink{}
+			incompleteFallback := &recordingSink{}
+			rIncomplete := route.New(incompleteFallback, route.Params{When: nil, Sink: warnSink})
+			if _, err := rIncomplete.Write(t.Context(), corelogger.RecordEvent{Level: level.Warn}, []byte("y")); err != nil {
+				t.Errorf("incomplete Params Write err = %v", err)
+			}
+			if incompleteFallback.writes.Load() != 1 {
+				t.Errorf("incomplete Params: fallback writes = %d, want 1", incompleteFallback.writes.Load())
+			}
+			if incompleteSink.writes.Load() != 0 {
+				t.Errorf("incomplete Params: warnSink should not have received writes via rIncomplete")
+			}
 			rec := corelogger.RecordEvent{Level: tc.recLevel}
 			if _, err := r.Write(t.Context(), rec, []byte("x")); err != nil {
 				t.Errorf("Write err = %v", err)
@@ -94,7 +106,7 @@ func TestRouter_FlushAndClose(t *testing.T) {
 			t.Parallel()
 			a := &recordingSink{}
 			b := &recordingSink{}
-			r := route.New(b, route.RouteParams{When: route.LevelAtLeast(level.Error), Sink: a})
+			r := route.New(b, route.Params{When: route.LevelAtLeast(level.Error), Sink: a})
 			if err := r.Flush(t.Context()); err != nil {
 				t.Errorf("Flush err = %v", err)
 			}
