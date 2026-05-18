@@ -12,9 +12,11 @@ import "slices"
 // *Error with a full trail: 16 * 4 bytes = 64 bytes, negligible.
 const maxTrailLen int = 16
 
-// trailReserveTail is the number of pre-existing trail entries we keep in
-// addition to the origin and the newest entry when an overflow truncates
-// the trail. Sized so the truncated slice still fits in maxTrailLen.
+// trailReserveTail is subtracted from maxTrailLen to compute how many tail
+// entries to preserve on overflow truncation: preservedTail = maxTrailLen -
+// trailReserveTail. The two reserved slots account for the origin (kept at
+// index 0) and the newest entry being appended, so the final slice
+// origin + preservedTail + newest fits within maxTrailLen.
 const trailReserveTail int = 2
 
 // appendTrail returns the new trail slice and whether truncation occurred.

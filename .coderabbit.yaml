@@ -11,8 +11,6 @@ reviews:
   sequence_diagrams: false
 
   path_filters:
-    - "!**/BUILD.bazel"
-    - "!**/MODULE.bazel"
     - "!**/MODULE.bazel.lock"
     - "!**/go.sum"
     - "!**/*.pb.go"

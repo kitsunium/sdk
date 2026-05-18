@@ -47,7 +47,7 @@ func TestNew(t *testing.T) {
 			//: ⇒ fallback receives the write).
 			incompleteSink := &recordingSink{}
 			incompleteFallback := &recordingSink{}
-			rIncomplete := route.New(incompleteFallback, route.Params{When: nil, Sink: warnSink})
+			rIncomplete := route.New(incompleteFallback, route.Params{When: nil, Sink: incompleteSink})
 			if _, err := rIncomplete.Write(t.Context(), corelogger.RecordEvent{Level: level.Warn}, []byte("y")); err != nil {
 				t.Errorf("incomplete Params Write err = %v", err)
 			}
@@ -55,7 +55,7 @@ func TestNew(t *testing.T) {
 				t.Errorf("incomplete Params: fallback writes = %d, want 1", incompleteFallback.writes.Load())
 			}
 			if incompleteSink.writes.Load() != 0 {
-				t.Errorf("incomplete Params: warnSink should not have received writes via rIncomplete")
+				t.Errorf("incomplete Params: incompleteSink should not have received writes via rIncomplete")
 			}
 			rec := corelogger.RecordEvent{Level: tc.recLevel}
 			if _, err := r.Write(t.Context(), rec, []byte("x")); err != nil {

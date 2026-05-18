@@ -117,8 +117,11 @@ func Test_newFromStdlibCause_FieldsCopy(t *testing.T) {
 			}, original)
 			original[0] = String("mutated", "mutated")
 			again := built.Fields()
-			if len(again) != 1 || again[0].Key() != "k" {
-				t.Errorf("defensive Clone failed: got Key=%q", again[0].Key())
+			if len(again) != 1 {
+				t.Fatalf("defensive Clone failed: got len=%d, want 1", len(again))
+			}
+			if again[0].Key() != "k" {
+				t.Errorf("defensive Clone failed: got Key=%q, want %q", again[0].Key(), "k")
 			}
 		})
 	}

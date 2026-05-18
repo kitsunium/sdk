@@ -259,13 +259,19 @@ func (s *asyncSink) handleFull(ent *recordEntry) (n int, err error) {
 	return 0, BufferFull
 }
 
-// Flush blocks until the queue has drained or ctx is cancelled.
+// Flush blocks until the queue has drained or ctx is cancelled. Supports
+// ctx == nil (legacy wait-forever semantics, observed via
+// waitForDrainerProgress).
 //
 // Params:
-//   - ctx: request-scoped context; cancellation aborts the wait.
+//   - ctx: request-scoped context; cancellation aborts the wait. May be nil
+//     to opt into an indefinite wait keyed only on drainer progress.
 //
 // Returns:
-//   - err: ctx.Err() on cancellation; nil once the queue is empty.
+//   - err: nil once the queue is empty; an *errs.Error wrapping ctx.Err() on
+//     cancellation; the typed Stopped sentinel when the drainer has exited
+//     (flushSignal closed) — Stopped is not a cancellation event and is safe
+//     to observe under a nil ctx.
 func (s *asyncSink) Flush(ctx context.Context) error {
 	//: wait for the drainer to signal progress instead of Gosched-spinning
 	//: (finding #22). Each forward() wakes us via flushSignal; we re-check

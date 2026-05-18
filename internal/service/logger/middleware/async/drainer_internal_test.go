@@ -84,12 +84,13 @@ func Test_asyncSink_drain(t *testing.T) {
 			if got := down.writes.Load(); got != int64(tc.n) {
 				t.Errorf("downstream writes = %d, want %d", got, tc.n)
 			}
-			//: drive the drainRemaining branch: enqueue directly into the
-			//: ring AFTER Close has signalled stop. The drainer's terminal
-			//: drainRemaining must flush these even though Write would now
-			//: reject them.
+			//: drive the drainRemaining branch deterministically: hold ringMu,
+			//: close stop, enqueue, release the lock, then wait for done.
+			//: This guarantees the drainer's main loop cannot consume the
+			//: primed entries before drainRemaining sees them.
 			if tc.postCloseEnqueue > 0 {
 				s.ringMu.Lock()
+				close(s.stop)
 				for range tc.postCloseEnqueue {
 					ent := s.pool.Get()
 					ent.rec = rec
@@ -100,8 +101,10 @@ func Test_asyncSink_drain(t *testing.T) {
 					}
 				}
 				s.ringMu.Unlock()
-			}
-			if err := s.Close(); err != nil {
+				//: drainer's terminal exit closes s.done; wait so all
+				//: post-stop entries have been forwarded before asserting.
+				<-s.done
+			} else if err := s.Close(); err != nil {
 				t.Errorf("Close err = %v", err)
 			}
 			//: after Close every queued entry (pre- or post-stop) must have
