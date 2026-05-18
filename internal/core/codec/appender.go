@@ -1,4 +1,4 @@
-// Package codec: appender.go declares the optional Appender extension that
+// Package codec — declares the optional Appender extension that
 // hot-path encoders (NDJSON, JSON, text) implement so callers can write into
 // a caller-supplied buffer without paying for an intermediate allocation.
 //
@@ -25,13 +25,5 @@ type Appender interface {
 	Codec
 	// Append encodes v and appends the bytes onto dst. The returned slice
 	// MUST contain the prior contents of dst followed by the encoded form.
-	//
-	// Params:
-	//   - dst: caller-supplied buffer; encoded bytes are appended onto it.
-	//   - v: value to encode; the codec's accepted shape is format-specific.
-	//
-	// Returns:
-	//   - []byte: the (possibly re-allocated) buffer with encoded bytes.
-	//   - error: format-specific failure; nil on success.
 	Append(dst []byte, v any) (out []byte, err error)
 }

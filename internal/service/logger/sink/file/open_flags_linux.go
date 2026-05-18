@@ -1,6 +1,6 @@
 //go:build linux
 
-// Package file: open_flags_linux.go pins openFlags to include O_NOFOLLOW
+// Package file — pins openFlags to include O_NOFOLLOW
 // on Linux so a symlink planted between Lstat and OpenFile causes open
 // to fail with ELOOP rather than silently follow the link. See CWE-59.
 package file

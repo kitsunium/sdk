@@ -69,7 +69,7 @@ func TestMarshal(t *testing.T) {
 }
 
 // TestMarshal_FormulaEscape_OptIn asserts the OWASP CSV-injection
-// mitigation (finding #19): the default singleton passes cells through
+// mitigation: the default singleton passes cells through
 // verbatim, while NewWithEscape(true) prefixes any formula-trigger
 // cell with a single quote so downstream spreadsheet apps render as text.
 func TestMarshal_FormulaEscape_OptIn(t *testing.T) {

@@ -1,4 +1,4 @@
-// Package json: decoder.go adapts *encoding/json.Decoder to codec.Decoder.
+// Package json — adapts *encoding/json.Decoder to codec.Decoder.
 package json
 
 import (
@@ -13,12 +13,6 @@ type jsonDecoder struct {
 }
 
 // Decode reads the next value from the wrapped stdlib decoder.
-//
-// Params:
-//   - v: pointer to the destination value.
-//
-// Returns:
-//   - error: UnmarshalFailed wrapping the stdlib cause on failure; nil otherwise.
 func (d *jsonDecoder) Decode(v any) error {
 	//: delegate to stdlib then wrap on error.
 	jerr := d.inner.Decode(v)
@@ -37,9 +31,6 @@ func (d *jsonDecoder) Decode(v any) error {
 }
 
 // More reports whether another JSON value remains in the stream.
-//
-// Returns:
-//   - bool: stdlib Decoder.More value.
 func (d *jsonDecoder) More() bool {
 	//: delegate to the stdlib bool.
 	return d.inner.More()

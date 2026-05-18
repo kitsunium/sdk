@@ -1,4 +1,4 @@
-// Package errs: parse.go provides ParseCode, the strict canonical parser
+// Package errs — provides ParseCode, the strict canonical parser
 // for dotted-quad Code strings produced by Code.String(). The parser is
 // intentionally NOT compatible with the Padded() form — that would make
 // two textual representations round-trip to the same Code, violating the
@@ -56,14 +56,6 @@ const (
 //     the canonical form is the only textual key that maps to a Code.
 //   - Each segment's numeric value is in [0, 255].
 //   - No leading/trailing whitespace, no sign character, no empty segment.
-//
-// Params:
-//   - s: the canonical dotted-quad string to decode.
-//
-// Returns:
-//   - c: the parsed Code on success.
-//   - err: nil on success, *Error with CodeInvalidCodeString otherwise.
-//     The returned error satisfies the typed-errors-only SDK rule.
 func ParseCode(s string) (c Code, err error) {
 	//: enforce the canonical-form length envelope before any per-byte work.
 	if len(s) < codeStringMinLen || len(s) > codeStringMaxLen {
@@ -98,13 +90,6 @@ func ParseCode(s string) (c Code, err error) {
 // scanOctets walks s, finalises each dot-delimited segment via parseOctet,
 // and returns the resulting four-octet array. Extracted from ParseCode to
 // keep its cyclomatic complexity below the SDK ceiling.
-//
-// Params:
-//   - s: the canonical dotted-quad input, already length-validated.
-//
-// Returns:
-//   - octets: the parsed octet array on success; zero array on failure.
-//   - err: nil on success, *Error with CodeInvalidCodeString otherwise.
 func scanOctets(s string) (octets [codeSegmentCount]uint8, err error) {
 	var segStart int
 	var segIdx int
@@ -145,13 +130,6 @@ func scanOctets(s string) (octets [codeSegmentCount]uint8, err error) {
 // parseOctet validates and returns a single octet per ParseCode rules.
 // Extracted so the ParseCode main loop stays under the SDK's cyclomatic
 // complexity ceiling.
-//
-// Params:
-//   - seg: the raw segment between two dots (or end markers).
-//
-// Returns:
-//   - octet: the numeric value (0-255) on success.
-//   - ok: true iff seg satisfies all segment rules.
 func parseOctet(seg string) (octet uint8, ok bool) {
 	//: empty, oversize, or leading-zero segments are all canonical-form rejects.
 	if len(seg) == 0 || len(seg) > codeSegmentMaxDigits || (len(seg) > 1 && seg[0] == '0') {
@@ -171,13 +149,6 @@ func parseOctet(seg string) (octet uint8, ok bool) {
 // digitsToOctet reads seg as a base-10 unsigned integer and validates that
 // every byte is an ASCII digit and that the result fits in a uint8.
 // Extracted from parseOctet to keep its cyclomatic complexity below 9.
-//
-// Params:
-//   - seg: a 1..3 byte segment whose leading-zero rule has already passed.
-//
-// Returns:
-//   - octet: the decoded value on success.
-//   - ok: true iff every byte is a digit and the result is ≤ octetMax.
 func digitsToOctet(seg string) (octet uint8, ok bool) {
 	var n int
 	//: accumulate digits left-to-right; range over len for the Go 1.22+ idiom.
@@ -202,13 +173,6 @@ func digitsToOctet(seg string) (octet uint8, ok bool) {
 // parseFailure builds the *Error returned by ParseCode. Wrapping it in a
 // helper keeps the call sites compact and centralises the Reason / Public
 // messaging.
-//
-// Params:
-//   - input: the malformed string (for diagnostics; truncated if very long).
-//   - detail: a short phrase describing which rule failed.
-//
-// Returns:
-//   - *Error: typed error satisfying the SDK's typed-errors-only rule.
 func parseFailure(input, detail string) *Error {
 	//: trim input to avoid logging adversarial gigantic payloads.
 	shown := input

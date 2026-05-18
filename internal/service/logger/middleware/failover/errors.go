@@ -1,4 +1,4 @@
-// Package failover: errors.go declares the sentinels returned by the
+// Package failover — declares the sentinels returned by the
 // failover Sink. Each var's name equals its errs.Define Reason in
 // SCREAMING_SNAKE form.
 package failover

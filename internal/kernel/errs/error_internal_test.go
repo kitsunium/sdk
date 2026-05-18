@@ -169,8 +169,9 @@ func Test_wrapSDKCause(t *testing.T) {
 	}
 }
 
-// Test_errCodeMatches covers the inner helper hauled out of HasCode so
-// the linter can see direct coverage of its branches.
+// Test_errCodeMatches covers the inner helper hauled out of HasCode; it
+// exists as its own table so the trail-walk and code-match legs each get a
+// direct test rather than only being exercised via HasCode call sites.
 func Test_errCodeMatches(t *testing.T) {
 	t.Parallel()
 	//: 0x00_03_0F_B0 = 0.3.15.176 — origin slot for the inner test.

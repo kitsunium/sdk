@@ -1,4 +1,4 @@
-// Package yaml: codes.go — range 0.3.4.* (ADR 0005 service/codec/yaml block).
+// Package yaml — range 0.3.4.* (ADR 0005 service/codec/yaml block).
 package yaml
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

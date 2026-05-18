@@ -185,9 +185,6 @@ func (failingDownstream) Close() error                  { return nil }
 type errDrainerBoom struct{}
 
 // Error renders a static marker; content is not asserted by the test.
-//
-// Returns:
-//   - msg: a static marker.
 func (errDrainerBoom) Error() (msg string) {
 	//: static marker — content is not asserted.
 	return "drainer boom"

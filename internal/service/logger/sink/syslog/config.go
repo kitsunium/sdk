@@ -1,6 +1,6 @@
-// Package syslog: config.go holds the Config struct consumed by
+// Package syslog — holds the Config struct consumed by
 // NewWithConfig. Pulled into its own file per the SDK's
-// one-exported-struct-per-file convention (KTN-STRUCT-ONEFILE).
+// one-exported-struct-per-file convention.
 package syslog
 
 import "net"

@@ -1,4 +1,4 @@
-// Package failover: codes.go — range 0.3.19.* (ADR 0005 service/logger/middleware/failover block).
+// Package failover — range 0.3.19.* (ADR 0005 service/logger/middleware/failover block).
 package failover
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

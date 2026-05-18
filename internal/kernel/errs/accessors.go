@@ -1,4 +1,4 @@
-// Package errs: accessors.go provides package-level introspection helpers
+// Package errs — provides package-level introspection helpers
 // that walk a cause chain and read fields from the deepest *Error
 // encountered. Consumers of pkg/v1/errs use re-exports of these.
 package errs
@@ -8,13 +8,6 @@ import "errors"
 // CodeOf walks the Unwrap chain and returns the deepest *Error.Code as int.
 //
 // Deprecated: use CodeValueOf for typed access. Kept at v1 for back-compat.
-//
-// Params:
-//   - err: any error value; the chain is walked via errors.AsType.
-//
-// Returns:
-//   - int: the deepest *Error.Code cast to int, or 0 if no *Error is found.
-//   - bool: true iff an *Error was found anywhere in the chain.
 func CodeOf(err error) (code int, ok bool) {
 	//: walk the chain and keep the deepest *Error we see.
 	deepest := deepestError(err)
@@ -29,13 +22,6 @@ func CodeOf(err error) (code int, ok bool) {
 }
 
 // CodeValueOf walks the chain and returns the deepest *Error's typed Code.
-//
-// Params:
-//   - err: any error value.
-//
-// Returns:
-//   - Code: the deepest Code, or zero if no *Error is found.
-//   - bool: true iff an *Error was found.
 func CodeValueOf(err error) (c Code, ok bool) {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
@@ -49,13 +35,6 @@ func CodeValueOf(err error) (c Code, ok bool) {
 }
 
 // ReasonOf walks the Unwrap chain and returns the deepest *Error.Reason.
-//
-// Params:
-//   - err: any error value.
-//
-// Returns:
-//   - string: the Reason, or "" if no *Error is found.
-//   - bool: true iff an *Error was found.
 func ReasonOf(err error) (reason string, ok bool) {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
@@ -68,13 +47,8 @@ func ReasonOf(err error) (reason string, ok bool) {
 	return deepest.reason, true
 }
 
-// PublicOf walks the Unwrap chain and returns the deepest *Error.Public.
-//
-// Params:
-//   - err: any error value.
-//
-// Returns:
-//   - string: the Public message, or "" if no *Error is found.
+// PublicOf walks the Unwrap chain and returns the deepest *Error.Public,
+// or "" when no *Error is present in the chain.
 func PublicOf(err error) string {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
@@ -87,15 +61,10 @@ func PublicOf(err error) string {
 	return deepest.public
 }
 
-// PrivateOf walks the chain and returns the deepest *Error.Private.
+// PrivateOf walks the chain and returns the deepest *Error.Private,
+// or "" when no *Error is present in the chain.
 // DIAGNOSTIC-ONLY: never expose in HTTP/gRPC responses or any user-facing
 // surface. Intended for operator tooling and log correlation.
-//
-// Params:
-//   - err: any error value.
-//
-// Returns:
-//   - string: the Private message, or "" if no *Error is found.
 func PrivateOf(err error) string {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
@@ -111,12 +80,6 @@ func PrivateOf(err error) string {
 // FieldsOf collects the FieldValues attached to every *Error along the
 // chain and returns them ordered inner-to-outer (oldest cause first,
 // newest wrapper last). The returned slice is a defensive copy.
-//
-// Params:
-//   - err: any error value.
-//
-// Returns:
-//   - []FieldValue: the accumulated fields; empty when no *Error is found.
 func FieldsOf(err error) []FieldValue {
 	//: pull the outermost *Error via errors.AsType; Wrap already merged fields inner-first.
 	layer, ok := errors.AsType[*Error](err)
@@ -130,12 +93,6 @@ func FieldsOf(err error) []FieldValue {
 }
 
 // LayerOf walks the chain and returns the deepest *Error.Layer().
-//
-// Params:
-//   - err: any error value.
-//
-// Returns:
-//   - int: 1..9 when an *Error with a valid layered code is found, 0 otherwise.
 func LayerOf(err error) int {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
@@ -149,12 +106,6 @@ func LayerOf(err error) int {
 }
 
 // HTTPStatusOf walks the chain and returns the deepest *Error.HTTPStatus().
-//
-// Params:
-//   - err: any error value.
-//
-// Returns:
-//   - int: the HTTP status mapped from the deepest *Error, or 500 if none.
 func HTTPStatusOf(err error) int {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
@@ -168,12 +119,6 @@ func HTTPStatusOf(err error) int {
 }
 
 // ExitCodeOf walks the chain and returns the deepest *Error.ExitCode().
-//
-// Params:
-//   - err: any error value.
-//
-// Returns:
-//   - int: the exit code mapped from the deepest *Error, or 70 if none.
 func ExitCodeOf(err error) int {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
@@ -191,26 +136,12 @@ func ExitCodeOf(err error) int {
 // multi-error wrappers (errors.Join) per ADR 0005 §3.10.
 //
 // Deprecated: use HasCode with a typed Code. Removed before v1.0.0.
-//
-// Params:
-//   - err: any error value.
-//   - code: numeric identifier to look for (cast to Code internally).
-//
-// Returns:
-//   - bool: true iff an *Error with a matching code is found.
 func HasCodeInt(err error, code int) bool {
 	//: delegate to the typed implementation for consistent chain semantics.
 	return HasCode(err, Code(uint32(code)))
 }
 
 // HasReason walks the chain and reports whether ANY *Error carries reason.
-//
-// Params:
-//   - err: any error value.
-//   - reason: SCREAMING_SNAKE identifier to look for.
-//
-// Returns:
-//   - bool: true iff an *Error with a matching Reason is found.
 func HasReason(err error, reason string) bool {
 	//: mirror the code-walk using Reason.
 	cursor := err
@@ -237,12 +168,6 @@ func HasReason(err error, reason string) bool {
 
 // deepestError walks err via errors.As and returns the innermost *Error.
 // Unexported because only the public accessors should use it.
-//
-// Params:
-//   - err: any error value.
-//
-// Returns:
-//   - *Error: the deepest *Error in the chain, or nil if none.
 func deepestError(err error) *Error {
 	var deepest *Error
 	//: walk by unwrapping, remembering the most recent *Error we saw.

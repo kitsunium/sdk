@@ -1,4 +1,4 @@
-// Package errs: error.go defines the SDK-wide typed Error plus the Define
+// Package errs — defines the SDK-wide typed Error plus the Define
 // and Wrap constructors. Consumers never import this package directly —
 // they introspect errors through github.com/kitsunium/sdk/pkg/v1/errs.
 package errs
@@ -50,12 +50,6 @@ type Error struct {
 type DefineOption func(e *Error)
 
 // WithHTTPStatus overrides the default HTTP status (500) for an Error.
-//
-// Params:
-//   - status: HTTP response code the emitter wants associated with this Error.
-//
-// Returns:
-//   - DefineOption: an opaque option applied by Define / Wrap.
 func WithHTTPStatus(status int) DefineOption {
 	//: return a closure so the option can be passed positionally to Define.
 	return func(e *Error) {
@@ -65,12 +59,6 @@ func WithHTTPStatus(status int) DefineOption {
 }
 
 // WithExitCode overrides the default POSIX exit code (70) for an Error.
-//
-// Params:
-//   - code: sysexits-style exit status the emitter wants associated.
-//
-// Returns:
-//   - DefineOption: an opaque option applied by Define / Wrap.
 func WithExitCode(code int) DefineOption {
 	//: closure mirrors WithHTTPStatus for symmetry at call sites.
 	return func(e *Error) {
@@ -82,16 +70,6 @@ func WithExitCode(code int) DefineOption {
 // NewError is a tooling-friendly alias for Define. Prefer Define at call
 // sites for consistency; NewError exists so code generators and lints
 // expecting a NewXxx constructor on exported types find one.
-//
-// Params:
-//   - code: typed Code identifier (dotted-quad; see ADR 0005).
-//   - reason: SCREAMING_SNAKE stable identifier (matches the enclosing var).
-//   - public: wire-safe message; the AST audit requires a string literal.
-//   - private: log-only detailed message; may reference internal concepts.
-//   - opts: optional Define-time overrides (WithHTTPStatus, WithExitCode).
-//
-// Returns:
-//   - *Error: delegation to Define, identical semantics.
 func NewError(code Code, reason, public, private string, opts ...DefineOption) *Error {
 	//: single source of truth lives in Define; NewError is a thin alias.
 	return Define(code, reason, public, private, opts...)
@@ -100,16 +78,6 @@ func NewError(code Code, reason, public, private string, opts ...DefineOption) *
 // NewErrorInt is a DEPRECATED shim for transition from pre-ADR-0005 int codes.
 //
 // Deprecated: use NewError with a typed Code constant. Removed before v1.0.0.
-//
-// Params:
-//   - code: int-typed dotted-quad code; cast through uint32 then Code.
-//   - reason: SCREAMING_SNAKE stable identifier.
-//   - public: wire-safe message.
-//   - private: log-only detailed message.
-//   - opts: optional Define-time overrides.
-//
-// Returns:
-//   - *Error: same as NewError after the int→Code conversion.
 func NewErrorInt(code int, reason, public, private string, opts ...DefineOption) *Error {
 	//: route the deprecated int signature through Define so behaviour stays in sync.
 	return Define(Code(uint32(code)), reason, public, private, opts...)
@@ -119,16 +87,6 @@ func NewErrorInt(code int, reason, public, private string, opts ...DefineOption)
 // (with a message citing one of the documentary meta-codes 0.0.0.1..6)
 // when validateDefineArgs returns non-nil, so structural mistakes surface
 // at program start rather than at the first emission.
-//
-// Params:
-//   - code: typed Code identifier (dotted-quad; see ADR 0005).
-//   - reason: SCREAMING_SNAKE stable identifier (matches the enclosing var).
-//   - public: wire-safe message; the AST audit requires a string literal.
-//   - private: log-only detailed message; may reference internal concepts.
-//   - opts: optional Define-time overrides (WithHTTPStatus, WithExitCode).
-//
-// Returns:
-//   - *Error: a fully constructed sentinel ready to be returned from APIs.
 func Define(code Code, reason, public, private string, opts ...DefineOption) *Error {
 	//: validate up-front so bad sentinels never reach runtime call sites.
 	if err := validateDefineArgs(code, reason, public, private); err != nil {
@@ -149,16 +107,6 @@ func Define(code Code, reason, public, private string, opts ...DefineOption) *Er
 // DefineInt is a DEPRECATED shim for transition from pre-ADR-0005 int codes.
 //
 // Deprecated: use Define with a typed Code constant. Removed before v1.0.0.
-//
-// Params:
-//   - code: int-typed dotted-quad code; cast through uint32 then Code.
-//   - reason: SCREAMING_SNAKE stable identifier.
-//   - public: wire-safe message.
-//   - private: log-only detailed message.
-//   - opts: optional Define-time overrides.
-//
-// Returns:
-//   - *Error: same as Define after the int→Code conversion.
 func DefineInt(code int, reason, public, private string, opts ...DefineOption) *Error {
 	//: route the deprecated int signature through Define so behaviour stays in sync.
 	return Define(Code(uint32(code)), reason, public, private, opts...)
@@ -169,14 +117,6 @@ func DefineInt(code int, reason, public, private string, opts ...DefineOption) *
 // recurse into validateDefineArgs again and blow the stack at init).
 //
 // Direct struct literal — does not call Define or validateDefineArgs.
-//
-// Params:
-//   - code: the meta-code identifying the structural failure.
-//   - reason: SCREAMING_SNAKE reason matching the meta-code.
-//   - public: human-readable failure description.
-//
-// Returns:
-//   - *Error: a bootstrap-only Error with no Private and no fields.
 func newValidationError(code Code, reason, public string) *Error {
 	//: bypass the whole validation/construction pipeline — this is the
 	//: ONLY correct way to surface structural failures from inside the
@@ -186,23 +126,15 @@ func newValidationError(code Code, reason, public string) *Error {
 
 // Wrap attaches a cause to a new *Error with origin-wins semantics.
 // Behaviour contract (see ADR 0005 §3.6):
-//  1. cause == nil (interface nil) → stdlib path, source = nil
-//  2. cause == (*Error)(nil) typed-nil → stdlib path, source = nil
-//  3. cause == (*T)(nil) typed-nil of non-*Error → stdlib path, source preserved
-//  4. cause is *Error (directly or behind a stdlib wrapper) → origin-wins,
-//     params.Code is APPENDED TO THE TRAIL (trail entry 0 is the origin)
-//  5. cause is other stdlib error → params.Code is origin, trail stays empty
+// 1. cause == nil (interface nil) → stdlib path, source = nil
+// 2. cause == (*Error)(nil) typed-nil → stdlib path, source = nil
+// 3. cause == (*T)(nil) typed-nil of non-*Error → stdlib path, source preserved
+// 4. cause is *Error (directly or behind a stdlib wrapper) → origin-wins,
+// params.Code is APPENDED TO THE TRAIL (trail entry 0 is the origin)
+// 5. cause is other stdlib error → params.Code is origin, trail stays empty
 //
 // Runtime policy (v5 HIGH fix): bad WrapParams at runtime does NOT panic;
 // the returned *Error carries CodeInvalidWrapParams and preserves cause.
-//
-// Params:
-//   - cause: original error being wrapped; may be nil or typed-nil.
-//   - params: the code / reason / public / private used only on the stdlib path.
-//   - fields: metadata always appended (both paths).
-//
-// Returns:
-//   - *Error: a fresh *Error wrapping the cause; never mutates input.
 func Wrap(cause error, params WrapParams, fields ...FieldValue) *Error {
 	//: case 1 — interface nil: fall straight through to stdlib path.
 	if cause == nil {
@@ -227,17 +159,8 @@ func Wrap(cause error, params WrapParams, fields ...FieldValue) *Error {
 }
 
 // wrapSDKCause builds the *Error returned when Wrap finds an *Error in
-// the cause chain. Extracted from Wrap to keep Wrap's cyclomatic
-// complexity under the linter budget.
-//
-// Params:
-//   - cause: the original error passed to Wrap (preserved as source).
-//   - inner: the deepest *Error reachable via errors.AsType.
-//   - params: caller-supplied WrapParams (only Code feeds the trail here).
-//   - fields: additional FieldValues to append to inner.fields.
-//
-// Returns:
-//   - *Error: a fresh *Error with origin-wins semantics applied.
+// the cause chain. Extracted from Wrap so each path through Wrap stays
+// readable as a top-to-bottom case analysis instead of one nested branch.
 func wrapSDKCause(cause error, inner *Error, params WrapParams, fields []FieldValue) *Error {
 	//: trail gains a new wrap-site entry; origin and metadata inherit
 	//: from the inner *Error per ADR 0002 §Origin-wins.
@@ -261,14 +184,6 @@ func wrapSDKCause(cause error, inner *Error, params WrapParams, fields []FieldVa
 // newFromStdlibCause builds an *Error for causes that are NOT *Error.
 // Runtime-safe: validation failure on caller-supplied WrapParams returns
 // a typed *Error{CodeInvalidWrapParams} instead of panicking (v5 HIGH fix).
-//
-// Params:
-//   - cause: the underlying stdlib error (may be nil or typed-nil).
-//   - params: caller-supplied code/reason/public/private.
-//   - fields: metadata attached to the returned *Error.
-//
-// Returns:
-//   - *Error: a freshly constructed Error; source preserves cause.
 func newFromStdlibCause(cause error, params WrapParams, fields []FieldValue) *Error {
 	//: runtime policy — bad params at wrap time MUST NOT crash the goroutine.
 	if bad := validateDefineArgs(params.Code, params.Reason, params.Public, params.Private); bad != nil {
@@ -300,36 +215,24 @@ func newFromStdlibCause(cause error, params WrapParams, fields []FieldValue) *Er
 // Deprecated: use CodeValue() Code. Kept at v1 for backward compatibility;
 // removed at v2. The int return is safe on 64-bit GOARCH (enforced by the
 // build tag in code.go) because Code is uint32 and int is 8 bytes.
-//
-// Returns:
-//   - int: the dotted-quad Code as a plain int.
 func (e *Error) Code() int {
 	//: cast through uint32 for portability — Code is uint32-backed.
 	return int(uint32(e.code))
 }
 
 // CodeValue returns the typed dotted-quad Code.
-//
-// Returns:
-//   - Code: the Code assigned at Define time.
 func (e *Error) CodeValue() Code {
 	//: direct read of the immutable member.
 	return e.code
 }
 
 // Reason returns this Error's stable SCREAMING_SNAKE identifier.
-//
-// Returns:
-//   - string: the Reason assigned at Define time.
 func (e *Error) Reason() string {
 	//: direct read — Reason is part of the API contract.
 	return e.reason
 }
 
 // Public returns this Error's wire-safe message.
-//
-// Returns:
-//   - string: the literal Public message assigned at Define time.
 func (e *Error) Public() string {
 	//: direct read — Public is wire-safe by construction.
 	return e.public
@@ -337,9 +240,6 @@ func (e *Error) Public() string {
 
 // Private returns this Error's log-only detailed message. Never expose
 // the return value over any user-facing surface.
-//
-// Returns:
-//   - string: the Private message assigned at Define time.
 func (e *Error) Private() string {
 	//: direct read — callers accept the diagnostic-only contract.
 	return e.private
@@ -347,9 +247,6 @@ func (e *Error) Private() string {
 
 // Fields returns a defensive copy of the structured metadata attached to
 // this Error. Mutating the returned slice has no effect on the Error.
-//
-// Returns:
-//   - []FieldValue: a fresh slice holding every FieldValue recorded.
 func (e *Error) Fields() []FieldValue {
 	//: copy on read so callers cannot mutate our internal state.
 	return slices.Clone(e.fields)
@@ -357,9 +254,6 @@ func (e *Error) Fields() []FieldValue {
 
 // Trail returns a defensive copy of the wrap-site chain (newest last).
 // The origin's code is NOT in the trail — it lives in CodeValue().
-//
-// Returns:
-//   - []Code: a fresh slice; mutating it does not affect the Error.
 func (e *Error) Trail() []Code {
 	//: copy on read — trail entries represent wrap sites, immutable contract.
 	return slices.Clone(e.trail)
@@ -368,9 +262,6 @@ func (e *Error) Trail() []Code {
 // TrailTruncated reports whether the trail's middle links have been
 // dropped due to exceeding maxTrailLen. The flag is MONOTONIC: once set
 // by appendTrail, it propagates unchanged to every subsequent wrap.
-//
-// Returns:
-//   - bool: true iff at least one middle link was dropped.
 func (e *Error) TrailTruncated() bool {
 	//: direct read — flag is an immutable boolean after construction.
 	return e.trailTruncated
@@ -379,9 +270,6 @@ func (e *Error) TrailTruncated() bool {
 // Layer returns the layer octet of this Error's Code as an int.
 //
 // Deprecated: use CodeValue().Layer(). Kept at v1 for backward compat.
-//
-// Returns:
-//   - int: the layer byte extracted from Code.
 func (e *Error) Layer() int {
 	//: delegate to Code.Layer() and widen for v1 compat.
 	return int(e.code.Layer())
@@ -389,22 +277,16 @@ func (e *Error) Layer() int {
 
 // Is implements the errors.Is protocol. Three matching modes:
 //
-//  1. target is *PrefixMatcher → match if origin code OR any trail entry
-//     satisfies the CIDR-style mask (ADR 0005 prefix routing).
-//  2. target is *Error with non-zero Code → match when the two share the
-//     same (Code, Reason). This lets errors.Is(err, sentinel) succeed
-//     even when err is a freshly-constructed Wrap result — the typed
-//     sentinel and the wire sentinel have identical Code+Reason by
-//     construction, and semantic equivalence is what callers expect.
-//     The Reason check defuses a hypothetical Code-collision (the
-//     registry audit is the primary guard; this is belt-and-suspenders).
-//  3. anything else → pointer equality (stdlib default).
-//
-// Params:
-//   - target: the error being compared against.
-//
-// Returns:
-//   - bool: true iff the comparison succeeds per the rules above.
+// 1. target is *PrefixMatcher → match if origin code OR any trail entry
+// satisfies the CIDR-style mask (ADR 0005 prefix routing).
+// 2. target is *Error with non-zero Code → match when the two share the
+// same (Code, Reason). This lets errors.Is(err, sentinel) succeed
+// even when err is a freshly-constructed Wrap result — the typed
+// sentinel and the wire sentinel have identical Code+Reason by
+// construction, and semantic equivalence is what callers expect.
+// The Reason check defuses a hypothetical Code-collision (the
+// registry audit is the primary guard; this is belt-and-suspenders).
+// 3. anything else → pointer equality (stdlib default).
 func (e *Error) Is(target error) bool {
 	//: prefix matching path — scan origin code + every trail entry.
 	if pm, ok := target.(*PrefixMatcher); ok {
@@ -424,14 +306,8 @@ func (e *Error) Is(target error) bool {
 }
 
 // matchesPrefix reports whether this Error's origin code or any trail
-// entry satisfies the *PrefixMatcher's (prefix, mask) pair. Extracted
-// from Is to keep its cyclomatic complexity within the linter budget.
-//
-// Params:
-//   - pm: the prefix matcher target.
-//
-// Returns:
-//   - bool: true on the first match across origin + trail.
+// entry satisfies the *PrefixMatcher's (prefix, mask) pair. Extracted from
+// Is so the three target-type branches there each remain a single line.
 func (e *Error) matchesPrefix(pm *PrefixMatcher) bool {
 	//: snapshot prefix+mask once so the comparison loop is cache-friendly.
 	prefix := pm.Prefix() & pm.Mask()
@@ -456,13 +332,6 @@ func (e *Error) matchesPrefix(pm *PrefixMatcher) bool {
 // matchesSentinel reports whether this Error and target (already typed
 // as *Error) refer to the same sentinel by (Code, Reason) — and falls
 // back to pointer equality if the codes do not match.
-//
-// Params:
-//   - te: target re-typed as *Error.
-//   - target: original interface value (used for the pointer-equality leg).
-//
-// Returns:
-//   - bool: true iff Code+Reason match OR the two pointers are equal.
 func (e *Error) matchesSentinel(te *Error, target error) bool {
 	//: zero code defuses the "both uninitialised" edge case.
 	if te.code != 0 && e.code == te.code && e.reason == te.reason {
@@ -484,9 +353,6 @@ func (e *Error) matchesSentinel(te *Error, target error) bool {
 //	[0.3.2.1 <- 1.2.0.3 JSON_MARSHAL_FAILED] invalid input
 //
 // Truncated trails append " (truncated)" before the Reason marker.
-//
-// Returns:
-//   - string: the stable neutral representation.
 func (e *Error) Error() string {
 	//: fast path — no trail, cheapest formatting.
 	if len(e.trail) == 0 {
@@ -518,9 +384,6 @@ func (e *Error) Error() string {
 }
 
 // Source returns the wrapped cause attached by Wrap.
-//
-// Returns:
-//   - error: the cause attached at Wrap time; nil for Define-only sentinels.
 func (e *Error) Source() error {
 	//: direct read — sentinels created by Define have no cause.
 	return e.source
@@ -529,9 +392,6 @@ func (e *Error) Source() error {
 // Unwrap delegates to Source so the stdlib errors.Is / errors.As machinery
 // can walk the chain. The nil-guard also makes this slightly more than a
 // pure field getter, which matters for callers storing errors by value.
-//
-// Returns:
-//   - error: the cause attached at Wrap time; nil when the receiver is nil.
 func (e *Error) Unwrap() error {
 	//: guard against nil receiver so errors.Is on a nil *Error is safe.
 	if e == nil {
@@ -543,9 +403,6 @@ func (e *Error) Unwrap() error {
 }
 
 // HTTPStatus returns the per-error override if set, otherwise 500.
-//
-// Returns:
-//   - int: the HTTP status this Error maps to.
 func (e *Error) HTTPStatus() int {
 	//: zero override signals "use the default"; non-zero wins.
 	if e.httpOverride != 0 {
@@ -557,9 +414,6 @@ func (e *Error) HTTPStatus() int {
 }
 
 // ExitCode returns the per-error override if set, otherwise 70 EX_SOFTWARE.
-//
-// Returns:
-//   - int: the POSIX exit code this Error maps to.
 func (e *Error) ExitCode() int {
 	//: same zero-vs-non-zero discrimination as HTTPStatus.
 	if e.exitOverride != 0 {
@@ -574,13 +428,6 @@ func (e *Error) ExitCode() int {
 // trail entry matches c. The walk recurses through BOTH single-error
 // wrappers (Unwrap() error) AND multi-error wrappers (Unwrap() []error,
 // e.g. errors.Join). Time complexity: O(total_errors + total_trail_lengths).
-//
-// Params:
-//   - err: the error chain to inspect.
-//   - c: the Code to search for.
-//
-// Returns:
-//   - bool: true iff c is found anywhere in the chain (code or trail).
 func HasCode(err error, c Code) bool {
 	//: nil-chain short-circuit.
 	if err == nil {
@@ -597,13 +444,6 @@ func HasCode(err error, c Code) bool {
 
 // errCodeMatches reports whether the outermost *Error layer of err
 // carries c either as its origin Code or anywhere in its trail.
-//
-// Params:
-//   - err: the error to inspect (only the outermost *Error layer is read).
-//   - c: the Code to search for.
-//
-// Returns:
-//   - bool: true iff the outermost *Error matches c via code or trail.
 func errCodeMatches(err error, c Code) bool {
 	//: assert to *Error — return false when no SDK layer is at this level.
 	sdkErr, ok := err.(*Error)
@@ -622,13 +462,6 @@ func errCodeMatches(err error, c Code) bool {
 
 // hasCodeInSingleUnwrap recurses through the single-error Unwrap()
 // interface to keep HasCode below the cyclo budget.
-//
-// Params:
-//   - err: error to descend into via Unwrap() error.
-//   - c: the Code to search for.
-//
-// Returns:
-//   - bool: true iff c is found anywhere below the single-Unwrap chain.
 func hasCodeInSingleUnwrap(err error, c Code) bool {
 	//: detect a single-error wrapper.
 	unwrapper, ok := err.(interface{ Unwrap() error })
@@ -642,13 +475,6 @@ func hasCodeInSingleUnwrap(err error, c Code) bool {
 
 // hasCodeInMultiUnwrap recurses through the multi-error Unwrap()
 // interface (e.g. errors.Join) to keep HasCode below the cyclo budget.
-//
-// Params:
-//   - err: error to descend into via Unwrap() []error.
-//   - c: the Code to search for.
-//
-// Returns:
-//   - bool: true iff c is found anywhere below the multi-Unwrap chain.
 func hasCodeInMultiUnwrap(err error, c Code) bool {
 	//: detect a multi-error wrapper.
 	multiUnwrapper, ok := err.(interface{ Unwrap() []error })

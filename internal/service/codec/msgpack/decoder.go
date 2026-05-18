@@ -1,4 +1,4 @@
-// Package msgpack: decoder.go adapts vmihailenco's *Decoder to codec.Decoder.
+// Package msgpack — adapts vmihailenco's *Decoder to codec.Decoder.
 package msgpack
 
 import (
@@ -18,12 +18,6 @@ type msgpackDecoder struct {
 }
 
 // Decode reads the next MessagePack object into v.
-//
-// Params:
-//   - v: pointer destination.
-//
-// Returns:
-//   - error: UnmarshalFailed on failure, io.EOF when the stream is drained.
 func (d *msgpackDecoder) Decode(v any) error {
 	//: delegate to the library.
 	derr := d.inner.Decode(v)
@@ -51,9 +45,6 @@ func (d *msgpackDecoder) Decode(v any) error {
 }
 
 // More reports whether additional items are still available.
-//
-// Returns:
-//   - bool: false once Decode has returned io.EOF.
 func (d *msgpackDecoder) More() bool {
 	//: reflect the sticky EOF latch.
 	return !d.done

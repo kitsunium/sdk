@@ -1,6 +1,6 @@
-// Package logger: text_handler.go implements the TextHandler — a concrete
+// Package logger — implements the TextHandler — a concrete
 // core.Handler that renders RecordEvent values as
-// "TIME LEVEL msg key=val ..." and writes the bytes to an io.Writer under a
+// "TIME LEVEL msg key=val..." and writes the bytes to an io.Writer under a
 // mutex. It composes the kernel/buffer pool and kernel/clock abstraction so
 // that tests can drive it deterministically.
 package logger
@@ -60,14 +60,6 @@ type TextHandler struct {
 
 // NewTextHandler constructs a TextHandler that writes to w and filters records
 // strictly below min. The returned handler uses the real system clock.
-//
-// Params:
-//   - w: destination writer; nil causes the constructor to reject the call.
-//   - min: minimum level to emit.
-//
-// Returns:
-//   - *TextHandler: a ready-to-use handler, or nil on rejection.
-//   - error: WriterNil when w is nil; nil on success.
 func NewTextHandler(w io.Writer, min level.Level) (h *TextHandler, err error) {
 	//: reject nil writers early rather than panic at first write.
 	if w == nil {
@@ -80,13 +72,6 @@ func NewTextHandler(w io.Writer, min level.Level) (h *TextHandler, err error) {
 
 // Enabled reports whether the handler would emit a record at r.Level, taking
 // context cancellation into account.
-//
-// Params:
-//   - ctx: request-scoped context; when already cancelled the handler is disabled.
-//   - r: the RecordEvent candidate.
-//
-// Returns:
-//   - bool: true when r.Level is at or above the configured minimum and ctx is live.
 func (h *TextHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) bool {
 	//: honour context cancellation: cancelled contexts short-circuit to disabled.
 	if ctx != nil && ctx.Err() != nil {
@@ -99,12 +84,6 @@ func (h *TextHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) boo
 
 // WithAttrs returns a derived TextHandler sharing the writer but owning a new
 // attrs slice that prepends the given attributes to every record.
-//
-// Params:
-//   - attrs: attributes to prepend on each emitted RecordEvent.
-//
-// Returns:
-//   - corelogger.Handler: a new handler carrying the combined attrs.
 func (h *TextHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler {
 	//: copy-on-write — child must not alias the parent's attrs slice.
 	cp := make([]corelogger.AttrValue, len(h.attrs)+len(attrs))
@@ -117,12 +96,6 @@ func (h *TextHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler
 
 // WithGroup returns a derived TextHandler that namespaces every subsequent
 // attribute key under the given group name (rendered as "name.key").
-//
-// Params:
-//   - name: group prefix; empty string yields the receiver unchanged.
-//
-// Returns:
-//   - corelogger.Handler: a new handler carrying the appended group.
 func (h *TextHandler) WithGroup(name string) corelogger.Handler {
 	//: empty group is a documented no-op so callers can pass user input.
 	if name == "" {
@@ -138,13 +111,6 @@ func (h *TextHandler) WithGroup(name string) corelogger.Handler {
 }
 
 // Handle formats and writes a RecordEvent to the underlying io.Writer.
-//
-// Params:
-//   - ctx: request-scoped context; a cancelled ctx aborts the write.
-//   - r: the RecordEvent to render.
-//
-// Returns:
-//   - error: ctx.Err() if cancelled, otherwise whatever the writer returned.
 func (h *TextHandler) Handle(ctx context.Context, r corelogger.RecordEvent) error {
 	//: honour context cancellation: cancelled contexts skip the write entirely.
 	if ctx != nil && ctx.Err() != nil {
@@ -167,13 +133,6 @@ func (h *TextHandler) Handle(ctx context.Context, r corelogger.RecordEvent) erro
 
 // renderLine formats a RecordEvent into the provided byte buffer. Extracted
 // from Handle to keep both functions below the KTN line-count ceiling.
-//
-// Params:
-//   - b: starting buffer (typically fresh from the kernel pool).
-//   - r: the RecordEvent being rendered; Time gets a clock fallback when zero.
-//
-// Returns:
-//   - []byte: the fully formatted line including the trailing newline.
 func (h *TextHandler) renderLine(b []byte, r corelogger.RecordEvent) []byte {
 	//: fall back to the handler clock when the caller did not timestamp.
 	if r.Time.IsZero() {
@@ -201,12 +160,6 @@ func (h *TextHandler) renderLine(b []byte, r corelogger.RecordEvent) []byte {
 }
 
 // writeLine serialises the mutex-guarded write and wraps any writer error.
-//
-// Params:
-//   - line: the already formatted bytes to emit.
-//
-// Returns:
-//   - error: nil on success; WriteFailed wrapping the writer's error otherwise.
 func (h *TextHandler) writeLine(line []byte) error {
 	//: serialise writes so concurrent goroutines never interleave lines.
 	h.mu.Lock()
@@ -228,14 +181,6 @@ func (h *TextHandler) writeLine(line []byte) error {
 
 // appendAttrWithGroups prepends the active group prefix stack ("g1.g2.…")
 // to the attribute key before delegating the value-rendering to appendAttr.
-//
-// Params:
-//   - dst: buffer to append to; returned grown.
-//   - groups: active group prefix stack (outermost first).
-//   - a: attribute whose Key and Value are rendered.
-//
-// Returns:
-//   - []byte: the potentially re-sliced buffer after append operations.
 func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) []byte {
 	//: no groups → fall back to the bare appendAttr behaviour.
 	if len(groups) == 0 {
@@ -260,13 +205,6 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) [
 
 // appendValueOnly renders only the value part of an AttrValue; shared by the
 // grouped and ungrouped paths so the encoding contract has a single source.
-//
-// Params:
-//   - dst: buffer to append to; returned grown.
-//   - a: attribute whose Value is rendered.
-//
-// Returns:
-//   - []byte: the potentially re-sliced buffer after append operations.
 func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 	//: dispatch on the typed Kind discriminant — same table as appendAttr.
 	switch a.Value.Kind() {
@@ -294,13 +232,6 @@ func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 }
 
 // appendAttr serialises a single AttrValue onto dst in "key=value" form.
-//
-// Params:
-//   - dst: buffer to append to; returned grown.
-//   - a: attribute whose Key and Value are rendered.
-//
-// Returns:
-//   - []byte: the potentially re-sliced buffer after append operations.
 func appendAttr(dst []byte, a corelogger.AttrValue) []byte {
 	//: separator between message and first attr, and between consecutive attrs.
 	dst = append(dst, ' ')
@@ -320,8 +251,8 @@ func appendAttr(dst []byte, a corelogger.AttrValue) []byte {
 	//: floats use Go's default shortest round-trip format.
 	case corelogger.KindFloat64:
 		dst = strconv.AppendFloat(dst, a.Value.Float64(), floatFormat, floatPrec, floatBitSize)
-	//: every other Kind (Any, Time, Duration, Uint64, Group) maps to '?' for now —
-	//: richer rendering ships with the Encoder split in commit 7.
+	//: every other Kind (Any, Time, Duration, Uint64, Group) maps to '?' here; richer rendering lives in the dedicated encoder package so
+	//: this handler stays format-agnostic.
 	default:
 		dst = append(dst, '?')
 	}

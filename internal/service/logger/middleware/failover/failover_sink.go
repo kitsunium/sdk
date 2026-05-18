@@ -22,13 +22,6 @@ type failoverSink struct {
 }
 
 // New constructs a failover Sink trying each branch in order.
-//
-// Params:
-//   - branches: ordered downstream sinks; nil entries are silently skipped.
-//
-// Returns:
-//   - corelogger.Sink: the failover Sink behind the public interface.
-//   - error: Empty when branches contains zero non-nil entries.
 func New(branches ...corelogger.Sink) (sink corelogger.Sink, err error) {
 	//: defensive copy that drops nil entries so the chain stays clean.
 	cp := make([]corelogger.Sink, 0, len(branches))
@@ -52,15 +45,6 @@ func New(branches ...corelogger.Sink) (sink corelogger.Sink, err error) {
 
 // Write tries each branch in order, returning the first success. When every
 // branch fails, Write returns Exhausted wrapping the joined failure chain.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to every attempted branch.
-//   - rec: originating record forwarded to every attempted branch.
-//   - p: formatted bytes forwarded to every attempted branch.
-//
-// Returns:
-//   - n: bytes accepted by the first successful branch (0 on Exhausted).
-//   - err: nil on first success; Exhausted wrapping all failures otherwise.
 func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: collect per-branch errors so the Exhausted error carries the full picture.
 	collected := make([]error, 0, len(s.chain))
@@ -87,12 +71,6 @@ func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p 
 
 // Flush forwards to every branch and aggregates per-branch errors via
 // errors.Join.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to every branch.
-//
-// Returns:
-//   - err: errors.Join of per-branch failures; nil on unanimous success.
 func (s *failoverSink) Flush(ctx context.Context) error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.chain))
@@ -115,9 +93,6 @@ func (s *failoverSink) Flush(ctx context.Context) error {
 
 // Close forwards to every branch and aggregates per-branch errors via
 // errors.Join.
-//
-// Returns:
-//   - err: errors.Join of per-branch failures; nil on unanimous success.
 func (s *failoverSink) Close() error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.chain))

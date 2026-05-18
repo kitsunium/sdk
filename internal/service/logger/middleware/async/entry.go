@@ -1,4 +1,4 @@
-// Package async: entry.go holds the recycled payload struct that travels
+// Package async — holds the recycled payload struct that travels
 // through the ring buffer between the producer (Write) and the consumer
 // (drain goroutine).
 package async
@@ -18,9 +18,6 @@ type recordEntry struct {
 
 // newRecordEntry returns a fresh *recordEntry with a nil bytes slice; the
 // producer owns sizing the slice when it copies the payload in.
-//
-// Returns:
-//   - *recordEntry: a zero-state entry ready for the recycler.
 func newRecordEntry() *recordEntry {
 	//: zero-state entry; payload is set by the producer at Write time.
 	return &recordEntry{}

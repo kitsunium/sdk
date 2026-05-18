@@ -1,4 +1,4 @@
-// Package buffer: pool.go provides Recycler[T any], a generic typed pool
+// Package buffer — provides Recycler[T any], a generic typed pool
 // contract backed by sync.Pool. Callers can recycle ANY pointer-sized object
 // (event records, attribute slices, scratch structs) without paying the
 // boxing cost on Get/Put. The byte-slice pool exposed by buffer.Get /
@@ -38,12 +38,6 @@ type objectBucket[T any] struct {
 // IFACE-PLUGIN: callers receive a Recycler[T] handle so the kernel can swap
 // the backing implementation (sync.Pool today, sharded buckets tomorrow)
 // without breaking call-site code; the concrete bucket type is unexported.
-//
-// Params:
-//   - newFn: factory called on a cache miss; nil rejects the construction.
-//
-// Returns:
-//   - Recycler[T]: a ready-to-use typed pool, or nil when newFn is nil.
 func NewRecycler[T any](newFn func() T) Recycler[T] {
 	//: refuse a nil factory — sync.Pool.Get would panic on cache miss otherwise.
 	if newFn == nil {
@@ -63,9 +57,6 @@ func NewRecycler[T any](newFn func() T) Recycler[T] {
 // Get borrows a value of type T from the bucket, invoking the factory on a
 // cache miss. The returned value MAY be a previously Put value or a freshly
 // built one — callers MUST treat it as opaquely owned until they Put it back.
-//
-// Returns:
-//   - T: a value previously Put into the bucket, or freshly created via newFn.
 func (b *objectBucket[T]) Get() T {
 	//: ask sync.Pool for any cached value; New fires on miss to satisfy the call.
 	raw := b.p.Get()
@@ -82,9 +73,6 @@ func (b *objectBucket[T]) Get() T {
 
 // Put returns a value to the bucket for future reuse. Callers MUST NOT touch v
 // after Put returns; the bucket may hand it to another goroutine immediately.
-//
-// Params:
-//   - v: value previously obtained from Get; the bucket re-caches it verbatim.
 func (b *objectBucket[T]) Put(v T) {
 	//: hand the value back to sync.Pool — boxing here is unavoidable but cheap.
 	b.p.Put(v)

@@ -1,4 +1,4 @@
-// Package codec: registry.go holds the process-wide Codec registry.
+// Package codec — holds the process-wide Codec registry.
 // Service-level codec packages register themselves via package-level var
 // initialisers when the package is imported.
 package codec
@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-// Package-level indexes — grouped so KTN-VAR-GROUP stays quiet.
+// Package-level indexes — grouped.
 //
 // sync.Map is the deliberate choice here over sync.RWMutex + map: codec
 // packages register themselves exactly ONCE at package import time
@@ -34,12 +34,6 @@ var (
 // IFACE-PLUGIN: the registry hands plug-in codec instances back to callers
 // so each domain can keep its concrete codec type unexported; the only
 // stable contract is the Codec interface itself.
-//
-// Params:
-//   - c: a fully constructed Codec instance.
-//
-// Returns:
-//   - Codec: the same Codec instance, ready to be bound to a var.
 func Register(c Codec) Codec {
 	//: nil registration is always a programming error.
 	if c == nil {
@@ -53,9 +47,8 @@ func Register(c Codec) Codec {
 		//: surface the doc code for grep-friendly panic messages.
 		panic(fmt.Sprintf("codec.Register [%d DUPLICATE_REGISTRATION]: duplicate Name %q", CodeDuplicateRegistration, name))
 	}
-	//: delegate MIME + extension indexing to helpers to keep Register below
-	//: the KTN-FUNC-CYCLO ceiling (8) — the conflict-detection branches would
-	//: otherwise push Register's cyclomatic complexity to 9.
+	//: split alias indexing into a helper so Register stays linear; otherwise
+	//: the conflict-detection branches push the cyclomatic complexity past budget.
 	indexAliases(&mimeIndex, c.MIMETypes(), name, "MIME")
 	//: extensions share the same shape.
 	indexAliases(&extIndex, c.Extensions(), name, "extension")
@@ -65,14 +58,6 @@ func Register(c Codec) Codec {
 
 // indexAliases stores every alias (MIME or extension) in dst, panicking
 // when a distinct codec already claims the same key.
-//
-// Params:
-//   - dst: the sync.Map to index into (mimeIndex or extIndex).
-//   - aliases: the alias list returned by the codec.
-//   - name: canonical Format of the codec being registered.
-//   - kind: human-readable category for the panic message ("MIME" / "extension").
-//
-// Returns: nothing; panics on conflict.
 func indexAliases(dst *sync.Map, aliases []string, name Format, kind string) {
 	//: iterate over every alias and publish it atomically.
 	for _, alias := range aliases {
@@ -100,13 +85,6 @@ func indexAliases(dst *sync.Map, aliases []string, name Format, kind string) {
 //
 // IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
 // interface — concrete types are intentionally unexported per-format.
-//
-// Params:
-//   - f: the Format identifier.
-//
-// Returns:
-//   - Codec: the registered codec, or nil if none.
-//   - bool: true iff f is registered.
 func Lookup(f Format) (c Codec, ok bool) {
 	//: direct map read.
 	raw, found := registry.Load(f)
@@ -127,13 +105,6 @@ func Lookup(f Format) (c Codec, ok bool) {
 //
 // IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
 // interface — concrete types are intentionally unexported per-format.
-//
-// Params:
-//   - raw: the MIME header value (case-insensitive).
-//
-// Returns:
-//   - c: the codec registered for the MIME, or nil if none.
-//   - ok: true iff the MIME resolves to a codec.
 func LookupMIME(raw string) (c Codec, ok bool) {
 	//: empty MIME always misses.
 	if raw == "" {
@@ -166,13 +137,6 @@ func LookupMIME(raw string) (c Codec, ok bool) {
 //
 // IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
 // interface — concrete types are intentionally unexported per-format.
-//
-// Params:
-//   - ext: the file extension with its leading dot.
-//
-// Returns:
-//   - Codec: the codec registered for the extension, or nil if none.
-//   - bool: true iff the extension resolves to a codec.
 func LookupExt(ext string) (c Codec, ok bool) {
 	//: empty extension always misses.
 	if ext == "" {
@@ -193,9 +157,6 @@ func LookupExt(ext string) (c Codec, ok bool) {
 }
 
 // Available returns the sorted list of registered Formats.
-//
-// Returns:
-//   - []Format: sorted ascending; empty when no codec is registered.
 func Available() []Format {
 	//: collect every key via sync.Map.Range.
 	var formats []Format

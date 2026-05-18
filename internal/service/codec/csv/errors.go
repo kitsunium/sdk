@@ -1,4 +1,4 @@
-// Package csv: errors.go declares the sentinel *errs.Error values for CSV.
+// Package csv — declares the sentinel *errs.Error values for CSV.
 package csv
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

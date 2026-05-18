@@ -29,12 +29,12 @@ const (
 )
 
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted to satisfy KTN-VAR-CONSTSLICE).
+// extension tables (hoisted).
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&cborCodec{})
 
-	//: MIME table hoisted to satisfy KTN-VAR-CONSTSLICE.
+	//: MIME table hoisted.
 	mimeTypes = []string{"application/cbor"}
 
 	//: extension table hoisted for the same reason.
@@ -51,9 +51,6 @@ var (
 // the options themselves are self-contradictory — caps here are within the
 // library's accepted range so the panic is practically unreachable, but
 // guards a future library upgrade that tightens validation.
-//
-// Returns:
-//   - gocbor.DecMode: the hardened decoder used by every cborCodec.Unmarshal call.
 func mustHardenedDecMode() gocbor.DecMode {
 	//: caps chosen per the fxamacker/cbor README Security Tips section.
 	opts := gocbor.DecOptions{
@@ -76,49 +73,30 @@ func mustHardenedDecMode() gocbor.DecMode {
 type cborCodec struct{}
 
 // New returns a CBOR codec instance.
-//
-// Returns:
-//   - codec.Codec: a fresh stateless codec.
 func New() codec.Codec {
 	//: stateless — one singleton is enough for the whole process.
 	return Codec
 }
 
 // Name implements codec.Codec.
-//
-// Returns:
-//   - string: always "cbor".
 func (*cborCodec) Name() string {
 	//: canonical identifier.
 	return "cbor"
 }
 
 // MIMETypes lists every MIME alias.
-//
-// Returns:
-//   - []string: canonical MIME first.
 func (*cborCodec) MIMETypes() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
-//
-// Returns:
-//   - []string: canonical extension first.
 func (*cborCodec) Extensions() []string {
 	//: hand back the package-level slice.
 	return slices.Clone(extensions)
 }
 
 // Marshal serialises v as CBOR bytes.
-//
-// Params:
-//   - v: value fxamacker/cbor/v2 supports.
-//
-// Returns:
-//   - encoded: the encoded CBOR bytes.
-//   - err: MarshalFailed wrapping the library cause on failure.
 func (*cborCodec) Marshal(v any) (encoded []byte, err error) {
 	//: delegate to the library for the actual encoding.
 	out, merr := gocbor.Marshal(v)
@@ -137,17 +115,10 @@ func (*cborCodec) Marshal(v any) (encoded []byte, err error) {
 }
 
 // Unmarshal parses data as CBOR into v.
-//
-// Params:
-//   - data: CBOR bytes.
-//   - v: pointer to the destination value.
-//
-// Returns:
-//   - error: UnmarshalFailed wrapping the library cause on failure.
 func (*cborCodec) Unmarshal(data []byte, v any) error {
 	//: route through the hardened DecMode so attacker-controlled input
 	//: cannot trigger memory exhaustion via huge arrays, huge maps, or
-	//: deeply-nested structures (finding #16).
+	//: deeply-nested structures.
 	uerr := decMode.Unmarshal(data, v)
 	//: success fast-path.
 	if uerr == nil {
@@ -164,24 +135,12 @@ func (*cborCodec) Unmarshal(data []byte, v any) error {
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.
-//
-// Params:
-//   - w: destination writer.
-//
-// Returns:
-//   - codec.Encoder: a streaming CBOR encoder bound to w.
 func (*cborCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the fxamacker encoder.
 	return &cborEncoder{inner: gocbor.NewEncoder(w)}
 }
 
 // NewDecoder wraps r in a streaming codec.Decoder.
-//
-// Params:
-//   - r: source reader.
-//
-// Returns:
-//   - codec.Decoder: a streaming CBOR decoder bound to r.
 func (*cborCodec) NewDecoder(r io.Reader) codec.Decoder {
 	//: wrap the fxamacker decoder.
 	return &cborDecoder{inner: gocbor.NewDecoder(r)}

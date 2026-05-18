@@ -1,64 +1,39 @@
-<!-- updated: 2026-04-10T12:00:00Z -->
-# GitHub Actions Workflows
+<!-- updated: 2026-05-18T14:30:00Z -->
+# .github/workflows/
 
 ## Purpose
 
-CI/CD automation. Primary workflow is `sdk-ci.yml` (Go tests + lint +
-vulncheck). The remaining workflows (`docker-images.yml`,
-`publish-features.yml`, `release.yml`) are inherited from the
-devcontainer-template parent repo and are path-gated on `.devcontainer/**`
-so they do not fire on SDK PRs.
+CI/CD automation. The SDK lane is `bazel-ci.yml`; the other three workflows are inherited from the devcontainer-template repo and path-gated on `.devcontainer/**`.
 
 ## Workflows
 
-| File | Description |
-|------|-------------|
-| `sdk-ci.yml` | Primary CI for this repo — Go tests, lint, govulncheck across all 4 SDK modules |
-| `docker-images.yml` | Build and push devcontainer images (path-gated on `.devcontainer/images/**`) |
-| `publish-features.yml` | Publish Dev Container Features as OCI artifacts (path-gated on `.devcontainer/features/**`) |
-| `release.yml` | Create GitHub Release with claude-assets.tar.gz (path-gated on `.devcontainer/**`) |
+| File | Trigger | Description |
+|---|---|---|
+| `bazel-ci.yml` | push to `main`, PRs | Primary SDK CI — drift check + build + test + coverage via Bazel 9 |
+| `docker-images.yml` | weekly + push to `.devcontainer/images/**` | Template-inherited; two-tier base+main image build |
+| `publish-features.yml` | push to `.devcontainer/features/**` | Template-inherited; publishes OCI feature artifacts |
+| `release.yml` | push to main on `.devcontainer/**` | Template-inherited; builds `claude-assets.tar.gz` and tags `vYYYY.MM.DD-<sha7>` |
 
-## docker-images.yml (Two-Tier Build)
+## bazel-ci.yml (the SDK lane)
 
-**Base image** (`devcontainer-base`):
-- **Trigger**: Weekly (Sunday 3AM UTC), `[base]` in commit message, manual dispatch
-- **Content**: apt, PPA tools, Cloud CLIs, MkDocs, Oh My Zsh (~1.1GB, stable)
+Single job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
 
-**Main image** (`devcontainer-template`):
-- **Trigger**: Push to main, PRs, daily (4AM UTC), ktn-linter-release
-- **Content**: kubectl, grepai, rtk, Claude Code, CodeRabbit, Qodo (~120MB delta)
+1. `bazel-contrib/setup-bazel@…` — caches `bazelisk`, disk cache keyed on `.bazelrc`+`.bazelversion`+`MODULE.bazel`+all `go.mod`/`go.sum`, plus the repository cache.
+2. **Drift check** — `bazel mod tidy && bazel run //:gazelle`, then `git diff --exit-code` AND a check for untracked `BUILD.bazel`/`go.mod`/`go.sum`. Catches both modifications and new files (post-audit finding #11).
+3. `bazel build --config=ci //...`
+4. `bazel test --config=ci //...`
+5. `bazel coverage --combined_report=lcov //...` → uploaded as `coverage-${{ github.run_number }}` artifact (per-run unique name so concurrent runs don't dedupe, post-audit finding #28).
 
-- **Registry**: ghcr.io
-- **Tags**: latest, date, commit SHA
-- **Platforms**: linux/amd64, linux/arm64
-- **Cache busting**: Scheduled builds pass `CACHE_BUST_DYNAMIC=YYYY-MM-DD`
-
-## publish-features.yml
-
-- **Trigger**: Push to main (features changed), workflow_dispatch
-- **Action**: Flattens features, embeds shared utils, publishes as OCI artifacts
-- **Registry**: `ghcr.io/kodflow/devcontainer-features/<feature>:v<version>`
-- **Uses**: `devcontainers/action@v1`
-
-## release.yml
-
-- **Trigger**: Push to main, workflow_dispatch
-- **Action**: Generates `claude-assets.tar.gz` and creates a GitHub Release
-- **Tag format**: `vYYYY.MM.DD-<sha7>`
-- **Latest**: Always marks as latest release (used by `install.sh`)
-
-## sdk-ci.yml
-
-- **Trigger**: Push to main, PRs — path-gated on `internal/**`, `pkg/**`, `go.work`, `go.mod`, `.golangci.yml`, `Makefile`
-- **Jobs**:
-  - `test`: `go test -race -cover` per module (matrix: kernel, core, service, pkg/v1)
-  - `lint`: `golangci-lint run` with depguard layer firewall
-  - `vulncheck`: `govulncheck ./...` per module
-- **Runs with** `GOWORK=off` so each module is tested as an external consumer via its own `go.mod` + `replace` directives.
+Concurrency: `${{ github.workflow }}-${{ github.ref }}` with cancel-in-progress.
 
 ## Conventions
 
-- Use `ubuntu-latest` runners
-- Cache Docker layers for speed
-- Action SHAs pinned with version comments
-- Use GITHUB_TOKEN for authentication
+- Action references SHA-pinned with a trailing `# vX` comment (e.g. `actions/checkout@93cb6efe…  # v5`).
+- `permissions: contents: read` only — nothing in the SDK lane writes back.
+- `bazel-ci.yml` is the only source-of-truth gate. CI does NOT run `go test`, `golangci-lint`, or `govulncheck` directly anymore (ADR 0004).
+
+## Do NOT
+
+- Re-introduce a `go test` matrix here — drift between local Bazel and CI defeats ADR 0004's "single build system" decision.
+- Drop the drift check; gazelle-generated `BUILD.bazel` files must be committed.
+- Edit the template-inherited workflows here for SDK reasons.

@@ -240,12 +240,6 @@ func (errSyslogBoom) Error() string { return "boom" }
 // connection" error returned by net.Conn.Close on an already-closed conn.
 // Used by cleanup paths to avoid t.Log spam when the test under
 // assertion intentionally closed the connection.
-//
-// Params:
-//   - err: cleanup-time close error to classify.
-//
-// Returns:
-//   - closed: true when err signals an already-closed connection.
 func isClosedNetErr(err error) (closed bool) {
 	//: nil errors do not represent any close failure.
 	if err == nil {

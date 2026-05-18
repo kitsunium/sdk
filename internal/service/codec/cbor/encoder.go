@@ -1,4 +1,4 @@
-// Package cbor: encoder.go adapts fxamacker's *Encoder to codec.Encoder.
+// Package cbor — adapts fxamacker's *Encoder to codec.Encoder.
 package cbor
 
 import (
@@ -13,12 +13,6 @@ type cborEncoder struct {
 }
 
 // Encode serialises v through the wrapped encoder.
-//
-// Params:
-//   - v: value to encode.
-//
-// Returns:
-//   - error: MarshalFailed wrapping the library cause on failure.
 func (e *cborEncoder) Encode(v any) error {
 	//: delegate and wrap on error.
 	cerr := e.inner.Encode(v)
@@ -37,9 +31,6 @@ func (e *cborEncoder) Encode(v any) error {
 }
 
 // Close is a no-op because the fxamacker encoder does not own the writer.
-//
-// Returns:
-//   - error: always nil.
 func (*cborEncoder) Close() error {
 	//: fxamacker's encoder owns no writer-level state.
 	return nil

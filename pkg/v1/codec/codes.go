@@ -1,4 +1,4 @@
-// Package codec: codes.go — range 1.2.0.* (ADR 0005 pkg/v1/codec block).
+// Package codec — range 1.2.0.* (ADR 0005 pkg/v1/codec block).
 package codec
 
 import "github.com/kitsunium/sdk/pkg/v1/errs"

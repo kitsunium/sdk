@@ -1,7 +1,6 @@
-// Package route: router_sink_params.go declares the Params struct that
-// pairs a predicate with a downstream sink. Held as a parent-prefixed
-// sibling of router_sink.go so the router file stays focused on the Sink
-// contract while preserving the KTN-STRUCT-COLOCATE convention.
+// Package route — declares the Params struct that pairs a predicate with a
+// downstream sink. Sibling of router_sink.go so the router file stays
+// focused on the Sink contract.
 package route
 
 import (
@@ -24,12 +23,6 @@ type Params struct {
 }
 
 // LevelAtLeast returns a Predicate matching records at or above min.
-//
-// Params:
-//   - min: minimum severity level the entry accepts.
-//
-// Returns:
-//   - Predicate: a closure usable as Params.When.
 func LevelAtLeast(min level.Level) Predicate {
 	//: closure binds min so the route table stays declarative at the call site.
 	return func(r corelogger.RecordEvent) (match bool) {

@@ -1,4 +1,4 @@
-// Package errs: codes.go — meta-codes (Layer=0 reserved for this file).
+// Package errs — meta-codes (Layer=0 reserved for this file).
 // Used in Define panic messages and in internal bootstrap errors
 // (newValidationError). These codes are documentary: they are NOT
 // returned from emitter APIs as sentinel *Error values.

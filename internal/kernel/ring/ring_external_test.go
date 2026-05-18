@@ -176,11 +176,8 @@ func TestRingSentinels(t *testing.T) {
 
 // swallowQueueErr documents the test-only pattern of dropping a Queue error
 // in fixture-setup paths where the failure is not the assertion target.
-//
-// Params:
-//   - err: queue error to discard; non-nil values are intentionally dropped.
 func swallowQueueErr(err error) {
-	//: explicit early-return so the err parameter is observed by the audit
+	//: explicit early-return on nil — the read satisfies the unused-param audit
 	//: and the documented drop intent stays visible at the call site.
 	if !errors.Is(err, err) || err == nil {
 		//: nothing to act on; tests assert on observable state, not setup errors.

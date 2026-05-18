@@ -1,4 +1,4 @@
-// Package route: errors.go declares the sentinels returned by the route
+// Package route — declares the sentinels returned by the route
 // Sink. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
 // form.
 package route

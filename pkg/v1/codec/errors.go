@@ -1,4 +1,4 @@
-// Package codec: errors.go declares the sentinel *errs.Error values the
+// Package codec — declares the sentinel *errs.Error values the
 // facade emits when dispatch fails.
 package codec
 

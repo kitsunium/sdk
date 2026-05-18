@@ -17,16 +17,15 @@ import (
 //
 // Before v1.0.0:
 //
-//  1. Delete the shim in internal/kernel/errs (DefineInt, NewErrorInt,
-//     HasCodeInt, LayerOf, CodeOf returning int, Error.Code() int).
-//  2. Delete the re-export from pkg/v1/errs.
-//  3. Flip this test to assert the symbols are ABSENT (remove the binds
-//     below, use reflect.TypeOf(errs.CodeValueOf).String() to document
-//     the remaining typed-only surface).
+// 1. Delete the shim in internal/kernel/errs (DefineInt, NewErrorInt,
+// HasCodeInt, LayerOf, CodeOf returning int, Error.Code() int).
+// 2. Delete the re-export from pkg/v1/errs.
+// 3. Flip this test to assert the symbols are ABSENT (remove the binds
+// below, use reflect.TypeOf(errs.CodeValueOf).String() to document
+// the remaining typed-only surface).
 //
 // The gate ensures the "Removed before v1.0.0" commitment in ADR 0005
 // §Deferred does not silently decay into a permanent v1 surface.
-// Finding #30 from post-audit review.
 func TestDeprecatedShimsStillExist(t *testing.T) {
 	t.Parallel()
 	//: reflection binds the symbols at runtime AND fails compilation if

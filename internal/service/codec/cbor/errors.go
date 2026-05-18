@@ -1,4 +1,4 @@
-// Package cbor: errors.go declares the sentinel *errs.Error values for CBOR.
+// Package cbor — declares the sentinel *errs.Error values for CBOR.
 package cbor
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

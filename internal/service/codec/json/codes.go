@@ -1,4 +1,4 @@
-// Package json: codes.go — range 0.3.2.* (ADR 0005 service/codec/json block).
+// Package json — range 0.3.2.* (ADR 0005 service/codec/json block).
 package json
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

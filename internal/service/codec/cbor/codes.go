@@ -1,4 +1,4 @@
-// Package cbor: codes.go — range 0.3.6.* (ADR 0005 service/codec/cbor block).
+// Package cbor — range 0.3.6.* (ADR 0005 service/codec/cbor block).
 package cbor
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

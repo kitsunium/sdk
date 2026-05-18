@@ -183,7 +183,7 @@ func TestNewDecoder(t *testing.T) {
 // the classic entity-expansion bomb without unbounded memory growth or a
 // hang. Go 1.21+ caps internal entity expansion by construction; this test
 // locks that property so a future Go upgrade regressing the behaviour is
-// caught by the build. Regresses finding #18 from the post-audit review.
+// caught by the build.
 //
 // The payload below is the textbook "billion laughs" shape — a nested
 // DOCTYPE that, without entity caps, would expand to ~10^9 characters

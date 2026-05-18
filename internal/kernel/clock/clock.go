@@ -17,21 +17,12 @@ type Clock interface {
 type systemClock struct{}
 
 // Now returns the current wall-clock instant from package time.
-//
-// Returns:
-//   - time.Time: the current time as reported by time.Now.
 func (systemClock) Now() time.Time {
 	//: delegate to the standard library so the OS provides the timestamp.
 	return time.Now()
 }
 
 // Since returns the elapsed duration between t and the current wall-clock time.
-//
-// Params:
-//   - t: a prior timestamp to subtract from the current time.
-//
-// Returns:
-//   - time.Duration: Now().Sub(t).
 func (systemClock) Since(t time.Time) time.Duration {
 	//: delegate to the standard library for monotonic-aware subtraction.
 	return time.Since(t)

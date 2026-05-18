@@ -1,4 +1,4 @@
-// Package ring: codes.go — range 0.1.3.* (ADR 0005 kernel/ring block).
+// Package ring — range 0.1.3.* (ADR 0005 kernel/ring block).
 package ring
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

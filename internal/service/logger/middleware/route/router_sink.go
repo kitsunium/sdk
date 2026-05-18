@@ -25,13 +25,6 @@ type routerSink struct {
 // New constructs a router Sink from the supplied entries and optional
 // fallback Sink. The entries slice is defensively copied so post-
 // construction mutation by the caller is harmless.
-//
-// Params:
-//   - fallback: catch-all sink; nil makes Write return NoMatch on misses.
-//   - entries: predicate / sink pairs evaluated in order.
-//
-// Returns:
-//   - corelogger.Sink: the router Sink behind the public interface.
 func New(fallback corelogger.Sink, entries ...Params) corelogger.Sink {
 	//: defensive copy — the router owns its entries table.
 	cp := make([]Params, 0, len(entries))
@@ -49,15 +42,6 @@ func New(fallback corelogger.Sink, entries ...Params) corelogger.Sink {
 }
 
 // Write dispatches p to the first matching entry or to the fallback sink.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to the matching sink.
-//   - rec: originating record consulted by the predicates.
-//   - p: formatted bytes forwarded to the matching sink.
-//
-// Returns:
-//   - n: bytes accepted by the matching sink (0 on NoMatch).
-//   - err: the matching sink's error; NoMatch when no predicate hits.
 func (s *routerSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: walk entries in order; first match wins.
 	for _, entry := range s.entries {
@@ -77,12 +61,6 @@ func (s *routerSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 }
 
 // Flush forwards to every entry + fallback and aggregates per-sink errors.
-//
-// Params:
-//   - ctx: request-scoped context forwarded to every sink.
-//
-// Returns:
-//   - err: errors.Join of per-sink failures; nil on unanimous success.
 func (s *routerSink) Flush(ctx context.Context) error {
 	//: collect per-sink errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.entries)+1)
@@ -112,9 +90,6 @@ func (s *routerSink) Flush(ctx context.Context) error {
 }
 
 // Close forwards to every entry + fallback and aggregates per-sink errors.
-//
-// Returns:
-//   - err: errors.Join of per-sink failures; nil on unanimous success.
 func (s *routerSink) Close() error {
 	//: collect per-sink errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.entries)+1)

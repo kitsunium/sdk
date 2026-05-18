@@ -1,4 +1,4 @@
-// Package errs: validate.go centralises the runtime structural checks
+// Package errs — centralises the runtime structural checks
 // applied by Define. Factoring the logic out of Define lets tests cover
 // every rule as a plain function call without subprocess fixtures for
 // package-init panics.
@@ -22,8 +22,8 @@ const reasonPattern string = "^[A-Z][A-Z0-9_]*$"
 // negative integer.
 const maxInt32Positive uint32 = 0x7FFFFFFF
 
-// Package-level mutable state. The KTN-VAR-GROUP rule requires all package
-// `var` declarations to live in one grouped block.
+// Package-level mutable state — all package `var` declarations live in one
+// grouped block to keep the static surface easy to audit.
 var (
 	// metaCodeAllowed is the whitelist — only these Codes may have Layer == 0.
 	// Anything else with Layer==0 is rejected by validateCode as structurally
@@ -52,17 +52,6 @@ var (
 )
 
 // validateDefineArgs applies Define's structural rules.
-//
-// Params:
-//   - code: typed Code identifier; must be non-zero, fit int32-positive, and
-//     satisfy the Layer rule (Layer==0 only for the meta-code whitelist).
-//   - reason: stable identifier; must match reasonPattern.
-//   - public: wire-safe message; non-empty, capped, no newline.
-//   - private: log-only message; non-empty.
-//
-// Returns:
-//   - *Error: nil on success; otherwise a bootstrap-only *Error built via
-//     newValidationError (NEVER via Define — avoids init recursion).
 func validateDefineArgs(code Code, reason, public, private string) *Error {
 	//: run the four structural checks in their documented order; first
 	//: failure short-circuits so Define reports the earliest violation.
@@ -92,15 +81,9 @@ func validateDefineArgs(code Code, reason, public, private string) *Error {
 }
 
 // validateCode checks the dotted-quad Code. Rules (see ADR 0005):
-//  1. code != 0
-//  2. uint32(code) <= 0x7FFF_FFFF (safe int32 round-trip)
-//  3. Layer(code) != 0 unless code is in metaCodeAllowed
-//
-// Params:
-//   - code: Code to verify.
-//
-// Returns:
-//   - *Error: nil on success; structural failure otherwise.
+// 1. code != 0
+// 2. uint32(code) <= 0x7FFF_FFFF (safe int32 round-trip)
+// 3. Layer(code) != 0 unless code is in metaCodeAllowed
 func validateCode(code Code) *Error {
 	//: reject zero — it is the sentinel "no code" value, never valid.
 	if code == 0 {
@@ -131,12 +114,6 @@ func validateCode(code Code) *Error {
 }
 
 // validateReason checks the SCREAMING_SNAKE_CASE shape of Reason.
-//
-// Params:
-//   - reason: stable identifier to verify.
-//
-// Returns:
-//   - *Error: nil on success; structural failure otherwise.
 func validateReason(reason string) *Error {
 	//: reject anything that is not a non-empty SCREAMING_SNAKE identifier.
 	if !isScreamingSnake(reason) {
@@ -150,12 +127,6 @@ func validateReason(reason string) *Error {
 }
 
 // validatePublic checks Public is non-empty, capped, and newline-free.
-//
-// Params:
-//   - public: wire-safe message to verify.
-//
-// Returns:
-//   - *Error: nil on success; structural failure otherwise.
 func validatePublic(public string) *Error {
 	//: reject empty Public — every error MUST carry a wire-safe message.
 	if public == "" {
@@ -184,12 +155,6 @@ func validatePublic(public string) *Error {
 
 // validatePrivate checks Private is non-empty. v5 bug fix: this now cites
 // CodeInvalidPrivate (not CodeInvalidPublic as pre-ADR-0005).
-//
-// Params:
-//   - private: log-only message to verify.
-//
-// Returns:
-//   - *Error: nil on success; structural failure otherwise.
 func validatePrivate(private string) *Error {
 	//: reject empty Private — operators MUST receive a log-only context line.
 	if private == "" {
@@ -202,12 +167,6 @@ func validatePrivate(private string) *Error {
 }
 
 // containsNewline reports whether s contains any newline rune.
-//
-// Params:
-//   - s: candidate string.
-//
-// Returns:
-//   - bool: true iff s contains '\n' or '\r'.
 func containsNewline(s string) bool {
 	//: scan rune-by-rune so a CR/LF anywhere — not just at the boundary —
 	//: trips the check.
@@ -225,12 +184,6 @@ func containsNewline(s string) bool {
 
 // isScreamingSnake reports whether s matches reasonPattern without pulling
 // regexp into the kernel package.
-//
-// Params:
-//   - s: candidate string.
-//
-// Returns:
-//   - bool: true iff s is a non-empty SCREAMING_SNAKE identifier.
 func isScreamingSnake(s string) bool {
 	//: an empty string can never satisfy the leading-uppercase rule.
 	if s == "" {
@@ -251,13 +204,6 @@ func isScreamingSnake(s string) bool {
 
 // isValidReasonRune reports whether r is acceptable at position i inside a
 // Reason identifier.
-//
-// Params:
-//   - i: zero-based rune index within the Reason.
-//   - r: the rune being validated.
-//
-// Returns:
-//   - bool: true iff r is allowed at position i.
 func isValidReasonRune(i int, r rune) bool {
 	//: the first rune is restricted to uppercase ASCII to keep Reason
 	//: identifiers searchable and pattern-matchable.
@@ -270,24 +216,12 @@ func isValidReasonRune(i int, r rune) bool {
 }
 
 // isUpperLetter reports whether r is an uppercase ASCII letter.
-//
-// Params:
-//   - r: rune to test.
-//
-// Returns:
-//   - bool: true iff r is in the range 'A'..'Z'.
 func isUpperLetter(r rune) bool {
 	//: inclusive range check against the ASCII uppercase block.
 	return r >= 'A' && r <= 'Z'
 }
 
 // isDigit reports whether r is an ASCII digit.
-//
-// Params:
-//   - r: rune to test.
-//
-// Returns:
-//   - bool: true iff r is in the range '0'..'9'.
 func isDigit(r rune) bool {
 	//: inclusive range check against the ASCII digit block.
 	return r >= '0' && r <= '9'

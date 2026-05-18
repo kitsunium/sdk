@@ -1,4 +1,4 @@
-// Package async: runtime.go gathers the small runtime helpers used by the
+// Package async — gathers the small runtime helpers used by the
 // async drainer (yield primitive, channel-closed probe, error swallowers).
 // Pulled out of async_sink.go to keep that file focused on the Sink contract.
 package async
@@ -18,12 +18,6 @@ func yieldOnce() {
 
 // isClosed reports whether ch has been closed. Used by Write to refuse work
 // after Close without forcing a sync.Mutex on the hot path.
-//
-// Params:
-//   - ch: stop channel observed by the drainer.
-//
-// Returns:
-//   - closed: true when the channel is closed; false otherwise.
 func isClosed(ch chan struct{}) bool {
 	//: a closed receive returns immediately with !ok; an open one falls through.
 	select {
@@ -40,22 +34,14 @@ func isClosed(ch chan struct{}) bool {
 // Always context.Background — the producer's request-scoped context is gone
 // by the time the drainer fires, so a long-lived background context lets
 // the downstream sink settle without spurious cancellation.
-//
-// Returns:
-//   - ctx: background context for the drainer's downstream calls.
 func asyncCtx() context.Context {
 	//: background context decouples drainer lifetime from producer lifetime.
 	return context.Background()
 }
 
 // forwardDownstreamError surfaces a downstream Write error to the OnError
-// callback so operators have a hook for metrics / fallback logging. Replaces
-// the previous silent-drop behaviour (finding #24 from post-audit review).
-//
-// Params:
-//   - s: async sink holding the configured onError callback.
-//   - bytes: byte count returned by the downstream sink; informational only.
-//   - err: downstream error to surface; nil is a no-op fast-path.
+// callback so operators have a hook for metrics / fallback logging; without
+// the callback the async sink would silently drop sink-level failures.
 func (s *asyncSink) forwardDownstreamError(bytes int, err error) {
 	//: defensive guard so bogus bytes do not trigger the callback.
 	if bytes < 0 || err == nil {
@@ -69,11 +55,8 @@ func (s *asyncSink) forwardDownstreamError(bytes int, err error) {
 // swallowRingError documents the test-only pattern of dropping a Queue error
 // in the DropOldest retry path. The retry happens after a successful TryRead,
 // so the slot is free and the second TryWrite will not fail in practice.
-//
-// Params:
-//   - err: ring error to discard.
 func swallowRingError(err error) {
-	//: explicit early-return so err is observed by the audit.
+	//: explicit early-return on nil — the read satisfies the unused-param audit.
 	if err == nil {
 		//: nothing to discard on the happy path.
 		return

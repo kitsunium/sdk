@@ -1,4 +1,4 @@
-// Package yaml: decoder.go adapts yaml.v3's *Decoder to codec.Decoder.
+// Package yaml — adapts yaml.v3's *Decoder to codec.Decoder.
 package yaml
 
 import (
@@ -18,12 +18,6 @@ type yamlDecoder struct {
 }
 
 // Decode reads the next document into v.
-//
-// Params:
-//   - v: pointer destination.
-//
-// Returns:
-//   - error: UnmarshalFailed on failure, io.EOF when the stream is drained.
 func (d *yamlDecoder) Decode(v any) error {
 	//: stream-end sentinel bubbles up verbatim so callers can exit loops.
 	derr := d.inner.Decode(v)
@@ -51,9 +45,6 @@ func (d *yamlDecoder) Decode(v any) error {
 }
 
 // More reports whether additional documents are still available.
-//
-// Returns:
-//   - bool: false once Decode has returned io.EOF.
 func (d *yamlDecoder) More() bool {
 	//: reflect the sticky EOF latch.
 	return !d.done

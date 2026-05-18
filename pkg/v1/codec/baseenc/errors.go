@@ -1,4 +1,4 @@
-// Package baseenc: errors.go declares the sentinel *errs.Error values.
+// Package baseenc — declares the sentinel *errs.Error values.
 package baseenc
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

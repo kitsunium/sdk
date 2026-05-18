@@ -99,7 +99,6 @@ func TestTextEncoder_Append(t *testing.T) {
 // TestTextEncoder_Append_StripsFramingSensitiveBytes asserts that Message
 // bytes CR, LF, and NUL never reach the encoded line — otherwise a syslog
 // or line-tailed-file sink could see attacker-injected frame boundaries.
-// Regresses finding #2 from the post-#12 audit.
 func TestTextEncoder_Append_StripsFramingSensitiveBytes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

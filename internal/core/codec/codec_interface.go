@@ -5,10 +5,6 @@
 // This package is interface-only: no runtime state, no registrations, no
 // format-specific knowledge. Codecs register themselves via the registry in
 // registry.go when their service subpackage is imported.
-//
-// codec_interface.go isolates the contract interfaces so KTN-INTERFACE-FILENAME
-// stays quiet (the rule asks interface-only files to use the *_interface.go
-// suffix when a single file declares more than one interface).
 package codec
 
 import "io"

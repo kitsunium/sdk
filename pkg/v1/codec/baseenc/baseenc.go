@@ -17,7 +17,7 @@ import (
 )
 
 // Encoding identifies one of the supported byte encodings. Encoded as a
-// typed int with iota (KTN-CONST-STRENUM) so consumers compare by identity
+// typed int with iota so consumers compare by identity
 // rather than by string, and the compiler catches typos at call sites.
 type Encoding int
 
@@ -42,13 +42,10 @@ const (
 
 // String implements fmt.Stringer for Encoding, returning the canonical
 // short name used in diagnostics.
-//
-// Returns:
-//   - string: the canonical name ("base64", "base64url", ...), or "unknown".
 func (e Encoding) String() string {
 	//: dispatch on the enum value so the textual form stays stable.
 	switch e {
-	//: zero value sentinel — explicit so KTN-SWITCH-EXHAUSTIVE stays quiet.
+	//: zero value sentinel — explicit.
 	case EncodingUnknown:
 		//: documented "unknown" form mirrors the out-of-range fallback.
 		return "unknown"
@@ -82,18 +79,10 @@ func (e Encoding) String() string {
 }
 
 // Encode encodes raw into text using the given Encoding.
-//
-// Params:
-//   - e: requested encoding.
-//   - raw: raw bytes to encode.
-//
-// Returns:
-//   - string: the encoded text.
-//   - error: InvalidEncoding when e is not supported.
 func Encode(e Encoding, raw []byte) (text string, err error) {
 	//: branch on the encoding identifier.
 	switch e {
-	//: zero value sentinel — explicit so KTN-SWITCH-EXHAUSTIVE stays quiet
+	//: zero value sentinel — explicit
 	//: while still funnelling into the INVALID_ENCODING failure path.
 	case EncodingUnknown:
 		//: fall through to the typed facade error below.
@@ -132,19 +121,10 @@ func Encode(e Encoding, raw []byte) (text string, err error) {
 }
 
 // Decode decodes text into raw bytes using the given Encoding.
-//
-// Params:
-//   - e: requested encoding.
-//   - text: encoded text.
-//
-// Returns:
-//   - []byte: decoded bytes.
-//   - error: InvalidEncoding when e is unknown; DecodeFailed when the
-//     decoder rejects the input.
 func Decode(e Encoding, text string) (raw []byte, err error) {
 	//: branch on the encoding identifier.
 	switch e {
-	//: zero value sentinel — explicit so KTN-SWITCH-EXHAUSTIVE stays quiet
+	//: zero value sentinel — explicit
 	//: while still funnelling into the INVALID_ENCODING failure path.
 	case EncodingUnknown:
 		//: fall through to the typed facade error below.
@@ -183,14 +163,6 @@ func Decode(e Encoding, text string) (raw []byte, err error) {
 }
 
 // encodeASCII85 returns the Ascii85 encoding of raw.
-//
-// Params:
-//   - raw: bytes to encode.
-//
-// Returns:
-//   - string: the Ascii85-encoded text.
-//   - error: defensively wraps any stdlib failure, though bytes.Buffer
-//     writes never error in practice.
 func encodeASCII85(raw []byte) (text string, err error) {
 	//: bytes.Buffer preallocates via Grow so append-style growth is avoided.
 	var buf bytes.Buffer
@@ -215,12 +187,6 @@ func encodeASCII85(raw []byte) (text string, err error) {
 // wrapASCII85Encode wraps an encoder-side failure with the ENCODE_FAILED
 // reason so callers can distinguish encode from decode errors via
 // errs.HasReason.
-//
-// Params:
-//   - cause: stdlib error returned by Write or Close.
-//
-// Returns:
-//   - error: EncodeFailed-wrapped error.
 func wrapASCII85Encode(cause error) error {
 	//: single construction site keeps the Private message aligned.
 	return errs.Wrap(cause, errs.WrapParams{
@@ -232,13 +198,6 @@ func wrapASCII85Encode(cause error) error {
 }
 
 // decodeASCII85 decodes Ascii85-encoded text.
-//
-// Params:
-//   - text: the Ascii85-encoded text.
-//
-// Returns:
-//   - []byte: decoded bytes.
-//   - error: DecodeFailed when the stdlib rejects the input.
 func decodeASCII85(text string) (raw []byte, err error) {
 	//: Ascii85 tolerates surrounding whitespace; NewDecoder handles it.
 	r := ascii85.NewDecoder(strings.NewReader(text))
@@ -259,14 +218,6 @@ func decodeASCII85(text string) (raw []byte, err error) {
 }
 
 // wrapDecode adapts an (out, err) pair into the DecodeFailed sentinel.
-//
-// Params:
-//   - out: decoded bytes returned by the stdlib call.
-//   - derr: error returned by the stdlib call.
-//
-// Returns:
-//   - []byte: the decoded bytes when derr is nil.
-//   - error: DecodeFailed wrapping derr, or nil on success.
 func wrapDecode(out []byte, derr error) (raw []byte, err error) {
 	//: success fast-path.
 	if derr == nil {

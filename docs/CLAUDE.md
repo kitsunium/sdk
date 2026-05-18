@@ -1,35 +1,40 @@
-<!-- updated: 2026-04-19T10:18:42Z -->
+<!-- updated: 2026-05-18T14:30:00Z -->
 # docs/
 
 ## Purpose
 
-Long-form SDK documentation. Everything in here is authoritative — READMEs at the package level are the short-form mirror; ADRs here are the source of truth for cross-cutting decisions.
+Long-form SDK documentation. ADRs here are the source of truth for cross-cutting decisions; package-level READMEs are the short-form mirror.
 
 ## Contents
 
-| File | Topic | State |
+| File | Topic | Status |
 |---|---|---|
-| `adr/0001-sdk-go-multimodule-layout.md` | Multi-module layout (kernel/core/service/pkg-v1) | Accepted |
-| `adr/0002-sdk-errors-package.md` | Layered `errs` package, registry, breaking changes | Accepted |
+| `adr/0001-sdk-go-multimodule-layout.md` | 4-layer architecture, 5 Go modules glued by `go.work` | Accepted |
+| `adr/0002-sdk-errors-package.md` | Layered typed `errs` package, Public/Private split, registry, breaking changes | Accepted (§Registry superseded by ADR 0005) |
+| `adr/0003-sdk-codec-package.md` | Universal codec surface (10 formats + baseenc) behind `Marshal/Unmarshal` dispatch | Accepted (M1+M2+M3+M4 shipped) |
+| `adr/0004-sdk-bazel-build-system.md` | Bazel 9 as single build/test system; visibility replaces depguard | Accepted |
+| `adr/0005-sdk-error-codes-dotted-quad.md` | `Code uint32` laid out `MM.LL.PP.SS`, wrap trail, CIDR-style `PrefixMatcher` | Accepted (supersedes ADR 0002 §Registry) |
+| `adr/0006-sdk-error-code-registry-extension.md` | Registry assignments for logger v2 sinks/middleware + `kernel/ring` | Accepted (amends ADR 0005 §Registry) |
 
 ## ADR conventions
 
 - Sequential numbering (`0001`, `0002`, …). Never reuse a number.
 - Filename slug = short kebab-case summary of the decision.
-- Header fields: `Status`, `Date`, `Deciders`, optional `Supersedes`, optional `Related`.
+- Header fields: `Status`, `Date`, `Deciders`, optional `Supersedes`, `Superseded by`, `Amends`, `Related`.
 - Standard sections: Context, Decision, Consequences / Semantics, Breaking changes, Why not …, Deferred, References.
-- Immutable after merge. Supersede via a new ADR that references the old one.
+- Immutable after merge. Supersede via a new ADR that references the old one (e.g. ADR 0005 supersedes ADR 0002 §Registry; ADR 0006 amends ADR 0005 §Registry).
 
-## ADR 0002 registry coupling
+## Registry coupling
 
-The code-allocation table in `docs/adr/0002-sdk-errors-package.md` is the **documentary source of truth**; the AST audit test in `internal/kernel/errs/registry_external_test.go` embeds the same table as the **executable source of truth**. Keep the two in sync manually on every change — a future cross-reference test will catch drift.
+The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-…` is the **documentary source of truth**; the AST audit test in `internal/kernel/errs/registry_external_test.go` embeds the same table as the **executable source of truth**. Keep the two in sync manually on every change — the audit catches drift on uniqueness and `reason = screamingSnake(varName)`.
 
 ## Do NOT
 
-- Put feature documentation here. Packages document themselves via `README.md`.
-- Delete an accepted ADR. Mark it superseded by adding a new ADR and updating the `Status`.
-- Re-number existing ADRs.
+- Put feature documentation here. Packages document themselves via `README.md` next to their code.
+- Delete an accepted ADR. Mark it superseded by adding a new ADR and updating both `Status` lines.
+- Re-number existing ADRs, even after a supersede chain.
+- Edit an ADR's Decision section after merge — write a new ADR.
 
 ## Subtree
 
-- `adr/` — Architecture Decision Records (see files above)
+- `adr/` — Architecture Decision Records (six accepted to date — see table above)

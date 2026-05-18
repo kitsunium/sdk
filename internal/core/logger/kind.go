@@ -1,4 +1,4 @@
-// Package logger: kind.go declares the Kind enum that discriminates the union
+// Package logger — declares the Kind enum that discriminates the union
 // payload carried by Value. Handlers switch on Kind to select the matching
 // accessor (String, Int64, Float64, …) instead of paying the cost of an
 // `any` type assertion at every render call.
@@ -59,10 +59,7 @@ type Kind int8
 
 // String returns the lowercase textual label associated with the Kind
 // receiver, suitable for diagnostic dumps and golden test fixtures.
-//
-// Returns:
-//   - string: one of "any", "bool", "duration", "float64", "int64",
-//     "string", "time", "uint64", "group" — or "unknown" for future variants.
+// "string", "time", "uint64", "group" — or "unknown" for future variants.
 func (k Kind) String() string {
 	//: bounds-check before indexing so unknown variants degrade gracefully.
 	if k < 0 || int(k) >= len(kindLabels) {

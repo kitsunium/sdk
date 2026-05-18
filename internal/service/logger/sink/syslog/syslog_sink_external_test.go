@@ -257,9 +257,6 @@ func TestNewWithConfig(t *testing.T) {
 type errDialerBoom struct{}
 
 // Error renders a static marker; content is not asserted by the test.
-//
-// Returns:
-//   - msg: a static marker.
 func (errDialerBoom) Error() (msg string) {
 	//: static marker — content is not asserted.
 	return "dialer boom"
@@ -290,7 +287,7 @@ func TestSyslogSentinels(t *testing.T) {
 
 // swallowSyslogClose drops a Close error from cleanup paths.
 func swallowSyslogClose(err error) {
-	//: defensive guard so err is observed by the audit.
+	//: read the parameter so the unused-param audit treats this no-op as intentional.
 	if err == nil {
 		//: nothing to discard on the happy path.
 		return
@@ -299,7 +296,7 @@ func swallowSyslogClose(err error) {
 
 // swallowSyslogDeadline drops a SetReadDeadline error from goroutines.
 func swallowSyslogDeadline(err error) {
-	//: defensive guard so err is observed by the audit.
+	//: read the parameter so the unused-param audit treats this no-op as intentional.
 	if err == nil {
 		//: nothing to discard on the happy path.
 		return
