@@ -1,47 +1,41 @@
-<!-- updated: 2026-04-19T10:18:42Z -->
+<!-- updated: 2026-05-18T14:30:00Z -->
 # internal/service/
 
 ## Purpose
 
-Concrete implementations of the contracts declared in `internal/core/*`. This is where actual I/O, formatting, locking, and error wrapping happen. The `pkg/v1/*` facade wraps service constructors and hides the wiring from consumers.
+Concrete implementations of the contracts declared in `internal/core/*`. This is where actual I/O, formatting, locking, codec dispatch, and error wrapping happen. The `pkg/v1/*` facade wraps service constructors and hides the wiring from consumers.
 
 ## Contents
 
-| Package | Purpose | Code range |
+| Sub-tree | Purpose | Code prefix |
 |---|---|---|
-| `logger/` | `TextHandler` + `loggerImpl` realising `core/logger.Handler` + `Logger` | 3100-3199 (emitter) |
+| `logger/` | v2 zero-alloc multi-sink architecture (`builder`, `encoder`, `sink/{console,file,syslog}`, `middleware/{multi,async,route,failover,sample,recover}`) realising `core/logger.Handler` + `Logger` | `0.3.1.*` (and per-component slots, see logger CLAUDE.md) |
+| `codec/` | 10 wire-format codecs (asn1, cbor, csv, json, msgpack, ndjson, pem, toml, xml, yaml), each implementing `core/codec.Codec`; some also satisfy `StreamingCodec` and/or `Appender` | `0.3.2.*` … `0.3.11.*` (one PP slot per codec) |
 
 ## Module
 
-Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod`. `replace` directives resolve `../kernel` and `../core` locally so `GOWORK=off go build ./...` works per-module in CI.
-
-## Emitted errors (service/logger)
-
-| Code | Var | Trigger |
-|---|---|---|
-| 3101 | `WriterNil` | `NewTextHandler(nil, …)` |
-| 3102 | `HandlerNil` | `New(nil)` |
-| 3110 | `CtxCancelled` | `Handle(ctx, r)` with a cancelled context — wraps `context.Canceled` |
-| 3120 | `WriteFailed` | Underlying `io.Writer.Write` returned an error — wraps the cause, ExitCode override 74 (EX_IOERR) |
-
-All four are declared in `logger/codes.go` + `logger/errors.go`. The AST audit (`make sdk-errs-audit`) enforces the convention `Go var name == Reason`.
+Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` shared by **both** logger and codec sub-trees. `replace` directives resolve `../kernel` and `../core` locally so `GOWORK=off go build ./...` works per-module in CI.
 
 ## Conventions
 
-- **Imports allowed**: stdlib + `internal/kernel/*` + `internal/core/*`. Never `pkg/*`.
-- **Concurrent safety**: every public type exposes the "safe for concurrent use" contract from core, and implements it (typically via `sync.Mutex` for stateful handlers).
-- **Error wrapping**: `errs.Wrap(cause, WrapParams{…})` when the cause is a stdlib error; the `errs.WrapParams` fields are SILENTLY IGNORED when the cause is already an `*errs.Error` (origin wins). See `internal/kernel/errs/README.md`.
-- **Function length**: `KTN-FUNC-MAXLOC` caps at 50 lines. `TextHandler.Handle` was split into `renderLine` + `writeLine` helpers for that reason.
+- **Imports allowed**: stdlib + `internal/kernel/*` + `internal/core/*` + third-party libraries that codec wrappers delegate to (e.g. `github.com/fxamacker/cbor/v2`, `gopkg.in/yaml.v3`). Never `pkg/*`.
+- **Concurrent safety**: every public type honours the "safe for concurrent use" contract inherited from the core interface it implements. Codec singletons are stateless; logger handlers serialise writes via `sync.Mutex` or async ring buffer.
+- **Error wrapping**: `errs.Wrap(cause, WrapParams{…})` when the cause is a stdlib / third-party error; the `errs.WrapParams` fields are SILENTLY IGNORED when the cause is already an `*errs.Error` (origin wins). See `internal/kernel/errs/README.md`.
+- **Codec registration**: each codec exports `var Codec codec.Codec = codec.Register(&xxxCodec{})` at package load — no `init()`. Blank-importing the package is enough to make it resolvable by Name / MIME / Extension.
+- **Function length**: `KTN-FUNC-MAXLOC` caps every function at 50 lines. Helpers are split out (e.g. `escapeFormulaCells` / `escapeFormulaRow` in `codec/csv`, `renderLine` / `writeLine` in `logger`).
 
 ## Do NOT
 
-- Re-export a service type as the public-facing API. The public facade is `pkg/v1/*` — consumers should never see a `svclogger.TextHandler` type.
-- Reach into `core/logger` structs to mutate them. `AttrValue` and `RecordEvent` are immutable after construction.
-- Swallow writer errors silently in a handler. Wrap them via `errs.Wrap` so `errors.Is(err, originalCause)` keeps working.
+- Re-export a service type as the public-facing API. The public facade is `pkg/v1/*` — consumers should never see `svccodec.jsonCodec` or `svclogger.builder` types directly.
+- Call `fmt.Errorf` / `errors.New` in production. All errors flow through `errs.Define` (sentinels in `errors.go`) + `errs.Wrap` (call sites in `codec.go` / handler code).
+- Reach into `core/*` structs to mutate them. Domain values (`AttrValue`, `RecordEvent`) are immutable after construction.
+- Swallow a third-party encode/decode error silently. Wrap it via `errs.Wrap` so `errors.Is(err, originalCause)` keeps working and the dotted-quad code surfaces.
+- Add an `init()` function to register a codec — the package-level `var Codec = codec.Register(...)` initialiser is the convention.
 
 ## Subtree
 
 - `logger/` — see `internal/service/logger/README.md` (full contract, error catalogue, output format)
+- `codec/` — see `internal/service/codec/CLAUDE.md` (10 codec packages + per-codec error ranges)
 
 ## Verification
 
@@ -52,5 +46,4 @@ bazel test --config=race //internal/service/...
 # Fallback (go test)
 cd internal/service
 GOWORK=off go test -race -cover ./...
-# expected: logger 100%
 ```

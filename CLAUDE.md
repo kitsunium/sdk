@@ -1,20 +1,20 @@
-<!-- updated: 2026-05-12T09:29:19Z -->
+<!-- updated: 2026-05-18T14:30:00Z -->
 # kitsunium/sdk
 
 ## Purpose
 
 Go SDK providing a normed, performant toolbox for downstream applications. Two domains ship today — a structured **logger** (zero-alloc, multi-sink) and a universal **codec** (10 wire formats behind a single `Marshal/Unmarshal` dispatch). New domains land in the same 4-layer shape (ADR 0001).
 
-**Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.26
+**Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.26.2 (pinned in `MODULE.bazel`)
 
 ## Architecture at a glance
 
 ```
 internal/
 ├── kernel/        stdlib-only AND generic primitives
-│                  errs, clock, buffer, ring
+│                  errs, buffer, clock, ring
 ├── core/          domain interfaces + domain values
-│                  logger, logger/level, codec
+│                  codec, logger, logger/level
 └── service/       concrete implementations
                    logger (+ encoder, sink/{console,file,syslog},
                              middleware/{multi,async,route,
@@ -29,7 +29,7 @@ pkg/
         └── baseenc/   (base16/32/64 wrappers, not a codec)
 ```
 
-- Every directory is an independent Go module (see `go.work`); each is individually buildable with `GOWORK=off` (useful when debugging outside Bazel).
+- Five independent Go modules held together by `go.work`: root (umbrella), `internal/kernel`, `internal/core`, `internal/service`, `pkg/v1`. Each module-local `go.mod` carries `replace` directives so `GOWORK=off go build ./...` per-module still works.
 - Dependency direction is strictly top-down: kernel → core → service → pkg/v1. Enforced by Bazel `package_group` + `visibility` (see ADR 0004). A rogue import fails `bazel build` before it ever reaches the linter.
 - Consumers import only `pkg/v1/*`; `internal/*` is blocked by Go's `internal/` firewall AND by the Bazel layer visibility.
 - Build / test / lint go through **Bazel 9** — see ADR 0004. `go test ./...` still works locally for quick iteration but CI only runs `bazel`.
@@ -41,7 +41,7 @@ pkg/
 | New feature or bug fix | `/plan "description"` → `/do` → `/git --commit` → `/git --merge` |
 | Code review | `/review` |
 | Linting | `make sdk-lint` (mod-tidy + gazelle drift) or `ktn-linter lint ./...` |
-| Local test suite | `make sdk-all` → shells to `bazel mod tidy`, `bazel run //:gazelle`, `bazel test --config=race //...` |
+| Local test suite | `make sdk-all` → wraps `bazel mod tidy`, `bazel run //:gazelle`, `bazel test --config=race //...` |
 | Single-package test | `bazel test //<path>:<target>` (e.g. `bazel test //internal/kernel/errs:errs_test`) |
 | Regenerate BUILD.bazel | `bazel run //:gazelle` after changing imports or `go.mod` |
 | Coverage | `bazel coverage --combined_report=lcov //...` — LCOV at `$(bazel info output_path)/_coverage/_coverage_report.dat` |
@@ -51,12 +51,12 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 ## SDK-wide rules (non-negotiable)
 
 1. **Kernel gate.** A kernel package MUST be stdlib-only AND generic (no domain vocabulary). `level` was moved OUT of kernel because it fails the second half — see ADR 0002 / the layer-placement audit in `.claude/contexts/sdk-layer-placement-audit.md`.
-2. **Typed errors only.** Every error returned from SDK code goes through `errs.Define` or `errs.Wrap` (`internal/kernel/errs`). `fmt.Errorf` / `errors.New` are banned in production code. The AST audit (`make sdk-errs-audit`) fails the build on violations.
-3. **Dotted-quad error codes.** `Code` is a `uint32` laid out `MM.LL.PP.SS` (Major / Layer / Package / Serial) — see ADR 0005. Each package owns a `PP` slot; ADR 0005 §Registry + the ADR 0006 extension are the authoritative allocation table, mirrored by the AST audit in `internal/kernel/errs/registry_external_test.go`. Match codes with `errs.HasCode(err, CodeX)` (walks `Unwrap() error` *and* `Unwrap() []error`) or `errors.Is(err, errs.NewPrefixMatcher(...))` for subnet-style routing.
-4. **Public/Private split.** Every SDK error carries a wire-safe `Public` (string literal ≤120 runes) and a log-only `Private`. `err.Error()` renders `"[<code> <REASON>] <public>"` on the no-trail fast path; when the wrap trail is non-empty, ADR 0005 §Semantics extends the bracket header with `" <- "`-separated trail codes and an optional `" (truncated)"` marker — never Private, never Fields. Log-parser regex: `\[[\d.]+(?: <- [\d.]+)*(?: \(truncated\))? \w+\]`.
+2. **Typed errors only.** Every error returned from SDK code goes through `errs.Define` or `errs.Wrap` (`internal/kernel/errs`). `fmt.Errorf` / `errors.New` are banned in production code. The AST audit (`make sdk-errs-audit` → `//internal/kernel/errs:errs_test`) fails the build on violations.
+3. **Dotted-quad error codes.** `Code` is a `uint32` laid out `MM.LL.PP.SS` (Major / Layer / Package / Serial) — see ADR 0005. Each package owns a `PP` slot; ADR 0005 §Registry + the ADR 0006 extension (logger v2 + ring) are the authoritative allocation table, mirrored by the AST audit in `internal/kernel/errs/registry_external_test.go`. Match codes with `errs.HasCode(err, CodeX)` (walks `Unwrap() error` *and* `Unwrap() []error`) or `errors.Is(err, errs.NewPrefixMatcher(...))` for subnet-style routing.
+4. **Public/Private split.** Every SDK error carries a wire-safe `Public` (string literal ≤120 runes, no newline) and a log-only `Private`. `err.Error()` renders `"[<code> <REASON>] <public>"` on the no-trail fast path; when the wrap trail is non-empty, ADR 0005 §Semantics extends the bracket header with `" <- "`-separated trail codes and an optional `" (truncated)"` marker — never Private, never Fields. Log-parser regex: `\[[\d.]+(?: <- [\d.]+)*(?: \(truncated\))? \w+\]`.
 5. **No empty stub files / dirs.** If a file or directory only carries a placeholder, inline its content into an existing file or delete it.
 6. **Origin wins on wrap.** When `errs.Wrap` receives an `*errs.Error` cause, it inherits the cause's Code/Reason/Public/Private. Wrappers can only add `Fields` (and extend the intrinsic wrap trail). To relabel, define a fresh sentinel.
-7. **`Version` via build-time injection.** `pkg/v1/logger.Version` is stamped at link time — under Bazel via `x_defs` + `--stamp` + `tools/workspace_status.sh` (`STABLE_VERSION`); under raw `go build` via `-ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=…"`. Every emitted log record carries `framework_version` automatically.
+7. **`Version` via build-time injection.** `pkg/v1/logger.Version` is stamped at link time — under Bazel via `x_defs` + `--stamp` + `tools/workspace_status.sh` (`STABLE_VERSION`); under raw `go build` via `-ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=…"`. `FrameworkVersion()` returns `"dev"` when unset; every emitted log record carries `framework_version` automatically.
 
 ## Layout
 
@@ -66,11 +66,11 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 ├── pkg/v1/                see pkg/CLAUDE.md + pkg/v1/CLAUDE.md
 ├── docs/                  ADRs — see docs/CLAUDE.md
 ├── .devcontainer/         devcontainer infrastructure (template-seeded; leave alone)
-├── .github/               CI workflows — bazel-ci.yml is the SDK job
+├── .github/               CI workflows — bazel-ci.yml is the SDK lane
 ├── go.work, go.mod        workspace + umbrella module (read by Bazel via from_file)
-├── MODULE.bazel           Bzlmod entry point (rules_go + gazelle + go_sdk + go_deps)
+├── MODULE.bazel           Bzlmod entry point (rules_go 0.60.0 + gazelle 0.50.0 + go_sdk 1.26.2 + go_deps)
 ├── BUILD.bazel            root gazelle target + audit_sources filegroup
-├── .bazelrc               named configs: race / pure / coverage / ci
+├── .bazelrc               race-on by default; named configs: race / pure / coverage / ci
 ├── .bazelversion          pins Bazel to 9.0.2
 ├── Makefile               SDK targets: wrappers over bazel mod tidy / run //:gazelle / test / coverage
 ├── tools/workspace_status.sh  prints STABLE_VERSION (consumed by --stamp + x_defs)
