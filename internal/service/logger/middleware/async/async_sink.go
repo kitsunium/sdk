@@ -294,14 +294,11 @@ func (s *asyncSink) Flush(ctx context.Context) error {
 		//: when the flushSignal was closed so the loop can surface a typed
 		//: error instead of busy-spinning (KTN-GOROUTINE-CHANRECV-OK).
 		if !s.waitForDrainerProgress(ctx) {
-			//: flushSignal closed — surface a typed cancellation wrap so
-			//: callers do not silently observe an indefinite spin.
-			return errs.Wrap(ctx.Err(), errs.WrapParams{
-				Code:    CodeAsyncCtxCancelled,
-				Reason:  "ASYNC_CTX_CANCELLED",
-				Public:  "Async sink flush aborted due to channel close",
-				Private: "service/logger/middleware/async.Flush observed flushSignal closed",
-			})
+			//: flushSignal closed means the drainer exited — return the
+			//: typed Stopped sentinel. ctx may be nil (legacy wait-forever
+			//: semantics) so we never dereference it here; this branch is
+			//: not a ctx-cancellation event.
+			return Stopped
 		}
 	}
 }
