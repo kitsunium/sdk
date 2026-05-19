@@ -32,8 +32,8 @@ missing_pub_readme=0
 # Discover every directory that owns at least one production *.go file.
 # `_test.go` alone does not count — tests can sit in a package whose
 # production files live elsewhere (build-tag-separated test fixtures).
-go_dirs=$(find internal pkg -type f -name '*.go' ! -name '*_test.go' 2>/dev/null \
-    | xargs -n1 dirname \
+go_dirs=$(find internal pkg -type f -name '*.go' ! -name '*_test.go' -print0 2>/dev/null \
+    | xargs -0 -n1 dirname \
     | sort -u \
     || true)
 

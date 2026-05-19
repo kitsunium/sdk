@@ -26,8 +26,8 @@ cd "$WORKSPACE"
 
 missing=0
 
-bench_dirs=$(find internal pkg -type f -name '*_bench_test.go' 2>/dev/null \
-    | xargs -n1 dirname \
+bench_dirs=$(find internal pkg -type f -name '*_bench_test.go' -print0 2>/dev/null \
+    | xargs -0 -n1 dirname \
     | sort -u \
     || true)
 
