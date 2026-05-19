@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -188,9 +189,9 @@ func Test_baseencCodec_appendEncode(t *testing.T) {
 		c := &baseencCodec{variant: tc.v}
 		raw := []byte("payload")
 		prefix := []byte("prefix:")
-		want := append([]byte(nil), prefix...)
+		want := slices.Clone(prefix)
 		want = append(want, c.encodeBytes(raw)...)
-		got := c.appendEncode(append([]byte(nil), prefix...), raw)
+		got := c.appendEncode(slices.Clone(prefix), raw)
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s: appendEncode=%q want=%q", tc.name, got, want)
 		}

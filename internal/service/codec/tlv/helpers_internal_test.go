@@ -128,7 +128,10 @@ func Test_tryEncodeComposite(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		_, handled, _ := tryEncodeComposite(nil, reflectView(reflect.ValueOf(tc.value)), 0)
+		_, handled, err := tryEncodeComposite(nil, reflectView(reflect.ValueOf(tc.value)), 0)
+		if err != nil {
+			t.Fatalf("%s: unexpected encode err=%v", tc.name, err)
+		}
 		if handled != tc.wantHandled {
 			t.Errorf("%s: handled=%v want %v", tc.name, handled, tc.wantHandled)
 		}
@@ -804,7 +807,10 @@ func Test_tryNumericTag(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		_, _, handled, _ := tryNumericTag(tc.tag, tc.length, tc.rest)
+		_, _, handled, err := tryNumericTag(tc.tag, tc.length, tc.rest)
+		if err != nil {
+			t.Fatalf("%s: unexpected numeric tag err=%v", tc.name, err)
+		}
 		if handled != tc.wantHandled {
 			t.Errorf("%s: handled=%v want %v", tc.name, handled, tc.wantHandled)
 		}
@@ -1078,8 +1084,8 @@ func Test_convertValue(t *testing.T) {
 		wantErr bool
 	}
 	tests := []tc{
-		{"int into int target", int64(7), reflect.TypeOf(int(0)), false},
-		{"string into int target", "abc", reflect.TypeOf(int(0)), true},
+		{"int into int target", int64(7), reflect.TypeFor[int](), false},
+		{"string into int target", "abc", reflect.TypeFor[int](), true},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -1103,10 +1109,10 @@ func Test_narrowNumeric(t *testing.T) {
 		wantHandled bool
 	}
 	tests := []tc{
-		{"int handled", int64(1), reflect.TypeOf(int(0)), true},
-		{"uint handled", uint64(1), reflect.TypeOf(uint(0)), true},
-		{"float handled", float64(1), reflect.TypeOf(float32(0)), true},
-		{"string skipped", "x", reflect.TypeOf(""), false},
+		{"int handled", int64(1), reflect.TypeFor[int](), true},
+		{"uint handled", uint64(1), reflect.TypeFor[uint](), true},
+		{"float handled", float64(1), reflect.TypeFor[float32](), true},
+		{"string skipped", "x", reflect.TypeFor[string](), false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -1129,9 +1135,9 @@ func Test_narrowFromInt(t *testing.T) {
 		wantHandled bool
 	}
 	tests := []tc{
-		{"int target", reflect.TypeOf(int(0)), true},
-		{"uint target", reflect.TypeOf(uint(0)), true},
-		{"string target", reflect.TypeOf(""), false},
+		{"int target", reflect.TypeFor[int](), true},
+		{"uint target", reflect.TypeFor[uint](), true},
+		{"string target", reflect.TypeFor[string](), false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -1154,9 +1160,9 @@ func Test_narrowFromUint(t *testing.T) {
 		wantHandled bool
 	}
 	tests := []tc{
-		{"int target", reflect.TypeOf(int(0)), true},
-		{"uint target", reflect.TypeOf(uint(0)), true},
-		{"string target", reflect.TypeOf(""), false},
+		{"int target", reflect.TypeFor[int](), true},
+		{"uint target", reflect.TypeFor[uint](), true},
+		{"string target", reflect.TypeFor[string](), false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -1179,9 +1185,9 @@ func Test_narrowFromFloat(t *testing.T) {
 		wantHandled bool
 	}
 	tests := []tc{
-		{"float32 target", reflect.TypeOf(float32(0)), true},
-		{"float64 target", reflect.TypeOf(float64(0)), true},
-		{"int target", reflect.TypeOf(int(0)), false},
+		{"float32 target", reflect.TypeFor[float32](), true},
+		{"float64 target", reflect.TypeFor[float64](), true},
+		{"int target", reflect.TypeFor[int](), false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

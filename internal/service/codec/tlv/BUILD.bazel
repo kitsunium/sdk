@@ -10,6 +10,7 @@ go_library(
         "decoder.go",
         "encoder.go",
         "errors.go",
+        "helpers.go",
         "types.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/codec/tlv",

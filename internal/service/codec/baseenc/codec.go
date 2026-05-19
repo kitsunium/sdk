@@ -32,10 +32,9 @@ import (
 // payloads (CWE-400) cannot reach the stdlib decoder.
 const maxBaseEncBytes int = 10 * 1024 * 1024
 
-// variant enumerates the supported base-N variants. The values are an
-// internal implementation detail — consumers address codecs by registered
-// Name (the public Format), never by variant identity.
-type variant int
+// asciiLowerToUpperOffset is the bit-5 distance between an ASCII lowercase
+// letter and its uppercase counterpart (e.g. 'a' - 'A' == 32).
+const asciiLowerToUpperOffset = byte(32)
 
 const (
 	// variantBase64 is the RFC 4648 standard base64 alphabet with padding.
@@ -52,6 +51,11 @@ const (
 	// variantASCII85 is Adobe's Ascii85 encoding.
 	variantASCII85
 )
+
+// variant enumerates the supported base-N variants. The values are an
+// internal implementation detail — consumers address codecs by registered
+// Name (the public Format), never by variant identity.
+type variant int
 
 // Singletons — registered with the core/codec registry at package load.
 // Binding each registration result to a typed package-level var keeps us
@@ -156,7 +160,7 @@ func (c *baseencCodec) Unmarshal(data []byte, v any) error {
 // allocates intermediate bytes by necessity (encoding/json.Marshal does
 // not expose an Append-style API), but the base-N step uses
 // AppendEncode where the stdlib offers it so dst grows in place.
-func (c *baseencCodec) Append(dst []byte, v any) (out []byte, err error) {
+func (c *baseencCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: snapshot dst length so a JSON failure leaves the buffer untouched.
 	origLen := len(dst)
 	//: encode through JSON first — this is the unavoidable allocation.
@@ -309,10 +313,6 @@ func appendEncodeASCII85(dst, raw []byte) []byte {
 	return append(dst, buf[:n]...)
 }
 
-// asciiLowerToUpperOffset is the bit-5 distance between an ASCII lowercase
-// letter and its uppercase counterpart (e.g. 'a' - 'A' == 32).
-const asciiLowerToUpperOffset = byte(32)
-
 // appendEncode appends the base-N encoding of raw onto dst, using the
 // stdlib AppendEncode helpers where available and a fresh-buffer fallback
 // for ascii85 which lacks the helper.
@@ -430,7 +430,7 @@ func wrapDecode(out []byte, derr error) (decoded []byte, err error) {
 }
 
 // decodeASCII85 drains an ascii85-encoded byte slice into a fresh buffer.
-func decodeASCII85(data []byte) (out []byte, err error) {
+func decodeASCII85(data []byte) (decoded []byte, err error) {
 	//: NewDecoder tolerates surrounding whitespace per the format spec.
 	r := ascii85.NewDecoder(strings.NewReader(string(data)))
 	//: drain into a buffer.
