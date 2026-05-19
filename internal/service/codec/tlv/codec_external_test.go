@@ -309,6 +309,75 @@ func TestSizeAndDepthCaps(t *testing.T) {
 	}
 }
 
+// TestDecoderHardeningRegressions covers the four post-audit hardening
+// fixes on the TLV decoder. Each subtest plants a crafted payload that
+// previously triggered a large allocation or a misleading error reason.
+func TestDecoderHardeningRegressions(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		data    []byte
+		wantErr string
+	}
+	//: Q1 — tagBytes (0x41) declares length=8 but only 2 body bytes follow.
+	//: The make([]byte, length) path used to allocate 8 bytes; now the
+	//: bounds check fires and TRUNCATED is returned.
+	q1BytesTruncated := []byte{0x41, 0x08, 'a', 'b'}
+	//: Q1 — tagString (0x40) declares length=16 against an empty body.
+	//: TRUNCATED is the expected reason for any "declared > remaining".
+	q1StringTruncated := []byte{0x40, 0x10}
+	//: Q2 — tagSlice (0x50) declares 2^31 elements against a 6-byte buffer.
+	//: The length>maxTLVBytes guard fires first (2^31 > 10 MiB), surfacing
+	//: SIZE_EXCEEDED before the initial pre-allocation is even attempted.
+	//: The LEB128 for 2^31 = 0x80,0x80,0x80,0x80,0x08.
+	q2HugeSlice := []byte{0x50, 0x80, 0x80, 0x80, 0x80, 0x08}
+	//: Q2 — tagMap (0x60) declares 2^31 pairs; same guard.
+	q2HugeMap := []byte{0x60, 0x80, 0x80, 0x80, 0x80, 0x08}
+	//: Q2 — tagSlice (0x50) declares 4097 elements (just above sliceHintCap)
+	//: against a 4-byte buffer. The pre-allocation must clamp to
+	//: sliceHintCap and then the for-loop must surface TRUNCATED on the
+	//: first missing element record. The LEB128 for 4097 = 0x81,0x20.
+	q2SliceJustAboveCap := []byte{0x50, 0x81, 0x20}
+	//: Q2 — tagMap (0x60) declares 4097 pairs; same path.
+	q2MapJustAboveCap := []byte{0x60, 0x81, 0x20}
+	//: Q3 — tagStruct (0x70) with 1 field, field-name TLV declares
+	//: length=256 (varint 0x80,0x02). The maxFieldNameBytes cap fires
+	//: before any body byte is consumed.
+	q3OversizeFieldName := []byte{0x70, 0x01, 0x40, 0x80, 0x02, 'a'}
+	//: C1 — tagFloat64 (0x31) declares length=8 (correct) but only 4 body
+	//: bytes follow. Used to return UNMARSHAL_FAILED; now returns
+	//: TRUNCATED, mirroring decodeInt / decodeUint.
+	c1FloatShortBuffer := []byte{0x31, 0x08, 0x01, 0x02, 0x03, 0x04}
+	//: C1 — tagFloat32 (0x30) declares length=4 (correct) but only 2 body
+	//: bytes follow.
+	c1Float32ShortBuffer := []byte{0x30, 0x04, 0x01, 0x02}
+	tests := []tc{
+		{"Q1 bytes declared > remaining → TRUNCATED", q1BytesTruncated, "TRUNCATED"},
+		{"Q1 string declared > remaining → TRUNCATED", q1StringTruncated, "TRUNCATED"},
+		{"Q2 huge slice count → SIZE_EXCEEDED", q2HugeSlice, "SIZE_EXCEEDED"},
+		{"Q2 huge map count → SIZE_EXCEEDED", q2HugeMap, "SIZE_EXCEEDED"},
+		{"Q2 slice above sliceHintCap → TRUNCATED", q2SliceJustAboveCap, "TRUNCATED"},
+		{"Q2 map above sliceHintCap → TRUNCATED", q2MapJustAboveCap, "TRUNCATED"},
+		{"Q3 field name > 255 bytes → UNMARSHAL_FAILED", q3OversizeFieldName, "UNMARSHAL_FAILED"},
+		{"C1 float64 declared OK, buffer short → TRUNCATED", c1FloatShortBuffer, "TRUNCATED"},
+		{"C1 float32 declared OK, buffer short → TRUNCATED", c1Float32ShortBuffer, "TRUNCATED"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		var out any
+		err := tlv.New().Unmarshal(tc.data, &out)
+		if !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected reason %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // TestRegisteredViaImport verifies the codec self-registers on package load.
 func TestRegisteredViaImport(t *testing.T) {
 	t.Parallel()

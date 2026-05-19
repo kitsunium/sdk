@@ -57,6 +57,10 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 5. **No empty stub files / dirs.** If a file or directory only carries a placeholder, inline its content into an existing file or delete it.
 6. **Origin wins on wrap.** When `errs.Wrap` receives an `*errs.Error` cause, it inherits the cause's Code/Reason/Public/Private. Wrappers can only add `Fields` (and extend the intrinsic wrap trail). To relabel, define a fresh sentinel.
 7. **`Version` via build-time injection.** `pkg/v1/logger.Version` is stamped at link time — under Bazel via `x_defs` + `--stamp` + `tools/workspace_status.sh` (`STABLE_VERSION`); under raw `go build` via `-ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=…"`. `FrameworkVersion()` returns `"dev"` when unset; every emitted log record carries `framework_version` automatically.
+8. **Every package is documented.** Pre-commit guard `scripts/pre-commit/check-pkg-docs.sh` blocks the commit when any `internal/*` or `pkg/v*/**` directory containing Go production code is missing `CLAUDE.md` AND `README.md`. Public packages (`pkg/v*/**`) additionally require `README.md` (consumer-facing — pkg.go.dev renders it; the model is `pkg/v1/errs/README.md`).
+9. **Every benchmark package ships its numbers.** Pre-commit guard `scripts/pre-commit/check-bench-md.sh` blocks the commit when a directory contains `*_bench_test.go` but no sibling `BENCH.md`. The report is regenerated with `make bench` (alias for `make sdk-bench-md`); it stamps machine, RAM, CPU, OS, Go toolchain, git SHA, and timestamp so cross-machine deltas can be evaluated honestly.
+
+After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-time per clone — sets `git config core.hooksPath .githooks`).
 
 ## Layout
 

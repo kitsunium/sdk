@@ -2,8 +2,35 @@ package baseenc
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// shortWriter is a deterministic io.Writer that always reports one fewer
+// byte written than the caller asked for, simulating a real-world
+// short-write surface (network pipe closed mid-flight, disk-full, etc.).
+// Drives the bufferingWriter.Close regression for C2.
+type shortWriter struct {
+	buf bytes.Buffer
+}
+
+// Write reports one fewer byte than len(p) so the caller sees a short write.
+func (s *shortWriter) Write(p []byte) (n int, err error) {
+	//: drain into the inner buffer so the test can inspect what was sent.
+	if len(p) == 0 {
+		//: zero-byte writes pass through unchanged.
+		return 0, nil
+	}
+	//: only commit n-1 bytes; the trailing byte is lost.
+	wrote := len(p) - 1
+	//: commit the truncated prefix to the inner buffer.
+	s.buf.Write(p[:wrote])
+	//: surface the truncated count.
+	return wrote, nil
+}
 
 // Test_baseencCodec_Name verifies each variant's canonical identifier.
 func Test_baseencCodec_Name(t *testing.T) {
@@ -196,8 +223,18 @@ func Test_baseencCodec_decodeBytes_malformed(t *testing.T) {
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
 		c := &baseencCodec{variant: tc.v}
-		if _, err := c.decodeBytes(tc.data); err == nil {
+		//: contract: every variant maps decoder failures onto the typed
+		//: CodeBaseEncDecodeFailed sentinel — asserting only `err != nil`
+		//: would mask a regression where the wrong code surfaced.
+		_, err := c.decodeBytes(tc.data)
+		if err == nil {
 			t.Errorf("%s: expected decode error, got nil", tc.name)
+			return
+		}
+		if !errs.HasCode(err, CodeBaseEncDecodeFailed) {
+			got, _ := errs.CodeOf(err)
+			t.Errorf("%s: decode error code = %s, want %s",
+				tc.name, got, CodeBaseEncDecodeFailed)
 		}
 	}
 	for _, tc := range tests {
@@ -229,6 +266,44 @@ func Test_bufferingWriter_RoundTrip(t *testing.T) {
 		}
 		if buf.Len() == 0 {
 			t.Errorf("%s: writer produced no bytes", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// Test_bufferingWriter_ShortWrite_C2 surfaces io.ErrShortWrite wrapped
+// with BASE_ENC_MARSHAL_FAILED when the underlying writer accepts only
+// part of the encoded payload. Previously Close silently truncated.
+func Test_bufferingWriter_ShortWrite_C2(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"short write surfaces io.ErrShortWrite"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &baseencCodec{variant: variantBase16}
+		dst := &shortWriter{}
+		w := &bufferingWriter{dst: dst, codec: c}
+		if _, err := w.Write([]byte("data")); err != nil {
+			t.Fatalf("%s: Write err=%v", tc.name, err)
+		}
+		err := w.Close()
+		if err == nil {
+			t.Fatalf("%s: expected error on short write", tc.name)
+		}
+		//: wrap chain must carry io.ErrShortWrite.
+		if !errors.Is(err, io.ErrShortWrite) {
+			t.Errorf("%s: expected io.ErrShortWrite in chain, got %v", tc.name, err)
+		}
+		//: wrap chain must carry the marshal-failed reason.
+		if !errs.HasReason(err, "BASE_ENC_MARSHAL_FAILED") {
+			t.Errorf("%s: expected BASE_ENC_MARSHAL_FAILED, got %v", tc.name, err)
 		}
 	}
 	for _, tc := range tests {

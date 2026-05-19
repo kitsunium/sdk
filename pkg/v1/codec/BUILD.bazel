@@ -1,5 +1,12 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
+# gazelle:exclude codec_bench_test.go
+# Reason: codec_bench_test.go is wired into a dedicated `codec_bench_test`
+# go_test target (tagged "manual") so it never runs under `bazel test //...`.
+# Without this exclude, gazelle merges it into the default codec_test target
+# on every run — the bench file would then be linked into the regular test
+# binary even though its package-level fixtures cost setup time for no gain.
+
 package(default_visibility = ["//visibility:public"])
 
 go_library(
@@ -41,7 +48,6 @@ go_test(
     name = "codec_test",
     size = "small",
     srcs = [
-        "codec_bench_test.go",
         "codec_external_test.go",
         "codec_internal_test.go",
     ],

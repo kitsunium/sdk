@@ -64,8 +64,10 @@ the outer base-N step wraps the JSON.
   the variant value.
 - Bypass the JSON wrap layer in Marshal/Unmarshal — the universal "flatten
   to JSON, then base-N" semantic is intentional. For raw-byte base-N
-  encoding without the JSON envelope, use `pkg/v1/codec/baseenc` (legacy
-  byte-level API).
+  encoding without the JSON envelope, call stdlib `encoding/base64`,
+  `encoding/base32`, `encoding/hex`, or `encoding/ascii85` directly; the
+  SDK does not ship a parallel byte-level surface (the former
+  `pkg/v1/codec/baseenc` was removed for uniformity).
 
 ## Verification
 

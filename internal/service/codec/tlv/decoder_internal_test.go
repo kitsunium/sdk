@@ -123,6 +123,49 @@ func Test_uintWidth(t *testing.T) {
 	}
 }
 
+// Test_decodeFieldName covers the maxFieldNameBytes cap on decode (Q3).
+// A struct field-name TLV with a declared length above 255 must be
+// rejected before any allocation, with a UNMARSHAL_FAILED reason and a
+// clear diagnostic.
+func Test_decodeFieldName(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		data    []byte
+		wantErr bool
+	}
+	//: oversize-name payload: tagString=0x40, length=256 (varint 0x80,0x02),
+	//: then 256 bytes of body. The length check fires BEFORE the body is
+	//: consumed so we only need a few body bytes to prove the rejection.
+	oversize := []byte{0x40, 0x80, 0x02, 'a', 'b', 'c'}
+	//: legal-name payload: tagString=0x40, length=3, "abc".
+	legal := []byte{0x40, 0x03, 'a', 'b', 'c'}
+	//: wrong-tag payload: tagInt8 where tagString was expected.
+	wrongTag := []byte{0x10, 0x01, 0x00}
+	tests := []tc{
+		{"oversize field name rejected", oversize, true},
+		{"legal field name accepted", legal, false},
+		{"wrong tag rejected", wrongTag, true},
+		{"empty buffer truncated", nil, true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		_, _, err := decodeFieldName(tc.data, 0)
+		if tc.wantErr && err == nil {
+			t.Errorf("%s: expected error, got nil", tc.name)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("%s: unexpected error %v", tc.name, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // Test_sliceHint covers the slice-pre-allocation cap.
 func Test_sliceHint(t *testing.T) {
 	t.Parallel()

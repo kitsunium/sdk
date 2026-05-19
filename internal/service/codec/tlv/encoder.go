@@ -30,7 +30,13 @@ func (e *tlvEncoder) Encode(v any) error {
 		return eerr
 	}
 	//: hand the whole record to the writer in one shot.
-	_, werr := e.w.Write(buf)
+	n, werr := e.w.Write(buf)
+	//: detect partial writes — Go's io.Writer contract permits n < len(buf)
+	//: with a nil error, but a torn TLV record on the wire is unrecoverable.
+	//: Surface as io.ErrShortWrite so callers can errors.Is() against it.
+	if werr == nil && n != len(buf) {
+		werr = io.ErrShortWrite
+	}
 	//: success fast-path.
 	if werr == nil {
 		//: nothing to wrap.
@@ -41,7 +47,7 @@ func (e *tlvEncoder) Encode(v any) error {
 		Code:    CodeTLVMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "TLV encoding failed",
-		Private: "service/codec/tlv.Encoder.Encode: writer returned an error",
+		Private: "service/codec/tlv.Encoder.Encode: writer error or short write",
 	})
 }
 

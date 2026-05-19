@@ -4,6 +4,7 @@
 package tlv
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -104,20 +105,32 @@ func readTag(r io.Reader) (tag byte, err error) {
 }
 
 // assembleRecord reads length value-bytes from r and rebuilds the
-// original tag+length+value record byte sequence.
+// original tag+length+value record byte sequence. The value buffer grows
+// in chunks so a crafted header declaring length≈maxTLVBytes against a
+// reader that delivers only a handful of bytes pays only the bytes
+// actually delivered, not the declared cap (CWE-400 defence).
 func assembleRecord(r io.Reader, tag byte, length uint64) (record []byte, err error) {
-	//: read the value bytes.
-	value := make([]byte, length)
-	//: short read is treated as a truncated record.
-	if _, verr := io.ReadFull(r, value); verr != nil {
-		//: short-read maps to TRUNCATED.
+	//: read the value bytes through a LimitReader so the read budget cannot
+	//: exceed the declared length, then drain incrementally so the buffer
+	//: only grows to the bytes the reader actually delivers.
+	limited := &io.LimitedReader{R: r, N: int64(length)} //nolint:gosec // length ≤ maxTLVBytes
+	//: streamReadBuffer grows naturally; ReadFrom uses 512-byte chunks.
+	var value bytes.Buffer
+	//: drain the limit-reader; short read surfaces as io.ErrUnexpectedEOF.
+	if _, verr := value.ReadFrom(limited); verr != nil {
+		//: surface as TRUNCATED via the shared wrapper.
 		return nil, wrapReadFailure(verr)
 	}
+	//: detect declared-but-undelivered bytes.
+	if uint64(value.Len()) != length {
+		//: short read maps to TRUNCATED.
+		return nil, wrapReadFailure(io.ErrUnexpectedEOF)
+	}
 	//: rebuild the original record: tag + length + value.
-	out := make([]byte, 0, 1+maxVarintBytes+int(length)) //nolint:gosec // length ≤ maxTLVBytes
+	out := make([]byte, 0, 1+maxVarintBytes+value.Len())
 	out = append(out, tag)
 	out = binary.AppendUvarint(out, length)
-	out = append(out, value...)
+	out = append(out, value.Bytes()...)
 	//: caller now owns the record bytes.
 	return out, nil
 }
@@ -462,21 +475,34 @@ func decodeUint(tag Tag, length uint64, rest []byte) (value any, residual []byte
 }
 
 // decodeFloat reads an IEEE-754 float of the width implied by tag.
+// Splits the malformed-length and truncated-buffer paths so callers can
+// distinguish a header lying about the width from a payload running out
+// of bytes (mirrors decodeInt / decodeUint).
 func decodeFloat(tag Tag, length uint64, rest []byte) (value any, residual []byte, err error) {
 	//: 32-bit branch.
 	if tag == tagFloat32 {
-		//: 4-byte expected.
-		if length != uint64(width32) || uint64(len(rest)) < uint64(width32) {
-			//: malformed or short.
+		//: declared length must match the tag width.
+		if length != uint64(width32) {
+			//: surface as malformed length.
 			return nil, rest, malformedLengthError(uint64(width32), length)
+		}
+		//: buffer must hold the declared payload.
+		if uint64(len(rest)) < uint64(width32) {
+			//: surface as truncated (mirrors decodeInt / decodeUint).
+			return nil, rest, truncatedError()
 		}
 		//: decode the single.
 		return float64(math.Float32frombits(binary.BigEndian.Uint32(rest[:width32]))), rest[width32:], nil
 	}
-	//: 64-bit branch.
-	if length != uint64(width64) || uint64(len(rest)) < uint64(width64) {
-		//: malformed or short.
+	//: 64-bit branch — declared length must match.
+	if length != uint64(width64) {
+		//: surface as malformed length.
 		return nil, rest, malformedLengthError(uint64(width64), length)
+	}
+	//: 64-bit branch — buffer must hold the declared payload.
+	if uint64(len(rest)) < uint64(width64) {
+		//: surface as truncated (mirrors decodeInt / decodeUint).
+		return nil, rest, truncatedError()
 	}
 	//: decode the double.
 	return math.Float64frombits(binary.BigEndian.Uint64(rest[:width64])), rest[width64:], nil
@@ -508,8 +534,14 @@ func decodeBytes(length uint64, rest []byte) (value any, residual []byte, err er
 }
 
 // decodeSlice reads a tagSlice record: length is the element count.
+// The initial capacity is clamped by sliceHint so a crafted header
+// declaring a huge count cannot trigger a multi-GB pre-allocation
+// before the elements are actually read (CWE-400 defence). The slice
+// still grows on demand as each element decodes, so the final size
+// matches the actual element stream.
 func decodeSlice(length uint64, rest []byte, depth int) (value any, residual []byte, err error) {
-	//: collect every element into a freshly-allocated []any.
+	//: collect every element into a freshly-allocated []any with a clamped
+	//: initial capacity — append() grows the slice as elements arrive.
 	out := make([]any, 0, sliceHint(length))
 	//: each element is a full TLV record.
 	for range length {
@@ -529,8 +561,13 @@ func decodeSlice(length uint64, rest []byte, depth int) (value any, residual []b
 }
 
 // decodeMap reads a tagMap record: length is the pair count.
+// The initial bucket hint is clamped by sliceHint so a crafted header
+// declaring a huge pair count cannot trigger a multi-GB pre-allocation
+// before the pairs are actually read (CWE-400 defence). The map still
+// grows on demand as each pair decodes.
 func decodeMap(length uint64, rest []byte, depth int) (value any, residual []byte, err error) {
-	//: collect into map[any]any so heterogeneous key types survive.
+	//: collect into map[any]any with a clamped initial bucket hint; the
+	//: map grows on demand as each pair arrives.
 	out := make(map[any]any, sliceHint(length))
 	//: each pair is two adjacent TLV records.
 	for range length {
@@ -564,24 +601,23 @@ func decodeMap(length uint64, rest []byte, depth int) (value any, residual []byt
 
 // decodeStruct reads a tagStruct record: length is the field count.
 // The Go representation is map[string]any since the wire is self-describing.
+// The initial bucket hint is clamped by sliceHint so a crafted header
+// declaring a huge field count cannot trigger a multi-GB pre-allocation
+// before the fields are actually read (CWE-400 defence). The map still
+// grows on demand as each field decodes.
 func decodeStruct(length uint64, rest []byte, depth int) (value any, residual []byte, err error) {
-	//: collect into map[string]any so field order is irrelevant.
+	//: collect into map[string]any with a clamped initial bucket hint;
+	//: the map grows on demand as each field arrives.
 	out := make(map[string]any, sliceHint(length))
 	//: each entry is name-TLV (string) then value-TLV.
 	for range length {
-		//: decode the field name.
-		name, next, nerr := decodeValue(rest, depth+1)
+		//: peek the name record header to enforce the maxFieldNameBytes
+		//: cap BEFORE the generic decoder would allocate the name buffer.
+		nameStr, next, nerr := decodeFieldName(rest, depth+1)
 		//: surface name failure.
 		if nerr != nil {
 			//: already wrapped.
 			return nil, rest, nerr
-		}
-		//: name must be a string.
-		nameStr, ok := name.(string)
-		//: malformed when name isn't a string.
-		if !ok {
-			//: surface as decode failure.
-			return nil, rest, nonStringFieldNameError()
 		}
 		//: decode the value.
 		val, next2, verr := decodeValue(next, depth+1)
@@ -597,6 +633,60 @@ func decodeStruct(length uint64, rest []byte, depth int) (value any, residual []
 	}
 	//: success.
 	return out, rest, nil
+}
+
+// decodeFieldName reads the name-TLV at the head of data, mirroring the
+// encoder's maxFieldNameBytes cap (255 bytes). A crafted payload that
+// declares a huge field-name length is rejected before any allocation —
+// this is a defence-in-depth check; decodeString's general "length ≤
+// len(rest)" guard would also catch the make([]byte, length) attempt,
+// but the explicit cap gives callers a precise diagnostic.
+func decodeFieldName(data []byte, depth int) (name string, rest []byte, err error) {
+	//: nesting guard — names live one level below the struct.
+	if depth > maxTLVDepth {
+		//: surface the documented depth sentinel.
+		return "", data, depthExceededError(depth)
+	}
+	//: every record needs at least 2 bytes (tag + 1-byte length).
+	if len(data) < minRecordBytes {
+		//: surface the truncated sentinel.
+		return "", data, truncatedError()
+	}
+	//: the only legal tag here is tagString.
+	tag := Tag(data[0])
+	//: malformed when the name is not a string TLV.
+	if tag != tagString {
+		//: surface as decode failure with the offending tag.
+		return "", data, nonStringFieldNameError()
+	}
+	//: read the LEB128 length.
+	length, after, lerr := readVarintFromBytes(data[1:])
+	//: surface varint failure.
+	if lerr != nil {
+		//: already wrapped.
+		return "", data, lerr
+	}
+	//: enforce the encoder-side cap before allocating the name buffer.
+	if length > uint64(maxFieldNameBytes) {
+		//: surface as decode failure with a precise diagnostic.
+		return "", data, fieldNameTooLongDecodeError(length)
+	}
+	//: decode the string body via the shared helper.
+	val, residual, derr := decodeString(length, after)
+	//: surface decode failure.
+	if derr != nil {
+		//: already wrapped.
+		return "", data, derr
+	}
+	//: decodeString returns a string in the any.
+	nameStr, ok := val.(string)
+	//: malformed when decodeString returned a non-string (defensive).
+	if !ok {
+		//: surface as decode failure.
+		return "", data, nonStringFieldNameError()
+	}
+	//: success.
+	return nameStr, residual, nil
 }
 
 // intWidth returns the byte width of a signed-integer tag.
@@ -873,6 +963,20 @@ func nonStringFieldNameError() error {
 		Public:  "TLV decoding failed",
 		Private: "service/codec/tlv.decodeStruct: field name is not a string",
 	})
+}
+
+// fieldNameTooLongDecodeError surfaces a wire-declared field-name length
+// above maxFieldNameBytes. Mirrors the encoder-side fieldNameTooLong
+// guard so the decoder rejects crafted payloads before allocating the
+// name buffer (CWE-400 defence).
+func fieldNameTooLongDecodeError(length uint64) error {
+	//: surface as decode failure with diagnostic fields.
+	return errs.Wrap(nil, errs.WrapParams{
+		Code:    CodeTLVUnmarshalFailed,
+		Reason:  "UNMARSHAL_FAILED",
+		Public:  "TLV decoding failed",
+		Private: "service/codec/tlv.decodeFieldName: declared field name length exceeds maxFieldNameBytes",
+	}, errs.String("len", strconv.FormatUint(length, decimalBase)), errs.Int("cap", maxFieldNameBytes))
 }
 
 // nonPointerTargetError surfaces a Unmarshal call with a non-pointer or

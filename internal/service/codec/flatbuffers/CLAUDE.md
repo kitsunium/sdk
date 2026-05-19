@@ -64,6 +64,6 @@ the `KTN-CONST-MAXLEN` 30-char cap on the const identifier).
 
 ## Verification
 
-```
+```shell
 bazel test --config=race //internal/service/codec/flatbuffers:flatbuffers_test
 ```
