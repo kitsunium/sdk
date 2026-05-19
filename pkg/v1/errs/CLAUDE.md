@@ -11,8 +11,8 @@ Read-only public introspection of SDK errors. The concrete error type, construct
 accessors.go — type aliases (Code, Major, Layer, PkgCode, Serial, PrefixMatcher),
                mask constants (MaskByMajor|Layer|Package|Exact),
                and the var-grouped accessors block re-exporting
-               CodeOf, CodeValueOf, ReasonOf, PublicOf, PrivateOf,
-               LayerOf, HTTPStatusOf, ExitCodeOf, HasCode, HasReason,
+               CodeOf, ReasonOf, PublicOf, PrivateOf,
+               HTTPStatusOf, ExitCodeOf, HasCode, HasReason,
                NewPrefixMatcher, Pack, ParseCode
 ```
 
@@ -23,7 +23,7 @@ accessors.go — type aliases (Code, Major, Layer, PkgCode, Serial, PrefixMatche
 - **Pure aliases.** `type Code = kerrs.Code` (and the rest) — same Go type identity as the kernel value. Sharing a `Code` between SDK and consumer code is free at runtime and at the type checker.
 - **Read-only.** No constructor is re-exported. `errs.Define` / `errs.Wrap` stay internal so consumers cannot mint codes outside the registry. Introspection happens through the `Of`-accessors, which all walk the `Unwrap() error` *and* `Unwrap() []error` chain and return the deepest `*errs.Error` value encountered.
 - **No package code range.** `pkg/v1/errs` emits no errors of its own (no `codes.go`, no `errors.go`). It is a re-export layer; every code observable through it originated in some other package (origin wins on wrap — ADR 0005).
-- **`CodeOf` is deprecated, kept at v1.** `CodeOf` returns `(int, bool)` for back-compat with the pre-ADR-0005 API. New code should use `CodeValueOf(err) (Code, bool)` for typed access. Same applies to `LayerOf` — prefer `CodeValueOf(err).Layer()`.
+- **Single typed accessor per concept.** `CodeOf(err) (Code, bool)` returns the typed `Code`; the layer octet is composable via `code.Layer()`. There is no int-returning shim and no parallel `LayerOf` — the kernel exports exactly one accessor per field and `pkg/v1/errs` re-exports it verbatim.
 - **PrefixMatcher routes via `errors.Is`.** Use `NewPrefixMatcher(code, mask)` (combined with `MaskByMajor` / `MaskByLayer` / `MaskByPackage` / `MaskExact`) for CIDR-style code routing inside dashboards / middleware. Single-code matching uses `HasCode(err, c)` which is cheaper.
 - **Defaults are global.** `HTTPStatusOf` returns 500 when no override exists; `ExitCodeOf` returns 70 (EX_SOFTWARE). Emitter packages set per-error overrides via `errs.WithHTTPStatus` / `WithExitCode` at `Define` time.
 

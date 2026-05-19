@@ -32,9 +32,9 @@ func HasReason(err error, reason string) bool
 func NewPrefixMatcher(prefix, mask Code) *PrefixMatcher // CIDR-style; pass to errors.Is
 ```
 
-Getters on `*Error`: `CodeValue() / Code() / Reason() / Public() / Private() / Fields() / Trail() / TrailTruncated() / Layer() / HTTPStatus() / ExitCode() / Error() / Unwrap() / Source()`.
+Getters on `*Error`: `Code() / Reason() / Public() / Private() / Fields() / Trail() / TrailTruncated() / HTTPStatus() / ExitCode() / Error() / Unwrap() / Source()`. The Layer/Major/Package/Serial octets are reached via `e.Code().Layer()` etc. — composable on the typed `Code`.
 
-Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf / PrivateOf / FieldsOf / LayerOf / HTTPStatusOf / ExitCodeOf`.
+Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf / PrivateOf / FieldsOf / HTTPStatusOf / ExitCodeOf`. All return the typed `Code` / `string` / etc. — no int variants.
 
 ## Conventions
 

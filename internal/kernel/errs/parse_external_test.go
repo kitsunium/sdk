@@ -109,9 +109,9 @@ func TestParseCode_ReturnsTypedError(t *testing.T) {
 		if !errors.As(err, &typed) {
 			t.Fatalf("expected *errs.Error, got %T", err)
 		}
-		if typed.CodeValue() != c.wantCode {
+		if typed.Code() != c.wantCode {
 			//: code drift breaks every callers' sentinel match.
-			t.Fatalf("expected Code == %#08x, got %#08x", uint32(c.wantCode), uint32(typed.CodeValue()))
+			t.Fatalf("expected Code == %#08x, got %#08x", uint32(c.wantCode), uint32(typed.Code()))
 		}
 		if typed.Reason() != c.wantReason {
 			//: reason drift breaks log/telemetry filters.

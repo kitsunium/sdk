@@ -7,7 +7,7 @@
 // any Define call with Layer==0 AND code not in this whitelist will panic.
 //
 // Constants are typed as Code so Define call sites accept them directly
-// and downstream comparisons with Error.CodeValue() are type-safe.
+// and downstream comparisons with Error.Code() are type-safe.
 package errs
 
 const (

@@ -18,11 +18,11 @@ func Test_deepestError(t *testing.T) {
 	type tc struct {
 		name     string
 		in       error
-		wantCode int // 0 means "want nil *Error"
+		wantCode Code // zero value means "want nil *Error"
 	}
 	tests := []tc{
-		{"sdk error directly", sample, int(uint32(0x00_03_01_64))},
-		{"wrapped stdlib cause", wrappedStdlib, int(uint32(0x00_03_01_65))},
+		{"sdk error directly", sample, 0x00_03_01_64},
+		{"wrapped stdlib cause", wrappedStdlib, 0x00_03_01_65},
 		{"nil cause", nil, 0},
 		{"stdlib without sdk layer", errors.New("plain"), 0},
 	}
@@ -36,7 +36,7 @@ func Test_deepestError(t *testing.T) {
 			return
 		}
 		if got == nil || got.Code() != c.wantCode {
-			t.Errorf("deepestError = %+v, want code %d", got, c.wantCode)
+			t.Errorf("deepestError = %+v, want code %s", got, c.wantCode)
 		}
 	}
 	for _, c := range tests {

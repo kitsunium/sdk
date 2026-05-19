@@ -52,13 +52,9 @@ const (
 // Re-exports of the internal accessors. Grouped to satisfy the repo-wide
 // var-grouping convention while keeping each helper's godoc on its own line.
 var (
-	// CodeOf returns the deepest *errs.Error code in err's chain, or (0, false).
-	//
-	// Deprecated: use CodeValueOf for typed access. Kept at v1 for back-compat.
+	// CodeOf returns the deepest *errs.Error's typed Code in err's chain,
+	// or (0, false) when no *errs.Error is present.
 	CodeOf = kerrs.CodeOf
-
-	// CodeValueOf returns the deepest typed Code in err's chain, or (0, false).
-	CodeValueOf = kerrs.CodeValueOf
 
 	// ReasonOf returns the deepest *errs.Error reason in err's chain, or ("", false).
 	ReasonOf = kerrs.ReasonOf
@@ -69,12 +65,6 @@ var (
 
 	// PrivateOf returns the deepest *errs.Error Private message. DIAGNOSTIC-ONLY.
 	PrivateOf = kerrs.PrivateOf
-
-	// LayerOf returns the layer octet of the deepest *errs.Error in the chain,
-	// or 0 when no *errs.Error is present.
-	//
-	// Deprecated: use CodeValueOf(err).Layer(). Kept at v1 for back-compat.
-	LayerOf = kerrs.LayerOf
 
 	// HTTPStatusOf returns the HTTP status mapped from the deepest *errs.Error,
 	// defaulting to 500 when no *errs.Error is present.
