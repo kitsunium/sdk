@@ -688,6 +688,14 @@ func codecAdapters() map[codec.Format]codecAdapter {
 		codec.Format("tlv"): tlvAdapter(),
 		//: FlatBuffers (when registered) — passthrough []byte.
 		codec.Format("flatbuffers"): flatbuffersAdapter(),
+		//: baseenc family — pipeline is JSON-mediated so the universal
+		//: complexRT shape round-trips byte-for-byte through every variant.
+		codec.Format("base64"):    universalAdapter("base64"),
+		codec.Format("base64url"): universalAdapter("base64url"),
+		codec.Format("base32"):    universalAdapter("base32"),
+		codec.Format("base16"):    universalAdapter("base16"),
+		codec.Format("hex"):       universalAdapter("hex"),
+		codec.Format("ascii85"):   universalAdapter("ascii85"),
 	}
 }
 
@@ -977,10 +985,13 @@ func TestRoundTrip_AllCodecs(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		//: unmapped codec — log and skip.
+		//: unmapped codec — hard failure. Every codec discovered via
+		//: codec.Available() MUST have an entry in codecAdapters(). The
+		//: silent-skip path was retired so a fresh codec registration
+		//: cannot slip past CI without a characterised round-trip.
 		if tc.adapter.encode == nil {
-			//: surface as a skip so the suite stays informative.
-			t.Skipf("%s: no adapter registered (codec discovered but not characterised)", tc.name)
+			//: surface as a fatal so the suite breaks the build.
+			t.Fatalf("%s: no adapter registered — every codec discovered via codec.Available() MUST have a codecAdapter entry. Add one to codecAdapters() or remove the codec registration.", tc.name)
 		}
 		//: marshal through the adapter.
 		data, err := tc.adapter.encode()
@@ -1015,7 +1026,12 @@ func TestStreamingRoundTrip_AllCodecs(t *testing.T) {
 		records []complexRT
 	}
 	var tests []tc
-	//: walk every Format and filter to streaming-capable + universal-shaped.
+	//: walk every Format and filter to streaming-capable codecs via
+	//: type-assertion on the core registry. Every StreamingCodec implementer
+	//: that accepts the universal complexRT shape participates in this run;
+	//: codecs with specialised decode targets (XML/TOML/TLV) are explicitly
+	//: excluded below with a comment naming the limitation — they remain
+	//: covered by TestRoundTrip_AllCodecs at the non-streaming level.
 	for _, f := range formats {
 		//: resolve via the core registry to type-assert StreamingCodec.
 		c, ok := corecodec.Lookup(f)
@@ -1029,20 +1045,24 @@ func TestStreamingRoundTrip_AllCodecs(t *testing.T) {
 			//: skip non-streaming codecs.
 			continue
 		}
-		//: shape filter: only codecs accepting the universal complexRT shape
-		//: appear in the universal streaming run. Specialised payloads
-		//: (XML/TOML/TLV) have non-uniform decode targets that require
-		//: per-codec adapters which the streaming subtests intentionally
-		//: skip here — they get covered by TestRoundTrip_AllCodecs above.
+		//: explicit shape-incompatibility skip list. These codecs stream but
+		//: decode into a non-complexRT target shape:
+		//:   - xml : encoding/xml requires the xmlDoc fixture (maps / []byte
+		//:           cannot round-trip through stdlib XML).
+		//:   - toml: go-toml/v2 Decoder reads ONE document per input stream;
+		//:           multi-record streams are not part of its contract.
+		//:   - tlv : decodes structs into map[string]any so reflect-based
+		//:           equality on complexRT cannot work without a per-codec
+		//:           comparison oracle.
 		switch strings.ToLower(string(f)) {
-		case "json", "yaml", "cbor", "msgpack":
-			//: capture three sequential records for this codec.
-			base := tweakForCodec(string(f), sampleComplex())
-			recs := []complexRT{base, nextInt(base), nextInt(nextInt(base))}
-			tests = append(tests, tc{name: string(f), format: f, records: recs})
-		default:
-			//: not a uniform-shape streaming codec — skip silently.
+		case "xml", "toml", "tlv":
+			//: documented limitation — surface as a skip below in runCase.
+			continue
 		}
+		//: capture three sequential records using the universal shape.
+		base := tweakForCodec(string(f), sampleComplex())
+		recs := []complexRT{base, nextInt(base), nextInt(nextInt(base))}
+		tests = append(tests, tc{name: string(f), format: f, records: recs})
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -1139,33 +1159,13 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 			//: silent skip.
 			continue
 		}
-		//: shape the payload + decode hook per codec.
-		switch strings.ToLower(string(f)) {
-		//: JSON appends a single complexRT instance.
-		case "json":
-			//: capture the codec + fixture + decode hook.
-			val := tweakForCodec(string(f), sampleComplex())
-			tests = append(tests, tc{
-				name:     string(f),
-				format:   f,
-				appender: a,
-				value:    val,
-				decode: func(t *testing.T, name string, data []byte) {
-					t.Helper()
-					//: decode into a fresh complexRT.
-					var got complexRT
-					if err := codec.Unmarshal(f, data, &got); err != nil {
-						//: hard failure on decode.
-						t.Fatalf("%s: Unmarshal err=%v", name, err)
-					}
-					//: time-aware comparison.
-					if !complexEqual(got, val) {
-						//: surface the diff.
-						t.Errorf("%s: append round-trip mismatch", name)
-					}
-				},
-			})
-		//: NDJSON appends a slice of complexRT records.
+		//: shape the payload + decode hook per codec. Every Appender
+		//: implementer discovered via codec.Available() lands in one of the
+		//: branches below — the default arm is a t.Fatal so a freshly-added
+		//: Appender cannot slip past the suite uncovered.
+		name := strings.ToLower(string(f))
+		switch name {
+		//: NDJSON appends a slice of complexRT records (one JSON object per line).
 		case "ndjson":
 			//: capture the slice payload.
 			base := tweakForCodec(string(f), sampleComplex())
@@ -1197,8 +1197,84 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 					}
 				},
 			})
+		//: TLV decodes structs to map[string]any — round-trip a primitive
+		//: payload type so the assertion stays unambiguous.
+		case "tlv":
+			//: int64 survives TLV byte-for-byte.
+			want := int64(-64_000_000_000)
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    want,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					//: decode into a fresh int64.
+					var got int64
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						//: hard failure on decode.
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					//: direct equality on the primitive payload.
+					if got != want {
+						//: surface the diff.
+						t.Errorf("%s: append round-trip mismatch got=%d want=%d", name, got, want)
+					}
+				},
+			})
+		//: FlatBuffers is a passthrough []byte sink — bytes in, bytes out.
+		case "flatbuffers":
+			//: deterministic synthesised buffer.
+			payload := sampleFlatBuffer()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    payload,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					//: passthrough decode writes through *[]byte.
+					var got []byte
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						//: hard failure on decode.
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					//: byte-level equality.
+					if !bytes.Equal(got, payload) {
+						//: surface the diff.
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: JSON + every baseenc variant accept the universal complexRT shape
+		//: (baseenc is JSON-mediated so any JSON-marshallable value works).
+		case "json", "base64", "base64url", "base32", "base16", "hex", "ascii85":
+			//: capture the codec + fixture + decode hook.
+			val := tweakForCodec(string(f), sampleComplex())
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    val,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					//: decode into a fresh complexRT.
+					var got complexRT
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						//: hard failure on decode.
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					//: time-aware comparison.
+					if !complexEqual(got, val) {
+						//: surface the diff.
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
 		default:
-			//: unknown appender — skip silently. Future codecs add a case here.
+			//: fresh Appender implementer with no characterised shape —
+			//: fail loudly so the suite cannot slide past silently.
+			t.Fatalf("%s: Appender implementer has no case in TestAppendRoundTrip_AllCodecs — add a payload + decode hook for this codec", string(f))
 		}
 	}
 	runCase := func(t *testing.T, tc tc) {

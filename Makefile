@@ -1,5 +1,5 @@
-.PHONY: sdk-sync sdk-tidy sdk-test sdk-lint sdk-cover sdk-errs-audit sdk-all sdk-release-check \
-        test build lint cover tidy
+.PHONY: sdk-sync sdk-tidy sdk-test sdk-lint sdk-cover sdk-errs-audit sdk-codec-bench sdk-all sdk-release-check \
+        test build lint cover tidy bench
 
 # `make` with no args runs the full pipeline (sync → lint → errs-audit → test).
 .DEFAULT_GOAL := sdk-all
@@ -30,6 +30,14 @@ sdk-cover:
 sdk-errs-audit:
 	bazel test --config=race //internal/kernel/errs:errs_test
 
+sdk-codec-bench:
+	bazel test //pkg/v1/codec:codec_bench_test \
+		--test_arg=-test.bench=. \
+		--test_arg=-test.benchmem \
+		--test_arg=-test.run=^$$ \
+		--test_arg=-test.benchtime=2s \
+		--test_output=streamed
+
 sdk-all: sdk-sync sdk-lint sdk-errs-audit sdk-test
 
 sdk-release-check:
@@ -41,6 +49,7 @@ test:  sdk-test
 lint:  sdk-lint
 cover: sdk-cover
 tidy:  sdk-tidy
+bench: sdk-codec-bench
 
 build:
 	bazel build //...

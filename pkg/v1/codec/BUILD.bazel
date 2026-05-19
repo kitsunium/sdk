@@ -41,10 +41,41 @@ go_test(
     name = "codec_test",
     size = "small",
     srcs = [
+        "codec_bench_test.go",
         "codec_external_test.go",
         "codec_internal_test.go",
     ],
     embed = [":codec"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+    ],
+)
+
+# Per-codec benchmark suite — 18 Format names × 3 payload sizes × up to 7
+# operations (Marshal / Unmarshal / *Parallel / Append / StreamEncode /
+# StreamDecode). The `manual` tag keeps the target OUT of the `bazel test //...`
+# wildcard so PR CI stays fast. Re-uses helpers from codec_external_test.go via
+# shared package codec_test. The bench file's TestMain enables block / mutex
+# profile collection — kept out of codec_test so regular runs are not slowed.
+# Invoke: `make sdk-codec-bench` or `bazel test //pkg/v1/codec:codec_bench_test
+# --test_arg=-test.bench=. --test_arg=-test.benchmem`.
+go_test(
+    name = "codec_bench_test",
+    srcs = [
+        "codec_bench_test.go",
+        "codec_external_test.go",
+    ],
+    args = [
+        "-test.run=^$$",
+        "-test.bench=.",
+        "-test.benchmem",
+    ],
+    embed = [":codec"],
+    tags = [
+        "benchmark",
+        "manual",
+    ],
     deps = [
         "//internal/core/codec",
         "//internal/kernel/errs",
