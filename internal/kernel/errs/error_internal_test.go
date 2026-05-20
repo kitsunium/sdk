@@ -30,8 +30,8 @@ func Test_newValidationError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			built := newValidationError(tc.code, tc.reason, tc.public)
-			if built.CodeValue() != tc.code {
-				t.Errorf("CodeValue = %s, want %s", built.CodeValue(), tc.code)
+			if built.Code() != tc.code {
+				t.Errorf("CodeValue = %s, want %s", built.Code(), tc.code)
 			}
 			if built.Reason() != tc.reason {
 				t.Errorf("Reason = %q, want %q", built.Reason(), tc.reason)
@@ -85,8 +85,8 @@ func Test_newFromStdlibCause(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			built := newFromStdlibCause(tc.cause, tc.params, nil)
-			if built.CodeValue() != tc.wantCode {
-				t.Errorf("CodeValue = %s, want %s", built.CodeValue(), tc.wantCode)
+			if built.Code() != tc.wantCode {
+				t.Errorf("CodeValue = %s, want %s", built.Code(), tc.wantCode)
 			}
 			//: source must always thread through, regardless of the validation leg.
 			if built.Source() != tc.cause {
@@ -155,8 +155,8 @@ func Test_wrapSDKCause(t *testing.T) {
 				Code: tc.wrapSiteCode, Reason: "INTERNAL_WRAP_SITE",
 				Public: "wrap site public", Private: "wrap site private",
 			}, []FieldValue{tc.extraField})
-			if built.CodeValue() != tc.originCode {
-				t.Errorf("CodeValue = %s, want %s", built.CodeValue(), tc.originCode)
+			if built.Code() != tc.originCode {
+				t.Errorf("CodeValue = %s, want %s", built.Code(), tc.originCode)
 			}
 			trail := built.Trail()
 			if len(trail) != 1 || trail[0] != tc.wrapSiteCode {
@@ -298,7 +298,7 @@ func Test_Error_matchesSentinel(t *testing.T) {
 	//: 0x00_03_0F_E8 = 0.3.15.232 — sentinel-helper slot.
 	left := Define(0x00_03_0F_E8, "SENT_LEFT",
 		"Sentinel left public", "Sentinel left private")
-	matching := &Error{code: left.CodeValue(), reason: left.Reason()}
+	matching := &Error{code: left.Code(), reason: left.Reason()}
 	otherCode := &Error{code: 0x00_03_0F_E9, reason: "SENT_RIGHT"}
 	tests := []struct {
 		name   string

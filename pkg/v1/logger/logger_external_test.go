@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
+	errs "github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
 )
 
@@ -75,8 +75,8 @@ func TestNewTextRejectsNilWriter(t *testing.T) {
 			if !errors.Is(err, logger.WriterRequired) {
 				t.Errorf("errors.Is(err, WriterRequired) = false: %v", err)
 			}
-			if code, _ := errs.CodeValueOf(err); code != logger.CodeWriterRequired {
-				t.Errorf("CodeValueOf = %v, want %v", code, logger.CodeWriterRequired)
+			if code, _ := errs.CodeOf(err); code != logger.CodeWriterRequired {
+				t.Errorf("CodeOf = %v, want %v", code, logger.CodeWriterRequired)
 			}
 		})
 	}

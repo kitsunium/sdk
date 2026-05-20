@@ -75,14 +75,6 @@ func NewError(code Code, reason, public, private string, opts ...DefineOption) *
 	return Define(code, reason, public, private, opts...)
 }
 
-// NewErrorInt is a DEPRECATED shim for transition from pre-ADR-0005 int codes.
-//
-// Deprecated: use NewError with a typed Code constant. Removed before v1.0.0.
-func NewErrorInt(code int, reason, public, private string, opts ...DefineOption) *Error {
-	//: route the deprecated int signature through Define so behaviour stays in sync.
-	return Define(Code(uint32(code)), reason, public, private, opts...)
-}
-
 // Define registers a sentinel-style *Error at package init. It panics
 // (with a message citing one of the documentary meta-codes 0.0.0.1..6)
 // when validateDefineArgs returns non-nil, so structural mistakes surface
@@ -102,14 +94,6 @@ func Define(code Code, reason, public, private string, opts ...DefineOption) *Er
 	}
 	//: hand back the sentinel ready to be returned from APIs.
 	return sentinel
-}
-
-// DefineInt is a DEPRECATED shim for transition from pre-ADR-0005 int codes.
-//
-// Deprecated: use Define with a typed Code constant. Removed before v1.0.0.
-func DefineInt(code int, reason, public, private string, opts ...DefineOption) *Error {
-	//: route the deprecated int signature through Define so behaviour stays in sync.
-	return Define(Code(uint32(code)), reason, public, private, opts...)
 }
 
 // newValidationError is the BOOTSTRAP constructor used by validateDefineArgs
@@ -210,18 +194,8 @@ func newFromStdlibCause(cause error, params WrapParams, fields []FieldValue) *Er
 	}
 }
 
-// Code returns this Error's numeric identifier as an int.
-//
-// Deprecated: use CodeValue() Code. Kept at v1 for backward compatibility;
-// removed at v2. The int return is safe on 64-bit GOARCH (enforced by the
-// build tag in code.go) because Code is uint32 and int is 8 bytes.
-func (e *Error) Code() int {
-	//: cast through uint32 for portability — Code is uint32-backed.
-	return int(uint32(e.code))
-}
-
-// CodeValue returns the typed dotted-quad Code.
-func (e *Error) CodeValue() Code {
+// Code returns this Error's typed dotted-quad identifier.
+func (e *Error) Code() Code {
 	//: direct read of the immutable member.
 	return e.code
 }
@@ -253,7 +227,7 @@ func (e *Error) Fields() []FieldValue {
 }
 
 // Trail returns a defensive copy of the wrap-site chain (newest last).
-// The origin's code is NOT in the trail — it lives in CodeValue().
+// The origin's code is NOT in the trail — it lives in Code().
 func (e *Error) Trail() []Code {
 	//: copy on read — trail entries represent wrap sites, immutable contract.
 	return slices.Clone(e.trail)
@@ -265,14 +239,6 @@ func (e *Error) Trail() []Code {
 func (e *Error) TrailTruncated() bool {
 	//: direct read — flag is an immutable boolean after construction.
 	return e.trailTruncated
-}
-
-// Layer returns the layer octet of this Error's Code as an int.
-//
-// Deprecated: use CodeValue().Layer(). Kept at v1 for backward compat.
-func (e *Error) Layer() int {
-	//: delegate to Code.Layer() and widen for v1 compat.
-	return int(e.code.Layer())
 }
 
 // Is implements the errors.Is protocol. Three matching modes:

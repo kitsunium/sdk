@@ -30,10 +30,10 @@ func Bool(key string, val bool) FieldValue
 func Float(key string, val float64) FieldValue
 ```
 
-Getters on `*Error`: `Code()`, `Reason()`, `Public()`, `Private()`, `Fields()`, `Layer()`, `HTTPStatus()`, `ExitCode()`, `Error()`, `Unwrap()`, `Source()`.
+Getters on `*Error`: `Code()`, `Reason()`, `Public()`, `Private()`, `Fields()`, `HTTPStatus()`, `ExitCode()`, `Error()`, `Unwrap()`, `Source()`. Layer/Major/Package/Serial octets are reached on the typed `Code` (e.g. `e.Code().Layer()`).
 
 Package-level accessors (walk Unwrap chain):
-`CodeOf / ReasonOf / PublicOf / PrivateOf / FieldsOf / LayerOf / HTTPStatusOf / ExitCodeOf / HasCode / HasReason`.
+`CodeOf / ReasonOf / PublicOf / PrivateOf / FieldsOf / HTTPStatusOf / ExitCodeOf / HasCode / HasReason`. `CodeOf` returns the typed `Code` — octet access composes via `code.Layer()` etc.
 
 ## How to declare a new sentinel
 

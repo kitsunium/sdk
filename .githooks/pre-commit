@@ -1,19 +1,36 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================================
-# pre-commit hook - Project-level pre-commit checks
+# pre-commit hook — chains the devcontainer template checks AND the project's
+# own pre-commit guards.
+#
+# Template checks (multi-language lint/build/test) live in the devcontainer
+# image and are auto-synced via `/update`. Project-local checks live in
+# scripts/pre-commit/ and ship in this repo so every clone gets them via
+# `git config core.hooksPath .githooks` (run once after clone).
 # ============================================================================
 
-WORKSPACE="${CLAUDE_PROJECT_DIR:-/workspace}"
-SCRIPT="$HOME/.claude/scripts/pre-commit-checks.sh"
+set -euo pipefail
 
-# Fallback to workspace scripts if home not available
-if [ ! -f "$SCRIPT" ]; then
-    SCRIPT="$WORKSPACE/.devcontainer/images/.claude/scripts/pre-commit-checks.sh"
+WORKSPACE="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+TEMPLATE_SCRIPT="$HOME/.claude/scripts/pre-commit-checks.sh"
+
+if [ ! -f "$TEMPLATE_SCRIPT" ]; then
+    TEMPLATE_SCRIPT="$WORKSPACE/.devcontainer/images/.claude/scripts/pre-commit-checks.sh"
 fi
 
-if [ -f "$SCRIPT" ]; then
-    bash "$SCRIPT" "$WORKSPACE"
-    exit $?
+# 1) Template-provided multi-language checks (optional — only when devcontainer
+#    is present).
+if [ -f "$TEMPLATE_SCRIPT" ]; then
+    bash "$TEMPLATE_SCRIPT" "$WORKSPACE" || exit $?
+fi
+
+# 2) Project-local checks. Every executable *.sh under scripts/pre-commit/
+#    runs in lexical order; a non-zero exit aborts the commit.
+LOCAL_DIR="$WORKSPACE/scripts/pre-commit"
+if [ -d "$LOCAL_DIR" ]; then
+    while IFS= read -r -d '' check; do
+        bash "$check" "$WORKSPACE" || exit $?
+    done < <(find "$LOCAL_DIR" -maxdepth 1 -type f -name '*.sh' -perm -u+x -print0 | sort -z)
 fi
 
 exit 0

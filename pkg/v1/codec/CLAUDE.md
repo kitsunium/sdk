@@ -46,4 +46,4 @@ cd pkg/v1 && GOWORK=off go test -race ./codec/...
 
 ## Subtree
 
-- `baseenc/` — see `pkg/v1/codec/baseenc/CLAUDE.md` (distinct surface — NOT a codec; wraps byte-encoding stdlibs).
+_(none — every codec lives under `internal/service/codec/*` and is reached via the universal dispatch above. The legacy byte-level `baseenc/` subpackage was removed in favour of `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)`.)_

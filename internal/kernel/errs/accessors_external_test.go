@@ -21,35 +21,6 @@ func TestCodeOf(t *testing.T) {
 	type tc struct {
 		name     string
 		in       func(tb testing.TB) error
-		wantCode int
-		wantOK   bool
-	}
-	tests := []tc{
-		{"sdk error", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 0x00_03_01_01, true},
-		{"stdlib", func(tb testing.TB) error { return errors.New("plain") }, 0, false},
-		{"nil", func(tb testing.TB) error { return nil }, 0, false},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		got, ok := errs.CodeOf(c.in(t))
-		//: both numeric and presence-bit must round-trip exactly.
-		if got != c.wantCode || ok != c.wantOK {
-			t.Errorf("CodeOf = (%d, %v), want (%d, %v)", got, ok, c.wantCode, c.wantOK)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-func TestCodeValueOf(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name     string
-		in       func(tb testing.TB) error
 		wantCode errs.Code
 		wantOK   bool
 	}
@@ -60,10 +31,10 @@ func TestCodeValueOf(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		got, ok := errs.CodeValueOf(c.in(t))
-		//: typed Code variant — value AND presence flag must both match.
+		got, ok := errs.CodeOf(c.in(t))
+		//: typed Code value AND presence flag must both match.
 		if got != c.wantCode || ok != c.wantOK {
-			t.Errorf("CodeValueOf = (%v, %v), want (%v, %v)", got, ok, c.wantCode, c.wantOK)
+			t.Errorf("CodeOf = (%s, %v), want (%s, %v)", got, ok, c.wantCode, c.wantOK)
 		}
 	}
 	for _, c := range tests {
@@ -194,33 +165,6 @@ func TestFieldsOf(t *testing.T) {
 	}
 }
 
-func TestLayerOf(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		in   func(tb testing.TB) error
-		want int
-	}
-	tests := []tc{
-		{"sdk error layer from code", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 3},
-		{"stdlib", func(tb testing.TB) error { return errors.New("plain") }, 0},
-		{"nil", func(tb testing.TB) error { return nil }, 0},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		//: layer must be derived from the deepest *Error's dotted-quad code.
-		if got := errs.LayerOf(c.in(t)); got != c.want {
-			t.Errorf("LayerOf = %d, want %d", got, c.want)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
 func TestHTTPStatusOf(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -295,35 +239,6 @@ func TestHasCode(t *testing.T) {
 		//: typed HasCode must follow the deepest-Error semantics.
 		if got := errs.HasCode(c.in(t), c.code); got != c.want {
 			t.Errorf("HasCode(%s) = %v, want %v", c.code, got, c.want)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-func TestHasCodeInt(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		in   func(tb testing.TB) error
-		code int
-		want bool
-	}
-	tests := []tc{
-		{"direct match", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 0x00_03_01_01, true},
-		{"miss", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, 0x00_03_01_02, false},
-		{"nil", func(tb testing.TB) error { return nil }, 0x00_03_01_01, false},
-		{"stdlib", func(tb testing.TB) error { return errors.New("plain") }, 0x00_03_01_01, false},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		//: deprecated int variant must mirror the typed HasCode semantics.
-		if got := errs.HasCodeInt(c.in(t), c.code); got != c.want {
-			t.Errorf("HasCodeInt(%#08x) = %v, want %v", c.code, got, c.want)
 		}
 	}
 	for _, c := range tests {
