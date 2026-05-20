@@ -12,6 +12,27 @@
 
 version: 1
 
+# ── Vocabulary (per kodflow/ktn-linter#337) ───────────────────────────────────
+# Project-declared adapter-role interfaces exempt from KTN-INTERFACE-ERNAME.
+#
+# Resolution order at the rule (per PR #337):
+#   1. exact FQN match against adapter_role_interfaces
+#   2. PascalCase HasSuffix scan against adapter_role_suffixes
+#   3. otherwise → rule fires
+#
+# Both lists default to empty; behaviour is strictly additive.
+vocabulary:
+  # Project-wide suffix family — every single-method interface whose name
+  # ends in one of these is exempt from the -er requirement. Provider /
+  # Acceptor / Source / Sink are the canonical adapter-role idioms used by
+  # codec adapter contracts (mirrors crypto.{Decrypter,Signer}-style naming
+  # but for nominal-role interfaces rather than verb-er interfaces).
+  adapter_role_suffixes:
+    - Provider
+    - Acceptor
+    - Source
+    - Sink
+
 # ── Global options ────────────────────────────────────────────────────────────
 
 # Full strict mode stays off so test files / testdata keep their ergonomic
