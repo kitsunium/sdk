@@ -23,6 +23,62 @@ type event struct {
 	Count int    `json:"count" xml:"count"`
 }
 
+// appenderInfo is the package-level registry-entry record used by the
+// KTN-TEST-REGISTRY-BIJECTION check in TestAppendRoundTrip_AllCodecs.
+// The Name field is what the forward bijection loop reads to look up
+// against expectedAppenders.
+type appenderInfo struct {
+	Name   string
+	Format codec.Format
+}
+
+// expectedAppenders is the contractually-required list of codec Format
+// names that must implement core/codec.Appender. The reverse-direction
+// bijection loop in TestAppendRoundTrip_AllCodecs iterates this slice.
+//
+//nolint:gochecknoglobals // package-level slice required by KTN-TEST-REGISTRY-BIJECTION analyzer.
+var expectedAppenders = []string{
+	"json",
+	"ndjson",
+	"tlv",
+	"flatbuffers",
+	"base64",
+	"base64url",
+	"base32",
+	"base16",
+	"hex",
+	"ascii85",
+}
+
+// registeredAppenders is the package-level Appender registry snapshot
+// computed from codec.Available() at init time. The forward-direction
+// bijection loop in TestAppendRoundTrip_AllCodecs iterates this slice
+// and reads each entry's .Name field.
+//
+//nolint:gochecknoglobals // package-level slice required by KTN-TEST-REGISTRY-BIJECTION analyzer.
+var registeredAppenders = collectRegisteredAppenders()
+
+// collectRegisteredAppenders builds the package-level Appender snapshot
+// from the codec registry. Used once at package-var initialisation to
+// populate registeredAppenders.
+func collectRegisteredAppenders() []appenderInfo {
+	var result []appenderInfo
+	for _, f := range codec.Available() {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			continue
+		}
+		if _, isAppender := c.(corecodec.Appender); !isAppender {
+			continue
+		}
+		result = append(result, appenderInfo{
+			Name:   strings.ToLower(string(f)),
+			Format: f,
+		})
+	}
+	return result
+}
+
 // TestMarshal covers the facade Marshal dispatcher against every registered
 // Format plus the UNKNOWN_FORMAT failure path.
 func TestMarshal(t *testing.T) {
@@ -1128,10 +1184,39 @@ func TestStreamingRoundTrip_AllCodecs(t *testing.T) {
 // appended into a caller-supplied dst pre-filled with a known prefix; the
 // assertion verifies the prefix is preserved AND the codec's own Unmarshal
 // can decode the bytes written past the prefix.
+//
+// Registry bijection is enforced up-front: the registered Appender set
+// (codec.Available() filtered to Appender) and the expectedAppenders map
+// must agree key-by-key in both directions. A swapped name or a missing
+// registration trips one of the two loops below; a count check would not.
 func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 	t.Parallel()
-	//: discover every codec.
-	formats := codec.Available()
+	//: Direction 1 (forward): all registered Appenders are expected.
+	//: Iterates the package-level registeredAppenders slice and uses
+	//: a.Name + map lookup so the KTN-TEST-REGISTRY-BIJECTION analyzer
+	//: classifies this as the forward direction.
+	expectedSet := map[string]bool{}
+	for _, name := range expectedAppenders {
+		expectedSet[name] = true
+	}
+	for _, a := range registeredAppenders {
+		if _, ok := expectedSet[a.Name]; !ok {
+			t.Errorf("appender %q registered but not expected — add it to expectedAppenders + a switch arm below", a.Name)
+		}
+	}
+	//: Direction 2 (reverse): all expected Appenders are registered.
+	//: Iterates the package-level expectedAppenders slice and uses
+	//: registeredSet[name] map lookup so the analyzer classifies this
+	//: as the reverse direction.
+	registeredSet := map[string]bool{}
+	for _, a := range registeredAppenders {
+		registeredSet[a.Name] = true
+	}
+	for _, name := range expectedAppenders {
+		if !registeredSet[name] {
+			t.Errorf("appender %q expected but not registered", name)
+		}
+	}
 	//: prefix that must survive untouched at the head of the buffer.
 	prefix := []byte("PREFIX\x00")
 	//: per-codec subtest table.
@@ -1143,27 +1228,33 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 		decode   func(t *testing.T, name string, data []byte)
 	}
 	var tests []tc
-	//: walk every Format and filter to Appender implementers.
-	for _, f := range formats {
+	//: iterate the expected Appender set rather than codec.Available() so
+	//: there is no additional registry-walking loop competing with the
+	//: bijection above. The bijection guarantees expectedAppenders ≡
+	//: registeredAppenders, so iterating either is equivalent for the
+	//: round-trip dispatch below.
+	for _, name := range expectedAppenders {
+		f := codec.Format(name)
 		//: resolve via the core registry to type-assert Appender.
 		c, ok := corecodec.Lookup(f)
 		//: defensive lookup.
 		if !ok {
-			//: should never happen — Available guarantees registration.
+			//: bijection above already reported the gap; skip the
+			//: round-trip so the suite reports one failure per missing
+			//: registration rather than cascading panics.
 			continue
 		}
 		//: only Appender implementations participate.
 		a, supports := c.(corecodec.Appender)
 		//: skip non-appender codecs.
 		if !supports {
-			//: silent skip.
+			//: silent skip — bijection above reports the contract violation.
 			continue
 		}
 		//: shape the payload + decode hook per codec. Every Appender
-		//: implementer discovered via codec.Available() lands in one of the
-		//: branches below — the default arm is a t.Fatal so a freshly-added
-		//: Appender cannot slip past the suite uncovered.
-		name := strings.ToLower(string(f))
+		//: implementer in expected lands in one of the branches below —
+		//: the default arm is a t.Fatal so a freshly-added Appender
+		//: cannot slip past the suite uncovered.
 		switch name {
 		//: NDJSON appends a slice of complexRT records (one JSON object per line).
 		case "ndjson":

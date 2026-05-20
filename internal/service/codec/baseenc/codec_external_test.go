@@ -14,40 +14,17 @@ import (
 	"github.com/kitsunium/sdk/internal/service/codec/baseenc"
 )
 
-// payload is the canonical struct used by every round-trip subtest.
 type payload struct {
 	Name string `json:"name"`
 	Age  int    `json:"age"`
 }
 
-// codecTC is the table-row used by the format-keyed round-trip suites.
 type codecTC struct {
 	format string
 	mime   string
 	ext    string
 }
 
-// malformedTC is the table-row for decoder rejection suites.
-type malformedTC struct {
-	format string
-	bad    []byte
-}
-
-// envTC is the table-row for malformed-JSON-inside-base-N envelope suites.
-type envTC struct {
-	format string
-	env    []byte
-}
-
-// singletonTC is the table-row for the package-level singleton assertion.
-type singletonTC struct {
-	name string
-	c    codec.Codec
-	want string
-}
-
-// codecs enumerates each registered codec by Format string. Tests iterate
-// over this list so a new variant only needs an entry here.
 var codecs = []codecTC{
 	{"base64", "application/base64", ".b64"},
 	{"base64url", "application/base64url", ".b64url"},
@@ -57,13 +34,13 @@ var codecs = []codecTC{
 	{"ascii85", "application/ascii85", ".a85"},
 }
 
-// runRoundTrip drives one Marshal/Unmarshal round-trip for a registered
-// codec. Factored into a named function so the loop in
-// TestMarshalUnmarshalRoundTrip does not capture tc via a closure literal —
-// passing tc by value keeps the heap escape away from the inner subtest.
-func runRoundTrip(tc codecTC) func(t *testing.T) {
-	return func(t *testing.T) {
-		t.Parallel()
+// TestMarshalUnmarshalRoundTrip verifies that every registered codec can
+// encode a struct and decode it back without loss.
+func TestMarshalUnmarshalRoundTrip(t *testing.T) {
+	t.Parallel()
+	tests := codecs
+	runCase := func(t *testing.T, tc codecTC) {
+		t.Helper()
 		c, ok := codec.Lookup(codec.Format(tc.format))
 		if !ok {
 			t.Fatalf("Lookup %q missed", tc.format)
@@ -80,23 +57,20 @@ func runRoundTrip(tc codecTC) func(t *testing.T) {
 			t.Errorf("round-trip mismatch got=%+v", got)
 		}
 	}
-}
-
-// TestMarshalUnmarshalRoundTrip verifies that every registered codec can
-// encode a struct and decode it back without loss.
-func TestMarshalUnmarshalRoundTrip(t *testing.T) {
-	t.Parallel()
-	for _, tc := range codecs {
-		t.Run(tc.format, runRoundTrip(tc))
+	for _, tc := range tests {
+		t.Run(tc.format, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-// runRegisteredViaImport asserts the Format / MIME / Extension entries are
-// present in the registry for a given variant. Passed by value so the
-// inner subtest does not capture tc via closure.
-func runRegisteredViaImport(tc codecTC) func(t *testing.T) {
-	return func(t *testing.T) {
-		t.Parallel()
+// TestRegisteredViaImport verifies each variant self-registers on package load.
+func TestRegisteredViaImport(t *testing.T) {
+	t.Parallel()
+	tests := codecs
+	runCase := func(t *testing.T, tc codecTC) {
+		t.Helper()
 		if _, ok := codec.Lookup(codec.Format(tc.format)); !ok {
 			t.Errorf("Format %q not registered", tc.format)
 		}
@@ -107,26 +81,11 @@ func runRegisteredViaImport(tc codecTC) func(t *testing.T) {
 			t.Errorf("Extension %q not registered for %q", tc.ext, tc.format)
 		}
 	}
-}
-
-// TestRegisteredViaImport verifies each variant self-registers on package load.
-func TestRegisteredViaImport(t *testing.T) {
-	t.Parallel()
-	for _, tc := range codecs {
-		t.Run(tc.format, runRegisteredViaImport(tc))
-	}
-}
-
-// runMarshalRejectsUnsupported asserts Marshal surfaces the dedicated
-// BASE_ENC_MARSHAL_FAILED reason when JSON cannot serialise the value.
-func runMarshalRejectsUnsupported(tc codecTC) func(t *testing.T) {
-	return func(t *testing.T) {
-		t.Parallel()
-		c, _ := codec.Lookup(codec.Format(tc.format))
-		_, err := c.Marshal(make(chan int))
-		if !errs.HasReason(err, "BASE_ENC_MARSHAL_FAILED") {
-			t.Errorf("expected BASE_ENC_MARSHAL_FAILED, got %v", err)
-		}
+	for _, tc := range tests {
+		t.Run(tc.format, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
@@ -134,22 +93,20 @@ func runMarshalRejectsUnsupported(tc codecTC) func(t *testing.T) {
 // encoding/json rejects the supplied value (channel, function, complex).
 func TestMarshalRejectsUnsupportedValue(t *testing.T) {
 	t.Parallel()
-	for _, tc := range codecs {
-		t.Run(tc.format, runMarshalRejectsUnsupported(tc))
-	}
-}
-
-// runUnmarshalRejectsMalformed asserts the stdlib decoder failure surfaces
-// the typed BASE_ENC_DECODE_FAILED sentinel for the variant.
-func runUnmarshalRejectsMalformed(tc malformedTC) func(t *testing.T) {
-	return func(t *testing.T) {
-		t.Parallel()
+	tests := codecs
+	runCase := func(t *testing.T, tc codecTC) {
+		t.Helper()
 		c, _ := codec.Lookup(codec.Format(tc.format))
-		var out payload
-		err := c.Unmarshal(tc.bad, &out)
-		if !errs.HasReason(err, "BASE_ENC_DECODE_FAILED") {
-			t.Errorf("expected BASE_ENC_DECODE_FAILED, got %v", err)
+		_, err := c.Marshal(make(chan int))
+		if !errs.HasReason(err, "BASE_ENC_MARSHAL_FAILED") {
+			t.Errorf("expected BASE_ENC_MARSHAL_FAILED, got %v", err)
 		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.format, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
@@ -157,7 +114,11 @@ func runUnmarshalRejectsMalformed(tc malformedTC) func(t *testing.T) {
 // the base-N decoder rejects the input bytes.
 func TestUnmarshalRejectsMalformedBase(t *testing.T) {
 	t.Parallel()
-	tests := []malformedTC{
+	type tc struct {
+		format string
+		bad    []byte
+	}
+	tests := []tc{
 		{"base64", []byte("!!!notb64!!!")},
 		{"base64url", []byte("!!!notb64!!!")},
 		{"base32", []byte("!!!notb32!!!")},
@@ -165,22 +126,20 @@ func TestUnmarshalRejectsMalformedBase(t *testing.T) {
 		{"hex", []byte("ZZZZ")},
 		{"ascii85", []byte{0x00, 0x01, 0xFF}},
 	}
-	for _, tc := range tests {
-		t.Run(tc.format, runUnmarshalRejectsMalformed(tc))
-	}
-}
-
-// runUnmarshalRejectsBadJSON asserts the recovered JSON-layer failure
-// surfaces the typed BASE_ENC_UNMARSHAL_FAILED sentinel.
-func runUnmarshalRejectsBadJSON(tc envTC) func(t *testing.T) {
-	return func(t *testing.T) {
-		t.Parallel()
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
 		c, _ := codec.Lookup(codec.Format(tc.format))
 		var out payload
-		err := c.Unmarshal(tc.env, &out)
-		if !errs.HasReason(err, "BASE_ENC_UNMARSHAL_FAILED") {
-			t.Errorf("expected BASE_ENC_UNMARSHAL_FAILED, got %v (env=%q)", err, tc.env)
+		err := c.Unmarshal(tc.bad, &out)
+		if !errs.HasReason(err, "BASE_ENC_DECODE_FAILED") {
+			t.Errorf("expected BASE_ENC_DECODE_FAILED, got %v", err)
 		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.format, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
@@ -190,7 +149,11 @@ func runUnmarshalRejectsBadJSON(tc envTC) func(t *testing.T) {
 // but the inner json.Unmarshal rejects "{not-json".
 func TestUnmarshalRejectsBadJSON(t *testing.T) {
 	t.Parallel()
-	tests := []envTC{
+	type tc struct {
+		format string
+		env    []byte
+	}
+	tests := []tc{
 		{"base64", encodeForTest("base64", []byte("{not-json"))},
 		{"base64url", encodeForTest("base64url", []byte("{not-json"))},
 		{"base32", encodeForTest("base32", []byte("{not-json"))},
@@ -198,15 +161,30 @@ func TestUnmarshalRejectsBadJSON(t *testing.T) {
 		{"hex", encodeForTest("hex", []byte("{not-json"))},
 		{"ascii85", encodeForTest("ascii85", []byte("{not-json"))},
 	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c, _ := codec.Lookup(codec.Format(tc.format))
+		var out payload
+		err := c.Unmarshal(tc.env, &out)
+		if !errs.HasReason(err, "BASE_ENC_UNMARSHAL_FAILED") {
+			t.Errorf("expected BASE_ENC_UNMARSHAL_FAILED, got %v (env=%q)", err, tc.env)
+		}
+	}
 	for _, tc := range tests {
-		t.Run(tc.format, runUnmarshalRejectsBadJSON(tc))
+		t.Run(tc.format, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-// runUnmarshalRejectsOversize asserts the 10 MiB cap fires for each variant.
-func runUnmarshalRejectsOversize(tc codecTC) func(t *testing.T) {
-	return func(t *testing.T) {
-		t.Parallel()
+// TestUnmarshalRejectsOversize surfaces BASE_ENC_SIZE_EXCEEDED when the
+// input exceeds the 10 MiB cap.
+func TestUnmarshalRejectsOversize(t *testing.T) {
+	t.Parallel()
+	tests := codecs
+	runCase := func(t *testing.T, tc codecTC) {
+		t.Helper()
 		c, _ := codec.Lookup(codec.Format(tc.format))
 		big := make([]byte, 10*1024*1024+1)
 		var out payload
@@ -215,22 +193,21 @@ func runUnmarshalRejectsOversize(tc codecTC) func(t *testing.T) {
 			t.Errorf("expected BASE_ENC_SIZE_EXCEEDED, got %v", err)
 		}
 	}
-}
-
-// TestUnmarshalRejectsOversize surfaces BASE_ENC_SIZE_EXCEEDED when the
-// input exceeds the 10 MiB cap.
-func TestUnmarshalRejectsOversize(t *testing.T) {
-	t.Parallel()
-	for _, tc := range codecs {
-		t.Run(tc.format, runUnmarshalRejectsOversize(tc))
+	for _, tc := range tests {
+		t.Run(tc.format, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-// runAppendRoundTrip drives one Append round-trip and cross-checks the tail
-// against Marshal so the Appender contract is preserved per variant.
-func runAppendRoundTrip(tc codecTC) func(t *testing.T) {
-	return func(t *testing.T) {
-		t.Parallel()
+// TestAppendRoundTrip verifies the Appender extension yields the same bytes
+// as Marshal and preserves an existing prefix on dst.
+func TestAppendRoundTrip(t *testing.T) {
+	t.Parallel()
+	tests := codecs
+	runCase := func(t *testing.T, tc codecTC) {
+		t.Helper()
 		c, _ := codec.Lookup(codec.Format(tc.format))
 		a, ok := c.(codec.Appender)
 		if !ok {
@@ -253,22 +230,21 @@ func runAppendRoundTrip(tc codecTC) func(t *testing.T) {
 				out[len(prefix):], marshalled)
 		}
 	}
-}
-
-// TestAppendRoundTrip verifies the Appender extension yields the same bytes
-// as Marshal and preserves an existing prefix on dst.
-func TestAppendRoundTrip(t *testing.T) {
-	t.Parallel()
-	for _, tc := range codecs {
-		t.Run(tc.format, runAppendRoundTrip(tc))
+	for _, tc := range tests {
+		t.Run(tc.format, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-// runAppendRejectsUnsupported asserts the Appender contract rolls dst back
-// to its original length on a JSON-side failure.
-func runAppendRejectsUnsupported(tc codecTC) func(t *testing.T) {
-	return func(t *testing.T) {
-		t.Parallel()
+// TestAppendRejectsUnsupportedValue surfaces BASE_ENC_MARSHAL_FAILED and
+// leaves dst untouched on JSON-side failure.
+func TestAppendRejectsUnsupportedValue(t *testing.T) {
+	t.Parallel()
+	tests := codecs
+	runCase := func(t *testing.T, tc codecTC) {
+		t.Helper()
 		c, _ := codec.Lookup(codec.Format(tc.format))
 		a := c.(codec.Appender)
 		prefix := []byte("prefix:")
@@ -280,24 +256,20 @@ func runAppendRejectsUnsupported(tc codecTC) func(t *testing.T) {
 			t.Errorf("Append should leave dst untouched on error, got=%q", out)
 		}
 	}
-}
-
-// TestAppendRejectsUnsupportedValue surfaces BASE_ENC_MARSHAL_FAILED and
-// leaves dst untouched on JSON-side failure.
-func TestAppendRejectsUnsupportedValue(t *testing.T) {
-	t.Parallel()
-	for _, tc := range codecs {
-		t.Run(tc.format, runAppendRejectsUnsupported(tc))
+	for _, tc := range tests {
+		t.Run(tc.format, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
-// runStreamingRoundTrip drives the NewEncoder/NewDecoder pair for one
-// variant. All registered baseenc variants implement codec.StreamingCodec,
-// so a missing implementation is a contract regression — assert it as a
-// hard failure rather than skipping.
-func runStreamingRoundTrip(tc codecTC) func(t *testing.T) {
-	return func(t *testing.T) {
-		t.Parallel()
+// TestStreamingRoundTrip exercises NewEncoder/NewDecoder for every variant.
+func TestStreamingRoundTrip(t *testing.T) {
+	t.Parallel()
+	tests := codecs
+	runCase := func(t *testing.T, tc codecTC) {
+		t.Helper()
 		c, _ := codec.Lookup(codec.Format(tc.format))
 		sc, ok := c.(codec.StreamingCodec)
 		if !ok {
@@ -323,13 +295,11 @@ func runStreamingRoundTrip(tc codecTC) func(t *testing.T) {
 			t.Errorf("streaming round-trip mismatch got=%+v", got)
 		}
 	}
-}
-
-// TestStreamingRoundTrip exercises NewEncoder/NewDecoder for every variant.
-func TestStreamingRoundTrip(t *testing.T) {
-	t.Parallel()
-	for _, tc := range codecs {
-		t.Run(tc.format, runStreamingRoundTrip(tc))
+	for _, tc := range tests {
+		t.Run(tc.format, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
@@ -337,7 +307,12 @@ func TestStreamingRoundTrip(t *testing.T) {
 // non-nil and resolve to their expected Format.
 func TestSingletonsExported(t *testing.T) {
 	t.Parallel()
-	tests := []singletonTC{
+	type tc struct {
+		name string
+		c    codec.Codec
+		want string
+	}
+	tests := []tc{
 		{"Base64", baseenc.Base64, "base64"},
 		{"Base64URL", baseenc.Base64URL, "base64url"},
 		{"Base32", baseenc.Base32, "base32"},
@@ -345,7 +320,7 @@ func TestSingletonsExported(t *testing.T) {
 		{"Hex", baseenc.Hex, "hex"},
 		{"ASCII85", baseenc.ASCII85, "ascii85"},
 	}
-	runCase := func(t *testing.T, tc singletonTC) {
+	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
 		if tc.c == nil {
 			t.Fatalf("%s: singleton is nil", tc.name)

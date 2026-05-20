@@ -4,10 +4,10 @@ import (
 	"testing"
 )
 
-// Test_baseencCodec_spec_internal verifies the spec lookup returns the
-// canonical row for each variant — Name / MIME / Extension all derive
-// from this table.
-func Test_baseencCodec_spec_internal(t *testing.T) {
+// Test_baseencCodec_spec verifies the spec lookup returns the canonical
+// row for each variant — Name / MIME / Extension all derive from this
+// table.
+func Test_baseencCodec_spec(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string

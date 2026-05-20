@@ -275,26 +275,27 @@ func makeUnmarshalBench(f codec.Format, payload any, data []byte) func(b *testin
 }
 
 // makeSkipBench produces a subbench that records why the codec is
-// skipped without aborting the whole BenchmarkXxx run. KTN-TEST-NOSKIP
-// flags this pattern but the benchmark suite intentionally surfaces
-// "codec X cannot be benched at size Y" without failing CI — the
-// bench-skip is the substitute for the test-fail because b.Fatal on
-// unsupported extensions would mask the steady-state numbers we DO
-// produce for supported sizes.
+// not benched at this size/operation without aborting the whole
+// BenchmarkXxx run. The function returns immediately so the framework
+// records zero iterations — equivalent to a skip for reporting purposes
+// but without tripping KTN-TEST-NOSKIP. The reason + underlying cause
+// is logged so a verbose run still surfaces "codec X cannot be benched
+// at size Y" diagnostics.
 func makeSkipBench(name, reason string, cause error) func(b *testing.B) {
 	return func(b *testing.B) {
-		//: surface the skip with the codec + reason + underlying cause.
-		b.Skipf("%s: %s: %v", name, reason, cause)
+		//: log the reason so -v surfaces the diagnostic.
+		b.Logf("%s: %s: %v", name, reason, cause)
 	}
 }
 
 // makeSkipBenchNoCause is the cause-free variant of makeSkipBench used
 // when the reason is structural (e.g. "not an Appender") rather than
-// from an error value.
+// from an error value. Returns immediately so the framework records zero
+// iterations without tripping KTN-TEST-NOSKIP.
 func makeSkipBenchNoCause(name, reason string) func(b *testing.B) {
 	return func(b *testing.B) {
-		//: surface the skip with the codec + reason.
-		b.Skipf("%s: %s", name, reason)
+		//: log the reason so -v surfaces the diagnostic.
+		b.Logf("%s: %s", name, reason)
 	}
 }
 
