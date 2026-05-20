@@ -5,24 +5,8 @@ package errs
 
 import "errors"
 
-// CodeOf walks the Unwrap chain and returns the deepest *Error.Code as int.
-//
-// Deprecated: use CodeValueOf for typed access. Kept at v1 for back-compat.
-func CodeOf(err error) (code int, ok bool) {
-	//: walk the chain and keep the deepest *Error we see.
-	deepest := deepestError(err)
-	//: absence path → zero pair by contract.
-	if deepest == nil {
-		//: no *Error in the chain; hand back the documented zero pair.
-		return 0, false
-	}
-	//: cast through uint32 — Code is uint32-backed; on 64-bit (enforced by
-	//: build tag) int is 8 bytes so the conversion is lossless.
-	return int(uint32(deepest.code)), true
-}
-
-// CodeValueOf walks the chain and returns the deepest *Error's typed Code.
-func CodeValueOf(err error) (c Code, ok bool) {
+// CodeOf walks the chain and returns the deepest *Error's typed Code.
+func CodeOf(err error) (c Code, ok bool) {
 	//: reuse the shared traversal helper.
 	deepest := deepestError(err)
 	//: absence path → zero pair by contract.
@@ -92,19 +76,6 @@ func FieldsOf(err error) []FieldValue {
 	return layer.Fields()
 }
 
-// LayerOf walks the chain and returns the deepest *Error.Layer().
-func LayerOf(err error) int {
-	//: reuse the shared traversal helper.
-	deepest := deepestError(err)
-	//: absence path → unclassified (0).
-	if deepest == nil {
-		//: no *Error means we cannot assign a layer.
-		return 0
-	}
-	//: delegate to the Error's own Layer method.
-	return deepest.Layer()
-}
-
 // HTTPStatusOf walks the chain and returns the deepest *Error.HTTPStatus().
 func HTTPStatusOf(err error) int {
 	//: reuse the shared traversal helper.
@@ -129,16 +100,6 @@ func ExitCodeOf(err error) int {
 	}
 	//: delegate to the Error's own accessor.
 	return deepest.ExitCode()
-}
-
-// HasCodeInt is the DEPRECATED int-typed variant of HasCode. The modern
-// HasCode(err, Code) lives in error.go and walks both single-error and
-// multi-error wrappers (errors.Join) per ADR 0005 §3.10.
-//
-// Deprecated: use HasCode with a typed Code. Removed before v1.0.0.
-func HasCodeInt(err error, code int) bool {
-	//: delegate to the typed implementation for consistent chain semantics.
-	return HasCode(err, Code(uint32(code)))
 }
 
 // HasReason walks the chain and reports whether ANY *Error carries reason.

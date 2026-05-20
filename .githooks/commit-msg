@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# ============================================================================
+# commit-msg hook — block AI/Claude mentions in commit messages.
+#
+# Mirrors the Claude Code PreToolUse guard (~/.claude/scripts/git-guard.sh)
+# so the SAME policy applies whether the commit comes from a human running
+# `git commit` directly OR from an AI agent issuing the same command. Two
+# enforcement points, one rule.
+#
+# Wired via `git config core.hooksPath .githooks` (run scripts/install-hooks.sh
+# once after clone).
+#
+# Exit 0 = commit allowed, Exit 1 = blocked.
+# ============================================================================
+
+set -euo pipefail
+
+# $1 is the path to the commit message file git stages before opening editor.
+MSG_FILE="${1:?commit-msg: expected commit-message path as first argument}"
+MSG="$(tr '[:upper:]' '[:lower:]' < "$MSG_FILE")"
+
+# Patterns copied verbatim from .devcontainer/images/.claude/scripts/git-guard.sh
+# (the Claude Code-side enforcement) so divergence cannot creep in.
+FORBIDDEN_PATTERNS=(
+    "co-authored-by.*claude"
+    "co-authored-by.*anthropic"
+    "co-authored-by.*openai"
+    "co-authored-by.*gpt"
+    "co-authored-by.*ai"
+    "co-authored-by.*copilot"
+    "co-authored-by.*gemini"
+    "co-authored-by.*llm"
+    "generated.*with.*claude"
+    "generated.*by.*claude"
+    "generated.*with.*ai"
+    "generated.*by.*ai"
+    "generated.*with.*gpt"
+    "generated.*by.*gpt"
+    "ai.assisted"
+    "ai-assisted"
+    "🤖"
+    "claude code"
+    "claude-code"
+    "anthropic"
+    "openai"
+    "chatgpt"
+    "copilot"
+)
+
+for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+    if printf '%s' "$MSG" | grep -qiE "$pattern"; then
+        cat >&2 <<EOF
+═══════════════════════════════════════════════
+  ❌ COMMIT BLOCKED — AI reference detected
+═══════════════════════════════════════════════
+
+  Forbidden pattern: $pattern
+
+  This project's policy (see CLAUDE.md §4.0) forbids AI/Claude/Anthropic
+  attribution in commit messages. Remove the reference and re-commit.
+
+═══════════════════════════════════════════════
+EOF
+        exit 1
+    fi
+done
+
+exit 0

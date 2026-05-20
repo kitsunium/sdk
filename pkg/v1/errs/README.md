@@ -11,16 +11,18 @@ Rationale: consumers should not be able to forge SDK errors. They observe them.
 All accessors walk the `Unwrap` chain and return the deepest `*errs.Error` value encountered. Default values when no SDK error is present are documented per function.
 
 ```go
-func CodeOf(err error)       (code int, ok bool)       // 0 / false if none
+func CodeOf(err error)       (code Code, ok bool)      // 0 / false if none — typed dotted-quad
 func ReasonOf(err error)     (reason string, ok bool)  // "" / false if none
 func PublicOf(err error)     string                    // "" if none
 func PrivateOf(err error)    string                    // "" if none — DIAGNOSTIC ONLY
-func LayerOf(err error)      int                       // 0 if none, else 1..9
 func HTTPStatusOf(err error) int                       // 500 default
 func ExitCodeOf(err error)   int                       // 70 (EX_SOFTWARE) default
-func HasCode(err error, code int)       bool
+func HasCode(err error, c Code) bool
 func HasReason(err error, reason string) bool
 ```
+
+Octets are reached on the typed Code itself: `code.Major()`, `code.Layer()`,
+`code.Package()`, `code.Serial()`. There is no separate `LayerOf` accessor.
 
 ## Quick start
 
@@ -31,11 +33,14 @@ import (
 )
 
 _, err := logger.NewText(logger.Config{})  // nil Writer → fails
-if errs.HasCode(err, 4101) {
+//: 0x01_01_00_01 = 1.1.0.1 (pkg/v1/logger WriterRequired under ADR 0005).
+if errs.HasCode(err, 0x01_01_00_01) {
     // configuration problem on our side
 }
 fmt.Println("wire-safe message:", errs.PublicOf(err))
-fmt.Println("layer:", errs.LayerOf(err))
+if code, ok := errs.CodeOf(err); ok {
+    fmt.Println("layer:", code.Layer())
+}
 fmt.Println("HTTP status:", errs.HTTPStatusOf(err))
 ```
 

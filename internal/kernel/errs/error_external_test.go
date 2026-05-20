@@ -22,21 +22,19 @@ func newSampleSentinel(tb testing.TB) *errs.Error {
 
 func TestDefine(t *testing.T) {
 	t.Parallel()
-	//: the int returns cast from uint32(0x00_03_01_01) == 197889.
-	//: Layer() returns the byte Layer octet as int.
 	tests := []struct {
 		name        string
-		wantCode    int
+		wantCode    errs.Code
 		wantReason  string
 		wantPublic  string
-		wantLayer   int
+		wantLayer   errs.Layer
 		wantHTTP    int
 		wantExit    int
 		wantErrText string
 	}{
 		{
 			name:        "writer-nil sentinel",
-			wantCode:    int(uint32(0x00_03_01_01)),
+			wantCode:    0x00_03_01_01,
 			wantReason:  "WRITER_NIL",
 			wantPublic:  "Log handler requires a non-nil writer",
 			wantLayer:   3,
@@ -51,7 +49,7 @@ func TestDefine(t *testing.T) {
 			//: rebuild the sentinel under the subtest so each parallel case is independent.
 			sentinel := newSampleSentinel(t)
 			if sentinel.Code() != tc.wantCode {
-				t.Errorf("Code() = %d", sentinel.Code())
+				t.Errorf("Code() = %s", sentinel.Code())
 			}
 			if sentinel.Reason() != tc.wantReason {
 				t.Errorf("Reason() = %q", sentinel.Reason())
@@ -59,8 +57,8 @@ func TestDefine(t *testing.T) {
 			if sentinel.Public() != tc.wantPublic {
 				t.Errorf("Public() = %q", sentinel.Public())
 			}
-			if sentinel.Layer() != tc.wantLayer {
-				t.Errorf("Layer() = %d", sentinel.Layer())
+			if sentinel.Code().Layer() != tc.wantLayer {
+				t.Errorf("Code().Layer() = %d", sentinel.Code().Layer())
 			}
 			if sentinel.HTTPStatus() != tc.wantHTTP {
 				t.Errorf("HTTPStatus() = %d", sentinel.HTTPStatus())
@@ -115,67 +113,17 @@ func TestNewError(t *testing.T) {
 		code       errs.Code
 		reason     string
 		public     string
-		wantCode   int
+		wantCode   errs.Code
 		wantReason string
 	}{
-		{"alias matches Define", 0x00_02_00_01, "LEVEL_TEST_NEW", "Level test public", int(uint32(0x00_02_00_01)), "LEVEL_TEST_NEW"},
+		{"alias matches Define", 0x00_02_00_01, "LEVEL_TEST_NEW", "Level test public", 0x00_02_00_01, "LEVEL_TEST_NEW"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := errs.NewError(tc.code, tc.reason, tc.public, "level test private")
 			if got.Code() != tc.wantCode || got.Reason() != tc.wantReason {
-				t.Errorf("got %d %q, want %d %q", got.Code(), got.Reason(), tc.wantCode, tc.wantReason)
-			}
-		})
-	}
-}
-
-// TestNewErrorInt covers the deprecated int-typed alias so the back-compat
-// surface keeps a direct test even after callers migrate to the typed Code.
-func TestNewErrorInt(t *testing.T) {
-	t.Parallel()
-	//: 0x00_02_00_02 = 0.2.0.2 — second core slot reserved for the int alias.
-	tests := []struct {
-		name       string
-		code       int
-		reason     string
-		public     string
-		wantCode   int
-		wantReason string
-	}{
-		{"int alias matches Define", int(uint32(0x00_02_00_02)), "INT_ALIAS_NEW", "Int alias public", int(uint32(0x00_02_00_02)), "INT_ALIAS_NEW"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := errs.NewErrorInt(tc.code, tc.reason, tc.public, "int alias private")
-			if got.Code() != tc.wantCode || got.Reason() != tc.wantReason {
-				t.Errorf("got %d %q, want %d %q", got.Code(), got.Reason(), tc.wantCode, tc.wantReason)
-			}
-		})
-	}
-}
-
-// TestDefineInt covers the deprecated int-typed alias for Define.
-func TestDefineInt(t *testing.T) {
-	t.Parallel()
-	//: 0x00_02_00_03 = 0.2.0.3 — third core slot reserved for the int alias.
-	tests := []struct {
-		name       string
-		code       int
-		reason     string
-		wantCode   int
-		wantReason string
-	}{
-		{"int alias matches Define", int(uint32(0x00_02_00_03)), "INT_ALIAS_DEF", int(uint32(0x00_02_00_03)), "INT_ALIAS_DEF"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := errs.DefineInt(tc.code, tc.reason, "Int define public", "int define private")
-			if got.Code() != tc.wantCode || got.Reason() != tc.wantReason {
-				t.Errorf("got %d %q, want %d %q", got.Code(), got.Reason(), tc.wantCode, tc.wantReason)
+				t.Errorf("got %s %q, want %s %q", got.Code(), got.Reason(), tc.wantCode, tc.wantReason)
 			}
 		})
 	}
@@ -261,8 +209,8 @@ func TestWrap(t *testing.T) {
 				if !errors.Is(wrapped, context.Canceled) {
 					t.Error("errors.Is(wrapped, context.Canceled) = false")
 				}
-				if wrapped.Code() != int(uint32(0x00_03_01_0A)) {
-					t.Errorf("Code = %d", wrapped.Code())
+				if wrapped.Code() != 0x00_03_01_0A {
+					t.Errorf("Code = %s", wrapped.Code())
 				}
 			},
 		},
@@ -300,8 +248,8 @@ func TestWrap_RuntimeSafeOnBadParams(t *testing.T) {
 			if got == nil {
 				t.Fatal("expected non-nil *Error")
 			}
-			if got.CodeValue() != errs.CodeInvalidWrapParams {
-				t.Errorf("expected CodeInvalidWrapParams, got %s", got.CodeValue())
+			if got.Code() != errs.CodeInvalidWrapParams {
+				t.Errorf("expected CodeInvalidWrapParams, got %s", got.Code())
 			}
 			if !errors.Is(got, fs.ErrNotExist) {
 				t.Error("errors.Is should still reach fs.ErrNotExist through the wrap")
@@ -310,26 +258,8 @@ func TestWrap_RuntimeSafeOnBadParams(t *testing.T) {
 	}
 }
 
+// TestError_Code covers the typed accessor on *Error.
 func TestError_Code(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-	}{
-		{"sentinel code matches Define"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if sentinel := newSampleSentinel(t); sentinel.Code() != int(uint32(0x00_03_01_01)) {
-				t.Errorf("Code = %d", sentinel.Code())
-			}
-		})
-	}
-}
-
-// TestError_CodeValue covers the typed accessor that the deprecated Code()
-// wraps; CodeValue is the long-lived API and deserves its own direct test.
-func TestError_CodeValue(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -340,8 +270,8 @@ func TestError_CodeValue(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if sentinel := newSampleSentinel(t); sentinel.CodeValue() != tc.want {
-				t.Errorf("CodeValue = %s, want %s", sentinel.CodeValue(), tc.want)
+			if sentinel := newSampleSentinel(t); sentinel.Code() != tc.want {
+				t.Errorf("CodeValue = %s, want %s", sentinel.Code(), tc.want)
 			}
 		})
 	}
@@ -510,17 +440,17 @@ func TestError_TrailTruncated(t *testing.T) {
 	}
 }
 
-func TestError_Layer(t *testing.T) {
+func TestError_Code_Layer(t *testing.T) {
 	t.Parallel()
-	//: Layer extracts the second byte (byte 2). ADR 0005 dotted-quad codes:
+	//: Layer extracts the second octet of the dotted-quad Code. Examples:
 	//: 0x00_01_01_00 = 0.1.1.0 (kernel) → Layer 1
 	//: 0x00_03_01_01 = 0.3.1.1 (service) → Layer 3
-	//: 0x01_01_00_01 = 1.1.0.1 (pkg v1) → Layer 1 (under v1 major)
+	//: 0x01_01_00_01 = 1.1.0.1 (pkg v1 under major=1) → Layer 1
 	tests := []struct {
 		name   string
 		code   errs.Code
 		reason string
-		want   int
+		want   errs.Layer
 	}{
 		{"kernel layer", 0x00_01_01_00, "LAYER_TEST_KERNEL", 1},
 		{"service layer", 0x00_03_01_01, "LAYER_TEST_SERVICE", 3},
@@ -530,8 +460,8 @@ func TestError_Layer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			built := errs.Define(tc.code, tc.reason, "Layer test public", "priv")
-			if built.Layer() != tc.want {
-				t.Errorf("Layer = %d, want %d", built.Layer(), tc.want)
+			if built.Code().Layer() != tc.want {
+				t.Errorf("Code().Layer() = %d, want %d", built.Code().Layer(), tc.want)
 			}
 		})
 	}
@@ -656,7 +586,7 @@ func TestError_Is_MatchesByCode(t *testing.T) {
 	//: WrapParams are ignored for *errs.Error causes (origin wins) so we
 	//: wrap a stdlib error to exercise the wrap path that inflates Code.
 	matching := errs.Wrap(errors.New("stdlib cause"), errs.WrapParams{
-		Code:    sentinel.CodeValue(),
+		Code:    sentinel.Code(),
 		Reason:  sentinel.Reason(),
 		Public:  sentinel.Public(),
 		Private: sentinel.Private(),
