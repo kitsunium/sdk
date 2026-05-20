@@ -11,7 +11,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 |---|---|---|
 | `logger/` | Logger facade: `Config` / `NewText` / `Default` / `NewWithSink`, `Info|Warn|Error|Debug`, `Build` builder, `String|Int|…` attr ctors, `Version` (ldflags injection point) | `pkg/v1/logger/README.md` |
 | `codec/` | Universal codec dispatch: `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` over a `Format` registry; blank-imports 13 service codecs covering 18 Format names — text/binary/base-N reached identically (asn1-der, baseenc family [base64/base64url/base32/base16/hex/ascii85], cbor, csv, flatbuffers, json, msgpack, ndjson, pem, tlv, toml, xml, yaml) | _(no README)_ |
-| `errs/` | Read-only error introspection: `CodeOf` / `ReasonOf` / `PublicOf` / `PrivateOf` / `HTTPStatusOf` / `ExitCodeOf` / `HasCode` / `HasReason` / `NewPrefixMatcher` / `Pack` / `ParseCode` + `Code|Major|Layer|PkgCode|Serial|PrefixMatcher` type aliases + `MaskBy*` constants. Octets are composable on the typed `Code` (e.g. `code.Layer()`). | `pkg/v1/errs/README.md` |
+| `errs/` | Read-only error introspection: `CodeOf` / `ReasonOf` / `PublicOf` / `PrivateOf` / `HTTPStatusOf` / `ExitCodeOf` / `HasCode` / `HasReason` / `NewPrefixMatcher` / `Pack` / `ParseCode` + `Code` / `Major` / `Layer` / `PkgCode` / `Serial` / `PrefixMatcher` type aliases + `MaskBy*` constants. Octets are composable on the typed `Code` (e.g. `code.Layer()`). | `pkg/v1/errs/README.md` |
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 

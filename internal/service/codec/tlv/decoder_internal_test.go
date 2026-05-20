@@ -2,6 +2,8 @@ package tlv
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"testing"
 )
 
@@ -9,6 +11,7 @@ import (
 // path to exercise the wrap branch.
 func Test_tlvDecoder_Decode(t *testing.T) {
 	t.Parallel()
+	const emptyStreamCase = "empty stream returns EOF on first call"
 	type tc struct {
 		name    string
 		data    []byte
@@ -16,7 +19,7 @@ func Test_tlvDecoder_Decode(t *testing.T) {
 	}
 	//: 0x01 0x00 is a complete tagNil/length=0 record.
 	tests := []tc{
-		{"empty stream returns EOF on first call", nil, true},
+		{emptyStreamCase, nil, true},
 		{"garbage bytes surface an error", []byte{0xff, 0xff, 0xff, 0xff}, true},
 		{"valid nil record decodes", []byte{0x01, 0x00}, false},
 	}
@@ -25,7 +28,15 @@ func Test_tlvDecoder_Decode(t *testing.T) {
 		dec := &tlvDecoder{r: bytes.NewReader(tc.data)}
 		var out any
 		err := dec.Decode(&out)
-		//: nil data path returns io.EOF.
+		//: empty-stream contract: must surface io.EOF, not just any error.
+		//: A plain `err != nil` accepts any failure mode, which would mask a
+		//: regression where Decode returned a wrong sentinel on no-data input.
+		if tc.name == emptyStreamCase {
+			if !errors.Is(err, io.EOF) {
+				t.Errorf("%s: expected io.EOF in chain, got %v", tc.name, err)
+			}
+			return
+		}
 		if tc.wantErr && err == nil {
 			t.Errorf("%s: expected error on malformed input", tc.name)
 		}

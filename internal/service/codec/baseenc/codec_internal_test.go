@@ -304,7 +304,13 @@ func Test_bufferingWriter_ShortWrite_C2(t *testing.T) {
 		if !errors.Is(err, io.ErrShortWrite) {
 			t.Errorf("%s: expected io.ErrShortWrite in chain, got %v", tc.name, err)
 		}
-		//: wrap chain must carry the marshal-failed reason.
+		//: wrap chain must carry the typed dotted-quad code so an
+		//: incorrect sentinel with the same reason cannot pass silently.
+		if !errs.HasCode(err, CodeBaseEncMarshalFailed) {
+			t.Errorf("%s: expected CodeBaseEncMarshalFailed, got %v", tc.name, err)
+		}
+		//: wrap chain must also carry the marshal-failed reason for log
+		//: consumers that match by reason string.
 		if !errs.HasReason(err, "BASE_ENC_MARSHAL_FAILED") {
 			t.Errorf("%s: expected BASE_ENC_MARSHAL_FAILED, got %v", tc.name, err)
 		}

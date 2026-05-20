@@ -22,9 +22,24 @@ WORKSPACE="${1:-${CLAUDE_PROJECT_DIR:-/workspace}}"
 cd "$WORKSPACE"
 
 if ! command -v ktn-linter >/dev/null 2>&1; then
-    echo "ktn-linter binary not found — skipping the active-phase gate."
-    echo "Install via: /ktn (or curl -fsSL https://github.com/kodflow/ktn-linter/releases/latest/download/ktn-linter-\$(go env GOOS)-\$(go env GOARCH) -o /usr/local/bin/ktn-linter && chmod +x /usr/local/bin/ktn-linter)"
-    exit 0
+    cat >&2 <<EOF
+═══════════════════════════════════════════════════════════════
+  ✘ ktn-linter binary not found — active-phase gate is ENFORCED
+═══════════════════════════════════════════════════════════════
+
+The pre-commit gate fails closed when ktn-linter is missing, so a
+commit cannot bypass the active-phase lint policy by simply not
+installing the tool. Install it before committing:
+
+  /ktn
+
+  # or manually:
+  curl -fsSL "https://github.com/kodflow/ktn-linter/releases/latest/download/ktn-linter-\$(go env GOOS)-\$(go env GOARCH)" \\
+      -o /usr/local/bin/ktn-linter && chmod +x /usr/local/bin/ktn-linter
+
+═══════════════════════════════════════════════════════════════
+EOF
+    exit 1
 fi
 
 # Run the linter on the whole tree, restricting to phases 1-7 (the active set

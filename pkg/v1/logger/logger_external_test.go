@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
+	errs "github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
 )
 

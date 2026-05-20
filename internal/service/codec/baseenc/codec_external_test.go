@@ -96,7 +96,10 @@ func TestMarshalRejectsUnsupportedValue(t *testing.T) {
 	tests := codecs
 	runCase := func(t *testing.T, tc codecTC) {
 		t.Helper()
-		c, _ := codec.Lookup(codec.Format(tc.format))
+		c, ok := codec.Lookup(codec.Format(tc.format))
+		if !ok {
+			t.Fatalf("Lookup %q missed — registration regression", tc.format)
+		}
 		_, err := c.Marshal(make(chan int))
 		if !errs.HasReason(err, "BASE_ENC_MARSHAL_FAILED") {
 			t.Errorf("expected BASE_ENC_MARSHAL_FAILED, got %v", err)
@@ -128,7 +131,10 @@ func TestUnmarshalRejectsMalformedBase(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		c, _ := codec.Lookup(codec.Format(tc.format))
+		c, ok := codec.Lookup(codec.Format(tc.format))
+		if !ok {
+			t.Fatalf("Lookup %q missed — registration regression", tc.format)
+		}
 		var out payload
 		err := c.Unmarshal(tc.bad, &out)
 		if !errs.HasReason(err, "BASE_ENC_DECODE_FAILED") {
@@ -163,7 +169,10 @@ func TestUnmarshalRejectsBadJSON(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		c, _ := codec.Lookup(codec.Format(tc.format))
+		c, ok := codec.Lookup(codec.Format(tc.format))
+		if !ok {
+			t.Fatalf("Lookup %q missed — registration regression", tc.format)
+		}
 		var out payload
 		err := c.Unmarshal(tc.env, &out)
 		if !errs.HasReason(err, "BASE_ENC_UNMARSHAL_FAILED") {
@@ -185,7 +194,10 @@ func TestUnmarshalRejectsOversize(t *testing.T) {
 	tests := codecs
 	runCase := func(t *testing.T, tc codecTC) {
 		t.Helper()
-		c, _ := codec.Lookup(codec.Format(tc.format))
+		c, ok := codec.Lookup(codec.Format(tc.format))
+		if !ok {
+			t.Fatalf("Lookup %q missed — registration regression", tc.format)
+		}
 		big := make([]byte, 10*1024*1024+1)
 		var out payload
 		err := c.Unmarshal(big, &out)
@@ -208,7 +220,10 @@ func TestAppendRoundTrip(t *testing.T) {
 	tests := codecs
 	runCase := func(t *testing.T, tc codecTC) {
 		t.Helper()
-		c, _ := codec.Lookup(codec.Format(tc.format))
+		c, ok := codec.Lookup(codec.Format(tc.format))
+		if !ok {
+			t.Fatalf("Lookup %q missed — registration regression", tc.format)
+		}
 		a, ok := c.(codec.Appender)
 		if !ok {
 			t.Fatalf("%s: codec does not implement Appender", tc.format)
@@ -245,8 +260,14 @@ func TestAppendRejectsUnsupportedValue(t *testing.T) {
 	tests := codecs
 	runCase := func(t *testing.T, tc codecTC) {
 		t.Helper()
-		c, _ := codec.Lookup(codec.Format(tc.format))
-		a := c.(codec.Appender)
+		c, ok := codec.Lookup(codec.Format(tc.format))
+		if !ok {
+			t.Fatalf("Lookup %q missed — registration regression", tc.format)
+		}
+		a, isAppender := c.(codec.Appender)
+		if !isAppender {
+			t.Fatalf("%s: codec does not implement Appender", tc.format)
+		}
 		prefix := []byte("prefix:")
 		out, err := a.Append(slices.Clone(prefix), make(chan int))
 		if !errs.HasReason(err, "BASE_ENC_MARSHAL_FAILED") {
@@ -270,7 +291,10 @@ func TestStreamingRoundTrip(t *testing.T) {
 	tests := codecs
 	runCase := func(t *testing.T, tc codecTC) {
 		t.Helper()
-		c, _ := codec.Lookup(codec.Format(tc.format))
+		c, ok := codec.Lookup(codec.Format(tc.format))
+		if !ok {
+			t.Fatalf("Lookup %q missed — registration regression", tc.format)
+		}
 		sc, ok := c.(codec.StreamingCodec)
 		if !ok {
 			t.Fatalf("%s: codec does not implement StreamingCodec", tc.format)
