@@ -72,6 +72,7 @@ sync_rust() {
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path 2>/dev/null
     fi
 
+    # shellcheck disable=SC1091  # cargo env is created at runtime by rustup; existence guarded above.
     [ -f "${CARGO_HOME}/env" ] && source "${CARGO_HOME}/env"
     rustup toolchain install stable --profile minimal 2>/dev/null
     rustup default stable 2>/dev/null
@@ -201,51 +202,90 @@ sync_go() {
     # short-circuit and skip Go sync entirely.
     local failed=0
     local tool installed upstream major_pin
-    # Atomic binary install for ktn-linter (release asset, not a Go module).
-    # Writes to a sibling .download path then renames — protects against a
-    # half-fetched binary if curl is interrupted mid-stream. Returns non-zero
-    # on any failure so the caller can flag the sync as incomplete.
+
+    # Resolve the most recent release tag whose assets contain a name matching
+    # `pattern`. `releases/latest` returns the latest tag regardless of whether
+    # any binary asset shipped — upstream pipelines can stamp a tag with zero
+    # assets (kodflow/ktn-linter v1.32+) and make `releases/latest/download/...`
+    # 404 forever. Walking `releases?per_page=20` newest-first and skipping
+    # empty-asset releases makes this path self-healing without manual pinning.
+    latest_release_with_asset() {
+        local repo="$1" pattern="$2" auth=()
+        [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: token ${GITHUB_TOKEN}")
+        local payload tag
+        payload=$(curl -fsS --connect-timeout 3 --max-time 8 \
+                       "${auth[@]}" \
+                       "https://api.github.com/repos/${repo}/releases?per_page=20" 2>/dev/null || true)
+        [ -z "$payload" ] && return 1
+        tag=$(printf '%s' "$payload" | awk -v pat="$pattern" '
+            /"tag_name":/ {
+                if (match($0, /"tag_name": *"v?[^"]+"/)) {
+                    t = substr($0, RSTART, RLENGTH)
+                    sub(/"tag_name": *"v?/, "", t); sub(/".*/, "", t)
+                    cur = t; have_asset = 0
+                }
+            }
+            /"name":/ && index($0, pat) > 0 && cur != "" && !have_asset {
+                have_asset = 1
+                print cur
+                exit
+            }
+        ' 2>/dev/null || true)
+        [ -n "$tag" ] && { echo "$tag"; return 0; }
+        return 1
+    }
+
+    # Atomic install for ktn-linter (tar.gz release asset).
+    # Writes to a sibling .download path then atomically renames the extracted
+    # binary — protects against a half-fetched archive if curl is interrupted
+    # mid-stream. Returns non-zero on any failure so the caller can flag the
+    # sync as incomplete and let onCreate retry next start.
     install_ktn_linter() {
+        local version="$1"
         local target="${GOPATH}/bin/ktn-linter"
-        local tmp="${target}.download"
-        if curl -fsSL --connect-timeout 10 --max-time 60 \
-                "https://github.com/kodflow/ktn-linter/releases/latest/download/ktn-linter-linux-${GO_ARCH}" \
-                -o "$tmp" 2>/dev/null \
-            && chmod +x "$tmp" \
-            && mv -f "$tmp" "$target"; then
+        local tmp_tar="${target}.download.tar.gz"
+        local tmp_bin="${target}.download"
+        local url="https://github.com/kodflow/ktn-linter/releases/download/v${version}/ktn-linter_linux_${GO_ARCH}.tar.gz"
+
+        if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$tmp_tar" 2>/dev/null \
+            && tar -xzf "$tmp_tar" -C "$(dirname "$tmp_bin")" ktn-linter 2>/dev/null \
+            && mv -f "$(dirname "$tmp_bin")/ktn-linter" "$tmp_bin" 2>/dev/null \
+            && chmod +x "$tmp_bin" \
+            && mv -f "$tmp_bin" "$target"; then
+            rm -f "$tmp_tar"
             return 0
         fi
-        rm -f "$tmp"
+        rm -f "$tmp_tar" "$tmp_bin"
         return 1
     }
 
     for tool in golangci-lint gosec gofumpt gotestsum goimports ktn-linter; do
         case "$tool" in
             ktn-linter)
-                # ktn-linter is published as a release binary on GitHub, NOT as a Go
+                # ktn-linter is published as a release tarball on GitHub, NOT as a Go
                 # module — `go install ktn-linter@latest` silently fails (not a valid
                 # module path). Must download the release asset directly, and do it
                 # HERE at runtime so the write lands in the already-mounted
                 # package-cache volume (build-time writes under $GOPATH/bin are
                 # masked by the volume at container start).
                 #
-                # Auto-refresh: probe upstream tag, reinstall on drift. Without
-                # this guard, an old ktn-linter cached in the volume survived
-                # every container rebuild — `command -v` short-circuited the
-                # install path even when a newer release was available. Mirrors
-                # the GO_TOOL_REPOS pattern (#330) but with direct asset download.
+                # Asset resolution: latest_release_with_asset() walks recent
+                # releases instead of trusting `releases/latest`, because the
+                # latest tag can ship with zero binary assets when upstream CI
+                # breaks (v1.32+ on kodflow/ktn-linter, May 2026). Without this
+                # `install_ktn_linter` would 404 forever and leave the stale
+                # volume-cached binary in place every rebuild.
                 installed=$(installed_tool_version ktn-linter)
-                upstream=$(upstream_latest_version "kodflow/ktn-linter")
+                upstream=$(latest_release_with_asset \
+                    "kodflow/ktn-linter" "ktn-linter_linux_${GO_ARCH}.tar.gz")
                 if [ -z "$upstream" ]; then
-                    # Network/rate-limit failure: keep an existing binary, only
-                    # install when truly missing (best-effort cold-start path).
                     if [ -z "$installed" ]; then
-                        echo "    ktn-linter: upstream probe failed and tool missing — installing latest (best-effort)..."
-                        install_ktn_linter || failed=1
+                        echo "    ktn-linter: no recent release ships ktn-linter_linux_${GO_ARCH}.tar.gz and tool missing — upstream pipeline likely broken"
+                        failed=1
                     fi
                 elif [ "$installed" != "$upstream" ]; then
                     echo "    ktn-linter: ${installed:-none} → ${upstream}"
-                    install_ktn_linter || failed=1
+                    install_ktn_linter "$upstream" || failed=1
                 fi
                 ;;
             *)

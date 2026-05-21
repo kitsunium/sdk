@@ -1,3 +1,4 @@
+<!-- updated: 2026-05-21T21:27:56Z -->
 # internal/service/codec/flatbuffers/
 
 ## Purpose
@@ -27,6 +28,11 @@ No third-party dependency — pure stdlib.
 |---|---|---|
 | `BytesProvider` (`Bytes() []byte`)     | Marshal / Append | lets generated FlatBuffer types expose their underlying buffer without exporting it as `[]byte` |
 | `BytesAcceptor` (`SetBytes([]byte)`)   | Unmarshal        | lets generated FlatBuffer types accept the buffer with their own ownership semantics |
+
+The `Provider` / `Acceptor` suffixes are registered as legitimate
+adapter-role vocabulary in `/workspace/.ktn-linter.yaml`
+(per kodflow/ktn-linter#337), so `KTN-INTERFACE-ERNAME` does not fire
+on these names.
 
 `Marshal` accepts `[]byte` directly OR any `BytesProvider`. `Unmarshal`
 accepts `*[]byte` directly (zero-copy reference; caller takes shared

@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-05-21T21:27:56Z -->
 # internal/service/
 
 ## Purpose

@@ -7,6 +7,10 @@ package flatbuffers
 // satisfy to hand the codec its already-encoded FlatBuffer payload. The
 // returned slice MUST remain valid for the lifetime of the codec call;
 // the codec performs no copy and treats the buffer as read-only.
+//
+// `Provider`/`Acceptor` suffixes are registered as legitimate adapter-role
+// vocabulary in `/workspace/.ktn-linter.yaml` (per kodflow/ktn-linter#337),
+// so `KTN-INTERFACE-ERNAME` does not fire here.
 type BytesProvider interface {
 	Bytes() []byte
 }

@@ -19,6 +19,7 @@ trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
 
 FEATURE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../shared/feature-utils.sh
+# shellcheck disable=SC1091  # Sourced at runtime; static path varies by install layout.
 source "${FEATURE_DIR}/feature-utils.sh" 2>/dev/null || \
 source "${FEATURE_DIR}/../shared/feature-utils.sh" 2>/dev/null || {
     RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -225,11 +226,52 @@ spawn_tool() {
 }
 
 # Fetch latest versions (non-fatal: empty string on rate-limit/timeout, retries 3x)
+# Resolve the most recent release tag whose assets contain a name matching
+# `pattern`. `releases/latest` returns the latest tag regardless of whether
+# its assets shipped — a broken upstream release pipeline can stamp a tag
+# with zero binary assets (kodflow/ktn-linter v1.32+) and make every
+# `releases/latest/download/...` URL 404 forever. Walking `releases?per_page=20`
+# newest-first and skipping empty-asset releases makes the install path
+# self-healing against that class of upstream regression.
+get_github_latest_release_with_asset() {
+    local repo="$1" pattern="$2" auth_args=()
+    [[ -n "${GITHUB_TOKEN:-}" ]] && auth_args=(-H "Authorization: token ${GITHUB_TOKEN}")
+    local attempt payload tag
+    for attempt in 1 2 3; do
+        payload=$(curl -fsS --connect-timeout 5 --max-time 10 \
+            "${auth_args[@]}" \
+            "https://api.github.com/repos/${repo}/releases?per_page=20" 2>/dev/null || true)
+        if [[ -n "$payload" ]]; then
+            tag=$(printf '%s' "$payload" | awk -v pat="$pattern" '
+                /"tag_name":/ {
+                    if (match($0, /"tag_name": *"v?[^"]+"/)) {
+                        t = substr($0, RSTART, RLENGTH)
+                        sub(/"tag_name": *"v?/, "", t); sub(/".*/, "", t)
+                        cur = t; have_asset = 0
+                    }
+                }
+                /"name":/ && index($0, pat) > 0 && cur != "" && !have_asset {
+                    have_asset = 1
+                    print cur
+                    exit
+                }
+            ' 2>/dev/null || true)
+            [[ -n "$tag" ]] && { echo "$tag"; return 0; }
+        fi
+        sleep $((attempt * 2))
+    done
+    return 1
+}
+
 step fetch-tool-versions begin
 GOLANGCI_VERSION=$(get_github_latest_version_or_empty "golangci/golangci-lint")
 GOSEC_VERSION=$(get_github_latest_version_or_empty "securego/gosec")
 GOFUMPT_VERSION=$(get_github_latest_version_or_empty "mvdan/gofumpt")
 GOTESTSUM_VERSION=$(get_github_latest_version_or_empty "gotestyourself/gotestsum")
+# ktn-linter publishes asset name `ktn-linter_linux_<arch>.tar.gz`; pinned to
+# the most recent release that actually ships that asset (skips broken tags).
+KTN_LINTER_VERSION=$(get_github_latest_release_with_asset \
+    "kodflow/ktn-linter" "ktn-linter_linux_${GO_ARCH}.tar.gz" 2>/dev/null || echo "")
 # buildifier + buildozer ship from the same bazelbuild/buildtools release.
 BUILDTOOLS_VERSION=$(get_github_latest_version_or_empty "bazelbuild/buildtools")
 
@@ -312,10 +354,27 @@ set +e
 TOOL_PIDS[goimports]=$!
 set -e
 
-spawn_tool "ktn-linter" \
-    "https://github.com/kodflow/ktn-linter/releases/latest/download/ktn-linter-linux-${GO_ARCH}" \
-    "" \
-    "binary"
+# ktn-linter ships its binary as `ktn-linter_linux_<arch>.tar.gz`, not as a bare
+# binary. The previous URL (`releases/latest/download/ktn-linter-linux-<arch>`)
+# 404'd against every release because the asset name uses underscores + tarball
+# packaging, AND `releases/latest` currently resolves to v1.33.0 / v1.32.x —
+# upstream tags shipped with zero assets. KTN_LINTER_VERSION is resolved against
+# `releases?per_page=20` to find the most recent tag that actually ships the
+# asset, so this self-heals once upstream republishes.
+if [[ -n "$KTN_LINTER_VERSION" ]]; then
+    spawn_tool "ktn-linter" \
+        "https://github.com/kodflow/ktn-linter/releases/download/v${KTN_LINTER_VERSION}/ktn-linter_linux_${GO_ARCH}.tar.gz" \
+        "" \
+        "tar.gz"
+else
+    set +e
+    ( trap - ERR; \
+      echo -e "${RED}ktn-linter: no recent release ships ktn-linter_linux_${GO_ARCH}.tar.gz${NC}" >&2; \
+      echo -e "${RED}  → upstream pipeline likely broken (kodflow/ktn-linter). Skipping.${NC}" >&2; \
+      exit 1 ) &
+    TOOL_PIDS[ktn-linter]=$!
+    set -e
+fi
 
 # Bazel tooling — same release ships both binaries.
 if [[ -n "$BUILDTOOLS_VERSION" ]]; then
