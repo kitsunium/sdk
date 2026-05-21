@@ -236,26 +236,38 @@ sync_go() {
     }
 
     # Atomic install for ktn-linter (tar.gz release asset).
-    # Writes to a sibling .download path then atomically renames the extracted
-    # binary — protects against a half-fetched archive if curl is interrupted
-    # mid-stream. Returns non-zero on any failure so the caller can flag the
+    # Extracts into a unique temp directory so the existing working binary at
+    # $target is NEVER touched until the final rename — a mid-stream tar
+    # failure can no longer overwrite or remove the previous good binary.
+    # Supports both root-level and nested tar layouts (mirrors the build-time
+    # spawn_tool path in install.sh) so runtime and build-time behaviour stay
+    # consistent. Returns non-zero on any failure so the caller can flag the
     # sync as incomplete and let onCreate retry next start.
     install_ktn_linter() {
         local version="$1"
         local target="${GOPATH}/bin/ktn-linter"
         local tmp_tar="${target}.download.tar.gz"
         local tmp_bin="${target}.download"
+        local tmp_dir
+        tmp_dir=$(mktemp -d 2>/dev/null) || return 1
         local url="https://github.com/kodflow/ktn-linter/releases/download/v${version}/ktn-linter_linux_${GO_ARCH}.tar.gz"
 
+        # ktn-linter ships its archive with the binary at root in current
+        # releases, but older releases used nested layouts. Try the root layout
+        # first (cheap), fall back to the wildcard strip used by install.sh.
         if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$tmp_tar" 2>/dev/null \
-            && tar -xzf "$tmp_tar" -C "$(dirname "$tmp_bin")" ktn-linter 2>/dev/null \
-            && mv -f "$(dirname "$tmp_bin")/ktn-linter" "$tmp_bin" 2>/dev/null \
+            && { tar -xzf "$tmp_tar" -C "$tmp_dir" ktn-linter 2>/dev/null \
+                 || tar -xzf "$tmp_tar" --wildcards --strip-components=1 -C "$tmp_dir" '*/ktn-linter' 2>/dev/null; } \
+            && [ -f "$tmp_dir/ktn-linter" ] && [ ! -L "$tmp_dir/ktn-linter" ] \
+            && mv -f "$tmp_dir/ktn-linter" "$tmp_bin" 2>/dev/null \
             && chmod +x "$tmp_bin" \
             && mv -f "$tmp_bin" "$target"; then
             rm -f "$tmp_tar"
+            rm -rf "$tmp_dir"
             return 0
         fi
         rm -f "$tmp_tar" "$tmp_bin"
+        rm -rf "$tmp_dir"
         return 1
     }
 

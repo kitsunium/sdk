@@ -1,6 +1,7 @@
 package flatbuffers
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -216,11 +217,19 @@ func Test_flatbuffersCodec_Unmarshal(t *testing.T) {
 		//: happy path — verify the target actually received the buffer.
 		switch dst := target.(type) {
 		case *[]byte:
-			if string(*dst) != string(tc.data) {
+			//: full byte equality, not just length.
+			if !bytes.Equal(*dst, tc.data) {
 				t.Errorf("%s: *[]byte target got %v want %v", tc.name, *dst, tc.data)
 			}
+			//: zero-copy contract: the published slice MUST alias tc.data's
+			//: backing array (Unmarshal documents zero-copy reference for
+			//: *[]byte targets). Compare the addresses of the first element.
+			if len(tc.data) > 0 && len(*dst) > 0 && &(*dst)[0] != &tc.data[0] {
+				t.Errorf("%s: *[]byte fast-path is not zero-copy (got new backing array)", tc.name)
+			}
 		case *fakeAcceptor:
-			if string(dst.got) != string(tc.data) {
+			//: full byte equality of the slice handed to the Acceptor.
+			if !bytes.Equal(dst.got, tc.data) {
 				t.Errorf("%s: fakeAcceptor.got=%v want %v", tc.name, dst.got, tc.data)
 			}
 		default:
@@ -265,6 +274,17 @@ func Test_flatbuffersCodec_Append(t *testing.T) {
 			if len(got) != tc.wantLen {
 				t.Errorf("%s: len(out)=%d want %d", tc.name, len(got), tc.wantLen)
 			}
+			//: happy path — verify the appended suffix matches the resolved
+			//: source bytes, not just total length (catches byte-corruption
+			//: regressions with unchanged length).
+			src, srcErr := resolveSourceBytes(tc.in)
+			if srcErr != nil {
+				t.Errorf("%s: resolveSourceBytes unexpectedly failed: %v", tc.name, srcErr)
+				return
+			}
+			if !bytes.Equal(got[len(tc.dst):], src) {
+				t.Errorf("%s: appended payload mismatch: got=%v want=%v", tc.name, got[len(tc.dst):], src)
+			}
 			return
 		}
 		if !errs.HasReason(err, tc.wantErr) {
@@ -273,6 +293,11 @@ func Test_flatbuffersCodec_Append(t *testing.T) {
 		//: error-path rollback: dst length must equal the input dst length.
 		if len(got) != tc.wantLen {
 			t.Errorf("%s: error-path len(out)=%d want %d", tc.name, len(got), tc.wantLen)
+		}
+		//: error-path content rollback: dst MUST be byte-identical to the
+		//: input dst (catches in-place mutations that preserve length).
+		if !bytes.Equal(got, tc.dst) {
+			t.Errorf("%s: error-path mutated dst: got=%v want=%v", tc.name, got, tc.dst)
 		}
 	}
 	for _, tc := range tests {
