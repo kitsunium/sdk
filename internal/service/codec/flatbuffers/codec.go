@@ -150,9 +150,9 @@ func resolveSourceBytes(v any) (src []byte, err error) {
 		return b, nil
 	}
 	//: structured-source path: caller implements BytesProvider.
-	if p, ok := v.(BytesProvider); ok {
+	if prov, ok := v.(BytesProvider); ok {
 		//: extract the payload; the implementation owns lifetime semantics.
-		return p.Bytes(), nil
+		return prov.Bytes(), nil
 	}
 	//: anything else is a programming error for this codec.
 	return nil, errs.Wrap(nil, errs.WrapParams{
