@@ -9,10 +9,10 @@ import Default from "../../../layouts/Default.astro";
 export async function getStaticPaths() {
   const all = await getCollection("docs");
   return all.map(entry => {
-    //: entry.slug looks like "v1/local/index", "v1/local/codec",
-    //: "v1/local/adr/0001-foo". First two segments are the major +
-    //: release; everything else is the page slug.
-    const segments = entry.slug.split("/");
+    //: entry.id (Astro 5 glob loader) looks like "v1/local/index",
+    //: "v1/local/codec", "v1/local/adr/0001-foo". First two segments
+    //: are the major + release; everything else is the page slug.
+    const segments = entry.id.split("/");
     const major = segments[0];
     const release = segments[1];
     const rest = segments.slice(2).join("/");
@@ -26,7 +26,7 @@ export async function getStaticPaths() {
 
 const { entry } = Astro.props;
 const { Content, headings } = await render(entry);
-const fallbackTitle = entry.slug.split("/").slice(-1)[0] ?? "Docs";
+const fallbackTitle = entry.id.split("/").slice(-1)[0] ?? "Docs";
 const title = entry.data?.title ?? fallbackTitle;
 const description = entry.data?.description;
 ---
