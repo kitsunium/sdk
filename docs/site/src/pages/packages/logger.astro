@@ -1,0 +1,14 @@
+---
+import Default from "../../layouts/Default.astro";
+import { readSourceMarkdown, renderMarkdown, stripTopHeading } from "../../utils/markdown.ts";
+
+const md = readSourceMarkdown("pkg/v1/logger/README.md");
+const body = renderMarkdown(stripTopHeading(md));
+---
+
+<Default
+  title="pkg/v1/logger"
+  subtitle="Zero-alloc structured logger — multi-sink, leveled, middleware-driven. Public surface frozen post-v1.0.0."
+>
+  <article class="md-body" set:html={body} />
+</Default>

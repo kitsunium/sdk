@@ -62,12 +62,32 @@ go_test(
 # operations (Marshal / Unmarshal / *Parallel / Append / StreamEncode /
 # StreamDecode). The `manual` tag keeps the target OUT of the `bazel test //...`
 # wildcard so PR CI stays fast. Re-uses helpers from codec_external_test.go via
-# shared package codec_test. The bench file's TestMain enables block / mutex
-# profile collection — kept out of codec_test so regular runs are not slowed.
-# Invoke: `make sdk-codec-bench` or `bazel test //pkg/v1/codec:codec_bench_test
-# --test_arg=-test.bench=. --test_arg=-test.benchmem`.
+# shared package codec_test.
+#
+# Two ways to invoke:
+#
+#   • `make bench` — runs `bazel run //pkg/v1/codec:codec_bench_test --
+#     -test.run=TestGenerateBenchMD …` which executes the matrix
+#     programmatically (via testing.Benchmark) and writes BENCH.md to the
+#     source tree using $BUILD_WORKSPACE_DIRECTORY.
+#
+#   • `bazel test //pkg/v1/codec:codec_bench_test --test_arg=-test.bench=.
+#     --test_arg=-test.benchmem` — the legacy mode used by developers who
+#     want stdout-streamed numbers without regenerating BENCH.md.
+#
+# `gotags = ["benchmark"]` activates the bench_report_test.go file which is
+# `//go:build benchmark`-gated so it is invisible to every other go_test
+# target / `go test ./...` invocation.
+#
+# `size = "enormous"` + `timeout = "eternal"` lift the default 5-min cap so
+# the full matrix at `-test.benchtime=2s` always completes — slower machines
+# (ARM emulation, CI sandboxes) need every bit of that budget. The `manual`
+# tag still keeps this OUT of `bazel test //...`, so the enormous size doesn't
+# slow down regular PR CI runs.
 go_test(
     name = "codec_bench_test",
+    size = "enormous",
+    timeout = "eternal",
     srcs = [
         "codec_bench_test.go",
         "codec_external_test.go",

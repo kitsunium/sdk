@@ -151,7 +151,14 @@ plans/
 # Claude Code session logs (context recovery)
 # ============================================
 .claude/logs/
-docs/site/
+# docs/site/ source IS tracked (Astro components, layouts, pages, scripts);
+# only the build artifacts and the auto-generated content tree stay out.
+# See ADR 0007 §5 (sync-versions.mjs writes src/data + src/content/docs/v*).
+docs/site/node_modules/
+docs/site/dist/
+docs/site/.astro/
+docs/site/src/data/versions.json
+docs/site/src/content/docs/v*/
 core.*
 .taskmaster/
 

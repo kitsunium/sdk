@@ -1,0 +1,114 @@
+---
+import Default from "../layouts/Default.astro";
+---
+
+<Default
+  title="Philosophy"
+  subtitle="Nine non-negotiable rules. Every line of SDK code obeys all nine — there is no per-package opt-out."
+>
+  <article class="md-body">
+    <p>
+      These rules are the contract between every domain. They land in
+      <code>/workspace/CLAUDE.md</code> (the project root) and are enforced by a
+      combination of Bazel visibility, the ktn-linter (148 rules across 8 phases),
+      the dotted-quad audit, and a pre-commit guard. Skipping any of them in a PR
+      means the PR doesn't merge.
+    </p>
+
+    <h2>1 · Kernel gate</h2>
+    <p>
+      A package qualifies for <code>internal/kernel/</code> only if it is
+      <strong>stdlib-only AND generic</strong>. Domain vocabulary (Logger, Codec, Request,
+      User) disqualifies — those belong in <code>internal/core/&lt;domain&gt;/</code>. The
+      <code>level</code> package was moved out of kernel for this reason (see ADR 0001).
+    </p>
+
+    <h2>2 · Typed errors only</h2>
+    <p>
+      Every error returned from SDK code goes through <code>errs.Define</code> or
+      <code>errs.Wrap</code>. <code>fmt.Errorf</code> / <code>errors.New</code> are
+      banned in production code. The AST audit (<code>//internal/kernel/errs:errs_test</code>,
+      run by <code>make test</code>) fails the build on violations.
+    </p>
+
+    <h2>3 · Dotted-quad error codes</h2>
+    <p>
+      <code>Code</code> is a <code>uint32</code> laid out <code>MM.LL.PP.SS</code>
+      (Major · Layer · Package · Serial). Each package owns a <code>PP</code> slot;
+      the registry table in ADR 0005 + ADR 0006 is the documentary source of truth and
+      the AST audit in <code>internal/kernel/errs/registry_external_test.go</code> is the
+      executable one. They stay in sync manually.
+    </p>
+    <p>
+      Match codes with <code>errs.HasCode(err, CodeX)</code> (walks both <code>Unwrap()
+      error</code> and <code>Unwrap() []error</code>) or
+      <code>errors.Is(err, errs.NewPrefixMatcher(...))</code> for subnet-style routing.
+    </p>
+
+    <h2>4 · Public/Private split</h2>
+    <p>
+      Every SDK error carries a wire-safe <code>Public</code> (string literal, ≤ 120 runes,
+      no newline) and a log-only <code>Private</code>. <code>err.Error()</code> renders
+      <code>&quot;[&lt;code&gt; &lt;REASON&gt;] &lt;public&gt;&quot;</code> on the no-trail fast path; when
+      the wrap trail is non-empty, ADR 0005 §Semantics extends the bracket header with
+      <code>&quot; &lt;- &quot;</code>-separated trail codes and an optional
+      <code>&quot; (truncated)&quot;</code> marker — never Private, never Fields.
+    </p>
+    <p>
+      Log-parser regex: <code>\[[\d.]+(?: &lt;- [\d.]+)*(?: \(truncated\))? \w+\]</code>
+    </p>
+
+    <h2>5 · No empty stub files / dirs</h2>
+    <p>
+      If a file or directory only carries a placeholder, inline its content into an
+      existing file or delete it.
+    </p>
+
+    <h2>6 · Origin wins on wrap</h2>
+    <p>
+      When <code>errs.Wrap</code> receives an <code>*errs.Error</code> cause, it
+      inherits the cause's Code/Reason/Public/Private. Wrappers can only add
+      <code>Fields</code> (and extend the intrinsic wrap trail). To relabel, define a
+      fresh sentinel.
+    </p>
+
+    <h2>7 · Version via build-time injection</h2>
+    <p>
+      <code>pkg/v1/logger.Version</code> is stamped at link time — under Bazel via
+      <code>x_defs</code> + <code>--stamp</code> + <code>tools/workspace_status.sh</code>
+      (<code>STABLE_VERSION</code>); under raw <code>go build</code> via
+      <code>-ldflags &quot;-X github.com/kitsunium/sdk/pkg/v1/logger.Version=…&quot;</code>.
+      <code>FrameworkVersion()</code> returns <code>&quot;dev&quot;</code> when unset; every emitted
+      log record carries <code>framework_version</code> automatically.
+    </p>
+
+    <h2>8 · Every package is documented</h2>
+    <p>
+      Pre-commit guard <code>scripts/pre-commit/check-pkg-docs.sh</code> blocks the
+      commit when any <code>internal/*</code> or <code>pkg/v*/**</code> directory
+      containing Go production code is missing <code>CLAUDE.md</code> AND
+      <code>README.md</code>. Public packages (<code>pkg/v*/**</code>) additionally
+      require <code>README.md</code> (consumer-facing — pkg.go.dev renders it; the
+      model is <code>pkg/v1/errs/README.md</code>).
+    </p>
+
+    <h2>9 · Every benchmark package ships its numbers</h2>
+    <p>
+      Pre-commit guard <code>scripts/pre-commit/check-bench-md.sh</code> blocks the
+      commit when a directory contains <code>*_bench_test.go</code> but no sibling
+      <code>BENCH.md</code>. The report is regenerated with <code>make bench</code>;
+      it stamps machine, RAM, CPU, OS, Go toolchain, git SHA, and timestamp so
+      cross-machine deltas can be evaluated honestly.
+    </p>
+
+    <h2>Hook installation</h2>
+    <p>
+      After cloning, wire the in-repo hooks with:
+    </p>
+    <pre is:raw><code>bash scripts/install-hooks.sh   # one-time per clone</code></pre>
+    <p>
+      This sets <code>git config core.hooksPath .githooks</code> so the pre-commit
+      guards above run on every commit.
+    </p>
+  </article>
+</Default>

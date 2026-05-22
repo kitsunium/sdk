@@ -1,0 +1,14 @@
+---
+import Default from "../../layouts/Default.astro";
+import { readSourceMarkdown, renderMarkdown, stripTopHeading } from "../../utils/markdown.ts";
+
+const md = readSourceMarkdown("pkg/v1/errs/README.md");
+const body = renderMarkdown(stripTopHeading(md));
+---
+
+<Default
+  title="pkg/v1/errs"
+  subtitle="Read-only error introspection — CodeOf, ReasonOf, PublicOf, PrivateOf, HasCode, HasReason, NewPrefixMatcher. The Define / Wrap constructors are intentionally NOT re-exported."
+>
+  <article class="md-body" set:html={body} />
+</Default>

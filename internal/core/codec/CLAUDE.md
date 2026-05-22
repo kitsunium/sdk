@@ -44,4 +44,4 @@ cd internal/core && GOWORK=off go test -race -cover ./codec/...
 # Appender detection covered; ≥95% line coverage.
 ```
 
-The audit (`make sdk-errs-audit`) verifies `CodeDuplicateRegistration` stays in the `0.2.2.*` block with reason `DUPLICATE_REGISTRATION`.
+The audit (`bazel test //internal/kernel/errs:errs_test`, also run by `make test`) verifies `CodeDuplicateRegistration` stays in the `0.2.2.*` block with reason `DUPLICATE_REGISTRATION`.

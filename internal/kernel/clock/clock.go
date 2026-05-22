@@ -28,7 +28,5 @@ func (systemClock) Since(t time.Time) time.Duration {
 	return time.Since(t)
 }
 
-var (
-	// System is the default Clock using the package time wall clock.
-	System Clock = systemClock{}
-)
+// System is the default Clock using the package time wall clock.
+var System Clock = systemClock{}

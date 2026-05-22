@@ -1,0 +1,17 @@
+{
+  "name": "kitsunium-sdk-docs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "kitsunium/sdk documentation portal — philosophy, package guides, ADRs, benchmarks. Built via `make docs` at the repo root.",
+  "scripts": {
+    "dev": "node scripts/sync-versions.mjs && astro dev",
+    "prebuild": "node scripts/sync-versions.mjs",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "^5.14.1",
+    "marked": "^15.0.7"
+  }
+}

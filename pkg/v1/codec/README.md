@@ -110,11 +110,17 @@ Per-codec failures carry the codec's own range (`0.3.*` for service codecs; see 
 Benchmarks for every registered Format × payload size × operation are checked in under `BENCH.md` files within each codec package. Run locally with:
 
 ```shell
-make sdk-codec-bench
-# or directly:
+# Regenerate every BENCH.md across the SDK (recommended — stamps a
+# reproducibility envelope at the top of each report):
+make bench
+
+# Or run codec benchmarks ad-hoc, output to stdout:
 bazel test //pkg/v1/codec:codec_bench_test \
     --test_arg=-test.bench=. \
-    --test_arg=-test.benchmem
+    --test_arg=-test.benchmem \
+    --test_arg=-test.run=^$ \
+    --test_arg=-test.benchtime=2s \
+    --test_output=streamed
 ```
 
 The bench target is tagged `manual` so it is excluded from `bazel test //...` and never runs on PR CI by default.

@@ -138,6 +138,23 @@ rules:
     exclude:
       - "**/internal/kernel/ring/**"
 
+  # KTN-TEST-SUFFIX + KTN-TEST-TABLE — scoped exception for the codec
+  # benchmark file. Normally Test* functions must live in
+  # _internal_test.go / _external_test.go (TEST-SUFFIX) and follow the
+  # table-driven pattern (TEST-TABLE). pkg/v1/codec/codec_bench_test.go
+  # hosts a single `TestGenerateBenchMD` whose only job is to drive the
+  # full bench matrix (via testing.Benchmark on the same package-local
+  # make<Op>Bench helpers used by every Benchmark* function in the file)
+  # and write pkg/v1/codec/BENCH.md. Moving the Test out would either
+  # duplicate the helpers or expose them across files; a single-shot
+  # report generator is also a poor fit for the table-driven pattern.
+  KTN-TEST-SUFFIX:
+    exclude:
+      - "**/pkg/v1/codec/codec_bench_test.go"
+  KTN-TEST-TABLE:
+    exclude:
+      - "**/pkg/v1/codec/codec_bench_test.go"
+
   # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,
   # sync.Once for lazy init, or package-level var initialisers. The codec

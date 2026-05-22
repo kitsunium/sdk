@@ -1,0 +1,144 @@
+---
+import Default from "../../layouts/Default.astro";
+import fs from "node:fs";
+import path from "node:path";
+
+//: workspace root — Astro runs from docs/site/, so ../../ lands at the
+//: repo root. Matches the helper in src/utils/markdown.ts.
+const WORKSPACE = path.resolve(process.cwd(), "../..");
+const adrDir = path.join(WORKSPACE, "docs/adr");
+
+interface AdrIndexEntry {
+  slug: string;
+  number: string;
+  title: string;
+  status: string;
+  date: string;
+  summary: string;
+}
+
+//: scrape Status / Date / first paragraph after Context from each ADR.
+function readAdrIndex(): AdrIndexEntry[] {
+  const files = fs
+    .readdirSync(adrDir)
+    .filter((f) => /^\d{4}-.+\.md$/.test(f))
+    .sort();
+
+  return files.map((file) => {
+    const raw = fs.readFileSync(path.join(adrDir, file), "utf-8");
+    const slug = file.replace(/\.md$/, "");
+    const numberMatch = file.match(/^(\d{4})/);
+    const number = numberMatch ? numberMatch[1] : "????";
+    const titleMatch = raw.match(/^#\s+(?:ADR\s+\d+[:.\s—-]+)?(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : slug;
+    const statusMatch = raw.match(/Status[:\s|]+([^\n|]+)/i);
+    const dateMatch = raw.match(/Date[:\s|]+([^\n|]+)/i);
+    //: the first non-header / non-meta paragraph as the summary; falls
+    //: back to "(see full ADR)" when the heuristic doesn't catch one.
+    const summary = pickSummary(raw);
+    return {
+      slug,
+      number,
+      title,
+      status: statusMatch ? statusMatch[1].trim() : "—",
+      date: dateMatch ? dateMatch[1].trim() : "—",
+      summary,
+    };
+  });
+}
+
+function pickSummary(raw: string): string {
+  //: scan past the title and the front-matter / meta block, take the
+  //: first prose paragraph encountered.
+  const lines = raw.split(/\r?\n/);
+  let inMeta = false;
+  let buf: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("# ")) continue;
+    if (trimmed.startsWith("##")) {
+      //: scan the FIRST h2 section's first paragraph; usually that's
+      //: "Context" or "Status" — but on most ADRs "Context" comes first.
+      buf = [];
+      inMeta = false;
+      continue;
+    }
+    if (/^(Status|Date|Deciders|Supersedes|Superseded by|Amends|Related)/.test(trimmed)) {
+      inMeta = true;
+      continue;
+    }
+    if (inMeta && trimmed === "") {
+      inMeta = false;
+      continue;
+    }
+    if (inMeta) continue;
+    if (trimmed === "" && buf.length > 0) break;
+    if (trimmed === "") continue;
+    if (trimmed.startsWith(">")) continue;
+    if (trimmed.startsWith("-")) continue;
+    if (trimmed.startsWith("|")) continue;
+    if (trimmed.startsWith("```")) break;
+    buf.push(trimmed);
+    if (buf.join(" ").length > 240) break;
+  }
+  const summary = buf.join(" ").trim();
+  if (!summary) return "(see full ADR)";
+  return summary.length > 280 ? summary.slice(0, 277) + "…" : summary;
+}
+
+const adrs = readAdrIndex();
+---
+
+<Default
+  title="Architecture Decision Records"
+  subtitle="Six accepted ADRs documenting the SDK's load-bearing decisions. ADRs are immutable after merge — supersede via a new ADR that references the old one."
+>
+  <article class="md-body">
+    <p>
+      The dotted-quad allocation table in ADR 0005 + the extension in ADR 0006 is the
+      <strong>documentary source of truth</strong>; the AST audit test in
+      <code>internal/kernel/errs/registry_external_test.go</code> embeds the same
+      table as the <strong>executable source of truth</strong>. Both stay in sync
+      manually on every change.
+    </p>
+
+    <h2>Index</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Title</th>
+          <th>Status</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          adrs.map((adr) => (
+            <tr>
+              <td>
+                <code>{adr.number}</code>
+              </td>
+              <td>
+                <a href={`/adr/${adr.slug}/`}>{adr.title}</a>
+                <br />
+                <span style="color: var(--color-muted); font-size: 0.85rem;">{adr.summary}</span>
+              </td>
+              <td>{adr.status}</td>
+              <td>{adr.date}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>ADR conventions</h2>
+    <ul>
+      <li>Sequential numbering (<code>0001</code>, <code>0002</code>, …). Never reuse a number.</li>
+      <li>Filename slug = short kebab-case summary of the decision.</li>
+      <li>Header fields: <code>Status</code>, <code>Date</code>, <code>Deciders</code>, optional <code>Supersedes</code>, <code>Superseded by</code>, <code>Amends</code>, <code>Related</code>.</li>
+      <li>Standard sections: Context, Decision, Consequences / Semantics, Breaking changes, Why not …, Deferred, References.</li>
+      <li>Immutable after merge. Supersede via a new ADR that references the old one (e.g. ADR 0005 supersedes ADR 0002 §Registry; ADR 0006 amends ADR 0005 §Registry).</li>
+    </ul>
+  </article>
+</Default>

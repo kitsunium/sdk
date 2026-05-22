@@ -94,7 +94,16 @@
   "postCreateCommand": "/etc/devcontainer-hooks/lifecycle/postCreate.sh",
   "postStartCommand": "/etc/devcontainer-hooks/lifecycle/postStart.sh",
   "postAttachCommand": "/etc/devcontainer-hooks/lifecycle/postAttach.sh",
-  "forwardPorts": [],
+  // Ports auto-forwardés au démarrage. Le mapping docker-compose
+  // (ports: 4321:4321) ouvre déjà l'accès depuis localhost hôte ;
+  // cette section ajoute juste l'auto-open dans VSCode/Cursor.
+  "forwardPorts": [4321],
+  "portsAttributes": {
+    "4321": {
+      "label": "SDK docs (make serve)",
+      "onAutoForward": "notify"
+    }
+  },
   "remoteUser": "vscode",
   "shutdownAction": "none"
 }

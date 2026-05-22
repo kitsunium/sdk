@@ -1,0 +1,48 @@
+---
+// Brand block — logo + literal "SDK" + version dropdown. Replaces the
+// previous `⌘ kitsunium/sdk` text mark in the sidebar (plan B2, B4).
+// The current major is derived from the URL pathname; the dropdown
+// component handles defaulting + EOL labelling.
+import VersionDropdown from "./VersionDropdown.astro";
+
+interface Props {
+  currentPath: string;
+}
+
+const { currentPath } = Astro.props;
+
+//: extract "v1" / "v2" / ... from a path like /v1/index. Anything that
+//: doesn't match falls through and the dropdown picks the default.
+const majorMatch = currentPath.match(/^\/(v\d+)(?:\/|$)/);
+const currentMajor = majorMatch?.[1] ?? null;
+---
+
+<a href="/" class="brand" aria-label="kitsunium SDK — home">
+  <img
+    src="/brand/kitsunium.jpg"
+    alt="Kitsunium"
+    width="28"
+    height="28"
+    class="brand-mark-img"
+  />
+  <span class="brand-text">SDK</span>
+  <VersionDropdown current={currentMajor} />
+</a>
+
+<style>
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    color: inherit;
+  }
+  .brand-mark-img {
+    border-radius: 6px;
+    display: block;
+  }
+  .brand-text {
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+</style>

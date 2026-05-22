@@ -65,8 +65,11 @@ func TestFanout_Write(t *testing.T) {
 		wantErr  bool
 	}{
 		{"all branches succeed", []*recordingSink{{}, {}}, false},
-		{"one branch fails — fanout returns FANOUT_WRITE_FAILED",
-			[]*recordingSink{{}, {werr: errors.New("boom")}}, true},
+		{
+			"one branch fails — fanout returns FANOUT_WRITE_FAILED",
+			[]*recordingSink{{}, {werr: errors.New("boom")}},
+			true,
+		},
 		{"empty fanout is a no-op", nil, false},
 	}
 	for _, tc := range tests {

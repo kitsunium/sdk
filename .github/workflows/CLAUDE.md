@@ -3,16 +3,17 @@
 
 ## Purpose
 
-CI/CD automation. The SDK lane is `bazel-ci.yml`; the other three workflows are inherited from the devcontainer-template repo and path-gated on `.devcontainer/**`.
+CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate) and `sdk-release.yml` (auto-tag after the gate); the remaining three workflows are inherited from the devcontainer-template repo and path-gated on `.devcontainer/**`.
 
 ## Workflows
 
 | File | Trigger | Description |
 |---|---|---|
 | `bazel-ci.yml` | push to `main`, PRs | Primary SDK CI — drift check + build + test + coverage via Bazel 9 |
+| `sdk-release.yml` | `workflow_run` after `SDK CI (Bazel)` success on `main`, plus manual `workflow_dispatch` | Impact-driven patch tags `pkg/<major>/vX.Y.Z` (see ADR 0007). Reads majors from `scripts/release/compute-bumps.sh` and pushes via `scripts/release/cut-tags.sh`. |
 | `docker-images.yml` | weekly + push to `.devcontainer/images/**` | Template-inherited; two-tier base+main image build |
 | `publish-features.yml` | push to `.devcontainer/features/**` | Template-inherited; publishes OCI feature artifacts |
-| `release.yml` | push to main on `.devcontainer/**` | Template-inherited; builds `claude-assets.tar.gz` and tags `vYYYY.MM.DD-<sha7>` |
+| `release.yml` | push to main on `.devcontainer/**` | Template-inherited; path-gated to `.devcontainer/**` and SDK-unaware — DO NOT edit for SDK reasons |
 
 ## bazel-ci.yml (the SDK lane)
 
@@ -25,6 +26,19 @@ Single job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
 5. `bazel coverage --combined_report=lcov //...` → uploaded as `coverage-${{ github.run_number }}` artifact (per-run unique name so concurrent runs don't dedupe, post-audit finding #28).
 
 Concurrency: `${{ github.workflow }}-${{ github.ref }}` with cancel-in-progress.
+
+## sdk-release.yml (the SDK release lane)
+
+Single job `release` on `ubuntu-latest`, gated by `workflow_run` on `SDK CI (Bazel)` success. Steps:
+
+1. `actions/checkout@93cb6efe…  # v5` with `fetch-depth: 0` — full history required so `git describe --tags` and `git worktree add <tag>` resolve.
+2. `actions/setup-go@…` + `bazel-contrib/setup-bazel@…` — Bazel is needed for the `rdeps` query inside `compute-bumps.sh`.
+3. Compute majors to bump (`scripts/release/compute-bumps.sh`, or `inputs.force_bumps` on manual dispatch).
+4. Cut tags (`scripts/release/cut-tags.sh`) — strips `replace` lines, verifies `GOWORK=off go mod download`, race-protected re-read.
+5. `gh release create --generate-notes --verify-tag` per pushed tag.
+6. Upload `release-summary-${{ github.run_number }}` artifact (always, even on no-op).
+
+Concurrency: `sdk-release-${{ github.ref }}` with `cancel-in-progress: false` (NEVER cancel a tag-push mid-flight).
 
 ## Conventions
 

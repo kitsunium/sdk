@@ -1,0 +1,119 @@
+name: SDK Release
+# Auto-cut patch tags after the Bazel CI lane succeeds on main. The
+# bump policy (impact-driven via bazel rdeps, patch-only by default,
+# minor via a maintainer-authored 'Release-bump: minor' trailer on the
+# merge commit) is documented in docs/adr/0007-sdk-release-and-versioning.md.
+#
+# Triggered AFTER bazel-ci.yml succeeds (no race, no double-build).
+# workflow_dispatch input force_bumps overrides the impact analysis when
+# the rdeps cache is stale or a maintainer wants to cut a tag manually.
+
+on:
+  workflow_run:
+    workflows: ["SDK CI (Bazel)"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_bumps:
+        description: 'Space-separated majors to bump (e.g. "v1 v2"). Empty = use compute-bumps.sh output.'
+        required: false
+        default: ""
+
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: >-
+      github.repository == 'kitsunium/sdk'
+      && (github.event_name == 'workflow_dispatch'
+        || (github.event.workflow_run.conclusion == 'success'
+            && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    env:
+      TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      GOWORK: "off"
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@e403ad507104847c3539436f64a9e9eecc73eeec # v0.15.0
+
+      - name: Configure git identity
+        run: |
+          git config user.email "ci@kitsunium.com"
+          git config user.name "kitsunium-bot"
+
+      - name: Compute majors to bump
+        id: compute
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.force_bumps }}" ]; then
+            echo "majors<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${{ inputs.force_bumps }}" | tr ' ' '\n' | grep -E '^v[0-9]+$' >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          else
+            echo "majors<<EOF" >> "$GITHUB_OUTPUT"
+            bash scripts/release/compute-bumps.sh >> "$GITHUB_OUTPUT" || true
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cut and push tags
+        if: steps.compute.outputs.majors != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "${{ steps.compute.outputs.majors }}" | bash scripts/release/cut-tags.sh | tee /tmp/cut.log
+
+      - name: Create GitHub releases
+        if: steps.compute.outputs.majors != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            gh release create "$tag" --generate-notes --verify-tag --title "$tag"
+          done < /tmp/cut.log
+
+      - name: Emit release summary artifact
+        if: always() && steps.compute.outputs.majors != ''
+        run: |
+          {
+            echo "## SDK release summary"
+            echo "Commit: $TARGET_SHA"
+            echo "Date: $(date -u +%FT%TZ)"
+            echo
+            echo "### Majors bumped"
+            echo "${{ steps.compute.outputs.majors }}"
+            echo
+            echo "### Tags pushed"
+            cat /tmp/cut.log 2>/dev/null || echo "(none)"
+          } > /tmp/release-summary.md
+
+      - name: Upload release summary
+        if: always() && steps.compute.outputs.majors != ''
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: release-summary-${{ github.run_number }}
+          path: /tmp/release-summary.md
+          retention-days: 30

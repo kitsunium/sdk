@@ -1,0 +1,87 @@
+---
+// Sidebar nav. The `currentPath` prop highlights the active link.
+// Sections are hand-curated so the order matches the recommended
+// reading flow (Overview → Getting started → Concepts → Packages →
+// Architecture → Reference → Benchmarks).
+import Brand from "./Brand.astro";
+
+interface Props {
+  currentPath: string;
+}
+const { currentPath } = Astro.props;
+
+interface NavItem {
+  href: string;
+  label: string;
+}
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+const sections: NavSection[] = [
+  {
+    title: "Overview",
+    items: [
+      { href: "/", label: "Home" },
+      { href: "/getting-started/", label: "Getting started" },
+      { href: "/philosophy/", label: "Philosophy" },
+    ],
+  },
+  {
+    title: "Packages",
+    items: [
+      { href: "/packages/logger/", label: "pkg/v1/logger" },
+      { href: "/packages/codec/", label: "pkg/v1/codec" },
+      { href: "/packages/errs/", label: "pkg/v1/errs" },
+    ],
+  },
+  {
+    title: "Reference",
+    items: [
+      { href: "/architecture/", label: "Architecture" },
+      { href: "/adr/", label: "ADRs (0001 – 0006)" },
+      { href: "/benchmarks/", label: "Benchmarks" },
+    ],
+  },
+];
+
+//: trailing-slash-tolerant match so /adr/ matches both /adr and /adr/.
+function isActive(href: string): boolean {
+  const a = href.replace(/\/$/, "");
+  const b = currentPath.replace(/\/$/, "");
+  return a === b;
+}
+---
+
+<aside class="sidebar" aria-label="Site navigation">
+  <div class="sidebar-inner">
+    <Brand currentPath={currentPath} />
+
+    {
+      sections.map((section) => (
+        <nav class="nav-section">
+          <h3>{section.title}</h3>
+          <ul>
+            {section.items.map((item) => (
+              <li>
+                <a href={item.href} class={isActive(item.href) ? "active" : ""}>
+                  {item.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ))
+    }
+
+    <div class="sidebar-foot">
+      <a href="https://github.com/kitsunium/sdk" target="_blank" rel="noopener">
+        GitHub ↗
+      </a>
+      <a href="https://pkg.go.dev/github.com/kitsunium/sdk" target="_blank" rel="noopener">
+        pkg.go.dev ↗
+      </a>
+    </div>
+  </div>
+</aside>

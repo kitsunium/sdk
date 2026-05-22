@@ -1,0 +1,430 @@
+/*
+ * Global stylesheet for the kitsunium/sdk documentation portal.
+ *
+ * Goals:
+ *   - Framework-free (no Tailwind, no UI lib).
+ *   - Readable on desktop AND mobile.
+ *   - GitHub-dark vibe with our own accent tuning.
+ *   - Preserve the green/red markers in the bench tables.
+ */
+
+:root {
+  --color-bg: #0d1117;
+  --color-bg-alt: #161b22;
+  --color-bg-elev: #1f242c;
+  --color-border: #30363d;
+  --color-border-bright: #424b56;
+  --color-text: #e6edf3;
+  --color-muted: #8b949e;
+  --color-accent: #58a6ff;
+  --color-accent-2: #a371f7;
+  --color-code-bg: #1f242c;
+  --color-good: #3fb950;
+  --color-bad: #f85149;
+  --color-baseline: #d29922;
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sidebar-w: 280px;
+  --container-w: 1140px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--color-code-bg);
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+}
+
+pre {
+  background: var(--color-bg-elev);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+blockquote {
+  margin: 0.75rem 0;
+  padding: 0.85rem 1rem;
+  background: var(--color-bg-elev);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 4px 4px 0;
+  color: var(--color-text);
+  font-size: 0.95rem;
+}
+blockquote p {
+  margin: 0;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.75rem;
+  font-size: 0.9rem;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th,
+td {
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+  font-variant-numeric: tabular-nums;
+}
+thead th {
+  background: var(--color-bg-elev);
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+}
+tbody tr:last-child td {
+  border-bottom: none;
+}
+tbody tr:hover {
+  background: rgba(88, 166, 255, 0.05);
+}
+
+/* ── App shell ────────────────────────────────────────────────────── */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  min-height: 100vh;
+}
+
+.content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.container {
+  max-width: var(--container-w);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  width: 100%;
+}
+
+.page-header {
+  background: linear-gradient(180deg, #161b22 0%, var(--color-bg) 100%);
+  border-bottom: 1px solid var(--color-border);
+  padding: 2.5rem 0 1.75rem;
+}
+.page-header h1 {
+  margin: 0 0 0.35rem;
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+.page-header .subtitle {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 1.02rem;
+  max-width: 720px;
+}
+
+main {
+  flex: 1;
+  padding: 1.5rem 0 3rem;
+}
+
+footer {
+  border-top: 1px solid var(--color-border);
+  padding: 1.5rem 0;
+  color: var(--color-muted);
+  font-size: 0.88rem;
+}
+footer p {
+  margin: 0;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────── */
+
+.sidebar {
+  background: #0a0d12;
+  border-right: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+.sidebar-inner {
+  padding: 1.5rem 1.25rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 100%;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.25rem 0.5rem 1.25rem;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 0.75rem;
+  color: var(--color-text);
+  font-weight: 600;
+}
+.brand:hover {
+  text-decoration: none;
+  color: var(--color-accent);
+}
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-2) 100%);
+  border-radius: 4px;
+  font-weight: 700;
+  color: #0d1117;
+}
+.brand-text {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+}
+
+.nav-section h3 {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+  margin: 0.85rem 0 0.4rem;
+  padding-left: 0.5rem;
+}
+.nav-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.nav-section li a {
+  display: block;
+  padding: 0.35rem 0.55rem;
+  color: var(--color-text);
+  border-radius: 4px;
+  font-size: 0.9rem;
+  transition:
+    background 0.1s,
+    color 0.1s;
+}
+.nav-section li a:hover {
+  background: rgba(88, 166, 255, 0.08);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.nav-section li a.active {
+  background: rgba(88, 166, 255, 0.14);
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.sidebar-foot a {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+.sidebar-foot a:hover {
+  color: var(--color-accent);
+}
+
+/* ── Markdown body class ─────────────────────────────────────────── */
+
+.md-body h1:first-of-type {
+  display: none;
+}
+.md-body h2 {
+  font-size: 1.5rem;
+  margin: 2.25rem 0 0.85rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--color-border);
+  letter-spacing: -0.01em;
+}
+.md-body h3 {
+  font-size: 1.15rem;
+  margin: 2rem 0 0.65rem;
+  color: var(--color-accent);
+  letter-spacing: -0.01em;
+}
+.md-body h4 {
+  font-size: 1.02rem;
+  margin: 1.5rem 0 0.55rem;
+  color: var(--color-text);
+}
+.md-body p {
+  margin: 0.75rem 0;
+}
+.md-body ul,
+.md-body ol {
+  padding-left: 1.4rem;
+}
+.md-body li {
+  margin: 0.25rem 0;
+}
+.md-body table th:first-child,
+.md-body table td:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+.md-body td code {
+  font-size: 0.82em;
+  opacity: 0.92;
+}
+.md-body table td[align="right"],
+.md-body table th[align="right"] {
+  text-align: right;
+}
+
+/* ── Home hero ───────────────────────────────────────────────────── */
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0 2.5rem;
+}
+.hero-card {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  text-decoration: none;
+  color: var(--color-text);
+  transition:
+    border-color 0.1s,
+    transform 0.1s;
+}
+.hero-card:hover {
+  border-color: var(--color-accent);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.hero-card .tag {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.hero-card .title {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.hero-card .lead {
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+/* ── Provenance fact-strip ───────────────────────────────────────── */
+
+.provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 2rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.provenance > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.provenance dt {
+  font-weight: 600;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.provenance dd {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+
+@media (max-width: 880px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .sidebar-inner {
+    padding: 1rem 1rem 1.25rem;
+  }
+  .brand {
+    padding-bottom: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+  .page-header {
+    padding: 1.5rem 0 1.1rem;
+  }
+  .page-header h1 {
+    font-size: 1.45rem;
+  }
+  .container {
+    padding: 0 1rem;
+  }
+  .md-body table {
+    font-size: 0.78rem;
+  }
+  .md-body th,
+  .md-body td {
+    padding: 0.4rem 0.5rem;
+  }
+}

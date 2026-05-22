@@ -1,0 +1,58 @@
+---
+// Default layout — sidebar + page chrome. Every page wraps its content
+// in this layout so the navigation + footer stay consistent.
+import Sidebar from "../components/Sidebar.astro";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+  subtitle?: string;
+}
+const { title, description, subtitle } = Astro.props;
+const url = new URL(Astro.request.url);
+const currentPath = url.pathname;
+const pageTitle =
+  title === "kitsunium/sdk"
+    ? "kitsunium/sdk — documentation"
+    : `${title} — kitsunium/sdk`;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{pageTitle}</title>
+    <meta
+      name="description"
+      content={description ??
+        "Documentation portal for the kitsunium/sdk Go SDK — philosophy, package guides, ADRs, benchmarks."}
+    />
+    <link rel="icon" type="image/jpeg" href="/brand/kitsunium.jpg" />
+    <link rel="apple-touch-icon" href="/brand/kitsunium.jpg" />
+  </head>
+  <body>
+    <div class="app">
+      <Sidebar currentPath={currentPath} />
+      <div class="content">
+        <header class="page-header">
+          <div class="container">
+            <h1>{title}</h1>
+            {subtitle && <p class="subtitle">{subtitle}</p>}
+          </div>
+        </header>
+        <main class="container">
+          <slot />
+        </main>
+        <footer>
+          <div class="container">
+            <p>
+              kitsunium/sdk · documentation portal · regenerate with <code>make docs</code>
+              · serve with <code>npx serve docs/site/dist</code>
+            </p>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </body>
+</html>
