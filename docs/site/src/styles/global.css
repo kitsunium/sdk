@@ -146,6 +146,76 @@ tbody tr:hover {
   width: 100%;
 }
 
+/* ── Page body: article + right-side TOC ─────────────────────────── */
+/* Two-column grid INSIDE .content so the TOC sticks to the right
+   of the article without disturbing the left sidebar. min-width: 0
+   on the main column lets long <pre> blocks wrap instead of
+   bursting the grid. */
+.page-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14rem;
+  gap: 2rem;
+  align-items: start;
+  max-width: calc(var(--container-w) + 14rem + 3rem);
+  margin: 0 auto;
+  width: 100%;
+  padding: 0 1.5rem;
+}
+.page-body > .container {
+  padding: 0;
+  margin: 0;
+  max-width: none;
+}
+.page-toc {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  font-size: 0.85rem;
+  padding: 1rem 0 1rem 0.75rem;
+  border-left: 1px solid var(--color-border);
+}
+.page-toc h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.page-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.page-toc li {
+  margin: 0;
+  line-height: 1.5;
+}
+.page-toc a {
+  display: block;
+  padding: 0.15rem 0;
+  color: var(--color-muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  padding-left: 0.6rem;
+  margin-left: -0.75rem;
+  transition:
+    color 80ms ease,
+    border-color 80ms ease;
+}
+.page-toc a:hover,
+.page-toc a:focus-visible {
+  color: var(--color-text);
+  border-left-color: var(--color-accent);
+  outline: none;
+}
+.page-toc .toc-d3 a {
+  padding-left: 1.2rem;
+  font-size: 0.82rem;
+}
+
 .page-header {
   background: linear-gradient(180deg, #161b22 0%, var(--color-bg) 100%);
   border-bottom: 1px solid var(--color-border);
@@ -405,6 +475,22 @@ footer p {
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 
+@media (max-width: 1100px) {
+  /* Below the 3-column threshold, TOC moves under the article. */
+  .page-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .page-toc {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-left: 0;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    padding-top: 1rem;
+    margin-top: 1.5rem;
+  }
+}
 @media (max-width: 880px) {
   .app {
     grid-template-columns: 1fr;

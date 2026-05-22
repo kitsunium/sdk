@@ -29,22 +29,13 @@ const { Content, headings } = await render(entry);
 const fallbackTitle = entry.id.split("/").slice(-1)[0] ?? "Docs";
 const title = entry.data?.title ?? fallbackTitle;
 const description = entry.data?.description;
+//: Filter to H2/H3 — H4+ headings clutter the TOC without helping
+//: navigation. The full hierarchy stays in the rendered article.
+const tocHeadings = (headings ?? []).filter(h => h.depth >= 2 && h.depth <= 3);
 ---
 
-<Default title={title} description={description}>
+<Default title={title} description={description} headings={tocHeadings}>
   <article class="md-body">
     <Content />
   </article>
-  {headings && headings.length > 0 && (
-    <aside class="toc" aria-label="Table of contents">
-      <h3>On this page</h3>
-      <ul>
-        {headings.filter(h => h.depth <= 3).map(h => (
-          <li class={`depth-${h.depth}`}>
-            <a href={`#${h.slug}`}>{h.text}</a>
-          </li>
-        ))}
-      </ul>
-    </aside>
-  )}
 </Default>

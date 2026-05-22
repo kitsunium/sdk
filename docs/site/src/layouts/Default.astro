@@ -8,12 +8,18 @@ import Sidebar from "../components/Sidebar.astro";
 import Header from "../components/Header.astro";
 import "../styles/global.css";
 
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
 interface Props {
   title: string;
   description?: string;
   subtitle?: string;
+  headings?: Heading[];
 }
-const { title, description, subtitle } = Astro.props;
+const { title, description, subtitle, headings = [] } = Astro.props;
 const url = new URL(Astro.request.url);
 const currentPath = url.pathname;
 
@@ -59,9 +65,23 @@ const descFallback = `Documentation portal for ${project}.`;
             {subtitle && <p class="subtitle">{subtitle}</p>}
           </div>
         </header>
-        <main class="container">
-          <slot />
-        </main>
+        <div class="page-body">
+          <main class="container">
+            <slot />
+          </main>
+          {headings.length > 0 && (
+            <aside class="page-toc" aria-label="On this page">
+              <h3>On this page</h3>
+              <ul>
+                {headings.map(h => (
+                  <li class={`toc-d${h.depth}`}>
+                    <a href={`#${h.slug}`}>{h.text}</a>
+                  </li>
+                ))}
+              </ul>
+            </aside>
+          )}
+        </div>
         <footer>
           <div class="container">
             <p>
