@@ -69,11 +69,13 @@ jobs:
 
       - name: govulncheck — gomarkdoc binary
         run: |
-          # govulncheck on the gomarkdoc binary keeps the build-time
-          # tool dep tracked even though it never compiles into pkg/v1.
-          # `go tool -n gomarkdoc` prints the cached binary path.
-          ( cd pkg/v1 && go install golang.org/x/vuln/cmd/govulncheck@latest )
-          ( cd pkg/v1 && govulncheck -mode=binary "$(go tool -n gomarkdoc)" )
+          # govulncheck on the gomarkdoc binary (shipped by the
+          # devcontainer Go feature on $PATH). Catches upstream CVEs
+          # without forcing gomarkdoc's transitive require entries
+          # into pkg/v1/go.mod (the trade-off we accepted then rolled
+          # back — see ADR 0008 §Consequences).
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck -mode=binary "$(command -v gomarkdoc)"
 
       - name: build
         run: bazel build --config=ci //...

@@ -144,12 +144,12 @@ release-dry-run:
 	fi
 
 # `docs-readme` regenerates pkg/v1/<service>/README.md from each
-# package's Go doc comment via `go tool gomarkdoc` (ADR 0008). The
-# tool directive in pkg/v1/go.mod pins gomarkdoc@v1.1.0 — no proxy
-# fetch at run time. Go ≥ 1.24 is required for the `tool` directive;
-# the preamble fails loudly with a readable message on older toolchains.
+# package's Go doc comment via the `gomarkdoc` binary (ADR 0008).
+# The binary is installed by the devcontainer Go feature
+# (.devcontainer/features/languages/go/install.sh) so it lives on
+# $PATH without polluting pkg/v1/go.mod with ~50 indirect deps.
 docs-readme:
-	@go version | awk '{print $$3}' | sed 's/go//' | awk -F. '{exit !($$1>1 || ($$1==1 && $$2>=24))}' \
-	  || { echo "Go ≥ 1.24 required (tool directive)"; exit 1; }
+	@command -v gomarkdoc >/dev/null 2>&1 \
+	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0 (or rebuild devcontainer)"; exit 1; }
 	cd pkg/v1 && go generate ./codec ./errs ./logger
 	@echo "→ pkg/v1/{codec,errs,logger}/README.md regenerated"

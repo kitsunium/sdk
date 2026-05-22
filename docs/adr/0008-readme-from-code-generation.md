@@ -22,13 +22,12 @@ Adopt the Go-community-standard tool [`gomarkdoc`](https://github.com/princjef/g
 
 Mechanics:
 
-1. **Pin via the Go 1.24+ `tool` directive** in `pkg/v1/go.mod`:
-   `tool github.com/princjef/gomarkdoc/cmd/gomarkdoc` (pinned to `@v1.1.0`). Invocation: `go tool gomarkdoc` (no proxy fetch at run time).
-2. **`//go:generate` directives** sit in the existing primary file of each package (`pkg/v1/codec/codec.go`, `pkg/v1/errs/accessors.go`, `pkg/v1/logger/logger.go`). No new `doc.go` files are created (user feedback memory: no empty stub files).
-3. **`make docs-readme`** regenerates all three READMEs via a single `go generate ./codec ./errs ./logger` from `pkg/v1`. A Go-version guard rejects toolchains older than 1.24.
-4. **Drift gate**: `scripts/pre-commit/check-readme-drift.sh` calls `go tool gomarkdoc --check` over the three packages. Wired into `make lint`, the pre-commit hook chain, and `.github/workflows/bazel-ci.yml` (between the gazelle drift check and `bazel build`, so a stale README fails fast).
+1. **Ship `gomarkdoc` as a devcontainer-installed binary** via the Go feature (`.devcontainer/features/languages/go/install.sh`), pinned to `@v1.1.0`. The binary lands on `$PATH` (`/home/vscode/.local/bin/gomarkdoc`) and `pkg/v1/go.mod` stays clean — no `tool` directive, no `require` entries for gomarkdoc's ~50 transitive deps. (An earlier iteration of this ADR used the Go 1.24 `tool` directive; it was rolled back when the dep-graph cost — `go.sum` swelled 23×, indirect deps 9× — proved too high relative to the alternative.)
+2. **`//go:generate` directives** sit in the existing primary file of each package (`pkg/v1/codec/codec.go`, `pkg/v1/errs/accessors.go`, `pkg/v1/logger/logger.go`). Form: `//go:generate gomarkdoc --output README.md .`. No new `doc.go` files are created (user feedback memory: no empty stub files).
+3. **`make docs-readme`** regenerates all three READMEs via a single `go generate ./codec ./errs ./logger` from `pkg/v1`. A preamble check fails loudly if `gomarkdoc` is not on `$PATH` (developer needs to rebuild the devcontainer or `go install` it manually).
+4. **Drift gate**: `scripts/pre-commit/check-readme-drift.sh` calls `gomarkdoc --check` over the three packages. Wired into `make lint`, the pre-commit hook chain, and `.github/workflows/bazel-ci.yml` (between the gazelle drift check and `bazel build`, so a stale README fails fast).
 5. **Determinism gate**: `scripts/pre-commit/check-readme-determinism.sh` runs `gomarkdoc` twice into separate temp dirs and `diff -r` must be empty. Catches non-determinism introduced by future gomarkdoc upgrades.
-6. **govulncheck** runs on the pinned `gomarkdoc` binary as part of the same CI lane.
+6. **govulncheck** runs on the resolved `gomarkdoc` binary (`govulncheck -mode=binary "$(command -v gomarkdoc)"`) as part of the same CI lane.
 
 The canonical [Package X] doc comment carries headings (`// # Surface`, `// # Quick start`, `// # Activation`, `// # Errors`) using the Go 1.19+ syntax; gomarkdoc renders them as Markdown H2/H3.
 
@@ -50,16 +49,18 @@ README generation lives outside the Bazel build graph by design, mirroring ADR 0
 
 - **Positive**: drift becomes impossible. CI blocks any PR that edits prose in one surface without regenerating the others. Code review of doc changes happens in the same diff as the API change. pkg.go.dev and the generated README share content byte-for-byte.
 - **Positive**: maintainer rationale and consumer prose are no longer co-mingled in the same file; the `CLAUDE.md` files keep "Why" and the doc comments keep "What" + "How".
-- **Negative — known trade-off**: the Go 1.24 `tool` directive registers gomarkdoc's transitive `require` entries in `pkg/v1/go.mod`'s **require block** alongside production deps. They are visible in `go list -m all` and end up in `go mod vendor` output for any consumer of `pkg/v1`. They never compile into the published API (no production code imports them) and `go mod tidy` keeps them flagged `// indirect`. The alternative — isolating gomarkdoc in a separate `tools/` module — was rejected because it would have added a 6th Go module to the workspace (the SDK already has five glued by `go.work`) and complicated `MODULE.bazel`. Accepting metadata-graph bloat over module-count bloat is the conscious call.
-- **Negative**: `gomarkdoc`'s default template structure (`Index / Constants / Variables / Functions / Types`) loses the bespoke section ordering of the hand-authored READMEs. The prose now flows from the package comment + per-identifier comments; Phase A.5 (custom `.gotxt` templates under `pkg/v1/.gomarkdoc/templates/`) is the documented fallback if the default style is rejected.
-- **Negative**: `gomarkdoc`'s upstream is a single-maintainer project. `govulncheck -mode=binary` runs in CI and the pinned version lives in `go.sum`. If upstream goes unmaintained the fallback is a 200-line hand-rolled generator built on `go/parser` + `go/doc` + `text/template` (blueprint preserved in `.claude/contexts/readme-from-code-generation.md` §5).
+- **Positive — dep-graph clean**: `pkg/v1/go.mod` is unaffected by gomarkdoc. Before rollback (Go 1.24 `tool` directive iteration), `go.sum` carried 458 lines and 54 `// indirect` entries; after rollback to the binary-on-`$PATH` model, `go.sum` is 33 lines / 9 indirect entries. Downstream consumers never see gomarkdoc in `go list -m all` or `go mod vendor`.
+- **Negative**: developers and CI runners depend on the devcontainer Go feature shipping the binary. Outside the devcontainer (e.g., bare laptop, foreign CI), `make docs-readme` and the drift gate fail loudly with a self-installation hint (`go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0`). Acceptable cost — the SDK already mandates the devcontainer for full-fidelity development.
+- **Negative**: `gomarkdoc`'s default template structure (`Index / Constants / Variables / Functions / Types`) loses the bespoke section ordering of the hand-authored READMEs. The prose now flows from the package comment + per-identifier comments; the documented fallback (custom `.gotxt` templates under `pkg/v1/.gomarkdoc/templates/`) fires if the default style is rejected.
+- **Negative**: `gomarkdoc`'s upstream is a single-maintainer project. `govulncheck -mode=binary` runs in CI against the resolved binary path. If upstream goes unmaintained the fallback is a 200-line hand-rolled generator built on `go/parser` + `go/doc` + `text/template` (blueprint preserved in `.claude/contexts/readme-from-code-generation.md` §5).
 
 ## Alternatives considered
 
 - **`godocdown`** (rejected) — unmaintained since 2013, no `--check` mode, no template customisation.
-- **Separate `tools/` Go module** (rejected) — 6th module in the workspace, MODULE.bazel + go.work churn, exhausted at v2's first refine.
+- **Go 1.24 `tool` directive in `pkg/v1/go.mod`** (tried, rolled back) — clean from a tool-resolution standpoint (`go tool gomarkdoc` reads the pinned version straight from `go.sum`), but the transitive `require` entries swelled the published consumer dep graph by 10× without any observable benefit. The devcontainer-installed binary model achieves the same pinning without the metadata pollution.
+- **Separate `tools/` Go module** (rejected) — would have added a 6th module to the workspace (`go.work` + MODULE.bazel churn) just to host a single tool dep.
 - **`gen-crd-api-reference-docs`** (rejected) — CRD-shaped; assumes Kubernetes-style `+marker` comments; over-fitted for our case.
-- **Bazel `genrule` around gomarkdoc** (rejected for now) — adds a layer of indirection without observable benefit; the `go tool` invocation is fast enough to keep `make docs-readme` interactive.
+- **Bazel `genrule` around gomarkdoc** (rejected for now) — adds a layer of indirection without observable benefit; the binary call is fast enough to keep `make docs-readme` interactive.
 - **Hand-rolled `go/doc` + `text/template` generator** (deferred fallback) — only meaningful if the gomarkdoc default style is unacceptable AND custom templates also fall short.
 - **Keep hand-authored READMEs** (rejected — this is the drift this ADR fixes).
 

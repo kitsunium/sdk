@@ -1,4 +1,4 @@
-//go:generate go tool gomarkdoc --output README.md .
+//go:generate gomarkdoc --output README.md .
 
 // Package errs is the read-only introspection facade for SDK errors.
 //

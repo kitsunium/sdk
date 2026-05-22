@@ -12,6 +12,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+if ! command -v gomarkdoc >/dev/null 2>&1; then
+    echo "✗ gomarkdoc not on PATH (shipped via the devcontainer Go feature)" >&2
+    exit 1
+fi
+
 a="$(mktemp -d)"
 b="$(mktemp -d)"
 trap 'rm -rf "$a" "$b"' EXIT
@@ -21,7 +26,7 @@ trap 'rm -rf "$a" "$b"' EXIT
 # via cp-after-the-fact instead.
 gen() {
   local out="$1"
-  ( cd pkg/v1 && go tool gomarkdoc \
+  ( cd pkg/v1 && gomarkdoc \
       --output "${out}/{{.Dir}}/README.md" \
       ./codec ./errs ./logger ) >/dev/null
 }

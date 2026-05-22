@@ -1,4 +1,4 @@
-//go:generate go tool gomarkdoc --output README.md .
+//go:generate gomarkdoc --output README.md .
 
 // Package logger is the stable v1 public API for SDK logging.
 //

@@ -1,4 +1,4 @@
-//go:generate go tool gomarkdoc --output README.md .
+//go:generate gomarkdoc --output README.md .
 
 // Package codec is the universal encoder/decoder dispatch facade.
 //
