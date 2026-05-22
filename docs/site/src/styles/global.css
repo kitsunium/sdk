@@ -23,10 +23,11 @@
   --color-bad: #f85149;
   --color-baseline: #d29922;
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
   --font-mono:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
   --sidebar-w: 280px;
   --container-w: 1140px;
 }
@@ -198,11 +199,17 @@ footer p {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  padding: 0.25rem 0.5rem 1.25rem;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 0.75rem;
+  padding: 0.25rem 0.5rem;
   color: var(--color-text);
   font-weight: 600;
+}
+/* The divider now sits on the wrapping brand-block (Brand.astro)
+   so it spans the full sidebar column, not just the logo+text. */
+.brand-block {
+  width: 100%;
+  padding-bottom: 1rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
 }
 .brand:hover {
   text-decoration: none;
@@ -214,7 +221,11 @@ footer p {
   justify-content: center;
   width: 1.6rem;
   height: 1.6rem;
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-2) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    var(--color-accent-2) 100%
+  );
   border-radius: 4px;
   font-weight: 700;
   color: #0d1117;

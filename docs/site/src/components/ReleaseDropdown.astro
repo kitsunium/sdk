@@ -1,10 +1,9 @@
 ---
-// ReleaseDropdown — picks a release within the current API major.
-// Lists "local" first (when the major has unreleased HEAD content),
-// then every published tag in descending semver order. Switching
-// navigates to that release's root page; the slug after the
-// (major, release) pair is not preserved across releases (a future
-// release may not have the same slug).
+// ReleaseDropdown — the page's primary "build coordinate" pill.
+// Renders the build commit SHA + active release version inside a
+// green pill; clicking opens the <select> that switches release.
+// Pill style intentionally vibrant (--color-accent green) so it
+// reads as the live, switchable coordinate, not passive metadata.
 interface Release {
   version: string;
   label: string;
@@ -20,17 +19,29 @@ interface Props {
   currentMajor: string;
   currentRelease: string;
   versions: Version[];
+  buildSha?: string | null;
+  buildDirty?: boolean;
 }
 
-const { currentMajor, currentRelease, versions } = Astro.props;
+const { currentMajor, currentRelease, versions, buildSha, buildDirty } =
+  Astro.props;
 
 const current = versions.find(v => v.major === currentMajor);
 const releases = current?.releases ?? [];
+const shaText = buildSha ? buildSha + (buildDirty ? "+" : "") : null;
 ---
 
 {releases.length > 0 && (
-  <label class="release-inline">
-    <span class="sr-only">Select release</span>
+  <label class="release-pill" aria-label="Release picker">
+    <span class="dot" aria-hidden="true" />
+    {shaText && (
+      <span class="pill-sha">
+        {shaText}
+        <span class="pill-sep" aria-hidden="true">·</span>
+      </span>
+    )}
+    <span class="pill-version">{releases.find(r => r.version === currentRelease)?.label ?? currentRelease}</span>
+    <span class="pill-caret" aria-hidden="true">▾</span>
     <select
       aria-label="Select release"
       class="release-select"
@@ -38,7 +49,7 @@ const releases = current?.releases ?? [];
     >
       {releases.map(r => (
         <option value={`/${currentMajor}/${r.version}/`} selected={r.version === currentRelease}>
-          {r.label}
+          {shaText ? `${shaText} · ${r.label}` : r.label}
         </option>
       ))}
     </select>
@@ -46,38 +57,83 @@ const releases = current?.releases ?? [];
 )}
 
 <style>
-  /* Top-right release picker — larger than the commit-SHA metadata
-     so the active release reads as the primary "build coordinate"
-     of the page. Anchored to the far right via margin-left: auto
-     (works even when the header band wraps to two lines). */
-  .release-inline {
+  /* Pill = the visible chrome; the real <select> is overlaid
+     transparent on top of it so the click hit-area matches the
+     pill exactly. Green accent + readable monospace so the
+     active coordinate pops against the page-meta band. */
+  .release-pill {
+    position: relative;
     display: inline-flex;
     align-items: center;
+    gap: 0.4rem;
     margin-left: auto;
-  }
-  .release-select {
-    padding: 0.25rem 0.65rem;
-    font-size: 0.95rem;
+    padding: 0.3rem 0.7rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.86rem;
     font-weight: 600;
-    background: rgba(255, 255, 255, 0.04);
-    color: inherit;
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    border-radius: 5px;
+    color: #c5f6c5;
+    background: rgba(46, 160, 67, 0.18);
+    border: 1px solid rgba(46, 160, 67, 0.5);
+    border-radius: 999px;
     cursor: pointer;
-    opacity: 0.95;
+    transition: background 80ms ease, border-color 80ms ease, transform 80ms ease;
+  }
+  .release-pill:hover,
+  .release-pill:focus-within {
+    background: rgba(46, 160, 67, 0.28);
+    border-color: rgba(46, 160, 67, 0.85);
+  }
+  .dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: #2ea043;
+    box-shadow: 0 0 6px rgba(46, 160, 67, 0.7);
+    flex-shrink: 0;
+  }
+  .pill-sha {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    opacity: 0.85;
+  }
+  .pill-sep { opacity: 0.5; }
+  .pill-version {
     letter-spacing: 0.02em;
+    color: #e2ffe2;
   }
-  .release-select:hover,
-  .release-select:focus-visible {
-    opacity: 1;
-    border-color: currentColor;
-    background: rgba(255, 255, 255, 0.08);
+  .pill-caret {
+    opacity: 0.65;
+    font-size: 0.75em;
+    margin-left: 0.1rem;
   }
-  .sr-only {
+  /* Real <select> stretched to cover the pill, fully transparent
+     so the user sees only our styling but native dropdown behavior
+     is preserved (keyboard nav, OS native dropdown UI). */
+  .release-select {
     position: absolute;
-    width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0, 0, 0, 0);
-    white-space: nowrap; border: 0;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: transparent;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    opacity: 0;
+  }
+  .release-select:focus-visible {
+    /* Surface focus on the parent pill via :focus-within; keep the
+       select itself outline-free. */
+    outline: none;
+  }
+  /* Native option list takes the OS default but we tint values
+     where supported (Firefox / Chromium honour `color`). */
+  .release-select option {
+    color: #0d1117;
+    background: #fff;
   }
 </style>

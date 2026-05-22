@@ -1,9 +1,9 @@
 ---
-// Top-right header band — surfaces the build's git provenance and
-// the release-axis dropdown. The release dropdown is here, not in
-// the sidebar, so it reads as a single "build coordinate" group
-// alongside the commit SHA and date (a pattern consumers of dev-
-// tool sites are used to: commit hash + build time + tag picker).
+// Top header band — spans the full content column. Build provenance
+// (date + branch) sits on the left; the release pill on the right
+// surfaces the build's commit SHA + the active release version
+// (or "local") in a single coloured pill. Clicking the pill opens
+// the release dropdown.
 import ReleaseDropdown from "./ReleaseDropdown.astro";
 import { findDefaults } from "../../scripts/lib/tag-format.mjs";
 
@@ -36,7 +36,7 @@ interface Props {
 let versions: Version[] = [];
 try {
   versions = ((await import("../data/versions.json")).default as Version[]) ?? [];
-} catch { /* bootstrap with no versions yet */ }
+} catch { /* bootstrap mode */ }
 
 let build: BuildInfo = {
   commitShort: null, commitFull: null, commitDate: null,
@@ -44,7 +44,7 @@ let build: BuildInfo = {
 };
 try {
   build = ((await import("../data/build-info.json")).default as BuildInfo) ?? build;
-} catch { /* build-info not generated yet */ }
+} catch { /* prebuild not run yet */ }
 
 const { currentPath } = Astro.props;
 const m = currentPath.match(/^\/(v\d+)(?:\/([^/]+))?(?:\/|$)/);
@@ -52,9 +52,6 @@ const fallback = findDefaults(versions);
 const currentMajor = m?.[1] ?? fallback.major;
 const currentRelease = m?.[2] ?? fallback.release;
 
-//: ISO date -> "2026-05-22" for the compact header read. We slice
-//: instead of formatting so the value stays timezone-stable across
-//: viewers.
 const commitDay = build.commitDate ? build.commitDate.slice(0, 10) : null;
 const commitHref = build.commitFull && build.repoUrl
   ? `${build.repoUrl}/commit/${build.commitFull}`
@@ -64,19 +61,8 @@ const commitHref = build.commitFull && build.repoUrl
 <header class="page-meta" role="banner">
   <div class="page-meta-inner">
     <span class="build-coord" aria-label="Build provenance">
-      <span class="build-label">build</span>
-      {commitHref ? (
-        <a href={commitHref} class="build-sha" target="_blank" rel="noopener" title={build.commitFull ?? undefined}>
-          {build.commitShort}{build.dirty && <span class="dirty-mark" title="working tree had uncommitted changes">+</span>}
-        </a>
-      ) : (
-        <span class="build-sha">{build.commitShort ?? "—"}</span>
-      )}
       {commitDay && (
-        <>
-          <span class="sep" aria-hidden="true">·</span>
-          <time class="build-date" datetime={build.commitDate ?? undefined}>{commitDay}</time>
-        </>
+        <time class="build-date" datetime={build.commitDate ?? undefined}>{commitDay}</time>
       )}
       {build.branch && build.branch !== "main" && (
         <>
@@ -84,65 +70,63 @@ const commitHref = build.commitFull && build.repoUrl
           <span class="build-branch" title="git branch">{build.branch}</span>
         </>
       )}
+      {commitHref && (
+        <>
+          <span class="sep" aria-hidden="true">·</span>
+          <a class="commit-link" href={commitHref} target="_blank" rel="noopener">
+            view commit ↗
+          </a>
+        </>
+      )}
     </span>
     <ReleaseDropdown
       currentMajor={currentMajor}
       currentRelease={currentRelease}
       versions={versions}
+      buildSha={build.commitShort}
+      buildDirty={build.dirty}
     />
   </div>
 </header>
 
 <style>
-  /* "Pro" header bar: monospace coordinates on the left, release
-     dropdown on the right. Sits inside the content column, top-right
-     anchor, sub-1rem font so it reads as metadata, not chrome. */
+  /* Full-width band — no max-width / centring; takes whatever the
+     content column gives it. Subtle bottom rule to detach it from
+     the page <h1>. */
   .page-meta {
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.02);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.78rem;
+    font-size: 0.82rem;
   }
   .page-meta-inner {
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: 0.45rem 1.5rem;
+    width: 100%;
+    padding: 0.45rem 1.25rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
     flex-wrap: wrap;
-    opacity: 0.78;
+    box-sizing: border-box;
   }
   .build-coord {
     display: inline-flex;
     align-items: baseline;
-    gap: 0.4rem;
+    gap: 0.45rem;
+    opacity: 0.7;
     letter-spacing: 0.02em;
   }
-  .build-label {
-    text-transform: uppercase;
-    font-size: 0.65rem;
-    letter-spacing: 0.12em;
-    opacity: 0.55;
+  .sep { opacity: 0.4; }
+  .build-date { opacity: 0.95; }
+  .build-branch {
+    padding: 0 0.35rem;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.06);
   }
-  .build-sha {
+  .commit-link {
     color: inherit;
     text-decoration: none;
     border-bottom: 1px dashed rgba(255, 255, 255, 0.25);
   }
-  .build-sha:hover { border-bottom-style: solid; opacity: 1; }
-  .dirty-mark {
-    color: #f0b400;
-    margin-left: 1px;
-    font-weight: bold;
-  }
-  .sep { opacity: 0.4; }
-  .build-date { opacity: 0.85; }
-  .build-branch {
-    padding: 0 0.3rem;
-    border-radius: 3px;
-    background: rgba(255, 255, 255, 0.06);
-    opacity: 0.9;
-  }
+  .commit-link:hover { border-bottom-style: solid; opacity: 1; }
 </style>
