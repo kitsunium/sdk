@@ -46,27 +46,34 @@ const releases = current?.releases ?? [];
 )}
 
 <style>
-  /* Compact form — sits in the top-right header band next to the
-     commit SHA and date. Reads as build-coordinate metadata, not a
-     primary control. */
+  /* Top-right release picker — larger than the commit-SHA metadata
+     so the active release reads as the primary "build coordinate"
+     of the page. Anchored to the far right via margin-left: auto
+     (works even when the header band wraps to two lines). */
   .release-inline {
     display: inline-flex;
     align-items: center;
+    margin-left: auto;
   }
   .release-select {
-    padding: 0.1rem 0.4rem;
-    font-size: 0.78rem;
+    padding: 0.25rem 0.65rem;
+    font-size: 0.95rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    background: transparent;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.04);
     color: inherit;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 5px;
     cursor: pointer;
-    opacity: 0.85;
+    opacity: 0.95;
     letter-spacing: 0.02em;
   }
   .release-select:hover,
-  .release-select:focus-visible { opacity: 1; border-color: currentColor; }
+  .release-select:focus-visible {
+    opacity: 1;
+    border-color: currentColor;
+    background: rgba(255, 255, 255, 0.08);
+  }
   .sr-only {
     position: absolute;
     width: 1px; height: 1px; padding: 0; margin: -1px;
