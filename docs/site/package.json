@@ -7,11 +7,14 @@
   "scripts": {
     "dev": "node scripts/sync-versions.mjs && astro dev",
     "prebuild": "node scripts/sync-versions.mjs",
-    "build": "astro build",
+    "build": "astro build && pagefind --site dist --output-subdir _pagefind",
     "preview": "astro preview"
   },
   "dependencies": {
     "astro": "^5.14.1",
     "marked": "^15.0.7"
+  },
+  "devDependencies": {
+    "pagefind": "^1.4.0"
   }
 }

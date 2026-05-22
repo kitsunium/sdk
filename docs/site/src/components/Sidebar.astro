@@ -5,6 +5,7 @@
 // sidebar against the new coordinate, so every link points at the
 // right snapshot of the docs tree.
 import Brand from "./Brand.astro";
+import Search from "./Search.astro";
 import { findDefaults, LOCAL_RELEASE } from "../../scripts/lib/tag-format.mjs";
 
 interface Release {
@@ -83,6 +84,7 @@ function isActive(href: string): boolean {
 <aside class="sidebar" aria-label="Site navigation">
   <div class="sidebar-inner">
     <Brand currentPath={currentPath} />
+    <Search />
 
     {
       sections.map((section) => (

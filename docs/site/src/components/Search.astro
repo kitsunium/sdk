@@ -1,0 +1,213 @@
+---
+// Search — Pagefind-powered full-text search over the static site.
+// Pagefind indexes the built HTML (post-Astro-build), so the entire
+// versioned tree (every /<major>/<release>/...) is searchable without
+// any server. The UI script is fetched lazily on first keystroke.
+//
+// Trigger: click the input OR press ⌘K / Ctrl+K anywhere on the page.
+// The popover opens, fetches /_pagefind/pagefind-ui.{js,css} on demand,
+// and renders results inline. Closes on Escape or click-outside.
+//
+// On `npm run dev` Pagefind has not indexed yet, so the input shows a
+// "search available in production build" hint and the popover stays
+// disabled — no console errors, just a graceful degradation.
+---
+
+<div class="search" data-search>
+  <button type="button" class="search-trigger" aria-label="Open search (⌘K / Ctrl+K)">
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <circle cx="11" cy="11" r="7"></circle>
+      <path d="m21 21-4.3-4.3"></path>
+    </svg>
+    <span class="search-label">Search</span>
+    <kbd class="search-kbd" aria-hidden="true">⌘K</kbd>
+  </button>
+
+  <div class="search-overlay" hidden role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-panel">
+      <div id="pagefind-search"></div>
+      <p class="search-fallback" hidden>
+        Search index unavailable. Run <code>npm run build</code> to generate
+        <code>/_pagefind/</code> — the indexer runs after Astro build.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Lazy-init the Pagefind UI on first open. Module + stylesheet are
+  // injected via <script type="module"> / <link> so the search payload
+  // (~50KB JS + the index chunks) only loads when the user actually
+  // triggers the search — no cost on cold page loads.
+  const PAGEFIND_JS = "/_pagefind/pagefind-ui.js";
+  const PAGEFIND_CSS = "/_pagefind/pagefind-ui.css";
+  let pagefindReady = false;
+  let pagefindFailed = false;
+
+  async function ensurePagefind(panel: HTMLElement): Promise<boolean> {
+    if (pagefindReady) return true;
+    if (pagefindFailed) return false;
+    try {
+      // Probe the script URL first so a 404 (dev mode) is a clean reject.
+      const head = await fetch(PAGEFIND_JS, { method: "HEAD" });
+      if (!head.ok) throw new Error("pagefind-ui.js not found");
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = PAGEFIND_CSS;
+      document.head.appendChild(link);
+      await import(/* @vite-ignore */ PAGEFIND_JS);
+      // PagefindUI is exposed on window when the module evaluates.
+      // @ts-ignore — module assigns globally per Pagefind convention.
+      new window.PagefindUI({
+        element: "#pagefind-search",
+        bundlePath: "/_pagefind/",
+        showSubResults: true,
+        showImages: false,
+        resetStyles: false,
+        excerptLength: 22,
+      });
+      pagefindReady = true;
+      return true;
+    } catch {
+      pagefindFailed = true;
+      const fb = panel.querySelector<HTMLElement>(".search-fallback");
+      if (fb) fb.hidden = false;
+      return false;
+    }
+  }
+
+  function initSearch(root: HTMLElement) {
+    const trigger = root.querySelector<HTMLButtonElement>(".search-trigger");
+    const overlay = root.querySelector<HTMLElement>(".search-overlay");
+    const panel = root.querySelector<HTMLElement>(".search-panel");
+    if (!trigger || !overlay || !panel) return;
+
+    const open = async () => {
+      overlay.hidden = false;
+      document.body.style.overflow = "hidden";
+      await ensurePagefind(panel);
+      // Focus the Pagefind UI input once the script has rendered it.
+      requestAnimationFrame(() => {
+        const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
+        input?.focus();
+      });
+    };
+    const close = () => {
+      overlay.hidden = true;
+      document.body.style.overflow = "";
+      trigger.focus();
+    };
+
+    trigger.addEventListener("click", open);
+    overlay.addEventListener("click", e => {
+      if (e.target === overlay) close();
+    });
+    document.addEventListener("keydown", e => {
+      const cmd = e.metaKey || e.ctrlKey;
+      if (cmd && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        overlay.hidden ? open() : close();
+        return;
+      }
+      if (e.key === "Escape" && !overlay.hidden) {
+        e.preventDefault();
+        close();
+      }
+    });
+  }
+  document.querySelectorAll<HTMLElement>("[data-search]").forEach(initSearch);
+</script>
+
+<style>
+  /* Trigger pill — sits flush in the sidebar between brand and the
+     first nav section. Mimics the API/release pill aesthetic
+     (monospace, outlined) so the chrome reads as a coherent set. */
+  .search {
+    width: 100%;
+    margin-bottom: 0.75rem;
+  }
+  .search-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    padding: 0.35rem 0.6rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 80ms ease, border-color 80ms ease, color 80ms ease;
+  }
+  .search-trigger:hover,
+  .search-trigger:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.35);
+    color: #fff;
+    outline: none;
+  }
+  .search-label {
+    flex: 1;
+    letter-spacing: 0.02em;
+  }
+  .search-kbd {
+    padding: 0.05rem 0.35rem;
+    font-family: inherit;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+  }
+
+  /* Modal overlay — full-viewport dim with the search panel centred. */
+  .search-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 4rem 1rem 1rem;
+    z-index: 200;
+    backdrop-filter: blur(2px);
+  }
+  .search-overlay[hidden] { display: none; }
+  .search-panel {
+    width: min(640px, 100%);
+    max-height: calc(100vh - 5rem);
+    overflow-y: auto;
+    background: #1a1f24;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 0.5rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .search-fallback {
+    margin: 1rem;
+    padding: 0.75rem;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(240, 180, 0, 0.08);
+    border: 1px solid rgba(240, 180, 0, 0.3);
+    border-radius: 6px;
+  }
+  .search-fallback code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+  }
+</style>
