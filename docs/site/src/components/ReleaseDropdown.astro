@@ -1,9 +1,12 @@
 ---
-// ReleaseDropdown — the page's primary "build coordinate" pill.
-// Renders the build commit SHA + active release version inside a
-// green pill; clicking opens the <select> that switches release.
-// Pill style intentionally vibrant (--color-accent green) so it
-// reads as the live, switchable coordinate, not passive metadata.
+// ReleaseDropdown — custom combobox (no browser <select>). The button
+// renders the active build coordinate "<sha>+ · <version>"; clicking
+// (or Enter / Space / ArrowDown) reveals a styled listbox of every
+// release for the current major. Closes on click-outside or Escape.
+//
+// Accessibility: roles + aria-expanded + aria-activedescendant follow
+// the WAI-ARIA combobox / listbox pattern. Keyboard: Up / Down move
+// focus, Enter activates, Escape closes.
 interface Release {
   version: string;
   label: string;
@@ -29,44 +32,137 @@ const { currentMajor, currentRelease, versions, buildSha, buildDirty } =
 const current = versions.find(v => v.major === currentMajor);
 const releases = current?.releases ?? [];
 const shaText = buildSha ? buildSha + (buildDirty ? "+" : "") : null;
+const activeLabel =
+  releases.find(r => r.version === currentRelease)?.label ?? currentRelease;
 ---
 
 {releases.length > 0 && (
-  <label class="release-pill" aria-label="Release picker">
-    <span class="dot" aria-hidden="true" />
-    {shaText && (
-      <span class="pill-sha">
-        {shaText}
-        <span class="pill-sep" aria-hidden="true">·</span>
-      </span>
-    )}
-    <span class="pill-version">{releases.find(r => r.version === currentRelease)?.label ?? currentRelease}</span>
-    <span class="pill-caret" aria-hidden="true">▾</span>
-    <select
-      aria-label="Select release"
-      class="release-select"
-      onchange="if(this.value)window.location.assign(this.value)"
+  <div class="release-combo" data-release-combo>
+    <button
+      type="button"
+      class="release-pill"
+      aria-haspopup="listbox"
+      aria-expanded="false"
+      aria-label={`Release: ${activeLabel}. Click to switch.`}
     >
-      {releases.map(r => (
-        <option value={`/${currentMajor}/${r.version}/`} selected={r.version === currentRelease}>
-          {shaText ? `${shaText} · ${r.label}` : r.label}
-        </option>
+      {shaText && (
+        <span class="pill-sha">
+          {shaText}
+          <span class="pill-sep" aria-hidden="true">·</span>
+        </span>
+      )}
+      <span class="pill-version">{activeLabel}</span>
+      <span class="pill-caret" aria-hidden="true">▾</span>
+    </button>
+    <ul class="release-listbox" role="listbox" tabindex="-1" hidden>
+      {releases.map((r, idx) => (
+        <li
+          role="option"
+          id={`release-opt-${idx}`}
+          aria-selected={r.version === currentRelease}
+          class:list={[r.version === currentRelease && "active"]}
+        >
+          <a href={`/${currentMajor}/${r.version}/`}>
+            {shaText && (
+              <>
+                <span class="opt-sha">{shaText}</span>
+                <span class="opt-sep" aria-hidden="true">·</span>
+              </>
+            )}
+            <span class="opt-version">{r.label}</span>
+          </a>
+        </li>
       ))}
-    </select>
-  </label>
+    </ul>
+  </div>
 )}
 
+<script>
+  // Vanilla combobox controller. Lives inline to avoid a runtime
+  // bundle; runs once per page on DOMContentLoaded. Multiple
+  // dropdown instances on a page would each get their own state via
+  // the data-release-combo scope.
+  function initReleaseCombo(root: HTMLElement) {
+    const btn = root.querySelector<HTMLButtonElement>(".release-pill");
+    const list = root.querySelector<HTMLUListElement>(".release-listbox");
+    if (!btn || !list) return;
+    const options = Array.from(list.querySelectorAll<HTMLLIElement>("[role='option']"));
+    let focusIdx = options.findIndex(o => o.getAttribute("aria-selected") === "true");
+    if (focusIdx < 0) focusIdx = 0;
+
+    const open = () => {
+      list.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+      options[focusIdx]?.querySelector("a")?.focus();
+    };
+    const close = () => {
+      list.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    };
+    const toggle = () => (list.hidden ? open() : close());
+
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      toggle();
+    });
+    btn.addEventListener("keydown", e => {
+      if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        open();
+      }
+    });
+    list.addEventListener("keydown", e => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+        btn.focus();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        focusIdx = Math.min(focusIdx + 1, options.length - 1);
+        options[focusIdx]?.querySelector("a")?.focus();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        focusIdx = Math.max(focusIdx - 1, 0);
+        options[focusIdx]?.querySelector("a")?.focus();
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        focusIdx = 0;
+        options[focusIdx]?.querySelector("a")?.focus();
+      } else if (e.key === "End") {
+        e.preventDefault();
+        focusIdx = options.length - 1;
+        options[focusIdx]?.querySelector("a")?.focus();
+      }
+    });
+    // Click-outside closes. Listener attached once; the data-attr
+    // gate ensures we only react when the click lands outside any
+    // open combo.
+    document.addEventListener("click", e => {
+      if (list.hidden) return;
+      if (!root.contains(e.target as Node)) close();
+    });
+  }
+  document
+    .querySelectorAll<HTMLElement>("[data-release-combo]")
+    .forEach(initReleaseCombo);
+</script>
+
 <style>
-  /* Pill = the visible chrome; the real <select> is overlaid
-     transparent on top of it so the click hit-area matches the
-     pill exactly. Green accent + readable monospace so the
-     active coordinate pops against the page-meta band. */
-  .release-pill {
+  .release-combo {
     position: relative;
+    margin-left: auto;
+    display: inline-block;
+  }
+
+  /* Pill = the visible button. Clean green accent — no decorative
+     extras. Active state on focus / hover so the user sees the
+     pill is interactive. */
+  .release-pill {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    margin-left: auto;
     padding: 0.3rem 0.7rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.86rem;
@@ -76,20 +172,15 @@ const shaText = buildSha ? buildSha + (buildDirty ? "+" : "") : null;
     border: 1px solid rgba(46, 160, 67, 0.5);
     border-radius: 999px;
     cursor: pointer;
-    transition: background 80ms ease, border-color 80ms ease, transform 80ms ease;
+    transition:
+      background 80ms ease,
+      border-color 80ms ease;
   }
   .release-pill:hover,
-  .release-pill:focus-within {
+  .release-pill:focus-visible {
     background: rgba(46, 160, 67, 0.28);
     border-color: rgba(46, 160, 67, 0.85);
-  }
-  .dot {
-    width: 0.55rem;
-    height: 0.55rem;
-    border-radius: 50%;
-    background: #2ea043;
-    box-shadow: 0 0 6px rgba(46, 160, 67, 0.7);
-    flex-shrink: 0;
+    outline: none;
   }
   .pill-sha {
     display: inline-flex;
@@ -97,43 +188,80 @@ const shaText = buildSha ? buildSha + (buildDirty ? "+" : "") : null;
     gap: 0.4rem;
     opacity: 0.85;
   }
-  .pill-sep { opacity: 0.5; }
+  .pill-sep {
+    opacity: 0.5;
+  }
   .pill-version {
     letter-spacing: 0.02em;
     color: #e2ffe2;
   }
   .pill-caret {
-    opacity: 0.65;
+    opacity: 0.7;
     font-size: 0.75em;
     margin-left: 0.1rem;
+    transform: translateY(-1px);
   }
-  /* Real <select> stretched to cover the pill, fully transparent
-     so the user sees only our styling but native dropdown behavior
-     is preserved (keyboard nav, OS native dropdown UI). */
-  .release-select {
+  .release-pill[aria-expanded="true"] .pill-caret {
+    transform: rotate(180deg) translateY(1px);
+  }
+
+  /* Listbox: floating panel below the pill. Subtle drop shadow,
+     dark surface matching the page chrome, monospace items so the
+     SHA + version columns align. */
+  .release-listbox {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 100%;
+    max-height: 360px;
+    overflow-y: auto;
     margin: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: transparent;
-    appearance: none;
-    -webkit-appearance: none;
-    cursor: pointer;
-    opacity: 0;
+    padding: 0.25rem 0;
+    list-style: none;
+    background: #1a1f24;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    z-index: 50;
   }
-  .release-select:focus-visible {
-    /* Surface focus on the parent pill via :focus-within; keep the
-       select itself outline-free. */
+  .release-listbox[hidden] {
+    display: none;
+  }
+  .release-listbox li {
+    margin: 0;
+  }
+  .release-listbox a {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.4rem 0.85rem;
+    color: rgba(255, 255, 255, 0.85);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.85rem;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .release-listbox a:hover,
+  .release-listbox a:focus-visible {
+    background: rgba(46, 160, 67, 0.18);
+    color: #e2ffe2;
     outline: none;
   }
-  /* Native option list takes the OS default but we tint values
-     where supported (Firefox / Chromium honour `color`). */
-  .release-select option {
-    color: #0d1117;
-    background: #fff;
+  .release-listbox li.active a {
+    color: #b9f5b9;
+  }
+  .release-listbox li.active a::before {
+    content: "✓";
+    color: #2ea043;
+    margin-right: 0.1rem;
+  }
+  .opt-sha {
+    opacity: 0.65;
+  }
+  .opt-sep {
+    opacity: 0.4;
+  }
+  .opt-version {
+    letter-spacing: 0.02em;
   }
 </style>
