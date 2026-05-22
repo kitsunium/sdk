@@ -38,12 +38,17 @@ async function shellSafe(file, args, opts = {}) {
 
 async function listReleasesViaGh() {
   const out = await shellSafe("gh", [
-    "release", "list",
-    "--limit", "200",
-    "--json", "tagName,publishedAt,isDraft,isPrerelease",
+    "release",
+    "list",
+    "--limit",
+    "200",
+    "--json",
+    "tagName,publishedAt,isDraft,isPrerelease",
   ]);
   if (typeof out !== "string") {
-    console.warn("[sync-versions] gh release list unavailable — falling back to local tags");
+    console.warn(
+      "[sync-versions] gh release list unavailable — falling back to local tags",
+    );
     return null;
   }
   return JSON.parse(out);
@@ -52,10 +57,16 @@ async function listReleasesViaGh() {
 async function listReleasesViaGitTags() {
   const out = await shellSafe("git", ["tag", "-l", "pkg/v*/v*"]);
   if (typeof out !== "string") return [];
-  return out.split("\n")
+  return out
+    .split("\n")
     .filter(Boolean)
     .filter(isValidTag)
-    .map(t => ({ tagName: t, publishedAt: null, isDraft: false, isPrerelease: false }));
+    .map((t) => ({
+      tagName: t,
+      publishedAt: null,
+      isDraft: false,
+      isPrerelease: false,
+    }));
 }
 
 async function copyTree(src, dest, predicate) {
@@ -75,23 +86,59 @@ async function copyTree(src, dest, predicate) {
   return count;
 }
 
+async function ensureLandingPage(dest, major, sourceRoot) {
+  // The dynamic route `[major]/[...slug].astro` only emits a landing
+  // page (dist/<major>/index.html) when the content collection has an
+  // entry whose slug resolves to `<major>` itself. Markdown copied
+  // from pkg/<major>/*.md becomes `<major>/<file>` — never the bare
+  // `<major>` — so synthesise an index.md per major (best source =
+  // pkg/<major>/CLAUDE.md, fallback to a minimal header).
+  const indexPath = join(dest, "index.md");
+  const candidates = ["CLAUDE.md", "README.md"];
+  for (const name of candidates) {
+    const src = join(sourceRoot, name);
+    if (existsSync(src)) {
+      await copyFile(src, indexPath);
+      return;
+    }
+  }
+  const fallback = `---
+title: ${major}
+---
+
+# kitsunium/sdk ${major}
+
+Documentation snapshot for ${major}. See the sidebar for packages and ADRs.
+`;
+  await writeFile(indexPath, fallback);
+}
+
 async function materialiseMajor(major, tag) {
   const dest = join(CONTENT_ROOT, major);
   await mkdir(dest, { recursive: true });
   const wt = `/tmp/wt-${major}-${Date.now()}`;
   try {
     await shellSafe("git", ["worktree", "prune"]);
-    const add = await shellSafe("git", ["worktree", "add", "--detach", wt, tag]);
+    const add = await shellSafe("git", [
+      "worktree",
+      "add",
+      "--detach",
+      wt,
+      tag,
+    ]);
     if (typeof add !== "string") {
       console.warn(`[sync-versions] worktree add failed for ${tag}; skipping`);
       return;
     }
     const pkgRoot = join(wt, "pkg", major);
     const adrRoot = join(wt, "docs", "adr");
-    const isDoc = name => /\.md$/i.test(name);
+    const isDoc = (name) => /\.md$/i.test(name);
     const pkgCount = await copyTree(pkgRoot, dest, isDoc);
     const adrCount = await copyTree(adrRoot, join(dest, "adr"), isDoc);
-    console.log(`[sync-versions] ${major} <- ${tag}: ${pkgCount} pkg doc(s) + ${adrCount} ADR(s)`);
+    await ensureLandingPage(dest, major, pkgRoot);
+    console.log(
+      `[sync-versions] ${major} <- ${tag}: ${pkgCount} pkg doc(s) + ${adrCount} ADR(s) + landing`,
+    );
   } finally {
     await shellSafe("git", ["worktree", "remove", "--force", wt]);
   }
@@ -100,12 +147,26 @@ async function materialiseMajor(major, tag) {
 async function ensureBootstrapEntry() {
   // No releases yet → synthesise a single v1 entry pointing at HEAD so
   // the docs build still produces a working /v1/ subtree on day one.
-  console.log("[sync-versions] bootstrap mode — no releases found, using HEAD as v1");
+  console.log(
+    "[sync-versions] bootstrap mode — no releases found, using HEAD as v1",
+  );
   const dest = join(CONTENT_ROOT, "v1");
+  const pkgRoot = join(REPO_ROOT, "pkg", "v1");
   await mkdir(dest, { recursive: true });
-  await copyTree(join(REPO_ROOT, "pkg", "v1"), dest, n => /\.md$/i.test(n));
-  await copyTree(join(REPO_ROOT, "docs", "adr"), join(dest, "adr"), n => /\.md$/i.test(n));
-  return [{ major: "v1", latest: "0.0.0", default: true, eol: false, publishedAt: null }];
+  await copyTree(pkgRoot, dest, (n) => /\.md$/i.test(n));
+  await copyTree(join(REPO_ROOT, "docs", "adr"), join(dest, "adr"), (n) =>
+    /\.md$/i.test(n),
+  );
+  await ensureLandingPage(dest, "v1", pkgRoot);
+  return [
+    {
+      major: "v1",
+      latest: "0.0.0",
+      default: true,
+      eol: false,
+      publishedAt: null,
+    },
+  ];
 }
 
 async function main() {
@@ -128,10 +189,12 @@ async function main() {
   }
 
   await writeFile(VERSIONS_JSON, JSON.stringify(versions, null, 2) + "\n");
-  console.log(`[sync-versions] wrote ${VERSIONS_JSON} (${versions.length} majors)`);
+  console.log(
+    `[sync-versions] wrote ${VERSIONS_JSON} (${versions.length} majors)`,
+  );
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error("[sync-versions] FAILED:", err);
   process.exit(1);
 });
