@@ -30,6 +30,7 @@ import {
   localOnlyVersions,
   LOCAL_RELEASE,
 } from "./lib/tag-format.mjs";
+import { RESERVED } from "./lib/page-catalog.mjs";
 
 const execFile = promisify(_execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -141,15 +142,23 @@ async function materialiseRelease(major, release, sourceRoot) {
   const claudeMd = join(sourceRoot, "CLAUDE.md");
   const adrDir = join(sourceRoot, "docs", "adr");
 
-  // 1. Landing page (index.md): the package's CLAUDE.md is the most
-  // authoritative "what is pkg/<major>" doc.
+  // 1. Landing page (index.md): the package's CLAUDE.md is the
+  // authoritative "what is pkg/<major>" doc. We prepend a frontmatter
+  // `title` from page-catalog.RESERVED.index.label so the page-header
+  // h1 in the docs site matches the sidebar label (single source of
+  // truth — RESERVED is shared with Sidebar + Search).
+  const landingTitle = RESERVED.index.label ?? major;
   const landing = join(pkgMajor, "CLAUDE.md");
   if (existsSync(landing)) {
-    await copyFile(landing, join(dest, "index.md"));
+    const body = await readFile(landing, "utf8");
+    await writeFile(
+      join(dest, "index.md"),
+      frontmatter(landingTitle, `Overview of pkg/${major}`) + body,
+    );
   } else {
     await writeFile(
       join(dest, "index.md"),
-      frontmatter(major, `Documentation snapshot for ${major}`) +
+      frontmatter(landingTitle, `Documentation snapshot for ${major}`) +
         `# ${major}\n\nDocumentation snapshot for ${major}.\n`,
     );
   }
@@ -166,9 +175,18 @@ async function materialiseRelease(major, release, sourceRoot) {
       }
     }
     // Special case: codec benchmark report -> /v?/<r>/benchmarks/
+    // Prepend frontmatter so the page-header h1 reads "Benchmarks"
+    // (RESERVED label) — aligned with the sidebar entry. BENCH.md's
+    // own '# Benchmarks — pkg/v1/codec' h1 still renders inside the
+    // article body for context.
     const bench = join(pkgMajor, "codec", "BENCH.md");
     if (existsSync(bench)) {
-      await copyFile(bench, join(dest, "benchmarks.md"));
+      const benchTitle = RESERVED.benchmarks.label ?? "Benchmarks";
+      const benchBody = await readFile(bench, "utf8");
+      await writeFile(
+        join(dest, "benchmarks.md"),
+        frontmatter(benchTitle, `Codec benchmark report`) + benchBody,
+      );
     }
   }
 
@@ -185,13 +203,15 @@ async function materialiseRelease(major, release, sourceRoot) {
         `- [${f.replace(/\.md$/, "")}](./${f.replace(/\.md$/, "")}/)`,
       );
     }
-    // Synthesised index lists every ADR file copied above.
+    // Synthesised index lists every ADR file copied above. Title comes
+    // from RESERVED so sidebar ("ADRs") and page-header h1 match.
+    const adrTitle = RESERVED.adr.label ?? "ADRs";
     const adrIndex =
       frontmatter(
-        "Architecture Decision Records",
+        adrTitle,
         `Frozen ADR set as of ${release === LOCAL_RELEASE ? "HEAD" : release}`,
       ) +
-      `# ADRs\n\n` +
+      `# ${adrTitle}\n\n` +
       `Architecture Decision Records snapshotted at \`${release}\`.\n\n` +
       adrIndexRows.sort().join("\n") +
       "\n";
@@ -199,18 +219,20 @@ async function materialiseRelease(major, release, sourceRoot) {
   }
 
   // 4. Cross-cutting pages extracted from /workspace/CLAUDE.md
-  // sections. Maintains "TOUT dynamique" — these are real chunks of
-  // the canonical CLAUDE.md, not hand-authored prose.
+  // sections. Title = RESERVED label so sidebar and page-header h1
+  // are byte-identical; description = the source section name
+  // (preserved for SEO + the modal subtitle).
   const sections = await extractClaudeMdSections(claudeMd);
   const pageMap = [
-    ["philosophy", "SDK-wide rules (non-negotiable)", "SDK philosophy"],
-    ["architecture", "Architecture at a glance", "Architecture at a glance"],
-    ["getting-started", "How to work", "Getting started"],
-    ["verification", "Verification", "Verification matrix"],
+    ["philosophy", "SDK-wide rules (non-negotiable)"],
+    ["architecture", "Architecture at a glance"],
+    ["getting-started", "How to work"],
+    ["verification", "Verification"],
   ];
-  for (const [slug, sectionTitle, pageTitle] of pageMap) {
+  for (const [slug, sectionTitle] of pageMap) {
     const body = sections[sectionTitle];
     if (!body) continue;
+    const pageTitle = RESERVED[slug]?.label ?? sectionTitle;
     await writeFile(
       join(dest, `${slug}.md`),
       frontmatter(pageTitle, sectionTitle) + `# ${pageTitle}\n\n` + body + "\n",
