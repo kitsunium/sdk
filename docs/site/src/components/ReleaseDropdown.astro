@@ -1,0 +1,68 @@
+---
+// ReleaseDropdown — picks a release within the current API major.
+// Lists "local" first (when the major has unreleased HEAD content),
+// then every published tag in descending semver order. Switching
+// navigates to that release's root page; the slug after the
+// (major, release) pair is not preserved across releases (a future
+// release may not have the same slug).
+interface Release {
+  version: string;
+  label: string;
+  default: boolean;
+  publishedAt: string | null;
+}
+interface Version {
+  major: string;
+  releases: Release[];
+}
+
+interface Props {
+  currentMajor: string;
+  currentRelease: string;
+  versions: Version[];
+}
+
+const { currentMajor, currentRelease, versions } = Astro.props;
+
+const current = versions.find(v => v.major === currentMajor);
+const releases = current?.releases ?? [];
+---
+
+{releases.length > 0 && (
+  <label class="dropdown-wrap">
+    <span class="sr-only">Select release</span>
+    <select
+      aria-label="Select release"
+      class="version-select"
+      onchange="if(this.value)window.location.assign(this.value)"
+    >
+      {releases.map(r => (
+        <option value={`/${currentMajor}/${r.version}/`} selected={r.version === currentRelease}>
+          {r.label}
+        </option>
+      ))}
+    </select>
+  </label>
+)}
+
+<style>
+  .dropdown-wrap { display: inline-flex; align-items: center; }
+  .version-select {
+    padding: 0.15rem 0.4rem;
+    font: inherit;
+    background: transparent;
+    color: inherit;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0.85;
+  }
+  .version-select:hover,
+  .version-select:focus-visible { opacity: 1; }
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border: 0;
+  }
+</style>

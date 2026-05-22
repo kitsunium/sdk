@@ -1,35 +1,68 @@
 ---
-// Brand block — logo + literal "SDK" + version dropdown. Replaces the
-// previous `⌘ kitsunium/sdk` text mark in the sidebar (plan B2, B4).
-// The current major is derived from the URL pathname; the dropdown
-// component handles defaulting + EOL labelling.
-import VersionDropdown from "./VersionDropdown.astro";
+// Brand block — logo + literal "SDK" + two dropdowns (API axis,
+// Release axis). The earlier version wrapped the <select> in the
+// <a href="/"> brand link; that made every click on the dropdown
+// bubble up to the anchor and navigate to "/", giving the user the
+// "ça rafraîchit la page" symptom. The fix is structural: the anchor
+// only covers the logo + text, the dropdowns are siblings.
+import ApiDropdown from "./ApiDropdown.astro";
+import ReleaseDropdown from "./ReleaseDropdown.astro";
+import { findDefaults, LOCAL_RELEASE } from "../../scripts/lib/tag-format.mjs";
 
 interface Props {
   currentPath: string;
 }
 
+let versions: Array<{
+  major: string;
+  default: boolean;
+  eol: boolean;
+  releases: Array<{ version: string; tag: string | null; label: string; default: boolean; publishedAt: string | null }>;
+}> = [];
+try {
+  versions = (await import("../data/versions.json")).default ?? [];
+} catch {
+  versions = [];
+}
+
 const { currentPath } = Astro.props;
 
-//: extract "v1" / "v2" / ... from a path like /v1/index. Anything that
-//: doesn't match falls through and the dropdown picks the default.
-const majorMatch = currentPath.match(/^\/(v\d+)(?:\/|$)/);
-const currentMajor = majorMatch?.[1] ?? null;
+//: extract the current major + release from the URL. URLs follow
+//: /<major>/<release>/...; anything that doesn't match falls back to
+//: the site defaults computed from versions.json.
+const m = currentPath.match(/^\/(v\d+)(?:\/([^/]+))?(?:\/|$)/);
+const fallback = findDefaults(versions);
+const currentMajor = m?.[1] ?? fallback.major;
+const currentRelease = m?.[2] ?? fallback.release;
+const homeHref = `/${fallback.major}/${fallback.release}/`;
 ---
 
-<a href="/" class="brand" aria-label="kitsunium SDK — home">
-  <img
-    src="/brand/kitsunium.jpg"
-    alt="Kitsunium"
-    width="28"
-    height="28"
-    class="brand-mark-img"
-  />
-  <span class="brand-text">SDK</span>
-  <VersionDropdown current={currentMajor} />
-</a>
+<div class="brand-block">
+  <a href={homeHref} class="brand" aria-label="kitsunium SDK — home">
+    <img
+      src="/brand/kitsunium.jpg"
+      alt="Kitsunium"
+      width="28"
+      height="28"
+      class="brand-mark-img"
+    />
+    <span class="brand-text">SDK</span>
+  </a>
+  {versions.length > 0 && (
+    <div class="version-row" role="group" aria-label="Documentation version selectors">
+      <ApiDropdown currentMajor={currentMajor} versions={versions} />
+      <ReleaseDropdown currentMajor={currentMajor} currentRelease={currentRelease} versions={versions} />
+    </div>
+  )}
+</div>
 
 <style>
+  .brand-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
   .brand {
     display: inline-flex;
     align-items: center;
@@ -44,5 +77,10 @@ const currentMajor = majorMatch?.[1] ?? null;
   .brand-text {
     font-weight: 700;
     letter-spacing: 0.04em;
+  }
+  .version-row {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
   }
 </style>

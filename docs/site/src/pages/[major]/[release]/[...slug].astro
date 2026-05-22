@@ -1,0 +1,50 @@
+---
+// Dynamic route for the entire versioned documentation tree.
+// URLs are /<major>/<release>/<slug?> — every page is fed by a
+// markdown file the prebuild script materialised from the real
+// source repository (no hand-authored prose in this Astro tree).
+import { getCollection, render } from "astro:content";
+import Default from "../../../layouts/Default.astro";
+
+export async function getStaticPaths() {
+  const all = await getCollection("docs");
+  return all.map(entry => {
+    //: entry.slug looks like "v1/local/index", "v1/local/codec",
+    //: "v1/local/adr/0001-foo". First two segments are the major +
+    //: release; everything else is the page slug.
+    const segments = entry.slug.split("/");
+    const major = segments[0];
+    const release = segments[1];
+    const rest = segments.slice(2).join("/");
+    const slug = rest === "" || rest === "index" ? undefined : rest;
+    return {
+      params: { major, release, slug },
+      props: { entry },
+    };
+  });
+}
+
+const { entry } = Astro.props;
+const { Content, headings } = await render(entry);
+const fallbackTitle = entry.slug.split("/").slice(-1)[0] ?? "Docs";
+const title = entry.data?.title ?? fallbackTitle;
+const description = entry.data?.description;
+---
+
+<Default title={title} description={description}>
+  <article class="md-body">
+    <Content />
+  </article>
+  {headings && headings.length > 0 && (
+    <aside class="toc" aria-label="Table of contents">
+      <h3>On this page</h3>
+      <ul>
+        {headings.filter(h => h.depth <= 3).map(h => (
+          <li class={`depth-${h.depth}`}>
+            <a href={`#${h.slug}`}>{h.text}</a>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  )}
+</Default>

@@ -1,0 +1,66 @@
+---
+// ApiDropdown — selects the API major (v1, v2, …). Switching majors
+// navigates to that major's default release. Plain HTML <select>,
+// no client framework, sibling-of-anchor (not child) so a click
+// inside the dropdown never bubbles up to a parent link.
+interface Release {
+  version: string;
+  default: boolean;
+}
+interface Version {
+  major: string;
+  eol: boolean;
+  releases: Release[];
+}
+
+interface Props {
+  currentMajor: string;
+  versions: Version[];
+}
+
+const { currentMajor, versions } = Astro.props;
+
+function defaultReleaseOf(v: Version): string {
+  return (v.releases.find(r => r.default) ?? v.releases[0])?.version ?? "local";
+}
+---
+
+<label class="dropdown-wrap">
+  <span class="sr-only">Select API major</span>
+  <select
+    aria-label="Select API major"
+    class="version-select"
+    onchange="if(this.value)window.location.assign(this.value)"
+  >
+    {versions.map(v => (
+      <option value={`/${v.major}/${defaultReleaseOf(v)}/`} selected={v.major === currentMajor}>
+        {v.major}{v.eol ? " (EOL)" : ""}
+      </option>
+    ))}
+  </select>
+</label>
+
+<style>
+  .dropdown-wrap {
+    display: inline-flex;
+    align-items: center;
+  }
+  .version-select {
+    padding: 0.15rem 0.4rem;
+    font: inherit;
+    background: transparent;
+    color: inherit;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0.85;
+  }
+  .version-select:hover,
+  .version-select:focus-visible { opacity: 1; }
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border: 0;
+  }
+</style>

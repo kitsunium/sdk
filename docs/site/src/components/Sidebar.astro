@@ -1,52 +1,78 @@
 ---
-// Sidebar nav. The `currentPath` prop highlights the active link.
-// Sections are hand-curated so the order matches the recommended
-// reading flow (Overview → Getting started → Concepts → Packages →
-// Architecture → Reference → Benchmarks).
+// Sidebar nav — every link inside the "services" / "reference" groups
+// is built from the current (major, release) coordinate read off the
+// URL. Switching major or release via the dropdowns re-renders the
+// sidebar against the new coordinate, so every link points at the
+// right snapshot of the docs tree.
 import Brand from "./Brand.astro";
+import { findDefaults, LOCAL_RELEASE } from "../../scripts/lib/tag-format.mjs";
+
+interface Release {
+  version: string;
+  label: string;
+  default: boolean;
+}
+interface Version {
+  major: string;
+  default: boolean;
+  releases: Release[];
+}
 
 interface Props {
   currentPath: string;
 }
 const { currentPath } = Astro.props;
 
-interface NavItem {
-  href: string;
-  label: string;
+let versions: Version[] = [];
+try {
+  versions = ((await import("../data/versions.json")).default as Version[]) ?? [];
+} catch {
+  versions = [];
 }
-interface NavSection {
-  title: string;
-  items: NavItem[];
-}
+
+const m = currentPath.match(/^\/(v\d+)(?:\/([^/]+))?(?:\/|$)/);
+const fallback = findDefaults(versions);
+const currentMajor = m?.[1] ?? fallback.major;
+const currentRelease = m?.[2] ?? fallback.release;
+
+//: prefix every dynamic link with the active (major, release).
+//: ALL items below are generated against this base — no hardcoded
+//: pkg/v1 prefixes survive the build.
+const base = `/${currentMajor}/${currentRelease}`;
+
+//: discover service slugs from the page data. A "service" is any
+//: pkg/<major>/<service>/README.md that the prebuild copied as
+//: <m>/<r>/<service>.md. We probe a known service list (logger,
+//: codec, errs) — the build will skip ones that didn't materialise.
+const services = ["logger", "codec", "errs"];
+
+interface NavItem { href: string; label: string }
+interface NavSection { title: string; items: NavItem[] }
 
 const sections: NavSection[] = [
   {
     title: "Overview",
     items: [
-      { href: "/", label: "Home" },
-      { href: "/getting-started/", label: "Getting started" },
-      { href: "/philosophy/", label: "Philosophy" },
+      { href: `${base}/`,                 label: "Home" },
+      { href: `${base}/getting-started/`, label: "Getting started" },
+      { href: `${base}/philosophy/`,      label: "Philosophy" },
     ],
   },
   {
     title: "services",
-    items: [
-      { href: "/packages/logger/", label: "logger" },
-      { href: "/packages/codec/", label: "codec" },
-      { href: "/packages/errs/", label: "errs" },
-    ],
+    items: services.map(name => ({ href: `${base}/${name}/`, label: name })),
   },
   {
     title: "Reference",
     items: [
-      { href: "/architecture/", label: "Architecture" },
-      { href: "/adr/", label: "ADRs (0001 – 0006)" },
-      { href: "/benchmarks/", label: "Benchmarks" },
+      { href: `${base}/architecture/`, label: "Architecture" },
+      { href: `${base}/adr/`,          label: "ADRs" },
+      { href: `${base}/benchmarks/`,   label: "Benchmarks" },
+      { href: `${base}/verification/`, label: "Verification" },
     ],
   },
 ];
 
-//: trailing-slash-tolerant match so /adr/ matches both /adr and /adr/.
 function isActive(href: string): boolean {
   const a = href.replace(/\/$/, "");
   const b = currentPath.replace(/\/$/, "");
