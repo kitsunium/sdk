@@ -133,6 +133,10 @@ const quickLinks = GROUP_ORDER
   <div class="search-overlay" hidden role="dialog" aria-modal="true" aria-label="Search documentation">
     <div class="search-panel">
       <div id="pagefind-search"></div>
+      <section class="symbol-results" data-symbol-results hidden aria-label="Symbol matches">
+        <h4>Symbols <span class="result-count" data-symbol-count></span></h4>
+        <ul data-symbol-list></ul>
+      </section>
       <div class="search-suggestions" data-suggestions>
         <p class="suggestions-hint">Start typing to search · or jump to:</p>
         {quickLinks.map(group => (
@@ -168,6 +172,112 @@ const quickLinks = GROUP_ORDER
   const PAGEFIND_CSS = "/_pagefind/pagefind-ui.css";
   let pagefindReady = false;
   let pagefindFailed = false;
+
+  //: Symbol search runs in parallel with Pagefind, sharing the same
+  //: input element. MiniSearch is bundled (6 KB) so the index is
+  //: ready as soon as symbols-<major>.json downloads (~one HTTP req).
+  type SymbolEntry = {
+    kind: "func" | "type" | "method" | "const" | "var";
+    name: string;
+    qualified: string;
+    package: string;
+    packageShort: string;
+    signature: string;
+    doc?: string;
+    url: string;
+    receiver?: string;
+  };
+  let symbolSearch: any = null;     // MiniSearch instance
+  let symbolEntries: Map<string, SymbolEntry> | null = null;
+  let symbolLoadPromise: Promise<boolean> | null = null;
+
+  //: pull the active major from the URL so we load the right index:
+  //: /v1/local/... -> symbols-v1.json
+  function activeMajor(): string {
+    const m = window.location.pathname.match(/^\/(v\d+)\//);
+    return m?.[1] ?? "v1";
+  }
+
+  async function ensureSymbolIndex(): Promise<boolean> {
+    if (symbolSearch) return true;
+    if (symbolLoadPromise) return symbolLoadPromise;
+    symbolLoadPromise = (async () => {
+      try {
+        const [{ default: MiniSearch }, payload] = await Promise.all([
+          import("minisearch"),
+          fetch(`/_search/symbols-${activeMajor()}.json`).then(r => {
+            if (!r.ok) throw new Error(`symbols ${r.status}`);
+            return r.json() as Promise<{ symbols: SymbolEntry[] }>;
+          }),
+        ]);
+        const ms = new MiniSearch({
+          //: id field MUST be unique; package+qualified guards against
+          //: duplicate basenames across packages.
+          idField: "id",
+          fields: ["name", "qualified", "doc", "signature", "packageShort"],
+          storeFields: ["kind", "name", "qualified", "package", "packageShort",
+                        "signature", "doc", "url", "receiver"],
+          searchOptions: {
+            //: heavy boost on name + qualified — what users type most.
+            boost: { name: 6, qualified: 4, packageShort: 2, signature: 1, doc: 1 },
+            fuzzy: 0.2,
+            prefix: true,
+            combineWith: "AND",
+          },
+        });
+        const docs = (payload.symbols ?? []).map((s, i) => ({
+          ...s,
+          id: `${s.package}#${s.kind}#${s.name}#${i}`,
+        }));
+        ms.addAll(docs);
+        symbolSearch = ms;
+        symbolEntries = new Map(docs.map(d => [d.id, d]));
+        return true;
+      } catch (err) {
+        console.warn("[search] symbol index unavailable:", err);
+        return false;
+      } finally {
+        symbolLoadPromise = null;
+      }
+    })();
+    return symbolLoadPromise;
+  }
+
+  const KIND_LABELS: Record<string, string> = {
+    func: "func", type: "type", method: "fn", const: "const", var: "var",
+  };
+
+  function renderSymbols(root: HTMLElement, query: string) {
+    const wrap = root.querySelector<HTMLElement>("[data-symbol-results]");
+    const list = root.querySelector<HTMLElement>("[data-symbol-list]");
+    const count = root.querySelector<HTMLElement>("[data-symbol-count]");
+    if (!wrap || !list || !count || !symbolSearch || !symbolEntries) return;
+    const q = query.trim();
+    if (q.length === 0) { wrap.hidden = true; list.innerHTML = ""; return; }
+    const hits = symbolSearch.search(q, { fuzzy: 0.2, prefix: true }).slice(0, 8);
+    if (hits.length === 0) { wrap.hidden = true; list.innerHTML = ""; return; }
+    list.innerHTML = hits.map((h: any) => {
+      const e = symbolEntries!.get(h.id);
+      if (!e) return "";
+      const docLine = e.doc ? `<span class="sym-doc">${escapeHtml(e.doc)}</span>` : "";
+      return `
+        <li>
+          <a href="${escapeHtml(e.url)}" data-symbol-link>
+            <span class="sym-kind sym-kind--${e.kind}">${KIND_LABELS[e.kind] ?? e.kind}</span>
+            <span class="sym-name">${escapeHtml(e.qualified)}</span>
+            <span class="sym-sig">${escapeHtml(e.signature)}</span>
+            ${docLine}
+          </a>
+        </li>`;
+    }).join("");
+    count.textContent = `(${hits.length})`;
+    wrap.hidden = false;
+  }
+
+  function escapeHtml(s: string): string {
+    return s.replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]!);
+  }
 
   async function ensurePagefind(panel: HTMLElement): Promise<boolean> {
     if (pagefindReady) return true;
@@ -210,10 +320,21 @@ const quickLinks = GROUP_ORDER
     const suggestions = panel.querySelector<HTMLElement>("[data-suggestions]");
     //: hide quick-links the moment the user starts typing; bring
     //: them back when the input goes empty again (no extra fetch).
+    //: ALSO route the same query into the MiniSearch symbol panel so
+    //: both indexes update together from a single keystroke.
     const watchInput = () => {
       const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
       if (!input || !suggestions) return;
-      const sync = () => { suggestions.hidden = input.value.trim().length > 0; };
+      let symbolBootstrapped = false;
+      const sync = async () => {
+        const q = input.value.trim();
+        suggestions.hidden = q.length > 0;
+        if (q.length > 0 && !symbolBootstrapped) {
+          symbolBootstrapped = true;
+          await ensureSymbolIndex();
+        }
+        renderSymbols(panel, q);
+      };
       input.addEventListener("input", sync);
       sync();
     };
@@ -336,6 +457,92 @@ const quickLinks = GROUP_ORDER
     background: rgba(255, 255, 255, 0.08);
     padding: 0.05rem 0.35rem;
     border-radius: 3px;
+  }
+
+  /* Symbol results — the rustdoc-style top-of-modal panel that lists
+     matching exported funcs / types / consts / methods straight from
+     the Go AST (tools/genindex → symbols-<major>.json). Hidden when
+     the query is empty so the empty-state suggestions show instead. */
+  .symbol-results {
+    padding: 0.25rem 0.5rem 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 0.25rem;
+  }
+  .symbol-results[hidden] { display: none; }
+  .symbol-results h4 {
+    margin: 0.55rem 0.5rem 0.4rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .symbol-results .result-count {
+    margin-left: 0.4rem;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 500;
+  }
+  .symbol-results ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .symbol-results li { margin: 0; }
+  .symbol-results a {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 0.6rem;
+    row-gap: 0.15rem;
+    align-items: baseline;
+    padding: 0.4rem 0.6rem;
+    color: rgba(255, 255, 255, 0.92);
+    text-decoration: none;
+    border-radius: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.83rem;
+  }
+  .symbol-results a:hover,
+  .symbol-results a:focus-visible {
+    background: rgba(46, 160, 67, 0.12);
+    outline: none;
+  }
+  .sym-kind {
+    grid-row: span 1;
+    grid-column: 1;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+    align-self: center;
+  }
+  .sym-kind--func   { background: rgba(46, 160, 67, 0.22);   color: #c5f6c5; }
+  .sym-kind--method { background: rgba(46, 160, 67, 0.18);   color: #b9e5b9; }
+  .sym-kind--type   { background: rgba(88, 128, 220, 0.22);  color: #cfdcff; }
+  .sym-kind--const  { background: rgba(220, 160, 60, 0.20);  color: #ffdfa8; }
+  .sym-kind--var    { background: rgba(180, 120, 200, 0.20); color: #e8c8ff; }
+  .sym-name {
+    grid-column: 2;
+    font-weight: 600;
+    color: #e2ffe2;
+  }
+  .sym-sig {
+    grid-column: 2;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sym-doc {
+    grid-column: 2;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-style: italic;
   }
 
   /* Empty-state suggestions — visible until the user types in the

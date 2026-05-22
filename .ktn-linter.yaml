@@ -65,6 +65,10 @@ serialization_tags:
 exclude:
   # Vendored third-party code — never our convention to enforce.
   - "vendor/**"
+  # Build-time tools (single-purpose scripts under tools/) — per the
+  # Rule 8 exemption in /workspace/CLAUDE.md, these are tooling, not
+  # library code, and stay out of the per-package doc-style gates.
+  - "tools/**"
   # Go module cache occasionally shows up in IDE-driven scans.
   - "**/.cache/**"
   # Protocol Buffers and gRPC generated code.

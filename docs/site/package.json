@@ -5,8 +5,8 @@
   "type": "module",
   "description": "kitsunium/sdk documentation portal — philosophy, package guides, ADRs, benchmarks. Built via `make docs` at the repo root.",
   "scripts": {
-    "dev": "node scripts/sync-versions.mjs && astro dev",
-    "prebuild": "node scripts/sync-versions.mjs",
+    "dev": "node scripts/sync-versions.mjs && node scripts/gen-symbols.mjs && astro dev",
+    "prebuild": "node scripts/sync-versions.mjs && node scripts/gen-symbols.mjs",
     "build": "astro build && pagefind --site dist --output-subdir _pagefind",
     "preview": "astro preview"
   },
@@ -15,6 +15,7 @@
     "marked": "^15.0.7"
   },
   "devDependencies": {
+    "minisearch": "^7.2.0",
     "pagefind": "^1.4.0"
   }
 }
