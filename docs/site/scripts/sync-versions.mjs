@@ -121,6 +121,25 @@ async function extractClaudeMdSections(claudeMdPath) {
   return sections;
 }
 
+/**
+ * Remove gomarkdoc's auto-generated "## Index" block (the flat
+ * symbol-list reference at the top of every README). It's pure
+ * duplication of the right-side TOC the docs site renders from
+ * the same headings — keeping it would have every page show its
+ * symbol map twice.
+ *
+ * Matches "## Index" up to (but not including) the next H2 ("\n## ")
+ * or end of file. The strip is markdown-safe because gomarkdoc
+ * always emits the Index as a single H2 section followed by
+ * sibling H2s (Constants / Variables / per-symbol).
+ *
+ * @param {string} body  — full markdown content
+ * @returns {string}     — same content with the Index section removed
+ */
+function stripGomarkdocIndex(body) {
+  return body.replace(/\n## Index\n[\s\S]*?(?=\n## |\s*$)/, "\n");
+}
+
 function frontmatter(title, description) {
   const desc = description
     ? `\ndescription: ${JSON.stringify(description)}`
@@ -164,14 +183,18 @@ async function materialiseRelease(major, release, sourceRoot) {
   }
 
   // 2. Service READMEs. Each sub-package under pkg/<major>/ that
-  // ships a README.md becomes a top-level service page.
+  // ships a README.md becomes a top-level service page. We post-
+  // process the gomarkdoc output to strip the "## Index" block —
+  // it's a redundant flat list of every symbol that duplicates
+  // the right-side TOC the docs site already renders.
   if (existsSync(pkgMajor)) {
     const subs = await readdir(pkgMajor, { withFileTypes: true });
     for (const sub of subs) {
       if (!sub.isDirectory()) continue;
       const readme = join(pkgMajor, sub.name, "README.md");
       if (existsSync(readme)) {
-        await copyFile(readme, join(dest, `${sub.name}.md`));
+        const raw = await readFile(readme, "utf8");
+        await writeFile(join(dest, `${sub.name}.md`), stripGomarkdocIndex(raw));
       }
     }
     // Special case: codec benchmark report -> /v?/<r>/benchmarks/

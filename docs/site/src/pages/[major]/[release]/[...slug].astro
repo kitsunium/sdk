@@ -39,9 +39,10 @@ const firstH1 = (headings ?? []).find(h => h.depth === 1);
 const slugFallback = entry.id.split("/").slice(-1)[0] ?? "Docs";
 const title = entry.data?.title ?? firstH1?.text ?? slugFallback;
 const description = entry.data?.description;
-//: Filter to H2/H3 — H4+ headings clutter the TOC without helping
-//: navigation. The full hierarchy stays in the rendered article.
-const tocHeadings = (headings ?? []).filter(h => h.depth >= 2 && h.depth <= 3);
+//: TOC shows H2 only by default. For dense gomarkdoc pages (logger
+//: with 18 H2 + 12 H3) showing every H3 would flood the rail. H3+
+//: are reachable via in-page scroll / fragment links from the body.
+const tocHeadings = (headings ?? []).filter(h => h.depth === 2);
 ---
 
 <Default title={title} description={description} headings={tocHeadings}>
