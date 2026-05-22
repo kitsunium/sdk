@@ -70,16 +70,18 @@ const descFallback = `Documentation portal for ${project}.`;
             <slot />
           </main>
           {headings.length > 0 && (
-            <aside class="page-toc" aria-label="On this page">
-              <h3>On this page</h3>
-              <ul>
-                {headings.map(h => (
-                  <li class={`toc-d${h.depth}`}>
-                    <a href={`#${h.slug}`}>{h.text}</a>
-                  </li>
-                ))}
-              </ul>
-            </aside>
+            <div class="toc-rail">
+              <aside class="page-toc" aria-label="On this page">
+                <h3>On this page</h3>
+                <ul>
+                  {headings.map(h => (
+                    <li class={`toc-d${h.depth}`}>
+                      <a href={`#${h.slug}`}>{h.text}</a>
+                    </li>
+                  ))}
+                </ul>
+              </aside>
+            </div>
           )}
         </div>
         <footer>
