@@ -25,20 +25,22 @@ function defaultReleaseOf(v: Version): string {
 }
 ---
 
-<label class="dropdown-wrap">
-  <span class="sr-only">Select API major</span>
-  <select
-    aria-label="Select API major"
-    class="version-select"
-    onchange="if(this.value)window.location.assign(this.value)"
-  >
-    {versions.map(v => (
-      <option value={`/${v.major}/${defaultReleaseOf(v)}/`} selected={v.major === currentMajor}>
-        {v.major}{v.eol ? " (EOL)" : ""}
-      </option>
-    ))}
-  </select>
-</label>
+{versions.length > 1 && (
+  <label class="dropdown-wrap">
+    <span class="sr-only">Select API major</span>
+    <select
+      aria-label="Select API major"
+      class="version-select"
+      onchange="if(this.value)window.location.assign(this.value)"
+    >
+      {versions.map(v => (
+        <option value={`/${v.major}/${defaultReleaseOf(v)}/`} selected={v.major === currentMajor}>
+          {v.major}{v.eol ? " (EOL)" : ""}
+        </option>
+      ))}
+    </select>
+  </label>
+)}
 
 <style>
   .dropdown-wrap {

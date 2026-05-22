@@ -1,0 +1,148 @@
+---
+// Top-right header band — surfaces the build's git provenance and
+// the release-axis dropdown. The release dropdown is here, not in
+// the sidebar, so it reads as a single "build coordinate" group
+// alongside the commit SHA and date (a pattern consumers of dev-
+// tool sites are used to: commit hash + build time + tag picker).
+import ReleaseDropdown from "./ReleaseDropdown.astro";
+import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+
+interface Release {
+  version: string;
+  label: string;
+  default: boolean;
+  publishedAt: string | null;
+}
+interface Version {
+  major: string;
+  default: boolean;
+  eol: boolean;
+  releases: Release[];
+}
+interface BuildInfo {
+  commitShort: string | null;
+  commitFull: string | null;
+  commitDate: string | null;
+  branch: string | null;
+  dirty: boolean;
+  builtAt: string | null;
+  repoUrl: string | null;
+}
+
+interface Props {
+  currentPath: string;
+}
+
+let versions: Version[] = [];
+try {
+  versions = ((await import("../data/versions.json")).default as Version[]) ?? [];
+} catch { /* bootstrap with no versions yet */ }
+
+let build: BuildInfo = {
+  commitShort: null, commitFull: null, commitDate: null,
+  branch: null, dirty: false, builtAt: null, repoUrl: null,
+};
+try {
+  build = ((await import("../data/build-info.json")).default as BuildInfo) ?? build;
+} catch { /* build-info not generated yet */ }
+
+const { currentPath } = Astro.props;
+const m = currentPath.match(/^\/(v\d+)(?:\/([^/]+))?(?:\/|$)/);
+const fallback = findDefaults(versions);
+const currentMajor = m?.[1] ?? fallback.major;
+const currentRelease = m?.[2] ?? fallback.release;
+
+//: ISO date -> "2026-05-22" for the compact header read. We slice
+//: instead of formatting so the value stays timezone-stable across
+//: viewers.
+const commitDay = build.commitDate ? build.commitDate.slice(0, 10) : null;
+const commitHref = build.commitFull && build.repoUrl
+  ? `${build.repoUrl}/commit/${build.commitFull}`
+  : null;
+---
+
+<header class="page-meta" role="banner">
+  <div class="page-meta-inner">
+    <span class="build-coord" aria-label="Build provenance">
+      <span class="build-label">build</span>
+      {commitHref ? (
+        <a href={commitHref} class="build-sha" target="_blank" rel="noopener" title={build.commitFull ?? undefined}>
+          {build.commitShort}{build.dirty && <span class="dirty-mark" title="working tree had uncommitted changes">+</span>}
+        </a>
+      ) : (
+        <span class="build-sha">{build.commitShort ?? "—"}</span>
+      )}
+      {commitDay && (
+        <>
+          <span class="sep" aria-hidden="true">·</span>
+          <time class="build-date" datetime={build.commitDate ?? undefined}>{commitDay}</time>
+        </>
+      )}
+      {build.branch && build.branch !== "main" && (
+        <>
+          <span class="sep" aria-hidden="true">·</span>
+          <span class="build-branch" title="git branch">{build.branch}</span>
+        </>
+      )}
+    </span>
+    <ReleaseDropdown
+      currentMajor={currentMajor}
+      currentRelease={currentRelease}
+      versions={versions}
+    />
+  </div>
+</header>
+
+<style>
+  /* "Pro" header bar: monospace coordinates on the left, release
+     dropdown on the right. Sits inside the content column, top-right
+     anchor, sub-1rem font so it reads as metadata, not chrome. */
+  .page-meta {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+  }
+  .page-meta-inner {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0.45rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    opacity: 0.78;
+  }
+  .build-coord {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    letter-spacing: 0.02em;
+  }
+  .build-label {
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    opacity: 0.55;
+  }
+  .build-sha {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.25);
+  }
+  .build-sha:hover { border-bottom-style: solid; opacity: 1; }
+  .dirty-mark {
+    color: #f0b400;
+    margin-left: 1px;
+    font-weight: bold;
+  }
+  .sep { opacity: 0.4; }
+  .build-date { opacity: 0.85; }
+  .build-branch {
+    padding: 0 0.3rem;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    opacity: 0.9;
+  }
+</style>

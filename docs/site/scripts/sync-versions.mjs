@@ -37,6 +37,7 @@ const SITE_ROOT = resolve(__dirname, "..");
 const REPO_ROOT = resolve(SITE_ROOT, "..", "..");
 const CONTENT_ROOT = join(SITE_ROOT, "src", "content", "docs");
 const VERSIONS_JSON = join(SITE_ROOT, "src", "data", "versions.json");
+const BUILD_INFO_JSON = join(SITE_ROOT, "src", "data", "build-info.json");
 
 async function shellSafe(file, args, opts = {}) {
   try {
@@ -314,6 +315,34 @@ async function main() {
   console.log(
     `[sync-versions] wrote ${VERSIONS_JSON} (${versions.length} major(s), ` +
       `${versions.reduce((n, v) => n + v.releases.length, 0)} release(s))`,
+  );
+
+  // 4. Capture build metadata for the Header. Surfaces the real git
+  // coordinate a deployed site was built from (commit SHA, date,
+  // branch, dirty flag) — a "pro" build provenance band, GitHub-style.
+  const commitShort = await shellSafe("git", ["rev-parse", "--short", "HEAD"]);
+  const commitFull = await shellSafe("git", ["rev-parse", "HEAD"]);
+  const commitDate = await shellSafe("git", [
+    "show",
+    "-s",
+    "--format=%cI",
+    "HEAD",
+  ]);
+  const branch = await shellSafe("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const dirty = await shellSafe("git", ["status", "--porcelain"]);
+
+  const buildInfo = {
+    commitShort: typeof commitShort === "string" ? commitShort.trim() : null,
+    commitFull: typeof commitFull === "string" ? commitFull.trim() : null,
+    commitDate: typeof commitDate === "string" ? commitDate.trim() : null,
+    branch: typeof branch === "string" ? branch.trim() : null,
+    dirty: typeof dirty === "string" ? dirty.trim().length > 0 : false,
+    builtAt: new Date().toISOString(),
+    repoUrl: "https://github.com/kitsunium/sdk",
+  };
+  await writeFile(BUILD_INFO_JSON, JSON.stringify(buildInfo, null, 2) + "\n");
+  console.log(
+    `[sync-versions] wrote ${BUILD_INFO_JSON} (commit=${buildInfo.commitShort ?? "?"}${buildInfo.dirty ? "+dirty" : ""})`,
   );
 }
 

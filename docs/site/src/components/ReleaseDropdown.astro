@@ -29,11 +29,11 @@ const releases = current?.releases ?? [];
 ---
 
 {releases.length > 0 && (
-  <label class="dropdown-wrap">
+  <label class="release-inline">
     <span class="sr-only">Select release</span>
     <select
       aria-label="Select release"
-      class="version-select"
+      class="release-select"
       onchange="if(this.value)window.location.assign(this.value)"
     >
       {releases.map(r => (
@@ -46,19 +46,27 @@ const releases = current?.releases ?? [];
 )}
 
 <style>
-  .dropdown-wrap { display: inline-flex; align-items: center; }
-  .version-select {
-    padding: 0.15rem 0.4rem;
-    font: inherit;
+  /* Compact form — sits in the top-right header band next to the
+     commit SHA and date. Reads as build-coordinate metadata, not a
+     primary control. */
+  .release-inline {
+    display: inline-flex;
+    align-items: center;
+  }
+  .release-select {
+    padding: 0.1rem 0.4rem;
+    font-size: 0.78rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     background: transparent;
     color: inherit;
-    border: 1px solid currentColor;
-    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
     cursor: pointer;
     opacity: 0.85;
+    letter-spacing: 0.02em;
   }
-  .version-select:hover,
-  .version-select:focus-visible { opacity: 1; }
+  .release-select:hover,
+  .release-select:focus-visible { opacity: 1; border-color: currentColor; }
   .sr-only {
     position: absolute;
     width: 1px; height: 1px; padding: 0; margin: -1px;

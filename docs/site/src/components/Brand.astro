@@ -6,7 +6,6 @@
 // "ça rafraîchit la page" symptom. The fix is structural: the anchor
 // only covers the logo + text, the dropdowns are siblings.
 import ApiDropdown from "./ApiDropdown.astro";
-import ReleaseDropdown from "./ReleaseDropdown.astro";
 import { findDefaults, LOCAL_RELEASE } from "../../scripts/lib/tag-format.mjs";
 
 interface Props {
@@ -48,10 +47,9 @@ const homeHref = `/${fallback.major}/${fallback.release}/`;
     />
     <span class="brand-text">SDK</span>
   </a>
-  {versions.length > 0 && (
-    <div class="version-row" role="group" aria-label="Documentation version selectors">
+  {versions.length > 1 && (
+    <div class="version-row" role="group" aria-label="API major selector">
       <ApiDropdown currentMajor={currentMajor} versions={versions} />
-      <ReleaseDropdown currentMajor={currentMajor} currentRelease={currentRelease} versions={versions} />
     </div>
   )}
 </div>
