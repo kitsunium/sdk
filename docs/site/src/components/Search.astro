@@ -8,9 +8,106 @@
 // The popover opens, fetches /_pagefind/pagefind-ui.{js,css} on demand,
 // and renders results inline. Closes on Escape or click-outside.
 //
+// Empty-state suggestions: when the search input is empty, the modal
+// shows a curated "Quick links" panel pointing at the current major's
+// landing, services, ADR index, etc. As soon as the user types, the
+// quick-links panel hides and Pagefind results take over.
+//
 // On `npm run dev` Pagefind has not indexed yet, so the input shows a
 // "search available in production build" hint and the popover stays
 // disabled — no console errors, just a graceful degradation.
+import { getCollection } from "astro:content";
+import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+
+interface VersionEntry {
+  major: string;
+  default: boolean;
+  releases: { version: string; default: boolean }[];
+}
+
+let versions: VersionEntry[] = [];
+try {
+  versions = (await import("../data/versions.json")).default ?? [];
+} catch { /* bootstrap */ }
+
+const { major, release } = findDefaults(versions);
+const base = `/${major}/${release}`;
+//: Astro 5's glob loader strips trailing "/index" from ids:
+//: src/content/docs/v1/local/index.md  → id "v1/local"
+//: src/content/docs/v1/local/codec.md  → id "v1/local/codec"
+//: src/content/docs/v1/local/adr/index.md → id "v1/local/adr"
+//: Match both "v1/local" exactly AND "v1/local/<rest>".
+const root = `${major}/${release}`;
+const prefix = `${root}/`;
+
+//: Reserved top-level pages get their own categorisation; everything
+//: else under <major>/<release>/ is treated as a "service" (sub-package
+//: README that gomarkdoc generated). This auto-discovery means a new
+//: sub-package landing under pkg/v1/ appears in the suggestions on the
+//: next build without any code change here.
+const RESERVED: Record<string, { group: string; hint: string; label?: string; order: number }> = {
+  index:            { group: "Get started", hint: "Package overview",            label: "Home",            order: 0 },
+  "getting-started":{ group: "Get started", hint: "Install + first program",     label: "Getting started", order: 1 },
+  philosophy:       { group: "Get started", hint: "SDK-wide rules",              label: "Philosophy",      order: 2 },
+  architecture:     { group: "Reference",   hint: "Layer model",                 label: "Architecture",    order: 0 },
+  adr:              { group: "Reference",   hint: "Decision records",            label: "ADRs",            order: 1 },
+  benchmarks:       { group: "Reference",   hint: "Performance reports",         label: "Benchmarks",      order: 2 },
+  verification:     { group: "Reference",   hint: "Build / test / lint gates",   label: "Verification",    order: 3 },
+};
+
+interface Link { href: string; label: string; hint?: string; order: number }
+const groups: Map<string, Link[]> = new Map();
+const pushLink = (group: string, link: Link) => {
+  if (!groups.has(group)) groups.set(group, []);
+  groups.get(group)!.push(link);
+};
+
+let entries: Awaited<ReturnType<typeof getCollection>> = [];
+try {
+  entries = await getCollection("docs", e => e.id === root || e.id.startsWith(prefix));
+} catch { /* collection empty in bootstrap */ }
+
+for (const entry of entries) {
+  //: derive the key + href:
+  //:   id === root       → key "index" (the landing page)
+  //:   id === root/<x>   → key "<x>"   (a top-level page like codec / adr)
+  //:   id === root/<x>/<y…> → SKIP (sub-pages handled by their group's landing)
+  let key: string;
+  let href: string;
+  if (entry.id === root) {
+    key = "index";
+    href = `${base}/`;
+  } else {
+    const rest = entry.id.slice(prefix.length);
+    if (rest.includes("/")) continue; // deeper page, not a quick link
+    key = rest;
+    href = `${base}/${key}/`;
+  }
+
+  const reserved = RESERVED[key];
+  if (reserved) {
+    pushLink(reserved.group, {
+      href,
+      label: reserved.label ?? key,
+      hint: reserved.hint,
+      order: reserved.order,
+    });
+  } else {
+    //: treat every other top-level page as a "service" entry —
+    //: derived from pkg/<major>/<service>/README.md so the label IS
+    //: the package directory name.
+    pushLink("Services", { href, label: key, hint: "Package", order: 100 });
+  }
+}
+
+//: stable, predictable presentation order
+const GROUP_ORDER = ["Get started", "Services", "Reference"];
+const quickLinks = GROUP_ORDER
+  .filter(g => groups.has(g))
+  .map(g => ({
+    group: g,
+    items: groups.get(g)!.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)),
+  }));
 ---
 
 <div class="search" data-search>
@@ -36,6 +133,24 @@
   <div class="search-overlay" hidden role="dialog" aria-modal="true" aria-label="Search documentation">
     <div class="search-panel">
       <div id="pagefind-search"></div>
+      <div class="search-suggestions" data-suggestions>
+        <p class="suggestions-hint">Start typing to search · or jump to:</p>
+        {quickLinks.map(group => (
+          <section class="suggestion-group">
+            <h4>{group.group}</h4>
+            <ul>
+              {group.items.map(item => (
+                <li>
+                  <a href={item.href}>
+                    <span class="suggestion-label">{item.label}</span>
+                    {item.hint && <span class="suggestion-hint">{item.hint}</span>}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
       <p class="search-fallback" hidden>
         Search index unavailable. Run <code>npm run build</code> to generate
         <code>/_pagefind/</code> — the indexer runs after Astro build.
@@ -92,6 +207,16 @@
     const panel = root.querySelector<HTMLElement>(".search-panel");
     if (!trigger || !overlay || !panel) return;
 
+    const suggestions = panel.querySelector<HTMLElement>("[data-suggestions]");
+    //: hide quick-links the moment the user starts typing; bring
+    //: them back when the input goes empty again (no extra fetch).
+    const watchInput = () => {
+      const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
+      if (!input || !suggestions) return;
+      const sync = () => { suggestions.hidden = input.value.trim().length > 0; };
+      input.addEventListener("input", sync);
+      sync();
+    };
     const open = async () => {
       overlay.hidden = false;
       document.body.style.overflow = "hidden";
@@ -100,11 +225,13 @@
       requestAnimationFrame(() => {
         const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
         input?.focus();
+        watchInput();
       });
     };
     const close = () => {
       overlay.hidden = true;
       document.body.style.overflow = "";
+      if (suggestions) suggestions.hidden = false;
       trigger.focus();
     };
 
@@ -209,5 +336,120 @@
     background: rgba(255, 255, 255, 0.08);
     padding: 0.05rem 0.35rem;
     border-radius: 3px;
+  }
+
+  /* Empty-state suggestions — visible until the user types in the
+     Pagefind input. Three columns of curated quick links to the
+     current major+release's key pages. */
+  .search-suggestions { padding: 0.5rem 0.25rem 0.75rem; }
+  .search-suggestions[hidden] { display: none; }
+  .suggestions-hint {
+    margin: 0.25rem 0.75rem 0.65rem;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.55);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .suggestion-group { margin: 0 0 0.5rem; }
+  .suggestion-group h4 {
+    margin: 0.55rem 0.75rem 0.2rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .suggestion-group ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .suggestion-group li { margin: 0; }
+  .suggestion-group a {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.4rem 0.75rem;
+    color: rgba(255, 255, 255, 0.85);
+    text-decoration: none;
+    border-radius: 4px;
+  }
+  .suggestion-group a:hover,
+  .suggestion-group a:focus-visible {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    outline: none;
+  }
+  .suggestion-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.88rem;
+    font-weight: 600;
+    min-width: 7rem;
+  }
+  .suggestion-hint {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.82rem;
+  }
+
+  /* Pagefind UI overrides — the default theme is light-only and the
+     'clear' (×) button ships as a square slab. Tone it down + match
+     our dark surface. Selectors are :global because Astro scopes
+     component styles, but Pagefind injects its own DOM at runtime. */
+  :global(.pagefind-ui),
+  :global(.pagefind-ui__form),
+  :global(.pagefind-ui__results-area) {
+    --pagefind-ui-primary: #e2ffe2;
+    --pagefind-ui-text: rgba(255, 255, 255, 0.92);
+    --pagefind-ui-background: transparent;
+    --pagefind-ui-border: rgba(255, 255, 255, 0.18);
+    --pagefind-ui-tag: rgba(255, 255, 255, 0.08);
+    --pagefind-ui-border-width: 1px;
+    --pagefind-ui-border-radius: 6px;
+    --pagefind-ui-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  :global(.pagefind-ui__search-input) {
+    background: rgba(255, 255, 255, 0.04) !important;
+    color: var(--pagefind-ui-text) !important;
+    border-color: var(--pagefind-ui-border) !important;
+  }
+  :global(.pagefind-ui__search-input::placeholder) {
+    color: rgba(255, 255, 255, 0.45) !important;
+  }
+  :global(.pagefind-ui__search-input:focus) {
+    border-color: rgba(46, 160, 67, 0.6) !important;
+    box-shadow: 0 0 0 2px rgba(46, 160, 67, 0.2) !important;
+    outline: none !important;
+  }
+  /* Clear button restyle — the original ships as a heavy beige slab. */
+  :global(.pagefind-ui__search-clear) {
+    background: transparent !important;
+    color: rgba(255, 255, 255, 0.55) !important;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
+    padding: 0.25rem 0.5rem !important;
+    border-radius: 4px !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+  }
+  :global(.pagefind-ui__search-clear:hover),
+  :global(.pagefind-ui__search-clear:focus-visible) {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #fff !important;
+    border-color: rgba(255, 255, 255, 0.25) !important;
+    outline: none !important;
+  }
+  :global(.pagefind-ui__result-link) {
+    color: #cfe9ff !important;
+  }
+  :global(.pagefind-ui__result-excerpt),
+  :global(.pagefind-ui__message),
+  :global(.pagefind-ui__suppressed) {
+    color: rgba(255, 255, 255, 0.7) !important;
+  }
+  :global(mark) {
+    background: rgba(46, 160, 67, 0.35) !important;
+    color: #e2ffe2 !important;
+    padding: 0 2px;
+    border-radius: 2px;
   }
 </style>
