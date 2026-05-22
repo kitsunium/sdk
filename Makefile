@@ -1,4 +1,4 @@
-.PHONY: help build test lint bench cover docs serve release-dry-run
+.PHONY: help build test lint bench cover docs serve release-dry-run docs-readme
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -32,6 +32,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "serve"  "kill / rebuild / re-serve docs on http://localhost:$(DIM)\$${PORT:-4321}$(RST)$(DIM)/$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate pkg/v1/{codec,errs,logger}/README.md from doc comments (see ADR 0008)$(RST)"
 
 # ── Wrappers ───────────────────────────────────────────────────────────
 # Every target shells to bazel (+ housekeeping tools). The .bazelrc named
@@ -141,3 +142,14 @@ release-dry-run:
 		echo "majors to bump:"; cat /tmp/sdk-release-majors.txt; echo; \
 		/bin/bash scripts/release/cut-tags.sh --dry-run < /tmp/sdk-release-majors.txt; \
 	fi
+
+# `docs-readme` regenerates pkg/v1/<service>/README.md from each
+# package's Go doc comment via `go tool gomarkdoc` (ADR 0008). The
+# tool directive in pkg/v1/go.mod pins gomarkdoc@v1.1.0 — no proxy
+# fetch at run time. Go ≥ 1.24 is required for the `tool` directive;
+# the preamble fails loudly with a readable message on older toolchains.
+docs-readme:
+	@go version | awk '{print $$3}' | sed 's/go//' | awk -F. '{exit !($$1>1 || ($$1==1 && $$2>=24))}' \
+	  || { echo "Go ≥ 1.24 required (tool directive)"; exit 1; }
+	cd pkg/v1 && go generate ./codec ./errs ./logger
+	@echo "→ pkg/v1/{codec,errs,logger}/README.md regenerated"

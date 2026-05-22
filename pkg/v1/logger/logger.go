@@ -1,8 +1,80 @@
+//go:generate go tool gomarkdoc --output README.md .
+
 // Package logger is the stable v1 public API for SDK logging.
-// Consumers import this package — internal/* paths are compile-blocked
-// outside the SDK repo. Type signatures exported here are frozen after the
-// first v1.0.0 release; breaking changes land in pkg/v2. Security fixes in
-// internal/* propagate via a minor bump without touching this façade.
+//
+// Consumers import this package; internal/* paths are compile-blocked
+// outside the SDK repo. Type signatures exported here are frozen after
+// the first v1.0.0 release; breaking changes land in pkg/v2. Security
+// fixes in internal/* propagate via a minor bump without touching this
+// façade.
+//
+// # Quick start (text on stderr)
+//
+//	import "github.com/kitsunium/sdk/pkg/v1/logger"
+//
+//	func main() {
+//	    lg, err := logger.NewText(logger.Config{Writer: os.Stderr, Level: logger.LevelInfo})
+//	    if err != nil { panic(err) }
+//	    lg.Info(context.Background(), "service ready",
+//	        logger.String("addr", ":8080"))
+//	}
+//
+// [Default] returns the stderr one-liner equivalent in tests + scripts.
+// Pass [Config]{Writer: nil} and [NewText] returns the typed sentinel
+// [WriterRequired] — the pre-errors API silently defaulted to
+// os.Stderr; that was a breaking change recorded in ADR 0002.
+//
+// # Custom sink topology
+//
+// For multi-sink fan-out, async / failover / sample / route middleware,
+// drive [NewWithSink] with a [SinkConfig]:
+//
+//	sink := logger.Multi(
+//	    logger.ConsoleStderr(logger.TextEncoder),
+//	    fileSink, // *yourSink implementing logger.Sink
+//	)
+//	lg, err := logger.NewWithSink(logger.SinkConfig{Sink: sink, Level: logger.LevelDebug})
+//
+// A nil Sink returns [SinkConfigRequired]. Both [NewText] and
+// [NewWithSink] decorate every emitted record with the
+// "framework_version" attribute (see [FrameworkVersion]).
+//
+// # Builder hot path
+//
+// [Build] returns a chainable, sync.Pool-backed [Builder] whose
+// steady-state per-call cost is zero heap allocations after the pool
+// warms. Callers MUST NOT use a Builder after [Builder.Send] — it
+// returns to the recycler.
+//
+//	logger.Build(lg, logger.LevelInfo).
+//	    Str("user", u.Name).
+//	    Int("age", u.Age).
+//	    Send(ctx, "user logged in")
+//
+// [LogAttrs] is the slice overload that avoids the variadic-slice
+// allocation in [Logger.Log].
+//
+// # Version stamping
+//
+// [Version] is the single ldflags injection point for the SDK.
+// Recipes:
+//
+//   - Raw go build: `go build -ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=v0.1.0" ./...`
+//   - Bazel: --stamp + x_defs + tools/workspace_status.sh (STABLE_VERSION).
+//
+// [FrameworkVersion] returns the link-time value or the literal "dev"
+// sentinel when unset. Every emitted record carries this value under
+// the "framework_version" attribute key.
+//
+// # Errors
+//
+// Construction failures carry typed dotted-quad codes under range
+// 1.1.0.* per ADR 0005:
+//
+//   - 1.1.0.1 [CodeWriterRequired] / [WriterRequired]: NewText with Writer == nil.
+//   - 1.1.0.2 [CodeSinkConfigRequired] / [SinkConfigRequired]: NewWithSink with Sink == nil.
+//
+// Inspect via the accessors in github.com/kitsunium/sdk/pkg/v1/errs.
 package logger
 
 import (

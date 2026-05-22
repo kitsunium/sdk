@@ -32,6 +32,15 @@ jobs:
           disk-cache: ${{ github.workflow }}-${{ hashFiles('.bazelrc', '.bazelversion', 'MODULE.bazel', '**/go.mod', '**/go.sum') }}
           repository-cache: true
 
+      # setup-bazel only provides a Bazel-sandboxed Go SDK; the README
+      # drift gate + govulncheck run outside Bazel and need a host Go
+      # toolchain on $PATH. SHA matches sdk-release.yml's pin.
+      - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
+        with:
+          go-version-file: pkg/v1/go.mod
+          cache: true
+          cache-dependency-path: pkg/v1/go.sum
+
       - name: drift check — bazel mod tidy + gazelle
         run: |
           bazel mod tidy
@@ -47,6 +56,24 @@ jobs:
             echo "::error::Gazelle created untracked BUILD.bazel/go.mod/go.sum files — commit them."
             exit 1
           fi
+
+      # README drift gate (ADR 0008). Sits between the gazelle drift
+      # check and `bazel build` so a stale README fails fast before the
+      # heavy build+test burn. The script is the canonical spec (also
+      # used by `make lint` and the local pre-commit hook).
+      - name: drift check — README.md regenerated
+        run: bash scripts/pre-commit/check-readme-drift.sh
+
+      - name: determinism check — gomarkdoc reproducible
+        run: bash scripts/pre-commit/check-readme-determinism.sh
+
+      - name: govulncheck — gomarkdoc binary
+        run: |
+          # govulncheck on the gomarkdoc binary keeps the build-time
+          # tool dep tracked even though it never compiles into pkg/v1.
+          # `go tool -n gomarkdoc` prints the cached binary path.
+          ( cd pkg/v1 && go install golang.org/x/vuln/cmd/govulncheck@latest )
+          ( cd pkg/v1 && govulncheck -mode=binary "$(go tool -n gomarkdoc)" )
 
       - name: build
         run: bazel build --config=ci //...

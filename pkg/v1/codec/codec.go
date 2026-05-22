@@ -1,8 +1,126 @@
-// Package codec exposes the SDK's public codec surface. Consumers address
-// codecs by Format (string alias) and dispatch through Marshal / Unmarshal /
-// NewEncoder / NewDecoder. This package blank-imports every stdlib-backed
-// codec so `import "github.com/kitsunium/sdk/pkg/v1/codec"` is enough to
-// enable JSON, NDJSON, XML, CSV, ASN.1 DER, and PEM.
+//go:generate go tool gomarkdoc --output README.md .
+
+// Package codec is the universal encoder/decoder dispatch facade.
+//
+// One verb, eighteen formats. [Marshal] and [Unmarshal] reach every
+// encoding the SDK ships — JSON, YAML, CBOR, MessagePack, NDJSON, XML,
+// TOML, CSV, ASN.1 DER, PEM, TLV, FlatBuffers, plus the six base-N
+// variants (base64, base64url, base32, base16, hex, ascii85).
+// Format-swap at runtime is a single string change.
+//
+// Concrete codecs live in internal/service/codec/*; this package is
+// the read-only dispatch facade. Importing the package activates
+// every codec via blank-import side effects.
+//
+// # Surface
+//
+// Dispatch — pick the codec by registered Format name:
+//
+//	func Marshal(format Format, v any) ([]byte, error)
+//	func Unmarshal(format Format, data []byte, v any) error
+//
+// Streaming — when the resolved codec implements core/codec.StreamingCodec:
+//
+//	func NewEncoder(format Format, w io.Writer) (Encoder, error)
+//	func NewDecoder(format Format, r io.Reader) (Decoder, error)
+//
+// Registry introspection:
+//
+//	func Available() []Format
+//	func FromMIME(mime string) (Format, bool)
+//	func FromExtension(ext string) (Format, bool)
+//
+// [Format] is an alias for the registered string name; the typed
+// constants ([JSON], [CBOR], [YAML], …) are the contract, and their
+// underlying string values are frozen post-v1.0.0.
+//
+// # Quick start
+//
+//	package main
+//
+//	import (
+//	    "fmt"
+//
+//	    "github.com/kitsunium/sdk/pkg/v1/codec"
+//	)
+//
+//	type User struct {
+//	    Name string `json:"name" cbor:"name" yaml:"name"`
+//	    Age  int    `json:"age"  cbor:"age"  yaml:"age"`
+//	}
+//
+//	func main() {
+//	    u := User{Name: "Ada", Age: 36}
+//	    for _, f := range []codec.Format{"json", "cbor", "yaml", "msgpack", "base64"} {
+//	        data, _ := codec.Marshal(f, u)
+//	        var back User
+//	        _ = codec.Unmarshal(f, data, &back)
+//	        fmt.Printf("%-10s %d bytes  → %#v\n", f, len(data), back)
+//	    }
+//	}
+//
+// # Activation
+//
+// A single blank import activates the full registry:
+//
+//	import _ "github.com/kitsunium/sdk/pkg/v1/codec"
+//
+// The package blank-imports every internal/service/codec/* package;
+// each registers itself in core/codec.Lookup via init(). Consumers
+// never call a Register() function — registration is purely a
+// side-effect of importing this package.
+//
+// # Choosing a Format
+//
+//   - json — API responses, configs (most-supported; reasonable size).
+//   - ndjson — streaming logs, line-oriented batches (appender + line framing).
+//   - yaml — human-edited configs (slower; not great at scale).
+//   - toml — app configs (strict typing).
+//   - xml — legacy integrations (verbose; specialised payloads).
+//   - csv — tabular exports (rows in / rows out; not arbitrary structs).
+//   - cbor — binary IoT / mobile (compact + fast).
+//   - msgpack — RPC payloads (compact; ecosystem-wide).
+//   - tlv — custom binary streams (self-describing, reflection-driven, hardened).
+//   - flatbuffers — zero-copy passthrough (schema lives outside the codec).
+//   - asn1-der — crypto / X.509 artefacts (strict DER rules).
+//   - pem — crypto / certificates (block-wrapped DER).
+//   - base64 / base64url / base32 / base16 / hex / ascii85 — wrap any
+//     structure in a text-safe encoding (pipeline = encoding/json.Marshal(v)
+//     → base-N). Use stdlib encoding/base64 (etc.) directly when you have
+//     raw bytes already.
+//
+// # Extension interfaces
+//
+// A registered codec MAY implement one or both of these optional
+// interfaces (assert at the call site):
+//
+//	// Append into a caller-supplied buffer — zero-alloc fast path.
+//	type Appender interface {
+//	    Append(dst []byte, v any) ([]byte, error)
+//	}
+//
+//	// Streaming — open Encoder/Decoder around an io.Writer/io.Reader.
+//	type StreamingCodec interface {
+//	    NewEncoder(w io.Writer) Encoder
+//	    NewDecoder(r io.Reader) Decoder
+//	}
+//
+// [StreamingUnsupported] is returned from [NewEncoder] / [NewDecoder]
+// when the resolved codec does not satisfy StreamingCodec.
+//
+// # Errors
+//
+// Dispatch failures carry typed dotted-quad codes under range 1.2.0.*:
+//
+//   - 1.2.0.1 — [CodeUnknownFormat]: Available() does not list the requested Format.
+//   - 1.2.0.2 — [CodeCodecUnavailable]: reserved for future build-tag gating.
+//   - 1.2.0.3 — [CodeStreamingUnsupported]: NewEncoder / NewDecoder called on a non-streaming codec.
+//
+// Per-codec failures carry the codec's own range (0.3.* for service
+// codecs). Inspect with the accessors in github.com/kitsunium/sdk/pkg/v1/errs:
+//
+//	if errs.HasCode(err, codec.CodeUnknownFormat) { … }
+//	if errs.HasReason(err, "UNKNOWN_FORMAT")       { … }
 package codec
 
 import (
