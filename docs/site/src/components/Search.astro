@@ -18,6 +18,7 @@
 // disabled — no console errors, just a graceful degradation.
 import { getCollection } from "astro:content";
 import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+import { buildCatalog } from "../../scripts/lib/page-catalog.mjs";
 
 interface VersionEntry {
   major: string;
@@ -32,82 +33,18 @@ try {
 
 const { major, release } = findDefaults(versions);
 const base = `/${major}/${release}`;
-//: Astro 5's glob loader strips trailing "/index" from ids:
-//: src/content/docs/v1/local/index.md  → id "v1/local"
-//: src/content/docs/v1/local/codec.md  → id "v1/local/codec"
-//: src/content/docs/v1/local/adr/index.md → id "v1/local/adr"
-//: Match both "v1/local" exactly AND "v1/local/<rest>".
 const root = `${major}/${release}`;
-const prefix = `${root}/`;
-
-//: Reserved top-level pages get their own categorisation; everything
-//: else under <major>/<release>/ is treated as a "service" (sub-package
-//: README that gomarkdoc generated). This auto-discovery means a new
-//: sub-package landing under pkg/v1/ appears in the suggestions on the
-//: next build without any code change here.
-const RESERVED: Record<string, { group: string; hint: string; label?: string; order: number }> = {
-  index:            { group: "Get started", hint: "Package overview",            label: "Home",            order: 0 },
-  "getting-started":{ group: "Get started", hint: "Install + first program",     label: "Getting started", order: 1 },
-  philosophy:       { group: "Get started", hint: "SDK-wide rules",              label: "Philosophy",      order: 2 },
-  architecture:     { group: "Reference",   hint: "Layer model",                 label: "Architecture",    order: 0 },
-  adr:              { group: "Reference",   hint: "Decision records",            label: "ADRs",            order: 1 },
-  benchmarks:       { group: "Reference",   hint: "Performance reports",         label: "Benchmarks",      order: 2 },
-  verification:     { group: "Reference",   hint: "Build / test / lint gates",   label: "Verification",    order: 3 },
-};
-
-interface Link { href: string; label: string; hint?: string; order: number }
-const groups: Map<string, Link[]> = new Map();
-const pushLink = (group: string, link: Link) => {
-  if (!groups.has(group)) groups.set(group, []);
-  groups.get(group)!.push(link);
-};
 
 let entries: Awaited<ReturnType<typeof getCollection>> = [];
 try {
-  entries = await getCollection("docs", e => e.id === root || e.id.startsWith(prefix));
+  entries = await getCollection("docs", e => e.id === root || e.id.startsWith(`${root}/`));
 } catch { /* collection empty in bootstrap */ }
 
-for (const entry of entries) {
-  //: derive the key + href:
-  //:   id === root       → key "index" (the landing page)
-  //:   id === root/<x>   → key "<x>"   (a top-level page like codec / adr)
-  //:   id === root/<x>/<y…> → SKIP (sub-pages handled by their group's landing)
-  let key: string;
-  let href: string;
-  if (entry.id === root) {
-    key = "index";
-    href = `${base}/`;
-  } else {
-    const rest = entry.id.slice(prefix.length);
-    if (rest.includes("/")) continue; // deeper page, not a quick link
-    key = rest;
-    href = `${base}/${key}/`;
-  }
-
-  const reserved = RESERVED[key];
-  if (reserved) {
-    pushLink(reserved.group, {
-      href,
-      label: reserved.label ?? key,
-      hint: reserved.hint,
-      order: reserved.order,
-    });
-  } else {
-    //: treat every other top-level page as a "service" entry —
-    //: derived from pkg/<major>/<service>/README.md so the label IS
-    //: the package directory name.
-    pushLink("Services", { href, label: key, hint: "Package", order: 100 });
-  }
-}
-
-//: stable, predictable presentation order
-const GROUP_ORDER = ["Get started", "Services", "Reference"];
-const quickLinks = GROUP_ORDER
-  .filter(g => groups.has(g))
-  .map(g => ({
-    group: g,
-    items: groups.get(g)!.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)),
-  }));
+//: shared with Sidebar.astro — buildCatalog auto-discovers every
+//: top-level page under <major>/<release>/, categorises reserved
+//: slugs into Overview / Reference and routes everything else into
+//: "services" (the gomarkdoc-generated pkg/<m>/<sub>/README.md set).
+const quickLinks = buildCatalog(entries as any, root, base);
 ---
 
 <div class="search" data-search>

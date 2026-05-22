@@ -1,6 +1,9 @@
 ---
 // Default layout — sidebar + page chrome. Every page wraps its content
-// in this layout so the navigation + footer stay consistent.
+// in this layout so the navigation + footer stay consistent. The
+// project name shown in <title> and the footer is derived from
+// build-info.json (which itself extracts it from the git repoUrl
+// at prebuild time) — no hardcoded "kitsunium/sdk" string survives.
 import Sidebar from "../components/Sidebar.astro";
 import Header from "../components/Header.astro";
 import "../styles/global.css";
@@ -13,10 +16,27 @@ interface Props {
 const { title, description, subtitle } = Astro.props;
 const url = new URL(Astro.request.url);
 const currentPath = url.pathname;
-const pageTitle =
-  title === "kitsunium/sdk"
-    ? "kitsunium/sdk — documentation"
-    : `${title} — kitsunium/sdk`;
+
+interface BuildInfo {
+  repoUrl?: string | null;
+}
+let build: BuildInfo = {};
+try {
+  build = ((await import("../data/build-info.json")).default as BuildInfo) ?? {};
+} catch { /* prebuild not run yet */ }
+
+//: derive "<org>/<repo>" from build-info.repoUrl (e.g.
+//: https://github.com/kitsunium/sdk → "kitsunium/sdk"). Falls back
+//: to a neutral "documentation" string if build-info is absent
+//: (fresh clone, dev probe).
+function projectName(repoUrl: string | null | undefined): string {
+  if (!repoUrl) return "documentation";
+  const m = repoUrl.match(/[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+  return m?.[1] ?? "documentation";
+}
+const project = projectName(build.repoUrl);
+const pageTitle = title === project ? `${project} — documentation` : `${title} — ${project}`;
+const descFallback = `Documentation portal for ${project}.`;
 ---
 
 <html lang="en">
@@ -24,11 +44,7 @@ const pageTitle =
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{pageTitle}</title>
-    <meta
-      name="description"
-      content={description ??
-        "Documentation portal for the kitsunium/sdk Go SDK — philosophy, package guides, ADRs, benchmarks."}
-    />
+    <meta name="description" content={description ?? descFallback} />
     <link rel="icon" type="image/jpeg" href="/brand/kitsunium.jpg" />
     <link rel="apple-touch-icon" href="/brand/kitsunium.jpg" />
   </head>
@@ -49,8 +65,8 @@ const pageTitle =
         <footer>
           <div class="container">
             <p>
-              kitsunium/sdk · documentation portal · regenerate with <code>make docs</code>
-              · serve with <code>npx serve docs/site/dist</code>
+              {project} · documentation portal · regenerate with <code>make docs</code>
+              · serve with <code>make serve</code>
             </p>
           </div>
         </footer>

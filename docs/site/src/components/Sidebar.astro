@@ -1,12 +1,14 @@
 ---
-// Sidebar nav — every link inside the "services" / "reference" groups
-// is built from the current (major, release) coordinate read off the
-// URL. Switching major or release via the dropdowns re-renders the
-// sidebar against the new coordinate, so every link points at the
-// right snapshot of the docs tree.
+// Sidebar nav — 100% derived from the content collection. Group
+// titles + per-page labels + the services list all come from
+// page-catalog.mjs (shared with Search.astro). Adding a new page
+// under src/content/docs/<m>/<r>/ surfaces it on the next build
+// without touching this component.
+import { getCollection } from "astro:content";
 import Brand from "./Brand.astro";
 import Search from "./Search.astro";
-import { findDefaults, LOCAL_RELEASE } from "../../scripts/lib/tag-format.mjs";
+import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+import { buildCatalog } from "../../scripts/lib/page-catalog.mjs";
 
 interface Release {
   version: string;
@@ -36,43 +38,31 @@ const fallback = findDefaults(versions);
 const currentMajor = m?.[1] ?? fallback.major;
 const currentRelease = m?.[2] ?? fallback.release;
 
-//: prefix every dynamic link with the active (major, release).
-//: ALL items below are generated against this base — no hardcoded
-//: pkg/v1 prefixes survive the build.
 const base = `/${currentMajor}/${currentRelease}`;
+const root = `${currentMajor}/${currentRelease}`;
 
-//: discover service slugs from the page data. A "service" is any
-//: pkg/<major>/<service>/README.md that the prebuild copied as
-//: <m>/<r>/<service>.md. We probe a known service list (logger,
-//: codec, errs) — the build will skip ones that didn't materialise.
-const services = ["logger", "codec", "errs"];
+let entries: Awaited<ReturnType<typeof getCollection>> = [];
+try {
+  entries = await getCollection("docs", e => e.id === root || e.id.startsWith(`${root}/`));
+} catch { /* collection empty in bootstrap */ }
 
-interface NavItem { href: string; label: string }
-interface NavSection { title: string; items: NavItem[] }
+//: same auto-discovery + categorisation as Search.astro — single
+//: source of truth lives in scripts/lib/page-catalog.mjs.
+const sections = buildCatalog(entries as any, root, base);
 
-const sections: NavSection[] = [
-  {
-    title: "Overview",
-    items: [
-      { href: `${base}/`,                 label: "Home" },
-      { href: `${base}/getting-started/`, label: "Getting started" },
-      { href: `${base}/philosophy/`,      label: "Philosophy" },
-    ],
-  },
-  {
-    title: "services",
-    items: services.map(name => ({ href: `${base}/${name}/`, label: name })),
-  },
-  {
-    title: "Reference",
-    items: [
-      { href: `${base}/architecture/`, label: "Architecture" },
-      { href: `${base}/adr/`,          label: "ADRs" },
-      { href: `${base}/benchmarks/`,   label: "Benchmarks" },
-      { href: `${base}/verification/`, label: "Verification" },
-    ],
-  },
-];
+//: footer external links — derived from build-info.repoUrl so the
+//: sidebar follows whoever owns the SDK without code touch.
+interface BuildInfo { repoUrl?: string | null }
+let build: BuildInfo = {};
+try {
+  build = ((await import("../data/build-info.json")).default as BuildInfo) ?? {};
+} catch { /* prebuild not run yet */ }
+const repoUrl = build.repoUrl ?? "";
+//: pkg.go.dev URL = "pkg.go.dev/" + "<host>/<owner>/<repo>".
+//: Derive from repoUrl host+path (works for github.com, gitlab.com,
+//: any VCS hoster pkg.go.dev recognises).
+const repoPath = repoUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+const pkgGoDev = repoPath ? `https://pkg.go.dev/${repoPath}` : "";
 
 function isActive(href: string): boolean {
   const a = href.replace(/\/$/, "");
@@ -89,7 +79,7 @@ function isActive(href: string): boolean {
     {
       sections.map((section) => (
         <nav class="nav-section">
-          <h3>{section.title}</h3>
+          <h3>{section.group}</h3>
           <ul>
             {section.items.map((item) => (
               <li>
@@ -104,12 +94,16 @@ function isActive(href: string): boolean {
     }
 
     <div class="sidebar-foot">
-      <a href="https://github.com/kitsunium/sdk" target="_blank" rel="noopener">
-        GitHub ↗
-      </a>
-      <a href="https://pkg.go.dev/github.com/kitsunium/sdk" target="_blank" rel="noopener">
-        pkg.go.dev ↗
-      </a>
+      {repoUrl && (
+        <a href={repoUrl} target="_blank" rel="noopener">
+          Repository ↗
+        </a>
+      )}
+      {pkgGoDev && (
+        <a href={pkgGoDev} target="_blank" rel="noopener">
+          pkg.go.dev ↗
+        </a>
+      )}
     </div>
   </div>
 </aside>
