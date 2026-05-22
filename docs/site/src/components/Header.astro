@@ -4,6 +4,7 @@
 // surfaces the build's commit SHA + the active release version
 // (or "local") in a single coloured pill. Clicking the pill opens
 // the release dropdown.
+import ApiDropdown from "./ApiDropdown.astro";
 import ReleaseDropdown from "./ReleaseDropdown.astro";
 import { findDefaults } from "../../scripts/lib/tag-format.mjs";
 
@@ -60,25 +61,20 @@ const commitHref = build.commitFull && build.repoUrl
 
 <header class="page-meta" role="banner">
   <div class="page-meta-inner">
-    <span class="build-coord" aria-label="Build provenance">
-      {commitDay && (
-        <time class="build-date" datetime={build.commitDate ?? undefined}>{commitDay}</time>
-      )}
-      {build.branch && build.branch !== "main" && (
-        <>
-          <span class="sep" aria-hidden="true">·</span>
-          <span class="build-branch" title="git branch">{build.branch}</span>
-        </>
-      )}
-      {commitHref && (
-        <>
-          <span class="sep" aria-hidden="true">·</span>
-          <a class="commit-link" href={commitHref} target="_blank" rel="noopener">
-            view commit ↗
-          </a>
-        </>
-      )}
-    </span>
+    <div class="left-group">
+      <ApiDropdown currentMajor={currentMajor} versions={versions} />
+      <span class="build-coord" aria-label="Build provenance">
+        {commitDay && (
+          <time class="build-date" datetime={build.commitDate ?? undefined}>{commitDay}</time>
+        )}
+        {build.branch && build.branch !== "main" && (
+          <>
+            <span class="sep" aria-hidden="true">·</span>
+            <span class="build-branch" title="git branch">{build.branch}</span>
+          </>
+        )}
+      </span>
+    </div>
     <ReleaseDropdown
       currentMajor={currentMajor}
       currentRelease={currentRelease}
@@ -109,6 +105,12 @@ const commitHref = build.commitFull && build.repoUrl
     flex-wrap: wrap;
     box-sizing: border-box;
   }
+  .left-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
   .build-coord {
     display: inline-flex;
     align-items: baseline;
@@ -123,10 +125,4 @@ const commitHref = build.commitFull && build.repoUrl
     border-radius: 3px;
     background: rgba(255, 255, 255, 0.06);
   }
-  .commit-link {
-    color: inherit;
-    text-decoration: none;
-    border-bottom: 1px dashed rgba(255, 255, 255, 0.25);
-  }
-  .commit-link:hover { border-bottom-style: solid; opacity: 1; }
 </style>

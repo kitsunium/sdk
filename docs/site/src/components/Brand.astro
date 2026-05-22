@@ -1,39 +1,22 @@
 ---
-// Brand block — logo + literal "SDK" + two dropdowns (API axis,
-// Release axis). The earlier version wrapped the <select> in the
-// <a href="/"> brand link; that made every click on the dropdown
-// bubble up to the anchor and navigate to "/", giving the user the
-// "ça rafraîchit la page" symptom. The fix is structural: the anchor
-// only covers the logo + text, the dropdowns are siblings.
-import ApiDropdown from "./ApiDropdown.astro";
-import { findDefaults, LOCAL_RELEASE } from "../../scripts/lib/tag-format.mjs";
-
+// Brand block — logo + literal "SDK". The API dropdown used to live
+// here but moved to the Header bar (left side, next to the build
+// date / branch) so all version controls share one location.
 interface Props {
   currentPath: string;
 }
 
-let versions: Array<{
-  major: string;
-  default: boolean;
-  eol: boolean;
-  releases: Array<{ version: string; tag: string | null; label: string; default: boolean; publishedAt: string | null }>;
-}> = [];
+const { currentPath } = Astro.props;
+
+let versions: Array<{ major: string; default: boolean; releases: { version: string; default: boolean }[] }> = [];
 try {
   versions = (await import("../data/versions.json")).default ?? [];
 } catch {
   versions = [];
 }
-
-const { currentPath } = Astro.props;
-
-//: extract the current major + release from the URL. URLs follow
-//: /<major>/<release>/...; anything that doesn't match falls back to
-//: the site defaults computed from versions.json.
-const m = currentPath.match(/^\/(v\d+)(?:\/([^/]+))?(?:\/|$)/);
-const fallback = findDefaults(versions);
-const currentMajor = m?.[1] ?? fallback.major;
-const currentRelease = m?.[2] ?? fallback.release;
-const homeHref = `/${fallback.major}/${fallback.release}/`;
+const def = versions.find(v => v?.default) ?? versions[0];
+const defRelease = def?.releases?.find(r => r.default) ?? def?.releases?.[0];
+const homeHref = def && defRelease ? `/${def.major}/${defRelease.version}/` : "/";
 ---
 
 <div class="brand-block">
@@ -47,11 +30,6 @@ const homeHref = `/${fallback.major}/${fallback.release}/`;
     />
     <span class="brand-text">SDK</span>
   </a>
-  {versions.length > 1 && (
-    <div class="version-row" role="group" aria-label="API major selector">
-      <ApiDropdown currentMajor={currentMajor} versions={versions} />
-    </div>
-  )}
 </div>
 
 <style>
@@ -75,10 +53,5 @@ const homeHref = `/${fallback.major}/${fallback.release}/`;
   .brand-text {
     font-weight: 700;
     letter-spacing: 0.04em;
-  }
-  .version-row {
-    display: flex;
-    gap: 0.4rem;
-    flex-wrap: wrap;
   }
 </style>

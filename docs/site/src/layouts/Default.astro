@@ -56,5 +56,77 @@ const pageTitle =
         </footer>
       </div>
     </div>
+    <script>
+      // Shared combobox controller. Activates every [data-combobox]
+      // root once; idempotent — running the script a second time
+      // (e.g. when two components both emit it) bails out via the
+      // dataset.comboInit flag.
+      function initCombobox(root: HTMLElement) {
+        if (root.dataset.comboInit === "1") return;
+        root.dataset.comboInit = "1";
+        const btn = root.querySelector<HTMLButtonElement>("button[aria-haspopup='listbox']");
+        const list = root.querySelector<HTMLElement>("[role='listbox']");
+        if (!btn || !list) return;
+        const options = Array.from(
+          list.querySelectorAll<HTMLLIElement>("[role='option']"),
+        );
+        let focusIdx = options.findIndex(
+          o => o.getAttribute("aria-selected") === "true",
+        );
+        if (focusIdx < 0) focusIdx = 0;
+
+        const open = () => {
+          list.hidden = false;
+          btn.setAttribute("aria-expanded", "true");
+          options[focusIdx]?.querySelector("a")?.focus();
+        };
+        const close = () => {
+          list.hidden = true;
+          btn.setAttribute("aria-expanded", "false");
+        };
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          list.hidden ? open() : close();
+        });
+        btn.addEventListener("keydown", e => {
+          if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            open();
+          }
+        });
+        list.addEventListener("keydown", e => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            close();
+            btn.focus();
+            return;
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            focusIdx = Math.min(focusIdx + 1, options.length - 1);
+            options[focusIdx]?.querySelector("a")?.focus();
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            focusIdx = Math.max(focusIdx - 1, 0);
+            options[focusIdx]?.querySelector("a")?.focus();
+          } else if (e.key === "Home") {
+            e.preventDefault();
+            focusIdx = 0;
+            options[focusIdx]?.querySelector("a")?.focus();
+          } else if (e.key === "End") {
+            e.preventDefault();
+            focusIdx = options.length - 1;
+            options[focusIdx]?.querySelector("a")?.focus();
+          }
+        });
+        document.addEventListener("click", e => {
+          if (list.hidden) return;
+          if (!root.contains(e.target as Node)) close();
+        });
+      }
+      document
+        .querySelectorAll<HTMLElement>("[data-combobox]")
+        .forEach(initCombobox);
+    </script>
   </body>
 </html>
