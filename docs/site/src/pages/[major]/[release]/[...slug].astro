@@ -26,8 +26,18 @@ export async function getStaticPaths() {
 
 const { entry } = Astro.props;
 const { Content, headings } = await render(entry);
-const fallbackTitle = entry.id.split("/").slice(-1)[0] ?? "Docs";
-const title = entry.data?.title ?? fallbackTitle;
+//: Title precedence:
+//:   1. explicit YAML frontmatter `title:` (lets sync-versions hand-stamp it)
+//:   2. first H1 in the markdown body (e.g. gomarkdoc's "# codec", or
+//:      pkg/v1/CLAUDE.md's "# pkg/v1/")
+//:   3. last path segment as a deliberate-fallback (only fires if a
+//:      page has neither — should not happen in practice)
+//: The slug fallback used to win for landing pages because their
+//: id is "v1/local" (Astro strips trailing /index), giving the
+//: useless "local" h1 — fixed by reading the first H1 here.
+const firstH1 = (headings ?? []).find(h => h.depth === 1);
+const slugFallback = entry.id.split("/").slice(-1)[0] ?? "Docs";
+const title = entry.data?.title ?? firstH1?.text ?? slugFallback;
 const description = entry.data?.description;
 //: Filter to H2/H3 — H4+ headings clutter the TOC without helping
 //: navigation. The full hierarchy stays in the rendered article.
@@ -35,7 +45,7 @@ const tocHeadings = (headings ?? []).filter(h => h.depth >= 2 && h.depth <= 3);
 ---
 
 <Default title={title} description={description} headings={tocHeadings}>
-  <article class="md-body">
+  <article class="md-body md-body--strip-first-h1">
     <Content />
   </article>
 </Default>

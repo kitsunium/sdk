@@ -146,6 +146,15 @@ tbody tr:hover {
   width: 100%;
 }
 
+/* Hide the markdown's first <h1> since the page-header already
+   renders it as the page title (we extract that h1 in the slug
+   route and pass it via Default.astro's `title` prop). Without
+   this, every page would show its own title twice — once in the
+   chrome and once at the top of the article. */
+.md-body--strip-first-h1 > h1:first-child {
+  display: none;
+}
+
 /* ── Page body: article + right-side TOC ─────────────────────────── */
 /* Two-column grid INSIDE .content so the TOC sticks to the right
    of the article without disturbing the left sidebar. min-width: 0
