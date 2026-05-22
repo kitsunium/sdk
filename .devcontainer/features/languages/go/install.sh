@@ -268,6 +268,13 @@ GOLANGCI_VERSION=$(get_github_latest_version_or_empty "golangci/golangci-lint")
 GOSEC_VERSION=$(get_github_latest_version_or_empty "securego/gosec")
 GOFUMPT_VERSION=$(get_github_latest_version_or_empty "mvdan/gofumpt")
 GOTESTSUM_VERSION=$(get_github_latest_version_or_empty "gotestyourself/gotestsum")
+# gomarkdoc — Go doc-comment → Markdown README generator. Used by projects
+# that put their README under a `//go:generate gomarkdoc ...` directive and
+# guard committed READMEs against drift via `gomarkdoc --check`. Installing
+# the binary at feature build time avoids pulling 50+ indirect deps into
+# every consumer module's go.mod when projects use `go tool gomarkdoc`.
+# See ADR 0008 in projects that opt into this pattern.
+GOMARKDOC_VERSION=$(get_github_latest_version_or_empty "princjef/gomarkdoc")
 # ktn-linter publishes asset name `ktn-linter_linux_<arch>.tar.gz`; pinned to
 # the most recent release that actually ships that asset (skips broken tags).
 KTN_LINTER_VERSION=$(get_github_latest_release_with_asset \
@@ -345,6 +352,25 @@ else
     set -e
 fi
 
+# gomarkdoc — README generator from Go doc comments. Shipped here as a
+# prebuilt binary so projects don't need a `tool` directive in go.mod
+# (which would drag ~50 indirect deps into every consumer's go.sum,
+# even though gomarkdoc never compiles into production code).
+if [[ -n "$GOMARKDOC_VERSION" ]]; then
+    spawn_tool "gomarkdoc" \
+        "https://github.com/princjef/gomarkdoc/releases/download/v${GOMARKDOC_VERSION}/gomarkdoc_${GOMARKDOC_VERSION}_linux_${GO_ARCH}.tar.gz" \
+        "github.com/princjef/gomarkdoc/cmd/gomarkdoc" \
+        "tar.gz"
+else
+    set +e
+    ( trap - ERR; \
+      echo -e "${YELLOW}gomarkdoc: version unavailable, building from source...${NC}" && \
+      go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@latest && \
+      echo -e "${GREEN}✓ gomarkdoc installed (from source)${NC}" ) &
+    TOOL_PIDS[gomarkdoc]=$!
+    set -e
+fi
+
 # goimports has no GitHub release — always compile from source.
 set +e
 ( trap - ERR; \
@@ -413,7 +439,11 @@ done
 # server binary (ktn-linter). A missing critical tool is a hard error: ship a
 # broken container and we reproduce exactly issue #324.
 CRITICAL_TOOLS=("golangci-lint" "gofumpt" "goimports" "ktn-linter")
-OPTIONAL_TOOLS=("gosec" "gotestsum" "buildifier" "buildozer")
+# gomarkdoc is OPTIONAL: not every Go project ships README-from-comments,
+# but projects that opt in via `//go:generate gomarkdoc ...` (see ADR 0008
+# in kitsunium/sdk) need the binary on PATH. Their own `make lint` /
+# pre-commit drift gate fails loudly when gomarkdoc is missing.
+OPTIONAL_TOOLS=("gosec" "gotestsum" "buildifier" "buildozer" "gomarkdoc")
 
 missing_critical=()
 for tool in "${CRITICAL_TOOLS[@]}"; do
@@ -560,7 +590,7 @@ echo "  - ${GO_INSTALLED}"
 echo "  - Go Modules (package manager)"
 echo ""
 echo "Development tools:"
-for _tool in golangci-lint gosec gofumpt goimports gotestsum ktn-linter buildifier buildozer; do
+for _tool in golangci-lint gosec gofumpt goimports gotestsum ktn-linter buildifier buildozer gomarkdoc; do
     if command -v "$_tool" &>/dev/null; then
         echo "  - $_tool (installed)"
     else

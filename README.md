@@ -18,7 +18,7 @@ curl -fsSL https://raw.githubusercontent.com/kodflow/devcontainer-template/main/
 - ✅ 11 commandes slash (`/git`, `/review`, `/plan`, `/do`, etc.)
 - ✅ 11 scripts de hooks (security, lint, format, test)
 - ✅ 155+ design patterns (GoF, Cloud, DDD, Enterprise)
-- ✅ Outils additionnels (grepai, status-line)
+- ✅ Outils additionnels (rtk, status-line)
 
 **Total :** 239 fichiers (~3.2MB) en 1-2 minutes
 
@@ -114,7 +114,6 @@ Le template inclut des serveurs MCP pré-configurés pour Claude Code.
 
 | Serveur | Description |
 |---------|-------------|
-| **grepai** | Recherche sémantique de code |
 | **github** | Intégration GitHub (PR, Issues) |
 | **gitlab** | Intégration GitLab (MR, Pipelines) |
 | **context7** | Documentation à jour (fragment image) |

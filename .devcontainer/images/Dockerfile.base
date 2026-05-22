@@ -4,7 +4,7 @@
 # Base Development Image (Stable Layer — rebuilt weekly)
 # =============================================================================
 # Heavy, rarely-changing dependencies: system packages, Cloud CLIs, PPA tools.
-# The main Dockerfile extends this with dynamic tools (Claude, grepai, etc.).
+# The main Dockerfile extends this with dynamic tools (Claude, etc.).
 #
 # Build:
 #   docker buildx build --platform linux/amd64,linux/arm64 \

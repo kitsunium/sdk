@@ -1,8 +1,8 @@
 {
   "id": "go",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "name": "Go Development Environment",
-  "description": "Installs Go with common development tools and multi-architecture support",
+  "description": "Installs Go with common development tools (golangci-lint, gofumpt, goimports, gotestsum, ktn-linter, buildifier, buildozer, gomarkdoc) and multi-architecture support",
   "options": {
     "version": {
       "type": "string",

@@ -18,8 +18,6 @@ All other lifecycle hooks are image-embedded at `/etc/devcontainer-hooks/lifecyc
 
 - Generates `.env` from `.env.example` (project name from git remote)
 - Validates feature structure (install.sh + devcontainer-feature.json)
-- Installs/starts Ollama on host with `OLLAMA_HOST=0.0.0.0` (container-accessible)
-- Pulls embedding model (`bge-m3`) for grepai semantic search
 - Pulls latest Docker image to bypass cache
 
 ## Execution Order

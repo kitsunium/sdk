@@ -4,7 +4,7 @@
 # Development Image (Dynamic Layer — rebuilt daily)
 # =============================================================================
 # Extends the stable base image with frequently-updated tools:
-# Claude Code, grepai, rtk, kubectl, helm, CodeRabbit, Qodo, etc.
+# Claude Code, rtk, kubectl, helm, CodeRabbit, Qodo, etc.
 #
 # Base image (devcontainer-base) contains: system deps, Cloud CLIs, PPA tools,
 # Oh My Zsh. It is rebuilt weekly via Dockerfile.base.
@@ -28,13 +28,9 @@ ARG CACHE_BUST_DYNAMIC=stable
 USER root
 
 # =============================================================================
-# Dynamic Binary Tools (grepai, rtk) — kubectl/helm/bazelisk/yq are in base
+# Dynamic Binary Tools (rtk) — kubectl/helm/bazelisk/yq are in base
 # =============================================================================
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
-    GREPAI_LATEST=$(curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: token ${GITHUB_TOKEN}"} "https://api.github.com/repos/yoanbernabeu/grepai/releases/latest" | jq -r '.tag_name') && \
-    echo "Installing grepai ${GREPAI_LATEST}..." && \
-    curl -fsSL "https://github.com/yoanbernabeu/grepai/releases/download/${GREPAI_LATEST}/grepai_${GREPAI_LATEST#v}_linux_${ARCH}.tar.gz" | \
-    tar xz -C /usr/local/bin grepai && \
     RTK_LATEST=$(curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: token ${GITHUB_TOKEN}"} "https://api.github.com/repos/rtk-ai/rtk/releases/latest" | jq -r '.tag_name') && \
     echo "Installing rtk ${RTK_LATEST}..." && \
     RTK_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64-unknown-linux-gnu" || echo "x86_64-unknown-linux-musl") && \
@@ -81,9 +77,6 @@ COPY --chown=vscode:vscode mcp-fragments/ /etc/mcp/fragments/
 # The version marker lets postStart skip sync when repo is ahead of image.
 COPY --chown=root:root features/ /etc/devcontainer-template/features/
 COPY --chown=root:root image-template-version.json /etc/devcontainer-template/.template-version
-
-# GrepAI config template (optimized for 12 languages)
-COPY --chown=vscode:vscode grepai.config.yaml /etc/grepai/config.yaml
 
 # RTK config template (token savings proxy, root-owned system template)
 COPY --chown=root:root rtk.config.toml /etc/rtk/config.toml

@@ -7,7 +7,7 @@ Two-tier Docker images with all development tools pre-installed.
 Claude Code and MCP servers are included; languages added via features.
 
 **Base image** (`Dockerfile.base`): Stable deps (apt, Cloud CLIs) — rebuilt weekly.
-**Main image** (`Dockerfile`): Dynamic tools (Claude, grepai, rtk) — rebuilt daily.
+**Main image** (`Dockerfile`): Dynamic tools (Claude, rtk) — rebuilt daily.
 
 ## Structure
 
@@ -17,7 +17,6 @@ Claude Code and MCP servers are included; languages added via features.
 ├── Dockerfile          # Dynamic layer (~120MB, daily rebuild)
 ├── .dockerignore       # Build context exclusions
 ├── mcp.json.tpl        # MCP server template
-├── grepai.config.yaml  # GrepAI search config (12 languages)
 ├── .p10k.zsh           # Powerlevel10k config
 ├── scripts/vpn/        # VPN helper scripts
 ├── hooks/              # Image-embedded lifecycle hooks
@@ -84,7 +83,7 @@ Lifecycle hooks called directly from `devcontainer.json` → `/etc/devcontainer-
 | Container | Docker (via feature), kubectl, Helm |
 | Network | ping, dig, nmap, traceroute, mtr, tcpdump, netcat, whois, iperf3, net-tools |
 | VPN | OpenVPN, WireGuard, StrongSwan (IPsec), PPTP |
-| Code Quality | ShellCheck, grepai, CodeRabbit, Qodo, RTK |
+| Code Quality | ShellCheck, CodeRabbit, Qodo, RTK |
 | Shell | Zsh (default `$SHELL`) + Oh My Zsh + Powerlevel10k |
 
 ## Shell Startup Optimization (v3)
@@ -105,28 +104,17 @@ Management commands (`nvm use`, `pyenv install`) trigger lazy-load on first call
 
 ## MCP Servers (Runtime)
 
-Core servers in `mcp.json.tpl` (grepai, GitHub, GitLab). Additional servers added via MCP fragments:
+Core servers in `mcp.json.tpl` (GitHub, GitLab). Additional servers added via MCP fragments:
 - Image-level fragments (`/etc/mcp/fragments/`): context7 — always merged
 - Feature-level fragments (`/etc/mcp/features/`): ktn-linter (Go), Playwright (browser), rust-analyzer, etc.
 
 | Server | Package | Type | Auth |
 |--------|---------|------|------|
-| **grepai** | `grepai` (binary) | Core (template) | None (local) |
 | **GitHub** | `ghcr.io/github/github-mcp-server` (Docker) | Core (template) | `GITHUB_TOKEN` |
 | **GitLab** | `@zereight/mcp-gitlab` | Core (template) | `GITLAB_TOKEN` |
 | **context7** | `@upstash/context7-mcp` | Fragment (image) | None |
 | **ktn-linter** | `ktn-linter` (binary) | Fragment (Go feature) | None |
 | **Playwright** | `@playwright/mcp` | Fragment (browser feature) | None |
-
-**grepai tools (MANDATORY - use instead of Grep):**
-
-| Tool | Description | Use Case |
-|------|-------------|----------|
-| `grepai_search` | Semantic code search | Natural language queries |
-| `grepai_trace_callers` | Find function callers | Impact analysis |
-| `grepai_trace_callees` | Find called functions | Dependency analysis |
-| `grepai_trace_graph` | Build call graph | Architecture understanding |
-| `grepai_index_status` | Check index health | Debugging |
 
 **GitLab tools (when GITLAB_TOKEN configured):**
 
