@@ -13,6 +13,7 @@ Pick the matcher / accessor that fits the routing you need.
 <div class="tabs" data-tabs>
 <div class="tab-strip" role="tablist">
 <button type="button" role="tab" id="errs-hascode-btn" aria-controls="errs-hascode" aria-selected="true" tabindex="0" class="active">Match a specific code</button>
+<button type="button" role="tab" id="errs-hasany-btn" aria-controls="errs-hasany" aria-selected="false" tabindex="-1">Match a set of codes</button>
 <button type="button" role="tab" id="errs-hasreason-btn" aria-controls="errs-hasreason" aria-selected="false" tabindex="-1">Match by symbolic reason</button>
 <button type="button" role="tab" id="errs-prefix-btn" aria-controls="errs-prefix" aria-selected="false" tabindex="-1">Match a code range</button>
 <button type="button" role="tab" id="errs-render-btn" aria-controls="errs-render" aria-selected="false" tabindex="-1">Render safely</button>
@@ -23,6 +24,23 @@ Pick the matcher / accessor that fits the routing you need.
 <pre><code class="language-go">if errs.HasCode(err, codec.CodeUnknownFormat) {
     // The caller asked for a Format we never registered.
     return fallback
+}</code></pre>
+</div>
+
+<div role="tabpanel" id="errs-hasany" aria-labelledby="errs-hasany-btn" hidden>
+<p><strong>Best for:</strong> retry / circuit-breaker policies that branch on a SET of failure modes ("retry on these 5 codes"). Variadic OR — saves the <code>HasCode(err,a) || HasCode(err,b) || …</code> chain.</p>
+<pre><code class="language-go">retryable := errs.HasAnyCode(err,
+    codec.CodeStreamingUnsupported,
+    logger.CodeWriterRequired,
+    logger.CodeSinkConfigRequired,
+)
+if retryable {
+    return backoff.Retry(ctx, do)
+}
+
+// String-keyed sibling for reason-based routing:
+if errs.HasAnyReason(err, "UNKNOWN_FORMAT", "WRITER_REQUIRED") {
+    log.Warn("configuration-class error", "err", err)
 }</code></pre>
 </div>
 

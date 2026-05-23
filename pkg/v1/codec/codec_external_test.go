@@ -1447,3 +1447,78 @@ func TestCrossCodec_JSONviaCBOR(t *testing.T) {
 		})
 	}
 }
+
+// TestMarshalMany asserts the broadcast variant returns one entry per
+// requested Format on the happy path, joins per-format errors via
+// errors.Join on partial failure, and leaves no map entry for a Format
+// that did not resolve.
+// TestMarshalMany covers the broadcast variant via a table: one row
+// per behaviour (happy-path full success, partial failure with one
+// bad Format, empty formats variadic no-op). Each row asserts the
+// returned map's expected keys + whether the joined err must surface
+// CodeUnknownFormat.
+func TestMarshalMany(t *testing.T) {
+	t.Parallel()
+	type marshalManyCase struct {
+		name           string
+		formats        []codec.Format
+		wantKeys       []codec.Format
+		wantMissingKey codec.Format
+		wantUnknown    bool
+	}
+	tests := []marshalManyCase{
+		{
+			name:        "happy_path_three_formats",
+			formats:     []codec.Format{codec.JSON, codec.CBOR, codec.MsgPack},
+			wantKeys:    []codec.Format{codec.JSON, codec.CBOR, codec.MsgPack},
+			wantUnknown: false,
+		},
+		{
+			name:           "partial_failure_unknown_format",
+			formats:        []codec.Format{codec.JSON, codec.Format("not-a-real-format"), codec.CBOR},
+			wantKeys:       []codec.Format{codec.JSON, codec.CBOR},
+			wantMissingKey: codec.Format("not-a-real-format"),
+			wantUnknown:    true,
+		},
+		{
+			name:        "empty_formats_returns_empty_map",
+			formats:     nil,
+			wantKeys:    nil,
+			wantUnknown: false,
+		},
+	}
+	value := event{Name: "many-probe", Count: 7}
+	runCase := func(t *testing.T, tc marshalManyCase) {
+		t.Helper()
+		out, err := codec.MarshalMany(value, tc.formats...)
+		if tc.wantUnknown {
+			if err == nil {
+				t.Fatalf("%s: expected joined error", tc.name)
+			}
+			if !errs.HasCode(err, codec.CodeUnknownFormat) {
+				t.Errorf("%s: expected CodeUnknownFormat in err, got %v", tc.name, err)
+			}
+		} else if err != nil {
+			t.Fatalf("%s: MarshalMany err=%v want nil", tc.name, err)
+		}
+		for _, f := range tc.wantKeys {
+			if _, ok := out[f]; !ok {
+				t.Errorf("%s: missing entry for %s", tc.name, f)
+			}
+		}
+		if tc.wantMissingKey != "" {
+			if _, ok := out[tc.wantMissingKey]; ok {
+				t.Errorf("%s: unexpected entry for %s", tc.name, tc.wantMissingKey)
+			}
+		}
+		if len(tc.wantKeys) != len(out) {
+			t.Errorf("%s: len(out)=%d want %d", tc.name, len(out), len(tc.wantKeys))
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}

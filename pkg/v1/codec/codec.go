@@ -24,6 +24,9 @@
 //     in consumer code.
 //   - Append for hot paths. Codecs implementing Appender let you
 //     reuse a []byte buffer across calls — handy in tight loops.
+//   - Broadcast marshal. MarshalMany(v, formats...) serialises the
+//     same value to N formats at once — content negotiation, replication,
+//     multi-protocol message buses.
 //
 // # What's shipped — all 18 formats
 //
@@ -127,6 +130,7 @@
 package codec
 
 import (
+	"errors"
 	"io"
 
 	corecodec "github.com/kitsunium/sdk/internal/core/codec"
@@ -208,6 +212,54 @@ func Unmarshal(f Format, data []byte, v any) error {
 	}
 	//: delegate to the concrete codec; its errors are already wrapped.
 	return c.Unmarshal(data, v)
+}
+
+// MarshalMany serialises v into every format in formats and returns a
+// map keyed by Format with the encoded bytes. The same logical value
+// goes out in N different wire encodings — handy for HTTP content
+// negotiation, multi-protocol message buses, archival doubling, or
+// cross-region replication where each region speaks a different
+// codec.
+//
+// Per-format errors are joined under [errors.Join] and returned as a
+// single error; partial results stay in the returned map so callers
+// can decide whether to ship the formats that succeeded or fail the
+// whole batch. An unknown Format in the list surfaces
+// [UnknownFormat] / [CodeUnknownFormat] inside that joined error
+// (and leaves no entry in the map for that Format).
+//
+// Calling with formats == nil (or empty) returns an empty map and no
+// error — the no-op semantics mirror calling Marshal zero times.
+//
+//	out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
+//	// out[codec.JSON], out[codec.CBOR], out[codec.MsgPack] all populated
+//	// when err == nil.
+func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, err error) {
+	//: pre-allocate the result map with exact cardinality.
+	encodedByFormat = make(map[Format][]byte, len(formats))
+	//: accumulator for per-format failures so partial success is visible.
+	var perFormat []error
+	//: iterate in caller order so a misordered formats list still yields a deterministic out map.
+	for _, f := range formats {
+		//: Marshal already resolves through the registry and returns a typed error on miss.
+		data, mErr := Marshal(f, v)
+		//: failure path — keep going so the caller sees every formats result.
+		if mErr != nil {
+			//: append the typed sentinel so HasCode(err, CodeUnknownFormat) keeps working through Join.
+			perFormat = append(perFormat, mErr)
+			//: don't record a partial bytes entry for this Format — absence is the signal.
+			continue
+		}
+		//: success — record the bytes under the Format key.
+		encodedByFormat[f] = data
+	}
+	//: collapse the per-format failure slice into a single joined error or nil.
+	if len(perFormat) > 0 {
+		//: errors.Join walks unwrap chains so HasCode keeps working.
+		return encodedByFormat, errors.Join(perFormat...)
+	}
+	//: clean exit — every requested Format encoded successfully.
+	return encodedByFormat, nil
 }
 
 // NewEncoder returns a streaming encoder for the codec registered under f.

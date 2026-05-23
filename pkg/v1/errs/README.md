@@ -32,7 +32,9 @@ Nine accessors, two code helpers, four mask presets, one matcher constructor. Al
 | errs.HTTPStatusOf(err)                | accessor   | int — HTTP status, default 500                             |
 | errs.ExitCodeOf(err)                  | accessor   | int — POSIX exit code, default 70 (EX_SOFTWARE)            |
 | errs.HasCode(err, c)                  | predicate  | bool — true if c appears in the Unwrap chain               |
+| errs.HasAnyCode(err, c1, c2, …)       | predicate  | bool — variadic OR over multiple codes (routing on a set)  |
 | errs.HasReason(err, r)                | predicate  | bool — same with the reason string                         |
+| errs.HasAnyReason(err, r1, r2, …)     | predicate  | bool — variadic OR over multiple reasons                   |
 | errs.NewPrefixMatcher(code, mask)     | matcher    | PrefixMatcher — use with errors.Is for range routing       |
 | errs.Pack(major, layer, pkg, serial)  | code ctor  | Code from four octets                                       |
 | errs.ParseCode(s)                     | code ctor  | Code from "M.L.P.S" string                                 |
@@ -102,6 +104,8 @@ fmt.Println("HTTP status:", errs.HTTPStatusOf(err))
 ## Index
 
 - [Variables](<#variables>)
+- [func HasAnyCode\(err error, codes ...Code\) bool](<#HasAnyCode>)
+- [func HasAnyReason\(err error, reasons ...string\) bool](<#HasAnyReason>)
 - [type Code](<#Code>)
 - [type Layer](<#Layer>)
 - [type Major](<#Major>)
@@ -157,8 +161,44 @@ var (
 )
 ```
 
+<a name="HasAnyCode"></a>
+## func [HasAnyCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L234>)
+
+```go
+func HasAnyCode(err error, codes ...Code) bool
+```
+
+HasAnyCode walks err's chain and reports whether any \*errs.Error carries a Code matching ANY of the supplied codes. Convenience equivalent of \`HasCode\(err, c1\) || HasCode\(err, c2\) || …\` — useful when a retry policy / circuit\-breaker / metric routes on a SET of failure modes rather than a single code.
+
+Returns false when codes is empty.
+
+```
+retryable := errs.HasAnyCode(err,
+    codec.CodeStreamingUnsupported,
+    logger.CodeWriterRequired,
+    logger.CodeSinkConfigRequired,
+)
+```
+
+<a name="HasAnyReason"></a>
+## func [HasAnyReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L257>)
+
+```go
+func HasAnyReason(err error, reasons ...string) bool
+```
+
+HasAnyReason is the reason\-string sibling of [HasAnyCode](<#HasAnyCode>). Reports whether any \*errs.Error in err's chain carries a Reason matching ANY of the supplied reasons. Useful when call sites read more naturally with the SCREAMING\_SNAKE label than the numeric code.
+
+Returns false when reasons is empty.
+
+```
+if errs.HasAnyReason(err, "UNKNOWN_FORMAT", "STREAMING_UNSUPPORTED") {
+    // fall back to a different transport
+}
+```
+
 <a name="Code"></a>
-## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L146>)
+## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L148>)
 
 Code is the dotted\-quad error identifier packed into uint32. See ADR 0005 for the registry and layout.
 
@@ -182,7 +222,7 @@ const (
 ```
 
 <a name="Layer"></a>
-## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L153>)
+## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L155>)
 
 Layer is the second octet of Code — SDK layer \(0 = meta, 1 = kernel, 2 = core, 3 = service,...\). See ADR 0005.
 
@@ -191,7 +231,7 @@ type Layer = kerrs.Layer
 ```
 
 <a name="Major"></a>
-## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L150>)
+## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L152>)
 
 Major is the top octet of Code — SemVer major version \(0 = internal, 1 = v1,...\). See ADR 0005.
 
@@ -200,7 +240,7 @@ type Major = kerrs.Major
 ```
 
 <a name="PkgCode"></a>
-## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L155>)
+## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L157>)
 
 PkgCode is the third octet of Code — per\-layer package slot. See ADR 0005 / 0006.
 
@@ -209,7 +249,7 @@ type PkgCode = kerrs.PkgCode
 ```
 
 <a name="PrefixMatcher"></a>
-## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L161>)
+## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L163>)
 
 PrefixMatcher is the errors.Is target for CIDR\-style Code matching. Construct via NewPrefixMatcher.
 
@@ -218,7 +258,7 @@ type PrefixMatcher = kerrs.PrefixMatcher
 ```
 
 <a name="Serial"></a>
-## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L157>)
+## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L159>)
 
 Serial is the low octet of Code — per\-package serial. See ADR 0005.
 

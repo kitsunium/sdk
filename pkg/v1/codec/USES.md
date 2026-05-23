@@ -10,7 +10,7 @@
 
 ## Use cases
 
-Pick the Format that fits the wire constraint — the call site stays identical.
+Pick the Format that fits the wire constraint — the call site stays identical. The last tab covers the broadcast variant when one Marshal must produce bytes in multiple wire encodings at once.
 
 <div class="tabs" data-tabs>
 <div class="tab-strip" role="tablist">
@@ -21,6 +21,7 @@ Pick the Format that fits the wire constraint — the call site stays identical.
 <button type="button" role="tab" id="uc-ndjson-btn" aria-controls="uc-ndjson" aria-selected="false" tabindex="-1">NDJSON</button>
 <button type="button" role="tab" id="uc-flatbuffers-btn" aria-controls="uc-flatbuffers" aria-selected="false" tabindex="-1">FlatBuffers</button>
 <button type="button" role="tab" id="uc-base64-btn" aria-controls="uc-base64" aria-selected="false" tabindex="-1">base64</button>
+<button type="button" role="tab" id="uc-many-btn" aria-controls="uc-many" aria-selected="false" tabindex="-1">Many at once (broadcast)</button>
 </div>
 
 <div role="tabpanel" id="uc-json" aria-labelledby="uc-json-btn">
@@ -75,6 +76,22 @@ data, _ := codec.Marshal("flatbuffers", builder.FinishedBytes())</code></pre>
 <pre><code class="language-go">data, err := codec.Marshal("base64", payload)
 // Six base-N flavours work the same way: "base64", "base64url",
 // "base32", "base16", "hex", "ascii85".</code></pre>
+</div>
+
+<div role="tabpanel" id="uc-many" aria-labelledby="uc-many-btn" hidden>
+<p><strong>Best for:</strong> HTTP content negotiation, multi-protocol message buses, archival doubling — same value out in N wire encodings in one call. Per-format errors are joined under <code>errors.Join</code> so partial success stays visible in the returned map.</p>
+<pre><code class="language-go">out, err := codec.MarshalMany(payload,
+    codec.JSON, codec.CBOR, codec.MsgPack, "base64",
+)
+// out[codec.JSON]    -> []byte for JSON wire
+// out[codec.CBOR]    -> []byte for CBOR wire
+// out[codec.MsgPack] -> []byte for MsgPack wire
+// out["base64"]      -> []byte for base64 text
+
+// Partial-success handling — a typo in one Format leaves the rest in `out`.
+if errs.HasCode(err, codec.CodeUnknownFormat) {
+    log.Warn("one Format was unknown; the rest succeeded")
+}</code></pre>
 </div>
 
 </div>
