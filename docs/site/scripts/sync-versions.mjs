@@ -140,11 +140,26 @@ function stripGomarkdocIndex(body) {
   return body.replace(/\n## Index\n[\s\S]*?(?=\n## |\s*$)/, "\n");
 }
 
-function frontmatter(title, description) {
-  const desc = description
-    ? `\ndescription: ${JSON.stringify(description)}`
-    : "";
-  return `---\ntitle: ${JSON.stringify(title)}${desc}\n---\n\n`;
+/**
+ * Build a minimal YAML frontmatter block. Every field is optional —
+ * omitted fields are simply not emitted (Astro's `.passthrough()`
+ * schema lets missing fields stay undefined in entry.data).
+ *
+ * `source` is the repo-relative path to the original file the page
+ * was materialised from. The site's EditLink component uses it to
+ * deep-link readers back to the source for an "Edit this page on
+ * GitHub" affordance.
+ *
+ * @param {{title?: string|null, description?: string|null, source?: string|null}} opts
+ * @returns {string}
+ */
+function frontmatter({ title, description, source } = {}) {
+  const parts = [];
+  if (title) parts.push(`title: ${JSON.stringify(title)}`);
+  if (description) parts.push(`description: ${JSON.stringify(description)}`);
+  if (source) parts.push(`source: ${JSON.stringify(source)}`);
+  if (parts.length === 0) return "";
+  return `---\n${parts.join("\n")}\n---\n\n`;
 }
 
 // ─── Per-release materialiser ─────────────────────────────────────
@@ -154,7 +169,11 @@ function frontmatter(title, description) {
 // — nothing is invented.
 
 async function materialiseRelease(major, release, sourceRoot) {
-  const dest = join(CONTENT_ROOT, major, release);
+  //: Dest is <release>/<major>/ — release is the time axis (snapshot
+  //: in git, e.g. local / v0.1.0), major is the API-surface axis
+  //: (v1 / v2). The hierarchy reads as "this release's v1 surface",
+  //: which matches how readers reason about a versioned SDK.
+  const dest = join(CONTENT_ROOT, release, major);
   await mkdir(dest, { recursive: true });
 
   const pkgMajor = join(sourceRoot, "pkg", major);
@@ -172,13 +191,19 @@ async function materialiseRelease(major, release, sourceRoot) {
     const body = await readFile(landing, "utf8");
     await writeFile(
       join(dest, "index.md"),
-      frontmatter(landingTitle, `Overview of pkg/${major}`) + body,
+      frontmatter({
+        title: landingTitle,
+        description: `Overview of pkg/${major}`,
+        source: `pkg/${major}/CLAUDE.md`,
+      }) + body,
     );
   } else {
     await writeFile(
       join(dest, "index.md"),
-      frontmatter(landingTitle, `Documentation snapshot for ${major}`) +
-        `# ${major}\n\nDocumentation snapshot for ${major}.\n`,
+      frontmatter({
+        title: landingTitle,
+        description: `Documentation snapshot for ${major}`,
+      }) + `# ${major}\n\nDocumentation snapshot for ${major}.\n`,
     );
   }
 
@@ -186,7 +211,11 @@ async function materialiseRelease(major, release, sourceRoot) {
   // ships a README.md becomes a top-level service page. We post-
   // process the gomarkdoc output to strip the "## Index" block —
   // it's a redundant flat list of every symbol that duplicates
-  // the right-side TOC the docs site already renders.
+  // the right-side TOC the docs site already renders. We inject a
+  // `source` frontmatter pointing at the gomarkdoc-generated README
+  // so the EditLink can deep-link readers to the file that drives
+  // the page (their edits should target the Go doc comments — but
+  // pkg.go.dev shows the right entry point all the same).
   if (existsSync(pkgMajor)) {
     const subs = await readdir(pkgMajor, { withFileTypes: true });
     for (const sub of subs) {
@@ -194,7 +223,11 @@ async function materialiseRelease(major, release, sourceRoot) {
       const readme = join(pkgMajor, sub.name, "README.md");
       if (existsSync(readme)) {
         const raw = await readFile(readme, "utf8");
-        await writeFile(join(dest, `${sub.name}.md`), stripGomarkdocIndex(raw));
+        await writeFile(
+          join(dest, `${sub.name}.md`),
+          frontmatter({ source: `pkg/${major}/${sub.name}/README.md` }) +
+            stripGomarkdocIndex(raw),
+        );
       }
     }
     // Special case: codec benchmark report -> /v?/<r>/benchmarks/
@@ -208,20 +241,30 @@ async function materialiseRelease(major, release, sourceRoot) {
       const benchBody = await readFile(bench, "utf8");
       await writeFile(
         join(dest, "benchmarks.md"),
-        frontmatter(benchTitle, `Codec benchmark report`) + benchBody,
+        frontmatter({
+          title: benchTitle,
+          description: `Codec benchmark report`,
+          source: `pkg/${major}/codec/BENCH.md`,
+        }) + benchBody,
       );
     }
   }
 
   // 3. ADRs — cross-version, snapshotted per release so the version
-  // dropdown shows the ADR set as of that tag.
+  // dropdown shows the ADR set as of that tag. We read+rewrite each
+  // file (instead of plain copyFile) so a `source` frontmatter can
+  // be prepended for the EditLink.
   if (existsSync(adrDir)) {
     const adrDest = join(dest, "adr");
     await mkdir(adrDest, { recursive: true });
     const adrIndexRows = [];
     for (const f of await readdir(adrDir)) {
       if (!/\.md$/i.test(f)) continue;
-      await copyFile(join(adrDir, f), join(adrDest, f));
+      const raw = await readFile(join(adrDir, f), "utf8");
+      await writeFile(
+        join(adrDest, f),
+        frontmatter({ source: `docs/adr/${f}` }) + raw,
+      );
       adrIndexRows.push(
         `- [${f.replace(/\.md$/, "")}](./${f.replace(/\.md$/, "")}/)`,
       );
@@ -230,10 +273,10 @@ async function materialiseRelease(major, release, sourceRoot) {
     // from RESERVED so sidebar ("ADRs") and page-header h1 match.
     const adrTitle = RESERVED.adr.label ?? "ADRs";
     const adrIndex =
-      frontmatter(
-        adrTitle,
-        `Frozen ADR set as of ${release === LOCAL_RELEASE ? "HEAD" : release}`,
-      ) +
+      frontmatter({
+        title: adrTitle,
+        description: `Frozen ADR set as of ${release === LOCAL_RELEASE ? "HEAD" : release}`,
+      }) +
       `# ${adrTitle}\n\n` +
       `Architecture Decision Records snapshotted at \`${release}\`.\n\n` +
       adrIndexRows.sort().join("\n") +
@@ -244,7 +287,9 @@ async function materialiseRelease(major, release, sourceRoot) {
   // 4. Cross-cutting pages extracted from /workspace/CLAUDE.md
   // sections. Title = RESERVED label so sidebar and page-header h1
   // are byte-identical; description = the source section name
-  // (preserved for SEO + the modal subtitle).
+  // (preserved for SEO + the modal subtitle). Source points back to
+  // the root CLAUDE.md so the EditLink works (readers will land on
+  // the file even if the section anchor isn't preserved).
   const sections = await extractClaudeMdSections(claudeMd);
   const pageMap = [
     ["philosophy", "SDK-wide rules (non-negotiable)"],
@@ -258,7 +303,14 @@ async function materialiseRelease(major, release, sourceRoot) {
     const pageTitle = RESERVED[slug]?.label ?? sectionTitle;
     await writeFile(
       join(dest, `${slug}.md`),
-      frontmatter(pageTitle, sectionTitle) + `# ${pageTitle}\n\n` + body + "\n",
+      frontmatter({
+        title: pageTitle,
+        description: sectionTitle,
+        source: `CLAUDE.md`,
+      }) +
+        `# ${pageTitle}\n\n` +
+        body +
+        "\n",
     );
   }
 }

@@ -1,0 +1,58 @@
+---
+// Breadcrumbs — shows the IN-DOCUMENT path only. URL layout is
+// /<release>/<major>/<page-path>, but the release + major coordinate
+// is already surfaced in the header band (ApiDropdown + release pill),
+// so duplicating them here just made the breadcrumb noisy ("site / v1
+// / local / codec"). We render only the slugs after <major>:
+//
+//   /local/v1/                       → (no breadcrumb, on Home)
+//   /local/v1/codec/                 → Home / codec
+//   /local/v1/adr/0005-foo/          → Home / ADRs / 0005-foo
+//
+// Labels come from the page catalog so they match what the sidebar
+// shows; falls back to the raw slug segment when no catalog entry
+// applies (deep-nested pages).
+import { RESERVED } from "../../scripts/lib/page-catalog.mjs";
+
+interface Props {
+  currentPath: string;
+}
+const { currentPath } = Astro.props;
+
+const segments = currentPath
+  .replace(/^\/+|\/+$/g, "")
+  .split("/")
+  .filter(Boolean);
+//: segments[0] = release, segments[1] = major, segments[2..] = in-doc.
+const inDoc = segments.slice(2);
+const base = segments.length >= 2 ? `/${segments[0]}/${segments[1]}` : "";
+const homeLabel = RESERVED.index.label ?? "Home";
+
+const crumbs: Array<{ href: string; label: string }> = [];
+if (base !== "") crumbs.push({ href: `${base}/`, label: homeLabel });
+let accum = base;
+for (const seg of inDoc) {
+  accum += `/${seg}`;
+  const label = RESERVED[seg]?.label ?? seg;
+  crumbs.push({ href: `${accum}/`, label });
+}
+const last = crumbs.length - 1;
+//: Hide on the landing page itself — no value in a single-link
+//: breadcrumb that just says "Home".
+const visible = inDoc.length > 0;
+---
+
+{visible && crumbs.length > 0 && (
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      {crumbs.map((c, i) => (
+        <li>
+          {i === last
+            ? <span aria-current="page">{c.label}</span>
+            : <a href={c.href}>{c.label}</a>}
+          {i !== last && <span class="sep" aria-hidden="true">/</span>}
+        </li>
+      ))}
+    </ol>
+  </nav>
+)}

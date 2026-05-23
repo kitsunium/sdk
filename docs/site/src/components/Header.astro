@@ -48,10 +48,12 @@ try {
 } catch { /* prebuild not run yet */ }
 
 const { currentPath } = Astro.props;
-const m = currentPath.match(/^\/(v\d+)(?:\/([^/]+))?(?:\/|$)/);
+//: URL layout: /<release>/<major>/... — release first (snapshot in
+//: time), major second (API surface).
+const m = currentPath.match(/^\/([^/]+)\/(v\d+)(?:\/|$)/);
 const fallback = findDefaults(versions);
-const currentMajor = m?.[1] ?? fallback.major;
-const currentRelease = m?.[2] ?? fallback.release;
+const currentRelease = m?.[1] ?? fallback.release;
+const currentMajor = m?.[2] ?? fallback.major;
 
 const commitDay = build.commitDate ? build.commitDate.slice(0, 10) : null;
 const commitHref = build.commitFull && build.repoUrl

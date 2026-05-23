@@ -8,4 +8,4 @@ dist/
 src/data/versions.json
 src/data/build-info.json
 public/_search/
-src/content/docs/v*/
+src/content/docs/*/

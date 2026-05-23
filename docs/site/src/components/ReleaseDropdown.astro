@@ -62,7 +62,7 @@ const activeLabel =
           aria-selected={r.version === currentRelease}
           class:list={[r.version === currentRelease && "active"]}
         >
-          <a href={`/${currentMajor}/${r.version}/`}>
+          <a href={`/${r.version}/${currentMajor}/`}>
             {shaText && (
               <>
                 <span class="opt-sha">{shaText}</span>

@@ -1,0 +1,80 @@
+---
+// Theme toggle — flips data-theme on <html> between "dark" (default)
+// and "light". State persists in localStorage so subsequent loads
+// honour the user's choice; the FOUC-busting inline boot script lives
+// in Default.astro <head> (runs before the body paints).
+---
+
+<button
+  type="button"
+  class="theme-toggle"
+  data-theme-toggle
+  aria-label="Toggle colour theme"
+  title="Toggle theme"
+>
+  <svg
+    class="icon icon-sun"
+    aria-hidden="true"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <circle cx="12" cy="12" r="4"></circle>
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+    ></path>
+  </svg>
+  <svg
+    class="icon icon-moon"
+    aria-hidden="true"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+  </svg>
+  <span class="theme-toggle-label" data-theme-label>Dark</span>
+</button>
+
+<script is:inline>
+  (function () {
+    const STORAGE_KEY = "kitsunium:docs:theme";
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      document
+        .querySelectorAll("[data-theme-toggle]")
+        .forEach((btn) => btn.setAttribute("aria-pressed", String(theme === "light")));
+      document
+        .querySelectorAll("[data-theme-label]")
+        .forEach((el) => (el.textContent = theme === "light" ? "Light" : "Dark"));
+    }
+    function init() {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      const initial = stored ?? document.documentElement.dataset.theme ?? "dark";
+      applyTheme(initial);
+      document.querySelectorAll("[data-theme-toggle]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const next = (document.documentElement.dataset.theme === "light") ? "dark" : "light";
+          localStorage.setItem(STORAGE_KEY, next);
+          applyTheme(next);
+        });
+      });
+    }
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", init);
+    } else {
+      init();
+    }
+    //: Re-bind after Astro view-transitions swap the DOM.
+    document.addEventListener("astro:page-load", init);
+  })();
+</script>

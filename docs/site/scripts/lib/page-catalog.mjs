@@ -129,3 +129,21 @@ export function buildCatalog(entries, root, base) {
       .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)),
   }));
 }
+
+/**
+ * Project a grouped catalog into a flat ordered list. Used by the
+ * Previous/Next page footer to find a page's neighbours in the
+ * canonical reading order: Overview → services → Reference.
+ *
+ * @param {ReturnType<typeof buildCatalog>} catalog
+ * @returns {Array<{ href: string, label: string, group: string }>}
+ */
+export function flattenCatalog(catalog) {
+  const out = [];
+  for (const section of catalog) {
+    for (const item of section.items) {
+      out.push({ href: item.href, label: item.label, group: section.group });
+    }
+  }
+  return out;
+}

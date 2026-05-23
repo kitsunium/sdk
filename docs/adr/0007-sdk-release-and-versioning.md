@@ -64,14 +64,14 @@ Bazel's role here is purely **read-only graph query** — release orchestration 
 1. Calls `gh release list --json tagName,publishedAt,isDraft,isPrerelease`.
 2. Filters tags through the canonical regex (`tag-format.mjs`) — drops drafts, pre-releases, and shell-injection bait.
 3. Picks the latest per major.
-4. For each (major, latest tag): `git worktree add /tmp/wt-<major> <tag>`, copies `pkg/<major>/**/README.md` + `**/BENCH.md` + `docs/adr/*.md` into `docs/site/src/content/docs/<major>/`, then `git worktree remove --force` in a `finally`.
+4. For each (major, latest tag): `git worktree add /tmp/wt-<major> <tag>`, copies `pkg/<major>/**/README.md` + `**/BENCH.md` + `docs/adr/*.md` into `docs/site/src/content/docs/<release>/<major>/`, then `git worktree remove --force` in a `finally`. The on-disk layout is `<release>/<major>` (release is the time axis — snapshot in git; major is the API surface — interface that evolves), matching the live URLs `/<release>/<major>/<page>` the Astro catch-all renders.
 5. Writes `docs/site/src/data/versions.json` with `{major, latest, default, eol, publishedAt}`. Newest non-EOL major is `default: true`.
 
 The sidebar's `<VersionDropdown />` reads `versions.json` at build time. The dropdown labels are `v1`, `v2`, … with `(latest: X.Y.Z)` suffix. EOL entries render with an `(EOL)` flag and stay served indefinitely (deprecation ritual = flip `eol: true` in the JSON; no 404).
 
 ### 6. Reserved routes (top-level page collision guard)
 
-`getting-started`, `philosophy`, `architecture`, `packages`, `adr`, `benchmarks` are reserved at the docs root. A future major must not be named after any of them (they're not valid semver majors anyway, but the regex would allow weirdness like `pkg/getting-started/v1.0.0`). The tag-format regex anchors `^pkg/v[0-9]+/…` and rejects them.
+`getting-started`, `philosophy`, `architecture`, `packages`, `adr`, `benchmarks`, `verification`, `index` are reserved page slugs under `/<release>/<major>/`. A future major must not be named after any of them (they're not valid semver majors anyway, but the regex would allow weirdness like `pkg/getting-started/v1.0.0`). The tag-format regex anchors `^pkg/v[0-9]+/…` and rejects them. Reserved RELEASE names (`local` today; future: tag-derived `v0.1.0` etc.) are non-colliding with major names because majors always start with `v\d+` and the canonical catch-all distinguishes the two by position, not pattern.
 
 ### 7. Logo asset
 

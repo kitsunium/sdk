@@ -34,31 +34,61 @@ async function loadVersions() {
   }
 }
 
-function runGenindex({ inputDir, outputFile, modulePath, urlBase }) {
-  const result = spawnSync(
-    "go",
-    [
-      "run",
-      ".",
-      "-input",
-      inputDir,
-      "-output",
-      outputFile,
-      "-module",
-      modulePath,
-      "-url-base",
-      urlBase,
-    ],
-    {
-      cwd: TOOL_DIR,
-      env: { ...process.env, GOWORK: "off" },
-      stdio: ["ignore", "inherit", "inherit"],
-    },
-  );
+function runGenindex({
+  inputDir,
+  outputFile,
+  modulePath,
+  urlBase,
+  sourceURLPrefix,
+}) {
+  const args = [
+    "run",
+    ".",
+    "-input",
+    inputDir,
+    "-output",
+    outputFile,
+    "-module",
+    modulePath,
+    "-url-base",
+    urlBase,
+    "-repo-root",
+    REPO_ROOT,
+  ];
+  if (sourceURLPrefix) {
+    args.push("-source-url-prefix", sourceURLPrefix);
+  }
+  const result = spawnSync("go", args, {
+    cwd: TOOL_DIR,
+    env: { ...process.env, GOWORK: "off" },
+    stdio: ["ignore", "inherit", "inherit"],
+  });
   if (result.status !== 0) {
     console.error(`[gen-symbols] genindex failed for ${modulePath}`);
     process.exit(result.status ?? 1);
   }
+}
+
+async function loadBuildInfo() {
+  try {
+    const txt = await readFile(join(DATA_DIR, "build-info.json"), "utf8");
+    return JSON.parse(txt);
+  } catch {
+    return {};
+  }
+}
+
+//: Build the "https://github.com/<org>/<repo>/blob/<ref>/" prefix the
+//: Go tool prepends to repo-relative source paths. Prefer the branch
+//: (lets readers follow follow-up commits) but fall back to the exact
+//: commit SHA so the deep link still resolves on stale builds.
+function deriveSourceURLPrefix(build) {
+  if (!build?.repoUrl) return "";
+  const ref =
+    build.branch && build.branch !== "HEAD"
+      ? build.branch
+      : (build.commitFull ?? "main");
+  return `${build.repoUrl.replace(/\/$/, "")}/blob/${ref}`;
 }
 
 async function main() {
@@ -74,6 +104,8 @@ async function main() {
     console.warn("[gen-symbols] versions.json empty — skipping");
     return;
   }
+  const buildInfo = await loadBuildInfo();
+  const sourceURLPrefix = deriveSourceURLPrefix(buildInfo);
 
   for (const v of versions) {
     //: every major maps to pkg/<major>/ on disk. Releases share that
@@ -88,10 +120,19 @@ async function main() {
       v.releases?.find((r) => r.default)?.version ??
       v.releases?.[0]?.version ??
       "local";
-    const urlBase = `/${v.major}/${release}`;
+    //: URL base is /<release>/<major> — mirrors the route layout
+    //: (src/pages/[release]/[major]/...). Symbol anchors will link to
+    //: /local/v1/codec/#Marshal, not /v1/local/codec/#Marshal.
+    const urlBase = `/${release}/${v.major}`;
     const modulePath = `github.com/kitsunium/sdk/pkg/${v.major}`;
     const outputFile = join(PUBLIC_SEARCH_DIR, `symbols-${v.major}.json`);
-    runGenindex({ inputDir, outputFile, modulePath, urlBase });
+    runGenindex({
+      inputDir,
+      outputFile,
+      modulePath,
+      urlBase,
+      sourceURLPrefix,
+    });
   }
 }
 

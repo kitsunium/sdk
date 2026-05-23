@@ -52,6 +52,7 @@ type Symbol struct {
 	Receiver     string   `json:"receiver,omitempty"` // only for methods: receiver type name
 	Examples     []string `json:"examples,omitempty"` // names of attached Example* funcs
 	Deprecated   bool     `json:"deprecated,omitempty"`
+	SourceURL    string   `json:"sourceUrl,omitempty"` // deep-link to the declaration on the source forge (GitHub blob URL)
 }
 
 // Index is the top-level JSON document.
@@ -64,10 +65,12 @@ type Index struct {
 
 func main() {
 	var (
-		input   = flag.String("input", "", "module root (e.g. ../pkg/v1)")
-		output  = flag.String("output", "", "output JSON file (omit for stdout)")
-		urlBase = flag.String("url-base", "/v1/local", "URL prefix for symbol anchors")
-		module  = flag.String("module", "github.com/kitsunium/sdk/pkg/v1", "Go module path of -input")
+		input           = flag.String("input", "", "module root (e.g. ../pkg/v1)")
+		output          = flag.String("output", "", "output JSON file (omit for stdout)")
+		urlBase         = flag.String("url-base", "/v1/local", "URL prefix for symbol anchors")
+		module          = flag.String("module", "github.com/kitsunium/sdk/pkg/v1", "Go module path of -input")
+		repoRoot        = flag.String("repo-root", "", "filesystem path of the repo root (used to compute the source path; defaults to two levels above -input)")
+		sourceURLPrefix = flag.String("source-url-prefix", "", "if set, build SourceURL = prefix + repo-relative-path#L<line> (e.g. https://github.com/kitsunium/sdk/blob/<sha>/)")
 	)
 	flag.Parse()
 
@@ -75,7 +78,15 @@ func main() {
 		exitErr("genindex: -input is required")
 	}
 
-	syms, err := collect(*input, *module, *urlBase)
+	// Default the repo root to <input>/../.. (e.g. /repo/pkg/v1 → /repo).
+	if *repoRoot == "" {
+		abs, err := filepath.Abs(*input)
+		if err == nil {
+			*repoRoot = filepath.Dir(filepath.Dir(abs))
+		}
+	}
+
+	syms, err := collect(*input, *module, *urlBase, *repoRoot, *sourceURLPrefix)
 	if err != nil {
 		exitErr("genindex: %v", err)
 	}
@@ -115,7 +126,7 @@ func main() {
 // directory via doc.NewFromFiles, and projects every exported symbol
 // into the flat Symbol list. _test.go files are PARSED (so Example
 // funcs are attached) but their own decls are skipped by go/doc.
-func collect(root, modulePath, urlBase string) ([]Symbol, error) {
+func collect(root, modulePath, urlBase, repoRoot, sourceURLPrefix string) ([]Symbol, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("resolve root: %w", err)
@@ -133,7 +144,7 @@ func collect(root, modulePath, urlBase string) ([]Symbol, error) {
 		if strings.HasPrefix(base, ".") || base == "vendor" || base == "testdata" || base == "node_modules" {
 			return filepath.SkipDir
 		}
-		syms, dirErr := loadDir(path, root, modulePath, urlBase)
+		syms, dirErr := loadDir(path, root, modulePath, urlBase, repoRoot, sourceURLPrefix)
 		if dirErr != nil {
 			return fmt.Errorf("load %s: %w", path, dirErr)
 		}
@@ -149,7 +160,7 @@ func collect(root, modulePath, urlBase string) ([]Symbol, error) {
 // loadDir parses a single directory. Returns nil (no error) if the
 // directory contains no Go files OR only an unexported "main" or
 // internal package we should not index.
-func loadDir(dir, root, modulePath, urlBase string) ([]Symbol, error) {
+func loadDir(dir, root, modulePath, urlBase, repoRoot, sourceURLPrefix string) ([]Symbol, error) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
 		// Include both .go and _test.go so Example funcs attach.
@@ -193,13 +204,31 @@ func loadDir(dir, root, modulePath, urlBase string) ([]Symbol, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, emit(dp, fset, rel, urlBase)...)
+		out = append(out, emit(dp, fset, rel, urlBase, repoRoot, sourceURLPrefix)...)
 	}
 	return out, nil
 }
 
+// sourceURL builds the forge URL deep-link for an AST node when a
+// source-URL prefix was supplied. Returns "" when the prefix is empty,
+// when the node is nil, or when the file lies outside the repo root.
+func sourceURL(prefix, repoRoot string, fset *token.FileSet, node ast.Node) string {
+	if prefix == "" || node == nil || repoRoot == "" {
+		return ""
+	}
+	pos := fset.Position(node.Pos())
+	if !pos.IsValid() {
+		return ""
+	}
+	rel, err := filepath.Rel(repoRoot, pos.Filename)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return strings.TrimSuffix(prefix, "/") + "/" + filepath.ToSlash(rel) + fmt.Sprintf("#L%d", pos.Line)
+}
+
 // emit projects every exported declaration into Symbol rows.
-func emit(p *doc.Package, fset *token.FileSet, packageShort, urlBase string) []Symbol {
+func emit(p *doc.Package, fset *token.FileSet, packageShort, urlBase, repoRoot, sourceURLPrefix string) []Symbol {
 	pkgURL := strings.TrimSuffix(urlBase, "/")
 	if packageShort != "." && packageShort != "" {
 		pkgURL = pkgURL + "/" + packageShort
@@ -221,6 +250,7 @@ func emit(p *doc.Package, fset *token.FileSet, packageShort, urlBase string) []S
 			URL:          pkgURL + "#" + f.Name,
 			Examples:     exampleNames(f.Examples),
 			Deprecated:   isDeprecated(f.Doc),
+			SourceURL:    sourceURL(sourceURLPrefix, repoRoot, fset, f.Decl),
 		})
 	}
 
@@ -236,6 +266,7 @@ func emit(p *doc.Package, fset *token.FileSet, packageShort, urlBase string) []S
 			URL:          pkgURL + "#" + t.Name,
 			Examples:     exampleNames(t.Examples),
 			Deprecated:   isDeprecated(t.Doc),
+			SourceURL:    sourceURL(sourceURLPrefix, repoRoot, fset, t.Decl),
 		})
 		// Methods attached to the type.
 		for _, m := range t.Methods {
@@ -251,20 +282,21 @@ func emit(p *doc.Package, fset *token.FileSet, packageShort, urlBase string) []S
 				Receiver:     t.Name,
 				Examples:     exampleNames(m.Examples),
 				Deprecated:   isDeprecated(m.Doc),
+				SourceURL:    sourceURL(sourceURLPrefix, repoRoot, fset, m.Decl),
 			})
 		}
 		// Type-attached consts / vars.
-		out = append(out, valueRows(t.Consts, "const", p, pkgLabel, packageShort, pkgURL, fset)...)
-		out = append(out, valueRows(t.Vars, "var", p, pkgLabel, packageShort, pkgURL, fset)...)
+		out = append(out, valueRows(t.Consts, "const", p, pkgLabel, packageShort, pkgURL, fset, repoRoot, sourceURLPrefix)...)
+		out = append(out, valueRows(t.Vars, "var", p, pkgLabel, packageShort, pkgURL, fset, repoRoot, sourceURLPrefix)...)
 	}
 
-	out = append(out, valueRows(p.Consts, "const", p, pkgLabel, packageShort, pkgURL, fset)...)
-	out = append(out, valueRows(p.Vars, "var", p, pkgLabel, packageShort, pkgURL, fset)...)
+	out = append(out, valueRows(p.Consts, "const", p, pkgLabel, packageShort, pkgURL, fset, repoRoot, sourceURLPrefix)...)
+	out = append(out, valueRows(p.Vars, "var", p, pkgLabel, packageShort, pkgURL, fset, repoRoot, sourceURLPrefix)...)
 
 	return out
 }
 
-func valueRows(values []*doc.Value, kind string, p *doc.Package, pkgLabel, packageShort, pkgURL string, fset *token.FileSet) []Symbol {
+func valueRows(values []*doc.Value, kind string, p *doc.Package, pkgLabel, packageShort, pkgURL string, fset *token.FileSet, repoRoot, sourceURLPrefix string) []Symbol {
 	var rows []Symbol
 	for _, v := range values {
 		// doc.Value can carry multiple Names declared in the same block
@@ -273,6 +305,7 @@ func valueRows(values []*doc.Value, kind string, p *doc.Package, pkgLabel, packa
 		sig := renderDecl(fset, v.Decl)
 		dep := isDeprecated(v.Doc)
 		doc := synopsis(v.Doc)
+		src := sourceURL(sourceURLPrefix, repoRoot, fset, v.Decl)
 		for _, n := range v.Names {
 			rows = append(rows, Symbol{
 				Kind:         kind,
@@ -284,6 +317,7 @@ func valueRows(values []*doc.Value, kind string, p *doc.Package, pkgLabel, packa
 				Doc:          doc,
 				URL:          pkgURL + "#" + n,
 				Deprecated:   dep,
+				SourceURL:    src,
 			})
 		}
 	}

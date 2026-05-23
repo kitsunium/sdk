@@ -4,8 +4,12 @@
 // project name shown in <title> and the footer is derived from
 // build-info.json (which itself extracts it from the git repoUrl
 // at prebuild time) — no hardcoded "kitsunium/sdk" string survives.
+import { ClientRouter } from "astro:transitions";
 import Sidebar from "../components/Sidebar.astro";
 import Header from "../components/Header.astro";
+import Breadcrumbs from "../components/Breadcrumbs.astro";
+import PrevNext from "../components/PrevNext.astro";
+import EditLink from "../components/EditLink.astro";
 import "../styles/global.css";
 
 interface Heading {
@@ -18,13 +22,23 @@ interface Props {
   description?: string;
   subtitle?: string;
   headings?: Heading[];
+  source?: string | null;
+  hideChrome?: boolean;
 }
-const { title, description, subtitle, headings = [] } = Astro.props;
+const {
+  title,
+  description,
+  subtitle,
+  headings = [],
+  source,
+  hideChrome = false,
+} = Astro.props;
 const url = new URL(Astro.request.url);
 const currentPath = url.pathname;
 
 interface BuildInfo {
   repoUrl?: string | null;
+  commitFull?: string | null;
 }
 let build: BuildInfo = {};
 try {
@@ -43,31 +57,70 @@ function projectName(repoUrl: string | null | undefined): string {
 const project = projectName(build.repoUrl);
 const pageTitle = title === project ? `${project} — documentation` : `${title} — ${project}`;
 const descFallback = `Documentation portal for ${project}.`;
+const canonicalUrl = new URL(currentPath, Astro.site ?? url.origin).toString();
+const ogImage = new URL("/brand/kitsunium.jpg", Astro.site ?? url.origin).toString();
 ---
 
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{pageTitle}</title>
     <meta name="description" content={description ?? descFallback} />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="canonical" href={canonicalUrl} />
     <link rel="icon" type="image/jpeg" href="/brand/kitsunium.jpg" />
     <link rel="apple-touch-icon" href="/brand/kitsunium.jpg" />
+    <link rel="alternate" type="application/rss+xml" title={`${project} — documentation feed`} href="/rss.xml" />
+    {/* OpenGraph + Twitter cards — link previews on Slack / X / Discord / etc. */}
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description ?? descFallback} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:site_name" content={`${project} — documentation`} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={description ?? descFallback} />
+    <meta name="twitter:image" content={ogImage} />
+    {/* Theme boot — sync read of localStorage so the page never paints
+        in the wrong theme (FOUC kill). Inline so it runs before <body>. */}
+    <script is:inline>
+      (function () {
+        try {
+          var t = localStorage.getItem("kitsunium:docs:theme");
+          if (t === "light" || t === "dark") {
+            document.documentElement.dataset.theme = t;
+          }
+        } catch (_) { /* private mode / blocked storage */ }
+      })();
+    </script>
+    <ClientRouter />
   </head>
   <body>
+    {/* Skip-to-content — visually hidden until focused; jumps past the
+        sidebar straight to the article. WCAG 2.4.1 (Bypass Blocks). */}
+    <a href="#main-content" class="skip-link">Skip to content</a>
     <div class="app">
       <Sidebar currentPath={currentPath} />
       <div class="content">
-        <Header currentPath={currentPath} />
+        {!hideChrome && <Header currentPath={currentPath} />}
         <header class="page-header">
           <div class="container">
+            {!hideChrome && <Breadcrumbs currentPath={currentPath} />}
             <h1>{title}</h1>
             {subtitle && <p class="subtitle">{subtitle}</p>}
           </div>
         </header>
         <div class="page-body">
-          <main class="container">
+          <main id="main-content" class="container" tabindex="-1">
             <slot />
+            {!hideChrome && (
+              <div class="page-foot-meta">
+                <EditLink source={source} />
+                <PrevNext currentPath={currentPath} />
+              </div>
+            )}
           </main>
           {headings.length > 0 && (
             <div class="toc-rail">
@@ -162,9 +215,88 @@ const descFallback = `Documentation portal for ${project}.`;
           if (!root.contains(e.target as Node)) close();
         });
       }
-      document
-        .querySelectorAll<HTMLElement>("[data-combobox]")
-        .forEach(initCombobox);
+
+      // Scrollspy — highlight the right-side TOC entry whose H2 is
+      // currently in the viewport. Uses IntersectionObserver so we
+      // don't run a scroll-listener every frame. The "current" entry
+      // gets data-toc-active for the .active CSS to lift it.
+      function initScrollspy() {
+        const tocLinks = Array.from(
+          document.querySelectorAll<HTMLAnchorElement>(".page-toc a"),
+        );
+        if (tocLinks.length === 0) return;
+        const linkMap = new Map<string, HTMLAnchorElement>();
+        for (const a of tocLinks) {
+          const id = a.getAttribute("href")?.slice(1);
+          if (id) linkMap.set(id, a);
+        }
+        const seen = new Set<string>();
+        const observer = new IntersectionObserver(entries => {
+          for (const e of entries) {
+            if (e.isIntersecting) seen.add(e.target.id);
+            else seen.delete(e.target.id);
+          }
+          tocLinks.forEach(a => a.removeAttribute("data-toc-active"));
+          //: Pick the first seen ID in document order so a small
+          //: heading near the top of the viewport always wins over a
+          //: bigger one below it.
+          const headings = Array.from(
+            document.querySelectorAll<HTMLElement>(".md-body h2[id]"),
+          );
+          const active = headings.find(h => seen.has(h.id));
+          if (active) {
+            linkMap.get(active.id)?.setAttribute("data-toc-active", "true");
+          }
+        }, { rootMargin: "-15% 0px -70% 0px", threshold: 0 });
+        document
+          .querySelectorAll<HTMLElement>(".md-body h2[id]")
+          .forEach(h => observer.observe(h));
+      }
+
+      // Mermaid — lazy-load on first ```mermaid block detected. The
+      // script element from the inline boot replaces every block with
+      // an SVG render. Loaded once per session via the ESM import map.
+      async function initMermaid() {
+        const blocks = document.querySelectorAll<HTMLElement>(
+          'pre code.language-mermaid, pre code.lang-mermaid, code.language-mermaid',
+        );
+        if (blocks.length === 0) return;
+        try {
+          // @ts-ignore — mermaid ESM is loaded via dynamic import; types
+          // are not bundled.
+          const { default: mermaid } = await import("mermaid");
+          mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
+          let i = 0;
+          for (const block of Array.from(blocks)) {
+            const source = block.textContent ?? "";
+            const id = `mermaid-${Date.now()}-${i++}`;
+            try {
+              const { svg } = await mermaid.render(id, source);
+              const wrap = document.createElement("div");
+              wrap.className = "mermaid-svg";
+              wrap.innerHTML = svg;
+              const pre = block.closest("pre");
+              (pre ?? block).replaceWith(wrap);
+            } catch (err) {
+              console.warn("[mermaid] render failed", err);
+            }
+          }
+        } catch (err) {
+          console.warn("[mermaid] module unavailable", err);
+        }
+      }
+
+      function bootAll() {
+        document
+          .querySelectorAll<HTMLElement>("[data-combobox]")
+          .forEach(initCombobox);
+        initScrollspy();
+        initMermaid();
+      }
+      bootAll();
+      //: Astro view-transitions swaps document.body — re-bind once the
+      //: new page is in the DOM.
+      document.addEventListener("astro:page-load", bootAll);
     </script>
   </body>
 </html>

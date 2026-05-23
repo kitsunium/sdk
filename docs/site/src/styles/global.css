@@ -251,7 +251,14 @@ tbody tr:hover {
 
 main {
   flex: 1;
-  padding: 1.5rem 0 3rem;
+  padding: 2rem 0 3rem;
+}
+/* Belt-and-braces: kill the first child's collapsing margin-top so
+   the gap between page-header and first body element is uniform
+   (gomarkdoc pages start with a <p>import…</p>; ADR pages start with
+   metadata; cross-cutting pages start with an h2). */
+.md-body > :first-child {
+  margin-top: 0;
 }
 
 footer {
@@ -491,6 +498,371 @@ footer p {
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 
+/* ── Light theme palette ─────────────────────────────────────────── */
+/* Triggered by the inline boot script in Default.astro setting
+   <html data-theme="light"> based on localStorage. CSS variables flip
+   so every consumer (cards, sidebar, code blocks) picks up the new
+   palette without per-component duplication. */
+:root[data-theme="light"] {
+  --color-bg: #ffffff;
+  --color-bg-alt: #f6f8fa;
+  --color-bg-elev: #ecf1f6;
+  --color-border: #d0d7de;
+  --color-border-bright: #afb8c1;
+  --color-text: #1f2328;
+  --color-muted: #57606a;
+  --color-accent: #0969da;
+  --color-accent-2: #8250df;
+  --color-code-bg: #f1f4f8;
+  --color-good: #1a7f37;
+  --color-bad: #cf222e;
+  --color-baseline: #9a6700;
+}
+:root[data-theme="light"] .sidebar {
+  background: #f6f8fa;
+}
+:root[data-theme="light"] .page-header {
+  background: linear-gradient(180deg, #f6f8fa 0%, #ffffff 100%);
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────── */
+/* Respect prefers-reduced-motion across every transition / animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Skip-to-content ─────────────────────────────────────────────── */
+.skip-link {
+  position: fixed;
+  top: -3rem;
+  left: 0.5rem;
+  z-index: 1000;
+  padding: 0.5rem 0.85rem;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 4px;
+  font-weight: 600;
+  transition: top 120ms ease;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 0.5rem;
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+  text-decoration: none;
+}
+main:focus-visible {
+  outline: none;
+}
+
+/* ── Breadcrumbs ─────────────────────────────────────────────────── */
+.breadcrumbs {
+  margin: 0 0 0.85rem;
+  font-size: 0.8rem;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+}
+.breadcrumbs ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+.breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.breadcrumbs a {
+  color: var(--color-muted);
+}
+.breadcrumbs a:hover {
+  color: var(--color-accent);
+}
+.breadcrumbs .sep {
+  color: var(--color-border-bright);
+}
+.breadcrumbs [aria-current="page"] {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* ── Prev / Next page footer ─────────────────────────────────────── */
+.prev-next {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 2.5rem 0 1rem;
+}
+.pn-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.85rem 1rem;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--color-text);
+  transition:
+    border-color 80ms ease,
+    transform 80ms ease;
+}
+.pn-link:hover,
+.pn-link:focus-visible {
+  border-color: var(--color-accent);
+  text-decoration: none;
+  transform: translateY(-1px);
+  outline: none;
+}
+.pn-next {
+  text-align: right;
+  align-items: flex-end;
+}
+.pn-dir {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.pn-label {
+  color: var(--color-accent);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.pn-spacer {
+  display: block;
+}
+
+/* ── Edit-this-page link ─────────────────────────────────────────── */
+.edit-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 2.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+  border-bottom: 1px dashed transparent;
+  width: max-content;
+}
+.edit-link:hover,
+.edit-link:focus-visible {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  text-decoration: none;
+  outline: none;
+}
+.page-foot-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ── Scrollspy active TOC entry ──────────────────────────────────── */
+.page-toc a[data-toc-active] {
+  color: var(--color-text);
+  border-left-color: var(--color-accent);
+  font-weight: 600;
+}
+
+/* ── Heading permalinks ──────────────────────────────────────────── */
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  position: relative;
+}
+.heading-anchor {
+  margin-left: 0.45rem;
+  font-size: 0.75em;
+  color: var(--color-muted);
+  opacity: 0;
+  text-decoration: none;
+  transition:
+    opacity 100ms ease,
+    color 100ms ease;
+}
+.md-body h2:hover .heading-anchor,
+.md-body h3:hover .heading-anchor,
+.md-body h4:hover .heading-anchor,
+.heading-anchor:focus-visible {
+  opacity: 1;
+  outline: none;
+  color: var(--color-accent);
+}
+
+/* ── Theme toggle ────────────────────────────────────────────────── */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 80ms ease,
+    border-color 80ms ease;
+}
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.35);
+  outline: none;
+}
+.theme-toggle .icon-sun {
+  display: none;
+}
+.theme-toggle .icon-moon {
+  display: inline;
+}
+:root[data-theme="light"] .theme-toggle .icon-sun {
+  display: inline;
+}
+:root[data-theme="light"] .theme-toggle .icon-moon {
+  display: none;
+}
+:root[data-theme="light"] .theme-toggle {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+:root[data-theme="light"] .theme-toggle:hover,
+:root[data-theme="light"] .theme-toggle:focus-visible {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+/* ── GitHub-style alerts (callouts) ──────────────────────────────── */
+/* remark-github-blockquote-alert emits `.markdown-alert` div with a
+   `.markdown-alert-note|tip|warning|caution|important` modifier and
+   `.markdown-alert-title` headline. We style each variant in the
+   GitHub palette but using our CSS variables so the light theme
+   still reads correctly. */
+.markdown-alert {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 4px solid var(--alert-color, var(--color-accent));
+  background: var(--alert-bg, var(--color-bg-elev));
+  border-radius: 0 6px 6px 0;
+}
+.markdown-alert > :last-child {
+  margin-bottom: 0;
+}
+.markdown-alert-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0;
+  margin-bottom: 0.45rem;
+  font-weight: 700;
+  color: var(--alert-color, var(--color-accent));
+  font-size: 0.92rem;
+}
+.markdown-alert-note {
+  --alert-color: #58a6ff;
+  --alert-bg: rgba(56, 139, 253, 0.08);
+}
+.markdown-alert-tip {
+  --alert-color: #3fb950;
+  --alert-bg: rgba(46, 160, 67, 0.08);
+}
+.markdown-alert-warning {
+  --alert-color: #d29922;
+  --alert-bg: rgba(210, 153, 34, 0.1);
+}
+.markdown-alert-caution {
+  --alert-color: #f85149;
+  --alert-bg: rgba(248, 81, 73, 0.1);
+}
+.markdown-alert-important {
+  --alert-color: #a371f7;
+  --alert-bg: rgba(163, 113, 247, 0.1);
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────── */
+.tabs {
+  margin: 1rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.tab-strip {
+  display: flex;
+  background: var(--color-bg-elev);
+  border-bottom: 1px solid var(--color-border);
+}
+.tab-strip button {
+  flex: 1;
+  padding: 0.55rem 0.85rem;
+  background: transparent;
+  border: none;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab-strip button:hover,
+.tab-strip button:focus-visible {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.04);
+  outline: none;
+}
+.tab-strip button.active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+.tabs > [role="tabpanel"] {
+  padding: 1rem;
+}
+
+/* ── Mermaid ─────────────────────────────────────────────────────── */
+.mermaid-svg {
+  margin: 1rem 0;
+  text-align: center;
+}
+.mermaid-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── Deprecation chips (symbol search) ───────────────────────────── */
+.sym-chip {
+  margin-left: 0.4rem;
+  padding: 0 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-radius: 3px;
+}
+.sym-chip--deprecated {
+  background: rgba(248, 81, 73, 0.18);
+  color: #ff8b85;
+}
+.sym-source {
+  grid-column: 2;
+  margin-top: 0.2rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.72rem;
+}
+.sym-source:hover {
+  color: var(--color-accent);
+}
+
 @media (max-width: 1100px) {
   /* Below the 3-column threshold, TOC moves under the article. */
   .page-body {
@@ -542,5 +914,12 @@ footer p {
   .md-body th,
   .md-body td {
     padding: 0.4rem 0.5rem;
+  }
+  .prev-next {
+    grid-template-columns: 1fr;
+  }
+  .pn-next {
+    text-align: left;
+    align-items: flex-start;
   }
 }

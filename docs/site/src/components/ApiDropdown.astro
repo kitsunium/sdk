@@ -53,7 +53,7 @@ const activeLabel = active ? active.major + (active.eol ? " (EOL)" : "") : "v?";
           aria-selected={v.major === currentMajor}
           class:list={[v.major === currentMajor && "active"]}
         >
-          <a href={`/${v.major}/${defaultReleaseOf(v)}/`}>
+          <a href={`/${defaultReleaseOf(v)}/${v.major}/`}>
             <span class="opt-version">{v.major}</span>
             {v.eol && <span class="opt-eol">(EOL)</span>}
           </a>

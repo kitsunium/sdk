@@ -16,7 +16,8 @@ try {
 }
 const def = versions.find(v => v?.default) ?? versions[0];
 const defRelease = def?.releases?.find(r => r.default) ?? def?.releases?.[0];
-const homeHref = def && defRelease ? `/${def.major}/${defRelease.version}/` : "/";
+//: URL layout is /<release>/<major>/... — release first.
+const homeHref = def && defRelease ? `/${defRelease.version}/${def.major}/` : "/";
 ---
 
 <div class="brand-block">
