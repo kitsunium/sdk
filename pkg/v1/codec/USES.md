@@ -1,14 +1,11 @@
 <!--
-  Per-package "Use cases" section. Injected by docs/site/scripts/sync-versions.mjs
-  AFTER the narrative pulled from the Go doc comment and BEFORE the
-  auto-generated gomarkdoc symbol dump (Constants / Variables / Functions
-  / Types) which is wrapped in a collapsible <details>.
+  Per-package "Use cases" — INTERACTIVE tabs (HTML). The narrative
+  "Goals" + "What's shipped" tables live in the Go doc comment (so
+  pkg.go.dev + README.md show them too); only the HTML tabs need a
+  hand-authored file because raw HTML inside a Go doc comment renders
+  as literal text on pkg.go.dev.
 
-  Authoring rule (replicable across packages — see pkg/v1/errs/USES.md,
-  pkg/v1/logger/USES.md): keep each tab to "Best for:" one-liner + a
-  5-10 line Go snippet. The tab strip uses the [data-tabs] markup that
-  the Default.astro `initTabs` script wires up — same accessibility
-  shape as the Tabs.astro component.
+  See pkg/v1/errs/USES.md and pkg/v1/logger/USES.md for the same shape.
 -->
 
 ## Use cases

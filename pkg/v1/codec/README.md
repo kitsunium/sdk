@@ -10,33 +10,42 @@ Package codec is the universal encoder/decoder dispatch facade.
 
 One verb, eighteen formats. [Marshal](<#Marshal>) and [Unmarshal](<#Unmarshal>) reach every encoding the SDK ships — JSON, YAML, CBOR, MessagePack, NDJSON, XML, TOML, CSV, ASN.1 DER, PEM, TLV, FlatBuffers, plus the six base\-N variants \(base64, base64url, base32, base16, hex, ascii85\). Format\-swap at runtime is a single string change.
 
-Concrete codecs live in internal/service/codec/\*; this package is the read\-only dispatch facade. Importing the package activates every codec via blank\-import side effects.
+### Goals
 
-### Surface
+- One verb, many formats. codec.Marshal\(f, v\) reaches every registered wire format — your call site doesn't change when you swap JSON for CBOR.
+- Stable Format strings. Once registered, a Format string is frozen across minor versions. Code that compiles today keeps compiling.
+- Streaming when it pays. Codecs that implement StreamingCodec get NewEncoder / NewDecoder automatically — no need to buffer megabytes.
+- Zero registration code. Blank\-import the package; the 13 service codecs self\-register via init\(\). No Register\(\) calls in consumer code.
+- Append for hot paths. Codecs implementing Appender let you reuse a \[\]byte buffer across calls — handy in tight loops.
 
-Dispatch — pick the codec by registered Format name:
+### What's shipped — all 18 formats
 
-```
-func Marshal(format Format, v any) ([]byte, error)
-func Unmarshal(format Format, data []byte, v any) error
-```
-
-Streaming — when the resolved codec implements core/codec.StreamingCodec:
-
-```
-func NewEncoder(format Format, w io.Writer) (Encoder, error)
-func NewDecoder(format Format, r io.Reader) (Decoder, error)
-```
-
-Registry introspection:
+Single blank import \(\`import \_ "github.com/kitsunium/sdk/pkg/v1/codec"\`\) activates the entire list. The Streaming column marks codecs that implement core/codec.StreamingCodec and unlock NewEncoder / NewDecoder.
 
 ```
-func Available() []Format
-func FromMIME(mime string) (Format, bool)
-func FromExtension(ext string) (Format, bool)
+| Format       | Go constant    | MIME                       | Extension       | Streaming | Best for |
+|--------------|----------------|----------------------------|-----------------|:---------:|----------|
+| json         | codec.JSON     | application/json           | .json           | yes       | API responses, public configs |
+| ndjson       | codec.NDJSON   | application/x-ndjson       | .ndjson         | yes       | streaming logs, line-oriented batches |
+| xml          | codec.XML      | application/xml            | .xml            | yes       | legacy integrations |
+| csv          | codec.CSV      | text/csv                   | .csv            | yes       | tabular exports |
+| asn1-der     | codec.ASN1DER  | application/pkix-cert      | .der            | —         | crypto / X.509 artefacts |
+| pem          | codec.PEM      | application/x-pem-file     | .pem            | —         | block-wrapped DER (certs, keys) |
+| yaml         | codec.YAML     | application/yaml           | .yaml / .yml    | yes       | human-edited configs |
+| toml         | codec.TOML     | application/toml           | .toml           | yes       | app configs (strict typing) |
+| cbor         | codec.CBOR     | application/cbor           | .cbor           | yes       | IoT / mobile (RFC 8949) |
+| msgpack      | codec.MsgPack  | application/msgpack        | .msgpack        | yes       | RPC payloads |
+| tlv          | "tlv"          | application/x-tlv          | —               | —         | custom binary streams, self-describing |
+| flatbuffers  | "flatbuffers"  | application/x-flatbuffers  | .fbs            | —         | zero-copy passthrough |
+| base64       | "base64"       | —                          | —               | —         | text-safe wrap (JSON → base-N) |
+| base64url    | "base64url"    | —                          | —               | —         | URL-safe base64 |
+| base32       | "base32"       | —                          | —               | —         | larger alphabet for human-typed tokens |
+| base16       | "base16"       | —                          | —               | —         | hex-like text |
+| hex          | "hex"          | —                          | —               | —         | classic hex pair encoding |
+| ascii85      | "ascii85"      | —                          | —               | —         | 4-byte to 5-char text packing |
 ```
 
-[Format](<#Format>) is an alias for the registered string name; the typed constants \([JSON](<#JSON>), [CBOR](<#JSON>), [YAML](<#JSON>), …\) are the contract, and their underlying string values are frozen post\-v1.0.0.
+Runtime introspection: codec.Available\(\) returns the live registry list, codec.FromMIME and codec.FromExtension resolve from external metadata.
 
 ### Quick start
 
@@ -73,23 +82,7 @@ A single blank import activates the full registry:
 import _ "github.com/kitsunium/sdk/pkg/v1/codec"
 ```
 
-The package blank\-imports every internal/service/codec/\* package; each registers itself in core/codec.Lookup via init\(\). Consumers never call a Register\(\) function — registration is purely a side\-effect of importing this package.
-
-### Choosing a Format
-
-- json — API responses, configs \(most\-supported; reasonable size\).
-- ndjson — streaming logs, line\-oriented batches \(appender \+ line framing\).
-- yaml — human\-edited configs \(slower; not great at scale\).
-- toml — app configs \(strict typing\).
-- xml — legacy integrations \(verbose; specialised payloads\).
-- csv — tabular exports \(rows in / rows out; not arbitrary structs\).
-- cbor — binary IoT / mobile \(compact \+ fast\).
-- msgpack — RPC payloads \(compact; ecosystem\-wide\).
-- tlv — custom binary streams \(self\-describing, reflection\-driven, hardened\).
-- flatbuffers — zero\-copy passthrough \(schema lives outside the codec\).
-- asn1\-der — crypto / X.509 artefacts \(strict DER rules\).
-- pem — crypto / certificates \(block\-wrapped DER\).
-- base64 / base64url / base32 / base16 / hex / ascii85 — wrap any structure in a text\-safe encoding \(pipeline = encoding/json.Marshal\(v\) → base\-N\). Use stdlib encoding/base64 \(etc.\) directly when you have raw bytes already.
+The package blank\-imports every internal/service/codec/\* package; each registers itself in core/codec.Lookup via init\(\). Consumers never call a Register\(\) function — registration is a side\-effect.
 
 ### Extension interfaces
 
@@ -193,7 +186,7 @@ var (
 ```
 
 <a name="Marshal"></a>
-## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L185>)
+## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L188>)
 
 ```go
 func Marshal(f Format, v any) (encoded []byte, err error)
@@ -202,7 +195,7 @@ func Marshal(f Format, v any) (encoded []byte, err error)
 Marshal serialises v using the codec registered under f.
 
 <a name="Unmarshal"></a>
-## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L198>)
+## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L201>)
 
 ```go
 func Unmarshal(f Format, data []byte, v any) error
@@ -211,7 +204,7 @@ func Unmarshal(f Format, data []byte, v any) error
 Unmarshal parses data into v using the codec registered under f.
 
 <a name="Codec"></a>
-## type [Codec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L152>)
+## type [Codec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L155>)
 
 Codec re\-exports core/codec.Codec for consumers who want direct access.
 
@@ -220,7 +213,7 @@ type Codec = corecodec.Codec
 ```
 
 <a name="Decoder"></a>
-## type [Decoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L158>)
+## type [Decoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L161>)
 
 Decoder re\-exports core/codec.Decoder for streaming callers.
 
@@ -229,7 +222,7 @@ type Decoder = corecodec.Decoder
 ```
 
 <a name="NewDecoder"></a>
-### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L224>)
+### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L227>)
 
 ```go
 func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
@@ -238,7 +231,7 @@ func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
 NewDecoder returns a streaming decoder for the codec registered under f.
 
 <a name="Encoder"></a>
-## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L155>)
+## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L158>)
 
 Encoder re\-exports core/codec.Encoder for streaming callers.
 
@@ -247,7 +240,7 @@ type Encoder = corecodec.Encoder
 ```
 
 <a name="NewEncoder"></a>
-### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L211>)
+### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L214>)
 
 ```go
 func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
@@ -256,7 +249,7 @@ func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
 NewEncoder returns a streaming encoder for the codec registered under f.
 
 <a name="Format"></a>
-## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L149>)
+## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L152>)
 
 Format re\-exports core/codec.Format so consumers only depend on pkg/v1.
 
@@ -292,7 +285,7 @@ const (
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L237>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L240>)
 
 ```go
 func Available() []Format
@@ -301,7 +294,7 @@ func Available() []Format
 Available returns the sorted list of registered formats.
 
 <a name="FromExtension"></a>
-### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L256>)
+### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L259>)
 
 ```go
 func FromExtension(ext string) (f Format, ok bool)
@@ -310,7 +303,7 @@ func FromExtension(ext string) (f Format, ok bool)
 FromExtension resolves a file extension to its registered Format.
 
 <a name="FromMIME"></a>
-### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L243>)
+### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L246>)
 
 ```go
 func FromMIME(mime string) (f Format, ok bool)

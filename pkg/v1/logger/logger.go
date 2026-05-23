@@ -8,6 +8,43 @@
 // fixes in internal/* propagate via a minor bump without touching this
 // façade.
 //
+// # Goals
+//
+//   - Zero-allocation hot path. The chainable Build(lg, lv).Str(...).
+//     Send(...) builder is backed by a sync.Pool; steady-state per-call
+//     cost is 0 allocations.
+//   - Composable transport. A Logger is wired from a Sink (where bytes
+//     go) + an Encoder (how bytes are formatted). Fan-out, async, route,
+//     failover, sample, recover middleware compose around a Sink —
+//     bring your own topology.
+//   - Typed Attrs at the call site. 9 typed constructors (String, Int,
+//     Bool, Float64, Int64, Uint64, Duration, Time, Any) — no
+//     any-untyped key/value pairs that error at runtime.
+//   - Build-time version stamping. Version is the single ldflags
+//     injection point. FrameworkVersion() is added as
+//     "framework_version" to every emitted record — set under
+//     go build -ldflags "-X .../logger.Version=…" or Bazel --stamp.
+//   - Two failure modes only. Construction returns WriterRequired
+//     (1.1.0.1) on a nil writer or SinkConfigRequired (1.1.0.2) on a
+//     nil sink — both introspectable via errs.HasCode.
+//
+// # What's shipped
+//
+// Three construction paths, three native sinks, six middleware kinds,
+// nine Attr ctors, four Level constants, three emission paths.
+//
+//	| Group               | Symbols                                                                     | Role |
+//	|---------------------|------------------------------------------------------------------------------|------|
+//	| Construction        | Default, NewText(Config), NewWithSink(SinkConfig)                            | Wire a Logger from explicit knobs OR a one-liner |
+//	| Sinks (native)      | ConsoleStderr, ConsoleStdout, Multi(branches…)                               | Native + fan-out; bring custom Sink for file/DB/etc. |
+//	| Middleware          | multi, async, route, failover, sample, recover                               | Compose around a base Sink; same Sink interface chainable |
+//	| Encoders            | TextEncoder                                                                  | key=value lines on system clock (JSON/structured: internal today) |
+//	| Emission            | Info / Warn / Error / Debug (variadic), Build(lg,lv) → chain → Send, LogAttrs| 1 alloc on variadic, 0 alloc steady-state on Build |
+//	| Attr constructors   | String, Int, Bool, Float64, Int64, Uint64, Duration, Time, Any               | Typed at the call site |
+//	| Levels              | LevelDebug, LevelInfo, LevelWarn, LevelError                                 | MinLevel on SinkConfig filters at the source |
+//	| Versioning          | Version (ldflags), FrameworkVersion()                                        | Stamp every record with the SDK build version |
+//	| Error sentinels     | WriterRequired (1.1.0.1), SinkConfigRequired (1.1.0.2)                       | Construction-time, introspectable via errs.HasCode |
+//
 // # Quick start (text on stderr)
 //
 //	import "github.com/kitsunium/sdk/pkg/v1/logger"

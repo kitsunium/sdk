@@ -8,6 +8,55 @@
 // variants (base64, base64url, base32, base16, hex, ascii85).
 // Format-swap at runtime is a single string change.
 //
+// # Goals
+//
+//   - One verb, many formats. codec.Marshal(f, v) reaches every
+//     registered wire format — your call site doesn't change when
+//     you swap JSON for CBOR.
+//   - Stable Format strings. Once registered, a Format string is
+//     frozen across minor versions. Code that compiles today keeps
+//     compiling.
+//   - Streaming when it pays. Codecs that implement StreamingCodec
+//     get NewEncoder / NewDecoder automatically — no need to buffer
+//     megabytes.
+//   - Zero registration code. Blank-import the package; the 13
+//     service codecs self-register via init(). No Register() calls
+//     in consumer code.
+//   - Append for hot paths. Codecs implementing Appender let you
+//     reuse a []byte buffer across calls — handy in tight loops.
+//
+// # What's shipped — all 18 formats
+//
+// Single blank import (`import _ "github.com/kitsunium/sdk/pkg/v1/codec"`)
+// activates the entire list. The Streaming column marks codecs that
+// implement core/codec.StreamingCodec and unlock NewEncoder /
+// NewDecoder.
+//
+//	| Format       | Go constant    | MIME                       | Extension       | Streaming | Best for |
+//	|--------------|----------------|----------------------------|-----------------|:---------:|----------|
+//	| json         | codec.JSON     | application/json           | .json           | yes       | API responses, public configs |
+//	| ndjson       | codec.NDJSON   | application/x-ndjson       | .ndjson         | yes       | streaming logs, line-oriented batches |
+//	| xml          | codec.XML      | application/xml            | .xml            | yes       | legacy integrations |
+//	| csv          | codec.CSV      | text/csv                   | .csv            | yes       | tabular exports |
+//	| asn1-der     | codec.ASN1DER  | application/pkix-cert      | .der            | —         | crypto / X.509 artefacts |
+//	| pem          | codec.PEM      | application/x-pem-file     | .pem            | —         | block-wrapped DER (certs, keys) |
+//	| yaml         | codec.YAML     | application/yaml           | .yaml / .yml    | yes       | human-edited configs |
+//	| toml         | codec.TOML     | application/toml           | .toml           | yes       | app configs (strict typing) |
+//	| cbor         | codec.CBOR     | application/cbor           | .cbor           | yes       | IoT / mobile (RFC 8949) |
+//	| msgpack      | codec.MsgPack  | application/msgpack        | .msgpack        | yes       | RPC payloads |
+//	| tlv          | "tlv"          | application/x-tlv          | —               | —         | custom binary streams, self-describing |
+//	| flatbuffers  | "flatbuffers"  | application/x-flatbuffers  | .fbs            | —         | zero-copy passthrough |
+//	| base64       | "base64"       | —                          | —               | —         | text-safe wrap (JSON → base-N) |
+//	| base64url    | "base64url"    | —                          | —               | —         | URL-safe base64 |
+//	| base32       | "base32"       | —                          | —               | —         | larger alphabet for human-typed tokens |
+//	| base16       | "base16"       | —                          | —               | —         | hex-like text |
+//	| hex          | "hex"          | —                          | —               | —         | classic hex pair encoding |
+//	| ascii85      | "ascii85"      | —                          | —               | —         | 4-byte to 5-char text packing |
+//
+// Runtime introspection: codec.Available() returns the live registry
+// list, codec.FromMIME and codec.FromExtension resolve from external
+// metadata.
+//
 // # Quick start
 //
 //	package main

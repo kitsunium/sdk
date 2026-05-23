@@ -73,8 +73,9 @@ lint:
 # matrix programmatically (testing.Benchmark per row, no text-format
 # parsing) under the `benchmark` build tag. Stamps a reproducibility
 # envelope (CPU, RAM, OS, Go toolchain, git SHA, timestamp) at the top
-# so cross-machine deltas can be evaluated honestly. Override the
-# per-row wall-clock with BENCH_TIME=1s for a quick smoke regen.
+# so cross-machine deltas can be evaluated honestly. Default per-row
+# wall-clock is 10s — enough to firm up numbers on the 5-operation × 3-size
+# x 18-codec matrix; override with e.g. BENCH_TIME=1s for a smoke regen.
 #
 # `bazel run` (not `bazel test`) is the entry point so BUILD_WORKSPACE_DIRECTORY
 # is set + the sandbox is lifted; that lets the test write BENCH.md back
@@ -82,8 +83,8 @@ lint:
 bench:
 	bazel run //pkg/v1/codec:codec_bench_test -- \
 		-test.run=TestGenerateBenchMD \
-		-test.timeout=1h \
-		-test.benchtime=$${BENCH_TIME:-2s} \
+		-test.timeout=2h \
+		-test.benchtime=$${BENCH_TIME:-10s} \
 		-test.v
 
 cover:

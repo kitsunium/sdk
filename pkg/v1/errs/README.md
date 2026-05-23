@@ -10,6 +10,38 @@ Package errs is the read\-only introspection facade for SDK errors.
 
 The concrete error type, constructors \([github.com/kitsunium/sdk/internal/kernel/errs](<https://pkg.go.dev/github.com/kitsunium/sdk/internal/kernel/errs/>).Define, Wrap\), and Field helpers live in internal/kernel/errs and are intentionally NOT re\-exported. Consumers receive \[error\] values from the SDK and query them via the Of\-family accessors below. This keeps callers from forging SDK errors while still enabling dashboards, retries, and structured logs to branch on Code / Reason / HTTPStatus / ExitCode.
 
+### Goals
+
+- Typed dotted\-quad codes. Every SDK error carries a Code uint32 packed as MM.LL.PP.SS \(Major / Layer / Package / Serial\). Composable octets — code.Layer\(\), code.Package\(\) — let routers branch without parsing.
+- Public / Private split. PublicOf returns a wire\-safe message \(≤120 runes, no newline\). PrivateOf returns the diagnostic envelope — never surface it to consumers.
+- Read\-only introspection. Consumer code never forges an SDK error; the constructors live in internal/kernel/errs. You receive error and query through the Of\-accessors.
+- HTTP / exit\-code mapping. Each error has an HTTPStatusOf \(default 500\) and ExitCodeOf \(default 70 / EX\_SOFTWARE\) so HTTP handlers and CLI binaries can return an SDK error verbatim.
+- CIDR\-style matching. NewPrefixMatcher\(code, mask\) \+ errors.Is route entire code\-ranges \(one package, one layer, one major\) with a single call.
+
+### What's shipped
+
+Nine accessors, two code helpers, four mask presets, one matcher constructor. All re\-exported as aliases over internal/kernel/errs.
+
+```
+| Symbol                                | Kind       | Returns / role                                            |
+|---------------------------------------|------------|------------------------------------------------------------|
+| errs.CodeOf(err)                      | accessor   | (Code, bool) — typed dotted-quad, 0/false if none          |
+| errs.ReasonOf(err)                    | accessor   | (string, bool) — SCREAMING_SNAKE reason                    |
+| errs.PublicOf(err)                    | accessor   | string — wire-safe message (≤120 runes)                    |
+| errs.PrivateOf(err)                   | accessor   | string — DIAGNOSTIC ONLY, never surface                    |
+| errs.HTTPStatusOf(err)                | accessor   | int — HTTP status, default 500                             |
+| errs.ExitCodeOf(err)                  | accessor   | int — POSIX exit code, default 70 (EX_SOFTWARE)            |
+| errs.HasCode(err, c)                  | predicate  | bool — true if c appears in the Unwrap chain               |
+| errs.HasReason(err, r)                | predicate  | bool — same with the reason string                         |
+| errs.NewPrefixMatcher(code, mask)     | matcher    | PrefixMatcher — use with errors.Is for range routing       |
+| errs.Pack(major, layer, pkg, serial)  | code ctor  | Code from four octets                                       |
+| errs.ParseCode(s)                     | code ctor  | Code from "M.L.P.S" string                                 |
+| errs.MaskByMajor / Layer / Package    | mask const | feed NewPrefixMatcher for the relevant subnet              |
+| errs.MaskExact                        | mask const | exact-code match (equivalent to HasCode)                   |
+```
+
+Type aliases: errs.Code \(a uint32\), errs.Major / Layer / PkgCode / Serial \(octet types\), errs.PrefixMatcher.
+
 ### Surface
 
 Accessors walk the Unwrap chain \(both \`Unwrap\(\) error\` and \`Unwrap\(\) \[\]error\`\) and return the deepest \*errs.Error value encountered. Defaults document the behaviour when no SDK error is present:
@@ -126,7 +158,7 @@ var (
 ```
 
 <a name="Code"></a>
-## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L103>)
+## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L146>)
 
 Code is the dotted\-quad error identifier packed into uint32. See ADR 0005 for the registry and layout.
 
@@ -150,7 +182,7 @@ const (
 ```
 
 <a name="Layer"></a>
-## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L110>)
+## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L153>)
 
 Layer is the second octet of Code — SDK layer \(0 = meta, 1 = kernel, 2 = core, 3 = service,...\). See ADR 0005.
 
@@ -159,7 +191,7 @@ type Layer = kerrs.Layer
 ```
 
 <a name="Major"></a>
-## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L107>)
+## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L150>)
 
 Major is the top octet of Code — SemVer major version \(0 = internal, 1 = v1,...\). See ADR 0005.
 
@@ -168,7 +200,7 @@ type Major = kerrs.Major
 ```
 
 <a name="PkgCode"></a>
-## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L112>)
+## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L155>)
 
 PkgCode is the third octet of Code — per\-layer package slot. See ADR 0005 / 0006.
 
@@ -177,7 +209,7 @@ type PkgCode = kerrs.PkgCode
 ```
 
 <a name="PrefixMatcher"></a>
-## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L118>)
+## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L161>)
 
 PrefixMatcher is the errors.Is target for CIDR\-style Code matching. Construct via NewPrefixMatcher.
 
@@ -186,7 +218,7 @@ type PrefixMatcher = kerrs.PrefixMatcher
 ```
 
 <a name="Serial"></a>
-## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L114>)
+## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L157>)
 
 Serial is the low octet of Code — per\-package serial. See ADR 0005.
 

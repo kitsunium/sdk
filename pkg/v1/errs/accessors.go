@@ -10,6 +10,49 @@
 // retries, and structured logs to branch on Code / Reason / HTTPStatus
 // / ExitCode.
 //
+// # Goals
+//
+//   - Typed dotted-quad codes. Every SDK error carries a Code uint32
+//     packed as MM.LL.PP.SS (Major / Layer / Package / Serial).
+//     Composable octets — code.Layer(), code.Package() — let routers
+//     branch without parsing.
+//   - Public / Private split. PublicOf returns a wire-safe message
+//     (≤120 runes, no newline). PrivateOf returns the diagnostic
+//     envelope — never surface it to consumers.
+//   - Read-only introspection. Consumer code never forges an SDK error;
+//     the constructors live in internal/kernel/errs. You receive error
+//     and query through the Of-accessors.
+//   - HTTP / exit-code mapping. Each error has an HTTPStatusOf
+//     (default 500) and ExitCodeOf (default 70 / EX_SOFTWARE) so HTTP
+//     handlers and CLI binaries can return an SDK error verbatim.
+//   - CIDR-style matching. NewPrefixMatcher(code, mask) + errors.Is
+//     route entire code-ranges (one package, one layer, one major)
+//     with a single call.
+//
+// # What's shipped
+//
+// Nine accessors, two code helpers, four mask presets, one matcher
+// constructor. All re-exported as aliases over internal/kernel/errs.
+//
+//	| Symbol                                | Kind       | Returns / role                                            |
+//	|---------------------------------------|------------|------------------------------------------------------------|
+//	| errs.CodeOf(err)                      | accessor   | (Code, bool) — typed dotted-quad, 0/false if none          |
+//	| errs.ReasonOf(err)                    | accessor   | (string, bool) — SCREAMING_SNAKE reason                    |
+//	| errs.PublicOf(err)                    | accessor   | string — wire-safe message (≤120 runes)                    |
+//	| errs.PrivateOf(err)                   | accessor   | string — DIAGNOSTIC ONLY, never surface                    |
+//	| errs.HTTPStatusOf(err)                | accessor   | int — HTTP status, default 500                             |
+//	| errs.ExitCodeOf(err)                  | accessor   | int — POSIX exit code, default 70 (EX_SOFTWARE)            |
+//	| errs.HasCode(err, c)                  | predicate  | bool — true if c appears in the Unwrap chain               |
+//	| errs.HasReason(err, r)                | predicate  | bool — same with the reason string                         |
+//	| errs.NewPrefixMatcher(code, mask)     | matcher    | PrefixMatcher — use with errors.Is for range routing       |
+//	| errs.Pack(major, layer, pkg, serial)  | code ctor  | Code from four octets                                       |
+//	| errs.ParseCode(s)                     | code ctor  | Code from "M.L.P.S" string                                 |
+//	| errs.MaskByMajor / Layer / Package    | mask const | feed NewPrefixMatcher for the relevant subnet              |
+//	| errs.MaskExact                        | mask const | exact-code match (equivalent to HasCode)                   |
+//
+// Type aliases: errs.Code (a uint32), errs.Major / Layer / PkgCode /
+// Serial (octet types), errs.PrefixMatcher.
+//
 // # Surface
 //
 // Accessors walk the Unwrap chain (both `Unwrap() error` and

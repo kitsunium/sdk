@@ -1,7 +1,9 @@
 <!--
-  See pkg/v1/codec/USES.md for the authoring rule (one tab per
-  variant, "Best for:" + 5-10 lines Go). Injected by sync-versions
-  AFTER the narrative and BEFORE the API reference dump.
+  Per-package "Use cases" — INTERACTIVE tabs (HTML). The narrative
+  "Goals" + "What's shipped" tables live in the Go doc comment of
+  accessors.go (so pkg.go.dev + README.md show them too); only the
+  HTML tabs need a hand-authored file because raw HTML inside a Go
+  doc comment renders as literal text on pkg.go.dev.
 -->
 
 ## Use cases
