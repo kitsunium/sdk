@@ -41,6 +41,7 @@ go_test(
     size = "small",
     srcs = [
         "builder_external_test.go",
+        "logger_bench_test.go",
         "logger_external_test.go",
         "sink_external_test.go",
         "version_external_test.go",

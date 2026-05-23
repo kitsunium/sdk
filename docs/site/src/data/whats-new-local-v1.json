@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-23T17:46:42.162Z",
+  "generatedAt": "2026-05-23T18:03:01.086Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "docs-site",
+      "breaking": false,
+      "summary": "Home renders README + WhatsNew banner + auto-generated changelog",
+      "sha": "d11b8c8ddc452f183da9cfd7e0c99bebce3325fd",
+      "short": "d11b8c8",
+      "date": "2026-05-23T19:51:41+02:00"
+    },
     {
       "type": "feat",
       "scope": "docs-site",
@@ -39,15 +48,6 @@
       "sha": "915008f840def0e00c6c39e8902b757f9cc1025f",
       "short": "915008f",
       "date": "2026-05-23T00:37:16+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "docs",
-      "breaking": false,
-      "summary": "code-driven symbol search via tools/genindex + MiniSearch",
-      "sha": "43cb8299028af396da7598c4ae28dc8ad4054baa",
-      "short": "43cb829",
-      "date": "2026-05-23T00:18:04+02:00"
     }
   ]
 }
