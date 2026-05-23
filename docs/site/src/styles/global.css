@@ -168,7 +168,12 @@ tbody tr:hover {
   max-width: calc(var(--container-w) + 14rem + 3rem);
   margin: 0 auto;
   width: 100%;
-  padding: 0 1.5rem;
+  /* Vertical padding lives on the grid parent so it spans BOTH the
+     article column AND the TOC rail. Previously the padding sat on
+     `main { padding: 2rem 0 3rem }` and got nuked by the higher-
+     specificity `.page-body > .container { padding: 0 }` reset below,
+     leaving the article flush against the page-header. */
+  padding: 2rem 1.5rem 3rem;
 }
 .page-body > .container {
   padding: 0;
@@ -251,7 +256,8 @@ tbody tr:hover {
 
 main {
   flex: 1;
-  padding: 2rem 0 3rem;
+  /* Vertical padding handled by .page-body now — see the comment there
+     for the specificity-collision history. Keeping `main` rule lean. */
 }
 /* Belt-and-braces: kill the first child's collapsing margin-top so
    the gap between page-header and first body element is uniform
