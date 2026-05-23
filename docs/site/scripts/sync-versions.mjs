@@ -463,15 +463,18 @@ async function materialiseRelease(major, release, sourceRoot) {
   // the file even if the section anchor isn't preserved).
   //
   // What we materialise vs what we drop (cf. docs-sidebar-rethink):
-  //   keep:    getting-started, concepts (← was 'architecture')
+  //   keep:    concepts (← was 'architecture', sliced from root CLAUDE.md)
   //   drop:    philosophy (0/7 SDKs surface this; lives in CLAUDE.md only)
   //   move:    verification → folded into contributors.md (hidden page,
   //            reachable via Sidebar footer 'For contributors ↗')
+  //
+  // "Getting started" is no longer synthesised from CLAUDE.md's
+  // 'How to work' section — that text is the MAINTAINER workflow
+  // (/plan, /do, /git --commit, make lint, bazel test) which has no
+  // place on a consumer-onboarding page. Source is now the dedicated
+  // /workspace/docs/getting-started.md file.
   const sections = await extractClaudeMdSections(claudeMd);
-  const pageMap = [
-    ["concepts", "Architecture at a glance"],
-    ["getting-started", "How to work"],
-  ];
+  const pageMap = [["concepts", "Architecture at a glance"]];
   for (const [slug, sectionTitle] of pageMap) {
     const body = sections[sectionTitle];
     if (!body) continue;
@@ -486,6 +489,28 @@ async function materialiseRelease(major, release, sourceRoot) {
         `# ${pageTitle}\n\n` +
         body +
         "\n",
+    );
+  }
+
+  // Getting started — sourced from /workspace/docs/getting-started.md
+  // (a real consumer-onboarding document, not a slice of maintainer
+  // workflow). Prepend frontmatter so the page-header h1 reads
+  // "Getting started" (RESERVED label) consistently with the sidebar.
+  const gsPath = join(sourceRoot, "docs", "getting-started.md");
+  if (existsSync(gsPath)) {
+    const gsTitle = RESERVED["getting-started"]?.label ?? "Getting started";
+    const gsBody = await readFile(gsPath, "utf8");
+    //: drop the leading H1 from the source — the page-header re-renders
+    //: the title from frontmatter, and the .md-body--strip-first-h1
+    //: rule hides any leading h1 to avoid duplication.
+    const stripped = gsBody.replace(/^#\s+.+?\n+/m, "");
+    await writeFile(
+      join(dest, "getting-started.md"),
+      frontmatter({
+        title: gsTitle,
+        description: "Five-minute install + first program",
+        source: "docs/getting-started.md",
+      }) + stripped,
     );
   }
 
