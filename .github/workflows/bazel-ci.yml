@@ -22,7 +22,17 @@ jobs:
     steps:
       # SHA-pinned per the .github/workflows/CLAUDE.md policy — version
       # comments track the resolved human-readable tag.
+      #
+      # fetch-depth: 0 — gomarkdoc resolves the repository URL + default
+      # branch via `git symbolic-ref refs/remotes/origin/HEAD` to build
+      # the source links in READMEs. A shallow clone (depth=1) makes
+      # that lookup fail and gomarkdoc falls back to a bare-name link
+      # shape that drifts from what local regen produces — the README
+      # drift gate then fails on a phantom diff. Full history kills
+      # the variability.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
 
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
