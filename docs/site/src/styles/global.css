@@ -168,15 +168,20 @@ tbody tr:hover {
   max-width: calc(var(--container-w) + 14rem + 3rem);
   margin: 0 auto;
   width: 100%;
-  /* Vertical padding lives on the grid parent so it spans BOTH the
-     article column AND the TOC rail. Previously the padding sat on
-     `main { padding: 2rem 0 3rem }` and got nuked by the higher-
-     specificity `.page-body > .container { padding: 0 }` reset below,
-     leaving the article flush against the page-header. */
-  padding: 2rem 1.5rem 3rem;
+  /* Horizontal only — keeps the grid spanning correctly. Vertical
+     padding sits on the article column (.page-body > .container)
+     below so the toc-rail's border-left can still anchor to the
+     TOP of the page-body row (stretched via align-self). */
+  padding: 0 1.5rem;
 }
 .page-body > .container {
-  padding: 0;
+  /* Reset .container defaults inside the grid (no auto margin / cap).
+     Vertical padding lives HERE (not on `main`) because the rule's
+     specificity (two classes) beats `main { padding }` (one element)
+     — pushing the padding here is the only way it survives. The TOC
+     rail intentionally has NO top padding so its vertical divider
+     starts at the very top of the page-body row. */
+  padding: 2rem 0 3rem;
   margin: 0;
   max-width: none;
 }

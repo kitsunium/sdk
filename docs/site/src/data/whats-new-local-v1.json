@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-23T18:29:28.409Z",
+  "generatedAt": "2026-05-23T18:32:33.732Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "fix",
+      "scope": "docs-site",
+      "breaking": false,
+      "summary": "restore vertical padding above page-body content",
+      "sha": "a15fedd1743bf688d8ea92e2ff9d6fa2305b0e87",
+      "short": "a15fedd",
+      "date": "2026-05-23T20:29:54+02:00"
+    },
     {
       "type": "feat",
       "scope": "docs-site",
@@ -39,15 +48,6 @@
       "sha": "c83a183d4579f887231045c8f8f3c5985d87689b",
       "short": "c83a183",
       "date": "2026-05-23T01:01:29+02:00"
-    },
-    {
-      "type": "fix",
-      "scope": "docs",
-      "breaking": false,
-      "summary": "page-header h1 matches sidebar label (single source: RESERVED map)",
-      "sha": "c8e0166d9890d82cfe9d8cb023f9dd5d4039f4a5",
-      "short": "c8e0166",
-      "date": "2026-05-23T00:52:22+02:00"
     }
   ]
 }
