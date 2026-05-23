@@ -17,18 +17,82 @@ import expressiveCode from "astro-expressive-code";
 import rehypeSlug from "rehype-slug";
 import remarkGithubBlockquoteAlert from "remark-github-blockquote-alert";
 
-//: gomarkdoc emits ``` fences with NO language tag (Go's doc-comment
-//: code-block syntax has no language affordance) so every code sample
-//: lifted from a Go doc comment lands as `lang: null` in the mdast and
-//: astro-expressive-code falls back to `plaintext` — visible as
-//: monochrome blocks next to the markdown-fenced ```go ones from
-//: USES.md. This is a Go-only SDK; tag every bare fence as `go` so a
-//: SINGLE highlighting pipeline lights up the whole page.
+//: gomarkdoc emits indented blocks from Go doc comments as ``` fences
+//: with NO language tag (the doc-comment grammar has no language
+//: affordance). Two distinct shapes land in those bare fences:
+//:   1. real Go code samples (Quick start, Activation, Extension
+//:      interfaces, Errors)
+//:   2. markdown pipe-tables that the doc author indented so they
+//:      survived through the Go-doc parser (e.g. the "What's shipped"
+//:      Format-x-MIME table in pkg/v1/codec/codec.go)
+//: Default both to Go and the table renders as red-keyword Go code —
+//: ridiculous. Discriminate:
+//:   - if every non-empty line starts with "|" → parse the bare fence
+//:     into a real mdast `table` node so Astro emits proper <table>
+//:     HTML (GFM is on by default)
+//:   - otherwise → tag the code node `go` so astro-expressive-code
+//:     applies the same Shiki github-dark + icon copy button as the
+//:     ```go fences in USES.md
+//: Plaintext snippets that match neither shape stay untagged.
+function tryParsePipeTable(value) {
+  const lines = value
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return null;
+  if (!lines.every((l) => l.startsWith("|"))) return null;
+  //: second line MUST be the alignment row (--- / :--- / :-: / ---:).
+  if (!/^\|[\s\-:|]+\|?$/.test(lines[1])) return null;
+  const splitRow = (line) =>
+    line
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((c) => c.trim());
+  const align = splitRow(lines[1]).map((c) => {
+    const l = c.startsWith(":");
+    const r = c.endsWith(":");
+    if (l && r) return "center";
+    if (r) return "right";
+    if (l) return "left";
+    return null;
+  });
+  const headerCells = splitRow(lines[0]);
+  const bodyRows = lines.slice(2).map(splitRow);
+  const cell = (text) => ({
+    type: "tableCell",
+    children: [{ type: "text", value: text }],
+  });
+  return {
+    type: "table",
+    align,
+    children: [
+      { type: "tableRow", children: headerCells.map(cell) },
+      ...bodyRows.map((row) => ({
+        type: "tableRow",
+        children: row.map(cell),
+      })),
+    ],
+  };
+}
+
 function remarkDefaultLangGo() {
   return (tree) => {
     const walk = (node) => {
-      if (node.type === "code" && !node.lang) node.lang = "go";
-      if (node.children) node.children.forEach(walk);
+      if (!node.children) return;
+      for (let i = 0; i < node.children.length; i++) {
+        const child = node.children[i];
+        if (child.type === "code" && !child.lang) {
+          const table = tryParsePipeTable(child.value || "");
+          if (table) {
+            node.children[i] = table;
+            continue;
+          }
+          child.lang = "go";
+          continue;
+        }
+        walk(child);
+      }
     };
     walk(tree);
   };
