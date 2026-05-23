@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-23T21:22:31.888Z",
+  "generatedAt": "2026-05-23T21:46:15.089Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "fix",
+      "scope": "docs-site",
+      "breaking": false,
+      "summary": "nuke content + .astro cache at top of sync-versions",
+      "sha": "5639994cf1d72b9cbbbb26ee162938d3fd69b2a7",
+      "short": "5639994",
+      "date": "2026-05-23T23:24:09+02:00"
+    },
     {
       "type": "fix",
       "scope": "docs-site",
@@ -39,15 +48,6 @@
       "sha": "f1fd8bbfa138db08eb9cd4dc6595b27e6a5e4294",
       "short": "f1fd8bb",
       "date": "2026-05-23T21:35:32+02:00"
-    },
-    {
-      "type": "fix",
-      "scope": "docs-site",
-      "breaking": false,
-      "summary": "rewrite Getting started as actual consumer onboarding",
-      "sha": "9a51874c5187565db6c2dc3bebf06c354bda632f",
-      "short": "9a51874",
-      "date": "2026-05-23T20:36:49+02:00"
     }
   ]
 }
