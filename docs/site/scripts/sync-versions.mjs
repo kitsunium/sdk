@@ -629,6 +629,20 @@ async function materialiseTag(major, version, tag) {
 async function main() {
   await mkdir(dirname(VERSIONS_JSON), { recursive: true });
 
+  // 0. Single deterministic wipe of the materialised content tree +
+  // Astro's content-collection cache. Two reasons:
+  //   (a) Layout migrations (e.g. <major>/<release> → <release>/<major>)
+  //       leave orphan directories the per-release wipes inside
+  //       materialiseRelease can't reach.
+  //   (b) Astro 5's glob loader can fire a "Duplicate id" warning on
+  //       its initial scan when a file appears in cache AND on disk
+  //       after a layout change. Nuking .astro/ alongside the on-disk
+  //       wipe guarantees astro starts from a known-empty store.
+  // The wipes are millisecond-scoped on a tree of ~20 markdown files.
+  await rm(CONTENT_ROOT, { recursive: true, force: true });
+  await rm(join(SITE_ROOT, ".astro"), { recursive: true, force: true });
+  await mkdir(CONTENT_ROOT, { recursive: true });
+
   // 1. Pick up all real release tags via gh, fallback to git tag -l.
   let releases = await listReleasesViaGh();
   if (!releases) releases = await listReleasesViaGitTags();
