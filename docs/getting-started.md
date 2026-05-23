@@ -4,7 +4,7 @@ This page walks you from "I have a fresh Go project" to running code that uses *
 
 ## Requirements
 
-- Go **1.22 or newer** (1.26 recommended — what the SDK is built against)
+- Go **1.26 or newer — mandatory**. The SDK is built and tested against 1.26.2 (pinned in `MODULE.bazel`) and uses language features (`for b.Loop()`, `b.Context()`, range-over-int) that older toolchains will refuse to compile.
 - A Go module to import from: `go mod init github.com/<you>/<project>` if you don't have one yet
 
 ## Install
