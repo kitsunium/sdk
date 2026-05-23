@@ -639,8 +639,15 @@ async function main() {
   //       after a layout change. Nuking .astro/ alongside the on-disk
   //       wipe guarantees astro starts from a known-empty store.
   // The wipes are millisecond-scoped on a tree of ~20 markdown files.
+  // .astro at the site root holds the schema + types, but the actual
+  // content-collection STORE (the source of phantom duplicate ids)
+  // lives in node_modules/.astro/data-store.json — wipe both.
   await rm(CONTENT_ROOT, { recursive: true, force: true });
   await rm(join(SITE_ROOT, ".astro"), { recursive: true, force: true });
+  await rm(join(SITE_ROOT, "node_modules", ".astro"), {
+    recursive: true,
+    force: true,
+  });
   await mkdir(CONTENT_ROOT, { recursive: true });
 
   // 1. Pick up all real release tags via gh, fallback to git tag -l.
