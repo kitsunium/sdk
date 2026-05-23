@@ -26,6 +26,16 @@ fi
 # Explicit per-package list (NOT a glob). Git pathspec ** does not
 # recurse across directories without :(glob) magic, and the explicit
 # list is more readable + version-independent.
+#
+# Hard-code --repository.url + --repository.default-branch + --repository.path
+# so the source-link rendering is identical between local + CI. Without
+# these, gomarkdoc auto-detects from the working tree's git state (current
+# branch, remote URL, default branch via `git symbolic-ref refs/remotes/origin/HEAD`)
+# — which varies between a devcontainer checkout and the CI runner and
+# produces a phantom drift in the link shape that this gate then flags.
 ( cd pkg/v1 && gomarkdoc --check \
     --output '{{.Dir}}/README.md' \
+    --repository.url 'https://github.com/kitsunium/sdk' \
+    --repository.default-branch main \
+    --repository.path '/pkg/v1' \
     ./codec ./errs ./logger )

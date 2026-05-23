@@ -1,4 +1,4 @@
-//go:generate gomarkdoc --output README.md .
+//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/errs .
 
 // Package errs is the read-only introspection facade for SDK errors.
 //

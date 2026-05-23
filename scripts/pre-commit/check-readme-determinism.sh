@@ -23,11 +23,15 @@ trap 'rm -rf "$a" "$b"' EXIT
 
 # Generate twice into temp prefixes so we never overwrite the committed
 # READMEs. {{.Dir}} expands to the package's source dir; we redirect
-# via cp-after-the-fact instead.
+# via cp-after-the-fact instead. Repository flags mirror
+# check-readme-drift.sh so both gates agree on the URL/branch shape.
 gen() {
   local out="$1"
   ( cd pkg/v1 && gomarkdoc \
       --output "${out}/{{.Dir}}/README.md" \
+      --repository.url 'https://github.com/kitsunium/sdk' \
+      --repository.default-branch main \
+      --repository.path '/pkg/v1' \
       ./codec ./errs ./logger ) >/dev/null
 }
 
