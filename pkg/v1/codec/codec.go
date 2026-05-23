@@ -8,32 +8,6 @@
 // variants (base64, base64url, base32, base16, hex, ascii85).
 // Format-swap at runtime is a single string change.
 //
-// Concrete codecs live in internal/service/codec/*; this package is
-// the read-only dispatch facade. Importing the package activates
-// every codec via blank-import side effects.
-//
-// # Surface
-//
-// Dispatch — pick the codec by registered Format name:
-//
-//	func Marshal(format Format, v any) ([]byte, error)
-//	func Unmarshal(format Format, data []byte, v any) error
-//
-// Streaming — when the resolved codec implements core/codec.StreamingCodec:
-//
-//	func NewEncoder(format Format, w io.Writer) (Encoder, error)
-//	func NewDecoder(format Format, r io.Reader) (Decoder, error)
-//
-// Registry introspection:
-//
-//	func Available() []Format
-//	func FromMIME(mime string) (Format, bool)
-//	func FromExtension(ext string) (Format, bool)
-//
-// [Format] is an alias for the registered string name; the typed
-// constants ([JSON], [CBOR], [YAML], …) are the contract, and their
-// underlying string values are frozen post-v1.0.0.
-//
 // # Quick start
 //
 //	package main
@@ -67,27 +41,7 @@
 //
 // The package blank-imports every internal/service/codec/* package;
 // each registers itself in core/codec.Lookup via init(). Consumers
-// never call a Register() function — registration is purely a
-// side-effect of importing this package.
-//
-// # Choosing a Format
-//
-//   - json — API responses, configs (most-supported; reasonable size).
-//   - ndjson — streaming logs, line-oriented batches (appender + line framing).
-//   - yaml — human-edited configs (slower; not great at scale).
-//   - toml — app configs (strict typing).
-//   - xml — legacy integrations (verbose; specialised payloads).
-//   - csv — tabular exports (rows in / rows out; not arbitrary structs).
-//   - cbor — binary IoT / mobile (compact + fast).
-//   - msgpack — RPC payloads (compact; ecosystem-wide).
-//   - tlv — custom binary streams (self-describing, reflection-driven, hardened).
-//   - flatbuffers — zero-copy passthrough (schema lives outside the codec).
-//   - asn1-der — crypto / X.509 artefacts (strict DER rules).
-//   - pem — crypto / certificates (block-wrapped DER).
-//   - base64 / base64url / base32 / base16 / hex / ascii85 — wrap any
-//     structure in a text-safe encoding (pipeline = encoding/json.Marshal(v)
-//     → base-N). Use stdlib encoding/base64 (etc.) directly when you have
-//     raw bytes already.
+// never call a Register() function — registration is a side-effect.
 //
 // # Extension interfaces
 //

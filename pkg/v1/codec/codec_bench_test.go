@@ -977,7 +977,13 @@ func writeResultsIntro(b *strings.Builder) {
 // for the first operation — so the page is scannable instead of being
 // a 21-table flood.
 func writeAllPivotTables(b *strings.Builder, rows []benchReportRow) {
-	categories := []string{"Marshal", "Unmarshal", "MarshalParallel", "UnmarshalParallel", "Append", "StreamEncode", "StreamDecode"}
+	//: Parallel variants intentionally dropped from the published
+	//: report — they bloat the page without telling a consumer
+	//: anything actionable about format choice (the parallel scaling
+	//: is a Go-runtime property, not a codec property). The bench
+	//: code still runs them (Bazel target picks them up) so we keep
+	//: the regression net, just not the table flood.
+	categories := []string{"Marshal", "Unmarshal", "Append", "StreamEncode", "StreamDecode"}
 	for i, cat := range categories {
 		any := false
 		for _, sz := range benchSizes {
