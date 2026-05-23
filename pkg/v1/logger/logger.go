@@ -35,8 +35,8 @@
 //
 //	| Group               | Symbols                                                                     | Role |
 //	|---------------------|------------------------------------------------------------------------------|------|
-//	| Construction        | Default, NewText(Config), NewWithSink(SinkConfig)                            | Wire a Logger from explicit knobs OR a one-liner |
-//	| Sinks (native)      | ConsoleStderr, ConsoleStdout, Multi(branches…)                               | Native + fan-out; bring custom Sink for file/DB/etc. |
+//	| Construction        | Default, NewText(Config), NewWithSink(SinkConfig)                            | Wire a Logger from explicit knobs OR a one-liner. Config has Writer (single) + Writers ([]io.Writer fan-out) — pick one. |
+//	| Sinks (native)      | ConsoleStderr, ConsoleStdout, NewWriterSink(w), Multi(branches…)             | Native + io.Writer adapter + fan-out; bring custom Sink for DB/etc. |
 //	| Middleware          | multi, async, route, failover, sample, recover                               | Compose around a base Sink; same Sink interface chainable |
 //	| Encoders            | TextEncoder                                                                  | key=value lines on system clock (JSON/structured: internal today) |
 //	| Emission            | Info / Warn / Error / Debug (variadic), Build(lg,lv) → chain → Send, LogAttrs| 1 alloc on variadic, 0 alloc steady-state on Build |
@@ -147,23 +147,72 @@ const LevelWarn Level = level.Warn
 const LevelError Level = level.Error
 
 // Config carries the construction parameters accepted by NewText.
-// Fields that remain at their zero value fall back to documented defaults,
-// so Config{} is a valid argument producing a stderr INFO+ logger.
+// Two destination forms are supported — pick the one that fits:
+//
+//   - Writer single — Writer: w. Records go to that one writer.
+//   - Writers fan-out — Writers: []io.Writer{a, b, c}. Records broadcast
+//     to every writer in order; per-branch failures are joined under
+//     FANOUT_WRITE_FAILED. Use this when you want stderr AND a log file
+//     in one go (a common ops pattern) without dropping to NewWithSink.
+//
+// When BOTH are set, Writers wins and Writer is ignored. Use whichever
+// reads more naturally at the call site. Construction returns
+// WriterRequired (1.1.0.1) when neither field carries any writer.
 type Config struct {
-	// Writer is the destination sink; nil defaults to os.Stderr.
+	// Writer is the single-destination convenience field; nil triggers
+	// WriterRequired unless Writers carries at least one entry.
 	Writer io.Writer
+	// Writers is the multi-destination fan-out field; non-empty wires
+	// the records through logger.Multi over per-writer console sinks.
+	// Nil/empty falls back to Writer.
+	Writers []io.Writer
 	// MinLevel is the minimum severity emitted; zero value is LevelInfo.
 	MinLevel Level
 }
 
-// NewText builds a text-format Logger writing to cfg.Writer filtered at
-// cfg.MinLevel. NewText intentionally does NOT default a nil Writer: callers
-// that want stderr use Default(), which supplies it explicitly. Every record
-// emitted through the returned Logger carries a "framework_version" attr.
+// NewText builds a text-format Logger writing to cfg.Writer (single) OR
+// cfg.Writers (fan-out) filtered at cfg.MinLevel. NewText intentionally
+// does NOT default a nil destination: callers that want stderr use
+// Default(), which supplies it explicitly. Every record emitted through
+// the returned Logger carries a "framework_version" attr.
+//
+// Multi-writer example — stream identical text records to stderr AND a
+// log file:
+//
+//	f, _ := os.OpenFile("/var/log/myapp.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+//	lg, err := logger.NewText(logger.Config{
+//	    Writers:  []io.Writer{os.Stderr, f},
+//	    MinLevel: logger.LevelInfo,
+//	})
 func NewText(cfg Config) (lg Logger, err error) {
+	//: prefer the Writers fan-out path when the slice is non-empty —
+	//: it covers strictly more cases than the single-writer path.
+	if len(cfg.Writers) > 0 {
+		//: pre-allocate the branch slice with exact cardinality.
+		branches := make([]Sink, 0, len(cfg.Writers))
+		//: wrap each plain io.Writer into a Sink so Multi can fold them.
+		for _, w := range cfg.Writers {
+			//: NewWriterSink rejects nil with WriterRequired so a typo
+			//: in the Writers slice surfaces the right typed error.
+			sink, sErr := NewWriterSink(w)
+			//: forward the construction error untouched (origin wins).
+			if sErr != nil {
+				//: bubble out so the caller sees the first failing writer.
+				return nil, sErr
+			}
+			branches = append(branches, sink)
+		}
+		//: route through NewWithSink so the same encoder + version
+		//: stamping pipeline applies as the single-writer path.
+		return NewWithSink(SinkConfig{
+			Sink:     Multi(branches...),
+			Encoder:  TextEncoder(),
+			MinLevel: cfg.MinLevel,
+		})
+	}
 	//: refuse to default silently — explicit construction prevents silent stderr.
 	if cfg.Writer == nil {
-		//: surface the documented sentinel so operators can HasCode(err, 4101).
+		//: surface the documented sentinel so operators can HasCode(err, 1.1.0.1).
 		return nil, WriterRequired
 	}
 	//: build the handler; svclogger owns its own validation.

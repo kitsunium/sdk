@@ -14,8 +14,9 @@ the bytes are formatted). Pick the topology that fits.
 <div class="tabs" data-tabs>
 <div class="tab-strip" role="tablist">
 <button type="button" role="tab" id="lg-default-btn" aria-controls="lg-default" aria-selected="true" tabindex="0" class="active">Default (stderr)</button>
-<button type="button" role="tab" id="lg-file-btn" aria-controls="lg-file" aria-selected="false" tabindex="-1">File sink</button>
-<button type="button" role="tab" id="lg-multi-btn" aria-controls="lg-multi" aria-selected="false" tabindex="-1">Multi (fan-out)</button>
+<button type="button" role="tab" id="lg-multiwriter-btn" aria-controls="lg-multiwriter" aria-selected="false" tabindex="-1">Multi-writer (stderr + file)</button>
+<button type="button" role="tab" id="lg-file-btn" aria-controls="lg-file" aria-selected="false" tabindex="-1">File only</button>
+<button type="button" role="tab" id="lg-multi-btn" aria-controls="lg-multi" aria-selected="false" tabindex="-1">Multi (custom sinks)</button>
 <button type="button" role="tab" id="lg-build-btn" aria-controls="lg-build" aria-selected="false" tabindex="-1">Build (hot path)</button>
 <button type="button" role="tab" id="lg-custom-btn" aria-controls="lg-custom" aria-selected="false" tabindex="-1">Custom sink</button>
 </div>
@@ -32,23 +33,42 @@ logger.Info(ctx, lg, "service started",
 )</code></pre>
 </div>
 
-<div role="tabpanel" id="lg-file" aria-labelledby="lg-file-btn" hidden>
-<p><strong>Best for:</strong> production daemons that ship logs to disk (with logrotate / fluentd reading the file).</p>
-<pre><code class="language-go">f, _ := os.OpenFile("/var/log/myapp.log",
+<div role="tabpanel" id="lg-multiwriter" aria-labelledby="lg-multiwriter-btn" hidden>
+<p><strong>Best for:</strong> "log to stderr AND to a file" — the most common ops pattern. Use the new <code>Writers []io.Writer</code> field of <code>Config</code> and <code>NewText</code> wires the fan-out for you (no <code>NewWithSink</code> dance).</p>
+<pre><code class="language-go">f, err := os.OpenFile("/var/log/myapp.log",
     os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+if err != nil { panic(err) }
 
-lg, err := logger.NewWithSink(logger.SinkConfig{
-    Sink:    fileSinkAroundWriter(f), // your adapter
-    Encoder: logger.TextEncoder(),
+lg, err := logger.NewText(logger.Config{
+    Writers:  []io.Writer{os.Stderr, f}, // any number of io.Writers
+    MinLevel: logger.LevelInfo,
+})
+// Records broadcast to BOTH writers, atomic per-line on each.</code></pre>
+</div>
+
+<div role="tabpanel" id="lg-file" aria-labelledby="lg-file-btn" hidden>
+<p><strong>Best for:</strong> production daemons that ship logs to a single on-disk file (with logrotate / fluentd reading it). Same <code>NewText</code> path — just one writer.</p>
+<pre><code class="language-go">f, err := os.OpenFile("/var/log/myapp.log",
+    os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+if err != nil { panic(err) }
+
+lg, err := logger.NewText(logger.Config{
+    Writer:   f,
+    MinLevel: logger.LevelInfo,
 })</code></pre>
 </div>
 
 <div role="tabpanel" id="lg-multi" aria-labelledby="lg-multi-btn" hidden>
-<p><strong>Best for:</strong> fan-out — stream to stderr <em>and</em> to a remote aggregator at the same time. Errors from any branch are joined under <code>FANOUT_WRITE_FAILED</code>.</p>
-<pre><code class="language-go">lg, err := logger.NewWithSink(logger.SinkConfig{
+<p><strong>Best for:</strong> fan-out across heterogeneous sinks — stderr + a remote syslog + a custom DB sink at once. When the branches aren't all plain <code>io.Writer</code>s, drop to <code>NewWithSink</code> and compose with <code>Multi</code>. Errors from any branch join under <code>FANOUT_WRITE_FAILED</code>.</p>
+<pre><code class="language-go">// NewWriterSink wraps any io.Writer (file, bytes.Buffer, net.Conn, …)
+// as a Sink so Multi can fold it alongside custom Sinks.
+fileSink, _ := logger.NewWriterSink(myFile)
+
+lg, err := logger.NewWithSink(logger.SinkConfig{
     Sink: logger.Multi(
         logger.ConsoleStderr(),
-        remoteSyslogSink, // your custom sink
+        fileSink,
+        remoteSyslogSink, // your custom Sink implementation
     ),
     Encoder: logger.TextEncoder(),
 })</code></pre>
