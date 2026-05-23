@@ -17,6 +17,23 @@ import expressiveCode from "astro-expressive-code";
 import rehypeSlug from "rehype-slug";
 import remarkGithubBlockquoteAlert from "remark-github-blockquote-alert";
 
+//: gomarkdoc emits ``` fences with NO language tag (Go's doc-comment
+//: code-block syntax has no language affordance) so every code sample
+//: lifted from a Go doc comment lands as `lang: null` in the mdast and
+//: astro-expressive-code falls back to `plaintext` — visible as
+//: monochrome blocks next to the markdown-fenced ```go ones from
+//: USES.md. This is a Go-only SDK; tag every bare fence as `go` so a
+//: SINGLE highlighting pipeline lights up the whole page.
+function remarkDefaultLangGo() {
+  return (tree) => {
+    const walk = (node) => {
+      if (node.type === "code" && !node.lang) node.lang = "go";
+      if (node.children) node.children.forEach(walk);
+    };
+    walk(tree);
+  };
+}
+
 const buildInfoPath = fileURLToPath(
   new URL("./src/data/build-info.json", import.meta.url),
 );
@@ -89,6 +106,6 @@ export default defineConfig({
     //: GitHub-flavoured > [!NOTE] / [!TIP] / [!WARNING] / [!CAUTION]
     //: / [!IMPORTANT] blockquote alerts. CSS handles the styling
     //: by selector .markdown-alert(-note|-tip|-warning|-caution|-important).
-    remarkPlugins: [remarkGithubBlockquoteAlert],
+    remarkPlugins: [remarkGithubBlockquoteAlert, remarkDefaultLangGo],
   },
 });
