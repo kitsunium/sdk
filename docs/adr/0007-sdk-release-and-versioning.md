@@ -71,7 +71,14 @@ The sidebar's `<VersionDropdown />` reads `versions.json` at build time. The dro
 
 ### 6. Reserved routes (top-level page collision guard)
 
-`getting-started`, `philosophy`, `architecture`, `packages`, `adr`, `benchmarks`, `verification`, `index` are reserved page slugs under `/<release>/<major>/`. A future major must not be named after any of them (they're not valid semver majors anyway, but the regex would allow weirdness like `pkg/getting-started/v1.0.0`). The tag-format regex anchors `^pkg/v[0-9]+/…` and rejects them. Reserved RELEASE names (`local` today; future: tag-derived `v0.1.0` etc.) are non-colliding with major names because majors always start with `v\d+` and the canonical catch-all distinguishes the two by position, not pattern.
+Reserved page slugs under `/<release>/<major>/` split into two tiers:
+
+- **Public nav** (`Sidebar.astro` groups): `index` (= Home), `getting-started`, `concepts`, `changelog`. Auto-discovered Go packages (`codec`, `errs`, `logger`, …) land under the `Packages` group.
+- **Hidden** (still reachable by URL, surfaced only via the Sidebar footer "For contributors ↗"): `adr`, `contributors`. These pages exist because the audit in `.claude/contexts/docs-sidebar-rethink.md` found that 0/7 surveyed SDKs (AWS, Azure, GCP, Cloudflare, Stripe, Go std, Rust std) expose ADRs / Benchmarks / Verification in the main consumer nav.
+
+A future major must not be named after any of these slugs. The tag-format regex anchors `^pkg/v[0-9]+/…` and rejects them anyway. Reserved RELEASE names (`local` today; future: tag-derived `v0.1.0` etc.) are non-colliding with major names because majors always start with `v\d+` and the canonical catch-all distinguishes the two by position, not pattern.
+
+The full reservation map lives in `docs/site/scripts/lib/page-catalog.mjs` (`RESERVED` constant) — single source of truth shared by `Sidebar.astro`, `Search.astro`, and `sync-versions.mjs`.
 
 ### 7. Logo asset
 

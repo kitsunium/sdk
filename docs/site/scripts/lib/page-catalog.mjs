@@ -4,31 +4,40 @@
 // (post-sync-versions materialisation) into the grouped + ordered
 // structure both Sidebar.astro and Search.astro need:
 //
-//     Overview          (Home / Getting started / Philosophy)
-//     services          (codec / errs / logger / …)
-//     Reference         (Architecture / ADRs / Benchmarks / Verification)
+//     Overview         (Home / Getting started)
+//     Packages         (codec / errs / logger / …)        — formerly "services"
+//     Reference        (Concepts / Changelog)
 //
-// Everything keyed off the page's content collection ID. Any new top-
-// level page under src/content/docs/<m>/<r>/ slots in automatically:
-//   - reserved keys (index, getting-started, philosophy, architecture,
-//     adr, benchmarks, verification) get their fixed group + label.
-//   - anything else lands in "services" (the pkg/<major>/<sub>/README
-//     pages that sync-versions copies as <sub>.md).
+// Hidden slugs (adr, contributors) still get pages built but are
+// surfaced via the sidebar FOOTER ("For contributors ↗"), not the
+// main nav — they're maintainer-facing, not consumer-facing.
 //
-// Sub-pages (e.g. adr/0001-foo) are intentionally not surfaced as
-// quick-links — the group's landing page surfaces them in-context.
+// Industry rationale (audit recorded in
+// /workspace/.claude/contexts/docs-sidebar-rethink.md):
+//   - "Philosophy" / "Verification" : 0/7 SDKs reviewed (AWS, Azure,
+//     GCP, Cloudflare, Stripe, Go std, Rust std) surface this in the
+//     consumer nav — pure maintainer self-indulgence.
+//   - "Architecture" : when present, concrete only (HTTP pipeline /
+//     security model) → renamed to "Concepts" with concrete content.
+//   - ADRs / Benchmarks : 0/7 SDKs surface them in main nav.
+//     Benchmarks move INLINE to each package page (cf.
+//     .claude/contexts/package-inline-benchmarks.md).
 
 /**
  * Reserved page metadata. Keys match the content-collection slug
- * within the (major, release) prefix.
+ * within the (release, major) prefix.
  *
- * @typedef {{ group: string, hint: string, label?: string, order: number }} ReservedMeta
+ * `hidden: true` means the page is materialised AND reachable by URL,
+ * but does NOT appear in the main sidebar groups — the Sidebar.astro
+ * footer surfaces it via a "For contributors ↗" link instead.
+ *
+ * @typedef {{ group: string, hint: string, label?: string, order: number, hidden?: boolean }} ReservedMeta
  * @type {Record<string, ReservedMeta>}
  */
 export const RESERVED = Object.freeze({
   index: {
     group: "Overview",
-    hint: "Package overview",
+    hint: "Project overview",
     label: "Home",
     order: 0,
   },
@@ -38,50 +47,47 @@ export const RESERVED = Object.freeze({
     label: "Getting started",
     order: 1,
   },
-  philosophy: {
-    group: "Overview",
-    hint: "SDK-wide rules",
-    label: "Philosophy",
-    order: 2,
-  },
-  architecture: {
+  concepts: {
     group: "Reference",
-    hint: "Layer model",
-    label: "Architecture",
+    hint: "Layer model + error semantics",
+    label: "Concepts",
     order: 0,
   },
+  changelog: {
+    group: "Reference",
+    hint: "What changed per release",
+    label: "Changelog",
+    order: 1,
+  },
+  //: Hidden — accessible by URL, surfaced via the Sidebar footer link.
   adr: {
     group: "Reference",
     hint: "Decision records",
     label: "ADRs",
-    order: 1,
+    order: 99,
+    hidden: true,
   },
-  benchmarks: {
+  contributors: {
     group: "Reference",
-    hint: "Performance reports",
-    label: "Benchmarks",
-    order: 2,
-  },
-  verification: {
-    group: "Reference",
-    hint: "Build / test / lint gates",
-    label: "Verification",
-    order: 3,
+    hint: "Maintainer onboarding",
+    label: "For contributors",
+    order: 100,
+    hidden: true,
   },
 });
 
 /**
- * Stable presentation order for the three top-level buckets.
+ * Stable presentation order for the top-level buckets.
  * Empty buckets are dropped by buildCatalog().
  */
-export const GROUP_ORDER = ["Overview", "services", "Reference"];
+export const GROUP_ORDER = ["Overview", "Packages", "Reference"];
 
 /**
  * Pure-function projection: collection entries → grouped catalog.
  *
  * @param {Array<{id: string}>} entries  — output of getCollection("docs")
- * @param {string} root                  — "<major>/<release>" (no trailing slash)
- * @param {string} base                  — "/<major>/<release>" (URL prefix)
+ * @param {string} root                  — "<release>/<major>" (no trailing slash)
+ * @param {string} base                  — "/<release>/<major>" (URL prefix)
  * @returns {Array<{ group: string, items: Array<{ href: string, label: string, hint?: string, order: number }> }>}
  */
 export function buildCatalog(entries, root, base) {
@@ -109,6 +115,10 @@ export function buildCatalog(entries, root, base) {
     }
     const reserved = RESERVED[key];
     if (reserved) {
+      //: Hidden RESERVED entries (ADRs, contributors) are NOT pushed
+      //: into the catalog at all — Sidebar.astro renders them via a
+      //: separate footer "For contributors ↗" link.
+      if (reserved.hidden) continue;
       push(reserved.group, {
         href,
         label: reserved.label ?? key,
@@ -116,9 +126,9 @@ export function buildCatalog(entries, root, base) {
         order: reserved.order,
       });
     } else {
-      //: everything else is a service auto-discovered from
+      //: everything else is a Go package auto-discovered from
       //: pkg/<major>/<sub>/README.md. Label = the directory name.
-      push("services", { href, label: key, hint: "Package", order: 100 });
+      push("Packages", { href, label: key, hint: "Package", order: 100 });
     }
   }
 
@@ -133,7 +143,7 @@ export function buildCatalog(entries, root, base) {
 /**
  * Project a grouped catalog into a flat ordered list. Used by the
  * Previous/Next page footer to find a page's neighbours in the
- * canonical reading order: Overview → services → Reference.
+ * canonical reading order: Overview → Packages → Reference.
  *
  * @param {ReturnType<typeof buildCatalog>} catalog
  * @returns {Array<{ href: string, label: string, group: string }>}

@@ -675,31 +675,6 @@ main:focus-visible {
   font-weight: 600;
 }
 
-/* ── Heading permalinks ──────────────────────────────────────────── */
-.md-body h2,
-.md-body h3,
-.md-body h4 {
-  position: relative;
-}
-.heading-anchor {
-  margin-left: 0.45rem;
-  font-size: 0.75em;
-  color: var(--color-muted);
-  opacity: 0;
-  text-decoration: none;
-  transition:
-    opacity 100ms ease,
-    color 100ms ease;
-}
-.md-body h2:hover .heading-anchor,
-.md-body h3:hover .heading-anchor,
-.md-body h4:hover .heading-anchor,
-.heading-anchor:focus-visible {
-  opacity: 1;
-  outline: none;
-  color: var(--color-accent);
-}
-
 /* ── Theme toggle ────────────────────────────────────────────────── */
 .theme-toggle {
   display: inline-flex;

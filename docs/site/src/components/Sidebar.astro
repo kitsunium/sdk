@@ -99,6 +99,14 @@ function isActive(href: string): boolean {
 
     <div class="sidebar-foot">
       <ThemeToggle />
+      {/* Hidden RESERVED pages (ADRs / Benchmarks / Verification) are
+          consolidated into /<release>/<major>/contributors/. That page
+          plus the link below replace what used to be 3 main-nav entries
+          aimed at maintainers. Reasoning + survey: see
+          /workspace/.claude/contexts/docs-sidebar-rethink.md. */}
+      <a href={`${base}/contributors/`} class={isActive(`${base}/contributors/`) ? "active" : ""}>
+        For contributors ↗
+      </a>
       {repoUrl && (
         <a href={repoUrl} target="_blank" rel="noopener">
           Repository ↗

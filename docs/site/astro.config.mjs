@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 import sitemap from "@astrojs/sitemap";
 import expressiveCode from "astro-expressive-code";
 import rehypeSlug from "rehype-slug";
-import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import remarkGithubBlockquoteAlert from "remark-github-blockquote-alert";
 
 const buildInfoPath = fileURLToPath(
@@ -80,35 +79,13 @@ export default defineConfig({
     sitemap(),
   ],
   markdown: {
-    //: Auto-id every heading (rehype-slug) then wrap the heading text
-    //: in an anchor link (rehype-autolink-headings). Click any H2/H3
-    //: copies the deep link to clipboard via the inline icon.
-    rehypePlugins: [
-      rehypeSlug,
-      [
-        rehypeAutolinkHeadings,
-        {
-          //: Skip H1 — the page layout HIDES the markdown H1 (the
-          //: page-header surfaces the title instead) and Astro's
-          //: `headings` extractor reads the heading textContent
-          //: including the appended "#" span, which leaked into
-          //: the page-header h1 ("codec#"). Anchors on H2/H3/H4
-          //: are what readers actually use to deep-link sections.
-          test: (element) => element.tagName !== "h1",
-          behavior: "append",
-          properties: {
-            class: "heading-anchor",
-            ariaLabel: "Permalink",
-          },
-          content: {
-            type: "element",
-            tagName: "span",
-            properties: { ariaHidden: "true" },
-            children: [{ type: "text", value: "#" }],
-          },
-        },
-      ],
-    ],
+    //: Auto-id every heading (rehype-slug) so the right-side TOC,
+    //: symbol search, and fragment URLs keep resolving. We deliberately
+    //: skip rehype-autolink-headings — a visible "#" affordance next
+    //: to every H2/H3 reads as noise even when opacity-hidden until
+    //: hover. Deep-links still work via the heading id; users copy a
+    //: section URL from the address bar or the sidebar.
+    rehypePlugins: [rehypeSlug],
     //: GitHub-flavoured > [!NOTE] / [!TIP] / [!WARNING] / [!CAUTION]
     //: / [!IMPORTANT] blockquote alerts. CSS handles the styling
     //: by selector .markdown-alert(-note|-tip|-warning|-caution|-important).
