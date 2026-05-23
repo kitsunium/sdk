@@ -140,6 +140,174 @@ function stripGomarkdocIndex(body) {
   return body.replace(/\n## Index\n[\s\S]*?(?=\n## |\s*$)/, "\n");
 }
 
+// ─── Changelog generation ─────────────────────────────────────────
+//
+// Source of truth = git log. No CHANGELOG.md hand-edited file (the
+// repo's commits are strictly conventional — see /workspace/CLAUDE.md).
+// For tagged releases: window = previous-tag..current-tag.
+// For "local": window = last 30 commits (no tags yet on this repo).
+
+const COMMIT_DELIM = "---COMMIT-END---";
+const COMMIT_FORMAT = `%H|%h|%cI|%s|%b${COMMIT_DELIM}`;
+
+const CONVENTIONAL_RE =
+  /^(feat|fix|perf|refactor|chore|docs|test|build|ci|style)(?:\(([^)]+)\))?(!)?:\s*(.+)$/;
+
+const GROUP_LABEL = {
+  feat: "Features",
+  fix: "Fixes",
+  perf: "Performance",
+  refactor: "Refactors",
+  docs: "Documentation",
+  build: "Build",
+  ci: "CI",
+  test: "Tests",
+  chore: "Chores",
+  style: "Style",
+  misc: "Other",
+};
+
+const GROUP_ORDER_FOR_CHANGELOG = [
+  "feat",
+  "fix",
+  "perf",
+  "refactor",
+  "docs",
+  "build",
+  "ci",
+  "test",
+  "style",
+  "chore",
+  "misc",
+];
+
+function classifyCommit(subject) {
+  const m = subject.match(CONVENTIONAL_RE);
+  if (!m)
+    return { type: "misc", scope: null, breaking: false, summary: subject };
+  return {
+    type: m[1],
+    scope: m[2] ?? null,
+    breaking: m[3] === "!",
+    summary: m[4],
+  };
+}
+
+async function gitLogCommits(sourceRoot, refSpec) {
+  const args = ["log", `--pretty=format:${COMMIT_FORMAT}`];
+  for (const part of refSpec) args.push(part);
+  const out = await shellSafe("git", args, { cwd: sourceRoot });
+  if (typeof out !== "string") return [];
+  return out
+    .split(COMMIT_DELIM)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      //: Subject can contain "|" (e.g. piped-shell commands quoted in a
+      //: commit summary). Split only on the first 4 separators to keep
+      //: the body intact even if it carries pipes.
+      const idx = [];
+      let pos = -1;
+      for (let i = 0; i < 4; i++) {
+        pos = s.indexOf("|", pos + 1);
+        if (pos === -1) break;
+        idx.push(pos);
+      }
+      if (idx.length < 4) return null;
+      const sha = s.slice(0, idx[0]);
+      const short = s.slice(idx[0] + 1, idx[1]);
+      const date = s.slice(idx[1] + 1, idx[2]);
+      const subject = s.slice(idx[2] + 1, idx[3]);
+      const body = s.slice(idx[3] + 1);
+      return { sha, short, date, subject, body };
+    })
+    .filter(Boolean);
+}
+
+function renderChangelogMarkdown(commits, release, major, repoUrl) {
+  const grouped = new Map();
+  for (const c of commits) {
+    const meta = classifyCommit(c.subject);
+    if (meta.type === "chore" && !meta.breaking) continue; //: drop chore noise from public changelog
+    if (!grouped.has(meta.type)) grouped.set(meta.type, []);
+    grouped.get(meta.type).push({ ...c, ...meta });
+  }
+  const lines = [];
+  for (const t of GROUP_ORDER_FOR_CHANGELOG) {
+    const rows = grouped.get(t);
+    if (!rows || rows.length === 0) continue;
+    lines.push(`### ${GROUP_LABEL[t]}`);
+    lines.push("");
+    for (const r of rows) {
+      const scope = r.scope ? `**${r.scope}**: ` : "";
+      const breaking = r.breaking ? " · ⚠️ breaking" : "";
+      const commitLink = repoUrl
+        ? `[\`${r.short}\`](${repoUrl}/commit/${r.sha})`
+        : `\`${r.short}\``;
+      lines.push(`- ${commitLink} ${scope}${r.summary}${breaking}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+async function materialiseChangelog(major, release, sourceRoot, dest, repoUrl) {
+  //: Window = last 30 commits for "local" (no tags yet on this repo);
+  //: for a real tag we'd pass `<prev-tag>..<this-tag>`. The tooling
+  //: is ready — the prev-tag wiring lands the day the first
+  //: pkg/<major>/vX.Y.Z tag exists.
+  const refSpec =
+    release === LOCAL_RELEASE ? ["-n", "30", "HEAD"] : ["-n", "100", release];
+  const commits = await gitLogCommits(sourceRoot, refSpec);
+  const body = renderChangelogMarkdown(commits, release, major, repoUrl);
+  const title = RESERVED.changelog?.label ?? "Changelog";
+  await writeFile(
+    join(dest, "changelog.md"),
+    frontmatter({
+      title,
+      description: `What changed in ${release}`,
+      source: `git log`,
+    }) +
+      `# ${title}\n\n` +
+      `_Generated from git log (${commits.length} commit${commits.length === 1 ? "" : "s"} ` +
+      `${release === LOCAL_RELEASE ? "in the last 30 on this branch" : "in this release"}). ` +
+      `Conventional-commit prefixes drive the grouping; bare \`chore:\` ` +
+      `entries are omitted to keep the log signal-rich._\n\n` +
+      body,
+  );
+
+  //: WhatsNew banner data — top 3 feat + top 2 fix, most recent first.
+  //: Banner shown ABOVE the article on the Home page only. JSON lives in
+  //: src/data/ rather than content/docs/ because Astro content collections
+  //: don't index JSON — we import it dynamically in WhatsNew.astro.
+  const tops = [];
+  let feat = 0;
+  let fix = 0;
+  for (const c of commits) {
+    const meta = classifyCommit(c.subject);
+    if (meta.type === "feat" && feat < 3) {
+      tops.push({ ...meta, sha: c.sha, short: c.short, date: c.date });
+      feat++;
+    } else if (meta.type === "fix" && fix < 2) {
+      tops.push({ ...meta, sha: c.sha, short: c.short, date: c.date });
+      fix++;
+    }
+    if (feat >= 3 && fix >= 2) break;
+  }
+  const wnPayload = {
+    release,
+    major,
+    generatedAt: new Date().toISOString(),
+    repoUrl: repoUrl ?? null,
+    entries: tops,
+  };
+  await mkdir(join(SITE_ROOT, "src", "data"), { recursive: true });
+  await writeFile(
+    join(SITE_ROOT, "src", "data", `whats-new-${release}-${major}.json`),
+    JSON.stringify(wnPayload, null, 2) + "\n",
+  );
+}
+
 /**
  * Build a minimal YAML frontmatter block. Every field is optional —
  * omitted fields are simply not emitted (Astro's `.passthrough()`
@@ -180,21 +348,23 @@ async function materialiseRelease(major, release, sourceRoot) {
   const claudeMd = join(sourceRoot, "CLAUDE.md");
   const adrDir = join(sourceRoot, "docs", "adr");
 
-  // 1. Landing page (index.md): the package's CLAUDE.md is the
-  // authoritative "what is pkg/<major>" doc. We prepend a frontmatter
-  // `title` from page-catalog.RESERVED.index.label so the page-header
-  // h1 in the docs site matches the sidebar label (single source of
-  // truth — RESERVED is shared with Sidebar + Search).
+  // 1. Landing page (index.md): the repo README is now the
+  // authoritative "what is this SDK" doc — same vocabulary on
+  // GitHub and on the docs portal Home (cf.
+  // .claude/contexts/home-and-changelog.md). pkg/<major>/CLAUDE.md
+  // stays as a maintainer-only file (not rendered on the site).
+  // We prepend frontmatter so the page-header h1 reads "Home"
+  // (RESERVED label) instead of the README's own "# kitsunium/sdk".
   const landingTitle = RESERVED.index.label ?? major;
-  const landing = join(pkgMajor, "CLAUDE.md");
-  if (existsSync(landing)) {
-    const body = await readFile(landing, "utf8");
+  const readme = join(sourceRoot, "README.md");
+  if (existsSync(readme)) {
+    const body = await readFile(readme, "utf8");
     await writeFile(
       join(dest, "index.md"),
       frontmatter({
         title: landingTitle,
-        description: `Overview of pkg/${major}`,
-        source: `pkg/${major}/CLAUDE.md`,
+        description: `Project overview`,
+        source: `README.md`,
       }) + body,
     );
   } else {
@@ -337,6 +507,14 @@ async function materialiseRelease(major, release, sourceRoot) {
       source: `CLAUDE.md`,
     }) + contributorsBody,
   );
+
+  // 6. Changelog (auto-generated from git log between tags).
+  // For "local" we window over the last 30 commits — until the first
+  // pkg/<major>/vX.Y.Z tag lands, that's the most honest signal.
+  // Also emits src/data/whats-new-<release>-<major>.json consumed by
+  // the <WhatsNew /> banner injected at the top of the Home page.
+  const repoUrl = "https://github.com/kitsunium/sdk";
+  await materialiseChangelog(major, release, sourceRoot, dest, repoUrl);
 }
 
 async function materialiseLocal(major) {

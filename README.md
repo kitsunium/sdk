@@ -1,208 +1,82 @@
-# devcontainer-template
+# kitsunium/sdk
 
-Coquille DevContainer universelle fournissant un ecosysteme IA complet — 35 agents specialistes, 11 commandes slash, workflows auto-correctifs — pour bootstrapper et developper n'importe quel projet avec une qualite maximale. Fiabilite d'abord : les agents raisonnent en profondeur, recoupent les sources officielles, et s'auto-corrigent jusqu'a ce que le resultat respecte les standards.
+A Go SDK providing a normed, performant toolbox for downstream applications: structured logging, universal codec dispatch, and typed errors with stable wire codes.
 
-## Installation Rapide
+## Packages
 
-### One-Liner (Machine Hôte ou Projet Existant)
+| Package | What it does |
+|---|---|
+| [`pkg/v1/logger`](./pkg/v1/logger) | Zero-allocation structured logger. Multi-sink (console / file / syslog), middleware chain (multi, async, route, failover, sample, recover), build-time version stamping. |
+| [`pkg/v1/codec`](./pkg/v1/codec) | Universal codec dispatch over a `Format` registry. 18 formats covered by a single `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` API — `asn1-der`, `cbor`, `csv`, `flatbuffers`, `json`, `msgpack`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 6 base-N encodings. |
+| [`pkg/v1/errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + Public/Private split. Read-only introspection: `CodeOf`, `ReasonOf`, `HasCode`, `NewPrefixMatcher`. |
 
-Installez Claude Code avec **TOUS les assets** (35 agents, 11 commands, 11 scripts, 155+ patterns) en une seule commande :
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kodflow/devcontainer-template/main/.devcontainer/install.sh | bash
-```
-
-**Ce qui est installé :**
-- ✅ Claude CLI (si pas déjà installé)
-- ✅ 35 agents spécialisés (Go, Python, Rust, Node.js, etc.)
-- ✅ 11 commandes slash (`/git`, `/review`, `/plan`, `/do`, etc.)
-- ✅ 11 scripts de hooks (security, lint, format, test)
-- ✅ 155+ design patterns (GoF, Cloud, DDD, Enterprise)
-- ✅ Outils additionnels (rtk, status-line)
-
-**Total :** 239 fichiers (~3.2MB) en 1-2 minutes
-
-**Installation minimale (sans documentation) :**
+## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kodflow/devcontainer-template/main/.devcontainer/install.sh | bash -s -- --minimal
+go get github.com/kitsunium/sdk/pkg/v1/codec
+go get github.com/kitsunium/sdk/pkg/v1/errs
+go get github.com/kitsunium/sdk/pkg/v1/logger
 ```
 
-**Installation avec target personnalisé :**
+## Quick example
 
-```bash
-DC_TARGET=/path/to/project curl -fsSL https://raw.githubusercontent.com/kodflow/devcontainer-template/main/.devcontainer/install.sh | bash
-```
+```go
+package main
 
-**Emplacements d'installation :**
-- **Machine hôte :** `~/.claude/`
-- **DevContainer :** `/workspace/.devcontainer/images/.claude/`
+import (
+    "fmt"
+    "github.com/kitsunium/sdk/pkg/v1/codec"
+)
 
-**Mise à jour ultérieure :**
-
-```bash
-# Dans Claude Code
-/update
-
-# Ou manuellement (dans DevContainer)
-bash .devcontainer/install.sh
-```
-
----
-
-## Outils inclus
-
-### Base
-- **Ubuntu 24.04 LTS**
-- **Zsh + Oh My Zsh + Powerlevel10k**
-- **Git, jq, yq, curl, build-essential**
-
-### Cloud & DevOps
-| Outil | Description |
-|-------|-------------|
-| **AWS CLI v2** | Amazon Web Services |
-| **gcloud** | Google Cloud SDK |
-| **az** | Azure CLI |
-| **terraform** | Infrastructure as Code |
-| **vault, consul, nomad, packer** | HashiCorp Suite |
-| **kubectl, helm** | Kubernetes |
-| **ansible** | Configuration Management |
-
-### Development
-| Outil | Description |
-|-------|-------------|
-| **gh** | GitHub CLI |
-| **claude** | Claude Code CLI |
-| **op** | 1Password CLI |
-| **bazel** | Build System |
-| **task** | Taskwarrior |
-| **status-line** | Claude Code status bar |
-
-### Langages
-Les langages sont ajoutés via **DevContainer Features** selon vos besoins :
-
-```jsonc
-// Dans devcontainer.json, décommenter les langages souhaités :
-"features": {
-  "ghcr.io/kodflow/devcontainer-features/go:1": {},
-  "ghcr.io/kodflow/devcontainer-features/python:1": {},
-  "ghcr.io/kodflow/devcontainer-features/rust:1": {}
+func main() {
+    payload := map[string]any{"hello": "world"}
+    out, err := codec.Marshal(codec.JSON, payload)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(string(out))
 }
 ```
 
-25 langages disponibles sur `ghcr.io/kodflow/devcontainer-features/`
+## What makes this SDK different
 
-## Installation
+- **Layered architecture** — `kernel` (stdlib-only primitives) → `core` (interfaces + values) → `service` (implementations) → `pkg/v1` (stable public alias layer). Dependency direction enforced by Bazel `visibility` rules.
+- **Typed errors throughout** — `fmt.Errorf` / `errors.New` are banned in production code. Every error carries a wire-safe `Public` message and a log-only `Private` envelope. AST audit gates the build.
+- **One Marshal/Unmarshal for everything** — text, binary, base-encoded — `codec.Marshal(format, v)` works the same way regardless of the underlying wire shape.
+- **Multi-module workspace** — `internal/kernel`, `internal/core`, `internal/service`, `pkg/v1`, root. Each can be built standalone with `GOWORK=off`; `go.work` is the umbrella.
 
-### Nouveau projet
+## Releases
+
+Versioning follows [semver](https://semver.org/) and Go's sub-directory tag convention: `pkg/<major>/v<MAJOR>.<MINOR>.<PATCH>`. Each major version (`pkg/v1`, future `pkg/v2`) has its own independent release cadence. Full release workflow lives in ADR 0007 (`docs/adr/`).
+
+## Documentation
+
+Full versioned documentation lives at the docs portal (run `make serve` from the repo root, or browse the published deployment). Highlights:
+
+- **Concepts** — the 4-layer model, error semantics, codec dispatch
+- **Changelog** — auto-generated from git log per release
+- **Per-package reference** — `codec`, `errs`, `logger` with their full Go doc surfaces
+- **ADRs** — architecture decisions, reachable from the "For contributors ↗" footer link
+
+## Repository layout
+
+```
+internal/        stdlib-only primitives (kernel) + domain interfaces (core) + concrete impls (service)
+pkg/v1/          stable public API — type aliases + ergonomic helpers
+docs/            ADRs + the Astro-based docs site
+scripts/release/ release tooling — see ADR 0007
+tools/           build-time helpers (workspace_status, genindex)
+```
+
+## Verification
 
 ```bash
-gh repo create mon-projet --template kodflow/devcontainer-template --public
-cd mon-projet
-code .
+make build   # bazel mod tidy + gazelle + gofumpt + bazel build //...
+make test    # every *_test target green incl. AST audits
+make lint    # drift check (read-only): mod tidy + gazelle + gofumpt + ktn-linter
+make bench   # regenerate codec BENCH.md from real Go benchmarks
 ```
-
-### Projet existant
-
-Copiez le dossier `.devcontainer/` dans votre projet.
-
-## Configuration MCP
-
-Le template inclut des serveurs MCP pré-configurés pour Claude Code.
-
-### Serveurs MCP inclus
-
-| Serveur | Description |
-|---------|-------------|
-| **github** | Intégration GitHub (PR, Issues) |
-| **gitlab** | Intégration GitLab (MR, Pipelines) |
-| **context7** | Documentation à jour (fragment image) |
-| **ktn-linter** | Linting de code (fragment image) |
-| **playwright** | Tests E2E, navigateur (feature browser) |
-
-### Configuration des tokens
-
-**Option 1 : Variables d'environnement**
-
-```bash
-export GITHUB_API_TOKEN="ghp_xxx"
-```
-
-**Option 2 : 1Password**
-
-Configurez `OP_SERVICE_ACCOUNT_TOKEN` et les items correspondants dans votre vault.
-
-### Fichiers MCP
-
-| Fichier | Description |
-|---------|-------------|
-| `mcp.json` | Config MCP projet (ignoré par git) |
-| `.devcontainer/images/mcp.json.tpl` | Template MCP |
-
-### ktn-linter & Claude Code Hooks
-
-Le template intègre `ktn-linter` comme serveur MCP **et** fournisseur de hooks Claude Code. Le template déclare 3 scripts wrapper qui appellent les endpoints HTTP de ktn-linter. Dégradation gracieuse si ktn-linter n'est pas en cours d'exécution.
-
-| Hook | Événement | Timeout | Rôle |
-|------|-----------|---------|------|
-| PreToolUse | Write/Edit | 5s | Contexte package avant édition |
-| PostToolUse | Write/Edit | 15s | Scan fichier + blocage si violation |
-| Stop | * | 30s | Validation finale des packages modifiés |
-
-**Vérification rapide :**
-
-```bash
-which ktn-linter && curl -sf http://localhost:7717/health && echo "OK"
-```
-
-Le contrat complet (hooks, ports, fichiers déclencheurs) est décrit dans la skill `/lint` (`~/.claude/commands/lint.md`).
-
-## Structure
-
-```
-.devcontainer/
-├── devcontainer.json          # Configuration DevContainer
-├── docker-compose.yml         # Services Docker
-├── Dockerfile                 # Extends l'image de base
-├── hooks/
-│   └── lifecycle/
-│       └── initialize.sh      # Avant création (hôte : Ollama, .env)
-└── images/
-    ├── Dockerfile.base        # Layer stable (apt, Cloud CLIs) — hebdo
-    ├── Dockerfile             # Layer dynamique (Claude, outils) — quotidien
-    ├── mcp.json.tpl           # Template MCP (+ fragments par feature)
-    └── hooks/lifecycle/       # Hooks embarqués dans l'image
-```
-
-## Commandes
-
-### Rebuild container
-
-```bash
-# VS Code
-Cmd+Shift+P > "Dev Containers: Rebuild Container"
-```
-
-### Claude avec MCP
-
-```bash
-# Alias configuré automatiquement
-super-claude
-```
-
-### Nettoyer
-
-```bash
-docker compose -f .devcontainer/docker-compose.yml down -v
-```
-
-## Volumes persistants
-
-- `zsh-history` : Historique shell
-- `package-cache` : Caches packages (npm, pip, cargo, etc.)
-- `claude-config` : Configuration Claude (credentials, sessions)
-- `cloud-config` : Config cloud (AWS, GCP, Azure, 1Password)
 
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE) for the full text.

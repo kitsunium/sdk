@@ -1,0 +1,53 @@
+{
+  "release": "local",
+  "major": "v1",
+  "generatedAt": "2026-05-23T17:46:42.162Z",
+  "repoUrl": "https://github.com/kitsunium/sdk",
+  "entries": [
+    {
+      "type": "feat",
+      "scope": "docs-site",
+      "breaking": false,
+      "summary": "chrome polish + release-first URL layout",
+      "sha": "5d38b8b5ac6659119420dde033fb1f27deb067b0",
+      "short": "5d38b8b",
+      "date": "2026-05-23T13:24:26+02:00"
+    },
+    {
+      "type": "fix",
+      "scope": "docs",
+      "breaking": false,
+      "summary": "strip gomarkdoc Index + TOC H2-only (kill duplication)",
+      "sha": "c83a183d4579f887231045c8f8f3c5985d87689b",
+      "short": "c83a183",
+      "date": "2026-05-23T01:01:29+02:00"
+    },
+    {
+      "type": "fix",
+      "scope": "docs",
+      "breaking": false,
+      "summary": "page-header h1 matches sidebar label (single source: RESERVED map)",
+      "sha": "c8e0166d9890d82cfe9d8cb023f9dd5d4039f4a5",
+      "short": "c8e0166",
+      "date": "2026-05-23T00:52:22+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "docs",
+      "breaking": false,
+      "summary": "move On this page to sticky right-side TOC (3-column layout)",
+      "sha": "915008f840def0e00c6c39e8902b757f9cc1025f",
+      "short": "915008f",
+      "date": "2026-05-23T00:37:16+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "docs",
+      "breaking": false,
+      "summary": "code-driven symbol search via tools/genindex + MiniSearch",
+      "sha": "43cb8299028af396da7598c4ae28dc8ad4054baa",
+      "short": "43cb829",
+      "date": "2026-05-23T00:18:04+02:00"
+    }
+  ]
+}
