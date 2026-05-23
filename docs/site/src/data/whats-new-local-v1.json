@@ -1,9 +1,27 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-23T19:58:05.189Z",
+  "generatedAt": "2026-05-23T20:47:09.266Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "codec, errs",
+      "breaking": false,
+      "summary": "broadcast Marshal + variadic HasAny matchers",
+      "sha": "f6b60f0d6590a284adaa18d8ae3c5c3224262db6",
+      "short": "f6b60f0",
+      "date": "2026-05-23T22:30:44+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "NewWriterSink + Config.Writers — native multi-writer",
+      "sha": "c15de9a15e048508c26d367aa7e7f472387ad5d1",
+      "short": "c15de9a",
+      "date": "2026-05-23T22:17:01+02:00"
+    },
     {
       "type": "feat",
       "scope": "docs-site",
@@ -12,15 +30,6 @@
       "sha": "f1fd8bbfa138db08eb9cd4dc6595b27e6a5e4294",
       "short": "f1fd8bb",
       "date": "2026-05-23T21:35:32+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "docs-site",
-      "breaking": false,
-      "summary": "bench tables get cell-tint + collapsible operations",
-      "sha": "f87377c56579d9c23aa5bf4c8ff5940e8efbcf73",
-      "short": "f87377c",
-      "date": "2026-05-23T21:03:22+02:00"
     },
     {
       "type": "fix",
@@ -39,15 +48,6 @@
       "sha": "96ec713749cc3a3f2b42dd1240973baaf6d09e4d",
       "short": "96ec713",
       "date": "2026-05-23T20:32:57+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "docs-site",
-      "breaking": false,
-      "summary": "inline benchmarks per package (codec / errs / logger)",
-      "sha": "e8db3d9aef143edeb4a522e0a5ed5c123ef1657f",
-      "short": "e8db3d9",
-      "date": "2026-05-23T20:08:12+02:00"
     }
   ]
 }

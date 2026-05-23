@@ -19,6 +19,7 @@ import {
   readdir,
   copyFile,
   readFile,
+  rm,
 } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve, basename } from "node:path";
@@ -342,6 +343,13 @@ async function materialiseRelease(major, release, sourceRoot) {
   //: (v1 / v2). The hierarchy reads as "this release's v1 surface",
   //: which matches how readers reason about a versioned SDK.
   const dest = join(CONTENT_ROOT, release, major);
+  //: Wipe the destination before rewriting so stale entries from a
+  //: previous layout (e.g. <major>/<release> pre-flip) can't bleed
+  //: through. Astro 5's glob-loader emits "Duplicate id" warnings
+  //: when a file appears in cache AND on disk after a layout change;
+  //: this guarantees the on-disk set is exactly what the current run
+  //: produces, nothing more.
+  await rm(dest, { recursive: true, force: true });
   await mkdir(dest, { recursive: true });
 
   const pkgMajor = join(sourceRoot, "pkg", major);
