@@ -57,6 +57,14 @@ jobs:
             exit 1
           fi
 
+      # gomarkdoc is the SOT for the README drift gate (ADR 0008). The
+      # devcontainer ships it pre-installed, but a fresh CI runner does
+      # not — install it here so the drift + determinism + govulncheck
+      # steps below all see the same binary the local pre-commit hook
+      # uses. Pinned to v1.1.0, matching .devcontainer/features/languages/go/install.sh.
+      - name: install gomarkdoc
+        run: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0
+
       # README drift gate (ADR 0008). Sits between the gazelle drift
       # check and `bazel build` so a stale README fails fast before the
       # heavy build+test burn. The script is the canonical spec (also
