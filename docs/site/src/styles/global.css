@@ -686,6 +686,79 @@ main:focus-visible {
   font-weight: 600;
 }
 
+/* ── Benchmark tables (codec/errs/logger) ────────────────────────── */
+/* Each cell is wrapped in a <span class="bench-win|bench-loss"> by
+   pkg/v1/codec/codec_bench_test.go's renderer. The whole value gets a
+   tinted background so the eye finds the green winners + red losers
+   at a glance — no emoji noise. */
+.bench-win,
+.bench-loss {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.bench-win {
+  background: rgba(46, 160, 67, 0.18);
+  color: #4dd07a;
+}
+.bench-loss {
+  background: rgba(248, 81, 73, 0.16);
+  color: #ff8b85;
+}
+:root[data-theme="light"] .bench-win {
+  background: rgba(26, 127, 55, 0.14);
+  color: #1a7f37;
+}
+:root[data-theme="light"] .bench-loss {
+  background: rgba(207, 34, 46, 0.1);
+  color: #cf222e;
+}
+/* Bench tables collapsed by default into <details> per operation —
+   the codec page bundles 21 sub-tables (Marshal/Unmarshal/Parallel/
+   Append/Stream × small/medium/large) so a flat dump was a wall of
+   numbers. Each operation now opens to reveal its 3 size tables. */
+.md-body details {
+  margin: 0.85rem 0;
+  padding: 0.6rem 0.85rem;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+.md-body details[open] {
+  background: var(--color-bg);
+}
+.md-body details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text);
+  list-style: none;
+  padding-left: 1.2rem;
+  position: relative;
+  user-select: none;
+}
+.md-body details > summary::-webkit-details-marker {
+  display: none;
+}
+.md-body details > summary::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  color: var(--color-muted);
+  transition: transform 100ms ease;
+}
+.md-body details[open] > summary::before {
+  transform: rotate(90deg);
+}
+.md-body details > summary:hover::before,
+.md-body details[open] > summary::before {
+  color: var(--color-accent);
+}
+.md-body details > summary > strong {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
 /* ── Theme toggle ────────────────────────────────────────────────── */
 .theme-toggle {
   display: inline-flex;

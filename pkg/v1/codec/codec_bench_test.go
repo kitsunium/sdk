@@ -959,23 +959,41 @@ func writeEnvelopeTable(b *strings.Builder, env machineEnvelope) {
 	fmt.Fprintf(b, "| Bench wall-clock   | %s |\n\n", env.BenchTime)
 }
 
-// writeResultsIntro explains the mean-baseline + color convention used
-// in every sub-table below.
+// writeResultsIntro explains the mean-baseline + cell-tint convention
+// used in every sub-table below.
 func writeResultsIntro(b *strings.Builder) {
 	b.WriteString("## Results\n\n")
 	b.WriteString("Each `(operation, size)` table is pivoted by codec and ranked by `ns/op`. Cells compare each codec to the **arithmetic mean** of every codec in that table:\n\n")
-	b.WriteString("- 🟢 = **below** the mean for that column (faster, lighter, fewer allocs — or more iters for `Iters`).\n")
-	b.WriteString("- 🔴 = **above** the mean.\n")
+	b.WriteString("- Green cells = **below** the mean for that column (faster, lighter, fewer allocs — or more iters for `Iters`).\n")
+	b.WriteString("- Red cells = **above** the mean.\n")
 	b.WriteString("- Delta is shown as `±X%` up to ±999% and `×N` / `÷N` past 10× either way.\n\n")
-	b.WriteString("Every registered Format participates in the average — `flatbuffers` (passthrough) and `tlv` (scalar payload) are included verbatim, so the mean reflects the full surface.\n\n")
+	b.WriteString("Each operation is wrapped in a collapsible block (small / medium / large grouped) so the table flood is opt-in. Every registered Format participates in the average — `flatbuffers` (passthrough) and `tlv` (scalar payload) are included verbatim, so the mean reflects the full surface.\n\n")
 }
 
 // writeAllPivotTables emits one sub-table per (category, size) pair, in
 // a stable order so reviewers always see Marshal small/medium/large
-// first, then Unmarshal, etc.
+// first, then Unmarshal, etc. Each operation's three size tables are
+// wrapped in a single <details> block — collapsed by default except
+// for the first operation — so the page is scannable instead of being
+// a 21-table flood.
 func writeAllPivotTables(b *strings.Builder, rows []benchReportRow) {
 	categories := []string{"Marshal", "Unmarshal", "MarshalParallel", "UnmarshalParallel", "Append", "StreamEncode", "StreamDecode"}
-	for _, cat := range categories {
+	for i, cat := range categories {
+		any := false
+		for _, sz := range benchSizes {
+			if len(filterRows(rows, cat, sz)) > 0 {
+				any = true
+				break
+			}
+		}
+		if !any {
+			continue
+		}
+		openAttr := ""
+		if i == 0 {
+			openAttr = " open"
+		}
+		fmt.Fprintf(b, "<details%s>\n<summary><strong>%s</strong> — small / medium / large payloads</summary>\n\n", openAttr, cat)
 		for _, sz := range benchSizes {
 			subset := filterRows(rows, cat, sz)
 			if len(subset) == 0 {
@@ -983,6 +1001,7 @@ func writeAllPivotTables(b *strings.Builder, rows []benchReportRow) {
 			}
 			writePivotTable(b, cat, sz, subset)
 		}
+		b.WriteString("</details>\n\n")
 	}
 }
 
@@ -1007,10 +1026,10 @@ func writePivotTable(b *strings.Builder, category, size string, rows []benchRepo
 	slices.SortFunc(rows, func(a, b benchReportRow) int {
 		return cmp.Compare(a.NsPerOp, b.NsPerOp)
 	})
-	fmt.Fprintf(b, "### %s — %s payload\n\n", category, size)
+	fmt.Fprintf(b, "#### %s — %s payload\n\n", category, size)
 	fmt.Fprintf(b,
 		"> **Mean baseline** across %d codecs: `%s ns/op` · `%s B/op` · `%s allocs/op` · `%s iters`. "+
-			"Cells are 🟢 when **below** the mean (faster / lighter / fewer allocs) and 🔴 when above.\n\n",
+			"Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.\n\n",
 		len(rows),
 		formatThousands(int64(means.nsop)),
 		formatThousands(int64(means.bop)),
@@ -1051,26 +1070,29 @@ func computeMeans(rows []benchReportRow) meanSet {
 	}
 }
 
-// formatCell renders one cell with its emoji + raw value + delta.
+// formatCell renders one cell with a CSS-class tint + raw value + delta.
 // higherIsBetter=true flips the colour rule (used for Iters, where more
 // iters means the bench ran faster). The delta carries the sign so the
-// reader doesn't have to recompute direction from the colour.
+// reader doesn't have to recompute direction from the colour. We emit
+// an inline <span> with the win/loss class so markdown renderers (Astro
+// + remark-gfm) carry the tint into the rendered table — no emojis,
+// the whole cell value gets a background highlight.
 func formatCell(val, base float64, higherIsBetter bool) string {
-	mark := "🔴"
+	cls := "bench-loss"
 	if higherIsBetter {
 		if val >= base {
-			mark = "🟢"
+			cls = "bench-win"
 		}
 	} else {
 		if val <= base {
-			mark = "🟢"
+			cls = "bench-win"
 		}
 	}
 	if base == 0 {
-		return fmt.Sprintf("%s %s", mark, formatThousands(int64(val)))
+		return fmt.Sprintf(`<span class="%s">%s</span>`, cls, formatThousands(int64(val)))
 	}
 	delta := (val - base) / base
-	return fmt.Sprintf("%s %s %s", mark, formatThousands(int64(val)), formatDelta(delta, val/base))
+	return fmt.Sprintf(`<span class="%s">%s %s</span>`, cls, formatThousands(int64(val)), formatDelta(delta, val/base))
 }
 
 // formatDelta renders the relative gap vs the baseline using the
