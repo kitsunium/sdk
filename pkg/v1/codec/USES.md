@@ -5,143 +5,269 @@
   hand-authored file because raw HTML inside a Go doc comment renders
   as literal text on pkg.go.dev.
 
-  Code blocks inside each tabpanel use markdown fences with blank
-  lines around them — CommonMark closes the HTML-block at the blank
-  line, processes the fence (so astro-expressive-code applies Shiki
-  github-dark + the copy-icon button at build time), then reopens the
-  HTML-block for </div>. This way every code sample on the page —
-  Quick start, Activation, tab panels, Errors — goes through the same
-  build-time pipeline and renders identically.
-
-  See pkg/v1/errs/USES.md and pkg/v1/logger/USES.md for the same shape.
+  Every tab shows the SAME Marshal/Unmarshal pair — only the Format
+  constant changes. That's the codec's core promise: format-swap at
+  the call site is a single string change. Code blocks inside each
+  tabpanel use markdown fences with blank lines around them so
+  astro-expressive-code processes them at build time (Shiki
+  github-dark + copy-icon button — same as Quick start).
 -->
 
 ## Use cases
 
-Pick the Format that fits the wire constraint — the call site stays identical. The last tab covers the broadcast variant when one Marshal must produce bytes in multiple wire encodings at once.
+Same `Marshal` + `Unmarshal` pair across every Format — only the constant changes. Declare the type once:
+
+```go
+type User struct {
+    Name string `json:"name" cbor:"name" yaml:"name"`
+    Age  int    `json:"age"  cbor:"age"  yaml:"age"`
+}
+
+u := User{Name: "Ada", Age: 36}
+```
+
+Then pick the wire format — the call site stays identical:
 
 <div class="tabs" data-tabs>
 <div class="tab-strip" role="tablist">
-<button type="button" role="tab" id="uc-json-btn" aria-controls="uc-json" aria-selected="true" tabindex="0" class="active">JSON</button>
-<button type="button" role="tab" id="uc-cbor-btn" aria-controls="uc-cbor" aria-selected="false" tabindex="-1">CBOR</button>
-<button type="button" role="tab" id="uc-msgpack-btn" aria-controls="uc-msgpack" aria-selected="false" tabindex="-1">MsgPack</button>
-<button type="button" role="tab" id="uc-yaml-btn" aria-controls="uc-yaml" aria-selected="false" tabindex="-1">YAML</button>
-<button type="button" role="tab" id="uc-ndjson-btn" aria-controls="uc-ndjson" aria-selected="false" tabindex="-1">NDJSON</button>
-<button type="button" role="tab" id="uc-flatbuffers-btn" aria-controls="uc-flatbuffers" aria-selected="false" tabindex="-1">FlatBuffers</button>
+<button type="button" role="tab" id="uc-json-btn" aria-controls="uc-json" aria-selected="true" tabindex="0" class="active">json</button>
+<button type="button" role="tab" id="uc-ndjson-btn" aria-controls="uc-ndjson" aria-selected="false" tabindex="-1">ndjson</button>
+<button type="button" role="tab" id="uc-xml-btn" aria-controls="uc-xml" aria-selected="false" tabindex="-1">xml</button>
+<button type="button" role="tab" id="uc-csv-btn" aria-controls="uc-csv" aria-selected="false" tabindex="-1">csv</button>
+<button type="button" role="tab" id="uc-asn1der-btn" aria-controls="uc-asn1der" aria-selected="false" tabindex="-1">asn1-der</button>
+<button type="button" role="tab" id="uc-pem-btn" aria-controls="uc-pem" aria-selected="false" tabindex="-1">pem</button>
+<button type="button" role="tab" id="uc-yaml-btn" aria-controls="uc-yaml" aria-selected="false" tabindex="-1">yaml</button>
+<button type="button" role="tab" id="uc-toml-btn" aria-controls="uc-toml" aria-selected="false" tabindex="-1">toml</button>
+<button type="button" role="tab" id="uc-cbor-btn" aria-controls="uc-cbor" aria-selected="false" tabindex="-1">cbor</button>
+<button type="button" role="tab" id="uc-msgpack-btn" aria-controls="uc-msgpack" aria-selected="false" tabindex="-1">msgpack</button>
+<button type="button" role="tab" id="uc-tlv-btn" aria-controls="uc-tlv" aria-selected="false" tabindex="-1">tlv</button>
+<button type="button" role="tab" id="uc-flatbuffers-btn" aria-controls="uc-flatbuffers" aria-selected="false" tabindex="-1">flatbuffers</button>
 <button type="button" role="tab" id="uc-base64-btn" aria-controls="uc-base64" aria-selected="false" tabindex="-1">base64</button>
-<button type="button" role="tab" id="uc-many-btn" aria-controls="uc-many" aria-selected="false" tabindex="-1">Many at once (broadcast)</button>
+<button type="button" role="tab" id="uc-base64url-btn" aria-controls="uc-base64url" aria-selected="false" tabindex="-1">base64url</button>
+<button type="button" role="tab" id="uc-base32-btn" aria-controls="uc-base32" aria-selected="false" tabindex="-1">base32</button>
+<button type="button" role="tab" id="uc-base16-btn" aria-controls="uc-base16" aria-selected="false" tabindex="-1">base16</button>
+<button type="button" role="tab" id="uc-hex-btn" aria-controls="uc-hex" aria-selected="false" tabindex="-1">hex</button>
+<button type="button" role="tab" id="uc-ascii85-btn" aria-controls="uc-ascii85" aria-selected="false" tabindex="-1">ascii85</button>
 </div>
 
 <div role="tabpanel" id="uc-json" aria-labelledby="uc-json-btn">
 
-**Best for:** API responses, public configs, anywhere "readable" matters. Most-supported format on the planet.
-
 ```go
-data, err := codec.Marshal(codec.JSON, payload)
+data, err := codec.Marshal(codec.JSON, u)
 if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
 
-var out MyType
-err = codec.Unmarshal(codec.JSON, data, &out)
-```
-
-</div>
-
-<div role="tabpanel" id="uc-cbor" aria-labelledby="uc-cbor-btn" hidden>
-
-**Best for:** IoT / mobile / embedded — compact binary, fast, RFC 8949 standard.
-
-```go
-data, err := codec.Marshal(codec.CBOR, payload)
-// data is ~30-50% smaller than equivalent JSON, decodes faster too.
-
-var out MyType
-err = codec.Unmarshal(codec.CBOR, data, &out)
-```
-
-</div>
-
-<div role="tabpanel" id="uc-msgpack" aria-labelledby="uc-msgpack-btn" hidden>
-
-**Best for:** RPC payloads. Compact, ecosystem-wide adoption (Python, Ruby, Java …), faster than JSON.
-
-```go
-data, err := codec.Marshal(codec.MsgPack, payload)
-var out MyType
-err = codec.Unmarshal(codec.MsgPack, data, &out)
-```
-
-</div>
-
-<div role="tabpanel" id="uc-yaml" aria-labelledby="uc-yaml-btn" hidden>
-
-**Best for:** human-edited configs (Kubernetes manifests, CI files). _Slower than JSON / CBOR_ — don't use it on the hot path.
-
-```go
-data, err := codec.Marshal(codec.YAML, payload)
-var cfg MyConfig
-err = codec.Unmarshal(codec.YAML, data, &cfg)
+var back User
+err = codec.Unmarshal(codec.JSON, data, &back)
 ```
 
 </div>
 
 <div role="tabpanel" id="uc-ndjson" aria-labelledby="uc-ndjson-btn" hidden>
 
-**Best for:** streaming logs, line-oriented batches. Each record is a self-contained JSON object on its own line — readable by `jq`, `grep`, log aggregators.
+```go
+data, err := codec.Marshal(codec.NDJSON, u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal(codec.NDJSON, data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-xml" aria-labelledby="uc-xml-btn" hidden>
 
 ```go
-// Streaming-friendly — use NewEncoder for a long-lived writer.
-enc, err := codec.NewEncoder(codec.NDJSON, os.Stdout)
-for _, rec := range records { _ = enc.Encode(rec) }
+data, err := codec.Marshal(codec.XML, u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal(codec.XML, data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-csv" aria-labelledby="uc-csv-btn" hidden>
+
+```go
+data, err := codec.Marshal(codec.CSV, u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal(codec.CSV, data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-asn1der" aria-labelledby="uc-asn1der-btn" hidden>
+
+```go
+data, err := codec.Marshal(codec.ASN1DER, u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal(codec.ASN1DER, data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-pem" aria-labelledby="uc-pem-btn" hidden>
+
+```go
+data, err := codec.Marshal(codec.PEM, u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal(codec.PEM, data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-yaml" aria-labelledby="uc-yaml-btn" hidden>
+
+```go
+data, err := codec.Marshal(codec.YAML, u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal(codec.YAML, data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-toml" aria-labelledby="uc-toml-btn" hidden>
+
+```go
+data, err := codec.Marshal(codec.TOML, u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal(codec.TOML, data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-cbor" aria-labelledby="uc-cbor-btn" hidden>
+
+```go
+data, err := codec.Marshal(codec.CBOR, u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal(codec.CBOR, data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-msgpack" aria-labelledby="uc-msgpack-btn" hidden>
+
+```go
+data, err := codec.Marshal(codec.MsgPack, u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal(codec.MsgPack, data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-tlv" aria-labelledby="uc-tlv-btn" hidden>
+
+```go
+data, err := codec.Marshal("tlv", u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal("tlv", data, &back)
 ```
 
 </div>
 
 <div role="tabpanel" id="uc-flatbuffers" aria-labelledby="uc-flatbuffers-btn" hidden>
 
-**Best for:** zero-copy reads (game state, ML tensors). Schema lives outside the codec — you generate Go types from `.fbs` and pass raw bytes through.
-
 ```go
-// Passthrough — the FlatBuffers codec does no encoding work
-// because the schema-generated code already produces a flat byte
-// buffer. codec.Marshal / Unmarshal route the bytes verbatim.
-data, _ := codec.Marshal("flatbuffers", builder.FinishedBytes())
+data, err := codec.Marshal("flatbuffers", u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal("flatbuffers", data, &back)
 ```
 
 </div>
 
 <div role="tabpanel" id="uc-base64" aria-labelledby="uc-base64-btn" hidden>
 
-**Best for:** text-safe wrap of any structure. The pipeline is JSON-encode → base-N. For raw bytes already in hand, reach for stdlib `encoding/base64` directly.
-
 ```go
-data, err := codec.Marshal("base64", payload)
-// Six base-N flavours work the same way: "base64", "base64url",
-// "base32", "base16", "hex", "ascii85".
+data, err := codec.Marshal("base64", u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal("base64", data, &back)
 ```
 
 </div>
 
-<div role="tabpanel" id="uc-many" aria-labelledby="uc-many-btn" hidden>
-
-**Best for:** HTTP content negotiation, multi-protocol message buses, archival doubling — same value out in N wire encodings in one call. Per-format errors are joined under `errors.Join` so partial success stays visible in the returned map.
+<div role="tabpanel" id="uc-base64url" aria-labelledby="uc-base64url-btn" hidden>
 
 ```go
-out, err := codec.MarshalMany(payload,
-    codec.JSON, codec.CBOR, codec.MsgPack, "base64",
-)
-// out[codec.JSON]    -> []byte for JSON wire
-// out[codec.CBOR]    -> []byte for CBOR wire
-// out[codec.MsgPack] -> []byte for MsgPack wire
-// out["base64"]      -> []byte for base64 text
+data, err := codec.Marshal("base64url", u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
 
-// Partial-success handling — a typo in one Format leaves the rest in `out`.
-if errs.HasCode(err, codec.CodeUnknownFormat) {
-    log.Warn("one Format was unknown; the rest succeeded")
-}
+var back User
+err = codec.Unmarshal("base64url", data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-base32" aria-labelledby="uc-base32-btn" hidden>
+
+```go
+data, err := codec.Marshal("base32", u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal("base32", data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-base16" aria-labelledby="uc-base16-btn" hidden>
+
+```go
+data, err := codec.Marshal("base16", u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal("base16", data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-hex" aria-labelledby="uc-hex-btn" hidden>
+
+```go
+data, err := codec.Marshal("hex", u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal("hex", data, &back)
+```
+
+</div>
+
+<div role="tabpanel" id="uc-ascii85" aria-labelledby="uc-ascii85-btn" hidden>
+
+```go
+data, err := codec.Marshal("ascii85", u)
+if err != nil { /* errs.HasCode(err, codec.CodeUnknownFormat) etc. */ }
+
+var back User
+err = codec.Unmarshal("ascii85", data, &back)
 ```
 
 </div>
 
 </div>
+
+Need to broadcast the same value to N formats in one call (HTTP content negotiation, multi-protocol buses)? Use `codec.MarshalMany(u, codec.JSON, codec.CBOR, "base64", …)` — see the API reference below.
 
 > Need a full perf comparison across all 18 codecs? See the <a href="#benchmarks">Benchmarks</a> section at the bottom of this page.
