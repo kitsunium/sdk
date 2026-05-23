@@ -4,6 +4,10 @@
   logger.go (so pkg.go.dev + README.md show them too); only the HTML
   tabs need a hand-authored file because raw HTML inside a Go doc
   comment renders as literal text on pkg.go.dev.
+
+  Code blocks inside each tabpanel use markdown fences with blank
+  lines around them so astro-expressive-code processes them at build
+  time (Shiki github-dark + copy-icon button — same as Quick start).
 -->
 
 ## Use cases
@@ -22,20 +26,28 @@ the bytes are formatted). Pick the topology that fits.
 </div>
 
 <div role="tabpanel" id="lg-default" aria-labelledby="lg-default-btn">
-<p><strong>Best for:</strong> bootstrap, CLI tools, container apps that already log to stderr.</p>
-<pre><code class="language-go">lg, err := logger.Default()
+
+**Best for:** bootstrap, CLI tools, container apps that already log to stderr.
+
+```go
+lg, err := logger.Default()
 if err != nil { panic(err) } // returns WriterRequired only on nil Writer
 
 ctx := context.Background()
 logger.Info(ctx, lg, "service started",
     logger.String("env", "prod"),
     logger.Int("port", 8080),
-)</code></pre>
+)
+```
+
 </div>
 
 <div role="tabpanel" id="lg-multiwriter" aria-labelledby="lg-multiwriter-btn" hidden>
-<p><strong>Best for:</strong> "log to stderr AND to a file" — the most common ops pattern. Use the new <code>Writers []io.Writer</code> field of <code>Config</code> and <code>NewText</code> wires the fan-out for you (no <code>NewWithSink</code> dance).</p>
-<pre><code class="language-go">f, err := os.OpenFile("/var/log/myapp.log",
+
+**Best for:** "log to stderr AND to a file" — the most common ops pattern. Use the new `Writers []io.Writer` field of `Config` and `NewText` wires the fan-out for you (no `NewWithSink` dance).
+
+```go
+f, err := os.OpenFile("/var/log/myapp.log",
     os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 if err != nil { panic(err) }
 
@@ -43,24 +55,34 @@ lg, err := logger.NewText(logger.Config{
     Writers:  []io.Writer{os.Stderr, f}, // any number of io.Writers
     MinLevel: logger.LevelInfo,
 })
-// Records broadcast to BOTH writers, atomic per-line on each.</code></pre>
+// Records broadcast to BOTH writers, atomic per-line on each.
+```
+
 </div>
 
 <div role="tabpanel" id="lg-file" aria-labelledby="lg-file-btn" hidden>
-<p><strong>Best for:</strong> production daemons that ship logs to a single on-disk file (with logrotate / fluentd reading it). Same <code>NewText</code> path — just one writer.</p>
-<pre><code class="language-go">f, err := os.OpenFile("/var/log/myapp.log",
+
+**Best for:** production daemons that ship logs to a single on-disk file (with logrotate / fluentd reading it). Same `NewText` path — just one writer.
+
+```go
+f, err := os.OpenFile("/var/log/myapp.log",
     os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 if err != nil { panic(err) }
 
 lg, err := logger.NewText(logger.Config{
     Writer:   f,
     MinLevel: logger.LevelInfo,
-})</code></pre>
+})
+```
+
 </div>
 
 <div role="tabpanel" id="lg-multi" aria-labelledby="lg-multi-btn" hidden>
-<p><strong>Best for:</strong> fan-out across heterogeneous sinks — stderr + a remote syslog + a custom DB sink at once. When the branches aren't all plain <code>io.Writer</code>s, drop to <code>NewWithSink</code> and compose with <code>Multi</code>. Errors from any branch join under <code>FANOUT_WRITE_FAILED</code>.</p>
-<pre><code class="language-go">// NewWriterSink wraps any io.Writer (file, bytes.Buffer, net.Conn, …)
+
+**Best for:** fan-out across heterogeneous sinks — stderr + a remote syslog + a custom DB sink at once. When the branches aren't all plain `io.Writer`s, drop to `NewWithSink` and compose with `Multi`. Errors from any branch join under `FANOUT_WRITE_FAILED`.
+
+```go
+// NewWriterSink wraps any io.Writer (file, bytes.Buffer, net.Conn, …)
 // as a Sink so Multi can fold it alongside custom Sinks.
 fileSink, _ := logger.NewWriterSink(myFile)
 
@@ -71,20 +93,30 @@ lg, err := logger.NewWithSink(logger.SinkConfig{
         remoteSyslogSink, // your custom Sink implementation
     ),
     Encoder: logger.TextEncoder(),
-})</code></pre>
+})
+```
+
 </div>
 
 <div role="tabpanel" id="lg-build" aria-labelledby="lg-build-btn" hidden>
-<p><strong>Best for:</strong> the zero-allocation hot path. The chainable builder is backed by a <code>sync.Pool</code>; steady-state per-call cost is 0 allocs once the pool is warm. Don't reuse the builder after <code>Send</code> — it returns to the recycler.</p>
-<pre><code class="language-go">logger.Build(lg, logger.LevelInfo).
+
+**Best for:** the zero-allocation hot path. The chainable builder is backed by a `sync.Pool`; steady-state per-call cost is 0 allocs once the pool is warm. Don't reuse the builder after `Send` — it returns to the recycler.
+
+```go
+logger.Build(lg, logger.LevelInfo).
     Str("env", "prod").
     Int("port", 8080).
-    Send(ctx, "service started")</code></pre>
+    Send(ctx, "service started")
+```
+
 </div>
 
 <div role="tabpanel" id="lg-custom" aria-labelledby="lg-custom-btn" hidden>
-<p><strong>Best for:</strong> push to a database / external observability stack. Implement the three-method <code>logger.Sink</code> interface and plug it through <code>NewWithSink</code>.</p>
-<pre><code class="language-go">type sqlSink struct{ db *sql.DB }
+
+**Best for:** push to a database / external observability stack. Implement the three-method `logger.Sink` interface and plug it through `NewWithSink`.
+
+```go
+type sqlSink struct{ db *sql.DB }
 
 func (s *sqlSink) Write(ctx context.Context, r logger.Record, p []byte) (int, error) {
     _, err := s.db.ExecContext(ctx,
@@ -95,7 +127,9 @@ func (s *sqlSink) Write(ctx context.Context, r logger.Record, p []byte) (int, er
 func (s *sqlSink) Flush(_ context.Context) error { return nil }
 func (s *sqlSink) Close() error                  { return s.db.Close() }
 
-lg, _ := logger.NewWithSink(logger.SinkConfig{Sink: &amp;sqlSink{db: db}})</code></pre>
+lg, _ := logger.NewWithSink(logger.SinkConfig{Sink: &sqlSink{db: db}})
+```
+
 </div>
 
 </div>

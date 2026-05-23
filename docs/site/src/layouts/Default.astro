@@ -335,102 +335,6 @@ const ogImage = new URL("/brand/kitsunium.jpg", Astro.site ?? url.origin).toStri
         });
       }
 
-      // Enhance plain <pre><code class="language-X"> blocks that
-      // astro-expressive-code didn't process (raw HTML in USES.md tab
-      // panels, mostly). Two enhancements:
-      //   1) wrap with a copy-to-clipboard button
-      //   2) regex-tokenise Go code so the colours match expressive-
-      //      code's github-dark palette (keywords, strings, comments,
-      //      function names, numbers)
-      // Idempotent — sets data-enh on processed blocks so re-running
-      // after astro:page-load is a no-op.
-      function initEnhanceCodeBlocks() {
-        const blocks = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            "pre > code[class*='language-']",
-          ),
-        );
-        for (const code of blocks) {
-          const pre = code.parentElement;
-          if (!pre || pre.dataset.enh === "1") continue;
-          //: skip blocks already inside an expressive-code wrapper
-          //: (markdown fenced blocks get processed at build time).
-          if (pre.closest(".expressive-code, .ec-frame, figure.frame")) continue;
-          pre.dataset.enh = "1";
-          //: extract the raw text BEFORE tokenising so the copy
-          //: button always copies the original source, not the
-          //: span-wrapped html.
-          const raw = code.textContent ?? "";
-          //: language detection from the class list (language-go etc.)
-          const lang = (code.className.match(/language-(\w+)/)?.[1] ?? "").toLowerCase();
-          //: token-colour the inner text when we recognise Go.
-          if (lang === "go") {
-            code.innerHTML = tokeniseGo(raw);
-          }
-          //: wrap pre in a positioned container so the copy button can
-          //: sit absolute top-right without breaking the block flow.
-          const wrap = document.createElement("div");
-          wrap.className = "code-enh";
-          pre.parentNode?.insertBefore(wrap, pre);
-          wrap.appendChild(pre);
-          //: copy button — minimal vanilla, no third-party.
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "code-enh-copy";
-          btn.setAttribute("aria-label", "Copy code to clipboard");
-          btn.textContent = "Copy";
-          btn.addEventListener("click", async () => {
-            try {
-              await navigator.clipboard.writeText(raw);
-              btn.textContent = "Copied";
-              btn.classList.add("copied");
-              setTimeout(() => {
-                btn.textContent = "Copy";
-                btn.classList.remove("copied");
-              }, 1500);
-            } catch {
-              btn.textContent = "Copy failed";
-              setTimeout(() => {
-                btn.textContent = "Copy";
-              }, 1500);
-            }
-          });
-          wrap.appendChild(btn);
-        }
-      }
-
-      //: Regex-based Go tokeniser — covers keywords, types, strings,
-      //: comments, numbers, function calls. Not a full parser; chosen
-      //: to match expressive-code's github-dark palette closely enough
-      //: that the tabs read consistently with the rest of the page.
-      function tokeniseGo(src: string): string {
-        const escape = (s: string) =>
-          s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        //: master regex — order matters: comments + strings first so
-        //: their content is not mistaken for keywords or numbers.
-        const re = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|`[^`]*`|'(?:\\.|[^'\\])*')|\b(0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?)\b|\b(func|var|const|if|else|for|range|return|package|import|type|struct|interface|map|chan|select|case|switch|default|go|defer|fallthrough|break|continue|true|false|nil)\b|\b(string|int|int8|int16|int32|int64|uint|uint8|uint16|uint32|uint64|byte|rune|float32|float64|bool|any|error)\b|([A-Za-z_]\w*)\s*\(|([A-Za-z_]\w*)/g;
-        let out = "";
-        let last = 0;
-        let m: RegExpExecArray | null;
-        while ((m = re.exec(src)) !== null) {
-          out += escape(src.slice(last, m.index));
-          const [full, comment, str, num, kw, ty, fn, id] = m;
-          if (comment) out += `<span class="tok-com">${escape(full)}</span>`;
-          else if (str) out += `<span class="tok-str">${escape(full)}</span>`;
-          else if (num) out += `<span class="tok-num">${escape(full)}</span>`;
-          else if (kw) out += `<span class="tok-kw">${escape(full)}</span>`;
-          else if (ty) out += `<span class="tok-ty">${escape(full)}</span>`;
-          else if (fn) {
-            //: function call — colour the name, leave the "(" raw.
-            const paren = full.slice(fn.length);
-            out += `<span class="tok-fn">${escape(fn)}</span>${escape(paren)}`;
-          } else if (id) out += escape(id);
-          last = re.lastIndex;
-        }
-        out += escape(src.slice(last));
-        return out;
-      }
-
       function bootAll() {
         document
           .querySelectorAll<HTMLElement>("[data-combobox]")
@@ -438,7 +342,6 @@ const ogImage = new URL("/brand/kitsunium.jpg", Astro.site ?? url.origin).toStri
         document
           .querySelectorAll<HTMLElement>("[data-tabs]")
           .forEach(initTabs);
-        initEnhanceCodeBlocks();
         initScrollspy();
         initMermaid();
       }
