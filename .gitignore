@@ -170,3 +170,8 @@ core.*
 /bazel-testlogs
 /bazel-workspace
 /bazel-sdk
+
+# pprof bench profiles (captured by `make profile WAVE=<slug>`).
+# Local artifacts only — bench.txt summaries are cited inline in
+# commit messages, raw .out files stay per-machine.
+/.bench/

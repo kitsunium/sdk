@@ -5,9 +5,12 @@ import (
 	stdpem "encoding/pem"
 	stdxml "encoding/xml"
 	"errors"
+	"flag"
 	"io"
 	"math"
+	"os"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -1699,4 +1702,34 @@ func TestUniversalRoundtripAllCodecs(t *testing.T) {
 			runCase(t, tc)
 		})
 	}
+}
+
+// TestMain is the bench/test harness entrypoint. It enables runtime
+// profile-rate hooks only when the matching test flag is set so
+// `go test -bench=. -blockprofile=block.out` records contention without
+// paying the per-event cost on normal runs. Block + mutex rates both
+// default to OFF in Go's runtime, so unset flags leave zero overhead.
+//
+// Flag names follow the testing package convention: `-blockprofile` is
+// exposed as `test.blockprofile`, `-mutexprofile` as `test.mutexprofile`;
+// flag.Lookup is the documented way to inspect them from a test binary.
+// TestMain lives here rather than in a standalone main_test.go because
+// KTN-TEST-FILES requires every test file to map to a source file, and
+// not in codec_bench_test.go because KTN-TEST-SUFFIX forbids non-Benchmark
+// functions in a _bench_test.go file.
+func TestMain(m *testing.M) {
+	//: enable block profile only when -blockprofile=... is set.
+	//: SetBlockProfileRate(1) records every contention event; leaving it
+	//: at the default (0) keeps the runtime overhead nil.
+	if f := flag.Lookup("test.blockprofile"); f != nil && f.Value.String() != "" {
+		//: rate=1 captures every blocking event — bench introspection only.
+		runtime.SetBlockProfileRate(1)
+	}
+	//: enable mutex profile only when -mutexprofile=... is set.
+	if f := flag.Lookup("test.mutexprofile"); f != nil && f.Value.String() != "" {
+		//: fraction=1 samples every mutex-contention event (1/rate=1.0).
+		runtime.SetMutexProfileFraction(1)
+	}
+	//: run the regular test/bench suite; propagate the harness exit code.
+	os.Exit(m.Run())
 }

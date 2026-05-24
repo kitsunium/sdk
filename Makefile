@@ -1,4 +1,4 @@
-.PHONY: help build test lint bench cover docs serve release-dry-run docs-readme
+.PHONY: help build test lint bench cover docs serve release-dry-run docs-readme profile benchstat-install benchstat-diff
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -33,6 +33,8 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate pkg/v1/{codec,errs,logger}/README.md from doc comments (see ADR 0008)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 
 # ── Wrappers ───────────────────────────────────────────────────────────
 # Every target shells to bazel (+ housekeeping tools). The .bazelrc named
@@ -154,3 +156,48 @@ docs-readme:
 	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0 (or rebuild devcontainer)"; exit 1; }
 	cd pkg/v1 && go generate ./codec ./errs ./logger
 	@echo "→ pkg/v1/{codec,errs,logger}/README.md regenerated"
+
+# `profile WAVE=<slug>` captures CPU + memory + block + mutex pprof
+# alongside a bench.txt summary for the named wave. Output lives under
+# .bench/profiles/<WAVE>/ (gitignored — see .gitignore). Commit messages
+# cite the bench.txt summary inline. Usage:
+#
+#   make profile WAVE=baseline
+#   make profile WAVE=post-wave-1 COUNT=15 BENCHTIME=10s
+#
+# COUNT defaults to 10 (benchstat needs ≥10 samples for mannwhitney);
+# BENCHTIME defaults to 5s (firms-up nanos on the small bench cells).
+# `pkg/v1/codec/main_test.go` toggles SetBlockProfileRate(1) +
+# SetMutexProfileFraction(1) when the corresponding -*profile flag is set.
+WAVE ?= current
+BEFORE ?= baseline
+AFTER ?= $(WAVE)
+profile:
+	@mkdir -p .bench/profiles/$(WAVE)
+	cd pkg/v1 && GOWORK=off go test -run='^$$' -bench=. -benchmem \
+	  -count=$${COUNT:-10} -benchtime=$${BENCHTIME:-5s} \
+	  -cpu=1,2,4,8 \
+	  -cpuprofile=$(CURDIR)/.bench/profiles/$(WAVE)/cpu.out \
+	  -memprofile=$(CURDIR)/.bench/profiles/$(WAVE)/mem.out \
+	  -blockprofile=$(CURDIR)/.bench/profiles/$(WAVE)/block.out \
+	  -mutexprofile=$(CURDIR)/.bench/profiles/$(WAVE)/mutex.out \
+	  ./codec/... \
+	  | tee $(CURDIR)/.bench/profiles/$(WAVE)/bench.txt
+	@echo "→ .bench/profiles/$(WAVE)/ {cpu,mem,block,mutex}.out + bench.txt"
+
+# `benchstat-install` installs the analysis CLI when missing. Pinned
+# to whatever golang.org/x/perf publishes on @latest; the CLI is
+# backwards-stable on its flag surface so this is safe.
+benchstat-install:
+	@command -v benchstat >/dev/null 2>&1 \
+	  || GOTOOLCHAIN=auto go install golang.org/x/perf/cmd/benchstat@latest
+
+# `benchstat-diff` compares two wave directories. Mann-Whitney with
+# 95% confidence per the benchstat docs; the p<0.05 cells become the
+# ship-gate signal for Phase B agent commits.
+benchstat-diff: benchstat-install
+	@test -f .bench/profiles/$(BEFORE)/bench.txt || { echo "✗ .bench/profiles/$(BEFORE)/bench.txt missing — run: make profile WAVE=$(BEFORE)"; exit 1; }
+	@test -f .bench/profiles/$(AFTER)/bench.txt  || { echo "✗ .bench/profiles/$(AFTER)/bench.txt missing — run: make profile WAVE=$(AFTER)"; exit 1; }
+	benchstat -confidence=0.95 -delta-test=mannwhitney \
+	  .bench/profiles/$(BEFORE)/bench.txt \
+	  .bench/profiles/$(AFTER)/bench.txt

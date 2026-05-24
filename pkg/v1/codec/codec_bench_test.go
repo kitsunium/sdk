@@ -278,6 +278,14 @@ func makeMarshalBench(f codec.Format, payload any) func(b *testing.B) {
 	return func(b *testing.B) {
 		//: report alloc/op every run — zero-alloc claims need this.
 		b.ReportAllocs()
+		//: pre-encode ONCE to learn the byte width and expose MB/s
+		//: alongside ns/op + B/op. SetBytes is required for benchstat
+		//: MB/s columns; without it benchstat reports ns/op only.
+		probe, perr := codec.Marshal(f, payload)
+		if perr != nil {
+			b.Fatalf("Marshal probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
 		//: b.Loop auto-KeepAlives values inside the loop body
 		//: (Go 1.24+ semantics) so DCE cannot strip the call.
 		for b.Loop() {
@@ -321,6 +329,9 @@ func BenchmarkUnmarshal(b *testing.B) {
 func makeUnmarshalBench(f codec.Format, payload any, data []byte) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: report MB/s relative to the encoded input size — every
+		//: byte of `data` is what the decode path actually parses.
+		b.SetBytes(int64(len(data)))
 		//: decode into a fresh target per iter — bench measures
 		//: the decode path, not target re-use.
 		for b.Loop() {
@@ -370,6 +381,13 @@ func BenchmarkMarshalParallel(b *testing.B) {
 func makeMarshalParallelBench(f codec.Format, payload any) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: pre-encode once so MB/s reflects the encoded payload width
+		//: under contention; symmetric with the sequential variant.
+		probe, perr := codec.Marshal(f, payload)
+		if perr != nil {
+			b.Fatalf("Marshal probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
 		//: each goroutine drives independent calls — codec
 		//: implementations are documented concurrent-safe.
 		b.RunParallel(func(pb *testing.PB) {
@@ -409,6 +427,8 @@ func BenchmarkUnmarshalParallel(b *testing.B) {
 func makeUnmarshalParallelBench(f codec.Format, payload any, data []byte) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: throughput is bytes parsed per second — sized off the seed.
+		b.SetBytes(int64(len(data)))
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				target := newDecodeTargetFor(string(f), payload)
@@ -450,6 +470,13 @@ func BenchmarkAppend(b *testing.B) {
 func makeAppendBench(appender corecodec.Appender, payload any) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: pre-Append once so MB/s reflects the appended width; the
+		//: probe also primes Go's allocator for the bench buffer below.
+		probe, perr := appender.Append(nil, payload)
+		if perr != nil {
+			b.Fatalf("Append probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
 		//: pre-allocate a reusable buffer big enough to avoid
 		//: re-growth inside the bench body — Append's whole point
 		//: is to amortise the caller's allocation.
@@ -500,6 +527,14 @@ func BenchmarkStreamEncode(b *testing.B) {
 func makeStreamEncodeBench(stream corecodec.StreamingCodec, records []any) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: pre-encode the batch ONCE outside the timer so SetBytes
+		//: reflects the actual emitted byte width per stream-iter.
+		//: seedStream reproduces the exact in-loop encode sequence.
+		probe, perr := seedStream(stream, records)
+		if perr != nil {
+			b.Fatalf("StreamEncode probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
 		for b.Loop() {
 			//: fresh buffer per iter — bench measures the
 			//: encoder's allocation profile, not buffer re-use.
@@ -559,6 +594,8 @@ func BenchmarkStreamDecode(b *testing.B) {
 func makeStreamDecodeBench(stream corecodec.StreamingCodec, name string, recordCount int, seed []byte) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: stream-decode throughput = bytes drained from `seed` per iter.
+		b.SetBytes(int64(len(seed)))
 		for b.Loop() {
 			//: fresh reader per iter — Decoders consume the
 			//: reader and every iter starts fresh.
