@@ -196,6 +196,9 @@ func Test_decodeLines(t *testing.T) {
 	tests := []tc{
 		{"two valid records", "1\n2\n", 2, false},
 		{"bad JSON surfaces error", "not json\n", 0, true},
+		{"trailing record without newline", "1\n2", 2, false},
+		{"empty input", "", 0, false},
+		{"blank lines skipped", "\n1\n\n2\n", 2, false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -207,6 +210,40 @@ func Test_decodeLines(t *testing.T) {
 		}
 		if !tc.wantErr && out.Len() != tc.wantLen {
 			t.Errorf("%s: decoded %d want %d", tc.name, out.Len(), tc.wantLen)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// Test_countNDJSONRecords pins the capacity-hint helper: every '\n' is a
+// record terminator plus one extra slot for a possible trailing record
+// that lacks a final newline.
+func Test_countNDJSONRecords(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		data string
+		want int
+	}
+	tests := []tc{
+		{"empty", "", 0},
+		{"single terminated", "1\n", 1},
+		{"single not terminated", "1", 1},
+		{"two terminated", "1\n2\n", 2},
+		{"trailing partial", "1\n2", 2},
+		{"all blanks counted as upper bound", "\n\n\n", 3},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got := countNDJSONRecords([]byte(tc.data))
+		//: this is a capacity hint, so exact equality is the contract.
+		if got != tc.want {
+			t.Errorf("%s: got %d want %d", tc.name, got, tc.want)
 		}
 	}
 	for _, tc := range tests {

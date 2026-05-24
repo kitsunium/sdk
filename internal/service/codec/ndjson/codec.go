@@ -7,7 +7,6 @@
 package ndjson
 
 import (
-	"bufio"
 	"bytes"
 	stdjson "encoding/json"
 	"reflect"
@@ -17,11 +16,9 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// scannerInitialCapacity is the starting buffer size for line scanning.
-const scannerInitialCapacity int = 64 * 1024
-
 // scannerMaxCapacity caps a single NDJSON record at 10 MiB; beyond that the
-// record likely represents a consumer bug or a corrupt stream.
+// record likely represents a consumer bug or a corrupt stream. Enforced
+// directly by the line splitter — no scanner buffer involved.
 const scannerMaxCapacity int = 10 * 1024 * 1024
 
 // Package-level state: the codec singleton plus the hoisted MIME /
@@ -206,30 +203,60 @@ func (*ndjsonCodec) Unmarshal(data []byte, v any) error {
 	return nil
 }
 
-// decodeLines reads data line-by-line and decodes each non-empty line into
-// a freshly-allocated element of sliceType.
+// decodeLines walks data line-by-line and decodes each non-empty line
+// into a freshly-allocated element of sliceType. Avoids bufio.Scanner
+// (which would copy each line into its internal buffer) by indexing on
+// '\n' directly into the input slice — every produced sub-slice aliases
+// data so no per-line copy occurs before stdjson.Unmarshal reads it.
+// Pre-counts records so the output slice is sized once instead of
+// re-grown via reflect.Append on every line.
 func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err error) {
-	//: split on '\n'; bufio.Scanner ignores the trailing empty line for us.
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	//: allow large records; default 64 KiB would reject legitimate payloads.
-	scanner.Buffer(make([]byte, 0, scannerInitialCapacity), scannerMaxCapacity)
-	//: build a fresh slice so we can accumulate decoded elements.
+	//: pre-count records so the output slice is sized exactly once
+	//: instead of paying reflect.Append's geometric re-grow per line.
+	recordCount := countNDJSONRecords(data)
+	//: build the result slice with the counted capacity.
 	elemType := sliceType.Elem()
-	out := reflect.MakeSlice(sliceType, 0, 0)
-	//: iterate over lines; skip empty ones to match the de facto dialect.
-	for scanner.Scan() {
-		//: drop whitespace-only lines (common when writers flush eagerly).
-		line := bytes.TrimSpace(scanner.Bytes())
-		//: skip empty lines.
+	out := reflect.MakeSlice(sliceType, 0, recordCount)
+	//: walk every '\n'-terminated chunk of data without copying.
+	cursor := 0
+	//: loop drains the input cursor-by-cursor; bytes.IndexByte is SIMD-fast.
+	for cursor < len(data) {
+		//: locate the next newline; -1 means this is the trailing line.
+		nlOffset := bytes.IndexByte(data[cursor:], '\n')
+		//: derive the line and advance the cursor in one branch.
+		var line []byte
+		//: branch on terminator presence — trailing-line case has no '\n'.
+		if nlOffset < 0 {
+			//: no trailing newline — the remainder is the final record.
+			line = data[cursor:]
+			cursor = len(data)
+		} else {
+			//: include only the bytes before '\n'; cursor advances past it.
+			line = data[cursor : cursor+nlOffset]
+			cursor += nlOffset + 1
+		}
+		//: enforce the per-record cap; bigger records likely mean corruption.
+		if len(line) > scannerMaxCapacity {
+			//: surface the documented sentinel for oversized records.
+			return reflect.Value{}, errs.Wrap(nil, errs.WrapParams{
+				Code:    CodeNDJSONUnmarshalFailed,
+				Reason:  "UNMARSHAL_FAILED",
+				Public:  "NDJSON record exceeds size limit",
+				Private: "service/codec/ndjson.Unmarshal: line length exceeds scannerMaxCapacity",
+			}, errs.Int("len", len(line)), errs.Int("cap", scannerMaxCapacity))
+		}
+		//: trim only after the size check so a giant whitespace line still trips it.
+		line = bytes.TrimSpace(line)
+		//: skip empty / whitespace-only lines (de-facto NDJSON dialect).
 		if len(line) == 0 {
-			//: nothing to decode here.
+			//: nothing to decode on this iteration.
 			continue
 		}
 		//: allocate a destination element and decode into it.
 		elem := reflect.New(elemType)
 		//: delegate per-record JSON decoding to the stdlib.
 		if uerr := stdjson.Unmarshal(line, elem.Interface()); uerr != nil {
-			//: wrap the stdlib error.
+			//: wrap the stdlib error for reason-based matching.
 			return reflect.Value{}, errs.Wrap(uerr, errs.WrapParams{
 				Code:    CodeNDJSONUnmarshalFailed,
 				Reason:  "UNMARSHAL_FAILED",
@@ -240,18 +267,30 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 		//: append the decoded element to the result.
 		out = reflect.Append(out, elem.Elem())
 	}
-	//: scanner.Err reports only I/O failures — bytes.Reader never errors.
-	if serr := scanner.Err(); serr != nil {
-		//: wrap defensively even though this is effectively unreachable.
-		return reflect.Value{}, errs.Wrap(serr, errs.WrapParams{
-			Code:    CodeNDJSONUnmarshalFailed,
-			Reason:  "UNMARSHAL_FAILED",
-			Public:  "NDJSON decoding failed",
-			Private: "service/codec/ndjson.Unmarshal: bufio.Scanner returned an error",
-		})
-	}
 	//: hand back the accumulated slice.
 	return out, nil
+}
+
+// countNDJSONRecords estimates the number of decodable records in data
+// by counting '\n' bytes plus one for a possible trailing line that has
+// no terminator. Conservative upper bound — actual decode skips empty /
+// whitespace-only lines, but over-allocating once is much cheaper than
+// re-growing the result slice on every record via reflect.Append.
+func countNDJSONRecords(data []byte) int {
+	//: empty input means zero records.
+	if len(data) == 0 {
+		//: nothing to allocate for.
+		return 0
+	}
+	//: bytes.Count uses SIMD on amd64/arm64 so this is effectively free.
+	count := bytes.Count(data, []byte{'\n'})
+	//: trailing record without a terminating '\n' adds one slot.
+	if data[len(data)-1] != '\n' {
+		//: include the orphan tail in the capacity hint.
+		count++
+	}
+	//: caller uses this as the slice cap hint.
+	return count
 }
 
 // Append encodes the slice v as NDJSON and appends the bytes to dst.
