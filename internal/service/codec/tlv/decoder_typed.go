@@ -57,9 +57,9 @@ func tryDecodeRootInto(data []byte, target reflect.Value) (handled bool, err err
 		//: signal caller to fall back.
 		return false, nil
 	}
-	//: dispatch on target.Kind() — struct and slice-of-struct each get
-	//: their own typed entry point; anything else falls through to the
-	//: untyped projector.
+	//: dispatch on target.Kind() — struct, slice-of-struct, and map each
+	//: get their own typed entry point; anything else falls through to
+	//: the untyped projector.
 	switch target.Kind() {
 	//: top-level struct — Phase 1 path.
 	case reflect.Struct:
@@ -75,11 +75,133 @@ func tryDecodeRootInto(data []byte, target reflect.Value) (handled bool, err err
 		}
 		//: typed slice-of-struct dispatcher.
 		return tryDecodeRootIntoSliceOfStruct(data, target)
+	//: top-level map[K]V — Phase 4 path. Skips the map[any]any
+	//: intermediate the untyped projector builds.
+	case reflect.Map:
+		//: typed map dispatcher; falls back when wire shape disagrees.
+		return tryDecodeRootIntoMap(data, target)
 	//: every other root target uses the untyped path.
 	default:
 		//: signal caller to fall back.
 		return false, nil
 	}
+}
+
+// tryDecodeRootIntoMap handles the Phase-4 *map[K]V target path.
+// Each (key, value) pair is decoded via the untyped walker and
+// narrowed into K and V respectively; the map[any]any intermediate
+// the legacy projector builds is skipped entirely.
+func tryDecodeRootIntoMap(data []byte, target reflect.Value) (handled bool, err error) {
+	//: peek the tag — only tagMap triggers the typed map path.
+	if len(data) < minRecordBytes {
+		//: surface the truncated sentinel via the typed path.
+		return true, truncatedError()
+	}
+	//: shape mismatch — let the untyped path project from map[any]any.
+	if Tag(data[0]) != tagMap {
+		//: signal fall-back.
+		return false, nil
+	}
+	//: read the pair count.
+	rest := data[1:]
+	length, rest, lerr := readVarintFromBytes(rest)
+	//: surface varint failure verbatim.
+	if lerr != nil {
+		//: already wrapped.
+		return true, lerr
+	}
+	//: cap-discard structural length before walking pairs.
+	if length > uint64(maxTLVBytes) {
+		//: surface the size sentinel.
+		return true, sizeExceededError(length)
+	}
+	//: walk every pair directly into the typed map.
+	residual, derr := decodeMapInto(length, rest, reflectView(target), 0)
+	//: surface pair-walk failure verbatim.
+	if derr != nil {
+		//: already wrapped.
+		return true, derr
+	}
+	//: typed path expects an exact buffer.
+	if len(residual) != 0 {
+		//: trailing bytes sentinel.
+		return true, trailingBytesError(len(residual))
+	}
+	//: typed-path success.
+	return true, nil
+}
+
+// decodeMapInto consumes `length` (key, value) records from rest and
+// builds the typed map in place. Each key + value pair goes through
+// the untyped walker then convertValue so cross-shape narrowing
+// (e.g. tagInt8 wire → int field) keeps working without code dup.
+func decodeMapInto(length uint64, rest []byte, targetView reflectView, depth int) (residual []byte, err error) {
+	//: unwrap once for method dispatch (Type/Key/Elem/Set).
+	target := reflect.Value(targetView)
+	//: depth guard fires before any allocation.
+	if depth+1 > maxTLVDepth {
+		//: surface the documented depth sentinel.
+		return rest, depthExceededError(depth + 1)
+	}
+	//: snapshot key + value types once.
+	keyType := target.Type().Key()
+	valType := target.Type().Elem()
+	//: pre-allocate via the clamped hint to defuse declared-length DoS.
+	out := reflect.MakeMapWithSize(target.Type(), sliceHint(length))
+	//: walk every (key, value) pair on the wire.
+	for range length {
+		//: decode the key via the untyped walker.
+		keyVal, next, kerr := decodeValue(rest, depth+1)
+		//: surface key failure verbatim.
+		if kerr != nil {
+			//: already wrapped.
+			return rest, kerr
+		}
+		//: decode the value next.
+		valVal, next2, verr := decodeValue(next, depth+1)
+		//: surface value failure verbatim.
+		if verr != nil {
+			//: already wrapped.
+			return rest, verr
+		}
+		//: narrow + publish the pair.
+		if perr := assignMapPair(reflectView(out), keyType, valType, keyVal, valVal); perr != nil {
+			//: already wrapped.
+			return rest, perr
+		}
+		//: advance past the consumed pair.
+		rest = next2
+	}
+	//: publish through the caller's map pointer.
+	target.Set(out)
+	//: walked every pair; hand back the residual.
+	return rest, nil
+}
+
+// assignMapPair narrows (key, value) into (keyType, valType) and
+// publishes into out via SetMapIndex. Hoisted from decodeMapInto so
+// that helper stays under the linter's MAXLOC + CYCLO budgets.
+func assignMapPair(outView reflectView, keyType, valType reflect.Type, keyVal, valVal any) error {
+	//: unwrap once for SetMapIndex dispatch.
+	out := reflect.Value(outView)
+	//: narrow the key.
+	kConv, kerr := convertValue(keyVal, keyType)
+	//: surface key conversion failure verbatim.
+	if kerr != nil {
+		//: already wrapped by convertValue.
+		return kerr
+	}
+	//: narrow the value.
+	vConv, verr := convertValue(valVal, valType)
+	//: surface value conversion failure verbatim.
+	if verr != nil {
+		//: already wrapped by convertValue.
+		return verr
+	}
+	//: publish the pair into the destination map.
+	out.SetMapIndex(kConv, vConv)
+	//: success.
+	return nil
 }
 
 // tryDecodeRootIntoStruct handles the Phase-1 *struct target path.

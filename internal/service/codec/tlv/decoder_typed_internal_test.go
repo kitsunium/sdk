@@ -459,3 +459,76 @@ func Test_tryDecodeRootIntoSliceOfStruct(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// Test_tryDecodeRootIntoMap pins the Phase-4 typed map path end-to-end
+// via the codec's Marshal/Unmarshal verbs.
+func Test_tryDecodeRootIntoMap(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		src  map[string]int
+	}
+	tests := []tc{
+		{"empty-map", map[string]int{}},
+		{"single-pair", map[string]int{"a": 1}},
+		{"multiple-pairs", map[string]int{"a": 1, "b": 2, "c": 3}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &tlvCodec{}
+		enc, merr := c.Marshal(tc.src)
+		if merr != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, merr)
+		}
+		var got map[string]int
+		if uerr := c.Unmarshal(enc, &got); uerr != nil {
+			t.Fatalf("%s: Unmarshal err=%v", tc.name, uerr)
+		}
+		//: contract: every pair survives round-trip.
+		if len(got) != len(tc.src) {
+			t.Fatalf("%s: length mismatch: got=%d want=%d", tc.name, len(got), len(tc.src))
+		}
+		for k, want := range tc.src {
+			if got[k] != want {
+				t.Errorf("%s: [%q] got=%d want=%d", tc.name, k, got[k], want)
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_assignMapPair pins the per-pair narrower: convertValue is
+// applied to both key and value before SetMapIndex publishes.
+func Test_assignMapPair(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		key  any
+		val  any
+		want string
+	}
+	tests := []tc{
+		{"string→string-pair", "k", "v", "v"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		out := reflect.MakeMap(reflect.TypeFor[map[string]string]())
+		err := assignMapPair(reflectView(out),
+			reflect.TypeFor[string](),
+			reflect.TypeFor[string](),
+			tc.key, tc.val)
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		//: contract: SetMapIndex publishes through the destination map.
+		got := out.MapIndex(reflect.ValueOf("k")).String()
+		if got != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
