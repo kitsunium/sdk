@@ -164,6 +164,24 @@ func escapeIfFormulaCell(cell string) string {
 	return "'" + cell
 }
 
+// Append encodes records into CSV bytes and appends them to dst.
+// Implements the optional codec.Appender interface so hot-path callers
+// (multi-table exports, paginated dumps) can stream CSV records into
+// a recycled buffer without an intermediate allocation per call.
+// Delegates to Marshal so the type-gate + escape-formula + wrap/error
+// contract has a single source.
+func (c *csvCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: delegate to Marshal so the contract has a single source.
+	encoded, merr := c.Marshal(v)
+	//: surface any encoding failure without touching dst.
+	if merr != nil {
+		//: return the untouched buffer plus the wrapped error.
+		return dst, merr
+	}
+	//: append the encoded bytes onto the caller's buffer.
+	return append(dst, encoded...), nil
+}
+
 // Unmarshal parses data as CSV into *[][]string.
 func (*csvCodec) Unmarshal(data []byte, v any) error {
 	//: target must be *[][]string so we can populate it.

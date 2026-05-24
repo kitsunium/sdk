@@ -86,6 +86,23 @@ func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 	return buf.Bytes(), nil
 }
 
+// Append encodes a *pem.Block as PEM bytes and appends them to dst.
+// Implements the optional codec.Appender interface so hot-path callers
+// can stitch PEM blocks into a larger framed buffer (multi-block cert
+// chain construction) without an intermediate allocation per block.
+func (c *pemCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: delegate to Marshal so the type-gate + wrap/error contract has
+	//: a single source.
+	encoded, merr := c.Marshal(v)
+	//: surface any encoding failure without touching dst.
+	if merr != nil {
+		//: return the untouched buffer plus the wrapped error.
+		return dst, merr
+	}
+	//: append the encoded bytes onto the caller's buffer.
+	return append(dst, encoded...), nil
+}
+
 // Unmarshal parses the first PEM block from data into v.
 func (*pemCodec) Unmarshal(data []byte, v any) error {
 	//: target must be **pem.Block so we can populate it.

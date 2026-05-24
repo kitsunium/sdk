@@ -47,6 +47,9 @@ var expectedAppenders = []string{
 	"toml",
 	"cbor",
 	"msgpack",
+	"asn1-der",
+	"pem",
+	"csv",
 	"base64",
 	"base64url",
 	"base32",
@@ -1373,6 +1376,66 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 					//: full structural compare on the remainder.
 					if !reflect.DeepEqual(got, val) {
 						//: structural diff.
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: ASN.1 DER round-trips a deterministic asn1Doc fixture (asn1
+		//: cannot encode arbitrary structs — only those with stdlib-
+		//: supported type tags).
+		case "asn1-der":
+			val := sampleASN1()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    val,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					var got asn1Doc
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					if !reflect.DeepEqual(got, val) {
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: PEM operates on *pem.Block. The round-trip target is
+		//: **pem.Block so Unmarshal can populate it.
+		case "pem":
+			val := samplePEMBlock()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    val,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					var got *stdpem.Block
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					if !reflect.DeepEqual(got, val) {
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: CSV operates on [][]string natively.
+		case "csv":
+			val := sampleCSV()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    val,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					var got [][]string
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					if !reflect.DeepEqual(got, val) {
 						t.Errorf("%s: append round-trip mismatch", name)
 					}
 				},

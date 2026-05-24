@@ -126,3 +126,51 @@ func Test_pemCodec_Unmarshal(t *testing.T) {
 		})
 	}
 }
+
+// Test_pemCodec_Append covers the Appender extension via the table-
+// driven runCase pattern: forward (error → dst untouched) + reverse
+// (prefix preserved on success).
+func Test_pemCodec_Append(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		dst     []byte
+		v       any
+		wantErr bool
+	}
+	tests := []tc{
+		{"happy-block", nil, &stdpem.Block{Type: "TEST", Bytes: []byte("hi")}, false},
+		{"happy-prefix", []byte("PRE"), &stdpem.Block{Type: "DATA", Bytes: []byte{1, 2}}, false},
+		{"reject-channel", []byte("PRE"), make(chan int), true},
+		{"reject-nil-block", []byte("PRE"), (*stdpem.Block)(nil), true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := New()
+		ap, ok := c.(interface {
+			Append([]byte, any) ([]byte, error)
+		})
+		if !ok {
+			t.Fatalf("%s: pemCodec does not implement Appender", tc.name)
+		}
+		got, err := ap.Append(tc.dst, tc.v)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("%s: want error, got nil", tc.name)
+			}
+			if len(got) != len(tc.dst) {
+				t.Errorf("%s: dst len changed on error: got=%d want=%d", tc.name, len(got), len(tc.dst))
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		if len(tc.dst) > 0 && string(got[:len(tc.dst)]) != string(tc.dst) {
+			t.Errorf("%s: prefix lost; got=%q", tc.name, got[:len(tc.dst)])
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
