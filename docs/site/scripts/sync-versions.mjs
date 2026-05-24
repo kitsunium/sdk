@@ -367,13 +367,23 @@ async function materialiseRelease(major, release, sourceRoot) {
   const readme = join(sourceRoot, "README.md");
   if (existsSync(readme)) {
     const body = await readFile(readme, "utf8");
+    //: The README's package links (`./pkg/v1/codec`) resolve to the package
+    //: directory on GitHub, but the docs portal renders each sub-package as a
+    //: flat sibling page (`/<major>/codec`, written as `${sub.name}.md` below).
+    //: Rewrite `](./pkg/<major>/<name>)` → `](./<name>/)` so the Home table
+    //: links to the portal routes instead of 404ing. Trailing slash matches
+    //: the ADR-index convention. Deeper links (BENCH.md, …) are left alone.
+    const portalBody = body.replace(
+      new RegExp("\\]\\(\\./pkg/" + major + "/([^)/]+)/?\\)", "g"),
+      "](./$1/)",
+    );
     await writeFile(
       join(dest, "index.md"),
       frontmatter({
         title: landingTitle,
         description: `Project overview`,
         source: `README.md`,
-      }) + body,
+      }) + portalBody,
     );
   } else {
     await writeFile(
