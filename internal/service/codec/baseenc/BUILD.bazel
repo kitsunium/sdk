@@ -34,6 +34,7 @@ go_test(
     size = "small",
     srcs = [
         "buffering_writer_internal_test.go",
+        "codec_alloc_integration_test.go",
         "codec_external_test.go",
         "codec_internal_test.go",
         "decoder_internal_test.go",

@@ -28,6 +28,7 @@ go_test(
     name = "ndjson_test",
     size = "small",
     srcs = [
+        "codec_alloc_integration_test.go",
         "codec_external_test.go",
         "codec_internal_test.go",
     ],

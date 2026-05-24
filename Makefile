@@ -59,6 +59,14 @@ build:
 test:
 	bazel test --config=race //...
 
+# `test-alloc` runs the per-codec allocation-budget regression gate. These
+# tests carry `//go:build !race` (testing.AllocsPerRun reports +1 under
+# -race), so they are invisible to the race suite above and need this
+# race-off pass. CI runs it as a dedicated step; run it locally before
+# touching a codec's allocation profile.
+test-alloc:
+	bazel test --config=alloc //internal/service/codec/...
+
 # `lint` is the read-only counterpart of `build`: same checks, but it
 # REFUSES to write — it asserts the tree is already consistent.
 lint:
