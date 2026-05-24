@@ -21,7 +21,6 @@ import (
 	stdjson "encoding/json"
 	"io"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -527,7 +526,10 @@ func wrapDecode(out []byte, derr error) (decoded []byte, err error) {
 // decodeASCII85 drains an ascii85-encoded byte slice into a fresh buffer.
 func decodeASCII85(data []byte) (decoded []byte, err error) {
 	//: NewDecoder tolerates surrounding whitespace per the format spec.
-	r := ascii85.NewDecoder(strings.NewReader(string(data)))
+	//: bytes.NewReader avoids the full-input string(data) copy the
+	//: strings.NewReader path used to pay — matches the no-string-copy
+	//: pattern the rest of decodeBytes already follows.
+	r := ascii85.NewDecoder(bytes.NewReader(data))
 	//: drain into a buffer.
 	decoded, rerr := io.ReadAll(r)
 	//: success fast-path.
