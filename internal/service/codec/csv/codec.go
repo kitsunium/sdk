@@ -11,6 +11,23 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// promotionHeaderCell is the single-column header label the facade
+// promotion path stamps when wrapping a non-CSV value (matches
+// pkg/v1/codec/promote.go csvPromotionHeader).
+const promotionHeaderCell = "_json"
+
+// promotionRowCount is the expected row count of a promotion-wrapped
+// CSV: one header row plus one body row carrying the JSON.
+const promotionRowCount int = 2
+
+// promotionColumnCount is the expected column count per promotion row.
+const promotionColumnCount int = 1
+
+// promotionBufWorstCaseFactor accounts for the worst-case `"` → `""`
+// expansion in the body cell of the promotion fast-path. Body length
+// is multiplied by this factor when pre-sizing the output buffer.
+const promotionBufWorstCaseFactor int = 2
+
 // Codec is the CSV singleton, registered with core/codec at package load.
 // Binding the registration result to a named var is more idiomatic than
 // `var _ = codec.Register(...)` and keeps us clear of init().
@@ -84,6 +101,14 @@ func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 			Public:  "CSV codec requires a [][]string value",
 			Private: "service/codec/csv.Marshal: argument is not [][]string",
 		})
+	}
+	//: promotion-shape fast-path: 2 rows × 1 column with header "_json"
+	//: is the canonical shape pkg/v1/codec/promote.go produces for CSV.
+	//: Bypass csv.Writer + WriteAll + Flush by hand-writing the bytes;
+	//: only escape is `"` → `""` because the body is JSON UTF-8.
+	if !c.escapeFormulas && isPromotionShape(records) {
+		//: dedicated fast-path emits identical RFC 4180 bytes.
+		return marshalPromotionShape(records[1][0]), nil
 	}
 	//: apply the OWASP CSV-injection mitigation when the caller opted in;
 	//: unmodified records on the default path preserve wire-format fidelity.
@@ -180,6 +205,56 @@ func (c *csvCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	}
 	//: append the encoded bytes onto the caller's buffer.
 	return append(dst, encoded...), nil
+}
+
+// isPromotionShape reports whether records is the exact 2-row × 1-col
+// shape pkg/v1/codec/promote.go produces — i.e. header == "_json" and
+// the body row has exactly one cell. Matching this shape lets Marshal
+// bypass csv.Writer for a measurable win on every promotion call.
+func isPromotionShape(records [][]string) bool {
+	//: combined row + column count guard — exact 2x1 promotion shape.
+	if len(records) != promotionRowCount ||
+		len(records[0]) != promotionColumnCount ||
+		len(records[1]) != promotionColumnCount {
+		//: not promotion-shaped.
+		return false
+	}
+	//: header literal pinned by the facade.
+	return records[0][0] == promotionHeaderCell
+}
+
+// marshalPromotionShape emits standards-compliant CSV bytes for the
+// 2-row × 1-col promotion shape. The body cell always contains JSON
+// (with `{`, `"`, `,` etc.) so it always needs quoting; the only
+// escape needed is `"` → `""` per the double-quote-doubling rule.
+// Saves csv.Writer construction + per-row Write loop + Flush.
+func marshalPromotionShape(body string) []byte {
+	//: pre-size: header + \n + opening " + worst-case body + closing " + \n.
+	out := make([]byte, 0, len(promotionHeaderCell)+1+1+promotionBufWorstCaseFactor*len(body)+1+1)
+	//: literal header row + line terminator.
+	out = append(out, promotionHeaderCell...)
+	out = append(out, '\n')
+	//: opening double-quote of the body cell.
+	out = append(out, '"')
+	//: per-byte walk: `"` doubles, everything else passes through.
+	for i := range len(body) {
+		//: double-quote escape.
+		if body[i] == '"' {
+			//: emit the doubled quote.
+			out = append(out, '"', '"')
+			//: next input byte.
+			continue
+		}
+		//: plain byte passthrough — CSV doesn't escape anything else
+		//: inside a quoted field except embedded `"`.
+		out = append(out, body[i])
+	}
+	//: closing double-quote of the body cell.
+	out = append(out, '"')
+	//: line terminator after the body row.
+	out = append(out, '\n')
+	//: caller owns the bytes.
+	return out
 }
 
 // Unmarshal parses data as CSV into *[][]string.
