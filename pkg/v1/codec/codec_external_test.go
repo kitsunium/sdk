@@ -1522,3 +1522,77 @@ func TestMarshalMany(t *testing.T) {
 		})
 	}
 }
+
+// universalRoundtripUser is the canonical value used by
+// TestUniversalRoundtripAllCodecs to prove the post-promotion contract:
+// every Format accepts the SAME ordinary Go struct in Marshal and
+// reconstructs it byte-for-byte in Unmarshal, regardless of whether the
+// codec is natively any-aware (json, cbor, msgpack, …) or constrained
+// (csv, ndjson, pem, flatbuffers, tlv) — the facade promotion path
+// closes the gap. Tags reflect the formats that ship native struct-tag
+// support; promoted codecs read the json route and ignore them.
+type universalRoundtripUser struct {
+	Name string `json:"name" cbor:"name" yaml:"name"`
+	Age  int    `json:"age"  cbor:"age"  yaml:"age"`
+}
+
+// TestUniversalRoundtripAllCodecs pins the post-promotion contract:
+// codec.Marshal(F, User) + codec.Unmarshal(F, data, &back) MUST yield
+// back == User for every Format the registry knows. Failure here means
+// the facade promotion path regressed for at least one codec —
+// previously 5/18 codecs rejected this very call shape.
+func TestUniversalRoundtripAllCodecs(t *testing.T) {
+	t.Parallel()
+	//: canonical fixture; struct intentionally small so the binary
+	//: codecs stay easy to inspect by eye if a failure prints hex.
+	original := universalRoundtripUser{Name: "Ada", Age: 36}
+	//: subtest record — `name` doubles as the t.Run label and the
+	//: Format key.
+	type universalCase struct {
+		name   string
+		format codec.Format
+	}
+	//: build the table dynamically from the live registry so a new
+	//: codec registration cannot slip past CI without a roundtrip
+	//: proof — but materialise it before iteration so the runCase
+	//: closure sees a table-driven shape.
+	var tests []universalCase
+	//: walk every discovered Format and turn it into a case.
+	for _, f := range codec.Available() {
+		//: capture the format string for the t.Run label.
+		tests = append(tests, universalCase{name: string(f), format: f})
+	}
+	//: per-case driver isolated so each t.Run body stays a one-line
+	//: dispatch.
+	runCase := func(t *testing.T, tc universalCase) {
+		t.Helper()
+		//: encode the user via the facade — fast or promotion path.
+		data, mErr := codec.Marshal(tc.format, original)
+		//: every codec must accept the ordinary struct.
+		if mErr != nil {
+			//: surface the failure with the format name for triage.
+			t.Fatalf("%s: Marshal err=%v", tc.name, mErr)
+		}
+		//: decode back into a fresh value of the same Go type.
+		var back universalRoundtripUser
+		//: feed the bytes back through the facade — symmetric path.
+		if uErr := codec.Unmarshal(tc.format, data, &back); uErr != nil {
+			//: surface the decode failure with the format name.
+			t.Fatalf("%s: Unmarshal err=%v (bytes=% x)", tc.name, uErr, data)
+		}
+		//: full-field equality is the contract — partial fills count
+		//: as failures so the test catches silent drift.
+		if back != original {
+			//: surface the actual decoded value for triage.
+			t.Errorf("%s: roundtrip mismatch: got %+v want %+v (bytes=% x)", tc.name, back, original, data)
+		}
+	}
+	//: every registered Format runs in parallel; t.Parallel is cheap
+	//: and surfaces concurrency issues if a codec leaks state.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}

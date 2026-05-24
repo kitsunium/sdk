@@ -15,3 +15,8 @@ const CodeCodecUnavailable errs.Code = 0x01_02_00_02 // 1.2.0.2
 // CodeStreamingUnsupported fires when NewEncoder / NewDecoder is called on
 // a codec that does not implement StreamingCodec.
 const CodeStreamingUnsupported errs.Code = 0x01_02_00_03 // 1.2.0.3
+
+// CodePromoteFailed fires when the facade's JSON-bridge promotion path
+// cannot serve the request (unknown Format with no promotion strategy,
+// or a malformed container after the codec populated it).
+const CodePromoteFailed errs.Code = 0x01_02_00_04 // 1.2.0.4

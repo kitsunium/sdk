@@ -188,7 +188,13 @@ const (
 	MsgPack Format = "msgpack"
 )
 
-// Marshal serialises v using the codec registered under f.
+// Marshal serialises v using the codec registered under f. The codec's
+// native input shape is tried first (fast path, zero overhead); if the
+// codec rejects v as the wrong shape (csv requires [][]string, pem
+// requires *pem.Block, etc.) the facade promotes v via json-encode +
+// codec-specific wrap so every Format accepts any Go value — see
+// promote.go for the per-format strategies and the uniform-contract
+// rationale.
 func Marshal(f Format, v any) (encoded []byte, err error) {
 	//: resolve the codec before delegating.
 	c, ok := corecodec.Lookup(f)
@@ -197,11 +203,22 @@ func Marshal(f Format, v any) (encoded []byte, err error) {
 		//: caller used an unregistered Format.
 		return nil, unknownFormat(f)
 	}
-	//: delegate to the concrete codec; its errors are already wrapped.
-	return c.Marshal(v)
+	//: fast path — try the codec's native input shape first.
+	encoded, err = c.Marshal(v)
+	//: slow path — codec rejected v's shape; retry through the
+	//: JSON-bridge promotion so the public contract holds for any v.
+	if err != nil && isValueShapeMismatch(err) {
+		//: promotion handles its own error wrapping.
+		return promoteMarshal(f, c, v)
+	}
+	//: success or unrelated error — pass through unchanged.
+	return encoded, err
 }
 
-// Unmarshal parses data into v using the codec registered under f.
+// Unmarshal parses data into v using the codec registered under f. As
+// with Marshal, the codec's native target shape is tried first; on
+// shape mismatch the facade promotes via JSON-bridge so every Format
+// can decode into any Go target.
 func Unmarshal(f Format, data []byte, v any) error {
 	//: resolve the codec before delegating.
 	c, ok := corecodec.Lookup(f)
@@ -210,8 +227,16 @@ func Unmarshal(f Format, data []byte, v any) error {
 		//: caller used an unregistered Format.
 		return unknownFormat(f)
 	}
-	//: delegate to the concrete codec; its errors are already wrapped.
-	return c.Unmarshal(data, v)
+	//: fast path — try the codec's native target shape first.
+	uErr := c.Unmarshal(data, v)
+	//: slow path — codec rejected v's shape; retry through the
+	//: JSON-bridge promotion so the public contract holds for any v.
+	if uErr != nil && isValueShapeMismatch(uErr) {
+		//: promotion handles its own error wrapping.
+		return promoteUnmarshal(f, c, data, v)
+	}
+	//: success or unrelated error — pass through unchanged.
+	return uErr
 }
 
 // MarshalMany serialises v into every format in formats and returns a
