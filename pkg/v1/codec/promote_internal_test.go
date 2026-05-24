@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	fbcodec "github.com/kitsunium/sdk/internal/service/codec/flatbuffers"
 )
 
 // promoteCanaryUser is the canonical fixture every promote-side test
@@ -204,9 +205,11 @@ func TestWrapForFormat(t *testing.T) {
 					t.Errorf("flatbuffers wrap shape=%T value=%v", container, container)
 					return
 				}
-				//: 4-byte header is little-endian zero offset.
-				if binary.LittleEndian.Uint32(raw[:flatBuffersHeaderBytes]) != 0 {
-					t.Errorf("flatbuffers wrap header non-zero: % x", raw[:flatBuffersHeaderBytes])
+				//: 4-byte header is fbcodec.PromotionMagic LE — lets the
+				//: flatbuffers codec recognise our own wrapper bytes and
+				//: skip its validateBuffer step on the recursive Marshal.
+				if binary.LittleEndian.Uint32(raw[:flatBuffersHeaderBytes]) != fbcodec.PromotionMagic {
+					t.Errorf("flatbuffers wrap header want=PromotionMagic got=% x", raw[:flatBuffersHeaderBytes])
 				}
 				//: payload after header must equal inner verbatim.
 				if string(raw[flatBuffersHeaderBytes:]) != innerStr {

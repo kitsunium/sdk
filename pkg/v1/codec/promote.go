@@ -20,6 +20,7 @@ import (
 	stdpem "encoding/pem"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	fbcodec "github.com/kitsunium/sdk/internal/service/codec/flatbuffers"
 )
 
 // flatBuffersHeaderBytes is the synthetic 4-byte root-offset header
@@ -125,8 +126,12 @@ func wrapForFormat(f Format, inner []byte) (container any, err error) {
 	case "flatbuffers":
 		//: header + payload allocated in one shot.
 		out := make([]byte, flatBuffersHeaderBytes+len(inner))
-		//: explicit zero offset — synthetic sentinel.
-		binary.LittleEndian.PutUint32(out[:flatBuffersHeaderBytes], 0)
+		//: PromotionMagic header lets the flatbuffers codec recognise
+		//: our wrapper bytes and skip its validateBuffer step on the
+		//: hot path (we just produced these bytes, re-checking is wasted
+		//: work). 0x80000001 is also invalid as a real FB root offset,
+		//: so flatc-generated readers fail predictably on these bytes.
+		binary.LittleEndian.PutUint32(out[:flatBuffersHeaderBytes], fbcodec.PromotionMagic)
 		//: inner json copied verbatim into the payload region.
 		copy(out[flatBuffersHeaderBytes:], inner)
 		//: flatbuffers Marshal passes []byte through verbatim.
