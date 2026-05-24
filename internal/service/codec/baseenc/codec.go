@@ -251,28 +251,29 @@ func (c *baseencCodec) encodeBytes(raw []byte) []byte {
 }
 
 // decodeBytes reverses encodeBytes for the variant. Returns a wrapped
-// error when the stdlib decoder rejects the input.
+// error when the stdlib decoder rejects the input. Routes through
+// AppendDecode (Go 1.22+) on a []byte source so the full input copy
+// the legacy `string(data)` chain induced is eliminated — saves 1 alloc
+// and len(data) bytes per Unmarshal call on every base-N variant.
 func (c *baseencCodec) decodeBytes(data []byte) (decoded []byte, err error) {
-	//: cache the string form so repeated DecodeString calls share one alloc.
-	text := string(data)
 	//: dispatch on the variant.
 	switch c.variant {
 	//: standard base64 with padding.
 	case variantBase64:
-		//: stdlib returns an allocated slice or an error.
-		return wrapDecode(base64.StdEncoding.DecodeString(text))
+		//: AppendDecode operates directly on []byte; no string copy.
+		return wrapDecode(base64.StdEncoding.AppendDecode(nil, data))
 	//: URL-safe base64 with padding.
 	case variantBase64URL:
-		//: stdlib returns an allocated slice or an error.
-		return wrapDecode(base64.URLEncoding.DecodeString(text))
+		//: AppendDecode operates directly on []byte; no string copy.
+		return wrapDecode(base64.URLEncoding.AppendDecode(nil, data))
 	//: standard base32 with padding.
 	case variantBase32:
-		//: stdlib returns an allocated slice or an error.
-		return wrapDecode(base32.StdEncoding.DecodeString(text))
+		//: AppendDecode operates directly on []byte; no string copy.
+		return wrapDecode(base32.StdEncoding.AppendDecode(nil, data))
 	//: hex variants — encoding/hex accepts both letter cases on input.
 	case variantBase16, variantHex:
-		//: hex.DecodeString tolerates both letter cases on input.
-		return wrapDecode(hex.DecodeString(text))
+		//: AppendDecode operates directly on []byte; no string copy.
+		return wrapDecode(hex.AppendDecode(nil, data))
 	//: Adobe ascii85.
 	case variantASCII85:
 		//: ascii85 needs a reader; drain it into a buffer.
