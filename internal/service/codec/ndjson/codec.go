@@ -304,7 +304,7 @@ func (*ndjsonCodec) Unmarshal(data []byte, v any) error {
 }
 
 // decodeLines walks data line-by-line and decodes each non-empty line
-// into a freshly-allocated element of sliceType. Avoids bufio.Scanner
+// in place into a pre-sized slice of sliceType. Avoids bufio.Scanner
 // (which would copy each line into its internal buffer) by indexing on
 // '\n' directly into the input slice — every produced sub-slice aliases
 // data so no per-line copy occurs before stdjson.Unmarshal reads it.
@@ -314,9 +314,14 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 	//: pre-count records so the output slice is sized exactly once
 	//: instead of paying reflect.Append's geometric re-grow per line.
 	recordCount := countNDJSONRecords(data)
-	//: build the result slice with the counted capacity.
-	elemType := sliceType.Elem()
-	out := reflect.MakeSlice(sliceType, 0, recordCount)
+	//: full-length slice so each record decodes in place into its own slot
+	//: — this drops the per-record reflect.New element allocation and the
+	//: reflect.Append element copy. recordCount is an upper bound (blank
+	//: lines are skipped), so the slice is re-sliced to the decoded count
+	//: before returning.
+	out := reflect.MakeSlice(sliceType, recordCount, recordCount)
+	//: decoded-record cursor; trails recordCount when blank lines are skipped.
+	decoded := 0
 	//: walk every '\n'-terminated chunk of data without copying.
 	cursor := 0
 	//: loop drains the input cursor-by-cursor; bytes.IndexByte is SIMD-fast.
@@ -352,10 +357,10 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 			//: nothing to decode on this iteration.
 			continue
 		}
-		//: allocate a destination element and decode into it.
-		elem := reflect.New(elemType)
-		//: delegate per-record JSON decoding to the stdlib.
-		if uerr := stdjson.Unmarshal(line, elem.Interface()); uerr != nil {
+		//: decode directly into the pre-allocated slot — slice elements
+		//: obtained via Index are addressable, so .Addr() yields a settable
+		//: pointer with no per-record reflect.New allocation.
+		if uerr := stdjson.Unmarshal(line, out.Index(decoded).Addr().Interface()); uerr != nil {
 			//: wrap the stdlib error for reason-based matching.
 			return reflect.Value{}, errs.Wrap(uerr, errs.WrapParams{
 				Code:    CodeNDJSONUnmarshalFailed,
@@ -364,11 +369,11 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 				Private: "service/codec/ndjson.Unmarshal: encoding/json returned an error",
 			})
 		}
-		//: append the decoded element to the result.
-		out = reflect.Append(out, elem.Elem())
+		//: advance the decoded-record cursor past the filled slot.
+		decoded++
 	}
-	//: hand back the accumulated slice.
-	return out, nil
+	//: re-slice to the decoded count — blank lines leave trailing slots.
+	return out.Slice(0, decoded), nil
 }
 
 // countNDJSONRecords estimates the number of decodable records in data
