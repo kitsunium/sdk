@@ -4,6 +4,8 @@ import (
 	"bytes"
 	stdpem "encoding/pem"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 )
 
 // Test_pemCodec_Name covers the canonical identifier returned by the codec.
@@ -185,7 +187,7 @@ func Test_detachAndRelease(t *testing.T) {
 	}
 	tests := []tc{
 		{"small-cloned-and-repooled", 1024},
-		{"oversize-orphaned-untouched", maxRetainedBufBytes + 1},
+		{"oversize-orphaned-untouched", scratch.MaxRetainedBufBytes + 1},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -196,28 +198,6 @@ func Test_detachAndRelease(t *testing.T) {
 		if string(out) != "xyz" {
 			t.Errorf("%s: got %q want %q", tc.name, out, "xyz")
 		}
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
-	}
-}
-
-// Test_releaseBuffer covers the error-path cap-discard helper.
-func Test_releaseBuffer(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		cap  int
-	}
-	tests := []tc{
-		{"small-retained", 1024},
-		{"discarded-oversize", maxRetainedBufBytes + 1},
-	}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		buf := new(bytes.Buffer)
-		buf.Grow(tc.cap)
-		releaseBuffer(buf)
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })

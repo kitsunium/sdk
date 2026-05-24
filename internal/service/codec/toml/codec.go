@@ -4,25 +4,18 @@
 package toml
 
 import (
-	"bytes"
 	"io"
 	"slices"
-	"sync"
 
 	gotoml "github.com/pelletier/go-toml/v2"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// maxRetainedBufBytes caps the size of *bytes.Buffer instances re-pooled
-// by Marshal / Append. A one-off oversized payload would otherwise pin
-// a large buffer for the lifetime of the pool's GC window. 256 KiB is
-// the project-wide threshold (codec-perf-extreme initiative).
-const maxRetainedBufBytes int = 256 << 10
-
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables + the Marshal-side buffer pool.
+// extension tables.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&tomlCodec{})
@@ -32,13 +25,6 @@ var (
 
 	//: extension table hoisted for the same reason.
 	extensions = []string{".toml"}
-
-	//: bufferPool reuses *bytes.Buffer across Marshal / Append calls.
-	//: pelletier/go-toml/v2 has no Encoder.Reset(w); pool only the
-	//: buffer and spin up a fresh Encoder per call.
-	bufferPool = sync.Pool{
-		New: func() any { return new(bytes.Buffer) },
-	}
 )
 
 // tomlCodec is the concrete Codec implementation for TOML.
@@ -72,21 +58,14 @@ func (*tomlCodec) Extensions() []string {
 // *bytes.Buffer + gotoml.NewEncoder so the per-call bytes.Buffer
 // allocation gotoml.Marshal pays internally is amortised across calls.
 func (*tomlCodec) Marshal(v any) (encoded []byte, err error) {
-	//: rent the output buffer; pool guarantees a *bytes.Buffer.
-	buf, ok := bufferPool.Get().(*bytes.Buffer)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/toml: bufferPool yielded non-*bytes.Buffer")
-	}
-	//: start clean — pool may return a partially-filled buffer.
-	buf.Reset()
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
 	//: pelletier Encoder has no Reset — fresh one per call.
 	enc := gotoml.NewEncoder(buf)
 	//: encode into the pooled buffer.
 	if merr := enc.Encode(v); merr != nil {
 		//: drop the buffer back to the pool if not oversized.
-		releaseBuffer(buf)
+		scratch.ReleaseBuffer(buf)
 		//: wrap the library error for reason-based matching.
 		return nil, errs.Wrap(merr, errs.WrapParams{
 			Code:    CodeTOMLMarshalFailed,
@@ -99,24 +78,9 @@ func (*tomlCodec) Marshal(v any) (encoded []byte, err error) {
 	//: alias the pooled buffer (next caller would overwrite it).
 	out := slices.Clone(buf.Bytes())
 	//: cap-discard release.
-	releaseBuffer(buf)
+	scratch.ReleaseBuffer(buf)
 	//: success — bytes are the caller's now.
 	return out, nil
-}
-
-// releaseBuffer returns buf to the pool unless its capacity exceeds the
-// cap-discard threshold.
-func releaseBuffer(buf *bytes.Buffer) {
-	//: oversized buffers would pin large allocations for the lifetime
-	//: of the pool's GC window — drop them instead.
-	if buf.Cap() > maxRetainedBufBytes {
-		//: orphan the buffer; the GC will reclaim it.
-		return
-	}
-	//: pool expects a clean buffer.
-	buf.Reset()
-	//: return for the next caller.
-	bufferPool.Put(buf)
 }
 
 // Unmarshal parses data as TOML into v.
@@ -143,21 +107,14 @@ func (*tomlCodec) Unmarshal(data []byte, v any) error {
 // *bytes.Buffer + appends onto dst — saves the slices.Clone the
 // Marshal-delegation shape paid.
 func (*tomlCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: rent the output buffer; pool guarantees a *bytes.Buffer.
-	buf, ok := bufferPool.Get().(*bytes.Buffer)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/toml: bufferPool yielded non-*bytes.Buffer")
-	}
-	//: start clean — pool may return a partially-filled buffer.
-	buf.Reset()
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
 	//: pelletier's Encoder has no Reset(w) — fresh one per call.
 	enc := gotoml.NewEncoder(buf)
 	//: encode into the pooled buffer.
 	if merr := enc.Encode(v); merr != nil {
 		//: cap-discard release; dst stays pristine, error surfaces.
-		releaseBuffer(buf)
+		scratch.ReleaseBuffer(buf)
 		//: wrap the library error for reason-based matching.
 		return dst, errs.Wrap(merr, errs.WrapParams{
 			Code:    CodeTOMLMarshalFailed,
@@ -169,7 +126,7 @@ func (*tomlCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: append the encoded bytes onto the caller's buffer (1 copy total).
 	dst = append(dst, buf.Bytes()...)
 	//: cap-discard release.
-	releaseBuffer(buf)
+	scratch.ReleaseBuffer(buf)
 	//: success — bytes are the caller's now.
 	return dst, nil
 }

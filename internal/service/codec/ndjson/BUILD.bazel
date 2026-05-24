@@ -13,6 +13,7 @@ go_library(
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/codec",
+        "//internal/core/codec/scratch",
         "//internal/kernel/errs",
     ],
 )
@@ -33,6 +34,7 @@ go_test(
     embed = [":ndjson"],
     deps = [
         "//internal/core/codec",
+        "//internal/core/codec/scratch",
         "//internal/kernel/errs",
     ],
 )

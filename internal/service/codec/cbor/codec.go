@@ -4,21 +4,15 @@
 package cbor
 
 import (
-	"bytes"
 	"io"
 	"slices"
-	"sync"
 
 	gocbor "github.com/fxamacker/cbor/v2"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
-
-// maxRetainedBufBytes caps the size of *bytes.Buffer instances re-pooled
-// by Append. A one-off oversized payload would otherwise pin a large
-// buffer for the lifetime of the pool's GC window. 256 KiB project-wide.
-const maxRetainedBufBytes int = 256 << 10
 
 // Security caps for hardened decoding. The library's default Unmarshal
 // uses package defaults that allow up to INT32_MAX array elements —
@@ -63,14 +57,6 @@ var (
 	//: so Append can encode directly into a caller-pool'd bytes.Buffer
 	//: without the intermediate alloc + copy that Marshal's API forces.
 	userBufferEncMode gocbor.UserBufferEncMode = mustUserBufferEncMode()
-
-	//: bufferPool reuses *bytes.Buffer across Append calls. Append's
-	//: hot path lands one alloc per call via MarshalToBuffer; pooling
-	//: amortises that across consecutive callers + tames the geometric
-	//: grow cascade on large payloads. 256 KiB cap-discard.
-	bufferPool = sync.Pool{
-		New: func() any { return new(bytes.Buffer) },
-	}
 )
 
 // mustEncMode builds the reusable EncMode with default options.
@@ -199,20 +185,13 @@ func (*cborCodec) Unmarshal(data []byte, v any) error {
 // UserBufferEncMode.MarshalToBuffer + a pooled *bytes.Buffer to avoid
 // the intermediate alloc+copy the Marshal API forces.
 func (*cborCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: rent the output buffer; pool guarantees a *bytes.Buffer.
-	buf, ok := bufferPool.Get().(*bytes.Buffer)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/cbor: bufferPool yielded non-*bytes.Buffer")
-	}
-	//: start clean — pool may return a partially-filled buffer.
-	buf.Reset()
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
 	//: encode directly into the pooled buffer; UserBufferEncMode
 	//: bypasses the lib-internal alloc + copy gocbor.Marshal pays.
 	if merr := userBufferEncMode.MarshalToBuffer(v, buf); merr != nil {
 		//: drop the buffer back to the pool if not oversized.
-		releaseBuffer(buf)
+		scratch.ReleaseBuffer(buf)
 		//: wrap the library error for reason-based matching.
 		return dst, errs.Wrap(merr, errs.WrapParams{
 			Code:    CodeCBORMarshalFailed,
@@ -224,24 +203,9 @@ func (*cborCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: append the encoded bytes onto the caller's buffer (1 copy total).
 	dst = append(dst, buf.Bytes()...)
 	//: cap-discard release.
-	releaseBuffer(buf)
+	scratch.ReleaseBuffer(buf)
 	//: success — bytes are the caller's now.
 	return dst, nil
-}
-
-// releaseBuffer returns buf to the pool unless its capacity exceeds the
-// cap-discard threshold.
-func releaseBuffer(buf *bytes.Buffer) {
-	//: oversized buffers would pin large allocations for the lifetime
-	//: of the pool's GC window — drop them instead.
-	if buf.Cap() > maxRetainedBufBytes {
-		//: orphan the buffer; the GC will reclaim it.
-		return
-	}
-	//: pool expects a clean buffer.
-	buf.Reset()
-	//: return for the next caller.
-	bufferPool.Put(buf)
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder. Routes through the

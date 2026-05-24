@@ -5,6 +5,8 @@ import (
 	stdjson "encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 )
 
 // Test_ndjsonCodec_Name covers the canonical identifier returned by the codec.
@@ -441,7 +443,7 @@ func Test_detachAndRelease(t *testing.T) {
 	}
 	tests := []tc{
 		{"small-cloned-and-repooled", 1024, true},
-		{"oversize-orphaned-untouched", maxRetainedBufBytes + 1, false},
+		{"oversize-orphaned-untouched", scratch.MaxRetainedBufBytes + 1, false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

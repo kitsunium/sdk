@@ -4,14 +4,13 @@
 package msgpack
 
 import (
-	"bytes"
 	"io"
 	"slices"
-	"sync"
 
 	gomsgpack "github.com/vmihailenco/msgpack/v5"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -24,13 +23,6 @@ import (
 // realistic configuration or event-stream document.
 const maxMsgPackBytes int = 10 << 20
 
-// maxRetainedBufBytes caps the size of *bytes.Buffer instances eligible
-// for re-pooling. A one-off oversized payload would otherwise pin a
-// large buffer for the lifetime of the pool's GC window. 256 KiB is the
-// project-wide cap (matches the scratch-package threshold from the
-// codec-perf-extreme initiative).
-const maxRetainedBufBytes int = 256 << 10
-
 // Package-level state: the codec singleton plus the hoisted MIME /
 // extension tables (hoisted).
 var (
@@ -42,22 +34,6 @@ var (
 
 	//: extension table hoisted for the same reason.
 	extensions = []string{".msgpack", ".mpk"}
-
-	//: bufferPool reuses *bytes.Buffer across Marshal calls. The
-	//: vmihailenco lib's package-level Marshal allocates a fresh
-	//: bytes.Buffer every call — this pool eliminates that allocation
-	//: on steady-state hot paths.
-	bufferPool = sync.Pool{
-		New: func() any { return new(bytes.Buffer) },
-	}
-
-	//: bytesReaderPool reuses *bytes.Reader across Unmarshal calls.
-	//: gomsgpack.Unmarshal internally builds a fresh bytes.Reader that
-	//: escapes to heap through the io.Reader interface — pooling it
-	//: removes that 16-byte struct allocation per call.
-	bytesReaderPool = sync.Pool{
-		New: func() any { return new(bytes.Reader) },
-	}
 )
 
 // msgpackCodec is the concrete Codec implementation for MessagePack.
@@ -92,19 +68,8 @@ func (*msgpackCodec) Extensions() []string {
 // — gomsgpack.Marshal already pools the encoder but allocates a fresh
 // bytes.Buffer per call; pooling the buffer eliminates that allocation.
 func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
-	//: rent the output buffer from the pool. Type assertion is total
-	//: because bufferPool.New always returns *bytes.Buffer; comma-ok
-	//: silences KTN-VAR-TYPEASSERT and surfaces a clear panic if a
-	//: future change ever broke the invariant.
-	buf, ok := bufferPool.Get().(*bytes.Buffer)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/msgpack: bufferPool yielded non-*bytes.Buffer")
-	}
-	//: start clean — pool may return a partially-filled buffer from a
-	//: previous call that hit the cap-discard threshold.
-	buf.Reset()
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
 	//: rent the encoder from the library's exposed pool.
 	enc := gomsgpack.GetEncoder()
 	//: re-point the encoder at our pooled buffer.
@@ -123,7 +88,7 @@ func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
 	//: failure path — surface the typed sentinel.
 	if merr != nil {
 		//: drop the buffer back to the pool only if it's not oversized.
-		releaseBuffer(buf)
+		scratch.ReleaseBuffer(buf)
 		//: wrap the library error for reason-based matching.
 		return nil, errs.Wrap(merr, errs.WrapParams{
 			Code:    CodeMsgPackMarshalFailed,
@@ -136,25 +101,9 @@ func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
 	//: pooled buffer (next caller would overwrite it).
 	out := slices.Clone(buf.Bytes())
 	//: cap-discard release.
-	releaseBuffer(buf)
+	scratch.ReleaseBuffer(buf)
 	//: success — bytes are the caller's now.
 	return out, nil
-}
-
-// releaseBuffer returns buf to the pool unless its capacity exceeds the
-// cap-discard threshold. Hoisted to avoid duplicating the cap check at
-// every Put site and to keep Marshal + Append under the linter budgets.
-func releaseBuffer(buf *bytes.Buffer) {
-	//: oversized buffers would pin large allocations for the lifetime
-	//: of the pool's GC window — drop them instead.
-	if buf.Cap() > maxRetainedBufBytes {
-		//: orphan the buffer; the GC will reclaim it.
-		return
-	}
-	//: pool expects a clean buffer.
-	buf.Reset()
-	//: return for the next caller.
-	bufferPool.Put(buf)
 }
 
 // Unmarshal parses data as MessagePack into v. Uses gomsgpack's exposed
@@ -173,17 +122,8 @@ func (*msgpackCodec) Unmarshal(data []byte, v any) error {
 			Private: "service/codec/msgpack.Unmarshal: len(data) exceeds maxMsgPackBytes",
 		}, errs.Int("len", len(data)), errs.Int("cap", maxMsgPackBytes))
 	}
-	//: rent the bytes reader from the pool and re-point at data.
-	//: Comma-ok asserts pool-invariant: bytesReaderPool.New always
-	//: returns *bytes.Reader; a future change that broke this would
-	//: panic with a clear diagnostic.
-	r, ok := bytesReaderPool.Get().(*bytes.Reader)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/msgpack: bytesReaderPool yielded non-*bytes.Reader")
-	}
-	r.Reset(data)
+	//: rent a *bytes.Reader from the shared pool, positioned at data.
+	r := scratch.AcquireReader(data)
 	//: rent the decoder from the library's exposed pool.
 	dec := gomsgpack.GetDecoder()
 	dec.Reset(r)
@@ -192,7 +132,7 @@ func (*msgpackCodec) Unmarshal(data []byte, v any) error {
 	//: return the decoder + reader to their pools unconditionally —
 	//: both are reusable post-Reset.
 	gomsgpack.PutDecoder(dec)
-	bytesReaderPool.Put(r)
+	scratch.ReleaseReader(r)
 	//: success fast-path.
 	if uerr == nil {
 		//: nothing to wrap.
@@ -212,15 +152,8 @@ func (*msgpackCodec) Unmarshal(data []byte, v any) error {
 // then appended onto the caller's buffer instead of returned as a
 // fresh slice. Saves the slices.Clone Marshal pays.
 func (*msgpackCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: rent the output buffer; pool guarantees a *bytes.Buffer.
-	buf, ok := bufferPool.Get().(*bytes.Buffer)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/msgpack: bufferPool yielded non-*bytes.Buffer")
-	}
-	//: start clean — pool may return a partially-filled buffer.
-	buf.Reset()
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
 	//: rent the encoder from the library's exposed pool.
 	enc := gomsgpack.GetEncoder()
 	//: re-point the encoder at our pooled buffer.
@@ -234,7 +167,7 @@ func (*msgpackCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: failure path — surface the typed sentinel, leave dst pristine.
 	if merr != nil {
 		//: drop the buffer back to the pool if not oversized.
-		releaseBuffer(buf)
+		scratch.ReleaseBuffer(buf)
 		//: wrap the library error for reason-based matching.
 		return dst, errs.Wrap(merr, errs.WrapParams{
 			Code:    CodeMsgPackMarshalFailed,
@@ -246,7 +179,7 @@ func (*msgpackCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: append into the caller's buffer (1 copy total — no slices.Clone).
 	dst = append(dst, buf.Bytes()...)
 	//: cap-discard release.
-	releaseBuffer(buf)
+	scratch.ReleaseBuffer(buf)
 	//: success — bytes are the caller's now.
 	return dst, nil
 }

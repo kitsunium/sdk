@@ -4,38 +4,19 @@
 package json
 
 import (
-	"bytes"
 	stdjson "encoding/json"
 	"io"
 	"slices"
-	"sync"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// maxRetainedAppendBufBytes caps the size of *bytes.Buffer instances
-// re-pooled by Append. A one-off oversized payload would otherwise pin
-// a large buffer for the lifetime of the pool's GC window. Matches the
-// project-wide threshold (256 KiB) documented in the codec-perf-extreme
-// initiative.
-const maxRetainedAppendBufBytes int = 256 << 10
-
-var (
-	// Codec is the JSON singleton, registered with core/codec at
-	// package load. Binding the registration result to a named var
-	// is more idiomatic than `var _ = codec.Register(...)` and keeps
-	// us clear of init().
-	Codec codec.Codec = codec.Register(&jsonCodec{})
-
-	// appendBufferPool reuses *bytes.Buffer across Append calls so
-	// the per-call alloc-and-grow cascade only happens on a cold
-	// start. The json.NewEncoder per-call allocation (a small struct)
-	// is dwarfed by what this saves on every realistic Append target.
-	appendBufferPool = sync.Pool{
-		New: func() any { return new(bytes.Buffer) },
-	}
-)
+// Codec is the JSON singleton, registered with core/codec at package
+// load. Binding the registration result to a named var is more idiomatic
+// than `var _ = codec.Register(...)` and keeps us clear of init().
+var Codec codec.Codec = codec.Register(&jsonCodec{})
 
 // jsonCodec is the concrete Codec implementation for JSON.
 type jsonCodec struct{}
@@ -159,15 +140,8 @@ func (*jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 		//: append the pre-encoded bytes directly onto the caller's dst.
 		return append(dst, out...), nil
 	}
-	//: rent the scratch buffer; pool guarantees a *bytes.Buffer.
-	buf, ok := appendBufferPool.Get().(*bytes.Buffer)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/json: appendBufferPool yielded non-*bytes.Buffer")
-	}
-	//: start clean — pool may return a partially-filled buffer.
-	buf.Reset()
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
 	//: stdjson.NewEncoder writes a trailing '\n' that we strip below.
 	enc := stdjson.NewEncoder(buf)
 	//: encode the value via the stdlib encoder.
@@ -175,7 +149,7 @@ func (*jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: encoding failure — keep dst pristine, surface the wrapped error.
 	if jerr != nil {
 		//: drop the buffer back to the pool if it's not oversized.
-		releaseAppendBuffer(buf)
+		scratch.ReleaseBuffer(buf)
 		//: return the untouched buffer plus the wrapped error.
 		return dst, errs.Wrap(jerr, errs.WrapParams{
 			Code:    CodeJSONMarshalFailed,
@@ -196,25 +170,9 @@ func (*jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: copy into the caller's buffer; the only copy on the hot path.
 	dst = append(dst, encoded...)
 	//: cap-discard release.
-	releaseAppendBuffer(buf)
+	scratch.ReleaseBuffer(buf)
 	//: success — bytes are the caller's now.
 	return dst, nil
-}
-
-// releaseAppendBuffer returns buf to the pool unless its capacity
-// exceeds the cap-discard threshold. Hoisted to keep Append under the
-// linter's MAXLOC/CYCLO budget.
-func releaseAppendBuffer(buf *bytes.Buffer) {
-	//: oversized buffers would pin large allocations for the lifetime
-	//: of the pool's GC window — drop them instead.
-	if buf.Cap() > maxRetainedAppendBufBytes {
-		//: orphan the buffer; the GC will reclaim it.
-		return
-	}
-	//: pool expects a clean buffer.
-	buf.Reset()
-	//: return for the next caller.
-	appendBufferPool.Put(buf)
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.

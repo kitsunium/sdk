@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -881,7 +882,7 @@ func Test_encodeHex(t *testing.T) {
 
 // Test_marshalJSONPooled covers the JSON-inner pool helper: returned
 // jsonBytes round-trip through json.Unmarshal; the returned buffer is
-// releasable via releaseJSONBuffer without panic.
+// releasable via scratch.ReleaseBuffer without panic.
 func Test_marshalJSONPooled(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -903,29 +904,7 @@ func Test_marshalJSONPooled(t *testing.T) {
 		if string(got) != tc.want {
 			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
 		}
-		releaseJSONBuffer(buf)
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
-	}
-}
-
-// Test_releaseJSONBuffer covers the cap-discard pool release.
-func Test_releaseJSONBuffer(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		cap  int
-	}
-	tests := []tc{
-		{"small-retained", 1024},
-		{"discarded-oversize", maxRetainedJSONBufBytes + 1},
-	}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		buf := new(bytes.Buffer)
-		buf.Grow(tc.cap)
-		releaseJSONBuffer(buf)
+		scratch.ReleaseBuffer(buf)
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })

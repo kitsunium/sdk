@@ -219,25 +219,3 @@ func Test_yamlCodec_Append(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
-
-// Test_releaseBuffer covers the cap-discard release helper.
-func Test_releaseBuffer(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		cap  int
-	}
-	tests := []tc{
-		{"small-retained", 1024},
-		{"discarded-oversize", maxRetainedBufBytes + 1},
-	}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		buf := new(bytes.Buffer)
-		buf.Grow(tc.cap)
-		releaseBuffer(buf)
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
-	}
-}

@@ -8,9 +8,9 @@ import (
 	"encoding/base64"
 	stdpem "encoding/pem"
 	"slices"
-	"sync"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -25,11 +25,6 @@ const (
 	// promotionLineLength is the base64 line width pem.Encode uses (each
 	// line of base64 content within a PEM block is wrapped at this width).
 	promotionLineLength int = 64
-
-	// maxRetainedBufBytes caps the size of *bytes.Buffer instances re-pooled
-	// by Marshal. A one-off oversized payload would otherwise pin a large
-	// buffer for the lifetime of the pool's GC window. 256 KiB project-wide.
-	maxRetainedBufBytes int = 256 << 10
 )
 
 // Package-level state: the codec singleton, MIME/extension tables, the
@@ -50,14 +45,6 @@ var (
 
 	//: pemJSONEnd is the END marker for a "JSON"-typed PEM block.
 	pemJSONEnd = []byte("-----END " + promotionBlockType + "-----\n")
-
-	//: bufferPool reuses *bytes.Buffer across Marshal calls on the slow
-	//: path (non-promotion blocks). pem.Encode allocates internally too
-	//: but the outer bytes.Buffer header still escapes per call without
-	//: this pool — the recycled storage saves one alloc per call.
-	bufferPool = sync.Pool{
-		New: func() any { return new(bytes.Buffer) },
-	}
 )
 
 // pemCodec is the concrete Codec implementation for PEM.
@@ -113,19 +100,12 @@ func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 		//: dedicated fast-path emits identical wire bytes to pem.Encode.
 		return marshalPromotionBlock(block.Bytes), nil
 	}
-	//: rent the output buffer; pool guarantees a *bytes.Buffer.
-	buf, ok := bufferPool.Get().(*bytes.Buffer)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/pem: bufferPool yielded non-*bytes.Buffer")
-	}
-	//: start clean — pool may return a partially-filled buffer.
-	buf.Reset()
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
 	//: stdlib Encode writes directly; propagate any writer failure.
 	if werr := stdpem.Encode(buf, block); werr != nil {
 		//: cap-discard release; abort with the wrapped error.
-		releaseBuffer(buf)
+		scratch.ReleaseBuffer(buf)
 		//: wrap the stdlib error.
 		return nil, errs.Wrap(werr, errs.WrapParams{
 			Code:    CodePEMMarshalFailed,
@@ -145,33 +125,17 @@ func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 func detachAndRelease(buf *bytes.Buffer) []byte {
 	//: large buffers: orphan path — the returned slice IS the buffer's
 	//: storage (caller-owned now), no clone, GC reclaims the buffer.
-	if buf.Cap() > maxRetainedBufBytes {
+	if buf.Cap() > scratch.MaxRetainedBufBytes {
 		//: do NOT reset the buffer; it would zero the bytes we return.
 		return buf.Bytes()
 	}
 	//: small buffer path: clone so the caller's slice doesn't alias
 	//: the pooled buffer (next caller would overwrite it).
 	out := slices.Clone(buf.Bytes())
-	//: pool expects a clean buffer.
-	buf.Reset()
-	//: return for the next caller.
-	bufferPool.Put(buf)
+	//: scratch.ReleaseBuffer resets + repools (cap is under the threshold).
+	scratch.ReleaseBuffer(buf)
 	//: caller-owned slice.
 	return out
-}
-
-// releaseBuffer feeds buf back to the pool on the error path without
-// cloning (caller discards the bytes). Same cap-discard semantics.
-func releaseBuffer(buf *bytes.Buffer) {
-	//: oversized buffers would pin large allocations; orphan them.
-	if buf.Cap() > maxRetainedBufBytes {
-		//: GC reclaims; pool stays cap-bounded.
-		return
-	}
-	//: pool expects a clean buffer.
-	buf.Reset()
-	//: return for the next caller.
-	bufferPool.Put(buf)
 }
 
 // marshalPromotionBlock emits the wire bytes for a "JSON"-typed PEM

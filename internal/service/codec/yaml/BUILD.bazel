@@ -15,6 +15,7 @@ go_library(
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/codec",
+        "//internal/core/codec/scratch",
         "//internal/kernel/errs",
         "@in_gopkg_yaml_v3//:yaml_v3",
     ],

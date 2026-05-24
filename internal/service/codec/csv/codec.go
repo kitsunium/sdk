@@ -9,9 +9,9 @@ import (
 	"errors"
 	"io"
 	"slices"
-	"sync"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -19,11 +19,6 @@ import (
 // KTN-CONST-ORDER: all consts first (cap-discard threshold + promotion
 // shape constants), then the package-level vars (pool + Codec singleton).
 const (
-	// maxRetainedBufBytes caps the size of *bytes.Buffer instances re-pooled
-	// by Marshal. A one-off oversized payload would otherwise pin a large
-	// buffer for the lifetime of the pool's GC window. 256 KiB project-wide.
-	maxRetainedBufBytes int = 256 << 10
-
 	// promotionHeaderCell is the single-column header label the facade
 	// promotion path stamps when wrapping a non-CSV value (matches
 	// pkg/v1/codec/promote.go csvPromotionHeader).
@@ -45,21 +40,6 @@ const (
 // Package-level vars: the Marshal-buffer pool plus the singleton
 // registered with core/codec at package load.
 var (
-	//: bufferPool reuses *bytes.Buffer across Marshal calls. csv.Writer
-	//: has no Reset(w) so we still allocate a fresh Writer per call, but
-	//: the underlying bytes.Buffer (and its grow cascade) is recycled.
-	bufferPool = sync.Pool{
-		New: func() any { return new(bytes.Buffer) },
-	}
-
-	//: bytesReaderPool reuses *bytes.Reader across Unmarshal calls.
-	//: stdcsv.NewReader wraps the io.Reader in its own buffered reader
-	//: so the bytes.Reader header alloc is the only one we can recycle
-	//: at this layer (csv.Reader has no Reset method).
-	bytesReaderPool = sync.Pool{
-		New: func() any { return new(bytes.Reader) },
-	}
-
 	//: Codec is the CSV singleton, registered with core/codec at package
 	//: load. Binding the registration result to a named var is more
 	//: idiomatic than `var _ = codec.Register(...)` and keeps us clear of
@@ -149,21 +129,14 @@ func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 		//: operate on a defensive copy so the caller's slice stays intact.
 		records = escapeFormulaCells(records)
 	}
-	//: rent the output buffer; pool guarantees a *bytes.Buffer.
-	buf, ok := bufferPool.Get().(*bytes.Buffer)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/csv: bufferPool yielded non-*bytes.Buffer")
-	}
-	//: start clean — pool may return a partially-filled buffer.
-	buf.Reset()
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
 	//: csv.Writer has no Reset — fresh one per call points at our buffer.
 	w := stdcsv.NewWriter(buf)
 	//: WriteAll flushes on return; any error is surfaced via Error().
 	if werr := w.WriteAll(records); werr != nil {
 		//: cap-discard release; abort with the wrapped error.
-		releaseBuffer(buf)
+		scratch.ReleaseBuffer(buf)
 		//: wrap the stdlib error.
 		return nil, errs.Wrap(werr, errs.WrapParams{
 			Code:    CodeCSVMarshalFailed,
@@ -186,33 +159,17 @@ func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 func detachAndRelease(buf *bytes.Buffer) []byte {
 	//: large buffers: orphan path — the returned slice IS the buffer's
 	//: storage (caller-owned), no clone, GC reclaims the buffer.
-	if buf.Cap() > maxRetainedBufBytes {
+	if buf.Cap() > scratch.MaxRetainedBufBytes {
 		//: do NOT reset the buffer; it would zero the bytes we return.
 		return buf.Bytes()
 	}
 	//: small buffer path: clone so the caller's slice doesn't alias
 	//: the pooled buffer (next caller would overwrite it).
 	out := slices.Clone(buf.Bytes())
-	//: pool expects a clean buffer.
-	buf.Reset()
-	//: return for the next caller.
-	bufferPool.Put(buf)
+	//: scratch.ReleaseBuffer resets + repools (cap is under the threshold).
+	scratch.ReleaseBuffer(buf)
 	//: caller-owned slice.
 	return out
-}
-
-// releaseBuffer feeds buf back to the pool on the error path without
-// cloning (caller discards the bytes). Same cap-discard semantics.
-func releaseBuffer(buf *bytes.Buffer) {
-	//: oversized buffers would pin large allocations; orphan them.
-	if buf.Cap() > maxRetainedBufBytes {
-		//: GC reclaims; pool stays cap-bounded.
-		return
-	}
-	//: pool expects a clean buffer.
-	buf.Reset()
-	//: return for the next caller.
-	bufferPool.Put(buf)
 }
 
 // escapeFormulaCells returns a defensive copy of records with every cell
@@ -353,15 +310,8 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 			Private: "service/codec/csv.Unmarshal: target is not *[][]string",
 		})
 	}
-	//: rent a *bytes.Reader from the pool and re-point at data so the
-	//: bytes.Reader header alloc is recycled across Unmarshal calls.
-	br, ok := bytesReaderPool.Get().(*bytes.Reader)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/csv: bytesReaderPool yielded non-*bytes.Reader")
-	}
-	br.Reset(data)
+	//: rent a *bytes.Reader from the shared pool, positioned at data.
+	br := scratch.AcquireReader(data)
 	//: hand-rolled Read loop replaces stdcsv.Reader.ReadAll: it pre-
 	//: sizes the outer [][]string from the wire newline count + uses
 	//: ReuseRecord to amortise per-record slice growth on the stdlib
@@ -371,9 +321,8 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 	//: (which are immutable and freshly allocated by the reader)
 	//: shared by reference.
 	recs, rerr := readAllPreSized(br, data)
-	//: bytes.Reader returns to the pool unconditionally — Reset wipes
-	//: its state on the next caller.
-	bytesReaderPool.Put(br)
+	//: hand the reader back to the shared pool.
+	scratch.ReleaseReader(br)
 	//: success fast-path.
 	if rerr == nil {
 		//: publish the decoded records through the caller's pointer.
