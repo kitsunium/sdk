@@ -259,7 +259,7 @@ type Decoder = corecodec.Decoder
 ```
 
 <a name="NewDecoder"></a>
-### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L329>)
+### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L359>)
 
 ```go
 func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
@@ -277,7 +277,7 @@ type Encoder = corecodec.Encoder
 ```
 
 <a name="NewEncoder"></a>
-### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L316>)
+### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L346>)
 
 ```go
 func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
@@ -343,7 +343,7 @@ const (
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L342>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L372>)
 
 ```go
 func Available() []Format
@@ -352,7 +352,7 @@ func Available() []Format
 Available returns the sorted list of registered formats.
 
 <a name="FromExtension"></a>
-### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L361>)
+### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L391>)
 
 ```go
 func FromExtension(ext string) (f Format, ok bool)
@@ -361,7 +361,7 @@ func FromExtension(ext string) (f Format, ok bool)
 FromExtension resolves a file extension to its registered Format.
 
 <a name="FromMIME"></a>
-### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L348>)
+### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L378>)
 
 ```go
 func FromMIME(mime string) (f Format, ok bool)

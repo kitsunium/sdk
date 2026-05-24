@@ -289,10 +289,23 @@ func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, e
 	encodedByFormat = make(map[Format][]byte, len(formats))
 	//: accumulator for per-format failures so partial success is visible.
 	var perFormat []error
-	//: iterate in caller order so a misordered formats list still yields a deterministic out map.
+	//: iterate in caller order so a misordered formats list still yields
+	//: a deterministic out map. resolve-once: Lookup the codec for each
+	//: Format up-front, dispatch c.Marshal(v) directly. Saves one
+	//: Marshal func-entry frame per format vs the old per-iter
+	//: Marshal(f, v) call (it would do the same Lookup internally).
 	for _, f := range formats {
-		//: Marshal already resolves through the registry and returns a typed error on miss.
-		data, mErr := Marshal(f, v)
+		//: resolve once — same path Marshal would take, no double-Lookup.
+		c, ok := corecodec.Lookup(f)
+		//: unknown Format → typed sentinel, no encode attempt.
+		if !ok {
+			//: caller used an unregistered Format.
+			perFormat = append(perFormat, unknownFormat(f))
+			//: absence in the out map signals "not encoded" for this Format.
+			continue
+		}
+		//: direct codec dispatch; the registry already validated f.
+		data, mErr := encodeWithPromotion(f, c, v)
 		//: failure path — keep going so the caller sees every formats result.
 		if mErr != nil {
 			//: append the typed sentinel so HasCode(err, CodeUnknownFormat) keeps working through Join.
@@ -310,6 +323,23 @@ func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, e
 	}
 	//: clean exit — every requested Format encoded successfully.
 	return encodedByFormat, nil
+}
+
+// encodeWithPromotion runs the same fast-path + promote-fallback the
+// public Marshal does, but takes a pre-resolved Codec so MarshalMany
+// doesn't pay a second Lookup per format. Identical wire output to
+// Marshal on every Format / value combination.
+func encodeWithPromotion(f Format, c corecodec.Codec, v any) (encoded []byte, err error) {
+	//: fast path — try the codec's native input shape first.
+	encoded, err = c.Marshal(v)
+	//: slow path — codec rejected v's shape; retry through the
+	//: JSON-bridge promotion so the public contract holds for any v.
+	if err != nil && isValueShapeMismatch(err) {
+		//: promotion handles its own error wrapping.
+		return promoteMarshal(f, c, v)
+	}
+	//: success or unrelated error — pass through unchanged.
+	return encoded, err
 }
 
 // NewEncoder returns a streaming encoder for the codec registered under f.
