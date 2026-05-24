@@ -427,25 +427,21 @@ func collectMapPairs(view reflectView) []any {
 
 // collectStructFields extracts every exported field as a (name, value)
 // pair flattened into []any. Unexported fields are silently dropped.
+// Uses cachedStructTypeInfo so the reflect.Type → field-metadata walk
+// happens at most once per type process-wide.
 func collectStructFields(view reflectView) []any {
 	//: convert once for method dispatch.
 	rv := reflect.Value(view)
-	//: pre-allocate the worst-case length (2 entries per field).
-	t := rv.Type()
-	out := make([]any, 0, fieldEntryStride*t.NumField())
-	//: walk each field.
-	for i := range t.NumField() {
-		//: skip unexported names.
-		sf := t.Field(i)
-		//: PkgPath is empty for exported names.
-		if sf.PkgPath != "" {
-			//: not exported.
-			continue
-		}
+	//: cached metadata — single reflect walk per type, then reused.
+	ti := cachedStructTypeInfo(rv.Type())
+	//: pre-allocate exactly the entries the cached field list needs.
+	out := make([]any, 0, fieldEntryStride*len(ti.fields))
+	//: walk the cached metadata in declaration order.
+	for _, f := range ti.fields {
 		//: append the (name, value) entries.
-		out = append(out, sf.Name)
+		out = append(out, f.name)
 		//: value follows the name.
-		out = append(out, rv.Field(i).Interface())
+		out = append(out, rv.Field(f.index).Interface())
 	}
 	//: caller iterates in declaration order, stepping by fieldEntryStride.
 	return out

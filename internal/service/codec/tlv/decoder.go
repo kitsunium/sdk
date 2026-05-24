@@ -946,22 +946,19 @@ func projectCompositePointer(value any, target reflect.Type) (converted reflect.
 // projectMapToStruct fills a struct of target type from the
 // map[string]any produced by decodeStruct. Field matching is by
 // exported field name — the inverse of collectStructFields which
-// writes sf.Name. Missing source fields leave the destination at its
-// zero value; nil source values explicitly zero the destination.
+// writes sf.Name. Uses cachedStructTypeInfo so the reflect.Type walk
+// runs at most once per target type process-wide.
+// Missing source fields leave the destination at its zero value;
+// nil source values explicitly zero the destination.
 func projectMapToStruct(src map[string]any, target reflect.Type) (converted reflect.Value, err error) {
+	//: cached metadata — single reflect walk per type, then reused.
+	ti := cachedStructTypeInfo(target)
 	//: new addressable instance we can Set into.
 	dst := reflect.New(target).Elem()
-	//: walk every declared field.
-	for i := range target.NumField() {
-		//: skip unexported fields — the encoder skips them too.
-		sf := target.Field(i)
-		//: PkgPath is empty for exported names (mirrors the encoder).
-		if sf.PkgPath != "" {
-			//: not exported.
-			continue
-		}
-		//: look up the wire value by Go-field-name.
-		srcVal, found := src[sf.Name]
+	//: walk the cached metadata in declaration order.
+	for _, f := range ti.fields {
+		//: look up the wire value by the cached field name.
+		srcVal, found := src[f.name]
 		//: silent absence — leave the destination field zero-valued.
 		if !found {
 			//: skip the field; reflect.New already zeroed it.
@@ -969,20 +966,20 @@ func projectMapToStruct(src map[string]any, target reflect.Type) (converted refl
 		}
 		//: nil source explicitly zeroes the destination.
 		if srcVal == nil {
-			//: write the zero value of the field's type.
-			dst.Field(i).Set(reflect.Zero(sf.Type))
+			//: write the zero value of the field's cached type.
+			dst.Field(f.index).Set(reflect.Zero(f.typ))
 			//: next field.
 			continue
 		}
 		//: recursive convertValue handles scalars + nested composites.
-		conv, cerr := convertValue(srcVal, sf.Type)
+		conv, cerr := convertValue(srcVal, f.typ)
 		//: bubble per-field projection failure verbatim.
 		if cerr != nil {
 			//: surface upward.
 			return reflect.Value{}, cerr
 		}
 		//: publish the converted value into the struct field.
-		dst.Field(i).Set(conv)
+		dst.Field(f.index).Set(conv)
 	}
 	//: success.
 	return dst, nil
