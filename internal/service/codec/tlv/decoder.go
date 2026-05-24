@@ -200,6 +200,18 @@ func decodeRoot(data []byte, v any) error {
 		//: surface a value-invalid sentinel.
 		return nonPointerTargetError()
 	}
+	//: target is the pointee; settability is required for Set to work.
+	target := rv.Elem()
+	//: target-aware fast path: if the target is a typed struct AND the
+	//: wire bytes carry a struct record, decode straight into the
+	//: struct fields (skips the map[string]any intermediate AND the
+	//: subsequent projectMapToStruct second walk). Returns handled=true
+	//: when it took the typed path; the fallback below covers everything
+	//: else (interface targets, slices, maps, scalars).
+	if handled, err := tryDecodeRootInto(data, target); handled {
+		//: typed path consumed the full buffer; surface err verbatim.
+		return err
+	}
 	//: decode one record at depth zero.
 	value, rest, derr := decodeValue(data, 0)
 	//: surface decode failure verbatim.
@@ -212,8 +224,6 @@ func decodeRoot(data []byte, v any) error {
 		//: surface as decode failure for callers that match by reason.
 		return trailingBytesError(len(rest))
 	}
-	//: target is the pointee; settability is required for Set to work.
-	target := rv.Elem()
 	//: wrap the target in a local view so the helper signature avoids
 	//: an externally-named concrete type.
 	return assignDecoded(reflectView(target), target.Type(), value)
