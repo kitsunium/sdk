@@ -299,27 +299,31 @@ func encodeCompositeSliceLike(dst []byte, view reflectView, depth int) (encoded 
 
 // encodeMapDirect emits a tagMap record by walking the reflect map
 // via MapRange. Each (key, value) pair is dispatched through
-// encodeReflectValue without going through a []any intermediate —
-// saves the slice-of-any allocation plus two .Interface() boxings
-// per entry (key + value) on every encode.
+// encodeFieldValue with the cached key/value Kinds so scalar
+// entries skip the encodeReflectValue → encodeByKind → tryEncodeScalar
+// dispatch chain. Composite entries still take the generic path.
 func encodeMapDirect(dst []byte, view reflectView, depth int) (encoded []byte, err error) {
 	//: convert once for method dispatch.
 	rv := reflect.Value(view)
 	//: emit the map header (tag + pair count).
 	dst = appendTagLen(dst, tagMap, uint64(rv.Len()))
+	//: snapshot key + value kinds once for the inline-scalar fast path
+	//: (skips per-element Kind() calls inside encodeReflectValue).
+	keyKind := rv.Type().Key().Kind()
+	valKind := rv.Type().Elem().Kind()
 	//: iterate via MapRange to honour Go's unordered-map contract.
 	iter := rv.MapRange()
 	//: walk every (key, value) entry.
 	for iter.Next() {
-		//: encode the key first via the interface-deref-aware dispatcher.
-		next, kerr := encodeReflectValue(dst, reflectView(iter.Key()), depth+1)
+		//: encode the key first via the cached-kind dispatcher.
+		next, kerr := encodeFieldValue(dst, reflectView(iter.Key()), keyKind, depth+1)
 		//: surface key failure verbatim.
 		if kerr != nil {
 			//: caller will roll dst back to its prior length.
 			return dst, kerr
 		}
 		//: encode the value second; depth shared with key (same level).
-		next2, verr := encodeReflectValue(next, reflectView(iter.Value()), depth+1)
+		next2, verr := encodeFieldValue(next, reflectView(iter.Value()), valKind, depth+1)
 		//: surface value failure verbatim.
 		if verr != nil {
 			//: caller will roll dst back to its prior length.
@@ -334,19 +338,21 @@ func encodeMapDirect(dst []byte, view reflectView, depth int) (encoded []byte, e
 
 // encodeSliceDirect emits a tagSlice record by walking the reflect
 // slice/array in place. Each element is dispatched through
-// encodeReflectValue without going through a []any intermediate —
-// saves the slice-of-any allocation plus one .Interface() boxing
-// per element on every encode.
+// encodeFieldValue with the cached element Kind so scalar elements
+// skip the encodeReflectValue → encodeByKind → tryEncodeScalar
+// dispatch chain. Composite elements still take the generic path.
 func encodeSliceDirect(dst []byte, view reflectView, depth int) (encoded []byte, err error) {
 	//: convert once for method dispatch.
 	rv := reflect.Value(view)
 	//: emit the slice header (tag + element count).
 	dst = appendTagLen(dst, tagSlice, uint64(rv.Len()))
+	//: snapshot the element kind once for the inline-scalar fast path
+	//: (skips per-element Kind() calls inside encodeReflectValue).
+	elemKind := rv.Type().Elem().Kind()
 	//: walk every element in declaration order.
 	for i := range rv.Len() {
-		//: emit the element through the interface-deref-aware dispatcher
-		//: (depth+1 for the nested record).
-		next, eerr := encodeReflectValue(dst, reflectView(rv.Index(i)), depth+1)
+		//: emit the element through the cached-kind dispatcher.
+		next, eerr := encodeFieldValue(dst, reflectView(rv.Index(i)), elemKind, depth+1)
 		//: surface per-element failure verbatim.
 		if eerr != nil {
 			//: caller will roll dst back to its prior length.
@@ -357,6 +363,50 @@ func encodeSliceDirect(dst []byte, view reflectView, depth int) (encoded []byte,
 	}
 	//: success path.
 	return dst, nil
+}
+
+// encodeFieldValue is the per-field dispatcher used by encodeStructDirect.
+// It short-circuits the encodeReflectValue → encodeByKind → tryEncodeScalar
+// three-call dispatch chain when the cached field kind is a known scalar:
+// the value is read straight off rv via the typed accessor (.Int(), .String(),
+// etc.) and emitted via the matching encode helper. Composite + nil-able
+// kinds (slice, map, struct, pointer, interface) fall through to the
+// generic encodeReflectValue path which still handles deref + recursion.
+func encodeFieldValue(dst []byte, rvView reflectView, kind reflect.Kind, depth int) (encoded []byte, err error) {
+	//: unwrap once for typed accessors.
+	rv := reflect.Value(rvView)
+	//: dispatch on the cached field kind — no rv.Kind() call needed.
+	switch kind {
+	//: boolean.
+	case reflect.Bool:
+		//: zero-payload record.
+		return encodeBool(dst, rv.Bool()), nil
+	//: signed integers narrow inside encodeInt.
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		//: width selection happens in encodeInt.
+		return encodeInt(dst, rv.Int()), nil
+	//: unsigned integers narrow inside encodeUint.
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		//: width selection happens in encodeUint.
+		return encodeUint(dst, rv.Uint()), nil
+	//: IEEE-754 floats — width follows the cached kind.
+	case reflect.Float32:
+		//: 32-bit float-bits payload.
+		return encodeFloat32(dst, float32(rv.Float())), nil
+	//: 64-bit float.
+	case reflect.Float64:
+		//: 64-bit float-bits payload.
+		return encodeFloat64(dst, rv.Float()), nil
+	//: UTF-8 string.
+	case reflect.String:
+		//: length prefix is the byte count.
+		return encodeString(dst, rv.String()), nil
+	//: everything else (slice/array/map/struct/pointer/interface) takes
+	//: the generic dispatcher which handles deref + composite recursion.
+	default:
+		//: dispatcher unwraps pointers/interfaces and recurses.
+		return encodeReflectValue(dst, reflectView(rv), depth)
+	}
 }
 
 // encodeReflectValue is the reflect.Value equivalent of encodeValue:
@@ -510,10 +560,11 @@ func encodeStructDirect(dst []byte, view reflectView, depth int) (encoded []byte
 		//: instead of calling encodeString (which does the same work
 		//: via appendTagLen + append on every encode).
 		dst = append(dst, f.namePrefix...)
-		//: emit the field value through the interface-deref-aware
-		//: dispatcher (depth+1 for the nested record). Struct fields of
-		//: type `any` or `*T` get unwrapped before Kind() dispatch.
-		next, eerr := encodeReflectValue(dst, reflectView(rv.Field(f.index)), depth+1)
+		//: scalar field fast-path skips the encodeReflectValue →
+		//: encodeByKind → tryEncodeScalar three-call dispatch chain.
+		//: Composite + nil-able kinds fall through to the generic
+		//: dispatcher which handles pointer/interface deref properly.
+		next, eerr := encodeFieldValue(dst, reflectView(rv.Field(f.index)), f.kind, depth+1)
 		//: surface per-field failure verbatim.
 		if eerr != nil {
 			//: caller will roll dst back to its prior length.
