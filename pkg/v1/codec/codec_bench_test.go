@@ -496,6 +496,60 @@ func makeAppendBench(appender corecodec.Appender, payload any) func(b *testing.B
 	}
 }
 
+// BenchmarkAppendParallel measures concurrent Appender throughput. Each
+// goroutine owns its own dst buffer — appending into a shared slice would
+// race — so the only shared state is the immutable payload + the codec
+// singleton.
+func BenchmarkAppendParallel(b *testing.B) {
+	for _, f := range codec.Available() {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			//: defensive — Available guarantees registration.
+			continue
+		}
+		//: skip codecs that do not implement the optional Appender.
+		appender, supports := c.(corecodec.Appender)
+		if !supports {
+			//: structurally not an Appender — nothing to measure.
+			continue
+		}
+		for _, sz := range benchSizes {
+			payload := payloadFor(string(f), sz)
+			b.Run(string(f)+"/"+sz, makeAppendParallelBench(appender, payload))
+		}
+	}
+}
+
+// makeAppendParallelBench builds the BenchmarkAppendParallel subbench. Each
+// goroutine keeps a private reusable buffer so Append's amortised-alloc
+// contract is exercised without cross-goroutine aliasing.
+func makeAppendParallelBench(appender corecodec.Appender, payload any) func(b *testing.B) {
+	return func(b *testing.B) {
+		b.ReportAllocs()
+		//: pre-Append once so MB/s reflects the appended width.
+		probe, perr := appender.Append(nil, payload)
+		if perr != nil {
+			b.Fatalf("Append probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
+		b.RunParallel(func(pb *testing.PB) {
+			//: per-goroutine buffer — Append into a shared slice would race.
+			dst := make([]byte, 0, 64<<10)
+			for pb.Next() {
+				//: reset in-place; Append returns the (re-grown) buffer.
+				dst = dst[:0]
+				out, aerr := appender.Append(dst, payload)
+				if aerr != nil {
+					b.Fatalf("Append: %v", aerr)
+				}
+				//: keep the slice alive past the RunParallel closure scope.
+				dst = out
+				runtime.KeepAlive(dst)
+			}
+		})
+	}
+}
+
 // BenchmarkStreamEncode measures streaming-encoder throughput. Each
 // iteration writes the codec-appropriate record batch to a fresh
 // bytes.Buffer and closes the encoder. Codecs that do NOT implement
@@ -557,6 +611,59 @@ func makeStreamEncodeBench(stream corecodec.StreamingCodec, records []any) func(
 	}
 }
 
+// BenchmarkStreamEncodeParallel measures concurrent streaming-encode
+// throughput. Each goroutine builds its own buffer + encoder per iter, so
+// the only shared state is the immutable record batch.
+func BenchmarkStreamEncodeParallel(b *testing.B) {
+	for _, f := range codec.Available() {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			continue
+		}
+		//: only StreamingCodec implementations participate.
+		stream, supports := c.(corecodec.StreamingCodec)
+		if !supports {
+			//: structurally not a StreamingCodec — nothing to measure.
+			continue
+		}
+		for _, sz := range benchSizes {
+			records := streamRecordsFor(string(f), sz)
+			b.Run(string(f)+"/"+sz, makeStreamEncodeParallelBench(stream, records))
+		}
+	}
+}
+
+// makeStreamEncodeParallelBench builds the BenchmarkStreamEncodeParallel
+// subbench. Mirrors the sequential encode loop inside b.RunParallel.
+func makeStreamEncodeParallelBench(stream corecodec.StreamingCodec, records []any) func(b *testing.B) {
+	return func(b *testing.B) {
+		b.ReportAllocs()
+		//: pre-encode the batch once so SetBytes reflects emitted width.
+		probe, perr := seedStream(stream, records)
+		if perr != nil {
+			b.Fatalf("StreamEncode probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				//: fresh buffer + encoder per iter, private to this goroutine.
+				var buf bytes.Buffer
+				enc := stream.NewEncoder(&buf)
+				for _, rec := range records {
+					if eerr := enc.Encode(rec); eerr != nil {
+						b.Fatalf("Encode: %v", eerr)
+					}
+				}
+				if cerr := enc.Close(); cerr != nil {
+					b.Fatalf("Close: %v", cerr)
+				}
+				//: keep the bytes alive past the RunParallel closure scope.
+				runtime.KeepAlive(buf.Bytes())
+			}
+		})
+	}
+}
+
 // BenchmarkStreamDecode measures streaming-decoder throughput. The
 // encoded buffer is pre-built outside the timer; each iteration wraps
 // it in a fresh bytes.Reader and drains the codec-appropriate record
@@ -609,6 +716,57 @@ func makeStreamDecodeBench(stream corecodec.StreamingCodec, name string, recordC
 				benchSink = target
 			}
 		}
+	}
+}
+
+// BenchmarkStreamDecodeParallel measures concurrent streaming-decode
+// throughput. The seed is shared read-only; each goroutine wraps it in its
+// own bytes.Reader and allocates fresh decode targets per iter.
+func BenchmarkStreamDecodeParallel(b *testing.B) {
+	for _, f := range codec.Available() {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			continue
+		}
+		stream, supports := c.(corecodec.StreamingCodec)
+		if !supports {
+			//: structurally not a StreamingCodec — nothing to measure.
+			continue
+		}
+		for _, sz := range benchSizes {
+			records := streamRecordsFor(string(f), sz)
+			seed, serr := seedStream(stream, records)
+			if serr != nil {
+				b.Run(string(f)+"/"+sz, makeSkipBench(string(f), "seed encode failed", serr))
+				continue
+			}
+			b.Run(string(f)+"/"+sz, makeStreamDecodeParallelBench(stream, string(f), len(records), seed))
+		}
+	}
+}
+
+// makeStreamDecodeParallelBench builds the BenchmarkStreamDecodeParallel
+// subbench. Mirrors the sequential decode loop inside b.RunParallel.
+func makeStreamDecodeParallelBench(stream corecodec.StreamingCodec, name string, recordCount int, seed []byte) func(b *testing.B) {
+	return func(b *testing.B) {
+		b.ReportAllocs()
+		//: stream-decode throughput = bytes drained from seed per iter.
+		b.SetBytes(int64(len(seed)))
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				//: fresh reader per iter, private to this goroutine.
+				dec := stream.NewDecoder(bytes.NewReader(seed))
+				for range recordCount {
+					//: target shape matches what streamRecordsFor emitted.
+					target := newStreamDecodeTarget(name)
+					if derr := dec.Decode(target); derr != nil {
+						b.Fatalf("Decode: %v", derr)
+					}
+					//: keep the target alive past the closure scope.
+					runtime.KeepAlive(target)
+				}
+			}
+		})
 	}
 }
 
