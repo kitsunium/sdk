@@ -14,7 +14,7 @@ XML codec wrapping stdlib `encoding/xml`. Streaming Encoder/Decoder are forwarde
 | `Extensions()`   | `.xml` |
 | Constructor      | `New() codec.Codec` |
 | Streaming        | yes (`NewEncoder`, `NewDecoder`) |
-| Appender         | not implemented |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — encodes into a pooled buffer, then appends onto dst |
 
 ## Error codes (range `0.3.3.*`)
 

@@ -14,7 +14,7 @@ MessagePack codec wrapping `github.com/vmihailenco/msgpack/v5`. Streaming Encode
 | `Extensions()`   | `.msgpack`, `.mpk` |
 | Constructor      | `New() codec.Codec` |
 | Streaming        | yes (`NewEncoder`, `NewDecoder`) |
-| Appender         | not implemented |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — pooled encoder + buffer (UseCompactInts), then appends onto dst |
 
 ## Error codes (range `0.3.7.*`)
 

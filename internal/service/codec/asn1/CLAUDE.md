@@ -14,7 +14,7 @@ ASN.1 DER codec wrapping stdlib `encoding/asn1`. Emits DER exclusively (the stdl
 | `Extensions()`   | `.der`, `.cer` |
 | Constructor      | `New() codec.Codec` (returns the registered singleton) |
 | Streaming        | not implemented |
-| Appender         | not implemented |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — delegates to Marshal (encoding/asn1 has no append API) then appends onto dst |
 
 ## Error codes (range `0.3.9.*`)
 

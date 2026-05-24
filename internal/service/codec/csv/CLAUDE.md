@@ -14,7 +14,7 @@ CSV codec wrapping stdlib `encoding/csv`. Models the wire format as a `[][]strin
 | `Extensions()`   | `.csv` |
 | Constructors     | `New() codec.Codec` (registered, `escapeFormulas=false`) · `NewWithEscape(escape bool) codec.Codec` (fresh, **not** registered) |
 | Streaming        | not implemented |
-| Appender         | not implemented |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — delegates to Marshal (single source for the type-gate + wrap contract) then appends onto dst |
 
 ## Error codes (range `0.3.8.*`)
 

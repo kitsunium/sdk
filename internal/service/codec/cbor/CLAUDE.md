@@ -14,7 +14,7 @@ CBOR codec wrapping `github.com/fxamacker/cbor/v2`. Streams individual CBOR item
 | `Extensions()`   | `.cbor` |
 | Constructor      | `New() codec.Codec` |
 | Streaming        | yes (`NewEncoder`, `NewDecoder`) |
-| Appender         | not implemented |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — `UserBufferEncMode.MarshalToBuffer` into a pooled buffer, then appends onto dst |
 
 ## Error codes (range `0.3.6.*`)
 

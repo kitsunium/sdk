@@ -14,7 +14,7 @@ TOML codec wrapping `github.com/pelletier/go-toml/v2`. Streaming Encoder/Decoder
 | `Extensions()`   | `.toml` |
 | Constructor      | `New() codec.Codec` |
 | Streaming        | yes (`NewEncoder`, `NewDecoder`) |
-| Appender         | not implemented |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — encodes into a pooled buffer, then appends onto dst |
 
 ## Error codes (range `0.3.5.*`)
 
