@@ -100,7 +100,7 @@ func tryDecodeRootIntoStruct(data []byte, target reflect.Value) (handled bool, e
 	}
 	//: parse the struct header (field count + cap-discard) and
 	//: dispatch into decodeStructInto.
-	residual, derr := decodeStructFromHeader(data[1:], target)
+	residual, derr := decodeStructFromHeader(data[1:], target, 0)
 	//: surface decode failure verbatim.
 	if derr != nil {
 		//: already wrapped.
@@ -214,7 +214,7 @@ func decodeSliceElement(rest []byte, elemType reflect.Type, depth int) (next []b
 		//: build a settable element placeholder.
 		ev := reflect.New(elemType).Elem()
 		//: dispatch into the struct walker (skips the tag byte).
-		next2, ferr := decodeStructFromHeader(rest[1:], ev)
+		next2, ferr := decodeStructFromHeader(rest[1:], ev, depth)
 		//: surface element-decode failure verbatim.
 		if ferr != nil {
 			//: already wrapped.
@@ -255,8 +255,14 @@ func decodeSliceElement(rest []byte, elemType reflect.Type, depth int) (next []b
 // decodeStructFromHeader reads the LEB128 field-count header at rest
 // and dispatches into decodeStructInto. Hoisted out of
 // tryDecodeRootInto so that function stays under the cyclomatic
-// budget.
-func decodeStructFromHeader(rest []byte, target reflect.Value) (residual []byte, err error) {
+// budget. depth is threaded through so nested struct fields (Phase 3
+// typed recursion) keep the depth guard consistent across the tree.
+func decodeStructFromHeader(rest []byte, target reflect.Value, depth int) (residual []byte, err error) {
+	//: depth guard — fires before any allocation.
+	if depth > maxTLVDepth {
+		//: surface the documented depth sentinel.
+		return rest, depthExceededError(depth)
+	}
 	//: read the field count.
 	length, rest, lerr := readVarintFromBytes(rest)
 	//: surface varint failure verbatim.
@@ -270,7 +276,7 @@ func decodeStructFromHeader(rest []byte, target reflect.Value) (residual []byte,
 		return rest, sizeExceededError(length)
 	}
 	//: walk the wire and assign each field into target in place.
-	return decodeStructInto(length, rest, target, 0)
+	return decodeStructInto(length, rest, target, depth)
 }
 
 // decodeStructInto walks `length` field records starting at rest and
@@ -368,6 +374,13 @@ func resolveFieldIndex(info *structTypeInfo, nameIndex map[string]int, name stri
 // through the untyped decode (when the wire field has no matching
 // struct field). The sentinel-based "found" signal keeps the
 // signature flat and under the linter's MAXPARAM budget.
+//
+// Phase 3 typed recursion: when the destination field is itself a
+// struct AND the wire carries a tagStruct record, recurse into
+// decodeStructFromHeader instead of building map[string]any and
+// converting. Same shape for slice-of-struct fields. Other field
+// types stay on the untyped path so cross-shape narrowings keep
+// working without code duplication.
 func decodeFieldValue(rest []byte, target reflect.Value, info *structTypeInfo, fieldIdx, depth int) (next []byte, err error) {
 	//: unknown field on the wire — skip its value to keep the cursor
 	//: aligned with the next field record. Mirrors encoding/json's
@@ -382,6 +395,11 @@ func decodeFieldValue(rest []byte, target reflect.Value, info *structTypeInfo, f
 		}
 		//: cursor advances past the unknown field's value.
 		return next2, nil
+	}
+	//: Phase 3 typed recursion when field kind + wire tag align.
+	if next2, took, terr := tryTypedFieldRecursion(rest, reflectView(target), info, fieldIdx, depth); took {
+		//: typed path consumed the value; surface its error verbatim.
+		return next2, terr
 	}
 	//: decode the field's value into a temporary `any` then convert
 	//: into the typed struct field via the existing narrowing path.
@@ -398,6 +416,81 @@ func decodeFieldValue(rest []byte, target reflect.Value, info *structTypeInfo, f
 	}
 	//: cursor advances past the consumed value record.
 	return next2, nil
+}
+
+// tryTypedFieldRecursion attempts the Phase 3 typed recursion for a
+// struct field whose kind matches the wire tag. Returns took=true when
+// the typed path handled the field (along with the advanced cursor
+// and any error); took=false signals the caller to fall back to the
+// untyped decodeValue + convertValue path.
+func tryTypedFieldRecursion(rest []byte, targetView reflectView, info *structTypeInfo, fieldIdx, depth int) (next []byte, took bool, err error) {
+	//: unwrap once for Field() dispatch.
+	target := reflect.Value(targetView)
+	//: short buffer can't hold a tag — leave the untyped path to
+	//: produce the truncation diagnostic.
+	if len(rest) < minRecordBytes {
+		//: signal fall-back; untyped path will report truncation.
+		return nil, false, nil
+	}
+	//: snapshot the field metadata once.
+	field := info.fields[fieldIdx]
+	//: addressable destination for direct writes.
+	dst := target.Field(field.index)
+	//: nested-struct typed recursion when both sides agree on shape.
+	if field.kind == reflect.Struct && Tag(rest[0]) == tagStruct {
+		//: walk the nested struct directly into the field.
+		next2, derr := decodeStructFromHeader(rest[1:], dst, depth+1)
+		//: caller surfaces err verbatim.
+		return next2, true, derr
+	}
+	//: nested slice-of-struct typed recursion when shapes align.
+	if isSliceOfStruct(field.typ) && Tag(rest[0]) == tagSlice {
+		//: walk every element directly into the field slice.
+		next2, serr := decodeNestedSliceOfStruct(rest[1:], dst, depth+1)
+		//: caller surfaces err verbatim.
+		return next2, true, serr
+	}
+	//: shape doesn't match any typed path — caller falls back.
+	return nil, false, nil
+}
+
+// isSliceOfStruct reports whether t is a slice whose element type is
+// itself a struct. Used by Phase 3 to gate the nested typed-slice
+// recursion.
+func isSliceOfStruct(t reflect.Type) bool {
+	//: slice kind first; non-slice short-circuits cheaply.
+	if t.Kind() != reflect.Slice {
+		//: not a slice — caller falls back.
+		return false
+	}
+	//: element-kind check — only struct elements take Phase 3.
+	return t.Elem().Kind() == reflect.Struct
+}
+
+// decodeNestedSliceOfStruct reads the LEB128 element count at rest
+// and dispatches into decodeSliceOfStructInto so a struct field whose
+// value is a []ElemStruct walks the typed slice path instead of the
+// untyped projector.
+func decodeNestedSliceOfStruct(rest []byte, target reflect.Value, depth int) (residual []byte, err error) {
+	//: depth guard — Phase 3 paths share the same maxTLVDepth gate.
+	if depth > maxTLVDepth {
+		//: surface the documented depth sentinel.
+		return rest, depthExceededError(depth)
+	}
+	//: read the element count.
+	length, rest, lerr := readVarintFromBytes(rest)
+	//: surface varint failure verbatim.
+	if lerr != nil {
+		//: already wrapped.
+		return rest, lerr
+	}
+	//: cap-discard structural length before walking elements.
+	if length > uint64(maxTLVBytes) {
+		//: surface the size sentinel.
+		return rest, sizeExceededError(length)
+	}
+	//: walk each element directly into the slice.
+	return decodeSliceOfStructInto(length, rest, reflectView(target), depth)
 }
 
 // assignFieldValue writes a decoded value into target.Field(i) using
