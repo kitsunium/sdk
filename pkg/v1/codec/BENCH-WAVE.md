@@ -82,7 +82,29 @@ base64, base64url, base32, base16, hex, ascii85
 
 Wave-3 deep refactors carry the bigger wins:
 - **TLV typeInfo cache + target-aware decoder** — kills the `map[string]any` intermediate; audit estimates -25-70% allocs on typed targets.
-- **msgpack InternedStrings + CompactInts** — wire shrinks 30-60% on key-heavy / int-heavy payloads.
+- **msgpack InternedStrings + CompactInts** — wire shrinks 30-60% on key-heavy / int-heavy payloads. *(InternedStrings REJECTED: changes wire format → incompatible with non-vmihailenco decoders. CompactInts shipped.)*
 - **per-type size-hint cache (json/xml/yaml/toml/cbor)** — `bytes.Buffer.Grow` rolling EWMA; expected -1-3 allocs/op on medium/large by killing geometric grow cascades.
 
 This snapshot is the ratchet floor for any wave-3 PR.
+
+## Wave-3 in-flight deltas (post-snapshot)
+
+Late-Wave-2 / Wave-3 micro-optimizations that landed on top of the table above. Numbers from `go test -bench -benchtime=2000x -count=3 -benchmem`.
+
+| Codec / path | Optimization | Δ measured |
+|---|---|---|
+| baseenc 6× | Shared JSON-inner *bytes.Buffer pool | base64 small parallel: **-20% ns, -41% B/op** ; medium parallel: **-17% ns, -28% B/op**. Family-wide. |
+| ndjson Unmarshal | bufio.Scanner → direct bytes.IndexByte walk + pre-sized reflect.MakeSlice | small: **-24% ns, -62% B/op** ; medium: **-5% ns, -17% B/op** ; small parallel: **-37% ns** ; allocs −4 |
+| yaml/toml/xml Append | Zero-clone Append via pooled buffer (drop Marshal-delegation double-copy) | **-1 alloc/op, -~10 KB/op** on small Append (yaml shown); same shape on toml/xml |
+| ndjson Marshal | Pool + size-aware release (small clones+repools, oversize orphans untouched) | small parallel: **-40% ns, -41% B/op** ; medium parallel: **-28% ns, -30% B/op** ; large parallel preserved at baseline (no regression) |
+| csv Marshal | Pool *bytes.Buffer with size-aware release | medium parallel: **-1 alloc/op (3→2), -1% B/op** |
+| pem Marshal slow path | Pool *bytes.Buffer with size-aware release | Bench rig hits the fast path; win benefits downstream cert/key callers (not in bench) |
+
+The "size-aware release" pattern (clone+repool when cap ≤ 256 KiB,
+orphan-without-clone when cap > 256 KiB) was the unlock that let
+ndjson Marshal pool without regressing the 3 MB tier. Same pattern
+mirrored into csv + pem for consistency.
+
+`TestUniversalRoundtripAllCodecs` still 19 PASS frames; every commit
+ran `make lint` (ktn-linter zero issues) + `bazel test --config=race`
+green before push.
