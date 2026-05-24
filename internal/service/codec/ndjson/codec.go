@@ -11,6 +11,7 @@ import (
 	stdjson "encoding/json"
 	"reflect"
 	"slices"
+	"sync"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -20,6 +21,11 @@ import (
 // record likely represents a consumer bug or a corrupt stream. Enforced
 // directly by the line splitter — no scanner buffer involved.
 const scannerMaxCapacity int = 10 * 1024 * 1024
+
+// maxRetainedBufBytes caps the size of *bytes.Buffer instances re-pooled
+// by Marshal. A one-off oversized payload would otherwise pin a large
+// buffer for the lifetime of the pool's GC window. 256 KiB project-wide.
+const maxRetainedBufBytes int = 256 << 10
 
 // Package-level state: the codec singleton plus the hoisted MIME /
 // extension tables (hoisted).
@@ -32,6 +38,14 @@ var (
 
 	//: extension table hoisted for the same reason.
 	extensions = []string{".ndjson", ".jsonl"}
+
+	//: bufferPool reuses *bytes.Buffer across Marshal calls so the
+	//: per-call alloc-and-grow cascade is amortised over consecutive
+	//: callers. Append builds onto the caller's dst so it doesn't need
+	//: this pool; Marshal returns a fresh detached slice and benefits.
+	bufferPool = sync.Pool{
+		New: func() any { return new(bytes.Buffer) },
+	}
 )
 
 // ndjsonCodec is the concrete Codec implementation for NDJSON.
@@ -84,29 +98,111 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 			Private: "service/codec/ndjson.Marshal: argument is not a slice",
 		})
 	}
-	//: buffer the output so the caller gets []byte.
-	var buf bytes.Buffer
+	//: rent the output buffer; pool guarantees a *bytes.Buffer.
+	buf := rentMarshalBuffer()
+	//: encode every slice element into the pooled buffer.
+	n := slice.Len()
+	//: closure pulls one element at a time — keeps the helper unaware
+	//: of reflect.Value's concrete type so the linter's API-MINIF rule
+	//: doesn't fire on a domain-specific exported helper.
+	if merr := encodeSliceInto(buf, n, func(i int) any { return slice.Index(i).Interface() }); merr != nil {
+		//: error path: pool the buffer back with cap-discard semantics.
+		returnMarshalBuffer(buf)
+		//: wrap the stdlib error for reason-based matching.
+		return nil, errs.Wrap(merr, errs.WrapParams{
+			Code:    CodeNDJSONMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "NDJSON encoding failed",
+			Private: "service/codec/ndjson.Marshal: encoding/json returned an error",
+		})
+	}
+	//: detach the bytes. Two release paths trade memory differently:
+	//: cap <= threshold → clone + repool (clone is cheap, future calls
+	//: reuse the buffer); cap > threshold → orphan the buffer untouched
+	//: (the slice header IS the caller's bytes — no extra copy on the
+	//: large path, GC reclaims the buffer next cycle).
+	out, _ := detachAndRelease(buf)
+	//: hand back the detached bytes.
+	return out, nil
+}
+
+// rentMarshalBuffer pulls a clean *bytes.Buffer from the pool. Hoisted
+// so Marshal stays under the linter's MAXLOC budget.
+func rentMarshalBuffer() *bytes.Buffer {
+	//: rent the output buffer; pool guarantees a *bytes.Buffer.
+	buf, ok := bufferPool.Get().(*bytes.Buffer)
+	//: pool invariant guard — never expected to fail at runtime.
+	if !ok {
+		//: invariant broken — fail loud at the call site.
+		panic("service/codec/ndjson: bufferPool yielded non-*bytes.Buffer")
+	}
+	//: start clean — pool may return a partially-filled buffer.
+	buf.Reset()
+	//: hand back to caller.
+	return buf
+}
+
+// returnMarshalBuffer feeds buf back to the pool on the error path
+// without cloning (caller is about to discard the bytes anyway). Same
+// cap-discard semantics as detachAndRelease's small path.
+func returnMarshalBuffer(buf *bytes.Buffer) {
+	//: oversized buffers go to the GC; small ones rejoin the pool.
+	if buf.Cap() > maxRetainedBufBytes {
+		//: orphan the buffer; the GC will reclaim it.
+		return
+	}
+	//: pool expects a clean buffer.
+	buf.Reset()
+	//: return for the next caller.
+	bufferPool.Put(buf)
+}
+
+// encodeSliceInto runs the per-record stdjson.Marshal loop and appends
+// each encoded record + '\n' separator onto buf. The getElem closure
+// produces one any-typed element at a time so the helper stays free of
+// reflect.Value at the API boundary. Stops at the first per-record
+// failure, returning the raw stdlib error so the caller can wrap it.
+func encodeSliceInto(buf *bytes.Buffer, n int, getElem func(int) any) error {
 	//: encode record-by-record; one '\n' per element.
-	for i := range slice.Len() {
+	for i := range n {
 		//: delegate per-record JSON encoding to the stdlib.
-		line, merr := stdjson.Marshal(slice.Index(i).Interface())
-		//: surface any per-record failure immediately.
+		line, merr := stdjson.Marshal(getElem(i))
+		//: surface the raw stdlib error to the caller for wrapping.
 		if merr != nil {
-			//: wrap the stdlib error for reason-based matching.
-			return nil, errs.Wrap(merr, errs.WrapParams{
-				Code:    CodeNDJSONMarshalFailed,
-				Reason:  "MARSHAL_FAILED",
-				Public:  "NDJSON encoding failed",
-				Private: "service/codec/ndjson.Marshal: encoding/json returned an error",
-			})
+			//: caller's responsibility to wrap and release the buffer.
+			return merr
 		}
 		//: append the record and the mandatory newline.
 		buf.Write(line)
 		//: RFC-compliant NDJSON separator.
 		buf.WriteByte('\n')
 	}
-	//: hand back the buffered bytes.
-	return buf.Bytes(), nil
+	//: every record written successfully.
+	return nil
+}
+
+// detachAndRelease pulls the encoded bytes out of buf and decides
+// whether to clone-and-repool (small payload) or orphan-without-clone
+// (over-cap payload). The ok return is true when the buffer made it
+// back into the pool, false on the orphan path — tests use it; callers
+// don't need it on the hot path.
+func detachAndRelease(buf *bytes.Buffer) (encoded []byte, repooled bool) {
+	//: large buffers would pay a huge slices.Clone AND pin the pool
+	//: entry. Orphan path: the returned slice IS the buffer's storage
+	//: (caller-owned now), the *bytes.Buffer header is GC'd next cycle.
+	if buf.Cap() > maxRetainedBufBytes {
+		//: caller-owned slice — do NOT reset the buffer (would zero it).
+		return buf.Bytes(), false
+	}
+	//: small buffer path: clone so the caller's slice doesn't alias
+	//: the pooled buffer (next caller would overwrite it).
+	out := slices.Clone(buf.Bytes())
+	//: pool expects a clean buffer.
+	buf.Reset()
+	//: return for the next caller.
+	bufferPool.Put(buf)
+	//: signal the clone-and-repool path.
+	return out, true
 }
 
 // marshalRawSliceTo writes a pre-encoded slice (one of []json.RawMessage

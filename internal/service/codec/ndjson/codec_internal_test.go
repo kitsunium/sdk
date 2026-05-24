@@ -1,6 +1,7 @@
 package ndjson
 
 import (
+	"bytes"
 	stdjson "encoding/json"
 	"reflect"
 	"testing"
@@ -422,6 +423,39 @@ func Test_marshalRawSliceTo(t *testing.T) {
 		}
 		if string(got) != tc.want {
 			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_detachAndRelease covers the two release paths: small buffer
+// (clone+repool, ok=true) and over-cap buffer (orphan, ok=false).
+func Test_detachAndRelease(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name       string
+		cap        int
+		wantRepool bool
+	}
+	tests := []tc{
+		{"small-cloned-and-repooled", 1024, true},
+		{"oversize-orphaned-untouched", maxRetainedBufBytes + 1, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		buf := new(bytes.Buffer)
+		buf.Grow(tc.cap)
+		buf.WriteString("xyz")
+		out, repooled := detachAndRelease(buf)
+		//: contract: caller's bytes survive both paths intact.
+		if string(out) != "xyz" {
+			t.Errorf("%s: got %q want %q", tc.name, out, "xyz")
+		}
+		//: contract: ok reflects the chosen path.
+		if repooled != tc.wantRepool {
+			t.Errorf("%s: repooled=%v want %v", tc.name, repooled, tc.wantRepool)
 		}
 	}
 	for _, tc := range tests {
