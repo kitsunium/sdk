@@ -206,3 +206,28 @@ func Test_jsonCodec_Append(t *testing.T) {
 		})
 	}
 }
+
+// Test_releaseAppendBuffer covers the cap-discard release helper used
+// by Append. Buffers under the threshold round-trip through the pool;
+// oversized buffers get orphaned.
+func Test_releaseAppendBuffer(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		cap  int
+	}
+	tests := []tc{
+		{"small-retained", 1024},
+		{"at-cap-discard-threshold", maxRetainedAppendBufBytes + 1},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		buf := new(bytes.Buffer)
+		buf.Grow(tc.cap)
+		//: helper must accept both cases without panicking.
+		releaseAppendBuffer(buf)
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

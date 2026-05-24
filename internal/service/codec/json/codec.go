@@ -4,17 +4,37 @@
 package json
 
 import (
+	"bytes"
 	stdjson "encoding/json"
 	"io"
+	"sync"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Codec is the JSON singleton, registered with core/codec at package load.
-// Binding the registration result to a named var is more idiomatic than
-// `var _ = codec.Register(...)` and keeps us clear of init().
-var Codec codec.Codec = codec.Register(&jsonCodec{})
+// maxRetainedAppendBufBytes caps the size of *bytes.Buffer instances
+// re-pooled by Append. A one-off oversized payload would otherwise pin
+// a large buffer for the lifetime of the pool's GC window. Matches the
+// project-wide threshold (256 KiB) documented in the codec-perf-extreme
+// initiative.
+const maxRetainedAppendBufBytes int = 256 << 10
+
+var (
+	// Codec is the JSON singleton, registered with core/codec at
+	// package load. Binding the registration result to a named var
+	// is more idiomatic than `var _ = codec.Register(...)` and keeps
+	// us clear of init().
+	Codec codec.Codec = codec.Register(&jsonCodec{})
+
+	// appendBufferPool reuses *bytes.Buffer across Append calls so
+	// the per-call alloc-and-grow cascade only happens on a cold
+	// start. The json.NewEncoder per-call allocation (a small struct)
+	// is dwarfed by what this saves on every realistic Append target.
+	appendBufferPool = sync.Pool{
+		New: func() any { return new(bytes.Buffer) },
+	}
+)
 
 // jsonCodec is the concrete Codec implementation for JSON.
 type jsonCodec struct{}
@@ -82,16 +102,69 @@ func (*jsonCodec) Unmarshal(data []byte, v any) error {
 // Append encodes v as JSON and appends the bytes to dst. Implements the
 // optional codec.Appender interface so hot-path callers (logger encoder,
 // batch sinks) can write into a recycled buffer.
-func (c *jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: delegate to Marshal so the wrap/error contract has a single source.
-	encoded, merr := c.Marshal(v)
-	//: surface any encoding failure without touching dst.
-	if merr != nil {
-		//: return the untouched buffer plus the wrapped error.
-		return dst, merr
+//
+// Uses a *bytes.Buffer pool + json.NewEncoder(buf).Encode(v) — replaces
+// the previous Marshal-then-append shape which paid a double copy
+// (stdjson.Marshal allocs+copies into a fresh []byte, then append copies
+// again into dst). The pool path encodes once into a reusable buffer
+// then copies once into dst — one alloc, one copy in steady state.
+func (*jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: rent the scratch buffer; pool guarantees a *bytes.Buffer.
+	buf, ok := appendBufferPool.Get().(*bytes.Buffer)
+	//: pool invariant guard — never expected to fail at runtime.
+	if !ok {
+		//: invariant broken — fail loud at the call site.
+		panic("service/codec/json: appendBufferPool yielded non-*bytes.Buffer")
 	}
-	//: append the encoded bytes onto the caller's buffer.
-	return append(dst, encoded...), nil
+	//: start clean — pool may return a partially-filled buffer.
+	buf.Reset()
+	//: stdjson.NewEncoder writes a trailing '\n' that we strip below.
+	enc := stdjson.NewEncoder(buf)
+	//: encode the value via the stdlib encoder.
+	jerr := enc.Encode(v)
+	//: encoding failure — keep dst pristine, surface the wrapped error.
+	if jerr != nil {
+		//: drop the buffer back to the pool if it's not oversized.
+		releaseAppendBuffer(buf)
+		//: return the untouched buffer plus the wrapped error.
+		return dst, errs.Wrap(jerr, errs.WrapParams{
+			Code:    CodeJSONMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "JSON encoding failed",
+			Private: "service/codec/json.Append: encoding/json returned an error",
+		})
+	}
+	//: stdjson.Encoder.Encode always emits a trailing '\n' which is NOT
+	//: part of the JSON value — strip it so Append's output matches
+	//: Marshal's byte-for-byte (audit-pinned wire contract).
+	encoded := buf.Bytes()
+	//: defensive against an empty payload (shouldn't happen on success).
+	if n := len(encoded); n > 0 && encoded[n-1] == '\n' {
+		//: drop the trailing newline.
+		encoded = encoded[:n-1]
+	}
+	//: copy into the caller's buffer; the only copy on the hot path.
+	dst = append(dst, encoded...)
+	//: cap-discard release.
+	releaseAppendBuffer(buf)
+	//: success — bytes are the caller's now.
+	return dst, nil
+}
+
+// releaseAppendBuffer returns buf to the pool unless its capacity
+// exceeds the cap-discard threshold. Hoisted to keep Append under the
+// linter's MAXLOC/CYCLO budget.
+func releaseAppendBuffer(buf *bytes.Buffer) {
+	//: oversized buffers would pin large allocations for the lifetime
+	//: of the pool's GC window — drop them instead.
+	if buf.Cap() > maxRetainedAppendBufBytes {
+		//: orphan the buffer; the GC will reclaim it.
+		return
+	}
+	//: pool expects a clean buffer.
+	buf.Reset()
+	//: return for the next caller.
+	appendBufferPool.Put(buf)
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.
