@@ -123,6 +123,8 @@ Package codec — range 1.2.0.\* \(ADR 0005 pkg/v1/codec block\).
 
 Package codec — declares the sentinel \*errs.Error values the facade emits when dispatch fails.
 
+Package codec — JSON\-bridge promotion path for codecs whose runtime preconditions reject the public Marshal\(F, any\) / Unmarshal\(F, \*, any\) contract. Five of the eighteen registered codecs constrain their input shape: csv expects \[\]\[\]string, ndjson expects \[\]T, pem expects \*pem.Block, flatbuffers expects \[\]byte or BytesProvider, tlv's decoder cannot project composites into typed targets. Without promotion the facade's "format\-swap is a single string change" promise is a lie for 5/18. Promotion intercepts the VALUE\_INVALID / FLATBUFFERS\_BAD\_\* / UNMARSHAL\_FAILED responses, encodes the value to JSON, wraps the bytes in a codec\-specific container the codec will accept, and reverses the pipeline on Unmarshal. The fast \(native\-shape\) path is untouched so existing callers see zero overhead. See TestUniversalRoundtripAllCodecs for the contract pin.
+
 ## Index
 
 - [Constants](<#constants>)
@@ -147,6 +149,12 @@ Package codec — declares the sentinel \*errs.Error values the facade emits whe
 
 ```go
 const CodeCodecUnavailable errs.Code = 0x01_02_00_02 // 1.2.0.2
+```
+
+<a name="CodePromoteFailed"></a>CodePromoteFailed fires when the facade's JSON\-bridge promotion path cannot serve the request \(unknown Format with no promotion strategy, or a malformed container after the codec populated it\).
+
+```go
+const CodePromoteFailed errs.Code = 0x01_02_00_04 // 1.2.0.4
 ```
 
 <a name="CodeStreamingUnsupported"></a>CodeStreamingUnsupported fires when NewEncoder / NewDecoder is called on a codec that does not implement StreamingCodec.
@@ -184,20 +192,28 @@ var (
     StreamingUnsupported = errs.Define(CodeStreamingUnsupported, "STREAMING_UNSUPPORTED",
         "codec does not support streaming",
         "pkg/v1/codec: target codec is not a core/codec.StreamingCodec")
+
+    // PromoteFailed is returned when the facade's JSON-bridge promotion
+    // cannot serve the request — either the Format has no promotion
+    // strategy registered, or the codec populated a container whose
+    // shape no longer matches what the wrap stage produced.
+    PromoteFailed = errs.Define(CodePromoteFailed, "PROMOTE_FAILED",
+        "codec promotion failed",
+        "pkg/v1/codec: JSON-bridge promotion path could not serve the request")
 )
 ```
 
 <a name="Marshal"></a>
-## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L192>)
+## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L198>)
 
 ```go
 func Marshal(f Format, v any) (encoded []byte, err error)
 ```
 
-Marshal serialises v using the codec registered under f.
+Marshal serialises v using the codec registered under f. The codec's native input shape is tried first \(fast path, zero overhead\); if the codec rejects v as the wrong shape \(csv requires \[\]\[\]string, pem requires \*pem.Block, etc.\) the facade promotes v via json\-encode \+ codec\-specific wrap so every Format accepts any Go value — see promote.go for the per\-format strategies and the uniform\-contract rationale.
 
 <a name="MarshalMany"></a>
-## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L237>)
+## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L262>)
 
 ```go
 func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, err error)
@@ -216,13 +232,13 @@ out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
 ```
 
 <a name="Unmarshal"></a>
-## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L205>)
+## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L222>)
 
 ```go
 func Unmarshal(f Format, data []byte, v any) error
 ```
 
-Unmarshal parses data into v using the codec registered under f.
+Unmarshal parses data into v using the codec registered under f. As with Marshal, the codec's native target shape is tried first; on shape mismatch the facade promotes via JSON\-bridge so every Format can decode into any Go target.
 
 <a name="Codec"></a>
 ## type [Codec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L159>)
@@ -243,7 +259,7 @@ type Decoder = corecodec.Decoder
 ```
 
 <a name="NewDecoder"></a>
-### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L279>)
+### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L304>)
 
 ```go
 func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
@@ -261,7 +277,7 @@ type Encoder = corecodec.Encoder
 ```
 
 <a name="NewEncoder"></a>
-### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L266>)
+### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L291>)
 
 ```go
 func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
@@ -306,7 +322,7 @@ const (
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L292>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L317>)
 
 ```go
 func Available() []Format
@@ -315,7 +331,7 @@ func Available() []Format
 Available returns the sorted list of registered formats.
 
 <a name="FromExtension"></a>
-### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L311>)
+### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L336>)
 
 ```go
 func FromExtension(ext string) (f Format, ok bool)
@@ -324,7 +340,7 @@ func FromExtension(ext string) (f Format, ok bool)
 FromExtension resolves a file extension to its registered Format.
 
 <a name="FromMIME"></a>
-### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L298>)
+### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L323>)
 
 ```go
 func FromMIME(mime string) (f Format, ok bool)

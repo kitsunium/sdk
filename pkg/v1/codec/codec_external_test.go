@@ -42,6 +42,7 @@ var expectedAppenders = []string{
 	"ndjson",
 	"tlv",
 	"flatbuffers",
+	"xml",
 	"base64",
 	"base64url",
 	"base32",
@@ -1333,6 +1334,41 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 					//: byte-level equality.
 					if !bytes.Equal(got, payload) {
 						//: surface the diff.
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: XML appends the specialised xmlDoc fixture (encoding/xml
+		//: cannot encode maps or []byte losslessly, so we reuse the
+		//: round-trip test's purpose-built shape).
+		case "xml":
+			//: capture the xmlDoc payload + structural decode hook.
+			val := sampleXML()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    val,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					//: decode into a fresh xmlDoc.
+					var got xmlDoc
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						//: hard failure on decode.
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					//: timestamp comparison via Equal — XML restores
+					//: RFC3339 to UTC cleanly.
+					if !got.Timestamp.Equal(val.Timestamp) {
+						//: instants differ.
+						t.Errorf("%s: timestamp mismatch got=%v want=%v", name, got.Timestamp, val.Timestamp)
+						return
+					}
+					//: zero out the timestamps before the structural compare.
+					got.Timestamp, val.Timestamp = time.Time{}, time.Time{}
+					//: full structural compare on the remainder.
+					if !reflect.DeepEqual(got, val) {
+						//: structural diff.
 						t.Errorf("%s: append round-trip mismatch", name)
 					}
 				},
