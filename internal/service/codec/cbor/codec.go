@@ -44,7 +44,30 @@ var (
 	//: call; built eagerly via mustHardenedDecMode so a mis-configuration
 	//: crashes at package load rather than silently passing through.
 	decMode gocbor.DecMode = mustHardenedDecMode()
+
+	//: encMode is the reusable encoder mode. fxamacker amortises the
+	//: per-call EncOptions resolution into one immutable EncMode value
+	//: so every Marshal hits the cached resolver instead of rebuilding
+	//: it. Default options (no sorting override, no float shortening)
+	//: keep wire bytes byte-identical to gocbor.Marshal.
+	encMode gocbor.EncMode = mustEncMode()
 )
+
+// mustEncMode builds the reusable EncMode with default options.
+// gocbor.EncOptions{}.EncMode() only fails on self-contradictory options;
+// the defaults are always valid so the panic guards a future library
+// upgrade that tightens validation.
+func mustEncMode() gocbor.EncMode {
+	//: default EncOptions preserve gocbor.Marshal's wire format byte-for-byte.
+	m, err := gocbor.EncOptions{}.EncMode()
+	//: EncMode only fails on self-contradictory options — fail loud.
+	if err != nil {
+		//: crash at package load so a misconfigured default never reaches runtime.
+		panic("service/codec/cbor: EncMode construction failed: " + err.Error())
+	}
+	//: publish the reusable encoder.
+	return m
+}
 
 // mustHardenedDecMode builds the reusable DecMode with security caps and
 // panics on the defensive error path. DecOptions.DecMode() only fails when
@@ -98,8 +121,9 @@ func (*cborCodec) Extensions() []string {
 
 // Marshal serialises v as CBOR bytes.
 func (*cborCodec) Marshal(v any) (encoded []byte, err error) {
-	//: delegate to the library for the actual encoding.
-	out, merr := gocbor.Marshal(v)
+	//: route through the hoisted encMode so fxamacker reuses the cached
+	//: resolver instead of rebuilding default EncOptions on every call.
+	out, merr := encMode.Marshal(v)
 	//: success fast-path.
 	if merr == nil {
 		//: return the encoded bytes verbatim.
@@ -134,14 +158,19 @@ func (*cborCodec) Unmarshal(data []byte, v any) error {
 	})
 }
 
-// NewEncoder wraps w in a streaming codec.Encoder.
+// NewEncoder wraps w in a streaming codec.Encoder. Routes through the
+// hoisted encMode so fxamacker reuses the cached resolver.
 func (*cborCodec) NewEncoder(w io.Writer) codec.Encoder {
-	//: wrap the fxamacker encoder.
-	return &cborEncoder{inner: gocbor.NewEncoder(w)}
+	//: encMode.NewEncoder reuses the cached resolver — matches Marshal.
+	return &cborEncoder{inner: encMode.NewEncoder(w)}
 }
 
-// NewDecoder wraps r in a streaming codec.Decoder.
+// NewDecoder wraps r in a streaming codec.Decoder. Routes through the
+// hardened decMode so the security caps apply to streaming Unmarshal too
+// — fixes the streaming-decode hardening gap where the package-level
+// gocbor.NewDecoder bypassed maxCBORArrayElements / maxCBORMapPairs /
+// maxCBORNestedLevels.
 func (*cborCodec) NewDecoder(r io.Reader) codec.Decoder {
-	//: wrap the fxamacker decoder.
-	return &cborDecoder{inner: gocbor.NewDecoder(r)}
+	//: decMode.NewDecoder applies the same caps as Unmarshal.
+	return &cborDecoder{inner: decMode.NewDecoder(r)}
 }

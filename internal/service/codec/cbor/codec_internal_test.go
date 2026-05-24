@@ -174,6 +174,31 @@ func Test_mustHardenedDecMode(t *testing.T) {
 	}
 }
 
+// Test_mustEncMode covers the reusable EncMode constructor: the
+// returned mode must be non-nil so every cborCodec.Marshal call hits
+// the cached resolver rather than rebuilding default EncOptions per
+// call. Defensive panic branch is unreachable for default options.
+func Test_mustEncMode(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"returns non-nil EncMode"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		mode := mustEncMode()
+		if mode == nil {
+			t.Errorf("%s: mustEncMode returned nil", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // Test_cborCodec_NewDecoder covers the streaming decoder constructor.
 func Test_cborCodec_NewDecoder(t *testing.T) {
 	t.Parallel()
