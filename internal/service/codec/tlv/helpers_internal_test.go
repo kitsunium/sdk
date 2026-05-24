@@ -335,20 +335,28 @@ func Test_bytesFromReflectValue(t *testing.T) {
 	}
 }
 
-// Test_collectSliceElements covers the materialisation helper.
-func Test_collectSliceElements(t *testing.T) {
+// Test_encodeSliceDirect covers the direct-into-buffer slice encoder
+// (replaces the legacy collect-then-emit pair).
+func Test_encodeSliceDirect(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
 		in   any
-		want int
 	}
-	tests := []tc{{"three elements", []int{1, 2, 3}, 3}}
+	tests := []tc{
+		{"int slice", []int{1, 2, 3}},
+		{"string slice", []string{"a", "b"}},
+		{"empty slice", []int{}},
+	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		got := collectSliceElements(reflectView(reflect.ValueOf(tc.in)))
-		if len(got) != tc.want {
-			t.Errorf("%s: len=%d want %d", tc.name, len(got), tc.want)
+		out, err := encodeSliceDirect(nil, reflectView(reflect.ValueOf(tc.in)), 0)
+		if err != nil {
+			t.Errorf("%s: err=%v", tc.name, err)
+		}
+		//: contract: header byte must be the slice tag.
+		if len(out) == 0 || out[0] != byte(tagSlice) {
+			t.Errorf("%s: missing tagSlice header in %v", tc.name, out)
 		}
 	}
 	for _, tc := range tests {
@@ -356,20 +364,28 @@ func Test_collectSliceElements(t *testing.T) {
 	}
 }
 
-// Test_collectMapPairs covers the map flattening helper.
-func Test_collectMapPairs(t *testing.T) {
+// Test_encodeMapDirect covers the direct-into-buffer map encoder
+// (replaces the legacy collect-then-emit pair).
+func Test_encodeMapDirect(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
 		in   any
-		want int
 	}
-	tests := []tc{{"two pairs", map[string]int{"a": 1, "b": 2}, 4}}
+	tests := []tc{
+		{"single pair", map[string]int{"a": 1}},
+		{"two pairs", map[string]int{"a": 1, "b": 2}},
+		{"empty map", map[string]int{}},
+	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		got := collectMapPairs(reflectView(reflect.ValueOf(tc.in)))
-		if len(got) != tc.want {
-			t.Errorf("%s: len=%d want %d", tc.name, len(got), tc.want)
+		out, err := encodeMapDirect(nil, reflectView(reflect.ValueOf(tc.in)), 0)
+		if err != nil {
+			t.Errorf("%s: err=%v", tc.name, err)
+		}
+		//: contract: header byte must be the map tag.
+		if len(out) == 0 || out[0] != byte(tagMap) {
+			t.Errorf("%s: missing tagMap header in %v", tc.name, out)
 		}
 	}
 	for _, tc := range tests {
@@ -441,52 +457,6 @@ func Test_encodeStructDirect_OversizeFieldName(t *testing.T) {
 		//: contract: only over-limit names trigger the rejection.
 		if (err != nil) != tc.wantError {
 			t.Errorf("%s: err=%v wantErr=%v", tc.name, err, tc.wantError)
-		}
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
-	}
-}
-
-// Test_encodeSliceElements covers the slice-payload emission helper.
-func Test_encodeSliceElements(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		in   []any
-	}
-	tests := []tc{{"two elements", []any{int64(1), "x"}}}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		out, err := encodeSliceElements(nil, tc.in, 0)
-		if err != nil {
-			t.Errorf("%s: err=%v", tc.name, err)
-		}
-		if out[0] != byte(tagSlice) {
-			t.Errorf("%s: wrong tag %d", tc.name, out[0])
-		}
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
-	}
-}
-
-// Test_encodeMapPairs covers the map-payload emission helper.
-func Test_encodeMapPairs(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		in   []any
-	}
-	tests := []tc{{"one pair", []any{"k", int64(1)}}}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		out, err := encodeMapPairs(nil, tc.in, 0)
-		if err != nil {
-			t.Errorf("%s: err=%v", tc.name, err)
-		}
-		if out[0] != byte(tagMap) {
-			t.Errorf("%s: wrong tag %d", tc.name, out[0])
 		}
 	}
 	for _, tc := range tests {

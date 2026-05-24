@@ -260,8 +260,9 @@ func tryEncodeComposite(dst []byte, view reflectView, depth int) (encoded []byte
 		return out, true, eerr
 	//: map of any TLV-encodable key type.
 	case reflect.Map:
-		//: collect pairs as []any (alternating key, value) and recurse.
-		out, eerr := encodeMapPairs(dst, collectMapPairs(view), depth)
+		//: direct walk: emit header + per-pair encode in one pass.
+		//: Skips the []any intermediate the legacy path allocated.
+		out, eerr := encodeMapDirect(dst, view, depth)
 		//: composite handled.
 		return out, true, eerr
 	//: struct uses exported fields only.
@@ -290,8 +291,100 @@ func encodeCompositeSliceLike(dst []byte, view reflectView, depth int) (encoded 
 		//: reuse the bytes payload helper.
 		return encodeBytes(dst, bytesFromReflectValue(view)), nil
 	}
-	//: generic slice — collect elements as []any and recurse.
-	return encodeSliceElements(dst, collectSliceElements(view), depth)
+	//: generic slice — direct walk: emit header + per-element encode
+	//: in one pass via the reflect-driven dispatcher. Skips the []any
+	//: + per-element .Interface() boxing the legacy path allocated.
+	return encodeSliceDirect(dst, view, depth)
+}
+
+// encodeMapDirect emits a tagMap record by walking the reflect map
+// via MapRange. Each (key, value) pair is dispatched through
+// encodeReflectValue without going through a []any intermediate —
+// saves the slice-of-any allocation plus two .Interface() boxings
+// per entry (key + value) on every encode.
+func encodeMapDirect(dst []byte, view reflectView, depth int) (encoded []byte, err error) {
+	//: convert once for method dispatch.
+	rv := reflect.Value(view)
+	//: emit the map header (tag + pair count).
+	dst = appendTagLen(dst, tagMap, uint64(rv.Len()))
+	//: iterate via MapRange to honour Go's unordered-map contract.
+	iter := rv.MapRange()
+	//: walk every (key, value) entry.
+	for iter.Next() {
+		//: encode the key first via the interface-deref-aware dispatcher.
+		next, kerr := encodeReflectValue(dst, reflectView(iter.Key()), depth+1)
+		//: surface key failure verbatim.
+		if kerr != nil {
+			//: caller will roll dst back to its prior length.
+			return dst, kerr
+		}
+		//: encode the value second; depth shared with key (same level).
+		next2, verr := encodeReflectValue(next, reflectView(iter.Value()), depth+1)
+		//: surface value failure verbatim.
+		if verr != nil {
+			//: caller will roll dst back to its prior length.
+			return dst, verr
+		}
+		//: advance the buffer pointer past the pair.
+		dst = next2
+	}
+	//: success path.
+	return dst, nil
+}
+
+// encodeSliceDirect emits a tagSlice record by walking the reflect
+// slice/array in place. Each element is dispatched through
+// encodeReflectValue without going through a []any intermediate —
+// saves the slice-of-any allocation plus one .Interface() boxing
+// per element on every encode.
+func encodeSliceDirect(dst []byte, view reflectView, depth int) (encoded []byte, err error) {
+	//: convert once for method dispatch.
+	rv := reflect.Value(view)
+	//: emit the slice header (tag + element count).
+	dst = appendTagLen(dst, tagSlice, uint64(rv.Len()))
+	//: walk every element in declaration order.
+	for i := range rv.Len() {
+		//: emit the element through the interface-deref-aware dispatcher
+		//: (depth+1 for the nested record).
+		next, eerr := encodeReflectValue(dst, reflectView(rv.Index(i)), depth+1)
+		//: surface per-element failure verbatim.
+		if eerr != nil {
+			//: caller will roll dst back to its prior length.
+			return dst, eerr
+		}
+		//: advance the buffer pointer.
+		dst = next
+	}
+	//: success path.
+	return dst, nil
+}
+
+// encodeReflectValue is the reflect.Value equivalent of encodeValue:
+// it drills through pointer / interface indirections before
+// dispatching by Kind, so the direct encoders can hand off a
+// reflect.Value of any nesting (including interface{} map values)
+// without paying .Interface() boxing. Nil indirections short-circuit
+// to a tagNil record.
+func encodeReflectValue(dst []byte, view reflectView, depth int) (encoded []byte, err error) {
+	//: depth guard runs before any reflection work.
+	if depth > maxTLVDepth {
+		//: surface the documented depth sentinel.
+		return dst, depthExceededError(depth)
+	}
+	//: unwrap once for method dispatch.
+	rv := reflect.Value(view)
+	//: drill through pointer / interface indirections; nil short-circuits.
+	for rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface {
+		//: nil intermediate counts as a typed nil.
+		if rv.IsNil() {
+			//: emit the nil record and stop.
+			return appendTagLen(dst, tagNil, 0), nil
+		}
+		//: peel one level of indirection.
+		rv = rv.Elem()
+	}
+	//: route to the family-specific helper by Kind.
+	return encodeByKind(dst, reflectView(rv), depth)
 }
 
 // encodeBool emits a 1-byte tag-only record for the boolean value.
@@ -391,42 +484,6 @@ func encodeBytes(dst, payload []byte) []byte {
 	return append(dst, payload...)
 }
 
-// collectSliceElements materialises a generic slice/array as []any so
-// downstream encoders never need to handle reflect.Value directly.
-func collectSliceElements(view reflectView) []any {
-	//: convert once for method dispatch.
-	rv := reflect.Value(view)
-	//: pre-allocate the exact capacity so append never grows the slice.
-	collected := make([]any, 0, rv.Len())
-	//: copy each element through Interface().
-	for i := range rv.Len() {
-		//: append the boxed Go value.
-		collected = append(collected, rv.Index(i).Interface())
-	}
-	//: caller iterates in order.
-	return collected
-}
-
-// collectMapPairs materialises a map as a flat []any of alternating
-// (key, value) entries. The order matches reflect.MapRange's emission.
-func collectMapPairs(view reflectView) []any {
-	//: convert once for method dispatch.
-	rv := reflect.Value(view)
-	//: pre-allocate to (mapPairStride * Len) so the slice never grows.
-	out := make([]any, 0, mapPairStride*rv.Len())
-	//: iterate via MapRange to honour the runtime's unordered guarantee.
-	iter := rv.MapRange()
-	//: each entry contributes key and value.
-	for iter.Next() {
-		//: append the key.
-		out = append(out, iter.Key().Interface())
-		//: append the value.
-		out = append(out, iter.Value().Interface())
-	}
-	//: caller iterates pair-by-pair.
-	return out
-}
-
 // encodeStructDirect emits a tagStruct record by walking the cached
 // structTypeInfo and encoding each (name, value) pair directly into
 // dst. Avoids the []any intermediate the legacy collectStructFields
@@ -450,9 +507,10 @@ func encodeStructDirect(dst []byte, view reflectView, depth int) (encoded []byte
 		}
 		//: emit the name as a tagString record.
 		dst = encodeString(dst, f.name)
-		//: emit the field value through the reflect-driven dispatcher
-		//: (depth+1 for the nested record).
-		next, eerr := encodeByKind(dst, reflectView(rv.Field(f.index)), depth+1)
+		//: emit the field value through the interface-deref-aware
+		//: dispatcher (depth+1 for the nested record). Struct fields of
+		//: type `any` or `*T` get unwrapped before Kind() dispatch.
+		next, eerr := encodeReflectValue(dst, reflectView(rv.Field(f.index)), depth+1)
 		//: surface per-field failure verbatim.
 		if eerr != nil {
 			//: caller will roll dst back to its prior length.
@@ -460,55 +518,6 @@ func encodeStructDirect(dst []byte, view reflectView, depth int) (encoded []byte
 		}
 		//: advance the buffer pointer.
 		dst = next
-	}
-	//: success path.
-	return dst, nil
-}
-
-// encodeSliceElements emits a tagSlice record from the pre-collected
-// element list.
-func encodeSliceElements(dst []byte, elements []any, depth int) (encoded []byte, err error) {
-	//: emit the slice header.
-	dst = appendTagLen(dst, tagSlice, uint64(len(elements)))
-	//: encode each element in order; failure aborts the whole record.
-	for _, el := range elements {
-		//: encode the element with depth+1.
-		next, eerr := encodeValue(dst, el, depth+1)
-		//: surface any per-element failure.
-		if eerr != nil {
-			//: caller will roll dst back to its prior length.
-			return dst, eerr
-		}
-		//: advance the buffer pointer.
-		dst = next
-	}
-	//: success path.
-	return dst, nil
-}
-
-// encodeMapPairs emits a tagMap record from the pre-collected flat
-// (key, value, key, value, …) slice.
-func encodeMapPairs(dst []byte, pairs []any, depth int) (encoded []byte, err error) {
-	//: pair count is half the flat length.
-	dst = appendTagLen(dst, tagMap, uint64(len(pairs)/mapPairStride))
-	//: walk pairs of two.
-	for i := 0; i < len(pairs); i += mapPairStride {
-		//: encode the key first.
-		next, kerr := encodeValue(dst, pairs[i], depth+1)
-		//: surface key failure.
-		if kerr != nil {
-			//: caller will roll dst back to its prior length.
-			return dst, kerr
-		}
-		//: encode the value second.
-		next2, verr := encodeValue(next, pairs[i+1], depth+1)
-		//: surface value failure.
-		if verr != nil {
-			//: caller will roll dst back to its prior length.
-			return dst, verr
-		}
-		//: advance the buffer pointer.
-		dst = next2
 	}
 	//: success path.
 	return dst, nil

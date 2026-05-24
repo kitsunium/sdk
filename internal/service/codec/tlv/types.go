@@ -58,11 +58,6 @@ const (
 
 	// decimalBase is the base used to format diagnostic numbers.
 	decimalBase int = 10
-
-	// mapPairStride is the number of slice slots per map pair in the
-	// flattened (key, value, …) buffer — two: one for the key, one for
-	// the value.
-	mapPairStride int = 2
 )
 
 // Wire-format tag constants — assigned in stable byte ranges grouped by
