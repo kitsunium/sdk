@@ -32,6 +32,11 @@ import {
   LOCAL_RELEASE,
 } from "./lib/tag-format.mjs";
 import { RESERVED } from "./lib/page-catalog.mjs";
+import {
+  classifyCommit,
+  gitLogCommits,
+  buildWhatsNewPayload,
+} from "./lib/whats-new.mjs";
 
 const execFile = promisify(_execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -148,12 +153,6 @@ function stripGomarkdocIndex(body) {
 // For tagged releases: window = previous-tag..current-tag.
 // For "local": window = last 30 commits (no tags yet on this repo).
 
-const COMMIT_DELIM = "---COMMIT-END---";
-const COMMIT_FORMAT = `%H|%h|%cI|%s|%b${COMMIT_DELIM}`;
-
-const CONVENTIONAL_RE =
-  /^(feat|fix|perf|refactor|chore|docs|test|build|ci|style)(?:\(([^)]+)\))?(!)?:\s*(.+)$/;
-
 const GROUP_LABEL = {
   feat: "Features",
   fix: "Fixes",
@@ -181,49 +180,6 @@ const GROUP_ORDER_FOR_CHANGELOG = [
   "chore",
   "misc",
 ];
-
-function classifyCommit(subject) {
-  const m = subject.match(CONVENTIONAL_RE);
-  if (!m)
-    return { type: "misc", scope: null, breaking: false, summary: subject };
-  return {
-    type: m[1],
-    scope: m[2] ?? null,
-    breaking: m[3] === "!",
-    summary: m[4],
-  };
-}
-
-async function gitLogCommits(sourceRoot, refSpec) {
-  const args = ["log", `--pretty=format:${COMMIT_FORMAT}`];
-  for (const part of refSpec) args.push(part);
-  const out = await shellSafe("git", args, { cwd: sourceRoot });
-  if (typeof out !== "string") return [];
-  return out
-    .split(COMMIT_DELIM)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => {
-      //: Subject can contain "|" (e.g. piped-shell commands quoted in a
-      //: commit summary). Split only on the first 4 separators to keep
-      //: the body intact even if it carries pipes.
-      const idx = [];
-      let pos = -1;
-      for (let i = 0; i < 4; i++) {
-        pos = s.indexOf("|", pos + 1);
-        if (pos === -1) break;
-        idx.push(pos);
-      }
-      if (idx.length < 4) return null;
-      const sha = s.slice(0, idx[0]);
-      const short = s.slice(idx[0] + 1, idx[1]);
-      const date = s.slice(idx[1] + 1, idx[2]);
-      const subject = s.slice(idx[2] + 1, idx[3]);
-      const body = s.slice(idx[3] + 1);
-      return { sha, short, date, subject, body };
-    })
-    .filter(Boolean);
-}
 
 function renderChangelogMarkdown(commits, release, major, repoUrl) {
   const grouped = new Map();
@@ -280,28 +236,9 @@ async function materialiseChangelog(major, release, sourceRoot, dest, repoUrl) {
   //: WhatsNew banner data — top 3 feat + top 2 fix, most recent first.
   //: Banner shown ABOVE the article on the Home page only. JSON lives in
   //: src/data/ rather than content/docs/ because Astro content collections
-  //: don't index JSON — we import it dynamically in WhatsNew.astro.
-  const tops = [];
-  let feat = 0;
-  let fix = 0;
-  for (const c of commits) {
-    const meta = classifyCommit(c.subject);
-    if (meta.type === "feat" && feat < 3) {
-      tops.push({ ...meta, sha: c.sha, short: c.short, date: c.date });
-      feat++;
-    } else if (meta.type === "fix" && fix < 2) {
-      tops.push({ ...meta, sha: c.sha, short: c.short, date: c.date });
-      fix++;
-    }
-    if (feat >= 3 && fix >= 2) break;
-  }
-  const wnPayload = {
-    release,
-    major,
-    generatedAt: new Date().toISOString(),
-    repoUrl: repoUrl ?? null,
-    entries: tops,
-  };
+  //: don't index JSON — we import it dynamically in WhatsNew.astro. The
+  //: selection rule is shared with the pre-commit regenerator via lib.
+  const wnPayload = buildWhatsNewPayload(commits, { release, major, repoUrl });
   await mkdir(join(SITE_ROOT, "src", "data"), { recursive: true });
   await writeFile(
     join(SITE_ROOT, "src", "data", `whats-new-${release}-${major}.json`),
