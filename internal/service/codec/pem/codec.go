@@ -5,6 +5,7 @@ package pem
 
 import (
 	"bytes"
+	"encoding/base64"
 	stdpem "encoding/pem"
 	"slices"
 
@@ -12,8 +13,22 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted).
+// promotionBlockType is the Type label the facade promotion path stamps
+// when wrapping a non-PEM value (matches pkg/v1/codec/promote.go
+// pemPromotionBlockType).
+const promotionBlockType = "JSON"
+
+// promotionLineLength is the base64 line width pem.Encode uses (each
+// line of base64 content within a PEM block is wrapped at this width).
+const promotionLineLength int = 64
+
+// promotionInputChunk is the raw-byte input width that produces one
+// promotionLineLength-byte base64 line. Each block of 48 input bytes
+// encodes to a 64-byte base64 line (a 4-out-per-3-in ratio).
+const promotionInputChunk int = 48
+
+// Package-level state: the codec singleton, MIME/extension tables, and
+// the cached promotion fast-path markers.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&pemCodec{})
@@ -23,6 +38,13 @@ var (
 
 	//: .pem is the canonical extension; .crt and .key are historical aliases.
 	extensions = []string{".pem", ".crt", ".key"}
+
+	//: pemJSONBegin is the BEGIN marker for a "JSON"-typed PEM block.
+	//: Cached so the promotion fast-path never re-builds it.
+	pemJSONBegin = []byte("-----BEGIN " + promotionBlockType + "-----\n")
+
+	//: pemJSONEnd is the END marker for a "JSON"-typed PEM block.
+	pemJSONEnd = []byte("-----END " + promotionBlockType + "-----\n")
 )
 
 // pemCodec is the concrete Codec implementation for PEM.
@@ -70,6 +92,14 @@ func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 			Private: "service/codec/pem.Marshal: argument is not a non-nil *pem.Block",
 		})
 	}
+	//: promotion-shape fast-path: Type=="JSON" + no Headers is the
+	//: canonical block pkg/v1/codec/promote.go produces. Bypass
+	//: pem.Encode (which does its own bytes.Buffer + lineBreaker +
+	//: base64.NewEncoder dance) and hand-write the wire bytes.
+	if block.Type == promotionBlockType && len(block.Headers) == 0 {
+		//: dedicated fast-path emits identical wire bytes to pem.Encode.
+		return marshalPromotionBlock(block.Bytes), nil
+	}
 	//: encode into a buffer so the caller gets []byte.
 	var buf bytes.Buffer
 	//: stdlib Encode writes directly; propagate any writer failure.
@@ -84,6 +114,43 @@ func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 	}
 	//: hand back the buffered bytes.
 	return buf.Bytes(), nil
+}
+
+// marshalPromotionBlock emits the wire bytes for a "JSON"-typed PEM
+// block with no headers — the exact shape pkg/v1/codec/promote.go
+// stamps. The output is byte-identical to pem.Encode for this shape
+// (BEGIN marker, base64-encoded payload split into 64-char lines,
+// END marker, trailing newline). Saves pem.Encode's intermediate
+// bytes.Buffer + lineBreaker + base64.NewEncoder allocations.
+func marshalPromotionBlock(payload []byte) []byte {
+	//: base64.EncodedLen gives the exact encoded body length.
+	bodyLen := base64.StdEncoding.EncodedLen(len(payload))
+	//: ceiling-divide so a partial last line still counts.
+	lineCount := (bodyLen + promotionLineLength - 1) / promotionLineLength
+	//: total bytes = BEGIN marker + body + 1 newline per line + END marker.
+	total := len(pemJSONBegin) + bodyLen + lineCount + len(pemJSONEnd)
+	out := make([]byte, 0, total)
+	//: emit the BEGIN marker (includes trailing \n).
+	out = append(out, pemJSONBegin...)
+	//: encode the payload in 48-byte input chunks → 64-byte output
+	//: lines (the exact width pem.Encode picks via lineBreaker).
+	for off := 0; off < len(payload); off += promotionInputChunk {
+		//: clamp the input slice to the remaining payload (last chunk
+		//: may be partial — min handles the partial-chunk boundary).
+		end := min(off+promotionInputChunk, len(payload))
+		//: prepare encode-destination slice extension.
+		startLen := len(out)
+		encLen := base64.StdEncoding.EncodedLen(end - off)
+		out = out[:startLen+encLen]
+		//: encode directly into the output buffer.
+		base64.StdEncoding.Encode(out[startLen:], payload[off:end])
+		//: line terminator after each base64 line.
+		out = append(out, '\n')
+	}
+	//: emit the END marker (includes trailing \n).
+	out = append(out, pemJSONEnd...)
+	//: caller owns the bytes.
+	return out
 }
 
 // Append encodes a *pem.Block as PEM bytes and appends them to dst.
