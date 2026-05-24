@@ -26,11 +26,6 @@ const (
 	// line of base64 content within a PEM block is wrapped at this width).
 	promotionLineLength int = 64
 
-	// promotionInputChunk is the raw-byte input width that produces one
-	// promotionLineLength-byte base64 line. Each block of 48 input bytes
-	// encodes to a 64-byte base64 line (a 4-out-per-3-in ratio).
-	promotionInputChunk int = 48
-
 	// maxRetainedBufBytes caps the size of *bytes.Buffer instances re-pooled
 	// by Marshal. A one-off oversized payload would otherwise pin a large
 	// buffer for the lifetime of the pool's GC window. 256 KiB project-wide.
@@ -185,6 +180,14 @@ func releaseBuffer(buf *bytes.Buffer) {
 // (BEGIN marker, base64-encoded payload split into 64-char lines,
 // END marker, trailing newline). Saves pem.Encode's intermediate
 // bytes.Buffer + lineBreaker + base64.NewEncoder allocations.
+//
+// Implementation: one-shot base64.Encode into the output buffer's
+// tail, then a forward walk that inserts '\n' every 64 bytes. The
+// earlier per-chunk loop called base64.StdEncoding.Encode N times
+// (one per 48-byte input chunk) — each call paid function-call
+// overhead + reset internal state. The single-encode + insert
+// approach makes one call total then memmove's lines into their
+// final slots.
 func marshalPromotionBlock(payload []byte) []byte {
 	//: base64.EncodedLen gives the exact encoded body length.
 	bodyLen := base64.StdEncoding.EncodedLen(len(payload))
@@ -192,28 +195,59 @@ func marshalPromotionBlock(payload []byte) []byte {
 	lineCount := (bodyLen + promotionLineLength - 1) / promotionLineLength
 	//: total bytes = BEGIN marker + body + 1 newline per line + END marker.
 	total := len(pemJSONBegin) + bodyLen + lineCount + len(pemJSONEnd)
+	//: allocate the output buffer at exact size; reslicing within
+	//: this storage avoids further appends/grows.
 	out := make([]byte, 0, total)
 	//: emit the BEGIN marker (includes trailing \n).
 	out = append(out, pemJSONBegin...)
-	//: encode the payload in 48-byte input chunks → 64-byte output
-	//: lines (the exact width pem.Encode picks via lineBreaker).
-	for off := 0; off < len(payload); off += promotionInputChunk {
-		//: clamp the input slice to the remaining payload (last chunk
-		//: may be partial — min handles the partial-chunk boundary).
-		end := min(off+promotionInputChunk, len(payload))
-		//: prepare encode-destination slice extension.
-		startLen := len(out)
-		encLen := base64.StdEncoding.EncodedLen(end - off)
-		out = out[:startLen+encLen]
-		//: encode directly into the output buffer.
-		base64.StdEncoding.Encode(out[startLen:], payload[off:end])
-		//: line terminator after each base64 line.
-		out = append(out, '\n')
-	}
+	//: snapshot where the base64 body starts so the line-split walk
+	//: knows the body's left edge inside out.
+	bodyStart := len(out)
+	//: extend out by the encoded body length AND every line's '\n'
+	//: in one slice grow, then encode + split in place.
+	out = out[:bodyStart+bodyLen+lineCount]
+	//: encode the whole payload in ONE call into the body region.
+	//: Working slice writes into out[bodyStart : bodyStart+bodyLen].
+	base64.StdEncoding.Encode(out[bodyStart:bodyStart+bodyLen], payload)
+	//: walk backwards inserting '\n' so we don't have to track
+	//: shifting offsets — the byte at lineCount × promotionLineLength
+	//: needs to land at lineCount × (promotionLineLength + 1).
+	insertNewlinesEvery64(out[bodyStart:], bodyLen, lineCount)
 	//: emit the END marker (includes trailing \n).
 	out = append(out, pemJSONEnd...)
 	//: caller owns the bytes.
 	return out
+}
+
+// insertNewlinesEvery64 walks the base64 body region in `body` (which
+// already has lineCount extra bytes reserved at the tail) and inserts
+// '\n' after every promotionLineLength (= 64) base64 characters. The
+// walk is backwards so earlier byte positions stay valid until they
+// are moved — same shift-right idiom encoding/pem's lineBreaker uses
+// internally, except in one pass without per-byte function calls.
+func insertNewlinesEvery64(body []byte, bodyLen, lineCount int) {
+	//: bytesWritten tracks the running insert position from the right.
+	//: After the loop, body[:bodyLen+lineCount] is fully populated.
+	dst := bodyLen + lineCount - 1
+	//: walk lines in reverse: last line (possibly partial) first.
+	for line := lineCount - 1; line >= 0; line-- {
+		//: line `line` in the encoded body starts at index `line*64`
+		//: in the un-inserted region. Its length is 64 except for the
+		//: last line which may be shorter (bodyLen - line*64).
+		lineStart := line * promotionLineLength
+		lineEnd := lineStart + promotionLineLength
+		//: clamp the final line to the actual body length via min.
+		lineEnd = min(lineEnd, bodyLen)
+		//: the line's trailing '\n' lands at dst.
+		body[dst] = '\n'
+		dst--
+		//: copy line bytes from right to left into [dst-lineLen+1 ... dst].
+		lineLen := lineEnd - lineStart
+		//: copy() handles overlapping src/dst correctly (memmove semantics).
+		copy(body[dst-lineLen+1:dst+1], body[lineStart:lineEnd])
+		//: advance dst past the line we just placed.
+		dst -= lineLen
+	}
 }
 
 // Append encodes a *pem.Block as PEM bytes and appends them to dst.
