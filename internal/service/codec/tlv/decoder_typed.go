@@ -1101,7 +1101,15 @@ func assignFieldValue(target reflectView, info *structTypeInfo, fieldIdx int, va
 		//: success.
 		return nil
 	}
-	//: convert through the shared narrowing helper.
+	//: scalar field fast-path: skip the convertValue → narrowNumeric
+	//: → reflect.ValueOf.Convert chain when (wire scalar source,
+	//: scalar field target) align — tryDirectScalarSet handles every
+	//: scalar combination via direct SetInt/SetUint/SetFloat/etc.
+	if isScalarKind(field.kind) && tryDirectScalarSet(dst, val) {
+		//: typed scalar path consumed the assignment.
+		return nil
+	}
+	//: composite + cross-shape narrowings go through the shared helper.
 	conv, cerr := convertValue(val, field.typ)
 	//: surface per-field conversion failure verbatim.
 	if cerr != nil {
