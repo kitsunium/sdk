@@ -106,6 +106,19 @@ type meanSet struct {
 	allocs float64
 }
 
+// benchProgress reports live progress of the otherwise-silent bench matrix.
+// testing.Benchmark blocks with no output, so a full `make bench` (hundreds
+// of cells at -benchtime=10s) looks hung for over an hour. Each completed
+// cell emits one stderr update carrying a running count, percentage, elapsed
+// wall-clock, and a linear ETA. Progress goes to stderr so it never
+// contaminates BENCH.md (written via os.WriteFile) or the test's stdout.
+type benchProgress struct {
+	total int       // total cells the matrix will run (pre-counted)
+	done  int       // cells finished so far
+	start time.Time // wall-clock start, for elapsed + ETA
+	tty   bool      // stderr is an interactive terminal (redraw vs lines)
+}
+
 // scaleComplex returns a copy of base with its slice/map fields multiplied
 // by factor. Deterministic — factor seeds the synthesised entries — so
 // rerunning the benchmark on the same machine produces identical
@@ -948,31 +961,105 @@ func resolveBenchOutputPath() string {
 	return "BENCH.md"
 }
 
+// newBenchProgress returns a reporter sized to total cells. It probes stderr:
+// a character device is an interactive terminal (a single redrawing bar
+// reads best); a pipe or file gets discrete newline-terminated lines so the
+// captured log stays greppable.
+func newBenchProgress(total int) *benchProgress {
+	//: a char-device stderr is a TTY — pick the in-place redraw renderer.
+	info, err := os.Stderr.Stat()
+	tty := err == nil && info.Mode()&os.ModeCharDevice != 0
+	return &benchProgress{total: total, start: time.Now(), tty: tty}
+}
+
+// step records one finished cell (labelled "<Op> <format>/<size>") and
+// renders the current progress to stderr.
+func (p *benchProgress) step(label string) {
+	p.done++
+	elapsed := time.Since(p.start)
+	//: linear ETA from the mean cell time so far — enough to set expectations.
+	var eta time.Duration
+	if p.done > 0 && p.done < p.total {
+		eta = elapsed / time.Duration(p.done) * time.Duration(p.total-p.done)
+	}
+	pct := 100 * p.done / max(p.total, 1)
+	line := fmt.Sprintf("bench %3d%% [%d/%d] %-30s %s elapsed, ~%s left",
+		pct, p.done, p.total, label, elapsed.Truncate(time.Second), eta.Truncate(time.Second))
+	if p.tty {
+		//: \r + clear-to-EOL redraw — one evolving line, no scroll spam.
+		fmt.Fprintf(os.Stderr, "\r\033[K%s", line)
+		return
+	}
+	//: redirected/piped — discrete lines keep the captured log readable.
+	fmt.Fprintln(os.Stderr, line)
+}
+
+// finish closes the display: the in-place bar carries no trailing newline, so
+// a TTY needs one before the summary line that reports the total wall-clock.
+func (p *benchProgress) finish() {
+	if p.tty {
+		//: terminate the redraw line before the summary.
+		fmt.Fprintln(os.Stderr)
+	}
+	fmt.Fprintf(os.Stderr, "bench done: %d cells in %s\n", p.done, time.Since(p.start).Truncate(time.Second))
+}
+
+// benchTotalCells pre-counts the matrix so progress can show [done/total].
+// Marshal + Unmarshal + their two parallel variants run for every codec;
+// Append and the two streaming families only for codecs that implement the
+// optional interfaces. A rare per-cell skip (a Marshal seed that fails) makes
+// the realised count slightly lower — finish() reports the true tally.
+func benchTotalCells(formats []codec.Format) int {
+	sizes := len(benchSizes)
+	//: four unconditional families × every codec × every size.
+	total := 4 * len(formats) * sizes
+	for _, f := range formats {
+		c, ok := corecodec.Lookup(f)
+		//: an unregistered format contributes no optional rows.
+		if !ok {
+			continue
+		}
+		//: Append adds one family when the codec implements Appender.
+		if _, yes := c.(corecodec.Appender); yes {
+			total += sizes
+		}
+		//: StreamEncode + StreamDecode add two families for streaming codecs.
+		if _, yes := c.(corecodec.StreamingCodec); yes {
+			total += 2 * sizes
+		}
+	}
+	return total
+}
+
 // runAllBenches drives every BenchmarkXxx family through testing.Benchmark
 // and returns a flat row list ready for rendering. Zero duplication
 // between `go test -bench=.` and this report generator — both call the
-// exact same make<Op>Bench helpers.
+// exact same make<Op>Bench helpers. A benchProgress reporter narrates the
+// otherwise-silent run to stderr.
 func runAllBenches() []benchReportRow {
 	rows := make([]benchReportRow, 0, 400)
 	formats := codec.Available()
+	prog := newBenchProgress(benchTotalCells(formats))
 
-	rows = collectMarshal(rows, formats)
-	rows = collectUnmarshal(rows, formats)
-	rows = collectMarshalParallel(rows, formats)
-	rows = collectUnmarshalParallel(rows, formats)
-	rows = collectAppend(rows, formats)
-	rows = collectStreamEncode(rows, formats)
-	rows = collectStreamDecode(rows, formats)
+	rows = collectMarshal(rows, formats, prog)
+	rows = collectUnmarshal(rows, formats, prog)
+	rows = collectMarshalParallel(rows, formats, prog)
+	rows = collectUnmarshalParallel(rows, formats, prog)
+	rows = collectAppend(rows, formats, prog)
+	rows = collectStreamEncode(rows, formats, prog)
+	rows = collectStreamDecode(rows, formats, prog)
+	prog.finish()
 	return rows
 }
 
 // collectMarshal benches every codec × size through codec.Marshal.
-func collectMarshal(rows []benchReportRow, formats []codec.Format) []benchReportRow {
+func collectMarshal(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
 	for _, f := range formats {
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
 			r := testing.Benchmark(makeMarshalBench(f, payload))
 			rows = append(rows, toRow("Marshal", string(f), sz, r))
+			prog.step("Marshal " + string(f) + "/" + sz)
 		}
 	}
 	return rows
@@ -980,7 +1067,7 @@ func collectMarshal(rows []benchReportRow, formats []codec.Format) []benchReport
 
 // collectUnmarshal benches every codec × size; Marshal is hoisted as a
 // one-shot seed outside b.Loop so only the decode cost is timed.
-func collectUnmarshal(rows []benchReportRow, formats []codec.Format) []benchReportRow {
+func collectUnmarshal(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
 	for _, f := range formats {
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
@@ -991,6 +1078,7 @@ func collectUnmarshal(rows []benchReportRow, formats []codec.Format) []benchRepo
 			}
 			r := testing.Benchmark(makeUnmarshalBench(f, payload, data))
 			rows = append(rows, toRow("Unmarshal", string(f), sz, r))
+			prog.step("Unmarshal " + string(f) + "/" + sz)
 		}
 	}
 	return rows
@@ -998,19 +1086,20 @@ func collectUnmarshal(rows []benchReportRow, formats []codec.Format) []benchRepo
 
 // collectMarshalParallel measures Marshal under b.RunParallel
 // (GOMAXPROCS goroutines, shared codec singleton).
-func collectMarshalParallel(rows []benchReportRow, formats []codec.Format) []benchReportRow {
+func collectMarshalParallel(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
 	for _, f := range formats {
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
 			r := testing.Benchmark(makeMarshalParallelBench(f, payload))
 			rows = append(rows, toRow("MarshalParallel", string(f), sz, r))
+			prog.step("MarshalParallel " + string(f) + "/" + sz)
 		}
 	}
 	return rows
 }
 
 // collectUnmarshalParallel benches Unmarshal under b.RunParallel.
-func collectUnmarshalParallel(rows []benchReportRow, formats []codec.Format) []benchReportRow {
+func collectUnmarshalParallel(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
 	for _, f := range formats {
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
@@ -1020,6 +1109,7 @@ func collectUnmarshalParallel(rows []benchReportRow, formats []codec.Format) []b
 			}
 			r := testing.Benchmark(makeUnmarshalParallelBench(f, payload, data))
 			rows = append(rows, toRow("UnmarshalParallel", string(f), sz, r))
+			prog.step("UnmarshalParallel " + string(f) + "/" + sz)
 		}
 	}
 	return rows
@@ -1028,7 +1118,7 @@ func collectUnmarshalParallel(rows []benchReportRow, formats []codec.Format) []b
 // collectAppend benches the optional Appender extension. Codecs that
 // do NOT implement Appender contribute no rows — the optional interface
 // absence is a structural fact, not a benchmark gap.
-func collectAppend(rows []benchReportRow, formats []codec.Format) []benchReportRow {
+func collectAppend(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
 	for _, f := range formats {
 		c, ok := corecodec.Lookup(f)
 		if !ok {
@@ -1042,6 +1132,7 @@ func collectAppend(rows []benchReportRow, formats []codec.Format) []benchReportR
 			payload := payloadFor(string(f), sz)
 			r := testing.Benchmark(makeAppendBench(appender, payload))
 			rows = append(rows, toRow("Append", string(f), sz, r))
+			prog.step("Append " + string(f) + "/" + sz)
 		}
 	}
 	return rows
@@ -1049,7 +1140,7 @@ func collectAppend(rows []benchReportRow, formats []codec.Format) []benchReportR
 
 // collectStreamEncode benches Encoder.Encode for codecs implementing
 // StreamingCodec. Per-codec record shape via streamRecordsFor.
-func collectStreamEncode(rows []benchReportRow, formats []codec.Format) []benchReportRow {
+func collectStreamEncode(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
 	for _, f := range formats {
 		c, ok := corecodec.Lookup(f)
 		if !ok {
@@ -1063,6 +1154,7 @@ func collectStreamEncode(rows []benchReportRow, formats []codec.Format) []benchR
 			records := streamRecordsFor(string(f), sz)
 			r := testing.Benchmark(makeStreamEncodeBench(stream, records))
 			rows = append(rows, toRow("StreamEncode", string(f), sz, r))
+			prog.step("StreamEncode " + string(f) + "/" + sz)
 		}
 	}
 	return rows
@@ -1070,7 +1162,7 @@ func collectStreamEncode(rows []benchReportRow, formats []codec.Format) []benchR
 
 // collectStreamDecode benches Decoder.Decode; the encoded seed is
 // pre-built once per (format, size) outside the timer.
-func collectStreamDecode(rows []benchReportRow, formats []codec.Format) []benchReportRow {
+func collectStreamDecode(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
 	for _, f := range formats {
 		c, ok := corecodec.Lookup(f)
 		if !ok {
@@ -1088,6 +1180,7 @@ func collectStreamDecode(rows []benchReportRow, formats []codec.Format) []benchR
 			}
 			r := testing.Benchmark(makeStreamDecodeBench(stream, string(f), len(records), seed))
 			rows = append(rows, toRow("StreamDecode", string(f), sz, r))
+			prog.step("StreamDecode " + string(f) + "/" + sz)
 		}
 	}
 	return rows
