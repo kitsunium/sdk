@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"slices"
 	"sync"
+	"unsafe"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -228,19 +229,22 @@ func marshalRawSliceTo(dst []byte, v any) (encoded []byte, ok bool) {
 	return nil, false
 }
 
-// rawMessageView re-types a []json.RawMessage as [][]byte without
-// copying. RawMessage is defined as []byte upstream so the conversion
-// is free at runtime — keeps appendNDJSONRaw single-shape.
+// rawMessageView re-types a []json.RawMessage as [][]byte with a
+// zero-copy unsafe pointer-cast. stdjson.RawMessage is defined as
+// `type RawMessage []byte` upstream, so the slice headers are
+// bit-identical at the runtime representation level — the cast
+// just reinterprets the same memory through a different element
+// type. Saves the make([][]byte, len(rows)) allocation + the N
+// per-element header copies the safe loop used to pay.
+//
+// Lifetime safety: the returned view aliases the caller's rows
+// slice. appendNDJSONRaw consumes the view synchronously and never
+// retains the slice header beyond its own stack frame.
 func rawMessageView(rows []stdjson.RawMessage) [][]byte {
-	//: unsafe-free re-slice: each RawMessage is already a []byte.
-	view := make([][]byte, len(rows))
-	//: alias the backing storage per element.
-	for i, r := range rows {
-		//: each RawMessage IS a []byte under the hood.
-		view[i] = r
-	}
-	//: caller iterates the slice header.
-	return view
+	//: bit-identical layout — both are slice-of-slice with the same
+	//: element-slice header (ptr, len, cap). The cast preserves
+	//: every element's backing storage by reference.
+	return *(*[][]byte)(unsafe.Pointer(&rows))
 }
 
 // appendNDJSONRaw appends rows + '\n' separators onto dst. Refuses any
