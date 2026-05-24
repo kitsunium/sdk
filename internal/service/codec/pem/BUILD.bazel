@@ -29,6 +29,7 @@ go_test(
     size = "small",
     srcs = [
         "codec_external_test.go",
+        "codec_integration_test.go",
         "codec_internal_test.go",
     ],
     embed = [":pem"],
