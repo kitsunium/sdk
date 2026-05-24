@@ -109,6 +109,12 @@ func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
 	enc := gomsgpack.GetEncoder()
 	//: re-point the encoder at our pooled buffer.
 	enc.Reset(buf)
+	//: UseCompactInts shrinks wire size on int-heavy payloads by
+	//: emitting positive fixint / int8 / int16 / int32 instead of the
+	//: lib default int64 for every int. Wire-compatible on the read
+	//: side (any conforming MessagePack decoder accepts narrower int
+	//: forms). Audit M3.
+	enc.UseCompactInts(true)
 	//: encode the value.
 	merr := enc.Encode(v)
 	//: return the encoder to the pool unconditionally — Encode failure
@@ -219,6 +225,8 @@ func (*msgpackCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	enc := gomsgpack.GetEncoder()
 	//: re-point the encoder at our pooled buffer.
 	enc.Reset(buf)
+	//: UseCompactInts — same wire-compatible flag as Marshal.
+	enc.UseCompactInts(true)
 	//: encode the value.
 	merr := enc.Encode(v)
 	//: return the encoder to the lib pool unconditionally.
