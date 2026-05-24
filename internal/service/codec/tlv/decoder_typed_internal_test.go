@@ -296,3 +296,166 @@ func decimalDigit(i int) string {
 	//: roll over to "A".."Z" for larger indices.
 	return string(rune('A' + i - digitsBeforeRollover))
 }
+
+// Test_decodeFieldValue covers the per-field router: known field
+// (fieldIdx != notFoundFieldIdx) takes the typed assignment branch;
+// unknown field consumes the value bytes via decodeValue and discards.
+func Test_decodeFieldValue(t *testing.T) {
+	t.Parallel()
+	//: wire shape: tagInt8 (0x10) with payload 0x05 = int8(5).
+	wire := []byte{0x10, 0x01, 0x05}
+	type tc struct {
+		name        string
+		fieldIdx    int
+		wantConsume bool
+	}
+	tests := []tc{
+		{"known-field-typed-assignment", 0, true},
+		{"unknown-field-discard", notFoundFieldIdx, true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: fresh target struct per case so assignments don't leak.
+		var dst struct{ X int }
+		target := reflect.ValueOf(&dst).Elem()
+		info := cachedStructTypeInfo(target.Type())
+		next, err := decodeFieldValue(wire, target, info, tc.fieldIdx, 1)
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		//: contract: wire bytes are fully consumed regardless of branch.
+		if (len(next) == 0) != tc.wantConsume {
+			t.Errorf("%s: consume mismatch — leftover=%d", tc.name, len(next))
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_assignFieldValue pins the per-field setter: it must publish a
+// decoded value into the cached field index, and nil values must zero
+// the destination.
+func Test_assignFieldValue(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		val  any
+		want int
+	}
+	tests := []tc{
+		{"non-nil-assigns", int64(42), 42},
+		{"nil-zeros-destination", nil, 0},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		var dst struct{ X int }
+		dst.X = 99
+		target := reflect.ValueOf(&dst).Elem()
+		info := cachedStructTypeInfo(target.Type())
+		if err := assignFieldValue(reflectView(target), info, 0, tc.val); err != nil {
+			t.Fatalf("%s: err=%v", tc.name, err)
+		}
+		//: contract: target field reflects the converted value.
+		if dst.X != tc.want {
+			t.Errorf("%s: X=%d want=%d", tc.name, dst.X, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_decodeSliceElement covers both branches of the slice-element
+// dispatcher: tagStruct → typed path; non-struct tag → untyped
+// fallback with conversion into the element type.
+func Test_decodeSliceElement(t *testing.T) {
+	t.Parallel()
+	type inner struct{ V int }
+	type tc struct {
+		name string
+		wire []byte
+		want inner
+	}
+	tests := []tc{
+		//: tagStruct (0x70) + field count 1 + field "V" (tagString,
+		//: 1B name) + value tagInt8 with payload 7.
+		{
+			"struct-element",
+			[]byte{0x70, 0x01, 0x40, 0x01, 'V', 0x10, 0x01, 0x07},
+			inner{V: 7},
+		},
+		//: tagNil (0x01) element — element stays at its zero value.
+		{
+			"nil-element",
+			[]byte{0x01, 0x00},
+			inner{},
+		},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		elemType := reflect.TypeFor[inner]()
+		next, ev, err := decodeSliceElement(tc.wire, elemType, 1)
+		if err != nil {
+			t.Fatalf("%s: err=%v", tc.name, err)
+		}
+		//: contract: returned reflect.Value carries the expected element.
+		got, ok := ev.Interface().(inner)
+		if !ok || got != tc.want {
+			t.Errorf("%s: got=%+v want=%+v", tc.name, got, tc.want)
+		}
+		//: contract: wire bytes are fully consumed.
+		if len(next) != 0 {
+			t.Errorf("%s: %d leftover bytes", tc.name, len(next))
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_tryDecodeRootIntoSliceOfStruct pins the Phase-2 typed slice
+// path end-to-end via the codec's Marshal/Unmarshal verbs.
+func Test_tryDecodeRootIntoSliceOfStruct(t *testing.T) {
+	t.Parallel()
+	type item struct {
+		ID   int
+		Name string
+	}
+	type tc struct {
+		name string
+		src  []item
+	}
+	tests := []tc{
+		{"empty-slice", []item{}},
+		{"single-element", []item{{ID: 1, Name: "alice"}}},
+		{
+			"multiple-elements",
+			[]item{{ID: 1, Name: "a"}, {ID: 2, Name: "b"}, {ID: 3, Name: "c"}},
+		},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &tlvCodec{}
+		enc, merr := c.Marshal(tc.src)
+		if merr != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, merr)
+		}
+		var got []item
+		if uerr := c.Unmarshal(enc, &got); uerr != nil {
+			t.Fatalf("%s: Unmarshal err=%v", tc.name, uerr)
+		}
+		//: contract: every element survives round-trip in declaration order.
+		if len(got) != len(tc.src) {
+			t.Fatalf("%s: length mismatch: got=%d want=%d", tc.name, len(got), len(tc.src))
+		}
+		for i := range tc.src {
+			if got[i] != tc.src[i] {
+				t.Errorf("%s: [%d] got=%+v want=%+v", tc.name, i, got[i], tc.src[i])
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

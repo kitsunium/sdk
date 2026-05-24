@@ -43,19 +43,51 @@ const notFoundFieldIdx int = -1
 // handled=false signals "this target shape doesn't benefit from the
 // fast path — caller falls through to decodeRoot's untyped walk".
 //
-// The Phase-1 scope is top-level *struct targets: that's where the
-// untyped path's map[string]any + projectMapToStruct double-walk
-// costs the most.
+// Phase 1 — top-level *struct targets: that's where the untyped
+// path's map[string]any + projectMapToStruct double-walk costs the
+// most.
+//
+// Phase 2 — top-level *[]struct targets: each element re-enters the
+// struct fast path so an N-element slice of structs avoids N map
+// allocations + N projections, just like the single-struct case but
+// linearly scaled.
 func tryDecodeRootInto(data []byte, target reflect.Value) (handled bool, err error) {
-	//: combine the target-shape gates so the linter's MERGEGUARD
-	//: rule is satisfied (both branches return the same sentinel).
-	if target.Kind() != reflect.Struct || !target.CanSet() {
-		//: signal caller to fall back to the untyped decodeRoot path.
+	//: target must be settable; the untyped path's diagnostic is clearer.
+	if !target.CanSet() {
+		//: signal caller to fall back.
 		return false, nil
 	}
+	//: dispatch on target.Kind() — struct and slice-of-struct each get
+	//: their own typed entry point; anything else falls through to the
+	//: untyped projector.
+	switch target.Kind() {
+	//: top-level struct — Phase 1 path.
+	case reflect.Struct:
+		//: hand off to the struct dispatcher.
+		return tryDecodeRootIntoStruct(data, target)
+	//: top-level []Struct — Phase 2 path (slice of structs only).
+	case reflect.Slice:
+		//: handle only slice-of-struct here; other element kinds keep
+		//: falling through to the untyped projector.
+		if target.Type().Elem().Kind() != reflect.Struct {
+			//: slice-of-non-struct uses the untyped path.
+			return false, nil
+		}
+		//: typed slice-of-struct dispatcher.
+		return tryDecodeRootIntoSliceOfStruct(data, target)
+	//: every other root target uses the untyped path.
+	default:
+		//: signal caller to fall back.
+		return false, nil
+	}
+}
+
+// tryDecodeRootIntoStruct handles the Phase-1 *struct target path.
+// Verifies the wire carries a tagStruct record then dispatches into
+// decodeStructFromHeader; falls back (handled=false) on any shape
+// mismatch so the untyped projector retains its current behaviour.
+func tryDecodeRootIntoStruct(data []byte, target reflect.Value) (handled bool, err error) {
 	//: peek the tag — if the wire isn't a struct record, fall back.
-	//: This keeps us compatible with payloads that encode a struct
-	//: target from a non-struct source (e.g. map[string]any wire).
 	if len(data) < minRecordBytes {
 		//: surface the truncated sentinel via the typed path so the
 		//: caller's untyped retry doesn't double-report.
@@ -69,8 +101,7 @@ func tryDecodeRootInto(data []byte, target reflect.Value) (handled bool, err err
 	//: parse the struct header (field count + cap-discard) and
 	//: dispatch into decodeStructInto.
 	residual, derr := decodeStructFromHeader(data[1:], target)
-	//: typed-path always reports handled=true once the wire is a
-	//: tagStruct (caller doesn't need to retry the untyped path).
+	//: surface decode failure verbatim.
 	if derr != nil {
 		//: already wrapped.
 		return true, derr
@@ -82,6 +113,143 @@ func tryDecodeRootInto(data []byte, target reflect.Value) (handled bool, err err
 	}
 	//: typed-path success.
 	return true, nil
+}
+
+// tryDecodeRootIntoSliceOfStruct handles the Phase-2 *[]Struct
+// target path. Each element re-enters decodeStructInto so the
+// per-element map[string]any allocations are avoided across the
+// whole slice.
+func tryDecodeRootIntoSliceOfStruct(data []byte, target reflect.Value) (handled bool, err error) {
+	//: peek the tag — only tagSlice triggers the typed slice path.
+	if len(data) < minRecordBytes {
+		//: surface the truncated sentinel via the typed path.
+		return true, truncatedError()
+	}
+	//: shape mismatch on the wire side; let the untyped path project.
+	if Tag(data[0]) != tagSlice {
+		//: shape mismatch; let the untyped path project from []any.
+		return false, nil
+	}
+	//: read the element count.
+	rest := data[1:]
+	length, rest, lerr := readVarintFromBytes(rest)
+	//: surface varint failure verbatim.
+	if lerr != nil {
+		//: already wrapped.
+		return true, lerr
+	}
+	//: cap-discard the structural length before walking elements.
+	if length > uint64(maxTLVBytes) {
+		//: surface the size sentinel.
+		return true, sizeExceededError(length)
+	}
+	//: walk each element directly into the slice.
+	residual, derr := decodeSliceOfStructInto(length, rest, reflectView(target), 0)
+	//: surface element-walk failure verbatim.
+	if derr != nil {
+		//: already wrapped.
+		return true, derr
+	}
+	//: typed path expects an exact buffer.
+	if len(residual) != 0 {
+		//: trailing bytes sentinel.
+		return true, trailingBytesError(len(residual))
+	}
+	//: typed-path success.
+	return true, nil
+}
+
+// decodeSliceOfStructInto consumes `length` struct records from rest
+// and builds a typed []ElemStruct in place on target. Pre-allocates
+// the slice with the wire-declared length (clamped against
+// sliceHintCap so a malformed declared-length cannot trigger a
+// multi-GB allocation).
+func decodeSliceOfStructInto(length uint64, rest []byte, targetView reflectView, depth int) (residual []byte, err error) {
+	//: unwrap once for method dispatch (Type/Elem/Set).
+	target := reflect.Value(targetView)
+	//: depth guard — one extra level for the slice's element step.
+	if depth+1 > maxTLVDepth {
+		//: surface the documented depth sentinel.
+		return rest, depthExceededError(depth + 1)
+	}
+	//: snapshot the element type once.
+	elemType := target.Type().Elem()
+	//: pre-allocate via the clamped hint to defuse declared-length DoS.
+	out := reflect.MakeSlice(target.Type(), 0, sliceHint(length))
+	//: walk every element on the wire.
+	for range length {
+		//: each element MUST carry at least a tag + length header.
+		if len(rest) < minRecordBytes {
+			//: short buffer — propagate the truncation sentinel.
+			return rest, truncatedError()
+		}
+		//: dispatch on element tag: tagStruct keeps the typed path,
+		//: everything else falls back through the generic walker.
+		next, elemValue, eerr := decodeSliceElement(rest, elemType, depth+1)
+		//: surface per-element decode failure verbatim.
+		if eerr != nil {
+			//: already wrapped.
+			return rest, eerr
+		}
+		//: append the populated (or zero) element onto the result slice.
+		out = reflect.Append(out, elemValue)
+		//: advance past the consumed element bytes.
+		rest = next
+	}
+	//: publish through the caller's slice pointer.
+	target.Set(out)
+	//: walked every element.
+	return rest, nil
+}
+
+// decodeSliceElement consumes one element record from rest and
+// returns the residual bytes + a settable reflect.Value of elemType
+// populated with the decoded element. Hoisted out of
+// decodeSliceOfStructInto to keep that helper under the linter's
+// MAXLOC + CYCLO budgets and to make per-element behaviour testable
+// in isolation.
+func decodeSliceElement(rest []byte, elemType reflect.Type, depth int) (next []byte, elemValue reflect.Value, err error) {
+	//: tagStruct → typed path, byte-skip + struct walker.
+	if Tag(rest[0]) == tagStruct {
+		//: build a settable element placeholder.
+		ev := reflect.New(elemType).Elem()
+		//: dispatch into the struct walker (skips the tag byte).
+		next2, ferr := decodeStructFromHeader(rest[1:], ev)
+		//: surface element-decode failure verbatim.
+		if ferr != nil {
+			//: already wrapped.
+			return rest, reflect.Value{}, ferr
+		}
+		//: caller appends the populated element.
+		return next2, ev, nil
+	}
+	//: untyped fallback — element isn't a struct record on the wire
+	//: (e.g. nil element). Decode via the generic walker and convert
+	//: into the typed element via the shared narrowing path.
+	val, next3, verr := decodeValue(rest, depth)
+	//: surface decode failure verbatim.
+	if verr != nil {
+		//: already wrapped.
+		return rest, reflect.Value{}, verr
+	}
+	//: build a settable element placeholder (zero value of elemType).
+	ev := reflect.New(elemType).Elem()
+	//: nil source → element stays at its zero value.
+	if val == nil {
+		//: caller appends the zero element.
+		return next3, ev, nil
+	}
+	//: route through the shared narrowing path.
+	conv, cerr := convertValue(val, elemType)
+	//: surface conversion failure verbatim.
+	if cerr != nil {
+		//: already wrapped.
+		return rest, reflect.Value{}, cerr
+	}
+	//: publish the converted value into the placeholder.
+	ev.Set(conv)
+	//: caller appends the converted element.
+	return next3, ev, nil
 }
 
 // decodeStructFromHeader reads the LEB128 field-count header at rest
