@@ -375,7 +375,17 @@ func tryNumericTag(tag Tag, length uint64, rest []byte) (value any, residual []b
 }
 
 // readVarintFromBytes reads one LEB128 value from the head of data.
+// 1-byte LEB128 (data[0] < 0x80) is the common case — inline that check
+// before calling binary.Uvarint to skip the function-call frame and the
+// loop setup on the > 90% common path (audit TL7).
 func readVarintFromBytes(data []byte) (value uint64, rest []byte, err error) {
+	//: 1-byte LEB128 fast-path: continuation bit clear means we have
+	//: the whole length in data[0] already.
+	if len(data) > 0 && uint64(data[0]) < uvarintSingleByteCap {
+		//: tag-and-length stride is 1 byte; return rest with that
+		//: advance and the length in the low 7 bits.
+		return uint64(data[0]), data[1:], nil
+	}
 	//: delegate to the stdlib helper.
 	val, n := binary.Uvarint(data)
 	//: n == 0 means buffer too small.

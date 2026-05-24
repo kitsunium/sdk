@@ -8,9 +8,74 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"sync"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// maxRetainedScratchBytes caps the size of recycled encode-scratch
+// buffers. A one-off oversized payload would otherwise pin a large
+// allocation in the pool for the lifetime of the GC window. 256 KiB is
+// the project-wide threshold.
+const maxRetainedScratchBytes int = 256 << 10
+
+// scratchInitialCap is the starting capacity for fresh pooled scratch
+// buffers. 256 bytes fits a typical small TLV record without forcing
+// an immediate grow.
+const scratchInitialCap int = 256
+
+// uvarintSingleByteCap is the exclusive upper bound for a single-byte
+// LEB128-encoded value. Lengths < 0x80 carry no continuation bit and
+// fit verbatim in one byte — the overwhelming common case for TLV
+// record lengths (struct field names, small scalars, sub-record sizes).
+const uvarintSingleByteCap uint64 = 0x80
+
+// scratchPool reuses []byte scratch buffers across tlvEncoder.Encode
+// and Marshal/Append calls. Without it every record paid one
+// allocation for the scratch slice that grows via append's geometric
+// doubling. Returning a *[]byte avoids the interface-boxing alloc on
+// sync.Pool.Put — per the pool & locality engineer's imposed rules.
+var scratchPool = sync.Pool{
+	New: newScratch,
+}
+
+// newScratch returns a freshly-allocated *[]byte with the standard
+// initial capacity. Uses the Go 1.26+ new(expr) form so the slice
+// header is heap-allocated in one shot without the v := expr; &v
+// intermediate (KTN-VAR-NEWEXPR).
+func newScratch() any {
+	//: pool stores pointers to avoid the Put-time boxing alloc.
+	return new(make([]byte, 0, scratchInitialCap))
+}
+
+// getScratch rents a *[]byte from scratchPool with a clean header.
+func getScratch() *[]byte {
+	//: pool invariant guard: New always returns *[]byte.
+	bp, ok := scratchPool.Get().(*[]byte)
+	//: pool invariant guard — never expected to fail at runtime.
+	if !ok {
+		//: invariant broken — fail loud at the call site.
+		panic("service/codec/tlv: scratchPool yielded non-*[]byte")
+	}
+	//: reset header so caller writes from offset 0.
+	*bp = (*bp)[:0]
+	//: caller owns the buffer until putScratch returns it.
+	return bp
+}
+
+// putScratch returns bp to the pool unless its capacity exceeds the
+// cap-discard threshold (otherwise a one-off huge payload pins the
+// buffer).
+func putScratch(bp *[]byte) {
+	//: cap-discard: drop oversized buffers, the GC reclaims them.
+	if cap(*bp) > maxRetainedScratchBytes {
+		//: orphan the buffer.
+		return
+	}
+	//: zero the header before returning to the pool.
+	*bp = (*bp)[:0]
+	scratchPool.Put(bp)
+}
 
 // tlvEncoder adapts an io.Writer to codec.Encoder. Each Encode call emits
 // exactly one independent TLV record.
@@ -21,16 +86,27 @@ type tlvEncoder struct {
 // Encode serialises v as a single TLV record and writes it to the wrapped
 // writer.
 func (e *tlvEncoder) Encode(v any) error {
-	//: encode into a scratch buffer first so a partial write never leaves
-	//: a torn record on the wire.
-	buf, eerr := encodeValue(nil, v, 0)
-	//: surface any encode failure verbatim.
+	//: rent a recycled scratch buffer (zero-len header). Pool eliminates
+	//: the fresh `nil` slice allocation that grew via append doubling
+	//: on every Encode call. Cap-discard release returns it.
+	bp := getScratch()
+	//: encode into the pooled scratch first so a partial write never
+	//: leaves a torn record on the wire.
+	buf, eerr := encodeValue(*bp, v, 0)
+	//: surface any encode failure verbatim. Scratch goes back regardless.
 	if eerr != nil {
-		//: nothing to flush to the writer.
+		//: stash the (possibly grown) backing array before bailing.
+		*bp = buf
+		putScratch(bp)
+		//: caller sees the wrapped TLV error.
 		return eerr
 	}
 	//: hand the whole record to the writer in one shot.
 	n, werr := e.w.Write(buf)
+	//: stash the (possibly grown) backing array back into the pool
+	//: before any error wrap so the slow path also amortises.
+	*bp = buf
+	putScratch(bp)
 	//: detect partial writes — Go's io.Writer contract permits n < len(buf)
 	//: with a nil error, but a torn TLV record on the wire is unrecoverable.
 	//: Surface as io.ErrShortWrite so callers can errors.Is() against it.
@@ -58,10 +134,22 @@ func (*tlvEncoder) Close() error {
 }
 
 // appendTagLen writes the 1-byte tag followed by the LEB128 length.
+// 1-byte LEB128 (length < 128) is the overwhelming common case for TLV
+// records (struct field names, small scalars, sub-record lengths). The
+// fast-path elides the binary.AppendUvarint function call + its loop
+// setup for that case — single `append(dst, byte(tag), byte(length))`
+// covers > 90% of records per the audit context (TL7+TL8).
 func appendTagLen(dst []byte, tag Tag, length uint64) []byte {
+	//: 1-byte LEB128 fast-path: lengths < 0x80 fit in a single byte
+	//: with the continuation bit clear. Same wire output as the
+	//: stdlib AppendUvarint for this range.
+	if length < uvarintSingleByteCap {
+		//: emit tag + length in one append call.
+		return append(dst, byte(tag), byte(length))
+	}
 	//: emit the tag byte first.
 	dst = append(dst, byte(tag))
-	//: then the LEB128 length.
+	//: multi-byte LEB128 falls through to the stdlib helper.
 	return binary.AppendUvarint(dst, length)
 }
 
