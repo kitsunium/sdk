@@ -572,8 +572,42 @@ func tryTypedFieldRecursion(rest []byte, targetView reflectView, info *structTyp
 		//: caller surfaces err verbatim.
 		return next2, true, serr
 	}
+	//: nested map typed recursion (Phase 5) when both sides agree.
+	if field.kind == reflect.Map && Tag(rest[0]) == tagMap {
+		//: walk every (key, value) pair directly into the field map.
+		next2, merr := decodeNestedMap(rest[1:], dst, depth+1)
+		//: caller surfaces err verbatim.
+		return next2, true, merr
+	}
 	//: shape doesn't match any typed path — caller falls back.
 	return nil, false, nil
+}
+
+// decodeNestedMap reads the LEB128 pair-count header at rest and
+// dispatches into decodeMapInto so a struct field whose value is
+// a map[K]V walks the typed map path instead of the untyped
+// projector. Phase-5 nested-field recursion companion to
+// decodeNestedSliceOfStruct.
+func decodeNestedMap(rest []byte, target reflect.Value, depth int) (residual []byte, err error) {
+	//: depth guard — Phase 5 paths share the same maxTLVDepth gate.
+	if depth > maxTLVDepth {
+		//: surface the documented depth sentinel.
+		return rest, depthExceededError(depth)
+	}
+	//: read the pair count.
+	length, rest, lerr := readVarintFromBytes(rest)
+	//: surface varint failure verbatim.
+	if lerr != nil {
+		//: already wrapped.
+		return rest, lerr
+	}
+	//: cap-discard structural length before walking pairs.
+	if length > uint64(maxTLVBytes) {
+		//: surface the size sentinel.
+		return rest, sizeExceededError(length)
+	}
+	//: walk each pair directly into the destination map.
+	return decodeMapInto(length, rest, reflectView(target), depth)
 }
 
 // isSliceOfStruct reports whether t is a slice whose element type is
