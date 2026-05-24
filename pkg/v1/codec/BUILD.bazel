@@ -51,6 +51,7 @@ go_test(
     srcs = [
         "codec_external_test.go",
         "codec_internal_test.go",
+        "fixtures_integration_test.go",
         "promote_internal_test.go",
     ],
     embed = [":codec"],
