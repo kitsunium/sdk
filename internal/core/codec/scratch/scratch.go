@@ -42,13 +42,8 @@ var (
 // caller owns it until ReleaseBuffer; the buffer is already Reset, so
 // callers append directly without re-resetting.
 func AcquireBuffer() *bytes.Buffer {
-	//: pool guarantees a *bytes.Buffer via its New func.
-	buf, ok := bufferPool.Get().(*bytes.Buffer)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("internal/core/codec/scratch: bufferPool yielded non-*bytes.Buffer")
-	}
+	//: poolGet carries the pool-invariant guard (unit-tested directly).
+	buf := poolGet[*bytes.Buffer](&bufferPool)
 	//: start clean — pool may return a partially-filled buffer.
 	buf.Reset()
 	//: hand the clean buffer to the caller.
@@ -75,13 +70,8 @@ func ReleaseBuffer(buf *bytes.Buffer) {
 // from src. The caller owns it until ReleaseReader. src must stay alive and
 // unmodified for as long as the reader is used.
 func AcquireReader(src []byte) *bytes.Reader {
-	//: pool guarantees a *bytes.Reader via its New func.
-	r, ok := readerPool.Get().(*bytes.Reader)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("internal/core/codec/scratch: readerPool yielded non-*bytes.Reader")
-	}
+	//: poolGet carries the pool-invariant guard (unit-tested directly).
+	r := poolGet[*bytes.Reader](&readerPool)
 	//: point the reader at src and rewind its cursor.
 	r.Reset(src)
 	//: hand the positioned reader to the caller.
@@ -93,4 +83,22 @@ func AcquireReader(src []byte) *bytes.Reader {
 func ReleaseReader(r *bytes.Reader) {
 	//: no cap check needed — the struct never grows.
 	readerPool.Put(r)
+}
+
+// poolGet pops a value from p and asserts it to T — the type p's New func
+// guarantees. Extracted from the Acquire* functions so the invariant guard
+// is unit-testable (via a poisoned local pool, without disturbing the
+// package pools); a future break panics loudly rather than nil-dereferencing
+// downstream. Taking *sync.Pool (not any) keeps the assertion off a
+// narrowable parameter.
+func poolGet[T any](p *sync.Pool) T {
+	//: assert the pooled value to the type p's New func guarantees.
+	v, ok := p.Get().(T)
+	//: invariant broken — a pool only ever holds the type its New builds.
+	if !ok {
+		//: fail loud rather than nil-deref downstream.
+		panic("internal/core/codec/scratch: pool yielded unexpected type")
+	}
+	//: hand back the asserted value.
+	return v
 }
