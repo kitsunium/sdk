@@ -30,8 +30,8 @@ go_test(
     name = "json_test",
     size = "small",
     srcs = [
-        "codec_alloc_integration_test.go",
         "codec_external_test.go",
+        "codec_integration_test.go",
         "codec_internal_test.go",
         "decoder_internal_test.go",
         "encoder_internal_test.go",
