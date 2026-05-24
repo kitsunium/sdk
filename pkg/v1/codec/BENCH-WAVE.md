@@ -105,6 +105,8 @@ Late-Wave-2 / Wave-3 micro-optimizations that landed on top of the table above. 
 | tlv Unmarshal Phase 3 (nested struct + nested slice-of-struct fields) | Per-field typed recursion when field.Kind() matches the wire tag; depth threaded through all paths | *Page with 50 nested Items + nested Owner struct: **-45% ns, -68% B/op, -55 allocs** |
 | tlv Marshal encodeStructDirect | Drop the collect-then-emit []any intermediate for structs; walk cachedStructTypeInfo and emit each field record directly | 5-field User: **-28% ns, -42% B/op, -50% allocs (12→6)** |
 | tlv Marshal encodeSliceDirect + encodeMapDirect | Same zero-intermediate pattern for slices + maps; companion to encodeStructDirect | []int(100): 8 allocs/op (was N+1 boxings); map[string]int(50): 107 allocs/op (same wire bytes, fewer in-flight) |
+| tlv Unmarshal Phase 4 (*map[K]V target) | Skip the map[any]any intermediate the legacy projector builds; decode directly into the typed map via convertValue narrowing | 50-entry *map[string]int: **-55% ns, -59% B/op, -105 allocs** |
+| tlv Unmarshal Phase 5 (nested map[K]V field) | Per-field typed recursion for nested map fields, mirroring Phase 3's nested struct + slice-of-struct paths | *Config with 2 nested map[string]X fields (20 entries each): **-52% ns, -55% B/op, -90 allocs** |
 
 The "size-aware release" pattern (clone+repool when cap ≤ 256 KiB,
 orphan-without-clone when cap > 256 KiB) was the unlock that let
