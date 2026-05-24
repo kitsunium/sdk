@@ -120,7 +120,7 @@ func (c *baseencCodec) Marshal(v any) (encoded []byte, err error) {
 	//: flatten the value through JSON first using the pooled buffer
 	//: so consecutive base-N Marshal calls amortise the bytes.Buffer
 	//: allocation + the geometric grow cascade.
-	jsonBytes, release, merr := marshalJSONPooled(v)
+	jsonBytes, buf, merr := marshalJSONPooled(v)
 	//: surface JSON-side failures with the dedicated reason.
 	if merr != nil {
 		//: keep encoded nil so callers do not consume a partial buffer.
@@ -135,17 +135,18 @@ func (c *baseencCodec) Marshal(v any) (encoded []byte, err error) {
 	//: go back as soon as we've consumed jsonBytes.
 	out := c.encodeBytes(jsonBytes)
 	//: cap-discard release of the pooled JSON buffer.
-	release()
+	releaseJSONBuffer(buf)
 	//: apply the variant's base-N alphabet to the JSON bytes.
 	return out, nil
 }
 
 // marshalJSONPooled encodes v via a pooled stdjson.Encoder + *bytes.Buffer
-// and returns (jsonBytes, releaseFn, err). The release closure returns
-// the buffer to the pool with cap-discard at maxRetainedJSONBufBytes.
-// Callers MUST call release() exactly once after consuming jsonBytes.
-// jsonBytes aliases the pooled buffer's backing array; release() invalidates it.
-func marshalJSONPooled(v any) (jsonBytes []byte, release func(), err error) {
+// and returns (jsonBytes, buf, err). jsonBytes aliases buf's backing array,
+// so callers MUST call releaseJSONBuffer(buf) exactly once after consuming
+// jsonBytes — which invalidates it. Returning the buffer rather than a
+// release closure keeps the Marshal/Append hot path free of a per-call
+// closure heap escape (the closure captured buf and so always escaped).
+func marshalJSONPooled(v any) (jsonBytes []byte, buf *bytes.Buffer, err error) {
 	//: rent the pooled buffer; pool guarantees a *bytes.Buffer.
 	buf, ok := jsonBufferPool.Get().(*bytes.Buffer)
 	//: pool invariant guard — never expected to fail at runtime.
@@ -171,8 +172,8 @@ func marshalJSONPooled(v any) (jsonBytes []byte, release func(), err error) {
 		//: drop the trailing newline.
 		b = b[:n-1]
 	}
-	//: caller consumes b before calling release.
-	return b, func() { releaseJSONBuffer(buf) }, nil
+	//: hand back the buffer; caller releases it after consuming b.
+	return b, buf, nil
 }
 
 // releaseJSONBuffer returns buf to jsonBufferPool unless its capacity
@@ -234,7 +235,7 @@ func (c *baseencCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	origLen := len(dst)
 	//: encode through JSON via the pooled buffer so consecutive calls
 	//: amortise the bytes.Buffer allocation + grow cascade.
-	jsonBytes, release, merr := marshalJSONPooled(v)
+	jsonBytes, buf, merr := marshalJSONPooled(v)
 	//: JSON-side failure restores dst and surfaces the dedicated reason.
 	if merr != nil {
 		//: leave dst exactly as the caller passed it.
@@ -248,7 +249,7 @@ func (c *baseencCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: base-N append uses the variant-specific AppendEncode where possible.
 	out := c.appendEncode(dst, jsonBytes)
 	//: cap-discard release of the pooled JSON buffer.
-	release()
+	releaseJSONBuffer(buf)
 	//: success — dst grew with the base-N encoding of jsonBytes.
 	return out, nil
 }

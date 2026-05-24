@@ -880,8 +880,8 @@ func Test_encodeHex(t *testing.T) {
 }
 
 // Test_marshalJSONPooled covers the JSON-inner pool helper: returned
-// jsonBytes round-trip through json.Unmarshal; release() is callable
-// without panic.
+// jsonBytes round-trip through json.Unmarshal; the returned buffer is
+// releasable via releaseJSONBuffer without panic.
 func Test_marshalJSONPooled(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -896,14 +896,14 @@ func Test_marshalJSONPooled(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		got, release, err := marshalJSONPooled(tc.v)
+		got, buf, err := marshalJSONPooled(tc.v)
 		if err != nil {
 			t.Fatalf("%s: unexpected err=%v", tc.name, err)
 		}
 		if string(got) != tc.want {
 			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
 		}
-		release()
+		releaseJSONBuffer(buf)
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
