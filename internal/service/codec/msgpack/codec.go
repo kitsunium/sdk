@@ -137,7 +137,7 @@ func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
 
 // releaseBuffer returns buf to the pool unless its capacity exceeds the
 // cap-discard threshold. Hoisted to avoid duplicating the cap check at
-// every Put site and to keep Marshal under the linter's MAXLOC budget.
+// every Put site and to keep Marshal + Append under the linter budgets.
 func releaseBuffer(buf *bytes.Buffer) {
 	//: oversized buffers would pin large allocations for the lifetime
 	//: of the pool's GC window — drop them instead.
@@ -199,6 +199,48 @@ func (*msgpackCodec) Unmarshal(data []byte, v any) error {
 		Public:  "MessagePack decoding failed",
 		Private: "service/codec/msgpack.Unmarshal: vmihailenco/msgpack/v5 returned an error",
 	})
+}
+
+// Append encodes v as MessagePack and appends the bytes to dst. Reuses
+// the same pooled encoder + buffer as Marshal — the encode result is
+// then appended onto the caller's buffer instead of returned as a
+// fresh slice. Saves the slices.Clone Marshal pays.
+func (*msgpackCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: rent the output buffer; pool guarantees a *bytes.Buffer.
+	buf, ok := bufferPool.Get().(*bytes.Buffer)
+	//: pool invariant guard — never expected to fail at runtime.
+	if !ok {
+		//: invariant broken — fail loud at the call site.
+		panic("service/codec/msgpack: bufferPool yielded non-*bytes.Buffer")
+	}
+	//: start clean — pool may return a partially-filled buffer.
+	buf.Reset()
+	//: rent the encoder from the library's exposed pool.
+	enc := gomsgpack.GetEncoder()
+	//: re-point the encoder at our pooled buffer.
+	enc.Reset(buf)
+	//: encode the value.
+	merr := enc.Encode(v)
+	//: return the encoder to the lib pool unconditionally.
+	gomsgpack.PutEncoder(enc)
+	//: failure path — surface the typed sentinel, leave dst pristine.
+	if merr != nil {
+		//: drop the buffer back to the pool if not oversized.
+		releaseBuffer(buf)
+		//: wrap the library error for reason-based matching.
+		return dst, errs.Wrap(merr, errs.WrapParams{
+			Code:    CodeMsgPackMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "MessagePack encoding failed",
+			Private: "service/codec/msgpack.Append: vmihailenco/msgpack/v5 returned an error",
+		})
+	}
+	//: append into the caller's buffer (1 copy total — no slices.Clone).
+	dst = append(dst, buf.Bytes()...)
+	//: cap-discard release.
+	releaseBuffer(buf)
+	//: success — bytes are the caller's now.
+	return dst, nil
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.

@@ -46,6 +46,7 @@ var expectedAppenders = []string{
 	"yaml",
 	"toml",
 	"cbor",
+	"msgpack",
 	"base64",
 	"base64url",
 	"base32",
@@ -1376,10 +1377,10 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 					}
 				},
 			})
-		//: Universal-any group: json + yaml + toml + cbor + every
-		//: baseenc variant (baseenc is JSON-mediated). All accept
+		//: Universal-any group: json + yaml + toml + cbor + msgpack +
+		//: every baseenc variant (baseenc is JSON-mediated). All accept
 		//: complexRT natively without going through the promotion path.
-		case "json", "yaml", "toml", "cbor", "base64", "base64url", "base32", "base16", "hex", "ascii85":
+		case "json", "yaml", "toml", "cbor", "msgpack", "base64", "base64url", "base32", "base16", "hex", "ascii85":
 			//: capture the codec + fixture + decode hook.
 			val := tweakForCodec(string(f), sampleComplex())
 			tests = append(tests, tc{
