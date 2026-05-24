@@ -1,53 +1,26 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-23T22:05:59.347Z",
+  "generatedAt": "2026-05-24T21:41:20.162Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
     {
-      "type": "feat",
-      "scope": "docs-site",
+      "type": "fix",
+      "scope": "docs",
       "breaking": false,
-      "summary": "syntax highlight + copy button on USES.md code blocks",
-      "sha": "1e04d4c5a1e74abd87a05f9e53124a8f806bfde5",
-      "short": "1e04d4c",
-      "date": "2026-05-23T23:47:38+02:00"
+      "summary": "resolve all broken docs-portal links + add MIT LICENSE",
+      "sha": "a077134fcfb6250a1f5973109e34dbbdc1d9e956",
+      "short": "a077134",
+      "date": "2026-05-24T23:29:07+02:00"
     },
     {
       "type": "fix",
-      "scope": "docs-site",
+      "scope": "docs",
       "breaking": false,
-      "summary": "nuke content + .astro cache at top of sync-versions",
-      "sha": "5639994cf1d72b9cbbbb26ee162938d3fd69b2a7",
-      "short": "5639994",
-      "date": "2026-05-23T23:24:09+02:00"
-    },
-    {
-      "type": "fix",
-      "scope": "docs-site",
-      "breaking": false,
-      "summary": "wipe-and-write per-release dest to kill duplicate-id warns",
-      "sha": "6489616499fc95cb72ab9349cdc764eed626b8e1",
-      "short": "6489616",
-      "date": "2026-05-23T22:48:07+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "codec, errs",
-      "breaking": false,
-      "summary": "broadcast Marshal + variadic HasAny matchers",
-      "sha": "f6b60f0d6590a284adaa18d8ae3c5c3224262db6",
-      "short": "f6b60f0",
-      "date": "2026-05-23T22:30:44+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "NewWriterSink + Config.Writers — native multi-writer",
-      "sha": "c15de9a15e048508c26d367aa7e7f472387ad5d1",
-      "short": "c15de9a",
-      "date": "2026-05-23T22:17:01+02:00"
+      "summary": "rewrite README package links for the docs portal",
+      "sha": "f53651d4661bb16f8d60da3df3662eba695c15ca",
+      "short": "f53651d",
+      "date": "2026-05-24T23:19:49+02:00"
     }
   ]
 }
