@@ -154,17 +154,51 @@ func (*xmlCodec) Unmarshal(data []byte, v any) error {
 
 // Append encodes v as XML and appends the bytes to dst. Implements the
 // optional codec.Appender interface so hot-path callers can stream
-// records into a recycled buffer.
-func (c *xmlCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: delegate to Marshal so the wrap/error contract has a single source.
-	encoded, merr := c.Marshal(v)
-	//: surface any encoding failure without touching dst.
-	if merr != nil {
-		//: return the untouched buffer plus the wrapped error.
-		return dst, merr
+// records into a recycled buffer. Encodes directly into the pooled
+// *bytes.Buffer + appends onto dst — saves the slices.Clone the
+// Marshal-delegation shape paid.
+func (*xmlCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: rent the output buffer; pool guarantees a *bytes.Buffer.
+	buf, ok := bufferPool.Get().(*bytes.Buffer)
+	//: pool invariant guard — never expected to fail at runtime.
+	if !ok {
+		//: invariant broken — fail loud at the call site.
+		panic("service/codec/xml: bufferPool yielded non-*bytes.Buffer")
 	}
-	//: append the encoded bytes onto the caller's buffer.
-	return append(dst, encoded...), nil
+	//: start clean — pool may return a partially-filled buffer.
+	buf.Reset()
+	//: stdxml.Encoder has no Reset(w) — fresh one per call.
+	enc := stdxml.NewEncoder(buf)
+	//: encode into the pooled buffer.
+	if xerr := enc.Encode(v); xerr != nil {
+		//: cap-discard release; dst stays pristine.
+		releaseBuffer(buf)
+		//: wrap the library error for reason-based matching.
+		return dst, errs.Wrap(xerr, errs.WrapParams{
+			Code:    CodeXMLMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "XML encoding failed",
+			Private: "service/codec/xml.Append: encoding/xml returned an error",
+		})
+	}
+	//: flush trailing tokens; same Close semantics as Marshal.
+	if cerr := enc.Close(); cerr != nil {
+		//: cap-discard release; dst stays pristine on close failure too.
+		releaseBuffer(buf)
+		//: surface the close failure as a marshal error.
+		return dst, errs.Wrap(cerr, errs.WrapParams{
+			Code:    CodeXMLMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "XML encoding failed",
+			Private: "service/codec/xml.Append: encoder.Close returned an error",
+		})
+	}
+	//: append the encoded bytes onto the caller's buffer (1 copy total).
+	dst = append(dst, buf.Bytes()...)
+	//: cap-discard release.
+	releaseBuffer(buf)
+	//: success — bytes are the caller's now.
+	return dst, nil
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.
