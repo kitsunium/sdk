@@ -44,6 +44,12 @@ jobs:
     # push / workflow_dispatch always proceed.
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    # `gh release list` inside sync-versions authenticates via GH_TOKEN; the
+    # default GITHUB_TOKEN (contents: read) is enough to enumerate releases.
+    # Set at job level so both the explicit prebuild and npm's build lifecycle
+    # have it.
+    env:
+      GH_TOKEN: ${{ github.token }}
     defaults:
       run:
         working-directory: docs/site
@@ -65,11 +71,14 @@ jobs:
         run: npm ci
       - name: Test versioning logic
         run: npm test
-      - name: Build (prebuild regenerates versions.json + per-tag snapshots)
-        # `gh release list` inside prebuild needs a token; the default
-        # GITHUB_TOKEN (contents: read) is enough to enumerate releases.
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # Run prebuild EXPLICITLY rather than relying solely on npm's build
+      # lifecycle: the version-snapshot regeneration (sync-versions + symbols)
+      # is then visible and unambiguous in the log, robust against future
+      # runner/package-manager quirks. npm will also run it before `build`;
+      # the repeat is idempotent.
+      - name: Regenerate versioned content (sync-versions + symbols)
+        run: npm run prebuild
+      - name: Build site (astro + pagefind)
         run: npm run build
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
