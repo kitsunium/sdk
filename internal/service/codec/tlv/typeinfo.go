@@ -13,9 +13,41 @@
 package tlv
 
 import (
+	"encoding/binary"
 	"reflect"
 	"sync"
 )
+
+// buildNamePrefix pre-computes the (tagString + LEB128 length + name)
+// byte sequence the encoder emits before every field value. Returns
+// nil when the name exceeds maxFieldNameBytes — the encoder's cap
+// check fires before the prefix is read, so nil is safe.
+func buildNamePrefix(name string) []byte {
+	//: oversized names get caught by the encoder's cap check; skip
+	//: the pre-computation to keep the cache clean.
+	if len(name) > maxFieldNameBytes {
+		//: signal "no cached prefix; encoder takes the slow path".
+		return nil
+	}
+	//: pre-size exactly: tag byte + LEB128 length (≤2 bytes for ≤255-
+	//: byte names) + the name bytes themselves.
+	prefix := make([]byte, 0, 1+maxVarintBytes+len(name))
+	//: 1-byte LEB128 fast-path matches appendTagLen's wire output for
+	//: lengths < 0x80 — names ≤ 127 bytes hit this branch (the common case).
+	if uint64(len(name)) < uvarintSingleByteCap {
+		//: tag + length in two bytes.
+		prefix = append(prefix, byte(tagString), byte(len(name)))
+	} else {
+		//: tag first.
+		prefix = append(prefix, byte(tagString))
+		//: multi-byte LEB128 via the stdlib helper.
+		prefix = binary.AppendUvarint(prefix, uint64(len(name)))
+	}
+	//: append the name bytes.
+	prefix = append(prefix, name...)
+	//: caller-owned slice — never mutated after build.
+	return prefix
+}
 
 // structFieldInfo carries the resolved metadata for one exported struct
 // field. Pre-resolving the field name as a string saves an allocation
@@ -33,6 +65,13 @@ type structFieldInfo struct {
 	//: kind is typ.Kind(), cached separately because it's the dispatch
 	//: discriminator in the hottest inner loops.
 	kind reflect.Kind
+	//: namePrefix is the pre-computed (tagString + LEB128 length + name)
+	//: byte sequence the encoder emits before every field value. Cached
+	//: at type-info build time so encodeStructDirect appends a single
+	//: byte slice per field instead of calling appendTagLen + append(s).
+	//: nil when name exceeds maxFieldNameBytes — the encoder rejects
+	//: those before reaching the append step.
+	namePrefix []byte
 }
 
 // structTypeInfo bundles the per-struct cache entry.
@@ -96,11 +135,15 @@ func buildStructTypeInfo(t reflect.Type) *structTypeInfo {
 			continue
 		}
 		//: capture name + index + typ + kind for the hot loops.
+		//: namePrefix is pre-computed only for names within the cap;
+		//: encodeStructDirect rejects oversized names before touching
+		//: the prefix (the cap check fires first).
 		fields = append(fields, structFieldInfo{
-			name:  sf.Name,
-			index: i,
-			typ:   sf.Type,
-			kind:  sf.Type.Kind(),
+			name:       sf.Name,
+			index:      i,
+			typ:        sf.Type,
+			kind:       sf.Type.Kind(),
+			namePrefix: buildNamePrefix(sf.Name),
 		})
 	}
 	//: caller stores by reflect.Type pointer.

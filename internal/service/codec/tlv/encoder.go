@@ -499,14 +499,17 @@ func encodeStructDirect(dst []byte, view reflectView, depth int) (encoded []byte
 	dst = appendTagLen(dst, tagStruct, uint64(len(info.fields)))
 	//: walk every exported field in declaration order.
 	for _, f := range info.fields {
-		//: defensive cap on the field-name byte length — same gate the
-		//: decoder applies on the read side.
-		if len(f.name) > maxFieldNameBytes {
+		//: defensive cap on the field-name byte length — namePrefix is
+		//: nil exactly when buildNamePrefix rejected the name as
+		//: over-cap, so we only need to check that one gate here.
+		if f.namePrefix == nil {
 			//: surface a marshal failure rather than silently truncating.
 			return dst, fieldNameTooLong(len(f.name))
 		}
-		//: emit the name as a tagString record.
-		dst = encodeString(dst, f.name)
+		//: emit the cached (tag + length + name) bytes in one append
+		//: instead of calling encodeString (which does the same work
+		//: via appendTagLen + append on every encode).
+		dst = append(dst, f.namePrefix...)
 		//: emit the field value through the interface-deref-aware
 		//: dispatcher (depth+1 for the nested record). Struct fields of
 		//: type `any` or `*T` get unwrapped before Kind() dispatch.
