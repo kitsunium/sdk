@@ -90,33 +90,36 @@ func Test_tryDecodeRootInto_TypedStruct(t *testing.T) {
 	}
 }
 
-// Test_tryDecodeRootInto_NonStructTarget pins the fall-back behaviour:
-// the typed path must signal handled=false for non-struct targets so
-// the untyped decodeRoot path runs.
-func Test_tryDecodeRootInto_NonStructTarget(t *testing.T) {
+// Test_tryDecodeRootInto_FallbackKinds pins the fall-back contract
+// for target kinds the typed path does NOT cover after Phase 7:
+// interface{}, array, complex. These must signal handled=false so
+// the untyped decodeRoot path runs without typed-path interference.
+func Test_tryDecodeRootInto_FallbackKinds(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name   string
 		target reflect.Value
 	}
 	tests := []tc{
-		{"int target", reflect.ValueOf(new(int)).Elem()},
-		{"string target", reflect.ValueOf(new(string)).Elem()},
-		{"slice target", reflect.ValueOf(new([]int)).Elem()},
-		{"map target", reflect.ValueOf(new(map[string]int)).Elem()},
+		//: any-target — the untyped path's canonical case.
+		{"interface{} target", reflect.ValueOf(new(any)).Elem()},
+		//: array (fixed-size) is not Slice, falls back.
+		{"array target", reflect.ValueOf(new([3]int)).Elem()},
+		//: complex64 is not in the scalar fast-path matrix.
+		{"complex64 target", reflect.ValueOf(new(complex64)).Elem()},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
 		//: arbitrary non-empty bytes — content is irrelevant because the
 		//: target shape alone determines the fall-back signal.
 		handled, terr := tryDecodeRootInto([]byte{0x01, 0x00}, tc.target)
-		//: non-struct targets must always fall back with no typed-path error.
+		//: fall-back kinds never produce a typed-path error.
 		if terr != nil {
 			t.Errorf("%s: typed path returned err on fall-back: %v", tc.name, terr)
 		}
-		//: non-struct targets must always fall back.
+		//: contract: handled=false routes the caller through the untyped path.
 		if handled {
-			t.Errorf("%s: expected handled=false for non-struct target", tc.name)
+			t.Errorf("%s: expected handled=false", tc.name)
 		}
 	}
 	for _, tc := range tests {
@@ -795,6 +798,178 @@ func Test_walkScalarSliceGrowing(t *testing.T) {
 			if got[i] != tc.src[i] {
 				t.Errorf("%s: [%d]=%d want=%d", tc.name, i, got[i], tc.src[i])
 			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_setBoolTarget pins the bool-target fast assignment.
+func Test_setBoolTarget(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		target any
+		value  bool
+		wantOK bool
+	}
+	tests := []tc{
+		{"bool-target-true", new(bool), true, true},
+		{"bool-target-false", new(bool), false, true},
+		{"int-target-rejects", new(int), true, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		rv := reflect.ValueOf(tc.target).Elem()
+		got := setBoolTarget(reflectView(rv), tc.value)
+		if got != tc.wantOK {
+			t.Errorf("%s: ok=%v want=%v", tc.name, got, tc.wantOK)
+		}
+		if tc.wantOK && rv.Kind() == reflect.Bool && rv.Bool() != tc.value {
+			t.Errorf("%s: target not written", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_setIntegerTarget pins the int64-source dispatch across every
+// signed + unsigned integer kind.
+func Test_setIntegerTarget(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		target any
+		value  int64
+		wantOK bool
+	}
+	tests := []tc{
+		{"int-target", new(int), 42, true},
+		{"int8-target", new(int8), 7, true},
+		{"uint64-target", new(uint64), 99, true},
+		{"string-target-rejects", new(string), 0, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		rv := reflect.ValueOf(tc.target).Elem()
+		got := setIntegerTarget(reflectView(rv), tc.value)
+		if got != tc.wantOK {
+			t.Errorf("%s: ok=%v want=%v", tc.name, got, tc.wantOK)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_setUnsignedTarget pins the uint64-source dispatch for signed
+// + unsigned kinds.
+func Test_setUnsignedTarget(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		target any
+		value  uint64
+		wantOK bool
+	}
+	tests := []tc{
+		{"uint-target", new(uint), 42, true},
+		{"int64-target-reinterprets", new(int64), 99, true},
+		{"float64-rejects", new(float64), 0, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		rv := reflect.ValueOf(tc.target).Elem()
+		got := setUnsignedTarget(reflectView(rv), tc.value)
+		if got != tc.wantOK {
+			t.Errorf("%s: ok=%v want=%v", tc.name, got, tc.wantOK)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_setFloatTarget pins the float-target fast path.
+func Test_setFloatTarget(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		target any
+		value  float64
+		wantOK bool
+	}
+	tests := []tc{
+		{"float64-target", new(float64), 3.14, true},
+		{"float32-target", new(float32), 2.5, true},
+		{"int-rejects", new(int), 0, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		rv := reflect.ValueOf(tc.target).Elem()
+		got := setFloatTarget(reflectView(rv), tc.value)
+		if got != tc.wantOK {
+			t.Errorf("%s: ok=%v want=%v", tc.name, got, tc.wantOK)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_setStringTarget pins the string-target fast assignment.
+func Test_setStringTarget(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		target any
+		value  string
+		wantOK bool
+	}
+	tests := []tc{
+		{"string-target", new(string), "hello", true},
+		{"int-rejects", new(int), "world", false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		rv := reflect.ValueOf(tc.target).Elem()
+		got := setStringTarget(reflectView(rv), tc.value)
+		if got != tc.wantOK {
+			t.Errorf("%s: ok=%v want=%v", tc.name, got, tc.wantOK)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_tryDirectScalarSet pins the wire-source dispatch across every
+// concrete Go type decodeValue produces for scalar tags.
+func Test_tryDirectScalarSet(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		target any
+		value  any
+		wantOK bool
+	}
+	tests := []tc{
+		{"bool-true", new(bool), true, true},
+		{"int64-source", new(int), int64(42), true},
+		{"uint64-source", new(uint), uint64(7), true},
+		{"float64-source", new(float64), float64(3.14), true},
+		{"float32-source", new(float32), float32(1.5), true},
+		{"string-source", new(string), "x", true},
+		{"unsupported-source-falls-back", new(int), []byte{1, 2}, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		rv := reflect.ValueOf(tc.target).Elem()
+		got := tryDirectScalarSet(rv, tc.value)
+		if got != tc.wantOK {
+			t.Errorf("%s: ok=%v want=%v", tc.name, got, tc.wantOK)
 		}
 	}
 	for _, tc := range tests {

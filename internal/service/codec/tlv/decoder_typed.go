@@ -57,9 +57,9 @@ func tryDecodeRootInto(data []byte, target reflect.Value) (handled bool, err err
 		//: signal caller to fall back.
 		return false, nil
 	}
-	//: dispatch on target.Kind() — struct, slice-of-struct, and map each
-	//: get their own typed entry point; anything else falls through to
-	//: the untyped projector.
+	//: dispatch on target.Kind() — struct, slice-of-struct, map, and
+	//: scalar each get their own typed entry point; anything else falls
+	//: through to the untyped projector.
 	switch target.Kind() {
 	//: top-level struct — Phase 1 path.
 	case reflect.Struct:
@@ -76,11 +76,200 @@ func tryDecodeRootInto(data []byte, target reflect.Value) (handled bool, err err
 	case reflect.Map:
 		//: typed map dispatcher; falls back when wire shape disagrees.
 		return tryDecodeRootIntoMap(data, target)
+	//: top-level scalar — Phase 7 path. Skips the reflect.ValueOf +
+	//: Convert dance the untyped projector pays for every scalar.
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64,
+		reflect.String:
+		//: typed scalar dispatcher; falls back when wire shape disagrees.
+		return tryDecodeRootIntoScalar(data, target)
 	//: every other root target uses the untyped path.
 	default:
 		//: signal caller to fall back.
 		return false, nil
 	}
+}
+
+// tryDecodeRootIntoScalar handles the Phase-7 *Scalar target path.
+// Calls the untyped walker to produce the decoded any-value, then
+// performs a direct SetInt / SetUint / SetFloat / SetString / SetBool
+// against the target — skipping the reflect.ValueOf().Convert() pair
+// the untyped projector's narrowNumeric / convertValue pay.
+//
+// Cross-shape cases (wire int64 → string target, etc.) fall back to
+// the untyped path via handled=false so the documented narrowing
+// behaviour is preserved.
+func tryDecodeRootIntoScalar(data []byte, target reflect.Value) (handled bool, err error) {
+	//: decode one record at depth zero via the existing walker.
+	value, rest, derr := decodeValue(data, 0)
+	//: surface decode failure verbatim.
+	if derr != nil {
+		//: already wrapped.
+		return true, derr
+	}
+	//: trailing-bytes check matches the rest of the typed path.
+	if len(rest) != 0 {
+		//: surface as decode failure for callers that match by reason.
+		return true, trailingBytesError(len(rest))
+	}
+	//: nil source zeros the destination scalar.
+	if value == nil {
+		//: write the zero value of the target's type.
+		target.Set(reflect.Zero(target.Type()))
+		//: typed path consumed.
+		return true, nil
+	}
+	//: dispatch on (wire kind via value's concrete type, target kind).
+	if tryDirectScalarSet(target, value) {
+		//: typed path consumed.
+		return true, nil
+	}
+	//: cross-shape narrowing — let the untyped projector handle it.
+	return false, nil
+}
+
+// tryDirectScalarSet performs the (wire scalar → target scalar) Set
+// without going through reflect.ValueOf().Convert(). Returns true
+// when the assignment succeeded; false signals the caller to fall
+// back to the untyped narrowing path (cross-shape conversion).
+func tryDirectScalarSet(target reflect.Value, value any) bool {
+	//: dispatch on the concrete decoded type — these are the only
+	//: scalar types decodeValue ever returns for scalar tags.
+	switch v := value.(type) {
+	//: bool from tagBoolFalse / tagBoolTrue.
+	case bool:
+		//: only matches a bool target.
+		return setBoolTarget(reflectView(target), v)
+	//: int64 from tagInt8..tagInt64 (always widened to int64).
+	case int64:
+		//: any signed/unsigned int target accepts via SetInt/SetUint.
+		return setIntegerTarget(reflectView(target), v)
+	//: uint64 from tagUint8..tagUint64 (always widened to uint64).
+	case uint64:
+		//: same kind dispatch as int64, using uint64-aware setters.
+		return setUnsignedTarget(reflectView(target), v)
+	//: float32 / float64 from tagFloat32 / tagFloat64.
+	case float64:
+		//: SetFloat handles both float32 and float64 targets.
+		return setFloatTarget(reflectView(target), v)
+	//: float32 source — promoted to float64 by SetFloat.
+	case float32:
+		//: SetFloat accepts the promoted value.
+		return setFloatTarget(reflectView(target), float64(v))
+	//: string from tagString.
+	case string:
+		//: only matches a string target.
+		return setStringTarget(reflectView(target), v)
+	//: anything else (bytes, slice, map, struct) → not a scalar match.
+	default:
+		//: caller falls back to the untyped projector.
+		return false
+	}
+}
+
+// setBoolTarget assigns v to target if target.Kind() == Bool.
+// Returns false when the target type does not match.
+func setBoolTarget(targetView reflectView, v bool) bool {
+	//: unwrap once for method dispatch.
+	target := reflect.Value(targetView)
+	//: only a bool target receives the direct assignment.
+	if target.Kind() != reflect.Bool {
+		//: caller falls back to narrowing.
+		return false
+	}
+	//: SetBool publishes directly into the typed scalar.
+	target.SetBool(v)
+	//: success.
+	return true
+}
+
+// setIntegerTarget assigns int64 v into target via SetInt for signed
+// kinds or SetUint for unsigned kinds (with the same wire-format
+// reinterpretation reflect.Value.Convert applies).
+func setIntegerTarget(targetView reflectView, v int64) bool {
+	//: unwrap once for method dispatch.
+	target := reflect.Value(targetView)
+	//: dispatch on the target's reflect.Kind().
+	switch target.Kind() {
+	//: every signed integer kind accepts SetInt directly.
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		//: direct typed assignment.
+		target.SetInt(v)
+		//: success.
+		return true
+	//: unsigned target reinterprets via SetUint (same bytes, different sign).
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		//: bit-reinterpret as uint64.
+		target.SetUint(uint64(v)) //nolint:gosec // matches reflect.Value.Convert semantics.
+		//: success.
+		return true
+	//: every other kind needs cross-shape narrowing.
+	default:
+		//: caller falls back.
+		return false
+	}
+}
+
+// setUnsignedTarget mirrors setIntegerTarget for a uint64 source:
+// signed kinds reinterpret via SetInt, unsigned kinds accept SetUint
+// directly.
+func setUnsignedTarget(targetView reflectView, v uint64) bool {
+	//: unwrap once for method dispatch.
+	target := reflect.Value(targetView)
+	//: dispatch on the target's reflect.Kind().
+	switch target.Kind() {
+	//: every unsigned integer kind accepts SetUint directly.
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		//: direct typed assignment.
+		target.SetUint(v)
+		//: success.
+		return true
+	//: signed target reinterprets via SetInt (same bytes, different sign).
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		//: bit-reinterpret as int64.
+		target.SetInt(int64(v)) //nolint:gosec // matches reflect.Value.Convert semantics.
+		//: success.
+		return true
+	//: every other kind needs cross-shape narrowing.
+	default:
+		//: caller falls back.
+		return false
+	}
+}
+
+// setFloatTarget assigns float64 v into a float-typed target via
+// SetFloat. Other kinds (e.g. int from a float wire) need the
+// untyped narrowing path.
+func setFloatTarget(targetView reflectView, v float64) bool {
+	//: unwrap once for method dispatch.
+	target := reflect.Value(targetView)
+	//: only float32 / float64 accept SetFloat directly.
+	if target.Kind() != reflect.Float32 && target.Kind() != reflect.Float64 {
+		//: caller falls back to narrowing.
+		return false
+	}
+	//: direct typed assignment.
+	target.SetFloat(v)
+	//: success.
+	return true
+}
+
+// setStringTarget assigns string v into target via SetString when
+// target.Kind() == String.
+func setStringTarget(targetView reflectView, v string) bool {
+	//: unwrap once for method dispatch.
+	target := reflect.Value(targetView)
+	//: only a string target receives the direct assignment.
+	if target.Kind() != reflect.String {
+		//: caller falls back to narrowing.
+		return false
+	}
+	//: direct typed assignment.
+	target.SetString(v)
+	//: success.
+	return true
 }
 
 // tryDecodeRootIntoMap handles the Phase-4 *map[K]V target path.
