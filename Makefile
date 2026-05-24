@@ -84,8 +84,16 @@ lint:
 # parsing) under the `benchmark` build tag. Stamps a reproducibility
 # envelope (CPU, RAM, OS, Go toolchain, git SHA, timestamp) at the top
 # so cross-machine deltas can be evaluated honestly. Default per-row
-# wall-clock is 10s — enough to firm up numbers on the 5-operation × 3-size
-# x 18-codec matrix; override with e.g. BENCH_TIME=1s for a smoke regen.
+# wall-clock is 1s (~8 min for the full 348-cell matrix): allocs/op and
+# B/op are deterministic regardless of benchtime — only ns/op precision
+# scales — so 1s is plenty for a snapshot pivot ranked by ns/op. Override
+# with BENCH_TIME=10s for a publishable canonical run (~84 min).
+#
+# `-test.bench=^$$` is load-bearing: the BUILD.bazel target args bake in
+# `-test.bench=.`, which would otherwise re-run all ten top-level Benchmark*
+# funcs (~116 min) on top of the generator and blow the timeout. The
+# generator already runs the full matrix internally, so we mask the bench
+# selector down to "match nothing".
 #
 # `bazel run` (not `bazel test`) is the entry point so BUILD_WORKSPACE_DIRECTORY
 # is set + the sandbox is lifted; that lets the test write BENCH.md back
@@ -93,8 +101,9 @@ lint:
 bench:
 	bazel run //pkg/v1/codec:codec_bench_test -- \
 		-test.run=TestGenerateBenchMD \
+		-test.bench=^$$ \
 		-test.timeout=2h \
-		-test.benchtime=$${BENCH_TIME:-10s} \
+		-test.benchtime=$${BENCH_TIME:-1s} \
 		-test.v
 
 cover:

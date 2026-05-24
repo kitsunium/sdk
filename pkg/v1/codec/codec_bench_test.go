@@ -926,12 +926,15 @@ func seedStream(stream corecodec.StreamingCodec, records []any) ([]byte, error) 
 // `make bench`, which translates to:
 //
 //	bazel run //pkg/v1/codec:codec_bench_test -- \
-//	    -test.run=TestGenerateBenchMD -test.timeout=1h -test.benchtime=2s
+//	    -test.run=TestGenerateBenchMD -test.bench=^$ -test.timeout=2h -test.benchtime=1s
 //
 // `bazel run` exposes BUILD_WORKSPACE_DIRECTORY so the report lands in
 // the source tree, not the runfiles sandbox. The default BUILD.bazel
 // args (`-test.run=^$`) keep this test off `bazel test //...` runs —
-// only an explicit `-test.run=TestGenerateBenchMD` triggers it.
+// only an explicit `-test.run=TestGenerateBenchMD` triggers it. The
+// `-test.bench=^$` overrides the BUILD args' `-test.bench=.`, which would
+// otherwise re-run all ten top-level Benchmark* funcs on top of this
+// generator (the matrix is already driven internally here).
 func TestGenerateBenchMD(t *testing.T) {
 	t.Helper()
 	rows := runAllBenches()
@@ -1441,9 +1444,9 @@ func formatThousands(n int64) string {
 func writeReproduce(b *strings.Builder) {
 	b.WriteString("## Reproduce\n\n")
 	b.WriteString("```shell\n")
-	b.WriteString("make bench   # regenerate this report (long: ~15-25 min at -benchtime=2s)\n")
-	b.WriteString("# or set a shorter wall-clock for a smoke regen:\n")
-	b.WriteString("BENCH_TIME=200ms make bench\n")
+	b.WriteString("make bench   # regenerate this report (~8 min at the default -benchtime=1s)\n")
+	b.WriteString("# canonical, publishable run (firmer ns/op, ~84 min):\n")
+	b.WriteString("BENCH_TIME=10s make bench\n")
 	b.WriteString("```\n")
 }
 
