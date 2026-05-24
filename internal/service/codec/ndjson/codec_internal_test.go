@@ -1,6 +1,7 @@
 package ndjson
 
 import (
+	stdjson "encoding/json"
 	"reflect"
 	"testing"
 )
@@ -290,5 +291,103 @@ func Test_ndjsonCodec_Append_RollbackOnMidSliceError(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
 		})
+	}
+}
+
+// Test_appendNDJSONRaw covers the raw-bytes writer + embedded-newline guard.
+func Test_appendNDJSONRaw(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		dst    []byte
+		rows   [][]byte
+		want   string
+		wantOK bool
+	}
+	tests := []tc{
+		{name: "empty-rows", dst: nil, rows: nil, want: "", wantOK: true},
+		{name: "one-row", dst: nil, rows: [][]byte{[]byte(`{"a":1}`)}, want: "{\"a\":1}\n", wantOK: true},
+		{name: "two-rows-append-to-existing", dst: []byte("prefix:"), rows: [][]byte{[]byte("a"), []byte("b")}, want: "prefix:a\nb\n", wantOK: true},
+		{name: "embedded-newline-rejects", dst: nil, rows: [][]byte{[]byte("ok"), []byte("bad\nnewline")}, want: "", wantOK: false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got, ok := appendNDJSONRaw(tc.dst, tc.rows)
+		if ok != tc.wantOK {
+			t.Fatalf("%s: ok=%v want %v", tc.name, ok, tc.wantOK)
+		}
+		if !tc.wantOK {
+			//: rejection path returns nil; no buffer expected.
+			return
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_rawMessageView covers the []json.RawMessage → [][]byte adapter.
+func Test_rawMessageView(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		in   []stdjson.RawMessage
+	}
+	tests := []tc{
+		{"empty", nil},
+		{"single", []stdjson.RawMessage{[]byte(`{"k":"v"}`)}},
+		{"multiple", []stdjson.RawMessage{[]byte("1"), []byte("2"), []byte("3")}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got := rawMessageView(tc.in)
+		if len(got) != len(tc.in) {
+			t.Fatalf("%s: len=%d want %d", tc.name, len(got), len(tc.in))
+		}
+		//: each view element must alias the underlying RawMessage bytes.
+		for i := range got {
+			if string(got[i]) != string(tc.in[i]) {
+				t.Errorf("%s: idx %d got=%q want=%q", tc.name, i, got[i], tc.in[i])
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_marshalRawSliceTo covers the top-level fast-path dispatch.
+func Test_marshalRawSliceTo(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		v      any
+		want   string
+		wantOK bool
+	}
+	tests := []tc{
+		{"raw-message-slice", []stdjson.RawMessage{[]byte(`{"a":1}`), []byte(`{"b":2}`)}, "{\"a\":1}\n{\"b\":2}\n", true},
+		{"bytes-slice", [][]byte{[]byte("x"), []byte("y")}, "x\ny\n", true},
+		{"non-raw-shape", []int{1, 2, 3}, "", false},
+		{"raw-with-embedded-newline-falls-back", []stdjson.RawMessage{[]byte("ok\nno")}, "", false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got, ok := marshalRawSliceTo(nil, tc.v)
+		if ok != tc.wantOK {
+			t.Fatalf("%s: ok=%v want %v", tc.name, ok, tc.wantOK)
+		}
+		if !tc.wantOK {
+			return
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }

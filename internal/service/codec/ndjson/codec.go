@@ -64,8 +64,17 @@ func (*ndjsonCodec) Extensions() []string {
 	return slices.Clone(extensions)
 }
 
-// Marshal encodes a slice v as NDJSON bytes.
+// Marshal encodes a slice v as NDJSON bytes. Pre-encoded raw payloads
+// (`[]json.RawMessage` or `[][]byte` — the exact shape the promotion
+// path in pkg/v1/codec/promote.go produces, and the natural shape for
+// callers proxying already-JSON records) take a fast-path that bypasses
+// the per-element stdjson.Marshal reflect walk.
 func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
+	//: pre-encoded fast-path — promotion + proxy callers hit this.
+	if out, ok := marshalRawSliceTo(nil, v); ok {
+		//: bytes are caller-owned now.
+		return out, nil
+	}
 	//: resolve v to a reflect.Value that is a slice or array.
 	slice, ok := asSlice(v)
 	//: shape-the-input rejection.
@@ -101,6 +110,73 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 	}
 	//: hand back the buffered bytes.
 	return buf.Bytes(), nil
+}
+
+// marshalRawSliceTo writes a pre-encoded slice (one of []json.RawMessage
+// or [][]byte) into dst as NDJSON. Returns (dst', true) on success;
+// (nil, false) when v isn't a recognised raw shape OR any element
+// contains an embedded '\n' (which would shred the line-delimited
+// invariant, so falling back to the stdjson path is the safe choice).
+// Used by both Marshal (dst=nil) and Append (dst=caller buffer).
+func marshalRawSliceTo(dst []byte, v any) (encoded []byte, ok bool) {
+	//: dispatch on concrete pre-encoded shapes only — anything else
+	//: falls through so the caller runs the reflect-based slow path.
+	switch rows := v.(type) {
+	//: []json.RawMessage is the promotion-path canonical shape.
+	case []stdjson.RawMessage:
+		//: hand the bytes off via the shared writer.
+		return appendNDJSONRaw(dst, rawMessageView(rows))
+	//: [][]byte covers proxy callers handing pre-encoded JSON bytes.
+	case [][]byte:
+		//: hand the bytes off via the shared writer.
+		return appendNDJSONRaw(dst, rows)
+	}
+	//: no recognised raw shape — caller falls back.
+	return nil, false
+}
+
+// rawMessageView re-types a []json.RawMessage as [][]byte without
+// copying. RawMessage is defined as []byte upstream so the conversion
+// is free at runtime — keeps appendNDJSONRaw single-shape.
+func rawMessageView(rows []stdjson.RawMessage) [][]byte {
+	//: unsafe-free re-slice: each RawMessage is already a []byte.
+	view := make([][]byte, len(rows))
+	//: alias the backing storage per element.
+	for i, r := range rows {
+		//: each RawMessage IS a []byte under the hood.
+		view[i] = r
+	}
+	//: caller iterates the slice header.
+	return view
+}
+
+// appendNDJSONRaw appends rows + '\n' separators onto dst. Refuses any
+// row carrying an embedded '\n' (returns ok=false) so the slow path
+// can re-encode it via json.Marshal (which always emits compact JSON
+// with escaped newlines).
+func appendNDJSONRaw(dst []byte, rows [][]byte) (appended []byte, ok bool) {
+	//: pre-grow dst by exactly the total bytes we'll write.
+	total := len(rows)
+	//: sum payload bytes per row (separator count already in total).
+	for _, r := range rows {
+		//: cumulative payload size.
+		total += len(r)
+	}
+	//: capacity reservation kills the geometric grow cascade.
+	dst = slices.Grow(dst, total)
+	//: per-row write with embedded-newline validation.
+	for _, r := range rows {
+		//: bytes.IndexByte is SIMD on amd64/arm64 — cheap rejection.
+		if bytes.IndexByte(r, '\n') >= 0 {
+			//: caller falls back; we don't touch dst on failure.
+			return nil, false
+		}
+		//: append the payload + the line separator.
+		dst = append(dst, r...)
+		dst = append(dst, '\n')
+	}
+	//: hand back the populated buffer.
+	return dst, true
 }
 
 // Unmarshal parses NDJSON data into v, which must be a pointer to a slice.
@@ -181,8 +257,13 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 // Append encodes the slice v as NDJSON and appends the bytes to dst.
 // Implements the optional codec.Appender interface so hot-path callers
 // can stream records into a recycled buffer (one '\n'-terminated line per
-// element).
+// element). Shares the same pre-encoded fast-path as Marshal.
 func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: pre-encoded fast-path — see Marshal for the same dispatch.
+	if out, ok := marshalRawSliceTo(dst, v); ok {
+		//: bytes appended in place; caller owns the buffer.
+		return out, nil
+	}
 	//: resolve v to a reflect.Value that is a slice or array.
 	slice, ok := asSlice(v)
 	//: shape-the-input rejection — same sentinel as Marshal for parity.
