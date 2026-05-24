@@ -66,7 +66,7 @@ type User struct {
 
 func main() {
     u := User{Name: "Ada", Age: 36}
-    for _, f := range []codec.Format{"json", "cbor", "yaml", "msgpack", "base64"} {
+    for _, f := range []codec.Format{codec.JSON, codec.CBOR, codec.YAML, codec.MsgPack, codec.Base64} {
         data, _ := codec.Marshal(f, u)
         var back User
         _ = codec.Unmarshal(f, data, &back)
@@ -204,7 +204,7 @@ var (
 ```
 
 <a name="Marshal"></a>
-## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L198>)
+## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L223>)
 
 ```go
 func Marshal(f Format, v any) (encoded []byte, err error)
@@ -213,7 +213,7 @@ func Marshal(f Format, v any) (encoded []byte, err error)
 Marshal serialises v using the codec registered under f. The codec's native input shape is tried first \(fast path, zero overhead\); if the codec rejects v as the wrong shape \(csv requires \[\]\[\]string, pem requires \*pem.Block, etc.\) the facade promotes v via json\-encode \+ codec\-specific wrap so every Format accepts any Go value — see promote.go for the per\-format strategies and the uniform\-contract rationale.
 
 <a name="MarshalMany"></a>
-## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L262>)
+## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L287>)
 
 ```go
 func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, err error)
@@ -232,7 +232,7 @@ out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
 ```
 
 <a name="Unmarshal"></a>
-## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L222>)
+## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L247>)
 
 ```go
 func Unmarshal(f Format, data []byte, v any) error
@@ -259,7 +259,7 @@ type Decoder = corecodec.Decoder
 ```
 
 <a name="NewDecoder"></a>
-### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L304>)
+### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L329>)
 
 ```go
 func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
@@ -277,7 +277,7 @@ type Encoder = corecodec.Encoder
 ```
 
 <a name="NewEncoder"></a>
-### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L291>)
+### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L316>)
 
 ```go
 func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
@@ -294,7 +294,7 @@ Format re\-exports core/codec.Format so consumers only depend on pkg/v1.
 type Format = corecodec.Format
 ```
 
-<a name="JSON"></a>Known format constants — string values are part of the public contract.
+<a name="JSON"></a>Known format constants — string values are part of the public contract. Prefer the typed constants over string literals at call sites: the IDE catches typos at compile time, autocomplete surfaces the full list, and the underlying string value \(frozen post\-v1.0.0\) stays available via \`string\(codec.JSON\)\` whenever raw access is needed.
 
 ```go
 const (
@@ -318,11 +318,32 @@ const (
     CBOR Format = "cbor"
     // MsgPack denotes the vmihailenco/msgpack/v5 wire format.
     MsgPack Format = "msgpack"
+
+    // TLV denotes the self-describing Type-Length-Value reflection
+    // codec (one record per encode; nested composites supported).
+    TLV Format = "tlv"
+    // FlatBuffers denotes the passthrough codec for already-encoded
+    // FlatBuffer payloads — schema-typed reads stay in the caller's
+    // flatc-generated accessors.
+    FlatBuffers Format = "flatbuffers"
+
+    // Base64 denotes the JSON-mediated base64 (std) text-safe wrap.
+    Base64 Format = "base64"
+    // Base64URL denotes the JSON-mediated base64 (URL-safe alphabet) wrap.
+    Base64URL Format = "base64url"
+    // Base32 denotes the JSON-mediated base32 (std) text-safe wrap.
+    Base32 Format = "base32"
+    // Base16 denotes the JSON-mediated base16 (uppercase hex) wrap.
+    Base16 Format = "base16"
+    // Hex denotes the JSON-mediated lowercase-hex text-safe wrap.
+    Hex Format = "hex"
+    // ASCII85 denotes the JSON-mediated Adobe Ascii85 text-safe wrap.
+    ASCII85 Format = "ascii85"
 )
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L317>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L342>)
 
 ```go
 func Available() []Format
@@ -331,7 +352,7 @@ func Available() []Format
 Available returns the sorted list of registered formats.
 
 <a name="FromExtension"></a>
-### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L336>)
+### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L361>)
 
 ```go
 func FromExtension(ext string) (f Format, ok bool)
@@ -340,7 +361,7 @@ func FromExtension(ext string) (f Format, ok bool)
 FromExtension resolves a file extension to its registered Format.
 
 <a name="FromMIME"></a>
-### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L323>)
+### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L348>)
 
 ```go
 func FromMIME(mime string) (f Format, ok bool)

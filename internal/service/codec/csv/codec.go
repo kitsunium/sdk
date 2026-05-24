@@ -6,6 +6,8 @@ package csv
 import (
 	"bytes"
 	stdcsv "encoding/csv"
+	"errors"
+	"io"
 	"slices"
 	"sync"
 
@@ -360,9 +362,15 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 		panic("service/codec/csv: bytesReaderPool yielded non-*bytes.Reader")
 	}
 	br.Reset(data)
-	//: ReadAll consumes every record from the reader.
-	r := stdcsv.NewReader(br)
-	recs, rerr := r.ReadAll()
+	//: hand-rolled Read loop replaces stdcsv.Reader.ReadAll: it pre-
+	//: sizes the outer [][]string from the wire newline count + uses
+	//: ReuseRecord to amortise per-record slice growth on the stdlib
+	//: side. ReuseRecord returns slices that alias the reader's
+	//: internal backing array; slices.Clone per record gives the
+	//: caller an independent []string while keeping the strings
+	//: (which are immutable and freshly allocated by the reader)
+	//: shared by reference.
+	recs, rerr := readAllPreSized(br, data)
 	//: bytes.Reader returns to the pool unconditionally — Reset wipes
 	//: its state on the next caller.
 	bytesReaderPool.Put(br)
@@ -380,6 +388,50 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 		Public:  "CSV decoding failed",
 		Private: "service/codec/csv.Unmarshal: ReadAll returned an error",
 	})
+}
+
+// readAllPreSized is the stdcsv.Reader.ReadAll equivalent with two
+// pre-allocation tricks: the outer [][]string is sized from the wire
+// newline count (one record per '\n', plus an orphan trailing record
+// if the input lacks the final terminator), and ReuseRecord lets the
+// stdlib reader avoid re-allocating the per-record []string backing
+// array on every call. Each record is cloned before storage because
+// ReuseRecord aliases — the strings inside are fresh (immutable)
+// but the slice header isn't.
+func readAllPreSized(br *bytes.Reader, data []byte) (records [][]string, err error) {
+	//: stdcsv.NewReader is the wire-parsing primitive; no Reset method
+	//: exists so we allocate a fresh one per call (16 ns micro-cost).
+	r := stdcsv.NewReader(br)
+	//: ReuseRecord = true tells the reader to alias the per-record
+	//: []string across Read calls, eliminating the geometric grow
+	//: cascade inside reader.go:441-445 ReadAll uses.
+	r.ReuseRecord = true
+	//: count newlines to pre-size the outer slice. +1 for a trailing
+	//: record without a final '\n' (legal CSV but uncommon).
+	hint := bytes.Count(data, []byte{'\n'}) + 1
+	//: pre-allocate the outer slice. The hint over-estimates by 1 on
+	//: trailing-newline inputs — append below handles the extra slot
+	//: as unused capacity, no extra alloc.
+	records = make([][]string, 0, hint)
+	//: read records one at a time so we can clone the aliased slice.
+	for {
+		//: stdlib Read returns the next record OR io.EOF / parse error.
+		record, rerr := r.Read()
+		//: clean stream end terminates the loop.
+		if errors.Is(rerr, io.EOF) {
+			//: every record consumed.
+			return records, nil
+		}
+		//: any other failure surfaces verbatim.
+		if rerr != nil {
+			//: caller wraps it.
+			return nil, rerr
+		}
+		//: ReuseRecord aliases — clone the slice header (strings
+		//: inside are fresh per Read, so cloning the []string is
+		//: enough; the underlying strings stay caller-owned).
+		records = append(records, slices.Clone(record))
+	}
 }
 
 // extractRecords coerces v into a [][]string, accepting both direct and
