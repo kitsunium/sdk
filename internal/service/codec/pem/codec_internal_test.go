@@ -1,6 +1,7 @@
 package pem
 
 import (
+	"bytes"
 	stdpem "encoding/pem"
 	"testing"
 )
@@ -169,6 +170,54 @@ func Test_pemCodec_Append(t *testing.T) {
 		if len(tc.dst) > 0 && string(got[:len(tc.dst)]) != string(tc.dst) {
 			t.Errorf("%s: prefix lost; got=%q", tc.name, got[:len(tc.dst)])
 		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_detachAndRelease covers the size-aware release paths.
+func Test_detachAndRelease(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		cap  int
+	}
+	tests := []tc{
+		{"small-cloned-and-repooled", 1024},
+		{"oversize-orphaned-untouched", maxRetainedBufBytes + 1},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		buf := new(bytes.Buffer)
+		buf.Grow(tc.cap)
+		buf.WriteString("xyz")
+		out := detachAndRelease(buf)
+		if string(out) != "xyz" {
+			t.Errorf("%s: got %q want %q", tc.name, out, "xyz")
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_releaseBuffer covers the error-path cap-discard helper.
+func Test_releaseBuffer(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		cap  int
+	}
+	tests := []tc{
+		{"small-retained", 1024},
+		{"discarded-oversize", maxRetainedBufBytes + 1},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		buf := new(bytes.Buffer)
+		buf.Grow(tc.cap)
+		releaseBuffer(buf)
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
