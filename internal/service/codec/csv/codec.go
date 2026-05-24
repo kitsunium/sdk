@@ -50,6 +50,14 @@ var (
 		New: func() any { return new(bytes.Buffer) },
 	}
 
+	//: bytesReaderPool reuses *bytes.Reader across Unmarshal calls.
+	//: stdcsv.NewReader wraps the io.Reader in its own buffered reader
+	//: so the bytes.Reader header alloc is the only one we can recycle
+	//: at this layer (csv.Reader has no Reset method).
+	bytesReaderPool = sync.Pool{
+		New: func() any { return new(bytes.Reader) },
+	}
+
 	//: Codec is the CSV singleton, registered with core/codec at package
 	//: load. Binding the registration result to a named var is more
 	//: idiomatic than `var _ = codec.Register(...)` and keeps us clear of
@@ -343,9 +351,21 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 			Private: "service/codec/csv.Unmarshal: target is not *[][]string",
 		})
 	}
+	//: rent a *bytes.Reader from the pool and re-point at data so the
+	//: bytes.Reader header alloc is recycled across Unmarshal calls.
+	br, ok := bytesReaderPool.Get().(*bytes.Reader)
+	//: pool invariant guard — never expected to fail at runtime.
+	if !ok {
+		//: invariant broken — fail loud at the call site.
+		panic("service/codec/csv: bytesReaderPool yielded non-*bytes.Reader")
+	}
+	br.Reset(data)
 	//: ReadAll consumes every record from the reader.
-	r := stdcsv.NewReader(bytes.NewReader(data))
+	r := stdcsv.NewReader(br)
 	recs, rerr := r.ReadAll()
+	//: bytes.Reader returns to the pool unconditionally — Reset wipes
+	//: its state on the next caller.
+	bytesReaderPool.Put(br)
 	//: success fast-path.
 	if rerr == nil {
 		//: publish the decoded records through the caller's pointer.
