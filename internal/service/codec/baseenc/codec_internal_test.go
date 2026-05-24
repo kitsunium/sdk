@@ -878,3 +878,56 @@ func Test_encodeHex(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// Test_marshalJSONPooled covers the JSON-inner pool helper: returned
+// jsonBytes round-trip through json.Unmarshal; release() is callable
+// without panic.
+func Test_marshalJSONPooled(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		v    any
+		want string
+	}
+	tests := []tc{
+		{"int", 42, "42"},
+		{"string", "hi", `"hi"`},
+		{"map", map[string]int{"a": 1}, `{"a":1}`},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got, release, err := marshalJSONPooled(tc.v)
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+		release()
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_releaseJSONBuffer covers the cap-discard pool release.
+func Test_releaseJSONBuffer(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		cap  int
+	}
+	tests := []tc{
+		{"small-retained", 1024},
+		{"discarded-oversize", maxRetainedJSONBufBytes + 1},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		buf := new(bytes.Buffer)
+		buf.Grow(tc.cap)
+		releaseJSONBuffer(buf)
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

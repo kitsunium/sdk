@@ -13,6 +13,7 @@
 package baseenc
 
 import (
+	"bytes"
 	"encoding/ascii85"
 	"encoding/base32"
 	"encoding/base64"
@@ -21,6 +22,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -34,6 +36,10 @@ const maxBaseEncBytes int = 10 * 1024 * 1024
 // asciiLowerToUpperOffset is the bit-5 distance between an ASCII lowercase
 // letter and its uppercase counterpart (e.g. 'a' - 'A' == 32).
 const asciiLowerToUpperOffset = byte(32)
+
+// maxRetainedJSONBufBytes caps re-pool eligibility for the JSON-inner
+// scratch buffer used by marshalJSONPooled. 256 KiB project-wide.
+const maxRetainedJSONBufBytes int = 256 << 10
 
 const (
 	// variantBase64 is the RFC 4648 standard base64 alphabet with padding.
@@ -72,6 +78,15 @@ var (
 	Hex codec.Codec = codec.Register(&baseencCodec{variant: variantHex})
 	// ASCII85 is the Adobe Ascii85 codec.
 	ASCII85 codec.Codec = codec.Register(&baseencCodec{variant: variantASCII85})
+
+	// jsonBufferPool reuses *bytes.Buffer across the JSON-inner step
+	// of every base-N Marshal / Append call. Audit §0.1 family-wide
+	// win: stdjson.Marshal allocates a fresh bytes.Buffer per call AND
+	// grows it geometrically; pooling at the package layer eliminates
+	// both. Cap-discard via releaseJSONBuffer at maxRetainedJSONBufBytes.
+	jsonBufferPool = sync.Pool{
+		New: func() any { return new(bytes.Buffer) },
+	}
 )
 
 // baseencCodec is the concrete codec.Codec implementation; one instance
@@ -103,8 +118,10 @@ func (c *baseencCodec) Extensions() []string {
 // []byte→base64-string convention applies inside the JSON payload before
 // the outer base-N step wraps it.
 func (c *baseencCodec) Marshal(v any) (encoded []byte, err error) {
-	//: flatten the value through JSON first.
-	jsonBytes, merr := stdjson.Marshal(v)
+	//: flatten the value through JSON first using the pooled buffer
+	//: so consecutive base-N Marshal calls amortise the bytes.Buffer
+	//: allocation + the geometric grow cascade.
+	jsonBytes, release, merr := marshalJSONPooled(v)
 	//: surface JSON-side failures with the dedicated reason.
 	if merr != nil {
 		//: keep encoded nil so callers do not consume a partial buffer.
@@ -115,8 +132,62 @@ func (c *baseencCodec) Marshal(v any) (encoded []byte, err error) {
 			Private: "service/codec/baseenc.Marshal: encoding/json.Marshal returned an error",
 		})
 	}
+	//: encode produces a fresh []byte we own — the pooled buffer can
+	//: go back as soon as we've consumed jsonBytes.
+	out := c.encodeBytes(jsonBytes)
+	//: cap-discard release of the pooled JSON buffer.
+	release()
 	//: apply the variant's base-N alphabet to the JSON bytes.
-	return c.encodeBytes(jsonBytes), nil
+	return out, nil
+}
+
+// marshalJSONPooled encodes v via a pooled stdjson.Encoder + *bytes.Buffer
+// and returns (jsonBytes, releaseFn, err). The release closure returns
+// the buffer to the pool with cap-discard at maxRetainedJSONBufBytes.
+// Callers MUST call release() exactly once after consuming jsonBytes.
+// jsonBytes aliases the pooled buffer's backing array; release() invalidates it.
+func marshalJSONPooled(v any) (jsonBytes []byte, release func(), err error) {
+	//: rent the pooled buffer; pool guarantees a *bytes.Buffer.
+	buf, ok := jsonBufferPool.Get().(*bytes.Buffer)
+	//: pool invariant guard — never expected to fail at runtime.
+	if !ok {
+		//: invariant broken — fail loud at the call site.
+		panic("service/codec/baseenc: jsonBufferPool yielded non-*bytes.Buffer")
+	}
+	//: start clean — pool may return a partially-filled buffer.
+	buf.Reset()
+	//: stdjson.Encoder appends a trailing '\n' we strip below.
+	enc := stdjson.NewEncoder(buf)
+	//: encode the value via the stdlib encoder.
+	if merr := enc.Encode(v); merr != nil {
+		//: bail on encode failure; buffer goes back to the pool.
+		releaseJSONBuffer(buf)
+		//: caller wraps with the BASE_ENC sentinel.
+		return nil, nil, merr
+	}
+	//: strip the trailing newline so jsonBytes match stdjson.Marshal output.
+	b := buf.Bytes()
+	//: defensive against an empty payload (shouldn't happen on success).
+	if n := len(b); n > 0 && b[n-1] == '\n' {
+		//: drop the trailing newline.
+		b = b[:n-1]
+	}
+	//: caller consumes b before calling release.
+	return b, func() { releaseJSONBuffer(buf) }, nil
+}
+
+// releaseJSONBuffer returns buf to jsonBufferPool unless its capacity
+// exceeds the cap-discard threshold.
+func releaseJSONBuffer(buf *bytes.Buffer) {
+	//: cap-discard: drop oversized buffers, the GC reclaims them.
+	if buf.Cap() > maxRetainedJSONBufBytes {
+		//: orphan the buffer.
+		return
+	}
+	//: pool expects a clean buffer.
+	buf.Reset()
+	//: return for the next caller.
+	jsonBufferPool.Put(buf)
 }
 
 // Unmarshal base-N decodes data, then parses the resulting JSON into v.
@@ -162,8 +233,9 @@ func (c *baseencCodec) Unmarshal(data []byte, v any) error {
 func (c *baseencCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: snapshot dst length so a JSON failure leaves the buffer untouched.
 	origLen := len(dst)
-	//: encode through JSON first — this is the unavoidable allocation.
-	jsonBytes, merr := stdjson.Marshal(v)
+	//: encode through JSON via the pooled buffer so consecutive calls
+	//: amortise the bytes.Buffer allocation + grow cascade.
+	jsonBytes, release, merr := marshalJSONPooled(v)
 	//: JSON-side failure restores dst and surfaces the dedicated reason.
 	if merr != nil {
 		//: leave dst exactly as the caller passed it.
@@ -175,7 +247,11 @@ func (c *baseencCodec) Append(dst []byte, v any) (appended []byte, err error) {
 		})
 	}
 	//: base-N append uses the variant-specific AppendEncode where possible.
-	return c.appendEncode(dst, jsonBytes), nil
+	out := c.appendEncode(dst, jsonBytes)
+	//: cap-discard release of the pooled JSON buffer.
+	release()
+	//: success — dst grew with the base-N encoding of jsonBytes.
+	return out, nil
 }
 
 // NewEncoder returns a streaming Encoder for the variant. The encoder
