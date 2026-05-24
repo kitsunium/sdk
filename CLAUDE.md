@@ -79,7 +79,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 ├── BUILD.bazel            root gazelle target + audit_sources filegroup
 ├── .bazelrc               race-on by default; named configs: race / pure / coverage / ci
 ├── .bazelversion          pins Bazel to 9.0.2
-├── Makefile               5 targets: build / test / lint / bench / cover (run `make` for help)
+├── Makefile               build / test / lint / bench / cover / docs / serve / release-dry-run / docs-readme … (run `make` for the full list)
 ├── tools/workspace_status.sh  prints STABLE_VERSION (consumed by --stamp + x_defs)
 ├── .golangci.yml          code-quality second-opinion linters (layer firewall is now Bazel visibility)
 ├── AGENTS.md, agent.toml  devcontainer agent specs (not SDK)

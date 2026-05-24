@@ -72,7 +72,10 @@ jobs:
             echo "EOF" >> "$GITHUB_OUTPUT"
           else
             echo "majors<<EOF" >> "$GITHUB_OUTPUT"
-            bash scripts/release/compute-bumps.sh >> "$GITHUB_OUTPUT" || true
+            # No `|| true`: compute-bumps.sh exits 0 on a legitimate no-op
+            # (empty output), so a non-zero exit is a real failure that must
+            # fail the job — not be masked into a silent no-op release.
+            bash scripts/release/compute-bumps.sh >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           fi
 

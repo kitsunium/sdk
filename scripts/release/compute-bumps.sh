@@ -44,6 +44,11 @@ done
 if [ -z "$RANGE" ]; then
   if last_tag="$(git describe --tags --abbrev=0 2>/dev/null)"; then
     RANGE="${last_tag}..HEAD"
+  elif [ "$(git rev-list --count HEAD)" -eq 1 ]; then
+    # Single-commit repo: root == HEAD, so root..HEAD is empty and the
+    # initial commit's paths would be invisible. Diff against the empty
+    # tree so the first release sees every added path.
+    RANGE="$(git hash-object -t tree /dev/null)..HEAD"
   else
     root="$(git rev-list --max-parents=0 HEAD | head -n1)"
     RANGE="${root}..HEAD"

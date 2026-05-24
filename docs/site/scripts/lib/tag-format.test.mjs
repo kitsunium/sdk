@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import {
   buildVersionsJson,
+  parseTag,
   stitchVersions,
   changelogRefSpec,
   LOCAL_RELEASE,
@@ -89,4 +90,23 @@ test("a real release keeps version for display and tag for git", () => {
   assert.equal(r.version, "1.0.0", "version is the display semver");
   assert.equal(r.tag, "pkg/v1/v1.0.0", "tag is the git ref");
   assert.equal(r.label, "v1.0.0");
+});
+
+test("parseTag rejects path-major ≠ semver-major (pkg/v1/v2.0.0)", () => {
+  //: shape-valid but the directory major (v1) disagrees with the semver
+  //: major (v2) — must be rejected so releases never misgroup.
+  assert.equal(
+    parseTag("pkg/v1/v2.0.0"),
+    null,
+    "mismatched major must be null",
+  );
+  assert.equal(
+    parseTag("pkg/v2/v1.2.3"),
+    null,
+    "mismatched major must be null",
+  );
+  //: aligned majors still parse.
+  const ok = parseTag("pkg/v2/v2.1.0");
+  assert.equal(ok?.major, "v2");
+  assert.deepEqual(ok?.parts, [2, 1, 0]);
 });

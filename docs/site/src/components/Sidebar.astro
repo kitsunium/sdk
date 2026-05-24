@@ -65,7 +65,15 @@ const repoUrl = build.repoUrl ?? "";
 //: pkg.go.dev URL = "pkg.go.dev/" + "<host>/<owner>/<repo>".
 //: Derive from repoUrl host+path (works for github.com, gitlab.com,
 //: any VCS hoster pkg.go.dev recognises).
-const repoPath = repoUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+//: normalise every remote shape to "<host>/<owner>/<repo>": scp-style
+//: (git@host:owner/repo), ssh:// , http(s):// , and a trailing .git — so the
+//: pkg.go.dev link holds regardless of how `origin` is configured.
+const repoPath = repoUrl
+  .replace(/^git@([^:]+):/, "$1/")
+  .replace(/^ssh:\/\/git@([^/]+)\//, "$1/")
+  .replace(/^https?:\/\//, "")
+  .replace(/\.git$/, "")
+  .replace(/\/$/, "");
 const pkgGoDev = repoPath ? `https://pkg.go.dev/${repoPath}` : "";
 
 function isActive(href: string): boolean {

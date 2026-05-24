@@ -235,6 +235,12 @@ func emit(p *doc.Package, fset *token.FileSet, packageShort, urlBase, repoRoot, 
 	}
 	pkgURL += "/"
 	pkgLabel := lastPathSegment(packageShort)
+	if pkgLabel == "" {
+		// Root package (packageShort == "." or "") has no path segment —
+		// fall back to the package's own name so Qualified reads "Name"
+		// instead of a leading-dot ".Name".
+		pkgLabel = p.Name
+	}
 
 	var out []Symbol
 

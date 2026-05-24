@@ -41,6 +41,12 @@ export function parseTag(tag) {
   const core = dash === -1 ? semver : semver.slice(0, dash);
   const prerelease = dash === -1 ? null : semver.slice(dash + 1);
   const parts = core.split(".").map(Number);
+  //: reject malformed cores and tags whose PATH major (pkg/vN) disagrees with
+  //: the SEMVER major (e.g. pkg/v1/v2.0.0) — the regex alone accepts them, and
+  //: a mismatch silently misgroups releases (ADR 0007 §1: the tag major is
+  //: load-bearing). Edited in lockstep with tag-format.sh's is_valid_tag.
+  if (parts.length !== 3) return null;
+  if (Number(major.slice(1)) !== parts[0]) return null;
   return { major, semver, parts, prerelease };
 }
 

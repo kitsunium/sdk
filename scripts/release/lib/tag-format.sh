@@ -15,7 +15,14 @@ TAG_REGEX='^pkg/v[0-9]+/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
 
 # Test a tag name against the canonical shape. Exits 0 on match.
 is_valid_tag() {
-  [[ "$1" =~ $TAG_REGEX ]]
+  [[ "$1" =~ $TAG_REGEX ]] || return 1
+  # Path major (pkg/vN) MUST equal the semver major (vN.…). The regex alone
+  # accepts mismatches like pkg/v2/v1.2.3, which break release invariants
+  # (ADR 0007 §1). Kept in lockstep with tag-format.mjs's parseTag.
+  local path_major ver_major
+  path_major="$(awk -F/ '{sub(/^v/, "", $2); print $2}' <<<"$1")"
+  ver_major="$(awk -F/ '{split($3, a, "."); sub(/^v/, "", a[1]); print a[1]}' <<<"$1")"
+  [[ "$path_major" == "$ver_major" ]]
 }
 
 # Extract the "vN" major from a full tag. Echo only; never exits non-zero

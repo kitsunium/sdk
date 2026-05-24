@@ -53,16 +53,32 @@ bump_for_major() {
 }
 
 verify_module_graph() {
-  local major="$1" modroot="pkg/$major"
+  # Two statements: `local major="$1" modroot="pkg/$major"` evaluates modroot
+  # against the OUTER (empty) major, yielding "pkg/" (shellcheck SC2318).
+  local major="$1"
+  local modroot="pkg/$major"
   [ -d "$modroot" ] || { echo "cut-tags: $modroot missing" >&2; return 1; }
-  local tmp
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
-  # Strip `replace ` lines from a *copy* of go.mod, then verify the
-  # bare module graph resolves under GOWORK=off (plan B9, B10).
-  grep -vE '^[[:space:]]*replace[[:space:]]' "$modroot/go.mod" > "$tmp/go.mod"
-  cp "$modroot/go.sum" "$tmp/go.sum" 2>/dev/null || true
-  ( cd "$tmp" && GOWORK=off go mod download all >/dev/null 2>&1 ) || {
+  # Run in a SUBSHELL so the cleanup trap is scoped to it (fires on subshell
+  # EXIT). A function-level `trap ... RETURN` would also fire on every later
+  # function return (e.g. latest_tag_for) with an out-of-scope $tmp and abort
+  # the script under set -eu.
+  (
+    tmp="$(mktemp -d)"
+    trap 'rm -rf -- "$tmp"' EXIT
+    # Strip single-line AND block-form `replace (...)` from a copy of go.mod
+    # (a line-based grep leaves the block body + a dangling `)`, producing an
+    # invalid go.mod), then verify the bare graph resolves under GOWORK=off
+    # (plan B9, B10).
+    awk '
+      /^[[:space:]]*replace[[:space:]]*\(/ { inblk = 1; next }
+      inblk && /^[[:space:]]*\)/           { inblk = 0; next }
+      inblk                                { next }
+      /^[[:space:]]*replace[[:space:]]+/   { next }
+      { print }
+    ' "$modroot/go.mod" > "$tmp/go.mod"
+    cp "$modroot/go.sum" "$tmp/go.sum" 2>/dev/null || true
+    cd "$tmp" && GOWORK=off go mod download all >/dev/null 2>&1
+  ) || {
     echo "cut-tags: go mod download failed for $modroot (GOWORK=off, replace stripped)" >&2
     return 1
   }
@@ -73,13 +89,23 @@ while IFS= read -r major; do
   case "$major" in v[0-9]*) ;; *) echo "cut-tags: bad major '$major'" >&2; exit 1 ;; esac
 
   last="$(latest_tag_for "$major" || true)"
-  [ -z "$last" ] && last="pkg/${major}/v1.0.0"
-  if ! is_valid_tag "$last"; then
-    echo "cut-tags: refusing pre-release or malformed: $last" >&2
-    exit 1
+  if [ -z "$last" ]; then
+    # First release for this major: seed the major-aligned v<N>.0.0 directly
+    # (e.g. v2 → pkg/v2/v2.0.0). Faking last="pkg/${major}/v1.0.0" for every
+    # major produced invalid lineage like pkg/v2/v1.0.1 (semver major ≠ path
+    # major). `$major` already carries the leading "v", so "${major}.0.0".
+    next="pkg/${major}/${major}.0.0"
+    if ! is_valid_tag "$next"; then
+      echo "cut-tags: computed invalid first tag '$next' for $major" >&2
+      exit 1
+    fi
+  else
+    if ! is_valid_tag "$last"; then
+      echo "cut-tags: refusing pre-release or malformed: $last" >&2
+      exit 1
+    fi
+    next="$(bump_for_major "$major" "$last")"
   fi
-
-  next="$(bump_for_major "$major" "$last")"
 
   verify_module_graph "$major"
 

@@ -79,9 +79,10 @@ go_test(
 #     --test_arg=-test.benchmem` — the legacy mode used by developers who
 #     want stdout-streamed numbers without regenerating BENCH.md.
 #
-# `gotags = ["benchmark"]` activates the bench_report_test.go file which is
-# `//go:build benchmark`-gated so it is invisible to every other go_test
-# target / `go test ./...` invocation.
+# `tags = ["benchmark", "manual"]` are Bazel target tags: `manual` keeps this
+# target OUT of `bazel test //...` (wildcard CI), and `benchmark` labels intent.
+# The target compiles codec_bench_test.go (the matrix + the BENCH.md generator);
+# there is no separate build-tag-gated file.
 #
 # `size = "enormous"` + `timeout = "eternal"` lift the default 5-min cap so
 # the full matrix at `-test.benchtime=2s` always completes — slower machines

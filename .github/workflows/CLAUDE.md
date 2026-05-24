@@ -36,7 +36,7 @@ Single job `release` on `ubuntu-latest`, gated by `workflow_run` on `SDK CI (Baz
 3. Compute majors to bump (`scripts/release/compute-bumps.sh`, or `inputs.force_bumps` on manual dispatch).
 4. Cut tags (`scripts/release/cut-tags.sh`) — strips `replace` lines, verifies `GOWORK=off go mod download`, race-protected re-read.
 5. `gh release create --generate-notes --verify-tag` per pushed tag.
-6. Upload `release-summary-${{ github.run_number }}` artifact (always, even on no-op).
+6. Upload `release-summary-${{ github.run_number }}` artifact — only when majors were bumped. The summary + upload steps are gated `if: always() && steps.compute.outputs.majors != ''`, so a no-op run (empty majors) skips both.
 
 Concurrency: `sdk-release-${{ github.ref }}` with `cancel-in-progress: false` (NEVER cancel a tag-push mid-flight).
 
