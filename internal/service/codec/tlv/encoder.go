@@ -266,8 +266,10 @@ func tryEncodeComposite(dst []byte, view reflectView, depth int) (encoded []byte
 		return out, true, eerr
 	//: struct uses exported fields only.
 	case reflect.Struct:
-		//: collect named exported fields and recurse.
-		out, eerr := encodeStructEntries(dst, collectStructFields(view), depth)
+		//: direct walk over the cached typeInfo — skips the
+		//: collectStructFields []any allocation + per-field .Interface()
+		//: boxing the entries-based path used to pay.
+		out, eerr := encodeStructDirect(dst, view, depth)
 		//: composite handled.
 		return out, true, eerr
 	//: scalar or rejected.
@@ -425,26 +427,42 @@ func collectMapPairs(view reflectView) []any {
 	return out
 }
 
-// collectStructFields extracts every exported field as a (name, value)
-// pair flattened into []any. Unexported fields are silently dropped.
-// Uses cachedStructTypeInfo so the reflect.Type → field-metadata walk
-// happens at most once per type process-wide.
-func collectStructFields(view reflectView) []any {
+// encodeStructDirect emits a tagStruct record by walking the cached
+// structTypeInfo and encoding each (name, value) pair directly into
+// dst. Avoids the []any intermediate the legacy collectStructFields
+// + encodeStructEntries pair allocated for every struct encode —
+// the slice header alloc and the per-field .Interface() boxing both
+// disappear.
+func encodeStructDirect(dst []byte, view reflectView, depth int) (encoded []byte, err error) {
 	//: convert once for method dispatch.
 	rv := reflect.Value(view)
 	//: cached metadata — single reflect walk per type, then reused.
-	ti := cachedStructTypeInfo(rv.Type())
-	//: pre-allocate exactly the entries the cached field list needs.
-	out := make([]any, 0, fieldEntryStride*len(ti.fields))
-	//: walk the cached metadata in declaration order.
-	for _, f := range ti.fields {
-		//: append the (name, value) entries.
-		out = append(out, f.name)
-		//: value follows the name.
-		out = append(out, rv.Field(f.index).Interface())
+	info := cachedStructTypeInfo(rv.Type())
+	//: emit the struct header (tag + field count).
+	dst = appendTagLen(dst, tagStruct, uint64(len(info.fields)))
+	//: walk every exported field in declaration order.
+	for _, f := range info.fields {
+		//: defensive cap on the field-name byte length — same gate the
+		//: decoder applies on the read side.
+		if len(f.name) > maxFieldNameBytes {
+			//: surface a marshal failure rather than silently truncating.
+			return dst, fieldNameTooLong(len(f.name))
+		}
+		//: emit the name as a tagString record.
+		dst = encodeString(dst, f.name)
+		//: emit the field value through the reflect-driven dispatcher
+		//: (depth+1 for the nested record).
+		next, eerr := encodeByKind(dst, reflectView(rv.Field(f.index)), depth+1)
+		//: surface per-field failure verbatim.
+		if eerr != nil {
+			//: caller will roll dst back to its prior length.
+			return dst, eerr
+		}
+		//: advance the buffer pointer.
+		dst = next
 	}
-	//: caller iterates in declaration order, stepping by fieldEntryStride.
-	return out
+	//: success path.
+	return dst, nil
 }
 
 // encodeSliceElements emits a tagSlice record from the pre-collected
@@ -491,36 +509,6 @@ func encodeMapPairs(dst []byte, pairs []any, depth int) (encoded []byte, err err
 		}
 		//: advance the buffer pointer.
 		dst = next2
-	}
-	//: success path.
-	return dst, nil
-}
-
-// encodeStructEntries emits a tagStruct record from the pre-collected
-// flat (name, value, name, value, …) entry slice.
-func encodeStructEntries(dst []byte, entries []any, depth int) (encoded []byte, err error) {
-	//: field count is half the flat length.
-	dst = appendTagLen(dst, tagStruct, uint64(len(entries)/fieldEntryStride))
-	//: emit each (name-TLV, value-TLV) pair.
-	for i := 0; i < len(entries); i += fieldEntryStride {
-		//: extract the (typed) field name.
-		name, _ := entries[i].(string)
-		//: enforce the field-name byte cap.
-		if len(name) > maxFieldNameBytes {
-			//: surface a marshal failure rather than silently truncating.
-			return dst, fieldNameTooLong(len(name))
-		}
-		//: the name is always a tagString TLV.
-		dst = encodeString(dst, name)
-		//: the value descends one level deeper.
-		next, verr := encodeValue(dst, entries[i+1], depth+1)
-		//: surface any value-encode failure.
-		if verr != nil {
-			//: caller will roll dst back to its prior length.
-			return dst, verr
-		}
-		//: advance the buffer pointer.
-		dst = next
 	}
 	//: success path.
 	return dst, nil

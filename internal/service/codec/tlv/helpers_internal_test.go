@@ -377,24 +377,70 @@ func Test_collectMapPairs(t *testing.T) {
 	}
 }
 
-// Test_collectStructFields covers exported-vs-unexported field collection.
-func Test_collectStructFields(t *testing.T) {
+// Test_encodeStructDirect covers the direct-into-buffer struct
+// encoder (replaces the legacy collect-then-emit pair).
+func Test_encodeStructDirect(t *testing.T) {
 	t.Parallel()
 	type sample struct {
-		Public  int `json:"public"`
+		Public  int
 		private int //nolint:unused // intentionally unexported for the test
 	}
 	type tc struct {
-		name string
-		in   any
-		want int
+		name    string
+		in      any
+		wantErr bool
 	}
-	tests := []tc{{"two slots for one exported field", sample{Public: 1, private: 2}, fieldEntryStride}}
+	tests := []tc{
+		{"single exported field encoded", sample{Public: 1, private: 2}, false},
+	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		got := collectStructFields(reflectView(reflect.ValueOf(tc.in)))
-		if len(got) != tc.want {
-			t.Errorf("%s: len=%d want %d", tc.name, len(got), tc.want)
+		out, err := encodeStructDirect(nil, reflectView(reflect.ValueOf(tc.in)), 0)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("%s: err=%v wantErr=%v", tc.name, err, tc.wantErr)
+		}
+		//: contract: header byte must be the struct tag.
+		if !tc.wantErr && (len(out) == 0 || out[0] != byte(tagStruct)) {
+			t.Errorf("%s: missing tagStruct header in %v", tc.name, out)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_encodeStructDirect_OversizeFieldName pins the field-name cap
+// gate — an exported field whose name exceeds maxFieldNameBytes must
+// surface as a marshal failure, not silently truncate.
+func Test_encodeStructDirect_OversizeFieldName(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		nameLen   int
+		wantError bool
+	}
+	tests := []tc{
+		{"at-limit-accepts", maxFieldNameBytes, false},
+		{"over-limit-rejects", maxFieldNameBytes + 1, true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: synthesise a struct field whose name is exactly tc.nameLen
+		//: long via reflect.StructOf. Field names must be valid Go
+		//: identifiers so we fill with repeated 'A' bytes.
+		buf := make([]byte, tc.nameLen)
+		for i := range buf {
+			//: 'A' is a stable valid identifier character at any position.
+			buf[i] = 'A'
+		}
+		typ := reflect.StructOf([]reflect.StructField{
+			{Name: string(buf), Type: reflect.TypeFor[int]()},
+		})
+		val := reflect.New(typ).Elem()
+		_, err := encodeStructDirect(nil, reflectView(val), 0)
+		//: contract: only over-limit names trigger the rejection.
+		if (err != nil) != tc.wantError {
+			t.Errorf("%s: err=%v wantErr=%v", tc.name, err, tc.wantError)
 		}
 	}
 	for _, tc := range tests {
@@ -441,31 +487,6 @@ func Test_encodeMapPairs(t *testing.T) {
 		}
 		if out[0] != byte(tagMap) {
 			t.Errorf("%s: wrong tag %d", tc.name, out[0])
-		}
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
-	}
-}
-
-// Test_encodeStructEntries covers the struct-payload emission helper.
-func Test_encodeStructEntries(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name    string
-		in      []any
-		wantErr bool
-	}
-	long := make([]byte, maxFieldNameBytes+1)
-	tests := []tc{
-		{"one field", []any{"x", int64(1)}, false},
-		{"oversize name rejected", []any{string(long), int64(1)}, true},
-	}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		_, err := encodeStructEntries(nil, tc.in, 0)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("%s: err=%v wantErr=%v", tc.name, err, tc.wantErr)
 		}
 	}
 	for _, tc := range tests {

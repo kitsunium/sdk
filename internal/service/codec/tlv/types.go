@@ -59,11 +59,6 @@ const (
 	// decimalBase is the base used to format diagnostic numbers.
 	decimalBase int = 10
 
-	// fieldEntryStride is the number of slice slots per struct-field
-	// entry in the flattened (name, value, …) buffer used by the encoder
-	// helpers — two: one for the name, one for the value.
-	fieldEntryStride int = 2
-
 	// mapPairStride is the number of slice slots per map pair in the
 	// flattened (key, value, …) buffer — two: one for the key, one for
 	// the value.
