@@ -4,8 +4,10 @@
 package yaml
 
 import (
+	"bytes"
 	"io"
 	"slices"
+	"sync"
 
 	goyaml "gopkg.in/yaml.v3"
 
@@ -23,8 +25,14 @@ import (
 // their own io.LimitReader sizing.
 const maxYAMLBytes int = 10 << 20
 
+// maxRetainedBufBytes caps the size of *bytes.Buffer instances re-pooled
+// by Marshal / Append. A one-off oversized payload would otherwise pin
+// a large buffer for the lifetime of the pool's GC window. 256 KiB is
+// the project-wide threshold (codec-perf-extreme initiative).
+const maxRetainedBufBytes int = 256 << 10
+
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted).
+// extension tables + the Marshal-side buffer pool.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&yamlCodec{})
@@ -34,6 +42,15 @@ var (
 
 	//: extension table hoisted for the same reason.
 	extensions = []string{".yaml", ".yml"}
+
+	//: bufferPool reuses *bytes.Buffer across Marshal / Append calls.
+	//: yaml.v3 has no Encoder.Reset(w) — we pool only the buffer and
+	//: spin up a fresh Encoder per call. Saves the bytes.Buffer header
+	//: allocation + the geometric grow cascade between consecutive
+	//: encodes.
+	bufferPool = sync.Pool{
+		New: func() any { return new(bytes.Buffer) },
+	}
 )
 
 // yamlCodec is the concrete Codec implementation for YAML.
@@ -63,22 +80,68 @@ func (*yamlCodec) Extensions() []string {
 	return slices.Clone(extensions)
 }
 
-// Marshal serialises v as YAML bytes.
+// Marshal serialises v as YAML bytes. Routes through a pooled
+// *bytes.Buffer + goyaml.NewEncoder so the per-call bytes.Buffer
+// allocation goyaml.Marshal pays internally is amortised across calls.
 func (*yamlCodec) Marshal(v any) (encoded []byte, err error) {
-	//: delegate to yaml.v3 for the actual encoding.
-	out, merr := goyaml.Marshal(v)
-	//: success fast-path.
-	if merr == nil {
-		//: return the encoded bytes verbatim.
-		return out, nil
+	//: rent the output buffer; pool guarantees a *bytes.Buffer.
+	buf, ok := bufferPool.Get().(*bytes.Buffer)
+	//: pool invariant guard — never expected to fail at runtime.
+	if !ok {
+		//: invariant broken — fail loud at the call site.
+		panic("service/codec/yaml: bufferPool yielded non-*bytes.Buffer")
 	}
-	//: wrap the library error for reason-based matching.
-	return nil, errs.Wrap(merr, errs.WrapParams{
-		Code:    CodeYAMLMarshalFailed,
-		Reason:  "MARSHAL_FAILED",
-		Public:  "YAML encoding failed",
-		Private: "service/codec/yaml.Marshal: gopkg.in/yaml.v3 returned an error",
-	})
+	//: start clean — pool may return a partially-filled buffer.
+	buf.Reset()
+	//: yaml.v3 Encoder has no Reset(w) — fresh one per call.
+	enc := goyaml.NewEncoder(buf)
+	//: encode into the pooled buffer.
+	if merr := enc.Encode(v); merr != nil {
+		//: drop the buffer back to the pool if not oversized.
+		releaseBuffer(buf)
+		//: wrap the library error for reason-based matching.
+		return nil, errs.Wrap(merr, errs.WrapParams{
+			Code:    CodeYAMLMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "YAML encoding failed",
+			Private: "service/codec/yaml.Marshal: gopkg.in/yaml.v3 returned an error",
+		})
+	}
+	//: yaml.v3 requires Close to flush the trailing document marker
+	//: + any pending state before the encoded bytes are complete.
+	if cerr := enc.Close(); cerr != nil {
+		//: drop the buffer back to the pool if not oversized.
+		releaseBuffer(buf)
+		//: surface the close failure as a marshal error.
+		return nil, errs.Wrap(cerr, errs.WrapParams{
+			Code:    CodeYAMLMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "YAML encoding failed",
+			Private: "service/codec/yaml.Marshal: encoder.Close returned an error",
+		})
+	}
+	//: detach: clone the buffer's bytes so the returned slice does not
+	//: alias the pooled buffer (next caller would overwrite it).
+	out := slices.Clone(buf.Bytes())
+	//: cap-discard release.
+	releaseBuffer(buf)
+	//: success — bytes are the caller's now.
+	return out, nil
+}
+
+// releaseBuffer returns buf to the pool unless its capacity exceeds the
+// cap-discard threshold.
+func releaseBuffer(buf *bytes.Buffer) {
+	//: oversized buffers would pin large allocations for the lifetime
+	//: of the pool's GC window — drop them instead.
+	if buf.Cap() > maxRetainedBufBytes {
+		//: orphan the buffer; the GC will reclaim it.
+		return
+	}
+	//: pool expects a clean buffer.
+	buf.Reset()
+	//: return for the next caller.
+	bufferPool.Put(buf)
 }
 
 // Unmarshal parses data as YAML into v.
@@ -108,6 +171,21 @@ func (*yamlCodec) Unmarshal(data []byte, v any) error {
 		Public:  "YAML decoding failed",
 		Private: "service/codec/yaml.Unmarshal: gopkg.in/yaml.v3 returned an error",
 	})
+}
+
+// Append encodes v as YAML and appends the bytes to dst. Implements the
+// optional codec.Appender interface so hot-path callers can stream
+// records into a recycled buffer.
+func (c *yamlCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: delegate to Marshal so the wrap/error contract has a single source.
+	encoded, merr := c.Marshal(v)
+	//: surface any encoding failure without touching dst.
+	if merr != nil {
+		//: return the untouched buffer plus the wrapped error.
+		return dst, merr
+	}
+	//: append the encoded bytes onto the caller's buffer.
+	return append(dst, encoded...), nil
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.
