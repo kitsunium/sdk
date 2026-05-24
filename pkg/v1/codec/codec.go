@@ -77,7 +77,7 @@
 //
 //	func main() {
 //	    u := User{Name: "Ada", Age: 36}
-//	    for _, f := range []codec.Format{"json", "cbor", "yaml", "msgpack", "base64"} {
+//	    for _, f := range []codec.Format{codec.JSON, codec.CBOR, codec.YAML, codec.MsgPack, codec.Base64} {
 //	        data, _ := codec.Marshal(f, u)
 //	        var back User
 //	        _ = codec.Unmarshal(f, data, &back)
@@ -165,6 +165,10 @@ type Encoder = corecodec.Encoder
 type Decoder = corecodec.Decoder
 
 // Known format constants — string values are part of the public contract.
+// Prefer the typed constants over string literals at call sites: the
+// IDE catches typos at compile time, autocomplete surfaces the full
+// list, and the underlying string value (frozen post-v1.0.0) stays
+// available via `string(codec.JSON)` whenever raw access is needed.
 const (
 	// JSON denotes the stdlib encoding/json wire format.
 	JSON Format = "json"
@@ -186,6 +190,27 @@ const (
 	CBOR Format = "cbor"
 	// MsgPack denotes the vmihailenco/msgpack/v5 wire format.
 	MsgPack Format = "msgpack"
+
+	// TLV denotes the self-describing Type-Length-Value reflection
+	// codec (one record per encode; nested composites supported).
+	TLV Format = "tlv"
+	// FlatBuffers denotes the passthrough codec for already-encoded
+	// FlatBuffer payloads — schema-typed reads stay in the caller's
+	// flatc-generated accessors.
+	FlatBuffers Format = "flatbuffers"
+
+	// Base64 denotes the JSON-mediated base64 (std) text-safe wrap.
+	Base64 Format = "base64"
+	// Base64URL denotes the JSON-mediated base64 (URL-safe alphabet) wrap.
+	Base64URL Format = "base64url"
+	// Base32 denotes the JSON-mediated base32 (std) text-safe wrap.
+	Base32 Format = "base32"
+	// Base16 denotes the JSON-mediated base16 (uppercase hex) wrap.
+	Base16 Format = "base16"
+	// Hex denotes the JSON-mediated lowercase-hex text-safe wrap.
+	Hex Format = "hex"
+	// ASCII85 denotes the JSON-mediated Adobe Ascii85 text-safe wrap.
+	ASCII85 Format = "ascii85"
 )
 
 // Marshal serialises v using the codec registered under f. The codec's
