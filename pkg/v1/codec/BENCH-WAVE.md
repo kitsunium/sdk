@@ -98,7 +98,13 @@ Late-Wave-2 / Wave-3 micro-optimizations that landed on top of the table above. 
 | yaml/toml/xml Append | Zero-clone Append via pooled buffer (drop Marshal-delegation double-copy) | **-1 alloc/op, -~10 KB/op** on small Append (yaml shown); same shape on toml/xml |
 | ndjson Marshal | Pool + size-aware release (small clones+repools, oversize orphans untouched) | small parallel: **-40% ns, -41% B/op** ; medium parallel: **-28% ns, -30% B/op** ; large parallel preserved at baseline (no regression) |
 | csv Marshal | Pool *bytes.Buffer with size-aware release | medium parallel: **-1 alloc/op (3→2), -1% B/op** |
+| csv Unmarshal | Pool *bytes.Reader | medium parallel: **-1 alloc/op (26→25), -45 B/op** |
 | pem Marshal slow path | Pool *bytes.Buffer with size-aware release | Bench rig hits the fast path; win benefits downstream cert/key callers (not in bench) |
+| tlv Unmarshal Phase 1 (*struct target) | Skip the map[string]any intermediate + projectMapToStruct second walk; write directly into target.Field(i) via cachedStructTypeInfo | 5-field User: **-35% ns, -59% B/op, -3 allocs** ; 18-field WideUser (name-index map kicks in): **-15% ns, -27% B/op, -2 allocs** |
+| tlv Unmarshal Phase 2 (*[]Struct target) | Each element re-enters the struct typed walker; N-element slice avoids N map[string]any allocations | 100-element []Item: **-32% ns, -60% B/op, -102 allocs** |
+| tlv Unmarshal Phase 3 (nested struct + nested slice-of-struct fields) | Per-field typed recursion when field.Kind() matches the wire tag; depth threaded through all paths | *Page with 50 nested Items + nested Owner struct: **-45% ns, -68% B/op, -55 allocs** |
+| tlv Marshal encodeStructDirect | Drop the collect-then-emit []any intermediate for structs; walk cachedStructTypeInfo and emit each field record directly | 5-field User: **-28% ns, -42% B/op, -50% allocs (12→6)** |
+| tlv Marshal encodeSliceDirect + encodeMapDirect | Same zero-intermediate pattern for slices + maps; companion to encodeStructDirect | []int(100): 8 allocs/op (was N+1 boxings); map[string]int(50): 107 allocs/op (same wire bytes, fewer in-flight) |
 
 The "size-aware release" pattern (clone+repool when cap ≤ 256 KiB,
 orphan-without-clone when cap > 256 KiB) was the unlock that let
