@@ -846,3 +846,35 @@ func TestDecodeASCII85(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// Test_encodeHex covers the shared base16/hex helper: lowercase output
+// for variantHex, uppercase for variantBase16, byte-for-byte parity
+// with the legacy hex.Encode + bytes.ToUpper path.
+func Test_encodeHex(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		v    variant
+		raw  []byte
+		want string
+	}
+	tests := []tc{
+		{"hex-empty", variantHex, []byte{}, ""},
+		{"hex-ascii", variantHex, []byte("Ada"), "416461"},
+		{"hex-binary", variantHex, []byte{0x00, 0xFF, 0xA5, 0x5A}, "00ffa55a"},
+		{"base16-empty", variantBase16, []byte{}, ""},
+		{"base16-ascii", variantBase16, []byte("Ada"), "416461"},
+		{"base16-binary", variantBase16, []byte{0x00, 0xFF, 0xA5, 0x5A}, "00FFA55A"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got := encodeHex(tc.v, tc.raw)
+		//: byte-for-byte parity with the legacy path.
+		if string(got) != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

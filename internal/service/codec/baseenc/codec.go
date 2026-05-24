@@ -13,7 +13,6 @@
 package baseenc
 
 import (
-	"bytes"
 	"encoding/ascii85"
 	"encoding/base32"
 	"encoding/base64"
@@ -228,16 +227,8 @@ func (c *baseencCodec) encodeBytes(raw []byte) []byte {
 		return encoded
 	//: hex variants — base16 is the upper-cased flavour, hex is lower-case.
 	case variantBase16, variantHex:
-		//: stdlib helper writes into a freshly-allocated slice.
-		encoded := make([]byte, hex.EncodedLen(len(raw)))
-		hex.Encode(encoded, raw)
-		//: base16 wants the uppercase alphabet.
-		if c.variant == variantBase16 {
-			//: in-place upper-case keeps the allocation cost at one slice.
-			return bytes.ToUpper(encoded)
-		}
-		//: hand back the lowercase form verbatim.
-		return encoded
+		//: shared helper handles both variants with one allocation.
+		return encodeHex(c.variant, raw)
 	//: Adobe ascii85.
 	case variantASCII85:
 		//: ascii85 has no AppendEncode; encode into a sized buffer.
@@ -281,6 +272,33 @@ func (c *baseencCodec) decodeBytes(data []byte) (decoded []byte, err error) {
 	}
 	//: unreachable — Register only stores known variants.
 	return nil, nil
+}
+
+// encodeHex emits the hex encoding of raw as a fresh slice. base16 gets
+// the uppercase alphabet via an in-place bit-5 mask on a..f only (digits
+// 0..9 left alone); hex keeps the stdlib lowercase output. Single
+// allocation either way — the legacy bytes.ToUpper(encoded) path was
+// allocating a second slice and re-walking it. Split out of encodeBytes
+// to keep that dispatch under the cyclo + LOC budget.
+func encodeHex(v variant, raw []byte) []byte {
+	//: stdlib helper writes into a freshly-allocated slice.
+	encoded := make([]byte, hex.EncodedLen(len(raw)))
+	hex.Encode(encoded, raw)
+	//: hex keeps the stdlib lowercase output; only base16 uppercases.
+	if v != variantBase16 {
+		//: hand back the lowercase form verbatim.
+		return encoded
+	}
+	//: walk the single allocation once, in place.
+	for i, b := range encoded {
+		//: only a..f need the 0x20 mask cleared.
+		if b >= 'a' && b <= 'f' {
+			//: bit 5 toggles case for ASCII letters.
+			encoded[i] = b - asciiLowerToUpperOffset
+		}
+	}
+	//: hand back the now-uppercase buffer.
+	return encoded
 }
 
 // appendEncodeBase16Upper appends the uppercase-hex encoding of raw onto dst.
