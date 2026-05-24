@@ -28,6 +28,14 @@ TOML codec wrapping `github.com/pelletier/go-toml/v2`. Streaming Encoder/Decoder
 - Stateless singleton.
 - No additional hardening beyond pelletier's own input validation; TOML's grammar inherently bounds document complexity.
 
+## Performance (lib-bound)
+
+pelletier/go-toml/v2 performs its reflect walk internally and exposes no
+encoder-buffer-reset hook, so the only lever at this layer is pooling the
+outer *bytes.Buffer that Marshal/Append encode into — now mutualised via
+`internal/core/codec/scratch`. The library's reflection is unreachable; do
+not re-add a local pool.
+
 ## Verification
 
 ```

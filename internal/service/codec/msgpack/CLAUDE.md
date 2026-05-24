@@ -29,6 +29,14 @@ MessagePack codec wrapping `github.com/vmihailenco/msgpack/v5`. Streaming Encode
 - Over-cap rejection carries diagnostic `Fields`: `len`, `cap` — surfaced via `errs.Int(...)`.
 - Stateless singleton.
 
+## Performance (lib-bound)
+
+vmihailenco/msgpack/v5 performs its reflect walk internally. The realised
+wins are GetEncoder/GetDecoder reuse from the library's own pools,
+`UseCompactInts(true)` for narrower int wire forms, and encoding into a
+pooled buffer + reader (now `internal/core/codec/scratch`). The library's
+reflect walk is not reachable from this layer; do not re-add a local pool.
+
 ## Verification
 
 ```

@@ -29,6 +29,14 @@ YAML codec wrapping `gopkg.in/yaml.v3`. Supports multi-document streams via `---
 - Over-cap rejection carries diagnostic `Fields`: `len`, `cap` — surfaced via `errs.Int(...)`.
 - Stateless singleton.
 
+## Performance (lib-bound)
+
+gopkg.in/yaml.v3 performs its reflect walk internally. The realised wins are
+`SetIndent(2)` (≈50% smaller output on nested configs, hence less buffer
+growth) and pooling the outer *bytes.Buffer — now mutualised via
+`internal/core/codec/scratch`. The library's reflection is unreachable; do
+not re-add a local pool.
+
 ## Verification
 
 ```

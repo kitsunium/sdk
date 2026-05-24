@@ -28,6 +28,13 @@ XML codec wrapping stdlib `encoding/xml`. Streaming Encoder/Decoder are forwarde
 - **Billion-Laughs bounded** by stdlib: `encoding/xml` does not expand external entities and rejects DOCTYPE declarations, so the classic XXE / entity-expansion DoS vector is inert. Asserted by `TestUnmarshal_BillionLaughsBounded` in `codec_external_test.go`. No additional hardening is layered on top.
 - Stateless singleton.
 
+## Performance (lib-bound)
+
+`encoding/xml`'s reflect walk is internal to the stdlib and its token API
+exposes no typed fast path, so the only lever here is pooling the outer
+*bytes.Buffer that Marshal/Append encode into — now mutualised via
+`internal/core/codec/scratch`. Do not re-add a local pool.
+
 ## Verification
 
 ```
