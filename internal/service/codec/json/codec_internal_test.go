@@ -2,6 +2,7 @@ package json
 
 import (
 	"bytes"
+	stdjson "encoding/json"
 	"testing"
 )
 
@@ -226,6 +227,42 @@ func Test_releaseAppendBuffer(t *testing.T) {
 		buf.Grow(tc.cap)
 		//: helper must accept both cases without panicking.
 		releaseAppendBuffer(buf)
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_marshalRawMessage pins the json.RawMessage / *json.RawMessage
+// pass-through fast path: pre-encoded inputs return their bytes
+// verbatim (defensive-cloned) instead of going through stdjson's
+// reflect + MarshalJSON round-trip.
+func Test_marshalRawMessage(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		input  any
+		wantOK bool
+		want   string
+	}
+	raw := new(stdjson.RawMessage(`{"k":"v"}`))
+	tests := []tc{
+		{"raw-message-non-empty", stdjson.RawMessage(`{"a":1}`), true, `{"a":1}`},
+		{"raw-message-empty-as-null", stdjson.RawMessage{}, true, `null`},
+		{"raw-message-pointer", raw, true, `{"k":"v"}`},
+		{"nil-pointer-as-null", (*stdjson.RawMessage)(nil), true, `null`},
+		{"non-raw-falls-back", "plain-string", false, ""},
+		{"struct-falls-back", struct{ X int }{1}, false, ""},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		out, ok := marshalRawMessage(tc.input)
+		if ok != tc.wantOK {
+			t.Errorf("%s: ok=%v want=%v", tc.name, ok, tc.wantOK)
+		}
+		if tc.wantOK && string(out) != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, out, tc.want)
+		}
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	stdjson "encoding/json"
 	"io"
+	"slices"
 	"sync"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -63,8 +64,17 @@ func (*jsonCodec) Extensions() []string {
 	return []string{".json"}
 }
 
-// Marshal serialises v as JSON bytes.
+// Marshal serialises v as JSON bytes. Pre-encoded inputs that already
+// carry valid JSON bytes (`json.RawMessage`, `*json.RawMessage`) take
+// a fast-path that bypasses the stdjson reflect + MarshalJSON
+// round-trip — the caller did the work, we just return the bytes
+// verbatim (after a defensive clone so the result is caller-owned).
 func (*jsonCodec) Marshal(v any) (encoded []byte, err error) {
+	//: pre-encoded fast-path — proxy/gateway callers hit this often.
+	if out, ok := marshalRawMessage(v); ok {
+		//: bytes are caller-owned now.
+		return out, nil
+	}
 	//: delegate to the stdlib for the actual encoding.
 	out, jerr := stdjson.Marshal(v)
 	//: success fast-path.
@@ -79,6 +89,40 @@ func (*jsonCodec) Marshal(v any) (encoded []byte, err error) {
 		Public:  "JSON encoding failed",
 		Private: "service/codec/json.Marshal: encoding/json returned an error",
 	})
+}
+
+// marshalRawMessage recognises pre-encoded json.RawMessage / *json.RawMessage
+// values and returns their bytes verbatim (cloned so the caller cannot
+// mutate the underlying buffer through our return). Returns ok=false
+// when v isn't a recognised raw shape so the caller falls back to the
+// stdjson reflect path.
+func marshalRawMessage(v any) (encoded []byte, ok bool) {
+	//: dispatch on the concrete RawMessage shapes only — anything else
+	//: keeps the reflect-based path that handles arbitrary Go values.
+	switch r := v.(type) {
+	//: stdjson.RawMessage IS a []byte; clone so caller-owned.
+	case stdjson.RawMessage:
+		//: nil/empty RawMessage marshals as "null" — match stdjson semantics.
+		if len(r) == 0 {
+			//: explicit null wire bytes for empty raw message.
+			return []byte("null"), true
+		}
+		//: caller-owned slice — defensive copy keeps storage independent.
+		return slices.Clone([]byte(r)), true
+	//: pointer form — dereference and recurse on the value.
+	case *stdjson.RawMessage:
+		//: nil pointer marshals as "null".
+		if r == nil || len(*r) == 0 {
+			//: explicit null wire bytes for nil/empty raw message.
+			return []byte("null"), true
+		}
+		//: caller-owned slice.
+		return slices.Clone([]byte(*r)), true
+	//: no recognised raw shape — caller falls back.
+	default:
+		//: stdjson's reflect path handles the rest.
+		return nil, false
+	}
 }
 
 // Unmarshal parses data as JSON into v.
@@ -109,6 +153,12 @@ func (*jsonCodec) Unmarshal(data []byte, v any) error {
 // again into dst). The pool path encodes once into a reusable buffer
 // then copies once into dst — one alloc, one copy in steady state.
 func (*jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: pre-encoded fast-path — same shape as Marshal, no scratch buffer
+	//: needed because the bytes already exist.
+	if out, ok := marshalRawMessage(v); ok {
+		//: append the pre-encoded bytes directly onto the caller's dst.
+		return append(dst, out...), nil
+	}
 	//: rent the scratch buffer; pool guarantees a *bytes.Buffer.
 	buf, ok := appendBufferPool.Get().(*bytes.Buffer)
 	//: pool invariant guard — never expected to fail at runtime.
