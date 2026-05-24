@@ -65,16 +65,12 @@ func tryDecodeRootInto(data []byte, target reflect.Value) (handled bool, err err
 	case reflect.Struct:
 		//: hand off to the struct dispatcher.
 		return tryDecodeRootIntoStruct(data, target)
-	//: top-level []Struct — Phase 2 path (slice of structs only).
+	//: top-level []T — Phase 2 (T=struct) or Phase 6 (T=scalar/bytes).
 	case reflect.Slice:
-		//: handle only slice-of-struct here; other element kinds keep
-		//: falling through to the untyped projector.
-		if target.Type().Elem().Kind() != reflect.Struct {
-			//: slice-of-non-struct uses the untyped path.
-			return false, nil
-		}
-		//: typed slice-of-struct dispatcher.
-		return tryDecodeRootIntoSliceOfStruct(data, target)
+		//: hand off to the slice dispatcher; falls back to untyped on
+		//: composite element kinds we don't directly handle yet (map,
+		//: nested slice, pointer).
+		return tryDecodeRootIntoSlice(data, target)
 	//: top-level map[K]V — Phase 4 path. Skips the map[any]any
 	//: intermediate the untyped projector builds.
 	case reflect.Map:
@@ -235,6 +231,256 @@ func tryDecodeRootIntoStruct(data []byte, target reflect.Value) (handled bool, e
 	}
 	//: typed-path success.
 	return true, nil
+}
+
+// tryDecodeRootIntoSlice dispatches *[]T root targets by element
+// kind: structs go through tryDecodeRootIntoSliceOfStruct (Phase 2),
+// scalars + bytes-typed slices go through
+// tryDecodeRootIntoSliceOfScalar (Phase 6). Anything else falls
+// through to the untyped projector so cross-shape behaviour is
+// preserved (e.g. *[]map[string]any).
+func tryDecodeRootIntoSlice(data []byte, target reflect.Value) (handled bool, err error) {
+	//: element-kind discriminator.
+	elemKind := target.Type().Elem().Kind()
+	//: struct element → Phase 2 (already shipped).
+	if elemKind == reflect.Struct {
+		//: typed slice-of-struct dispatcher.
+		return tryDecodeRootIntoSliceOfStruct(data, target)
+	}
+	//: scalar element → Phase 6 typed scalar-slice path.
+	if isScalarKind(elemKind) {
+		//: typed slice-of-scalar dispatcher.
+		return tryDecodeRootIntoSliceOfScalar(data, reflectView(target))
+	}
+	//: composite-element slices (slice/map/pointer) still go through
+	//: the untyped projector — these need their own Phase 7+ work.
+	return false, nil
+}
+
+// isScalarKind reports whether k is a fixed-width Go scalar kind
+// (int*, uint*, float*, bool, string) that maps cleanly onto a
+// single TLV scalar tag. Bytes (uint8) are scalar but the wire
+// representation differs ([]byte ↔ tagBytes), so the slice walker
+// handles uint8 separately below.
+func isScalarKind(k reflect.Kind) bool {
+	//: dispatch on the discriminator; explicit list keeps the
+	//: classifier readable and easy to extend.
+	switch k {
+	//: bool / signed integers / unsigned integers (incl. uint8 for
+	//: []byte which the wire encodes as a single tagBytes record).
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64,
+		reflect.String:
+		//: caller takes the typed path.
+		return true
+	//: every other kind needs composite handling.
+	default:
+		//: caller falls back.
+		return false
+	}
+}
+
+// tryDecodeRootIntoSliceOfScalar handles the Phase-6 *[]Scalar
+// target path. Each element is decoded into the target slice
+// directly via narrowNumeric / SetString / SetBool — saves the
+// projectSliceToTyped's per-element any-boxing.
+//
+// Special case: *[]byte targets — the wire encodes a tagBytes
+// record (not tagSlice), so we fall back to the untyped path to
+// preserve that asymmetry.
+func tryDecodeRootIntoSliceOfScalar(data []byte, targetView reflectView) (handled bool, err error) {
+	//: unwrap once for method dispatch on the target.
+	target := reflect.Value(targetView)
+	//: *[]byte uses tagBytes on the wire — let the untyped path
+	//: handle it (it knows how to convert tagBytes → []byte).
+	if target.Type().Elem().Kind() == reflect.Uint8 {
+		//: signal caller to fall back to decodeValue + convertValue.
+		return false, nil
+	}
+	//: peek the tag — only tagSlice triggers the typed scalar path.
+	if len(data) < minRecordBytes {
+		//: surface the truncated sentinel via the typed path.
+		return true, truncatedError()
+	}
+	//: shape mismatch on the wire side; let the untyped path project.
+	if Tag(data[0]) != tagSlice {
+		//: signal fall-back.
+		return false, nil
+	}
+	//: read the element count.
+	rest := data[1:]
+	length, rest, lerr := readVarintFromBytes(rest)
+	//: surface varint failure verbatim.
+	if lerr != nil {
+		//: already wrapped.
+		return true, lerr
+	}
+	//: cap-discard structural length before walking elements.
+	if length > uint64(maxTLVBytes) {
+		//: surface the size sentinel.
+		return true, sizeExceededError(length)
+	}
+	//: walk each element directly into the slice.
+	residual, derr := decodeSliceOfScalarInto(length, rest, reflectView(target), 0)
+	//: surface element-walk failure verbatim.
+	if derr != nil {
+		//: already wrapped.
+		return true, derr
+	}
+	//: typed path expects an exact buffer.
+	if len(residual) != 0 {
+		//: trailing bytes sentinel.
+		return true, trailingBytesError(len(residual))
+	}
+	//: typed-path success.
+	return true, nil
+}
+
+// decodeSliceOfScalarInto consumes `length` scalar records from rest
+// and builds a typed []ScalarT in place on target. Each element goes
+// through decodeValue (so wire-format narrowing is unchanged) then
+// convertValue narrows the boxed any into the element type. The
+// outer []any allocation the legacy projector built is skipped.
+func decodeSliceOfScalarInto(length uint64, rest []byte, targetView reflectView, depth int) (residual []byte, err error) {
+	//: unwrap once for Type()/Set() dispatch.
+	target := reflect.Value(targetView)
+	//: depth guard fires before any allocation.
+	if depth+1 > maxTLVDepth {
+		//: surface the documented depth sentinel.
+		return rest, depthExceededError(depth + 1)
+	}
+	//: pre-allocate cap, capped at sliceHintCap to defuse declared-
+	//: length DoS. The actual slice grows via reflect.Append when
+	//: wire length exceeds the hint (rare; defends a malicious
+	//: declared length from triggering a multi-GB initial alloc).
+	out, err := walkScalarSlice(reflectView(target), length, rest, depth+1)
+	//: surface any element-level failure verbatim.
+	if err != nil {
+		//: already wrapped by the inner walker.
+		return rest, err
+	}
+	//: publish through the caller's slice pointer.
+	target.Set(out.slice)
+	//: walked every element; hand the residual back to the caller.
+	return out.residual, nil
+}
+
+// scalarSliceWalkResult bundles the populated slice + residual bytes
+// produced by walkScalarSlice. Two-value return would exceed the
+// linter's NAMEDRETURN budget on a multi-error path.
+type scalarSliceWalkResult struct {
+	//: slice carries the populated typed result for caller publish.
+	slice reflect.Value
+	//: residual bytes are the unread tail after the walk completes.
+	residual []byte
+}
+
+// walkScalarSlice consumes `length` scalar records from rest and
+// fills a freshly-built typed slice with them. Two branches: a
+// fast path with exact pre-alloc + indexed Set when length fits the
+// sliceHintCap budget, and a grow-as-we-go path for extreme or
+// malicious lengths. Both branches share the per-element narrowing
+// logic via narrowAndSet.
+func walkScalarSlice(targetView reflectView, length uint64, rest []byte, depth int) (result scalarSliceWalkResult, err error) {
+	//: unwrap once for method dispatch.
+	target := reflect.Value(targetView)
+	//: fast path when length fits the safe pre-alloc bucket.
+	if length <= uint64(sliceHintCap) {
+		//: hand off to the exact-pre-alloc walker.
+		return walkScalarSliceExact(reflectView(target), length, rest, depth)
+	}
+	//: slow path for over-budget lengths; reflect.Append grows on demand.
+	return walkScalarSliceGrowing(reflectView(target), length, rest, depth)
+}
+
+// walkScalarSliceExact handles the fast-path scalar slice walk for
+// lengths that fit the sliceHintCap budget: pre-allocate exactly
+// length entries and write each via indexed Set after narrowing.
+func walkScalarSliceExact(targetView reflectView, length uint64, rest []byte, depth int) (result scalarSliceWalkResult, err error) {
+	//: unwrap once for method dispatch.
+	target := reflect.Value(targetView)
+	//: snapshot the element type once.
+	elemType := target.Type().Elem()
+	//: result with exact len + cap; indexed Set per element.
+	out := reflect.MakeSlice(target.Type(), int(length), int(length)) //nolint:gosec // bound by sliceHintCap
+	//: walk every element in order.
+	for i := range int(length) { //nolint:gosec // same bound.
+		//: decode + narrow + Set via the shared per-element helper.
+		next, derr := narrowAndSet(reflectView(out.Index(i)), elemType, rest, depth)
+		//: surface element failure verbatim.
+		if derr != nil {
+			//: already wrapped.
+			return scalarSliceWalkResult{}, derr
+		}
+		//: advance past the consumed value record.
+		rest = next
+	}
+	//: fast path produces a fully-populated slice + residual.
+	return scalarSliceWalkResult{slice: out, residual: rest}, nil
+}
+
+// walkScalarSliceGrowing handles the slow-path scalar slice walk
+// for lengths that exceed sliceHintCap. reflect.Append grows the
+// slice on demand from the initial sliceHintCap capacity.
+func walkScalarSliceGrowing(targetView reflectView, length uint64, rest []byte, depth int) (result scalarSliceWalkResult, err error) {
+	//: unwrap once for method dispatch.
+	target := reflect.Value(targetView)
+	//: snapshot the element type once.
+	elemType := target.Type().Elem()
+	//: starting capacity of sliceHintCap avoids the early
+	//: geometric grow cascade for the first 4096 elements.
+	out := reflect.MakeSlice(target.Type(), 0, sliceHintCap)
+	//: walk every element in order.
+	for range length {
+		//: build a settable placeholder; default zero on nil source.
+		ev := reflect.New(elemType).Elem()
+		//: decode + narrow + Set into the placeholder.
+		next, derr := narrowAndSet(reflectView(ev), elemType, rest, depth)
+		//: surface element failure verbatim.
+		if derr != nil {
+			//: already wrapped.
+			return scalarSliceWalkResult{}, derr
+		}
+		//: append onto the growing slice + advance.
+		out = reflect.Append(out, ev)
+		rest = next
+	}
+	//: slow path produces a fully-populated slice + residual.
+	return scalarSliceWalkResult{slice: out, residual: rest}, nil
+}
+
+// narrowAndSet decodes one record from rest, narrows the boxed `any`
+// into elemType, and publishes it into dst (which must already be
+// settable). nil source values leave dst at its zero value. Returns
+// the residual buffer after the consumed record.
+func narrowAndSet(dstView reflectView, elemType reflect.Type, rest []byte, depth int) (next []byte, err error) {
+	//: unwrap once for the final Set dispatch.
+	dst := reflect.Value(dstView)
+	//: decode the element value via the generic walker.
+	val, next, verr := decodeValue(rest, depth)
+	//: surface decode failure verbatim.
+	if verr != nil {
+		//: already wrapped.
+		return rest, verr
+	}
+	//: nil source leaves the destination zero-valued.
+	if val == nil {
+		//: cursor still advances.
+		return next, nil
+	}
+	//: narrow into the target element type.
+	conv, cerr := convertValue(val, elemType)
+	//: surface conversion failure verbatim.
+	if cerr != nil {
+		//: already wrapped.
+		return rest, cerr
+	}
+	//: publish the narrowed value into the caller's slot.
+	dst.Set(conv)
+	//: caller advances past the consumed value.
+	return next, nil
 }
 
 // tryDecodeRootIntoSliceOfStruct handles the Phase-2 *[]Struct

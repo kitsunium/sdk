@@ -532,3 +532,272 @@ func Test_assignMapPair(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// Test_PhaseSixSliceOfInts pins the Phase-6 typed scalar slice path
+// for []int. Forward = Marshal produces wire bytes; reverse =
+// Unmarshal recovers an identical slice element-by-element.
+func Test_PhaseSixSliceOfInts(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		src  []int
+	}
+	tests := []tc{
+		{"one-element", []int{42}},
+		{"five-elements", []int{1, 2, 3, 4, 5}},
+		{"empty", []int{}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &tlvCodec{}
+		enc, err := c.Marshal(tc.src)
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		var got []int
+		if uerr := c.Unmarshal(enc, &got); uerr != nil {
+			t.Fatalf("%s: Unmarshal err=%v", tc.name, uerr)
+		}
+		if len(got) != len(tc.src) {
+			t.Fatalf("%s: length: got=%d want=%d", tc.name, len(got), len(tc.src))
+		}
+		for i := range tc.src {
+			if got[i] != tc.src[i] {
+				t.Errorf("%s: [%d]=%d want=%d", tc.name, i, got[i], tc.src[i])
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_PhaseSixSliceOfStrings pins the typed scalar slice path for
+// []string with the same forward+reverse pattern.
+func Test_PhaseSixSliceOfStrings(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		src  []string
+	}
+	tests := []tc{
+		{"single", []string{"hello"}},
+		{"varying-lengths", []string{"a", "bb", "ccc"}},
+		{"empty", []string{}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &tlvCodec{}
+		enc, err := c.Marshal(tc.src)
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		var got []string
+		if uerr := c.Unmarshal(enc, &got); uerr != nil {
+			t.Fatalf("%s: Unmarshal err=%v", tc.name, uerr)
+		}
+		if len(got) != len(tc.src) {
+			t.Fatalf("%s: length: got=%d want=%d", tc.name, len(got), len(tc.src))
+		}
+		for i := range tc.src {
+			if got[i] != tc.src[i] {
+				t.Errorf("%s: [%d]=%q want=%q", tc.name, i, got[i], tc.src[i])
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_PhaseSixBytesFallback pins the *[]byte fall-back case: the
+// wire encodes []byte as a single tagBytes record, not a tagSlice
+// of uint8 elements, so the Phase-6 dispatcher must defer to the
+// untyped projector. Roundtrip preserves the exact byte sequence.
+func Test_PhaseSixBytesFallback(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		src  []byte
+	}
+	tests := []tc{
+		{"three-bytes", []byte{1, 2, 3}},
+		{"empty", []byte{}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &tlvCodec{}
+		enc, err := c.Marshal(tc.src)
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		var got []byte
+		if uerr := c.Unmarshal(enc, &got); uerr != nil {
+			t.Fatalf("%s: Unmarshal err=%v", tc.name, uerr)
+		}
+		if string(got) != string(tc.src) {
+			t.Errorf("%s: got=%v want=%v", tc.name, got, tc.src)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_isScalarKind pins the scalar-kind classifier used by the
+// Phase 6 typed-slice dispatcher.
+func Test_isScalarKind(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		kind reflect.Kind
+		want bool
+	}
+	tests := []tc{
+		{"int-is-scalar", reflect.Int, true},
+		{"string-is-scalar", reflect.String, true},
+		{"float64-is-scalar", reflect.Float64, true},
+		{"bool-is-scalar", reflect.Bool, true},
+		{"struct-is-not-scalar", reflect.Struct, false},
+		{"slice-is-not-scalar", reflect.Slice, false},
+		{"map-is-not-scalar", reflect.Map, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got := isScalarKind(tc.kind)
+		if got != tc.want {
+			t.Errorf("%s: got=%v want=%v", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_narrowAndSet pins the per-element narrower used by both
+// Phase-6 walk paths: it must decode one wire record, narrow into
+// the target element type, and publish via reflect.Value.Set.
+func Test_narrowAndSet(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		wire []byte
+		want int64
+	}
+	tests := []tc{
+		//: tagInt8 (0x10) carries a 1-byte int8 payload of value 7.
+		{"int8-element", []byte{0x10, 0x01, 0x07}, 7},
+		//: tagInt8 with value 42.
+		{"int8-element-42", []byte{0x10, 0x01, 0x2A}, 42},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		var dst int64
+		rv := reflect.ValueOf(&dst).Elem()
+		next, err := narrowAndSet(reflectView(rv), reflect.TypeFor[int64](), tc.wire, 1)
+		if err != nil {
+			t.Fatalf("%s: err=%v", tc.name, err)
+		}
+		//: contract: every wire byte consumed.
+		if len(next) != 0 {
+			t.Errorf("%s: %d leftover bytes", tc.name, len(next))
+		}
+		//: contract: decoded value matches.
+		if dst != tc.want {
+			t.Errorf("%s: got=%d want=%d", tc.name, dst, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_walkScalarSliceExact pins the fast-path walker that handles
+// scalar slices fitting the sliceHintCap budget. Uses pre-encoded
+// wire bytes to exercise the inner loop directly.
+func Test_walkScalarSliceExact(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		src  []int
+	}
+	tests := []tc{
+		{"three-elements", []int{1, 2, 3}},
+		{"single-element", []int{99}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &tlvCodec{}
+		//: forward via the codec to get canonical wire bytes.
+		enc, err := c.Marshal(tc.src)
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		//: skip the tagSlice header byte + length byte.
+		var got []int
+		target := reflect.ValueOf(&got).Elem()
+		//: extract length from wire (1 byte for these short slices).
+		length := uint64(enc[1])
+		//: reverse: walk into the target slice.
+		result, derr := walkScalarSliceExact(reflectView(target), length, enc[2:], 1)
+		if derr != nil {
+			t.Fatalf("%s: walk err=%v", tc.name, derr)
+		}
+		target.Set(result.slice)
+		//: bijection check.
+		if len(got) != len(tc.src) {
+			t.Fatalf("%s: length: got=%d want=%d", tc.name, len(got), len(tc.src))
+		}
+		for i := range tc.src {
+			if got[i] != tc.src[i] {
+				t.Errorf("%s: [%d]=%d want=%d", tc.name, i, got[i], tc.src[i])
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_walkScalarSliceGrowing pins the slow-path walker (reflect.Append
+// growth-on-demand) for completeness. Synthesised wire data exercises
+// the same forward+reverse pair as the exact walker.
+func Test_walkScalarSliceGrowing(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		src  []int
+	}
+	tests := []tc{
+		{"two-elements", []int{10, 20}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &tlvCodec{}
+		//: forward via the codec.
+		enc, err := c.Marshal(tc.src)
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		var got []int
+		target := reflect.ValueOf(&got).Elem()
+		length := uint64(enc[1])
+		//: reverse via the growing walker explicitly.
+		result, derr := walkScalarSliceGrowing(reflectView(target), length, enc[2:], 1)
+		if derr != nil {
+			t.Fatalf("%s: walk err=%v", tc.name, derr)
+		}
+		target.Set(result.slice)
+		if len(got) != len(tc.src) {
+			t.Fatalf("%s: length: got=%d want=%d", tc.name, len(got), len(tc.src))
+		}
+		for i := range tc.src {
+			if got[i] != tc.src[i] {
+				t.Errorf("%s: [%d]=%d want=%d", tc.name, i, got[i], tc.src[i])
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
