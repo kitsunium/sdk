@@ -136,6 +136,70 @@ export function localOnlyVersions(majors) {
   }));
 }
 
+// stitchVersions merges the on-disk majors (each gets a "local" release) with
+// the real tagged releases (buildVersionsJson output), then resolves defaults:
+//   - release level: a major's newest real release is default; "local" is
+//     default ONLY when the major has no real tagged release yet;
+//   - site level: the newest non-EOL major is flagged default.
+// Pure (no I/O) so the defaulting policy is unit-testable — the property that
+// "local" stops being default the moment a real tag exists is what keeps the
+// dropdown honest once the first pkg/<major>/vX.Y.Z lands.
+export function stitchVersions({
+  majorsOnDisk,
+  realByMajor,
+  localRelease = LOCAL_RELEASE,
+}) {
+  const merged = new Map();
+  for (const m of majorsOnDisk) {
+    merged.set(m, { major: m, default: false, eol: false, releases: [] });
+  }
+  for (const entry of realByMajor) {
+    //: a tagged major might not exist on disk (rare) — still surface it.
+    if (!merged.has(entry.major)) {
+      merged.set(entry.major, {
+        major: entry.major,
+        default: false,
+        eol: false,
+        releases: [],
+      });
+    }
+    merged.get(entry.major).releases.push(...entry.releases);
+  }
+  for (const m of majorsOnDisk) {
+    const slot = merged.get(m);
+    //: "local" is default only while the major has no real release.
+    slot.releases.unshift({
+      version: localRelease,
+      tag: null,
+      label: localRelease,
+      default: slot.releases.length === 0,
+      publishedAt: null,
+    });
+  }
+  const versions = [...merged.values()].sort(
+    (a, b) => Number(a.major.slice(1)) - Number(b.major.slice(1)),
+  );
+  //: newest non-EOL major wins the site-level default.
+  if (versions.length > 0) {
+    versions.forEach((v) => {
+      v.default = false;
+    });
+    const newest = versions.filter((v) => !v.eol).at(-1);
+    if (newest) newest.default = true;
+  }
+  return versions;
+}
+
+// changelogRefSpec returns the `git log` window for a release. "local" windows
+// over recent HEAD; a tagged release windows over commits reachable from its
+// TAG (a real git ref, e.g. pkg/v1/v1.0.0) — NEVER the bare semver "version",
+// which is not a ref. version is for display; tag is for git. Falls back to
+// HEAD if a non-local release somehow arrives without a tag.
+export function changelogRefSpec(release, tag, localRelease = LOCAL_RELEASE) {
+  if (release === localRelease) return ["-n", "30", "HEAD"];
+  return ["-n", "100", tag ?? "HEAD"];
+}
+
 // findDefaults walks the schema and returns {major, release} the redirect
 // logic should target. Falls back to the first major / first release if
 // no default flag is set.

@@ -29,6 +29,8 @@ import {
   isValidTag,
   buildVersionsJson,
   localOnlyVersions,
+  stitchVersions,
+  changelogRefSpec,
   LOCAL_RELEASE,
 } from "./lib/tag-format.mjs";
 import { RESERVED } from "./lib/page-catalog.mjs";
@@ -208,13 +210,18 @@ function renderChangelogMarkdown(commits, release, major, repoUrl) {
   return lines.join("\n");
 }
 
-async function materialiseChangelog(major, release, sourceRoot, dest, repoUrl) {
-  //: Window = last 30 commits for "local" (no tags yet on this repo);
-  //: for a real tag we'd pass `<prev-tag>..<this-tag>`. The tooling
-  //: is ready — the prev-tag wiring lands the day the first
-  //: pkg/<major>/vX.Y.Z tag exists.
-  const refSpec =
-    release === LOCAL_RELEASE ? ["-n", "30", "HEAD"] : ["-n", "100", release];
+async function materialiseChangelog(
+  major,
+  release,
+  sourceRoot,
+  dest,
+  repoUrl,
+  tag,
+) {
+  //: Window = last 30 commits for "local"; for a tagged release, commits
+  //: reachable from the TAG (a real git ref) — never the bare semver version.
+  //: A future refinement is `<prev-tag>..<this-tag>`; the tooling is ready.
+  const refSpec = changelogRefSpec(release, tag);
   const commits = await gitLogCommits(sourceRoot, refSpec);
   const body = renderChangelogMarkdown(commits, release, major, repoUrl);
   const title = RESERVED.changelog?.label ?? "Changelog";
@@ -274,7 +281,7 @@ function frontmatter({ title, description, source } = {}) {
 // checkout for a tag). Every page is extracted from a real source file
 // — nothing is invented.
 
-async function materialiseRelease(major, release, sourceRoot) {
+async function materialiseRelease(major, release, sourceRoot, tag) {
   //: Dest is <release>/<major>/ — release is the time axis (snapshot
   //: in git, e.g. local / v0.1.0), major is the API-surface axis
   //: (v1 / v2). The hierarchy reads as "this release's v1 surface",
@@ -564,12 +571,12 @@ async function materialiseRelease(major, release, sourceRoot) {
   // Also emits src/data/whats-new-<release>-<major>.json consumed by
   // the <WhatsNew /> banner injected at the top of the Home page.
   const repoUrl = "https://github.com/kitsunium/sdk";
-  await materialiseChangelog(major, release, sourceRoot, dest, repoUrl);
+  await materialiseChangelog(major, release, sourceRoot, dest, repoUrl, tag);
 }
 
 async function materialiseLocal(major) {
   console.log(`[sync-versions] ${major}/local <- HEAD`);
-  await materialiseRelease(major, LOCAL_RELEASE, REPO_ROOT);
+  await materialiseRelease(major, LOCAL_RELEASE, REPO_ROOT, null);
 }
 
 async function materialiseTag(major, version, tag) {
@@ -588,7 +595,7 @@ async function materialiseTag(major, version, tag) {
       return;
     }
     console.log(`[sync-versions] ${major}/${version} <- ${tag}`);
-    await materialiseRelease(major, version, wt);
+    await materialiseRelease(major, version, wt, tag);
   } finally {
     await shellSafe("git", ["worktree", "remove", "--force", wt]);
   }
@@ -626,49 +633,11 @@ async function main() {
     releases && releases.length > 0 ? buildVersionsJson(releases) : [];
   const majorsOnDisk = await discoverMajors(REPO_ROOT);
 
-  // 2. Stitch the two: every major on disk gets a "local" release;
-  // any major with real tags also gets those tags. The newest
-  // (default) release of the newest major is the site default.
-  const merged = new Map();
-  for (const m of majorsOnDisk) {
-    merged.set(m, { major: m, default: false, eol: false, releases: [] });
-  }
-  for (const entry of realByMajor) {
-    if (!merged.has(entry.major)) {
-      merged.set(entry.major, {
-        major: entry.major,
-        default: false,
-        eol: false,
-        releases: [],
-      });
-    }
-    const slot = merged.get(entry.major);
-    slot.releases.push(...entry.releases);
-  }
-  // Always prepend a "local" release for the major(s) that exist on disk.
-  for (const m of majorsOnDisk) {
-    const slot = merged.get(m);
-    slot.releases.unshift({
-      version: LOCAL_RELEASE,
-      tag: null,
-      label: LOCAL_RELEASE,
-      default: slot.releases.length === 0,
-      publishedAt: null,
-    });
-  }
-
-  const versions = [...merged.values()].sort(
-    (a, b) => Number(a.major.slice(1)) - Number(b.major.slice(1)),
-  );
-
-  // Newest non-EOL major wins the default flag.
-  if (versions.length > 0) {
-    versions.forEach((v) => {
-      v.default = false;
-    });
-    const newest = versions.filter((v) => !v.eol).at(-1);
-    if (newest) newest.default = true;
-  }
+  // 2. Stitch the two: every major on disk gets a "local" release; any major
+  // with real tags also gets those tags; "local" stops being default the
+  // moment a real release exists, and the newest non-EOL major wins the site
+  // default. Pure logic extracted to lib/tag-format.mjs (unit-tested).
+  const versions = stitchVersions({ majorsOnDisk, realByMajor });
 
   // 3. Materialise content for every (major, release) combo.
   for (const v of versions) {
