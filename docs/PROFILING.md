@@ -77,7 +77,7 @@ removed a few large ones. Both ship as wins.
 
 ### Block / mutex profiles
 
-Only meaningful when `-cpu=2,4,8` actually triggers contention. Cumulative
+Only meaningful when `-cpu=2,4,8,16` actually triggers contention. Cumulative
 delay > 1 ms/sec of wall clock is the flag-this-cell threshold from the
 plan's concurrency-contention lens.
 

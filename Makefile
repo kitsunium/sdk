@@ -184,7 +184,7 @@ profile:
 	@mkdir -p .bench/profiles/$(WAVE)
 	cd pkg/v1 && GOWORK=off go test -run='^$$' -bench=. -benchmem \
 	  -count=$${COUNT:-10} -benchtime=$${BENCHTIME:-5s} \
-	  -cpu=1,2,4,8 \
+	  -cpu=1,2,4,8,16 \
 	  -cpuprofile=$(CURDIR)/.bench/profiles/$(WAVE)/cpu.out \
 	  -memprofile=$(CURDIR)/.bench/profiles/$(WAVE)/mem.out \
 	  -blockprofile=$(CURDIR)/.bench/profiles/$(WAVE)/block.out \
