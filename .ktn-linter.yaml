@@ -150,38 +150,34 @@ rules:
     exclude:
       - "**/pkg/v1/codec/codec_bench_test.go"
 
-  # KTN-STRUCT-ROLE + KTN-STRUCT-ROLE-STUTTER — TEMPORARY scoped exception for
-  # the generic recycler primitives. Recycler[T] and CappedRecycler[T] ARE the
-  # package's whole public surface: their names are the API, exactly like the
-  # stdlib's ring.Ring / list.List single-concept primitives. A role suffix
-  # would be redundant noise (no second "kind" of recycler to disambiguate);
-  # the package/type repetition is idiomatic for a single-concept primitive
-  # package; and recycler is internal/kernel plumbing (never re-exported in
-  # pkg/v1), so the "interface-for-consumers" convention does not apply — a
-  # concrete struct is deliberate per ADR 0010 and avoids an interface dispatch
-  # on the Get/Put hot path.
+  # KTN-STRUCT-ROLE + KTN-STRUCT-ROLE-STUTTER — narrow exclude for CappedRecycler
+  # ONLY (one file). recycler is internal/kernel plumbing, never re-exported in
+  # pkg/v1, so the interface-for-consumers convention does not apply; the
+  # primitives are concrete structs per ADR 0010 (avoids an interface dispatch
+  # on the Get/Put hot path).
   #
-  # WHY AN EXCLUDE AND NOT CONFIG (today): the underlying trigger is an upstream
-  # heuristic gap — KTN-STRUCT-ROLE's PNPT exemption (kodflow/ktn-linter#263) is
-  # silently suppressed when a non-package-matching sibling (CappedRecycler) is
-  # added. Filed as kodflow/ktn-linter#356.
+  # Recycler[T] needs NO exclude: the PNPT per-declaration fix
+  # (kodflow/ktn-linter#356, PR #357) makes a package-named primitive exempt
+  # regardless of siblings. CappedRecycler[T] is a cap-bounded variant of the
+  # same primitive, but its name is not an exact PNPT match (recycler !=
+  # cappedrecycler), so STRUCT-ROLE + the info-level STUTTER still flag it.
+  # That compound-variant case is filed as kodflow/ktn-linter#359 (proposal:
+  # extend PNPT to a trailing-component match, or adopt #285 additional_suffixes).
   #
-  # TODO(remove once a ktn-linter release > v1.34.0 ships the config knobs that
-  # are already merged on the linter's main branch):
-  #   - replace this exclude with `KTN-STRUCT-ROLE.additional_suffixes: [Recycler]`
-  #     (kodflow/ktn-linter#285 — both Recycler and CappedRecycler end in
-  #     "Recycler", so the suffix rule then passes natively, no path-suppress);
-  #   - drop the STUTTER line via a `KTN-STRUCT-ROLE-STUTTER.severity` override
-  #     (kodflow/ktn-linter#332) instead of fully excluding it.
-  # Neither knob exists in the v1.34.0 binary the devcontainer ships (verified
-  # via `ktn-linter config --generate`), so the path-exclude is the only
-  # mechanism for now.
+  # REQUIRES a ktn-linter build that includes #356 (on the linter's main branch
+  # today; cut a release > v1.34.0, or pin the devcontainer to it). Under the
+  # plain v1.34.0 release Recycler ALSO flags and this one-file exclude is
+  # insufficient — widen back to "**/internal/kernel/recycler/**" in that case.
+  #
+  # TODO(remove entirely once #359 lands OR #285 additional_suffixes ships in a
+  # release: then add `KTN-STRUCT-ROLE.additional_suffixes: [Recycler]` and drop
+  # this block).
   KTN-STRUCT-ROLE:
     exclude:
-      - "**/internal/kernel/recycler/**"
+      - "**/internal/kernel/recycler/capped.go"
   KTN-STRUCT-ROLE-STUTTER:
     exclude:
-      - "**/internal/kernel/recycler/**"
+      - "**/internal/kernel/recycler/capped.go"
 
   # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,
