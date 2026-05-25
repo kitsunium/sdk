@@ -25,6 +25,18 @@ is_valid_tag() {
   [[ "$path_major" == "$ver_major" ]]
 }
 
+# Internal-module resolution tags (ADR 0009): `internal/<mod>/vX.Y.Z`. These are
+# cut alongside the pkg/<major> tag so the published module graph resolves
+# without `replace`; Go's internal/ rule still blocks direct consumer import.
+# Bare module paths only carry major 0/1, so the semver major is held to 0|1
+# (v2+ would need internal/<mod>/vN paths — deferred per ADR 0009).
+INTERNAL_TAG_REGEX='^internal/[a-z][a-z0-9]*/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+
+# Test an internal-module tag against the canonical shape. Exits 0 on match.
+is_valid_internal_tag() {
+  [[ "$1" =~ $INTERNAL_TAG_REGEX ]]
+}
+
 # Extract the "vN" major from a full tag. Echo only; never exits non-zero
 # on bad input — caller must gate with is_valid_tag first.
 major_from_tag() {

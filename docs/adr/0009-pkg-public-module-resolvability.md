@@ -1,10 +1,10 @@
 # ADR 0009 — Public module must be `go get`-resolvable and accessible
 
-**Status**: Accepted (requirement); implementation Deferred
+**Status**: Accepted; release-layer mechanism implemented (first-release validation pending)
 **Date**: 2026-05-25
 **Deciders**: kitsunium maintainers
 **Supersedes**: —
-**Amends**: —
+**Amends**: ADR 0007 (release now also cuts `internal/<mod>/vX.Y.Z` resolution tags)
 **Related**: ADR 0001 (5-module layout), ADR 0007 (release workflow + versioning)
 
 ## Context
@@ -33,17 +33,33 @@ For any module published under `pkg/<major>/`, two properties are **normative**:
 
 The `go.work` + `replace` + zero-pseudo setup is retained for **development only**; it MUST NOT leak into a published tag.
 
-## Implementation directions (Deferred — pick in a follow-up `/plan`)
+## Decision: tag the chain at release (chosen over single-module)
 
-- **(Recommended) Rewrite at tag time.** Before tagging, `go mod edit` each `pkg/<major>/go.mod` to require `internal/*@<real pseudo-version of the release commit>` and drop the `replace` block, then tag *that* tree. The internal modules resolve from the public repo via commit pseudo-versions (the commit is pushed at release). Least disruption to ADR 0001; lands in the release tooling ADR 0007 already owns.
-- **(Alternative) Single module.** Collapse to one `go.mod` at the root; Go's `internal/` rule still hides `internal/*` from consumers. Simplest resolution, but reverses ADR 0001's multi-module decision.
+Keep the five-module layout (ADR 0001) and, at release, publish a `go get`-able
+form: rewrite every chain module's `go.mod` to drop `replace` and pin its
+intra-repo deps to the release version, then tag the whole chain
+(`internal/kernel`, `internal/core`, `internal/service`, `pkg/<major>`) at the
+same version on a detached release commit. Tags resolve the no-self-reference
+problem that blocks pseudo-versions; the dev branch keeps `replace` + `go.work`
+untouched. Internal tags are resolution-only — Go's `internal/` rule still
+blocks direct consumer import.
 
-`verify_module_graph` in `cut-tags.sh` (which strips replaces and runs `go mod download`) is the gate that proves property (1); it cannot pass until the chosen direction is implemented.
+The alternative — collapse to one root module — was rejected: it reverses
+ADR 0001 and changes the tag scheme (`pkg/<major>/v…` → `v…`), reworking the
+docs-versioning + release tooling for no architectural gain.
+
+The release-layer mechanism lives in `scripts/release/` (see its `CLAUDE.md`).
 
 ## Consequences
 
-- The first real release tag MUST NOT be cut until property (1) is implemented and `verify_module_graph` passes from a clean environment — otherwise the published `pkg/v1` is broken for every consumer.
-- PR #29's `5e861e3` fixed the *mechanical* half of the gate (block-aware `replace` strip, the leaked `RETURN` trap, the `modroot` bug) so the verifier is correct; this ADR records the *publishability* requirement the verifier must ultimately satisfy.
+- The **first** release is a deliberate, manually-validated step: it publishes
+  the chain's `go.mod`s to the proxy/sumdb permanently, and pushed-tag checksums
+  (`go.sum`) cannot be computed before the tags exist. The release tooling
+  refuses to auto-cut the first release and a clean-room `go get` must pass
+  first; only then is it cut manually. Subsequent releases are automatic.
+- Lockstep versioning holds while the chain is at major 0/1. A future `pkg/v2`
+  needs the internal modules to adopt `/vN` module paths (the tooling fails
+  loud rather than mint an invalid internal tag) — addressed when v2 lands.
 
 ## References
 

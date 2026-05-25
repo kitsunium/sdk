@@ -84,8 +84,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          echo "${{ steps.compute.outputs.majors }}" | bash scripts/release/cut-tags.sh | tee /tmp/cut.log
+          set -uo pipefail
+          # A manual workflow_dispatch authorises the bootstrap (very first)
+          # release; automatic runs must NOT blind-cut it — cut-tags exits 3 to
+          # signal a held bootstrap (ADR 0009: validate go.sum + clean-room
+          # go-get first).
+          flags=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            flags="--allow-bootstrap"
+          fi
+          # shellcheck disable=SC2086
+          echo "${{ steps.compute.outputs.majors }}" | bash scripts/release/cut-tags.sh $flags | tee /tmp/cut.log
+          rc=${PIPESTATUS[1]}
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::First release held for manual validation (ADR 0009). Dispatch this workflow manually once go.sum + a clean-room 'go get' are verified."
+            exit 0
+          fi
+          exit "$rc"
 
       - name: Create GitHub releases
         if: steps.compute.outputs.majors != ''
