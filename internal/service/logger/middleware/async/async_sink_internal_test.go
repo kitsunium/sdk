@@ -6,7 +6,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
-	"github.com/kitsunium/sdk/internal/kernel/buffer"
+	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
 // noopDownstream satisfies corelogger.Sink for white-box drainer tests
@@ -26,7 +26,7 @@ func (noopDownstream) Close() error                  { return nil }
 func freshSink(t testing.TB, policy DropPolicy) *asyncSink {
 	t.Helper()
 	queue := mustNewRing(4)
-	pool := buffer.NewRecycler[*recordEntry](newRecordEntry)
+	pool := recycler.NewRecycler[*recordEntry](newRecordEntry)
 	done := make(chan struct{})
 	close(done)
 	return &asyncSink{

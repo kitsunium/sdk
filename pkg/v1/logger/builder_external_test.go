@@ -135,4 +135,5 @@ type foreignLogger struct{}
 func (foreignLogger) Enabled(context.Context, logger.Level) bool                { return true }
 func (foreignLogger) Log(context.Context, logger.Level, string, ...logger.Attr) {}
 func (foreignLogger) With(...logger.Attr) logger.Logger                         { return foreignLogger{} }
-func (foreignLogger) WithGroup(string) logger.Logger                            { return foreignLogger{} }
+
+func (foreignLogger) WithGroup(string) logger.Logger { return foreignLogger{} }

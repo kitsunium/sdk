@@ -1,11 +1,11 @@
-package buffer_test
+package recycler_test
 
 import (
 	"sync"
 	"sync/atomic"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/kernel/buffer"
+	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
 // TestNewRecycler validates the constructor across its documented contract:
@@ -20,7 +20,7 @@ func TestNewRecycler(t *testing.T) {
 		{
 			name: "nil factory yields nil Recycler",
 			runner: func(t *testing.T) {
-				r := buffer.NewRecycler[*int](nil)
+				r := recycler.NewRecycler[*int](nil)
 				if r != nil {
 					t.Errorf("NewRecycler(nil) = %v, want nil", r)
 				}
@@ -34,7 +34,7 @@ func TestNewRecycler(t *testing.T) {
 					calls.Add(1)
 					return new(int(calls.Load()))
 				}
-				r := buffer.NewRecycler[*int](factory)
+				r := recycler.NewRecycler[*int](factory)
 				if r == nil {
 					t.Fatal("NewRecycler returned nil with non-nil factory")
 				}
@@ -51,7 +51,7 @@ func TestNewRecycler(t *testing.T) {
 			name: "Put then Get hands out a non-nil instance",
 			runner: func(t *testing.T) {
 				factory := func() *[16]byte { return &[16]byte{} }
-				r := buffer.NewRecycler[*[16]byte](factory)
+				r := recycler.NewRecycler[*[16]byte](factory)
 				seed := r.Get()
 				r.Put(seed)
 				got := r.Get()
@@ -85,7 +85,7 @@ func TestRecyclerConcurrentGetPut(t *testing.T) {
 			t.Parallel()
 			var ops atomic.Uint64
 			factory := func() *[64]byte { return &[64]byte{} }
-			r := buffer.NewRecycler[*[64]byte](factory)
+			r := recycler.NewRecycler[*[64]byte](factory)
 			var wg sync.WaitGroup
 			for range tc.goroutines {
 				wg.Go(func() {
@@ -103,22 +103,5 @@ func TestRecyclerConcurrentGetPut(t *testing.T) {
 				t.Errorf("ops counter = %d, want %d", ops.Load(), want)
 			}
 		})
-	}
-}
-
-// BenchmarkRecyclerSteadyState measures the steady-state cost of Get+Put after
-// the pool is warm. The zero-allocation claim is validated via -benchmem on
-// the asserted floor.
-func BenchmarkRecyclerSteadyState(b *testing.B) {
-	factory := func() *[64]byte { return &[64]byte{} }
-	r := buffer.NewRecycler[*[64]byte](factory)
-	//: warm the pool so we exercise the cache-hit path during the run.
-	primer := r.Get()
-	r.Put(primer)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		v := r.Get()
-		r.Put(v)
 	}
 }

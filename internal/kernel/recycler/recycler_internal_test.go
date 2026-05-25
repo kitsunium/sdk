@@ -1,4 +1,4 @@
-package buffer
+package recycler
 
 import "testing"
 

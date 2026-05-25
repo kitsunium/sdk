@@ -1324,7 +1324,8 @@ func writePivotTable(b *strings.Builder, category, size string, rows []benchRepo
 		return cmp.Compare(a.NsPerOp, b.NsPerOp)
 	})
 	fmt.Fprintf(b, "#### %s — %s payload\n\n", category, size)
-	fmt.Fprintf(b,
+	fmt.Fprintf(
+		b,
 		"> **Mean baseline** across %d codecs: `%s ns/op` · `%s B/op` · `%s allocs/op` · `%s iters`. "+
 			"Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.\n\n",
 		len(rows),

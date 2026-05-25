@@ -8,7 +8,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
-	"github.com/kitsunium/sdk/internal/kernel/buffer"
+	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
 // countingDownstream counts every Write so drainer tests can assert that
@@ -30,7 +30,7 @@ func liveSink(t testing.TB, down corelogger.Sink) *asyncSink {
 	s := &asyncSink{
 		downstream: down,
 		queue:      mustNewRing(8),
-		pool:       buffer.NewRecycler[*recordEntry](newRecordEntry),
+		pool:       recycler.NewRecycler[*recordEntry](newRecordEntry),
 		policy:     DropNewest,
 		onDrop:     noopOnDrop,
 		stop:       make(chan struct{}),

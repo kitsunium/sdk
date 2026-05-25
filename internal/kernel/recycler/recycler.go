@@ -1,10 +1,13 @@
-// Package buffer — provides Recycler[T any], a generic typed pool
-// contract backed by sync.Pool. Callers can recycle ANY pointer-sized object
-// (event records, attribute slices, scratch structs) without paying the
-// boxing cost on Get/Put. The byte-slice pool exposed by buffer.Get /
-// buffer.Put remains the idiomatic choice for raw scratch space; Recycler[T]
-// complements it for typed objects whose construction is non-trivial.
-package buffer
+// Package recycler provides Recycler[T any], a generic typed object pool
+// backed by sync.Pool. Callers recycle ANY pointer-sized object (event
+// records, attribute slices, scratch structs) without paying the boxing cost
+// on Get/Put. Stdlib-only and domain-neutral: any byte buffer, codec stream,
+// HTTP body encoder, or metrics line writer can reuse it.
+//
+// The byte-slice pool (internal/kernel/buffer) and the codec scratch buffer
+// pool (internal/core/codec/scratch) are built ON this primitive; Recycler[T]
+// is the shared mechanism, the capacity thresholds stay with the consumers.
+package recycler
 
 import "sync"
 
