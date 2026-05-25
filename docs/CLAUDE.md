@@ -19,6 +19,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0008-readme-from-code-generation.md` | `README.md` generated from Go doc comments via gomarkdoc | Accepted |
 | `adr/0009-pkg-public-module-resolvability.md` | Published `pkg/<major>` must be `go get`-resolvable + accessible (no local `replace`) | Accepted (requirement); impl Deferred |
 | `adr/0010-kernel-recycler-primitive.md` | Generic kernel `Pool[T]` + `CappedPool[T]`; `buffer` + `core/codec/scratch` become consumers | Accepted |
+| `adr/0011-kernel-snapshot-primitive.md` | Generic kernel `Value[T]` copy-on-write container; codec registry consolidates onto it | Accepted |
 
 ## ADR conventions
 

@@ -1,0 +1,32 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "snapshot",
+    srcs = ["snapshot.go"],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/snapshot",
+    visibility = ["//internal/kernel:kernel_consumers"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":snapshot",
+    visibility = ["//internal/kernel:kernel_consumers"],
+)
+
+go_test(
+    name = "snapshot_test",
+    size = "small",
+    srcs = [
+        "snapshot_external_test.go",
+        "snapshot_integration_test.go",
+    ],
+    deps = [":snapshot"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
