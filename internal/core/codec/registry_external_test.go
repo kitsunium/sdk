@@ -20,6 +20,10 @@ func (m *mockCodec) Marshal(v any) ([]byte, error)      { return []byte(m.name),
 func (m *mockCodec) Unmarshal(data []byte, v any) error { return nil }
 
 func TestRegister(t *testing.T) {
+	//: start from a clean registry so this test is isolated and survives
+	//: `go test -count=N` (the process — and package-global registry — persists
+	//: across iterations).
+	codec.ResetForTest()
 	tests := []struct {
 		name string
 		arg  *mockCodec
@@ -57,6 +61,9 @@ func TestRegister(t *testing.T) {
 }
 
 func TestRegisterPanics(t *testing.T) {
+	//: clean slate so the duplicate-Name case panics on its OWN second
+	//: registration, not on a leftover from a prior test or `-count` iteration.
+	codec.ResetForTest()
 	tests := []struct {
 		name string
 		run  func()

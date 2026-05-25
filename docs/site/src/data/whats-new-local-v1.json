@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-25T21:54:03.841Z",
+  "generatedAt": "2026-05-25T22:06:17.306Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "kernel",
+      "breaking": false,
+      "summary": "add snapshot.Value[T] copy-on-write primitive + consolidate codec registry (ADR 0011)",
+      "sha": "6dd281443c62835293c3f77144cff4801a79eb73",
+      "short": "6dd2814",
+      "date": "2026-05-25T23:53:33+02:00"
+    },
     {
       "type": "fix",
       "scope": "docs",
@@ -39,15 +48,6 @@
       "sha": "45ab9fb51b8bf4b30f4c970a3f64b8a2dc295398",
       "short": "45ab9fb",
       "date": "2026-05-20T13:31:25+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "v2 zero-alloc multi-sink architecture (#12)",
-      "sha": "7fd4c5c4f6d2dafeb70fdd4f75dac0328bc57437",
-      "short": "7fd4c5c",
-      "date": "2026-04-23T15:13:58+02:00"
     }
   ]
 }
