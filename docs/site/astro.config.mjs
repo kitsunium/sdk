@@ -113,13 +113,30 @@ function deriveSiteUrl(repoUrl) {
   if (process.env.DOCS_SITE_URL) return process.env.DOCS_SITE_URL;
   if (!repoUrl) return "https://example.invalid";
   const gh = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
-  if (gh) return `https://${gh[1]}.github.io/${gh[2]}`;
+  //: ORIGIN only — the repo path is carried by `base` (a GitHub project page
+  //: serves under /<repo>/). site + base then compose correctly for routes,
+  //: assets, canonical, and sitemap.
+  if (gh) return `https://${gh[1]}.github.io`;
   return repoUrl;
 }
+//: Base path. A GitHub project page serves at https://<org>.github.io/<repo>/,
+//: so every absolute asset/link must be prefixed with /<repo> or it 404s
+//: (ADR 0009 §accessible). A custom domain (DOCS_SITE_URL) or non-GitHub
+//: remote serves at root. Override with DOCS_BASE if needed.
+function deriveBase(repoUrl) {
+  if (process.env.DOCS_BASE) return process.env.DOCS_BASE;
+  if (process.env.DOCS_SITE_URL) return "/";
+  const gh = (repoUrl || "").match(
+    /github\.com\/[^/]+\/([^/]+?)(?:\.git)?\/?$/,
+  );
+  return gh ? `/${gh[1]}` : "/";
+}
 const site = deriveSiteUrl(buildInfo.repoUrl);
+const base = deriveBase(buildInfo.repoUrl);
 
 export default defineConfig({
   site,
+  base,
   output: "static",
   build: {
     //: directory format so the catch-all generates real index.html files

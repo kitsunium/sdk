@@ -11,6 +11,7 @@ import {
   flattenCatalog,
 } from "../../scripts/lib/page-catalog.mjs";
 import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+import { DEPLOY_BASE } from "../../scripts/lib/base.mjs";
 
 interface VersionEntry {
   major: string;
@@ -27,7 +28,7 @@ try {
 //: + its default release. Same fallback Sidebar/Search use.
 //: URL layout: /<release>/<major>/... — release first, then major.
 const { major, release } = findDefaults(versions);
-const base = `/${release}/${major}`;
+const base = `${DEPLOY_BASE}/${release}/${major}`;
 const root = `${release}/${major}`;
 
 let entries: Awaited<ReturnType<typeof getCollection>> = [];
@@ -70,7 +71,7 @@ const suggestions = flattenCatalog(buildCatalog(entries as any, root, base)).sli
 
     <h2>Go home</h2>
     <p>
-      <a href={`${base}/`}>Return to {root}</a> · <a href="/">Site root</a>
+      <a href={`${base}/`}>Return to {root}</a>
     </p>
   </article>
 </Default>

@@ -2,6 +2,8 @@
 // Brand block — logo + literal "SDK". The API dropdown used to live
 // here but moved to the Header bar (left side, next to the build
 // date / branch) so all version controls share one location.
+import { withBase } from "../../scripts/lib/base.mjs";
+
 interface Props {
   currentPath: string;
 }
@@ -17,13 +19,15 @@ try {
 const def = versions.find(v => v?.default) ?? versions[0];
 const defRelease = def?.releases?.find(r => r.default) ?? def?.releases?.[0];
 //: URL layout is /<release>/<major>/... — release first.
-const homeHref = def && defRelease ? `/${defRelease.version}/${def.major}/` : "/";
+const homeHref = withBase(
+  def && defRelease ? `/${defRelease.version}/${def.major}/` : "/",
+);
 ---
 
 <div class="brand-block">
   <a href={homeHref} class="brand" aria-label="kitsunium SDK — home">
     <img
-      src="/brand/kitsunium.jpg"
+      src={withBase("/brand/kitsunium.jpg")}
       alt="Kitsunium"
       width="28"
       height="28"

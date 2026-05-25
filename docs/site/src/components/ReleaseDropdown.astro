@@ -7,6 +7,8 @@
 // Accessibility: roles + aria-expanded + aria-activedescendant follow
 // the WAI-ARIA combobox / listbox pattern. Keyboard: Up / Down move
 // focus, Enter activates, Escape closes.
+import { withBase } from "../../scripts/lib/base.mjs";
+
 interface Release {
   version: string;
   label: string;
@@ -62,7 +64,7 @@ const activeLabel =
           aria-selected={r.version === currentRelease}
           class:list={[r.version === currentRelease && "active"]}
         >
-          <a href={`/${r.version}/${currentMajor}/`}>
+          <a href={withBase(`/${r.version}/${currentMajor}/`)}>
             {shaText && (
               <>
                 <span class="opt-sha">{shaText}</span>

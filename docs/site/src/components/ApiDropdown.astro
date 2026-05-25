@@ -6,6 +6,8 @@
 //
 // Hides itself when only one major exists — switching makes no
 // sense with a single entry.
+import { withBase } from "../../scripts/lib/base.mjs";
+
 interface Release {
   version: string;
   default: boolean;
@@ -53,7 +55,7 @@ const activeLabel = active ? active.major + (active.eol ? " (EOL)" : "") : "v?";
           aria-selected={v.major === currentMajor}
           class:list={[v.major === currentMajor && "active"]}
         >
-          <a href={`/${defaultReleaseOf(v)}/${v.major}/`}>
+          <a href={withBase(`/${defaultReleaseOf(v)}/${v.major}/`)}>
             <span class="opt-version">{v.major}</span>
             {v.eol && <span class="opt-eol">(EOL)</span>}
           </a>
