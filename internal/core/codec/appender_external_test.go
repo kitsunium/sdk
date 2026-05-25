@@ -21,10 +21,12 @@ func (f *fakeAppendCodec) Marshal(_ any) (encoded []byte, err error) {
 	//: Marshal is not exercised by this test — the Appender path is the focus.
 	return nil, f.err
 }
+
 func (f *fakeAppendCodec) Unmarshal(_ []byte, _ any) (err error) {
 	//: Unmarshal is not exercised by this test — the Appender path is the focus.
 	return f.err
 }
+
 func (f *fakeAppendCodec) Append(dst []byte, _ any) (appended []byte, err error) {
 	//: shortcut error path so callers can exercise the failure branch.
 	if f.err != nil {

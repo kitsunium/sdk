@@ -22,7 +22,17 @@ jobs:
     steps:
       # SHA-pinned per the .github/workflows/CLAUDE.md policy — version
       # comments track the resolved human-readable tag.
+      #
+      # fetch-depth: 0 — gomarkdoc resolves the repository URL + default
+      # branch via `git symbolic-ref refs/remotes/origin/HEAD` to build
+      # the source links in READMEs. A shallow clone (depth=1) makes
+      # that lookup fail and gomarkdoc falls back to a bare-name link
+      # shape that drifts from what local regen produces — the README
+      # drift gate then fails on a phantom diff. Full history kills
+      # the variability.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
 
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
@@ -31,6 +41,15 @@ jobs:
           # disk-cache (otherwise stale objects could survive the upgrade).
           disk-cache: ${{ github.workflow }}-${{ hashFiles('.bazelrc', '.bazelversion', 'MODULE.bazel', '**/go.mod', '**/go.sum') }}
           repository-cache: true
+
+      # setup-bazel only provides a Bazel-sandboxed Go SDK; the README
+      # drift gate + govulncheck run outside Bazel and need a host Go
+      # toolchain on $PATH. SHA matches sdk-release.yml's pin.
+      - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
+        with:
+          go-version-file: pkg/v1/go.mod
+          cache: true
+          cache-dependency-path: pkg/v1/go.sum
 
       - name: drift check — bazel mod tidy + gazelle
         run: |
@@ -48,11 +67,44 @@ jobs:
             exit 1
           fi
 
+      # gomarkdoc is the SOT for the README drift gate (ADR 0008). The
+      # devcontainer ships it pre-installed, but a fresh CI runner does
+      # not — install it here so the drift + determinism + govulncheck
+      # steps below all see the same binary the local pre-commit hook
+      # uses. Pinned to v1.1.0, matching .devcontainer/features/languages/go/install.sh.
+      - name: install gomarkdoc
+        run: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0
+
+      # README drift gate (ADR 0008). Sits between the gazelle drift
+      # check and `bazel build` so a stale README fails fast before the
+      # heavy build+test burn. The script is the canonical spec (also
+      # used by `make lint` and the local pre-commit hook).
+      - name: drift check — README.md regenerated
+        run: bash scripts/pre-commit/check-readme-drift.sh
+
+      - name: determinism check — gomarkdoc reproducible
+        run: bash scripts/pre-commit/check-readme-determinism.sh
+
+      # govulncheck on the gomarkdoc binary was removed: gomarkdoc@v1.1.0
+      # (the last released tag) bundles golang.org/x/crypto < v0.52.0 and
+      # github.com/go-git/v5 < v5.17.1, both carrying historical CVEs in
+      # SSH / knownhosts / repo-write paths gomarkdoc never reaches. We
+      # can't bump the deps without a new gomarkdoc release, so scanning
+      # the binary blocks every SDK PR on a waiting-for-upstream signal.
+      # The SDK runtime is gated by bazel test (ADR 0004 SoT). Re-enable
+      # this step when gomarkdoc ships a refreshed release.
+
       - name: build
         run: bazel build --config=ci //...
 
       - name: test
         run: bazel test --config=ci //...
+
+      # The per-codec allocation-budget tests carry //go:build !race
+      # (testing.AllocsPerRun reports +1 under -race), so the race suite
+      # above never compiles them. This race-off pass is their only gate.
+      - name: alloc-budget gate (race off)
+        run: bazel test --config=alloc //internal/service/codec/...
 
       - name: coverage
         run: |

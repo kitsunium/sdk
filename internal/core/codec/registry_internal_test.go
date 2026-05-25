@@ -2,7 +2,7 @@ package codec
 
 import (
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -26,12 +26,17 @@ func Test_indexAliases(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		var m sync.Map
-		for _, a := range tc.existing {
-			m.Store(strings.ToLower(a), tc.existName)
+		var dst atomic.Pointer[map[string]Format]
+		//: seed the snapshot with the existing aliases via the same publish path.
+		if len(tc.existing) > 0 {
+			seed := make(map[string]Format, len(tc.existing))
+			for _, a := range tc.existing {
+				seed[strings.ToLower(a)] = tc.existName
+			}
+			dst.Store(&seed)
 		}
 		//: wrap the call so we can inspect panics inside a recover.
-		panicked, r := callRecoverAliases(&m, []string{tc.newAlias}, tc.newName, tc.kind)
+		panicked, r := callRecoverAliases(&dst, []string{tc.newAlias}, tc.newName, tc.kind)
 		if panicked != tc.wantPanic {
 			t.Errorf("%s: panic=%v wantPanic=%v (r=%v)", tc.name, panicked, tc.wantPanic, r)
 		}
@@ -48,7 +53,7 @@ func Test_indexAliases(t *testing.T) {
 // subtests can assert panic behaviour without using defer — t.Cleanup is
 // not usable here because we want the panic-recovery to happen before the
 // assertion runs.
-func callRecoverAliases(dst *sync.Map, aliases []string, name Format, kind string) (panicked bool, recovered any) {
+func callRecoverAliases(dst *atomic.Pointer[map[string]Format], aliases []string, name Format, kind string) (panicked bool, recovered any) {
 	//: classic recover pattern isolated in a helper so the caller stays flat.
 	defer func() {
 		//: capture the recover value inline.

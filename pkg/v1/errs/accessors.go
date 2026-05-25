@@ -1,13 +1,139 @@
-// Package errs exposes read-only introspection of SDK errors to external
-// consumers. The concrete error type, constructors, and Field helpers live
-// in internal/kernel/errs — consumers receive errors from the SDK and
-// query them via the Of-accessors re-exported here. This keeps callers
-// from forging SDK errors while still enabling dashboards, retries, and
-// structured logs to branch on Code / Reason / HTTPStatus / ExitCode.
+//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/errs .
+
+// Package errs is the read-only introspection facade for SDK errors.
 //
-// PrivateOf is exposed intentionally for operator diagnostics. DIAGNOSTIC
-// ONLY — its output must never land in HTTP/gRPC responses, error pages,
-// or any user-facing surface. Use Public for those channels.
+// The concrete error type, constructors ([github.com/kitsunium/sdk/internal/kernel/errs].Define,
+// Wrap), and Field helpers live in internal/kernel/errs and are
+// intentionally NOT re-exported. Consumers receive [error] values from
+// the SDK and query them via the Of-family accessors below. This keeps
+// callers from forging SDK errors while still enabling dashboards,
+// retries, and structured logs to branch on Code / Reason / HTTPStatus
+// / ExitCode.
+//
+// # Goals
+//
+//   - Typed dotted-quad codes. Every SDK error carries a Code uint32
+//     packed as MM.LL.PP.SS (Major / Layer / Package / Serial).
+//     Composable octets — code.Layer(), code.Package() — let routers
+//     branch without parsing.
+//   - Public / Private split. PublicOf returns a wire-safe message
+//     (≤120 runes, no newline). PrivateOf returns the diagnostic
+//     envelope — never surface it to consumers.
+//   - Read-only introspection. Consumer code never forges an SDK error;
+//     the constructors live in internal/kernel/errs. You receive error
+//     and query through the Of-accessors.
+//   - HTTP / exit-code mapping. Each error has an HTTPStatusOf
+//     (default 500) and ExitCodeOf (default 70 / EX_SOFTWARE) so HTTP
+//     handlers and CLI binaries can return an SDK error verbatim.
+//   - CIDR-style matching. NewPrefixMatcher(code, mask) + errors.Is
+//     route entire code-ranges (one package, one layer, one major)
+//     with a single call.
+//
+// # What's shipped
+//
+// Nine accessors, two code helpers, four mask presets, one matcher
+// constructor. All re-exported as aliases over internal/kernel/errs.
+//
+//	| Symbol                                | Kind       | Returns / role                                            |
+//	|---------------------------------------|------------|------------------------------------------------------------|
+//	| errs.CodeOf(err)                      | accessor   | (Code, bool) — typed dotted-quad, 0/false if none          |
+//	| errs.ReasonOf(err)                    | accessor   | (string, bool) — SCREAMING_SNAKE reason                    |
+//	| errs.PublicOf(err)                    | accessor   | string — wire-safe message (≤120 runes)                    |
+//	| errs.PrivateOf(err)                   | accessor   | string — DIAGNOSTIC ONLY, never surface                    |
+//	| errs.HTTPStatusOf(err)                | accessor   | int — HTTP status, default 500                             |
+//	| errs.ExitCodeOf(err)                  | accessor   | int — POSIX exit code, default 70 (EX_SOFTWARE)            |
+//	| errs.HasCode(err, c)                  | predicate  | bool — true if c appears in the Unwrap chain               |
+//	| errs.HasAnyCode(err, c1, c2, …)       | predicate  | bool — variadic OR over multiple codes (routing on a set)  |
+//	| errs.HasReason(err, r)                | predicate  | bool — same with the reason string                         |
+//	| errs.HasAnyReason(err, r1, r2, …)     | predicate  | bool — variadic OR over multiple reasons                   |
+//	| errs.NewPrefixMatcher(code, mask)     | matcher    | PrefixMatcher — use with errors.Is for range routing       |
+//	| errs.Pack(major, layer, pkg, serial)  | code ctor  | Code from four octets                                       |
+//	| errs.ParseCode(s)                     | code ctor  | Code from "M.L.P.S" string                                 |
+//	| errs.MaskByMajor / Layer / Package    | mask const | feed NewPrefixMatcher for the relevant subnet              |
+//	| errs.MaskExact                        | mask const | exact-code match (equivalent to HasCode)                   |
+//
+// Type aliases: errs.Code (a uint32), errs.Major / Layer / PkgCode /
+// Serial (octet types), errs.PrefixMatcher.
+//
+// # Surface
+//
+// Accessors walk the Unwrap chain (both `Unwrap() error` and
+// `Unwrap() []error`) and return the deepest *errs.Error value
+// encountered. Defaults document the behaviour when no SDK error is
+// present:
+//
+//	func CodeOf(err error)       (Code, bool)    // 0 / false if none — typed dotted-quad
+//	func ReasonOf(err error)     (string, bool)  // "" / false if none
+//	func PublicOf(err error)     string          // "" if none
+//	func PrivateOf(err error)    string          // "" if none — DIAGNOSTIC ONLY
+//	func HTTPStatusOf(err error) int             // 500 default
+//	func ExitCodeOf(err error)   int             // 70 (EX_SOFTWARE) default
+//	func HasCode(err error, c Code) bool
+//	func HasReason(err error, reason string) bool
+//
+// Octets are reached on the typed [Code] itself: code.Major(),
+// code.Layer(), code.Package(), code.Serial(). No separate LayerOf
+// accessor exists — the kernel exports exactly one accessor per field
+// and this package re-exports it verbatim.
+//
+// # Quick start
+//
+//	import (
+//	    "github.com/kitsunium/sdk/pkg/v1/errs"
+//	    "github.com/kitsunium/sdk/pkg/v1/logger"
+//	)
+//
+//	_, err := logger.NewText(logger.Config{})  // nil Writer → fails
+//	// 0x01_01_00_01 = 1.1.0.1 (pkg/v1/logger WriterRequired under ADR 0005).
+//	if errs.HasCode(err, 0x01_01_00_01) {
+//	    // configuration problem on our side
+//	}
+//	fmt.Println("wire-safe message:", errs.PublicOf(err))
+//	if code, ok := errs.CodeOf(err); ok {
+//	    fmt.Println("layer:", code.Layer())
+//	}
+//	fmt.Println("HTTP status:", errs.HTTPStatusOf(err))
+//
+// # The Public/Private split
+//
+// [PublicOf] returns the wire-safe message (≤120 runes, literal, no
+// interpolation). Send it in HTTP/gRPC responses, error pages, and
+// user-facing surfaces.
+//
+// [PrivateOf] returns the detailed log-only message. DIAGNOSTIC ONLY.
+// Never put it in a response, an error page, or anything the end user
+// can see. It exists so observability tooling can correlate a request
+// ID with a detailed server-side explanation in the log backend
+// without re-logging the entire chain.
+//
+// # HTTP status policy
+//
+// [HTTPStatusOf] defaults to 500 when the error does not carry an
+// explicit override. That default is deliberate for internal failures
+// but it is a leak-by-default anti-pattern for domain errors that are
+// really 4xx (validation, not-found, conflict, authorisation). Such
+// errors MUST pass errs.WithHTTPStatus(4xx) at Define time so the
+// accessor surfaces the correct status.
+//
+// # Semantics reminders
+//
+//   - Origin wins on wrap. An error born in service/logger (code 31xx) and
+//     observed through pkg/v1/logger keeps its 31xx code — the Code
+//     describes the origin, never the observation surface.
+//   - errors.Is keeps stdlib semantics. For code / reason matching use
+//     the explicit [HasCode] / [HasReason] helpers; errors.Is(err,
+//     context.Canceled) still walks the chain through errs.Wrap.
+//   - Default HTTP / exit codes are global (500 / 70). Per-error
+//     overrides come from errs.WithHTTPStatus / WithExitCode inside the
+//     emitter package.
+//
+// # PrefixMatcher routing
+//
+// [NewPrefixMatcher] returns a sentinel that classifies any wrapped
+// error by Code prefix when used through errors.Is. Combine with
+// [MaskByMajor] / [MaskByLayer] / [MaskByPackage] / [MaskExact] for
+// CIDR-style code routing in dashboards / middleware. Single-code
+// matching uses [HasCode] which is cheaper.
 package errs
 
 import kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -91,3 +217,52 @@ var (
 	// ParseCode parses the canonical "M.L.P.S" textual form.
 	ParseCode = kerrs.ParseCode
 )
+
+// HasAnyCode walks err's chain and reports whether any *errs.Error
+// carries a Code matching ANY of the supplied codes. Convenience
+// equivalent of `HasCode(err, c1) || HasCode(err, c2) || …` — useful
+// when a retry policy / circuit-breaker / metric routes on a SET of
+// failure modes rather than a single code.
+//
+// Returns false when codes is empty.
+//
+//	retryable := errs.HasAnyCode(err,
+//	    codec.CodeStreamingUnsupported,
+//	    logger.CodeWriterRequired,
+//	    logger.CodeSinkConfigRequired,
+//	)
+func HasAnyCode(err error, codes ...Code) bool {
+	//: short-circuit on the empty list — no candidates can match.
+	for _, c := range codes {
+		//: each HasCode walk is O(chain depth); typical chains are 1-3 deep.
+		if HasCode(err, c) {
+			//: first hit wins; no need to walk the remaining candidates.
+			return true
+		}
+	}
+	//: walked every code without a hit.
+	return false
+}
+
+// HasAnyReason is the reason-string sibling of [HasAnyCode]. Reports
+// whether any *errs.Error in err's chain carries a Reason matching ANY
+// of the supplied reasons. Useful when call sites read more naturally
+// with the SCREAMING_SNAKE label than the numeric code.
+//
+// Returns false when reasons is empty.
+//
+//	if errs.HasAnyReason(err, "UNKNOWN_FORMAT", "STREAMING_UNSUPPORTED") {
+//	    // fall back to a different transport
+//	}
+func HasAnyReason(err error, reasons ...string) bool {
+	//: same loop shape as HasAnyCode — kept intentionally parallel.
+	for _, r := range reasons {
+		//: per-reason walk delegated to HasReason which already handles Unwrap chains.
+		if HasReason(err, r) {
+			//: first match short-circuits.
+			return true
+		}
+	}
+	//: no reason in the list matched the chain.
+	return false
+}

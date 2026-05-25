@@ -37,6 +37,13 @@ services:
     # Network configuration
     networks:
       - default
+    # Host-published ports — anything bound on these inside the container
+    # is reachable from the host's localhost AND from the host's LAN IP.
+    # Independent of VSCode/Cursor port-forwarding; works even when the
+    # IDE is closed. Add new entries here when wiring a new dev service.
+    ports:
+      # docs/site Astro static viewer (make serve / make docs+npx serve dist).
+      - "4321:4321"
     # Host resolution for accessing host Ollama (GPU-accelerated)
     # Needed on Linux; Mac/Windows Docker Desktop provides this automatically
     extra_hosts:

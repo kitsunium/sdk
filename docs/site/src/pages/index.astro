@@ -1,0 +1,44 @@
+---
+// Root redirect — sends "/" to the default major's default release.
+// Implemented as a real Astro page (not via the astro.config redirects
+// map) so the emitted file has a proper <html lang="en"> wrapper
+// instead of the HTML5-light shape Astro's built-in redirects use.
+// That keeps Pagefind from warning about pages without a lang attr
+// on every build; data-pagefind-ignore on <body> stops the page
+// being indexed in the first place.
+interface VersionEntry {
+  major: string;
+  default: boolean;
+  releases: { version: string; default: boolean }[];
+}
+let versions: VersionEntry[] = [];
+try {
+  versions = ((await import("../data/versions.json")).default as VersionEntry[]) ?? [];
+} catch { /* bootstrap */ }
+
+const defaultMajor =
+  versions.find(v => v?.default)?.major ?? versions[0]?.major ?? "v1";
+const defaultMajorEntry =
+  versions.find(v => v.major === defaultMajor) ?? versions[0];
+const defaultRelease =
+  defaultMajorEntry?.releases?.find(r => r.default)?.version ??
+  defaultMajorEntry?.releases?.[0]?.version ??
+  "local";
+//: URL layout is /<release>/<major>/<page> — release is the time axis,
+//: major the API surface. The root redirect lands the visitor at the
+//: newest non-EOL major's default release.
+const target = `/${defaultRelease}/${defaultMajor}/`;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="refresh" content={`0;url=${target}`} />
+    <meta name="robots" content="noindex" />
+    <link rel="canonical" href={target} />
+    <title>Redirecting to {target}</title>
+  </head>
+  <body data-pagefind-ignore="all">
+    <a href={target}>Redirecting to {target}</a>
+  </body>
+</html>

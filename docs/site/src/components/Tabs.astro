@@ -1,0 +1,74 @@
+---
+// Tabs — small wrapper for multi-pane sections (e.g. install / verify
+// snippets in multiple languages). Author writes:
+//
+//   <Tabs labels={["Bazel", "go test"]}>
+//     <Fragment slot="panel-0">…</Fragment>
+//     <Fragment slot="panel-1">…</Fragment>
+//   </Tabs>
+//
+// Roles + arrow-key navigation follow the WAI-ARIA tabs pattern.
+interface Props {
+  labels: string[];
+  id?: string;
+}
+const { labels, id = `tabs-${Math.random().toString(36).slice(2, 8)}` } = Astro.props;
+---
+
+<div class="tabs" data-tabs id={id}>
+  <div class="tab-strip" role="tablist">
+    {labels.map((label, i) => (
+      <button
+        type="button"
+        role="tab"
+        id={`${id}-tab-${i}`}
+        aria-controls={`${id}-panel-${i}`}
+        aria-selected={i === 0}
+        tabindex={i === 0 ? 0 : -1}
+        class={i === 0 ? "active" : ""}
+      >{label}</button>
+    ))}
+  </div>
+  {labels.map((_, i) => (
+    <div
+      role="tabpanel"
+      id={`${id}-panel-${i}`}
+      aria-labelledby={`${id}-tab-${i}`}
+      hidden={i !== 0}
+    >
+      <slot name={`panel-${i}`} />
+    </div>
+  ))}
+</div>
+
+<script>
+  function initTabs(root: HTMLElement) {
+    if (root.dataset.tabsInit === "1") return;
+    root.dataset.tabsInit = "1";
+    const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>("[role='tab']"));
+    const panels = Array.from(root.querySelectorAll<HTMLElement>("[role='tabpanel']"));
+    const activate = (i: number) => {
+      tabs.forEach((t, idx) => {
+        const selected = idx === i;
+        t.setAttribute("aria-selected", String(selected));
+        t.tabIndex = selected ? 0 : -1;
+        t.classList.toggle("active", selected);
+      });
+      panels.forEach((p, idx) => { p.hidden = idx !== i; });
+      tabs[i]?.focus();
+    };
+    tabs.forEach((tab, i) => {
+      tab.addEventListener("click", () => activate(i));
+      tab.addEventListener("keydown", e => {
+        if (e.key === "ArrowRight") { e.preventDefault(); activate((i + 1) % tabs.length); }
+        if (e.key === "ArrowLeft") { e.preventDefault(); activate((i - 1 + tabs.length) % tabs.length); }
+        if (e.key === "Home") { e.preventDefault(); activate(0); }
+        if (e.key === "End") { e.preventDefault(); activate(tabs.length - 1); }
+      });
+    });
+  }
+  document.querySelectorAll<HTMLElement>("[data-tabs]").forEach(initTabs);
+  document.addEventListener("astro:page-load", () => {
+    document.querySelectorAll<HTMLElement>("[data-tabs]").forEach(initTabs);
+  });
+</script>

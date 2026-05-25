@@ -1,0 +1,196 @@
+---
+// WhatsNew — banner injected at the TOP of the Home page (only).
+// Lists the most recent feat: + fix: entries from the changelog and
+// links to the full changelog page. Hybrid pattern that serves
+// returning users (recent changes visible immediately) without
+// hurting drive-by visitors (pitch + packages still ABOVE the fold
+// because the banner is COMPACT — 5 lines + a CTA).
+//
+// Data source: sync-versions.mjs writes src/data/whats-new-<release>-<major>.json
+// at prebuild time. The component does a best-effort dynamic import;
+// if the JSON is missing (fresh clone, no git history yet) it renders
+// nothing.
+
+interface Entry {
+  type: "feat" | "fix" | "perf" | "refactor" | "docs" | "chore" | "build" | "ci" | "test" | "style" | "misc";
+  scope: string | null;
+  breaking: boolean;
+  summary: string;
+  sha: string;
+  short: string;
+  date: string;
+}
+interface Payload {
+  release: string;
+  major: string;
+  generatedAt: string;
+  repoUrl: string | null;
+  entries: Entry[];
+}
+
+interface Props {
+  release: string;
+  major: string;
+  changelogHref: string;
+}
+const { release, major, changelogHref } = Astro.props;
+
+let payload: Payload | null = null;
+try {
+  //: Astro/Vite resolves these dynamic imports at build time when the
+  //: pattern matches a known file. Missing file → caught + fall-through.
+  payload = ((await import(`../data/whats-new-${release}-${major}.json`)).default as Payload) ?? null;
+} catch {
+  payload = null;
+}
+
+const entries = payload?.entries ?? [];
+const KIND_LABEL: Record<string, string> = {
+  feat: "feat",
+  fix: "fix",
+  perf: "perf",
+  refactor: "refactor",
+  docs: "docs",
+  chore: "chore",
+  build: "build",
+  ci: "ci",
+  test: "test",
+  style: "style",
+  misc: "misc",
+};
+---
+
+{entries.length > 0 && (
+  <section class="whats-new" aria-labelledby="whats-new-heading">
+    <header>
+      <h2 id="whats-new-heading">What's new<span class="release-tag">in <code>{release}</code></span></h2>
+      <a href={changelogHref} class="whats-new-cta">Full changelog →</a>
+    </header>
+    <ul>
+      {entries.map(e => {
+        const commitUrl = payload?.repoUrl ? `${payload.repoUrl}/commit/${e.sha}` : null;
+        return (
+          <li>
+            <span class={`wn-kind wn-kind--${e.type}`}>{KIND_LABEL[e.type] ?? e.type}</span>
+            {e.scope && <span class="wn-scope">{e.scope}</span>}
+            <span class="wn-summary">{e.summary}</span>
+            {e.breaking && <span class="wn-breaking" title="Breaking change">⚠ breaking</span>}
+            {commitUrl && (
+              <a class="wn-sha" href={commitUrl} target="_blank" rel="noopener">{e.short}</a>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  </section>
+)}
+
+<style>
+  .whats-new {
+    margin: 0 0 2rem;
+    padding: 1rem 1.1rem;
+    background: var(--color-bg-alt);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-accent);
+    border-radius: 6px;
+  }
+  .whats-new header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.6rem;
+  }
+  .whats-new h2 {
+    margin: 0;
+    padding: 0;
+    border-bottom: none;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--color-text);
+    letter-spacing: 0;
+  }
+  .whats-new h2 .release-tag {
+    margin-left: 0.5rem;
+    color: var(--color-muted);
+    font-weight: 500;
+    font-size: 0.85rem;
+  }
+  .whats-new h2 .release-tag code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--color-accent);
+  }
+  .whats-new-cta {
+    font-size: 0.82rem;
+    color: var(--color-accent);
+    white-space: nowrap;
+  }
+  .whats-new ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .whats-new li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+    font-size: 0.88rem;
+    line-height: 1.55;
+  }
+  .wn-kind {
+    flex: 0 0 auto;
+    padding: 0.05rem 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+    align-self: center;
+  }
+  .wn-kind--feat { background: rgba(46, 160, 67, 0.22); color: #c5f6c5; }
+  .wn-kind--fix  { background: rgba(248, 81, 73, 0.18); color: #ffb8b4; }
+  .wn-kind--perf { background: rgba(210, 153, 34, 0.20); color: #ffdfa8; }
+  .wn-kind--refactor,
+  .wn-kind--docs,
+  .wn-kind--build,
+  .wn-kind--ci,
+  .wn-kind--test,
+  .wn-kind--style,
+  .wn-kind--chore { background: rgba(88, 128, 220, 0.16); color: #cfdcff; }
+  .wn-scope {
+    color: var(--color-muted);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+  .wn-summary {
+    flex: 1;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .wn-breaking {
+    color: var(--color-bad);
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .wn-sha {
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--color-muted);
+  }
+  .wn-sha:hover { color: var(--color-accent); }
+  /* Light theme — colours need stronger contrast */
+  :root[data-theme="light"] .wn-kind { background: rgba(0, 0, 0, 0.06); color: var(--color-text); }
+  :root[data-theme="light"] .wn-kind--feat { background: rgba(26, 127, 55, 0.14); color: #1a7f37; }
+  :root[data-theme="light"] .wn-kind--fix  { background: rgba(207, 34, 46, 0.10); color: #cf222e; }
+  :root[data-theme="light"] .wn-kind--perf { background: rgba(154, 103, 0, 0.12); color: #9a6700; }
+</style>

@@ -200,6 +200,18 @@ func decodeRoot(data []byte, v any) error {
 		//: surface a value-invalid sentinel.
 		return nonPointerTargetError()
 	}
+	//: target is the pointee; settability is required for Set to work.
+	target := rv.Elem()
+	//: target-aware fast path: if the target is a typed struct AND the
+	//: wire bytes carry a struct record, decode straight into the
+	//: struct fields (skips the map[string]any intermediate AND the
+	//: subsequent projectMapToStruct second walk). Returns handled=true
+	//: when it took the typed path; the fallback below covers everything
+	//: else (interface targets, slices, maps, scalars).
+	if handled, err := tryDecodeRootInto(data, target); handled {
+		//: typed path consumed the full buffer; surface err verbatim.
+		return err
+	}
 	//: decode one record at depth zero.
 	value, rest, derr := decodeValue(data, 0)
 	//: surface decode failure verbatim.
@@ -212,8 +224,6 @@ func decodeRoot(data []byte, v any) error {
 		//: surface as decode failure for callers that match by reason.
 		return trailingBytesError(len(rest))
 	}
-	//: target is the pointee; settability is required for Set to work.
-	target := rv.Elem()
 	//: wrap the target in a local view so the helper signature avoids
 	//: an externally-named concrete type.
 	return assignDecoded(reflectView(target), target.Type(), value)
@@ -375,7 +385,17 @@ func tryNumericTag(tag Tag, length uint64, rest []byte) (value any, residual []b
 }
 
 // readVarintFromBytes reads one LEB128 value from the head of data.
+// 1-byte LEB128 (data[0] < 0x80) is the common case — inline that check
+// before calling binary.Uvarint to skip the function-call frame and the
+// loop setup on the > 90% common path (audit TL7).
 func readVarintFromBytes(data []byte) (value uint64, rest []byte, err error) {
+	//: 1-byte LEB128 fast-path: continuation bit clear means we have
+	//: the whole length in data[0] already.
+	if len(data) > 0 && uint64(data[0]) < uvarintSingleByteCap {
+		//: tag-and-length stride is 1 byte; return rest with that
+		//: advance and the length in the low 7 bits.
+		return uint64(data[0]), data[1:], nil
+	}
 	//: delegate to the stdlib helper.
 	val, n := binary.Uvarint(data)
 	//: n == 0 means buffer too small.
@@ -811,8 +831,247 @@ func convertValue(value any, target reflect.Type) (converted reflect.Value, err 
 		//: explicit Convert.
 		return rv.Convert(target), nil
 	}
+	//: composite projection — the decoder produces generic types
+	//: (map[string]any, []any, map[any]any) for composite TLV
+	//: records; project them into the caller's typed struct/slice/map.
+	if conv, ok, perr := projectComposite(value, target); ok || perr != nil {
+		//: applied path returns conv (possibly with err); non-applied
+		//: falls through to the incompatible-type sentinel.
+		return conv, perr
+	}
 	//: incompatible — surface as decode failure.
 	return reflect.Value{}, incompatibleTypeError(rv.Type().String(), target.String())
+}
+
+// projectComposite handles composite-to-typed projections the decoder
+// needs to make Marshal+Unmarshal a true roundtrip for typed
+// struct/slice/map/pointer targets (the decoder builds map[string]any
+// / []any / map[any]any from the wire; the helpers fit them to the
+// caller's type). Returns (converted, true, nil) on a matched
+// projection, (zero, false, nil) when no projection applies (caller
+// falls through to the incompatible-type sentinel), or
+// (zero, false, err) on a recursive projection failure.
+func projectComposite(value any, target reflect.Type) (converted reflect.Value, applied bool, err error) {
+	//: dispatch on the destination kind — that's what determines the
+	//: shape we need to manufacture.
+	switch target.Kind() {
+	//: struct target ← map[string]any from decodeStruct.
+	case reflect.Struct:
+		//: small helper keeps cyclomatic + LOC under the linter caps.
+		return projectCompositeStruct(value, target)
+	//: slice target ← []any from decodeSlice.
+	case reflect.Slice:
+		//: small helper keeps cyclomatic + LOC under the linter caps.
+		return projectCompositeSlice(value, target)
+	//: map target ← map[any]any or map[string]any from decodeMap/decodeStruct.
+	case reflect.Map:
+		//: small helper keeps cyclomatic + LOC under the linter caps.
+		return projectCompositeMap(value, target)
+	//: pointer target — build the element, then box it.
+	case reflect.Pointer:
+		//: small helper keeps cyclomatic + LOC under the linter caps.
+		return projectCompositePointer(value, target)
+	//: every other kind — leave the fallback chain in place.
+	default:
+		//: no projection strategy for this kind.
+		return reflect.Value{}, false, nil
+	}
+}
+
+// projectCompositeStruct attempts the map[string]any → struct
+// projection. Falls through (applied=false) when the source isn't the
+// expected generic map shape.
+func projectCompositeStruct(value any, target reflect.Type) (converted reflect.Value, applied bool, err error) {
+	//: type-assert the source against the generic map decodeStruct
+	//: produces; non-matching sources fall through to the caller's
+	//: incompatible-type sentinel.
+	m, ok := value.(map[string]any)
+	//: source shape mismatch → no projection.
+	if !ok {
+		//: fall through; not applied.
+		return reflect.Value{}, false, nil
+	}
+	//: per-field projection by exported sf.Name.
+	conv, perr := projectMapToStruct(m, target)
+	//: applied path — caller surfaces perr verbatim.
+	return conv, true, perr
+}
+
+// projectCompositeSlice attempts the []any → typed slice projection.
+func projectCompositeSlice(value any, target reflect.Type) (converted reflect.Value, applied bool, err error) {
+	//: type-assert the source against the generic []any decodeSlice
+	//: produces.
+	s, ok := value.([]any)
+	//: source shape mismatch → no projection.
+	if !ok {
+		//: fall through.
+		return reflect.Value{}, false, nil
+	}
+	//: per-element projection.
+	conv, perr := projectSliceToTyped(s, target)
+	//: applied path.
+	return conv, true, perr
+}
+
+// projectCompositeMap attempts the map[any]any / map[string]any →
+// typed map projection. Reflect-based source walk handles both
+// decoded map flavours uniformly.
+func projectCompositeMap(value any, target reflect.Type) (converted reflect.Value, applied bool, err error) {
+	//: defensive — guard against non-map sources so we never panic.
+	if reflect.ValueOf(value).Kind() != reflect.Map {
+		//: fall through.
+		return reflect.Value{}, false, nil
+	}
+	//: per-entry key+value projection — projectMapToTyped accepts any
+	//: so the linter doesn't pin the parameter to a concrete reflect
+	//: type (KTN-API-MINIF).
+	conv, perr := projectMapToTyped(value, target)
+	//: applied path.
+	return conv, true, perr
+}
+
+// projectCompositePointer recursively projects into target.Elem() and
+// wraps the result in a fresh pointer.
+func projectCompositePointer(value any, target reflect.Type) (converted reflect.Value, applied bool, err error) {
+	//: project into the pointed-to type first.
+	elem, ok, perr := projectComposite(value, target.Elem())
+	//: bubble up a projection error verbatim.
+	if perr != nil {
+		//: not applied so caller can chain further fallbacks.
+		return reflect.Value{}, false, perr
+	}
+	//: no projection matched at the element level either.
+	if !ok {
+		//: fall through.
+		return reflect.Value{}, false, nil
+	}
+	//: allocate a new addressable pointee and wrap it in a pointer.
+	ptr := reflect.New(target.Elem())
+	//: publish the projected element through the pointer.
+	ptr.Elem().Set(elem)
+	//: applied path.
+	return ptr, true, nil
+}
+
+// projectMapToStruct fills a struct of target type from the
+// map[string]any produced by decodeStruct. Field matching is by
+// exported field name — the inverse of collectStructFields which
+// writes sf.Name. Uses cachedStructTypeInfo so the reflect.Type walk
+// runs at most once per target type process-wide.
+// Missing source fields leave the destination at its zero value;
+// nil source values explicitly zero the destination.
+func projectMapToStruct(src map[string]any, target reflect.Type) (converted reflect.Value, err error) {
+	//: cached metadata — single reflect walk per type, then reused.
+	ti := cachedStructTypeInfo(target)
+	//: new addressable instance we can Set into.
+	dst := reflect.New(target).Elem()
+	//: walk the cached metadata in declaration order.
+	for _, f := range ti.fields {
+		//: look up the wire value by the cached field name.
+		srcVal, found := src[f.name]
+		//: silent absence — leave the destination field zero-valued.
+		if !found {
+			//: skip the field; reflect.New already zeroed it.
+			continue
+		}
+		//: nil source explicitly zeroes the destination.
+		if srcVal == nil {
+			//: write the zero value of the field's cached type.
+			dst.Field(f.index).Set(reflect.Zero(f.typ))
+			//: next field.
+			continue
+		}
+		//: recursive convertValue handles scalars + nested composites.
+		conv, cerr := convertValue(srcVal, f.typ)
+		//: bubble per-field projection failure verbatim.
+		if cerr != nil {
+			//: surface upward.
+			return reflect.Value{}, cerr
+		}
+		//: publish the converted value into the struct field.
+		dst.Field(f.index).Set(conv)
+	}
+	//: success.
+	return dst, nil
+}
+
+// projectSliceToTyped fills a typed slice from the []any produced by
+// decodeSlice. Element conversion goes through convertValue so nested
+// composites (slice of struct, slice of map) recurse cleanly.
+func projectSliceToTyped(src []any, target reflect.Type) (converted reflect.Value, err error) {
+	//: snapshot the element type once.
+	elemType := target.Elem()
+	//: pre-allocate with the source length so reslicing is avoided.
+	dst := reflect.MakeSlice(target, len(src), len(src))
+	//: per-element conversion.
+	for i, e := range src {
+		//: nil element gets the zero value of the element type.
+		if e == nil {
+			//: write zero.
+			dst.Index(i).Set(reflect.Zero(elemType))
+			//: next element.
+			continue
+		}
+		//: convertValue handles scalar narrowing + composite recursion.
+		conv, cerr := convertValue(e, elemType)
+		//: bubble per-element failure verbatim.
+		if cerr != nil {
+			//: surface upward.
+			return reflect.Value{}, cerr
+		}
+		//: publish the element.
+		dst.Index(i).Set(conv)
+	}
+	//: success.
+	return dst, nil
+}
+
+// projectMapToTyped fills a typed map from any source value whose
+// reflect.Kind is Map — covers both map[any]any (decodeMap output)
+// and map[string]any (decodeStruct output). Reflect-based iteration
+// handles both flavours without two branches. Accepting `any` keeps
+// the parameter signature minimal (KTN-API-MINIF) — the caller's
+// guard already confirmed src is map-shaped.
+func projectMapToTyped(src any, target reflect.Type) (converted reflect.Value, err error) {
+	//: reflect over the source once locally; caller already
+	//: confirmed Kind() == Map so this is safe.
+	rv := reflect.ValueOf(src)
+	//: snapshot key + value types once.
+	keyType := target.Key()
+	//: value type is the codomain.
+	valType := target.Elem()
+	//: pre-allocate with source cardinality.
+	dst := reflect.MakeMapWithSize(target, rv.Len())
+	//: walk every entry.
+	for _, k := range rv.MapKeys() {
+		//: project the key into the target key type.
+		kConv, kErr := convertValue(k.Interface(), keyType)
+		//: bubble key conversion failure verbatim.
+		if kErr != nil {
+			//: surface upward.
+			return reflect.Value{}, kErr
+		}
+		//: read the value through the reflect indirection.
+		rawV := rv.MapIndex(k).Interface()
+		//: nil value gets the zero value of the value type.
+		if rawV == nil {
+			//: write zero.
+			dst.SetMapIndex(kConv, reflect.Zero(valType))
+			//: next entry.
+			continue
+		}
+		//: project the value into the target value type.
+		vConv, vErr := convertValue(rawV, valType)
+		//: bubble value conversion failure verbatim.
+		if vErr != nil {
+			//: surface upward.
+			return reflect.Value{}, vErr
+		}
+		//: install the entry.
+		dst.SetMapIndex(kConv, vConv)
+	}
+	//: success.
+	return dst, nil
 }
 
 // narrowNumeric widens or narrows a decoded numeric value into target.

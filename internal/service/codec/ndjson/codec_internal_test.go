@@ -1,8 +1,12 @@
 package ndjson
 
 import (
+	"bytes"
+	stdjson "encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 )
 
 // Test_ndjsonCodec_Name covers the canonical identifier returned by the codec.
@@ -195,6 +199,9 @@ func Test_decodeLines(t *testing.T) {
 	tests := []tc{
 		{"two valid records", "1\n2\n", 2, false},
 		{"bad JSON surfaces error", "not json\n", 0, true},
+		{"trailing record without newline", "1\n2", 2, false},
+		{"empty input", "", 0, false},
+		{"blank lines skipped", "\n1\n\n2\n", 2, false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -206,6 +213,40 @@ func Test_decodeLines(t *testing.T) {
 		}
 		if !tc.wantErr && out.Len() != tc.wantLen {
 			t.Errorf("%s: decoded %d want %d", tc.name, out.Len(), tc.wantLen)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// Test_countNDJSONRecords pins the capacity-hint helper: every '\n' is a
+// record terminator plus one extra slot for a possible trailing record
+// that lacks a final newline.
+func Test_countNDJSONRecords(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		data string
+		want int
+	}
+	tests := []tc{
+		{"empty", "", 0},
+		{"single terminated", "1\n", 1},
+		{"single not terminated", "1", 1},
+		{"two terminated", "1\n2\n", 2},
+		{"trailing partial", "1\n2", 2},
+		{"all blanks counted as upper bound", "\n\n\n", 3},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got := countNDJSONRecords([]byte(tc.data))
+		//: this is a capacity hint, so exact equality is the contract.
+		if got != tc.want {
+			t.Errorf("%s: got %d want %d", tc.name, got, tc.want)
 		}
 	}
 	for _, tc := range tests {
@@ -290,5 +331,136 @@ func Test_ndjsonCodec_Append_RollbackOnMidSliceError(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
 		})
+	}
+}
+
+// Test_appendNDJSONRaw covers the raw-bytes writer + embedded-newline guard.
+func Test_appendNDJSONRaw(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		dst    []byte
+		rows   [][]byte
+		want   string
+		wantOK bool
+	}
+	tests := []tc{
+		{name: "empty-rows", dst: nil, rows: nil, want: "", wantOK: true},
+		{name: "one-row", dst: nil, rows: [][]byte{[]byte(`{"a":1}`)}, want: "{\"a\":1}\n", wantOK: true},
+		{name: "two-rows-append-to-existing", dst: []byte("prefix:"), rows: [][]byte{[]byte("a"), []byte("b")}, want: "prefix:a\nb\n", wantOK: true},
+		{name: "embedded-newline-rejects", dst: nil, rows: [][]byte{[]byte("ok"), []byte("bad\nnewline")}, want: "", wantOK: false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got, ok := appendNDJSONRaw(tc.dst, tc.rows)
+		if ok != tc.wantOK {
+			t.Fatalf("%s: ok=%v want %v", tc.name, ok, tc.wantOK)
+		}
+		if !tc.wantOK {
+			//: rejection path returns nil; no buffer expected.
+			return
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_rawMessageView covers the []json.RawMessage → [][]byte adapter.
+func Test_rawMessageView(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		in   []stdjson.RawMessage
+	}
+	tests := []tc{
+		{"empty", nil},
+		{"single", []stdjson.RawMessage{[]byte(`{"k":"v"}`)}},
+		{"multiple", []stdjson.RawMessage{[]byte("1"), []byte("2"), []byte("3")}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got := rawMessageView(tc.in)
+		if len(got) != len(tc.in) {
+			t.Fatalf("%s: len=%d want %d", tc.name, len(got), len(tc.in))
+		}
+		//: each view element must alias the underlying RawMessage bytes.
+		for i := range got {
+			if string(got[i]) != string(tc.in[i]) {
+				t.Errorf("%s: idx %d got=%q want=%q", tc.name, i, got[i], tc.in[i])
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_marshalRawSliceTo covers the top-level fast-path dispatch.
+func Test_marshalRawSliceTo(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		v      any
+		want   string
+		wantOK bool
+	}
+	tests := []tc{
+		{"raw-message-slice", []stdjson.RawMessage{[]byte(`{"a":1}`), []byte(`{"b":2}`)}, "{\"a\":1}\n{\"b\":2}\n", true},
+		{"bytes-slice", [][]byte{[]byte("x"), []byte("y")}, "x\ny\n", true},
+		{"non-raw-shape", []int{1, 2, 3}, "", false},
+		{"raw-with-embedded-newline-falls-back", []stdjson.RawMessage{[]byte("ok\nno")}, "", false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got, ok := marshalRawSliceTo(nil, tc.v)
+		if ok != tc.wantOK {
+			t.Fatalf("%s: ok=%v want %v", tc.name, ok, tc.wantOK)
+		}
+		if !tc.wantOK {
+			return
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_detachAndRelease covers the two release paths: small buffer
+// (clone+repool, ok=true) and over-cap buffer (orphan, ok=false).
+func Test_detachAndRelease(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name       string
+		cap        int
+		wantRepool bool
+	}
+	tests := []tc{
+		{"small-cloned-and-repooled", 1024, true},
+		{"oversize-orphaned-untouched", scratch.MaxRetainedBufBytes + 1, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		buf := new(bytes.Buffer)
+		buf.Grow(tc.cap)
+		buf.WriteString("xyz")
+		out, repooled := detachAndRelease(buf)
+		//: contract: caller's bytes survive both paths intact.
+		if string(out) != "xyz" {
+			t.Errorf("%s: got %q want %q", tc.name, out, "xyz")
+		}
+		//: contract: ok reflects the chosen path.
+		if repooled != tc.wantRepool {
+			t.Errorf("%s: repooled=%v want %v", tc.name, repooled, tc.wantRepool)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }

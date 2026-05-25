@@ -45,7 +45,6 @@ Checks:
 Checks:
 - Verify `/workspace/mcp.json` exists. If missing: score 0, skip rest.
 - Count top-level keys in `mcpServers` object via jq. Expect >= 5. Score: `min(count/7*100, 100)`.
-- Check that `grepai` key is ABSENT from mcpServers (deprecated since 2026-04). If present: -20 points.
 
 ### 4. Settings
 

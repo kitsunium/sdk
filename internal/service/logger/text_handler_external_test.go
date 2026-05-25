@@ -284,8 +284,10 @@ func TestTextHandler_WithGroup(t *testing.T) {
 			for _, g := range tc.groups {
 				current = current.WithGroup(g)
 			}
-			rec := corelogger.RecordEvent{Level: level.Info, Message: "m",
-				Attrs: []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}}}
+			rec := corelogger.RecordEvent{
+				Level: level.Info, Message: "m",
+				Attrs: []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}},
+			}
 			if err := current.Handle(t.Context(), rec); err != nil {
 				t.Fatalf("Handle err = %v", err)
 			}

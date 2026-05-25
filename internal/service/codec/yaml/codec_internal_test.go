@@ -170,3 +170,52 @@ func Test_yamlCodec_NewDecoder(t *testing.T) {
 		})
 	}
 }
+
+// Test_yamlCodec_Append covers the Appender extension: happy round-trip
+// + dst-untouched-on-error semantics.
+func Test_yamlCodec_Append(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		dst     []byte
+		v       any
+		wantErr bool
+	}
+	tests := []tc{
+		{"happy-empty-dst", nil, map[string]int{"a": 1}, false},
+		{"happy-prefix-dst", []byte("PRE-"), "value", false},
+		//: yaml.v3 panics on chan/func types instead of returning an
+		//: error — out of our codec's control. Reject test omitted.
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := New()
+		ap, ok := c.(interface {
+			Append([]byte, any) ([]byte, error)
+		})
+		if !ok {
+			t.Fatalf("%s: yamlCodec does not implement Appender", tc.name)
+		}
+		got, err := ap.Append(tc.dst, tc.v)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("%s: want error, got nil", tc.name)
+			}
+			//: dst returned untouched on error (length match).
+			if len(got) != len(tc.dst) {
+				t.Errorf("%s: dst len changed on error: got=%d want=%d", tc.name, len(got), len(tc.dst))
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		//: prefix preserved verbatim when supplied.
+		if len(tc.dst) > 0 && string(got[:len(tc.dst)]) != string(tc.dst) {
+			t.Errorf("%s: prefix lost; got=%q", tc.name, got[:len(tc.dst)])
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

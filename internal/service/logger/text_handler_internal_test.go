@@ -50,14 +50,29 @@ func Test_appendAttrWithGroups(t *testing.T) {
 		attr   corelogger.AttrValue
 		want   string
 	}{
-		{"no groups falls back to bare appendAttr", nil,
-			corelogger.AttrValue{Key: "k", Value: corelogger.StringValue("v")}, ` k="v"`},
-		{"empty groups slice still falls back to bare appendAttr", []string{},
-			corelogger.AttrValue{Key: "k", Value: corelogger.BoolValue(true)}, ` k=true`},
-		{"single group prefixes the key", []string{"http"},
-			corelogger.AttrValue{Key: "method", Value: corelogger.StringValue("GET")}, ` http.method="GET"`},
-		{"nested groups chain with dots", []string{"req", "http"},
-			corelogger.AttrValue{Key: "status", Value: corelogger.IntValue(200)}, ` req.http.status=200`},
+		{
+			"no groups falls back to bare appendAttr", nil,
+			corelogger.AttrValue{Key: "k", Value: corelogger.StringValue("v")},
+			` k="v"`,
+		},
+		{
+			"empty groups slice still falls back to bare appendAttr",
+			[]string{},
+			corelogger.AttrValue{Key: "k", Value: corelogger.BoolValue(true)},
+			` k=true`,
+		},
+		{
+			"single group prefixes the key",
+			[]string{"http"},
+			corelogger.AttrValue{Key: "method", Value: corelogger.StringValue("GET")},
+			` http.method="GET"`,
+		},
+		{
+			"nested groups chain with dots",
+			[]string{"req", "http"},
+			corelogger.AttrValue{Key: "status", Value: corelogger.IntValue(200)},
+			` req.http.status=200`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

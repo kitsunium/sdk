@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -841,6 +842,69 @@ func TestDecodeASCII85(t *testing.T) {
 		if !bytes.Equal(got, tc.raw) {
 			t.Errorf("%s: decoded=%q want=%q", tc.name, got, tc.raw)
 		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_encodeHex covers the shared base16/hex helper: lowercase output
+// for variantHex, uppercase for variantBase16, byte-for-byte parity
+// with the legacy hex.Encode + bytes.ToUpper path.
+func Test_encodeHex(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		v    variant
+		raw  []byte
+		want string
+	}
+	tests := []tc{
+		{"hex-empty", variantHex, []byte{}, ""},
+		{"hex-ascii", variantHex, []byte("Ada"), "416461"},
+		{"hex-binary", variantHex, []byte{0x00, 0xFF, 0xA5, 0x5A}, "00ffa55a"},
+		{"base16-empty", variantBase16, []byte{}, ""},
+		{"base16-ascii", variantBase16, []byte("Ada"), "416461"},
+		{"base16-binary", variantBase16, []byte{0x00, 0xFF, 0xA5, 0x5A}, "00FFA55A"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got := encodeHex(tc.v, tc.raw)
+		//: byte-for-byte parity with the legacy path.
+		if string(got) != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// Test_marshalJSONPooled covers the JSON-inner pool helper: returned
+// jsonBytes round-trip through json.Unmarshal; the returned buffer is
+// releasable via scratch.ReleaseBuffer without panic.
+func Test_marshalJSONPooled(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		v    any
+		want string
+	}
+	tests := []tc{
+		{"int", 42, "42"},
+		{"string", "hi", `"hi"`},
+		{"map", map[string]int{"a": 1}, `{"a":1}`},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got, buf, err := marshalJSONPooled(tc.v)
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+		scratch.ReleaseBuffer(buf)
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })

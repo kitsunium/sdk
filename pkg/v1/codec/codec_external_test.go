@@ -5,9 +5,12 @@ import (
 	stdpem "encoding/pem"
 	stdxml "encoding/xml"
 	"errors"
+	"flag"
 	"io"
 	"math"
+	"os"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -42,6 +45,14 @@ var expectedAppenders = []string{
 	"ndjson",
 	"tlv",
 	"flatbuffers",
+	"xml",
+	"yaml",
+	"toml",
+	"cbor",
+	"msgpack",
+	"asn1-der",
+	"pem",
+	"csv",
 	"base64",
 	"base64url",
 	"base32",
@@ -1337,9 +1348,105 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 					}
 				},
 			})
-		//: JSON + every baseenc variant accept the universal complexRT shape
-		//: (baseenc is JSON-mediated so any JSON-marshallable value works).
-		case "json", "base64", "base64url", "base32", "base16", "hex", "ascii85":
+		//: XML appends the specialised xmlDoc fixture (encoding/xml
+		//: cannot encode maps or []byte losslessly, so we reuse the
+		//: round-trip test's purpose-built shape).
+		case "xml":
+			//: capture the xmlDoc payload + structural decode hook.
+			val := sampleXML()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    val,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					//: decode into a fresh xmlDoc.
+					var got xmlDoc
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						//: hard failure on decode.
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					//: timestamp comparison via Equal — XML restores
+					//: RFC3339 to UTC cleanly.
+					if !got.Timestamp.Equal(val.Timestamp) {
+						//: instants differ.
+						t.Errorf("%s: timestamp mismatch got=%v want=%v", name, got.Timestamp, val.Timestamp)
+						return
+					}
+					//: zero out the timestamps before the structural compare.
+					got.Timestamp, val.Timestamp = time.Time{}, time.Time{}
+					//: full structural compare on the remainder.
+					if !reflect.DeepEqual(got, val) {
+						//: structural diff.
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: ASN.1 DER round-trips a deterministic asn1Doc fixture (asn1
+		//: cannot encode arbitrary structs — only those with stdlib-
+		//: supported type tags).
+		case "asn1-der":
+			val := sampleASN1()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    val,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					var got asn1Doc
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					if !reflect.DeepEqual(got, val) {
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: PEM operates on *pem.Block. The round-trip target is
+		//: **pem.Block so Unmarshal can populate it.
+		case "pem":
+			val := samplePEMBlock()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    val,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					var got *stdpem.Block
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					if !reflect.DeepEqual(got, val) {
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: CSV operates on [][]string natively.
+		case "csv":
+			val := sampleCSV()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    val,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					var got [][]string
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					if !reflect.DeepEqual(got, val) {
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: Universal-any group: json + yaml + toml + cbor + msgpack +
+		//: every baseenc variant (baseenc is JSON-mediated). All accept
+		//: complexRT natively without going through the promotion path.
+		case "json", "yaml", "toml", "cbor", "msgpack", "base64", "base64url", "base32", "base16", "hex", "ascii85":
 			//: capture the codec + fixture + decode hook.
 			val := tweakForCodec(string(f), sampleComplex())
 			tests = append(tests, tc{
@@ -1446,4 +1553,183 @@ func TestCrossCodec_JSONviaCBOR(t *testing.T) {
 			runCase(t, tc)
 		})
 	}
+}
+
+// TestMarshalMany asserts the broadcast variant returns one entry per
+// requested Format on the happy path, joins per-format errors via
+// errors.Join on partial failure, and leaves no map entry for a Format
+// that did not resolve.
+// TestMarshalMany covers the broadcast variant via a table: one row
+// per behaviour (happy-path full success, partial failure with one
+// bad Format, empty formats variadic no-op). Each row asserts the
+// returned map's expected keys + whether the joined err must surface
+// CodeUnknownFormat.
+func TestMarshalMany(t *testing.T) {
+	t.Parallel()
+	type marshalManyCase struct {
+		name           string
+		formats        []codec.Format
+		wantKeys       []codec.Format
+		wantMissingKey codec.Format
+		wantUnknown    bool
+	}
+	tests := []marshalManyCase{
+		{
+			name:        "happy_path_three_formats",
+			formats:     []codec.Format{codec.JSON, codec.CBOR, codec.MsgPack},
+			wantKeys:    []codec.Format{codec.JSON, codec.CBOR, codec.MsgPack},
+			wantUnknown: false,
+		},
+		{
+			name:           "partial_failure_unknown_format",
+			formats:        []codec.Format{codec.JSON, codec.Format("not-a-real-format"), codec.CBOR},
+			wantKeys:       []codec.Format{codec.JSON, codec.CBOR},
+			wantMissingKey: codec.Format("not-a-real-format"),
+			wantUnknown:    true,
+		},
+		{
+			name:        "empty_formats_returns_empty_map",
+			formats:     nil,
+			wantKeys:    nil,
+			wantUnknown: false,
+		},
+	}
+	value := event{Name: "many-probe", Count: 7}
+	runCase := func(t *testing.T, tc marshalManyCase) {
+		t.Helper()
+		out, err := codec.MarshalMany(value, tc.formats...)
+		if tc.wantUnknown {
+			if err == nil {
+				t.Fatalf("%s: expected joined error", tc.name)
+			}
+			if !errs.HasCode(err, codec.CodeUnknownFormat) {
+				t.Errorf("%s: expected CodeUnknownFormat in err, got %v", tc.name, err)
+			}
+		} else if err != nil {
+			t.Fatalf("%s: MarshalMany err=%v want nil", tc.name, err)
+		}
+		for _, f := range tc.wantKeys {
+			if _, ok := out[f]; !ok {
+				t.Errorf("%s: missing entry for %s", tc.name, f)
+			}
+		}
+		if tc.wantMissingKey != "" {
+			if _, ok := out[tc.wantMissingKey]; ok {
+				t.Errorf("%s: unexpected entry for %s", tc.name, tc.wantMissingKey)
+			}
+		}
+		if len(tc.wantKeys) != len(out) {
+			t.Errorf("%s: len(out)=%d want %d", tc.name, len(out), len(tc.wantKeys))
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// universalRoundtripUser is the canonical value used by
+// TestUniversalRoundtripAllCodecs to prove the post-promotion contract:
+// every Format accepts the SAME ordinary Go struct in Marshal and
+// reconstructs it byte-for-byte in Unmarshal, regardless of whether the
+// codec is natively any-aware (json, cbor, msgpack, …) or constrained
+// (csv, ndjson, pem, flatbuffers, tlv) — the facade promotion path
+// closes the gap. Tags reflect the formats that ship native struct-tag
+// support; promoted codecs read the json route and ignore them.
+type universalRoundtripUser struct {
+	Name string `json:"name" cbor:"name" yaml:"name"`
+	Age  int    `json:"age"  cbor:"age"  yaml:"age"`
+}
+
+// TestUniversalRoundtripAllCodecs pins the post-promotion contract:
+// codec.Marshal(F, User) + codec.Unmarshal(F, data, &back) MUST yield
+// back == User for every Format the registry knows. Failure here means
+// the facade promotion path regressed for at least one codec —
+// previously 5/18 codecs rejected this very call shape.
+func TestUniversalRoundtripAllCodecs(t *testing.T) {
+	t.Parallel()
+	//: canonical fixture; struct intentionally small so the binary
+	//: codecs stay easy to inspect by eye if a failure prints hex.
+	original := universalRoundtripUser{Name: "Ada", Age: 36}
+	//: subtest record — `name` doubles as the t.Run label and the
+	//: Format key.
+	type universalCase struct {
+		name   string
+		format codec.Format
+	}
+	//: build the table dynamically from the live registry so a new
+	//: codec registration cannot slip past CI without a roundtrip
+	//: proof — but materialise it before iteration so the runCase
+	//: closure sees a table-driven shape.
+	var tests []universalCase
+	//: walk every discovered Format and turn it into a case.
+	for _, f := range codec.Available() {
+		//: capture the format string for the t.Run label.
+		tests = append(tests, universalCase{name: string(f), format: f})
+	}
+	//: per-case driver isolated so each t.Run body stays a one-line
+	//: dispatch.
+	runCase := func(t *testing.T, tc universalCase) {
+		t.Helper()
+		//: encode the user via the facade — fast or promotion path.
+		data, mErr := codec.Marshal(tc.format, original)
+		//: every codec must accept the ordinary struct.
+		if mErr != nil {
+			//: surface the failure with the format name for triage.
+			t.Fatalf("%s: Marshal err=%v", tc.name, mErr)
+		}
+		//: decode back into a fresh value of the same Go type.
+		var back universalRoundtripUser
+		//: feed the bytes back through the facade — symmetric path.
+		if uErr := codec.Unmarshal(tc.format, data, &back); uErr != nil {
+			//: surface the decode failure with the format name.
+			t.Fatalf("%s: Unmarshal err=%v (bytes=% x)", tc.name, uErr, data)
+		}
+		//: full-field equality is the contract — partial fills count
+		//: as failures so the test catches silent drift.
+		if back != original {
+			//: surface the actual decoded value for triage.
+			t.Errorf("%s: roundtrip mismatch: got %+v want %+v (bytes=% x)", tc.name, back, original, data)
+		}
+	}
+	//: every registered Format runs in parallel; t.Parallel is cheap
+	//: and surfaces concurrency issues if a codec leaks state.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestMain is the bench/test harness entrypoint. It enables runtime
+// profile-rate hooks only when the matching test flag is set so
+// `go test -bench=. -blockprofile=block.out` records contention without
+// paying the per-event cost on normal runs. Block + mutex rates both
+// default to OFF in Go's runtime, so unset flags leave zero overhead.
+//
+// Flag names follow the testing package convention: `-blockprofile` is
+// exposed as `test.blockprofile`, `-mutexprofile` as `test.mutexprofile`;
+// flag.Lookup is the documented way to inspect them from a test binary.
+// TestMain lives here rather than in a standalone main_test.go because
+// KTN-TEST-FILES requires every test file to map to a source file, and
+// not in codec_bench_test.go because KTN-TEST-SUFFIX forbids non-Benchmark
+// functions in a _bench_test.go file.
+func TestMain(m *testing.M) {
+	//: enable block profile only when -blockprofile=... is set.
+	//: SetBlockProfileRate(1) records every contention event; leaving it
+	//: at the default (0) keeps the runtime overhead nil.
+	if f := flag.Lookup("test.blockprofile"); f != nil && f.Value.String() != "" {
+		//: rate=1 captures every blocking event — bench introspection only.
+		runtime.SetBlockProfileRate(1)
+	}
+	//: enable mutex profile only when -mutexprofile=... is set.
+	if f := flag.Lookup("test.mutexprofile"); f != nil && f.Value.String() != "" {
+		//: fraction=1 samples every mutex-contention event (1/rate=1.0).
+		runtime.SetMutexProfileFraction(1)
+	}
+	//: run the regular test/bench suite; propagate the harness exit code.
+	os.Exit(m.Run())
 }

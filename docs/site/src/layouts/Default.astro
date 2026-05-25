@@ -1,0 +1,354 @@
+---
+// Default layout — sidebar + page chrome. Every page wraps its content
+// in this layout so the navigation + footer stay consistent. The
+// project name shown in <title> and the footer is derived from
+// build-info.json (which itself extracts it from the git repoUrl
+// at prebuild time) — no hardcoded "kitsunium/sdk" string survives.
+import { ClientRouter } from "astro:transitions";
+import Sidebar from "../components/Sidebar.astro";
+import Header from "../components/Header.astro";
+import Breadcrumbs from "../components/Breadcrumbs.astro";
+import PrevNext from "../components/PrevNext.astro";
+import EditLink from "../components/EditLink.astro";
+import "../styles/global.css";
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+interface Props {
+  title: string;
+  description?: string;
+  subtitle?: string;
+  headings?: Heading[];
+  source?: string | null;
+  hideChrome?: boolean;
+}
+const {
+  title,
+  description,
+  subtitle,
+  headings = [],
+  source,
+  hideChrome = false,
+} = Astro.props;
+const url = new URL(Astro.request.url);
+const currentPath = url.pathname;
+
+interface BuildInfo {
+  repoUrl?: string | null;
+  commitFull?: string | null;
+}
+let build: BuildInfo = {};
+try {
+  build = ((await import("../data/build-info.json")).default as BuildInfo) ?? {};
+} catch { /* prebuild not run yet */ }
+
+//: derive "<org>/<repo>" from build-info.repoUrl (e.g.
+//: https://github.com/kitsunium/sdk → "kitsunium/sdk"). Falls back
+//: to a neutral "documentation" string if build-info is absent
+//: (fresh clone, dev probe).
+function projectName(repoUrl: string | null | undefined): string {
+  if (!repoUrl) return "documentation";
+  const m = repoUrl.match(/[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+  return m?.[1] ?? "documentation";
+}
+const project = projectName(build.repoUrl);
+const pageTitle = title === project ? `${project} — documentation` : `${title} — ${project}`;
+const descFallback = `Documentation portal for ${project}.`;
+const canonicalUrl = new URL(currentPath, Astro.site ?? url.origin).toString();
+const ogImage = new URL("/brand/kitsunium.jpg", Astro.site ?? url.origin).toString();
+---
+
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description ?? descFallback} />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="canonical" href={canonicalUrl} />
+    <link rel="icon" type="image/jpeg" href="/brand/kitsunium.jpg" />
+    <link rel="apple-touch-icon" href="/brand/kitsunium.jpg" />
+    <link rel="alternate" type="application/rss+xml" title={`${project} — documentation feed`} href="/rss.xml" />
+    {/* OpenGraph + Twitter cards — link previews on Slack / X / Discord / etc. */}
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description ?? descFallback} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:site_name" content={`${project} — documentation`} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={description ?? descFallback} />
+    <meta name="twitter:image" content={ogImage} />
+    {/* Theme boot — sync read of localStorage so the page never paints
+        in the wrong theme (FOUC kill). Inline so it runs before <body>. */}
+    <script is:inline>
+      (function () {
+        try {
+          var t = localStorage.getItem("kitsunium:docs:theme");
+          if (t === "light" || t === "dark") {
+            document.documentElement.dataset.theme = t;
+          }
+        } catch (_) { /* private mode / blocked storage */ }
+      })();
+    </script>
+    <ClientRouter />
+  </head>
+  <body>
+    {/* Skip-to-content — visually hidden until focused; jumps past the
+        sidebar straight to the article. WCAG 2.4.1 (Bypass Blocks). */}
+    <a href="#main-content" class="skip-link">Skip to content</a>
+    <div class="app">
+      <Sidebar currentPath={currentPath} />
+      <div class="content">
+        {!hideChrome && <Header currentPath={currentPath} />}
+        <header class="page-header">
+          <div class="container">
+            {!hideChrome && <Breadcrumbs currentPath={currentPath} />}
+            <h1>{title}</h1>
+            {subtitle && <p class="subtitle">{subtitle}</p>}
+          </div>
+        </header>
+        <div class="page-body">
+          <main id="main-content" class="container" tabindex="-1">
+            <slot />
+            {!hideChrome && (
+              <div class="page-foot-meta">
+                <EditLink source={source} />
+                <PrevNext currentPath={currentPath} />
+              </div>
+            )}
+          </main>
+          {headings.length > 0 && (
+            <div class="toc-rail">
+              <aside class="page-toc" aria-label="On this page">
+                <h3>On this page</h3>
+                <ul>
+                  {headings.map(h => (
+                    <li class={`toc-d${h.depth}`}>
+                      <a href={`#${h.slug}`}>{h.text}</a>
+                    </li>
+                  ))}
+                </ul>
+              </aside>
+            </div>
+          )}
+        </div>
+        <footer>
+          <div class="container">
+            <p>
+              {project} · documentation portal · regenerate with <code>make docs</code>
+              · serve with <code>make serve</code>
+            </p>
+          </div>
+        </footer>
+      </div>
+    </div>
+    <script>
+      // Shared combobox controller. Activates every [data-combobox]
+      // root once; idempotent — running the script a second time
+      // (e.g. when two components both emit it) bails out via the
+      // dataset.comboInit flag.
+      function initCombobox(root: HTMLElement) {
+        if (root.dataset.comboInit === "1") return;
+        root.dataset.comboInit = "1";
+        const btn = root.querySelector<HTMLButtonElement>("button[aria-haspopup='listbox']");
+        const list = root.querySelector<HTMLElement>("[role='listbox']");
+        if (!btn || !list) return;
+        const options = Array.from(
+          list.querySelectorAll<HTMLLIElement>("[role='option']"),
+        );
+        let focusIdx = options.findIndex(
+          o => o.getAttribute("aria-selected") === "true",
+        );
+        if (focusIdx < 0) focusIdx = 0;
+
+        const open = () => {
+          list.hidden = false;
+          btn.setAttribute("aria-expanded", "true");
+          options[focusIdx]?.querySelector("a")?.focus();
+        };
+        const close = () => {
+          list.hidden = true;
+          btn.setAttribute("aria-expanded", "false");
+        };
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          list.hidden ? open() : close();
+        });
+        btn.addEventListener("keydown", e => {
+          if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            open();
+          }
+        });
+        list.addEventListener("keydown", e => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            close();
+            btn.focus();
+            return;
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            focusIdx = Math.min(focusIdx + 1, options.length - 1);
+            options[focusIdx]?.querySelector("a")?.focus();
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            focusIdx = Math.max(focusIdx - 1, 0);
+            options[focusIdx]?.querySelector("a")?.focus();
+          } else if (e.key === "Home") {
+            e.preventDefault();
+            focusIdx = 0;
+            options[focusIdx]?.querySelector("a")?.focus();
+          } else if (e.key === "End") {
+            e.preventDefault();
+            focusIdx = options.length - 1;
+            options[focusIdx]?.querySelector("a")?.focus();
+          }
+        });
+        document.addEventListener("click", e => {
+          if (list.hidden) return;
+          if (!root.contains(e.target as Node)) close();
+        });
+      }
+
+      // Scrollspy — highlight the right-side TOC entry whose H2 is
+      // currently in the viewport. Uses IntersectionObserver so we
+      // don't run a scroll-listener every frame. The "current" entry
+      // gets data-toc-active for the .active CSS to lift it.
+      function initScrollspy() {
+        const tocLinks = Array.from(
+          document.querySelectorAll<HTMLAnchorElement>(".page-toc a"),
+        );
+        if (tocLinks.length === 0) return;
+        const linkMap = new Map<string, HTMLAnchorElement>();
+        for (const a of tocLinks) {
+          const id = a.getAttribute("href")?.slice(1);
+          if (id) linkMap.set(id, a);
+        }
+        const seen = new Set<string>();
+        const observer = new IntersectionObserver(entries => {
+          for (const e of entries) {
+            if (e.isIntersecting) seen.add(e.target.id);
+            else seen.delete(e.target.id);
+          }
+          tocLinks.forEach(a => a.removeAttribute("data-toc-active"));
+          //: Pick the first seen ID in document order so a small
+          //: heading near the top of the viewport always wins over a
+          //: bigger one below it.
+          const headings = Array.from(
+            document.querySelectorAll<HTMLElement>(".md-body h2[id]"),
+          );
+          const active = headings.find(h => seen.has(h.id));
+          if (active) {
+            linkMap.get(active.id)?.setAttribute("data-toc-active", "true");
+          }
+        }, { rootMargin: "-15% 0px -70% 0px", threshold: 0 });
+        document
+          .querySelectorAll<HTMLElement>(".md-body h2[id]")
+          .forEach(h => observer.observe(h));
+      }
+
+      // Mermaid — lazy-load on first ```mermaid block detected. The
+      // script element from the inline boot replaces every block with
+      // an SVG render. Loaded once per session via the ESM import map.
+      async function initMermaid() {
+        const blocks = document.querySelectorAll<HTMLElement>(
+          'pre code.language-mermaid, pre code.lang-mermaid, code.language-mermaid',
+        );
+        if (blocks.length === 0) return;
+        try {
+          // @ts-ignore — mermaid ESM is loaded via dynamic import; types
+          // are not bundled.
+          const { default: mermaid } = await import("mermaid");
+          mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
+          let i = 0;
+          for (const block of Array.from(blocks)) {
+            const source = block.textContent ?? "";
+            const id = `mermaid-${Date.now()}-${i++}`;
+            try {
+              const { svg } = await mermaid.render(id, source);
+              const wrap = document.createElement("div");
+              wrap.className = "mermaid-svg";
+              wrap.innerHTML = svg;
+              const pre = block.closest("pre");
+              (pre ?? block).replaceWith(wrap);
+            } catch (err) {
+              console.warn("[mermaid] render failed", err);
+            }
+          }
+        } catch (err) {
+          console.warn("[mermaid] module unavailable", err);
+        }
+      }
+
+      // Tabs — picks up any [data-tabs] in the document (Tabs.astro
+      // component OR the markdown-embedded use-case tabs sync-versions
+      // injects from each package's USES.md). One idempotent init per
+      // root so re-binding on astro:page-load is cheap.
+      function initTabs(root: HTMLElement) {
+        if (root.dataset.tabsInit === "1") return;
+        root.dataset.tabsInit = "1";
+        const tabs = Array.from(
+          root.querySelectorAll<HTMLButtonElement>("[role='tab']"),
+        );
+        const panels = Array.from(
+          root.querySelectorAll<HTMLElement>("[role='tabpanel']"),
+        );
+        const activate = (i: number) => {
+          tabs.forEach((t, idx) => {
+            const selected = idx === i;
+            t.setAttribute("aria-selected", String(selected));
+            t.tabIndex = selected ? 0 : -1;
+            t.classList.toggle("active", selected);
+          });
+          panels.forEach((p, idx) => {
+            p.hidden = idx !== i;
+          });
+        };
+        tabs.forEach((tab, i) => {
+          tab.addEventListener("click", () => activate(i));
+          tab.addEventListener("keydown", e => {
+            if (e.key === "ArrowRight") {
+              e.preventDefault();
+              activate((i + 1) % tabs.length);
+              tabs[(i + 1) % tabs.length].focus();
+            } else if (e.key === "ArrowLeft") {
+              e.preventDefault();
+              const prev = (i - 1 + tabs.length) % tabs.length;
+              activate(prev);
+              tabs[prev].focus();
+            } else if (e.key === "Home") {
+              e.preventDefault();
+              activate(0);
+              tabs[0].focus();
+            } else if (e.key === "End") {
+              e.preventDefault();
+              activate(tabs.length - 1);
+              tabs[tabs.length - 1].focus();
+            }
+          });
+        });
+      }
+
+      function bootAll() {
+        document
+          .querySelectorAll<HTMLElement>("[data-combobox]")
+          .forEach(initCombobox);
+        document
+          .querySelectorAll<HTMLElement>("[data-tabs]")
+          .forEach(initTabs);
+        initScrollspy();
+        initMermaid();
+      }
+      bootAll();
+      //: Astro view-transitions swaps document.body — re-bind once the
+      //: new page is in the DOM.
+      document.addEventListener("astro:page-load", bootAll);
+    </script>
+  </body>
+</html>

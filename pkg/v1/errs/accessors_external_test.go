@@ -82,3 +82,51 @@ func TestV1ErrsOnStdlibError(t *testing.T) {
 		})
 	}
 }
+
+// TestHasAnyCode_AndHasAnyReason cover the variadic OR helpers added
+// alongside HasCode / HasReason — common shape for retry / circuit
+// breaker / metric routing on a SET of codes rather than a single one.
+func TestHasAnyCode_AndHasAnyReason(t *testing.T) {
+	t.Parallel()
+
+	//: force a real failure path to obtain a typed *errs.Error with a
+	//: known Code + Reason. NewText(Config{Writer:nil}) returns
+	//: WriterRequired (1.1.0.1) per ADR 0005.
+	_, err := logger.NewText(logger.Config{})
+	if err == nil {
+		t.Fatal("setup: NewText with nil Writer must fail")
+	}
+
+	cases := []struct {
+		name    string
+		codes   []errs.Code
+		reasons []string
+		want    bool
+	}{
+		{"single match in code list", []errs.Code{0x01_01_00_01}, nil, true},
+		{"match somewhere in code list", []errs.Code{0x99_99_99_99, 0x01_01_00_01, 0x00_00_00_42}, nil, true},
+		{"no match in code list", []errs.Code{0x99_99_99_99}, nil, false},
+		{"empty code list", nil, nil, false},
+		{"single match in reason list", nil, []string{"WRITER_REQUIRED"}, true},
+		{"match somewhere in reason list", nil, []string{"UNKNOWN", "WRITER_REQUIRED", "OTHER"}, true},
+		{"no match in reason list", nil, []string{"UNKNOWN_THING"}, false},
+		{"empty reason list", nil, []string{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if len(tc.codes) > 0 || tc.codes == nil && len(tc.reasons) == 0 {
+				got := errs.HasAnyCode(err, tc.codes...)
+				if got != tc.want {
+					t.Errorf("HasAnyCode(%v) = %v want %v", tc.codes, got, tc.want)
+				}
+			}
+			if len(tc.reasons) > 0 || tc.codes == nil && tc.reasons != nil {
+				got := errs.HasAnyReason(err, tc.reasons...)
+				if got != tc.want {
+					t.Errorf("HasAnyReason(%v) = %v want %v", tc.reasons, got, tc.want)
+				}
+			}
+		})
+	}
+}

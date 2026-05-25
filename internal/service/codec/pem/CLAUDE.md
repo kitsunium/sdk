@@ -14,7 +14,7 @@ PEM codec wrapping stdlib `encoding/pem`. PEM is block-structured (`-----BEGIN C
 | `Extensions()`   | `.pem`, `.crt`, `.key` |
 | Constructor      | `New() codec.Codec` |
 | Streaming        | **not** implemented (PEM blocks are atomic; multi-block streams should be decoded by looping `pem.Decode` in the caller) |
-| Appender         | not implemented |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — delegates to Marshal (encoding/pem has no append API) then appends onto dst |
 | Type alias       | `pem.Block = stdpem.Block` (re-export so consumers do not need to import `encoding/pem` directly) |
 
 ## Error codes (range `0.3.10.*`)

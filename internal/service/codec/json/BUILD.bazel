@@ -15,6 +15,7 @@ go_library(
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/codec",
+        "//internal/core/codec/scratch",
         "//internal/kernel/errs",
     ],
 )
@@ -30,6 +31,7 @@ go_test(
     size = "small",
     srcs = [
         "codec_external_test.go",
+        "codec_integration_test.go",
         "codec_internal_test.go",
         "decoder_internal_test.go",
         "encoder_internal_test.go",

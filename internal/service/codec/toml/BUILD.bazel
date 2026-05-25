@@ -15,6 +15,7 @@ go_library(
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/codec",
+        "//internal/core/codec/scratch",
         "//internal/kernel/errs",
         "@com_github_pelletier_go_toml_v2//:go-toml",
     ],
@@ -31,6 +32,7 @@ go_test(
     size = "small",
     srcs = [
         "codec_external_test.go",
+        "codec_integration_test.go",
         "codec_internal_test.go",
         "decoder_internal_test.go",
         "encoder_internal_test.go",

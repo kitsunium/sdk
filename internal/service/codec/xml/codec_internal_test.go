@@ -175,3 +175,57 @@ func Test_xmlCodec_NewDecoder(t *testing.T) {
 		})
 	}
 }
+
+// Test_xmlCodec_Append covers the Appender extension: round-trip and
+// dst-untouched-on-error semantics.
+func Test_xmlCodec_Append(t *testing.T) {
+	t.Parallel()
+	type fixture struct {
+		XMLName stdxml.Name `xml:"doc"`
+		Title   string      `xml:"title"`
+	}
+	type tc struct {
+		name    string
+		dst     []byte
+		v       any
+		wantErr bool
+	}
+	tests := []tc{
+		{"happy-empty-dst", nil, fixture{Title: "hello"}, false},
+		{"happy-prefix-dst", []byte("PRE-"), fixture{Title: "hi"}, false},
+		{"reject-channel", nil, make(chan int), true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := New()
+		ap, ok := c.(interface {
+			Append([]byte, any) ([]byte, error)
+		})
+		if !ok {
+			t.Fatalf("%s: xmlCodec does not implement Appender", tc.name)
+		}
+		got, err := ap.Append(tc.dst, tc.v)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("%s: want error, got nil", tc.name)
+			}
+			//: dst must be returned untouched on error. Compare length
+			//: when both slices are non-empty (avoid &got[0] panic on
+			//: empty result, which is the error contract).
+			if len(got) != len(tc.dst) {
+				t.Errorf("%s: dst len changed on error: got=%d want=%d", tc.name, len(got), len(tc.dst))
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		//: appended output must contain the prefix when one was supplied.
+		if len(tc.dst) > 0 && string(got[:len(tc.dst)]) != string(tc.dst) {
+			t.Errorf("%s: prefix lost; got=%q", tc.name, got[:len(tc.dst)])
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

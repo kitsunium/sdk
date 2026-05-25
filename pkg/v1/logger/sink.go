@@ -6,6 +6,8 @@
 package logger
 
 import (
+	"io"
+
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	svclogger "github.com/kitsunium/sdk/internal/service/logger"
@@ -83,6 +85,38 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 func Multi(branches ...Sink) Sink {
 	//: delegate to the internal fan-out implementation.
 	return multi.New(branches...)
+}
+
+// NewWriterSink wraps an arbitrary [io.Writer] in a [Sink] so callers can
+// compose plain file / network / bytes.Buffer writers with [Multi] for
+// fan-out. The returned Sink serialises Write calls through an internal
+// mutex (identical contract to [ConsoleStderr] / [ConsoleStdout]).
+//
+// Returns [WriterRequired] when w is nil.
+//
+//	f, _ := os.OpenFile("/var/log/app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+//	fileSink, _ := logger.NewWriterSink(f)
+//	lg, _ := logger.NewWithSink(logger.SinkConfig{
+//	    Sink: logger.Multi(logger.ConsoleStderr(), fileSink),
+//	})
+func NewWriterSink(w io.Writer) (sink Sink, err error) {
+	//: refuse nil writers up-front with the same sentinel NewText uses,
+	//: so callers see a consistent failure mode across the public API.
+	if w == nil {
+		//: surface the documented sentinel so HasCode(err, 1.1.0.1) works.
+		return nil, WriterRequired
+	}
+	//: delegate to the canonical console sink constructor; its mutex
+	//: + error-wrapping behaviour is what we want for any plain writer.
+	built, bErr := console.New(w)
+	//: forward any console-level error unchanged (origin wins).
+	if bErr != nil {
+		//: console.New only fails on nil writer — already filtered above,
+		//: but forward defensively in case the contract evolves.
+		return nil, bErr
+	}
+	//: hand back the validated sink to the caller.
+	return built, nil
 }
 
 // ConsoleStderr returns the stderr console Sink used by Default. Exposed

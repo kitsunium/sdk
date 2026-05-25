@@ -60,6 +60,22 @@ func (*asn1Codec) Marshal(v any) (encoded []byte, err error) {
 	})
 }
 
+// Append encodes v as ASN.1 DER and appends the bytes to dst. Implements
+// the optional codec.Appender interface. Delegates to Marshal so the
+// wrap/error contract has a single source — stdlib encoding/asn1 lacks
+// a MarshalToBuffer-style direct-write API.
+func (c *asn1Codec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: delegate to Marshal so the wrap/error contract has a single source.
+	encoded, merr := c.Marshal(v)
+	//: surface any encoding failure without touching dst.
+	if merr != nil {
+		//: return the untouched buffer plus the wrapped error.
+		return dst, merr
+	}
+	//: append the encoded bytes onto the caller's buffer.
+	return append(dst, encoded...), nil
+}
+
 // Unmarshal parses data as ASN.1 BER/DER into v. Trailing bytes past the
 // first decoded structure are accepted silently — this matches
 // encoding/asn1's own lenient contract and preserves compatibility with

@@ -1,0 +1,26 @@
+{
+  "release": "local",
+  "major": "v1",
+  "generatedAt": "2026-05-24T23:49:32.273Z",
+  "repoUrl": "https://github.com/kitsunium/sdk",
+  "entries": [
+    {
+      "type": "fix",
+      "scope": "review",
+      "breaking": false,
+      "summary": "address legitimate CodeRabbit + Qodo findings (PR #29)",
+      "sha": "5e861e3edf2854d50a8867ddc9379465e90c46a2",
+      "short": "5e861e3",
+      "date": "2026-05-25T01:26:36+02:00"
+    },
+    {
+      "type": "fix",
+      "scope": "docs",
+      "breaking": false,
+      "summary": "resolve all broken docs-portal links + add MIT LICENSE",
+      "sha": "a077134fcfb6250a1f5973109e34dbbdc1d9e956",
+      "short": "a077134",
+      "date": "2026-05-24T23:29:07+02:00"
+    }
+  ]
+}

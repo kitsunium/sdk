@@ -140,7 +140,7 @@ jobs:
             $(printf '${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}@sha256:%s ' *)
 
   # =============================================================================
-  # Main image: dynamic layers (Claude, grepai, rtk) — rebuilt daily
+  # Main image: dynamic layers (Claude, rtk) — rebuilt daily
   # =============================================================================
   build:
     # Wait for base image if it's being rebuilt; skip waiting otherwise

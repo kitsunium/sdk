@@ -39,7 +39,6 @@ Hooks auto-update when the Docker image is rebuilt. No workspace stubs needed.
 | Shell env repair | `step_shell_env_repair` | v1→v3 upgrade, duplicate cleanup |
 | Completion cache | `step_cache_completions` | Pre-generate `~/.zsh_completions/` |
 | p10k segments | `step_generate_p10k_segments` | Dynamic `~/.p10k-segments.zsh` |
-| grepai watch | `init_semantic_search` | `.health-stamp` + watchdog (60s) |
 | VPN | `init_vpn` | 1Password profile detection |
 | Claude Code update | `step_update_claude_code` | Auto-update to latest version |
 | RTK init | `init_rtk` | Token savings proxy initialization |

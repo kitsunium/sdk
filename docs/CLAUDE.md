@@ -15,6 +15,9 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0004-sdk-bazel-build-system.md` | Bazel 9 as single build/test system; visibility replaces depguard | Accepted |
 | `adr/0005-sdk-error-codes-dotted-quad.md` | `Code uint32` laid out `MM.LL.PP.SS`, wrap trail, CIDR-style `PrefixMatcher` | Accepted (supersedes ADR 0002 §Registry) |
 | `adr/0006-sdk-error-code-registry-extension.md` | Registry assignments for logger v2 sinks/middleware + `kernel/ring` | Accepted (amends ADR 0005 §Registry) |
+| `adr/0007-sdk-release-and-versioning.md` | Impact-driven patch tags `pkg/<major>/vX.Y.Z`, docs versioning via tag snapshots | Accepted |
+| `adr/0008-readme-from-code-generation.md` | `README.md` generated from Go doc comments via gomarkdoc | Accepted |
+| `adr/0009-pkg-public-module-resolvability.md` | Published `pkg/<major>` must be `go get`-resolvable + accessible (no local `replace`) | Accepted (requirement); impl Deferred |
 
 ## ADR conventions
 

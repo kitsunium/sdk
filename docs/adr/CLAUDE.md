@@ -15,6 +15,9 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0004-sdk-bazel-build-system.md` | Bazel 9 with `rules_go` + `gazelle` + `package_group`/`visibility` for layer firewall | Accepted |
 | `0005-sdk-error-codes-dotted-quad.md` | `Code uint32` packed as `MM.LL.PP.SS` with wrap trail + canonical `Error()` regex | Accepted |
 | `0006-sdk-error-code-registry-extension.md` | Logger v2 + `ring` code-range allocations on top of 0005 | Accepted |
+| `0007-sdk-release-and-versioning.md` | Impact-driven patch tags `pkg/<major>/vX.Y.Z` + docs versioning from tag snapshots | Accepted |
+| `0008-readme-from-code-generation.md` | `README.md` generated from Go doc comments (gomarkdoc) | Accepted |
+| `0009-pkg-public-module-resolvability.md` | Published `pkg/<major>` must be `go get`-resolvable + accessible; release tags the whole module chain | Accepted; mechanism implemented |
 
 ## Conventions
 

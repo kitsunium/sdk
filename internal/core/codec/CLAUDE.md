@@ -19,7 +19,7 @@ No format-specific knowledge lives here — concrete codecs live under `internal
 
 ## Conventions
 
-- **`sync.Map` not `sync.RWMutex`+map** — codecs Register exactly once at import; everything else is read-many. Documented at the top of `registry.go`.
+- **`atomic.Pointer[map[K]V]` not `sync.Map`** — codecs Register exactly once at import; everything else is read-many. A frozen-after-init map read via `atomic.Pointer` is ~30% faster than `sync.Map.Load` + the interface-to-Codec type assertion (microbench: 9.1 ns vs 12.8 ns). Documented at the top of `registry.go`. Register uses a CAS-loop on the snapshot pointer so concurrent first-use init (rare under Go's single-goroutine init order) loses gracefully without dropping entries.
 - **Aliases are lowercased** before indexing; MIME parameters (`; charset=utf-8`) are stripped via `mime.ParseMediaType` with a manual fallback when the header is malformed.
 - **Idempotent re-registration** of the same `Format` under the same alias is accepted; distinct codecs claiming the same name/MIME/ext **panic at boot** with the dotted-quad code in the message.
 - **`Format("")` is reserved** as the invalid zero value — `Known()` returns false; `Lookup` of empty `Format` always misses.
@@ -44,4 +44,4 @@ cd internal/core && GOWORK=off go test -race -cover ./codec/...
 # Appender detection covered; ≥95% line coverage.
 ```
 
-The audit (`make sdk-errs-audit`) verifies `CodeDuplicateRegistration` stays in the `0.2.2.*` block with reason `DUPLICATE_REGISTRATION`.
+The audit (`bazel test //internal/kernel/errs:errs_test`, also run by `make test`) verifies `CodeDuplicateRegistration` stays in the `0.2.2.*` block with reason `DUPLICATE_REGISTRATION`.

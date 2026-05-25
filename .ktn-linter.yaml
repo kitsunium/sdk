@@ -65,6 +65,10 @@ serialization_tags:
 exclude:
   # Vendored third-party code — never our convention to enforce.
   - "vendor/**"
+  # Build-time tools (single-purpose scripts under tools/) — per the
+  # Rule 8 exemption in /workspace/CLAUDE.md, these are tooling, not
+  # library code, and stay out of the per-package doc-style gates.
+  - "tools/**"
   # Go module cache occasionally shows up in IDE-driven scans.
   - "**/.cache/**"
   # Protocol Buffers and gRPC generated code.
@@ -137,6 +141,23 @@ rules:
   KTN-VAR-SLICECAP:
     exclude:
       - "**/internal/kernel/ring/**"
+
+  # KTN-TEST-SUFFIX + KTN-TEST-TABLE — scoped exception for the codec
+  # benchmark file. Normally Test* functions must live in
+  # _internal_test.go / _external_test.go (TEST-SUFFIX) and follow the
+  # table-driven pattern (TEST-TABLE). pkg/v1/codec/codec_bench_test.go
+  # hosts a single `TestGenerateBenchMD` whose only job is to drive the
+  # full bench matrix (via testing.Benchmark on the same package-local
+  # make<Op>Bench helpers used by every Benchmark* function in the file)
+  # and write pkg/v1/codec/BENCH.md. Moving the Test out would either
+  # duplicate the helpers or expose them across files; a single-shot
+  # report generator is also a poor fit for the table-driven pattern.
+  KTN-TEST-SUFFIX:
+    exclude:
+      - "**/pkg/v1/codec/codec_bench_test.go"
+  KTN-TEST-TABLE:
+    exclude:
+      - "**/pkg/v1/codec/codec_bench_test.go"
 
   # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,

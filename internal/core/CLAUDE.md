@@ -28,7 +28,7 @@ Single Go module `github.com/kitsunium/sdk/internal/core` — one `go.mod`, one 
 
 ## Do NOT
 
-- Add concrete runtime types with stateful methods here. The `codec` registry's `sync.Map`-backed lookup is the one exception — it carries no domain logic, only routing.
+- Add concrete runtime types with stateful methods here. The `codec` registry's `atomic.Pointer[map]`-backed lookup is the one exception — it carries no domain logic, only routing.
 - Import `context` outside of interface signatures.
 - Reach upward into `internal/service/*` or `pkg/*`.
 - Grow a third sibling beside `codec/` and `logger/` without first widening the layer's purpose statement.

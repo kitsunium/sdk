@@ -1,0 +1,1022 @@
+/*
+ * Global stylesheet for the kitsunium/sdk documentation portal.
+ *
+ * Goals:
+ *   - Framework-free (no Tailwind, no UI lib).
+ *   - Readable on desktop AND mobile.
+ *   - GitHub-dark vibe with our own accent tuning.
+ *   - Preserve the green/red markers in the bench tables.
+ */
+
+:root {
+  --color-bg: #0d1117;
+  --color-bg-alt: #161b22;
+  --color-bg-elev: #1f242c;
+  --color-border: #30363d;
+  --color-border-bright: #424b56;
+  --color-text: #e6edf3;
+  --color-muted: #8b949e;
+  --color-accent: #58a6ff;
+  --color-accent-2: #a371f7;
+  --color-code-bg: #1f242c;
+  --color-good: #3fb950;
+  --color-bad: #f85149;
+  --color-baseline: #d29922;
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --sidebar-w: 280px;
+  --container-w: 1140px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--color-code-bg);
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+}
+
+pre {
+  background: var(--color-bg-elev);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+blockquote {
+  margin: 0.75rem 0;
+  padding: 0.85rem 1rem;
+  background: var(--color-bg-elev);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 4px 4px 0;
+  color: var(--color-text);
+  font-size: 0.95rem;
+}
+blockquote p {
+  margin: 0;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.75rem;
+  font-size: 0.9rem;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th,
+td {
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+  font-variant-numeric: tabular-nums;
+}
+thead th {
+  background: var(--color-bg-elev);
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+}
+tbody tr:last-child td {
+  border-bottom: none;
+}
+tbody tr:hover {
+  background: rgba(88, 166, 255, 0.05);
+}
+
+/* ── App shell ────────────────────────────────────────────────────── */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  min-height: 100vh;
+}
+
+.content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.container {
+  max-width: var(--container-w);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  width: 100%;
+}
+
+/* Hide the markdown's first <h1> since the page-header already
+   renders it as the page title (we extract that h1 in the slug
+   route and pass it via Default.astro's `title` prop). Without
+   this, every page would show its own title twice — once in the
+   chrome and once at the top of the article. */
+.md-body--strip-first-h1 > h1:first-child {
+  display: none;
+}
+
+/* ── Page body: article + right-side TOC ─────────────────────────── */
+/* Two-column grid INSIDE .content so the TOC sticks to the right
+   of the article without disturbing the left sidebar. min-width: 0
+   on the main column lets long <pre> blocks wrap instead of
+   bursting the grid. */
+.page-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14rem;
+  gap: 2rem;
+  align-items: start;
+  max-width: calc(var(--container-w) + 14rem + 3rem);
+  margin: 0 auto;
+  width: 100%;
+  /* Horizontal only — keeps the grid spanning correctly. Vertical
+     padding sits on the article column (.page-body > .container)
+     below so the toc-rail's border-left can still anchor to the
+     TOP of the page-body row (stretched via align-self). */
+  padding: 0 1.5rem;
+}
+.page-body > .container {
+  /* Reset .container defaults inside the grid (no auto margin / cap).
+     Vertical padding lives HERE (not on `main`) because the rule's
+     specificity (two classes) beats `main { padding }` (one element)
+     — pushing the padding here is the only way it survives. The TOC
+     rail intentionally has NO top padding so its vertical divider
+     starts at the very top of the page-body row. */
+  padding: 2rem 0 3rem;
+  margin: 0;
+  max-width: none;
+}
+/* Rail wraps the TOC so the vertical divider spans the FULL height
+   of the page-body grid row (= the article height) — without it the
+   border-left would only stretch to the TOC's own content height,
+   leaving a stub under long articles. */
+.toc-rail {
+  align-self: stretch;
+  border-left: 1px solid var(--color-border);
+  padding-left: 1rem;
+}
+.page-toc {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  font-size: 0.85rem;
+  padding: 1rem 0;
+}
+.page-toc h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.page-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.page-toc li {
+  margin: 0;
+  line-height: 1.5;
+}
+.page-toc a {
+  display: block;
+  padding: 0.15rem 0;
+  color: var(--color-muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  padding-left: 0.6rem;
+  margin-left: -0.75rem;
+  transition:
+    color 80ms ease,
+    border-color 80ms ease;
+}
+.page-toc a:hover,
+.page-toc a:focus-visible {
+  color: var(--color-text);
+  border-left-color: var(--color-accent);
+  outline: none;
+}
+.page-toc .toc-d3 a {
+  padding-left: 1.2rem;
+  font-size: 0.82rem;
+}
+
+.page-header {
+  background: linear-gradient(180deg, #161b22 0%, var(--color-bg) 100%);
+  border-bottom: 1px solid var(--color-border);
+  padding: 2.5rem 0 1.75rem;
+}
+.page-header h1 {
+  margin: 0 0 0.35rem;
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+.page-header .subtitle {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 1.02rem;
+  max-width: 720px;
+}
+
+main {
+  flex: 1;
+  /* Vertical padding handled by .page-body now — see the comment there
+     for the specificity-collision history. Keeping `main` rule lean. */
+}
+/* Belt-and-braces: kill the first child's collapsing margin-top so
+   the gap between page-header and first body element is uniform
+   (gomarkdoc pages start with a <p>import…</p>; ADR pages start with
+   metadata; cross-cutting pages start with an h2). */
+.md-body > :first-child {
+  margin-top: 0;
+}
+
+footer {
+  border-top: 1px solid var(--color-border);
+  padding: 1.5rem 0;
+  color: var(--color-muted);
+  font-size: 0.88rem;
+}
+footer p {
+  margin: 0;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────── */
+
+.sidebar {
+  background: #0a0d12;
+  border-right: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+.sidebar-inner {
+  padding: 1.5rem 1.25rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 100%;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.25rem 0.5rem;
+  color: var(--color-text);
+  font-weight: 600;
+}
+/* The divider now sits on the wrapping brand-block (Brand.astro)
+   so it spans the full sidebar column, not just the logo+text. */
+.brand-block {
+  width: 100%;
+  padding-bottom: 1rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.brand:hover {
+  text-decoration: none;
+  color: var(--color-accent);
+}
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    var(--color-accent-2) 100%
+  );
+  border-radius: 4px;
+  font-weight: 700;
+  color: #0d1117;
+}
+.brand-text {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+}
+
+.nav-section h3 {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+  margin: 0.85rem 0 0.4rem;
+  padding-left: 0.5rem;
+}
+.nav-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.nav-section li a {
+  display: block;
+  padding: 0.35rem 0.55rem;
+  color: var(--color-text);
+  border-radius: 4px;
+  font-size: 0.9rem;
+  transition:
+    background 0.1s,
+    color 0.1s;
+}
+.nav-section li a:hover {
+  background: rgba(88, 166, 255, 0.08);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.nav-section li a.active {
+  background: rgba(88, 166, 255, 0.14);
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.sidebar-foot a {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+.sidebar-foot a:hover {
+  color: var(--color-accent);
+}
+
+/* ── Markdown body class ─────────────────────────────────────────── */
+
+.md-body h1:first-of-type {
+  display: none;
+}
+.md-body h2 {
+  font-size: 1.5rem;
+  margin: 2.25rem 0 0.85rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--color-border);
+  letter-spacing: -0.01em;
+}
+.md-body h3 {
+  font-size: 1.15rem;
+  margin: 2rem 0 0.65rem;
+  color: var(--color-accent);
+  letter-spacing: -0.01em;
+}
+.md-body h4 {
+  font-size: 1.02rem;
+  margin: 1.5rem 0 0.55rem;
+  color: var(--color-text);
+}
+.md-body p {
+  margin: 0.75rem 0;
+}
+.md-body ul,
+.md-body ol {
+  padding-left: 1.4rem;
+}
+.md-body li {
+  margin: 0.25rem 0;
+}
+.md-body table th:first-child,
+.md-body table td:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+.md-body td code {
+  font-size: 0.82em;
+  opacity: 0.92;
+}
+.md-body table td[align="right"],
+.md-body table th[align="right"] {
+  text-align: right;
+}
+
+/* ── Home hero ───────────────────────────────────────────────────── */
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0 2.5rem;
+}
+.hero-card {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  text-decoration: none;
+  color: var(--color-text);
+  transition:
+    border-color 0.1s,
+    transform 0.1s;
+}
+.hero-card:hover {
+  border-color: var(--color-accent);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.hero-card .tag {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.hero-card .title {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.hero-card .lead {
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+/* ── Provenance fact-strip ───────────────────────────────────────── */
+
+.provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 2rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.provenance > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.provenance dt {
+  font-weight: 600;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.provenance dd {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+
+/* ── Light theme palette ─────────────────────────────────────────── */
+/* Triggered by the inline boot script in Default.astro setting
+   <html data-theme="light"> based on localStorage. CSS variables flip
+   so every consumer (cards, sidebar, code blocks) picks up the new
+   palette without per-component duplication. */
+:root[data-theme="light"] {
+  --color-bg: #ffffff;
+  --color-bg-alt: #f6f8fa;
+  --color-bg-elev: #ecf1f6;
+  --color-border: #d0d7de;
+  --color-border-bright: #afb8c1;
+  --color-text: #1f2328;
+  --color-muted: #57606a;
+  --color-accent: #0969da;
+  --color-accent-2: #8250df;
+  --color-code-bg: #f1f4f8;
+  --color-good: #1a7f37;
+  --color-bad: #cf222e;
+  --color-baseline: #9a6700;
+}
+:root[data-theme="light"] .sidebar {
+  background: #f6f8fa;
+}
+:root[data-theme="light"] .page-header {
+  background: linear-gradient(180deg, #f6f8fa 0%, #ffffff 100%);
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────── */
+/* Respect prefers-reduced-motion across every transition / animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Skip-to-content ─────────────────────────────────────────────── */
+.skip-link {
+  position: fixed;
+  top: -3rem;
+  left: 0.5rem;
+  z-index: 1000;
+  padding: 0.5rem 0.85rem;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 4px;
+  font-weight: 600;
+  transition: top 120ms ease;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 0.5rem;
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+  text-decoration: none;
+}
+main:focus-visible {
+  outline: none;
+}
+
+/* ── Breadcrumbs ─────────────────────────────────────────────────── */
+.breadcrumbs {
+  margin: 0 0 0.85rem;
+  font-size: 0.8rem;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+}
+.breadcrumbs ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+.breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.breadcrumbs a {
+  color: var(--color-muted);
+}
+.breadcrumbs a:hover {
+  color: var(--color-accent);
+}
+.breadcrumbs .sep {
+  color: var(--color-border-bright);
+}
+.breadcrumbs [aria-current="page"] {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* ── Prev / Next page footer ─────────────────────────────────────── */
+.prev-next {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 2.5rem 0 1rem;
+}
+.pn-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.85rem 1rem;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--color-text);
+  transition:
+    border-color 80ms ease,
+    transform 80ms ease;
+}
+.pn-link:hover,
+.pn-link:focus-visible {
+  border-color: var(--color-accent);
+  text-decoration: none;
+  transform: translateY(-1px);
+  outline: none;
+}
+.pn-next {
+  text-align: right;
+  align-items: flex-end;
+}
+.pn-dir {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.pn-label {
+  color: var(--color-accent);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.pn-spacer {
+  display: block;
+}
+
+/* ── Edit-this-page link ─────────────────────────────────────────── */
+.edit-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 2.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+  border-bottom: 1px dashed transparent;
+  width: max-content;
+}
+.edit-link:hover,
+.edit-link:focus-visible {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  text-decoration: none;
+  outline: none;
+}
+.page-foot-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ── Scrollspy active TOC entry ──────────────────────────────────── */
+.page-toc a[data-toc-active] {
+  color: var(--color-text);
+  border-left-color: var(--color-accent);
+  font-weight: 600;
+}
+
+/* ── Benchmark tables (codec/errs/logger) ────────────────────────── */
+/* Each cell is wrapped in a <span class="bench-win|bench-loss"> by
+   pkg/v1/codec/codec_bench_test.go's renderer. The whole value gets a
+   tinted background so the eye finds the green winners + red losers
+   at a glance — no emoji noise. */
+.bench-win,
+.bench-loss {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.bench-win {
+  background: rgba(46, 160, 67, 0.18);
+  color: #4dd07a;
+}
+.bench-loss {
+  background: rgba(248, 81, 73, 0.16);
+  color: #ff8b85;
+}
+:root[data-theme="light"] .bench-win {
+  background: rgba(26, 127, 55, 0.14);
+  color: #1a7f37;
+}
+:root[data-theme="light"] .bench-loss {
+  background: rgba(207, 34, 46, 0.1);
+  color: #cf222e;
+}
+/* Bench tables collapsed by default into <details> per operation —
+   the codec page bundles 21 sub-tables (Marshal/Unmarshal/Parallel/
+   Append/Stream × small/medium/large) so a flat dump was a wall of
+   numbers. Each operation now opens to reveal its 3 size tables. */
+.md-body details {
+  margin: 0.85rem 0;
+  padding: 0.6rem 0.85rem;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+.md-body details[open] {
+  background: var(--color-bg);
+}
+.md-body details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text);
+  list-style: none;
+  padding-left: 1.2rem;
+  position: relative;
+  user-select: none;
+}
+.md-body details > summary::-webkit-details-marker {
+  display: none;
+}
+.md-body details > summary::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  color: var(--color-muted);
+  transition: transform 100ms ease;
+}
+.md-body details[open] > summary::before {
+  transform: rotate(90deg);
+}
+.md-body details > summary:hover::before,
+.md-body details[open] > summary::before {
+  color: var(--color-accent);
+}
+.md-body details > summary > strong {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+/* ── Theme toggle ────────────────────────────────────────────────── */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 80ms ease,
+    border-color 80ms ease;
+}
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.35);
+  outline: none;
+}
+.theme-toggle .icon-sun {
+  display: none;
+}
+.theme-toggle .icon-moon {
+  display: inline;
+}
+:root[data-theme="light"] .theme-toggle .icon-sun {
+  display: inline;
+}
+:root[data-theme="light"] .theme-toggle .icon-moon {
+  display: none;
+}
+:root[data-theme="light"] .theme-toggle {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+:root[data-theme="light"] .theme-toggle:hover,
+:root[data-theme="light"] .theme-toggle:focus-visible {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+/* ── GitHub-style alerts (callouts) ──────────────────────────────── */
+/* remark-github-blockquote-alert emits `.markdown-alert` div with a
+   `.markdown-alert-note|tip|warning|caution|important` modifier and
+   `.markdown-alert-title` headline. We style each variant in the
+   GitHub palette but using our CSS variables so the light theme
+   still reads correctly. */
+.markdown-alert {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 4px solid var(--alert-color, var(--color-accent));
+  background: var(--alert-bg, var(--color-bg-elev));
+  border-radius: 0 6px 6px 0;
+}
+.markdown-alert > :last-child {
+  margin-bottom: 0;
+}
+.markdown-alert-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0;
+  margin-bottom: 0.45rem;
+  font-weight: 700;
+  color: var(--alert-color, var(--color-accent));
+  font-size: 0.92rem;
+}
+.markdown-alert-note {
+  --alert-color: #58a6ff;
+  --alert-bg: rgba(56, 139, 253, 0.08);
+}
+.markdown-alert-tip {
+  --alert-color: #3fb950;
+  --alert-bg: rgba(46, 160, 67, 0.08);
+}
+.markdown-alert-warning {
+  --alert-color: #d29922;
+  --alert-bg: rgba(210, 153, 34, 0.1);
+}
+.markdown-alert-caution {
+  --alert-color: #f85149;
+  --alert-bg: rgba(248, 81, 73, 0.1);
+}
+.markdown-alert-important {
+  --alert-color: #a371f7;
+  --alert-bg: rgba(163, 113, 247, 0.1);
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────── */
+/* Shared by the Tabs.astro component and the markdown-embedded use-case
+   tabs that sync-versions injects from each package's USES.md.
+   Initialised by Default.astro `initTabs` (walks all [data-tabs]). */
+.tabs {
+  margin: 1rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--color-bg-alt);
+}
+.tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  background: var(--color-bg-elev);
+  border-bottom: 1px solid var(--color-border);
+}
+.tab-strip button {
+  padding: 0.55rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition:
+    color 80ms ease,
+    background 80ms ease,
+    border-color 80ms ease;
+}
+.tab-strip button:hover,
+.tab-strip button:focus-visible {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.04);
+  outline: none;
+}
+.tab-strip button.active,
+.tab-strip button[aria-selected="true"] {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  background: var(--color-bg-alt);
+}
+.tabs > [role="tabpanel"] {
+  padding: 1rem 1.1rem;
+}
+.tabs > [role="tabpanel"][hidden] {
+  display: none;
+}
+.tabs > [role="tabpanel"] > pre {
+  margin: 0.6rem 0 0;
+}
+
+/* ── API reference (gomarkdoc auto-dump, collapsed) ─────────────────── */
+/* The Constants / Variables / func / type sections gomarkdoc appends
+   live behind a <details> so the page narrative isn't drowned by the
+   symbol catalog. sync-versions.mjs wraps them at materialisation time. */
+.md-body details.api-reference {
+  margin: 1.5rem 0;
+  background: var(--color-bg-alt);
+}
+.md-body details.api-reference > summary > strong {
+  font-family: var(--font-sans);
+  font-weight: 700;
+}
+.md-body details.api-reference > * {
+  padding-top: 0;
+}
+/* Drop the auto-appended "Generated by gomarkdoc" footer noise — it's
+   technical metadata, not consumer content. */
+.md-body p:last-of-type a[href*="gomarkdoc"] {
+  font-size: 0.8rem;
+  color: var(--color-muted);
+}
+
+/* ── Mermaid ─────────────────────────────────────────────────────── */
+.mermaid-svg {
+  margin: 1rem 0;
+  text-align: center;
+}
+.mermaid-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── Deprecation chips (symbol search) ───────────────────────────── */
+.sym-chip {
+  margin-left: 0.4rem;
+  padding: 0 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-radius: 3px;
+}
+.sym-chip--deprecated {
+  background: rgba(248, 81, 73, 0.18);
+  color: #ff8b85;
+}
+.sym-source {
+  grid-column: 2;
+  margin-top: 0.2rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.72rem;
+}
+.sym-source:hover {
+  color: var(--color-accent);
+}
+
+@media (max-width: 1100px) {
+  /* Below the 3-column threshold, TOC moves under the article. */
+  .page-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .toc-rail {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--color-border);
+    padding-top: 1rem;
+    margin-top: 1.5rem;
+  }
+  .page-toc {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+  }
+}
+@media (max-width: 880px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .sidebar-inner {
+    padding: 1rem 1rem 1.25rem;
+  }
+  .brand {
+    padding-bottom: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+  .page-header {
+    padding: 1.5rem 0 1.1rem;
+  }
+  .page-header h1 {
+    font-size: 1.45rem;
+  }
+  .container {
+    padding: 0 1rem;
+  }
+  .md-body table {
+    font-size: 0.78rem;
+  }
+  .md-body th,
+  .md-body td {
+    padding: 0.4rem 0.5rem;
+  }
+  .prev-next {
+    grid-template-columns: 1fr;
+  }
+  .pn-next {
+    text-align: left;
+    align-items: flex-start;
+  }
+}

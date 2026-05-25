@@ -1034,21 +1034,6 @@ step_auto_init_check() {
 }
 
 # ============================================================================
-# Legacy grepai/ollama cleanup (transitive — runs once after migration v2026.04)
-# ============================================================================
-# Removed in 2026-04: grepai+ollama dropped (high CPU/RAM cost, marginal benefit).
-# Replaced by RTK auto-rewrite (PreToolUse hook) + targeted Grep in agents.
-# This step kills any leftover daemon and removes index/config artifacts.
-cleanup_legacy_grepai() {
-    pkill -f 'grepai watch' 2>/dev/null || true
-    pkill -f 'grepai mcp-serve' 2>/dev/null || true
-    rm -f /tmp/.grepai-init.pid /tmp/grepai-watchdog.pid \
-          /tmp/grepai.log /tmp/grepai-init.log 2>/dev/null || true
-    rm -rf "${WORKSPACE_FOLDER:-/workspace}/.grepai" 2>/dev/null || true
-    [ -d /etc/grepai ] && rm -rf /etc/grepai 2>/dev/null || true
-}
-
-# ============================================================================
 # VPN Auto-Connect (optional - skipped if no config found)
 # ============================================================================
 # Multi-protocol VPN support: OpenVPN, WireGuard, IPsec/IKEv2, PPTP
@@ -1689,8 +1674,6 @@ run_step "MCP configuration"        step_mcp_configuration
 run_step "CodeRabbit auth"           step_coderabbit_auth
 run_step "Qodo auth"               step_qodo_auth
 run_step "Git credential cleanup"   step_git_credential_cleanup
-
-run_step "Legacy grepai/ollama cleanup" cleanup_legacy_grepai
 
 # Background tasks (tracked via PID files for diagnostics)
 init_vpn >> /tmp/vpn-init.log 2>&1 &

@@ -52,6 +52,21 @@ arbitrary Go values; decoder reconstructs them as Go-native types
   the prior length on a mid-encode failure, so callers never see a torn
   buffer.
 
+## Performance (own-traversal; audit levers verified)
+
+The encode path writes into a pre-sized pooled scratch buffer, so the
+`-gcflags=-m=2` "escapes to heap" annotations on `encodeInt`/`encodeUint`'s
+`append` calls are benign — the buffer has capacity, so no allocation
+occurs at runtime (Marshal of a scalar is 3 allocs / 48 B, none from those
+functions). Splitting them to satisfy the inline budget is churn with no
+measurable win. A `decodeString` `unsafe.String` fast-path is also unsafe
+here: decoded values outlive the `Unmarshal` call while the caller may
+reuse the input `data`, so aliasing it risks a use-after-free — the
+`string(rest[:length])` copy is correct and stays. The realised wins are
+the cached `structTypeInfo`, inline-scalar dispatch, pre-computed name
+prefixes, and typed root decode (Phases 6-8). The buffer pool is
+mutualised via `internal/core/codec/scratch`.
+
 ## Verification
 
 ```
