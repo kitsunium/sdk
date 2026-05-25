@@ -159,6 +159,23 @@ rules:
     exclude:
       - "**/pkg/v1/codec/codec_bench_test.go"
 
+  # KTN-STRUCT-ROLE + KTN-STRUCT-ROLE-STUTTER — scoped exception for the
+  # generic recycler primitives. Recycler[T] and CappedRecycler[T] ARE the
+  # package's whole public surface: their names are the API, exactly like the
+  # stdlib's ring.Ring / list.List single-concept primitives. A role suffix
+  # would be redundant noise (there is no second "kind" of recycler to
+  # disambiguate from) and the package/type repetition is the idiomatic shape
+  # for a single-concept primitive package. The role-suffix heuristic reports
+  # "no strong inference available" for a pure generic pool — the same class of
+  # generic-type-parameter false positive already scoped out for kernel/ring
+  # above. Concrete structs (not interfaces) are deliberate per ADR 0010.
+  KTN-STRUCT-ROLE:
+    exclude:
+      - "**/internal/kernel/recycler/**"
+  KTN-STRUCT-ROLE-STUTTER:
+    exclude:
+      - "**/internal/kernel/recycler/**"
+
   # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,
   # sync.Once for lazy init, or package-level var initialisers. The codec
