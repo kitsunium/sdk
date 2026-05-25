@@ -15,7 +15,7 @@ mechanism lives here, the capacity thresholds stay with the consumers
 | Primitive | Surface | Use case |
 |---|---|---|
 | `Recycler[T]` | `NewRecycler[T any](newFn func() T)` → `Get() T` / `Put(v T)` | recycle typed objects; no reset |
-| `CappedRecycler[T]` *(commit 3)* | `NewCappedRecycler[T any](newFn, resetFn, capOfFn, maxCap)` → `Get`/`Put` | adds reset-on-Put + cap-discard |
+| `CappedRecycler[T]` | `NewCappedRecycler[T any](newFn, resetFn, capOfFn, maxCap)` → `Get`/`Put` | adds reset-on-Put + cap-discard |
 
 ## Conventions
 

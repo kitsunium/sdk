@@ -1,9 +1,27 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-25T09:57:29.782Z",
+  "generatedAt": "2026-05-25T12:58:52.169Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "kernel",
+      "breaking": false,
+      "summary": "add CappedRecycler[T] (reset-on-Put + cap-discard)",
+      "sha": "ab004eeb25ad266b24bdbd478c1b6c6912d743d5",
+      "short": "ab004ee",
+      "date": "2026-05-25T14:41:44+02:00"
+    },
+    {
+      "type": "fix",
+      "scope": "docs",
+      "breaking": false,
+      "summary": "make npm test glob node-version-agnostic (#31)",
+      "sha": "dcff33ba199373bcc579168f287bd783aa5b3e1f",
+      "short": "dcff33b",
+      "date": "2026-05-25T09:59:30Z"
+    },
     {
       "type": "fix",
       "scope": "docs",
@@ -12,15 +30,6 @@
       "sha": "5bff559252443700989d2507c57039696da9ded2",
       "short": "5bff559",
       "date": "2026-05-25T09:45:30Z"
-    },
-    {
-      "type": "feat",
-      "scope": "kernel",
-      "breaking": false,
-      "summary": "add CappedRecycler[T] (reset-on-Put + cap-discard)",
-      "sha": "d75717b61fa714072a6908f4184dbdb9000cc3e8",
-      "short": "d75717b",
-      "date": "2026-05-25T14:30:02+02:00"
     },
     {
       "type": "feat",

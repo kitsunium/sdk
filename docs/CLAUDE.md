@@ -18,6 +18,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0007-sdk-release-and-versioning.md` | Impact-driven patch tags `pkg/<major>/vX.Y.Z`, docs versioning via tag snapshots | Accepted |
 | `adr/0008-readme-from-code-generation.md` | `README.md` generated from Go doc comments via gomarkdoc | Accepted |
 | `adr/0009-pkg-public-module-resolvability.md` | Published `pkg/<major>` must be `go get`-resolvable + accessible (no local `replace`) | Accepted (requirement); impl Deferred |
+| `adr/0010-kernel-recycler-primitive.md` | Generic kernel `Recycler[T]` + `CappedRecycler[T]`; `buffer` + `core/codec/scratch` become consumers | Accepted |
 
 ## ADR conventions
 

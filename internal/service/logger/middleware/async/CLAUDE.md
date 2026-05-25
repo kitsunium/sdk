@@ -19,7 +19,7 @@ S3) so a backed-up drain never stalls the application.
 | `async_sink_policy.go` | `DropPolicy` enum (`DropNewest` default, `DropOldest`) |
 | `drainer.go`           | drainer goroutine: `drain` / `forward` / `drainRemaining`; `maxSaneCap` (64 KiB) bounds pool retention against attacker-influenced records |
 | `runtime.go`           | helpers — `yieldOnce`, `isClosed`, `asyncCtx`, `forwardDownstreamError`, `swallowRingError` |
-| `entry.go`             | `recordEntry` recycled through `buffer.Recycler` |
+| `entry.go`             | `recordEntry` recycled through `recycler.Recycler` |
 | `config.go`            | `Config{BufferSize, Policy, OnDrop, OnError}` |
 | `codes.go`, `errors.go`| sentinels — range 0.3.17.\* |
 
