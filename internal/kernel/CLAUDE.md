@@ -11,6 +11,7 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 |---|---|---|
 | `errs/` | SDK-wide typed error + dotted-quad registry (ADR 0005) | 1000-1099 (meta-codes, documentary only) |
 | `recycler/` | generic `Pool[T]` + `CappedPool[T]` object pools (ADR 0010) | (none — panics on programmer error) |
+| `snapshot/` | generic `Value[T]` copy-on-write container (ADR 0011) | (none — never returns errors) |
 | `buffer/` | `sync.Pool` of `[]byte` — a `recycler.CappedPool[*[]byte]` specialisation | 1200-1299 (reserved) |
 | `clock/` | `Clock` interface (`Now` + `Since`) for testable time | 1300-1399 (reserved) |
 | `ring/` | SPSC lock-free bounded queue (ADR 0006) | 1400-1499 (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
@@ -36,6 +37,7 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 - `recycler` admitted by ADR 0010 — `Pool[T]` + `CappedPool[T]` are textbook generic object pools (reuse + reset + cap-discard). Any byte buffer, codec stream, HTTP body encoder, or metrics line writer can reuse the mechanism; the thresholds stay with the consumers.
 - `buffer` stays — the `[]byte` pool is generic even though `service/logger` is the heaviest consumer today. Since ADR 0010 it is a thin specialisation over `recycler.CappedPool[*[]byte]` (the generic `Pool[T]` moved to `recycler`).
 - `ring` admitted by ADR 0006 — SPSC bounded queue is a textbook generic primitive. Logger's async middleware is the only consumer today; metrics batchers and codec stream pipelines are obvious future users.
+- `snapshot` admitted by ADR 0011 — `Value[T]` is a textbook generic copy-on-write container (lock-free `Load` + mutex-serialised writers). The codec registry consolidated its three hand-rolled `atomic.Pointer[map]` + CAS loops onto it; routing tables, feature-flag maps, and hot-reloaded config are obvious future consumers.
 
 ## Conventions unique to kernel
 
@@ -65,6 +67,8 @@ GOWORK=off go test -race -cover ./...
 ## Subtree
 
 - `errs/` — see `internal/kernel/errs/CLAUDE.md`
+- `recycler/` — see `internal/kernel/recycler/CLAUDE.md`
+- `snapshot/` — see `internal/kernel/snapshot/CLAUDE.md`
 - `buffer/` — see `internal/kernel/buffer/CLAUDE.md`
 - `clock/` — see `internal/kernel/clock/CLAUDE.md`
 - `ring/` — see `internal/kernel/ring/CLAUDE.md`

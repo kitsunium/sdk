@@ -1,26 +1,17 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-25T20:06:04.965Z",
+  "generatedAt": "2026-05-25T22:06:17.306Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
-    {
-      "type": "fix",
-      "scope": "codec/scratch",
-      "breaking": false,
-      "summary": "release pooled bytes.Reader src before repooling",
-      "sha": "f9b474f865a492276cec2f579233fb24e4c542cc",
-      "short": "f9b474f",
-      "date": "2026-05-25T21:51:51+02:00"
-    },
     {
       "type": "feat",
       "scope": "kernel",
       "breaking": false,
-      "summary": "add CappedRecycler[T] (reset-on-Put + cap-discard)",
-      "sha": "ab004eeb25ad266b24bdbd478c1b6c6912d743d5",
-      "short": "ab004ee",
-      "date": "2026-05-25T14:41:44+02:00"
+      "summary": "add snapshot.Value[T] copy-on-write primitive + consolidate codec registry (ADR 0011)",
+      "sha": "6dd281443c62835293c3f77144cff4801a79eb73",
+      "short": "6dd2814",
+      "date": "2026-05-25T23:53:33+02:00"
     },
     {
       "type": "fix",
@@ -30,6 +21,15 @@
       "sha": "dcff33ba199373bcc579168f287bd783aa5b3e1f",
       "short": "dcff33b",
       "date": "2026-05-25T09:59:30Z"
+    },
+    {
+      "type": "fix",
+      "scope": "docs",
+      "breaking": false,
+      "summary": "base-path the portal for GitHub Pages project deploys + a11y/SEO (#30)",
+      "sha": "5bff559252443700989d2507c57039696da9ded2",
+      "short": "5bff559",
+      "date": "2026-05-25T09:45:30Z"
     },
     {
       "type": "feat",

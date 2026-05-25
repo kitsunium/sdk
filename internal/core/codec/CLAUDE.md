@@ -14,12 +14,12 @@ No format-specific knowledge lives here — concrete codecs live under `internal
 | `codec_interface.go` | `Codec` (`Name` / `MIMETypes` / `Extensions` / `Marshal` / `Unmarshal`), `StreamingCodec` (adds `NewEncoder` / `NewDecoder`), `Encoder` (`Encode` / `Close`), `Decoder` (`Decode` / `More`) |
 | `appender.go` | `Appender` extension (`Append(dst, v) ([]byte, error)`) — hot-path zero-copy encode into a caller-owned buffer |
 | `format.go` | `Format` typed string + `Known()` / `String()` |
-| `registry.go` | Package-level `sync.Map` registry + `Register` / `Lookup` / `LookupMIME` / `LookupExt` / `Available`. All constructors marked `// IFACE-PLUGIN:` |
+| `registry.go` | Package-level `snapshot.Value`-backed registry (copy-on-write, ADR 0011) + `Register` / `Lookup` / `LookupMIME` / `LookupExt` / `Available`. All constructors marked `// IFACE-PLUGIN:` |
 | `codes.go` | `CodeDuplicateRegistration` (0.2.2.1) — emitted via `panic` at boot; 0.2.2.2-4 reserved for Marshal/Unmarshal sentinels |
 
 ## Conventions
 
-- **`atomic.Pointer[map[K]V]` not `sync.Map`** — codecs Register exactly once at import; everything else is read-many. A frozen-after-init map read via `atomic.Pointer` is ~30% faster than `sync.Map.Load` + the interface-to-Codec type assertion (microbench: 9.1 ns vs 12.8 ns). Documented at the top of `registry.go`. Register uses a CAS-loop on the snapshot pointer so concurrent first-use init (rare under Go's single-goroutine init order) loses gracefully without dropping entries.
+- **`snapshot.Value[map[K]V]` not `sync.Map`** — codecs Register exactly once at import; everything else is read-many. A frozen-after-init map read via `snapshot.Value.Load` (one `atomic.Pointer` load) is ~30% faster than `sync.Map.Load` + the interface-to-Codec type assertion (microbench: 9.1 ns vs 12.8 ns). The copy-on-write mechanism lives in `internal/kernel/snapshot` (ADR 0011); `registry.go` keeps only the domain clone logic (`cloneFormatMap` / `cloneAliasMap`). `Register` publishes via `Value.Update`, which serialises writers on a mutex — no hand-rolled CAS loop — while `Lookup*` stay lock-free via `Value.Load`.
 - **Aliases are lowercased** before indexing; MIME parameters (`; charset=utf-8`) are stripped via `mime.ParseMediaType` with a manual fallback when the header is malformed.
 - **Idempotent re-registration** of the same `Format` under the same alias is accepted; distinct codecs claiming the same name/MIME/ext **panic at boot** with the dotted-quad code in the message.
 - **`Format("")` is reserved** as the invalid zero value — `Known()` returns false; `Lookup` of empty `Format` always misses.
