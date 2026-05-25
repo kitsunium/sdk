@@ -150,16 +150,32 @@ rules:
     exclude:
       - "**/pkg/v1/codec/codec_bench_test.go"
 
-  # KTN-STRUCT-ROLE + KTN-STRUCT-ROLE-STUTTER — scoped exception for the
-  # generic recycler primitives. Recycler[T] and CappedRecycler[T] ARE the
+  # KTN-STRUCT-ROLE + KTN-STRUCT-ROLE-STUTTER — TEMPORARY scoped exception for
+  # the generic recycler primitives. Recycler[T] and CappedRecycler[T] ARE the
   # package's whole public surface: their names are the API, exactly like the
   # stdlib's ring.Ring / list.List single-concept primitives. A role suffix
-  # would be redundant noise (there is no second "kind" of recycler to
-  # disambiguate from) and the package/type repetition is the idiomatic shape
-  # for a single-concept primitive package. The role-suffix heuristic reports
-  # "no strong inference available" for a pure generic pool — the same class of
-  # generic-type-parameter false positive already scoped out for kernel/ring
-  # above. Concrete structs (not interfaces) are deliberate per ADR 0010.
+  # would be redundant noise (no second "kind" of recycler to disambiguate);
+  # the package/type repetition is idiomatic for a single-concept primitive
+  # package; and recycler is internal/kernel plumbing (never re-exported in
+  # pkg/v1), so the "interface-for-consumers" convention does not apply — a
+  # concrete struct is deliberate per ADR 0010 and avoids an interface dispatch
+  # on the Get/Put hot path.
+  #
+  # WHY AN EXCLUDE AND NOT CONFIG (today): the underlying trigger is an upstream
+  # heuristic gap — KTN-STRUCT-ROLE's PNPT exemption (kodflow/ktn-linter#263) is
+  # silently suppressed when a non-package-matching sibling (CappedRecycler) is
+  # added. Filed as kodflow/ktn-linter#356.
+  #
+  # TODO(remove once a ktn-linter release > v1.34.0 ships the config knobs that
+  # are already merged on the linter's main branch):
+  #   - replace this exclude with `KTN-STRUCT-ROLE.additional_suffixes: [Recycler]`
+  #     (kodflow/ktn-linter#285 — both Recycler and CappedRecycler end in
+  #     "Recycler", so the suffix rule then passes natively, no path-suppress);
+  #   - drop the STUTTER line via a `KTN-STRUCT-ROLE-STUTTER.severity` override
+  #     (kodflow/ktn-linter#332) instead of fully excluding it.
+  # Neither knob exists in the v1.34.0 binary the devcontainer ships (verified
+  # via `ktn-linter config --generate`), so the path-exclude is the only
+  # mechanism for now.
   KTN-STRUCT-ROLE:
     exclude:
       - "**/internal/kernel/recycler/**"

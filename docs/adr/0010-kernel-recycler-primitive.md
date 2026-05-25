@@ -66,12 +66,20 @@ Capacity thresholds remain owned by the consumers: 64 KiB (`kernel/buffer`),
 
 - **Keep `Recycler[T]` as an interface (IFACE-PLUGIN), the prior kernel
   convention.** Rejected: a single-implementation interface in a kernel
-  primitive is over-abstraction; the concrete struct sharpens inlining on the
-  zero-alloc hot path. ktn-linter's `KTN-STRUCT-ROLE` flags the exported
-  struct (its name has no role suffix); a single-concept primitive whose name
-  IS its API (cf. stdlib `ring.Ring` / `list.List`) is the documented exception
-  — scoped out in `.ktn-linter.yaml`, the same way `kernel/ring` scopes the
-  generic-type-parameter false positives.
+  primitive is over-abstraction, and recycler is internal plumbing never
+  re-exported in `pkg/v1` — the interface-for-consumers convention lives at the
+  public boundary (`logger.Logger`, `codec.Codec`), not here. The concrete
+  struct also avoids an interface dispatch on the `Get`/`Put` hot path (the
+  exact ns gain is left to a benchmark, but it is strictly ≥ 0 and the 0-alloc
+  invariant holds either way). ktn-linter's `KTN-STRUCT-ROLE` flags the exported
+  struct (no role suffix); a single-concept primitive whose name IS its API (cf.
+  stdlib `ring.Ring` / `list.List`) is the legitimate exception, scoped out in
+  `.ktn-linter.yaml`. That exclusion is **temporary**: its root is an upstream
+  heuristic gap (the PNPT exemption is suppressed by a non-matching sibling —
+  filed as kodflow/ktn-linter#356), and config knobs already merged on the
+  linter's main branch (#285 `additional_suffixes`, #332 per-rule `severity`)
+  will replace the path-suppress with native config once a release > v1.34.0
+  ships them (see the TODO in `.ktn-linter.yaml`).
 - **A `worker` pool sibling now.** Deferred: a worker pool composes `ring`, not
   `recycler`, and has only one plausible consumer today (async logger). Built
   on demand, not ahead of it (no empty package).
