@@ -14,7 +14,7 @@ No format-specific knowledge lives here — concrete codecs live under `internal
 | `codec_interface.go` | `Codec` (`Name` / `MIMETypes` / `Extensions` / `Marshal` / `Unmarshal`), `StreamingCodec` (adds `NewEncoder` / `NewDecoder`), `Encoder` (`Encode` / `Close`), `Decoder` (`Decode` / `More`) |
 | `appender.go` | `Appender` extension (`Append(dst, v) ([]byte, error)`) — hot-path zero-copy encode into a caller-owned buffer |
 | `format.go` | `Format` typed string + `Known()` / `String()` |
-| `registry.go` | Package-level `sync.Map` registry + `Register` / `Lookup` / `LookupMIME` / `LookupExt` / `Available`. All constructors marked `// IFACE-PLUGIN:` |
+| `registry.go` | Package-level `snapshot.Value`-backed registry (copy-on-write, ADR 0011) + `Register` / `Lookup` / `LookupMIME` / `LookupExt` / `Available`. All constructors marked `// IFACE-PLUGIN:` |
 | `codes.go` | `CodeDuplicateRegistration` (0.2.2.1) — emitted via `panic` at boot; 0.2.2.2-4 reserved for Marshal/Unmarshal sentinels |
 
 ## Conventions

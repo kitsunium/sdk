@@ -111,7 +111,7 @@ duplicate-Name/MIME/extension panic, lock-free lookups) is preserved verbatim.
 - [ADR 0010 — kernel object-recycling primitive](./0010-kernel-recycler-primitive.md) (sibling concrete-struct primitive)
 - `internal/kernel/CLAUDE.md` — kernel gate (stdlib-only AND generic)
 - `.claude/contexts/kernel-perf-primitives.md` — the primitive survey that ranked this Tier A
-- ADR 0005 — error codes (snapshot emits none)
+- [ADR 0005 — error codes](./0005-sdk-error-codes-dotted-quad.md) (snapshot emits none)
 - Tracked upstream linter false positives suppressed for this primitive:
   `kodflow/ktn-linter#365` (`KTN-VAR-PTRINTF` on `*T`), `kodflow/ktn-linter#366`
   (`KTN-API-MINIF` on a concrete generic primitive)
