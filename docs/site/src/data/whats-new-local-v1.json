@@ -1,26 +1,35 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-24T23:49:32.273Z",
+  "generatedAt": "2026-05-25T09:43:11.364Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
     {
-      "type": "fix",
-      "scope": "review",
+      "type": "feat",
+      "scope": "release+docs",
       "breaking": false,
-      "summary": "address legitimate CodeRabbit + Qodo findings (PR #29)",
-      "sha": "5e861e3edf2854d50a8867ddc9379465e90c46a2",
-      "short": "5e861e3",
-      "date": "2026-05-25T01:26:36+02:00"
+      "summary": "impact-driven patch tags + versioned docs (ADR 0007) (#29)",
+      "sha": "f8a3aed28e648a7df889b8895ba46c21bec66075",
+      "short": "f8a3aed",
+      "date": "2026-05-25T11:01:40+02:00"
     },
     {
-      "type": "fix",
-      "scope": "docs",
+      "type": "feat",
+      "scope": "codec",
+      "breaking": true,
+      "summary": "add TLV + FlatBuffers codecs + migrate baseenc to Codec family (#27)",
+      "sha": "45ab9fb51b8bf4b30f4c970a3f64b8a2dc295398",
+      "short": "45ab9fb",
+      "date": "2026-05-20T13:31:25+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "logger",
       "breaking": false,
-      "summary": "resolve all broken docs-portal links + add MIT LICENSE",
-      "sha": "a077134fcfb6250a1f5973109e34dbbdc1d9e956",
-      "short": "a077134",
-      "date": "2026-05-24T23:29:07+02:00"
+      "summary": "v2 zero-alloc multi-sink architecture (#12)",
+      "sha": "7fd4c5c4f6d2dafeb70fdd4f75dac0328bc57437",
+      "short": "7fd4c5c",
+      "date": "2026-04-23T15:13:58+02:00"
     }
   ]
 }

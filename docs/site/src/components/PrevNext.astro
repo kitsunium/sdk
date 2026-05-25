@@ -6,6 +6,7 @@
 import { getCollection } from "astro:content";
 import { findDefaults } from "../../scripts/lib/tag-format.mjs";
 import { buildCatalog, flattenCatalog } from "../../scripts/lib/page-catalog.mjs";
+import { DEPLOY_BASE } from "../../scripts/lib/base.mjs";
 
 interface Props {
   currentPath: string;
@@ -27,7 +28,7 @@ const m = currentPath.match(/^\/([^/]+)\/(v\d+)(?:\/|$)/);
 const fallback = findDefaults(versions);
 const currentRelease = m?.[1] ?? fallback.release;
 const currentMajor = m?.[2] ?? fallback.major;
-const base = `/${currentRelease}/${currentMajor}`;
+const base = `${DEPLOY_BASE}/${currentRelease}/${currentMajor}`;
 const root = `${currentRelease}/${currentMajor}`;
 
 let entries: Awaited<ReturnType<typeof getCollection>> = [];

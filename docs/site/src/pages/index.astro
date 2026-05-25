@@ -6,6 +6,8 @@
 // That keeps Pagefind from warning about pages without a lang attr
 // on every build; data-pagefind-ignore on <body> stops the page
 // being indexed in the first place.
+import { withBase } from "../../scripts/lib/base.mjs";
+
 interface VersionEntry {
   major: string;
   default: boolean;
@@ -27,7 +29,7 @@ const defaultRelease =
 //: URL layout is /<release>/<major>/<page> — release is the time axis,
 //: major the API surface. The root redirect lands the visitor at the
 //: newest non-EOL major's default release.
-const target = `/${defaultRelease}/${defaultMajor}/`;
+const target = withBase(`/${defaultRelease}/${defaultMajor}/`);
 ---
 <!doctype html>
 <html lang="en">

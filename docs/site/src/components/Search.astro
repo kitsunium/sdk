@@ -19,6 +19,7 @@
 import { getCollection } from "astro:content";
 import { findDefaults } from "../../scripts/lib/tag-format.mjs";
 import { buildCatalog } from "../../scripts/lib/page-catalog.mjs";
+import { DEPLOY_BASE } from "../../scripts/lib/base.mjs";
 
 interface VersionEntry {
   major: string;
@@ -34,7 +35,7 @@ try {
 //: URL layout is /<release>/<major>/<page> — see Sidebar.astro for
 //: the rationale (release is time-axis, major is API surface).
 const { major, release } = findDefaults(versions);
-const base = `/${release}/${major}`;
+const base = `${DEPLOY_BASE}/${release}/${major}`;
 const root = `${release}/${major}`;
 
 let entries: Awaited<ReturnType<typeof getCollection>> = [];

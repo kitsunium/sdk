@@ -8,6 +8,7 @@
 import { getCollection, render } from "astro:content";
 import Default from "../../../layouts/Default.astro";
 import WhatsNew from "../../../components/WhatsNew.astro";
+import { withBase } from "../../../../scripts/lib/base.mjs";
 
 export async function getStaticPaths() {
   const all = await getCollection("docs");
@@ -61,7 +62,7 @@ const segments = entry.id.split("/");
 const isHome = segments.length === 2;
 const release = segments[0];
 const major = segments[1];
-const changelogHref = `/${release}/${major}/changelog/`;
+const changelogHref = withBase(`/${release}/${major}/changelog/`);
 ---
 
 <Default title={title} description={description} headings={tocHeadings} source={source}>

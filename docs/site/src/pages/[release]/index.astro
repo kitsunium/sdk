@@ -3,6 +3,8 @@
 // Implemented as a real Astro page (not via the astro.config redirects
 // map) so the emitted file has a proper <html lang="en"> wrapper for
 // Pagefind. data-pagefind-ignore on <body> excludes it from the index.
+import { withBase } from "../../../scripts/lib/base.mjs";
+
 interface VersionEntry {
   major: string;
   default: boolean;
@@ -31,7 +33,7 @@ export async function getStaticPaths() {
   }
   return [...seen.entries()].map(([release, major]) => ({
     params: { release },
-    props: { target: `/${release}/${major}/` },
+    props: { target: withBase(`/${release}/${major}/`) },
   }));
 }
 

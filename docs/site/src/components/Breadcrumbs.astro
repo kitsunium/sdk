@@ -13,6 +13,7 @@
 // shows; falls back to the raw slug segment when no catalog entry
 // applies (deep-nested pages).
 import { RESERVED } from "../../scripts/lib/page-catalog.mjs";
+import { DEPLOY_BASE } from "../../scripts/lib/base.mjs";
 
 interface Props {
   currentPath: string;
@@ -25,7 +26,10 @@ const segments = currentPath
   .filter(Boolean);
 //: segments[0] = release, segments[1] = major, segments[2..] = in-doc.
 const inDoc = segments.slice(2);
-const base = segments.length >= 2 ? `/${segments[0]}/${segments[1]}` : "";
+const base =
+  segments.length >= 2
+    ? `${DEPLOY_BASE}/${segments[0]}/${segments[1]}`
+    : DEPLOY_BASE || "";
 const homeLabel = RESERVED.index.label ?? "Home";
 
 const crumbs: Array<{ href: string; label: string }> = [];
