@@ -10,27 +10,30 @@ import (
 	"mime"
 	"slices"
 	"strings"
-	"sync/atomic"
+
+	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // Package-level indexes + the duplicate-registration sentinel.
 //
-// atomic.Pointer[map[K]V] is the deliberate choice here over sync.Map:
+// snapshot.Value[map[K]V] is the deliberate choice here over sync.Map:
 // codec packages register themselves exactly ONCE at package import time
 // (their package-level var initializer calls Register), and every other
 // access is a read (Lookup / LookupMIME / LookupExt). A frozen-after-init
-// map read via atomic.Pointer is ~30% faster than sync.Map.Load + the
-// interface-to-Codec type assertion (microbench: 9.1 ns vs 12.8 ns) and
-// avoids the dirty-map fallback machinery sync.Map carries for write-mostly
-// workloads we never trigger.
+// map read via Value.Load (one atomic.Pointer load) is ~30% faster than
+// sync.Map.Load + the interface-to-Codec type assertion (microbench: 9.1 ns
+// vs 12.8 ns) and avoids the dirty-map fallback machinery sync.Map carries
+// for the write-mostly workloads we never trigger.
 //
-// Register uses a CAS-loop on the snapshot pointer so concurrent first-use
-// init (rare — Go package init is single-goroutine, but defensive) loses
-// gracefully without dropping entries.
+// snapshot.Value (ADR 0011) serialises writers on a mutex, so Register's
+// read-modify-write publish is race-free WITHOUT the hand-rolled CAS loop this
+// package carried before; readers stay lock-free via Value.Load. The
+// copy-on-write mechanism lives in internal/kernel/snapshot — only the domain
+// clone logic (cloneFormatMap / cloneAliasMap) stays here.
 var (
-	registry  atomic.Pointer[map[Format]Codec]
-	mimeIndex atomic.Pointer[map[string]Format]
-	extIndex  atomic.Pointer[map[string]Format]
+	registry  snapshot.Value[map[Format]Codec]
+	mimeIndex snapshot.Value[map[string]Format]
+	extIndex  snapshot.Value[map[string]Format]
 
 	//: errDuplicateRegistration is the wrappable sentinel for boot-time
 	//: duplicate-codec panics. Wrapping via %w keeps the error chain
@@ -40,15 +43,15 @@ var (
 	errDuplicateRegistration = errors.New("duplicate registration")
 )
 
-// loadRegistry returns the current registry snapshot, or an empty map
-// when no codec has registered yet (rare — service codec init order
-// runs before any application code).
+// loadRegistry returns the current registry snapshot, or nil when no codec
+// has registered yet (rare — service codec init order runs before any
+// application code).
 func loadRegistry() map[Format]Codec {
 	//: load the current snapshot pointer; nil before first Register call.
 	current := registry.Load()
 	//: nil snapshot means no codec registered yet — empty result.
 	if current == nil {
-		//: hand back a fresh empty map (caller never mutates).
+		//: hand back nil so callers see a clean miss.
 		return nil
 	}
 	//: dereference the snapshot for caller reads.
@@ -57,7 +60,7 @@ func loadRegistry() map[Format]Codec {
 
 // loadAliasIndex returns the current alias-index snapshot for mime or
 // extension lookup. Same nil-handling as loadRegistry.
-func loadAliasIndex(p *atomic.Pointer[map[string]Format]) map[string]Format {
+func loadAliasIndex(p *snapshot.Value[map[string]Format]) map[string]Format {
 	//: load the snapshot pointer; nil before first Register call.
 	current := p.Load()
 	//: nil snapshot — no aliases registered yet.
@@ -85,8 +88,7 @@ func Register(c Codec) Codec {
 	}
 	//: the canonical Format is the primary key.
 	name := Format(c.Name())
-	//: CAS-loop publishes a new snapshot that includes c. Duplicate detection
-	//: happens inside the loop so a winning racer sees the loser's panic.
+	//: publish the codec under the writer lock; duplicate Name is a hard conflict.
 	if err := publishCodec(name, c); err != nil {
 		//: surface the doc code for grep-friendly panic messages.
 		panic(err.Error())
@@ -100,51 +102,37 @@ func Register(c Codec) Codec {
 	return c
 }
 
-// publishCodec performs the CAS-loop that inserts (name → c) into the
-// registry snapshot. Returns a non-nil error when name is already
-// registered to a different codec — the caller turns the error into a
-// panic so the boot-time failure is loud and grep-friendly.
-//
-//nolint:gocyclo // CAS-retry shape inherently raises cyclomatic count.
+// publishCodec inserts (name → c) into the registry snapshot under the writer
+// lock. Returns a non-nil error when name is already registered to a different
+// codec — the caller turns the error into a panic so the boot-time failure is
+// loud and grep-friendly.
 func publishCodec(name Format, c Codec) error {
-	//: CAS loop — concurrent first-Register calls (rare under Go's
-	//: single-goroutine init order) retry until one wins. The loop
-	//: body's make() is NOT a hot allocation: every Register call is
-	//: a one-shot init-time operation, never a per-request path.
-	//: next is hoisted outside so each retry overwrites the same
-	//: stack slot rather than declaring a fresh variable per loop.
-	var next *map[Format]Codec
-	//: CAS retry loop; loop body documented inline below.
-	for {
-		//: snapshot the current registry state.
-		current := registry.Load()
-		//: duplicate detection runs on the current snapshot before any
-		//: allocation — caller's panic is grep-friendly via the code.
+	//: dupErr escapes the Update closure to signal a conflicting registration.
+	var dupErr error
+	//: Update serialises writers on the snapshot mutex, so the duplicate check
+	//: and the publish are atomic against any concurrent Register.
+	registry.Update(func(current *map[Format]Codec) *map[Format]Codec {
+		//: duplicate detection runs on the current snapshot before any allocation.
 		if current != nil {
-			//: any prior registration of `name` is a hard conflict.
+			//: any prior registration of name is a hard conflict.
 			if _, dup := (*current)[name]; dup {
-				//: wrap the sentinel so errors.Is finds the chain.
-				return fmt.Errorf("codec.Register [%d %w]: duplicate Name %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
+				//: wrap the sentinel so errors.Is finds the chain, then abort.
+				dupErr = fmt.Errorf("codec.Register [%d %w]: duplicate Name %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
+				//: no-op publish — republish the current snapshot unchanged.
+				return current
 			}
 		}
-		//: clone the snapshot + append the new entry. maps.Copy handles
-		//: the nil-source case so we don't need a separate branch.
-		//: new(expr) is Go 1.26+ form — heap-allocates the cloned map
-		//: in one shot, no v := expr; &v intermediate.
-		next = new(cloneFormatMap(current, name, c))
-		//: CAS publishes the new snapshot. Failure loops back to retry.
-		if registry.CompareAndSwap(current, next) {
-			//: snapshot installed atomically — readers see the new entry.
-			return nil
-		}
-	}
+		//: clone the snapshot + insert the new entry, then publish atomically.
+		//: new(expr) is Go 1.26+ form — heap-allocates the cloned map in one shot.
+		return new(cloneFormatMap(current, name, c))
+	})
+	//: surface any conflict to Register, which panics with the doc code.
+	return dupErr
 }
 
-// cloneFormatMap copies the source snapshot and inserts (name → c).
-// Hoisted out of publishCodec's CAS loop so the per-retry alloc is
-// attributed to its own stack frame (the linter's HOTLOOP rule reads
-// this as init-time work, which it is — Register is called once per
-// codec at package import).
+// cloneFormatMap copies the source snapshot and inserts (name → c). Register
+// is called once per codec at package import, so this clone is init-time,
+// one-shot work — not a per-request hot path.
 func cloneFormatMap(src *map[Format]Codec, name Format, c Codec) map[Format]Codec {
 	//: size hint = source size + 1 for the new entry; nil source → 1.
 	var size int
@@ -163,19 +151,18 @@ func cloneFormatMap(src *map[Format]Codec, name Format, c Codec) map[Format]Code
 	}
 	//: insert the new entry.
 	next[name] = c
-	//: caller installs the snapshot via CAS.
+	//: caller publishes the snapshot via Value.Update.
 	return next
 }
 
 // indexAliases stores every alias (MIME or extension) in dst, panicking
-// when a distinct codec already claims the same key. Uses the same
-// CAS-loop pattern as publishCodec for race-free first-Register.
-func indexAliases(dst *atomic.Pointer[map[string]Format], aliases []string, name Format, kind string) {
+// when a distinct codec already claims the same key.
+func indexAliases(dst *snapshot.Value[map[string]Format], aliases []string, name Format, kind string) {
 	//: iterate over every alias and publish it atomically.
 	for _, alias := range aliases {
 		//: normalise so lookups are case-insensitive.
 		key := strings.ToLower(alias)
-		//: publishAlias handles the conflict + CAS retry semantics.
+		//: publishAlias handles the conflict + atomic publish semantics.
 		if err := publishAlias(dst, key, name, kind, alias); err != nil {
 			//: distinct codec conflict — loud failure at boot.
 			panic(err.Error())
@@ -183,50 +170,41 @@ func indexAliases(dst *atomic.Pointer[map[string]Format], aliases []string, name
 	}
 }
 
-// publishAlias performs the CAS-loop that inserts (key → name) into an
-// alias index snapshot. Returns a non-nil error when key is already
-// claimed by a different Format; idempotent re-registration by the same
-// Format is accepted.
-//
-//nolint:gocyclo // CAS-retry shape inherently raises cyclomatic count.
-func publishAlias(dst *atomic.Pointer[map[string]Format], key string, name Format, kind, alias string) error {
-	//: CAS loop matches publishCodec's shape; same init-time semantics
-	//: apply (Register runs once per codec at package import).
-	//: next is hoisted outside so each retry overwrites the same slot.
-	var next *map[string]Format
-	//: CAS retry loop; loop body documented inline below.
-	for {
-		//: snapshot the current alias index.
-		current := dst.Load()
-		//: conflict + idempotent-reregistration detection runs on the
-		//: current snapshot before any allocation.
+// publishAlias inserts (key → name) into an alias index snapshot under the
+// writer lock. Returns a non-nil error when key is already claimed by a
+// different Format; idempotent re-registration by the same Format is accepted.
+func publishAlias(dst *snapshot.Value[map[string]Format], key string, name Format, kind, alias string) error {
+	//: conflictErr escapes the Update closure to signal a clashing alias.
+	var conflictErr error
+	//: Update serialises writers; the conflict check and publish are atomic.
+	dst.Update(func(current *map[string]Format) *map[string]Format {
+		//: conflict + idempotent-reregistration detection on the current snapshot.
 		if current != nil {
-			//: any prior alias under `key` is checked against `name`.
+			//: any prior alias under key is checked against name.
 			if prev, exists := (*current)[key]; exists {
 				//: idempotent same-codec re-registration is fine.
 				if prev == name {
-					//: no-op — alias already points at us.
-					return nil
+					//: no-op publish — alias already points at us.
+					return current
 				}
-				//: wrap the sentinel so errors.Is finds the chain.
-				return fmt.Errorf("codec.Register [%d %w]: %s %q already registered by %q (requested by %q)",
+				//: distinct-codec conflict — wrap the sentinel, then abort.
+				conflictErr = fmt.Errorf("codec.Register [%d %w]: %s %q already registered by %q (requested by %q)",
 					CodeDuplicateRegistration, errDuplicateRegistration, kind, alias, prev, name)
+				//: no-op publish — republish the current snapshot unchanged.
+				return current
 			}
 		}
-		//: clone + insert via the hoisted helper (same HOTLOOP rationale
-		//: as cloneFormatMap above). Go 1.26+ new(expr) form.
-		next = new(cloneAliasMap(current, key, name))
-		//: CAS publishes the new snapshot. Failure loops back to retry.
-		if dst.CompareAndSwap(current, next) {
-			//: snapshot installed atomically.
-			return nil
-		}
-	}
+		//: clone + insert via the hoisted helper, then publish atomically.
+		//: Go 1.26+ new(expr) form.
+		return new(cloneAliasMap(current, key, name))
+	})
+	//: surface any conflict to indexAliases, which panics with the doc code.
+	return conflictErr
 }
 
-// cloneAliasMap mirrors cloneFormatMap for the MIME / extension alias
-// indexes: copies the source snapshot and inserts (key → name). The
-// per-Register call shape is identical (init-time, one-shot work).
+// cloneAliasMap mirrors cloneFormatMap for the MIME / extension alias indexes:
+// copies the source snapshot and inserts (key → name). Same init-time,
+// one-shot call shape (once per codec at package import).
 func cloneAliasMap(src *map[string]Format, key string, name Format) map[string]Format {
 	//: size hint = source size + 1 for the new entry; nil source → 1.
 	var size int
@@ -244,7 +222,7 @@ func cloneAliasMap(src *map[string]Format, key string, name Format) map[string]F
 	}
 	//: insert the new entry.
 	next[key] = name
-	//: caller installs the snapshot via CAS.
+	//: caller publishes the snapshot via Value.Update.
 	return next
 }
 

@@ -2,8 +2,9 @@ package codec
 
 import (
 	"strings"
-	"sync/atomic"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // Test_indexAliases covers fresh-alias, idempotent, and conflict paths of
@@ -26,7 +27,7 @@ func Test_indexAliases(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		var dst atomic.Pointer[map[string]Format]
+		var dst snapshot.Value[map[string]Format]
 		//: seed the snapshot with the existing aliases via the same publish path.
 		if len(tc.existing) > 0 {
 			seed := make(map[string]Format, len(tc.existing))
@@ -53,7 +54,7 @@ func Test_indexAliases(t *testing.T) {
 // subtests can assert panic behaviour without using defer — t.Cleanup is
 // not usable here because we want the panic-recovery to happen before the
 // assertion runs.
-func callRecoverAliases(dst *atomic.Pointer[map[string]Format], aliases []string, name Format, kind string) (panicked bool, recovered any) {
+func callRecoverAliases(dst *snapshot.Value[map[string]Format], aliases []string, name Format, kind string) (panicked bool, recovered any) {
 	//: classic recover pattern isolated in a helper so the caller stays flat.
 	defer func() {
 		//: capture the recover value inline.

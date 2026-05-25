@@ -12,7 +12,7 @@ Go SDK providing a normed, performant toolbox for downstream applications. Two d
 ```
 internal/
 ├── kernel/        stdlib-only AND generic primitives
-│                  errs, recycler, buffer, clock, ring
+│                  errs, recycler, snapshot, buffer, clock, ring
 ├── core/          domain interfaces + domain values
 │                  codec, logger, logger/level
 └── service/       concrete implementations
@@ -112,5 +112,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0008 — README generation from Go doc comments — `docs/adr/0008-readme-from-code-generation.md`
 - ADR 0009 — public module `go get`-resolvability — `docs/adr/0009-pkg-public-module-resolvability.md`
 - ADR 0010 — kernel object-recycling primitive — `docs/adr/0010-kernel-recycler-primitive.md`
+- ADR 0011 — kernel copy-on-write snapshot primitive — `docs/adr/0011-kernel-snapshot-primitive.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`
