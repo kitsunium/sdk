@@ -103,8 +103,19 @@ Capacity thresholds remain owned by the consumers: 64 KiB (`kernel/buffer`),
   structs by deliberate choice.
 - recycler emits no dotted-quad error codes (it panics on programmer error;
   panics are not returned errors, so ADR 0005 has no entry).
-- `worker` remains a deferred sibling until at least two concrete consumers
-  exist.
+## Breaking changes
+
+None to the public API — `pkg/v1/*` is untouched (an `internal/`-only refactor).
+The single internal-breaking change (`recycler.NewPool(nil)` panics where the
+former `buffer.NewRecycler(nil)` returned nil) is contained to the interface
+collapse commit and documented in the package `CLAUDE.md`.
+
+## Deferred
+
+- A `worker` sibling primitive (it would compose `ring`, not `recycler`) stays
+  deferred until at least two concrete consumers exist.
+- The kernel-wide zero-alloc gate over ring/clock/errs hot paths is tracked
+  separately; this ADR ships only the recycler/buffer-scoped probe.
 
 ## References
 

@@ -90,6 +90,9 @@ func ReleaseReader(r *bytes.Reader) {
 		//: nothing to recycle.
 		return
 	}
+	//: drop the caller's src before pooling so an idle reader cannot keep the
+	//: backing array alive (Reset is re-applied with the real src on Acquire).
+	r.Reset(nil)
 	//: return the reader for reuse; the next AcquireReader repositions it.
 	readerPool.Put(r)
 }

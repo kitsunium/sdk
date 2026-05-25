@@ -40,7 +40,7 @@ mechanism lives here, the capacity thresholds stay with the consumers
 
 ## Verification
 
-```
+```sh
 bazel test --config=race //internal/kernel/recycler:recycler_test
 # zero-alloc gate runs HORS race (race instrumentation perturbs allocs):
 bazel test --config=pure //internal/kernel/recycler:recycler_test
