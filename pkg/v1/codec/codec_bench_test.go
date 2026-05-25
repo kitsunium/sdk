@@ -18,11 +18,19 @@ package codec_test
 
 import (
 	"bytes"
+	"cmp"
 	stdpem "encoding/pem"
+	"flag"
+	"fmt"
+	"math"
+	"os"
+	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	corecodec "github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/pkg/v1/codec"
@@ -34,6 +42,11 @@ import (
 // cost beyond Bench's auto-scaling sweet spot.
 const streamRecordCount int = 3
 
+// benchOutputRelativePath is the path of BENCH.md relative to the
+// workspace root. `bazel run` sets BUILD_WORKSPACE_DIRECTORY so the
+// report lands in the source tree, not the runfiles sandbox.
+const benchOutputRelativePath = "pkg/v1/codec/BENCH.md"
+
 // benchSink is the package-level escape sink. Assigning bench results to
 // a top-level var defeats dead-code elimination outside b.Loop's auto-
 // KeepAlive scope (e.g. inside b.RunParallel closure bodies, where the
@@ -42,6 +55,69 @@ var benchSink any
 
 // benchSizes is the canonical three-size sweep applied to every codec.
 var benchSizes = []string{"small", "medium", "large"}
+
+// benchReportRow is the typed equivalent of one `BenchmarkXxx-N N ns/op
+// B/op allocs/op` line in `go test -bench=.` output. Built directly from
+// testing.BenchmarkResult so no text parsing is needed by the report
+// renderer below.
+type benchReportRow struct {
+	//: Category is the BenchmarkXxx prefix (Marshal, Unmarshal, …).
+	Category string
+	//: Codec is the registered Format name (json, base64, xml, …).
+	Codec string
+	//: Size is small / medium / large.
+	Size string
+	//: Iters is the iteration count the testing framework auto-picked.
+	Iters int
+	//: NsPerOp is the per-op wall-clock cost in nanoseconds.
+	NsPerOp int64
+	//: BPerOp is the per-op bytes-allocated count.
+	BPerOp int64
+	//: AllocsPerOp is the per-op allocation count.
+	AllocsPerOp int64
+}
+
+// machineEnvelope is the reproducibility metadata stamped at the top of
+// every BENCH.md. Values are best-effort; missing pieces render as
+// `"unknown"` rather than aborting the run.
+type machineEnvelope struct {
+	CPU          string
+	CPUCores     string
+	CPUFrequency string
+	RAM          string
+	OS           string
+	Kernel       string
+	Architecture string
+	Hostname     string
+	GoToolchain  string
+	Bazel        string
+	GitBranch    string
+	GitCommit    string
+	GeneratedAt  string
+	BenchTime    string
+}
+
+// meanSet collects the per-column arithmetic means used as the cell
+// baseline by writePivotTable / formatCell.
+type meanSet struct {
+	iters  float64
+	nsop   float64
+	bop    float64
+	allocs float64
+}
+
+// benchProgress reports live progress of the otherwise-silent bench matrix.
+// testing.Benchmark blocks with no output, so a full `make bench` (hundreds
+// of cells at -benchtime=10s) looks hung for over an hour. Each completed
+// cell emits one stderr update carrying a running count, percentage, elapsed
+// wall-clock, and a linear ETA. Progress goes to stderr so it never
+// contaminates BENCH.md (written via os.WriteFile) or the test's stdout.
+type benchProgress struct {
+	total int       // total cells the matrix will run (pre-counted)
+	done  int       // cells finished so far
+	start time.Time // wall-clock start, for elapsed + ETA
+	tty   bool      // stderr is an interactive terminal (redraw vs lines)
+}
 
 // scaleComplex returns a copy of base with its slice/map fields multiplied
 // by factor. Deterministic — factor seeds the synthesised entries — so
@@ -215,6 +291,14 @@ func makeMarshalBench(f codec.Format, payload any) func(b *testing.B) {
 	return func(b *testing.B) {
 		//: report alloc/op every run — zero-alloc claims need this.
 		b.ReportAllocs()
+		//: pre-encode ONCE to learn the byte width and expose MB/s
+		//: alongside ns/op + B/op. SetBytes is required for benchstat
+		//: MB/s columns; without it benchstat reports ns/op only.
+		probe, perr := codec.Marshal(f, payload)
+		if perr != nil {
+			b.Fatalf("Marshal probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
 		//: b.Loop auto-KeepAlives values inside the loop body
 		//: (Go 1.24+ semantics) so DCE cannot strip the call.
 		for b.Loop() {
@@ -258,6 +342,9 @@ func BenchmarkUnmarshal(b *testing.B) {
 func makeUnmarshalBench(f codec.Format, payload any, data []byte) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: report MB/s relative to the encoded input size — every
+		//: byte of `data` is what the decode path actually parses.
+		b.SetBytes(int64(len(data)))
 		//: decode into a fresh target per iter — bench measures
 		//: the decode path, not target re-use.
 		for b.Loop() {
@@ -288,17 +375,6 @@ func makeSkipBench(name, reason string, cause error) func(b *testing.B) {
 	}
 }
 
-// makeSkipBenchNoCause is the cause-free variant of makeSkipBench used
-// when the reason is structural (e.g. "not an Appender") rather than
-// from an error value. Returns immediately so the framework records zero
-// iterations without tripping KTN-TEST-NOSKIP.
-func makeSkipBenchNoCause(name, reason string) func(b *testing.B) {
-	return func(b *testing.B) {
-		//: log the reason so -v surfaces the diagnostic.
-		b.Logf("%s: %s", name, reason)
-	}
-}
-
 // BenchmarkMarshalParallel measures concurrent Marshal throughput under
 // b.RunParallel. The closure body is NOT subject to b.Loop's auto-
 // KeepAlive (Go 1.24 docs), so we explicitly KeepAlive(out) and route
@@ -318,6 +394,13 @@ func BenchmarkMarshalParallel(b *testing.B) {
 func makeMarshalParallelBench(f codec.Format, payload any) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: pre-encode once so MB/s reflects the encoded payload width
+		//: under contention; symmetric with the sequential variant.
+		probe, perr := codec.Marshal(f, payload)
+		if perr != nil {
+			b.Fatalf("Marshal probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
 		//: each goroutine drives independent calls — codec
 		//: implementations are documented concurrent-safe.
 		b.RunParallel(func(pb *testing.PB) {
@@ -357,6 +440,8 @@ func BenchmarkUnmarshalParallel(b *testing.B) {
 func makeUnmarshalParallelBench(f codec.Format, payload any, data []byte) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: throughput is bytes parsed per second — sized off the seed.
+		b.SetBytes(int64(len(data)))
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				target := newDecodeTargetFor(string(f), payload)
@@ -370,9 +455,8 @@ func makeUnmarshalParallelBench(f codec.Format, payload any, data []byte) func(b
 }
 
 // BenchmarkAppend measures the optional Appender extension across every
-// codec that implements it. Codecs without Appender are skipped via
-// b.Skipf — this is a benchmark, not a correctness test, so b.Skip
-// communicates the gap without failing the run.
+// codec that implements it. Codecs without Appender contribute no rows
+// — the optional interface is a structural fact, not a benchable gap.
 func BenchmarkAppend(b *testing.B) {
 	for _, f := range codec.Available() {
 		//: resolve via the core registry; the universal codec facade
@@ -382,12 +466,10 @@ func BenchmarkAppend(b *testing.B) {
 			//: defensive — Available guarantees registration.
 			continue
 		}
-		//: type-assert the Appender extension.
+		//: type-assert the Appender extension; skip silently when absent.
 		appender, supports := c.(corecodec.Appender)
 		if !supports {
-			//: non-Appender codecs surface a single skip subbench so
-			//: the gap is visible in the bench output.
-			b.Run(string(f)+"/skip", makeSkipBenchNoCause(string(f), "not an Appender"))
+			//: structurally not an Appender — nothing to measure.
 			continue
 		}
 		for _, sz := range benchSizes {
@@ -401,6 +483,13 @@ func BenchmarkAppend(b *testing.B) {
 func makeAppendBench(appender corecodec.Appender, payload any) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: pre-Append once so MB/s reflects the appended width; the
+		//: probe also primes Go's allocator for the bench buffer below.
+		probe, perr := appender.Append(nil, payload)
+		if perr != nil {
+			b.Fatalf("Append probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
 		//: pre-allocate a reusable buffer big enough to avoid
 		//: re-growth inside the bench body — Append's whole point
 		//: is to amortise the caller's allocation.
@@ -420,9 +509,65 @@ func makeAppendBench(appender corecodec.Appender, payload any) func(b *testing.B
 	}
 }
 
+// BenchmarkAppendParallel measures concurrent Appender throughput. Each
+// goroutine owns its own dst buffer — appending into a shared slice would
+// race — so the only shared state is the immutable payload + the codec
+// singleton.
+func BenchmarkAppendParallel(b *testing.B) {
+	for _, f := range codec.Available() {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			//: defensive — Available guarantees registration.
+			continue
+		}
+		//: skip codecs that do not implement the optional Appender.
+		appender, supports := c.(corecodec.Appender)
+		if !supports {
+			//: structurally not an Appender — nothing to measure.
+			continue
+		}
+		for _, sz := range benchSizes {
+			payload := payloadFor(string(f), sz)
+			b.Run(string(f)+"/"+sz, makeAppendParallelBench(appender, payload))
+		}
+	}
+}
+
+// makeAppendParallelBench builds the BenchmarkAppendParallel subbench. Each
+// goroutine keeps a private reusable buffer so Append's amortised-alloc
+// contract is exercised without cross-goroutine aliasing.
+func makeAppendParallelBench(appender corecodec.Appender, payload any) func(b *testing.B) {
+	return func(b *testing.B) {
+		b.ReportAllocs()
+		//: pre-Append once so MB/s reflects the appended width.
+		probe, perr := appender.Append(nil, payload)
+		if perr != nil {
+			b.Fatalf("Append probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
+		b.RunParallel(func(pb *testing.PB) {
+			//: per-goroutine buffer — Append into a shared slice would race.
+			dst := make([]byte, 0, 64<<10)
+			for pb.Next() {
+				//: reset in-place; Append returns the (re-grown) buffer.
+				dst = dst[:0]
+				out, aerr := appender.Append(dst, payload)
+				if aerr != nil {
+					b.Fatalf("Append: %v", aerr)
+				}
+				//: keep the slice alive past the RunParallel closure scope.
+				dst = out
+				runtime.KeepAlive(dst)
+			}
+		})
+	}
+}
+
 // BenchmarkStreamEncode measures streaming-encoder throughput. Each
-// iteration writes streamRecordCount records to a fresh bytes.Buffer
-// then Closes the encoder. Codecs without StreamingCodec are skipped.
+// iteration writes the codec-appropriate record batch to a fresh
+// bytes.Buffer and closes the encoder. Codecs that do NOT implement
+// StreamingCodec contribute no rows — the optional interface is a
+// structural fact, not a benchable gap.
 func BenchmarkStreamEncode(b *testing.B) {
 	for _, f := range codec.Available() {
 		c, ok := corecodec.Lookup(f)
@@ -432,27 +577,31 @@ func BenchmarkStreamEncode(b *testing.B) {
 		//: only StreamingCodec implementations participate.
 		stream, supports := c.(corecodec.StreamingCodec)
 		if !supports {
-			b.Run(string(f)+"/skip", makeSkipBenchNoCause(string(f), "not a StreamingCodec"))
-			continue
-		}
-		//: streaming requires complexRT-shape payloads via the per-codec
-		//: tweak. Codecs whose Marshal already fails on complexRT (XML,
-		//: CSV, ASN.1, PEM, TLV, FlatBuffers) are filtered out below.
-		if !acceptsComplexRT(string(f)) {
-			b.Run(string(f)+"/skip", makeSkipBenchNoCause(string(f), "streaming bench requires complexRT-shape payloads"))
+			//: structurally not a StreamingCodec — nothing to measure.
 			continue
 		}
 		for _, sz := range benchSizes {
-			records := buildStreamRecords(string(f), sz)
+			//: codec-native record batch (xmlDoc / int64 / complexRT / …).
+			records := streamRecordsFor(string(f), sz)
 			b.Run(string(f)+"/"+sz, makeStreamEncodeBench(stream, records))
 		}
 	}
 }
 
 // makeStreamEncodeBench builds the BenchmarkStreamEncode subbench closure.
-func makeStreamEncodeBench(stream corecodec.StreamingCodec, records []complexRT) func(b *testing.B) {
+// The records slice carries codec-native typed values inside an []any so
+// every codec drives its Encode through its own concrete payload type.
+func makeStreamEncodeBench(stream corecodec.StreamingCodec, records []any) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: pre-encode the batch ONCE outside the timer so SetBytes
+		//: reflects the actual emitted byte width per stream-iter.
+		//: seedStream reproduces the exact in-loop encode sequence.
+		probe, perr := seedStream(stream, records)
+		if perr != nil {
+			b.Fatalf("StreamEncode probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
 		for b.Loop() {
 			//: fresh buffer per iter — bench measures the
 			//: encoder's allocation profile, not buffer re-use.
@@ -475,9 +624,64 @@ func makeStreamEncodeBench(stream corecodec.StreamingCodec, records []complexRT)
 	}
 }
 
+// BenchmarkStreamEncodeParallel measures concurrent streaming-encode
+// throughput. Each goroutine builds its own buffer + encoder per iter, so
+// the only shared state is the immutable record batch.
+func BenchmarkStreamEncodeParallel(b *testing.B) {
+	for _, f := range codec.Available() {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			continue
+		}
+		//: only StreamingCodec implementations participate.
+		stream, supports := c.(corecodec.StreamingCodec)
+		if !supports {
+			//: structurally not a StreamingCodec — nothing to measure.
+			continue
+		}
+		for _, sz := range benchSizes {
+			records := streamRecordsFor(string(f), sz)
+			b.Run(string(f)+"/"+sz, makeStreamEncodeParallelBench(stream, records))
+		}
+	}
+}
+
+// makeStreamEncodeParallelBench builds the BenchmarkStreamEncodeParallel
+// subbench. Mirrors the sequential encode loop inside b.RunParallel.
+func makeStreamEncodeParallelBench(stream corecodec.StreamingCodec, records []any) func(b *testing.B) {
+	return func(b *testing.B) {
+		b.ReportAllocs()
+		//: pre-encode the batch once so SetBytes reflects emitted width.
+		probe, perr := seedStream(stream, records)
+		if perr != nil {
+			b.Fatalf("StreamEncode probe: %v", perr)
+		}
+		b.SetBytes(int64(len(probe)))
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				//: fresh buffer + encoder per iter, private to this goroutine.
+				var buf bytes.Buffer
+				enc := stream.NewEncoder(&buf)
+				for _, rec := range records {
+					if eerr := enc.Encode(rec); eerr != nil {
+						b.Fatalf("Encode: %v", eerr)
+					}
+				}
+				if cerr := enc.Close(); cerr != nil {
+					b.Fatalf("Close: %v", cerr)
+				}
+				//: keep the bytes alive past the RunParallel closure scope.
+				runtime.KeepAlive(buf.Bytes())
+			}
+		})
+	}
+}
+
 // BenchmarkStreamDecode measures streaming-decoder throughput. The
 // encoded buffer is pre-built outside the timer; each iteration wraps
-// it in a fresh bytes.Reader and drains streamRecordCount records.
+// it in a fresh bytes.Reader and drains the codec-appropriate record
+// count. Single-document codecs (TOML) decode exactly one record per
+// iteration — the multi-record variant is meaningless for them.
 func BenchmarkStreamDecode(b *testing.B) {
 	for _, f := range codec.Available() {
 		c, ok := corecodec.Lookup(f)
@@ -486,48 +690,175 @@ func BenchmarkStreamDecode(b *testing.B) {
 		}
 		stream, supports := c.(corecodec.StreamingCodec)
 		if !supports {
-			b.Run(string(f)+"/skip", makeSkipBenchNoCause(string(f), "not a StreamingCodec"))
-			continue
-		}
-		if !acceptsComplexRT(string(f)) {
-			b.Run(string(f)+"/skip", makeSkipBenchNoCause(string(f), "streaming bench requires complexRT-shape payloads"))
+			//: structurally not a StreamingCodec — nothing to measure.
 			continue
 		}
 		for _, sz := range benchSizes {
-			records := buildStreamRecords(string(f), sz)
+			//: codec-native record batch the encoder will emit, then
+			//: the matching decoder will drain.
+			records := streamRecordsFor(string(f), sz)
 			seed, serr := seedStream(stream, records)
 			if serr != nil {
 				b.Run(string(f)+"/"+sz, makeSkipBench(string(f), "seed encode failed", serr))
 				continue
 			}
-			b.Run(string(f)+"/"+sz, makeStreamDecodeBench(stream, records, seed))
+			b.Run(string(f)+"/"+sz, makeStreamDecodeBench(stream, string(f), len(records), seed))
 		}
 	}
 }
 
 // makeStreamDecodeBench builds the BenchmarkStreamDecode subbench closure.
-func makeStreamDecodeBench(stream corecodec.StreamingCodec, records []complexRT, seed []byte) func(b *testing.B) {
+// recordCount + name drive the per-iter decode loop: name picks the decode
+// target shape (xmlDoc / int64 / complexRT / …), recordCount tells the
+// loop how many Decode calls to issue.
+func makeStreamDecodeBench(stream corecodec.StreamingCodec, name string, recordCount int, seed []byte) func(b *testing.B) {
 	return func(b *testing.B) {
 		b.ReportAllocs()
+		//: stream-decode throughput = bytes drained from `seed` per iter.
+		b.SetBytes(int64(len(seed)))
 		for b.Loop() {
 			//: fresh reader per iter — Decoders consume the
 			//: reader and every iter starts fresh.
 			dec := stream.NewDecoder(bytes.NewReader(seed))
-			for range records {
-				var got complexRT
-				if derr := dec.Decode(&got); derr != nil {
+			for range recordCount {
+				//: target shape matches what streamRecordsFor emitted.
+				target := newStreamDecodeTarget(name)
+				if derr := dec.Decode(target); derr != nil {
 					b.Fatalf("Decode: %v", derr)
 				}
-				benchSink = got
+				benchSink = target
 			}
 		}
 	}
 }
 
+// BenchmarkStreamDecodeParallel measures concurrent streaming-decode
+// throughput. The seed is shared read-only; each goroutine wraps it in its
+// own bytes.Reader and allocates fresh decode targets per iter.
+func BenchmarkStreamDecodeParallel(b *testing.B) {
+	for _, f := range codec.Available() {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			continue
+		}
+		stream, supports := c.(corecodec.StreamingCodec)
+		if !supports {
+			//: structurally not a StreamingCodec — nothing to measure.
+			continue
+		}
+		for _, sz := range benchSizes {
+			records := streamRecordsFor(string(f), sz)
+			seed, serr := seedStream(stream, records)
+			if serr != nil {
+				b.Run(string(f)+"/"+sz, makeSkipBench(string(f), "seed encode failed", serr))
+				continue
+			}
+			b.Run(string(f)+"/"+sz, makeStreamDecodeParallelBench(stream, string(f), len(records), seed))
+		}
+	}
+}
+
+// makeStreamDecodeParallelBench builds the BenchmarkStreamDecodeParallel
+// subbench. Mirrors the sequential decode loop inside b.RunParallel.
+func makeStreamDecodeParallelBench(stream corecodec.StreamingCodec, name string, recordCount int, seed []byte) func(b *testing.B) {
+	return func(b *testing.B) {
+		b.ReportAllocs()
+		//: stream-decode throughput = bytes drained from seed per iter.
+		b.SetBytes(int64(len(seed)))
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				//: fresh reader per iter, private to this goroutine.
+				dec := stream.NewDecoder(bytes.NewReader(seed))
+				for range recordCount {
+					//: target shape matches what streamRecordsFor emitted.
+					target := newStreamDecodeTarget(name)
+					if derr := dec.Decode(target); derr != nil {
+						b.Fatalf("Decode: %v", derr)
+					}
+					//: keep the target alive past the closure scope.
+					runtime.KeepAlive(target)
+				}
+			}
+		})
+	}
+}
+
+// streamRecordsFor returns the codec-appropriate record batch the
+// streaming Encode/Decode pair will iterate over. The slice type is
+// []any so every codec drives its Encode through its own concrete
+// payload type (xmlDoc for xml, int64 for tlv, complexRT for the
+// universal-shape codecs). Single-document codecs (TOML) return a
+// one-element slice so the Decode loop matches the codec's grammar.
+func streamRecordsFor(name, size string) []any {
+	//: lower-case once for case-insensitive dispatch.
+	switch strings.ToLower(name) {
+	//: xml streams concatenated <doc>…</doc> elements; xmlDoc round-trips
+	//: through encoding/xml's Encoder + Decoder identically per record.
+	case "xml":
+		//: scale via record count, not field count — xml's bench cost is
+		//: dominated by start-element / end-element bookkeeping.
+		base := sampleXML()
+		recs := make([]any, 0, streamRecordCount)
+		for range streamRecordCount {
+			recs = append(recs, base)
+		}
+		return recs
+	//: tlv streams primitive int64 records (the TLV encoder dispatches
+	//: on reflect.Kind, so a scalar exercises the fast path). Three
+	//: distinct values keep DCE honest.
+	case "tlv":
+		return []any{int64(-64_000_000_000), int64(1 << 30), int64(-1 << 29)}
+	//: toml is single-document by design — pelletier/go-toml.Decoder
+	//: reads the entire stream into one value, so the bench emits ONE
+	//: record per stream. Multi-record concat would yield invalid TOML.
+	case "toml":
+		base := tweakForCodec("toml", sampleComplex())
+		switch size {
+		case "medium":
+			base = scaleComplex(base, 100)
+		case "large":
+			base = scaleComplex(base, 1000)
+		}
+		return []any{base}
+	}
+	//: universal-shape codecs (json, yaml, cbor, msgpack, baseenc family).
+	//: streamRecordCount records keep the Encode/Decode loop measurable.
+	typed := buildStreamRecords(name, size)
+	//: indexed-assignment widens []complexRT into []any without the
+	//: make-range-append pattern that triggers KTN-VAR-SLICECLONE
+	//: (slices.Clone can't change element type, so it doesn't apply).
+	out := make([]any, len(typed))
+	for i, r := range typed {
+		out[i] = r
+	}
+	return out
+}
+
+// newStreamDecodeTarget returns a fresh, codec-shaped pointer the
+// streaming decoder writes through. Symmetric with streamRecordsFor:
+// every record type emitted there has a matching target here.
+func newStreamDecodeTarget(name string) any {
+	//: lower-case once for case-insensitive dispatch.
+	switch strings.ToLower(name) {
+	case "xml":
+		//: encoding/xml.Decoder.Decode reads into a typed struct.
+		var d xmlDoc
+		return &d
+	case "tlv":
+		//: tlv scalar — Decode writes through *int64.
+		var i int64
+		return &i
+	}
+	//: universal target is *complexRT — every other streaming codec
+	//: round-trips that shape.
+	var c complexRT
+	return &c
+}
+
 // buildStreamRecords synthesises streamRecordCount sequential complexRT
-// records for the streaming benches. Records share the size-appropriate
-// fixture and offset their integer fields via nextInt so each record is
-// distinguishable on decode.
+// records for the universal-shape streaming benches. Records share the
+// size-appropriate fixture and offset their integer fields via nextInt
+// so each record is distinguishable on decode.
 func buildStreamRecords(name, size string) []complexRT {
 	//: base fixture sized for the bench class.
 	base := tweakForCodec(name, sampleComplex())
@@ -551,10 +882,11 @@ func buildStreamRecords(name, size string) []complexRT {
 	return records
 }
 
-// seedStream pre-encodes a streamRecordCount-record batch through
-// stream's encoder and returns the resulting bytes for the decode
-// bench to consume.
-func seedStream(stream corecodec.StreamingCodec, records []complexRT) ([]byte, error) {
+// seedStream pre-encodes the record batch through stream's encoder and
+// returns the resulting bytes for the decode bench to consume. The
+// records slice is []any so single-doc codecs (TOML, 1 record) and
+// multi-doc codecs (3 records) share the same plumbing.
+func seedStream(stream corecodec.StreamingCodec, records []any) ([]byte, error) {
 	//: fresh buffer for the seed batch.
 	var buf bytes.Buffer
 	//: one-shot encoder.
@@ -575,18 +907,730 @@ func seedStream(stream corecodec.StreamingCodec, records []complexRT) ([]byte, e
 	return buf.Bytes(), nil
 }
 
-// acceptsComplexRT reports whether a codec's Marshal will accept the
-// universal complexRT shape. Mirror of the tweakForCodec default arm:
-// codecs with specialised payload types (XML, CSV, ASN.1, PEM, TLV,
-// FlatBuffers) are excluded — their streaming variants are exercised by
-// other targeted benches in the codec's own service package, not here.
-func acceptsComplexRT(name string) bool {
-	//: lower-case once for case-insensitive dispatch.
-	switch strings.ToLower(name) {
-	case "xml", "csv", "asn1-der", "pem", "tlv", "flatbuffers":
-		return false
+// ═══════════════════════════════════════════════════════════════════════════
+// BENCH.md report generator — driven by `make bench` (bazel run … --
+// -test.run=TestGenerateBenchMD). Runs every Benchmark* function above
+// programmatically via testing.Benchmark, pivots the rows by codec,
+// computes a per-column mean baseline, and writes pkg/v1/codec/BENCH.md
+// next to this file (the bazel sandbox is lifted via $BUILD_WORKSPACE_DIRECTORY).
+//
+// Living here keeps the bench logic + the report in one file. The
+// KTN-TEST-PLACEMENT linter rule (Test functions belong in
+// _internal/_external) is excluded for this file in .ktn-linter.yaml —
+// the report-gen Test reuses the package-local makeXxxBench helpers,
+// which only exist in this file.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// TestGenerateBenchMD runs the full bench matrix programmatically and
+// rewrites pkg/v1/codec/BENCH.md. The canonical entry point is
+// `make bench`, which translates to:
+//
+//	bazel run //pkg/v1/codec:codec_bench_test -- \
+//	    -test.run=TestGenerateBenchMD -test.bench=^$ -test.timeout=2h -test.benchtime=1s
+//
+// `bazel run` exposes BUILD_WORKSPACE_DIRECTORY so the report lands in
+// the source tree, not the runfiles sandbox. The default BUILD.bazel
+// args (`-test.run=^$`) keep this test off `bazel test //...` runs —
+// only an explicit `-test.run=TestGenerateBenchMD` triggers it. The
+// `-test.bench=^$` overrides the BUILD args' `-test.bench=.`, which would
+// otherwise re-run all ten top-level Benchmark* funcs on top of this
+// generator (the matrix is already driven internally here).
+func TestGenerateBenchMD(t *testing.T) {
+	t.Helper()
+	rows := runAllBenches()
+	env := collectMachineEnvelope()
+	md := renderBenchMarkdown(env, rows)
+	outPath := resolveBenchOutputPath()
+	if werr := os.WriteFile(outPath, []byte(md), 0o644); werr != nil {
+		t.Fatalf("write %s: %v", outPath, werr)
 	}
-	//: every remaining registered codec accepts the universal shape
-	//: (json, ndjson, yaml, toml, cbor, msgpack, baseenc family).
-	return true
+	t.Logf("wrote %s (%d rows)", outPath, len(rows))
+}
+
+// resolveBenchOutputPath returns the absolute path where BENCH.md will
+// be written. Three runtime contexts are supported:
+//
+//  1. `bazel run` — bazel sets BUILD_WORKSPACE_DIRECTORY to the user's
+//     workspace root, so the file lands at <root>/pkg/v1/codec/BENCH.md.
+//  2. `go test ./pkg/v1/codec` — CWD is already pkg/v1/codec/, so a
+//     bare "BENCH.md" lands correctly next to the sources.
+//  3. `bazel test` — the test runs in a sandbox; the file is written
+//     there and lost on cleanup. The Makefile target uses `bazel run`
+//     (which lifts the sandbox) for that reason.
+func resolveBenchOutputPath() string {
+	if root, ok := os.LookupEnv("BUILD_WORKSPACE_DIRECTORY"); ok && root != "" {
+		return root + "/" + benchOutputRelativePath
+	}
+	return "BENCH.md"
+}
+
+// newBenchProgress returns a reporter sized to total cells. It probes stderr:
+// a character device is an interactive terminal (a single redrawing bar
+// reads best); a pipe or file gets discrete newline-terminated lines so the
+// captured log stays greppable.
+func newBenchProgress(total int) *benchProgress {
+	//: a char-device stderr is a TTY — pick the in-place redraw renderer.
+	info, err := os.Stderr.Stat()
+	tty := err == nil && info.Mode()&os.ModeCharDevice != 0
+	return &benchProgress{total: total, start: time.Now(), tty: tty}
+}
+
+// step records one finished cell (labelled "<Op> <format>/<size>") and
+// renders the current progress to stderr.
+func (p *benchProgress) step(label string) {
+	p.done++
+	elapsed := time.Since(p.start)
+	//: linear ETA from the mean cell time so far — enough to set expectations.
+	var eta time.Duration
+	if p.done > 0 && p.done < p.total {
+		eta = elapsed / time.Duration(p.done) * time.Duration(p.total-p.done)
+	}
+	pct := 100 * p.done / max(p.total, 1)
+	line := fmt.Sprintf("bench %3d%% [%d/%d] %-30s %s elapsed, ~%s left",
+		pct, p.done, p.total, label, elapsed.Truncate(time.Second), eta.Truncate(time.Second))
+	if p.tty {
+		//: \r + clear-to-EOL redraw — one evolving line, no scroll spam.
+		fmt.Fprintf(os.Stderr, "\r\033[K%s", line)
+		return
+	}
+	//: redirected/piped — discrete lines keep the captured log readable.
+	fmt.Fprintln(os.Stderr, line)
+}
+
+// finish closes the display: the in-place bar carries no trailing newline, so
+// a TTY needs one before the summary line that reports the total wall-clock.
+func (p *benchProgress) finish() {
+	if p.tty {
+		//: terminate the redraw line before the summary.
+		fmt.Fprintln(os.Stderr)
+	}
+	fmt.Fprintf(os.Stderr, "bench done: %d cells in %s\n", p.done, time.Since(p.start).Truncate(time.Second))
+}
+
+// benchTotalCells pre-counts the matrix so progress can show [done/total].
+// Marshal + Unmarshal + their two parallel variants run for every codec;
+// Append and the two streaming families only for codecs that implement the
+// optional interfaces. A rare per-cell skip (a Marshal seed that fails) makes
+// the realised count slightly lower — finish() reports the true tally.
+func benchTotalCells(formats []codec.Format) int {
+	sizes := len(benchSizes)
+	//: four unconditional families × every codec × every size.
+	total := 4 * len(formats) * sizes
+	for _, f := range formats {
+		c, ok := corecodec.Lookup(f)
+		//: an unregistered format contributes no optional rows.
+		if !ok {
+			continue
+		}
+		//: Append adds one family when the codec implements Appender.
+		if _, yes := c.(corecodec.Appender); yes {
+			total += sizes
+		}
+		//: StreamEncode + StreamDecode add two families for streaming codecs.
+		if _, yes := c.(corecodec.StreamingCodec); yes {
+			total += 2 * sizes
+		}
+	}
+	return total
+}
+
+// runAllBenches drives every BenchmarkXxx family through testing.Benchmark
+// and returns a flat row list ready for rendering. Zero duplication
+// between `go test -bench=.` and this report generator — both call the
+// exact same make<Op>Bench helpers. A benchProgress reporter narrates the
+// otherwise-silent run to stderr.
+func runAllBenches() []benchReportRow {
+	rows := make([]benchReportRow, 0, 400)
+	formats := codec.Available()
+	prog := newBenchProgress(benchTotalCells(formats))
+
+	rows = collectMarshal(rows, formats, prog)
+	rows = collectUnmarshal(rows, formats, prog)
+	rows = collectMarshalParallel(rows, formats, prog)
+	rows = collectUnmarshalParallel(rows, formats, prog)
+	rows = collectAppend(rows, formats, prog)
+	rows = collectStreamEncode(rows, formats, prog)
+	rows = collectStreamDecode(rows, formats, prog)
+	prog.finish()
+	return rows
+}
+
+// collectMarshal benches every codec × size through codec.Marshal.
+func collectMarshal(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
+	for _, f := range formats {
+		for _, sz := range benchSizes {
+			payload := payloadFor(string(f), sz)
+			r := testing.Benchmark(makeMarshalBench(f, payload))
+			rows = append(rows, toRow("Marshal", string(f), sz, r))
+			prog.step("Marshal " + string(f) + "/" + sz)
+		}
+	}
+	return rows
+}
+
+// collectUnmarshal benches every codec × size; Marshal is hoisted as a
+// one-shot seed outside b.Loop so only the decode cost is timed.
+func collectUnmarshal(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
+	for _, f := range formats {
+		for _, sz := range benchSizes {
+			payload := payloadFor(string(f), sz)
+			data, merr := codec.Marshal(f, payload)
+			if merr != nil {
+				//: skip — Marshal already failed, decode would be moot.
+				continue
+			}
+			r := testing.Benchmark(makeUnmarshalBench(f, payload, data))
+			rows = append(rows, toRow("Unmarshal", string(f), sz, r))
+			prog.step("Unmarshal " + string(f) + "/" + sz)
+		}
+	}
+	return rows
+}
+
+// collectMarshalParallel measures Marshal under b.RunParallel
+// (GOMAXPROCS goroutines, shared codec singleton).
+func collectMarshalParallel(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
+	for _, f := range formats {
+		for _, sz := range benchSizes {
+			payload := payloadFor(string(f), sz)
+			r := testing.Benchmark(makeMarshalParallelBench(f, payload))
+			rows = append(rows, toRow("MarshalParallel", string(f), sz, r))
+			prog.step("MarshalParallel " + string(f) + "/" + sz)
+		}
+	}
+	return rows
+}
+
+// collectUnmarshalParallel benches Unmarshal under b.RunParallel.
+func collectUnmarshalParallel(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
+	for _, f := range formats {
+		for _, sz := range benchSizes {
+			payload := payloadFor(string(f), sz)
+			data, merr := codec.Marshal(f, payload)
+			if merr != nil {
+				continue
+			}
+			r := testing.Benchmark(makeUnmarshalParallelBench(f, payload, data))
+			rows = append(rows, toRow("UnmarshalParallel", string(f), sz, r))
+			prog.step("UnmarshalParallel " + string(f) + "/" + sz)
+		}
+	}
+	return rows
+}
+
+// collectAppend benches the optional Appender extension. Codecs that
+// do NOT implement Appender contribute no rows — the optional interface
+// absence is a structural fact, not a benchmark gap.
+func collectAppend(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
+	for _, f := range formats {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			continue
+		}
+		appender, supports := c.(corecodec.Appender)
+		if !supports {
+			continue
+		}
+		for _, sz := range benchSizes {
+			payload := payloadFor(string(f), sz)
+			r := testing.Benchmark(makeAppendBench(appender, payload))
+			rows = append(rows, toRow("Append", string(f), sz, r))
+			prog.step("Append " + string(f) + "/" + sz)
+		}
+	}
+	return rows
+}
+
+// collectStreamEncode benches Encoder.Encode for codecs implementing
+// StreamingCodec. Per-codec record shape via streamRecordsFor.
+func collectStreamEncode(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
+	for _, f := range formats {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			continue
+		}
+		stream, supports := c.(corecodec.StreamingCodec)
+		if !supports {
+			continue
+		}
+		for _, sz := range benchSizes {
+			records := streamRecordsFor(string(f), sz)
+			r := testing.Benchmark(makeStreamEncodeBench(stream, records))
+			rows = append(rows, toRow("StreamEncode", string(f), sz, r))
+			prog.step("StreamEncode " + string(f) + "/" + sz)
+		}
+	}
+	return rows
+}
+
+// collectStreamDecode benches Decoder.Decode; the encoded seed is
+// pre-built once per (format, size) outside the timer.
+func collectStreamDecode(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
+	for _, f := range formats {
+		c, ok := corecodec.Lookup(f)
+		if !ok {
+			continue
+		}
+		stream, supports := c.(corecodec.StreamingCodec)
+		if !supports {
+			continue
+		}
+		for _, sz := range benchSizes {
+			records := streamRecordsFor(string(f), sz)
+			seed, serr := seedStream(stream, records)
+			if serr != nil {
+				continue
+			}
+			r := testing.Benchmark(makeStreamDecodeBench(stream, string(f), len(records), seed))
+			rows = append(rows, toRow("StreamDecode", string(f), sz, r))
+			prog.step("StreamDecode " + string(f) + "/" + sz)
+		}
+	}
+	return rows
+}
+
+// toRow projects a testing.BenchmarkResult onto the typed row record
+// the renderer consumes.
+func toRow(category, codec, size string, r testing.BenchmarkResult) benchReportRow {
+	return benchReportRow{
+		Category:    category,
+		Codec:       codec,
+		Size:        size,
+		Iters:       r.N,
+		NsPerOp:     r.NsPerOp(),
+		BPerOp:      r.AllocedBytesPerOp(),
+		AllocsPerOp: r.AllocsPerOp(),
+	}
+}
+
+// ─── Markdown renderer ──────────────────────────────────────────────────────
+
+// renderBenchMarkdown assembles BENCH.md from the typed envelope + row
+// set. The output structure is documented in BENCH.md itself: an
+// envelope table, then one pivoted sub-table per (operation, size)
+// combination, each ranked by ns/op with mean-baseline deltas.
+func renderBenchMarkdown(env machineEnvelope, rows []benchReportRow) string {
+	var b strings.Builder
+	writeReportHeader(&b)
+	writeEnvelopeTable(&b, env)
+	writeResultsIntro(&b)
+	writeAllPivotTables(&b, rows)
+	writeReproduce(&b)
+	return b.String()
+}
+
+// writeReportHeader emits the markdown title block + the auto-generated
+// banner that warns readers not to hand-edit the file.
+func writeReportHeader(b *strings.Builder) {
+	b.WriteString("<!-- generated by pkg/v1/codec/codec_bench_test.go — do not edit by hand -->\n")
+	b.WriteString("# Benchmarks — `pkg/v1/codec`\n\n")
+	b.WriteString("Bazel target: `pkg/v1/codec:codec_bench_test` (tag `manual,benchmark` — excluded from `bazel test //...`)\n\n")
+}
+
+// writeEnvelopeTable emits the per-machine reproducibility envelope so
+// cross-machine deltas can be evaluated honestly.
+func writeEnvelopeTable(b *strings.Builder, env machineEnvelope) {
+	b.WriteString("## Reproducibility envelope\n\n")
+	b.WriteString("> **Numbers vary across machines.** This report stamps the box that produced\n")
+	b.WriteString("> them so cross-machine deltas can be evaluated honestly.\n\n")
+	b.WriteString("| Dimension | Value |\n|---|---|\n")
+	fmt.Fprintf(b, "| CPU                | %s |\n", env.CPU)
+	fmt.Fprintf(b, "| CPU cores          | %s |\n", env.CPUCores)
+	fmt.Fprintf(b, "| CPU frequency      | %s |\n", env.CPUFrequency)
+	fmt.Fprintf(b, "| RAM                | %s |\n", env.RAM)
+	fmt.Fprintf(b, "| OS                 | %s |\n", env.OS)
+	fmt.Fprintf(b, "| Kernel             | %s |\n", env.Kernel)
+	fmt.Fprintf(b, "| Architecture       | %s |\n", env.Architecture)
+	fmt.Fprintf(b, "| Hostname           | %s |\n", env.Hostname)
+	fmt.Fprintf(b, "| Go toolchain       | %s |\n", env.GoToolchain)
+	fmt.Fprintf(b, "| Bazel              | %s |\n", env.Bazel)
+	fmt.Fprintf(b, "| Git branch         | %s |\n", env.GitBranch)
+	fmt.Fprintf(b, "| Git commit         | %s |\n", env.GitCommit)
+	fmt.Fprintf(b, "| Generated (UTC)    | %s |\n", env.GeneratedAt)
+	fmt.Fprintf(b, "| Bench wall-clock   | %s |\n\n", env.BenchTime)
+}
+
+// writeResultsIntro explains the mean-baseline + cell-tint convention
+// used in every sub-table below.
+func writeResultsIntro(b *strings.Builder) {
+	b.WriteString("## Results\n\n")
+	b.WriteString("Each `(operation, size)` table is pivoted by codec and ranked by `ns/op`. Cells compare each codec to the **arithmetic mean** of every codec in that table:\n\n")
+	b.WriteString("- Green cells = **below** the mean for that column (faster, lighter, fewer allocs — or more iters for `Iters`).\n")
+	b.WriteString("- Red cells = **above** the mean.\n")
+	b.WriteString("- Delta is shown as `±X%` up to ±999% and `×N` / `÷N` past 10× either way.\n\n")
+	b.WriteString("Each operation is wrapped in a collapsible block (small / medium / large grouped) so the table flood is opt-in. Every registered Format participates in the average — `flatbuffers` (passthrough) and `tlv` (scalar payload) are included verbatim, so the mean reflects the full surface.\n\n")
+}
+
+// writeAllPivotTables emits one sub-table per (category, size) pair, in
+// a stable order so reviewers always see Marshal small/medium/large
+// first, then Unmarshal, etc. Each operation's three size tables are
+// wrapped in a single <details> block — collapsed by default except
+// for the first operation — so the page is scannable instead of being
+// a 21-table flood.
+func writeAllPivotTables(b *strings.Builder, rows []benchReportRow) {
+	//: Parallel variants intentionally dropped from the published
+	//: report — they bloat the page without telling a consumer
+	//: anything actionable about format choice (the parallel scaling
+	//: is a Go-runtime property, not a codec property). The bench
+	//: code still runs them (Bazel target picks them up) so we keep
+	//: the regression net, just not the table flood.
+	categories := []string{"Marshal", "Unmarshal", "Append", "StreamEncode", "StreamDecode"}
+	for i, cat := range categories {
+		any := false
+		for _, sz := range benchSizes {
+			if len(filterRows(rows, cat, sz)) > 0 {
+				any = true
+				break
+			}
+		}
+		if !any {
+			continue
+		}
+		openAttr := ""
+		if i == 0 {
+			openAttr = " open"
+		}
+		fmt.Fprintf(b, "<details%s>\n<summary><strong>%s</strong> — small / medium / large payloads</summary>\n\n", openAttr, cat)
+		for _, sz := range benchSizes {
+			subset := filterRows(rows, cat, sz)
+			if len(subset) == 0 {
+				continue
+			}
+			writePivotTable(b, cat, sz, subset)
+		}
+		b.WriteString("</details>\n\n")
+	}
+}
+
+// filterRows returns the subset of rows matching the given (category,
+// size) pair. Callers use it to feed writePivotTable.
+func filterRows(rows []benchReportRow, category, size string) []benchReportRow {
+	out := make([]benchReportRow, 0, len(rows))
+	for _, r := range rows {
+		if r.Category == category && r.Size == size {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// writePivotTable emits one mean-baseline sub-table. The codec column
+// is sorted by ns/op ascending so the fastest codecs sit at the top.
+func writePivotTable(b *strings.Builder, category, size string, rows []benchReportRow) {
+	means := computeMeans(rows)
+	//: slices.SortFunc is the Go 1.21+ generic, reflection-free alternative
+	//: to sort.Slice (KTN-VAR-SORTALLOC).
+	slices.SortFunc(rows, func(a, b benchReportRow) int {
+		return cmp.Compare(a.NsPerOp, b.NsPerOp)
+	})
+	fmt.Fprintf(b, "#### %s — %s payload\n\n", category, size)
+	fmt.Fprintf(b,
+		"> **Mean baseline** across %d codecs: `%s ns/op` · `%s B/op` · `%s allocs/op` · `%s iters`. "+
+			"Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.\n\n",
+		len(rows),
+		formatThousands(int64(means.nsop)),
+		formatThousands(int64(means.bop)),
+		formatThousands(int64(means.allocs)),
+		formatThousands(int64(means.iters)),
+	)
+	b.WriteString("| Codec | Iters | ns/op | B/op | allocs/op |\n|---|---:|---:|---:|---:|\n")
+	for _, r := range rows {
+		itersCell := formatCell(float64(r.Iters), means.iters, true)
+		nsopCell := formatCell(float64(r.NsPerOp), means.nsop, false)
+		bopCell := formatCell(float64(r.BPerOp), means.bop, false)
+		allocsCell := formatCell(float64(r.AllocsPerOp), means.allocs, false)
+		fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n", r.Codec, itersCell, nsopCell, bopCell, allocsCell)
+	}
+	b.WriteString("\n")
+}
+
+// computeMeans averages every column of the given row set. Caller
+// passes a non-empty slice; otherwise the means default to zero (which
+// formatCell handles as "no comparison").
+func computeMeans(rows []benchReportRow) meanSet {
+	if len(rows) == 0 {
+		return meanSet{}
+	}
+	var sumIters, sumNs, sumBop, sumAl float64
+	for _, r := range rows {
+		sumIters += float64(r.Iters)
+		sumNs += float64(r.NsPerOp)
+		sumBop += float64(r.BPerOp)
+		sumAl += float64(r.AllocsPerOp)
+	}
+	n := float64(len(rows))
+	return meanSet{
+		iters:  sumIters / n,
+		nsop:   sumNs / n,
+		bop:    sumBop / n,
+		allocs: sumAl / n,
+	}
+}
+
+// formatCell renders one cell with a CSS-class tint + raw value + delta.
+// higherIsBetter=true flips the colour rule (used for Iters, where more
+// iters means the bench ran faster). The delta carries the sign so the
+// reader doesn't have to recompute direction from the colour. We emit
+// an inline <span> with the win/loss class so markdown renderers (Astro
+// + remark-gfm) carry the tint into the rendered table — no emojis,
+// the whole cell value gets a background highlight.
+func formatCell(val, base float64, higherIsBetter bool) string {
+	cls := "bench-loss"
+	if higherIsBetter {
+		if val >= base {
+			cls = "bench-win"
+		}
+	} else {
+		if val <= base {
+			cls = "bench-win"
+		}
+	}
+	if base == 0 {
+		return fmt.Sprintf(`<span class="%s">%s</span>`, cls, formatThousands(int64(val)))
+	}
+	delta := (val - base) / base
+	return fmt.Sprintf(`<span class="%s">%s %s</span>`, cls, formatThousands(int64(val)), formatDelta(delta, val/base))
+}
+
+// formatDelta renders the relative gap vs the baseline using the
+// `±X%` / `×N` / `÷N` convention validated with the user. Stays in
+// percent up to ±999% then switches to multiplicative ratios so the
+// scale stays readable for the extreme outliers (yaml/large at
+// ×64,000+).
+func formatDelta(delta, ratio float64) string {
+	if math.Abs(delta) < 0.005 {
+		return "`±0%`"
+	}
+	if math.Abs(delta) < 10 {
+		sign := ""
+		if delta >= 0 {
+			sign = "+"
+		}
+		return fmt.Sprintf("`%s%.0f%%`", sign, delta*100)
+	}
+	if delta > 0 {
+		return fmt.Sprintf("`×%.1f`", ratio)
+	}
+	return fmt.Sprintf("`÷%.1f`", 1/ratio)
+}
+
+// formatThousands turns 5749803 into "5,749,803". Stays integer-only —
+// the bench results are always whole numbers (ns/op rounds to int64 by
+// testing.BenchmarkResult.NsPerOp).
+func formatThousands(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	neg := false
+	if strings.HasPrefix(s, "-") {
+		neg = true
+		s = s[1:]
+	}
+	//: walk right-to-left inserting a comma every three digits.
+	var b strings.Builder
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	if neg {
+		return "-" + b.String()
+	}
+	return b.String()
+}
+
+// writeReproduce closes the report with the one-liner that regenerates
+// it. The Reproduce shell block is the contract between the file and
+// its operator.
+func writeReproduce(b *strings.Builder) {
+	b.WriteString("## Reproduce\n\n")
+	b.WriteString("```shell\n")
+	b.WriteString("make bench   # regenerate this report (~8 min at the default -benchtime=1s)\n")
+	b.WriteString("# canonical, publishable run (firmer ns/op, ~84 min):\n")
+	b.WriteString("BENCH_TIME=10s make bench\n")
+	b.WriteString("```\n")
+}
+
+// ─── Machine envelope ──────────────────────────────────────────────────────
+
+// collectMachineEnvelope gathers the reproducibility fingerprint that
+// stamps every report. Cross-platform: prefers Linux /proc lookups,
+// falls back to uname + sysctl on Darwin/BSD, never aborts on a missing
+// piece (renders `unknown` instead).
+func collectMachineEnvelope() machineEnvelope {
+	host, herr := os.Hostname()
+	if herr != nil {
+		host = "unknown"
+	}
+	return machineEnvelope{
+		CPU:          readCPUModel(),
+		CPUCores:     strconv.Itoa(runtime.NumCPU()),
+		CPUFrequency: readCPUFrequency(),
+		RAM:          readRAM(),
+		OS:           readOSName(),
+		Kernel:       readKernel(),
+		Architecture: runtime.GOARCH,
+		Hostname:     host,
+		GoToolchain:  runtime.Version() + " " + runtime.GOOS + "/" + runtime.GOARCH,
+		Bazel:        readBazelVersion(),
+		GitBranch:    readGit("rev-parse", "--abbrev-ref", "HEAD"),
+		GitCommit:    readGit("rev-parse", "--short", "HEAD"),
+		GeneratedAt:  time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		BenchTime:    benchTimeDisplay(),
+	}
+}
+
+// benchTimeDisplay returns the configured -test.benchtime value
+// formatted for the envelope. Reads the testing package's flag directly
+// so the envelope value always matches what testing.Benchmark used.
+func benchTimeDisplay() string {
+	if fl := flag.Lookup("test.benchtime"); fl != nil {
+		return "`-test.benchtime=" + fl.Value.String() + "`"
+	}
+	return "`-test.benchtime=1s`"
+}
+
+// readCPUModel returns the human-readable CPU model. On Linux uses the
+// `model name` line of /proc/cpuinfo; on Darwin falls back to `sysctl -n
+// machdep.cpu.brand_string`; unknown otherwise.
+func readCPUModel() string {
+	if v, ok := readProcCPUField("model name"); ok {
+		return v
+	}
+	if v, ok := readCmd("sysctl", "-n", "machdep.cpu.brand_string"); ok {
+		return v
+	}
+	return "unknown"
+}
+
+// readCPUFrequency returns the per-core MHz reading from /proc/cpuinfo
+// on Linux, falling back to sysctl on Darwin. Best-effort.
+func readCPUFrequency() string {
+	if v, ok := readProcCPUField("cpu MHz"); ok {
+		return v + " MHz"
+	}
+	if v, ok := readCmd("sysctl", "-n", "hw.cpufrequency"); ok {
+		return v + " Hz"
+	}
+	return "unknown"
+}
+
+// readRAM returns total RAM in GiB. Linux: MemTotal in /proc/meminfo.
+// Darwin: sysctl hw.memsize. Best-effort.
+func readRAM() string {
+	if v, ok := readProcField("/proc/meminfo", "MemTotal:"); ok {
+		v = strings.TrimSuffix(strings.TrimSpace(v), " kB")
+		var kb int64
+		if _, perr := fmt.Sscanf(v, "%d", &kb); perr == nil {
+			return fmt.Sprintf("%.1f GiB", float64(kb)/1024/1024)
+		}
+	}
+	if v, ok := readCmd("sysctl", "-n", "hw.memsize"); ok {
+		var bytes int64
+		if _, perr := fmt.Sscanf(v, "%d", &bytes); perr == nil {
+			return fmt.Sprintf("%.1f GiB", float64(bytes)/1024/1024/1024)
+		}
+	}
+	return "unknown"
+}
+
+// readOSName returns the human-friendly OS name. Linux: PRETTY_NAME in
+// /etc/os-release. Darwin: `sw_vers -productName` + ` ` + version.
+func readOSName() string {
+	if v, ok := readOSReleaseField("PRETTY_NAME"); ok {
+		return v
+	}
+	if name, ok := readCmd("sw_vers", "-productName"); ok {
+		if ver, vok := readCmd("sw_vers", "-productVersion"); vok {
+			return name + " " + ver
+		}
+		return name
+	}
+	return runtime.GOOS
+}
+
+// readKernel returns the kernel name + release (`Linux 6.x.y` /
+// `Darwin 23.x.y`). Uses `uname -sr` which exists on every Unix.
+func readKernel() string {
+	if v, ok := readCmd("uname", "-sr"); ok {
+		return v
+	}
+	return runtime.GOOS
+}
+
+// readBazelVersion returns the Bazel build label from `bazel version`.
+// Optional — when bazel is absent the report renders `unknown` and the
+// run still succeeds.
+func readBazelVersion() string {
+	out, oerr := exec.Command("bazel", "version").Output()
+	if oerr != nil {
+		return "unknown"
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if rest, ok := strings.CutPrefix(line, "Build label:"); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return "unknown"
+}
+
+// readGit runs `git <args...>` and returns the trimmed stdout. Returns
+// `unknown` on failure (e.g. running outside a checkout).
+func readGit(args ...string) string {
+	if v, ok := readCmd("git", args...); ok {
+		return v
+	}
+	return "unknown"
+}
+
+// readCmd runs the given command and returns (trimmed stdout, true) on
+// success or ("", false) on any failure.
+func readCmd(name string, args ...string) (string, bool) {
+	out, oerr := exec.Command(name, args...).Output()
+	if oerr != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// readProcField returns the first matching field value from a /proc-
+// style file (lines of `key: value`).
+func readProcField(path, key string) (string, bool) {
+	data, derr := os.ReadFile(path)
+	if derr != nil {
+		return "", false
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if strings.HasPrefix(line, key) {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			return strings.TrimSpace(parts[1]), true
+		}
+	}
+	return "", false
+}
+
+// readProcCPUField is the /proc/cpuinfo specialisation of readProcField
+// — pinned to the first matching field so we don't pick up multi-core
+// duplicates.
+func readProcCPUField(key string) (string, bool) {
+	return readProcField("/proc/cpuinfo", key)
+}
+
+// readOSReleaseField parses /etc/os-release for the given key. Values
+// are typically double-quoted; quotes are stripped.
+func readOSReleaseField(key string) (string, bool) {
+	data, derr := os.ReadFile("/etc/os-release")
+	if derr != nil {
+		return "", false
+	}
+	prefix := key + "="
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(line, prefix); ok {
+			rest = strings.Trim(rest, "\"")
+			return strings.TrimSpace(rest), true
+		}
+	}
+	return "", false
 }

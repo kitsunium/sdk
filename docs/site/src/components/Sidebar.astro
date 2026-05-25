@@ -1,0 +1,133 @@
+---
+// Sidebar nav — 100% derived from the content collection. Group
+// titles + per-page labels + the services list all come from
+// page-catalog.mjs (shared with Search.astro). Adding a new page
+// under src/content/docs/<m>/<r>/ surfaces it on the next build
+// without touching this component.
+import { getCollection } from "astro:content";
+import Brand from "./Brand.astro";
+import Search from "./Search.astro";
+import ThemeToggle from "./ThemeToggle.astro";
+import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+import { buildCatalog } from "../../scripts/lib/page-catalog.mjs";
+
+interface Release {
+  version: string;
+  label: string;
+  default: boolean;
+}
+interface Version {
+  major: string;
+  default: boolean;
+  releases: Release[];
+}
+
+interface Props {
+  currentPath: string;
+}
+const { currentPath } = Astro.props;
+
+let versions: Version[] = [];
+try {
+  versions = ((await import("../data/versions.json")).default as Version[]) ?? [];
+} catch {
+  versions = [];
+}
+
+//: URLs are /<release>/<major>/<page>. Release is anything non-empty
+//: that's NOT a vN major (matches "local" plus future semver tags
+//: like "v0.1.0", "v1.2.3"); major is the v\d+ slot.
+const m = currentPath.match(/^\/([^/]+)\/(v\d+)(?:\/|$)/);
+const fallback = findDefaults(versions);
+const currentRelease = m?.[1] ?? fallback.release;
+const currentMajor = m?.[2] ?? fallback.major;
+
+const base = `/${currentRelease}/${currentMajor}`;
+const root = `${currentRelease}/${currentMajor}`;
+
+let entries: Awaited<ReturnType<typeof getCollection>> = [];
+try {
+  entries = await getCollection("docs", e => e.id === root || e.id.startsWith(`${root}/`));
+} catch { /* collection empty in bootstrap */ }
+
+//: same auto-discovery + categorisation as Search.astro — single
+//: source of truth lives in scripts/lib/page-catalog.mjs.
+const sections = buildCatalog(entries as any, root, base);
+
+//: footer external links — derived from build-info.repoUrl so the
+//: sidebar follows whoever owns the SDK without code touch.
+interface BuildInfo { repoUrl?: string | null }
+let build: BuildInfo = {};
+try {
+  build = ((await import("../data/build-info.json")).default as BuildInfo) ?? {};
+} catch { /* prebuild not run yet */ }
+const repoUrl = build.repoUrl ?? "";
+//: pkg.go.dev URL = "pkg.go.dev/" + "<host>/<owner>/<repo>".
+//: Derive from repoUrl host+path (works for github.com, gitlab.com,
+//: any VCS hoster pkg.go.dev recognises).
+//: normalise every remote shape to "<host>/<owner>/<repo>": scp-style
+//: (git@host:owner/repo), ssh:// , http(s):// , and a trailing .git — so the
+//: pkg.go.dev link holds regardless of how `origin` is configured.
+const repoPath = repoUrl
+  .replace(/^git@([^:]+):/, "$1/")
+  .replace(/^ssh:\/\/git@([^/]+)\//, "$1/")
+  .replace(/^https?:\/\//, "")
+  .replace(/\.git$/, "")
+  .replace(/\/$/, "");
+const pkgGoDev = repoPath ? `https://pkg.go.dev/${repoPath}` : "";
+
+function isActive(href: string): boolean {
+  const a = href.replace(/\/$/, "");
+  const b = currentPath.replace(/\/$/, "");
+  return a === b;
+}
+---
+
+<aside class="sidebar" aria-label="Site navigation">
+  <div class="sidebar-inner">
+    <Brand currentPath={currentPath} />
+    <Search />
+
+    {
+      sections.map((section) => (
+        <nav class="nav-section">
+          <h3>{section.group}</h3>
+          <ul>
+            {section.items.map((item) => (
+              <li>
+                <a href={item.href} class={isActive(item.href) ? "active" : ""}>
+                  {item.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ))
+    }
+
+    <div class="sidebar-foot">
+      <ThemeToggle />
+      {/* Hidden RESERVED pages (ADRs / Benchmarks / Verification) are
+          consolidated into /<release>/<major>/contributors/. That page
+          plus the link below replace what used to be 3 main-nav entries
+          aimed at maintainers. Reasoning + survey: see
+          /workspace/.claude/contexts/docs-sidebar-rethink.md. */}
+      <a href={`${base}/contributors/`} class={isActive(`${base}/contributors/`) ? "active" : ""}>
+        For contributors ↗
+      </a>
+      {repoUrl && (
+        <a href={repoUrl} target="_blank" rel="noopener">
+          Repository ↗
+        </a>
+      )}
+      {pkgGoDev && (
+        <a href={pkgGoDev} target="_blank" rel="noopener">
+          pkg.go.dev ↗
+        </a>
+      )}
+      <a href="/rss.xml" rel="alternate">
+        RSS feed ↗
+      </a>
+    </div>
+  </div>
+</aside>

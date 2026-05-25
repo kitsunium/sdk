@@ -84,6 +84,5 @@ Conversational initialization with **progressive context building**:
 | 4.8 | Feature bootstrap | Read ~/.claude/commands/init/templates.md |
 | 5.0 | Environment validation (parallel checks) | Read ~/.claude/commands/init/validate.md |
 | 6.0 | Final report | Read ~/.claude/commands/init/validate.md |
-| 7.0 | GrepAI calibration | Read ~/.claude/commands/init/validate.md |
 
 **To execute a phase**, read the corresponding module file for full instructions.

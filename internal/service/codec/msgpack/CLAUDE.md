@@ -14,7 +14,7 @@ MessagePack codec wrapping `github.com/vmihailenco/msgpack/v5`. Streaming Encode
 | `Extensions()`   | `.msgpack`, `.mpk` |
 | Constructor      | `New() codec.Codec` |
 | Streaming        | yes (`NewEncoder`, `NewDecoder`) |
-| Appender         | not implemented |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — pooled encoder + buffer (UseCompactInts), then appends onto dst |
 
 ## Error codes (range `0.3.7.*`)
 
@@ -28,6 +28,14 @@ MessagePack codec wrapping `github.com/vmihailenco/msgpack/v5`. Streaming Encode
 - **Byte cap on `Unmarshal`**: `maxMsgPackBytes = 10 << 20` (10 MiB). vmihailenco/msgpack v5 exposes no per-decoder caps for array / map / nesting depth; a MessagePack value with a huge declared length pre-allocates that many slots before any consistency check, so size-limiting the input buffer is the primary defence against memory-exhaustion DoS (CWE-400 / CWE-1284).
 - Over-cap rejection carries diagnostic `Fields`: `len`, `cap` — surfaced via `errs.Int(...)`.
 - Stateless singleton.
+
+## Performance (lib-bound)
+
+vmihailenco/msgpack/v5 performs its reflect walk internally. The realised
+wins are GetEncoder/GetDecoder reuse from the library's own pools,
+`UseCompactInts(true)` for narrower int wire forms, and encoding into a
+pooled buffer + reader (now `internal/core/codec/scratch`). The library's
+reflect walk is not reachable from this layer; do not re-add a local pool.
 
 ## Verification
 

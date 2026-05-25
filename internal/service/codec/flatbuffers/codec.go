@@ -12,6 +12,7 @@
 package flatbuffers
 
 import (
+	"encoding/binary"
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -30,6 +31,18 @@ const flatBuffersHeaderBytes int = 4
 // that legitimately need bigger buffers can bypass the codec and feed the
 // generated accessors directly.
 const maxFlatBuffersBytes int = 64 << 20
+
+// PromotionMagic is the synthetic little-endian uint32 header stamped by
+// the facade promotion path in pkg/v1/codec/promote.go when it wraps a
+// non-FlatBuffer value in flatbuffers-shaped bytes. 0x80000001 is a
+// deliberately invalid root offset (a real root offset points INTO the
+// buffer, never past it AND never the high bit set), so a flatc-
+// generated reader fails predictably on these bytes — only the SDK
+// itself recognises and unwraps them.
+//
+// Exported so promote.go can stamp the same value without a duplicated
+// magic-number constant.
+const PromotionMagic uint32 = 0x80000001
 
 // Package-level state: the codec singleton plus the hoisted MIME /
 // extension tables.
@@ -74,8 +87,19 @@ func (*flatbuffersCodec) Extensions() []string {
 
 // Marshal resolves v to its already-encoded FlatBuffer bytes and returns
 // them verbatim. No copy is performed in the happy path; the caller owns
-// the returned slice.
+// the returned slice. Promotion-marked bytes (header == PromotionMagic)
+// skip the full validation step — we just produced them in promote.go
+// so re-checking the size + header is wasted work on the hot path.
 func (*flatbuffersCodec) Marshal(v any) (encoded []byte, err error) {
+	//: promotion-sentinel fast-path — recognise our own wrapper bytes
+	//: and skip resolveSourceBytes + validateBuffer (size cap still
+	//: applies via the comparison below).
+	if b, ok := v.([]byte); ok && len(b) >= flatBuffersHeaderBytes &&
+		binary.LittleEndian.Uint32(b) == PromotionMagic &&
+		len(b) <= maxFlatBuffersBytes {
+		//: caller bytes verbatim — we own the lifetime via promote.go.
+		return b, nil
+	}
 	//: extract a payload via the shared resolver so Marshal/Append agree.
 	src, rerr := resolveSourceBytes(v)
 	//: surface the typed rejection immediately.

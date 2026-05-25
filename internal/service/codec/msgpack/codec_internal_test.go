@@ -170,3 +170,48 @@ func Test_msgpackCodec_NewDecoder(t *testing.T) {
 		})
 	}
 }
+
+// Test_msgpackCodec_Append covers the Appender extension.
+func Test_msgpackCodec_Append(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		dst     []byte
+		v       any
+		wantErr bool
+	}
+	tests := []tc{
+		{"happy-empty-dst", nil, map[string]int{"a": 1}, false},
+		{"happy-prefix-dst", []byte("PRE"), "hello", false},
+		{"reject-channel", nil, make(chan int), true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := New()
+		ap, ok := c.(interface {
+			Append([]byte, any) ([]byte, error)
+		})
+		if !ok {
+			t.Fatalf("%s: msgpackCodec does not implement Appender", tc.name)
+		}
+		got, err := ap.Append(tc.dst, tc.v)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("%s: want error, got nil", tc.name)
+			}
+			if len(got) != len(tc.dst) {
+				t.Errorf("%s: dst len changed on error", tc.name)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		if len(tc.dst) > 0 && string(got[:len(tc.dst)]) != string(tc.dst) {
+			t.Errorf("%s: prefix lost", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

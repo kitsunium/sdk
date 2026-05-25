@@ -604,7 +604,7 @@ unset _legacy_rtk _wrapper_rtk _tmp_settings
 
 # Migration: remove deprecated MCP servers from runtime mcp.json
 if [ -f "$HOME/.claude/mcp.json" ] && command -v jq &>/dev/null; then
-    for server in codacy taskmaster grepai; do
+    for server in codacy taskmaster; do
         if jq -e ".mcpServers.$server" "$HOME/.claude/mcp.json" &>/dev/null; then
             jq "del(.mcpServers.$server)" "$HOME/.claude/mcp.json" > "$HOME/.claude/mcp.json.tmp" && \
                 mv "$HOME/.claude/mcp.json.tmp" "$HOME/.claude/mcp.json"
@@ -615,20 +615,6 @@ fi
 
 # Migration: remove .taskmaster/ directory
 [ -d ".taskmaster" ] && rm -rf ".taskmaster" && echo "  Removed deprecated .taskmaster/"
-
-# Migration (v2026.04): legacy grepai/ollama removal — high CPU/RAM cost, replaced by RTK
-if [ -f ".devcontainer/images/grepai.config.yaml" ]; then
-    rm -f ".devcontainer/images/grepai.config.yaml"
-    echo "  Removed deprecated grepai.config.yaml"
-fi
-if [ -d ".grepai" ]; then
-    rm -rf ".grepai"
-    echo "  Removed deprecated .grepai/ workspace index"
-fi
-# Kill any leftover grepai daemon (transitive — image rebuild also handles this)
-pkill -f 'grepai watch' 2>/dev/null || true
-pkill -f 'grepai mcp-serve' 2>/dev/null || true
-rm -f /tmp/.grepai-init.pid /tmp/grepai-watchdog.pid 2>/dev/null || true
 ```
 
 ### 5.7: Update devcontainer version file

@@ -151,7 +151,16 @@ plans/
 # Claude Code session logs (context recovery)
 # ============================================
 .claude/logs/
-docs/site/
+# docs/site/ source IS tracked (Astro components, layouts, pages, scripts);
+# only the build artifacts and the auto-generated content tree stay out.
+# See ADR 0007 §5 (sync-versions.mjs writes src/data + src/content/docs/<release>/<major>/).
+docs/site/node_modules/
+docs/site/dist/
+docs/site/.astro/
+docs/site/src/data/versions.json
+docs/site/src/data/build-info.json
+docs/site/public/_search/
+docs/site/src/content/docs/*/
 core.*
 .taskmaster/
 
@@ -161,3 +170,8 @@ core.*
 /bazel-testlogs
 /bazel-workspace
 /bazel-sdk
+
+# pprof bench profiles (captured by `make profile WAVE=<slug>`).
+# Local artifacts only — bench.txt summaries are cited inline in
+# commit messages, raw .out files stay per-machine.
+/.bench/

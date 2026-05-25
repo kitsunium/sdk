@@ -1,0 +1,58 @@
+---
+// Brand block — logo + literal "SDK". The API dropdown used to live
+// here but moved to the Header bar (left side, next to the build
+// date / branch) so all version controls share one location.
+interface Props {
+  currentPath: string;
+}
+
+const { currentPath } = Astro.props;
+
+let versions: Array<{ major: string; default: boolean; releases: { version: string; default: boolean }[] }> = [];
+try {
+  versions = (await import("../data/versions.json")).default ?? [];
+} catch {
+  versions = [];
+}
+const def = versions.find(v => v?.default) ?? versions[0];
+const defRelease = def?.releases?.find(r => r.default) ?? def?.releases?.[0];
+//: URL layout is /<release>/<major>/... — release first.
+const homeHref = def && defRelease ? `/${defRelease.version}/${def.major}/` : "/";
+---
+
+<div class="brand-block">
+  <a href={homeHref} class="brand" aria-label="kitsunium SDK — home">
+    <img
+      src="/brand/kitsunium.jpg"
+      alt="Kitsunium"
+      width="28"
+      height="28"
+      class="brand-mark-img"
+    />
+    <span class="brand-text">SDK</span>
+  </a>
+</div>
+
+<style>
+  .brand-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: stretch;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    color: inherit;
+  }
+  .brand-mark-img {
+    border-radius: 6px;
+    display: block;
+  }
+  .brand-text {
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+</style>

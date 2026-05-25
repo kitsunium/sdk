@@ -55,7 +55,7 @@ Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf 
   1. Every `errs.Define` Public is a string literal (no `fmt.Sprintf`, no concat).
   2. Reason == `screamingSnake(varName)` (`WriterNil` ↔ `"WRITER_NIL"`).
   3. Code identifiers are unique across the SDK.
-  Failure fails `bazel test //internal/kernel/errs:errs_test` (alias: `make sdk-errs-audit`).
+  Failure fails `bazel test //internal/kernel/errs:errs_test` (also run by `make test`).
 - **Meta-codes are documentary.** 0.0.0.1..6 (`CodeInvalidCode / Reason / Public / Private / CodeString / WrapParams`) appear in Define panic messages and in `newValidationError` outputs; they are NEVER returned to callers as sentinel `*Error` values.
 
 ## How to declare a sentinel (emitter packages)

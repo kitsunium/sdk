@@ -1,0 +1,61 @@
+---
+// PrevNext — sequential-reading nav. Builds the flat ordered list of
+// pages from the same catalog Sidebar.astro uses, finds the current
+// page, and exposes the neighbours. Hidden for pages absent from the
+// catalog (deep ADR sub-pages).
+import { getCollection } from "astro:content";
+import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+import { buildCatalog, flattenCatalog } from "../../scripts/lib/page-catalog.mjs";
+
+interface Props {
+  currentPath: string;
+}
+const { currentPath } = Astro.props;
+
+interface VersionEntry {
+  major: string;
+  default: boolean;
+  releases: { version: string; default: boolean }[];
+}
+let versions: VersionEntry[] = [];
+try {
+  versions = ((await import("../data/versions.json")).default as VersionEntry[]) ?? [];
+} catch { /* bootstrap */ }
+
+//: URL layout: /<release>/<major>/... (see Sidebar.astro for the why)
+const m = currentPath.match(/^\/([^/]+)\/(v\d+)(?:\/|$)/);
+const fallback = findDefaults(versions);
+const currentRelease = m?.[1] ?? fallback.release;
+const currentMajor = m?.[2] ?? fallback.major;
+const base = `/${currentRelease}/${currentMajor}`;
+const root = `${currentRelease}/${currentMajor}`;
+
+let entries: Awaited<ReturnType<typeof getCollection>> = [];
+try {
+  entries = await getCollection("docs", e => e.id === root || e.id.startsWith(`${root}/`));
+} catch { /* collection empty */ }
+
+const catalog = buildCatalog(entries as any, root, base);
+const flat = flattenCatalog(catalog);
+const norm = (p: string) => p.replace(/\/+$/, "");
+const idx = flat.findIndex(it => norm(it.href) === norm(currentPath));
+const prev = idx > 0 ? flat[idx - 1] : null;
+const next = idx >= 0 && idx < flat.length - 1 ? flat[idx + 1] : null;
+---
+
+{(prev || next) && (
+  <nav class="prev-next" aria-label="Sequential page navigation">
+    {prev ? (
+      <a class="pn-link pn-prev" href={prev.href} rel="prev">
+        <span class="pn-dir">← Previous</span>
+        <span class="pn-label">{prev.label}</span>
+      </a>
+    ) : <span class="pn-spacer" />}
+    {next ? (
+      <a class="pn-link pn-next" href={next.href} rel="next">
+        <span class="pn-dir">Next →</span>
+        <span class="pn-label">{next.label}</span>
+      </a>
+    ) : <span class="pn-spacer" />}
+  </nav>
+)}

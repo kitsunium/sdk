@@ -4,23 +4,17 @@
 ## 1.0 MCP-FIRST (MANDATORY)
 
 Use MCP tools BEFORE CLI fallbacks:
-- `mcp__grepai__*` before Grep
 - `mcp__github__*` before `gh`
 - `mcp__gitlab__*` before GitLab API
 - `mcp__playwright__*` before npx playwright (when browser feature enabled)
 
 MCP has pre-configured auth. NEVER ask for tokens if MCP is configured.
 
-## 2.0 GREPAI-FIRST (MANDATORY)
+## 2.0 SEARCH (MANDATORY)
 
-| Need | Tool |
-|------|------|
-| Semantic search | `grepai_search` |
-| Find callers | `grepai_trace_callers` |
-| Exact string | Grep (fallback) |
-| Regex pattern | Grep (fallback) |
-
-Fallback to Grep only if: grepai returns 0 results, exact match needed, or MCP unavailable.
+Use `Grep` for exact strings and regex; use the `Explore` agent for open-ended
+codebase searches that span multiple files. Avoid semantic-search shortcuts
+that aren't in this list.
 
 ## 3.0 ZSH-FIRST (MANDATORY)
 

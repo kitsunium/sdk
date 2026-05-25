@@ -1,0 +1,72 @@
+---
+// Dynamic route for the entire versioned documentation tree.
+// URLs are /<release>/<major>/<slug?> — release is the time-axis
+// (e.g. local / v0.1.0), major is the API-surface axis (v1 / v2).
+// Every page is fed by a markdown file the prebuild script
+// materialised from the real source repository (no hand-authored
+// prose in this Astro tree).
+import { getCollection, render } from "astro:content";
+import Default from "../../../layouts/Default.astro";
+import WhatsNew from "../../../components/WhatsNew.astro";
+
+export async function getStaticPaths() {
+  const all = await getCollection("docs");
+  return all.map(entry => {
+    //: entry.id (Astro 5 glob loader) looks like "local/v1/index",
+    //: "local/v1/codec", "local/v1/adr/0001-foo". First two segments
+    //: are the release + major; everything else is the page slug.
+    const segments = entry.id.split("/");
+    const release = segments[0];
+    const major = segments[1];
+    const rest = segments.slice(2).join("/");
+    const slug = rest === "" || rest === "index" ? undefined : rest;
+    return {
+      params: { release, major, slug },
+      props: { entry },
+    };
+  });
+}
+
+const { entry } = Astro.props;
+const { Content, headings } = await render(entry);
+//: Title precedence:
+//:   1. explicit YAML frontmatter `title:` (lets sync-versions hand-stamp it)
+//:   2. first H1 in the markdown body (e.g. gomarkdoc's "# codec", or
+//:      pkg/v1/CLAUDE.md's "# pkg/v1/")
+//:   3. last path segment as a deliberate-fallback (only fires if a
+//:      page has neither — should not happen in practice)
+//: The slug fallback used to win for landing pages because their
+//: id is "v1/local" (Astro strips trailing /index), giving the
+//: useless "local" h1 — fixed by reading the first H1 here.
+const firstH1 = (headings ?? []).find(h => h.depth === 1);
+const slugFallback = entry.id.split("/").slice(-1)[0] ?? "Docs";
+const title = entry.data?.title ?? firstH1?.text ?? slugFallback;
+const description = entry.data?.description;
+//: `source` is repo-relative path to the original file the docs page
+//: was materialised from. sync-versions writes it into frontmatter
+//: (e.g. pkg/v1/codec/README.md). Default.astro feeds it to the
+//: EditLink component so readers can deep-link to GitHub.
+const source = (entry.data as { source?: string | null } | undefined)?.source ?? null;
+//: TOC shows H2 only by default. For dense gomarkdoc pages (logger
+//: with 18 H2 + 12 H3) showing every H3 would flood the rail. H3+
+//: are reachable via in-page scroll / fragment links from the body.
+const tocHeadings = (headings ?? []).filter(h => h.depth === 2);
+
+//: Home page detection — Astro strips trailing /index so the landing
+//: page's entry.id is exactly "<release>/<major>". On that page we
+//: inject the <WhatsNew /> banner ABOVE the article (returning users
+//: see recent changes immediately; drive-by visitors get the README
+//: pitch right under the banner).
+const segments = entry.id.split("/");
+const isHome = segments.length === 2;
+const release = segments[0];
+const major = segments[1];
+const changelogHref = `/${release}/${major}/changelog/`;
+---
+
+<Default title={title} description={description} headings={tocHeadings} source={source}>
+  {isHome && <WhatsNew release={release} major={major} changelogHref={changelogHref} />}
+  <article class="md-body md-body--strip-first-h1">
+    <Content />
+  </article>
+</Default>

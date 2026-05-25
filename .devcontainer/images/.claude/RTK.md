@@ -41,7 +41,7 @@ The agent never sees the rewrite — only the compressed output.
 
 ## Commands NOT Rewritten (pass-through)
 
-- `echo`, `make`, `terraform`, `helm`, `grepai`
+- `echo`, `make`, `terraform`, `helm`
 - Commands already prefixed with `rtk`
 - Heredocs (`<<`)
 - Unrecognized commands

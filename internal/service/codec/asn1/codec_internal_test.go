@@ -129,3 +129,53 @@ func Test_asn1Codec_Unmarshal(t *testing.T) {
 		})
 	}
 }
+
+// Test_asn1Codec_Append covers the Appender extension via the table-
+// driven runCase pattern: forward direction (every case appends
+// correctly OR returns dst untouched on error) + reverse direction
+// (encoded prefix is preserved on success).
+func Test_asn1Codec_Append(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		dst     []byte
+		v       any
+		wantErr bool
+	}
+	tests := []tc{
+		{"happy-int", nil, 42, false},
+		{"happy-prefix", []byte("PRE"), 7, false},
+		{"reject-channel", []byte("PRE"), make(chan int), true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := New()
+		ap, ok := c.(interface {
+			Append([]byte, any) ([]byte, error)
+		})
+		if !ok {
+			t.Fatalf("%s: asn1Codec does not implement Appender", tc.name)
+		}
+		got, err := ap.Append(tc.dst, tc.v)
+		//: forward direction: error → dst untouched (len match).
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("%s: want error, got nil", tc.name)
+			}
+			if len(got) != len(tc.dst) {
+				t.Errorf("%s: dst len changed on error: got=%d want=%d", tc.name, len(got), len(tc.dst))
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		//: reverse direction: prefix preserved on success.
+		if len(tc.dst) > 0 && string(got[:len(tc.dst)]) != string(tc.dst) {
+			t.Errorf("%s: prefix lost; got=%q", tc.name, got[:len(tc.dst)])
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

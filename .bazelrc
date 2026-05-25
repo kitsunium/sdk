@@ -46,3 +46,13 @@ build:ci --config=race
 test:ci  --config=race
 test:ci  --test_output=errors
 test:ci  --flaky_test_attempts=1
+
+# Alloc-budget lane — runs the per-codec `//go:build !race` AllocsPerRun
+# regression tests. They are excluded from the default race build because
+# testing.AllocsPerRun miscounts by +1 under -race (the detector's own
+# bookkeeping), so the budgets are only meaningful with race OFF. KTN
+# forbids t.Skip, so compile-time exclusion via the build tag is the only
+# clean gate. CI-only (a second, race-off pass); see bazel-ci.yml.
+build:alloc --@rules_go//go/config:race=false
+test:alloc  --@rules_go//go/config:race=false
+test:alloc  --test_output=errors

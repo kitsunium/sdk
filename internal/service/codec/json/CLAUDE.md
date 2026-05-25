@@ -29,6 +29,15 @@ JSON codec wrapping stdlib `encoding/json`. Reference implementation for the reg
 - `Append` delegates to `Marshal` so the wrap/error contract has a single source; on failure the original `dst` is returned untouched and the wrapped error surfaces with `CodeJSONMarshalFailed`.
 - Streaming encoder/decoder wrap the stdlib types only to bridge the `core/codec.Encoder.Close` and `core/codec.Decoder.More` shape.
 
+## Performance (lib-bound)
+
+`encoding/json`'s reflect walk and `typeFields` cache are internal to the
+stdlib — unreachable from this layer. The realised wins are the
+`json.RawMessage` pass-through fast-path (Marshal + Append skip the reflect
+round-trip when the bytes already exist) and Append encoding into a pooled
+buffer (now `internal/core/codec/scratch`). `encoding/json/v2` (GOEXPERIMENT)
+would be the only further lever and is ADR-gated. Do not re-add a local pool.
+
 ## Verification
 
 ```

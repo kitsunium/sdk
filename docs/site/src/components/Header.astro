@@ -1,0 +1,130 @@
+---
+// Top header band — spans the full content column. Build provenance
+// (date + branch) sits on the left; the release pill on the right
+// surfaces the build's commit SHA + the active release version
+// (or "local") in a single coloured pill. Clicking the pill opens
+// the release dropdown.
+import ApiDropdown from "./ApiDropdown.astro";
+import ReleaseDropdown from "./ReleaseDropdown.astro";
+import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+
+interface Release {
+  version: string;
+  label: string;
+  default: boolean;
+  publishedAt: string | null;
+}
+interface Version {
+  major: string;
+  default: boolean;
+  eol: boolean;
+  releases: Release[];
+}
+interface BuildInfo {
+  commitShort: string | null;
+  commitFull: string | null;
+  commitDate: string | null;
+  branch: string | null;
+  dirty: boolean;
+  builtAt: string | null;
+  repoUrl: string | null;
+}
+
+interface Props {
+  currentPath: string;
+}
+
+let versions: Version[] = [];
+try {
+  versions = ((await import("../data/versions.json")).default as Version[]) ?? [];
+} catch { /* bootstrap mode */ }
+
+let build: BuildInfo = {
+  commitShort: null, commitFull: null, commitDate: null,
+  branch: null, dirty: false, builtAt: null, repoUrl: null,
+};
+try {
+  build = ((await import("../data/build-info.json")).default as BuildInfo) ?? build;
+} catch { /* prebuild not run yet */ }
+
+const { currentPath } = Astro.props;
+//: URL layout: /<release>/<major>/... — release first (snapshot in
+//: time), major second (API surface).
+const m = currentPath.match(/^\/([^/]+)\/(v\d+)(?:\/|$)/);
+const fallback = findDefaults(versions);
+const currentRelease = m?.[1] ?? fallback.release;
+const currentMajor = m?.[2] ?? fallback.major;
+
+const commitDay = build.commitDate ? build.commitDate.slice(0, 10) : null;
+const commitHref = build.commitFull && build.repoUrl
+  ? `${build.repoUrl}/commit/${build.commitFull}`
+  : null;
+---
+
+<header class="page-meta" role="banner">
+  <div class="page-meta-inner">
+    <div class="left-group">
+      <ApiDropdown currentMajor={currentMajor} versions={versions} />
+      <span class="build-coord" aria-label="Build provenance">
+        {commitDay && (
+          <time class="build-date" datetime={build.commitDate ?? undefined}>{commitDay}</time>
+        )}
+        {build.branch && build.branch !== "main" && (
+          <>
+            <span class="sep" aria-hidden="true">·</span>
+            <span class="build-branch" title="git branch">{build.branch}</span>
+          </>
+        )}
+      </span>
+    </div>
+    <ReleaseDropdown
+      currentMajor={currentMajor}
+      currentRelease={currentRelease}
+      versions={versions}
+      buildSha={build.commitShort}
+      buildDirty={build.dirty}
+    />
+  </div>
+</header>
+
+<style>
+  /* Full-width band — no max-width / centring; takes whatever the
+     content column gives it. Subtle bottom rule to detach it from
+     the page <h1>. */
+  .page-meta {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.82rem;
+  }
+  .page-meta-inner {
+    width: 100%;
+    padding: 0.45rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    box-sizing: border-box;
+  }
+  .left-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .build-coord {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    opacity: 0.7;
+    letter-spacing: 0.02em;
+  }
+  .sep { opacity: 0.4; }
+  .build-date { opacity: 0.95; }
+  .build-branch {
+    padding: 0 0.35rem;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.06);
+  }
+</style>

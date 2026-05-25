@@ -1,0 +1,642 @@
+---
+// Search — Pagefind-powered full-text search over the static site.
+// Pagefind indexes the built HTML (post-Astro-build), so the entire
+// versioned tree (every /<major>/<release>/...) is searchable without
+// any server. The UI script is fetched lazily on first keystroke.
+//
+// Trigger: click the input OR press ⌘K / Ctrl+K anywhere on the page.
+// The popover opens, fetches /_pagefind/pagefind-ui.{js,css} on demand,
+// and renders results inline. Closes on Escape or click-outside.
+//
+// Empty-state suggestions: when the search input is empty, the modal
+// shows a curated "Quick links" panel pointing at the current major's
+// landing, services, ADR index, etc. As soon as the user types, the
+// quick-links panel hides and Pagefind results take over.
+//
+// On `npm run dev` Pagefind has not indexed yet, so the input shows a
+// "search available in production build" hint and the popover stays
+// disabled — no console errors, just a graceful degradation.
+import { getCollection } from "astro:content";
+import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+import { buildCatalog } from "../../scripts/lib/page-catalog.mjs";
+
+interface VersionEntry {
+  major: string;
+  default: boolean;
+  releases: { version: string; default: boolean }[];
+}
+
+let versions: VersionEntry[] = [];
+try {
+  versions = (await import("../data/versions.json")).default ?? [];
+} catch { /* bootstrap */ }
+
+//: URL layout is /<release>/<major>/<page> — see Sidebar.astro for
+//: the rationale (release is time-axis, major is API surface).
+const { major, release } = findDefaults(versions);
+const base = `/${release}/${major}`;
+const root = `${release}/${major}`;
+
+let entries: Awaited<ReturnType<typeof getCollection>> = [];
+try {
+  entries = await getCollection("docs", e => e.id === root || e.id.startsWith(`${root}/`));
+} catch { /* collection empty in bootstrap */ }
+
+//: shared with Sidebar.astro — buildCatalog auto-discovers every
+//: top-level page under <major>/<release>/, categorises reserved
+//: slugs into Overview / Reference and routes everything else into
+//: "services" (the gomarkdoc-generated pkg/<m>/<sub>/README.md set).
+const quickLinks = buildCatalog(entries as any, root, base);
+---
+
+<div class="search" data-search>
+  <button type="button" class="search-trigger" aria-label="Open search (⌘K / Ctrl+K)">
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <circle cx="11" cy="11" r="7"></circle>
+      <path d="m21 21-4.3-4.3"></path>
+    </svg>
+    <span class="search-label">Search</span>
+    <kbd class="search-kbd" aria-hidden="true">⌘K</kbd>
+  </button>
+
+  <div class="search-overlay" hidden role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-panel">
+      <div id="pagefind-search"></div>
+      <section class="symbol-results" data-symbol-results hidden aria-label="Symbol matches">
+        <h4>Symbols <span class="result-count" data-symbol-count></span></h4>
+        <ul data-symbol-list></ul>
+      </section>
+      <div class="search-suggestions" data-suggestions>
+        <p class="suggestions-hint">Start typing to search · or jump to:</p>
+        {quickLinks.map(group => (
+          <section class="suggestion-group">
+            <h4>{group.group}</h4>
+            <ul>
+              {group.items.map(item => (
+                <li>
+                  <a href={item.href}>
+                    <span class="suggestion-label">{item.label}</span>
+                    {item.hint && <span class="suggestion-hint">{item.hint}</span>}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+      <p class="search-fallback" hidden>
+        Search index unavailable. Run <code>npm run build</code> to generate
+        <code>/_pagefind/</code> — the indexer runs after Astro build.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Lazy-init the Pagefind UI on first open. Module + stylesheet are
+  // injected via <script type="module"> / <link> so the search payload
+  // (~50KB JS + the index chunks) only loads when the user actually
+  // triggers the search — no cost on cold page loads.
+  const PAGEFIND_JS = "/_pagefind/pagefind-ui.js";
+  const PAGEFIND_CSS = "/_pagefind/pagefind-ui.css";
+  let pagefindReady = false;
+  let pagefindFailed = false;
+
+  //: Symbol search runs in parallel with Pagefind, sharing the same
+  //: input element. MiniSearch is bundled (6 KB) so the index is
+  //: ready as soon as symbols-<major>.json downloads (~one HTTP req).
+  type SymbolEntry = {
+    kind: "func" | "type" | "method" | "const" | "var";
+    name: string;
+    qualified: string;
+    package: string;
+    packageShort: string;
+    signature: string;
+    doc?: string;
+    url: string;
+    receiver?: string;
+    deprecated?: boolean;
+    sourceUrl?: string;
+  };
+  let symbolSearch: any = null;     // MiniSearch instance
+  let symbolEntries: Map<string, SymbolEntry> | null = null;
+  let symbolLoadPromise: Promise<boolean> | null = null;
+
+  //: Pull the active major from the URL so we load the right index.
+  //: URL shape is /<release>/<major>/... — second segment is v1/v2/…
+  function activeMajor(): string {
+    const m = window.location.pathname.match(/^\/[^/]+\/(v\d+)\//);
+    return m?.[1] ?? "v1";
+  }
+
+  async function ensureSymbolIndex(): Promise<boolean> {
+    if (symbolSearch) return true;
+    if (symbolLoadPromise) return symbolLoadPromise;
+    symbolLoadPromise = (async () => {
+      try {
+        const [{ default: MiniSearch }, payload] = await Promise.all([
+          import("minisearch"),
+          fetch(`/_search/symbols-${activeMajor()}.json`).then(r => {
+            if (!r.ok) throw new Error(`symbols ${r.status}`);
+            return r.json() as Promise<{ symbols: SymbolEntry[] }>;
+          }),
+        ]);
+        const ms = new MiniSearch({
+          //: id field MUST be unique; package+qualified guards against
+          //: duplicate basenames across packages.
+          idField: "id",
+          fields: ["name", "qualified", "doc", "signature", "packageShort"],
+          storeFields: ["kind", "name", "qualified", "package", "packageShort",
+                        "signature", "doc", "url", "receiver",
+                        "deprecated", "sourceUrl"],
+          searchOptions: {
+            //: heavy boost on name + qualified — what users type most.
+            boost: { name: 6, qualified: 4, packageShort: 2, signature: 1, doc: 1 },
+            fuzzy: 0.2,
+            prefix: true,
+            combineWith: "AND",
+          },
+        });
+        const docs = (payload.symbols ?? []).map((s, i) => ({
+          ...s,
+          id: `${s.package}#${s.kind}#${s.name}#${i}`,
+        }));
+        ms.addAll(docs);
+        symbolSearch = ms;
+        symbolEntries = new Map(docs.map(d => [d.id, d]));
+        return true;
+      } catch (err) {
+        console.warn("[search] symbol index unavailable:", err);
+        return false;
+      } finally {
+        symbolLoadPromise = null;
+      }
+    })();
+    return symbolLoadPromise;
+  }
+
+  const KIND_LABELS: Record<string, string> = {
+    func: "func", type: "type", method: "fn", const: "const", var: "var",
+  };
+
+  function renderSymbols(root: HTMLElement, query: string) {
+    const wrap = root.querySelector<HTMLElement>("[data-symbol-results]");
+    const list = root.querySelector<HTMLElement>("[data-symbol-list]");
+    const count = root.querySelector<HTMLElement>("[data-symbol-count]");
+    if (!wrap || !list || !count || !symbolSearch || !symbolEntries) return;
+    const q = query.trim();
+    if (q.length === 0) { wrap.hidden = true; list.innerHTML = ""; return; }
+    const hits = symbolSearch.search(q, { fuzzy: 0.2, prefix: true }).slice(0, 8);
+    if (hits.length === 0) { wrap.hidden = true; list.innerHTML = ""; return; }
+    list.innerHTML = hits.map((h: any) => {
+      const e = symbolEntries!.get(h.id);
+      if (!e) return "";
+      const docLine = e.doc ? `<span class="sym-doc">${escapeHtml(e.doc)}</span>` : "";
+      const deprecatedChip = e.deprecated
+        ? `<span class="sym-chip sym-chip--deprecated">Deprecated</span>`
+        : "";
+      //: Source link sits outside the anchor (separate <a>) so it
+      //: doesn't hijack a click on the row itself; CSS clicks
+      //: through with target=_blank.
+      const sourceLine = e.sourceUrl
+        ? `<a class="sym-source" href="${escapeHtml(e.sourceUrl)}" target="_blank" rel="noopener">Source ↗</a>`
+        : "";
+      return `
+        <li>
+          <a href="${escapeHtml(e.url)}" data-symbol-link>
+            <span class="sym-kind sym-kind--${e.kind}">${KIND_LABELS[e.kind] ?? e.kind}</span>
+            <span class="sym-name">${escapeHtml(e.qualified)}${deprecatedChip}</span>
+            <span class="sym-sig">${escapeHtml(e.signature)}</span>
+            ${docLine}
+            ${sourceLine}
+          </a>
+        </li>`;
+    }).join("");
+    count.textContent = `(${hits.length})`;
+    wrap.hidden = false;
+  }
+
+  function escapeHtml(s: string): string {
+    return s.replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]!);
+  }
+
+  async function ensurePagefind(panel: HTMLElement): Promise<boolean> {
+    if (pagefindReady) return true;
+    if (pagefindFailed) return false;
+    try {
+      // Probe the script URL first so a 404 (dev mode) is a clean reject.
+      const head = await fetch(PAGEFIND_JS, { method: "HEAD" });
+      if (!head.ok) throw new Error("pagefind-ui.js not found");
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = PAGEFIND_CSS;
+      document.head.appendChild(link);
+      await import(/* @vite-ignore */ PAGEFIND_JS);
+      // PagefindUI is exposed on window when the module evaluates.
+      // @ts-ignore — module assigns globally per Pagefind convention.
+      new window.PagefindUI({
+        element: "#pagefind-search",
+        bundlePath: "/_pagefind/",
+        showSubResults: true,
+        showImages: false,
+        resetStyles: false,
+        excerptLength: 22,
+      });
+      pagefindReady = true;
+      return true;
+    } catch {
+      pagefindFailed = true;
+      const fb = panel.querySelector<HTMLElement>(".search-fallback");
+      if (fb) fb.hidden = false;
+      return false;
+    }
+  }
+
+  function initSearch(root: HTMLElement) {
+    const trigger = root.querySelector<HTMLButtonElement>(".search-trigger");
+    const overlay = root.querySelector<HTMLElement>(".search-overlay");
+    const panel = root.querySelector<HTMLElement>(".search-panel");
+    if (!trigger || !overlay || !panel) return;
+
+    const suggestions = panel.querySelector<HTMLElement>("[data-suggestions]");
+    //: hide quick-links the moment the user starts typing; bring
+    //: them back when the input goes empty again (no extra fetch).
+    //: ALSO route the same query into the MiniSearch symbol panel so
+    //: both indexes update together from a single keystroke.
+    const watchInput = () => {
+      const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
+      if (!input || !suggestions) return;
+      let symbolBootstrapped = false;
+      const sync = async () => {
+        const q = input.value.trim();
+        suggestions.hidden = q.length > 0;
+        if (q.length > 0 && !symbolBootstrapped) {
+          symbolBootstrapped = true;
+          await ensureSymbolIndex();
+        }
+        renderSymbols(panel, q);
+      };
+      input.addEventListener("input", sync);
+      sync();
+    };
+    const open = async () => {
+      overlay.hidden = false;
+      document.body.style.overflow = "hidden";
+      await ensurePagefind(panel);
+      // Focus the Pagefind UI input once the script has rendered it.
+      requestAnimationFrame(() => {
+        const input = panel.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
+        input?.focus();
+        watchInput();
+      });
+    };
+    const close = () => {
+      overlay.hidden = true;
+      document.body.style.overflow = "";
+      if (suggestions) suggestions.hidden = false;
+      trigger.focus();
+    };
+
+    //: Focus-trap — keep Tab/Shift+Tab cycling INSIDE the modal until
+    //: it closes. WAI-ARIA dialog pattern (developer.mozilla.org →
+    //: Web/Accessibility/ARIA/Roles/dialog_role). Without this, Tab
+    //: leaks focus to the underlying page and the user can't see
+    //: where it went (overlay hides the scroll).
+    const focusableSelector =
+      'a[href], button:not([disabled]), input:not([disabled]), ' +
+      'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    function trapTab(e: KeyboardEvent) {
+      if (e.key !== "Tab" || overlay.hidden) return;
+      const focusables = Array.from(
+        panel.querySelectorAll<HTMLElement>(focusableSelector),
+      ).filter(el => !el.hasAttribute("hidden") && el.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+
+    trigger.addEventListener("click", open);
+    overlay.addEventListener("click", e => {
+      if (e.target === overlay) close();
+    });
+    document.addEventListener("keydown", e => {
+      const cmd = e.metaKey || e.ctrlKey;
+      if (cmd && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        overlay.hidden ? open() : close();
+        return;
+      }
+      if (e.key === "Escape" && !overlay.hidden) {
+        e.preventDefault();
+        close();
+        return;
+      }
+      trapTab(e);
+    });
+  }
+  document.querySelectorAll<HTMLElement>("[data-search]").forEach(initSearch);
+</script>
+
+<style>
+  /* Trigger pill — sits flush in the sidebar between brand and the
+     first nav section. Mimics the API/release pill aesthetic
+     (monospace, outlined) so the chrome reads as a coherent set. */
+  .search {
+    width: 100%;
+    margin-bottom: 0.75rem;
+  }
+  .search-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    padding: 0.35rem 0.6rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 80ms ease, border-color 80ms ease, color 80ms ease;
+  }
+  .search-trigger:hover,
+  .search-trigger:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.35);
+    color: #fff;
+    outline: none;
+  }
+  .search-label {
+    flex: 1;
+    letter-spacing: 0.02em;
+  }
+  .search-kbd {
+    padding: 0.05rem 0.35rem;
+    font-family: inherit;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+  }
+
+  /* Modal overlay — full-viewport dim with the search panel centred. */
+  .search-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 4rem 1rem 1rem;
+    z-index: 200;
+    backdrop-filter: blur(2px);
+  }
+  .search-overlay[hidden] { display: none; }
+  .search-panel {
+    width: min(640px, 100%);
+    max-height: calc(100vh - 5rem);
+    overflow-y: auto;
+    background: #1a1f24;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 0.5rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .search-fallback {
+    margin: 1rem;
+    padding: 0.75rem;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(240, 180, 0, 0.08);
+    border: 1px solid rgba(240, 180, 0, 0.3);
+    border-radius: 6px;
+  }
+  .search-fallback code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+  }
+
+  /* Symbol results — the rustdoc-style top-of-modal panel that lists
+     matching exported funcs / types / consts / methods straight from
+     the Go AST (tools/genindex → symbols-<major>.json). Hidden when
+     the query is empty so the empty-state suggestions show instead. */
+  .symbol-results {
+    padding: 0.25rem 0.5rem 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 0.25rem;
+  }
+  .symbol-results[hidden] { display: none; }
+  .symbol-results h4 {
+    margin: 0.55rem 0.5rem 0.4rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .symbol-results .result-count {
+    margin-left: 0.4rem;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 500;
+  }
+  .symbol-results ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .symbol-results li { margin: 0; }
+  .symbol-results a {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 0.6rem;
+    row-gap: 0.15rem;
+    align-items: baseline;
+    padding: 0.4rem 0.6rem;
+    color: rgba(255, 255, 255, 0.92);
+    text-decoration: none;
+    border-radius: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.83rem;
+  }
+  .symbol-results a:hover,
+  .symbol-results a:focus-visible {
+    background: rgba(46, 160, 67, 0.12);
+    outline: none;
+  }
+  .sym-kind {
+    grid-row: span 1;
+    grid-column: 1;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+    align-self: center;
+  }
+  .sym-kind--func   { background: rgba(46, 160, 67, 0.22);   color: #c5f6c5; }
+  .sym-kind--method { background: rgba(46, 160, 67, 0.18);   color: #b9e5b9; }
+  .sym-kind--type   { background: rgba(88, 128, 220, 0.22);  color: #cfdcff; }
+  .sym-kind--const  { background: rgba(220, 160, 60, 0.20);  color: #ffdfa8; }
+  .sym-kind--var    { background: rgba(180, 120, 200, 0.20); color: #e8c8ff; }
+  .sym-name {
+    grid-column: 2;
+    font-weight: 600;
+    color: #e2ffe2;
+  }
+  .sym-sig {
+    grid-column: 2;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sym-doc {
+    grid-column: 2;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-style: italic;
+  }
+
+  /* Empty-state suggestions — visible until the user types in the
+     Pagefind input. Three columns of curated quick links to the
+     current major+release's key pages. */
+  .search-suggestions { padding: 0.5rem 0.25rem 0.75rem; }
+  .search-suggestions[hidden] { display: none; }
+  .suggestions-hint {
+    margin: 0.25rem 0.75rem 0.65rem;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.55);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .suggestion-group { margin: 0 0 0.5rem; }
+  .suggestion-group h4 {
+    margin: 0.55rem 0.75rem 0.2rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .suggestion-group ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .suggestion-group li { margin: 0; }
+  .suggestion-group a {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.4rem 0.75rem;
+    color: rgba(255, 255, 255, 0.85);
+    text-decoration: none;
+    border-radius: 4px;
+  }
+  .suggestion-group a:hover,
+  .suggestion-group a:focus-visible {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    outline: none;
+  }
+  .suggestion-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.88rem;
+    font-weight: 600;
+    min-width: 7rem;
+  }
+  .suggestion-hint {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.82rem;
+  }
+
+  /* Pagefind UI overrides — the default theme is light-only and the
+     'clear' (×) button ships as a square slab. Tone it down + match
+     our dark surface. Selectors are :global because Astro scopes
+     component styles, but Pagefind injects its own DOM at runtime. */
+  :global(.pagefind-ui),
+  :global(.pagefind-ui__form),
+  :global(.pagefind-ui__results-area) {
+    --pagefind-ui-primary: #e2ffe2;
+    --pagefind-ui-text: rgba(255, 255, 255, 0.92);
+    --pagefind-ui-background: transparent;
+    --pagefind-ui-border: rgba(255, 255, 255, 0.18);
+    --pagefind-ui-tag: rgba(255, 255, 255, 0.08);
+    --pagefind-ui-border-width: 1px;
+    --pagefind-ui-border-radius: 6px;
+    --pagefind-ui-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  :global(.pagefind-ui__search-input) {
+    background: rgba(255, 255, 255, 0.04) !important;
+    color: var(--pagefind-ui-text) !important;
+    border-color: var(--pagefind-ui-border) !important;
+  }
+  :global(.pagefind-ui__search-input::placeholder) {
+    color: rgba(255, 255, 255, 0.45) !important;
+  }
+  :global(.pagefind-ui__search-input:focus) {
+    border-color: rgba(46, 160, 67, 0.6) !important;
+    box-shadow: 0 0 0 2px rgba(46, 160, 67, 0.2) !important;
+    outline: none !important;
+  }
+  /* Clear button restyle — the original ships as a heavy beige slab. */
+  :global(.pagefind-ui__search-clear) {
+    background: transparent !important;
+    color: rgba(255, 255, 255, 0.55) !important;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
+    padding: 0.25rem 0.5rem !important;
+    border-radius: 4px !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+  }
+  :global(.pagefind-ui__search-clear:hover),
+  :global(.pagefind-ui__search-clear:focus-visible) {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #fff !important;
+    border-color: rgba(255, 255, 255, 0.25) !important;
+    outline: none !important;
+  }
+  :global(.pagefind-ui__result-link) {
+    color: #cfe9ff !important;
+  }
+  :global(.pagefind-ui__result-excerpt),
+  :global(.pagefind-ui__message),
+  :global(.pagefind-ui__suppressed) {
+    color: rgba(255, 255, 255, 0.7) !important;
+  }
+  :global(mark) {
+    background: rgba(46, 160, 67, 0.35) !important;
+    color: #e2ffe2 !important;
+    padding: 0 2px;
+    border-radius: 2px;
+  }
+</style>

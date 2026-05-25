@@ -174,6 +174,31 @@ func Test_mustHardenedDecMode(t *testing.T) {
 	}
 }
 
+// Test_mustEncMode covers the reusable EncMode constructor: the
+// returned mode must be non-nil so every cborCodec.Marshal call hits
+// the cached resolver rather than rebuilding default EncOptions per
+// call. Defensive panic branch is unreachable for default options.
+func Test_mustEncMode(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"returns non-nil EncMode"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		mode := mustEncMode()
+		if mode == nil {
+			t.Errorf("%s: mustEncMode returned nil", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // Test_cborCodec_NewDecoder covers the streaming decoder constructor.
 func Test_cborCodec_NewDecoder(t *testing.T) {
 	t.Parallel()
@@ -193,5 +218,59 @@ func Test_cborCodec_NewDecoder(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
 		})
+	}
+}
+
+// Test_mustUserBufferEncMode covers the UserBufferEncMode constructor.
+func Test_mustUserBufferEncMode(t *testing.T) {
+	t.Parallel()
+	mode := mustUserBufferEncMode()
+	if mode == nil {
+		t.Errorf("mustUserBufferEncMode returned nil")
+	}
+}
+
+// Test_cborCodec_Append covers the Appender extension on the CBOR codec.
+func Test_cborCodec_Append(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		dst     []byte
+		v       any
+		wantErr bool
+	}
+	tests := []tc{
+		{"happy-empty-dst", nil, map[string]int{"a": 1}, false},
+		{"happy-prefix-dst", []byte("PRE"), "hello", false},
+		{"reject-channel", nil, make(chan int), true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := New()
+		ap, ok := c.(interface {
+			Append([]byte, any) ([]byte, error)
+		})
+		if !ok {
+			t.Fatalf("%s: cborCodec does not implement Appender", tc.name)
+		}
+		got, err := ap.Append(tc.dst, tc.v)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("%s: want error, got nil", tc.name)
+			}
+			if len(got) != len(tc.dst) {
+				t.Errorf("%s: dst len changed on error: got=%d want=%d", tc.name, len(got), len(tc.dst))
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected err=%v", tc.name, err)
+		}
+		if len(tc.dst) > 0 && string(got[:len(tc.dst)]) != string(tc.dst) {
+			t.Errorf("%s: prefix lost", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }

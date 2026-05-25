@@ -154,11 +154,18 @@ func Test_mergeAttrs(t *testing.T) {
 		wantLen int
 	}{
 		{"empty parent + empty child", nil, nil, 0},
-		{"empty parent + non-empty child clones", nil,
-			[]corelogger.AttrValue{{Key: "k"}}, 1},
+		{
+			"empty parent + non-empty child clones", nil,
+			[]corelogger.AttrValue{{Key: "k"}},
+			1,
+		},
 		{"non-empty parent + empty child concats", []corelogger.AttrValue{{Key: "p"}}, nil, 1},
-		{"both non-empty concats parent first",
-			[]corelogger.AttrValue{{Key: "p"}}, []corelogger.AttrValue{{Key: "c"}}, 2},
+		{
+			"both non-empty concats parent first",
+			[]corelogger.AttrValue{{Key: "p"}},
+			[]corelogger.AttrValue{{Key: "c"}},
+			2,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

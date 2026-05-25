@@ -306,9 +306,6 @@ learn_workflow:
     OK /src/handlers/CLAUDE.md - Removed obsolete refs
     -- /tests/CLAUDE.md - Skipped (user choice)
 
-  GrepAI config:
-    OK Project-specific exclusions added
-
   Learned conventions:
     OK <n> patterns discovered, <n> injected
 

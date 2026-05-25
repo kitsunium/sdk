@@ -21,9 +21,9 @@ import (
 	stdjson "encoding/json"
 	"io"
 	"slices"
-	"strings"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -104,8 +104,10 @@ func (c *baseencCodec) Extensions() []string {
 // []byte→base64-string convention applies inside the JSON payload before
 // the outer base-N step wraps it.
 func (c *baseencCodec) Marshal(v any) (encoded []byte, err error) {
-	//: flatten the value through JSON first.
-	jsonBytes, merr := stdjson.Marshal(v)
+	//: flatten the value through JSON first using the pooled buffer
+	//: so consecutive base-N Marshal calls amortise the bytes.Buffer
+	//: allocation + the geometric grow cascade.
+	jsonBytes, buf, merr := marshalJSONPooled(v)
 	//: surface JSON-side failures with the dedicated reason.
 	if merr != nil {
 		//: keep encoded nil so callers do not consume a partial buffer.
@@ -116,8 +118,42 @@ func (c *baseencCodec) Marshal(v any) (encoded []byte, err error) {
 			Private: "service/codec/baseenc.Marshal: encoding/json.Marshal returned an error",
 		})
 	}
+	//: encode produces a fresh []byte we own — the pooled buffer can
+	//: go back as soon as we've consumed jsonBytes.
+	out := c.encodeBytes(jsonBytes)
+	//: cap-discard release of the pooled JSON buffer.
+	scratch.ReleaseBuffer(buf)
 	//: apply the variant's base-N alphabet to the JSON bytes.
-	return c.encodeBytes(jsonBytes), nil
+	return out, nil
+}
+
+// marshalJSONPooled encodes v via a pooled stdjson.Encoder + *bytes.Buffer
+// and returns (jsonBytes, buf, err). jsonBytes aliases buf's backing array,
+// so callers MUST call scratch.ReleaseBuffer(buf) exactly once after consuming
+// jsonBytes — which invalidates it. Returning the buffer rather than a
+// release closure keeps the Marshal/Append hot path free of a per-call
+// closure heap escape (the closure captured buf and so always escaped).
+func marshalJSONPooled(v any) (jsonBytes []byte, buf *bytes.Buffer, err error) {
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf = scratch.AcquireBuffer()
+	//: stdjson.Encoder appends a trailing '\n' we strip below.
+	enc := stdjson.NewEncoder(buf)
+	//: encode the value via the stdlib encoder.
+	if merr := enc.Encode(v); merr != nil {
+		//: bail on encode failure; buffer goes back to the pool.
+		scratch.ReleaseBuffer(buf)
+		//: caller wraps with the BASE_ENC sentinel.
+		return nil, nil, merr
+	}
+	//: strip the trailing newline so jsonBytes match stdjson.Marshal output.
+	b := buf.Bytes()
+	//: defensive against an empty payload (shouldn't happen on success).
+	if n := len(b); n > 0 && b[n-1] == '\n' {
+		//: drop the trailing newline.
+		b = b[:n-1]
+	}
+	//: hand back the buffer; caller releases it after consuming b.
+	return b, buf, nil
 }
 
 // Unmarshal base-N decodes data, then parses the resulting JSON into v.
@@ -163,8 +199,9 @@ func (c *baseencCodec) Unmarshal(data []byte, v any) error {
 func (c *baseencCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: snapshot dst length so a JSON failure leaves the buffer untouched.
 	origLen := len(dst)
-	//: encode through JSON first — this is the unavoidable allocation.
-	jsonBytes, merr := stdjson.Marshal(v)
+	//: encode through JSON via the pooled buffer so consecutive calls
+	//: amortise the bytes.Buffer allocation + grow cascade.
+	jsonBytes, buf, merr := marshalJSONPooled(v)
 	//: JSON-side failure restores dst and surfaces the dedicated reason.
 	if merr != nil {
 		//: leave dst exactly as the caller passed it.
@@ -176,7 +213,11 @@ func (c *baseencCodec) Append(dst []byte, v any) (appended []byte, err error) {
 		})
 	}
 	//: base-N append uses the variant-specific AppendEncode where possible.
-	return c.appendEncode(dst, jsonBytes), nil
+	out := c.appendEncode(dst, jsonBytes)
+	//: cap-discard release of the pooled JSON buffer.
+	scratch.ReleaseBuffer(buf)
+	//: success — dst grew with the base-N encoding of jsonBytes.
+	return out, nil
 }
 
 // NewEncoder returns a streaming Encoder for the variant. The encoder
@@ -228,16 +269,8 @@ func (c *baseencCodec) encodeBytes(raw []byte) []byte {
 		return encoded
 	//: hex variants — base16 is the upper-cased flavour, hex is lower-case.
 	case variantBase16, variantHex:
-		//: stdlib helper writes into a freshly-allocated slice.
-		encoded := make([]byte, hex.EncodedLen(len(raw)))
-		hex.Encode(encoded, raw)
-		//: base16 wants the uppercase alphabet.
-		if c.variant == variantBase16 {
-			//: in-place upper-case keeps the allocation cost at one slice.
-			return bytes.ToUpper(encoded)
-		}
-		//: hand back the lowercase form verbatim.
-		return encoded
+		//: shared helper handles both variants with one allocation.
+		return encodeHex(c.variant, raw)
 	//: Adobe ascii85.
 	case variantASCII85:
 		//: ascii85 has no AppendEncode; encode into a sized buffer.
@@ -251,28 +284,29 @@ func (c *baseencCodec) encodeBytes(raw []byte) []byte {
 }
 
 // decodeBytes reverses encodeBytes for the variant. Returns a wrapped
-// error when the stdlib decoder rejects the input.
+// error when the stdlib decoder rejects the input. Routes through
+// AppendDecode (Go 1.22+) on a []byte source so the full input copy
+// the legacy `string(data)` chain induced is eliminated — saves 1 alloc
+// and len(data) bytes per Unmarshal call on every base-N variant.
 func (c *baseencCodec) decodeBytes(data []byte) (decoded []byte, err error) {
-	//: cache the string form so repeated DecodeString calls share one alloc.
-	text := string(data)
 	//: dispatch on the variant.
 	switch c.variant {
 	//: standard base64 with padding.
 	case variantBase64:
-		//: stdlib returns an allocated slice or an error.
-		return wrapDecode(base64.StdEncoding.DecodeString(text))
+		//: AppendDecode operates directly on []byte; no string copy.
+		return wrapDecode(base64.StdEncoding.AppendDecode(nil, data))
 	//: URL-safe base64 with padding.
 	case variantBase64URL:
-		//: stdlib returns an allocated slice or an error.
-		return wrapDecode(base64.URLEncoding.DecodeString(text))
+		//: AppendDecode operates directly on []byte; no string copy.
+		return wrapDecode(base64.URLEncoding.AppendDecode(nil, data))
 	//: standard base32 with padding.
 	case variantBase32:
-		//: stdlib returns an allocated slice or an error.
-		return wrapDecode(base32.StdEncoding.DecodeString(text))
+		//: AppendDecode operates directly on []byte; no string copy.
+		return wrapDecode(base32.StdEncoding.AppendDecode(nil, data))
 	//: hex variants — encoding/hex accepts both letter cases on input.
 	case variantBase16, variantHex:
-		//: hex.DecodeString tolerates both letter cases on input.
-		return wrapDecode(hex.DecodeString(text))
+		//: AppendDecode operates directly on []byte; no string copy.
+		return wrapDecode(hex.AppendDecode(nil, data))
 	//: Adobe ascii85.
 	case variantASCII85:
 		//: ascii85 needs a reader; drain it into a buffer.
@@ -280,6 +314,33 @@ func (c *baseencCodec) decodeBytes(data []byte) (decoded []byte, err error) {
 	}
 	//: unreachable — Register only stores known variants.
 	return nil, nil
+}
+
+// encodeHex emits the hex encoding of raw as a fresh slice. base16 gets
+// the uppercase alphabet via an in-place bit-5 mask on a..f only (digits
+// 0..9 left alone); hex keeps the stdlib lowercase output. Single
+// allocation either way — the legacy bytes.ToUpper(encoded) path was
+// allocating a second slice and re-walking it. Split out of encodeBytes
+// to keep that dispatch under the cyclo + LOC budget.
+func encodeHex(v variant, raw []byte) []byte {
+	//: stdlib helper writes into a freshly-allocated slice.
+	encoded := make([]byte, hex.EncodedLen(len(raw)))
+	hex.Encode(encoded, raw)
+	//: hex keeps the stdlib lowercase output; only base16 uppercases.
+	if v != variantBase16 {
+		//: hand back the lowercase form verbatim.
+		return encoded
+	}
+	//: walk the single allocation once, in place.
+	for i, b := range encoded {
+		//: only a..f need the 0x20 mask cleared.
+		if b >= 'a' && b <= 'f' {
+			//: bit 5 toggles case for ASCII letters.
+			encoded[i] = b - asciiLowerToUpperOffset
+		}
+	}
+	//: hand back the now-uppercase buffer.
+	return encoded
 }
 
 // appendEncodeBase16Upper appends the uppercase-hex encoding of raw onto dst.
@@ -432,7 +493,10 @@ func wrapDecode(out []byte, derr error) (decoded []byte, err error) {
 // decodeASCII85 drains an ascii85-encoded byte slice into a fresh buffer.
 func decodeASCII85(data []byte) (decoded []byte, err error) {
 	//: NewDecoder tolerates surrounding whitespace per the format spec.
-	r := ascii85.NewDecoder(strings.NewReader(string(data)))
+	//: bytes.NewReader avoids the full-input string(data) copy the
+	//: strings.NewReader path used to pay — matches the no-string-copy
+	//: pattern the rest of decodeBytes already follows.
+	r := ascii85.NewDecoder(bytes.NewReader(data))
 	//: drain into a buffer.
 	decoded, rerr := io.ReadAll(r)
 	//: success fast-path.

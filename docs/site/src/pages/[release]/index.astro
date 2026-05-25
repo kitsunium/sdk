@@ -1,0 +1,53 @@
+---
+// Per-release redirect — sends /<release>/ to /<release>/<default-major>/.
+// Implemented as a real Astro page (not via the astro.config redirects
+// map) so the emitted file has a proper <html lang="en"> wrapper for
+// Pagefind. data-pagefind-ignore on <body> excludes it from the index.
+interface VersionEntry {
+  major: string;
+  default: boolean;
+  eol: boolean;
+  releases: { version: string; default: boolean }[];
+}
+
+export async function getStaticPaths() {
+  let versions: VersionEntry[] = [];
+  try {
+    versions = ((await import("../../data/versions.json")).default as VersionEntry[]) ?? [];
+  } catch { /* bootstrap */ }
+  //: For each unique release name, pick the newest non-EOL major that
+  //: carries it. That gives /local/ → /local/v1/ today (and a future
+  //: v2 would flip it to /local/v2/ automatically once it's marked
+  //: default).
+  const seen = new Map<string, string>();
+  const orderOf = (m: string) => versions.findIndex(v => v.major === m);
+  for (const v of versions) {
+    for (const r of v.releases ?? []) {
+      const cur = seen.get(r.version);
+      if (!cur || (!v.eol && orderOf(v.major) > orderOf(cur))) {
+        seen.set(r.version, v.major);
+      }
+    }
+  }
+  return [...seen.entries()].map(([release, major]) => ({
+    params: { release },
+    props: { target: `/${release}/${major}/` },
+  }));
+}
+
+interface Props { target: string; }
+const { target } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="refresh" content={`0;url=${target}`} />
+    <meta name="robots" content="noindex" />
+    <link rel="canonical" href={target} />
+    <title>Redirecting to {target}</title>
+  </head>
+  <body data-pagefind-ignore="all">
+    <a href={target}>Redirecting to {target}</a>
+  </body>
+</html>

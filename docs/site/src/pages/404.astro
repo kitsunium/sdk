@@ -1,0 +1,91 @@
+---
+// 404 — "page not found". Lives at the site root so it's the file
+// Astro emits as dist/404.html (most static hosts serve it for any
+// unknown path). Uses the Default layout so sidebar + header + footer
+// stay visible — the user can recover by clicking a menu entry rather
+// than being dropped into an orphaned page.
+import { getCollection } from "astro:content";
+import Default from "../layouts/Default.astro";
+import {
+  buildCatalog,
+  flattenCatalog,
+} from "../../scripts/lib/page-catalog.mjs";
+import { findDefaults } from "../../scripts/lib/tag-format.mjs";
+
+interface VersionEntry {
+  major: string;
+  default: boolean;
+  releases: { version: string; default: boolean }[];
+}
+let versions: VersionEntry[] = [];
+try {
+  versions = ((await import("../data/versions.json")).default as VersionEntry[]) ?? [];
+} catch { /* bootstrap */ }
+
+//: We don't know which (major, release) the visitor wanted, so we
+//: anchor the suggestions in the SITE default — newest non-EOL major
+//: + its default release. Same fallback Sidebar/Search use.
+//: URL layout: /<release>/<major>/... — release first, then major.
+const { major, release } = findDefaults(versions);
+const base = `/${release}/${major}`;
+const root = `${release}/${major}`;
+
+let entries: Awaited<ReturnType<typeof getCollection>> = [];
+try {
+  entries = await getCollection("docs", e => e.id === root || e.id.startsWith(`${root}/`));
+} catch { /* bootstrap */ }
+
+//: First 8 pages in canonical reading order make for honest
+//: recovery links — landing, getting-started, then services, then
+//: reference.
+const suggestions = flattenCatalog(buildCatalog(entries as any, root, base)).slice(0, 8);
+---
+
+<Default title="404 — page not found" description="The URL you requested doesn't match any page in this version of the docs.">
+  <article class="md-body">
+    <p>
+      The URL you requested doesn't match any page in this version of the
+      documentation. It may have moved, been renamed, or never existed.
+    </p>
+
+    <p>
+      The sidebar on the left lists every page in the current (major, release)
+      coordinate, and the search modal (<kbd>⌘K</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd>)
+      indexes both the prose and every exported Go symbol.
+    </p>
+
+    {suggestions.length > 0 && (
+      <>
+        <h2>Try one of these</h2>
+        <ul>
+          {suggestions.map(item => (
+            <li>
+              <a href={item.href}>{item.label}</a>
+              <span class="group-hint"> · {item.group}</span>
+            </li>
+          ))}
+        </ul>
+      </>
+    )}
+
+    <h2>Go home</h2>
+    <p>
+      <a href={`${base}/`}>Return to {root}</a> · <a href="/">Site root</a>
+    </p>
+  </article>
+</Default>
+
+<style>
+  .group-hint {
+    color: var(--color-muted);
+    font-size: 0.85rem;
+  }
+  kbd {
+    background: var(--color-code-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    padding: 0.05rem 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+  }
+</style>

@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "scratch",
+    srcs = ["scratch.go"],
+    importpath = "github.com/kitsunium/sdk/internal/core/codec/scratch",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":scratch",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "scratch_test",
+    srcs = [
+        "scratch_external_test.go",
+        "scratch_internal_test.go",
+    ],
+    embed = [":scratch"],
+)

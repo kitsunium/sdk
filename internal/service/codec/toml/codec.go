@@ -10,11 +10,12 @@ import (
 	gotoml "github.com/pelletier/go-toml/v2"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted).
+// extension tables.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&tomlCodec{})
@@ -53,22 +54,33 @@ func (*tomlCodec) Extensions() []string {
 	return slices.Clone(extensions)
 }
 
-// Marshal serialises v as TOML bytes.
+// Marshal serialises v as TOML bytes. Routes through a pooled
+// *bytes.Buffer + gotoml.NewEncoder so the per-call bytes.Buffer
+// allocation gotoml.Marshal pays internally is amortised across calls.
 func (*tomlCodec) Marshal(v any) (encoded []byte, err error) {
-	//: delegate to the library for the actual encoding.
-	out, merr := gotoml.Marshal(v)
-	//: success fast-path.
-	if merr == nil {
-		//: return the encoded bytes verbatim.
-		return out, nil
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
+	//: pelletier Encoder has no Reset — fresh one per call.
+	enc := gotoml.NewEncoder(buf)
+	//: encode into the pooled buffer.
+	if merr := enc.Encode(v); merr != nil {
+		//: drop the buffer back to the pool if not oversized.
+		scratch.ReleaseBuffer(buf)
+		//: wrap the library error for reason-based matching.
+		return nil, errs.Wrap(merr, errs.WrapParams{
+			Code:    CodeTOMLMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "TOML encoding failed",
+			Private: "service/codec/toml.Marshal: pelletier/go-toml/v2 returned an error",
+		})
 	}
-	//: wrap the library error for reason-based matching.
-	return nil, errs.Wrap(merr, errs.WrapParams{
-		Code:    CodeTOMLMarshalFailed,
-		Reason:  "MARSHAL_FAILED",
-		Public:  "TOML encoding failed",
-		Private: "service/codec/toml.Marshal: pelletier/go-toml/v2 returned an error",
-	})
+	//: detach: clone the buffer's bytes so the returned slice does not
+	//: alias the pooled buffer (next caller would overwrite it).
+	out := slices.Clone(buf.Bytes())
+	//: cap-discard release.
+	scratch.ReleaseBuffer(buf)
+	//: success — bytes are the caller's now.
+	return out, nil
 }
 
 // Unmarshal parses data as TOML into v.
@@ -87,6 +99,36 @@ func (*tomlCodec) Unmarshal(data []byte, v any) error {
 		Public:  "TOML decoding failed",
 		Private: "service/codec/toml.Unmarshal: pelletier/go-toml/v2 returned an error",
 	})
+}
+
+// Append encodes v as TOML and appends the bytes to dst. Implements the
+// optional codec.Appender interface so hot-path callers can stream
+// records into a recycled buffer. Encodes directly into the pooled
+// *bytes.Buffer + appends onto dst — saves the slices.Clone the
+// Marshal-delegation shape paid.
+func (*tomlCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: rent an already-Reset buffer from the shared codec pool.
+	buf := scratch.AcquireBuffer()
+	//: pelletier's Encoder has no Reset(w) — fresh one per call.
+	enc := gotoml.NewEncoder(buf)
+	//: encode into the pooled buffer.
+	if merr := enc.Encode(v); merr != nil {
+		//: cap-discard release; dst stays pristine, error surfaces.
+		scratch.ReleaseBuffer(buf)
+		//: wrap the library error for reason-based matching.
+		return dst, errs.Wrap(merr, errs.WrapParams{
+			Code:    CodeTOMLMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "TOML encoding failed",
+			Private: "service/codec/toml.Append: pelletier/go-toml/v2 returned an error",
+		})
+	}
+	//: append the encoded bytes onto the caller's buffer (1 copy total).
+	dst = append(dst, buf.Bytes()...)
+	//: cap-discard release.
+	scratch.ReleaseBuffer(buf)
+	//: success — bytes are the caller's now.
+	return dst, nil
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.

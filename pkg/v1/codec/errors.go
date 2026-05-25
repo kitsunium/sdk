@@ -22,4 +22,12 @@ var (
 	StreamingUnsupported = errs.Define(CodeStreamingUnsupported, "STREAMING_UNSUPPORTED",
 		"codec does not support streaming",
 		"pkg/v1/codec: target codec is not a core/codec.StreamingCodec")
+
+	// PromoteFailed is returned when the facade's JSON-bridge promotion
+	// cannot serve the request — either the Format has no promotion
+	// strategy registered, or the codec populated a container whose
+	// shape no longer matches what the wrap stage produced.
+	PromoteFailed = errs.Define(CodePromoteFailed, "PROMOTE_FAILED",
+		"codec promotion failed",
+		"pkg/v1/codec: JSON-bridge promotion path could not serve the request")
 )
