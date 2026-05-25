@@ -13,10 +13,11 @@ import (
 // preservation through the underlying sync.Pool.
 func TestNewPool(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name   string
 		runner func(t *testing.T)
-	}{
+	}
+	tests := []tc{
 		{
 			name: "nil factory panics",
 			runner: func(t *testing.T) {
@@ -65,10 +66,16 @@ func TestNewPool(t *testing.T) {
 			},
 		},
 	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; each runner owns its own recover where a panic is expected.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		tc.runner(t)
+	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tc.runner(t)
+			runCase(t, tc)
 		})
 	}
 }
@@ -77,35 +84,42 @@ func TestNewPool(t *testing.T) {
 // surface data races under -race; the pool's internal sync.Pool MUST cope.
 func TestPoolConcurrentGetPut(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name        string
 		goroutines  int
 		opsPerRoute int
-	}{
+	}
+	tests := []tc{
 		{"32 goroutines × 1024 ops", 32, 1024},
+	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; every goroutine must complete all of its Get/Put ops.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		var ops atomic.Uint64
+		factory := func() *[64]byte { return &[64]byte{} }
+		r := recycler.NewPool[*[64]byte](factory)
+		var wg sync.WaitGroup
+		for range tc.goroutines {
+			wg.Go(func() {
+				for range tc.opsPerRoute {
+					v := r.Get()
+					r.Put(v)
+					ops.Add(1)
+				}
+			})
+		}
+		wg.Wait()
+		//: every goroutine MUST have completed all of its ops.
+		want := uint64(tc.goroutines * tc.opsPerRoute)
+		if ops.Load() != want {
+			t.Errorf("ops counter = %d, want %d", ops.Load(), want)
+		}
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var ops atomic.Uint64
-			factory := func() *[64]byte { return &[64]byte{} }
-			r := recycler.NewPool[*[64]byte](factory)
-			var wg sync.WaitGroup
-			for range tc.goroutines {
-				wg.Go(func() {
-					for range tc.opsPerRoute {
-						v := r.Get()
-						r.Put(v)
-						ops.Add(1)
-					}
-				})
-			}
-			wg.Wait()
-			//: every goroutine MUST have completed all of its ops.
-			want := uint64(tc.goroutines * tc.opsPerRoute)
-			if ops.Load() != want {
-				t.Errorf("ops counter = %d, want %d", ops.Load(), want)
-			}
+			runCase(t, tc)
 		})
 	}
 }
@@ -114,24 +128,31 @@ func TestPoolConcurrentGetPut(t *testing.T) {
 // (factory-built) path and the warm-pool (recycled) path.
 func TestPool_Get(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name string
 		warm bool
-	}{
+	}
+	tests := []tc{
 		{"cold pool builds via factory", false},
 		{"warm pool returns a recycled value", true},
+	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; the warm case seeds the pool to exercise the cache-hit path.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		r := recycler.NewPool[*[8]byte](func() *[8]byte { return &[8]byte{} })
+		//: seed the pool so the warm case exercises the cache-hit path.
+		if tc.warm {
+			r.Put(r.Get())
+		}
+		if got := r.Get(); got == nil {
+			t.Fatal("Get returned nil")
+		}
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			r := recycler.NewPool[*[8]byte](func() *[8]byte { return &[8]byte{} })
-			//: seed the pool so the warm case exercises the cache-hit path.
-			if tc.warm {
-				r.Put(r.Get())
-			}
-			if got := r.Get(); got == nil {
-				t.Fatal("Get returned nil")
-			}
+			runCase(t, tc)
 		})
 	}
 }
@@ -140,20 +161,25 @@ func TestPool_Get(t *testing.T) {
 // subsequent Get (stored in the underlying sync.Pool).
 func TestPool_Put(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-	}{
+	type tc struct{ name string }
+	tests := []tc{
 		{"put then get returns a non-nil value"},
+	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; a value handed back via Put must survive to the next Get.
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		r := recycler.NewPool[*int](func() *int { return new(int(0)) })
+		seed := r.Get()
+		r.Put(seed)
+		if got := r.Get(); got == nil {
+			t.Fatal("Get returned nil after Put")
+		}
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			r := recycler.NewPool[*int](func() *int { return new(int(0)) })
-			seed := r.Get()
-			r.Put(seed)
-			if got := r.Get(); got == nil {
-				t.Fatal("Get returned nil after Put")
-			}
+			runCase(t, tc)
 		})
 	}
 }

@@ -9,11 +9,12 @@ import "testing"
 // white-box test.
 func Test_Pool_Get_failLoud(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name      string
 		runner    func(t *testing.T)
 		wantPanic bool
-	}{
+	}
+	tests := []tc{
 		{
 			name: "homogeneous pool returns the typed value",
 			runner: func(t *testing.T) {
@@ -36,18 +37,24 @@ func Test_Pool_Get_failLoud(t *testing.T) {
 			wantPanic: true,
 		},
 	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; the deferred recover turns a panic into an assertable bool.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		defer func() {
+			//: recover so a panic becomes an assertable outcome.
+			got := recover() != nil
+			//: the recovered state must match the case's expectation.
+			if got != tc.wantPanic {
+				t.Errorf("panic = %v, want %v", got, tc.wantPanic)
+			}
+		}()
+		tc.runner(t)
+	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			defer func() {
-				//: recover so a panic becomes an assertable outcome.
-				got := recover() != nil
-				//: the recovered state must match the case's expectation.
-				if got != tc.wantPanic {
-					t.Errorf("panic = %v, want %v", got, tc.wantPanic)
-				}
-			}()
-			tc.runner(t)
+			runCase(t, tc)
 		})
 	}
 }
