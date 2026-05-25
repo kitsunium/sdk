@@ -11,72 +11,55 @@ package recycler
 
 import "sync"
 
-// Recycler describes a typed object pool that hands out values of T from an
-// internal cache and accepts them back via Put for future reuse.
-// Implementations MUST be safe for concurrent use by multiple goroutines.
-type Recycler[T any] interface {
-	// Get returns a value of type T, possibly freshly built by the factory
-	// supplied at construction time. Callers own the returned value until
-	// they hand it back via Put.
-	Get() (v T)
-	// Put returns a value to the pool for future reuse. Callers MUST NOT
-	// retain a reference to v after Put returns; the pool may hand it to
-	// another goroutine immediately.
-	Put(v T)
+// Recycler is a concrete generic object pool over sync.Pool. It performs NO
+// reset — consumers that need cleanup either reset before Put (logger
+// Builder.Send, async data[:0]) or use CappedRecycler. Safe for concurrent
+// use. Always used behind a pointer: sync.Pool must not be copied.
+type Recycler[T any] struct {
+	// pool is the underlying sync.Pool holding the recycled values.
+	pool sync.Pool
 }
 
-// objectBucket is the default Recycler implementation backed by sync.Pool.
-type objectBucket[T any] struct {
-	// p is the underlying sync.Pool that holds the recycled values.
-	p sync.Pool
-	// new is the factory invoked when p.Get triggers a cache miss; it MUST
-	// return a non-zero T because the pool re-caches the value verbatim.
-	new func() T
-}
-
-// NewRecycler constructs a Recycler[T] backed by sync.Pool. The factory is
-// invoked exactly once per cache miss; its result is stored back in the pool
-// when Put is called for the corresponding Get.
-//
-// IFACE-PLUGIN: callers receive a Recycler[T] handle so the kernel can swap
-// the backing implementation (sync.Pool today, sharded buckets tomorrow)
-// without breaking call-site code; the concrete bucket type is unexported.
-func NewRecycler[T any](newFn func() T) Recycler[T] {
-	//: refuse a nil factory — sync.Pool.Get would panic on cache miss otherwise.
+// NewRecycler returns a Recycler[T] whose factory fires on every cache miss.
+// A nil factory is a programmer error and panics at construction rather than
+// deferring the panic to sync.Pool.Get on the first cache miss, far from the
+// offending call site.
+func NewRecycler[T any](newFn func() T) *Recycler[T] {
+	//: refuse a nil factory loudly at construction, not on first Get.
 	if newFn == nil {
-		//: documented contract: caller must supply a factory.
-		return nil
+		//: programmer error — fail fast at the call site.
+		panic("recycler: nil factory")
 	}
-	//: build the bucket with a thin closure that boxes the factory output for sync.Pool.
-	bucket := &objectBucket[T]{new: newFn}
-	bucket.p.New = func() (boxed any) {
+	//: build the recycler with a thin closure boxing the factory output for sync.Pool.
+	r := &Recycler[T]{}
+	r.pool.New = func() any {
 		//: invoke the caller's factory and hand its result to sync.Pool as any.
 		return newFn()
 	}
-	//: hand the typed bucket back to the caller as the public interface.
-	return bucket
+	//: hand the concrete recycler back to the caller.
+	return r
 }
 
-// Get borrows a value of type T from the bucket, invoking the factory on a
-// cache miss. The returned value MAY be a previously Put value or a freshly
-// built one — callers MUST treat it as opaquely owned until they Put it back.
-func (b *objectBucket[T]) Get() T {
-	//: ask sync.Pool for any cached value; New fires on miss to satisfy the call.
-	raw := b.p.Get()
-	//: comma-ok defends against the (impossible-by-contract) wrong-type case.
-	val, ok := raw.(T)
-	//: unexpected pool contents — fall back on a fresh factory invocation.
+// Get borrows a value of type T, invoking the factory on a cache miss. The
+// returned value MAY be a previously Put value or a freshly built one. The
+// comma-ok assertion is fail-loud: the pool only ever holds T (both New and
+// Put are typed), so a wrong-typed entry is an internal invariant break that
+// panics rather than silently masking it (mirrors core/codec/scratch.poolGet).
+func (r *Recycler[T]) Get() T {
+	//: the pool only ever holds T — comma-ok guards the invariant.
+	v, ok := r.pool.Get().(T)
+	//: a wrong-typed entry is impossible by contract; fail loud if it happens.
 	if !ok {
-		//: callers must never observe a zero T; rebuild rather than propagate it.
-		return b.new()
+		//: never mask a broken pool invariant behind a zero value.
+		panic("recycler: pool yielded unexpected type")
 	}
-	//: return the recycled (or freshly created) value to the caller.
-	return val
+	//: return the recycled or freshly built value.
+	return v
 }
 
-// Put returns a value to the bucket for future reuse. Callers MUST NOT touch v
-// after Put returns; the bucket may hand it to another goroutine immediately.
-func (b *objectBucket[T]) Put(v T) {
-	//: hand the value back to sync.Pool — boxing here is unavoidable but cheap.
-	b.p.Put(v)
+// Put returns v to the pool for future reuse. Callers MUST NOT touch v after
+// Put returns; the pool may hand it to another goroutine immediately.
+func (r *Recycler[T]) Put(v T) {
+	//: hand the value back to sync.Pool — boxing a pointer-sized T is alloc-free.
+	r.pool.Put(v)
 }

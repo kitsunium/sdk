@@ -18,12 +18,16 @@ func TestNewRecycler(t *testing.T) {
 		runner func(t *testing.T)
 	}{
 		{
-			name: "nil factory yields nil Recycler",
+			name: "nil factory panics",
 			runner: func(t *testing.T) {
-				r := recycler.NewRecycler[*int](nil)
-				if r != nil {
-					t.Errorf("NewRecycler(nil) = %v, want nil", r)
-				}
+				//: a nil factory is a programmer error — NewRecycler must fail loud.
+				defer func() {
+					//: the deferred recover turns the expected panic into a pass.
+					if recover() == nil {
+						t.Error("NewRecycler(nil) did not panic")
+					}
+				}()
+				recycler.NewRecycler[*int](nil)
 			},
 		},
 		{
@@ -101,6 +105,54 @@ func TestRecyclerConcurrentGetPut(t *testing.T) {
 			want := uint64(tc.goroutines * tc.opsPerRoute)
 			if ops.Load() != want {
 				t.Errorf("ops counter = %d, want %d", ops.Load(), want)
+			}
+		})
+	}
+}
+
+// TestRecycler_Get verifies Get returns a usable value on both the cold-pool
+// (factory-built) path and the warm-pool (recycled) path.
+func TestRecycler_Get(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		warm bool
+	}{
+		{"cold pool builds via factory", false},
+		{"warm pool returns a recycled value", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := recycler.NewRecycler[*[8]byte](func() *[8]byte { return &[8]byte{} })
+			//: seed the pool so the warm case exercises the cache-hit path.
+			if tc.warm {
+				r.Put(r.Get())
+			}
+			if got := r.Get(); got == nil {
+				t.Fatal("Get returned nil")
+			}
+		})
+	}
+}
+
+// TestRecycler_Put verifies a value handed back via Put is observable on a
+// subsequent Get (stored in the underlying sync.Pool).
+func TestRecycler_Put(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"put then get returns a non-nil value"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := recycler.NewRecycler[*int](func() *int { return new(int(0)) })
+			seed := r.Get()
+			r.Put(seed)
+			if got := r.Get(); got == nil {
+				t.Fatal("Get returned nil after Put")
 			}
 		})
 	}

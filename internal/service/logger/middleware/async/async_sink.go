@@ -35,7 +35,7 @@ type asyncSink struct {
 	// queue is the lock-free ring buffer holding pending entries.
 	queue ring.Queue[*recordEntry]
 	// pool recycles *recordEntry values to avoid per-write allocation.
-	pool recycler.Recycler[*recordEntry]
+	pool *recycler.Recycler[*recordEntry]
 	// policy selects the saturation behaviour at Write time.
 	policy DropPolicy
 	// onDrop fires for every entry discarded by the policy; never nil.

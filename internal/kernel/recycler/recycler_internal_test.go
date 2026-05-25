@@ -2,90 +2,52 @@ package recycler
 
 import "testing"
 
-// Test_objectBucket_Get exercises both branches of objectBucket.Get: the happy
-// path where the cached value type-asserts cleanly, and the defensive fallback
-// where the underlying sync.Pool somehow returns a value of the wrong type
-// (impossible in practice, but the branch must be covered).
-func Test_objectBucket_Get(t *testing.T) {
+// Test_Recycler_Get_failLoud covers the white-box assertion path in Get: the
+// pool is contractually homogeneous (only ever holds T), so a wrong-typed
+// entry is an internal invariant break that MUST panic rather than silently
+// degrade. Reaching it requires poisoning the unexported pool, hence a
+// white-box test.
+func Test_Recycler_Get_failLoud(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
-		runner func(t *testing.T)
+		name      string
+		runner    func(t *testing.T)
+		wantPanic bool
 	}{
 		{
-			name: "happy path returns the typed value from the underlying pool",
+			name: "homogeneous pool returns the typed value",
 			runner: func(t *testing.T) {
-				known := new(int(7))
-				factory := func() *int { return new(int(0)) }
-				bucket, ok := NewRecycler[*int](factory).(*objectBucket[*int])
-				if !ok {
-					t.Fatal("NewRecycler did not return *objectBucket[*int]")
-				}
-				//: override sync.Pool.New so Get deterministically receives the known instance.
-				bucket.p.New = func() any { return known }
-				got := bucket.Get()
-				if got != known {
-					t.Errorf("Get returned %p, want known %p", got, known)
+				r := NewRecycler[*int](func() *int { return new(int(0)) })
+				if got := r.Get(); got == nil {
+					t.Fatal("Get returned nil on a healthy pool")
 				}
 			},
+			wantPanic: false,
 		},
 		{
-			name: "wrong-type cache content falls back to factory",
+			name: "wrong-typed pool content fails loud",
 			runner: func(t *testing.T) {
-				var fallbackCalls int
-				factory := func() *int {
-					fallbackCalls++
-					return new(int(42))
-				}
-				bucket, ok := NewRecycler[*int](factory).(*objectBucket[*int])
-				if !ok {
-					t.Fatal("NewRecycler did not return *objectBucket[*int]")
-				}
-				//: poison the underlying sync.Pool with the wrong concrete type.
-				bucket.p.Put(new("not-a-pointer-to-int"))
-				//: drain the factory invocation triggered by NewRecycler's first New call.
-				fallbackCalls = 0
-				got := bucket.Get()
-				if got == nil {
-					t.Fatal("Get returned nil after wrong-type fallback")
-				}
-				if fallbackCalls != 1 {
-					t.Errorf("fallback factory calls = %d, want 1", fallbackCalls)
-				}
+				r := NewRecycler[*int](func() *int { return new(int(0)) })
+				//: poison the factory so the next cache miss yields a non-*int.
+				r.pool.New = func() any { return "not-a-pointer-to-int" }
+				//: empty pool → Get triggers New → the assertion in Get must panic.
+				r.Get()
 			},
+			wantPanic: true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			defer func() {
+				//: recover so a panic becomes an assertable outcome.
+				got := recover() != nil
+				//: the recovered state must match the case's expectation.
+				if got != tc.wantPanic {
+					t.Errorf("panic = %v, want %v", got, tc.wantPanic)
+				}
+			}()
 			tc.runner(t)
-		})
-	}
-}
-
-// Test_objectBucket_Put confirms that values handed back via Put are stored in
-// the underlying sync.Pool and observable via a follow-up Get.
-func Test_objectBucket_Put(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-	}{
-		{"put then get returns a non-nil value"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			factory := func() *int { return new(int(0)) }
-			bucket, ok := NewRecycler[*int](factory).(*objectBucket[*int])
-			if !ok {
-				t.Fatal("NewRecycler did not return *objectBucket[*int]")
-			}
-			seed := factory()
-			bucket.Put(seed)
-			got := bucket.Get()
-			if got == nil {
-				t.Fatal("Get returned nil after Put")
-			}
 		})
 	}
 }
