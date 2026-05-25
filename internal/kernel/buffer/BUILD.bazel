@@ -7,6 +7,7 @@ go_library(
     srcs = ["buffer.go"],
     importpath = "github.com/kitsunium/sdk/internal/kernel/buffer",
     visibility = ["//internal/kernel:kernel_consumers"],
+    deps = ["//internal/kernel/recycler"],
 )
 
 alias(

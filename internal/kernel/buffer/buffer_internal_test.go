@@ -27,19 +27,18 @@ func TestInternalPoolAllocatesFreshBuffer(t *testing.T) {
 	tests := []struct {
 		name string
 	}{
-		{"pool.New returns a *[]byte at standard capacity"},
+		{"bytePool builds a *[]byte at standard capacity"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			raw := pool.New()
-			ptr, ok := raw.(*[]byte)
-			if !ok {
-				t.Fatalf("pool.New returned %T, want *[]byte", raw)
+			ptr := bytePool.Get()
+			if ptr == nil {
+				t.Fatal("bytePool.Get returned nil")
 				return
 			}
 			if cap(*ptr) < initialCap {
-				t.Errorf("pool.New cap = %d, want >= %d", cap(*ptr), initialCap)
+				t.Errorf("fresh buffer cap = %d, want >= %d", cap(*ptr), initialCap)
 			}
 		})
 	}
