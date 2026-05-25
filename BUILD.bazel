@@ -25,6 +25,7 @@ filegroup(
         "//internal/kernel/buffer:audit_srcs",
         "//internal/kernel/clock:audit_srcs",
         "//internal/kernel/errs:audit_srcs",
+        "//internal/kernel/recycler:audit_srcs",
         "//internal/service/codec/asn1:audit_srcs",
         "//internal/service/codec/baseenc:audit_srcs",
         "//internal/service/codec/cbor:audit_srcs",

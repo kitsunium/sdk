@@ -10,7 +10,8 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 | Package | Purpose | Code range |
 |---|---|---|
 | `errs/` | SDK-wide typed error + dotted-quad registry (ADR 0005) | 1000-1099 (meta-codes, documentary only) |
-| `buffer/` | `sync.Pool` of `[]byte` + generic `Recycler[T]` for zero-alloc reuse | 1200-1299 (reserved) |
+| `recycler/` | generic `Pool[T]` + `CappedPool[T]` object pools (ADR 0010) | (none — panics on programmer error) |
+| `buffer/` | `sync.Pool` of `[]byte` — a `recycler.CappedPool[*[]byte]` specialisation | 1200-1299 (reserved) |
 | `clock/` | `Clock` interface (`Now` + `Since`) for testable time | 1300-1399 (reserved) |
 | `ring/` | SPSC lock-free bounded queue (ADR 0006) | 1400-1499 (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
 
@@ -32,15 +33,16 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 
 - `errs` stays — every layer of the SDK uses typed errors, including kernel itself. Meta-infrastructure.
 - `clock` stays — textbook generic time abstraction.
-- `buffer` stays — byte-pool + `Recycler[T]` are generic even though `service/logger` is the heaviest consumer today (any future codec stream, HTTP body encoder, or metrics line writer can reuse them).
+- `recycler` admitted by ADR 0010 — `Pool[T]` + `CappedPool[T]` are textbook generic object pools (reuse + reset + cap-discard). Any byte buffer, codec stream, HTTP body encoder, or metrics line writer can reuse the mechanism; the thresholds stay with the consumers.
+- `buffer` stays — the `[]byte` pool is generic even though `service/logger` is the heaviest consumer today. Since ADR 0010 it is a thin specialisation over `recycler.CappedPool[*[]byte]` (the generic `Pool[T]` moved to `recycler`).
 - `ring` admitted by ADR 0006 — SPSC bounded queue is a textbook generic primitive. Logger's async middleware is the only consumer today; metrics batchers and codec stream pipelines are obvious future users.
 
 ## Conventions unique to kernel
 
 1. **Import-only-stdlib.** Kernel packages MAY import each other (e.g. `ring` imports `errs` for its sentinels) but MUST NOT reach into `core/*` or `service/*`. No package outside of `errs` may use `fmt.Errorf` / `errors.New` in production code.
 2. **`errs` self-reference.** The `errs` package uses its own meta-codes 0.0.0.1..6 as documentary identifiers for Define-time validation failures — they are never instantiated as `*Error` sentinels.
-3. **No domain vocabulary in public APIs.** No `User`, `Request`, `Log`, `Entity` in type names. `Queue[T]`, `Recycler[T]`, `Clock`, `Error` all pass.
-4. **IFACE-PLUGIN marker.** Constructors returning an interface backed by an unexported struct (`buffer.NewRecycler`, `ring.New`) tag their interface with the `// IFACE-PLUGIN:` comment so ktn-linter recognises the swap-able-implementation pattern.
+3. **No domain vocabulary in public APIs.** No `User`, `Request`, `Log`, `Entity` in type names. `Queue[T]`, `Pool[T]`, `Clock`, `Error` all pass.
+4. **IFACE-PLUGIN marker.** Constructors returning an interface backed by an unexported struct (`ring.New`) tag their interface with the `// IFACE-PLUGIN:` comment so ktn-linter recognises the swap-able-implementation pattern. **Exception:** `recycler` ships concrete structs (`Pool[T]` / `CappedPool[T]`) by deliberate choice (ADR 0010) — a single-impl interface there was over-abstraction. The `sync.Pool`-style names carry the recognized "Pool" role suffix, so they pass `KTN-STRUCT-ROLE` natively — no linter exemption needed.
 
 ## Do NOT
 
