@@ -3,27 +3,32 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 package(default_visibility = ["//internal/kernel:kernel_consumers"])
 
 go_library(
-    name = "buffer",
-    srcs = ["buffer.go"],
-    importpath = "github.com/kitsunium/sdk/internal/kernel/buffer",
+    name = "recycler",
+    srcs = [
+        "capped.go",
+        "recycler.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/recycler",
     visibility = ["//internal/kernel:kernel_consumers"],
-    deps = ["//internal/kernel/recycler"],
 )
 
 alias(
     name = "go_default_library",
-    actual = ":buffer",
+    actual = ":recycler",
     visibility = ["//internal/kernel:kernel_consumers"],
 )
 
 go_test(
-    name = "buffer_test",
+    name = "recycler_test",
     size = "small",
     srcs = [
-        "buffer_external_test.go",
-        "buffer_internal_test.go",
+        "capped_external_test.go",
+        "recycler_external_test.go",
+        "recycler_integration_test.go",
+        "recycler_internal_test.go",
     ],
-    embed = [":buffer"],
+    embed = [":recycler"],
+    deps = ["//internal/kernel/buffer"],
 )
 
 filegroup(

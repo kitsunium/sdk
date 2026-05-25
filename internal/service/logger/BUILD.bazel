@@ -21,6 +21,7 @@ go_library(
         "//internal/kernel/buffer",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/kernel/recycler",
         "//internal/service/logger/encoder",
     ],
 )
@@ -35,6 +36,7 @@ go_test(
     name = "logger_test",
     size = "small",
     srcs = [
+        "builder_bench_test.go",
         "builder_external_test.go",
         "builder_internal_test.go",
         "handler_external_test.go",

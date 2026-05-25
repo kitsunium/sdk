@@ -35,7 +35,7 @@ Logger ── Handler (genericHandler / TextHandler)
 | `builder.go`      | `Builder` interface + `chainBuilder` impl (recycled via `recordPool`) |
 | `handler.go`      | `genericHandler` (Encoder × Sink composition) + `NewHandler` |
 | `text_handler.go` | `TextHandler` legacy fused handler (`NewTextHandler`) |
-| `pool.go`         | `recordPool` — `buffer.Recycler[*chainBuilder]` with pre-sized attrs |
+| `pool.go`         | `recordPool` — `recycler.Pool[*chainBuilder]` with pre-sized attrs |
 | `codes.go`        | `Code*` constants — ADR 0005 range **0.3.1.\*** |
 | `errors.go`       | Sentinels — `WriterNil`, `HandlerNil`, `EncoderNil`, `SinkRequired`, `CtxCancelled`, `WriteFailed` |
 

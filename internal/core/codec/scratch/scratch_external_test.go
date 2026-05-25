@@ -34,7 +34,8 @@ func TestAcquireBuffer(t *testing.T) {
 		if got == nil {
 			t.Fatalf("%s: AcquireBuffer returned nil", tc.name)
 		}
-		//: AcquireBuffer Resets before returning, so length is always zero.
+		//: reset-on-Put cleans the buffer at ReleaseBuffer, so a re-acquired
+		//: buffer is always zero-length — no stale content leaks across uses.
 		if got.Len() != 0 {
 			t.Errorf("%s: buffer not clean: len=%d", tc.name, got.Len())
 		}
