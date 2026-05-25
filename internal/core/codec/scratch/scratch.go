@@ -36,7 +36,7 @@ var (
 	//: reset-on-Put (b.Reset) keeps the next caller's buffer clean; the
 	//: recycler discards before reset, so an over-cap buffer whose Bytes() the
 	//: caller still holds is orphaned untouched (detach contract preserved).
-	bufferPool = recycler.NewCappedRecycler[*bytes.Buffer](
+	bufferPool = recycler.NewCappedPool[*bytes.Buffer](
 		func() *bytes.Buffer { return new(bytes.Buffer) },
 		func(b *bytes.Buffer) { b.Reset() },
 		func(b *bytes.Buffer) int { return b.Cap() },
@@ -44,8 +44,8 @@ var (
 	)
 	//: readerPool recycles *bytes.Reader. A bytes.Reader is a fixed-size struct
 	//: repositioned by AcquireReader's Reset(src), so it needs neither
-	//: cap-discard nor reset-on-Put — a plain Recycler is the right fit.
-	readerPool = recycler.NewRecycler[*bytes.Reader](func() *bytes.Reader { return new(bytes.Reader) })
+	//: cap-discard nor reset-on-Put — a plain Pool is the right fit.
+	readerPool = recycler.NewPool[*bytes.Reader](func() *bytes.Reader { return new(bytes.Reader) })
 )
 
 // AcquireBuffer returns a clean, zero-length *bytes.Buffer from the shared
@@ -61,7 +61,7 @@ func AcquireBuffer() *bytes.Buffer {
 // Callers MUST NOT use buf — or any slice aliasing buf.Bytes() — after this
 // call; clone first if the encoded bytes must outlive the release.
 func ReleaseBuffer(buf *bytes.Buffer) {
-	//: nil-safe no-op — the generic CappedRecycler cannot nil-check *bytes.Buffer.
+	//: nil-safe no-op — the generic CappedPool cannot nil-check *bytes.Buffer.
 	if buf == nil {
 		//: nothing to recycle.
 		return

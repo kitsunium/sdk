@@ -5,9 +5,9 @@
 
 A pooled `*[]byte` for zero-alloc formatting on hot paths. Stdlib-only,
 domain-neutral. Since ADR 0010 this is a thin **byte-slice specialisation over
-`recycler.CappedRecycler[*[]byte]`**: the recycling mechanism lives in
+`recycler.CappedPool[*[]byte]`**: the recycling mechanism lives in
 `internal/kernel/recycler`; the 64-KiB threshold and the `*[]byte` type live
-here. The generic `Recycler[T]` that used to share this package moved to
+here. The generic `Pool[T]` that used to share this package moved to
 `recycler`.
 
 ## Contents
@@ -22,7 +22,7 @@ here. The generic `Recycler[T]` that used to share this package moved to
   `sync.Pool`'s `any` payload on every trip — this is what keeps the hot path
   allocation-free. Callers `*bp = b` after growth to publish the resized slice.
 - **`Put(nil)` is a safe no-op.** Callers `defer Put(bp)` unconditionally. The
-  generic `CappedRecycler` cannot nil-check a pointer-like `T`, so the guard
+  generic `CappedPool` cannot nil-check a pointer-like `T`, so the guard
   lives in `Put`.
 - **Drop-on-oversize.** Buffers whose `cap > maxRetain` (64 KiB) are dropped on
   `Put` — implemented as the recycler's discard-before-reset.
@@ -31,8 +31,8 @@ here. The generic `Recycler[T]` that used to share this package moved to
 
 - Keep a reference to a buffer after `Put`. The pool may hand it to another
   goroutine immediately.
-- Reach for a typed object pool here — that is `recycler.Recycler[T]` /
-  `recycler.CappedRecycler[T]`.
+- Reach for a typed object pool here — that is `recycler.Pool[T]` /
+  `recycler.CappedPool[T]`.
 - Add `Sleep`, timer helpers, or anything time-shaped here — that's `clock/`.
 
 ## Verification

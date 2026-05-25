@@ -20,8 +20,8 @@ var allocSink any
 // `bazel test --config=alloc //internal/kernel/recycler:recycler_test` or
 // `--config=pure`.
 func TestZeroAllocInvariant(t *testing.T) {
-	rec := recycler.NewRecycler[*[64]byte](func() *[64]byte { return &[64]byte{} })
-	capped := recycler.NewCappedRecycler[*[]byte](
+	rec := recycler.NewPool[*[64]byte](func() *[64]byte { return &[64]byte{} })
+	capped := recycler.NewCappedPool[*[]byte](
 		func() *[]byte { return new(make([]byte, 0, 1024)) },
 		func(b *[]byte) { *b = (*b)[:0] },
 		func(b *[]byte) int { return cap(*b) },
@@ -32,8 +32,8 @@ func TestZeroAllocInvariant(t *testing.T) {
 		fn   func()
 	}
 	tests := []tc{
-		{"Recycler Get+Put", func() { v := rec.Get(); allocSink = v; rec.Put(v) }},
-		{"CappedRecycler Get+Put", func() { v := capped.Get(); allocSink = v; capped.Put(v) }},
+		{"Pool Get+Put", func() { v := rec.Get(); allocSink = v; rec.Put(v) }},
+		{"CappedPool Get+Put", func() { v := capped.Get(); allocSink = v; capped.Put(v) }},
 		{"buffer Get+Put", func() { b := buffer.Get(); allocSink = b; buffer.Put(b) }},
 	}
 	runCase := func(t *testing.T, tc tc) {

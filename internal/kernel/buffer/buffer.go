@@ -1,7 +1,7 @@
 // Package buffer provides a pooled *[]byte for zero-alloc formatting in hot
 // paths. Consumers acquire a reusable buffer via Get and return it via Put so
 // steady-state allocations tend toward zero. It is a thin byte-slice
-// specialisation over internal/kernel/recycler.CappedRecycler (ADR 0010): the
+// specialisation over internal/kernel/recycler.CappedPool (ADR 0010): the
 // recycling mechanism lives in recycler, the 64-KiB capacity threshold and the
 // *[]byte type live here.
 package buffer
@@ -17,12 +17,12 @@ const initialCap int = 1024
 // from retaining unbounded memory after a rare large log record.
 const maxRetain int = 64 * 1024
 
-// bytePool recycles *[]byte via the kernel CappedRecycler. Storing *[]byte
+// bytePool recycles *[]byte via the kernel CappedPool. Storing *[]byte
 // (rather than []byte) avoids boxing the slice header into sync.Pool's any
 // payload on every Put, which is what keeps the hot path allocation-free.
 // reset truncates length to zero; capOf reports cap so the recycler drops any
 // buffer grown past maxRetain (discard-before-reset).
-var bytePool = recycler.NewCappedRecycler[*[]byte](
+var bytePool = recycler.NewCappedPool[*[]byte](
 	func() *[]byte { return new(make([]byte, 0, initialCap)) },
 	func(b *[]byte) { *b = (*b)[:0] },
 	func(b *[]byte) int { return cap(*b) },
@@ -37,7 +37,7 @@ func Get() *[]byte {
 
 // Put returns a buffer to the pool after use; the recycler truncates its length
 // and drops it when cap exceeds maxRetain. A nil argument is a safe no-op so
-// call sites can always defer Put — the generic CappedRecycler cannot nil-check
+// call sites can always defer Put — the generic CappedPool cannot nil-check
 // a pointer-like T, so the guard lives here.
 func Put(b *[]byte) {
 	//: nil-safe no-op so callers can defer Put unconditionally.

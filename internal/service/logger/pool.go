@@ -1,5 +1,5 @@
 // Package logger — declares the recycled event-record bucket consumed
-// by the Builder API. Pulling RecordEvent values from a recycler.Recycler
+// by the Builder API. Pulling RecordEvent values from a recycler.Pool
 // keeps the hot path allocation-free in steady state — combined with the
 // kind-discriminated Value union the per-call cost is dominated by the
 // encoder + sink rather than GC pressure.
@@ -18,7 +18,7 @@ const initialAttrCap int = 8
 // recordPool recycles *chainBuilder values across Log calls. The factory
 // returns a fresh chainBuilder with a pre-allocated attrs slice so the
 // steady-state cost of Build() is zero heap allocations.
-var recordPool = recycler.NewRecycler[*chainBuilder](newChainBuilder)
+var recordPool = recycler.NewPool[*chainBuilder](newChainBuilder)
 
 // newChainBuilder returns a fresh *chainBuilder with a pre-allocated attrs
 // slice.

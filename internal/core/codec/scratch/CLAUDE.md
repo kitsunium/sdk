@@ -12,8 +12,8 @@ truth for the cap-discard policy and the shared pool.
 ## Why core, not kernel
 
 Since ADR 0010 the recycling MECHANISM is shared: `bufferPool` is a
-`recycler.CappedRecycler[*bytes.Buffer]` and `readerPool` a plain
-`recycler.Recycler[*bytes.Reader]`. What stays here is the codec VOCABULARY —
+`recycler.CappedPool[*bytes.Buffer]` and `readerPool` a plain
+`recycler.Pool[*bytes.Reader]`. What stays here is the codec VOCABULARY —
 the 256 KiB codec-payload threshold (`MaxRetainedBufBytes`) and the concrete
 `*bytes.Buffer` / `*bytes.Reader` types — which is why this package lives in
 `core/codec`, consumed only by `service/codec/*` below `core` in the layer

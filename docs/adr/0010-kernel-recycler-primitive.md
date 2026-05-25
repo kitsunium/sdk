@@ -21,7 +21,7 @@ layers:
 | Mechanism | Layer | Type | Cap-discard | Reset |
 |---|---|---|---|---|
 | `kernel/buffer` `Get`/`Put` | kernel | `*[]byte` | 64 KiB, hand-rolled | on Put |
-| `kernel/buffer` `Recycler[T]` (interface) | kernel | `T` | none | none |
+| `kernel/buffer` `Pool[T]` (interface) | kernel | `T` | none | none |
 | `core/codec/scratch` `Acquire*`/`Release*` | core | `*bytes.Buffer` + `*bytes.Reader` | 256 KiB, hand-rolled | Acquire + Release |
 
 The cap-discard *mechanism* is generic; only the *threshold* and the concrete
@@ -32,54 +32,55 @@ The cap-discard *mechanism* is generic; only the *threshold* and the concrete
 Introduce `internal/kernel/recycler`, a minimal kernel primitive for reusable
 object recycling. It exposes **concrete types only — no public interface**:
 
-- `Recycler[T]` — owns a `sync.Pool`, performs **no reset**. Suitable for
+- `Pool[T]` — owns a `sync.Pool`, performs **no reset**. Suitable for
   consumers that reset at their own boundary (logger `Builder.Send`, async
   `data[:0]`).
-- `CappedRecycler[T]` — composes a concrete `*Recycler[T]` and adds
+- `CappedPool[T]` — composes a concrete `*Pool[T]` and adds
   `reset func(T)` + `capOf func(T) int` + `maxCap int`.
 
 Conventions:
 
-- **reset-on-Put**, only in `CappedRecycler`.
-- `CappedRecycler.Put` **discards oversized values BEFORE reset** — an over-cap
+- **reset-on-Put**, only in `CappedPool`.
+- `CappedPool.Put` **discards oversized values BEFORE reset** — an over-cap
   value is orphaned (never reset, never repooled). This preserves the codec
   scratch detach contract, where an over-cap buffer's `Bytes()` has been handed
   to the caller and must not be touched. **Reset is not a memory wipe**; a
   consumer recycling sensitive bytes must zero them before Put.
-- `NewRecycler(nil)` **panics** (programmer error). `NewCappedRecycler` panics
+- `NewPool(nil)` **panics** (programmer error). `NewCappedPool` panics
   on a nil reset/capOf or a non-positive `maxCap` (a non-positive threshold
   would orphan every value, silently turning the pool into a never-recycling
   allocator).
-- `Recycler.Get()` is **fail-loud** via comma-ok + panic (mirrors
+- `Pool.Get()` is **fail-loud** via comma-ok + panic (mirrors
   `core/codec/scratch.poolGet`): the pool is contractually homogeneous, so a
   wrong-typed entry is an invariant break that must surface, not hide.
 - **Generic recyclers do NOT nil-check**; public/package-level wrappers
   (`buffer.Put`, `scratch.ReleaseBuffer`/`ReleaseReader`) keep nil guards where
   nil is part of their accepted API — a generic `T any` cannot nil-check.
 - **Runtime-parameterized resets** (`bytes.Reader.Reset(src)`) stay
-  consumer-side on Acquire, backed by a plain `Recycler[T]`.
+  consumer-side on Acquire, backed by a plain `Pool[T]`.
 
 Capacity thresholds remain owned by the consumers: 64 KiB (`kernel/buffer`),
 256 KiB (`core/codec/scratch`).
 
 ## Alternatives considered
 
-- **Keep `Recycler[T]` as an interface (IFACE-PLUGIN), the prior kernel
+- **Keep the primitives as interfaces (IFACE-PLUGIN), the prior kernel
   convention.** Rejected: a single-implementation interface in a kernel
   primitive is over-abstraction, and recycler is internal plumbing never
   re-exported in `pkg/v1` — the interface-for-consumers convention lives at the
-  public boundary (`logger.Logger`, `codec.Codec`), not here. The concrete
-  struct also avoids an interface dispatch on the `Get`/`Put` hot path (the
-  exact ns gain is left to a benchmark, but it is strictly ≥ 0 and the 0-alloc
-  invariant holds either way). ktn-linter's `KTN-STRUCT-ROLE` flags the exported
-  struct (no role suffix); a single-concept primitive whose name IS its API (cf.
-  stdlib `ring.Ring` / `list.List`) is the legitimate exception, scoped out in
-  `.ktn-linter.yaml`. That exclusion is **temporary**: its root is an upstream
-  heuristic gap (the PNPT exemption is suppressed by a non-matching sibling —
-  filed as kodflow/ktn-linter#356), and config knobs already merged on the
-  linter's main branch (#285 `additional_suffixes`, #332 per-rule `severity`)
-  will replace the path-suppress with native config once a release > v1.34.0
-  ships them (see the TODO in `.ktn-linter.yaml`).
+  public boundary (`logger.Logger`, `codec.Codec`), not here. Concrete structs
+  also avoid an interface dispatch on the `Get`/`Put` hot path (exact ns gain
+  left to a benchmark; the 0-alloc invariant holds either way).
+- **Name the types `Recycler` / `CappedRecycler`.** Rejected on lint grounds:
+  `recycler.CappedRecycler` is a genuine compound stutter — ktn-linter#359
+  ruled this **by-design** (`KTN-STRUCT-ROLE-STUTTER` is doing its job), so
+  carrying those names would force a permanent `.ktn-linter.yaml` exclusion.
+  Renamed to the `sync.Pool`-idiomatic `Pool[T]` / `CappedPool[T]` instead:
+  "Pool" is a recognized role suffix, so both types pass `KTN-STRUCT-ROLE` and
+  `KTN-STRUCT-ROLE-STUTTER` **natively — zero exclusion**, and independent of
+  the PNPT fix (kodflow/ktn-linter#356), so it works on the released v1.34.0
+  binary (verified). The package stays `recycler` (the mechanism); the types are
+  pools, exactly like `sync.Pool`.
 - **A `worker` pool sibling now.** Deferred: a worker pool composes `ring`, not
   `recycler`, and has only one plausible consumer today (async logger). Built
   on demand, not ahead of it (no empty package).
@@ -89,14 +90,14 @@ Capacity thresholds remain owned by the consumers: 64 KiB (`kernel/buffer`),
 
 ## Consequences
 
-- `kernel/buffer` becomes a `recycler.CappedRecycler[*[]byte]` (64 KiB) wrapper;
+- `kernel/buffer` becomes a `recycler.CappedPool[*[]byte]` (64 KiB) wrapper;
   `*[]byte` and the nil-safe `Put` no-op stay.
-- `core/codec/scratch` uses `recycler.CappedRecycler[*bytes.Buffer]` (256 KiB)
-  for buffers and a plain `recycler.Recycler[*bytes.Reader]` for readers; the
+- `core/codec/scratch` uses `recycler.CappedPool[*bytes.Buffer]` (256 KiB)
+  for buffers and a plain `recycler.Pool[*bytes.Reader]` for readers; the
   `poolGet` helper is gone. The "Why core, not kernel" rationale is revised —
   only the mechanism migrated; the 256 KiB codec threshold stays in core.
 - `service/logger` (recordPool) and `service/logger/middleware/async` (sink
-  pool) consume `recycler.Recycler`; reset stays consumer-side.
+  pool) consume `recycler.Pool`; reset stays consumer-side.
 - The IFACE-PLUGIN convention (kernel exported types are interfaces) no longer
   applies to `recycler`: it is the first kernel primitive shipped as concrete
   structs by deliberate choice.

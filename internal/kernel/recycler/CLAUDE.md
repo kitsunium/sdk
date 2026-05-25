@@ -3,7 +3,7 @@
 ## Purpose
 
 The SDK's generic object-recycling primitive. Stdlib-only, domain-neutral.
-`Recycler[T]` wraps a `sync.Pool` to recycle ANY pointer-sized typed object
+`Pool[T]` wraps a `sync.Pool` to recycle ANY pointer-sized typed object
 (event records, attr slices, scratch structs) without the boxing cost on
 Get/Put. The byte-slice pool (`internal/kernel/buffer`) and the codec scratch
 buffer pool (`internal/core/codec/scratch`) are built ON this primitive — the
@@ -14,15 +14,15 @@ mechanism lives here, the capacity thresholds stay with the consumers
 
 | Primitive | Surface | Use case |
 |---|---|---|
-| `Recycler[T]` | `NewRecycler[T any](newFn func() T)` → `Get() T` / `Put(v T)` | recycle typed objects; no reset |
-| `CappedRecycler[T]` | `NewCappedRecycler[T any](newFn, resetFn, capOfFn, maxCap)` → `Get`/`Put` | adds reset-on-Put + cap-discard |
+| `Pool[T]` | `NewPool[T any](newFn func() T)` → `Get() T` / `Put(v T)` | recycle typed objects; no reset |
+| `CappedPool[T]` | `NewCappedPool[T any](newFn, resetFn, capOfFn, maxCap)` → `Get`/`Put` | adds reset-on-Put + cap-discard |
 
 ## Conventions
 
-- **Recycler[T] has no reset.** Consumers that need cleanup either reset
+- **Pool[T] has no reset.** Consumers that need cleanup either reset
   before Put (logger `Builder.Send`, async `data[:0]`) or use
-  `CappedRecycler[T]`.
-- **CappedRecycler[T] is reset-on-Put + discard-before-reset.** Over-cap
+  `CappedPool[T]`.
+- **CappedPool[T] is reset-on-Put + discard-before-reset.** Over-cap
   values are orphaned (never reset, never repooled) — this preserves the
   codec scratch detach contract. Reset is NOT a memory wipe.
 - **Generic recyclers do NOT nil-check.** Public/package-level wrappers
@@ -34,7 +34,7 @@ mechanism lives here, the capacity thresholds stay with the consumers
 ## Do NOT
 
 - Keep a reference to a value after `Put`.
-- Use `Recycler[T]` for value types larger than a few words.
+- Use `Pool[T]` for value types larger than a few words.
 - Add worker pools, queues, metrics, policy objects, or lifecycle managers
   here — this is a primitive, not a framework (ADR 0010).
 

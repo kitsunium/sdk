@@ -26,7 +26,7 @@ func (noopDownstream) Close() error                  { return nil }
 func freshSink(t testing.TB, policy DropPolicy) *asyncSink {
 	t.Helper()
 	queue := mustNewRing(4)
-	pool := recycler.NewRecycler[*recordEntry](newRecordEntry)
+	pool := recycler.NewPool[*recordEntry](newRecordEntry)
 	done := make(chan struct{})
 	close(done)
 	return &asyncSink{

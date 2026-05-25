@@ -1,37 +1,37 @@
-// Package recycler provides Recycler[T any], a generic typed object pool
+// Package recycler provides Pool[T any], a generic typed object pool
 // backed by sync.Pool. Callers recycle ANY pointer-sized object (event
 // records, attribute slices, scratch structs) without paying the boxing cost
 // on Get/Put. Stdlib-only and domain-neutral: any byte buffer, codec stream,
 // HTTP body encoder, or metrics line writer can reuse it.
 //
 // The byte-slice pool (internal/kernel/buffer) and the codec scratch buffer
-// pool (internal/core/codec/scratch) are built ON this primitive; Recycler[T]
+// pool (internal/core/codec/scratch) are built ON this primitive; Pool[T]
 // is the shared mechanism, the capacity thresholds stay with the consumers.
 package recycler
 
 import "sync"
 
-// Recycler is a concrete generic object pool over sync.Pool. It performs NO
+// Pool is a concrete generic object pool over sync.Pool. It performs NO
 // reset — consumers that need cleanup either reset before Put (logger
-// Builder.Send, async data[:0]) or use CappedRecycler. Safe for concurrent
+// Builder.Send, async data[:0]) or use CappedPool. Safe for concurrent
 // use. Always used behind a pointer: sync.Pool must not be copied.
-type Recycler[T any] struct {
+type Pool[T any] struct {
 	// pool is the underlying sync.Pool holding the recycled values.
 	pool sync.Pool
 }
 
-// NewRecycler returns a Recycler[T] whose factory fires on every cache miss.
+// NewPool returns a Pool[T] whose factory fires on every cache miss.
 // A nil factory is a programmer error and panics at construction rather than
 // deferring the panic to sync.Pool.Get on the first cache miss, far from the
 // offending call site.
-func NewRecycler[T any](newFn func() T) *Recycler[T] {
+func NewPool[T any](newFn func() T) *Pool[T] {
 	//: refuse a nil factory loudly at construction, not on first Get.
 	if newFn == nil {
 		//: programmer error — fail fast at the call site.
 		panic("recycler: nil factory")
 	}
 	//: build the recycler with a thin closure boxing the factory output for sync.Pool.
-	r := &Recycler[T]{}
+	r := &Pool[T]{}
 	r.pool.New = func() any {
 		//: invoke the caller's factory and hand its result to sync.Pool as any.
 		return newFn()
@@ -45,7 +45,7 @@ func NewRecycler[T any](newFn func() T) *Recycler[T] {
 // comma-ok assertion is fail-loud: the pool only ever holds T (both New and
 // Put are typed), so a wrong-typed entry is an internal invariant break that
 // panics rather than silently masking it (mirrors core/codec/scratch.poolGet).
-func (r *Recycler[T]) Get() T {
+func (r *Pool[T]) Get() T {
 	//: the pool only ever holds T — comma-ok guards the invariant.
 	v, ok := r.pool.Get().(T)
 	//: a wrong-typed entry is impossible by contract; fail loud if it happens.
@@ -59,7 +59,7 @@ func (r *Recycler[T]) Get() T {
 
 // Put returns v to the pool for future reuse. Callers MUST NOT touch v after
 // Put returns; the pool may hand it to another goroutine immediately.
-func (r *Recycler[T]) Put(v T) {
+func (r *Pool[T]) Put(v T) {
 	//: hand the value back to sync.Pool — boxing a pointer-sized T is alloc-free.
 	r.pool.Put(v)
 }

@@ -18,7 +18,7 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0007-sdk-release-and-versioning.md` | Impact-driven patch tags `pkg/<major>/vX.Y.Z` + docs versioning from tag snapshots | Accepted |
 | `0008-readme-from-code-generation.md` | `README.md` generated from Go doc comments (gomarkdoc) | Accepted |
 | `0009-pkg-public-module-resolvability.md` | Published `pkg/<major>` must be `go get`-resolvable + accessible; release tags the whole module chain | Accepted; mechanism implemented |
-| `0010-kernel-recycler-primitive.md` | Generic `recycler.Recycler[T]` + `CappedRecycler[T]` object pools; `buffer`/`scratch` become consumers | Accepted |
+| `0010-kernel-recycler-primitive.md` | Generic `recycler.Pool[T]` + `CappedPool[T]` object pools; `buffer`/`scratch` become consumers | Accepted |
 
 ## Conventions
 

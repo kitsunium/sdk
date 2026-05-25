@@ -1,8 +1,8 @@
-// Package recycler — CappedRecycler[T] layers a reset-on-Put + cap-discard
-// policy on top of the plain Recycler[T] declared in recycler.go.
+// Package recycler — CappedPool[T] layers a reset-on-Put + cap-discard
+// policy on top of the plain Pool[T] declared in recycler.go.
 package recycler
 
-// CappedRecycler wraps a concrete *Recycler[T] and layers a cap-discard policy
+// CappedPool wraps a concrete *Pool[T] and layers a cap-discard policy
 // on top: on Put, a value whose reported capacity exceeds maxCap is orphaned
 // (never reset, never repooled), otherwise it is reset then repooled.
 //
@@ -11,12 +11,12 @@ package recycler
 // to the caller and must not be touched. Reset is NOT a memory wipe — a
 // consumer recycling sensitive bytes must zero them itself before Put.
 //
-// Always used behind a pointer: the embedded *Recycler owns a non-copyable
+// Always used behind a pointer: the embedded *Pool owns a non-copyable
 // sync.Pool.
-type CappedRecycler[T any] struct {
+type CappedPool[T any] struct {
 	// inner is the composed plain recycler. Concrete (not an interface) so
 	// Get/Put stay inlinable on the hot path.
-	inner *Recycler[T]
+	inner *Pool[T]
 	// reset returns a value to its reusable zero state before it is repooled.
 	reset func(T)
 	// capOf reports the value's current capacity, compared against maxCap.
@@ -25,13 +25,13 @@ type CappedRecycler[T any] struct {
 	maxCap int
 }
 
-// NewCappedRecycler returns a CappedRecycler[T]. newFn builds fresh values,
+// NewCappedPool returns a CappedPool[T]. newFn builds fresh values,
 // resetFn returns a value to its reusable state, and capOfFn reports a value's
 // capacity for the discard decision. All three functions are required and a
 // nil one panics. maxCap must be positive: a non-positive threshold would
 // orphan every value, silently turning the pool into a never-recycling
 // allocator, so it panics rather than degrade.
-func NewCappedRecycler[T any](newFn func() T, resetFn func(T), capOfFn func(T) int, maxCap int) *CappedRecycler[T] {
+func NewCappedPool[T any](newFn func() T, resetFn func(T), capOfFn func(T) int, maxCap int) *CappedPool[T] {
 	//: reset is mandatory — reset-on-Put is the whole reason this variant exists.
 	if resetFn == nil {
 		//: programmer error — fail fast at construction.
@@ -47,9 +47,9 @@ func NewCappedRecycler[T any](newFn func() T, resetFn func(T), capOfFn func(T) i
 		//: refuse the degenerate configuration loudly.
 		panic("recycler: max capacity must be positive")
 	}
-	//: compose the plain recycler concretely; NewRecycler validates newFn.
-	return &CappedRecycler[T]{
-		inner:  NewRecycler(newFn),
+	//: compose the plain recycler concretely; NewPool validates newFn.
+	return &CappedPool[T]{
+		inner:  NewPool(newFn),
 		reset:  resetFn,
 		capOf:  capOfFn,
 		maxCap: maxCap,
@@ -58,7 +58,7 @@ func NewCappedRecycler[T any](newFn func() T, resetFn func(T), capOfFn func(T) i
 
 // Get borrows a value of type T from the underlying recycler, invoking the
 // factory on a cache miss. Callers own it until they hand it back via Put.
-func (c *CappedRecycler[T]) Get() T {
+func (c *CappedPool[T]) Get() T {
 	//: delegate to the composed recycler's Get.
 	return c.inner.Get()
 }
@@ -66,7 +66,7 @@ func (c *CappedRecycler[T]) Get() T {
 // Put returns v for reuse unless its capacity exceeds maxCap, in which case v
 // is orphaned (discard-before-reset: never reset, never repooled). Otherwise v
 // is reset then repooled. Callers MUST NOT touch v after Put returns.
-func (c *CappedRecycler[T]) Put(v T) {
+func (c *CappedPool[T]) Put(v T) {
 	//: discard oversized values BEFORE reset — orphan them for the GC.
 	if c.capOf(v) > c.maxCap {
 		//: over-cap: caller may still alias the bytes, so never reset/repool.

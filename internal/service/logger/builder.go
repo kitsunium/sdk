@@ -1,6 +1,6 @@
 // Package logger — declares the chainable Builder API — the
 // zero-allocation hot path for callers that care about per-call cost.
-// Pulled from a recycler.Recycler[*chainBuilder], the builder accumulates
+// Pulled from a recycler.Pool[*chainBuilder], the builder accumulates
 // attrs without allocating beyond the pre-sized scratchpad and returns to
 // the pool on Send.
 package logger

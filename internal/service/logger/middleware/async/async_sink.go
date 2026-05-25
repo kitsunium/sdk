@@ -35,7 +35,7 @@ type asyncSink struct {
 	// queue is the lock-free ring buffer holding pending entries.
 	queue ring.Queue[*recordEntry]
 	// pool recycles *recordEntry values to avoid per-write allocation.
-	pool *recycler.Recycler[*recordEntry]
+	pool *recycler.Pool[*recordEntry]
 	// policy selects the saturation behaviour at Write time.
 	policy DropPolicy
 	// onDrop fires for every entry discarded by the policy; never nil.
@@ -107,7 +107,7 @@ func New(downstream corelogger.Sink, cfg Config) corelogger.Sink {
 		errCallback = noopOnError
 	}
 	//: recycler keeps per-entry allocation off the hot path.
-	pool := recycler.NewRecycler[*recordEntry](newRecordEntry)
+	pool := recycler.NewPool[*recordEntry](newRecordEntry)
 	//: build the sink with channels primed for the drainer lifecycle.
 	out := &asyncSink{
 		downstream:  downstream,

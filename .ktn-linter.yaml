@@ -150,34 +150,12 @@ rules:
     exclude:
       - "**/pkg/v1/codec/codec_bench_test.go"
 
-  # KTN-STRUCT-ROLE + KTN-STRUCT-ROLE-STUTTER — narrow exclude for CappedRecycler
-  # ONLY (one file). recycler is internal/kernel plumbing, never re-exported in
-  # pkg/v1, so the interface-for-consumers convention does not apply; the
-  # primitives are concrete structs per ADR 0010 (avoids an interface dispatch
-  # on the Get/Put hot path).
-  #
-  # Recycler[T] needs NO exclude: the PNPT per-declaration fix
-  # (kodflow/ktn-linter#356, PR #357) makes a package-named primitive exempt
-  # regardless of siblings. CappedRecycler[T] is a cap-bounded variant of the
-  # same primitive, but its name is not an exact PNPT match (recycler !=
-  # cappedrecycler), so STRUCT-ROLE + the info-level STUTTER still flag it.
-  # That compound-variant case is filed as kodflow/ktn-linter#359 (proposal:
-  # extend PNPT to a trailing-component match, or adopt #285 additional_suffixes).
-  #
-  # REQUIRES a ktn-linter build that includes #356 (on the linter's main branch
-  # today; cut a release > v1.34.0, or pin the devcontainer to it). Under the
-  # plain v1.34.0 release Recycler ALSO flags and this one-file exclude is
-  # insufficient — widen back to "**/internal/kernel/recycler/**" in that case.
-  #
-  # TODO(remove entirely once #359 lands OR #285 additional_suffixes ships in a
-  # release: then add `KTN-STRUCT-ROLE.additional_suffixes: [Recycler]` and drop
-  # this block).
-  KTN-STRUCT-ROLE:
-    exclude:
-      - "**/internal/kernel/recycler/capped.go"
-  KTN-STRUCT-ROLE-STUTTER:
-    exclude:
-      - "**/internal/kernel/recycler/capped.go"
+  # (No recycler exclusion.) internal/kernel/recycler ships Pool[T] +
+  # CappedPool[T]: "Pool" is a recognized role suffix, so both pass
+  # KTN-STRUCT-ROLE and KTN-STRUCT-ROLE-STUTTER natively — no path-suppress and
+  # no dependency on the PNPT fix (#356). The earlier Recycler/CappedRecycler
+  # naming stuttered (kodflow/ktn-linter#359, by-design) and was renamed to the
+  # idiomatic sync.Pool-style form instead of carrying an exclusion (ADR 0010).
 
   # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,

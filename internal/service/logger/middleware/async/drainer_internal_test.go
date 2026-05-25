@@ -30,7 +30,7 @@ func liveSink(t testing.TB, down corelogger.Sink) *asyncSink {
 	s := &asyncSink{
 		downstream: down,
 		queue:      mustNewRing(8),
-		pool:       recycler.NewRecycler[*recordEntry](newRecordEntry),
+		pool:       recycler.NewPool[*recordEntry](newRecordEntry),
 		policy:     DropNewest,
 		onDrop:     noopOnDrop,
 		stop:       make(chan struct{}),

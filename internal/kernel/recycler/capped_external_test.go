@@ -7,17 +7,17 @@ import (
 )
 
 // capBox is a test value whose reported capacity and reset state are both
-// observable, so CappedRecycler's discard-before-reset policy can be asserted
+// observable, so CappedPool's discard-before-reset policy can be asserted
 // directly on a held reference.
 type capBox struct {
 	cap      int
 	wasReset bool
 }
 
-// newCappedTestRecycler builds a CappedRecycler over *capBox with the given
+// newCappedTestPool builds a CappedPool over *capBox with the given
 // threshold; reset flips wasReset, capOf reports the box's cap field.
-func newCappedTestRecycler(maxCap int) *recycler.CappedRecycler[*capBox] {
-	return recycler.NewCappedRecycler[*capBox](
+func newCappedTestPool(maxCap int) *recycler.CappedPool[*capBox] {
+	return recycler.NewCappedPool[*capBox](
 		func() *capBox { return &capBox{} },
 		func(b *capBox) { b.wasReset = true },
 		func(b *capBox) int { return b.cap },
@@ -25,10 +25,10 @@ func newCappedTestRecycler(maxCap int) *recycler.CappedRecycler[*capBox] {
 	)
 }
 
-// TestNewCappedRecycler covers the fail-fast constructor contract: nil
+// TestNewCappedPool covers the fail-fast constructor contract: nil
 // reset/capOf and a non-positive maxCap are programmer errors and panic; a
 // valid configuration returns without panicking.
-func TestNewCappedRecycler(t *testing.T) {
+func TestNewCappedPool(t *testing.T) {
 	t.Parallel()
 	mk := func() *capBox { return &capBox{} }
 	tests := []struct {
@@ -36,11 +36,11 @@ func TestNewCappedRecycler(t *testing.T) {
 		runner    func()
 		wantPanic bool
 	}{
-		{"nil reset panics", func() { recycler.NewCappedRecycler[*capBox](mk, nil, func(*capBox) int { return 0 }, 8) }, true},
-		{"nil capOf panics", func() { recycler.NewCappedRecycler[*capBox](mk, func(*capBox) {}, nil, 8) }, true},
-		{"zero maxCap panics", func() { recycler.NewCappedRecycler[*capBox](mk, func(*capBox) {}, func(*capBox) int { return 0 }, 0) }, true},
-		{"negative maxCap panics", func() { recycler.NewCappedRecycler[*capBox](mk, func(*capBox) {}, func(*capBox) int { return 0 }, -1) }, true},
-		{"valid configuration does not panic", func() { newCappedTestRecycler(8) }, false},
+		{"nil reset panics", func() { recycler.NewCappedPool[*capBox](mk, nil, func(*capBox) int { return 0 }, 8) }, true},
+		{"nil capOf panics", func() { recycler.NewCappedPool[*capBox](mk, func(*capBox) {}, nil, 8) }, true},
+		{"zero maxCap panics", func() { recycler.NewCappedPool[*capBox](mk, func(*capBox) {}, func(*capBox) int { return 0 }, 0) }, true},
+		{"negative maxCap panics", func() { recycler.NewCappedPool[*capBox](mk, func(*capBox) {}, func(*capBox) int { return 0 }, -1) }, true},
+		{"valid configuration does not panic", func() { newCappedTestPool(8) }, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,8 +57,8 @@ func TestNewCappedRecycler(t *testing.T) {
 	}
 }
 
-// TestCappedRecycler_Get verifies Get hands out a usable value on a cold pool.
-func TestCappedRecycler_Get(t *testing.T) {
+// TestCappedPool_Get verifies Get hands out a usable value on a cold pool.
+func TestCappedPool_Get(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -68,7 +68,7 @@ func TestCappedRecycler_Get(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			r := newCappedTestRecycler(8)
+			r := newCappedTestPool(8)
 			if got := r.Get(); got == nil {
 				t.Fatal("Get returned nil on cold pool")
 			}
@@ -76,10 +76,10 @@ func TestCappedRecycler_Get(t *testing.T) {
 	}
 }
 
-// TestCappedRecycler_Put verifies the discard-before-reset policy: a value at
+// TestCappedPool_Put verifies the discard-before-reset policy: a value at
 // or under maxCap is reset (and repooled); an over-cap value is orphaned
 // WITHOUT reset (so a caller still aliasing its bytes is not clobbered).
-func TestCappedRecycler_Put(t *testing.T) {
+func TestCappedPool_Put(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
@@ -93,7 +93,7 @@ func TestCappedRecycler_Put(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			r := newCappedTestRecycler(8)
+			r := newCappedTestPool(8)
 			b := &capBox{cap: tc.cap}
 			r.Put(b)
 			//: reset runs synchronously inside Put on the under-cap path only;

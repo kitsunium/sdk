@@ -2,12 +2,12 @@ package recycler
 
 import "testing"
 
-// Test_Recycler_Get_failLoud covers the white-box assertion path in Get: the
+// Test_Pool_Get_failLoud covers the white-box assertion path in Get: the
 // pool is contractually homogeneous (only ever holds T), so a wrong-typed
 // entry is an internal invariant break that MUST panic rather than silently
 // degrade. Reaching it requires poisoning the unexported pool, hence a
 // white-box test.
-func Test_Recycler_Get_failLoud(t *testing.T) {
+func Test_Pool_Get_failLoud(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
@@ -17,7 +17,7 @@ func Test_Recycler_Get_failLoud(t *testing.T) {
 		{
 			name: "homogeneous pool returns the typed value",
 			runner: func(t *testing.T) {
-				r := NewRecycler[*int](func() *int { return new(int(0)) })
+				r := NewPool[*int](func() *int { return new(int(0)) })
 				if got := r.Get(); got == nil {
 					t.Fatal("Get returned nil on a healthy pool")
 				}
@@ -27,7 +27,7 @@ func Test_Recycler_Get_failLoud(t *testing.T) {
 		{
 			name: "wrong-typed pool content fails loud",
 			runner: func(t *testing.T) {
-				r := NewRecycler[*int](func() *int { return new(int(0)) })
+				r := NewPool[*int](func() *int { return new(int(0)) })
 				//: poison the factory so the next cache miss yields a non-*int.
 				r.pool.New = func() any { return "not-a-pointer-to-int" }
 				//: empty pool → Get triggers New → the assertion in Get must panic.
