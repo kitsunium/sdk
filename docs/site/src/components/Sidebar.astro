@@ -10,6 +10,7 @@ import Search from "./Search.astro";
 import ThemeToggle from "./ThemeToggle.astro";
 import { findDefaults } from "../../scripts/lib/tag-format.mjs";
 import { buildCatalog } from "../../scripts/lib/page-catalog.mjs";
+import { DEPLOY_BASE, withBase } from "../../scripts/lib/base.mjs";
 
 interface Release {
   version: string;
@@ -42,7 +43,7 @@ const fallback = findDefaults(versions);
 const currentRelease = m?.[1] ?? fallback.release;
 const currentMajor = m?.[2] ?? fallback.major;
 
-const base = `/${currentRelease}/${currentMajor}`;
+const base = `${DEPLOY_BASE}/${currentRelease}/${currentMajor}`;
 const root = `${currentRelease}/${currentMajor}`;
 
 let entries: Awaited<ReturnType<typeof getCollection>> = [];
@@ -125,7 +126,7 @@ function isActive(href: string): boolean {
           pkg.go.dev ↗
         </a>
       )}
-      <a href="/rss.xml" rel="alternate">
+      <a href={withBase("/rss.xml")} rel="alternate">
         RSS feed ↗
       </a>
     </div>

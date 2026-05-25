@@ -521,7 +521,9 @@ footer p {
   --color-border: #d0d7de;
   --color-border-bright: #afb8c1;
   --color-text: #1f2328;
-  --color-muted: #57606a;
+  /* Darkened from #57606a so muted text clears WCAG AA (4.5:1) on white even
+     through the 0.7-opacity usages (build-coord, hints). */
+  --color-muted: #4a535d;
   --color-accent: #0969da;
   --color-accent-2: #8250df;
   --color-code-bg: #f1f4f8;

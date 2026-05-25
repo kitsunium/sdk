@@ -34,7 +34,15 @@ const {
   hideChrome = false,
 } = Astro.props;
 const url = new URL(Astro.request.url);
-const currentPath = url.pathname;
+//: fullPath keeps the deploy base (/sdk) for canonical/OG URLs; currentPath
+//: strips it so the /<release>/<major>/ parsing in Sidebar/Breadcrumbs/etc.
+//: works unchanged. Hrefs built in those components re-add the base.
+const fullPath = url.pathname;
+const deployBase = (import.meta.env.BASE_URL || "/").replace(/\/+$/, "");
+const currentPath =
+  (deployBase && fullPath.startsWith(deployBase)
+    ? fullPath.slice(deployBase.length)
+    : fullPath) || "/";
 
 interface BuildInfo {
   repoUrl?: string | null;
@@ -57,21 +65,26 @@ function projectName(repoUrl: string | null | undefined): string {
 const project = projectName(build.repoUrl);
 const pageTitle = title === project ? `${project} — documentation` : `${title} — ${project}`;
 const descFallback = `Documentation portal for ${project}.`;
-const canonicalUrl = new URL(currentPath, Astro.site ?? url.origin).toString();
-const ogImage = new URL("/brand/kitsunium.jpg", Astro.site ?? url.origin).toString();
+const canonicalUrl = new URL(fullPath, Astro.site ?? url.origin).toString();
+const ogImage = new URL(
+  `${deployBase}/brand/kitsunium.jpg`,
+  Astro.site ?? url.origin,
+).toString();
 ---
 
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <title>{pageTitle}</title>
     <meta name="description" content={description ?? descFallback} />
     <meta name="generator" content={Astro.generator} />
     <link rel="canonical" href={canonicalUrl} />
-    <link rel="icon" type="image/jpeg" href="/brand/kitsunium.jpg" />
-    <link rel="apple-touch-icon" href="/brand/kitsunium.jpg" />
-    <link rel="alternate" type="application/rss+xml" title={`${project} — documentation feed`} href="/rss.xml" />
+    <link rel="icon" type="image/jpeg" href={`${deployBase}/brand/kitsunium.jpg`} />
+    <link rel="apple-touch-icon" href={`${deployBase}/brand/kitsunium.jpg`} />
+    <link rel="alternate" type="application/rss+xml" title={`${project} — documentation feed`} href={`${deployBase}/rss.xml`} />
     {/* OpenGraph + Twitter cards — link previews on Slack / X / Discord / etc. */}
     <meta property="og:type" content="article" />
     <meta property="og:title" content={pageTitle} />
