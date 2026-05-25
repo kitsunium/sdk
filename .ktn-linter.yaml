@@ -127,20 +127,11 @@ rules:
       - "**/internal/service/logger/**"
       - "**/pkg/v1/logger/**"
 
-  # KTN-VAR-MAKEAPPEND + KTN-VAR-SLICECAP false-positive on generic
-  # fixed-length storage. The ring buffer (and other future generic
-  # primitives) allocate their slot array via `make([]T, n)` and only
-  # use indexed access (no append ever runs against the slice). The
-  # linter heuristic cannot prove the absence of append for a generic
-  # type parameter and conservatively flags every such call. We scope
-  # the exclusion to the kernel/ring tree so the rule still catches
-  # genuine append-as-storage misuse everywhere else.
-  KTN-VAR-MAKEAPPEND:
-    exclude:
-      - "**/internal/kernel/ring/**"
-  KTN-VAR-SLICECAP:
-    exclude:
-      - "**/internal/kernel/ring/**"
+  # (Removed) KTN-VAR-MAKEAPPEND + KTN-VAR-SLICECAP ring exclusion: the
+  # generic fixed-length-storage false positive it covered was fixed upstream
+  # in ktn-linter (append-reachability gating, kodflow/ktn-linter#183) and is
+  # no longer reproducible on v1.34.0 — verified by lint-with-exclusion-removed.
+  # Re-add a scoped exclusion only if a future binary regresses the heuristic.
 
   # KTN-TEST-SUFFIX + KTN-TEST-TABLE — scoped exception for the codec
   # benchmark file. Normally Test* functions must live in
