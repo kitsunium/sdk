@@ -780,6 +780,56 @@ func Test_baseencCodec_streamReader(t *testing.T) {
 	}
 }
 
+// Test_baseencCodec_unknownVariant_defaults exercises the defensive
+// fall-through return in every variant-dispatch switch (encodeBytes,
+// decodeBytes, appendEncode, streamWriter, streamReader). These arms are
+// unreachable in production because Register only stores the six known
+// variants, but a white-box test can construct an out-of-range value to
+// prove the defaults behave as documented (nil / dst-unchanged / pass-through).
+// The sentinel is built inline as variant(0xFF) rather than a named const so
+// it is not treated as an enumerated member by KTN-SWITCH-EXHAUSTIVE.
+func Test_baseencCodec_unknownVariant_defaults(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"unknown variant hits every dispatch default"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: 0xFF is past the last registered iota variant, so every dispatch
+		//: switch falls through to its defensive return.
+		c := &baseencCodec{variant: variant(0xFF)}
+		//: encodeBytes default returns nil for an unknown variant.
+		if got := c.encodeBytes([]byte("x")); got != nil {
+			t.Errorf("%s: encodeBytes(unknown)=%q, want nil", tc.name, got)
+		}
+		//: decodeBytes default returns (nil, nil) — no decode, no error.
+		dec, derr := c.decodeBytes([]byte("x"))
+		if dec != nil || derr != nil {
+			t.Errorf("%s: decodeBytes(unknown)=(%q,%v), want (nil,nil)", tc.name, dec, derr)
+		}
+		//: appendEncode default returns dst unchanged.
+		dst := []byte("prefix")
+		if got := c.appendEncode(slices.Clone(dst), []byte("x")); !bytes.Equal(got, dst) {
+			t.Errorf("%s: appendEncode(unknown)=%q, want %q", tc.name, got, dst)
+		}
+		//: streamWriter default wraps w in a nopWriteCloser.
+		var sink bytes.Buffer
+		w := c.streamWriter(&sink)
+		if _, ok := w.(nopWriteCloser); !ok {
+			t.Errorf("%s: streamWriter(unknown) type=%T, want nopWriteCloser", tc.name, w)
+		}
+		//: streamReader default returns the source reader verbatim.
+		src := bytes.NewReader(nil)
+		if r := c.streamReader(src); r != src {
+			t.Errorf("%s: streamReader(unknown) did not pass through the reader", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
 // TestWrapDecode verifies the (bytes, error) → BASE_ENC_DECODE_FAILED
 // adapter passes the success path through verbatim and wraps failures
 // with the typed sentinel.

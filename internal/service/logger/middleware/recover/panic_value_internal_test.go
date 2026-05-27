@@ -101,6 +101,29 @@ func (evilStringer) String() (s string) {
 	panic("evil: String() panic")
 }
 
+// nestedPanicPayload is a panic value whose own String() panics. fmt's
+// internal Stringer-panic guard catches the OUTER panic, then tries to
+// render this payload, panics AGAIN, and re-raises rather than producing a
+// "%!v(PANIC=...)" marker — the only path that drives safeString's inner
+// recover (panic_value.go:37) instead of letting fmt absorb the panic.
+type nestedPanicPayload struct{}
+
+// String panics so fmt cannot format the payload during its own panic guard.
+func (nestedPanicPayload) String() string {
+	//: panic during payload formatting forces fmt to re-raise.
+	panic("nested: payload String() panic")
+}
+
+// doublePanicStringer panics with a value that ITSELF panics on String().
+// This re-raises out of fmt.Sprintf, exercising safeString's inner recover.
+type doublePanicStringer struct{}
+
+// String panics with a nestedPanicPayload so fmt re-raises the meta-panic.
+func (doublePanicStringer) String() string {
+	//: panic payload is itself unformattable, defeating fmt's panic guard.
+	panic(nestedPanicPayload{})
+}
+
 // Test_safeString_GuardsAgainstPanickingStringer asserts the meta-panic
 // invariant: even when v.String() panics, safeString returns gracefully.
 //
@@ -140,6 +163,38 @@ func Test_safeString_GuardsAgainstPanickingStringer(t *testing.T) {
 			gotDegraded := okFmt || okInner
 			if gotDegraded != tc.degradedMarker {
 				t.Errorf("safeString(%v) = %q, gotDegraded=%v want %v", tc.val, got, gotDegraded, tc.degradedMarker)
+			}
+		})
+	}
+}
+
+// Test_safeString_InnerRecoverMarker drives the meta-panic arm that fmt
+// cannot absorb: a Stringer whose panic payload is itself unformattable
+// forces fmt.Sprintf to re-raise, so safeString's own deferred recover
+// (panic_value.go:37) substitutes the "<panic in String(): T>" marker.
+// The plain evilStringer case is absorbed by fmt and therefore exercises a
+// different arm — this test pins the genuine inner-recover path.
+func Test_safeString_InnerRecoverMarker(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		val  any
+	}{
+		{"double-panic stringer triggers safeString's inner recover", doublePanicStringer{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			defer func() {
+				//: the inner recover must absorb the re-raised meta-panic.
+				if r := recover(); r != nil {
+					t.Fatalf("safeString allowed a meta-panic to escape: %v", r)
+				}
+			}()
+			got := safeString(tc.val)
+			//: the substituted marker proves line 37 ran (not fmt's own guard).
+			if !strings.Contains(got, "panic in String()") {
+				t.Errorf("safeString(%v) = %q, want inner-recover marker %q", tc.val, got, "<panic in String(): T>")
 			}
 		})
 	}

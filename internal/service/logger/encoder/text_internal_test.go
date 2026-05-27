@@ -118,6 +118,7 @@ func Test_appendValueOnly(t *testing.T) {
 	}{
 		{"string", corelogger.StringValue("v"), `"v"`},
 		{"int64", corelogger.Int64Value(7), "7"},
+		{"uint64", corelogger.Uint64Value(42), "42"},
 		{"bool", corelogger.BoolValue(true), "true"},
 		{"float", corelogger.Float64Value(0.5), "0.5"},
 		{"any degrades to ?", corelogger.AnyValue(struct{}{}), "?"},

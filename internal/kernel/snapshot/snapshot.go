@@ -30,10 +30,10 @@ type Value[T any] struct {
 	p atomic.Pointer[T]
 }
 
-// New returns a Value holding initial. A nil initial is valid and leaves the
-// container empty (Load returns nil), the same state as the zero value —
+// NewValue returns a Value holding initial. A nil initial is valid and leaves
+// the container empty (Load returns nil), the same state as the zero value —
 // offered as call-site sugar when an initial value is already known.
-func New[T any](initial *T) *Value[T] {
+func NewValue[T any](initial *T) *Value[T] {
 	//: build the empty container; the zero value is already usable.
 	v := &Value[T]{}
 	//: a nil initial is a legitimate empty snapshot, not a programmer error.

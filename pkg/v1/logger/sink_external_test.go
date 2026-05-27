@@ -264,3 +264,50 @@ func TestTextEncoderIsNonNil(t *testing.T) {
 		})
 	}
 }
+
+// TestNewWriterSink covers both arms of the io.Writer adapter: a nil writer
+// surfaces WriterRequired (the same sentinel NewText uses), and a real
+// writer yields a Sink that ships records through NewWithSink.
+func TestNewWriterSink(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		nilW bool
+	}{
+		{"nil writer yields WriterRequired", true},
+		{"real writer ships records", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: nil-writer arm — construction must abort with the typed sentinel.
+			if tc.nilW {
+				sink, err := logger.NewWriterSink(nil)
+				if sink != nil {
+					t.Errorf("expected nil sink, got %v", sink)
+				}
+				if !errors.Is(err, logger.WriterRequired) {
+					t.Errorf("errors.Is(err, WriterRequired) = false: %v", err)
+				}
+				if code, _ := errs.CodeOf(err); code != logger.CodeWriterRequired {
+					t.Errorf("CodeOf = %v, want %v", code, logger.CodeWriterRequired)
+				}
+				return
+			}
+			//: real-writer arm — the adapter must produce a record-shipping sink.
+			var buf bytes.Buffer
+			sink, err := logger.NewWriterSink(&buf)
+			if err != nil {
+				t.Fatalf("NewWriterSink err = %v", err)
+			}
+			lg, err := logger.NewWithSink(logger.SinkConfig{Sink: sink})
+			if err != nil {
+				t.Fatalf("NewWithSink err = %v", err)
+			}
+			logger.Info(t.Context(), lg, "wrote")
+			if !strings.Contains(buf.String(), "wrote") {
+				t.Errorf("writer sink missing payload: %q", buf.String())
+			}
+		})
+	}
+}

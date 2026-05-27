@@ -8,9 +8,10 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
-// TestNew validates the constructor contract: a nil initial yields an empty
-// container (Load returns nil), a non-nil initial is observable on first Load.
-func TestNew(t *testing.T) {
+// TestNewValue validates the constructor contract: a nil initial yields an
+// empty container (Load returns nil), a non-nil initial is observable on first
+// Load.
+func TestNewValue(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name    string
@@ -25,7 +26,7 @@ func TestNew(t *testing.T) {
 	//: branch; the constructed container must reflect the initial argument.
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		v := snapshot.New(tc.initial)
+		v := snapshot.NewValue(tc.initial)
 		got := v.Load()
 		//: nil-initial path: Load must observe the empty (nil) state.
 		if tc.wantNil {
@@ -147,7 +148,7 @@ func TestValue_Update(t *testing.T) {
 	//: branch; an abort leaves the prior value installed unchanged.
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		v := snapshot.New(new(10))
+		v := snapshot.NewValue(new(10))
 		v.Update(func(current *int) *int {
 			//: the abort case returns the current pointer unchanged.
 			if tc.abort {
@@ -188,7 +189,7 @@ func TestValue_ConcurrentUpdateLoad(t *testing.T) {
 	//: branch; the final count must equal the total number of Update calls.
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		v := snapshot.New(new(0))
+		v := snapshot.NewValue(new(0))
 		var reads atomic.Uint64
 		var wg sync.WaitGroup
 		//: spawn writer goroutines that each increment via serialised Update.

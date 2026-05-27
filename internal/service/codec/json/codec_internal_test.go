@@ -83,18 +83,43 @@ func Test_jsonCodec_Extensions(t *testing.T) {
 	}
 }
 
-// Test_jsonCodec_Marshal exercises the Marshal path with a single canonical case.
+// Test_jsonCodec_Marshal exercises the Marshal path: the reflect route,
+// the RawMessage pre-encoded fast-path, and the wrapped-error branch.
 func Test_jsonCodec_Marshal(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name string
+		name    string
+		in      any
+		want    string
+		wantErr bool
 	}
-	tests := []tc{{"canonical marshal"}}
+	tests := []tc{
+		//: reflect route — map encodes via stdjson.Marshal.
+		{"reflect-route", map[string]int{"a": 1}, `{"a":1}`, false},
+		//: RawMessage fast-path — Marshal returns the pre-encoded bytes
+		//: verbatim (lines 55-58) instead of the reflect round-trip.
+		{"raw-message-fast-path", stdjson.RawMessage(`{"pre":true}`), `{"pre":true}`, false},
+		//: error route — a channel cannot be JSON-encoded, so stdjson.Marshal
+		//: fails and Marshal wraps it (lines 67-72).
+		{"unsupported-value-wraps-error", make(chan int), "", true},
+	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
 		c := &jsonCodec{}
-		if _, err := c.Marshal(map[string]int{"a": 1}); err != nil {
+		out, err := c.Marshal(tc.in)
+		//: error branch — verify failure surfaced, value bytes irrelevant.
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("%s: expected error, got nil", tc.name)
+			}
+			return
+		}
+		if err != nil {
 			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		//: success branch — assert exact wire bytes for both routes.
+		if string(out) != tc.want {
+			t.Errorf("%s: Marshal=%q want %q", tc.name, out, tc.want)
 		}
 	}
 	for _, tc := range tests {
@@ -184,6 +209,9 @@ func Test_jsonCodec_Append(t *testing.T) {
 	tests := []tc{
 		{"appends to empty buffer", nil, map[string]int{"k": 1}, []byte(`{"k":1}`), false},
 		{"appends to non-empty buffer", []byte("prefix:"), 7, []byte("prefix:7"), false},
+		//: RawMessage fast-path — Append writes the pre-encoded bytes onto
+		//: dst directly (lines 139-142), skipping the scratch encoder.
+		{"raw-message-fast-path", []byte("pre:"), stdjson.RawMessage(`{"x":1}`), []byte(`pre:{"x":1}`), false},
 		{"unsupported value yields error", nil, make(chan int), nil, true},
 	}
 	runCase := func(t *testing.T, tc tc) {

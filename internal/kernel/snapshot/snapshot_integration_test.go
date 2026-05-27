@@ -22,7 +22,7 @@ var allocSink any
 // `--config=pure`.
 func TestZeroAllocInvariant(t *testing.T) {
 	a, b := 1, 2
-	v := snapshot.New(&a)
+	v := snapshot.NewValue(&a)
 	type tc struct {
 		name string
 		fn   func()

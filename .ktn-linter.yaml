@@ -185,6 +185,23 @@ rules:
     exclude:
       - "**/internal/core/codec/registry.go"
 
+  # KTN-TEST-PARALLEL (warning) — "test function must call t.Parallel()".
+  #
+  # Scoped exception: pkg/v1/logger/version_external_test.go's
+  # TestFrameworkVersionInjected MUST be serial. It covers the non-fallback
+  # arm of FrameworkVersion() by stamping the package-global `Version` (the
+  # ldflags / Bazel --stamp injection point) and asserting it is returned
+  # verbatim. Every other test in the package reads FrameworkVersion()
+  # concurrently under t.Parallel(); a parallel mutator would be a data race
+  # under `-race`. Running serially, the mutate→assert→restore completes
+  # while the parallel readers are still paused, so the shared global is
+  # never observed mid-write. This is the only safe way to cover the
+  # injected-Version branch — t.Parallel() here is mutually exclusive with
+  # correctness, not merely inconvenient. Scoped to the one file.
+  KTN-TEST-PARALLEL:
+    exclude:
+      - "**/pkg/v1/logger/version_external_test.go"
+
   # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
   # Go 1.26 convention is to avoid init() in favour of explicit constructors,
   # sync.Once for lazy init, or package-level var initialisers. The codec

@@ -3,6 +3,8 @@ package msgpack
 import (
 	"bytes"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Test_msgpackCodec_Name covers the canonical identifier returned by the codec.
@@ -108,15 +110,26 @@ func Test_msgpackCodec_Marshal(t *testing.T) {
 func Test_msgpackCodec_Unmarshal(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name string
+		name    string
+		data    []byte
+		wantErr string
 	}
-	tests := []tc{{"canonical unmarshal"}}
+	tests := []tc{
+		//: malformed byte 0xc1 (reserved/never-used) drives the library
+		//: decode error → UNMARSHAL_FAILED wrap.
+		{"malformed-byte-fails", []byte{0xc1}, "UNMARSHAL_FAILED"},
+		//: input one byte past maxMsgPackBytes trips the size-cap guard
+		//: (lines 116-124) before any decode — the DoS defence branch.
+		{"over-cap-rejected", make([]byte, maxMsgPackBytes+1), "UNMARSHAL_FAILED"},
+	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
 		c := &msgpackCodec{}
 		var out map[string]int
-		if err := c.Unmarshal([]byte{0xc1}, &out); err == nil {
-			t.Errorf("%s: expected Unmarshal error", tc.name)
+		err := c.Unmarshal(tc.data, &out)
+		//: every case here expects a failure — assert the reason matches.
+		if !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
 		}
 	}
 	for _, tc := range tests {

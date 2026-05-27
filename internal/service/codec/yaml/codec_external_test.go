@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -15,6 +16,22 @@ type payload struct {
 	Name string `yaml:"name"`
 	Age  int    `yaml:"age"`
 }
+
+// badMarshaler implements yaml.v3's Marshaler contract returning an error so
+// Encode surfaces a clean error (no panic, no failing writer) — the only
+// public-API way to drive the Marshal/Append encode-error wrap branches,
+// since yaml.v3 panics on chan/func payloads instead of erroring.
+type badMarshaler struct{}
+
+// MarshalYAML returns a synthetic failure so yaml.v3's Encoder.Encode errors.
+func (badMarshaler) MarshalYAML() (any, error) {
+	//: deterministic failure surfaced by the codec as MARSHAL_FAILED.
+	return nil, errSyntheticMarshal
+}
+
+// errSyntheticMarshal is the sentinel badMarshaler hands back; kept package-
+// level so the failure is a stable, non-allocating value.
+var errSyntheticMarshal = errors.New("synthetic marshaler failure")
 
 // TestNew verifies the constructor returns a non-nil singleton with the
 // canonical name.
@@ -53,6 +70,8 @@ func TestMarshal(t *testing.T) {
 	}
 	tests := []tc{
 		{"round-trip success", payload{Name: "a", Age: 1}, ""},
+		//: a value whose MarshalYAML errors drives the encode-error wrap.
+		{"marshaler error surfaces MARSHAL_FAILED", badMarshaler{}, "MARSHAL_FAILED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -80,6 +99,11 @@ func TestUnmarshal(t *testing.T) {
 	if merr != nil {
 		t.Fatalf("Marshal setup err=%v", merr)
 	}
+	//: maxYAMLBytes is unexported but pinned at 10 MiB by the codec; one byte
+	//: past it must trip the size-cap rejection before any parse is attempted.
+	const maxYAMLBytes int = 10 << 20
+	//: a string scalar one byte over the cap — valid YAML, rejected on size.
+	oversize := []byte("a: " + strings.Repeat("x", maxYAMLBytes))
 	type tc struct {
 		name    string
 		data    []byte
@@ -88,9 +112,12 @@ func TestUnmarshal(t *testing.T) {
 	}
 	var good payload
 	var bad payload
+	var capped map[string]any
 	tests := []tc{
 		{"round-trip success", data, &good, ""},
 		{"malformed bytes surface UNMARSHAL_FAILED", []byte("[unclosed"), &bad, "UNMARSHAL_FAILED"},
+		//: input exceeding maxYAMLBytes is rejected before parsing (CWE-400).
+		{"over-cap input surfaces UNMARSHAL_FAILED", oversize, &capped, "UNMARSHAL_FAILED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

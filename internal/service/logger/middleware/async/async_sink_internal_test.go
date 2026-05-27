@@ -2,10 +2,12 @@ package async
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
@@ -108,16 +110,48 @@ func Test_asyncSink_Flush(t *testing.T) {
 	tests := []struct {
 		name      string
 		ctxCancel bool
-		wantErr   bool
+		//: prime enqueues entries before Flush so the loop sees a non-empty
+		//: ring and falls through to the cancellation arm instead of the
+		//: empty-queue fast path. freshSink has no live drainer so the
+		//: primed entries are never consumed.
+		prime bool
+		//: closeSignal pre-closes flushSignal so waitForDrainerProgress
+		//: returns false on the first non-empty iteration — driving Flush's
+		//: documented Stopped arm ("flushSignal observed closed").
+		closeSignal bool
+		wantErr     bool
+		wantCode    bool
+		//: wantStopped asserts the Stopped sentinel (drainer-exited path).
+		wantStopped bool
 	}{
-		{"empty queue + live ctx returns nil", false, false},
-		{"empty queue + cancelled ctx still flushes downstream", true, false},
-		{"explicit nil context is permitted by the contract", false, false},
+		{"empty queue + live ctx returns nil", false, false, false, false, false, false},
+		{"empty queue + cancelled ctx still flushes downstream", true, false, false, false, false, false},
+		{"explicit nil context is permitted by the contract", false, false, false, false, false, false},
+		{"non-empty queue + cancelled ctx surfaces the typed cancellation", true, true, false, true, true, false},
+		{"non-empty queue + closed flushSignal surfaces Stopped", false, true, true, true, false, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s := freshSink(t, DropNewest)
+			//: prime the ring so Flush observes remaining > 0 and reaches the
+			//: ctx-cancellation arm rather than returning on the empty path.
+			if tc.prime {
+				if werr := s.queue.TryWrite(newRecordEntry()); werr != nil {
+					t.Fatalf("priming TryWrite err = %v", werr)
+				}
+			}
+			//: pre-close flushSignal to reproduce the documented drainer-exited
+			//: state so Flush's waitForDrainerProgress returns false and the
+			//: Stopped arm runs. freshSink leaves flushSignal nil, so equip a
+			//: dedicated channel first (mirroring Test_waitForDrainerProgress),
+			//: then close it. The drainer never closes this channel in
+			//: production (only Close terminates it indirectly), so this
+			//: white-box setup is the only way to exercise the defensive arm.
+			if tc.closeSignal {
+				s.flushSignal = make(chan struct{}, 1)
+				close(s.flushSignal)
+			}
 			ctx := t.Context()
 			if tc.ctxCancel {
 				cancelled, cancel := context.WithCancel(ctx)
@@ -127,6 +161,20 @@ func Test_asyncSink_Flush(t *testing.T) {
 			err := s.Flush(ctx)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("Flush err = %v, wantErr = %v", err, tc.wantErr)
+			}
+			//: the cancellation arm wraps ctx.Err() with the typed sentinel —
+			//: assert both the dotted-quad code and stdlib Is() chaining.
+			if tc.wantCode {
+				if !errs.HasCode(err, CodeAsyncCtxCancelled) {
+					t.Errorf("Flush err = %v, want CodeAsyncCtxCancelled", err)
+				}
+				if !errors.Is(err, context.Canceled) {
+					t.Errorf("Flush err = %v, want errors.Is(context.Canceled)", err)
+				}
+			}
+			//: the Stopped arm returns the drainer-exited sentinel verbatim.
+			if tc.wantStopped && !errs.HasCode(err, CodeAsyncStopped) {
+				t.Errorf("Flush err = %v, want Stopped", err)
 			}
 		})
 	}
@@ -226,12 +274,37 @@ func Test_mustNewRing(t *testing.T) {
 	tests := []struct {
 		name string
 		size int
+		//: wantPanic asserts the documented contract-violation arm: a
+		//: non-positive size makes ring.New fail, which mustNewRing converts
+		//: into a panic. New never reaches this path (it substitutes the
+		//: default for size <= 0); the helper is probed directly so the
+		//: defensive arm has explicit coverage.
+		wantPanic bool
 	}{
-		{"valid size returns a non-nil queue", 4},
+		{"valid size returns a non-nil queue", 4, false},
+		{"zero size violates the ring contract and panics", 0, true},
+		{"negative size violates the ring contract and panics", -1, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: panic arm — capture the recover so the helper's contract-breach
+			//: path is exercised without escaping the test goroutine.
+			if tc.wantPanic {
+				panicked := false
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							panicked = true
+						}
+					}()
+					mustNewRing(tc.size)
+				}()
+				if !panicked {
+					t.Errorf("mustNewRing(%d) did not panic; contract requires a panic on bad capacity", tc.size)
+				}
+				return
+			}
 			q := mustNewRing(tc.size)
 			if q == nil {
 				t.Error("mustNewRing returned nil")
