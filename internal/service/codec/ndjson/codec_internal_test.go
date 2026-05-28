@@ -86,18 +86,42 @@ func Test_ndjsonCodec_Extensions(t *testing.T) {
 	}
 }
 
-// Test_ndjsonCodec_Marshal exercises the Marshal path with a single canonical case.
+// Test_ndjsonCodec_Marshal exercises the Marshal path: the reflect slice
+// route, the pre-encoded raw-slice fast-path, and the VALUE_INVALID branch.
 func Test_ndjsonCodec_Marshal(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name string
+		name    string
+		in      any
+		want    string
+		wantErr bool
 	}
-	tests := []tc{{"canonical marshal"}}
+	tests := []tc{
+		//: reflect route — []int encodes per-element via stdjson.Marshal.
+		{"reflect-slice-route", []int{1, 2}, "1\n2\n", false},
+		//: raw-slice fast-path — []json.RawMessage bypasses the reflect
+		//: walk (lines 73-76), the exact shape promote.go produces.
+		{"raw-message-fast-path", []stdjson.RawMessage{[]byte(`{"a":1}`), []byte(`{"b":2}`)}, "{\"a\":1}\n{\"b\":2}\n", false},
+		//: non-slice argument trips the VALUE_INVALID shape guard.
+		{"non-slice-rejected", 42, "", true},
+	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
 		c := &ndjsonCodec{}
-		if _, err := c.Marshal([]int{1, 2}); err != nil {
+		out, err := c.Marshal(tc.in)
+		//: error branch — assert failure, ignore bytes.
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("%s: expected error, got nil", tc.name)
+			}
+			return
+		}
+		if err != nil {
 			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		//: success branch — exact wire bytes for both routes.
+		if string(out) != tc.want {
+			t.Errorf("%s: Marshal=%q want %q", tc.name, out, tc.want)
 		}
 	}
 	for _, tc := range tests {
@@ -143,6 +167,9 @@ func Test_asSlice(t *testing.T) {
 		{"direct slice", []int{1}, true},
 		{"pointer to slice", &[]int{1}, true},
 		{"non-slice value", 42, false},
+		//: nil typed pointer trips the IsNil guard (lines 410-413) — a nil
+		//: pointer cannot carry a slice, so the helper rejects it.
+		{"nil pointer rejected", (*[]int)(nil), false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -196,12 +223,16 @@ func Test_decodeLines(t *testing.T) {
 		wantLen int
 		wantErr bool
 	}
+	//: a single record one byte past scannerMaxCapacity (no '\n') trips
+	//: the per-record size guard (lines 298-306) BEFORE any decode.
+	oversizeLine := string(bytes.Repeat([]byte{'a'}, scannerMaxCapacity+1))
 	tests := []tc{
 		{"two valid records", "1\n2\n", 2, false},
 		{"bad JSON surfaces error", "not json\n", 0, true},
 		{"trailing record without newline", "1\n2", 2, false},
 		{"empty input", "", 0, false},
 		{"blank lines skipped", "\n1\n\n2\n", 2, false},
+		{"oversize record exceeds cap", oversizeLine, 0, true},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -273,6 +304,9 @@ func Test_ndjsonCodec_Append(t *testing.T) {
 	tests := []tc{
 		{"appends one record per slice element", nil, []int{1, 2}, []byte("1\n2\n"), false},
 		{"appends to non-empty buffer", []byte("prefix:"), []int{3}, []byte("prefix:3\n"), false},
+		//: raw-slice fast-path — []json.RawMessage writes pre-encoded rows
+		//: straight onto dst (lines 361-364), skipping the reflect walk.
+		{"raw-message-fast-path", []byte("pre:"), []stdjson.RawMessage{[]byte(`{"a":1}`)}, []byte("pre:{\"a\":1}\n"), false},
 		{"non-slice value yields error", nil, 7, nil, true},
 		{"per-record marshal failure surfaces error", nil, []any{make(chan int)}, nil, true},
 	}

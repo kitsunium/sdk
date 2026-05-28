@@ -8,9 +8,26 @@ import (
 	"strings"
 	"testing"
 
+	corecodec "github.com/kitsunium/sdk/internal/core/codec"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	fbcodec "github.com/kitsunium/sdk/internal/service/codec/flatbuffers"
 )
+
+// lookupCodec resolves a registered codec from the core registry for the
+// promotion-path tests that need a real codec to drive the inner
+// Marshal / Unmarshal failure arms (the blank imports in codec.go have
+// already registered every Format by the time the test runs).
+func lookupCodec(t *testing.T, f Format) corecodec.Codec {
+	t.Helper()
+	//: registry lookup mirrors what the public facade does.
+	c, ok := corecodec.Lookup(f)
+	//: a missing registration is a build-wiring bug, not a test input.
+	if !ok {
+		t.Fatalf("codec %q not registered", f)
+	}
+	//: caller drives the promotion path with the concrete codec.
+	return c
+}
 
 // promoteCanaryUser is the canonical fixture every promote-side test
 // runs against — small enough that all binary codecs fit the JSON
@@ -642,6 +659,140 @@ func TestPromoteUnmarshal_UnknownFormat(t *testing.T) {
 		err := promoteUnmarshal(tc.format, nil, []byte("ignored"), &back)
 		if reason, ok := kerrs.ReasonOf(err); !ok || reason != "PROMOTE_FAILED" {
 			t.Errorf("%s: reason=%q want PROMOTE_FAILED (err=%v)", tc.name, reason, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestPromoteMarshal_JSONError asserts promoteMarshal forwards the
+// encoding/json failure verbatim when the value cannot be serialised to
+// the JSON intermediate. A chan can never round-trip through json, so a
+// CSV-routed chan reaches the codec's VALUE_INVALID shape-rejection but
+// fails one step earlier at the json.Marshal bridge — exercising the
+// "surface json failure verbatim" arm that no roundtrip fixture hits.
+func TestPromoteMarshal_JSONError(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		format Format
+		value  any
+	}
+	tests := []tc{
+		//: chan is the canonical json-unsupported type.
+		{name: "csv-chan", format: CSV, value: make(chan int)},
+		//: func is the second json-unsupported scalar; ndjson is another
+		//: constrained codec so the arm holds across promotion targets.
+		{name: "ndjson-func", format: NDJSON, value: func() {}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := lookupCodec(t, tc.format)
+		_, err := promoteMarshal(tc.format, c, tc.value)
+		//: the json bridge fails before any wrap step.
+		if err == nil {
+			t.Fatalf("%s: want json marshal error, got nil", tc.name)
+		}
+		//: the failure is the raw encoding/json error, NOT a typed
+		//: PromoteFailed sentinel — promoteMarshal forwards it as-is.
+		if _, ok := kerrs.ReasonOf(err); ok {
+			t.Errorf("%s: err=%v unexpectedly carries a typed reason; want raw json error", tc.name, err)
+		}
+		//: the json package names itself in the message.
+		if !strings.Contains(err.Error(), "json") {
+			t.Errorf("%s: err=%q does not look like an encoding/json failure", tc.name, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestPromoteUnmarshal_ContainerUnmarshalError asserts promoteUnmarshal
+// surfaces the codec's own decode failure when the wire bytes are
+// malformed for the codec's native container. The CSV reader rejects a
+// row whose field count disagrees with the header, so feeding ragged CSV
+// drives the "codec failed to decode the wire bytes" arm — distinct from
+// the extract-shape arm below.
+func TestPromoteUnmarshal_ContainerUnmarshalError(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		format Format
+		data   []byte
+		reason string
+	}
+	tests := []tc{
+		//: ragged CSV (header has 3 cols, body has 2) fails ReadAll.
+		{name: "csv-ragged", format: CSV, data: []byte("a,b,c\n1,2\n"), reason: "UNMARSHAL_FAILED"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := lookupCodec(t, tc.format)
+		var back promoteCanaryUser
+		err := promoteUnmarshal(tc.format, c, tc.data, &back)
+		//: the codec rejected the wire bytes before extract could run.
+		if err == nil {
+			t.Fatalf("%s: want codec decode error, got nil", tc.name)
+		}
+		//: the surfaced reason is the codec's own UNMARSHAL_FAILED, not
+		//: the promotion container sentinel.
+		if reason, ok := kerrs.ReasonOf(err); !ok || reason != tc.reason {
+			t.Errorf("%s: reason=%q ok=%v want %q", tc.name, reason, ok, tc.reason)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestPromoteUnmarshal_ExtractError asserts promoteUnmarshal surfaces the
+// typed PromoteFailed container sentinel when the codec decodes the wire
+// bytes cleanly but into a shape the extract closure rejects. A single-
+// row CSV parses fine yet lacks the header+body pair the csv extract
+// requires, so this drives the "container shape mismatch" arm that sits
+// after a SUCCESSFUL inner Unmarshal.
+func TestPromoteUnmarshal_ExtractError(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		format  Format
+		data    []byte
+		private string
+	}
+	tests := []tc{
+		//: a lone header row parses to a 1-row table; extractCSV needs 2.
+		{name: "csv-single-row", format: CSV, data: []byte("onlyheader\n"), private: "malformed csv"},
+		//: an empty ndjson stream parses to a 0-row slice; extractNDJSON
+		//: needs at least one record.
+		{name: "ndjson-empty", format: NDJSON, data: []byte(""), private: "empty ndjson"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := lookupCodec(t, tc.format)
+		var back promoteCanaryUser
+		err := promoteUnmarshal(tc.format, c, tc.data, &back)
+		//: extract rejected the populated container shape.
+		if err == nil {
+			t.Fatalf("%s: want container-shape error, got nil", tc.name)
+		}
+		//: the typed sentinel keeps PROMOTE_FAILED routing intact.
+		if reason, ok := kerrs.ReasonOf(err); !ok || reason != "PROMOTE_FAILED" {
+			t.Fatalf("%s: reason=%q want PROMOTE_FAILED (err=%v)", tc.name, reason, err)
+		}
+		//: Private names the malformed container so triage is precise.
+		if priv := kerrs.PrivateOf(err); !strings.Contains(priv, tc.private) {
+			t.Errorf("%s: Private=%q missing %q", tc.name, priv, tc.private)
 		}
 	}
 	for _, tc := range tests {

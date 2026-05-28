@@ -645,3 +645,156 @@ func TestError_Is(t *testing.T) {
 		})
 	}
 }
+
+// TestError_Error_RendersTrail covers the non-empty-trail formatting arm of
+// Error(): wrapping an *Error with a non-zero wrap Code appends a trail entry,
+// so the rendered header carries the origin code, the " <- " separator, the
+// wrap-site code, then the inherited Reason and public message.
+func TestError_Error_RendersTrail(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"single wrap renders one <- separated trail code"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: 0x00_03_0F_70 = origin slot; 0x00_03_0F_71 = wrap-site slot.
+			origin := errs.Define(0x00_03_0F_70, "ORIGIN_TRAIL",
+				"origin public", "origin private")
+			wrapped := errs.Wrap(origin, errs.WrapParams{Code: 0x00_03_0F_71})
+			got := wrapped.Error()
+			//: a populated trail must render the ASCII wrap separator.
+			if !strings.Contains(got, " <- ") {
+				t.Errorf("Error() = %q, want ' <- ' trail separator", got)
+			}
+			//: origin-wins — Reason and public come from the wrapped cause.
+			if !strings.Contains(got, "ORIGIN_TRAIL") || !strings.Contains(got, "origin public") {
+				t.Errorf("Error() = %q, want origin reason + public", got)
+			}
+			//: Private must never leak into the rendered form.
+			if strings.Contains(got, "origin private") {
+				t.Errorf("Error() leaked Private: %q", got)
+			}
+		})
+	}
+}
+
+// TestError_Error_RendersTruncated drives the trail past its cap so the
+// monotonic truncation marker " (truncated)" is rendered before the Reason.
+func TestError_Error_RendersTruncated(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		wraps int
+	}{
+		{"forty wraps overflow the trail cap", 40},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: 0x00_03_0F_72 = origin slot for the truncation walk.
+			var err error = errs.Define(0x00_03_0F_72, "TRUNC_ORIGIN",
+				"trunc public", "trunc private")
+			//: each wrap adds one distinct non-zero trail code; well past the
+			//: documented cap of 16 this must flip trailTruncated.
+			for i := range tc.wraps {
+				//: 0x00_07_01_xx — distinct non-zero wrap codes in layer 7.
+				err = errs.Wrap(err, errs.WrapParams{Code: errs.Code(0x00_07_01_00 + i + 1)})
+			}
+			got := err.Error()
+			//: overflow must surface the verbatim marker operators grep for.
+			if !strings.Contains(got, "(truncated)") {
+				t.Errorf("Error() = %q, want '(truncated)' marker", got)
+			}
+		})
+	}
+}
+
+// TestWrap_TypedNilErrorCause covers the typed-nil guard in Wrap: a
+// (*errs.Error)(nil) cause must collapse to the stdlib path with a nil source
+// rather than dereferencing the nil receiver.
+func TestWrap_TypedNilErrorCause(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"typed-nil *Error cause yields a params-driven error with nil source"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: a typed-nil *Error is the classic interface-holding-nil trap.
+			var cause *errs.Error
+			//: 0x00_03_0F_73 = wrap slot for the typed-nil path.
+			wrapped := errs.Wrap(cause, errs.WrapParams{
+				Code: 0x00_03_0F_73, Reason: "TYPED_NIL_WRAP",
+				Public: "typed nil collapses to stdlib path", Private: "debug",
+			})
+			//: params apply because no *Error was inherited from the cause.
+			if wrapped.Code() != 0x00_03_0F_73 {
+				t.Errorf("Code = %s, want params code", wrapped.Code())
+			}
+			//: the collapsed path carries no wrapped cause.
+			if wrapped.Source() != nil {
+				t.Errorf("Source = %v, want nil", wrapped.Source())
+			}
+		})
+	}
+}
+
+// TestError_Is_MatchesTrailPrefix covers the trail-walk arm of matchesPrefix:
+// the origin code falls outside the matcher's subnet but a wrap-site trail
+// code falls inside it, so errors.Is must still report a hit.
+func TestError_Is_MatchesTrailPrefix(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"prefix matches a trail entry the origin misses"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: origin sits in layer 3; the matcher targets layer 7.
+			origin := errs.Define(0x00_03_0F_74, "PREFIX_TRAIL_ORIGIN",
+				"prefix trail public", "prefix trail private")
+			//: wrap with a layer-7 code so only the trail entry can match.
+			wrapped := errs.Wrap(origin, errs.WrapParams{Code: 0x00_07_01_01})
+			//: subnet over major+layer == 0.7 — origin (layer 3) misses it.
+			matcher := errs.NewPrefixMatcher(0x00_07_00_00, errs.MaskByLayer)
+			if !errors.Is(wrapped, matcher) {
+				t.Errorf("errors.Is(wrapped, layer-7 matcher) = false, want true via trail")
+			}
+		})
+	}
+}
+
+// TestHasCode_MultiUnwrap covers the multi-error Unwrap arm of HasCode: an
+// errors.Join aggregate exposes Unwrap() []error, and HasCode must recurse
+// through every branch to find a matching *Error code.
+func TestHasCode_MultiUnwrap(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		code errs.Code
+		want bool
+	}{
+		{"code present in a joined branch", 0x00_03_0F_75, true},
+		{"code absent from every branch", 0x00_03_0F_76, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: 0x00_03_0F_75 = the sdk branch buried inside the join.
+			sdk := errs.Define(0x00_03_0F_75, "JOINED_SDK",
+				"joined public", "joined private")
+			//: errors.Join exposes Unwrap() []error, forcing the multi walk.
+			joined := errors.Join(errors.New("plain branch"), sdk)
+			if got := errs.HasCode(joined, tc.code); got != tc.want {
+				t.Errorf("HasCode(joined, %s) = %v, want %v", tc.code, got, tc.want)
+			}
+		})
+	}
+}

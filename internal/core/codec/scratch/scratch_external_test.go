@@ -79,6 +79,35 @@ func TestReleaseBuffer(t *testing.T) {
 	}
 }
 
+// TestReleaseNilIsNoOp covers the nil-safe guards: the documented contract
+// lets callers `defer scratch.ReleaseBuffer(b)` / `ReleaseReader(r)` before
+// the acquire could have failed, so a nil argument must be a silent no-op
+// rather than a panic.
+func TestReleaseNilIsNoOp(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		release func()
+	}{
+		{"ReleaseBuffer(nil)", func() { scratch.ReleaseBuffer(nil) }},
+		{"ReleaseReader(nil)", func() { scratch.ReleaseReader(nil) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: a recovered panic is the failure signal — a nil release must
+			//: complete cleanly, so any panic here fails the assertion.
+			defer func() {
+				//: recover surfaces a panic as an explicit test failure.
+				if rec := recover(); rec != nil {
+					t.Errorf("%s panicked: %v", tc.name, rec)
+				}
+			}()
+			tc.release()
+		})
+	}
+}
+
 // TestBufferPoolConcurrent hammers Acquire/Release from many goroutines so
 // the race detector can prove the shared pool is safe for concurrent use.
 func TestBufferPoolConcurrent(t *testing.T) {

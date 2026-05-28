@@ -127,67 +127,27 @@ rules:
       - "**/internal/service/logger/**"
       - "**/pkg/v1/logger/**"
 
-  # (Removed) KTN-VAR-MAKEAPPEND + KTN-VAR-SLICECAP ring exclusion: the
-  # generic fixed-length-storage false positive it covered was fixed upstream
-  # in ktn-linter (append-reachability gating, kodflow/ktn-linter#183) and is
-  # no longer reproducible on v1.34.0 — verified by lint-with-exclusion-removed.
-  # Re-add a scoped exclusion only if a future binary regresses the heuristic.
-
-  # KTN-TEST-SUFFIX + KTN-TEST-TABLE — scoped exception for the codec
-  # benchmark file. Normally Test* functions must live in
-  # _internal_test.go / _external_test.go (TEST-SUFFIX) and follow the
-  # table-driven pattern (TEST-TABLE). pkg/v1/codec/codec_bench_test.go
-  # hosts a single `TestGenerateBenchMD` whose only job is to drive the
-  # full bench matrix (via testing.Benchmark on the same package-local
-  # make<Op>Bench helpers used by every Benchmark* function in the file)
-  # and write pkg/v1/codec/BENCH.md. Moving the Test out would either
-  # duplicate the helpers or expose them across files; a single-shot
-  # report generator is also a poor fit for the table-driven pattern.
-  KTN-TEST-SUFFIX:
-    exclude:
-      - "**/pkg/v1/codec/codec_bench_test.go"
-  KTN-TEST-TABLE:
-    exclude:
-      - "**/pkg/v1/codec/codec_bench_test.go"
-
-  # (No recycler exclusion.) internal/kernel/recycler ships Pool[T] +
-  # CappedPool[T]: "Pool" is a recognized role suffix, so both pass
-  # KTN-STRUCT-ROLE and KTN-STRUCT-ROLE-STUTTER natively — no path-suppress and
-  # no dependency on the PNPT fix (#356). The earlier Recycler/CappedRecycler
-  # naming stuttered (kodflow/ktn-linter#359, by-design) and was renamed to the
-  # idiomatic sync.Pool-style form instead of carrying an exclusion (ADR 0010).
-
-  # KTN-VAR-PTRINTF (warning) — "pointer to interface; use the interface directly".
+  # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
+  # Every exclusion that used to live here was removed and the linter re-run on
+  # v1.34.5 (current latest). With v1.34.5 + one code refactor, ALL FIVE are gone;
+  # only the KTN-INTERFACE-ANYUSE domain exception above remains.
   #
-  # FALSE POSITIVE on `*T` where T is a generic type parameter constrained to
-  # `any` (kodflow/ktn-linter#365). internal/kernel/snapshot ships Value[T any],
-  # a copy-on-write container over atomic.Pointer[T]; its New/Load/Store/Swap
-  # signatures use `*T` exactly as the stdlib sync/atomic.Pointer[T] does. The
-  # rule reads T's `any` constraint as an interface and flags the pointer, but a
-  # pointer to a type parameter is a normal pointer (Value[map[…]], Value[int]).
-  # Scoped to the snapshot package; remove once #365 ships the type-parameter skip.
-  KTN-VAR-PTRINTF:
-    exclude:
-      - "**/internal/kernel/snapshot/**"
-
-  # KTN-API-MINIF (info) — "parameter uses concrete type; suggest interface".
+  # • KTN-VAR-PTRINTF — false positive on a generic `*T` (kodflow/ktn-linter#365).
+  #   v1.34.5 no longer flags internal/kernel/snapshot's Value[T] *T signatures.
+  # • KTN-API-MINIF — false positive on *snapshot.Value[...] params + a malformed
+  #   message (#366). v1.34.5 no longer flags internal/core/codec/registry.go.
+  # • KTN-TEST-PARALLEL — false positive: a serial test mutating the package
+  #   global logger.Version (FrameworkVersion injection) was wrongly required to
+  #   call t.Parallel() (a data race). Fixed by #379 (Closes #376) — NOPARALLEL
+  #   now detects `pkg.Var = x` selector writes, so PARALLEL exempts the safe
+  #   serial mutator. version_external_test.go lints clean serial.
+  # • KTN-TEST-SUFFIX + KTN-TEST-TABLE — the codec BENCH.md generator
+  #   (TestGenerateBenchMD in codec_bench_test.go). Fixed by #377 (Closes #375) —
+  #   a benchmark-orchestrator Test* (transitively drives testing.Benchmark and
+  #   makes NO t.* assertion) is now allowed in *_bench_test.go and skipped by
+  #   TABLE/PARALLEL/ASSERT. Code change: the generator panics on a write error
+  #   instead of t.Fatalf, so it qualifies as a pure orchestrator.
   #
-  # The codec registry's unexported helpers (loadAliasIndex, publishAlias) take
-  # *snapshot.Value[...], a deliberately CONCRETE kernel primitive (ADR 0011) and
-  # the direct analog of stdlib sync/atomic.Pointer[T], which this rule does NOT
-  # flag in the same role. A generic pointer-container primitive has no alternate
-  # implementation to abstract over; wrapping it in a one-method interface for two
-  # same-package helpers is the over-abstraction the kernel design rejects
-  # (ADR 0010/0011: concrete structs, no single-impl interfaces). The rule also
-  # emits a malformed suggestion message here (kodflow/ktn-linter#366). Scoped to
-  # the registry; remove once #366 aligns it with the atomic.Pointer treatment.
-  KTN-API-MINIF:
-    exclude:
-      - "**/internal/core/codec/registry.go"
-
-  # KTN-FUNC-NOINIT stays ACTIVE everywhere — no exclusion.
-  # Go 1.26 convention is to avoid init() in favour of explicit constructors,
-  # sync.Once for lazy init, or package-level var initialisers. The codec
-  # registry will follow that: each codec subpackage registers itself via
-  # `var Codec codec.Codec = codec.Register(&fooCodec{})` (named singleton,
-  # not init()), or via an explicit constructor the facade invokes.
+  # KTN-FUNC-NOINIT stays ACTIVE everywhere (no exclusion) — Go 1.26 avoids init()
+  # in favour of explicit constructors; the codec registry uses
+  # `var Codec = codec.Register(&fooCodec{})` named singletons.

@@ -165,6 +165,33 @@ func TestFieldsOf(t *testing.T) {
 	}
 }
 
+// TestFieldsOfAbsent covers the absence arm of FieldsOf: a chain carrying no
+// *Error layer must yield nil rather than an empty-but-non-nil slice.
+func TestFieldsOfAbsent(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		in   func(tb testing.TB) error
+	}
+	tests := []tc{
+		{"stdlib error", func(_ testing.TB) error { return errors.New("plain") }},
+		{"nil error", func(_ testing.TB) error { return nil }},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: no sdk layer present → the accessor returns a nil slice.
+		if got := errs.FieldsOf(c.in(t)); got != nil {
+			t.Errorf("FieldsOf = %v, want nil", got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func TestHTTPStatusOf(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -261,6 +288,9 @@ func TestHasReason(t *testing.T) {
 		{"direct match", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, "WRITER_NIL_ACC", true},
 		{"miss", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, "OTHER", false},
 		{"nil", func(tb testing.TB) error { return nil }, "ANY", false},
+		//: stdlib error in the chain — the AsType walk hits a non-*Error and
+		//: must stop without a match (exercises the !ok exhaustion branch).
+		{"stdlib has no sdk layer", func(tb testing.TB) error { return errors.New("plain") }, "ANY", false},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
