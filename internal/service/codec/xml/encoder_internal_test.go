@@ -5,6 +5,8 @@ import (
 	stdxml "encoding/xml"
 	"errors"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 type xmlDoc struct {
@@ -102,8 +104,10 @@ func Test_xmlEncoder_Close_FlushError(t *testing.T) {
 			t.Fatalf("%s: EncodeToken setup err=%v", tc.name, terr)
 		}
 		//: Close → Flush fails over the failing writer, hitting the wrap.
-		if err := enc.Close(); err == nil {
-			t.Errorf("%s: Close=nil, want flush error wrapped as MARSHAL_FAILED", tc.name)
+		//: assert the typed code, not just non-nil, so a regression where
+		//: Close stops carrying the dotted-quad sentinel actually fails.
+		if err := enc.Close(); !errs.HasCode(err, CodeXMLMarshalFailed) {
+			t.Errorf("%s: Close err=%v, want CodeXMLMarshalFailed (0.3.3.1)", tc.name, err)
 		}
 	}
 	for _, tc := range tests {

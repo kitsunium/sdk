@@ -3,6 +3,7 @@ package yaml
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -210,14 +211,17 @@ func Test_yamlCodec_Append(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: yamlCodec does not implement Appender", tc.name)
 		}
+		//: snapshot dst BEFORE Append so a same-length in-place mutation
+		//: on the error path is still detectable — length alone would miss it.
+		orig := slices.Clone(tc.dst)
 		got, err := ap.Append(tc.dst, tc.v)
 		if tc.wantErr {
 			if err == nil {
 				t.Fatalf("%s: want error, got nil", tc.name)
 			}
-			//: dst returned untouched on error (length match).
-			if len(got) != len(tc.dst) {
-				t.Errorf("%s: dst len changed on error: got=%d want=%d", tc.name, len(got), len(tc.dst))
+			//: dst returned byte-for-byte untouched on error.
+			if !bytes.Equal(got, orig) {
+				t.Errorf("%s: dst mutated on error: got=%q want=%q", tc.name, got, orig)
 			}
 			return
 		}
