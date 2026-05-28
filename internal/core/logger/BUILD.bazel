@@ -6,12 +6,15 @@ go_library(
     name = "logger",
     srcs = [
         "attr.go",
+        "base_sink.go",
         "encoder.go",
         "handler.go",
         "kind.go",
         "logger.go",
         "record.go",
         "sink.go",
+        "sink_caps.go",
+        "sink_class.go",
         "value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/logger",
@@ -34,8 +37,12 @@ filegroup(
 go_test(
     name = "logger_test",
     srcs = [
+        "base_sink_external_test.go",
+        "base_sink_internal_test.go",
         "kind_external_test.go",
         "kind_internal_test.go",
+        "sink_caps_external_test.go",
+        "sink_class_external_test.go",
         "value_external_test.go",
         "value_internal_test.go",
     ],

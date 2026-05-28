@@ -11,6 +11,30 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
+// ctxKind / flushOutcome consolidate the table-driven test flags so the
+// Test_asyncSink_Flush case struct stays under the KTN-STRUCT-FLAGS
+// threshold and each row's intent is self-documenting.
+
+const (
+	ctxLive      ctxKind = iota //: default — t.Context()
+	ctxNil                      //: literal nil — wait-forever contract
+	ctxCancelled                //: pre-cancelled context — drives the typed cancellation arm
+)
+
+const (
+	outcomeOK        flushOutcome = iota //: Flush returns nil (happy path / fast-return)
+	outcomeCancelled                     //: Flush wraps ctx.Err() as CodeAsyncCtxCancelled
+	outcomeStopped                       //: Flush returns the Stopped sentinel (drainer exited)
+)
+
+// ctxKind enumerates the Flush context flavours the table exercises.
+type ctxKind uint8
+
+// flushOutcome enumerates the three documented terminal states of Flush
+// (nil / typed cancellation / Stopped) so the table-case struct can
+// express the assertion with one enum instead of three parallel bools.
+type flushOutcome uint8
+
 // noopDownstream satisfies corelogger.Sink for white-box drainer tests
 // that don't care about delivery.
 type noopDownstream struct{}
@@ -107,9 +131,10 @@ func Test_asyncSink_handleFull(t *testing.T) {
 
 func Test_asyncSink_Flush(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name      string
-		ctxCancel bool
+	type tc struct {
+		name string
+		//: ctx picks the Flush context flavour for this row.
+		ctx ctxKind
 		//: prime enqueues entries before Flush so the loop sees a non-empty
 		//: ring and falls through to the cancellation arm instead of the
 		//: empty-queue fast path. freshSink has no live drainer so the
@@ -119,64 +144,85 @@ func Test_asyncSink_Flush(t *testing.T) {
 		//: returns false on the first non-empty iteration — driving Flush's
 		//: documented Stopped arm ("flushSignal observed closed").
 		closeSignal bool
-		wantErr     bool
-		wantCode    bool
-		//: wantStopped asserts the Stopped sentinel (drainer-exited path).
-		wantStopped bool
-	}{
-		{"empty queue + live ctx returns nil", false, false, false, false, false, false},
-		{"empty queue + cancelled ctx still flushes downstream", true, false, false, false, false, false},
-		{"explicit nil context is permitted by the contract", false, false, false, false, false, false},
-		{"non-empty queue + cancelled ctx surfaces the typed cancellation", true, true, false, true, true, false},
-		{"non-empty queue + closed flushSignal surfaces Stopped", false, true, true, true, false, true},
+		//: want consolidates the three terminal states (nil/cancelled/
+		//: stopped) so each row carries one verdict instead of three
+		//: parallel booleans.
+		want flushOutcome
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			s := freshSink(t, DropNewest)
-			//: prime the ring so Flush observes remaining > 0 and reaches the
-			//: ctx-cancellation arm rather than returning on the empty path.
-			if tc.prime {
-				if werr := s.queue.TryWrite(newRecordEntry()); werr != nil {
-					t.Fatalf("priming TryWrite err = %v", werr)
-				}
+	tests := []tc{
+		{"empty queue + live ctx returns nil", ctxLive, false, false, outcomeOK},
+		{"empty queue + cancelled ctx still flushes downstream", ctxCancelled, false, false, outcomeOK},
+		{"explicit nil context is permitted by the contract", ctxNil, false, false, outcomeOK},
+		{"non-empty queue + cancelled ctx surfaces the typed cancellation", ctxCancelled, true, false, outcomeCancelled},
+		{"non-empty queue + closed flushSignal surfaces Stopped", ctxLive, true, true, outcomeStopped},
+	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; Flush's documented contract spans the empty-queue fast path,
+	//: nil-ctx wait-forever, cancellation arm, and Stopped sentinel — every
+	//: row drives one of those branches under a freshSink (no live drainer).
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		s := freshSink(t, DropNewest)
+		//: prime the ring so Flush observes remaining > 0 and reaches the
+		//: ctx-cancellation arm rather than returning on the empty path.
+		if tc.prime {
+			if werr := s.queue.TryWrite(newRecordEntry()); werr != nil {
+				t.Fatalf("priming TryWrite err = %v", werr)
 			}
-			//: pre-close flushSignal to reproduce the documented drainer-exited
-			//: state so Flush's waitForDrainerProgress returns false and the
-			//: Stopped arm runs. freshSink leaves flushSignal nil, so equip a
-			//: dedicated channel first (mirroring Test_waitForDrainerProgress),
-			//: then close it. The drainer never closes this channel in
-			//: production (only Close terminates it indirectly), so this
-			//: white-box setup is the only way to exercise the defensive arm.
-			if tc.closeSignal {
-				s.flushSignal = make(chan struct{}, 1)
-				close(s.flushSignal)
+		}
+		//: pre-close flushSignal to reproduce the documented drainer-exited
+		//: state so Flush's waitForDrainerProgress returns false and the
+		//: Stopped arm runs. freshSink leaves flushSignal nil, so equip a
+		//: dedicated channel first (mirroring Test_waitForDrainerProgress),
+		//: then close it. The drainer never closes this channel in
+		//: production (only Close terminates it indirectly), so this
+		//: white-box setup is the only way to exercise the defensive arm.
+		if tc.closeSignal {
+			s.flushSignal = make(chan struct{}, 1)
+			close(s.flushSignal)
+		}
+		//: select the ctx the row asks for; the nil arm exercises the
+		//: documented "wait-forever, no cancellation" contract.
+		var ctx context.Context
+		switch tc.ctx {
+		case ctxNil:
+			ctx = nil
+		case ctxCancelled:
+			cancelled, cancel := context.WithCancel(t.Context())
+			cancel()
+			ctx = cancelled
+		case ctxLive:
+			fallthrough
+		default:
+			ctx = t.Context()
+		}
+		err := s.Flush(ctx)
+		//: dispatch on the single verdict — each branch fully covers its
+		//: outcome (nil-on-OK, typed code + stdlib chain on cancelled,
+		//: Stopped sentinel on drainer-exited).
+		switch tc.want {
+		case outcomeOK:
+			if err != nil {
+				t.Errorf("Flush err = %v, want nil", err)
 			}
-			ctx := t.Context()
-			if tc.ctxCancel {
-				cancelled, cancel := context.WithCancel(ctx)
-				cancel()
-				ctx = cancelled
+		case outcomeCancelled:
+			if err == nil {
+				t.Fatal("Flush err = nil, want CodeAsyncCtxCancelled")
 			}
-			err := s.Flush(ctx)
-			if (err != nil) != tc.wantErr {
-				t.Errorf("Flush err = %v, wantErr = %v", err, tc.wantErr)
+			if !errs.HasCode(err, CodeAsyncCtxCancelled) {
+				t.Errorf("Flush err = %v, want CodeAsyncCtxCancelled", err)
 			}
-			//: the cancellation arm wraps ctx.Err() with the typed sentinel —
-			//: assert both the dotted-quad code and stdlib Is() chaining.
-			if tc.wantCode {
-				if !errs.HasCode(err, CodeAsyncCtxCancelled) {
-					t.Errorf("Flush err = %v, want CodeAsyncCtxCancelled", err)
-				}
-				if !errors.Is(err, context.Canceled) {
-					t.Errorf("Flush err = %v, want errors.Is(context.Canceled)", err)
-				}
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("Flush err = %v, want errors.Is(context.Canceled)", err)
 			}
-			//: the Stopped arm returns the drainer-exited sentinel verbatim.
-			if tc.wantStopped && !errs.HasCode(err, CodeAsyncStopped) {
+		case outcomeStopped:
+			if !errs.HasCode(err, CodeAsyncStopped) {
 				t.Errorf("Flush err = %v, want Stopped", err)
 			}
-		})
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
 

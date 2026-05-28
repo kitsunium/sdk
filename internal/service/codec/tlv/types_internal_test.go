@@ -541,10 +541,16 @@ func TestDecodeLargeScalarSlice(t *testing.T) {
 		if uerr := New().Unmarshal(encoded, &out); uerr != nil {
 			t.Fatalf("%s: Unmarshal err=%v", tc.name, uerr)
 		}
-		//: every element must survive the grow-as-we-go walk.
-		if len(out) != tc.size || out[tc.size-1] != int64(tc.size-1) {
-			t.Errorf("%s: len=%d last=%d, want len=%d last=%d",
-				tc.name, len(out), out[len(out)-1], tc.size, tc.size-1)
+		//: every element must survive the grow-as-we-go walk. Length is
+		//: checked first so a short-decode failure doesn't index past
+		//: out — out[tc.size-1] would panic on len(out) == 0 and mask
+		//: the real failure.
+		if len(out) != tc.size {
+			t.Errorf("%s: len=%d, want len=%d", tc.name, len(out), tc.size)
+			return
+		}
+		if out[tc.size-1] != int64(tc.size-1) {
+			t.Errorf("%s: last=%d, want last=%d", tc.name, out[tc.size-1], tc.size-1)
 		}
 	}
 	for _, tc := range tests {
