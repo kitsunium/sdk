@@ -46,6 +46,7 @@ go_test(
         "encoder_internal_test.go",
         "helpers_internal_test.go",
         "typeinfo_internal_test.go",
+        "types_internal_test.go",
     ],
     embed = [":tlv"],
     deps = [

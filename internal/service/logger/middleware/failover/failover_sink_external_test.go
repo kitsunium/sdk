@@ -68,6 +68,43 @@ func TestNew(t *testing.T) {
 	}
 }
 
+// TestNew_SkipsNilBranches covers the nil-skip arm of New: nil entries are
+// silently dropped from the chain (documented contract), so a slate mixing
+// nils with one real sink still yields a usable failover Sink.
+func TestNew_SkipsNilBranches(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		real    int
+		wantErr bool
+	}{
+		{"nils plus one real branch succeeds", 1, false},
+		{"only nils collapses to Empty", 0, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: interleave two nil branches with tc.real concrete sinks.
+			branches := []corelogger.Sink{nil, nil}
+			for range tc.real {
+				branches = append(branches, &controlledSink{})
+			}
+			s, err := failover.New(branches...)
+			//: an all-nil slate must collapse to the Empty sentinel.
+			if tc.wantErr {
+				if !errs.HasCode(err, failover.CodeFailoverEmpty) {
+					t.Errorf("New err = %v, want Empty", err)
+				}
+				return
+			}
+			//: a surviving real branch must yield a usable sink.
+			if err != nil || s == nil {
+				t.Errorf("New = (%v, %v), want a non-nil sink", s, err)
+			}
+		})
+	}
+}
+
 func TestFailover_Write(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -115,22 +152,36 @@ func TestFailover_Write(t *testing.T) {
 func TestFailover_Flush(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		name    string
+		bFails  bool
+		wantErr bool
 	}{
-		{"Flush hits every branch"},
+		{"clean flush hits every branch", false, false},
+		{"a failing branch is aggregated, others still flush", true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			a := &controlledSink{}
 			b := &controlledSink{}
+			//: a failing downstream Flush must be collected, not short-circuited.
+			if tc.bFails {
+				b.ferr = errors.New("flush boom")
+			}
 			s, err := failover.New(a, b)
 			if err != nil {
 				t.Fatalf("New err = %v", err)
 			}
-			if ferr := s.Flush(t.Context()); ferr != nil {
-				t.Errorf("Flush err = %v", ferr)
+			ferr := s.Flush(t.Context())
+			//: the failure case must surface the joined branch error.
+			if tc.wantErr {
+				if !errors.Is(ferr, b.ferr) {
+					t.Errorf("Flush err = %v, want it to wrap %v", ferr, b.ferr)
+				}
+			} else if ferr != nil {
+				t.Errorf("Flush err = %v, want nil", ferr)
 			}
+			//: every branch is flushed unconditionally regardless of failures.
 			if a.flush.Load() != 1 || b.flush.Load() != 1 {
 				t.Errorf("flush counts: a=%d b=%d, want both 1", a.flush.Load(), b.flush.Load())
 			}
@@ -141,22 +192,36 @@ func TestFailover_Flush(t *testing.T) {
 func TestFailover_Close(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		name    string
+		aFails  bool
+		wantErr bool
 	}{
-		{"Close hits every branch"},
+		{"clean close hits every branch", false, false},
+		{"a failing branch is aggregated, others still close", true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			a := &controlledSink{}
 			b := &controlledSink{}
+			//: a failing downstream Close must be collected, not short-circuited.
+			if tc.aFails {
+				a.cerr = errors.New("close boom")
+			}
 			s, err := failover.New(a, b)
 			if err != nil {
 				t.Fatalf("New err = %v", err)
 			}
-			if cerr := s.Close(); cerr != nil {
-				t.Errorf("Close err = %v", cerr)
+			cerr := s.Close()
+			//: the failure case must surface the joined branch error.
+			if tc.wantErr {
+				if !errors.Is(cerr, a.cerr) {
+					t.Errorf("Close err = %v, want it to wrap %v", cerr, a.cerr)
+				}
+			} else if cerr != nil {
+				t.Errorf("Close err = %v, want nil", cerr)
 			}
+			//: every branch is closed unconditionally regardless of failures.
 			if a.closed.Load() != 1 || b.closed.Load() != 1 {
 				t.Errorf("close counts: a=%d b=%d, want both 1", a.closed.Load(), b.closed.Load())
 			}

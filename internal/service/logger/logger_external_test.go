@@ -70,24 +70,47 @@ func TestBuild(t *testing.T) {
 func TestLogAttrs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		name    string
+		nilLog  bool
+		message string
+		callLvl level.Level
+		minLvl  level.Level
+		want    bool
 	}{
-		{"LogAttrs on nil Logger silently drops without panicking"},
+		{"LogAttrs on nil Logger silently drops without panicking", true, "msg", level.Info, level.Info, false},
+		{"LogAttrs on real Logger above threshold emits the line", false, "emitted", level.Warn, level.Info, true},
+		{"LogAttrs on real Logger below threshold emits nothing", false, "quiet", level.Debug, level.Info, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			panicked := false
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						panicked = true
-					}
+			//: nil-logger arm asserts the silent-drop contract: no panic, no write.
+			if tc.nilLog {
+				panicked := false
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							panicked = true
+						}
+					}()
+					svclogger.LogAttrs(t.Context(), nil, tc.callLvl, tc.message, nil)
 				}()
-				svclogger.LogAttrs(t.Context(), nil, level.Info, "msg", nil)
-			}()
-			if panicked {
-				t.Error("LogAttrs panicked on nil Logger; contract requires silent drop")
+				if panicked {
+					t.Error("LogAttrs panicked on nil Logger; contract requires silent drop")
+				}
+				return
+			}
+			//: real-logger arm exercises the happy path that delegates to the
+			//: concrete loggerImpl and honours the handler's Enabled gate.
+			var buf bytes.Buffer
+			lg, err := svclogger.New(mustNewText(t, &buf, tc.minLvl))
+			if err != nil {
+				t.Fatalf("New returned err: %v", err)
+			}
+			attrs := []corelogger.AttrValue{{Key: "k", Value: corelogger.StringValue("v")}}
+			svclogger.LogAttrs(t.Context(), lg, tc.callLvl, tc.message, attrs)
+			if got := bytes.Contains(buf.Bytes(), []byte(tc.message)); got != tc.want {
+				t.Errorf("LogAttrs emitted=%v, want %v (buf=%q)", got, tc.want, buf.String())
 			}
 		})
 	}

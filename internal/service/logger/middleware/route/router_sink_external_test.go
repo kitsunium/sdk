@@ -2,6 +2,7 @@ package route_test
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 
@@ -22,6 +23,20 @@ func (r *recordingSink) Write(_ context.Context, _ corelogger.RecordEvent, p []b
 
 func (r *recordingSink) Flush(_ context.Context) error { return nil }
 func (r *recordingSink) Close() error                  { return nil }
+
+// erroringSink is a Sink whose Flush and Close always fail with a fixed
+// error so the router's error-aggregation arms (errors.Join over per-sink
+// failures) are exercised on both the entry and the fallback path.
+type erroringSink struct {
+	err error
+}
+
+func (e *erroringSink) Write(_ context.Context, _ corelogger.RecordEvent, p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (e *erroringSink) Flush(_ context.Context) error { return e.err }
+func (e *erroringSink) Close() error                  { return e.err }
 
 func TestNew(t *testing.T) {
 	t.Parallel()
@@ -112,6 +127,37 @@ func TestRouter_FlushAndClose(t *testing.T) {
 			}
 			if err := r.Close(); err != nil {
 				t.Errorf("Close err = %v", err)
+			}
+		})
+	}
+}
+
+func TestRouter_FlushAndClose_AggregatesErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"Flush + Close join the entry and fallback failures"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: distinct sentinels prove the join captured BOTH the entry and the
+			//: fallback failure rather than short-circuiting on the first.
+			entryErr := errors.New("entry sink failed")
+			fallbackErr := errors.New("fallback sink failed")
+			entrySink := &erroringSink{err: entryErr}
+			fallbackSink := &erroringSink{err: fallbackErr}
+			r := route.New(fallbackSink, route.Params{When: route.LevelAtLeast(level.Error), Sink: entrySink})
+			//: Flush walks the entry then the fallback, joining both failures.
+			ferr := r.Flush(t.Context())
+			if !errors.Is(ferr, entryErr) || !errors.Is(ferr, fallbackErr) {
+				t.Errorf("Flush err = %v, want join of entry + fallback failures", ferr)
+			}
+			//: Close mirrors Flush — both downstream Close failures are joined.
+			cerr := r.Close()
+			if !errors.Is(cerr, entryErr) || !errors.Is(cerr, fallbackErr) {
+				t.Errorf("Close err = %v, want join of entry + fallback failures", cerr)
 			}
 		})
 	}

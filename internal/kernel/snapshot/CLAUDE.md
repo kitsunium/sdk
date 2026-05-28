@@ -13,7 +13,7 @@ lives here, the domain clone logic stays with the consumer (ADR 0011).
 
 | Primitive | Surface | Use case |
 |---|---|---|
-| `Value[T]` | `New[T any](initial *T)` → `Load` / `Store` / `Swap` / `Update` | read-mostly shared state: registries, routing tables, hot-reloaded config |
+| `Value[T]` | `NewValue[T any](initial *T)` → `Load` / `Store` / `Swap` / `Update` | read-mostly shared state: registries, routing tables, hot-reloaded config |
 
 ## Conventions
 
@@ -24,7 +24,7 @@ lives here, the domain clone logic stays with the consumer (ADR 0011).
   so a read-modify-write (`Update`) cannot lose a concurrent write. Readers
   never take the lock.
 - **The zero value is usable.** `var v Value[T]` reads nil until the first
-  `Store`; `New` is call-site sugar when an initial value is known.
+  `Store`; `NewValue` is call-site sugar when an initial value is known.
 - **Concrete struct, no interface.** Like `recycler` (ADR 0010), snapshot ships
   a concrete struct by deliberate choice — a single-impl interface would be
   over-abstraction (ADR 0011). The `Value` role suffix passes `KTN-STRUCT-ROLE`

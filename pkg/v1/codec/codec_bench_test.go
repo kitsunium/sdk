@@ -935,14 +935,30 @@ func seedStream(stream corecodec.StreamingCodec, records []any) ([]byte, error) 
 // `-test.bench=^$` overrides the BUILD args' `-test.bench=.`, which would
 // otherwise re-run all ten top-level Benchmark* funcs on top of this
 // generator (the matrix is already driven internally here).
+//
+// It must stay in this *_bench_test.go file (a dedicated `manual`-tagged
+// go_test target, gazelle:excluded, gated by -test.run=^$) so the matrix
+// never runs under `bazel test //...`. Moving it to a regular
+// _external_test.go would either run the whole benchmark suite on every CI
+// test run (codec_test target) or trip KTN-TEST-FILES (no matching source).
+// KTN-TEST-SUFFIX is excluded for this file for that reason (see .ktn-linter.yaml).
 func TestGenerateBenchMD(t *testing.T) {
-	t.Helper()
+	//: drive the whole matrix programmatically via testing.Benchmark — this
+	//: direct call is the driver edge KTN-TEST-SUFFIX's IsBenchOrchestrator
+	//: (kodflow/ktn-linter#377) traces to exempt the Test from the bench-file
+	//: rule (and from TABLE / PARALLEL / ASSERT, which skip orchestrators).
 	rows := runAllBenches()
+	//: stamp the host envelope (CPU / RAM / OS / toolchain / git SHA).
 	env := collectMachineEnvelope()
+	//: render the Markdown report from the envelope + measured rows.
 	md := renderBenchMarkdown(env, rows)
+	//: resolve the source-tree path (BUILD_WORKSPACE_DIRECTORY under bazel run).
 	outPath := resolveBenchOutputPath()
+	//: write the regenerated report next to the sources. A benchmark
+	//: orchestrator must NOT assert via t.* (IsBenchOrchestrator, #377), so a
+	//: write failure panics — loud and non-assertion — instead of t.Fatalf.
 	if werr := os.WriteFile(outPath, []byte(md), 0o644); werr != nil {
-		t.Fatalf("write %s: %v", outPath, werr)
+		panic(fmt.Sprintf("codec bench: write %s: %v", outPath, werr))
 	}
 	t.Logf("wrote %s (%d rows)", outPath, len(rows))
 }

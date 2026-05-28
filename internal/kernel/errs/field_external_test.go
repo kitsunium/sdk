@@ -169,6 +169,9 @@ func TestFieldValue_StringValue(t *testing.T) {
 		{"int", func() errs.FieldValue { return errs.Int("k", 42) }, "42"},
 		{"bool", func() errs.FieldValue { return errs.Bool("k", true) }, "true"},
 		{"float", func() errs.FieldValue { return errs.Float("k", 0.5) }, "0.5"},
+		//: zero-value FieldValue was never built through a constructor — its
+		//: fieldInvalid kind must degrade to "" rather than panic.
+		{"zero-value degrades to empty", func() errs.FieldValue { return errs.FieldValue{} }, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

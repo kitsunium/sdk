@@ -2,6 +2,7 @@ package flatbuffers
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -114,6 +115,59 @@ func Test_flatbuffersCodec_Extensions(t *testing.T) {
 	}
 }
 
+// Test_flatbuffersCodec_Marshal exercises Marshal directly: the
+// PromotionMagic fast-path (recognise our own wrapper bytes and skip
+// resolve+validate), the regular []byte validation route, and the
+// shape-rejection branch.
+func Test_flatbuffersCodec_Marshal(t *testing.T) {
+	t.Parallel()
+	//: stamp a buffer whose LE uint32 header == PromotionMagic so Marshal
+	//: takes the promotion fast-path (lines 99-102).
+	promoted := make([]byte, 8)
+	binary.LittleEndian.PutUint32(promoted, PromotionMagic)
+	type tc struct {
+		name    string
+		in      any
+		wantLen int
+		wantErr string
+	}
+	tests := []tc{
+		//: promotion-sentinel fast-path — bytes returned verbatim.
+		{"promotion-magic-fast-path", promoted, len(promoted), ""},
+		//: regular route — a valid 4-byte buffer passes resolve+validate.
+		{"regular-bytes-validated", []byte{1, 2, 3, 4}, 4, ""},
+		//: shape rejection — int is neither []byte nor BytesProvider.
+		{"bad-type-rejected", 42, 0, "FLATBUFFERS_BAD_TYPE"},
+		//: truncated regular buffer fails validation (not promotion-marked).
+		{"truncated-rejected", []byte{1, 2}, 0, "FLATBUFFERS_TRUNCATED"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c := &flatbuffersCodec{}
+		got, err := c.Marshal(tc.in)
+		//: error branch — assert the reason and that no bytes leak out.
+		if tc.wantErr != "" {
+			if !errs.HasReason(err, tc.wantErr) {
+				t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		//: success branch — passthrough returns the bytes verbatim.
+		if len(got) != tc.wantLen {
+			t.Errorf("%s: len=%d want %d", tc.name, len(got), tc.wantLen)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // Test_validateBuffer exercises the size invariants directly.
 func Test_validateBuffer(t *testing.T) {
 	t.Parallel()
@@ -126,6 +180,9 @@ func Test_validateBuffer(t *testing.T) {
 		{"exact header passes", []byte{0, 0, 0, 0}, ""},
 		{"empty buffer surfaces FLATBUFFERS_TRUNCATED", nil, "FLATBUFFERS_TRUNCATED"},
 		{"three bytes surfaces FLATBUFFERS_TRUNCATED", []byte{1, 2, 3}, "FLATBUFFERS_TRUNCATED"},
+		//: one byte past the 64 MiB ceiling trips the max-size guard
+		//: (lines 205-213) — the CWE-400 blast-radius cap.
+		{"over-cap surfaces FLATBUFFERS_TRUNCATED", make([]byte, maxFlatBuffersBytes+1), "FLATBUFFERS_TRUNCATED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

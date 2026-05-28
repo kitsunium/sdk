@@ -2,8 +2,20 @@ package yaml
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
+
+// appendBadMarshaler implements yaml.v3's Marshaler returning an error so the
+// Append encode-error branch is reachable without a chan/func payload (which
+// yaml.v3 panics on) or a failing writer (Append owns its buffer).
+type appendBadMarshaler struct{}
+
+// MarshalYAML returns a synthetic failure so the encoder surfaces an error.
+func (appendBadMarshaler) MarshalYAML() (any, error) {
+	//: deterministic failure → MARSHAL_FAILED, dst stays pristine.
+	return nil, errors.New("synthetic marshaler failure")
+}
 
 // Test_yamlCodec_Name covers the canonical identifier returned by the codec.
 func Test_yamlCodec_Name(t *testing.T) {
@@ -185,7 +197,9 @@ func Test_yamlCodec_Append(t *testing.T) {
 		{"happy-empty-dst", nil, map[string]int{"a": 1}, false},
 		{"happy-prefix-dst", []byte("PRE-"), "value", false},
 		//: yaml.v3 panics on chan/func types instead of returning an
-		//: error — out of our codec's control. Reject test omitted.
+		//: error, but a value whose MarshalYAML errors drives the encode-
+		//: error branch cleanly with dst left untouched.
+		{"reject-marshaler-error", []byte("PRE-"), appendBadMarshaler{}, true},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

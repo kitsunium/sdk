@@ -1,17 +1,17 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-25T22:06:17.306Z",
+  "generatedAt": "2026-05-27T14:33:16.872Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
     {
       "type": "feat",
       "scope": "kernel",
       "breaking": false,
-      "summary": "add snapshot.Value[T] copy-on-write primitive + consolidate codec registry (ADR 0011)",
-      "sha": "6dd281443c62835293c3f77144cff4801a79eb73",
-      "short": "6dd2814",
-      "date": "2026-05-25T23:53:33+02:00"
+      "summary": "add snapshot.Value[T] copy-on-write primitive + consolidate codec registry (ADR 0011) (#34)",
+      "sha": "7cdda6956418834f17a92ffcf3620fc7591bf4be",
+      "short": "7cdda69",
+      "date": "2026-05-26T01:38:33+02:00"
     },
     {
       "type": "fix",

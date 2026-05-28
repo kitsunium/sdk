@@ -1,6 +1,7 @@
 package pem_test
 
 import (
+	"bytes"
 	stdpem "encoding/pem"
 	"testing"
 
@@ -48,6 +49,14 @@ func TestMarshal(t *testing.T) {
 		{"valid block round-trips", &stdpem.Block{Type: "TEST", Bytes: []byte("hello")}, ""},
 		{"wrong type surfaces VALUE_INVALID", "nope", "VALUE_INVALID"},
 		{"nil block surfaces VALUE_INVALID", (*stdpem.Block)(nil), "VALUE_INVALID"},
+		//: Type=="JSON" + no headers is the promotion shape — Marshal takes
+		//: the hand-written fast-path (marshalPromotionBlock).
+		{"promotion-shape block uses fast-path", &stdpem.Block{Type: "JSON", Bytes: []byte("hello")}, ""},
+		//: a header KEY containing a colon makes encoding/pem.Encode return
+		//: a non-writer error (pem.go: "header key that contains a colon"),
+		//: driving the MARSHAL_FAILED wrap. Headers != 0 so it bypasses the
+		//: promotion fast-path and reaches stdpem.Encode.
+		{"colon header key surfaces MARSHAL_FAILED", &stdpem.Block{Type: "CERT", Headers: map[string]string{"bad:key": "v"}, Bytes: []byte("x")}, "MARSHAL_FAILED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -97,6 +106,60 @@ func TestUnmarshal(t *testing.T) {
 		}
 		if tc.wantErr != "" && !errs.HasReason(err, tc.wantErr) {
 			t.Errorf("%s: expected %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestMarshalPromotionShape pins the promotion fast-path
+// (marshalPromotionBlock + insertNewlinesEvery64): for a "JSON"-typed
+// block with no headers, Marshal MUST emit bytes byte-identical to
+// encoding/pem.EncodeToMemory (the production comment guarantees this),
+// and the result MUST round-trip back to the same block. Payload sizes
+// are chosen to hit every line-split shape: zero bytes, a single short
+// line, an exact 48-byte input (one full 64-char base64 line), and a
+// multi-line payload whose final line is partial.
+func TestMarshalPromotionShape(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		payload []byte
+	}
+	tests := []tc{
+		//: empty payload — bodyLen 0, lineCount 0 (loop body never runs).
+		{"empty payload", []byte{}},
+		//: short payload — one partial base64 line (< 64 chars).
+		{"short single line", []byte("hello")},
+		//: 48 input bytes encode to exactly 64 base64 chars = one full line.
+		{"exact one full line", bytes.Repeat([]byte{0xAB}, 48)},
+		//: 100 input bytes span multiple 64-char lines with a partial tail —
+		//: forces the multi-iteration backwards walk in insertNewlinesEvery64.
+		{"multi-line partial tail", bytes.Repeat([]byte{0x5A}, 100)},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		block := &stdpem.Block{Type: "JSON", Bytes: tc.payload}
+		got, err := pem.New().Marshal(block)
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		//: byte-identity contract — the fast-path must equal stdlib output.
+		want := stdpem.EncodeToMemory(block)
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s: promotion bytes diverge from pem.EncodeToMemory\n got=%q\nwant=%q", tc.name, got, want)
+		}
+		//: round-trip contract — decoding the fast-path bytes recovers the payload.
+		var back *stdpem.Block
+		if uerr := pem.New().Unmarshal(got, &back); uerr != nil {
+			t.Fatalf("%s: Unmarshal err=%v", tc.name, uerr)
+		}
+		if back.Type != "JSON" || !bytes.Equal(back.Bytes, tc.payload) {
+			t.Errorf("%s: round-trip mismatch: type=%q bytes=%q", tc.name, back.Type, back.Bytes)
 		}
 	}
 	for _, tc := range tests {

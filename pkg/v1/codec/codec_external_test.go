@@ -1630,6 +1630,92 @@ func TestMarshalMany(t *testing.T) {
 	}
 }
 
+// marshalManyPromoteUser is the ordinary Go struct MarshalMany's
+// promotion-path cases broadcast. It is NOT a [][]string, so a
+// constrained codec (csv) rejects its native shape and forces
+// MarshalMany down the encodeWithPromotion → promoteMarshal fallback
+// that the JSON/CBOR/MsgPack happy-path cases never touch.
+type marshalManyPromoteUser struct {
+	Name string `json:"name"`
+	Age  int    `json:"age"`
+}
+
+// TestMarshalMany_PromotionPath drives the encodeWithPromotion fallback
+// inside MarshalMany: a constrained Format (csv) plus an ordinary struct
+// makes the codec reject the native shape, so MarshalMany must promote
+// via the JSON bridge and still record the bytes. The chan case proves
+// the symmetric failure arm — promotion's json.Marshal step fails, the
+// per-format error is joined, and no map entry is recorded for that
+// Format. Kept separate from TestMarshalMany because that table fixes a
+// single shared value across all formats, whereas the promotion arms
+// need a value the constrained codec rejects natively.
+func TestMarshalMany_PromotionPath(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name        string
+		value       any
+		formats     []codec.Format
+		wantKeys    []codec.Format
+		wantMissing []codec.Format
+		wantErr     bool
+	}
+	tests := []tc{
+		{
+			//: csv rejects the struct natively → promotion encodes it →
+			//: bytes recorded under csv. json is the native control.
+			name:     "csv_promotion_succeeds",
+			value:    marshalManyPromoteUser{Name: "Ada", Age: 36},
+			formats:  []codec.Format{codec.JSON, codec.CSV},
+			wantKeys: []codec.Format{codec.JSON, codec.CSV},
+			wantErr:  false,
+		},
+		{
+			//: a chan never serialises to the JSON intermediate, so csv
+			//: promotion fails; the joined error carries it and csv gets
+			//: no map entry, while json still fails the same way (chan is
+			//: not json-marshalable for either codec) — both missing.
+			name:        "csv_promotion_json_error",
+			value:       make(chan int),
+			formats:     []codec.Format{codec.CSV},
+			wantMissing: []codec.Format{codec.CSV},
+			wantErr:     true,
+		},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		out, err := codec.MarshalMany(tc.value, tc.formats...)
+		//: error expectation gate.
+		if tc.wantErr && err == nil {
+			t.Fatalf("%s: expected joined error, got nil", tc.name)
+		}
+		if !tc.wantErr && err != nil {
+			t.Fatalf("%s: MarshalMany err=%v want nil", tc.name, err)
+		}
+		//: every expected key must carry bytes.
+		for _, f := range tc.wantKeys {
+			if _, ok := out[f]; !ok {
+				t.Errorf("%s: missing entry for %s", tc.name, f)
+			}
+		}
+		//: every failed Format must be absent from the map.
+		for _, f := range tc.wantMissing {
+			if _, ok := out[f]; ok {
+				t.Errorf("%s: unexpected entry for %s", tc.name, f)
+			}
+		}
+		//: the map cardinality matches exactly the successful keys.
+		if len(out) != len(tc.wantKeys) {
+			t.Errorf("%s: len(out)=%d want %d", tc.name, len(out), len(tc.wantKeys))
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // universalRoundtripUser is the canonical value used by
 // TestUniversalRoundtripAllCodecs to prove the post-promotion contract:
 // every Format accepts the SAME ordinary Go struct in Marshal and

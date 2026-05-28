@@ -190,3 +190,105 @@ func TestAvailable(t *testing.T) {
 		})
 	}
 }
+
+// TestRegistryHitPaths covers the success arms the miss-only tables above
+// never reach: a resolved Lookup / LookupMIME / LookupExt, MIME-parameter
+// stripping, the malformed-MIME manual fallback, and case-insensitive
+// extension matching. Sequential — it mutates the process-wide registry.
+func TestRegistryHitPaths(t *testing.T) {
+	//: clean slate so the assertions below see exactly the one codec we add.
+	codec.ResetForTest()
+	mc := &mockCodec{
+		name: "cov-hit",
+		mime: []string{"application/x-cov"},
+		ext:  []string{".cov"},
+	}
+	codec.Register(mc)
+	tests := []struct {
+		name   string
+		lookup func() (codec.Codec, bool)
+		wantOK bool
+	}{
+		{"Lookup resolves the registered Format", func() (codec.Codec, bool) {
+			return codec.Lookup(codec.Format("cov-hit"))
+		}, true},
+		{"LookupMIME resolves the bare media type", func() (codec.Codec, bool) {
+			return codec.LookupMIME("application/x-cov")
+		}, true},
+		{"LookupMIME strips the charset parameter", func() (codec.Codec, bool) {
+			return codec.LookupMIME("application/x-cov; charset=utf-8")
+		}, true},
+		{"LookupMIME on a malformed header falls back and resolves", func() (codec.Codec, bool) {
+			return codec.LookupMIME("application/x-cov; =bad")
+		}, true},
+		{"LookupExt resolves the registered extension", func() (codec.Codec, bool) {
+			return codec.LookupExt(".cov")
+		}, true},
+		{"LookupExt matches case-insensitively", func() (codec.Codec, bool) {
+			return codec.LookupExt(".COV")
+		}, true},
+		//: index is seeded but the key is absent — exercises the !found arm
+		//: that the m==nil empty-registry test never reaches.
+		{"LookupMIME misses an absent key on a populated index", func() (codec.Codec, bool) {
+			return codec.LookupMIME("application/x-absent")
+		}, false},
+		{"LookupExt misses an absent key on a populated index", func() (codec.Codec, bool) {
+			return codec.LookupExt(".absent")
+		}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			//: sequential — shares the process-wide registry seeded above.
+			if _, ok := tc.lookup(); ok != tc.wantOK {
+				t.Errorf("%s: ok=%v want %v", tc.name, ok, tc.wantOK)
+			}
+		})
+	}
+	//: Available must now surface the freshly registered Format.
+	found := false
+	for _, f := range codec.Available() {
+		//: scan for our codec among the sorted Formats.
+		if f == codec.Format("cov-hit") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Available() = %v, want it to contain cov-hit", codec.Available())
+	}
+}
+
+// TestRegistryEmptyMisses covers the nil-snapshot arms of every reader:
+// before any Register (the documented init-order edge), loadRegistry and
+// loadAliasIndex return nil so each lookup is a clean miss and Available is
+// nil. Sequential — parallel tables only resume after the sequential phase,
+// so resetting the global here never races a concurrent reader.
+func TestRegistryEmptyMisses(t *testing.T) {
+	//: drive all three snapshots back to nil to hit the absence branches.
+	codec.ResetForTest()
+	tests := []struct {
+		name   string
+		lookup func() (codec.Codec, bool)
+	}{
+		{"Lookup misses on empty registry", func() (codec.Codec, bool) {
+			return codec.Lookup(codec.Format("cov-hit"))
+		}},
+		{"LookupMIME misses on empty index", func() (codec.Codec, bool) {
+			return codec.LookupMIME("application/x-cov")
+		}},
+		{"LookupExt misses on empty index", func() (codec.Codec, bool) {
+			return codec.LookupExt(".cov")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			//: every reader must report a miss against the nil snapshot.
+			if _, ok := tc.lookup(); ok {
+				t.Errorf("%s: ok=true, want false on empty registry", tc.name)
+			}
+		})
+	}
+	//: Available must return the documented nil slice when nothing is registered.
+	if got := codec.Available(); got != nil {
+		t.Errorf("Available() = %v, want nil on empty registry", got)
+	}
+}

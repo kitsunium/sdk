@@ -3,6 +3,7 @@ package xml
 import (
 	"bytes"
 	stdxml "encoding/xml"
+	"errors"
 	"testing"
 )
 
@@ -59,6 +60,50 @@ func Test_xmlEncoder_Close(t *testing.T) {
 		err := enc.Close()
 		if (err != nil) != tc.wantErr {
 			t.Errorf("%s: Close err=%v wantErr=%v", tc.name, err, tc.wantErr)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// failingWriter always fails its Write so the stdlib encoder's Flush (driven
+// by Close) surfaces an error. Used to reach the Close wrap branch.
+type failingWriter struct{}
+
+// Write reports a synthetic failure for every byte the encoder flushes.
+func (failingWriter) Write(_ []byte) (n int, err error) {
+	//: deterministic failure so Flush propagates an error through Close.
+	return 0, errors.New("synthetic writer failure")
+}
+
+// Test_xmlEncoder_Close_FlushError covers the Close wrap branch
+// (encoder.go:34) which the success-only test never reaches. The trick is
+// to leave a token buffered without flushing it: EncodeToken does NOT flush
+// per call, so a StartElement stays pending until Close → Flush, which then
+// fails over a writer that errors on every byte. Calling Encode instead
+// would flush eagerly and leave nothing for Close to push, so the failing
+// writer must be paired with a buffered-token producer.
+func Test_xmlEncoder_Close_FlushError(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"flush failure surfaces via Close wrap"}}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		enc := &xmlEncoder{inner: stdxml.NewEncoder(failingWriter{})}
+		//: a start-element token stays buffered (EncodeToken does not flush),
+		//: so the pending bytes are pushed only when Close calls Flush.
+		if terr := enc.inner.EncodeToken(stdxml.StartElement{Name: stdxml.Name{Local: "x"}}); terr != nil {
+			t.Fatalf("%s: EncodeToken setup err=%v", tc.name, terr)
+		}
+		//: Close → Flush fails over the failing writer, hitting the wrap.
+		if err := enc.Close(); err == nil {
+			t.Errorf("%s: Close=nil, want flush error wrapped as MARSHAL_FAILED", tc.name)
 		}
 	}
 	for _, tc := range tests {
