@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -1134,6 +1135,10 @@ func TestAppendRollbackOnError(t *testing.T) {
 			t.Fatal("codec does not implement Appender")
 		}
 		prefill := []byte{0xAA, 0xBB, 0xCC}
+		//: snapshot prefill BEFORE Append so any in-place mutation is
+		//: visible — otherwise comparing out against prefill could silently
+		//: agree when prefill itself was clobbered.
+		want := slices.Clone(prefill)
 		out, err := ap.Append(prefill, make(chan int))
 		//: the encode must fail on the unsupported value.
 		if err == nil {
@@ -1141,8 +1146,8 @@ func TestAppendRollbackOnError(t *testing.T) {
 		}
 		//: rollback contract — the returned buffer is byte-for-byte the prior
 		//: prefix: neither truncated/grown (length) nor mutated (content).
-		if !bytes.Equal(out, prefill) {
-			t.Errorf("Append did not roll back: out=%v, want %v", out, prefill)
+		if !bytes.Equal(out, want) {
+			t.Errorf("Append did not roll back: out=%v, want %v", out, want)
 		}
 	}
 	for _, tc := range tests {

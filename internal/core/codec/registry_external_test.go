@@ -204,11 +204,12 @@ func TestRegistryHitPaths(t *testing.T) {
 		ext:  []string{".cov"},
 	}
 	codec.Register(mc)
-	tests := []struct {
+	type tc struct {
 		name   string
 		lookup func() (codec.Codec, bool)
 		wantOK bool
-	}{
+	}
+	tests := []tc{
 		{"Lookup resolves the registered Format", func() (codec.Codec, bool) {
 			return codec.Lookup(codec.Format("cov-hit"))
 		}, true},
@@ -236,13 +237,16 @@ func TestRegistryHitPaths(t *testing.T) {
 			return codec.LookupExt(".absent")
 		}, false},
 	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; sequential — shares the process-wide registry seeded above.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		if _, ok := tc.lookup(); ok != tc.wantOK {
+			t.Errorf("%s: ok=%v want %v", tc.name, ok, tc.wantOK)
+		}
+	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			//: sequential — shares the process-wide registry seeded above.
-			if _, ok := tc.lookup(); ok != tc.wantOK {
-				t.Errorf("%s: ok=%v want %v", tc.name, ok, tc.wantOK)
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
 	}
 	//: Available must now surface the freshly registered Format.
 	found := false
@@ -265,10 +269,11 @@ func TestRegistryHitPaths(t *testing.T) {
 func TestRegistryEmptyMisses(t *testing.T) {
 	//: drive all three snapshots back to nil to hit the absence branches.
 	codec.ResetForTest()
-	tests := []struct {
+	type tc struct {
 		name   string
 		lookup func() (codec.Codec, bool)
-	}{
+	}
+	tests := []tc{
 		{"Lookup misses on empty registry", func() (codec.Codec, bool) {
 			return codec.Lookup(codec.Format("cov-hit"))
 		}},
@@ -279,13 +284,16 @@ func TestRegistryEmptyMisses(t *testing.T) {
 			return codec.LookupExt(".cov")
 		}},
 	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; every reader must report a miss against the nil snapshot.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		if _, ok := tc.lookup(); ok {
+			t.Errorf("%s: ok=true, want false on empty registry", tc.name)
+		}
+	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			//: every reader must report a miss against the nil snapshot.
-			if _, ok := tc.lookup(); ok {
-				t.Errorf("%s: ok=true, want false on empty registry", tc.name)
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
 	}
 	//: Available must return the documented nil slice when nothing is registered.
 	if got := codec.Available(); got != nil {

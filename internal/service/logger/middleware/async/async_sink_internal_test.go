@@ -110,6 +110,11 @@ func Test_asyncSink_Flush(t *testing.T) {
 	tests := []struct {
 		name      string
 		ctxCancel bool
+		//: nilCtx swaps t.Context() for a literal nil so the
+		//: "nil-context permitted by the contract" row actually exercises
+		//: the nil-ctx path (the empty-queue fast return) instead of the
+		//: live-ctx path the previous all-zero row tested by accident.
+		nilCtx bool
 		//: prime enqueues entries before Flush so the loop sees a non-empty
 		//: ring and falls through to the cancellation arm instead of the
 		//: empty-queue fast path. freshSink has no live drainer so the
@@ -124,11 +129,11 @@ func Test_asyncSink_Flush(t *testing.T) {
 		//: wantStopped asserts the Stopped sentinel (drainer-exited path).
 		wantStopped bool
 	}{
-		{"empty queue + live ctx returns nil", false, false, false, false, false, false},
-		{"empty queue + cancelled ctx still flushes downstream", true, false, false, false, false, false},
-		{"explicit nil context is permitted by the contract", false, false, false, false, false, false},
-		{"non-empty queue + cancelled ctx surfaces the typed cancellation", true, true, false, true, true, false},
-		{"non-empty queue + closed flushSignal surfaces Stopped", false, true, true, true, false, true},
+		{"empty queue + live ctx returns nil", false, false, false, false, false, false, false},
+		{"empty queue + cancelled ctx still flushes downstream", true, false, false, false, false, false, false},
+		{"explicit nil context is permitted by the contract", false, true, false, false, false, false, false},
+		{"non-empty queue + cancelled ctx surfaces the typed cancellation", true, false, true, false, true, true, false},
+		{"non-empty queue + closed flushSignal surfaces Stopped", false, false, true, true, true, false, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -152,11 +157,18 @@ func Test_asyncSink_Flush(t *testing.T) {
 				s.flushSignal = make(chan struct{}, 1)
 				close(s.flushSignal)
 			}
-			ctx := t.Context()
-			if tc.ctxCancel {
-				cancelled, cancel := context.WithCancel(ctx)
+			//: select the ctx the row asks for; the nil arm exercises the
+			//: documented "wait-forever, no cancellation" contract.
+			var ctx context.Context
+			switch {
+			case tc.nilCtx:
+				ctx = nil
+			case tc.ctxCancel:
+				cancelled, cancel := context.WithCancel(t.Context())
 				cancel()
 				ctx = cancelled
+			default:
+				ctx = t.Context()
 			}
 			err := s.Flush(ctx)
 			if (err != nil) != tc.wantErr {
