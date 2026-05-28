@@ -652,32 +652,36 @@ func TestError_Is(t *testing.T) {
 // wrap-site code, then the inherited Reason and public message.
 func TestError_Error_RendersTrail(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name string
-	}{
+	}
+	tests := []tc{
 		{"single wrap renders one <- separated trail code"},
 	}
+	//: runCase executes one row directly so the static analyser credits
+	//: the branch; a wrap on a non-zero Code must produce the " <- " trail.
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: 0x00_03_0F_70 = origin slot; 0x00_03_0F_71 = wrap-site slot.
+		origin := errs.Define(0x00_03_0F_70, "ORIGIN_TRAIL",
+			"origin public", "origin private")
+		wrapped := errs.Wrap(origin, errs.WrapParams{Code: 0x00_03_0F_71})
+		got := wrapped.Error()
+		//: a populated trail must render the ASCII wrap separator.
+		if !strings.Contains(got, " <- ") {
+			t.Errorf("Error() = %q, want ' <- ' trail separator", got)
+		}
+		//: origin-wins — Reason and public come from the wrapped cause.
+		if !strings.Contains(got, "ORIGIN_TRAIL") || !strings.Contains(got, "origin public") {
+			t.Errorf("Error() = %q, want origin reason + public", got)
+		}
+		//: Private must never leak into the rendered form.
+		if strings.Contains(got, "origin private") {
+			t.Errorf("Error() leaked Private: %q", got)
+		}
+	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			//: 0x00_03_0F_70 = origin slot; 0x00_03_0F_71 = wrap-site slot.
-			origin := errs.Define(0x00_03_0F_70, "ORIGIN_TRAIL",
-				"origin public", "origin private")
-			wrapped := errs.Wrap(origin, errs.WrapParams{Code: 0x00_03_0F_71})
-			got := wrapped.Error()
-			//: a populated trail must render the ASCII wrap separator.
-			if !strings.Contains(got, " <- ") {
-				t.Errorf("Error() = %q, want ' <- ' trail separator", got)
-			}
-			//: origin-wins — Reason and public come from the wrapped cause.
-			if !strings.Contains(got, "ORIGIN_TRAIL") || !strings.Contains(got, "origin public") {
-				t.Errorf("Error() = %q, want origin reason + public", got)
-			}
-			//: Private must never leak into the rendered form.
-			if strings.Contains(got, "origin private") {
-				t.Errorf("Error() leaked Private: %q", got)
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
 
@@ -685,30 +689,34 @@ func TestError_Error_RendersTrail(t *testing.T) {
 // monotonic truncation marker " (truncated)" is rendered before the Reason.
 func TestError_Error_RendersTruncated(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name  string
 		wraps int
-	}{
+	}
+	tests := []tc{
 		{"forty wraps overflow the trail cap", 40},
 	}
+	//: runCase executes one row directly so the static analyser credits
+	//: the branch; overflowing the trail cap must flip trailTruncated.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: 0x00_03_0F_72 = origin slot for the truncation walk.
+		var err error = errs.Define(0x00_03_0F_72, "TRUNC_ORIGIN",
+			"trunc public", "trunc private")
+		//: each wrap adds one distinct non-zero trail code; well past the
+		//: documented cap of 16 this must flip trailTruncated.
+		for i := range tc.wraps {
+			//: 0x00_07_01_xx — distinct non-zero wrap codes in layer 7.
+			err = errs.Wrap(err, errs.WrapParams{Code: errs.Code(0x00_07_01_00 + i + 1)})
+		}
+		got := err.Error()
+		//: overflow must surface the verbatim marker operators grep for.
+		if !strings.Contains(got, "(truncated)") {
+			t.Errorf("Error() = %q, want '(truncated)' marker", got)
+		}
+	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			//: 0x00_03_0F_72 = origin slot for the truncation walk.
-			var err error = errs.Define(0x00_03_0F_72, "TRUNC_ORIGIN",
-				"trunc public", "trunc private")
-			//: each wrap adds one distinct non-zero trail code; well past the
-			//: documented cap of 16 this must flip trailTruncated.
-			for i := range tc.wraps {
-				//: 0x00_07_01_xx — distinct non-zero wrap codes in layer 7.
-				err = errs.Wrap(err, errs.WrapParams{Code: errs.Code(0x00_07_01_00 + i + 1)})
-			}
-			got := err.Error()
-			//: overflow must surface the verbatim marker operators grep for.
-			if !strings.Contains(got, "(truncated)") {
-				t.Errorf("Error() = %q, want '(truncated)' marker", got)
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
 
@@ -717,30 +725,34 @@ func TestError_Error_RendersTruncated(t *testing.T) {
 // rather than dereferencing the nil receiver.
 func TestWrap_TypedNilErrorCause(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name string
-	}{
+	}
+	tests := []tc{
 		{"typed-nil *Error cause yields a params-driven error with nil source"},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			//: a typed-nil *Error is the classic interface-holding-nil trap.
-			var cause *errs.Error
-			//: 0x00_03_0F_73 = wrap slot for the typed-nil path.
-			wrapped := errs.Wrap(cause, errs.WrapParams{
-				Code: 0x00_03_0F_73, Reason: "TYPED_NIL_WRAP",
-				Public: "typed nil collapses to stdlib path", Private: "debug",
-			})
-			//: params apply because no *Error was inherited from the cause.
-			if wrapped.Code() != 0x00_03_0F_73 {
-				t.Errorf("Code = %s, want params code", wrapped.Code())
-			}
-			//: the collapsed path carries no wrapped cause.
-			if wrapped.Source() != nil {
-				t.Errorf("Source = %v, want nil", wrapped.Source())
-			}
+	//: runCase executes one row directly so the static analyser credits
+	//: the branch; a typed-nil *Error cause must collapse to the params path.
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: a typed-nil *Error is the classic interface-holding-nil trap.
+		var cause *errs.Error
+		//: 0x00_03_0F_73 = wrap slot for the typed-nil path.
+		wrapped := errs.Wrap(cause, errs.WrapParams{
+			Code: 0x00_03_0F_73, Reason: "TYPED_NIL_WRAP",
+			Public: "typed nil collapses to stdlib path", Private: "debug",
 		})
+		//: params apply because no *Error was inherited from the cause.
+		if wrapped.Code() != 0x00_03_0F_73 {
+			t.Errorf("Code = %s, want params code", wrapped.Code())
+		}
+		//: the collapsed path carries no wrapped cause.
+		if wrapped.Source() != nil {
+			t.Errorf("Source = %v, want nil", wrapped.Source())
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
 
@@ -749,25 +761,30 @@ func TestWrap_TypedNilErrorCause(t *testing.T) {
 // code falls inside it, so errors.Is must still report a hit.
 func TestError_Is_MatchesTrailPrefix(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name string
-	}{
+	}
+	tests := []tc{
 		{"prefix matches a trail entry the origin misses"},
 	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; the trail-walk arm of matchesPrefix must catch a wrap-site
+	//: code whose subnet the origin misses.
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: origin sits in layer 3; the matcher targets layer 7.
+		origin := errs.Define(0x00_03_0F_74, "PREFIX_TRAIL_ORIGIN",
+			"prefix trail public", "prefix trail private")
+		//: wrap with a layer-7 code so only the trail entry can match.
+		wrapped := errs.Wrap(origin, errs.WrapParams{Code: 0x00_07_01_01})
+		//: subnet over major+layer == 0.7 — origin (layer 3) misses it.
+		matcher := errs.NewPrefixMatcher(0x00_07_00_00, errs.MaskByLayer)
+		if !errors.Is(wrapped, matcher) {
+			t.Errorf("errors.Is(wrapped, layer-7 matcher) = false, want true via trail")
+		}
+	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			//: origin sits in layer 3; the matcher targets layer 7.
-			origin := errs.Define(0x00_03_0F_74, "PREFIX_TRAIL_ORIGIN",
-				"prefix trail public", "prefix trail private")
-			//: wrap with a layer-7 code so only the trail entry can match.
-			wrapped := errs.Wrap(origin, errs.WrapParams{Code: 0x00_07_01_01})
-			//: subnet over major+layer == 0.7 — origin (layer 3) misses it.
-			matcher := errs.NewPrefixMatcher(0x00_07_00_00, errs.MaskByLayer)
-			if !errors.Is(wrapped, matcher) {
-				t.Errorf("errors.Is(wrapped, layer-7 matcher) = false, want true via trail")
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
 
@@ -776,25 +793,29 @@ func TestError_Is_MatchesTrailPrefix(t *testing.T) {
 // through every branch to find a matching *Error code.
 func TestHasCode_MultiUnwrap(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name string
 		code errs.Code
 		want bool
-	}{
+	}
+	tests := []tc{
 		{"code present in a joined branch", 0x00_03_0F_75, true},
 		{"code absent from every branch", 0x00_03_0F_76, false},
 	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; HasCode must recurse through every Unwrap() []error branch.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: 0x00_03_0F_75 = the sdk branch buried inside the join.
+		sdk := errs.Define(0x00_03_0F_75, "JOINED_SDK",
+			"joined public", "joined private")
+		//: errors.Join exposes Unwrap() []error, forcing the multi walk.
+		joined := errors.Join(errors.New("plain branch"), sdk)
+		if got := errs.HasCode(joined, tc.code); got != tc.want {
+			t.Errorf("HasCode(joined, %s) = %v, want %v", tc.code, got, tc.want)
+		}
+	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			//: 0x00_03_0F_75 = the sdk branch buried inside the join.
-			sdk := errs.Define(0x00_03_0F_75, "JOINED_SDK",
-				"joined public", "joined private")
-			//: errors.Join exposes Unwrap() []error, forcing the multi walk.
-			joined := errors.Join(errors.New("plain branch"), sdk)
-			if got := errs.HasCode(joined, tc.code); got != tc.want {
-				t.Errorf("HasCode(joined, %s) = %v, want %v", tc.code, got, tc.want)
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
