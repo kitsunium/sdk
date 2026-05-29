@@ -1,26 +1,17 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-29T20:24:17.387Z",
+  "generatedAt": "2026-05-29T22:24:43.557Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
-    {
-      "type": "fix",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "address CodeRabbit/Qodo review on writer registry (PR #52)",
-      "sha": "661c4f04247d5dd07d2bf10d6e5035d222c39acf",
-      "short": "661c4f0",
-      "date": "2026-05-29T22:08:52+02:00"
-    },
     {
       "type": "feat",
       "scope": "logger",
       "breaking": false,
-      "summary": "add config-driven writer registry (console/file/s3/cloudwatch) — ADR 0012",
-      "sha": "9d5e28fbe57b39e818ca270f84d315a4c23fa62a",
-      "short": "9d5e28f",
-      "date": "2026-05-29T20:57:14+02:00"
+      "summary": "config-driven writer registry (console/file/s3/cloudwatch) — ADR 0012 (#52)",
+      "sha": "3732c6885d1f03b786621b18688e8b51f10fafe9",
+      "short": "3732c68",
+      "date": "2026-05-29T22:26:54+02:00"
     },
     {
       "type": "feat",
@@ -39,6 +30,15 @@
       "sha": "dcff33ba199373bcc579168f287bd783aa5b3e1f",
       "short": "dcff33b",
       "date": "2026-05-25T09:59:30Z"
+    },
+    {
+      "type": "fix",
+      "scope": "docs",
+      "breaking": false,
+      "summary": "base-path the portal for GitHub Pages project deploys + a11y/SEO (#30)",
+      "sha": "5bff559252443700989d2507c57039696da9ded2",
+      "short": "5bff559",
+      "date": "2026-05-25T09:45:30Z"
     },
     {
       "type": "feat",
