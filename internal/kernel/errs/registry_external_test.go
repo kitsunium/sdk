@@ -46,13 +46,16 @@ func sdkRoot(tb testing.TB) (root string) {
 	return ""
 }
 
-// collectDefineCalls walks every non-test.go file under root/internal and
-// root/pkg, returning each (file:line, call) pair whose callee resolves to
-// errs.Define. Used by the audits below.
+// collectDefineCalls walks every non-test.go file under root/internal,
+// root/pkg, and root/third-party, returning each (file:line, call) pair whose
+// callee resolves to errs.Define. third-party is included so the opt-in
+// vendor-dependent emitters (e.g. the AWS writers, ADR 0012) are audited for
+// the same Public-is-literal / reason / code-uniqueness invariants as the rest
+// of the SDK. Used by the audits below.
 func collectDefineCalls(tb testing.TB, root string) (out []defineCall) {
 	tb.Helper()
 	fset := token.NewFileSet()
-	for _, sub := range []string{"internal", "pkg"} {
+	for _, sub := range []string{"internal", "pkg", "third-party"} {
 		base := filepath.Join(root, sub)
 		filepath.Walk(base, func(path string, info os.FileInfo, _ error) error { //nolint:errcheck // audit is best-effort
 			if info == nil || info.IsDir() {
@@ -188,6 +191,45 @@ func TestAuditCodeUniqueness(t *testing.T) {
 					seen[key] = dc.varName
 				}
 			}
+		})
+	}
+}
+
+func TestAuditScansThirdParty(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		code string
+	}
+	tests := []tc{
+		//: a known errs.Define code from a third-party/* emitter (ADR 0012 AWS
+		//: writers) MUST be collected — proves the audit walks third-party, not
+		//: just internal/ + pkg/. Guards against a regression of the scan roots.
+		{"s3 writer sentinel is audited", "CodeS3ClientInitFailed"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		root := sdkRoot(t)
+		found := false
+		for _, dc := range collectDefineCalls(t, root) {
+			if len(dc.call.Args) == 0 {
+				continue
+			}
+			//: arg[0] is the dotted-quad code identifier passed to errs.Define.
+			if ident, ok := dc.call.Args[0].(*ast.Ident); ok && ident.Name == c.code {
+				found = true
+				break
+			}
+		}
+		//: absence means the audit is blind to third-party — the ADR-0012 drift.
+		if !found {
+			t.Errorf("%s: %q not collected; audit does not scan third-party", c.name, c.code)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
 		})
 	}
 }
