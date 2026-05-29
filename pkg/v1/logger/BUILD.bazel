@@ -11,6 +11,7 @@ go_library(
         "logger.go",
         "sink.go",
         "version.go",
+        "writer.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/logger",
     visibility = ["//visibility:public"],
@@ -21,6 +22,7 @@ go_library(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
+        "//internal/core/writer",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/service/logger",
@@ -45,11 +47,13 @@ go_test(
         "logger_external_test.go",
         "sink_external_test.go",
         "version_external_test.go",
+        "writer_external_test.go",
     ],
     deps = [
         ":logger",
         "//internal/core/logger",
         "//pkg/v1/errs",
+        "//pkg/v1/logger/writer",
     ],
 )
 
