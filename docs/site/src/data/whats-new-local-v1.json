@@ -1,9 +1,27 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-27T14:33:16.872Z",
+  "generatedAt": "2026-05-29T20:24:17.387Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "fix",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "address CodeRabbit/Qodo review on writer registry (PR #52)",
+      "sha": "661c4f04247d5dd07d2bf10d6e5035d222c39acf",
+      "short": "661c4f0",
+      "date": "2026-05-29T22:08:52+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "add config-driven writer registry (console/file/s3/cloudwatch) — ADR 0012",
+      "sha": "9d5e28fbe57b39e818ca270f84d315a4c23fa62a",
+      "short": "9d5e28f",
+      "date": "2026-05-29T20:57:14+02:00"
+    },
     {
       "type": "feat",
       "scope": "kernel",
@@ -23,15 +41,6 @@
       "date": "2026-05-25T09:59:30Z"
     },
     {
-      "type": "fix",
-      "scope": "docs",
-      "breaking": false,
-      "summary": "base-path the portal for GitHub Pages project deploys + a11y/SEO (#30)",
-      "sha": "5bff559252443700989d2507c57039696da9ded2",
-      "short": "5bff559",
-      "date": "2026-05-25T09:45:30Z"
-    },
-    {
       "type": "feat",
       "scope": "release+docs",
       "breaking": false,
@@ -39,15 +48,6 @@
       "sha": "f8a3aed28e648a7df889b8895ba46c21bec66075",
       "short": "f8a3aed",
       "date": "2026-05-25T11:01:40+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "codec",
-      "breaking": true,
-      "summary": "add TLV + FlatBuffers codecs + migrate baseenc to Codec family (#27)",
-      "sha": "45ab9fb51b8bf4b30f4c970a3f64b8a2dc295398",
-      "short": "45ab9fb",
-      "date": "2026-05-20T13:31:25+02:00"
     }
   ]
 }

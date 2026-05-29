@@ -18,4 +18,11 @@ var (
 	SinkConfigRequired = errs.Define(CodeSinkConfigRequired, "SINK_CONFIG_REQUIRED",
 		"Logger SinkConfig requires an explicit sink",
 		"pkg/v1/logger.NewWithSink called with SinkConfig.Sink==nil; supply a Sink or use logger.Default()")
+
+	// WriterSpecInvalid is returned when NewMulti is called with zero
+	// WriterSpec entries. Supply at least one named writer (and blank-import
+	// its package) so the fan-out has a destination.
+	WriterSpecInvalid = errs.Define(CodeWriterSpecInvalid, "WRITER_SPEC_INVALID",
+		"NewMulti requires at least one writer spec",
+		"pkg/v1/logger.NewMulti called with no WriterSpec entries; supply at least one named writer")
 )

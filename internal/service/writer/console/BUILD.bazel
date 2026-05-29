@@ -1,0 +1,41 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "console",
+    srcs = ["console.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/writer/console",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/writer",
+        "//internal/service/logger/sink/console",
+        "//internal/service/writer/levelgate",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":console",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "console_test",
+    srcs = [
+        "console_external_test.go",
+        "console_internal_test.go",
+    ],
+    embed = [":console"],
+    deps = [
+        "//internal/core/logger/level",
+        "//internal/core/writer",
+    ],
+)

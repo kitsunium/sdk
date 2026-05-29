@@ -106,6 +106,8 @@ Package logger — exposes the Sink port and the multi\-sink helper alongside th
 
 Package logger — exposes the SDK version to the rest of the logger package. The ldflags pipeline injects the real value at build time; local development runs fall back to the "dev" sentinel.
 
+Package logger — exposes the named, config\-driven writer surface \(ADR 0012\): the WriterName / \*Config aliases, the WriterSpec pair, and NewMulti, which resolves each named writer to a Sink and fans records out to all of them via Multi. Built\-in console \+ file writers activate with a blank import of pkg/v1/logger/writer; s3 / cloudwatch activate with a blank import of the matching third\-party/aws/writer package \(which alone pulls the AWS SDK\).
+
 ## Index
 
 - [Constants](<#constants>)
@@ -128,24 +130,46 @@ Package logger — exposes the SDK version to the rest of the logger package. Th
   - [func Uint64\(key string, val uint64\) Attr](<#Uint64>)
 - [type Builder](<#Builder>)
   - [func Build\(lg Logger, lv Level\) Builder](<#Build>)
+- [type CloudWatchConfig](<#CloudWatchConfig>)
 - [type Config](<#Config>)
+- [type ConsoleConfig](<#ConsoleConfig>)
+- [type ConsoleStream](<#ConsoleStream>)
+- [type CredentialProvider](<#CredentialProvider>)
+- [type CredentialValue](<#CredentialValue>)
+  - [func NewCredentialValue\(accessKeyID, secretAccessKey, sessionToken string\) CredentialValue](<#NewCredentialValue>)
 - [type Encoder](<#Encoder>)
   - [func TextEncoder\(\) Encoder](<#TextEncoder>)
+- [type FileConfig](<#FileConfig>)
 - [type Level](<#Level>)
 - [type Logger](<#Logger>)
   - [func Default\(\) \(lg Logger, err error\)](<#Default>)
+  - [func NewMulti\(min Level, specs ...WriterSpec\) \(lg Logger, err error\)](<#NewMulti>)
   - [func NewText\(cfg Config\) \(lg Logger, err error\)](<#NewText>)
   - [func NewWithSink\(cfg SinkConfig\) \(lg Logger, err error\)](<#NewWithSink>)
 - [type Record](<#Record>)
+- [type S3Config](<#S3Config>)
 - [type Sink](<#Sink>)
   - [func ConsoleStderr\(\) Sink](<#ConsoleStderr>)
   - [func ConsoleStdout\(\) Sink](<#ConsoleStdout>)
   - [func Multi\(branches ...Sink\) Sink](<#Multi>)
   - [func NewWriterSink\(w io.Writer\) \(sink Sink, err error\)](<#NewWriterSink>)
 - [type SinkConfig](<#SinkConfig>)
+- [type WriterName](<#WriterName>)
+- [type WriterSpec](<#WriterSpec>)
 
 
 ## Constants
+
+<a name="StreamStdout"></a>StreamStdout targets os.Stdout \(the zero value\); StreamStderr targets stderr. Typed as corewriter.ConsoleStream so the constants stand alone ahead of the type aliases below \(const → type ordering\).
+
+```go
+const (
+    // StreamStdout selects os.Stdout for the console writer (zero value).
+    StreamStdout corewriter.ConsoleStream = corewriter.ConsoleStdout
+    // StreamStderr selects os.Stderr for the console writer.
+    StreamStderr corewriter.ConsoleStream = corewriter.ConsoleStderr
+)
+```
 
 <a name="CodeSinkConfigRequired"></a>CodeSinkConfigRequired identifies a NewWithSink call with SinkConfig.Sink == nil; the v1 façade refuses to default silently to a console sink so callers see the misconfiguration immediately. The identifier is qualified with "Config" so the AST audit can distinguish it from the service\-layer sink/handler validation \(0.3.1.4\).
 
@@ -157,6 +181,12 @@ const CodeSinkConfigRequired errs.Code = 0x01_01_00_02 // 1.1.0.2
 
 ```go
 const CodeWriterRequired errs.Code = 0x01_01_00_01 // 1.1.0.1
+```
+
+<a name="CodeWriterSpecInvalid"></a>CodeWriterSpecInvalid identifies a NewMulti call with no WriterSpec entries; the façade refuses to build a logger that fans out to nothing \(ADR 0012\).
+
+```go
+const CodeWriterSpecInvalid errs.Code = 0x01_01_00_03 // 1.1.0.3
 ```
 
 ## Variables
@@ -178,6 +208,13 @@ var (
     SinkConfigRequired = errs.Define(CodeSinkConfigRequired, "SINK_CONFIG_REQUIRED",
         "Logger SinkConfig requires an explicit sink",
         "pkg/v1/logger.NewWithSink called with SinkConfig.Sink==nil; supply a Sink or use logger.Default()")
+
+    // WriterSpecInvalid is returned when NewMulti is called with zero
+    // WriterSpec entries. Supply at least one named writer (and blank-import
+    // its package) so the fan-out has a destination.
+    WriterSpecInvalid = errs.Define(CodeWriterSpecInvalid, "WRITER_SPEC_INVALID",
+        "NewMulti requires at least one writer spec",
+        "pkg/v1/logger.NewMulti called with no WriterSpec entries; supply at least one named writer")
 )
 ```
 
@@ -355,6 +392,15 @@ func Build(lg Logger, lv Level) Builder
 
 Build returns a chainable Builder bound to lg at the supplied level. Builders are recycled through a sync.Pool so the steady\-state per\-call cost is zero heap allocations once the pool is warm.
 
+<a name="CloudWatchConfig"></a>
+## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L41>)
+
+CloudWatchConfig configures the "cloudwatch" writer. Same import\-gated resolution as S3Config.
+
+```go
+type CloudWatchConfig = corewriter.CloudWatchConfig
+```
+
 <a name="Config"></a>
 ## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L161-L171>)
 
@@ -379,6 +425,51 @@ type Config struct {
 }
 ```
 
+<a name="ConsoleConfig"></a>
+## type [ConsoleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L30>)
+
+ConsoleConfig configures the "console" writer \(stream \+ optional MinLevel\).
+
+```go
+type ConsoleConfig = corewriter.ConsoleConfig
+```
+
+<a name="ConsoleStream"></a>
+## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L44>)
+
+ConsoleStream selects which standard stream the console writer targets.
+
+```go
+type ConsoleStream = corewriter.ConsoleStream
+```
+
+<a name="CredentialProvider"></a>
+## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L48>)
+
+CredentialProvider yields short\-lived credentials on demand for the network writers; the SDK never logs or wraps the returned material.
+
+```go
+type CredentialProvider = corewriter.CredentialProvider
+```
+
+<a name="CredentialValue"></a>
+## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L52>)
+
+CredentialValue is the opaque, redacting credential set returned by a CredentialProvider; its String output is always "\<redacted\>".
+
+```go
+type CredentialValue = corewriter.CredentialValue
+```
+
+<a name="NewCredentialValue"></a>
+### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L56>)
+
+```go
+func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue
+```
+
+NewCredentialValue builds a CredentialValue from AWS SigV4 material. An empty sessionToken is valid for long\-lived keys.
+
 <a name="Encoder"></a>
 ## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L33>)
 
@@ -396,6 +487,15 @@ func TextEncoder() Encoder
 ```
 
 TextEncoder returns a fresh text Encoder bound to the real system clock. Callers passing a custom Encoder to NewWithSink usually want this as a starting point — it is the same encoder NewText / Default rely on.
+
+<a name="FileConfig"></a>
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L33>)
+
+FileConfig configures the "file" writer \(path \+ optional MinLevel\).
+
+```go
+type FileConfig = corewriter.FileConfig
+```
 
 <a name="Level"></a>
 ## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L135>)
@@ -448,6 +548,29 @@ func Default() (lg Logger, err error)
 
 Default returns a Logger writing INFO\-and\-above records to os.Stderr. The stderr Writer is supplied explicitly here; NewText itself no longer silently defaults a nil Writer.
 
+<a name="NewMulti"></a>
+### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L86>)
+
+```go
+func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error)
+```
+
+NewMulti builds a Logger that fans every record out to all specs, each resolved to a Sink by its registered factory and composed through Multi. Records are filtered at min \(the handler\-global level\); a spec's own MinLevel can restrict an individual writer further.
+
+Each writer's package MUST be imported for its Name to resolve: blank\-import pkg/v1/logger/writer for console \+ file, and third\-party/aws/writer/\{s3,cloudwatch\} for the AWS writers. An unresolved Name returns the registry's WriterUnknownName; an empty specs list returns WriterSpecInvalid.
+
+```
+import (
+    "github.com/kitsunium/sdk/pkg/v1/logger"
+    _ "github.com/kitsunium/sdk/pkg/v1/logger/writer" // console + file
+)
+
+lg, err := logger.NewMulti(logger.LevelInfo,
+    logger.WriterSpec{Name: "console", Config: logger.ConsoleConfig{Stream: logger.StreamStderr}},
+    logger.WriterSpec{Name: "file",    Config: logger.FileConfig{Path: "/var/log/app.log"}},
+)
+```
+
 <a name="NewText"></a>
 ### func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L187>)
 
@@ -483,6 +606,15 @@ Record is the stable alias for the internal RecordEvent value passed to Sink.Wri
 
 ```go
 type Record = corelogger.RecordEvent
+```
+
+<a name="S3Config"></a>
+## type [S3Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L37>)
+
+S3Config configures the "s3" writer. Usable as a value without the AWS SDK; it resolves to a working sink only once third\-party/aws/writer/s3 is imported.
+
+```go
+type S3Config = corewriter.S3Config
 ```
 
 <a name="Sink"></a>
@@ -554,6 +686,24 @@ type SinkConfig struct {
     // MinLevel is the minimum severity emitted; zero value is LevelInfo.
     MinLevel Level
 }
+```
+
+<a name="WriterName"></a>
+## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L27>)
+
+WriterName is the stable alias for a registered writer key \("console" / "file" / "s3" / "cloudwatch"\).
+
+```go
+type WriterName = corewriter.Name
+```
+
+<a name="WriterSpec"></a>
+## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L65>)
+
+WriterSpec names a writer and carries its concrete config. Read at call sites as logger.WriterSpec\{Name: "file", Config: logger.FileConfig\{Path: …\}\}. It is a type alias onto internal/core/writer, so the public type is identity\-equal to the internal writer model \(alias\-based public surface, zero runtime cost\).
+
+```go
+type WriterSpec = corewriter.Spec
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

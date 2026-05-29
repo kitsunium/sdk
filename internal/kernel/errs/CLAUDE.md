@@ -16,7 +16,9 @@ func WithHTTPStatus(status int) DefineOption // default 500
 func WithExitCode(code int)     DefineOption // default 70 (EX_SOFTWARE)
 
 // Attach a cause. Origin wins when cause is already *Error.
-type WrapParams struct{ Code Code; Reason, Public, Private string }
+// ExitCode (optional, default 70) sets the wrapping Error's exit status on the
+// stdlib-cause path — the origin-wins path inherits the cause Error's instead.
+type WrapParams struct{ Code Code; Reason, Public, Private string; ExitCode int }
 func Wrap(cause error, params WrapParams, fields ...FieldValue) *Error
 
 // Closed scalar union for structured metadata.

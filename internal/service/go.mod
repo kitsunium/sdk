@@ -16,8 +16,11 @@ require (
 )
 
 require (
+	github.com/kr/text v0.2.0 // indirect
+	github.com/stretchr/testify v1.8.0 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
 replace (

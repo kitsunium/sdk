@@ -14,4 +14,11 @@ type WrapParams struct {
 	Public string
 	// Private is the log-only detailed message.
 	Private string
+	// ExitCode optionally overrides the POSIX exit status of the wrapping
+	// Error (default 70 EX_SOFTWARE); the zero value keeps the default. It
+	// lets a stdlib cause be wrapped into an Error that carries the same
+	// exit semantics as a sibling errs.Define sentinel — the origin-wins
+	// path already inherits a cause Error's exit override, but the
+	// stdlib-cause path has no Error to inherit from.
+	ExitCode int
 }
