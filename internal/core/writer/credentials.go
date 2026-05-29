@@ -64,3 +64,11 @@ func (c CredentialValue) String() string {
 	//: constant redaction marker regardless of which fields are populated.
 	return "<redacted>"
 }
+
+// GoString implements fmt.GoStringer so %#v stays redacted too. fmt bypasses
+// String for %#v (Go-syntax formatting) and would otherwise dump the unexported
+// credential fields; GoString closes that leak.
+func (c CredentialValue) GoString() string {
+	//: same constant marker — %#v must never expose credential material.
+	return "<redacted>"
+}

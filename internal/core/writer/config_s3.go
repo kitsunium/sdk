@@ -22,8 +22,10 @@ type S3Config struct {
 	// the default AWS endpoint; set it for S3-compatible backends (MinIO,
 	// GovCloud) or a LocalStack integration test.
 	Endpoint string
-	// Credentials yields short-lived AWS credentials on demand; nil makes the
-	// factory fall back to the AWS SDK's default credential chain.
+	// Credentials yields short-lived AWS credentials on demand and is REQUIRED:
+	// a nil provider is rejected with ClientInitFailed. The AWS default
+	// credential chain is intentionally not wired (it would pull the heavyweight
+	// aws config module into every consumer).
 	Credentials CredentialProvider
 	// FlushEvery bounds how long a batch waits before upload; the zero value
 	// uploads only on an explicit Flush / Close.

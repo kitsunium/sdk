@@ -42,6 +42,11 @@ func TestRegisterPanics(t *testing.T) {
 	}{
 		{"nil factory panics", func() { writer.Register(nil) }},
 		{
+			"empty Name panics",
+			//: Name("") is the reserved invalid zero value — rejected at boot.
+			func() { writer.Register(&fakeFactory{id: "", sink: stubSink{}}) },
+		},
+		{
 			"duplicate Name panics",
 			func() {
 				dup := &fakeFactory{id: "dup-ext", sink: stubSink{}}
@@ -61,6 +66,37 @@ func TestRegisterPanics(t *testing.T) {
 			}()
 			tc.run()
 		})
+	}
+}
+
+func TestRegisterIdempotent(t *testing.T) {
+	//: clean slate so the same-factory re-registration is the only mutation.
+	writer.ResetForTest()
+	type tc struct {
+		name string
+		id   writer.Name
+	}
+	tests := []tc{{"re-registering the same factory is a no-op, not a panic", "idem"}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		ff := &fakeFactory{id: c.id, sink: stubSink{}}
+		//: first registration publishes the factory.
+		writer.Register(ff)
+		//: re-registering the SAME factory is documented as idempotent (a
+		//: DISTINCT factory under the same Name still panics — see above).
+		got := writer.Register(ff)
+		//: Register hands back the factory it was given.
+		if got.Name() != c.id {
+			t.Errorf("%s: idempotent Register returned Name %q want %q", c.name, got.Name(), c.id)
+		}
+		//: the factory stays resolvable after the idempotent re-register.
+		if _, ok := writer.Lookup(c.id); !ok {
+			t.Errorf("%s: Lookup(%q) failed after idempotent re-register", c.name, c.id)
+		}
+	}
+	for _, c := range tests {
+		//: sequential — Register mutates the process-wide registry.
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 

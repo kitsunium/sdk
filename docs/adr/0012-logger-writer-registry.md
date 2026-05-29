@@ -197,7 +197,7 @@ or `Private` (log-only) field.
 
 | Package | Block | Codes |
 |---|---|---|
-| `internal/core/writer` | `0.2.3.*` | `CodeDuplicateRegistration=0.2.3.1`, `CodeWriterUnknownName=0.2.3.2`, `CodeWriterConfigInvalid=0.2.3.3`, `CodeWriterNil=0.2.3.4` |
+| `internal/core/writer` | `0.2.3.*` | `CodeDuplicateRegistration=0.2.3.1`, `CodeWriterUnknownName=0.2.3.2`, `CodeWriterConfigInvalid=0.2.3.3`, `CodeWriterNil=0.2.3.4`, `CodeWriterNameEmpty=0.2.3.5` |
 | `internal/service/writer/console` | `0.3.22.*` | reserved — delegates to `sink/console`; returns the shared `core/writer.WriterConfigInvalid` on a wrong-type config |
 | `internal/service/writer/file` | `0.3.23.*` | reserved — delegates to `sink/file`; returns the shared `core/writer.WriterConfigInvalid` |
 | `third-party/aws/writer/s3` | `0.3.24.*` | `CodePutFailed=0.3.24.20`, `CodeFlushFailed=0.3.24.30`, `CodeCloseFailed=0.3.24.40` (config errors reuse the shared `WriterConfigInvalid`) |

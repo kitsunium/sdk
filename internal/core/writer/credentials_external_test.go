@@ -1,6 +1,7 @@
 package writer_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/writer"
@@ -113,6 +114,36 @@ func TestCredentialValue_String(t *testing.T) {
 		//: String must never surface any secret material.
 		if got := c.in.String(); got != "<redacted>" {
 			t.Errorf("%s: String()=%q want <redacted>", c.name, got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func TestCredentialValue_GoString(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		in   writer.CredentialValue
+	}
+	tests := []tc{
+		{"populated redacts under %#v", writer.NewCredentialValue("AKIA", "secret", "session")},
+		{"zero value redacts under %#v", writer.CredentialValue{}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: GoString itself must return the constant marker.
+		if got := c.in.GoString(); got != "<redacted>" {
+			t.Errorf("%s: GoString()=%q want <redacted>", c.name, got)
+		}
+		//: and the real %#v formatting path must stay redacted — never dump the
+		//: unexported credential fields the way default Go-syntax formatting would.
+		if got := fmt.Sprintf("%#v", c.in); got != "<redacted>" {
+			t.Errorf("%s: %%#v=%q want <redacted>", c.name, got)
 		}
 	}
 	for _, c := range tests {

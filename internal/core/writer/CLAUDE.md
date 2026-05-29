@@ -21,8 +21,9 @@ Code range: `0.2.3.*` (ADR 0012).
 | File | Surface |
 |---|---|
 | `writer.go`   | `Name` (typed key + `String`/`Known`), `Config = any`, `Factory` interface (`Name` / `Open`) |
+| `writer_spec.go` | `Spec` value type (`Name` + `Config`); re-exported as `logger.WriterSpec` |
 | `registry.go` | `snapshot.Value[map[Name]Factory]` registry: `Register` / `Lookup` / `Open` / `Available` (mirrors `core/codec/registry.go`) |
-| `codes.go`    | `CodeDuplicateRegistration` (0.2.3.1), `CodeWriterUnknownName` (0.2.3.2), `CodeWriterConfigInvalid` (0.2.3.3), `CodeWriterNil` (0.2.3.4) |
+| `codes.go`    | `CodeDuplicateRegistration` (0.2.3.1), `CodeWriterUnknownName` (0.2.3.2), `CodeWriterConfigInvalid` (0.2.3.3), `CodeWriterNil` (0.2.3.4), `CodeWriterNameEmpty` (0.2.3.5) |
 | `errors.go`   | `WriterUnknownName` + the shared `WriterConfigInvalid` sentinel (the latter returned by every factory on a wrong-type `Config`) |
 
 ## Conventions
@@ -52,7 +53,7 @@ Code range: `0.2.3.*` (ADR 0012).
 
 ## Verification
 
-```
+```bash
 bazel test --config=race //internal/core/writer:writer_test
 # Fallback
 cd internal/core && GOWORK=off go test -race -cover ./writer/...

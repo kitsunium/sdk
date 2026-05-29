@@ -393,7 +393,7 @@ func Build(lg Logger, lv Level) Builder
 Build returns a chainable Builder bound to lg at the supplied level. Builders are recycled through a sync.Pool so the steady\-state per\-call cost is zero heap allocations once the pool is warm.
 
 <a name="CloudWatchConfig"></a>
-## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L39>)
+## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L41>)
 
 CloudWatchConfig configures the "cloudwatch" writer. Same import\-gated resolution as S3Config.
 
@@ -426,7 +426,7 @@ type Config struct {
 ```
 
 <a name="ConsoleConfig"></a>
-## type [ConsoleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L28>)
+## type [ConsoleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L30>)
 
 ConsoleConfig configures the "console" writer \(stream \+ optional MinLevel\).
 
@@ -435,7 +435,7 @@ type ConsoleConfig = corewriter.ConsoleConfig
 ```
 
 <a name="ConsoleStream"></a>
-## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L42>)
+## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L44>)
 
 ConsoleStream selects which standard stream the console writer targets.
 
@@ -444,7 +444,7 @@ type ConsoleStream = corewriter.ConsoleStream
 ```
 
 <a name="CredentialProvider"></a>
-## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L46>)
+## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L48>)
 
 CredentialProvider yields short\-lived credentials on demand for the network writers; the SDK never logs or wraps the returned material.
 
@@ -453,7 +453,7 @@ type CredentialProvider = corewriter.CredentialProvider
 ```
 
 <a name="CredentialValue"></a>
-## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L50>)
+## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L52>)
 
 CredentialValue is the opaque, redacting credential set returned by a CredentialProvider; its String output is always "\<redacted\>".
 
@@ -462,7 +462,7 @@ type CredentialValue = corewriter.CredentialValue
 ```
 
 <a name="NewCredentialValue"></a>
-### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L54>)
+### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L56>)
 
 ```go
 func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue
@@ -489,7 +489,7 @@ func TextEncoder() Encoder
 TextEncoder returns a fresh text Encoder bound to the real system clock. Callers passing a custom Encoder to NewWithSink usually want this as a starting point — it is the same encoder NewText / Default rely on.
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L31>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L33>)
 
 FileConfig configures the "file" writer \(path \+ optional MinLevel\).
 
@@ -549,7 +549,7 @@ func Default() (lg Logger, err error)
 Default returns a Logger writing INFO\-and\-above records to os.Stderr. The stderr Writer is supplied explicitly here; NewText itself no longer silently defaults a nil Writer.
 
 <a name="NewMulti"></a>
-### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L88>)
+### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L86>)
 
 ```go
 func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error)
@@ -609,7 +609,7 @@ type Record = corelogger.RecordEvent
 ```
 
 <a name="S3Config"></a>
-## type [S3Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L35>)
+## type [S3Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L37>)
 
 S3Config configures the "s3" writer. Usable as a value without the AWS SDK; it resolves to a working sink only once third\-party/aws/writer/s3 is imported.
 
@@ -689,7 +689,7 @@ type SinkConfig struct {
 ```
 
 <a name="WriterName"></a>
-## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L25>)
+## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L27>)
 
 WriterName is the stable alias for a registered writer key \("console" / "file" / "s3" / "cloudwatch"\).
 
@@ -698,18 +698,12 @@ type WriterName = corewriter.Name
 ```
 
 <a name="WriterSpec"></a>
-## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L61-L67>)
+## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L65>)
 
-WriterSpec names a writer and carries its concrete config. Read at call sites as logger.WriterSpec\{Name: "file", Config: logger.FileConfig\{Path: …\}\}.
+WriterSpec names a writer and carries its concrete config. Read at call sites as logger.WriterSpec\{Name: "file", Config: logger.FileConfig\{Path: …\}\}. It is a type alias onto internal/core/writer, so the public type is identity\-equal to the internal writer model \(alias\-based public surface, zero runtime cost\).
 
 ```go
-type WriterSpec struct {
-    // Name is the registered writer key resolved against the writer registry.
-    Name WriterName
-    // Config is the writer's concrete config value (ConsoleConfig, FileConfig,
-    // S3Config, CloudWatchConfig); the resolved factory type-asserts it.
-    Config any
-}
+type WriterSpec = corewriter.Spec
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

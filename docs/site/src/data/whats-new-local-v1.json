@@ -1,7 +1,7 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-29T18:57:14.061Z",
+  "generatedAt": "2026-05-29T20:09:33.818Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
     {
@@ -9,9 +9,9 @@
       "scope": "logger",
       "breaking": false,
       "summary": "add config-driven writer registry (console/file/s3/cloudwatch) — ADR 0012",
-      "sha": "17b33099aae7111ce8d73a7d24e354793457fdee",
-      "short": "17b3309",
-      "date": "2026-05-29T19:46:05+02:00"
+      "sha": "9d5e28fbe57b39e818ca270f84d315a4c23fa62a",
+      "short": "9d5e28f",
+      "date": "2026-05-29T20:57:14+02:00"
     },
     {
       "type": "feat",

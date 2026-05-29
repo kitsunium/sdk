@@ -52,6 +52,7 @@ go_test(
     deps = [
         ":logger",
         "//internal/core/logger",
+        "//internal/core/writer",
         "//pkg/v1/errs",
         "//pkg/v1/logger/writer",
     ],

@@ -37,7 +37,7 @@ No `codes.go` — a wrong-type `Config` returns the shared
 
 ## Verification
 
-```
+```sh
 bazel test --config=race //internal/service/writer/console:console_test
 # Fallback
 cd internal/service && GOWORK=off go test -race -cover ./writer/console/...

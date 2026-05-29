@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // fakeUploader records uploads so the batching tests need no network.
@@ -251,8 +252,18 @@ func Test_s3Sink_flushError(t *testing.T) {
 		s := newS3Sink(fp.upload, "", 0, 0, nil)
 		writeLine(t, s, "x\n")
 		//: the caller-facing Flush propagates rather than routing to onError.
-		if err := s.Flush(t.Context()); !errors.Is(err, boom) {
+		err := s.Flush(t.Context())
+		if !errors.Is(err, boom) {
 			t.Errorf("Flush err=%v want %v", err, boom)
+		}
+		//: errors.Is must reach the typed PutFailed sentinel too.
+		if !errors.Is(err, PutFailed) {
+			t.Errorf("Flush err=%v does not match PutFailed", err)
+		}
+		//: the wrapped error must carry PutFailed's I/O exit code (74), not the
+		//: default 70 — proves WrapParams.ExitCode is honoured on the wrap path.
+		if got := errs.ExitCodeOf(err); got != exitIOErr {
+			t.Errorf("ExitCodeOf=%d want %d", got, exitIOErr)
 		}
 	}
 	for _, c := range tests {

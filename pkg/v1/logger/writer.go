@@ -7,6 +7,8 @@
 package logger
 
 import (
+	"errors"
+
 	corewriter "github.com/kitsunium/sdk/internal/core/writer"
 )
 
@@ -57,14 +59,10 @@ func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) Crede
 }
 
 // WriterSpec names a writer and carries its concrete config. Read at call sites
-// as logger.WriterSpec{Name: "file", Config: logger.FileConfig{Path: …}}.
-type WriterSpec struct {
-	// Name is the registered writer key resolved against the writer registry.
-	Name WriterName
-	// Config is the writer's concrete config value (ConsoleConfig, FileConfig,
-	// S3Config, CloudWatchConfig); the resolved factory type-asserts it.
-	Config any
-}
+// as logger.WriterSpec{Name: "file", Config: logger.FileConfig{Path: …}}. It is
+// a type alias onto internal/core/writer, so the public type is identity-equal
+// to the internal writer model (alias-based public surface, zero runtime cost).
+type WriterSpec = corewriter.Spec
 
 // NewMulti builds a Logger that fans every record out to all specs, each
 // resolved to a Sink by its registered factory and composed through Multi.
@@ -93,21 +91,49 @@ func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error) {
 	}
 	//: pre-size the branch slate with exact cardinality.
 	branches := make([]Sink, 0, len(specs))
+	//: rollback closes every opened sink (reverse order) on a failed build so
+	//: no file descriptor / async drainer leaks, folding any close failure
+	//: behind cause so none is dropped; a clean rollback returns cause verbatim.
+	//: A local closure keeps this helper off the file's top-level surface.
+	rollback := func(cause error) error {
+		closeErrs := make([]error, 0, len(branches))
+		//: walk in reverse so the most recently opened sink unwinds first.
+		for i := len(branches) - 1; i >= 0; i-- {
+			//: check each close — a failure joins the returned chain, never drops.
+			if cErr := branches[i].Close(); cErr != nil {
+				closeErrs = append(closeErrs, cErr)
+			}
+		}
+		//: no close failed — the rollback is clean.
+		if len(closeErrs) == 0 {
+			//: keep the typed cause (errs.HasCode / errors.Is stay intact).
+			return cause
+		}
+		//: fold close failures behind the primary cause for full observability.
+		return errors.Join(append([]error{cause}, closeErrs...)...)
+	}
 	//: resolve each named writer to a Sink via the core registry.
 	for _, spec := range specs {
 		//: Open resolves the factory and validates the config (origin wins).
 		sink, oErr := corewriter.Open(spec.Name, spec.Config)
-		//: forward the first failing writer's typed error untouched.
+		//: a failing writer aborts construction.
 		if oErr != nil {
-			//: unknown name / bad config already carries the right code/reason.
-			return nil, oErr
+			//: roll back the sinks already opened, then surface the cause.
+			return nil, rollback(oErr)
 		}
 		branches = append(branches, sink)
 	}
 	//: route through NewWithSink so the same encoder + version stamping applies.
-	return NewWithSink(SinkConfig{
+	lg, err = NewWithSink(SinkConfig{
 		Sink:     Multi(branches...),
 		Encoder:  TextEncoder(),
 		MinLevel: min,
 	})
+	//: NewWithSink failed after every sink opened.
+	if err != nil {
+		//: roll them all back before surfacing the construction error.
+		return nil, rollback(err)
+	}
+	//: success — the returned Logger now owns the branches via Multi.
+	return lg, nil
 }

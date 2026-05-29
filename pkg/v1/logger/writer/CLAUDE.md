@@ -35,7 +35,7 @@ side-effects. `README.md` is generated from the package doc comment via
 
 ## Verification
 
-```
+```bash
 bazel build //pkg/v1/logger/writer:writer
 # Fallback
 cd pkg/v1 && GOWORK=off go build ./logger/writer/...

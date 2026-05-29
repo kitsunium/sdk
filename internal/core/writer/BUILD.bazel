@@ -14,6 +14,7 @@ go_library(
         "errors.go",
         "registry.go",
         "writer.go",
+        "writer_spec.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/writer",
     visibility = [

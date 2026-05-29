@@ -8,18 +8,12 @@ package s3
 import (
 	"bytes"
 	"context"
-	"errors"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/kitsunium/sdk/internal/core/writer"
 )
-
-// errCredentialsRequired is returned when no CredentialProvider was supplied;
-// the v1 S3 writer requires explicit credentials (the default chain would pull
-// the heavyweight aws config module into every consumer).
-var errCredentialsRequired = errors.New("s3 writer requires an explicit CredentialProvider")
 
 // newUploadFunc builds the AWS-backed upload seam from cfg, adapting its
 // credentials into the SDK's interface. A nil cfg.Credentials is rejected
@@ -32,8 +26,8 @@ var errCredentialsRequired = errors.New("s3 writer requires an explicit Credenti
 func newUploadFunc(cfg writer.S3Config, opts ...func(*awss3.Options)) (up uploadFunc, err error) {
 	//: v1 requires explicit credentials; refuse the nil default-chain path.
 	if cfg.Credentials == nil {
-		//: surface the documented requirement to the factory.
-		return nil, errCredentialsRequired
+		//: surface the typed client-init sentinel (the factory's contract).
+		return nil, ClientInitFailed
 	}
 	//: build a static AWS config from region + the adapted credential source.
 	awsCfg := aws.Config{Region: cfg.Region, Credentials: credAdapter{provider: cfg.Credentials}}

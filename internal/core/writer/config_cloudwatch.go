@@ -21,8 +21,10 @@ type CloudWatchConfig struct {
 	// Endpoint optionally overrides the CloudWatch Logs endpoint URL. Empty uses
 	// the default AWS endpoint; set it for a LocalStack integration test.
 	Endpoint string
-	// Credentials yields short-lived AWS credentials on demand; nil makes the
-	// factory fall back to the AWS SDK's default credential chain.
+	// Credentials yields short-lived AWS credentials on demand and is REQUIRED:
+	// a nil provider is rejected with ClientInitFailed. The AWS default
+	// credential chain is intentionally not wired (it would pull the heavyweight
+	// aws config module into every consumer).
 	Credentials CredentialProvider
 	// FlushEvery bounds how long a batch waits before the PutLogEvents call;
 	// the zero value flushes only on an explicit Flush / Close.

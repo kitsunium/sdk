@@ -37,7 +37,7 @@ No `codes.go` / `errors.go` — the gate never originates an error.
 
 ## Verification
 
-```
+```sh
 bazel test --config=race //internal/service/writer/levelgate:levelgate_test
 # Fallback
 cd internal/service && GOWORK=off go test -race -cover ./writer/levelgate/...

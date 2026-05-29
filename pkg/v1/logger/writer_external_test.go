@@ -1,17 +1,55 @@
 package logger_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	corewriter "github.com/kitsunium/sdk/internal/core/writer"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
+
 	// Registers the console + file writers so NewMulti can resolve them.
 	_ "github.com/kitsunium/sdk/pkg/v1/logger/writer"
 )
+
+// probeCloseCount counts Close calls on probe sinks so the leak test can assert
+// NewMulti released an already-opened sink when a later spec failed to resolve.
+var probeCloseCount atomic.Int64
+
+// probeSink is a no-op Sink whose Close bumps probeCloseCount.
+type probeSink struct{}
+
+func (probeSink) Write(context.Context, corelogger.RecordEvent, []byte) (int, error) {
+	//: the leak test never emits — only construction + rollback matter.
+	return 0, nil
+}
+
+func (probeSink) Flush(context.Context) error { return nil }
+
+func (probeSink) Close() error {
+	//: record that this opened sink was released on rollback.
+	probeCloseCount.Add(1)
+	return nil
+}
+
+// probeFactory registers under a unique Name and hands back a probeSink.
+type probeFactory struct{}
+
+func (probeFactory) Name() corewriter.Name { return "probe-leak" }
+
+func (probeFactory) Open(corewriter.Config) (corelogger.Sink, error) {
+	//: a fresh probe sink per Open so the rollback close is observable.
+	return probeSink{}, nil
+}
+
+// Register the probe writer once at package load (mirrors the real writers).
+var _ = corewriter.Register(probeFactory{})
 
 func TestNewMulti(t *testing.T) {
 	t.Parallel()
@@ -109,6 +147,41 @@ func TestNewMultiFanOut(t *testing.T) {
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func TestNewMultiClosesOpenedSinksOnError(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a later unresolved writer closes the sinks already opened"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		before := probeCloseCount.Load()
+		//: the first spec opens a probe sink; the second (unknown) fails to
+		//: resolve, so NewMulti must close the opened probe sink before returning.
+		_, err := logger.NewMulti(
+			logger.LevelInfo,
+			logger.WriterSpec{Name: "probe-leak", Config: nil},
+			logger.WriterSpec{Name: "ghost-zzz", Config: nil},
+		)
+		//: the unresolved second writer must surface an error.
+		if err == nil {
+			t.Fatal("NewMulti: want error from the unknown second writer")
+		}
+		//: exactly the one opened probe sink must have been closed (no leak).
+		if got := probeCloseCount.Load() - before; got != 1 {
+			t.Errorf("probe Close calls=%d want 1 (opened sink leaked on error)", got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			//: parallel-safe: probe-leak is opened only here, so the atomic
+			//: before/after delta is unaffected by other concurrent tests.
 			t.Parallel()
 			runCase(t, c)
 		})

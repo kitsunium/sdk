@@ -37,7 +37,7 @@ wins).
 
 ## Verification
 
-```
+```sh
 bazel test --config=race //internal/service/writer/file:file_test
 # Fallback
 cd internal/service && GOWORK=off go test -race -cover ./writer/file/...

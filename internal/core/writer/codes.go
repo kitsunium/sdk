@@ -19,3 +19,8 @@ const CodeWriterConfigInvalid errs.Code = 0x00_02_03_03 // 0.2.3.3
 
 // CodeWriterNil identifies a Register call made with a nil Factory.
 const CodeWriterNil errs.Code = 0x00_02_03_04 // 0.2.3.4
+
+// CodeWriterNameEmpty identifies a Register call whose Factory reports the
+// reserved invalid empty Name. Surfaced via panic at boot (see registry.go),
+// not as an *Error sentinel.
+const CodeWriterNameEmpty errs.Code = 0x00_02_03_05 // 0.2.3.5

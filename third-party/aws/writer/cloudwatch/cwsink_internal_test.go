@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // fakePutter records delivered batches so the batching tests need no network.
@@ -206,6 +207,41 @@ func Test_cwSink_flushOnce(t *testing.T) {
 	}
 }
 
+func Test_cwSink_flushSortsByTimestamp(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"out-of-order record times deliver chronologically (PutLogEvents requires it)"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		fp := &fakePutter{}
+		//: large cap so the three writes buffer into a single Flush batch.
+		s := newCWSink(fp.putEvents, 0, 0, nil)
+		base := time.Unix(1700000000, 0)
+		//: write the records OUT of chronological order (t+2, t+0, t+1).
+		for _, off := range []time.Duration{2 * time.Second, 0, 1 * time.Second} {
+			if _, err := s.Write(t.Context(), corelogger.RecordEvent{Time: base.Add(off)}, []byte("m\n")); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+		}
+		if err := s.Flush(t.Context()); err != nil {
+			t.Fatalf("Flush: %v", err)
+		}
+		//: the delivered batch must be sorted ascending by timestamp.
+		batch := fp.batches[0]
+		if !slices.IsSortedFunc(batch, func(a, b cwEvent) int { return a.ts.Compare(b.ts) }) {
+			t.Errorf("delivered batch not chronological: %v", batch)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func Test_cwSink_Close(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -277,8 +313,18 @@ func Test_cwSink_flushError(t *testing.T) {
 		s := newCWSink(fp.putEvents, 0, 0, nil)
 		writeLine(t, s, "x\n")
 		//: the caller-facing Flush propagates rather than routing to onError.
-		if err := s.Flush(t.Context()); !errors.Is(err, boom) {
+		err := s.Flush(t.Context())
+		if !errors.Is(err, boom) {
 			t.Errorf("Flush err=%v want %v", err, boom)
+		}
+		//: errors.Is must reach the typed PutFailed sentinel too.
+		if !errors.Is(err, PutFailed) {
+			t.Errorf("Flush err=%v does not match PutFailed", err)
+		}
+		//: the wrapped error must carry PutFailed's I/O exit code (74), not the
+		//: default 70 — proves WrapParams.ExitCode is honoured on the wrap path.
+		if got := errs.ExitCodeOf(err); got != exitIOErr {
+			t.Errorf("ExitCodeOf=%d want %d", got, exitIOErr)
 		}
 	}
 	for _, c := range tests {

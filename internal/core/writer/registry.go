@@ -60,6 +60,12 @@ func Register(f Factory) Factory {
 	}
 	//: the canonical Name is the primary key.
 	name := f.Name()
+	//: Name("") is the reserved invalid zero value (writer.go); reject it at
+	//: boot so it can never leak into Lookup / Open / Available.
+	if name == "" {
+		//: panic so the offending factory is visible at boot.
+		panic(fmt.Sprintf("writer.Register [%d WRITER_NAME_EMPTY]: empty Name", CodeWriterNameEmpty))
+	}
 	//: publish the factory under the writer lock; duplicate Name is a hard conflict.
 	if err := publishFactory(name, f); err != nil {
 		//: surface the doc code for grep-friendly panic messages.
@@ -80,8 +86,15 @@ func publishFactory(name Name, f Factory) error {
 	registry.Update(func(current *map[Name]Factory) *map[Name]Factory {
 		//: duplicate detection runs on the current snapshot before any allocation.
 		if current != nil {
-			//: any prior registration of name is a hard conflict.
-			if _, dup := (*current)[name]; dup {
+			//: an existing entry under name decides idempotent vs conflict.
+			if existing, dup := (*current)[name]; dup {
+				//: re-registering the SAME factory is idempotent — a no-op
+				//: republish (interface == compares the factory pointers).
+				if existing == f {
+					//: nothing changes; keep the current snapshot.
+					return current
+				}
+				//: a DISTINCT factory under a taken Name is the hard conflict;
 				//: wrap the sentinel so errors.Is finds the chain, then abort.
 				dupErr = fmt.Errorf("writer.Register [%d %w]: duplicate Name %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
 				//: no-op publish — republish the current snapshot unchanged.

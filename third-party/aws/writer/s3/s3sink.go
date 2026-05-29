@@ -151,12 +151,15 @@ func (s *s3Sink) flushOnce(ctx context.Context) error {
 	s.mu.Unlock()
 	//: upload outside the lock so a slow PutObject never blocks producers.
 	if uerr := s.up(ctx, key, batch); uerr != nil {
-		//: wrap the SDK cause as the typed PutFailed sentinel (errors.Is reaches it).
+		//: wrap the SDK cause as the typed PutFailed sentinel (errors.Is reaches
+		//: it). ExitCode mirrors the PutFailed Define so the wrapped error keeps
+		//: the I/O exit status (74) instead of decaying to the default 70.
 		return errs.Wrap(uerr, errs.WrapParams{
-			Code:    CodeS3PutFailed,
-			Reason:  "PUT_FAILED",
-			Public:  "S3 writer failed to upload a log batch",
-			Private: "third-party/aws/writer/s3: PutObject failed while flushing a batch",
+			Code:     CodeS3PutFailed,
+			Reason:   "PUT_FAILED",
+			Public:   "S3 writer failed to upload a log batch",
+			Private:  "third-party/aws/writer/s3: PutObject failed while flushing a batch",
+			ExitCode: exitIOErr,
 		})
 	}
 	//: happy path — batch delivered.

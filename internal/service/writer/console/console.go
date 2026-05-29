@@ -31,9 +31,11 @@ func (*consoleFactory) Name() writer.Name {
 func (*consoleFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error) {
 	//: reject a mismatched config type with the shared sentinel.
 	c, ok := cfg.(writer.ConsoleConfig)
-	//: type assertion guards the rest of the construction.
-	if !ok {
-		//: surface the documented config-type-mismatch sentinel.
+	//: reject a wrong-type config OR a stream selector outside {stdout, stderr}
+	//: (silently defaulting an out-of-range stream to stdout would hide a
+	//: malformed config). Short-circuit keeps c unread when the assertion fails.
+	if !ok || (c.Stream != writer.ConsoleStdout && c.Stream != writer.ConsoleStderr) {
+		//: surface the documented config-invalid sentinel for both cases.
 		return nil, writer.WriterConfigInvalid
 	}
 	//: apply the optional per-writer floor over the chosen stream sink.

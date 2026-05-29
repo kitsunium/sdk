@@ -8,6 +8,7 @@ package cloudwatch
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -145,14 +146,25 @@ func (s *cwSink) flushOnce(ctx context.Context) error {
 	batch := s.buf
 	s.buf = nil
 	s.mu.Unlock()
+	//: PutLogEvents rejects a batch whose events are not in chronological
+	//: order; Write appends in arrival order and zero-time records fall back
+	//: to now, so out-of-order RecordEvent.Time can interleave. Sort by ts
+	//: (stable, so equal timestamps keep arrival order) before delivery.
+	slices.SortStableFunc(batch, func(a, b cwEvent) int {
+		//: compare the event timestamps; ascending chronological order.
+		return a.ts.Compare(b.ts)
+	})
 	//: deliver outside the lock so a slow PutLogEvents never blocks producers.
 	if perr := s.deliver(ctx, batch); perr != nil {
-		//: wrap the SDK cause as the typed PutFailed sentinel (errors.Is reaches it).
+		//: wrap the SDK cause as the typed PutFailed sentinel (errors.Is reaches
+		//: it). ExitCode mirrors the PutFailed Define so the wrapped error keeps
+		//: the I/O exit status (74) instead of decaying to the default 70.
 		return errs.Wrap(perr, errs.WrapParams{
-			Code:    CodeCWPutFailed,
-			Reason:  "PUT_FAILED",
-			Public:  "CloudWatch writer failed to deliver a log batch",
-			Private: "third-party/aws/writer/cloudwatch: PutLogEvents failed while flushing a batch",
+			Code:     CodeCWPutFailed,
+			Reason:   "PUT_FAILED",
+			Public:   "CloudWatch writer failed to deliver a log batch",
+			Private:  "third-party/aws/writer/cloudwatch: PutLogEvents failed while flushing a batch",
+			ExitCode: exitIOErr,
 		})
 	}
 	//: happy path — batch delivered.

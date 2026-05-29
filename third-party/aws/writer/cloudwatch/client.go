@@ -6,7 +6,6 @@ package cloudwatch
 
 import (
 	"context"
-	"errors"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -14,10 +13,6 @@ import (
 
 	"github.com/kitsunium/sdk/internal/core/writer"
 )
-
-// errCredentialsRequired is returned when no CredentialProvider was supplied;
-// the v1 CloudWatch writer requires explicit credentials.
-var errCredentialsRequired = errors.New("cloudwatch writer requires an explicit CredentialProvider")
 
 // newDeliverFunc builds the AWS-backed delivery seam from cfg, adapting its
 // credentials into the SDK's interface. A nil cfg.Credentials is rejected. A
@@ -29,8 +24,8 @@ var errCredentialsRequired = errors.New("cloudwatch writer requires an explicit 
 func newDeliverFunc(cfg writer.CloudWatchConfig, opts ...func(*cloudwatchlogs.Options)) (deliver deliverFunc, err error) {
 	//: v1 requires explicit credentials; refuse the nil default-chain path.
 	if cfg.Credentials == nil {
-		//: surface the documented requirement to the factory.
-		return nil, errCredentialsRequired
+		//: surface the typed client-init sentinel (the factory's contract).
+		return nil, ClientInitFailed
 	}
 	//: build a static AWS config from region + the adapted credential source.
 	awsCfg := aws.Config{Region: cfg.Region, Credentials: credAdapter{provider: cfg.Credentials}}

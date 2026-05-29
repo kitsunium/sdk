@@ -65,7 +65,7 @@ real S3-compatible backends (MinIO, GovCloud). Zero ktn-linter deviations.
 
 ## Verification
 
-```
+```sh
 # from the repo root (root umbrella module)
 GOWORK=off go test -race -cover ./third-party/aws/writer/s3/...
 ```

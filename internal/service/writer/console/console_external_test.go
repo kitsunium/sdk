@@ -41,6 +41,9 @@ func TestConsoleOpen(t *testing.T) {
 		{"stderr stream", writer.ConsoleConfig{Stream: writer.ConsoleStderr}, false},
 		{"per-writer error floor", writer.ConsoleConfig{MinLevel: level.Error}, false},
 		{"wrong config type rejected", writer.FileConfig{Path: "/x"}, true},
+		//: a stream selector outside {stdout, stderr} must fail fast, not
+		//: silently default to stdout.
+		{"out-of-range stream rejected", writer.ConsoleConfig{Stream: writer.ConsoleStream(99)}, true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
