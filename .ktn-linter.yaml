@@ -127,6 +127,23 @@ rules:
       - "**/internal/service/logger/**"
       - "**/pkg/v1/logger/**"
 
+  # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
+  #
+  # TEMPORARY false-positive exception — kodflow/ktn-linter#385. The rule is not
+  # interface-aware: it flags `aesgcm.Seal/Open`'s `key crypto.Key` parameter and
+  # suggests `interface{ Bytes() []byte }`, but those methods IMPLEMENT the
+  # core/crypto.AEAD contract, whose signatures fix the parameter to the concrete
+  # redacting `Key`. Narrowing the param breaks interface satisfaction (compile
+  # error), so the suggestion is unactionable. This is the same class of
+  # contract-required-type FP that #366 fixed for snapshot.Value params.
+  #
+  # Scoped to the AEAD scheme implementations ONLY. RETIRE this block once #385
+  # ships interface-awareness (mirror the 2026-05-28 retirement of the five
+  # earlier overrides below).
+  KTN-API-MINIF:
+    exclude:
+      - "**/internal/service/crypto/**"
+
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on
   # v1.34.5 (current latest). With v1.34.5 + one code refactor, ALL FIVE are gone;

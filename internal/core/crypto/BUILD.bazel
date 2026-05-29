@@ -1,0 +1,55 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "crypto",
+    srcs = [
+        "aead.go",
+        "algorithm.go",
+        "codes.go",
+        "errors.go",
+        "key.go",
+        "registry.go",
+        "seal.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/crypto",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = [
+        "//internal/kernel/errs",
+        "//internal/kernel/snapshot",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":crypto",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "crypto_test",
+    srcs = [
+        "algorithm_external_test.go",
+        "key_external_test.go",
+        "registry_external_test.go",
+        "registry_internal_test.go",
+        "seal_external_test.go",
+    ],
+    embed = [":crypto"],
+    deps = ["//internal/kernel/errs"],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (//:audit_sources) so its errs.Define call sites are scanned under Bazel.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

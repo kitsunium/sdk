@@ -14,11 +14,13 @@ internal/
 ├── kernel/        stdlib-only AND generic primitives
 │                  errs, recycler, snapshot, buffer, clock, ring
 ├── core/          domain interfaces + domain values
-│                  codec, logger, logger/level
+│                  codec, writer, crypto, logger, logger/level
 └── service/       concrete implementations
                    logger (+ encoder, sink/{console,file,syslog},
                              middleware/{multi,async,route,
                                          failover,sample,recover})
+                   writer (console, file, levelgate)
+                   crypto (aesgcm)
                    codec  (asn1, cbor, csv, json, msgpack,
                            ndjson, pem, toml, xml, yaml)
 pkg/
@@ -115,5 +117,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0010 — kernel object-recycling primitive — `docs/adr/0010-kernel-recycler-primitive.md`
 - ADR 0011 — kernel copy-on-write snapshot primitive — `docs/adr/0011-kernel-snapshot-primitive.md`
 - ADR 0012 — logger writer registry (named, config-driven Sink factories) — `docs/adr/0012-logger-writer-registry.md`
+- ADR 0013 — crypto domain (AEAD Seal/Open, hidden nonce; AES-256-GCM default) — `docs/adr/0013-sdk-crypto-domain.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`
