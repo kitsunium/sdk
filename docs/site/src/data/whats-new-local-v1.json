@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-29T20:09:33.818Z",
+  "generatedAt": "2026-05-29T20:24:17.387Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "fix",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "address CodeRabbit/Qodo review on writer registry (PR #52)",
+      "sha": "661c4f04247d5dd07d2bf10d6e5035d222c39acf",
+      "short": "661c4f0",
+      "date": "2026-05-29T22:08:52+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -30,15 +39,6 @@
       "sha": "dcff33ba199373bcc579168f287bd783aa5b3e1f",
       "short": "dcff33b",
       "date": "2026-05-25T09:59:30Z"
-    },
-    {
-      "type": "fix",
-      "scope": "docs",
-      "breaking": false,
-      "summary": "base-path the portal for GitHub Pages project deploys + a11y/SEO (#30)",
-      "sha": "5bff559252443700989d2507c57039696da9ded2",
-      "short": "5bff559",
-      "date": "2026-05-25T09:45:30Z"
     },
     {
       "type": "feat",

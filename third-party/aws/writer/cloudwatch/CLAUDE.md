@@ -63,6 +63,6 @@ deviations.
 
 ## Verification
 
-```
+```sh
 GOWORK=off go test -race -cover ./third-party/aws/writer/cloudwatch/...
 ```
