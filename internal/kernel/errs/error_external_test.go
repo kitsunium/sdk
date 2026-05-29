@@ -214,6 +214,34 @@ func TestWrap(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "stdlib cause → WrapParams.ExitCode overrides the default 70",
+			run: func(t *testing.T) {
+				//: a stdlib cause has no *Error to inherit an exit override from,
+				//: so WrapParams.ExitCode is how a wrap carries sysexits-style codes.
+				wrapped := errs.Wrap(context.Canceled, errs.WrapParams{
+					Code: 0x00_03_01_0A, Reason: "CTX_CANCELLED",
+					Public: "Operation aborted due to cancellation", Private: "wrapped context.Canceled",
+					ExitCode: 74,
+				})
+				if wrapped.ExitCode() != 74 {
+					t.Errorf("ExitCode = %d, want 74", wrapped.ExitCode())
+				}
+			},
+		},
+		{
+			name: "stdlib cause → zero ExitCode keeps the default 70",
+			run: func(t *testing.T) {
+				//: the zero value must not disturb the documented default.
+				wrapped := errs.Wrap(context.Canceled, errs.WrapParams{
+					Code: 0x00_03_01_0A, Reason: "CTX_CANCELLED",
+					Public: "Operation aborted due to cancellation", Private: "wrapped context.Canceled",
+				})
+				if wrapped.ExitCode() != 70 {
+					t.Errorf("ExitCode = %d, want 70 (default)", wrapped.ExitCode())
+				}
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

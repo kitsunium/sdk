@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "writer",
+    srcs = [
+        "codes.go",
+        "config_cloudwatch.go",
+        "config_console.go",
+        "config_file.go",
+        "config_s3.go",
+        "credentials.go",
+        "errors.go",
+        "registry.go",
+        "writer.go",
+        "writer_spec.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/writer",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/errs",
+        "//internal/kernel/snapshot",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":writer",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "writer_test",
+    srcs = [
+        "credentials_external_test.go",
+        "registry_external_test.go",
+        "registry_internal_test.go",
+        "writer_external_test.go",
+    ],
+    embed = [":writer"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/kernel/errs",
+    ],
+)

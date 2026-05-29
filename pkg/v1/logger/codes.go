@@ -15,3 +15,7 @@ const CodeWriterRequired errs.Code = 0x01_01_00_01 // 1.1.0.1
 // identifier is qualified with "Config" so the AST audit can distinguish
 // it from the service-layer sink/handler validation (0.3.1.4).
 const CodeSinkConfigRequired errs.Code = 0x01_01_00_02 // 1.1.0.2
+
+// CodeWriterSpecInvalid identifies a NewMulti call with no WriterSpec entries;
+// the façade refuses to build a logger that fans out to nothing (ADR 0012).
+const CodeWriterSpecInvalid errs.Code = 0x01_01_00_03 // 1.1.0.3

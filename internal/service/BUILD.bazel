@@ -11,5 +11,6 @@ package_group(
     packages = [
         "//internal/service/...",
         "//pkg/v1/...",
+        "//third-party/...",
     ],
 )

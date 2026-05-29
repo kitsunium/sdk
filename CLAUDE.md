@@ -29,7 +29,7 @@ pkg/
         └── baseenc/   (base16/32/64 wrappers, not a codec)
 ```
 
-- Five independent Go modules held together by `go.work`: root (umbrella), `internal/kernel`, `internal/core`, `internal/service`, `pkg/v1`. Each module-local `go.mod` carries `replace` directives so `GOWORK=off go build ./...` per-module still works.
+- Five independent Go modules held together by `go.work`: root (umbrella — also hosts the opt-in, vendor-dependent integrations under `third-party/*`, e.g. the AWS writers; see ADR 0012), `internal/kernel`, `internal/core`, `internal/service`, `pkg/v1`. Each module-local `go.mod` carries `replace` directives so `GOWORK=off go build ./...` per-module still works. Heavy vendor deps (AWS SDK) live in the **root** `go.mod` only — nothing requires the root module, so `pkg/v1` consumers stay dep-light.
 - Dependency direction is strictly top-down: kernel → core → service → pkg/v1. Enforced by Bazel `package_group` + `visibility` (see ADR 0004). A rogue import fails `bazel build` before it ever reaches the linter.
 - Consumers import only `pkg/v1/*`; `internal/*` is blocked by Go's `internal/` firewall AND by the Bazel layer visibility.
 - Build / test / lint go through **Bazel 9** — see ADR 0004. `go test ./...` still works locally for quick iteration but CI only runs `bazel`.
@@ -71,6 +71,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 /workspace/
 ├── internal/              see internal/CLAUDE.md
 ├── pkg/v1/                see pkg/CLAUDE.md + pkg/v1/CLAUDE.md
+├── third-party/           opt-in vendor integrations in the root module (AWS writers — ADR 0012)
 ├── docs/                  ADRs — see docs/CLAUDE.md
 ├── .devcontainer/         devcontainer infrastructure (template-seeded; leave alone)
 ├── .github/               CI workflows — bazel-ci.yml is the SDK lane
@@ -113,5 +114,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0009 — public module `go get`-resolvability — `docs/adr/0009-pkg-public-module-resolvability.md`
 - ADR 0010 — kernel object-recycling primitive — `docs/adr/0010-kernel-recycler-primitive.md`
 - ADR 0011 — kernel copy-on-write snapshot primitive — `docs/adr/0011-kernel-snapshot-primitive.md`
+- ADR 0012 — logger writer registry (named, config-driven Sink factories) — `docs/adr/0012-logger-writer-registry.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

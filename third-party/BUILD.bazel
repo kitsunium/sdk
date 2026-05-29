@@ -1,0 +1,9 @@
+# gazelle:default_visibility //visibility:public
+
+# third-party/ hosts opt-in, vendor-dependent integrations (ADR 0012) as
+# packages of the root umbrella module. Everything here is publicly visible —
+# consumers blank-import these packages to activate the matching writer; the
+# heavy vendor deps (e.g. the AWS SDK) are declared in the root go.mod, which
+# no other module requires.
+
+package(default_visibility = ["//visibility:public"])

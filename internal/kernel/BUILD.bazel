@@ -18,5 +18,6 @@ package_group(
         "//internal/kernel/...",
         "//internal/service/...",
         "//pkg/v1/...",
+        "//third-party/...",
     ],
 )

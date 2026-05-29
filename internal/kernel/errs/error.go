@@ -185,12 +185,13 @@ func newFromStdlibCause(cause error, params WrapParams, fields []FieldValue) *Er
 	copied := slices.Clone(fields)
 	//: hand back a freshly constructed *Error wrapping the stdlib cause.
 	return &Error{
-		code:    params.Code,
-		reason:  params.Reason,
-		public:  params.Public,
-		private: params.Private,
-		fields:  copied,
-		source:  cause,
+		code:         params.Code,
+		reason:       params.Reason,
+		public:       params.Public,
+		private:      params.Private,
+		fields:       copied,
+		exitOverride: params.ExitCode,
+		source:       cause,
 	}
 }
 

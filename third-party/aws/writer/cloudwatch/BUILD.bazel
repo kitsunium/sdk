@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "cloudwatch",
+    srcs = [
+        "client.go",
+        "cloudwatch.go",
+        "codes.go",
+        "cred_adapter.go",
+        "cw_event.go",
+        "cwsink.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+        "//internal/service/logger/middleware/async",
+        "//internal/service/writer/levelgate",
+        "@com_github_aws_aws_sdk_go_v2//aws",
+        "@com_github_aws_aws_sdk_go_v2_service_cloudwatchlogs//:cloudwatchlogs",
+        "@com_github_aws_aws_sdk_go_v2_service_cloudwatchlogs//types",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":cloudwatch",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "cloudwatch_test",
+    srcs = [
+        "client_internal_test.go",
+        "cloudwatch_external_test.go",
+        "cloudwatch_internal_test.go",
+        "cred_adapter_internal_test.go",
+        "cwsink_internal_test.go",
+    ],
+    embed = [":cloudwatch"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+        "@com_github_aws_aws_sdk_go_v2//aws",
+        "@com_github_aws_aws_sdk_go_v2_service_cloudwatchlogs//:cloudwatchlogs",
+        "@com_github_aws_smithy_go//middleware",
+    ],
+)
