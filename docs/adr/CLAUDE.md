@@ -20,6 +20,7 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0009-pkg-public-module-resolvability.md` | Published `pkg/<major>` must be `go get`-resolvable + accessible; release tags the whole module chain | Accepted; mechanism implemented |
 | `0010-kernel-recycler-primitive.md` | Generic `recycler.Pool[T]` + `CappedPool[T]` object pools; `buffer`/`scratch` become consumers | Accepted |
 | `0011-kernel-snapshot-primitive.md` | Generic `snapshot.Value[T]` copy-on-write container; codec registry consolidates onto it | Accepted |
+| `0012-sdk-writer-subsystem-architecture.md` | Writer subsystem v2: identity methods on `Sink`, factory registry, 5 new reliability middlewares, composition validator, public facade, PP-block reservation 0.3.25-79 + 1.1.1.* | Accepted (amends ADR 0006) |
 
 ## Conventions
 

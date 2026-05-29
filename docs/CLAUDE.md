@@ -20,6 +20,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0009-pkg-public-module-resolvability.md` | Published `pkg/<major>` must be `go get`-resolvable + accessible (no local `replace`) | Accepted (requirement); impl Deferred |
 | `adr/0010-kernel-recycler-primitive.md` | Generic kernel `Pool[T]` + `CappedPool[T]`; `buffer` + `core/codec/scratch` become consumers | Accepted |
 | `adr/0011-kernel-snapshot-primitive.md` | Generic kernel `Value[T]` copy-on-write container; codec registry consolidates onto it | Accepted |
+| `adr/0012-sdk-writer-subsystem-architecture.md` | Writer subsystem v2: `Sink` identity methods + factory registry + 5 new middlewares + `composevalidate` + public facade + reserved PP block 0.3.25-79 + 1.1.1.* | Accepted (amends ADR 0006) |
 
 ## ADR conventions
 

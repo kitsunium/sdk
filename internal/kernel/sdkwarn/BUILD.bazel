@@ -1,0 +1,33 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "sdkwarn",
+    srcs = ["sdkwarn.go"],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/sdkwarn",
+    visibility = ["//internal/kernel:kernel_consumers"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":sdkwarn",
+    visibility = ["//internal/kernel:kernel_consumers"],
+)
+
+go_test(
+    name = "sdkwarn_test",
+    size = "small",
+    srcs = [
+        "sdkwarn_external_test.go",
+        "sdkwarn_integration_test.go",
+        "sdkwarn_internal_test.go",
+    ],
+    embed = [":sdkwarn"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

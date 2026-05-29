@@ -109,6 +109,11 @@ assigning it by analogy without checking.
   authoritative list — this extension table becomes part of it after
   merge.
 
+- **Amended by ADR 0012** (writer subsystem v2) for the logger sub-tree
+  — see ADR 0012 §11 for the new block reservations 0.3.25-79 plus the
+  Layer-1 1.1.1.* facade range. The "PP slot 22+" guidance above stays
+  valid for non-logger sub-trees.
+
 ## Deferred (not addressed here)
 
 - **`KTN-ERRS-DOTTEDQUAD` linter rule** (ADR 0005 §Deferred): an

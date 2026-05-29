@@ -15,6 +15,7 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 | `buffer/` | `sync.Pool` of `[]byte` — a `recycler.CappedPool[*[]byte]` specialisation | 1200-1299 (reserved) |
 | `clock/` | `Clock` interface (`Now` + `Since`) for testable time | 1300-1399 (reserved) |
 | `ring/` | SPSC lock-free bounded queue (ADR 0006) | 1400-1499 (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
+| `sdkwarn/` | construction-time warning channel + installable audit hook (ADR 0012) | (none — never returns errors) |
 
 Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
 
@@ -38,6 +39,7 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 - `buffer` stays — the `[]byte` pool is generic even though `service/logger` is the heaviest consumer today. Since ADR 0010 it is a thin specialisation over `recycler.CappedPool[*[]byte]` (the generic `Pool[T]` moved to `recycler`).
 - `ring` admitted by ADR 0006 — SPSC bounded queue is a textbook generic primitive. Logger's async middleware is the only consumer today; metrics batchers and codec stream pipelines are obvious future users.
 - `snapshot` admitted by ADR 0011 — `Value[T]` is a textbook generic copy-on-write container (lock-free `Load` + mutex-serialised writers). The codec registry consolidated its three hand-rolled `atomic.Pointer[map]` + CAS loops onto it; routing tables, feature-flag maps, and hot-reloaded config are obvious future consumers.
+- `sdkwarn` admitted by ADR 0012 — one-shot construction-time warning channel (`Emit` + `SetHook`) over `atomic.Pointer[func(string)]`. Stdlib-only AND domain-neutral (any future kernel/core/service package needing a "this composition is dubious but not wrong" channel can use it). Never on the hot path. Tests install a hook to capture warnings without piping `os.Stderr`.
 
 ## Conventions unique to kernel
 
@@ -72,3 +74,4 @@ GOWORK=off go test -race -cover ./...
 - `buffer/` — see `internal/kernel/buffer/CLAUDE.md`
 - `clock/` — see `internal/kernel/clock/CLAUDE.md`
 - `ring/` — see `internal/kernel/ring/CLAUDE.md`
+- `sdkwarn/` — see `internal/kernel/sdkwarn/CLAUDE.md`
