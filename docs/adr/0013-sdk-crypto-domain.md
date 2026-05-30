@@ -30,7 +30,7 @@ knows `codec.Marshal` already knows `crypto.Seal`.
 
 ### Layer layout
 
-```
+```text
 internal/core/crypto/        # 0.2.4.* — AEAD interface, redacting Key, registry. No algorithm bodies, no vendor types.
 internal/service/crypto/     # stdlib-only schemes (aesgcm today). Dep-free → keeps pkg/v1 dep-light.
 third-party/x-crypto/*       # FUTURE — golang.org/x/crypto schemes (XChaCha20-Poly1305, argon2id, …), opt-in blank import.
@@ -87,7 +87,7 @@ via their own explicit blank import — never auto-pulled into `pkg/v1`.
 
 ## Error-code allocation (amends ADR 0005)
 
-```
+```text
 core/crypto — 0.2.4.*
   0.2.4.1  CodeDuplicateRegistration  (panic-only, boot)
   0.2.4.2  CodeUnknownAlgorithm       Seal of an unregistered algorithm

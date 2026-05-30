@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-29T23:44:21.362Z",
+  "generatedAt": "2026-05-30T00:15:49.458Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "ADR-0013 + core/crypto AEAD seam + stdlib AES-GCM + pkg/v1 Seal/Open",
+      "sha": "dd5a368a199e416b83a6225b295538821642ccc3",
+      "short": "dd5a368",
+      "date": "2026-05-30T01:43:53+02:00"
+    },
     {
       "type": "fix",
       "scope": "errs",
@@ -39,15 +48,6 @@
       "sha": "dcff33ba199373bcc579168f287bd783aa5b3e1f",
       "short": "dcff33b",
       "date": "2026-05-25T09:59:30Z"
-    },
-    {
-      "type": "feat",
-      "scope": "release+docs",
-      "breaking": false,
-      "summary": "impact-driven patch tags + versioned docs (ADR 0007) (#29)",
-      "sha": "f8a3aed28e648a7df889b8895ba46c21bec66075",
-      "short": "f8a3aed",
-      "date": "2026-05-25T11:01:40+02:00"
     }
   ]
 }

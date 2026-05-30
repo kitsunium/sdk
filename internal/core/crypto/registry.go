@@ -43,7 +43,7 @@ func Register(a AEAD) AEAD {
 	//: nil registration is always a programming error.
 	if a == nil {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.Register [%d DUPLICATE_REGISTRATION]: nil AEAD", CodeDuplicateRegistration))
+		panic(fmt.Sprintf("crypto.Register [%s DUPLICATE_REGISTRATION]: nil AEAD", CodeDuplicateRegistration))
 	}
 	//: publish under the scheme name first, then index the wire id; either
 	//: conflict turns into a boot-time panic with the doc code.
@@ -79,7 +79,7 @@ func publishAEAD(name Algorithm, a AEAD) error {
 					return current
 				}
 				//: a DISTINCT scheme under a taken name is the hard conflict.
-				dupErr = fmt.Errorf("crypto.Register [%d %w]: duplicate Algorithm %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
+				dupErr = fmt.Errorf("crypto.Register [%s %w]: duplicate Algorithm %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}
@@ -107,7 +107,7 @@ func indexID(id byte, a AEAD) error {
 					return current
 				}
 				//: a DISTINCT scheme under a taken id is the hard conflict.
-				dupErr = fmt.Errorf("crypto.Register [%d %w]: duplicate wire id 0x%02x", CodeDuplicateRegistration, errDuplicateRegistration, id)
+				dupErr = fmt.Errorf("crypto.Register [%s %w]: duplicate wire id 0x%02x", CodeDuplicateRegistration, errDuplicateRegistration, id)
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}
