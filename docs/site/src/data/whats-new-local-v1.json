@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T21:35:56.438Z",
+  "generatedAt": "2026-05-30T21:40:27.353Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "encwrite middleware — encrypt records before a byte sink (ADR 0014)",
+      "sha": "e2b5a13a43cd708156e3bb46b0c3372fc9ed9965",
+      "short": "e2b5a13",
+      "date": "2026-05-30T23:35:06+02:00"
+    },
     {
       "type": "feat",
       "scope": "codec",
@@ -21,15 +30,6 @@
       "sha": "91070a58d89b8b42462975a97fde99ef95670801",
       "short": "91070a5",
       "date": "2026-05-30T21:02:12+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "core",
-      "breaking": false,
-      "summary": "transform tier — Compressor registry (gzip/flate) (ADR 0014)",
-      "sha": "8f4cdc95fc2016ffc300834286610f0f00755d87",
-      "short": "8f4cdc9",
-      "date": "2026-05-30T18:46:09+02:00"
     },
     {
       "type": "fix",
