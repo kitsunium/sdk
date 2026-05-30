@@ -146,8 +146,10 @@ sentinels are enforced for Public-is-literal / reason / uniqueness from day one.
   `core/crypto`, stdlib HKDF-SHA256 in `service/crypto/hkdfsha256`, facade
   `pkg/v1/kdf`). — **HKDF shipped**; argon2id password-stretching is its own port.
 - Signatures (`Sign`/`Verify`/`GenerateKey`; `Signer` port + third registry in
-  `core/crypto`, stdlib Ed25519 in `service/crypto/ed25519sig`, facade
-  `pkg/v1/sign`). — **Ed25519 shipped**; ECDSA is the next scheme follow-on.
+  `core/crypto`, facade `pkg/v1/sign`). — **Ed25519 shipped**
+  (`service/crypto/ed25519sig`, the modern default) **+ ECDSA-P256 shipped**
+  (`service/crypto/ecdsasig`, SHA-256 + ASN.1/DER, the JWT/X.509 interop choice);
+  both stdlib, both activated by importing `pkg/v1/sign`.
 - Streaming AEAD, encrypt-then-codec, signed-codec (see the feature roadmap).
 
 ## References

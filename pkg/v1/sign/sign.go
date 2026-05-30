@@ -26,10 +26,13 @@
 //
 // # Algorithms
 //
-// Importing this package activates Ed25519 with zero non-stdlib deps:
+// Importing this package activates both schemes with zero non-stdlib deps:
 //
 //   - [Ed25519] — the modern default: small fixed-size keys, fast verification,
 //     nothing to misconfigure.
+//   - [ECDSAP256] — ECDSA over NIST P-256 with SHA-256 + ASN.1/DER signatures;
+//     the interoperable choice for JWT/X.509 ecosystems. Keys are DER-marshalled
+//     (PKIX public, SEC1 private).
 //
 // # Stable algorithm strings
 //
@@ -40,8 +43,9 @@ package sign
 import (
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 
-	// Activates the stdlib Ed25519 signer. Stdlib-only, so importing pkg/v1/sign
-	// pulls zero non-stdlib dependencies.
+	// Activates the stdlib Ed25519 + ECDSA-P256 signers. Stdlib-only, so importing
+	// pkg/v1/sign pulls zero non-stdlib dependencies.
+	_ "github.com/kitsunium/sdk/internal/service/crypto/ecdsasig"
 	_ "github.com/kitsunium/sdk/internal/service/crypto/ed25519sig"
 )
 
@@ -51,6 +55,10 @@ type Algorithm = corecrypto.Algorithm
 // Ed25519 is the EdDSA signature scheme over Curve25519 (RFC 8032): a 256-bit
 // public key, fast constant-time verification, and no parameter choices.
 const Ed25519 Algorithm = "ed25519"
+
+// ECDSAP256 is ECDSA over NIST P-256 with SHA-256 and ASN.1/DER signatures — the
+// interoperable choice for JWT/X.509 ecosystems. Keys are DER-marshalled.
+const ECDSAP256 Algorithm = "ecdsa-p256"
 
 // GenerateKey draws a fresh keypair for the named scheme, returning the public
 // and private key bytes. An unregistered algorithm returns

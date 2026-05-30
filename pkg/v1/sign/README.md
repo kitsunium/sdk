@@ -26,9 +26,10 @@ Use signatures for authenticity \+ non\-repudiation under a public key anyone ca
 
 ### Algorithms
 
-Importing this package activates Ed25519 with zero non\-stdlib deps:
+Importing this package activates both schemes with zero non\-stdlib deps:
 
 - [Ed25519](<#Ed25519>) — the modern default: small fixed\-size keys, fast verification, nothing to misconfigure.
+- [ECDSAP256](<#ECDSAP256>) — ECDSA over NIST P\-256 with SHA\-256 \+ ASN.1/DER signatures; the interoperable choice for JWT/X.509 ecosystems. Keys are DER\-marshalled \(PKIX public, SEC1 private\).
 
 ### Stable algorithm strings
 
@@ -43,7 +44,7 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0 — a signature 
 
 
 <a name="GenerateKey"></a>
-## func [GenerateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L58>)
+## func [GenerateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L66>)
 
 ```go
 func GenerateKey(a Algorithm) (pub, priv []byte, err error)
@@ -52,7 +53,7 @@ func GenerateKey(a Algorithm) (pub, priv []byte, err error)
 GenerateKey draws a fresh keypair for the named scheme, returning the public and private key bytes. An unregistered algorithm returns UnknownSignatureAlgorithm; treat priv as a secret.
 
 <a name="Sign"></a>
-## func [Sign](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L66>)
+## func [Sign](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L74>)
 
 ```go
 func Sign(a Algorithm, priv, message []byte) (sig []byte, err error)
@@ -61,7 +62,7 @@ func Sign(a Algorithm, priv, message []byte) (sig []byte, err error)
 Sign returns a detached signature over message using priv under the named scheme. An unregistered algorithm returns UnknownSignatureAlgorithm; a malformed priv returns SigningFailed.
 
 <a name="Verify"></a>
-## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L74>)
+## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L82>)
 
 ```go
 func Verify(a Algorithm, pub, message, sig []byte) (ok bool, err error)
@@ -70,12 +71,18 @@ func Verify(a Algorithm, pub, message, sig []byte) (ok bool, err error)
 Verify reports whether sig is a valid signature for message under pub for the named scheme. An unregistered algorithm returns \(false, UnknownSignatureAlgorithm\); an invalid signature is \(false, nil\).
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L49>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L53>)
 
 Algorithm is the stable identifier of a signature scheme.
 
 ```go
 type Algorithm = corecrypto.Algorithm
+```
+
+<a name="ECDSAP256"></a>ECDSAP256 is ECDSA over NIST P\-256 with SHA\-256 and ASN.1/DER signatures — the interoperable choice for JWT/X.509 ecosystems. Keys are DER\-marshalled.
+
+```go
+const ECDSAP256 Algorithm = "ecdsa-p256"
 ```
 
 <a name="Ed25519"></a>Ed25519 is the EdDSA signature scheme over Curve25519 \(RFC 8032\): a 256\-bit public key, fast constant\-time verification, and no parameter choices.
