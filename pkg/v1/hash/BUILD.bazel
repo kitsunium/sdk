@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "hash",
+    srcs = ["hash.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/hash",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/service/crypto/stdhash",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":hash",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "hash_test",
+    srcs = ["hash_external_test.go"],
+    deps = [":hash"],
+)

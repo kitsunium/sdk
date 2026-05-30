@@ -1,0 +1,43 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "stdhash",
+    srcs = [
+        "crc32c_hasher.go",
+        "fnv_hasher.go",
+        "sha256_hasher.go",
+        "sha3_hasher.go",
+        "sha512_hasher.go",
+        "stdhash.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/stdhash",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = ["//internal/core/crypto"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":stdhash",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "stdhash_test",
+    srcs = [
+        "crc32c_hasher_internal_test.go",
+        "fnv_hasher_internal_test.go",
+        "sha256_hasher_internal_test.go",
+        "sha3_hasher_internal_test.go",
+        "sha512_hasher_internal_test.go",
+    ],
+    embed = [":stdhash"],
+    deps = ["//internal/core/crypto"],
+)

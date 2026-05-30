@@ -1,17 +1,35 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T08:41:18.938Z",
+  "generatedAt": "2026-05-30T12:03:01.132Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
     {
       "type": "feat",
       "scope": "crypto",
       "breaking": false,
-      "summary": "ADR-0013 — AEAD Seal/Open with a hidden nonce (stdlib AES-256-GCM) (#54)",
-      "sha": "7095a0d5f4a5ccfcbfa1a18e2140dcfd860a19a6",
-      "short": "7095a0d",
-      "date": "2026-05-30T02:18:29+02:00"
+      "summary": "add ECDSA-P256 signature scheme (SHA-256, ASN.1/DER) — ADR 0013",
+      "sha": "06036dae9deff84788086287eeb097a5d425d62b",
+      "short": "06036da",
+      "date": "2026-05-30T13:16:37+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "add argon2id password scheme (opt-in, third-party/x-crypto) — ADR 0013",
+      "sha": "fd4e8ed476ef1b5e6bd8e21392cbc69a54386fa0",
+      "short": "fd4e8ed",
+      "date": "2026-05-30T12:56:06+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "add password-storage domain (PBKDF2-SHA256, PHC, upgrade-on-verify) — ADR 0013",
+      "sha": "8bb86cc01d70a3e320935d59fdfb1e5c9bd4ae06",
+      "short": "8bb86cc",
+      "date": "2026-05-30T12:42:44+02:00"
     },
     {
       "type": "fix",
@@ -21,24 +39,6 @@
       "sha": "e8c78b5450e26e658caa2a02d92750027d4bd202",
       "short": "e8c78b5",
       "date": "2026-05-30T00:29:53+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "config-driven writer registry (console/file/s3/cloudwatch) — ADR 0012 (#52)",
-      "sha": "3732c6885d1f03b786621b18688e8b51f10fafe9",
-      "short": "3732c68",
-      "date": "2026-05-29T22:26:54+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "kernel",
-      "breaking": false,
-      "summary": "add snapshot.Value[T] copy-on-write primitive + consolidate codec registry (ADR 0011) (#34)",
-      "sha": "7cdda6956418834f17a92ffcf3620fc7591bf4be",
-      "short": "7cdda69",
-      "date": "2026-05-26T01:38:33+02:00"
     },
     {
       "type": "fix",

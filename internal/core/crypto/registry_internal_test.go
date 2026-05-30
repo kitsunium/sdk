@@ -10,4 +10,12 @@ func ResetForTest() {
 	//: store nil snapshots; Lookup / lookupByID then report empty.
 	registry.Store(nil)
 	idIndex.Store(nil)
+	//: also clear the separate Hasher registry so hash tests isolate too.
+	hashers.Store(nil)
+	//: and the Signer registry, so signature tests isolate as well.
+	signers.Store(nil)
+	//: and the Deriver registry, so KDF tests isolate too.
+	derivers.Store(nil)
+	//: and the PasswordHasher registry, so password tests isolate as well.
+	passwordHashers.Store(nil)
 }

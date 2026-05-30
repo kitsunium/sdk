@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "ed25519sig",
+    srcs = ["ed25519sig.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/ed25519sig",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ed25519sig",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "ed25519sig_test",
+    srcs = [
+        "ed25519sig_external_test.go",
+        "ed25519sig_internal_test.go",
+    ],
+    embed = [":ed25519sig"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)

@@ -11,7 +11,7 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 |---|---|---|
 | `codec/` | `Codec` / `StreamingCodec` / `Encoder` / `Decoder` / `Appender` + process-wide registry, `Format` value type | `0.2.2.*` |
 | `writer/` | `Factory` / `Name` / `Config` + process-wide registry mapping a writer name to a `Sink`-producing factory (ADR 0012) | `0.2.3.*` |
-| `crypto/` | `AEAD` interface + redacting `Key` + process-wide registry mapping an `Algorithm`/wire-id to a scheme (ADR 0013) | `0.2.4.*` |
+| `crypto/` | five registries on one `Algorithm` keyspace: `AEAD` + redacting `Key` (`Seal`/`Open`), the non-authenticated `Hasher` (`Sum`/`SumHex`/`NewHash`), the `Signer` (`Sign`/`Verify`/`GenerateKey`), the key-separation `Deriver` (`Subkey`), and the password-storage `PasswordHasher` (`HashPassword`/`VerifyPassword`/`NeedsRehash`) (ADR 0013) | `0.2.4.*` |
 | `logger/` | `Logger` / `Handler` / `Sink` / `Encoder` interfaces, `RecordEvent`, `AttrValue`, `Value`, `Kind` | `0.2.16.*` (reserved) |
 | `logger/level/` | `Level int8` + `Debug`/`Info`/`Warn`/`Error` constants + `String()` | `0.2.17.*` (reserved) |
 
