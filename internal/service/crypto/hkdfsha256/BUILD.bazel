@@ -1,0 +1,36 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "hkdfsha256",
+    srcs = ["hkdfsha256.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/hkdfsha256",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = ["//internal/core/crypto"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":hkdfsha256",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "hkdfsha256_test",
+    srcs = [
+        "hkdfsha256_external_test.go",
+        "hkdfsha256_internal_test.go",
+    ],
+    embed = [":hkdfsha256"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)

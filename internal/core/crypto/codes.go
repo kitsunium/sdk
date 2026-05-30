@@ -42,3 +42,11 @@ const CodeSigningFailed errs.Code = 0x00_02_04_08 // 0.2.4.8
 // CodeKeyGenerationFailed identifies a crypto/rand failure while generating a
 // signing keypair in GenerateKey — a host entropy fault, not a caller error.
 const CodeKeyGenerationFailed errs.Code = 0x00_02_04_09 // 0.2.4.9
+
+// CodeUnknownKDFAlgorithm identifies a Subkey call naming a key-derivation
+// Algorithm that no imported package has registered.
+const CodeUnknownKDFAlgorithm errs.Code = 0x00_02_04_0A // 0.2.4.10
+
+// CodeDerivationFailed identifies a Subkey call whose requested length exceeds
+// the scheme's maximum output — a caller data error, not a fault.
+const CodeDerivationFailed errs.Code = 0x00_02_04_0B // 0.2.4.11

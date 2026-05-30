@@ -67,4 +67,17 @@ var (
 	KeyGenerationFailed = errs.Define(CodeKeyGenerationFailed, "KEY_GENERATION_FAILED",
 		"Could not gather entropy for key generation",
 		"core/crypto.GenerateKey: crypto/rand failed while generating a signing keypair")
+
+	// UnknownKDFAlgorithm is returned by Subkey when no Deriver is registered
+	// under the requested Algorithm — usually a missing blank-import.
+	UnknownKDFAlgorithm = errs.Define(CodeUnknownKDFAlgorithm, "UNKNOWN_KDF_ALGORITHM",
+		"No key-derivation function is registered under that algorithm",
+		"core/crypto.Subkey: KDF algorithm absent from registry; blank-import the deriver's package to register it")
+
+	// DerivationFailed is returned by Subkey when the requested length exceeds
+	// the scheme's maximum output (e.g. HKDF's 255*HashLen ceiling).
+	DerivationFailed = errs.Define(CodeDerivationFailed, "DERIVATION_FAILED",
+		"Requested derived-key length is too large",
+		"core/crypto.Subkey: requested length exceeds the scheme's maximum output",
+		errs.WithExitCode(exitDataErr))
 )

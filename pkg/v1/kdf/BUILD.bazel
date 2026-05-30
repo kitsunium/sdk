@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "kdf",
+    srcs = ["kdf.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/kdf",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/service/crypto/hkdfsha256",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":kdf",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "kdf_test",
+    srcs = ["kdf_external_test.go"],
+    deps = [":kdf"],
+)

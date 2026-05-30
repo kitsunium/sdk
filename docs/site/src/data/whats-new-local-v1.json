@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T10:14:22.151Z",
+  "generatedAt": "2026-05-30T10:28:20.319Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "add Ed25519 digital-signature domain (Sign/Verify/GenerateKey) — ADR 0013",
+      "sha": "6f16cf4e033a095e650394cdffc6dcb6ee74f4f1",
+      "short": "6f16cf4",
+      "date": "2026-05-30T12:13:35+02:00"
+    },
     {
       "type": "feat",
       "scope": "crypto",
@@ -21,15 +30,6 @@
       "sha": "63ece0729b2a1f001aff74295cc1b2a31e1cc4d9",
       "short": "63ece07",
       "date": "2026-05-30T11:00:48+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "crypto",
-      "breaking": false,
-      "summary": "ADR-0013 — AEAD Seal/Open with a hidden nonce (stdlib AES-256-GCM) (#54)",
-      "sha": "7095a0d5f4a5ccfcbfa1a18e2140dcfd860a19a6",
-      "short": "7095a0d",
-      "date": "2026-05-30T02:18:29+02:00"
     },
     {
       "type": "fix",

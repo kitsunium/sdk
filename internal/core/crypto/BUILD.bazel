@@ -8,6 +8,8 @@ go_library(
         "aead.go",
         "algorithm.go",
         "codes.go",
+        "deriver.go",
+        "deriver_registry.go",
         "errors.go",
         "hash_registry.go",
         "hasher.go",
@@ -41,6 +43,8 @@ go_test(
     name = "crypto_test",
     srcs = [
         "algorithm_external_test.go",
+        "deriver_registry_external_test.go",
+        "deriver_registry_internal_test.go",
         "hash_registry_external_test.go",
         "hash_registry_internal_test.go",
         "key_external_test.go",

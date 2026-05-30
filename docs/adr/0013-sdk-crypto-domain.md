@@ -98,11 +98,13 @@ core/crypto — 0.2.4.*
   0.2.4.7  CodeUnknownSignatureAlgorithm  Sign/Verify/GenerateKey of an unregistered signer
   0.2.4.8  CodeSigningFailed          Sign with a malformed private key       (exit 65 EX_DATAERR)
   0.2.4.9  CodeKeyGenerationFailed    crypto/rand fault in GenerateKey
+  0.2.4.10 CodeUnknownKDFAlgorithm    Subkey of an unregistered deriver
+  0.2.4.11 CodeDerivationFailed       Subkey length above the scheme's maximum (exit 65 EX_DATAERR)
 pkg/v1/crypto — 1.3.0.* (reserved; facade adds no sentinels in this cut)
 ```
 
-`0.2.4.6`–`0.2.4.9` were filled in by the hashing + signature follow-ons (see
-Deferred); they sit in the already-claimed `0.2.4.*` block, so these are
+`0.2.4.6`–`0.2.4.11` were filled in by the hashing + signature + KDF follow-ons
+(see Deferred); they sit in the already-claimed `0.2.4.*` block, so these are
 registry syncs (mirrored by the AST audit), not Decision changes.
 
 The AST audit (`internal/kernel/errs/registry_external_test.go`) scans
@@ -133,7 +135,9 @@ sentinels are enforced for Public-is-literal / reason / uniqueness from day one.
   authentication; `Hasher` port + second registry in `core/crypto`,
   stdlib schemes in `service/crypto/stdhash`, facade `pkg/v1/hash`). — **shipped**
 - Password storage (PHC strings + upgrade-on-verify, argon2id).
-- KDF (`DeriveFromPassword`, HKDF `Subkey`).
+- KDF (HKDF `Subkey` for key separation; `Deriver` port + fourth registry in
+  `core/crypto`, stdlib HKDF-SHA256 in `service/crypto/hkdfsha256`, facade
+  `pkg/v1/kdf`). — **HKDF shipped**; argon2id password-stretching is its own port.
 - Signatures (`Sign`/`Verify`/`GenerateKey`; `Signer` port + third registry in
   `core/crypto`, stdlib Ed25519 in `service/crypto/ed25519sig`, facade
   `pkg/v1/sign`). — **Ed25519 shipped**; ECDSA is the next scheme follow-on.
