@@ -33,19 +33,29 @@ Code range: `0.2.4.*` (ADR 0013).
 | `deriver_registry.go` | fourth `snapshot.Value`-backed registry mapping an `Algorithm` to a `Deriver`: `RegisterDeriver` / `LookupDeriver` / `AvailableDerivers` + `Subkey` dispatch |
 | `password_hasher.go` | `PasswordHasher` interface (`Algorithm` / `Hash` / `Verify` / `NeedsRehash`) — the **password-storage** port (deliberately slow, salted, PHC-string) |
 | `password_registry.go` | fifth `snapshot.Value`-backed registry: `RegisterPasswordHasher` / `LookupPasswordHasher` / `AvailablePasswordHashers` + `HashPassword` / `VerifyPassword` / `NeedsRehash` dispatch (the latter two resolve the scheme from the PHC id via `phcID`) |
+| `mac.go`       | `MAC` interface (`Algorithm` / `Tag` / `Verify` / `New`) — the **keyed detached-authentication** port; a tag IS secret-comparison-sensitive (route through `Verify`, never `==`) |
+| `mac_registry.go` | sixth `snapshot.Value`-backed registry mapping an `Algorithm` to a `MAC`: `RegisterMAC` / `LookupMAC` / `AvailableMACs` + `MACTag` / `MACVerify` dispatch (named `MAC*` so they never collide with the signer/verifier verbs) |
+| `agreement.go` | `Agreement` interface (`Algorithm` / `GenerateKey` / `Shared`) — the **DH-style key-agreement** port; raw `Shared` output MUST be KDF'd before use |
+| `agreement_registry.go` | seventh `snapshot.Value`-backed registry mapping an `Algorithm` to an `Agreement`: `RegisterAgreement` / `LookupAgreement` / `AvailableAgreements` + `GenerateAgreementKey` / `AgreementShared` dispatch (a scheme `Shared` fault wraps into `AgreementFailed`, leaking no key bytes) |
+| `stream.go`    | `StreamSealer` interface (`Algorithm` / `Writer` / `Reader`) — the **chunked streaming-AEAD** port with the hold-back contract; truncation surfaces as `StreamTruncated` |
+| `stream_registry.go` | eighth `snapshot.Value`-backed registry mapping an `Algorithm` to a `StreamSealer`: `RegisterStreamSealer` / `LookupStreamSealer` / `AvailableStreamSealers` + `SealStream` / `OpenStream` dispatch (a lookup miss reuses the AEAD `UnknownAlgorithm` sentinel — streaming extends the AEAD domain) |
 | `codes.go`     | `Code*` constants — range 0.2.4.\* |
-| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9), `UnknownKDFAlgorithm` (0.2.4.10), `DerivationFailed` (0.2.4.11), `UnknownPasswordAlgorithm` (0.2.4.12), `PasswordHashFailed` (0.2.4.13), `InvalidPasswordHash` (0.2.4.14) |
+| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9), `UnknownKDFAlgorithm` (0.2.4.10), `DerivationFailed` (0.2.4.11), `UnknownPasswordAlgorithm` (0.2.4.12), `PasswordHashFailed` (0.2.4.13), `InvalidPasswordHash` (0.2.4.14), `UnknownMACAlgorithm` (0.2.4.15), `UnknownAgreementAlgorithm` (0.2.4.16), `AgreementFailed` (0.2.4.17), `StreamTruncated` (0.2.4.18) |
 
-Five **independent** registries live here, all on one `Algorithm` keyspace: the
+Eight **independent** registries live here, all on one `Algorithm` keyspace: the
 **AEAD** (`registry.go`, keyed encryption), **Hasher** (`hash_registry.go`,
 public fingerprints), **Signer** (`signer_registry.go`, public-key signatures),
 **Deriver** (`deriver_registry.go`, key-separation KDF from a *strong* secret),
-and **PasswordHasher** (`password_registry.go`, slow salted storage of *human*
-passwords). They never mix: a digest carries no secret, `Open`/`Verify` are
-non-oracle, `Subkey` rejects passwords by contract, and password hashing is the
-one deliberately-slow surface. `pkg/v1/{crypto,hash,sign,kdf,password}` re-export
-the five
-surfaces respectively.
+**PasswordHasher** (`password_registry.go`, slow salted storage of *human*
+passwords), **MAC** (`mac_registry.go`, keyed detached authentication),
+**Agreement** (`agreement_registry.go`, DH-style shared-secret establishment),
+and **StreamSealer** (`stream_registry.go`, chunked streaming AEAD). They never
+mix: a digest carries no secret, `Open`/`Verify`/`MACVerify` are constant-time
+or non-oracle, `Subkey` rejects passwords by contract, password hashing is the
+one deliberately-slow surface, the raw `Shared` secret is never handed back
+un-KDF'd, and `SealStream`/`OpenStream` reuse the AEAD `UnknownAlgorithm` miss
+because streaming extends the AEAD domain. `pkg/v1/{crypto,hash,sign,kdf,password,mac,agree}`
+re-export these surfaces (the streaming verbs ride `pkg/v1/crypto`).
 
 ## Wire format
 

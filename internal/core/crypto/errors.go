@@ -99,4 +99,30 @@ var (
 	InvalidPasswordHash = errs.Define(CodeInvalidPasswordHash, "INVALID_PASSWORD_HASH",
 		"Stored password hash is malformed",
 		"core/crypto.VerifyPassword: stored PHC string is not well-formed for its scheme")
+
+	// UnknownMACAlgorithm is returned by MACTag/MACVerify when no MAC is
+	// registered under the requested Algorithm — typically a missing blank-import.
+	UnknownMACAlgorithm = errs.Define(CodeUnknownMACAlgorithm, "UNKNOWN_MAC_ALGORITHM",
+		"No MAC is registered under that algorithm",
+		"core/crypto.MACTag: MAC algorithm absent from registry; blank-import the scheme's package to register it")
+
+	// UnknownAgreementAlgorithm is returned by GenerateAgreementKey/AgreementShared
+	// when no Agreement scheme is registered under the requested Algorithm.
+	UnknownAgreementAlgorithm = errs.Define(CodeUnknownAgreementAlgorithm, "UNKNOWN_AGREEMENT_ALGORITHM",
+		"No key-agreement scheme is registered under that algorithm",
+		"core/crypto.AgreementShared: agreement algorithm absent from registry; blank-import the scheme's package to register it")
+
+	// AgreementFailed wraps an AgreementShared fault where the scheme rejected the
+	// inputs (e.g. a low-order peer point); it never leaks key bytes.
+	AgreementFailed = errs.Define(CodeAgreementFailed, "AGREEMENT_FAILED",
+		"Key agreement failed to derive a shared secret",
+		"core/crypto.AgreementShared: the scheme rejected the inputs (cause withheld of key bytes)",
+		errs.WithExitCode(exitDataErr))
+
+	// StreamTruncated is returned by a streaming Open reader when the stream ends
+	// before its final-flag chunk — a truncated or tampered stream, not a clean EOF.
+	StreamTruncated = errs.Define(CodeStreamTruncated, "STREAM_TRUNCATED",
+		"The authenticated stream was truncated before its final chunk",
+		"core/crypto.OpenStream: reader hit EOF before decrypting the final-flag chunk",
+		errs.WithExitCode(exitDataErr))
 )
