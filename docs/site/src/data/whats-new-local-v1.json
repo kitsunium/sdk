@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T16:46:00.744Z",
+  "generatedAt": "2026-05-30T16:05:18.621Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "kernel",
+      "breaking": false,
+      "summary": "worker.LoopDaemon — generic start/stop/join lifecycle (ADR 0014)",
+      "sha": "46e191eff199f5ee855096a45e1ac44f7a09c743",
+      "short": "46e191e",
+      "date": "2026-05-30T17:13:34+02:00"
+    },
     {
       "type": "feat",
       "scope": "crypto",
@@ -30,6 +39,15 @@
       "sha": "bfcb793de9bab5008c53b7f514747a1bafb1bcee",
       "short": "bfcb793",
       "date": "2026-05-30T14:10:16+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "XChaCha20-Poly1305 AEAD scheme (third-party/x-crypto, opt-in) (#55)",
+      "sha": "63ece0729b2a1f001aff74295cc1b2a31e1cc4d9",
+      "short": "63ece07",
+      "date": "2026-05-30T11:00:48+02:00"
     },
     {
       "type": "fix",
