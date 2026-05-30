@@ -1,17 +1,17 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T00:15:49.458Z",
+  "generatedAt": "2026-05-30T08:41:18.938Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
     {
       "type": "feat",
       "scope": "crypto",
       "breaking": false,
-      "summary": "ADR-0013 + core/crypto AEAD seam + stdlib AES-GCM + pkg/v1 Seal/Open",
-      "sha": "dd5a368a199e416b83a6225b295538821642ccc3",
-      "short": "dd5a368",
-      "date": "2026-05-30T01:43:53+02:00"
+      "summary": "ADR-0013 — AEAD Seal/Open with a hidden nonce (stdlib AES-256-GCM) (#54)",
+      "sha": "7095a0d5f4a5ccfcbfa1a18e2140dcfd860a19a6",
+      "short": "7095a0d",
+      "date": "2026-05-30T02:18:29+02:00"
     },
     {
       "type": "fix",
