@@ -97,8 +97,8 @@ func TestNeedsRehash(t *testing.T) {
 	}
 	tests := []tc{
 		{"a current-policy hash is not stale", fresh, false},
-		//: i=1 is far below policy → stale (valid base64 salt/digest fields).
-		{"a low-iteration hash is stale", "$pbkdf2-sha256$i=1$c2FsdA$ZGlnZXN0", true},
+		//: i=1 is far below policy → stale (16-byte salt + 32-byte digest fields).
+		{"a low-iteration hash is stale", "$pbkdf2-sha256$i=1$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", true},
 		{"a malformed hash is never stale", "garbage", false},
 	}
 	runCase := func(t *testing.T, c tc) {

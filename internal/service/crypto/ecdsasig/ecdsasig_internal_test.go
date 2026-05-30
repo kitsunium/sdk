@@ -1,6 +1,9 @@
 package ecdsasig
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/x509"
 	"testing"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
@@ -107,6 +110,40 @@ func Test_ecdsaP256_Verify(t *testing.T) {
 			//: validity is a plain bool; malformed inputs are false, never a panic.
 			if got := (ecdsaP256{}).Verify(c.pub, c.msg, c.sig); got != c.want {
 				t.Errorf("Verify=%v want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// Test_ecdsaP256_Verify_rejectsOffCurveKey proves the scheme is curve-bound: a
+// structurally valid ECDSA key on a DIFFERENT NIST curve must verify to false
+// rather than being accepted as a weaker-but-valid signer.
+func Test_ecdsaP256_Verify_rejectsOffCurveKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		curve elliptic.Curve
+	}{
+		{"rejects a P-384 key", elliptic.P384()},
+		{"rejects a P-521 key", elliptic.P521()},
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			//: a real keypair on the wrong curve — valid ECDSA, wrong algorithm;
+			//: nil reader selects crypto/rand by default (Go 1.26+).
+			key, gerr := ecdsa.GenerateKey(c.curve, nil)
+			if gerr != nil {
+				t.Fatalf("GenerateKey: %v", gerr)
+			}
+			//: marshal to the same PKIX DER form Verify parses.
+			pubDER, merr := x509.MarshalPKIXPublicKey(&key.PublicKey)
+			if merr != nil {
+				t.Fatalf("MarshalPKIXPublicKey: %v", merr)
+			}
+			//: the off-curve key parses fine but must be rejected on the curve check.
+			if (ecdsaP256{}).Verify(pubDER, []byte("message"), []byte("sig")) {
+				t.Errorf("%s: Verify accepted an off-curve key; want false", c.name)
 			}
 		})
 	}

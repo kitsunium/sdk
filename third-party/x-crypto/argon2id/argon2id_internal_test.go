@@ -101,8 +101,8 @@ func Test_argon2idPW_NeedsRehash(t *testing.T) {
 		want bool
 	}{
 		{"current-policy hash is fresh", fresh, false},
-		//: m=8,t=1,p=1 is far below policy → stale (valid base64 salt/digest).
-		{"weak-parameter hash is stale", "$argon2id$v=19$m=8,t=1,p=1$c2FsdA$ZGlnZXN0", true},
+		//: m=8,t=1,p=1 is far below policy → stale (16-byte salt + 32-byte digest).
+		{"weak-parameter hash is stale", "$argon2id$v=19$m=8,t=1,p=1$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", true},
 		{"malformed PHC is never stale", "not-a-phc", false},
 	}
 	for _, c := range tests {
@@ -146,12 +146,16 @@ func Test_decodePHC(t *testing.T) {
 		phc    string
 		wantOK bool
 	}{
-		{"well-formed parses", "$argon2id$v=19$m=8,t=1,p=1$c2FsdA$ZGlnZXN0", true},
+		{"well-formed parses", "$argon2id$v=19$m=8,t=1,p=1$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", true},
 		{"wrong field count fails", "$argon2id$v=19$m=8,t=1,p=1$only", false},
-		{"wrong id fails", "$other$v=19$m=8,t=1,p=1$c2FsdA$ZGlnZXN0", false},
-		{"wrong version fails", "$argon2id$v=99$m=8,t=1,p=1$c2FsdA$ZGlnZXN0", false},
-		{"bad params field fails", "$argon2id$v=19$m=8,t=1$c2FsdA$ZGlnZXN0", false},
-		{"bad base64 salt fails", "$argon2id$v=19$m=8,t=1,p=1$!!!$ZGlnZXN0", false},
+		{"wrong id fails", "$other$v=19$m=8,t=1,p=1$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		{"wrong version fails", "$argon2id$v=99$m=8,t=1,p=1$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		{"bad params field fails", "$argon2id$v=19$m=8,t=1$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		{"bad base64 salt fails", "$argon2id$v=19$m=8,t=1,p=1$!!!$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		//: a salt that is not exactly 16 bytes is corruption → reject.
+		{"wrong salt length fails", "$argon2id$v=19$m=8,t=1,p=1$ZmlmdGVlbi1ieXRlLXNs$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		//: a digest that is not exactly 32 bytes is corruption → reject.
+		{"wrong digest length fails", "$argon2id$v=19$m=8,t=1,p=1$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LW9uZS1ieXRlLWRpZ2VzdC1wYWRkaW5nIQ", false},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -175,6 +179,12 @@ func Test_parseParams(t *testing.T) {
 		{"wrong order key fails", "t=2,m=19456,p=1", false},
 		{"too few parameters fails", "m=19456,t=2", false},
 		{"non-numeric value fails", "m=abc,t=2,p=1", false},
+		//: p=256 would wrap the uint8 cast to 0 → reject above the 255 ceiling.
+		{"parallelism above 255 fails", "m=19456,t=2,p=256", false},
+		//: m above the 2 GiB cap is a resource-exhaustion attempt → reject.
+		{"memory above cap fails", "m=2097153,t=2,p=1", false},
+		//: t above the cap is an unbounded-work attempt → reject.
+		{"time above cap fails", "m=19456,t=1048577,p=1", false},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {

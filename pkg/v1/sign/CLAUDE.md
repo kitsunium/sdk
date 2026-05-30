@@ -7,15 +7,17 @@ Public **detached digital-signature** facade (ADR 0013). Generate a keypair,
 delegation over `internal/core/crypto`'s Signer registry — zero runtime cost,
 no business logic (per `pkg/` convention).
 
-Importing the package blank-imports `internal/service/crypto/ed25519sig`,
-activating Ed25519 with **zero non-stdlib deps**.
+Importing the package blank-imports `internal/service/crypto/ed25519sig` AND
+`internal/service/crypto/ecdsasig`, activating both Ed25519 and ECDSA-P256 with
+**zero non-stdlib deps**.
 
 ## Surface
 
 | Identifier | Role |
 |---|---|
 | `Algorithm` | alias of `corecrypto.Algorithm` (stable scheme id) |
-| `Ed25519` | the EdDSA-over-Curve25519 scheme const (RFC 8032) |
+| `Ed25519` | the EdDSA-over-Curve25519 scheme const (RFC 8032) — the modern default |
+| `ECDSAP256` | ECDSA over NIST P-256 with SHA-256 + ASN.1/DER signatures (JWT `ES256`, X.509, COSE interop) |
 | `GenerateKey(a) (pub, priv []byte, error)` | fresh keypair; `priv` is secret |
 | `Sign(a, priv, message) ([]byte, error)` | detached signature; bad `priv` → `SigningFailed` |
 | `Verify(a, pub, message, sig) (bool, error)` | `(true,nil)` valid · `(false,nil)` invalid · `(false, UnknownSignatureAlgorithm)` unregistered |
@@ -23,7 +25,8 @@ activating Ed25519 with **zero non-stdlib deps**.
 ## Keys are raw bytes — the private key is secret
 
 Keys/signatures are scheme-specific `[]byte` (Ed25519: 32-byte public, 64-byte
-private, 64-byte signature). The private key is secret material: hold it like a
+private, 64-byte signature; ECDSA-P256: DER-encoded keys — PKIX public, SEC1
+private — and ASN.1/DER signatures). The private key is secret material: hold it like a
 password, never log it, zero it when done. `Verify` is constant-time w.r.t. the
 signature and **never errors on an invalid signature** — invalid is `(false,
 nil)`, so the error channel signals only misconfiguration (unregistered scheme),

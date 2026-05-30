@@ -101,8 +101,8 @@ func Test_pbkdf2PW_NeedsRehash(t *testing.T) {
 		want bool
 	}{
 		{"current-policy hash is fresh", fresh, false},
-		//: i=1 is far below the 600000 policy → stale (valid base64 salt/digest).
-		{"low-iteration hash is stale", "$pbkdf2-sha256$i=1$c2FsdA$ZGlnZXN0", true},
+		//: i=1 is far below the 600000 policy → stale (16-byte salt + 32-byte digest).
+		{"low-iteration hash is stale", "$pbkdf2-sha256$i=1$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", true},
 		{"malformed PHC is never stale", "not-a-phc", false},
 	}
 	for _, c := range tests {
@@ -146,12 +146,18 @@ func Test_decodePHC(t *testing.T) {
 		phc    string
 		wantOK bool
 	}{
-		{"well-formed parses", "$pbkdf2-sha256$i=5$c2FsdA$ZGlnZXN0", true},
+		{"well-formed parses", "$pbkdf2-sha256$i=5$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", true},
 		{"wrong field count fails", "$pbkdf2-sha256$i=5$only", false},
-		{"wrong id fails", "$other$i=5$c2FsdA$ZGlnZXN0", false},
-		{"missing i= label fails", "$pbkdf2-sha256$5$c2FsdA$ZGlnZXN0", false},
-		{"non-numeric iters fails", "$pbkdf2-sha256$i=abc$c2FsdA$ZGlnZXN0", false},
-		{"bad base64 salt fails", "$pbkdf2-sha256$i=5$!!!$ZGlnZXN0", false},
+		{"wrong id fails", "$other$i=5$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		{"missing i= label fails", "$pbkdf2-sha256$5$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		{"non-numeric iters fails", "$pbkdf2-sha256$i=abc$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		{"bad base64 salt fails", "$pbkdf2-sha256$i=5$!!!$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		//: a count above maxIters is an unbounded-work DoS attempt → reject.
+		{"over-max iters fails", "$pbkdf2-sha256$i=100000001$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		//: a salt that is not exactly 16 bytes is corruption → reject.
+		{"wrong salt length fails", "$pbkdf2-sha256$i=5$ZmlmdGVlbi1ieXRlLXNs$dGhpcnR5LXR3by1ieXRlLWRpZ2VzdC1wYWRkaW5nISE", false},
+		//: a digest that is not exactly 32 bytes is corruption → reject.
+		{"wrong digest length fails", "$pbkdf2-sha256$i=5$c2l4dGVlbi1ieXRlLXNsdA$dGhpcnR5LW9uZS1ieXRlLWRpZ2VzdC1wYWRkaW5nIQ", false},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {

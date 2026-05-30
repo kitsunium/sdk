@@ -43,7 +43,7 @@ public fingerprints), **Signer** (`signer_registry.go`, public-key signatures),
 and **PasswordHasher** (`password_registry.go`, slow salted storage of *human*
 passwords). They never mix: a digest carries no secret, `Open`/`Verify` are
 non-oracle, `Subkey` rejects passwords by contract, and password hashing is the
-one deliberately-slow surface. `pkg/v1/{hash,crypto,sign,kdf,password}` re-export
+one deliberately-slow surface. `pkg/v1/{crypto,hash,sign,kdf,password}` re-export
 the five
 surfaces respectively.
 

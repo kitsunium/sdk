@@ -52,6 +52,15 @@ const (
 	fieldDigest int = 5
 	// paramCount is the number of cost parameters (m, t, p) parsed from the field.
 	paramCount int = 3
+	// maxMem caps the PHC-supplied memory cost (KiB) accepted on Verify so a
+	// hostile or corrupt stored hash cannot force an extreme allocation —
+	// 2 GiB, far above any real policy yet bounded.
+	maxMem int = 1 << 21
+	// maxTime caps the PHC-supplied time (iteration) cost accepted on Verify.
+	maxTime int = 1 << 20
+	// maxThreads caps parallelism at the uint8 ceiling argon2 accepts; a value
+	// above it would wrap on the uint8 cast (256 -> 0) and silently weaken the hash.
+	maxThreads int = 255
 )
 
 // PasswordHasher is the registered argon2id scheme singleton (no init();
@@ -145,16 +154,33 @@ func decodePHC(phc string) (memCost, timeCost uint32, threads uint8, salt, diges
 		//: reject.
 		return 0, 0, 0, nil, nil, false
 	}
-	//: decode the salt + digest from un-padded base64.
-	saltRaw, serr := base64.RawStdEncoding.DecodeString(fields[fieldSalt])
-	digRaw, derr := base64.RawStdEncoding.DecodeString(fields[fieldDigest])
-	//: either decode failing means the stored hash is corrupt.
-	if serr != nil || derr != nil {
+	//: decode + length-check the salt and digest fields.
+	saltRaw, digRaw, decoded := decodeSaltDigest(fields[fieldSalt], fields[fieldDigest])
+	//: a bad base64 or off-spec length is corruption.
+	if !decoded {
 		//: reject.
 		return 0, 0, 0, nil, nil, false
 	}
 	//: a fully validated PHC string.
 	return memCost, timeCost, threads, saltRaw, digRaw, true
+}
+
+// decodeSaltDigest base64-decodes the salt + digest PHC fields and enforces the
+// scheme's fixed lengths. It returns ok=false on a decode error or any length
+// other than saltLen / keyLen: this scheme only ever emits a 16-byte salt +
+// 32-byte digest, so a deviation is corruption — and pinning the digest length
+// stops Verify from recomputing an attacker-chosen, arbitrary-length key.
+func decodeSaltDigest(saltField, digestField string) (salt, digest []byte, ok bool) {
+	//: un-padded base64 is the PHC convention for both fields.
+	saltRaw, serr := base64.RawStdEncoding.DecodeString(saltField)
+	digRaw, derr := base64.RawStdEncoding.DecodeString(digestField)
+	//: a decode failure or off-spec length is corruption — reject in one guard.
+	if serr != nil || derr != nil || len(saltRaw) != saltLen || len(digRaw) != int(keyLen) {
+		//: reject.
+		return nil, nil, false
+	}
+	//: both fields are valid and exactly the expected size.
+	return saltRaw, digRaw, true
 }
 
 // parseParams parses the "m=<n>,t=<n>,p=<n>" argon2 cost field.
@@ -163,14 +189,25 @@ func parseParams(field string) (memCost, timeCost uint32, threads uint8, ok bool
 	//: empty-token ambiguity; Sscanf rejects any structural mismatch.
 	var memVal, timeVal, parVal int
 	count, serr := fmt.Sscanf(field, "m=%d,t=%d,p=%d", &memVal, &timeVal, &parVal)
-	//: reject in one guard — all three must parse, be positive, and re-render to
-	//: the exact field (the re-render rejects trailing junk Sscanf would ignore;
-	//: short-circuit means it only runs once the values are known-good).
-	if serr != nil || count != paramCount || memVal <= 0 || timeVal <= 0 || parVal <= 0 ||
+	//: reject in one guard — Sscanf must consume all three, the costs must be
+	//: in-bounds (validCosts), and the field must re-render exactly (the re-render
+	//: rejects trailing junk Sscanf would ignore; short-circuit means the costly
+	//: Sprintf only runs once the values are known-good).
+	if serr != nil || count != paramCount || !validCosts(memVal, timeVal, parVal) ||
 		field != fmt.Sprintf("m=%d,t=%d,p=%d", memVal, timeVal, parVal) {
-		//: malformed, non-positive, or non-canonical cost field.
+		//: malformed, out-of-bounds, or non-canonical cost field.
 		return 0, 0, 0, false
 	}
-	//: threads is a uint8; the casts are safe after the positive-range check.
+	//: threads is a uint8; the casts are safe after validCosts bounded them.
 	return uint32(memVal), uint32(timeVal), uint8(parVal), true
+}
+
+// validCosts reports whether the parsed argon2 m/t/p costs are positive and
+// within their Verify-time bounds: p<=255 prevents the uint8 cast wrapping
+// (256 -> 0), while the m/t caps bound the work + allocation a hostile or
+// corrupt PHC string can request.
+func validCosts(memVal, timeVal, parVal int) bool {
+	//: every axis must be positive AND under its cap.
+	return memVal > 0 && timeVal > 0 && parVal > 0 &&
+		memVal <= maxMem && timeVal <= maxTime && parVal <= maxThreads
 }

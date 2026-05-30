@@ -102,9 +102,11 @@ func (ecdsaP256) Verify(pub, message, sig []byte) bool {
 	}
 	//: the blob must decode to an ECDSA public key specifically.
 	key, ok := parsed.(*ecdsa.PublicKey)
-	//: a non-ECDSA key (e.g. RSA, Ed25519) cannot verify this scheme.
-	if !ok {
-		//: clean false.
+	//: reject a non-ECDSA key (RSA/Ed25519) OR an off-curve key — this scheme is
+	//: curve-bound to P-256, so anything else is the wrong algorithm. The !ok
+	//: short-circuit guards the nil deref when the type assertion failed.
+	if !ok || key.Curve != elliptic.P256() {
+		//: clean false, never a panic.
 		return false
 	}
 	//: hash the message the same way Sign did, then verify the DER signature.

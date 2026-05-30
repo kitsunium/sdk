@@ -38,6 +38,10 @@ const (
 	keyLen int = 32
 	// currentIters is the present iteration policy (OWASP 2023 for PBKDF2-SHA256).
 	currentIters int = 600_000
+	// maxIters caps the PHC-supplied iteration count accepted on Verify so a
+	// hostile or corrupt stored hash cannot force unbounded CPU work. It sits
+	// far above currentIters to leave ratchet headroom, yet stays bounded.
+	maxIters int = 100_000_000
 	// phcFields is the number of `$`-delimited fields in a well-formed hash.
 	phcFields int = 5
 	// fieldID indexes the scheme id after a split on "$" (index 0 is the empty
@@ -152,21 +156,38 @@ func decodePHC(phc string) (iters int, salt, digest []byte, ok bool) {
 		//: reject.
 		return 0, nil, nil, false
 	}
-	//: parse the iteration count; it must be a positive integer.
+	//: parse the iteration count; it must be a positive, bounded integer.
 	n, perr := strconv.Atoi(iterStr)
-	//: a non-numeric or non-positive count is malformed.
-	if perr != nil || n <= 0 {
+	//: non-numeric, non-positive, or above the cap (unbounded-work DoS) is malformed.
+	if perr != nil || n <= 0 || n > maxIters {
 		//: reject.
 		return 0, nil, nil, false
 	}
-	//: decode the salt + digest from un-padded base64.
-	saltRaw, serr := base64.RawStdEncoding.DecodeString(fields[fieldSalt])
-	digRaw, derr := base64.RawStdEncoding.DecodeString(fields[fieldDigest])
-	//: either decode failing means the stored hash is corrupt.
-	if serr != nil || derr != nil {
+	//: decode + length-check the salt and digest fields.
+	saltRaw, digRaw, decoded := decodeSaltDigest(fields[fieldSalt], fields[fieldDigest])
+	//: a bad base64 or off-spec length is corruption.
+	if !decoded {
 		//: reject.
 		return 0, nil, nil, false
 	}
 	//: a fully validated PHC string.
 	return n, saltRaw, digRaw, true
+}
+
+// decodeSaltDigest base64-decodes the salt + digest PHC fields and enforces the
+// scheme's fixed lengths. It returns ok=false on a decode error or any length
+// other than saltLen / keyLen: this scheme only ever emits a 16-byte salt +
+// 32-byte digest, so a deviation is corruption — and pinning the digest length
+// stops Verify from deriving an attacker-chosen, arbitrary-length key.
+func decodeSaltDigest(saltField, digestField string) (salt, digest []byte, ok bool) {
+	//: un-padded base64 is the PHC convention for both fields.
+	saltRaw, serr := base64.RawStdEncoding.DecodeString(saltField)
+	digRaw, derr := base64.RawStdEncoding.DecodeString(digestField)
+	//: a decode failure or off-spec length is corruption — reject in one guard.
+	if serr != nil || derr != nil || len(saltRaw) != saltLen || len(digRaw) != keyLen {
+		//: reject.
+		return nil, nil, false
+	}
+	//: both fields are valid and exactly the expected size.
+	return saltRaw, digRaw, true
 }
