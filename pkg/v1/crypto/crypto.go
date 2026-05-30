@@ -64,6 +64,7 @@ import (
 	// Activates the default AES-256-GCM scheme. Stdlib-only, so importing
 	// pkg/v1/crypto pulls zero non-stdlib dependencies.
 	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
+	"github.com/kitsunium/sdk/internal/service/crypto/keyenvelope"
 
 	// Activates the stdlib streaming AES-256-GCM scheme behind SealStream /
 	// OpenStream. Stdlib-only, so it preserves the dep-light invariant.
@@ -145,4 +146,21 @@ func SealStream(dst io.Writer, k Key, aad []byte) (sealed io.WriteCloser, err er
 func OpenStream(src io.Reader, k Key, aad []byte) (opened io.Reader, err error) {
 	//: dispatch to the stdlib streaming scheme via the core registry.
 	return corecrypto.OpenStream(streamAlgorithm, k, src, aad)
+}
+
+// WrapKey seals the data key dek at rest under passphrase, returning the frozen
+// "$kenv$" envelope string. The KEK is stretched from passphrase with
+// PBKDF2-SHA256 and the dek is sealed under AES-256-GCM; the envelope header is
+// bound as AAD so tampering is detected on UnwrapKey.
+func WrapKey(passphrase []byte, dek Key) (envelope string, err error) {
+	//: delegate to the service emitter; this façade adds no behaviour.
+	return keyenvelope.WrapKey(passphrase, dek)
+}
+
+// UnwrapKey recovers the data key sealed in envelope under passphrase. A
+// structurally invalid envelope returns InvalidKeyEnvelope; a wrong passphrase
+// returns the non-oracle DecryptionFailed.
+func UnwrapKey(passphrase []byte, envelope string) (dek Key, err error) {
+	//: delegate to the service emitter; this façade adds no behaviour.
+	return keyenvelope.UnwrapKey(passphrase, envelope)
 }

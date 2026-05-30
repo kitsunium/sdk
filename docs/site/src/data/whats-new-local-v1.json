@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T22:50:21.628Z",
+  "generatedAt": "2026-05-30T23:21:50.376Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "FromConfig + writer.Decoder — config-driven topology (ADR 0014)",
+      "sha": "1154a7150b41cc2070a2310ef53c7dc21fc242e3",
+      "short": "1154a71",
+      "date": "2026-05-31T00:49:49+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -21,15 +30,6 @@
       "sha": "e2b5a13a43cd708156e3bb46b0c3372fc9ed9965",
       "short": "e2b5a13",
       "date": "2026-05-30T23:35:06+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "codec",
-      "breaking": false,
-      "summary": "MarshalCompressed/UnmarshalCompressed — compressed frame (ADR 0014)",
-      "sha": "1858b59034b1d6251fb3bd80b92735bfe7696b67",
-      "short": "1858b59",
-      "date": "2026-05-30T23:33:23+02:00"
     },
     {
       "type": "fix",

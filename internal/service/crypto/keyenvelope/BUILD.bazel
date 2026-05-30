@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "keyenvelope",
+    srcs = ["keyenvelope.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/keyenvelope",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+        "//internal/service/crypto/aesgcm",
+    ],
+)
+
+go_test(
+    name = "keyenvelope_test",
+    srcs = [
+        "keyenvelope_external_test.go",
+        "keyenvelope_internal_test.go",
+    ],
+    embed = [":keyenvelope"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":keyenvelope",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)

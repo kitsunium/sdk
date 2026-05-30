@@ -10,6 +10,7 @@ go_library(
     deps = [
         "//internal/core/crypto",
         "//internal/service/crypto/aesgcm",
+        "//internal/service/crypto/keyenvelope",
         "//internal/service/crypto/streamaead",
     ],
 )

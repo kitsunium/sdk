@@ -126,6 +126,15 @@ var (
 		"core/crypto.OpenStream: reader hit EOF before decrypting the final-flag chunk",
 		errs.WithExitCode(exitDataErr))
 
+	// InvalidKeyEnvelope is returned by UnwrapKey when the supplied $kenv$ string
+	// is structurally invalid (bad field count, magic, version, kdf/aead id, or
+	// base64). It signals corruption only — a wrong passphrase surfaces the
+	// non-oracle DecryptionFailed instead, so this is no key/password oracle.
+	InvalidKeyEnvelope = errs.Define(CodeInvalidKeyEnvelope, "INVALID_KEY_ENVELOPE",
+		"Key envelope is malformed",
+		"service/crypto/keyenvelope.UnwrapKey: $kenv$ string is not well-formed",
+		errs.WithExitCode(exitDataErr))
+
 	// DigestMismatch is returned by a VerifyingReader on its final (EOF) read when
 	// the computed digest does not match the expected value. The digest is public,
 	// so the comparison is non-oracle and surfaces only at the terminal read.
