@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T08:41:18.938Z",
+  "generatedAt": "2026-05-30T09:55:56.241Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "XChaCha20-Poly1305 AEAD scheme (third-party/x-crypto, opt-in) (#55)",
+      "sha": "63ece0729b2a1f001aff74295cc1b2a31e1cc4d9",
+      "short": "63ece07",
+      "date": "2026-05-30T11:00:48+02:00"
+    },
     {
       "type": "feat",
       "scope": "crypto",
@@ -30,15 +39,6 @@
       "sha": "3732c6885d1f03b786621b18688e8b51f10fafe9",
       "short": "3732c68",
       "date": "2026-05-29T22:26:54+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "kernel",
-      "breaking": false,
-      "summary": "add snapshot.Value[T] copy-on-write primitive + consolidate codec registry (ADR 0011) (#34)",
-      "sha": "7cdda6956418834f17a92ffcf3620fc7591bf4be",
-      "short": "7cdda69",
-      "date": "2026-05-26T01:38:33+02:00"
     },
     {
       "type": "fix",

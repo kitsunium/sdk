@@ -26,3 +26,7 @@ const CodeDecryptionFailed errs.Code = 0x00_02_04_04 // 0.2.4.4
 // CodeEntropyFailed identifies a crypto/rand failure while generating a nonce in
 // Seal — a host entropy fault, not a caller error.
 const CodeEntropyFailed errs.Code = 0x00_02_04_05 // 0.2.4.5
+
+// CodeUnknownHashAlgorithm identifies a Sum/SumHex call naming a hash Algorithm
+// that no imported package has registered.
+const CodeUnknownHashAlgorithm errs.Code = 0x00_02_04_06 // 0.2.4.6

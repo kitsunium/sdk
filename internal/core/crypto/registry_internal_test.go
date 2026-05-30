@@ -10,4 +10,6 @@ func ResetForTest() {
 	//: store nil snapshots; Lookup / lookupByID then report empty.
 	registry.Store(nil)
 	idIndex.Store(nil)
+	//: also clear the separate Hasher registry so hash tests isolate too.
+	hashers.Store(nil)
 }

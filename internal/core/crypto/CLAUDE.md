@@ -23,10 +23,19 @@ Code range: `0.2.4.*` (ADR 0013).
 | `algorithm.go` | `Algorithm` typed string (`String` / `Known`) |
 | `key.go`       | `Key` — opaque, redacting 256-bit key (`NewKey` / `Bytes` / `Zeroize`); `KeyLen` |
 | `aead.go`      | `AEAD` interface (`Algorithm` / `ID` / `Seal` / `Open`) |
-| `registry.go`  | `snapshot.Value`-backed registry + id index: `Register` / `Lookup` / `Available` |
+| `registry.go`  | `snapshot.Value`-backed AEAD registry + id index: `Register` / `Lookup` / `Available` |
 | `seal.go`      | `Seal` / `Open` dispatch + the frozen box `Version` byte |
+| `hasher.go`    | `Hasher` interface (`Algorithm` / `New`) — the **non-authenticated** fingerprint port |
+| `hash_registry.go` | second `snapshot.Value`-backed registry mapping an `Algorithm` to a `Hasher`: `RegisterHasher` / `LookupHasher` / `AvailableHashers` + `Sum` / `SumHex` / `NewHash` dispatch |
 | `codes.go`     | `Code*` constants — range 0.2.4.\* |
-| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed` |
+| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6) |
+
+Two **independent** registries live here: the **AEAD** registry (`registry.go`,
+authenticated encryption — keyed, secret) and the **Hasher** registry
+(`hash_registry.go`, public fingerprints/content IDs — unkeyed, public). They
+never mix: a digest is public and `Sum` is non-oracle-irrelevant (no secret),
+whereas `Open` is non-oracle by construction. `pkg/v1/hash` re-exports the
+Hasher surface; `pkg/v1/crypto` re-exports the AEAD surface.
 
 ## Wire format
 

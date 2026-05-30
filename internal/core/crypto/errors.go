@@ -41,4 +41,10 @@ var (
 	EntropyFailed = errs.Define(CodeEntropyFailed, "ENTROPY_FAILED",
 		"Could not gather entropy for encryption",
 		"core/crypto.Seal: crypto/rand.Read failed while generating a nonce")
+
+	// UnknownHashAlgorithm is returned by Sum/SumHex when no Hasher is
+	// registered under the requested Algorithm — typically a missing blank-import.
+	UnknownHashAlgorithm = errs.Define(CodeUnknownHashAlgorithm, "UNKNOWN_HASH_ALGORITHM",
+		"No hasher is registered under that algorithm",
+		"core/crypto.Sum: hash algorithm absent from registry; blank-import the hasher's package to register it")
 )

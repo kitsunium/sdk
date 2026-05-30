@@ -94,8 +94,13 @@ core/crypto — 0.2.4.*
   0.2.4.3  CodeInvalidKey             NewKey wrong length          (exit 65 EX_DATAERR)
   0.2.4.4  CodeDecryptionFailed       any Open failure (non-oracle) (http 400, exit 65)
   0.2.4.5  CodeEntropyFailed          crypto/rand fault in Seal
+  0.2.4.6  CodeUnknownHashAlgorithm   Sum/SumHex/NewHash of an unregistered hasher
 pkg/v1/crypto — 1.3.0.* (reserved; facade adds no sentinels in this cut)
 ```
+
+`0.2.4.6` was filled in by the hashing follow-on (see Deferred); it sits in the
+already-claimed `0.2.4.*` block, so this is a registry sync (mirrored by the AST
+audit), not a Decision change.
 
 The AST audit (`internal/kernel/errs/registry_external_test.go`) scans
 `internal/` + `pkg/` + `third-party/` (see the ADR-0012 audit fix), so these
@@ -120,8 +125,10 @@ sentinels are enforced for Public-is-literal / reason / uniqueness from day one.
 
 ## Deferred (follow-on PRs, each just registers a factory)
 
-- XChaCha20-Poly1305 scheme (`third-party/x-crypto/*`).
-- Hashing (`Sum`/`SumHex`, fingerprint — explicitly NOT authentication).
+- XChaCha20-Poly1305 scheme (`third-party/x-crypto/*`). — **shipped**
+- Hashing (`Sum`/`SumHex`/`NewHash`, fingerprint — explicitly NOT
+  authentication; `Hasher` port + second registry in `core/crypto`,
+  stdlib schemes in `service/crypto/stdhash`, facade `pkg/v1/hash`). — **shipped**
 - Password storage (PHC strings + upgrade-on-verify, argon2id).
 - KDF (`DeriveFromPassword`, HKDF `Subkey`).
 - Signatures (`Sign`/`Verify`, Ed25519/ECDSA).
