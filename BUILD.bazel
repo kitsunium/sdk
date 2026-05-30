@@ -45,6 +45,8 @@ filegroup(
         "//internal/service/codec/xml:audit_srcs",
         "//internal/service/codec/yaml:audit_srcs",
         "//internal/service/logger:audit_srcs",
+        "//internal/service/logger/middleware/encwrite:audit_srcs",
+        "//internal/service/logger/middleware/tee:audit_srcs",
         "//internal/service/transform:audit_srcs",
         "//internal/service/writer/rotfile:audit_srcs",
         "//pkg/v1/codec:audit_srcs",
