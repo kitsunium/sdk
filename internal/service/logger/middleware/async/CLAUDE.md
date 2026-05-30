@@ -15,9 +15,9 @@ S3) so a backed-up drain never stalls the application.
 
 | File | Role |
 |---|---|
-| `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close` |
+| `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close`; production drainer lifecycle runs on a `kernel/worker.LoopDaemon` (replaces the former hand-rolled `stop/stopOnce/done/doneOnce` scaffold — ADR 0014 §D6) |
 | `async_sink_policy.go` | `DropPolicy` enum (`DropNewest` default, `DropOldest`) |
-| `drainer.go`           | drainer goroutine: `drain` / `forward` / `drainRemaining`; `maxSaneCap` (64 KiB) bounds pool retention against attacker-influenced records |
+| `drainer.go`           | drainer body: `drain` (test entry, closes `done`) / `drainLoop` (the `worker.Loop`, selects on `stop`) / `forward` / `drainRemaining`; `maxSaneCap` (64 KiB) bounds pool retention against attacker-influenced records |
 | `runtime.go`           | helpers — `yieldOnce`, `isClosed`, `asyncCtx`, `forwardDownstreamError`, `swallowRingError` |
 | `entry.go`             | `recordEntry` recycled through `recycler.Pool` |
 | `config.go`            | `Config{BufferSize, Policy, OnDrop, OnError}` |
@@ -39,6 +39,13 @@ S3) so a backed-up drain never stalls the application.
 - **ringMu.** A single mutex around every ring access serialises the
   effective producers (`Write`, `Close`, `DropOldest`'s read-then-write
   retry) against the drainer's read. Closes the Close-vs-Write TOCTOU race.
+- **Lifecycle via worker.LoopDaemon.** The production drainer goroutine is
+  owned by a `kernel/worker.LoopDaemon`; its idempotent `Stop` joins the loop.
+  `Close` closes the `stop` channel under `ringMu` (guarded by `stopOnce` so
+  repeated Close never double-closes) then joins the daemon, preserving the
+  `drainRemaining` "lose nothing accepted" contract. The white-box test path
+  builds the sink without a daemon and joins on the `done` channel that
+  `drain()` closes via `doneOnce` (ADR 0014 §D6).
 - **Pool amplification guard.** After `forward()`, entries with
   `cap(data) > maxSaneCap` drop the slice so the pool never retains
   pathologically large buffers (CWE-400 / CWE-789).

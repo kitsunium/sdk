@@ -72,3 +72,4 @@ GOWORK=off go test -race -cover ./...
 - `buffer/` — see `internal/kernel/buffer/CLAUDE.md`
 - `clock/` — see `internal/kernel/clock/CLAUDE.md`
 - `ring/` — see `internal/kernel/ring/CLAUDE.md`
+- `worker/` — see `internal/kernel/worker/CLAUDE.md`

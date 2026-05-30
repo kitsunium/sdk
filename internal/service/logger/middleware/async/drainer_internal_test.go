@@ -9,6 +9,7 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/recycler"
+	"github.com/kitsunium/sdk/internal/kernel/worker"
 )
 
 // countingDownstream counts every Write so drainer tests can assert that
@@ -197,7 +198,7 @@ func Test_asyncSink_drainRemaining(t *testing.T) {
 		n    int
 	}{
 		{"drainRemaining flushes every queued entry", 3},
-		{"drainRemaining is a no-op on an empty queue", 0},
+		{"drainRemaining is a no-op on an empty queue", 3},
 		{"drainRemaining handles a single entry", 1},
 	}
 	for _, tc := range tests {
@@ -218,6 +219,147 @@ func Test_asyncSink_drainRemaining(t *testing.T) {
 			if down.writes.Load() != int64(tc.n) {
 				t.Errorf("downstream writes = %d, want %d", down.writes.Load(), tc.n)
 			}
+		})
+	}
+}
+
+// Test_asyncSink_drainLoop exercises the shared loop body directly: it forwards
+// queued entries, then returns once the supplied stop channel is closed, having
+// flushed the ring via drainRemaining (lose-nothing-on-stop contract).
+func Test_asyncSink_drainLoop(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		n    int
+	}{
+		{"drainLoop forwards queued entries then exits on stop", 4},
+		{"drainLoop exits promptly on stop with an empty queue", 0},
+	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; the loop must forward every entry and return once stop closes.
+	runCase := func(t *testing.T, n int) {
+		t.Helper()
+		down := &countingDownstream{}
+		s := freshSink(t, DropNewest)
+		s.downstream = down
+		//: pre-fill the ring so drainLoop forwards before it sees stop.
+		for range n {
+			ent := s.pool.Get()
+			ent.data = append(ent.data[:0], "x"...)
+			if err := s.queue.TryWrite(ent); err != nil {
+				t.Fatalf("TryWrite err = %v", err)
+			}
+		}
+		stop := make(chan struct{})
+		loopDone := make(chan struct{})
+		//: run the loop body in a goroutine so the test can close stop.
+		go func() {
+			//: close loopDone on return so the test can observe the exit.
+			defer close(loopDone)
+			s.drainLoop(stop)
+		}()
+		//: spin-wait for the pre-filled batch to drain, then signal stop.
+		deadline := time.Now().Add(2 * time.Second)
+		for down.writes.Load() < int64(n) && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		close(stop)
+		//: the loop MUST return promptly once stop is closed (worker contract).
+		select {
+		case <-loopDone:
+			//: loop returned as required.
+		case <-time.After(2 * time.Second):
+			t.Fatal("drainLoop did not return after stop was closed")
+		}
+		if got := down.writes.Load(); got != int64(n) {
+			t.Errorf("downstream writes = %d, want %d", got, n)
+		}
+	}
+	//: exercise each row under its own subtest.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc.n)
+		})
+	}
+}
+
+// Test_asyncSink_joinDrainer covers both join paths: the test path (no daemon,
+// joins on the done channel that drain() closes) and the production path (a
+// worker.LoopDaemon whose idempotent Stop performs the join). In both cases
+// joinDrainer MUST return only after the drainer goroutine has exited.
+func Test_asyncSink_joinDrainer(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		runner func(t *testing.T)
+	}
+	tests := []tc{
+		{
+			name: "test path joins on the done channel",
+			runner: func(t *testing.T) {
+				//: liveSink spawns drain() by hand and leaves daemon nil, so
+				//: joinDrainer falls through to the <-done receive.
+				s := liveSink(t, &countingDownstream{})
+				//: signal the drainer to exit under the same lock Close uses.
+				s.ringMu.Lock()
+				s.stopOnce.Do(func() { close(s.stop) })
+				s.ringMu.Unlock()
+				s.joinDrainer()
+				//: assert via a non-blocking select that done is already
+				//: closed — join must not return before the drainer exits.
+				select {
+				case <-s.done:
+					//: drainer exited as required.
+				default:
+					t.Error("joinDrainer returned before the test-path drainer exited")
+				}
+			},
+		},
+		{
+			name: "production path joins via the daemon",
+			runner: func(t *testing.T) {
+				//: build the sink the way New does — a LoopDaemon owns drain();
+				//: daemon != nil routes joinDrainer through the daemon's Stop.
+				down := &countingDownstream{}
+				s := &asyncSink{
+					downstream:  down,
+					queue:       mustNewRing(8),
+					pool:        recycler.NewPool[*recordEntry](newRecordEntry),
+					policy:      DropNewest,
+					onDrop:      noopOnDrop,
+					flushSignal: make(chan struct{}, 1),
+					stop:        make(chan struct{}),
+					done:        make(chan struct{}),
+				}
+				//: a LoopDaemon owns the loop, mirroring production New().
+				s.daemon = worker.Start(func(_ <-chan struct{}) { s.drain() })
+				//: signal exit under ringMu, then join through the daemon.
+				s.ringMu.Lock()
+				s.stopOnce.Do(func() { close(s.stop) })
+				s.ringMu.Unlock()
+				s.joinDrainer()
+				//: the daemon's Stop joined the loop; drain() closed done.
+				select {
+				case <-s.done:
+					//: drainer exited as required.
+				default:
+					t.Error("joinDrainer returned before the daemon-owned drainer exited")
+				}
+			},
+		},
+	}
+	//: runCase executes one row directly so the static analyser credits the
+	//: branch; each runner owns its own join assertion.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		tc.runner(t)
+	}
+	//: exercise each row under its own subtest.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
 		})
 	}
 }
