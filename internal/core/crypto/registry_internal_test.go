@@ -12,4 +12,6 @@ func ResetForTest() {
 	idIndex.Store(nil)
 	//: also clear the separate Hasher registry so hash tests isolate too.
 	hashers.Store(nil)
+	//: and the Signer registry, so signature tests isolate as well.
+	signers.Store(nil)
 }

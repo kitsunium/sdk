@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T09:55:56.241Z",
+  "generatedAt": "2026-05-30T10:14:22.151Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "add fingerprint hash domain (Sum/SumHex/NewHash) — ADR 0013",
+      "sha": "1bad1b9947d025d2d634df57b56207ee847115cd",
+      "short": "1bad1b9",
+      "date": "2026-05-30T11:55:02+02:00"
+    },
     {
       "type": "feat",
       "scope": "crypto",
@@ -30,15 +39,6 @@
       "sha": "e8c78b5450e26e658caa2a02d92750027d4bd202",
       "short": "e8c78b5",
       "date": "2026-05-30T00:29:53+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "config-driven writer registry (console/file/s3/cloudwatch) — ADR 0012 (#52)",
-      "sha": "3732c6885d1f03b786621b18688e8b51f10fafe9",
-      "short": "3732c68",
-      "date": "2026-05-29T22:26:54+02:00"
     },
     {
       "type": "fix",

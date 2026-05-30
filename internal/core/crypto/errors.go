@@ -47,4 +47,24 @@ var (
 	UnknownHashAlgorithm = errs.Define(CodeUnknownHashAlgorithm, "UNKNOWN_HASH_ALGORITHM",
 		"No hasher is registered under that algorithm",
 		"core/crypto.Sum: hash algorithm absent from registry; blank-import the hasher's package to register it")
+
+	// UnknownSignatureAlgorithm is returned by Sign/Verify/GenerateKey when no
+	// Signer is registered under the requested Algorithm — usually a missing
+	// blank-import of the scheme's package.
+	UnknownSignatureAlgorithm = errs.Define(CodeUnknownSignatureAlgorithm, "UNKNOWN_SIGNATURE_ALGORITHM",
+		"No signer is registered under that algorithm",
+		"core/crypto.Sign: signature algorithm absent from registry; blank-import the signer's package to register it")
+
+	// SigningFailed is returned by Sign when the supplied private key is not
+	// well-formed for the scheme (e.g. the wrong length).
+	SigningFailed = errs.Define(CodeSigningFailed, "SIGNING_FAILED",
+		"Signing key is malformed",
+		"core/crypto.Sign: private key is not valid for the scheme (wrong length or encoding)",
+		errs.WithExitCode(exitDataErr))
+
+	// KeyGenerationFailed wraps a crypto/rand failure while generating a signing
+	// keypair; it signals a host entropy fault rather than a caller error.
+	KeyGenerationFailed = errs.Define(CodeKeyGenerationFailed, "KEY_GENERATION_FAILED",
+		"Could not gather entropy for key generation",
+		"core/crypto.GenerateKey: crypto/rand failed while generating a signing keypair")
 )

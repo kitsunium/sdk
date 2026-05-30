@@ -95,12 +95,15 @@ core/crypto — 0.2.4.*
   0.2.4.4  CodeDecryptionFailed       any Open failure (non-oracle) (http 400, exit 65)
   0.2.4.5  CodeEntropyFailed          crypto/rand fault in Seal
   0.2.4.6  CodeUnknownHashAlgorithm   Sum/SumHex/NewHash of an unregistered hasher
+  0.2.4.7  CodeUnknownSignatureAlgorithm  Sign/Verify/GenerateKey of an unregistered signer
+  0.2.4.8  CodeSigningFailed          Sign with a malformed private key       (exit 65 EX_DATAERR)
+  0.2.4.9  CodeKeyGenerationFailed    crypto/rand fault in GenerateKey
 pkg/v1/crypto — 1.3.0.* (reserved; facade adds no sentinels in this cut)
 ```
 
-`0.2.4.6` was filled in by the hashing follow-on (see Deferred); it sits in the
-already-claimed `0.2.4.*` block, so this is a registry sync (mirrored by the AST
-audit), not a Decision change.
+`0.2.4.6`–`0.2.4.9` were filled in by the hashing + signature follow-ons (see
+Deferred); they sit in the already-claimed `0.2.4.*` block, so these are
+registry syncs (mirrored by the AST audit), not Decision changes.
 
 The AST audit (`internal/kernel/errs/registry_external_test.go`) scans
 `internal/` + `pkg/` + `third-party/` (see the ADR-0012 audit fix), so these
@@ -131,7 +134,9 @@ sentinels are enforced for Public-is-literal / reason / uniqueness from day one.
   stdlib schemes in `service/crypto/stdhash`, facade `pkg/v1/hash`). — **shipped**
 - Password storage (PHC strings + upgrade-on-verify, argon2id).
 - KDF (`DeriveFromPassword`, HKDF `Subkey`).
-- Signatures (`Sign`/`Verify`, Ed25519/ECDSA).
+- Signatures (`Sign`/`Verify`/`GenerateKey`; `Signer` port + third registry in
+  `core/crypto`, stdlib Ed25519 in `service/crypto/ed25519sig`, facade
+  `pkg/v1/sign`). — **Ed25519 shipped**; ECDSA is the next scheme follow-on.
 - Streaming AEAD, encrypt-then-codec, signed-codec (see the feature roadmap).
 
 ## References

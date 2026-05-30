@@ -30,3 +30,15 @@ const CodeEntropyFailed errs.Code = 0x00_02_04_05 // 0.2.4.5
 // CodeUnknownHashAlgorithm identifies a Sum/SumHex call naming a hash Algorithm
 // that no imported package has registered.
 const CodeUnknownHashAlgorithm errs.Code = 0x00_02_04_06 // 0.2.4.6
+
+// CodeUnknownSignatureAlgorithm identifies a Sign/Verify/GenerateKey call naming
+// an Algorithm that no imported signature package has registered.
+const CodeUnknownSignatureAlgorithm errs.Code = 0x00_02_04_07 // 0.2.4.7
+
+// CodeSigningFailed identifies a Sign call whose private key was not well-formed
+// for the scheme (e.g. the wrong length) — a caller data error, not a fault.
+const CodeSigningFailed errs.Code = 0x00_02_04_08 // 0.2.4.8
+
+// CodeKeyGenerationFailed identifies a crypto/rand failure while generating a
+// signing keypair in GenerateKey — a host entropy fault, not a caller error.
+const CodeKeyGenerationFailed errs.Code = 0x00_02_04_09 // 0.2.4.9

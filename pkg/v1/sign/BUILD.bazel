@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "sign",
+    srcs = ["sign.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/sign",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/service/crypto/ed25519sig",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":sign",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "sign_test",
+    srcs = ["sign_external_test.go"],
+    deps = [":sign"],
+)

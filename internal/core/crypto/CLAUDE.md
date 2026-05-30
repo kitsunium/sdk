@@ -27,15 +27,19 @@ Code range: `0.2.4.*` (ADR 0013).
 | `seal.go`      | `Seal` / `Open` dispatch + the frozen box `Version` byte |
 | `hasher.go`    | `Hasher` interface (`Algorithm` / `New`) — the **non-authenticated** fingerprint port |
 | `hash_registry.go` | second `snapshot.Value`-backed registry mapping an `Algorithm` to a `Hasher`: `RegisterHasher` / `LookupHasher` / `AvailableHashers` + `Sum` / `SumHex` / `NewHash` dispatch |
+| `signer.go`    | `Signer` interface (`Algorithm` / `GenerateKey` / `Sign` / `Verify`) — the **digital-signature** port (public-key authenticity) |
+| `signer_registry.go` | third `snapshot.Value`-backed registry mapping an `Algorithm` to a `Signer`: `RegisterSigner` / `LookupSigner` / `AvailableSigners` + `GenerateKey` / `Sign` / `Verify` dispatch |
 | `codes.go`     | `Code*` constants — range 0.2.4.\* |
-| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6) |
+| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9) |
 
-Two **independent** registries live here: the **AEAD** registry (`registry.go`,
-authenticated encryption — keyed, secret) and the **Hasher** registry
-(`hash_registry.go`, public fingerprints/content IDs — unkeyed, public). They
-never mix: a digest is public and `Sum` is non-oracle-irrelevant (no secret),
-whereas `Open` is non-oracle by construction. `pkg/v1/hash` re-exports the
-Hasher surface; `pkg/v1/crypto` re-exports the AEAD surface.
+Three **independent** registries live here: the **AEAD** registry (`registry.go`,
+authenticated encryption — keyed, secret), the **Hasher** registry
+(`hash_registry.go`, public fingerprints/content IDs — unkeyed, public), and the
+**Signer** registry (`signer_registry.go`, public-key signatures — keypair,
+public verification). They never mix: a digest is public and carries no secret,
+`Open` is non-oracle by construction, and `Verify` returns a plain bool (invalid
+is `(false, nil)`, never an oracle). `pkg/v1/{hash,crypto,sign}` re-export the
+three surfaces respectively.
 
 ## Wire format
 
