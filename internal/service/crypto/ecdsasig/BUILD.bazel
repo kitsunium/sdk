@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "ecdsasig",
+    srcs = ["ecdsasig.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/ecdsasig",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ecdsasig",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "ecdsasig_test",
+    srcs = [
+        "ecdsasig_external_test.go",
+        "ecdsasig_internal_test.go",
+    ],
+    embed = [":ecdsasig"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)

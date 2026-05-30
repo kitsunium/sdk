@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "pbkdf2pw",
+    srcs = ["pbkdf2pw.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/pbkdf2pw",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":pbkdf2pw",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "pbkdf2pw_test",
+    srcs = [
+        "pbkdf2pw_external_test.go",
+        "pbkdf2pw_internal_test.go",
+    ],
+    embed = [":pbkdf2pw"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)

@@ -41,4 +41,62 @@ var (
 	EntropyFailed = errs.Define(CodeEntropyFailed, "ENTROPY_FAILED",
 		"Could not gather entropy for encryption",
 		"core/crypto.Seal: crypto/rand.Read failed while generating a nonce")
+
+	// UnknownHashAlgorithm is returned by Sum/SumHex when no Hasher is
+	// registered under the requested Algorithm — typically a missing blank-import.
+	UnknownHashAlgorithm = errs.Define(CodeUnknownHashAlgorithm, "UNKNOWN_HASH_ALGORITHM",
+		"No hasher is registered under that algorithm",
+		"core/crypto.Sum: hash algorithm absent from registry; blank-import the hasher's package to register it")
+
+	// UnknownSignatureAlgorithm is returned by Sign/Verify/GenerateKey when no
+	// Signer is registered under the requested Algorithm — usually a missing
+	// blank-import of the scheme's package.
+	UnknownSignatureAlgorithm = errs.Define(CodeUnknownSignatureAlgorithm, "UNKNOWN_SIGNATURE_ALGORITHM",
+		"No signer is registered under that algorithm",
+		"core/crypto.Sign: signature algorithm absent from registry; blank-import the signer's package to register it")
+
+	// SigningFailed is returned by Sign when the supplied private key is not
+	// well-formed for the scheme (e.g. the wrong length).
+	SigningFailed = errs.Define(CodeSigningFailed, "SIGNING_FAILED",
+		"Signing key is malformed",
+		"core/crypto.Sign: private key is not valid for the scheme (wrong length or encoding)",
+		errs.WithExitCode(exitDataErr))
+
+	// KeyGenerationFailed wraps a crypto/rand failure while generating a signing
+	// keypair; it signals a host entropy fault rather than a caller error.
+	KeyGenerationFailed = errs.Define(CodeKeyGenerationFailed, "KEY_GENERATION_FAILED",
+		"Could not gather entropy for key generation",
+		"core/crypto.GenerateKey: crypto/rand failed while generating a signing keypair")
+
+	// UnknownKDFAlgorithm is returned by Subkey when no Deriver is registered
+	// under the requested Algorithm — usually a missing blank-import.
+	UnknownKDFAlgorithm = errs.Define(CodeUnknownKDFAlgorithm, "UNKNOWN_KDF_ALGORITHM",
+		"No key-derivation function is registered under that algorithm",
+		"core/crypto.Subkey: KDF algorithm absent from registry; blank-import the deriver's package to register it")
+
+	// DerivationFailed is returned by Subkey when the requested length exceeds
+	// the scheme's maximum output (e.g. HKDF's 255*HashLen ceiling).
+	DerivationFailed = errs.Define(CodeDerivationFailed, "DERIVATION_FAILED",
+		"Requested derived-key length is too large",
+		"core/crypto.Subkey: requested length exceeds the scheme's maximum output",
+		errs.WithExitCode(exitDataErr))
+
+	// UnknownPasswordAlgorithm is returned by HashPassword/VerifyPassword when no
+	// PasswordHasher is registered under the requested Algorithm or PHC id —
+	// usually a missing blank-import.
+	UnknownPasswordAlgorithm = errs.Define(CodeUnknownPasswordAlgorithm, "UNKNOWN_PASSWORD_ALGORITHM",
+		"No password hasher is registered under that algorithm",
+		"core/crypto.VerifyPassword: password scheme absent from registry; blank-import the hasher's package to register it")
+
+	// PasswordHashFailed wraps a crypto/rand failure while generating a password
+	// salt; it signals a host entropy fault rather than a caller error.
+	PasswordHashFailed = errs.Define(CodePasswordHashFailed, "PASSWORD_HASH_FAILED",
+		"Could not gather entropy for password hashing",
+		"core/crypto.HashPassword: crypto/rand failed while generating a salt")
+
+	// InvalidPasswordHash is returned by VerifyPassword when the stored PHC
+	// string cannot be parsed — server-side data corruption, never a mismatch.
+	InvalidPasswordHash = errs.Define(CodeInvalidPasswordHash, "INVALID_PASSWORD_HASH",
+		"Stored password hash is malformed",
+		"core/crypto.VerifyPassword: stored PHC string is not well-formed for its scheme")
 )

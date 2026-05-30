@@ -43,7 +43,7 @@ A box is \[1\-byte version\]\[1\-byte algorithm\-id\]\[nonce\]\[ciphertext || ta
 - [func SealAs\(a Algorithm, k Key, plaintext, aad \[\]byte\) \(box \[\]byte, err error\)](<#SealAs>)
 - [type Algorithm](<#Algorithm>)
 - [type Key](<#Key>)
-  - [func NewKey\(raw \[\]byte\) \(Key, error\)](<#NewKey>)
+  - [func NewKey\(raw \[\]byte\) \(key Key, err error\)](<#NewKey>)
 
 
 ## Constants
@@ -51,11 +51,11 @@ A box is \[1\-byte version\]\[1\-byte algorithm\-id\]\[nonce\]\[ciphertext || ta
 <a name="KeyLen"></a>KeyLen is the required symmetric key length in bytes \(256\-bit\).
 
 ```go
-const KeyLen = corecrypto.KeyLen
+const KeyLen int = corecrypto.KeyLen
 ```
 
 <a name="Open"></a>
-## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L97>)
+## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L105>)
 
 ```go
 func Open(k Key, box, aad []byte) (plaintext []byte, err error)
@@ -64,7 +64,7 @@ func Open(k Key, box, aad []byte) (plaintext []byte, err error)
 Open decrypts a box produced by Seal/SealAs under k, verifying aad, and returns the plaintext. The algorithm is read from the box — the caller never names it. Any failure returns the single non\-oracle DecryptionFailed.
 
 <a name="Seal"></a>
-## func [Seal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L82>)
+## func [Seal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L90>)
 
 ```go
 func Seal(k Key, plaintext, aad []byte) (box []byte, err error)
@@ -73,7 +73,7 @@ func Seal(k Key, plaintext, aad []byte) (box []byte, err error)
 Seal encrypts plaintext under k using the default algorithm \(AES\-256\-GCM\), binding aad, and returns a self\-describing box. The nonce is generated and embedded for you. Pass nil aad when unused.
 
 <a name="SealAs"></a>
-## func [SealAs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L89>)
+## func [SealAs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L97>)
 
 ```go
 func SealAs(a Algorithm, k Key, plaintext, aad []byte) (box []byte, err error)
@@ -82,7 +82,7 @@ func SealAs(a Algorithm, k Key, plaintext, aad []byte) (box []byte, err error)
 SealAs is Seal with an explicit algorithm — e.g. a scheme activated by its own blank import. An unregistered algorithm returns UnknownAlgorithm.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L66>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L74>)
 
 Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs.
 
@@ -96,8 +96,19 @@ type Algorithm = corecrypto.Algorithm
 const AESGCM Algorithm = "aes-256-gcm"
 ```
 
+<a name="XChaCha20Poly1305"></a>XChaCha20Poly1305 is the 192\-bit\-nonce AEAD, preferred for high\-volume random\-nonce workloads. Pass it to SealAs after a blank import of third\-party/x\-crypto/xchacha \(which alone pulls golang.org/x/crypto\):
+
+```
+import _ "github.com/kitsunium/sdk/third-party/x-crypto/xchacha"
+box, _ := crypto.SealAs(crypto.XChaCha20Poly1305, k, pt, aad)
+```
+
+```go
+const XChaCha20Poly1305 Algorithm = "xchacha20poly1305"
+```
+
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L70>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L78>)
 
 Key is an opaque, redacting 256\-bit symmetric key. Build one with NewKey; its String output is always "\<redacted\>".
 
@@ -106,10 +117,10 @@ type Key = corecrypto.Key
 ```
 
 <a name="NewKey"></a>
-### func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L74>)
+### func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L82>)
 
 ```go
-func NewKey(raw []byte) (Key, error)
+func NewKey(raw []byte) (key Key, err error)
 ```
 
 NewKey builds a Key from raw, which must be exactly KeyLen \(32\) bytes. A wrong length returns InvalidKey; the bytes are copied defensively.
