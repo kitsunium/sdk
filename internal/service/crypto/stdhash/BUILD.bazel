@@ -6,11 +6,13 @@ go_library(
     name = "stdhash",
     srcs = [
         "crc32c_hasher.go",
+        "digest_writer.go",
         "fnv_hasher.go",
         "sha256_hasher.go",
         "sha3_hasher.go",
         "sha512_hasher.go",
         "stdhash.go",
+        "verifying_reader.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/crypto/stdhash",
     visibility = [
@@ -33,11 +35,17 @@ go_test(
     name = "stdhash_test",
     srcs = [
         "crc32c_hasher_internal_test.go",
+        "digest_writer_external_test.go",
         "fnv_hasher_internal_test.go",
         "sha256_hasher_internal_test.go",
         "sha3_hasher_internal_test.go",
         "sha512_hasher_internal_test.go",
+        "verifying_reader_external_test.go",
+        "verifying_reader_internal_test.go",
     ],
     embed = [":stdhash"],
-    deps = ["//internal/core/crypto"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
 )

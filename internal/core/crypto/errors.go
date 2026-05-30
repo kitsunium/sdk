@@ -125,4 +125,12 @@ var (
 		"The authenticated stream was truncated before its final chunk",
 		"core/crypto.OpenStream: reader hit EOF before decrypting the final-flag chunk",
 		errs.WithExitCode(exitDataErr))
+
+	// DigestMismatch is returned by a VerifyingReader on its final (EOF) read when
+	// the computed digest does not match the expected value. The digest is public,
+	// so the comparison is non-oracle and surfaces only at the terminal read.
+	DigestMismatch = errs.Define(CodeDigestMismatch, "DIGEST_MISMATCH",
+		"Stream digest does not match the expected value",
+		"service/crypto/stdhash.VerifyingReader: computed digest differs from the expected hex at EOF",
+		errs.WithExitCode(exitDataErr))
 )

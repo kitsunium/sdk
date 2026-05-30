@@ -59,9 +59,9 @@ func Test_newCWSink(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		s := newCWSink((&fakePutter{}).putEvents, c.maxBatchEvents, 0, c.onError)
-		//: the constructor must always yield a usable sink with a positive cap.
-		if s == nil || s.maxBatchEvents <= 0 || s.onError == nil {
-			t.Errorf("%s: newCWSink gave cap=%d onError-nil=%v", c.name, s.maxBatchEvents, s.onError == nil)
+		//: the constructor must always yield a usable sink with its batcher + hook wired.
+		if s == nil || s.batch == nil || s.deliver == nil || s.onError == nil {
+			t.Errorf("%s: newCWSink gave batch-nil=%v deliver-nil=%v onError-nil=%v", c.name, s.batch == nil, s.deliver == nil, s.onError == nil)
 		}
 	}
 	for _, c := range tests {
@@ -173,41 +173,7 @@ func Test_cwSink_Flush(t *testing.T) {
 	}
 }
 
-func Test_cwSink_flushOnce(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name        string
-		lines       int
-		wantBatches int
-	}
-	tests := []tc{
-		{"empty buffer delivers nothing", 0, 0},
-		{"buffered events deliver once", 1, 1},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		fp := &fakePutter{}
-		s := newCWSink(fp.putEvents, 0, 0, nil)
-		for range c.lines {
-			writeLine(t, s, "x\n")
-		}
-		//: a direct flushOnce delivers one batch (or none when empty).
-		if err := s.flushOnce(t.Context()); err != nil {
-			t.Fatalf("%s: flushOnce: %v", c.name, err)
-		}
-		if fp.count() != c.wantBatches {
-			t.Errorf("%s: batches=%d want %d", c.name, fp.count(), c.wantBatches)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-func Test_cwSink_flushSortsByTimestamp(t *testing.T) {
+func Test_cwSink_deliverBatch(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
@@ -232,6 +198,61 @@ func Test_cwSink_flushSortsByTimestamp(t *testing.T) {
 		batch := fp.batches[0]
 		if !slices.IsSortedFunc(batch, func(a, b cwEvent) int { return a.ts.Compare(b.ts) }) {
 			t.Errorf("delivered batch not chronological: %v", batch)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func Test_cwSink_deliverBatchSortRace(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"concurrent writers + ticker keep every delivered batch chronological"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		fp := &fakePutter{}
+		//: a fast ticker races the producers so batches flush concurrently.
+		s := newCWSink(fp.putEvents, 4, time.Millisecond, nil)
+		base := time.Unix(1700000000, 0)
+		ctx := t.Context()
+		// produce writes 50 descending-timestamp events for one producer; taking
+		// off as a parameter keeps the loop var off the closure's escape path.
+		produce := func(off int) {
+			for i := range 50 {
+				ts := base.Add(time.Duration(off*100-i) * time.Millisecond)
+				//: out-of-order arrival times exercise the closure's reorder.
+				if _, err := s.Write(ctx, corelogger.RecordEvent{Time: ts}, []byte("m\n")); err != nil {
+					t.Errorf("Write: %v", err)
+				}
+			}
+		}
+		// Producer goroutines append out-of-order events concurrently; each
+		// exits after 50 writes and wg.Wait joins them before Close, so none
+		// outlive the test.
+		var wg sync.WaitGroup
+		for p := range 6 {
+			wg.Go(func() { produce(p) })
+		}
+		wg.Wait()
+		//: Close drains the tail and joins the ticker goroutine.
+		if err := s.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		//: every delivered batch must be chronological — the closure sort holds
+		//: even under concurrent Add + ticker flushing.
+		fp.mu.Lock()
+		defer fp.mu.Unlock()
+		for i, b := range fp.batches {
+			//: each delivered batch must be ascending by timestamp.
+			if !slices.IsSortedFunc(b, func(a, c cwEvent) int { return a.ts.Compare(c.ts) }) {
+				t.Errorf("batch %d not chronological: %v", i, b)
+			}
 		}
 	}
 	for _, c := range tests {
@@ -282,14 +303,22 @@ func Test_cwSink_onError(t *testing.T) {
 	runCase := func(t *testing.T, _ tc) {
 		t.Helper()
 		boom := errors.New("put boom")
+		var mu sync.Mutex
 		var gotErr error
 		//: cap=1 makes the first Write cross the cap and deliver inline.
 		fp := &fakePutter{err: boom}
-		s := newCWSink(fp.putEvents, 1, 0, func(e error) { gotErr = e })
+		s := newCWSink(fp.putEvents, 1, 0, func(e error) {
+			mu.Lock()
+			gotErr = e
+			mu.Unlock()
+		})
 		writeLine(t, s, "x\n")
 		//: the background routing must have observed the delivery failure.
-		if !errors.Is(gotErr, boom) {
-			t.Errorf("onError saw %v want %v", gotErr, boom)
+		mu.Lock()
+		seen := gotErr
+		mu.Unlock()
+		if !errors.Is(seen, boom) {
+			t.Errorf("onError saw %v want %v", seen, boom)
 		}
 	}
 	for _, c := range tests {
@@ -335,7 +364,7 @@ func Test_cwSink_flushError(t *testing.T) {
 	}
 }
 
-func Test_cwSink_loop(t *testing.T) {
+func Test_cwSink_ticker(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string

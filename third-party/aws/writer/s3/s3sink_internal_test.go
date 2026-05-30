@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -47,6 +48,32 @@ func writeLine(t *testing.T, s *s3Sink, line string) {
 	}
 }
 
+func Test_payloadBytes(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		in   []byte
+		want int64
+	}
+	tests := []tc{
+		{"empty payload weighs zero", nil, 0},
+		{"weight equals byte length", []byte("kitsunium"), 9},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: payloadBytes is the batcher WeightOf seam — it must report len in bytes.
+		if got := payloadBytes(c.in); got != c.want {
+			t.Errorf("%s: payloadBytes=%d want %d", c.name, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func Test_newS3Sink(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -61,9 +88,9 @@ func Test_newS3Sink(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		s := newS3Sink((&fakeUploader{}).upload, "p/", c.maxBatchBytes, 0, c.onError)
-		//: the constructor must always yield a non-nil sink with a usable buffer cap.
-		if s == nil || s.maxBatchBytes <= 0 || s.onError == nil {
-			t.Errorf("%s: newS3Sink gave maxBatchBytes=%d onError-nil=%v", c.name, s.maxBatchBytes, s.onError == nil)
+		//: the constructor must always yield a usable sink with its batcher + hook wired.
+		if s == nil || s.batch == nil || s.up == nil || s.onError == nil {
+			t.Errorf("%s: newS3Sink gave batch-nil=%v up-nil=%v onError-nil=%v", c.name, s.batch == nil, s.up == nil, s.onError == nil)
 		}
 	}
 	for _, c := range tests {
@@ -185,49 +212,23 @@ func Test_s3Sink_onError(t *testing.T) {
 	runCase := func(t *testing.T, _ tc) {
 		t.Helper()
 		boom := errors.New("upload boom")
+		var mu sync.Mutex
 		var gotErr error
 		//: maxBatchBytes=1 makes the first Write cross the cap and flush inline;
 		//: the failed background upload must reach onError (not the caller).
 		fp := &fakeUploader{err: boom}
-		s := newS3Sink(fp.upload, "", 1, 0, func(e error) { gotErr = e })
+		s := newS3Sink(fp.upload, "", 1, 0, func(e error) {
+			mu.Lock()
+			gotErr = e
+			mu.Unlock()
+		})
 		writeLine(t, s, "x\n")
 		//: the background routing must have observed the upload failure.
-		if !errors.Is(gotErr, boom) {
-			t.Errorf("onError saw %v want %v", gotErr, boom)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-func Test_s3Sink_flushOnce(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name     string
-		lines    []string
-		wantPuts int
-	}
-	tests := []tc{
-		{"empty buffer uploads nothing", nil, 0},
-		{"buffered records upload once", []string{"a\n"}, 1},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		fp := &fakeUploader{}
-		s := newS3Sink(fp.upload, "k/", 0, 0, nil)
-		for _, l := range c.lines {
-			writeLine(t, s, l)
-		}
-		//: a direct flushOnce uploads exactly one object (or none when empty).
-		if err := s.flushOnce(t.Context()); err != nil {
-			t.Fatalf("%s: flushOnce: %v", c.name, err)
-		}
-		if fp.count() != c.wantPuts {
-			t.Errorf("%s: puts=%d want %d", c.name, fp.count(), c.wantPuts)
+		mu.Lock()
+		seen := gotErr
+		mu.Unlock()
+		if !errors.Is(seen, boom) {
+			t.Errorf("onError saw %v want %v", seen, boom)
 		}
 	}
 	for _, c := range tests {
@@ -274,7 +275,51 @@ func Test_s3Sink_flushError(t *testing.T) {
 	}
 }
 
-func Test_s3Sink_loop(t *testing.T) {
+func Test_s3Sink_deliver(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		prefix   string
+		payloads []string
+		wantBody string
+	}
+	tests := []tc{
+		{"payloads concatenate into one object", "logs/", []string{"a\n", "b\n", "c\n"}, "a\nb\nc\n"},
+		{"single payload is delivered verbatim", "", []string{"solo\n"}, "solo\n"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		fp := &fakeUploader{}
+		s := newS3Sink(fp.upload, c.prefix, 0, 0, nil)
+		items := make([][]byte, 0, len(c.payloads))
+		for _, p := range c.payloads {
+			items = append(items, []byte(p))
+		}
+		//: deliver concatenates the batch and uploads exactly one object.
+		if err := s.deliver(t.Context(), items); err != nil {
+			t.Fatalf("%s: deliver: %v", c.name, err)
+		}
+		if fp.count() != 1 {
+			t.Fatalf("%s: puts=%d want 1", c.name, fp.count())
+		}
+		//: the uploaded body must be the in-order concatenation.
+		if string(fp.bodies[0]) != c.wantBody {
+			t.Errorf("%s: body=%q want %q", c.name, string(fp.bodies[0]), c.wantBody)
+		}
+		//: the generated key must carry the configured prefix and the .log suffix.
+		if !strings.HasPrefix(fp.keys[0], c.prefix) || !strings.HasSuffix(fp.keys[0], ".log") {
+			t.Errorf("%s: key=%q want prefix %q and .log suffix", c.name, fp.keys[0], c.prefix)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func Test_s3Sink_ticker(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string

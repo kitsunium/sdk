@@ -18,6 +18,7 @@ go_library(
     deps = [
         "//internal/core/logger",
         "//internal/core/writer",
+        "//internal/kernel/batcher",
         "//internal/kernel/errs",
         "//internal/service/logger/middleware/async",
         "//internal/service/writer/levelgate",

@@ -43,15 +43,36 @@
 // version and per-algorithm id are frozen post-v1.0.0, so a box sealed today
 // opens tomorrow. Open reads the id to pick the algorithm — the caller never
 // names it.
+//
+// # Streaming large payloads
+//
+// [Seal] is whole-buffer: it holds the full plaintext and box in memory. For
+// payloads too large to buffer, [SealStream] / [OpenStream] wrap an io.Writer /
+// io.Reader and process the data in fixed 64 KiB authenticated chunks under a
+// disjoint, frozen wire format (stream version 0x02). The chunked construction
+// (a random per-stream salt + a counter nonce + a final-chunk flag) is
+// truncation-resistant and never surfaces a chunk's plaintext before it
+// authenticates. The streaming frame is bespoke and SDK-owned (not age/libsodium
+// interop) and stays stdlib-only, so it preserves the dep-light invariant.
 package crypto
 
 import (
+	"io"
+
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 
 	// Activates the default AES-256-GCM scheme. Stdlib-only, so importing
 	// pkg/v1/crypto pulls zero non-stdlib dependencies.
 	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
+
+	// Activates the stdlib streaming AES-256-GCM scheme behind SealStream /
+	// OpenStream. Stdlib-only, so it preserves the dep-light invariant.
+	_ "github.com/kitsunium/sdk/internal/service/crypto/streamaead"
 )
+
+// streamAlgorithm is the frozen algorithm key of the stdlib streaming scheme
+// SealStream / OpenStream dispatch to (activated by the blank import above).
+const streamAlgorithm Algorithm = "aes-256-gcm-stream"
 
 // KeyLen is the required symmetric key length in bytes (256-bit).
 const KeyLen int = corecrypto.KeyLen
@@ -105,4 +126,23 @@ func SealAs(a Algorithm, k Key, plaintext, aad []byte) (box []byte, err error) {
 func Open(k Key, box, aad []byte) (plaintext []byte, err error) {
 	//: the core dispatcher sniffs the box's algorithm id and verifies.
 	return corecrypto.Open(k, box, aad)
+}
+
+// SealStream wraps dst so writes are sealed under k with aad in fixed 64 KiB
+// authenticated chunks. The returned io.WriteCloser buffers and seals chunks as
+// they fill; Close writes the final authenticated chunk and MUST be called to
+// produce a valid stream. Pass nil aad when unused.
+func SealStream(dst io.Writer, k Key, aad []byte) (sealed io.WriteCloser, err error) {
+	//: dispatch to the stdlib streaming scheme via the core registry.
+	return corecrypto.SealStream(streamAlgorithm, k, dst, aad)
+}
+
+// OpenStream wraps src so reads are opened under k with aad, decrypting the
+// chunked stream produced by SealStream. The returned io.Reader never surfaces a
+// chunk's plaintext before it authenticates, returns EOF only after the final
+// chunk verifies, and surfaces a truncated stream as StreamTruncated. Pass nil
+// aad when unused.
+func OpenStream(src io.Reader, k Key, aad []byte) (opened io.Reader, err error) {
+	//: dispatch to the stdlib streaming scheme via the core registry.
+	return corecrypto.OpenStream(streamAlgorithm, k, src, aad)
 }

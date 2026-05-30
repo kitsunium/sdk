@@ -78,3 +78,8 @@ const CodeAgreementFailed errs.Code = 0x00_02_04_11 // 0.2.4.17
 // CodeStreamTruncated identifies a streaming Open that hit EOF before the
 // final-flag chunk — the stream was cut short, not legitimately ended.
 const CodeStreamTruncated errs.Code = 0x00_02_04_12 // 0.2.4.18
+
+// CodeDigestMismatch identifies a VerifyingReader whose computed digest did not
+// match the expected hex at EOF. The digest is public, so the mismatch is
+// non-oracle — it surfaces only on the terminal read, never mid-stream.
+const CodeDigestMismatch errs.Code = 0x00_02_04_14 // 0.2.4.20

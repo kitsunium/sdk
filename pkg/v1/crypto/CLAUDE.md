@@ -15,9 +15,22 @@ rendered to `README.md` by gomarkdoc — edit the doc comment, not the README.
 
 ```
 crypto.go  — Key / Algorithm aliases, KeyLen + AESGCM consts, NewKey,
-             Seal / SealAs / Open; blank-imports the aesgcm activator
+             Seal / SealAs / Open + SealStream / OpenStream; blank-imports the
+             aesgcm + streamaead activators
 README.md  — generated from the package doc comment (make docs-readme)
 ```
+
+## Streaming (ADR 0014 §D2)
+
+`SealStream(dst, key, aad)` / `OpenStream(src, key, aad)` wrap an `io.Writer` /
+`io.Reader` and process the payload in fixed 64 KiB authenticated chunks under a
+disjoint, frozen wire format (stream version `0x02`, the box is `0x01`). The
+construction is truncation-resistant (final-chunk flag in the nonce + a random
+per-stream salt) and never surfaces a chunk's plaintext before it authenticates.
+The streaming scheme (`internal/service/crypto/streamaead`) is **stdlib-only**
+(AES-256-GCM + HKDF), so it preserves the dep-light invariant — no x/crypto.
+`Close()` on the writer is mandatory: it seals the final chunk. The whole-buffer
+`Open` rejects a `0x02` stream and `OpenStream` rejects a `0x01` box.
 
 ## Conventions
 
