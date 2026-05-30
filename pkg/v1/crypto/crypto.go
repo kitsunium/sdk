@@ -59,6 +59,14 @@ const KeyLen int = corecrypto.KeyLen
 // AESGCM is the default algorithm: AES-256-GCM. Active out of the box.
 const AESGCM Algorithm = "aes-256-gcm"
 
+// XChaCha20Poly1305 is the 192-bit-nonce AEAD, preferred for high-volume
+// random-nonce workloads. Pass it to SealAs after a blank import of
+// third-party/x-crypto/xchacha (which alone pulls golang.org/x/crypto):
+//
+//	import _ "github.com/kitsunium/sdk/third-party/x-crypto/xchacha"
+//	box, _ := crypto.SealAs(crypto.XChaCha20Poly1305, k, pt, aad)
+const XChaCha20Poly1305 Algorithm = "xchacha20poly1305"
+
 // defaultAlgorithm is the scheme Seal uses when the caller does not pick one.
 const defaultAlgorithm Algorithm = AESGCM
 

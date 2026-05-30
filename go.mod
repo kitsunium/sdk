@@ -15,7 +15,10 @@ require (
 	github.com/kitsunium/sdk/internal/service v0.0.0
 )
 
-require github.com/aws/smithy-go v1.25.1
+require (
+	github.com/aws/smithy-go v1.25.1
+	golang.org/x/crypto v0.52.0
+)
 
 require (
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
@@ -26,6 +29,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.17 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.24 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.24 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 )
 
 replace github.com/kitsunium/sdk/internal/kernel => ./internal/kernel

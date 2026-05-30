@@ -47,4 +47,5 @@ use_repo(
     "com_github_pelletier_go_toml_v2",
     "com_github_vmihailenco_msgpack_v5",
     "in_gopkg_yaml_v3",
+    "org_golang_x_crypto",
 )
