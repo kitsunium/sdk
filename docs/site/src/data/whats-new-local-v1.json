@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T19:03:11.482Z",
+  "generatedAt": "2026-05-30T21:34:15.996Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "sdk",
+      "breaking": false,
+      "summary": "batcher + digest-stream + crypto schemes + rotfile sink (ADR 0014)",
+      "sha": "91070a58d89b8b42462975a97fde99ef95670801",
+      "short": "91070a5",
+      "date": "2026-05-30T21:02:12+02:00"
+    },
     {
       "type": "feat",
       "scope": "core",
@@ -21,15 +30,6 @@
       "sha": "456679a7c4d05eb98afd1cb1a8e7ec577796089f",
       "short": "456679a",
       "date": "2026-05-30T18:46:00+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "crypto",
-      "breaking": false,
-      "summary": "MAC + Agreement + StreamSealer ports (interface-only, core) (ADR 0014)",
-      "sha": "b329a92c591c36192fe2017cca0871cee961f765",
-      "short": "b329a92",
-      "date": "2026-05-30T18:44:23+02:00"
     },
     {
       "type": "fix",
