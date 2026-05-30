@@ -12,6 +12,8 @@ Package logger — range 1.1.0.\* \(ADR 0005 pkg/v1/logger block\).
 
 Package logger — declares pkg/v1/logger's sentinels. Each var's name equals its errs.Define Reason in SCREAMING\_SNAKE form.
 
+Package logger — exposes FromConfig, the capstone of the config\-driven writer subsystem \(ADR 0014 §D5\): it builds a fully wired Logger from a config blob with zero Go glue. The blob is decoded by a codec the CONSUMER already registered \(FromConfig imports only the core/codec dispatch surface, never pkg/v1/codec or any service codec, so a pkg/v1/logger consumer inherits no vendor modules\). Each decoded WriterEntry is resolved against the writer registry; a Factory that implements ConfigDecoder translates its own option map, otherwise a default mapping passes the raw map straight to the factory.
+
 Package logger is the stable v1 public API for SDK logging.
 
 Consumers import this package; internal/\* paths are compile\-blocked outside the SDK repo. Type signatures exported here are frozen after the first v1.0.0 release; breaking changes land in pkg/v2. Security fixes in internal/\* propagate via a minor bump without touching this façade.
@@ -104,9 +106,13 @@ Inspect via the accessors in github.com/kitsunium/sdk/pkg/v1/errs.
 
 Package logger — exposes the Sink port and the multi\-sink helper alongside the encoder\-aware constructor NewWithSink. Together they let consumers replace the default text\-on\-stderr wiring \(NewText / Default\) with arbitrary fan\-out / async / file / syslog topologies — without reaching into internal/\* packages.
 
+Package logger — declares the TopologyConfig DTO consumed by FromConfig. A TopologyConfig is the decoded shape of a logger config file: a global level plus an ordered list of named writer entries. It is a plain data carrier with no behaviour — the construction logic lives in FromConfig.
+
 Package logger — exposes the SDK version to the rest of the logger package. The ldflags pipeline injects the real value at build time; local development runs fall back to the "dev" sentinel.
 
 Package logger — exposes the named, config\-driven writer surface \(ADR 0012\): the WriterName / \*Config aliases, the WriterSpec pair, and NewMulti, which resolves each named writer to a Sink and fans records out to all of them via Multi. Built\-in console \+ file writers activate with a blank import of pkg/v1/logger/writer; s3 / cloudwatch activate with a blank import of the matching third\-party/aws/writer package \(which alone pulls the AWS SDK\).
+
+Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A WriterEntryConfig names a registered writer and carries its raw, codec\- decoded option map; FromConfig hands that map to the writer's Decoder \(or a default mapping\) to obtain a typed writer.Config.
 
 ## Index
 
@@ -140,9 +146,11 @@ Package logger — exposes the named, config\-driven writer surface \(ADR 0012\)
 - [type Encoder](<#Encoder>)
   - [func TextEncoder\(\) Encoder](<#TextEncoder>)
 - [type FileConfig](<#FileConfig>)
+- [type Format](<#Format>)
 - [type Level](<#Level>)
 - [type Logger](<#Logger>)
   - [func Default\(\) \(lg Logger, err error\)](<#Default>)
+  - [func FromConfig\(format Format, raw \[\]byte\) \(lg Logger, err error\)](<#FromConfig>)
   - [func NewMulti\(min Level, specs ...WriterSpec\) \(lg Logger, err error\)](<#NewMulti>)
   - [func NewText\(cfg Config\) \(lg Logger, err error\)](<#NewText>)
   - [func NewWithSink\(cfg SinkConfig\) \(lg Logger, err error\)](<#NewWithSink>)
@@ -154,6 +162,8 @@ Package logger — exposes the named, config\-driven writer surface \(ADR 0012\)
   - [func Multi\(branches ...Sink\) Sink](<#Multi>)
   - [func NewWriterSink\(w io.Writer\) \(sink Sink, err error\)](<#NewWriterSink>)
 - [type SinkConfig](<#SinkConfig>)
+- [type TopologyConfig](<#TopologyConfig>)
+- [type WriterEntryConfig](<#WriterEntryConfig>)
 - [type WriterName](<#WriterName>)
 - [type WriterSpec](<#WriterSpec>)
 
@@ -175,6 +185,12 @@ const (
 
 ```go
 const CodeSinkConfigRequired errs.Code = 0x01_01_00_02 // 1.1.0.2
+```
+
+<a name="CodeTopologyInvalid"></a>CodeTopologyInvalid identifies a FromConfig call whose config blob is malformed, names an unregistered writer, or whose Factory/DecodeConfig rejected its options. The error path is redacted: it names only the writer and the failure kind, never any decoded credential or option value \(ADR 0014\).
+
+```go
+const CodeTopologyInvalid errs.Code = 0x01_01_00_04 // 1.1.0.4
 ```
 
 <a name="CodeWriterRequired"></a>CodeWriterRequired identifies a NewText call with Config.Writer == nil; the v1 façade refuses to default silently to stderr.
@@ -215,6 +231,15 @@ var (
     WriterSpecInvalid = errs.Define(CodeWriterSpecInvalid, "WRITER_SPEC_INVALID",
         "NewMulti requires at least one writer spec",
         "pkg/v1/logger.NewMulti called with no WriterSpec entries; supply at least one named writer")
+
+    // TopologyInvalid is returned by FromConfig when the config blob cannot be
+    // decoded, names a writer no imported package has registered, or a writer's
+    // Factory/DecodeConfig rejected its options. The message is redacted: it
+    // names only the writer and the failure kind, never a decoded credential or
+    // option value (the SECRET GATE of ADR 0014 §D5).
+    TopologyInvalid = errs.Define(CodeTopologyInvalid, "TOPOLOGY_INVALID",
+        "Logger topology config is invalid",
+        "pkg/v1/logger.FromConfig: blob undecodable, unknown writer name, or a writer rejected its options (option values redacted)")
 )
 ```
 
@@ -497,6 +522,15 @@ FileConfig configures the "file" writer \(path \+ optional MinLevel\).
 type FileConfig = corewriter.FileConfig
 ```
 
+<a name="Format"></a>
+## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/fromconfig.go#L20>)
+
+Format is the typed wire\-format identifier accepted by FromConfig. It is a stable alias onto the core codec dispatch surface, so a consumer names a format with the same string values the codec facade exposes.
+
+```go
+type Format = corecodec.Format
+```
+
 <a name="Level"></a>
 ## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L135>)
 
@@ -547,6 +581,17 @@ func Default() (lg Logger, err error)
 ```
 
 Default returns a Logger writing INFO\-and\-above records to os.Stderr. The stderr Writer is supplied explicitly here; NewText itself no longer silently defaults a nil Writer.
+
+<a name="FromConfig"></a>
+### func [FromConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/fromconfig.go#L34>)
+
+```go
+func FromConfig(format Format, raw []byte) (lg Logger, err error)
+```
+
+FromConfig builds a Logger from raw, a config blob in the wire format named by format, decoded by a codec the consumer has already registered \(blank\-import github.com/kitsunium/sdk/pkg/v1/codec or a single service codec to activate one\). It unmarshals raw into a Topology, resolves each WriterEntry against the writer registry — calling the Factory's ConfigDecoder when it implements one, else a default mapping — composes the sinks via Multi, and returns a Logger filtered at the topology's Level.
+
+FromConfig returns TopologyInvalid \(1.1.0.4\) when format is unregistered, the blob is undecodable, the topology has no writers, a writer Name is unknown, or a writer rejects its options. The error is redacted: it names only the writer and the failure kind, never a decoded credential or option value.
 
 <a name="NewMulti"></a>
 ### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L86>)
@@ -685,6 +730,34 @@ type SinkConfig struct {
     Encoder Encoder
     // MinLevel is the minimum severity emitted; zero value is LevelInfo.
     MinLevel Level
+}
+```
+
+<a name="TopologyConfig"></a>
+## type [TopologyConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/topology.go#L13-L18>)
+
+TopologyConfig is the decoded logger configuration: a global Level \(parsed by the same names the level package prints — "debug" / "info" / "warn" / "error", case\-insensitive, empty defaults to info\) and the ordered Writers fanned out to. FromConfig unmarshals a config blob into a TopologyConfig via a consumer\-registered codec, then resolves each entry against the writer registry. The Config role suffix marks it a config DTO \(KTN\-STRUCT\-ROLE\).
+
+```go
+type TopologyConfig struct {
+    // Level is the minimum severity emitted, by name; empty defaults to info.
+    Level string `json:"level" yaml:"level" toml:"level"`
+    // Writers is the ordered set of named writer entries to fan records out to.
+    Writers []WriterEntryConfig `json:"writers" yaml:"writers" toml:"writers"`
+}
+```
+
+<a name="WriterEntryConfig"></a>
+## type [WriterEntryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer_entry.go#L14-L19>)
+
+WriterEntryConfig names one writer in a TopologyConfig and carries its raw option map as decoded from the config blob. Name MUST match a writer registered via a blank\-import; Options is the per\-writer option bag handed to the writer's Decoder \(when it implements one\) or passed straight to the factory's Open otherwise. Option values are never echoed into an error — the SECRET GATE redacts them. The Config role suffix marks it a config DTO \(KTN\-STRUCT\-ROLE\).
+
+```go
+type WriterEntryConfig struct {
+    // Name is the registered writer key ("console" / "file" / "s3" / …).
+    Name string `json:"name" yaml:"name" toml:"name"`
+    // Options is the raw, codec-decoded per-writer option map.
+    Options map[string]any `json:"config" yaml:"config" toml:"config"`
 }
 ```
 

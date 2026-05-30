@@ -311,3 +311,205 @@ func TestNewWriterSink(t *testing.T) {
 		})
 	}
 }
+
+// Test_NewWithSink is the name-matched test for NewWithSink (KTN-TEST-SYNC/
+// COVERAGE). It asserts NewWithSink builds a working Logger from a Sink and
+// rejects a nil Sink with the typed SinkConfigRequired sentinel.
+func Test_NewWithSink(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		nilSink bool
+	}
+
+	tests := []tc{
+		{name: "non-nil sink builds a usable logger", nilSink: false},
+		{name: "nil sink rejected with SinkConfigRequired", nilSink: true},
+	}
+
+	runCase := func(t *testing.T, nilSink bool) {
+		t.Helper()
+		//: the nil-sink arm exercises rejection; the non-nil arm wires a capture
+		//: sink and expects the record to be delivered (the two are mutually
+		//: exclusive, so a single nilSink flag fully selects the expectation).
+		if nilSink {
+			lg, err := logger.NewWithSink(logger.SinkConfig{Sink: nil, MinLevel: logger.LevelInfo})
+			if lg != nil {
+				t.Errorf("expected nil logger, got %v", lg)
+			}
+			//: rejection must surface the typed SinkConfigRequired sentinel.
+			if !errors.Is(err, logger.SinkConfigRequired) {
+				t.Errorf("err=%v want SinkConfigRequired", err)
+			}
+			return
+		}
+		capture := &bufSink{}
+		lg, err := logger.NewWithSink(logger.SinkConfig{Sink: capture, MinLevel: logger.LevelInfo})
+		if err != nil || lg == nil {
+			t.Fatalf("NewWithSink=(%v,%v) want (logger,nil)", lg, err)
+		}
+		logger.Info(t.Context(), lg, "hello")
+		//: a successfully built logger must deliver records to its sink.
+		if !strings.Contains(capture.Snapshot(), "hello") {
+			t.Errorf("sink missing payload: %q", capture.Snapshot())
+		}
+	}
+
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.nilSink)
+		})
+	}
+}
+
+// Test_Multi is the name-matched test for Multi (KTN-TEST-SYNC/COVERAGE). It
+// asserts Multi composes a fan-out Sink that broadcasts every record to all
+// branches.
+func Test_Multi(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		branches int
+	}
+
+	tests := []tc{
+		{name: "single branch receives", branches: 1},
+		{name: "three branches all receive", branches: 3},
+	}
+
+	runCase := func(t *testing.T, branches int) {
+		t.Helper()
+		sinks := make([]logger.Sink, branches)
+		caps := make([]*bufSink, branches)
+		for i := range sinks {
+			cs := &bufSink{}
+			caps[i] = cs
+			sinks[i] = cs
+		}
+		fanout := logger.Multi(sinks...)
+		//: Multi must return a non-nil composed Sink.
+		if fanout == nil {
+			t.Fatalf("Multi returned nil")
+		}
+		lg, err := logger.NewWithSink(logger.SinkConfig{Sink: fanout})
+		if err != nil {
+			t.Fatalf("NewWithSink: %v", err)
+		}
+		logger.Info(t.Context(), lg, "fan")
+		//: every branch must observe the broadcast record.
+		for i, cs := range caps {
+			if !strings.Contains(cs.Snapshot(), "fan") {
+				t.Errorf("branch %d received nothing", i)
+			}
+		}
+	}
+
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.branches)
+		})
+	}
+}
+
+// Test_ConsoleStderr is the name-matched test for ConsoleStderr (KTN-TEST-SYNC/
+// COVERAGE). It asserts ConsoleStderr returns a non-nil, usable Sink.
+func Test_ConsoleStderr(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		wantNil bool
+	}
+
+	tests := []tc{
+		{name: "ConsoleStderr returns a non-nil sink", wantNil: false},
+	}
+
+	runCase := func(t *testing.T, wantNil bool) {
+		t.Helper()
+		sink := logger.ConsoleStderr()
+		//: the convenience constructor must always yield a usable Sink.
+		if (sink == nil) != wantNil {
+			t.Errorf("ConsoleStderr nil=%v want %v", sink == nil, wantNil)
+		}
+	}
+
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.wantNil)
+		})
+	}
+}
+
+// Test_ConsoleStdout is the name-matched test for ConsoleStdout (KTN-TEST-SYNC/
+// COVERAGE). It asserts ConsoleStdout returns a non-nil, usable Sink.
+func Test_ConsoleStdout(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		wantNil bool
+	}
+
+	tests := []tc{
+		{name: "ConsoleStdout returns a non-nil sink", wantNil: false},
+	}
+
+	runCase := func(t *testing.T, wantNil bool) {
+		t.Helper()
+		sink := logger.ConsoleStdout()
+		//: the convenience constructor must always yield a usable Sink.
+		if (sink == nil) != wantNil {
+			t.Errorf("ConsoleStdout nil=%v want %v", sink == nil, wantNil)
+		}
+	}
+
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.wantNil)
+		})
+	}
+}
+
+// Test_TextEncoder is the name-matched test for TextEncoder (KTN-TEST-SYNC/
+// COVERAGE). It asserts TextEncoder returns a non-nil Encoder that NewWithSink
+// accepts and that delivers records.
+func Test_TextEncoder(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		msg  string
+	}
+
+	tests := []tc{
+		{name: "TextEncoder-backed logger delivers records", msg: "encoded"},
+	}
+
+	runCase := func(t *testing.T, msg string) {
+		t.Helper()
+		enc := logger.TextEncoder()
+		//: the encoder constructor must always yield a non-nil Encoder.
+		if enc == nil {
+			t.Fatalf("TextEncoder returned nil")
+		}
+		sink := &bufSink{}
+		lg, err := logger.NewWithSink(logger.SinkConfig{Sink: sink, Encoder: enc})
+		if err != nil || lg == nil {
+			t.Fatalf("NewWithSink with TextEncoder=(%v,%v) want (logger,nil)", lg, err)
+		}
+		logger.Info(t.Context(), lg, msg)
+		//: a record emitted through the text encoder must reach the sink.
+		if !strings.Contains(sink.Snapshot(), msg) {
+			t.Errorf("TextEncoder-backed logger missing %q: %q", msg, sink.Snapshot())
+		}
+	}
+
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.msg)
+		})
+	}
+}

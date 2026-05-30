@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T21:40:27.353Z",
+  "generatedAt": "2026-05-30T22:50:21.628Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "tee middleware — fan-out with a dead-letter spill seam (ADR 0014)",
+      "sha": "8b1d12be9364b96a71662532a5ba1e1c26380482",
+      "short": "8b1d12b",
+      "date": "2026-05-30T23:39:55+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -21,15 +30,6 @@
       "sha": "1858b59034b1d6251fb3bd80b92735bfe7696b67",
       "short": "1858b59",
       "date": "2026-05-30T23:33:23+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "sdk",
-      "breaking": false,
-      "summary": "batcher + digest-stream + crypto schemes + rotfile sink (ADR 0014)",
-      "sha": "91070a58d89b8b42462975a97fde99ef95670801",
-      "short": "91070a5",
-      "date": "2026-05-30T21:02:12+02:00"
     },
     {
       "type": "fix",
