@@ -1,0 +1,34 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "argon2id",
+    srcs = ["argon2id.go"],
+    importpath = "github.com/kitsunium/sdk/third-party/x-crypto/argon2id",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+        "@org_golang_x_crypto//argon2",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":argon2id",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "argon2id_test",
+    srcs = [
+        "argon2id_external_test.go",
+        "argon2id_internal_test.go",
+    ],
+    embed = [":argon2id"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)

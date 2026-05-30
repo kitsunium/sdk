@@ -140,7 +140,8 @@ sentinels are enforced for Public-is-literal / reason / uniqueness from day one.
 - Password storage (PHC strings + upgrade-on-verify; `PasswordHasher` port +
   fifth registry in `core/crypto`, stdlib PBKDF2-SHA256 in
   `service/crypto/pbkdf2pw`, facade `pkg/v1/password`). — **PBKDF2 shipped**;
-  memory-hard argon2id is the opt-in `third-party/x-crypto` follow-on.
+  memory-hard **argon2id shipped** as the opt-in `third-party/x-crypto/argon2id`
+  scheme (same precedent as xchacha: not blank-imported by `pkg/v1`).
 - KDF (HKDF `Subkey` for key separation; `Deriver` port + fourth registry in
   `core/crypto`, stdlib HKDF-SHA256 in `service/crypto/hkdfsha256`, facade
   `pkg/v1/kdf`). — **HKDF shipped**; argon2id password-stretching is its own port.

@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T10:43:09.345Z",
+  "generatedAt": "2026-05-30T10:56:33.300Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "add password-storage domain (PBKDF2-SHA256, PHC, upgrade-on-verify) — ADR 0013",
+      "sha": "8bb86cc01d70a3e320935d59fdfb1e5c9bd4ae06",
+      "short": "8bb86cc",
+      "date": "2026-05-30T12:42:44+02:00"
+    },
     {
       "type": "feat",
       "scope": "crypto",
@@ -21,15 +30,6 @@
       "sha": "6f16cf4e033a095e650394cdffc6dcb6ee74f4f1",
       "short": "6f16cf4",
       "date": "2026-05-30T12:13:35+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "crypto",
-      "breaking": false,
-      "summary": "add fingerprint hash domain (Sum/SumHex/NewHash) — ADR 0013",
-      "sha": "1bad1b9947d025d2d634df57b56207ee847115cd",
-      "short": "1bad1b9",
-      "date": "2026-05-30T11:55:02+02:00"
     },
     {
       "type": "fix",
