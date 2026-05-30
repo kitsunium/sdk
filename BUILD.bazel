@@ -20,6 +20,7 @@ filegroup(
     srcs = [
         "go.work",
         "//internal/core/codec:audit_srcs",
+        "//internal/core/crypto:audit_srcs",
         "//internal/core/logger:audit_srcs",
         "//internal/core/logger/level:audit_srcs",
         "//internal/core/writer:audit_srcs",

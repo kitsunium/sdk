@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "aesgcm",
+    srcs = ["aesgcm.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/aesgcm",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":aesgcm",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "aesgcm_test",
+    srcs = [
+        "aesgcm_external_test.go",
+        "aesgcm_internal_test.go",
+    ],
+    embed = [":aesgcm"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)
