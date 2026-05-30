@@ -16,4 +16,6 @@ func ResetForTest() {
 	signers.Store(nil)
 	//: and the Deriver registry, so KDF tests isolate too.
 	derivers.Store(nil)
+	//: and the PasswordHasher registry, so password tests isolate as well.
+	passwordHashers.Store(nil)
 }

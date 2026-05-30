@@ -100,12 +100,15 @@ core/crypto — 0.2.4.*
   0.2.4.9  CodeKeyGenerationFailed    crypto/rand fault in GenerateKey
   0.2.4.10 CodeUnknownKDFAlgorithm    Subkey of an unregistered deriver
   0.2.4.11 CodeDerivationFailed       Subkey length above the scheme's maximum (exit 65 EX_DATAERR)
+  0.2.4.12 CodeUnknownPasswordAlgorithm  HashPassword/VerifyPassword of an unregistered scheme
+  0.2.4.13 CodePasswordHashFailed    crypto/rand fault generating a password salt
+  0.2.4.14 CodeInvalidPasswordHash   stored PHC string is malformed (not a mismatch)
 pkg/v1/crypto — 1.3.0.* (reserved; facade adds no sentinels in this cut)
 ```
 
-`0.2.4.6`–`0.2.4.11` were filled in by the hashing + signature + KDF follow-ons
-(see Deferred); they sit in the already-claimed `0.2.4.*` block, so these are
-registry syncs (mirrored by the AST audit), not Decision changes.
+`0.2.4.6`–`0.2.4.14` were filled in by the hashing + signature + KDF + password
+follow-ons (see Deferred); they sit in the already-claimed `0.2.4.*` block, so
+these are registry syncs (mirrored by the AST audit), not Decision changes.
 
 The AST audit (`internal/kernel/errs/registry_external_test.go`) scans
 `internal/` + `pkg/` + `third-party/` (see the ADR-0012 audit fix), so these
@@ -134,7 +137,10 @@ sentinels are enforced for Public-is-literal / reason / uniqueness from day one.
 - Hashing (`Sum`/`SumHex`/`NewHash`, fingerprint — explicitly NOT
   authentication; `Hasher` port + second registry in `core/crypto`,
   stdlib schemes in `service/crypto/stdhash`, facade `pkg/v1/hash`). — **shipped**
-- Password storage (PHC strings + upgrade-on-verify, argon2id).
+- Password storage (PHC strings + upgrade-on-verify; `PasswordHasher` port +
+  fifth registry in `core/crypto`, stdlib PBKDF2-SHA256 in
+  `service/crypto/pbkdf2pw`, facade `pkg/v1/password`). — **PBKDF2 shipped**;
+  memory-hard argon2id is the opt-in `third-party/x-crypto` follow-on.
 - KDF (HKDF `Subkey` for key separation; `Deriver` port + fourth registry in
   `core/crypto`, stdlib HKDF-SHA256 in `service/crypto/hkdfsha256`, facade
   `pkg/v1/kdf`). — **HKDF shipped**; argon2id password-stretching is its own port.

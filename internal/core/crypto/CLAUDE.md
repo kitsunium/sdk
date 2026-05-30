@@ -31,17 +31,20 @@ Code range: `0.2.4.*` (ADR 0013).
 | `signer_registry.go` | third `snapshot.Value`-backed registry mapping an `Algorithm` to a `Signer`: `RegisterSigner` / `LookupSigner` / `AvailableSigners` + `GenerateKey` / `Sign` / `Verify` dispatch |
 | `deriver.go`   | `Deriver` interface (`Algorithm` / `Derive`) — the **key-separation KDF** port (NOT password stretching) |
 | `deriver_registry.go` | fourth `snapshot.Value`-backed registry mapping an `Algorithm` to a `Deriver`: `RegisterDeriver` / `LookupDeriver` / `AvailableDerivers` + `Subkey` dispatch |
+| `password_hasher.go` | `PasswordHasher` interface (`Algorithm` / `Hash` / `Verify` / `NeedsRehash`) — the **password-storage** port (deliberately slow, salted, PHC-string) |
+| `password_registry.go` | fifth `snapshot.Value`-backed registry: `RegisterPasswordHasher` / `LookupPasswordHasher` / `AvailablePasswordHashers` + `HashPassword` / `VerifyPassword` / `NeedsRehash` dispatch (the latter two resolve the scheme from the PHC id via `phcID`) |
 | `codes.go`     | `Code*` constants — range 0.2.4.\* |
-| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9), `UnknownKDFAlgorithm` (0.2.4.10), `DerivationFailed` (0.2.4.11) |
+| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9), `UnknownKDFAlgorithm` (0.2.4.10), `DerivationFailed` (0.2.4.11), `UnknownPasswordAlgorithm` (0.2.4.12), `PasswordHashFailed` (0.2.4.13), `InvalidPasswordHash` (0.2.4.14) |
 
-Four **independent** registries live here, all on one `Algorithm` keyspace: the
-**AEAD** registry (`registry.go`, authenticated encryption — keyed, secret), the
-**Hasher** registry (`hash_registry.go`, public fingerprints — unkeyed, public),
-the **Signer** registry (`signer_registry.go`, public-key signatures), and the
-**Deriver** registry (`deriver_registry.go`, key-separation KDF). They never
-mix: a digest carries no secret, `Open` is non-oracle by construction, `Verify`
-returns a plain bool (invalid is `(false, nil)`), and `Subkey` expands a *strong*
-secret (never a password). `pkg/v1/{hash,crypto,sign,kdf}` re-export the four
+Five **independent** registries live here, all on one `Algorithm` keyspace: the
+**AEAD** (`registry.go`, keyed encryption), **Hasher** (`hash_registry.go`,
+public fingerprints), **Signer** (`signer_registry.go`, public-key signatures),
+**Deriver** (`deriver_registry.go`, key-separation KDF from a *strong* secret),
+and **PasswordHasher** (`password_registry.go`, slow salted storage of *human*
+passwords). They never mix: a digest carries no secret, `Open`/`Verify` are
+non-oracle, `Subkey` rejects passwords by contract, and password hashing is the
+one deliberately-slow surface. `pkg/v1/{hash,crypto,sign,kdf,password}` re-export
+the five
 surfaces respectively.
 
 ## Wire format

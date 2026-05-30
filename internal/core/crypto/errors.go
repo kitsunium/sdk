@@ -80,4 +80,23 @@ var (
 		"Requested derived-key length is too large",
 		"core/crypto.Subkey: requested length exceeds the scheme's maximum output",
 		errs.WithExitCode(exitDataErr))
+
+	// UnknownPasswordAlgorithm is returned by HashPassword/VerifyPassword when no
+	// PasswordHasher is registered under the requested Algorithm or PHC id —
+	// usually a missing blank-import.
+	UnknownPasswordAlgorithm = errs.Define(CodeUnknownPasswordAlgorithm, "UNKNOWN_PASSWORD_ALGORITHM",
+		"No password hasher is registered under that algorithm",
+		"core/crypto.VerifyPassword: password scheme absent from registry; blank-import the hasher's package to register it")
+
+	// PasswordHashFailed wraps a crypto/rand failure while generating a password
+	// salt; it signals a host entropy fault rather than a caller error.
+	PasswordHashFailed = errs.Define(CodePasswordHashFailed, "PASSWORD_HASH_FAILED",
+		"Could not gather entropy for password hashing",
+		"core/crypto.HashPassword: crypto/rand failed while generating a salt")
+
+	// InvalidPasswordHash is returned by VerifyPassword when the stored PHC
+	// string cannot be parsed — server-side data corruption, never a mismatch.
+	InvalidPasswordHash = errs.Define(CodeInvalidPasswordHash, "INVALID_PASSWORD_HASH",
+		"Stored password hash is malformed",
+		"core/crypto.VerifyPassword: stored PHC string is not well-formed for its scheme")
 )

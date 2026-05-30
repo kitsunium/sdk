@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "password",
+    srcs = ["password.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/password",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/service/crypto/pbkdf2pw",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":password",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "password_test",
+    srcs = ["password_external_test.go"],
+    deps = [":password"],
+)

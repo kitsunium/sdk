@@ -50,3 +50,15 @@ const CodeUnknownKDFAlgorithm errs.Code = 0x00_02_04_0A // 0.2.4.10
 // CodeDerivationFailed identifies a Subkey call whose requested length exceeds
 // the scheme's maximum output — a caller data error, not a fault.
 const CodeDerivationFailed errs.Code = 0x00_02_04_0B // 0.2.4.11
+
+// CodeUnknownPasswordAlgorithm identifies a HashPassword/VerifyPassword call
+// whose Algorithm (or PHC id segment) no imported package has registered.
+const CodeUnknownPasswordAlgorithm errs.Code = 0x00_02_04_0C // 0.2.4.12
+
+// CodePasswordHashFailed identifies a crypto/rand failure while generating a
+// password salt in HashPassword — a host entropy fault, not a caller error.
+const CodePasswordHashFailed errs.Code = 0x00_02_04_0D // 0.2.4.13
+
+// CodeInvalidPasswordHash identifies a stored PHC string that cannot be parsed
+// during VerifyPassword — server-side data corruption, not a password mismatch.
+const CodeInvalidPasswordHash errs.Code = 0x00_02_04_0E // 0.2.4.14

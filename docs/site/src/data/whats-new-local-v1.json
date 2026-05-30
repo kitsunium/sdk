@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T10:28:20.319Z",
+  "generatedAt": "2026-05-30T10:43:09.345Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "add HKDF key-derivation domain (Subkey, key separation) — ADR 0013",
+      "sha": "bac5aa7d79b254501bc560334c24f497ae678952",
+      "short": "bac5aa7",
+      "date": "2026-05-30T12:27:57+02:00"
+    },
     {
       "type": "feat",
       "scope": "crypto",
@@ -21,15 +30,6 @@
       "sha": "1bad1b9947d025d2d634df57b56207ee847115cd",
       "short": "1bad1b9",
       "date": "2026-05-30T11:55:02+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "crypto",
-      "breaking": false,
-      "summary": "XChaCha20-Poly1305 AEAD scheme (third-party/x-crypto, opt-in) (#55)",
-      "sha": "63ece0729b2a1f001aff74295cc1b2a31e1cc4d9",
-      "short": "63ece07",
-      "date": "2026-05-30T11:00:48+02:00"
     },
     {
       "type": "fix",
