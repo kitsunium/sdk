@@ -21,6 +21,7 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0010-kernel-recycler-primitive.md` | Generic `recycler.Pool[T]` + `CappedPool[T]` object pools; `buffer`/`scratch` become consumers | Accepted |
 | `0011-kernel-snapshot-primitive.md` | Generic `snapshot.Value[T]` copy-on-write container; codec registry consolidates onto it | Accepted |
 | `0012-logger-writer-registry.md` | Named, config-driven `Sink` factory registry (`writer`); console/file in-tree + AWS s3/cloudwatch under third-party/ (root module) | Accepted (amends 0005/0006 §Registry) |
+| `0013-sdk-crypto-domain.md` | Crypto domain — `AEAD` `Seal`/`Open` with hidden nonce; stdlib AES-256-GCM default, x/crypto schemes under third-party/ | Accepted (amends core purpose + 0005 §Registry) |
 
 ## Conventions
 
