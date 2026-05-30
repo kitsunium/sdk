@@ -1,35 +1,35 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-30T12:03:01.132Z",
+  "generatedAt": "2026-05-30T14:18:21.358Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
     {
       "type": "feat",
       "scope": "crypto",
       "breaking": false,
-      "summary": "add ECDSA-P256 signature scheme (SHA-256, ASN.1/DER) — ADR 0013",
-      "sha": "06036dae9deff84788086287eeb097a5d425d62b",
-      "short": "06036da",
-      "date": "2026-05-30T13:16:37+02:00"
+      "summary": "public crypto tier — hash / sign / kdf / password (ADR 0013) (#56)",
+      "sha": "bfcb793de9bab5008c53b7f514747a1bafb1bcee",
+      "short": "bfcb793",
+      "date": "2026-05-30T14:10:16+02:00"
     },
     {
       "type": "feat",
       "scope": "crypto",
       "breaking": false,
-      "summary": "add argon2id password scheme (opt-in, third-party/x-crypto) — ADR 0013",
-      "sha": "fd4e8ed476ef1b5e6bd8e21392cbc69a54386fa0",
-      "short": "fd4e8ed",
-      "date": "2026-05-30T12:56:06+02:00"
+      "summary": "XChaCha20-Poly1305 AEAD scheme (third-party/x-crypto, opt-in) (#55)",
+      "sha": "63ece0729b2a1f001aff74295cc1b2a31e1cc4d9",
+      "short": "63ece07",
+      "date": "2026-05-30T11:00:48+02:00"
     },
     {
       "type": "feat",
       "scope": "crypto",
       "breaking": false,
-      "summary": "add password-storage domain (PBKDF2-SHA256, PHC, upgrade-on-verify) — ADR 0013",
-      "sha": "8bb86cc01d70a3e320935d59fdfb1e5c9bd4ae06",
-      "short": "8bb86cc",
-      "date": "2026-05-30T12:42:44+02:00"
+      "summary": "ADR-0013 — AEAD Seal/Open with a hidden nonce (stdlib AES-256-GCM) (#54)",
+      "sha": "7095a0d5f4a5ccfcbfa1a18e2140dcfd860a19a6",
+      "short": "7095a0d",
+      "date": "2026-05-30T02:18:29+02:00"
     },
     {
       "type": "fix",
