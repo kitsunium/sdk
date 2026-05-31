@@ -1,17 +1,22 @@
 // Package s3 — the batching terminal Sink. AWS-free: it talks to S3 only through
 // the uploader seam, so the batching/flush logic is unit-tested with a fake
 // (the real AWS adapter lives in client.go). Records are coalesced into one
-// uploaded object per batch — flushed when the buffer reaches MaxBatchBytes, on
-// the FlushEvery ticker, or on Flush / Close.
+// uploaded object per batch via the generic kernel batcher — flushed when the
+// buffered bytes reach MaxBatchBytes, on the FlushEvery ticker, or on Flush /
+// Close. The per-batch object key and the byte-weight both ride in the deliver
+// closure / WeightOf, so the coalescing/flush/ticker machinery is the shared
+// kernel/batcher (ADR 0014), not a hand-rolled copy.
 package s3
 
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/batcher"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -26,36 +31,30 @@ const defaultMaxBatchBytes int = 1 << 20 // 1 MiB
 // network and the seam carries no untestable named method.
 type uploadFunc func(ctx context.Context, key string, body []byte) error
 
-// s3Sink coalesces formatted records into batched object uploads.
+// s3Sink coalesces formatted records into batched object uploads. The
+// coalesce/flush/ticker lifecycle is delegated to a kernel batcher whose items
+// are the per-record payloads; the deliver closure concatenates them, mints the
+// object key, and uploads.
 type s3Sink struct {
 	// up is the upload seam (real AWS closure or a test fake).
 	up uploadFunc
+	// batch is the generic coalescing buffer; each item is one record payload.
+	batch *batcher.Batcher[[]byte]
 	// prefix is prepended to every generated object key.
 	prefix string
-	// maxBatchBytes forces an upload once the buffer reaches it.
-	maxBatchBytes int
 	// onError surfaces background upload failures; never nil after newS3Sink.
 	onError func(err error)
 	// now supplies timestamps for object keys (injectable for tests).
 	now func() time.Time
 
-	// mu guards buf + seq against the ticker, Write, Flush and Close.
+	// mu guards seq against concurrent deliver closures (eager-flush + ticker).
 	mu  sync.Mutex
-	buf []byte
 	seq uint64
-
-	// stop/done drive the optional FlushEvery ticker goroutine; the Once
-	// guards make the channel closes safe under concurrent Close calls.
-	stop     chan struct{}
-	stopOnce sync.Once
-	done     chan struct{}
-	doneOnce sync.Once
-	ticking  bool
 }
 
-// newS3Sink builds a batching sink over up. When flushEvery > 0 it spawns a
-// ticker goroutine that flushes on the interval; the goroutine is joined by
-// Close.
+// newS3Sink builds a batching sink over up. When flushEvery > 0 the underlying
+// batcher spawns a ticker goroutine that flushes on the interval; the goroutine
+// is joined by Close.
 func newS3Sink(up uploadFunc, prefix string, maxBatchBytes int, flushEvery time.Duration, onError func(error)) *s3Sink {
 	//: substitute the default cap when the caller left it at zero.
 	if maxBatchBytes <= 0 {
@@ -68,43 +67,33 @@ func newS3Sink(up uploadFunc, prefix string, maxBatchBytes int, flushEvery time.
 		onError = func(error) {}
 	}
 	s := &s3Sink{
-		up:            up,
-		prefix:        prefix,
-		maxBatchBytes: maxBatchBytes,
-		onError:       onError,
-		now:           time.Now,
-		stop:          make(chan struct{}),
-		done:          make(chan struct{}),
+		up:      up,
+		prefix:  prefix,
+		onError: onError,
+		now:     time.Now,
 	}
-	//: only run the ticker when a positive interval was requested.
-	if flushEvery > 0 {
-		//: mark ticking so Close knows to join the goroutine.
-		s.ticking = true
-		//: background flusher bounds batch latency to flushEvery.
-		go s.loop(flushEvery)
-	}
+	//: byte-weight each payload so MaxBatchBytes bounds the coalesced object.
+	s.batch = batcher.NewBatcher(s.deliver, batcher.Config[[]byte]{
+		MaxWeight:  int64(maxBatchBytes),
+		WeightOf:   payloadBytes,
+		FlushEvery: flushEvery,
+		OnError:    onError,
+	})
 	//: hand back the constructed batching sink.
 	return s
 }
 
-// Write appends the formatted payload to the current batch and triggers an
-// upload when the batch reaches its byte cap. It never blocks on the network —
-// the producer is decoupled by the async middleware wrapping this sink, and a
+// Write appends the formatted payload to the current batch; the batcher uploads
+// eagerly once the buffered bytes reach the cap. It never blocks on the network
+// — the producer is decoupled by the async middleware wrapping this sink, and a
 // cap-triggered upload failure is routed to onError, not returned.
 func (s *s3Sink) Write(ctx context.Context, _ corelogger.RecordEvent, p []byte) (n int, err error) {
-	//: append under the lock; the ticker / Flush share buf.
-	s.mu.Lock()
-	s.buf = append(s.buf, p...)
-	//: decide whether this append crossed the upload threshold.
-	full := len(s.buf) >= s.maxBatchBytes
-	s.mu.Unlock()
-	//: flush eagerly when the batch is full so memory stays bounded.
-	if full {
-		//: forward the caller's ctx; route a cap-flush failure to the observer.
-		if ferr := s.flushOnce(ctx); ferr != nil {
-			//: surface the background failure via the configured hook.
-			s.onError(ferr)
-		}
+	//: clone the payload; the caller may reuse p after Write returns.
+	item := slices.Clone(p)
+	//: a cap-flush failure surfaces through the observer, never the caller.
+	if aerr := s.batch.Add(ctx, item); aerr != nil {
+		//: surface the background failure via the configured hook.
+		s.onError(aerr)
 	}
 	//: report the payload as accepted regardless of the upload outcome.
 	return len(p), nil
@@ -114,43 +103,41 @@ func (s *s3Sink) Write(ctx context.Context, _ corelogger.RecordEvent, p []byte) 
 // the caller.
 func (s *s3Sink) Flush(ctx context.Context) error {
 	//: caller-facing flush propagates the error rather than routing to onError.
-	return s.flushOnce(ctx)
+	return s.batch.Flush(ctx)
 }
 
 // Close stops the ticker (if any), uploads the final batch, and returns the
 // flush error.
 func (s *s3Sink) Close() error {
-	//: join the ticker goroutine first so it cannot race the final flush.
-	if s.ticking {
-		//: idempotent stop signal so a double Close never panics.
-		s.stopOnce.Do(func() { close(s.stop) })
-		//: wait for the loop to acknowledge exit.
-		<-s.done
-	}
-	//: upload whatever remains; background context — Close has no caller ctx.
-	return s.flushOnce(context.Background())
+	//: background context — Close has no caller ctx; the batcher joins the ticker.
+	return s.batch.Close(context.Background())
 }
 
-// flushOnce swaps out the pending batch under the lock and uploads it outside
-// the lock. An empty batch is a no-op; the upload error is returned to the
-// caller (Write / loop route it to onError, Flush / Close propagate it).
-func (s *s3Sink) flushOnce(ctx context.Context) error {
-	//: take ownership of the pending batch under the lock.
-	s.mu.Lock()
-	//: nothing buffered — release and report success.
-	if len(s.buf) == 0 {
-		s.mu.Unlock()
-		//: empty-batch fast path.
-		return nil
+// payloadBytes reports a record payload's byte weight, so MaxBatchBytes caps
+// the coalesced object size (the batcher sums this over the pending batch).
+func payloadBytes(p []byte) int64 {
+	//: the byte length is the object-size contribution of this record.
+	return int64(len(p))
+}
+
+// deliver concatenates a batch of record payloads into one object body, mints a
+// unique key, and uploads it. It runs outside the batcher's lock, so a slow
+// PutObject never blocks producers.
+func (s *s3Sink) deliver(ctx context.Context, items [][]byte) error {
+	//: concatenate the per-record payloads into a single object body.
+	var body []byte
+	//: walk the batch in arrival order so the object body preserves it.
+	for _, p := range items {
+		//: append each record's bytes in batch order.
+		body = append(body, p...)
 	}
-	//: hand the batch off and reset; a nil buf starts a fresh backing array.
-	batch := s.buf
-	s.buf = nil
+	//: mint a unique key under the lock; seq is shared by eager-flush + ticker.
+	s.mu.Lock()
 	s.seq++
 	key := fmt.Sprintf("%s%d-%d.log", s.prefix, s.now().UnixNano(), s.seq)
 	s.mu.Unlock()
-	//: upload outside the lock so a slow PutObject never blocks producers.
-	if uerr := s.up(ctx, key, batch); uerr != nil {
+	//: upload the coalesced object body under the generated key.
+	if uerr := s.up(ctx, key, body); uerr != nil {
 		//: wrap the SDK cause as the typed PutFailed sentinel (errors.Is reaches
 		//: it). ExitCode mirrors the PutFailed Define so the wrapped error keeps
 		//: the I/O exit status (74) instead of decaying to the default 70.
@@ -164,29 +151,4 @@ func (s *s3Sink) flushOnce(ctx context.Context) error {
 	}
 	//: happy path — batch delivered.
 	return nil
-}
-
-// loop runs the FlushEvery ticker until Close signals stop.
-func (s *s3Sink) loop(every time.Duration) {
-	//: signal Close that the goroutine has fully exited (guarded for safety).
-	defer s.doneOnce.Do(func() { close(s.done) })
-	//: periodic flusher bounds how long a partial batch waits.
-	t := time.NewTicker(every)
-	defer t.Stop()
-	//: drain on every tick; exit promptly on stop.
-	for {
-		select {
-		//: interval elapsed — flush whatever has accumulated.
-		case <-t.C:
-			//: route a tick-flush failure to the observer.
-			if ferr := s.flushOnce(context.Background()); ferr != nil {
-				//: surface the background failure via the configured hook.
-				s.onError(ferr)
-			}
-		//: Close requested — let Close perform the final flush.
-		case <-s.stop:
-			//: terminal exit; deferred close(done) unblocks Close.
-			return
-		}
-	}
 }

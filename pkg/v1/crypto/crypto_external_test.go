@@ -3,6 +3,7 @@ package crypto_test
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/crypto"
@@ -128,6 +129,123 @@ func TestSealAs_UnknownAlgorithm(t *testing.T) {
 		//: a scheme whose package was never imported must not resolve.
 		if _, err := crypto.SealAs(c.alg, mustKey(t, 0x3), []byte("x"), nil); err == nil {
 			t.Errorf("%s: SealAs resolved an unregistered algorithm", c.name)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func TestSealStream_RoundTrip(t *testing.T) {
+	t.Parallel()
+	const chunk int = 64 * 1024
+	type tc struct {
+		name string
+		size int
+		aad  []byte
+	}
+	tests := []tc{
+		{"empty stream", 0, nil},
+		{"sub-chunk payload", 500, []byte("ctx")},
+		{"multi-chunk payload", chunk*2 + 13, []byte("ctx")},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		key := mustKey(t, 0xB)
+		//: a deterministic pattern keeps the equality check exact.
+		pt := make([]byte, c.size)
+		for i := range pt {
+			pt[i] = byte(i % 97)
+		}
+		var dst bytes.Buffer
+		//: SealStream activates the stdlib streaming scheme via the blank import.
+		w, err := crypto.SealStream(&dst, key, c.aad)
+		if err != nil {
+			t.Fatalf("%s: SealStream: %v", c.name, err)
+		}
+		if _, werr := w.Write(pt); werr != nil {
+			t.Fatalf("%s: Write: %v", c.name, werr)
+		}
+		//: Close seals the final chunk; the stream is invalid without it.
+		if cerr := w.Close(); cerr != nil {
+			t.Fatalf("%s: Close: %v", c.name, cerr)
+		}
+		r, oerr := crypto.OpenStream(bytes.NewReader(dst.Bytes()), key, c.aad)
+		if oerr != nil {
+			t.Fatalf("%s: OpenStream: %v", c.name, oerr)
+		}
+		//: the opened stream must reproduce the plaintext exactly.
+		got, rerr := io.ReadAll(r)
+		if rerr != nil || !bytes.Equal(got, pt) {
+			t.Errorf("%s: round-trip err=%v equal=%v", c.name, rerr, bytes.Equal(got, pt))
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func TestOpenStream_RejectsBox(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a whole-buffer box (0x01) is rejected by the streaming reader"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		key := mustKey(t, 0xC)
+		//: a whole-buffer box has lead byte 0x01; the streaming reader must reject it.
+		box, err := crypto.Seal(key, []byte("not a stream"), nil)
+		if err != nil {
+			t.Fatalf("Seal: %v", err)
+		}
+		r, oerr := crypto.OpenStream(bytes.NewReader(box), key, nil)
+		if oerr != nil {
+			t.Fatalf("OpenStream: %v", oerr)
+		}
+		//: reading a 0x01 box through the streaming reader must error, not decode.
+		if _, rerr := io.ReadAll(r); rerr == nil {
+			t.Errorf("OpenStream accepted a whole-buffer box")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func TestOpen_RejectsStream(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a streaming box (0x02) is rejected by whole-buffer Open"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		key := mustKey(t, 0xD)
+		//: produce a streaming frame (lead byte 0x02).
+		var dst bytes.Buffer
+		w, err := crypto.SealStream(&dst, key, nil)
+		if err != nil {
+			t.Fatalf("SealStream: %v", err)
+		}
+		if _, werr := w.Write([]byte("streamed")); werr != nil {
+			t.Fatalf("Write: %v", werr)
+		}
+		if cerr := w.Close(); cerr != nil {
+			t.Fatalf("Close: %v", cerr)
+		}
+		//: whole-buffer Open must reject the 0x02 stream lead byte.
+		if _, oerr := crypto.Open(key, dst.Bytes(), nil); oerr == nil {
+			t.Errorf("Open accepted a streaming frame")
 		}
 	}
 	for _, c := range tests {

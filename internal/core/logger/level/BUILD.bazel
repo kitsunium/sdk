@@ -4,9 +4,18 @@ package(default_visibility = ["//internal/core:core_consumers"])
 
 go_library(
     name = "level",
-    srcs = ["level.go"],
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "level.go",
+        "level_compliance.go",
+        "leveler.go",
+        "parse.go",
+        "var.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/core/logger/level",
     visibility = ["//internal/core:core_consumers"],
+    deps = ["//internal/kernel/errs"],
 )
 
 alias(
@@ -18,7 +27,11 @@ alias(
 go_test(
     name = "level_test",
     size = "small",
-    srcs = ["level_external_test.go"],
+    srcs = [
+        "level_external_test.go",
+        "parse_external_test.go",
+        "var_external_test.go",
+    ],
     deps = [":level"],
 )
 

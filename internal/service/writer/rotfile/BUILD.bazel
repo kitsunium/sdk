@@ -1,0 +1,73 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "rotfile",
+    srcs = [
+        "backups.go",
+        "codes.go",
+        "errors.go",
+        "open_flags_linux.go",
+        "open_flags_other.go",
+        "prune.go",
+        "rotate.go",
+        "rotate_manual.go",
+        "rotating_sink.go",
+        "rotating_sink_config.go",
+        "rotfile.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/writer/rotfile",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/core/writer",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/writer/levelgate",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":rotfile",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "rotfile_test",
+    srcs = [
+        "backups_internal_test.go",
+        "errors_external_test.go",
+        "errors_internal_test.go",
+        "prune_internal_test.go",
+        "rotate_internal_test.go",
+        "rotate_manual_internal_test.go",
+        "rotating_sink_internal_test.go",
+        "rotfile_external_test.go",
+        "rotfile_internal_test.go",
+    ],
+    embed = [":rotfile"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's *.go to the errs AST audit (ADR 0014); the
+# package defines new dotted-quad codes (0.3.27.*) so it must be listed in the
+# root //:audit_sources filegroup.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

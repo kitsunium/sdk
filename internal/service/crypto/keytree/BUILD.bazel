@@ -1,0 +1,36 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "keytree",
+    srcs = ["keytree.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/keytree",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/service/crypto/hkdfsha256",
+    ],
+)
+
+go_test(
+    name = "keytree_test",
+    srcs = [
+        "keytree_external_test.go",
+        "keytree_internal_test.go",
+    ],
+    embed = [":keytree"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":keytree",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)

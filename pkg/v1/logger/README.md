@@ -8,9 +8,17 @@ import "github.com/kitsunium/sdk/pkg/v1/logger"
 
 Package logger — re\-exports the chainable Builder API and the slice\-overload LogAttrs entry point. Both are routed through the internal service implementation, which owns the recycler that keeps the steady\-state hot\-path at zero allocations.
 
+Package logger — adds the opt\-in caller annotation surface. WithCaller derives a Logger whose records carry a structured "source" attribute \(file:line:function\) resolved from the program counter the front\-end already captures. It is additive: an unwrapped Logger emits no source field, so the frozen record shape is unchanged until a caller opts in.
+
 Package logger — range 1.1.0.\* \(ADR 0005 pkg/v1/logger block\).
 
+Package logger — adds ergonomic Encoder constructors to the public facade. The Encoder type alias itself lives in sink.go; this file contributes the named constructors \(NewTextEncoder / NewJSONEncoder\) so consumers can build an encoder directly and pass it to NewWithSink without importing internal/\*.
+
 Package logger — declares pkg/v1/logger's sentinels. Each var's name equals its errs.Define Reason in SCREAMING\_SNAKE form.
+
+Package logger — exposes FromConfig, the capstone of the config\-driven writer subsystem \(ADR 0014 §D5\): it builds a fully wired Logger from a config blob with zero Go glue. The blob is decoded by a codec the CONSUMER already registered \(FromConfig imports only the core/codec dispatch surface, never pkg/v1/codec or any service codec, so a pkg/v1/logger consumer inherits no vendor modules\). Each decoded WriterEntry is resolved against the writer registry; a Factory that implements ConfigDecoder translates its own option map, otherwise a default mapping passes the raw map straight to the factory.
+
+Package logger — exposes the runtime\-tunable level surface: ParseLevel \(the strict inverse of a lowercased Level.String\), the Leveler one\-method port, and LevelVar, an atomically mutable threshold holder a custom sink or gate consults on each record to retune a live logger's floor without rebuilding the pipeline.
 
 Package logger is the stable v1 public API for SDK logging.
 
@@ -102,11 +110,19 @@ Construction failures carry typed dotted\-quad codes under range 1.1.0.\* per AD
 
 Inspect via the accessors in github.com/kitsunium/sdk/pkg/v1/errs.
 
+Package logger — exposes the in\-memory test sink \(NewMemorySink\) and its RecordSnapshot element type so consumers can assert on what was logged.
+
 Package logger — exposes the Sink port and the multi\-sink helper alongside the encoder\-aware constructor NewWithSink. Together they let consumers replace the default text\-on\-stderr wiring \(NewText / Default\) with arbitrary fan\-out / async / file / syslog topologies — without reaching into internal/\* packages.
+
+Package logger — declares the TopologyConfig DTO consumed by FromConfig. A TopologyConfig is the decoded shape of a logger config file: a global level plus an ordered list of named writer entries. It is a plain data carrier with no behaviour — the construction logic lives in FromConfig.
 
 Package logger — exposes the SDK version to the rest of the logger package. The ldflags pipeline injects the real value at build time; local development runs fall back to the "dev" sentinel.
 
+Package logger — WithError decomposes an SDK typed error into structured log Attrs \(error.code / error.reason / error.public \+ wrap\-trail codes\), making the SDK's dotted\-quad errors first\-class structured data rather than a flat string. It lives beside the Attr constructors it produces.
+
 Package logger — exposes the named, config\-driven writer surface \(ADR 0012\): the WriterName / \*Config aliases, the WriterSpec pair, and NewMulti, which resolves each named writer to a Sink and fans records out to all of them via Multi. Built\-in console \+ file writers activate with a blank import of pkg/v1/logger/writer; s3 / cloudwatch activate with a blank import of the matching third\-party/aws/writer package \(which alone pulls the AWS SDK\).
+
+Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A WriterEntryConfig names a registered writer and carries its raw, codec\- decoded option map; FromConfig hands that map to the writer's Decoder \(or a default mapping\) to obtain a typed writer.Config.
 
 ## Index
 
@@ -128,6 +144,7 @@ Package logger — exposes the named, config\-driven writer surface \(ADR 0012\)
   - [func String\(key, val string\) Attr](<#String>)
   - [func Time\(key string, val time.Time\) Attr](<#Time>)
   - [func Uint64\(key string, val uint64\) Attr](<#Uint64>)
+  - [func WithError\(err error\) \[\]Attr](<#WithError>)
 - [type Builder](<#Builder>)
   - [func Build\(lg Logger, lv Level\) Builder](<#Build>)
 - [type CloudWatchConfig](<#CloudWatchConfig>)
@@ -138,15 +155,27 @@ Package logger — exposes the named, config\-driven writer surface \(ADR 0012\)
 - [type CredentialValue](<#CredentialValue>)
   - [func NewCredentialValue\(accessKeyID, secretAccessKey, sessionToken string\) CredentialValue](<#NewCredentialValue>)
 - [type Encoder](<#Encoder>)
+  - [func NewJSONEncoder\(\) Encoder](<#NewJSONEncoder>)
+  - [func NewTextEncoder\(\) Encoder](<#NewTextEncoder>)
   - [func TextEncoder\(\) Encoder](<#TextEncoder>)
 - [type FileConfig](<#FileConfig>)
+- [type Format](<#Format>)
 - [type Level](<#Level>)
+  - [func ParseLevel\(name string\) \(lvl Level, err error\)](<#ParseLevel>)
+- [type LevelVar](<#LevelVar>)
+  - [func NewLevelVar\(initial Level\) \*LevelVar](<#NewLevelVar>)
+- [type Leveler](<#Leveler>)
 - [type Logger](<#Logger>)
   - [func Default\(\) \(lg Logger, err error\)](<#Default>)
+  - [func FromConfig\(format Format, raw \[\]byte\) \(lg Logger, err error\)](<#FromConfig>)
   - [func NewMulti\(min Level, specs ...WriterSpec\) \(lg Logger, err error\)](<#NewMulti>)
   - [func NewText\(cfg Config\) \(lg Logger, err error\)](<#NewText>)
   - [func NewWithSink\(cfg SinkConfig\) \(lg Logger, err error\)](<#NewWithSink>)
+  - [func WithCaller\(lg Logger, skip int\) Logger](<#WithCaller>)
+- [type MemorySink](<#MemorySink>)
+  - [func NewMemorySink\(\) \*MemorySink](<#NewMemorySink>)
 - [type Record](<#Record>)
+- [type RecordSnapshot](<#RecordSnapshot>)
 - [type S3Config](<#S3Config>)
 - [type Sink](<#Sink>)
   - [func ConsoleStderr\(\) Sink](<#ConsoleStderr>)
@@ -154,6 +183,8 @@ Package logger — exposes the named, config\-driven writer surface \(ADR 0012\)
   - [func Multi\(branches ...Sink\) Sink](<#Multi>)
   - [func NewWriterSink\(w io.Writer\) \(sink Sink, err error\)](<#NewWriterSink>)
 - [type SinkConfig](<#SinkConfig>)
+- [type TopologyConfig](<#TopologyConfig>)
+- [type WriterEntryConfig](<#WriterEntryConfig>)
 - [type WriterName](<#WriterName>)
 - [type WriterSpec](<#WriterSpec>)
 
@@ -175,6 +206,12 @@ const (
 
 ```go
 const CodeSinkConfigRequired errs.Code = 0x01_01_00_02 // 1.1.0.2
+```
+
+<a name="CodeTopologyInvalid"></a>CodeTopologyInvalid identifies a FromConfig call whose config blob is malformed, names an unregistered writer, or whose Factory/DecodeConfig rejected its options. The error path is redacted: it names only the writer and the failure kind, never any decoded credential or option value \(ADR 0014\).
+
+```go
+const CodeTopologyInvalid errs.Code = 0x01_01_00_04 // 1.1.0.4
 ```
 
 <a name="CodeWriterRequired"></a>CodeWriterRequired identifies a NewText call with Config.Writer == nil; the v1 façade refuses to default silently to stderr.
@@ -215,6 +252,15 @@ var (
     WriterSpecInvalid = errs.Define(CodeWriterSpecInvalid, "WRITER_SPEC_INVALID",
         "NewMulti requires at least one writer spec",
         "pkg/v1/logger.NewMulti called with no WriterSpec entries; supply at least one named writer")
+
+    // TopologyInvalid is returned by FromConfig when the config blob cannot be
+    // decoded, names a writer no imported package has registered, or a writer's
+    // Factory/DecodeConfig rejected its options. The message is redacted: it
+    // names only the writer and the failure kind, never a decoded credential or
+    // option value (the SECRET GATE of ADR 0014 §D5).
+    TopologyInvalid = errs.Define(CodeTopologyInvalid, "TOPOLOGY_INVALID",
+        "Logger topology config is invalid",
+        "pkg/v1/logger.FromConfig: blob undecodable, unknown writer name, or a writer rejected its options (option values redacted)")
 )
 ```
 
@@ -374,6 +420,19 @@ func Uint64(key string, val uint64) Attr
 
 Uint64 builds an Attr carrying a uint64 value.
 
+<a name="WithError"></a>
+### func [WithError](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/witherror.go#L42>)
+
+```go
+func WithError(err error) []Attr
+```
+
+WithError decomposes err into structured log Attrs so the SDK's dotted\-quad typed errors become first\-class structured data rather than a flat string.
+
+For an SDK error it emits error.code, error.reason and error.public, then one error.trail.\<n\> Attr per wrap\-trail code \(newest wrap last\). Empty metadata fields are skipped. For a plain stdlib error it falls back to a single error.message Attr. A nil err yields no Attrs.
+
+The result is meant to be spread into an emission call, e.g. logger.Error\(ctx, lg, "op failed", logger.WithError\(err\)...\).
+
 <a name="Builder"></a>
 ## type [Builder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/builder.go#L17>)
 
@@ -479,6 +538,24 @@ Encoder is the stable alias for the internal service encoder interface. The defa
 type Encoder = encoder.Encoder
 ```
 
+<a name="NewJSONEncoder"></a>
+### func [NewJSONEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/encoder.go#L25>)
+
+```go
+func NewJSONEncoder() Encoder
+```
+
+NewJSONEncoder returns a structured single\-line JSON encoder, rendering each record as one encoding/json\-compatible object per line: \{"ts":…,"level":…,"msg":…,\<flat attrs\>\}. Grouped attributes flatten to dotted keys \("g1.g2.key"\) to match the text encoder's convention. Pass it to NewWithSink via SinkConfig.Encoder for machine\-readable output.
+
+<a name="NewTextEncoder"></a>
+### func [NewTextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/encoder.go#L15>)
+
+```go
+func NewTextEncoder() Encoder
+```
+
+NewTextEncoder returns the default human\-readable encoder, rendering each record as "TIME LEVEL msg key=val …\\n" with RFC3339\-millisecond timestamps. It is a named peer of TextEncoder bound to the real system clock.
+
 <a name="TextEncoder"></a>
 ### func [TextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L140>)
 
@@ -495,6 +572,15 @@ FileConfig configures the "file" writer \(path \+ optional MinLevel\).
 
 ```go
 type FileConfig = corewriter.FileConfig
+```
+
+<a name="Format"></a>
+## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/fromconfig.go#L20>)
+
+Format is the typed wire\-format identifier accepted by FromConfig. It is a stable alias onto the core codec dispatch surface, so a consumer names a format with the same string values the codec facade exposes.
+
+```go
+type Format = corecodec.Format
 ```
 
 <a name="Level"></a>
@@ -530,6 +616,44 @@ const LevelInfo Level = level.Info
 const LevelWarn Level = level.Warn
 ```
 
+<a name="ParseLevel"></a>
+### func [ParseLevel](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/levelvar.go#L35>)
+
+```go
+func ParseLevel(name string) (lvl Level, err error)
+```
+
+ParseLevel maps a canonical lowercase level name \(debug / info / warn / error\) to its Level, the strict inverse of a lowercased Level.String. Input is trimmed and lowercased before matching. Unknown names return the zero Level and a redacted LevelUnknown error — the offending input is never echoed.
+
+Unlike the internal best\-effort config path, this surface reports the miss so a caller validating an env/flag value can reject it rather than silently falling back to Info.
+
+<a name="LevelVar"></a>
+## type [LevelVar](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/levelvar.go#L17>)
+
+LevelVar is the stable alias for the atomic Level holder. Its zero value reports LevelInfo; Set and Level are safe for concurrent use, so one goroutine can retune the floor while a sink reads it on the hot path.
+
+```go
+type LevelVar = level.Var
+```
+
+<a name="NewLevelVar"></a>
+### func [NewLevelVar](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/levelvar.go#L22>)
+
+```go
+func NewLevelVar(initial Level) *LevelVar
+```
+
+NewLevelVar returns a LevelVar seeded with initial. Hold the returned pointer where a sink or gate can read its Level, then call Set to raise or lower the live threshold. Pair it with ParseLevel to retune from an env or flag value.
+
+<a name="Leveler"></a>
+## type [Leveler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/levelvar.go#L12>)
+
+Leveler is the stable alias for the internal one\-method level port. A custom Sink reads Level on each record so the threshold can change at runtime; both LevelVar and any constant\-returning type satisfy it.
+
+```go
+type Leveler = level.Leveler
+```
+
 <a name="Logger"></a>
 ## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L129>)
 
@@ -547,6 +671,17 @@ func Default() (lg Logger, err error)
 ```
 
 Default returns a Logger writing INFO\-and\-above records to os.Stderr. The stderr Writer is supplied explicitly here; NewText itself no longer silently defaults a nil Writer.
+
+<a name="FromConfig"></a>
+### func [FromConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/fromconfig.go#L34>)
+
+```go
+func FromConfig(format Format, raw []byte) (lg Logger, err error)
+```
+
+FromConfig builds a Logger from raw, a config blob in the wire format named by format, decoded by a codec the consumer has already registered \(blank\-import github.com/kitsunium/sdk/pkg/v1/codec or a single service codec to activate one\). It unmarshals raw into a Topology, resolves each WriterEntry against the writer registry — calling the Factory's ConfigDecoder when it implements one, else a default mapping — composes the sinks via Multi, and returns a Logger filtered at the topology's Level.
+
+FromConfig returns TopologyInvalid \(1.1.0.4\) when format is unregistered, the blob is undecodable, the topology has no writers, a writer Name is unknown, or a writer rejects its options. The error is redacted: it names only the writer and the failure kind, never a decoded credential or option value.
 
 <a name="NewMulti"></a>
 ### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L86>)
@@ -599,6 +734,39 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error)
 
 NewWithSink builds a Logger forwarding records through cfg.Sink and formatting them with cfg.Encoder. It is the port\-and\-adapter entry point for callers that want full control over both the format \(Encoder\) and the transport \(Sink\); use NewText for the default text\-on\-stderr wiring.
 
+<a name="WithCaller"></a>
+### func [WithCaller](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/caller.go#L22>)
+
+```go
+func WithCaller(lg Logger, skip int) Logger
+```
+
+WithCaller returns a derived Logger whose emitted records carry a "source" attribute resolving the call site into file:line:function. The skip argument is the extra stack\-frame offset reserved for wrapper layers; pass 0 for direct callers. The returned Logger shares the original's sink and encoder; the only change is the added annotation, so the option is safe to layer onto any Logger built by this package.
+
+```
+lg, _ := logger.Default()
+lg = logger.WithCaller(lg, 0)
+lg.Info(ctx, "ready") // record now carries source=…/main.go:42:main.run
+```
+
+<a name="MemorySink"></a>
+## type [MemorySink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/memory.go#L20>)
+
+MemorySink is a Sink that buffers a defensive snapshot of every received record in a mutex\-guarded slice. It is intended for tests that assert on what was logged. Pass it to NewWithSink \(it satisfies Sink\), retrieve the buffered records with Records, and clear them with Reset.
+
+```go
+type MemorySink = memory.Memory
+```
+
+<a name="NewMemorySink"></a>
+### func [NewMemorySink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/memory.go#L23>)
+
+```go
+func NewMemorySink() *MemorySink
+```
+
+NewMemorySink returns an empty MemorySink ready to record received records.
+
 <a name="Record"></a>
 ## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L27>)
 
@@ -606,6 +774,15 @@ Record is the stable alias for the internal RecordEvent value passed to Sink.Wri
 
 ```go
 type Record = corelogger.RecordEvent
+```
+
+<a name="RecordSnapshot"></a>
+## type [RecordSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/memory.go#L14>)
+
+RecordSnapshot is a buffered copy of a single recorded log event. It is the element type returned by MemorySink.Records, letting tests assert on a record's Level, Message, and Attrs without parsing an encoder's byte output. It is the same type as Record \(an alias of the core RecordEvent\).
+
+```go
+type RecordSnapshot = corelogger.RecordEvent
 ```
 
 <a name="S3Config"></a>
@@ -685,6 +862,34 @@ type SinkConfig struct {
     Encoder Encoder
     // MinLevel is the minimum severity emitted; zero value is LevelInfo.
     MinLevel Level
+}
+```
+
+<a name="TopologyConfig"></a>
+## type [TopologyConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/topology.go#L13-L18>)
+
+TopologyConfig is the decoded logger configuration: a global Level \(parsed by the same names the level package prints — "debug" / "info" / "warn" / "error", case\-insensitive, empty defaults to info\) and the ordered Writers fanned out to. FromConfig unmarshals a config blob into a TopologyConfig via a consumer\-registered codec, then resolves each entry against the writer registry. The Config role suffix marks it a config DTO \(KTN\-STRUCT\-ROLE\).
+
+```go
+type TopologyConfig struct {
+    // Level is the minimum severity emitted, by name; empty defaults to info.
+    Level string `json:"level" yaml:"level" toml:"level"`
+    // Writers is the ordered set of named writer entries to fan records out to.
+    Writers []WriterEntryConfig `json:"writers" yaml:"writers" toml:"writers"`
+}
+```
+
+<a name="WriterEntryConfig"></a>
+## type [WriterEntryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer_entry.go#L14-L19>)
+
+WriterEntryConfig names one writer in a TopologyConfig and carries its raw option map as decoded from the config blob. Name MUST match a writer registered via a blank\-import; Options is the per\-writer option bag handed to the writer's Decoder \(when it implements one\) or passed straight to the factory's Open otherwise. Option values are never echoed into an error — the SECRET GATE redacts them. The Config role suffix marks it a config DTO \(KTN\-STRUCT\-ROLE\).
+
+```go
+type WriterEntryConfig struct {
+    // Name is the registered writer key ("console" / "file" / "s3" / …).
+    Name string `json:"name" yaml:"name" toml:"name"`
+    // Options is the raw, codec-decoded per-writer option map.
+    Options map[string]any `json:"config" yaml:"config" toml:"config"`
 }
 ```
 

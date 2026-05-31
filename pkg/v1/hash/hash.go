@@ -12,9 +12,19 @@
 //
 // This package is for content IDs, cache keys, and dedup keys — NOT message
 // authentication, password storage, or signatures. No hasher is keyed, and a
-// digest is public. The package deliberately offers no equality helper: never
-// branch on a secret-dependent comparison of a digest. Keyed integrity lives in
-// the crypto AEAD and signature surfaces (constant-time by construction there).
+// digest is public. The package deliberately offers no secret-comparison
+// equality helper: never branch on a secret-dependent comparison of a digest.
+// Keyed integrity lives in the crypto AEAD and signature surfaces (constant-time
+// by construction there).
+//
+// # Streaming content addressing
+//
+// [NewDigestWriter] tees writes into a destination while computing the digest of
+// everything written; [NewVerifyingReader] verifies a stream against an expected
+// hex digest, failing only on the final (EOF) read with DigestMismatch. This is
+// public-digest, non-oracle verification — a content-ID check on public data, not
+// a secret-comparison oracle — so it does not contradict the NOT-authentication
+// rule above.
 //
 // # Algorithms
 //
@@ -34,12 +44,10 @@ package hash
 
 import (
 	"hash"
+	"io"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
-
-	// Activates the stdlib hashers (sha256/sha512/sha3-256/crc32c/fnv1a-64).
-	// Stdlib-only, so importing pkg/v1/hash pulls zero non-stdlib dependencies.
-	_ "github.com/kitsunium/sdk/internal/service/crypto/stdhash"
+	"github.com/kitsunium/sdk/internal/service/crypto/stdhash"
 )
 
 // Algorithm is the stable identifier of a hash scheme.
@@ -57,6 +65,14 @@ const (
 	// FNV1a64 is FNV-1a 64-bit: a fast NON-cryptographic fingerprint.
 	FNV1a64 Algorithm = "fnv1a-64"
 )
+
+// DigestWriter tees writes into both a destination io.Writer and a running hash,
+// exposing the digest of everything written so far. See [NewDigestWriter].
+type DigestWriter = stdhash.DigestWriter
+
+// VerifyingReader wraps a source reader and verifies its digest against an
+// expected value on the final (EOF) read. See [NewVerifyingReader].
+type VerifyingReader = stdhash.VerifyingReader
 
 // Sum returns the digest of data under the named algorithm. An unregistered
 // algorithm returns UnknownHashAlgorithm.
@@ -77,4 +93,23 @@ func SumHex(a Algorithm, data []byte) (digest string, err error) {
 func New(a Algorithm) (h hash.Hash, err error) {
 	//: delegate to the core registry dispatcher.
 	return corecrypto.NewHash(a)
+}
+
+// NewDigestWriter returns a DigestWriter that tees writes into dst while hashing
+// them under the named algorithm, so the content-address digest of everything
+// written is available via Sum/SumHex. An unregistered algorithm returns
+// UnknownHashAlgorithm.
+func NewDigestWriter(a Algorithm, dst io.Writer) (writer *DigestWriter, err error) {
+	//: delegate to the stdhash emitter — the facade is alias + delegation only.
+	return stdhash.NewDigestWriter(a, dst)
+}
+
+// NewVerifyingReader returns a VerifyingReader over src that hashes the stream
+// under the named algorithm and verifies it against wantHex on the final (EOF)
+// read — a public-digest, non-oracle, EOF-typed check that never fails
+// mid-stream. An unregistered algorithm returns UnknownHashAlgorithm; a digest
+// mismatch surfaces as DigestMismatch only at EOF.
+func NewVerifyingReader(a Algorithm, src io.Reader, wantHex string) (reader *VerifyingReader, err error) {
+	//: delegate to the stdhash emitter — the facade is alias + delegation only.
+	return stdhash.NewVerifyingReader(a, src, wantHex)
 }

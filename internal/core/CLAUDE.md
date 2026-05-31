@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Domain **interfaces** and immutable domain **value types** for the SDK's domains — **codecs, the logger, log-transport writers, and cryptographic schemes** (ADR 0012, ADR 0013). Core describes "what the SDK's domains are" without prescribing how they are realised — every method body belongs in `internal/service/*`, every public alias belongs in `pkg/v1/*`. Plug-in registries (codec, writer, crypto) are the deliberate exception: they carry routing state, no domain logic.
+Domain **interfaces** and immutable domain **value types** for the SDK's domains — **codecs, the logger, log-transport writers, cryptographic schemes, and byte transforms** (ADR 0012, ADR 0013, ADR 0014). Core describes "what the SDK's domains are" without prescribing how they are realised — every method body belongs in `internal/service/*`, every public alias belongs in `pkg/v1/*`. Plug-in registries (codec, writer, crypto, transform) are the deliberate exception: they carry routing state, no domain logic.
 
 ## Contents
 
@@ -12,6 +12,7 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `codec/` | `Codec` / `StreamingCodec` / `Encoder` / `Decoder` / `Appender` + process-wide registry, `Format` value type | `0.2.2.*` |
 | `writer/` | `Factory` / `Name` / `Config` + process-wide registry mapping a writer name to a `Sink`-producing factory (ADR 0012) | `0.2.3.*` |
 | `crypto/` | five registries on one `Algorithm` keyspace: `AEAD` + redacting `Key` (`Seal`/`Open`), the non-authenticated `Hasher` (`Sum`/`SumHex`/`NewHash`), the `Signer` (`Sign`/`Verify`/`GenerateKey`), the key-separation `Deriver` (`Subkey`), and the password-storage `PasswordHasher` (`HashPassword`/`VerifyPassword`/`NeedsRehash`) (ADR 0013) | `0.2.4.*` |
+| `transform/` | `Compressor` port + process-wide registry mapping an `Algorithm` to a `Compressor` (`Compress`/`Decompress`); a parallel registry, never a codec `Format` (ADR 0014) | `0.2.5.*` |
 | `logger/` | `Logger` / `Handler` / `Sink` / `Encoder` interfaces, `RecordEvent`, `AttrValue`, `Value`, `Kind` | `0.2.16.*` (reserved) |
 | `logger/level/` | `Level int8` + `Debug`/`Info`/`Warn`/`Error` constants + `String()` | `0.2.17.*` (reserved) |
 
@@ -30,10 +31,10 @@ Single Go module `github.com/kitsunium/sdk/internal/core` — one `go.mod`, one 
 
 ## Do NOT
 
-- Add concrete runtime types with stateful methods here. The `codec` / `writer` registries' `snapshot.Value`-backed lookups are the deliberate exceptions — they carry no domain logic, only routing.
+- Add concrete runtime types with stateful methods here. The `codec` / `writer` / `crypto` / `transform` registries' `snapshot.Value`-backed lookups are the deliberate exceptions — they carry no domain logic, only routing.
 - Import `context` outside of interface signatures.
 - Reach upward into `internal/service/*` or `pkg/*`.
-- Grow a **fifth** sibling beside `codec/`, `writer/`, `crypto/`, and `logger/` without first widening the layer's purpose statement (the `writer` sibling was admitted by ADR 0012; `crypto` by ADR 0013).
+- Grow a **sixth** sibling beside `codec/`, `writer/`, `crypto/`, `logger/`, and `transform/` without first widening the layer's purpose statement (the `writer` sibling was admitted by ADR 0012; `crypto` by ADR 0013; `transform` by ADR 0014).
 
 ## Verification
 
@@ -52,5 +53,6 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `codec/` — see `internal/core/codec/CLAUDE.md`
 - `writer/` — see `internal/core/writer/CLAUDE.md`
 - `crypto/` — see `internal/core/crypto/CLAUDE.md`
+- `transform/` — see `internal/core/transform/CLAUDE.md`
 - `logger/` — see `internal/core/logger/CLAUDE.md` (README is the human-readable surface doc)
 - `logger/level/` — see `internal/core/logger/level/CLAUDE.md`

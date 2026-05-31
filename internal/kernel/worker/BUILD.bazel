@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "worker",
+    srcs = [
+        "every.go",
+        "worker.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/worker",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":worker",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "worker_test",
+    size = "small",
+    srcs = [
+        "every_external_test.go",
+        "worker_external_test.go",
+    ],
+    deps = [":worker"],
+)

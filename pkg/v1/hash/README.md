@@ -17,7 +17,11 @@ ck    := hash.SumHex(hash.CRC32C, payload)   // fast cache key
 
 ### NOT authentication
 
-This package is for content IDs, cache keys, and dedup keys — NOT message authentication, password storage, or signatures. No hasher is keyed, and a digest is public. The package deliberately offers no equality helper: never branch on a secret\-dependent comparison of a digest. Keyed integrity lives in the crypto AEAD and signature surfaces \(constant\-time by construction there\).
+This package is for content IDs, cache keys, and dedup keys — NOT message authentication, password storage, or signatures. No hasher is keyed, and a digest is public. The package deliberately offers no secret\-comparison equality helper: never branch on a secret\-dependent comparison of a digest. Keyed integrity lives in the crypto AEAD and signature surfaces \(constant\-time by construction there\).
+
+### Streaming content addressing
+
+[NewDigestWriter](<#NewDigestWriter>) tees writes into a destination while computing the digest of everything written; [NewVerifyingReader](<#NewVerifyingReader>) verifies a stream against an expected hex digest, failing only on the final \(EOF\) read with DigestMismatch. This is public\-digest, non\-oracle verification — a content\-ID check on public data, not a secret\-comparison oracle — so it does not contradict the NOT\-authentication rule above.
 
 ### Algorithms
 
@@ -36,10 +40,14 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0 — a SumHex val
 - [func Sum\(a Algorithm, data \[\]byte\) \(digest \[\]byte, err error\)](<#Sum>)
 - [func SumHex\(a Algorithm, data \[\]byte\) \(digest string, err error\)](<#SumHex>)
 - [type Algorithm](<#Algorithm>)
+- [type DigestWriter](<#DigestWriter>)
+  - [func NewDigestWriter\(a Algorithm, dst io.Writer\) \(writer \*DigestWriter, err error\)](<#NewDigestWriter>)
+- [type VerifyingReader](<#VerifyingReader>)
+  - [func NewVerifyingReader\(a Algorithm, src io.Reader, wantHex string\) \(reader \*VerifyingReader, err error\)](<#NewVerifyingReader>)
 
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L77>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L93>)
 
 ```go
 func New(a Algorithm) (h hash.Hash, err error)
@@ -48,7 +56,7 @@ func New(a Algorithm) (h hash.Hash, err error)
 New returns a fresh streaming hash.Hash for the named algorithm, for io.Copy over large inputs. An unregistered algorithm returns UnknownHashAlgorithm.
 
 <a name="Sum"></a>
-## func [Sum](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L63>)
+## func [Sum](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L79>)
 
 ```go
 func Sum(a Algorithm, data []byte) (digest []byte, err error)
@@ -57,7 +65,7 @@ func Sum(a Algorithm, data []byte) (digest []byte, err error)
 Sum returns the digest of data under the named algorithm. An unregistered algorithm returns UnknownHashAlgorithm.
 
 <a name="SumHex"></a>
-## func [SumHex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L70>)
+## func [SumHex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L86>)
 
 ```go
 func SumHex(a Algorithm, data []byte) (digest string, err error)
@@ -66,7 +74,7 @@ func SumHex(a Algorithm, data []byte) (digest string, err error)
 SumHex returns Sum as canonical lowercase hex — the frozen string form for content IDs and cache keys.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L46>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L54>)
 
 Algorithm is the stable identifier of a hash scheme.
 
@@ -90,5 +98,41 @@ const (
     FNV1a64 Algorithm = "fnv1a-64"
 )
 ```
+
+<a name="DigestWriter"></a>
+## type [DigestWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L71>)
+
+DigestWriter tees writes into both a destination io.Writer and a running hash, exposing the digest of everything written so far. See [NewDigestWriter](<#NewDigestWriter>).
+
+```go
+type DigestWriter = stdhash.DigestWriter
+```
+
+<a name="NewDigestWriter"></a>
+### func [NewDigestWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L102>)
+
+```go
+func NewDigestWriter(a Algorithm, dst io.Writer) (writer *DigestWriter, err error)
+```
+
+NewDigestWriter returns a DigestWriter that tees writes into dst while hashing them under the named algorithm, so the content\-address digest of everything written is available via Sum/SumHex. An unregistered algorithm returns UnknownHashAlgorithm.
+
+<a name="VerifyingReader"></a>
+## type [VerifyingReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L75>)
+
+VerifyingReader wraps a source reader and verifies its digest against an expected value on the final \(EOF\) read. See [NewVerifyingReader](<#NewVerifyingReader>).
+
+```go
+type VerifyingReader = stdhash.VerifyingReader
+```
+
+<a name="NewVerifyingReader"></a>
+### func [NewVerifyingReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L112>)
+
+```go
+func NewVerifyingReader(a Algorithm, src io.Reader, wantHex string) (reader *VerifyingReader, err error)
+```
+
+NewVerifyingReader returns a VerifyingReader over src that hashes the stream under the named algorithm and verifies it against wantHex on the final \(EOF\) read — a public\-digest, non\-oracle, EOF\-typed check that never fails mid\-stream. An unregistered algorithm returns UnknownHashAlgorithm; a digest mismatch surfaces as DigestMismatch only at EOF.
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

@@ -10,6 +10,7 @@ go_library(
     deps = [
         "//internal/core/crypto",
         "//internal/service/crypto/hkdfsha256",
+        "//internal/service/crypto/keytree",
     ],
 )
 

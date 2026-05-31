@@ -25,4 +25,13 @@ var (
 	WriterSpecInvalid = errs.Define(CodeWriterSpecInvalid, "WRITER_SPEC_INVALID",
 		"NewMulti requires at least one writer spec",
 		"pkg/v1/logger.NewMulti called with no WriterSpec entries; supply at least one named writer")
+
+	// TopologyInvalid is returned by FromConfig when the config blob cannot be
+	// decoded, names a writer no imported package has registered, or a writer's
+	// Factory/DecodeConfig rejected its options. The message is redacted: it
+	// names only the writer and the failure kind, never a decoded credential or
+	// option value (the SECRET GATE of ADR 0014 §D5).
+	TopologyInvalid = errs.Define(CodeTopologyInvalid, "TOPOLOGY_INVALID",
+		"Logger topology config is invalid",
+		"pkg/v1/logger.FromConfig: blob undecodable, unknown writer name, or a writer rejected its options (option values redacted)")
 )

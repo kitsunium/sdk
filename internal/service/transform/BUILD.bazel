@@ -1,0 +1,56 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "transform",
+    srcs = [
+        "bounded.go",
+        "codes.go",
+        "errors.go",
+        "flate.go",
+        "gzip.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/transform",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/transform",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":transform",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "transform_test",
+    srcs = [
+        "bounded_internal_test.go",
+        "flate_external_test.go",
+        "flate_internal_test.go",
+        "gzip_external_test.go",
+        "gzip_internal_test.go",
+    ],
+    embed = [":transform"],
+    deps = [
+        "//internal/core/transform",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (//:audit_sources) so its errs.Define call sites are scanned under Bazel.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

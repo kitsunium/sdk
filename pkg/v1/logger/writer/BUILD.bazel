@@ -10,6 +10,7 @@ go_library(
     deps = [
         "//internal/service/writer/console",
         "//internal/service/writer/file",
+        "//internal/service/writer/rotfile",
     ],
 )
 

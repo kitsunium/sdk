@@ -15,6 +15,7 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 | `buffer/` | `sync.Pool` of `[]byte` — a `recycler.CappedPool[*[]byte]` specialisation | 1200-1299 (reserved) |
 | `clock/` | `Clock` interface (`Now` + `Since`) for testable time | 1300-1399 (reserved) |
 | `ring/` | SPSC lock-free bounded queue (ADR 0006) | 1400-1499 (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
+| `batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014) | 0.1.5.* (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
 
 Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
 
@@ -72,3 +73,5 @@ GOWORK=off go test -race -cover ./...
 - `buffer/` — see `internal/kernel/buffer/CLAUDE.md`
 - `clock/` — see `internal/kernel/clock/CLAUDE.md`
 - `ring/` — see `internal/kernel/ring/CLAUDE.md`
+- `batcher/` — see `internal/kernel/batcher/CLAUDE.md`
+- `worker/` — see `internal/kernel/worker/CLAUDE.md`

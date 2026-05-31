@@ -128,6 +128,48 @@ func TestWithGroupOnRealLogger(t *testing.T) {
 	}
 }
 
+// Test_Build is the name-matched test for Build (KTN-TEST-SYNC/COVERAGE). It
+// asserts Build returns a usable, chainable Builder bound to the supplied Logger
+// — the hot-path entry point the other builder tests drive through.
+func Test_Build(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		level logger.Level
+		key   string
+		val   string
+		want  string
+	}
+
+	tests := []tc{
+		{name: "build at info emits the chained attr", level: logger.LevelInfo, key: "user", val: "ada", want: "user=\"ada\""},
+		{name: "build at error emits the chained attr", level: logger.LevelError, key: "code", val: "x99", want: "code=\"x99\""},
+	}
+
+	runCase := func(t *testing.T, level logger.Level, key, val, want string) {
+		t.Helper()
+		sink := &builderSink{}
+		lg := mustNewWithSink(t, sink)
+		b := logger.Build(lg, level)
+		//: Build must return a non-nil, chainable Builder.
+		if b == nil {
+			t.Fatalf("Build returned nil")
+		}
+		b.Str(key, val).Send(t.Context(), "msg")
+		//: the returned Builder must be wired to lg — its output reaches the sink.
+		if !strings.Contains(string(sink.captured), want) {
+			t.Errorf("output %q missing %q", sink.captured, want)
+		}
+	}
+
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.level, c.key, c.val, c.want)
+		})
+	}
+}
+
 // foreignLogger is a Logger implementation NOT produced by svclogger.New, used
 // to drive the type-assertion fallbacks inside Build / LogAttrs.
 type foreignLogger struct{}

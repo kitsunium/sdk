@@ -22,6 +22,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0011-kernel-snapshot-primitive.md` | Generic kernel `Value[T]` copy-on-write container; codec registry consolidates onto it | Accepted |
 | `adr/0012-logger-writer-registry.md` | Named, config-driven `Sink` factory registry (`writer`); console/file in-tree + AWS s3/cloudwatch under third-party/ (root module) | Accepted (amends ADR 0005/0006 §Registry) |
 | `adr/0013-sdk-crypto-domain.md` | Crypto domain — `AEAD` `Seal`/`Open` with hidden nonce; stdlib AES-256-GCM default, x/crypto schemes under third-party/ | Accepted (amends core purpose + ADR 0005 §Registry) |
+| `adr/0014-sdk-transform-crypto-ports-config-topology.md` | The verb wave — `core/transform` (5th sibling), crypto MAC/Agreement/StreamSealer ports + KeyEnvelope/KeyTree, `logger.FromConfig` + `ConfigDecoder` | Accepted (amends core purpose + ADR 0012/0013 + ADR 0005 §Registry) |
 
 ## ADR conventions
 
