@@ -4,11 +4,10 @@
 package transform
 
 import (
-	"errors"
-	"fmt"
 	"maps"
 	"slices"
 
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
@@ -19,15 +18,7 @@ import (
 // Load (ADR 0011) — the same read-mostly shape that justifies it for the codec
 // and crypto registries. Update serialises writers on a mutex so Register's
 // read-modify-write publish is race-free; Lookup stays lock-free.
-var (
-	registry snapshot.Value[map[Algorithm]Compressor]
-
-	//: errDuplicateRegistration is the wrappable sentinel for boot-time
-	//: duplicate-scheme panics. Wrapping via %w keeps the chain inspectable
-	//: while the message retains the dotted-quad code for grep-friendly logs.
-	//: Lowercase per Go style guide (KTN-FUNC-ERRFMT enforces).
-	errDuplicateRegistration = errors.New("duplicate registration")
-)
+var registry snapshot.Value[map[Algorithm]Compressor]
 
 // Register inserts c into the registry under c.Algorithm() and returns it so
 // callers can bind the singleton to a typed package-level variable like
@@ -40,8 +31,10 @@ var (
 func Register(c Compressor) Compressor {
 	//: nil registration is always a programming error.
 	if c == nil {
-		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("transform.Register [%s DUPLICATE_REGISTRATION]: nil Compressor", CodeUnknownCompressor))
+		//: panic with the DuplicateRegistration sentinel so the bracket header
+		//: "[<0.2.5.5> DUPLICATE_REGISTRATION]" is a valid (code,reason) pairing —
+		//: the sentinel's Error() already renders the dotted-quad code + reason.
+		panic(DuplicateRegistration.Error())
 	}
 	//: publish under the scheme name; a conflict turns into a boot-time panic.
 	if err := publishCompressor(c.Algorithm(), c); err != nil {
@@ -70,8 +63,12 @@ func publishCompressor(name Algorithm, c Compressor) error {
 					//: nothing changes; keep the current snapshot.
 					return current
 				}
-				//: a DISTINCT scheme under a taken name is the hard conflict.
-				dupErr = fmt.Errorf("transform.Register [%s %w]: duplicate Algorithm %q", CodeUnknownCompressor, errDuplicateRegistration, name)
+				//: a DISTINCT scheme under a taken name is the hard conflict;
+				//: origin-wins keeps the DuplicateRegistration code+reason so the
+				//: bracket header pairs 0.2.5.5 with DUPLICATE_REGISTRATION, while
+				//: the algorithm name rides along as a structured field (the empty
+				//: WrapParams.Code is dropped from the trail per the poison-pill rule).
+				dupErr = errs.Wrap(DuplicateRegistration, errs.WrapParams{}, errs.String("algorithm", string(name)))
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}

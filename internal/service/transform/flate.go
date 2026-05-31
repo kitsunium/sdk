@@ -50,13 +50,25 @@ func (flateCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
 	return buf.Bytes(), nil
 }
 
-// Decompress DEFLATE-decodes src and appends the result to dst, bounded by
-// maxDecompressedBytes (see bounded.go) so a bomb cannot drive an OOM here.
+// Decompress DEFLATE-decodes src and appends the result to dst, bounded by the
+// production ceiling (maxDecompressedBytes, see bounded.go) so a bomb cannot
+// drive an OOM here. It delegates to flateDecompress, the cap-parameterised core
+// a white-box test drives with a lowered cap to exercise the overflow backstop.
 func (flateCompressor) Decompress(dst, src []byte) (decoded []byte, err error) {
+	//: production always uses the full 256 MiB ceiling.
+	return flateDecompress(dst, src, maxDecompressedBytes)
+}
+
+// flateDecompress DEFLATE-decodes src and appends the result to dst, refusing to
+// materialise more than max plaintext bytes. An over-cap stream returns the
+// FlateFailed sentinel rather than an OOM; a corrupt body returns a wrapped
+// flate error. max is an explicit parameter so the overflow backstop is testable
+// without mutating shared state.
+func flateDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
 	//: raw DEFLATE has no header to pre-validate; the reader fails on read.
 	r := flate.NewReader(bytes.NewReader(src))
-	//: drain the reader through the shared bounded helper.
-	plain, overflow, derr := readAllBounded(r)
+	//: drain the reader through the shared bounded helper at the given cap.
+	plain, overflow, derr := readAllBounded(r, max)
 	//: fold a Close fault into the result so the reader error is never dropped.
 	if cerr := r.Close(); cerr != nil && derr == nil {
 		//: a clean drain followed by a Close fault still fails decompression.

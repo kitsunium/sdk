@@ -1,6 +1,7 @@
 package keyenvelope_test
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -67,8 +68,14 @@ func Test_WrapKey(t *testing.T) {
 	}
 }
 
-// Test_UnwrapKey asserts wrong passphrase and corrupt envelope error shapes,
-// including an AAD-bound header tamper that surfaces as a structural fault.
+// Test_UnwrapKey asserts the failure shapes of UnwrapKey. A wrong passphrase
+// and the AAD-bound salt swap both fail inside the AEAD open as
+// DecryptionFailed; a structurally short box also surfaces DecryptionFailed
+// (parseEnvelope defers the length check to the AEAD). The corrupt and
+// swapped-kdf cases are rejected earlier by framing validation as
+// InvalidKeyEnvelope. The salt swap is the load-bearing case: it keeps the
+// framing valid yet changes the only per-envelope AAD field, proving the salt
+// is genuinely bound into the AEAD rather than merely framed.
 func Test_UnwrapKey(t *testing.T) {
 	t.Parallel()
 	dek := dek32(t)
@@ -77,6 +84,19 @@ func Test_UnwrapKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wrap: %v", err)
 	}
+	parts := strings.Split(base, "$")
+	//: the fixture envelope must carry the frozen seven-segment framing
+	if len(parts) != 7 {
+		t.Fatalf("framing: got %d segments want 7", len(parts))
+	}
+	//: a different but structurally-valid 32-byte salt keeps framing valid yet
+	//: changes the per-envelope AAD field, so the open fails inside the AEAD.
+	saltSwap := strings.Split(base, "$")
+	saltSwap[4] = base64.RawStdEncoding.EncodeToString([]byte("fedcba9876543210fedcba9876543210"))
+	//: a valid-framing envelope whose box ("Ym94" -> "box", 3 bytes) is shorter
+	//: than the AES-GCM nonce+tag must surface the fault from the AEAD open.
+	shortBox := strings.Split(base, "$")
+	shortBox[6] = "Ym94"
 	//: table-driven cases keep arms isolated; wantCode is the single discriminator
 	cases := []struct {
 		name     string
@@ -87,6 +107,8 @@ func Test_UnwrapKey(t *testing.T) {
 		{name: "wrong-pass", pass: []byte("wrong"), envelope: base, wantCode: corecrypto.CodeDecryptionFailed},
 		{name: "corrupt", pass: []byte("right"), envelope: "$kenv$bad", wantCode: corecrypto.CodeInvalidKeyEnvelope},
 		{name: "tampered-kdf", pass: []byte("right"), envelope: strings.Replace(base, "pbkdf2-sha256", "scrypt", 1), wantCode: corecrypto.CodeInvalidKeyEnvelope},
+		{name: "salt-swap", pass: []byte("right"), envelope: strings.Join(saltSwap, "$"), wantCode: corecrypto.CodeDecryptionFailed},
+		{name: "short-box", pass: []byte("right"), envelope: strings.Join(shortBox, "$"), wantCode: corecrypto.CodeDecryptionFailed},
 	}
 	check := func(t *testing.T, pass []byte, envelope string, wantCode errs.Code) {
 		t.Helper()

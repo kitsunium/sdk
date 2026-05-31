@@ -10,10 +10,11 @@
 package writer
 
 // Decoder is the optional extension implemented by a Factory that can build its
-// typed Config from a raw map[string]any decoded from a config file. It embeds
-// Factory (so an implementer is always a usable writer) and adds the Decode
-// translation step. Topology builders (pkg/v1/logger.FromConfig) detect support
-// with a type assertion: a Factory that implements Decoder owns the translation
+// typed Config from a raw map[string]any decoded from a config file. It does NOT
+// embed Factory: it is a standalone single-method interface, asserted on a value
+// already known to be a Factory. Topology builders (pkg/v1/logger.FromConfig)
+// first resolve a Factory from the registry, then type-assert that resolved
+// Factory to Decoder: a Factory that also implements Decoder owns the translation
 // of its own option keys; one that does not falls back to a default mapping that
 // hands the raw map straight to Factory.Open.
 //

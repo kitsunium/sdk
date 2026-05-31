@@ -132,14 +132,21 @@ func (b *Batcher[T]) Close(ctx context.Context) error {
 		//: wait for the loop to acknowledge exit.
 		<-b.done
 	}
-	//: deliver whatever remains before flipping the closed flag.
-	err := b.flushOnce(ctx)
-	//: mark closed so later Add / Flush calls fail fast.
+	//: flip closed and capture the final batch atomically under the lock so a
+	//: concurrent Add either lands in this batch or is rejected — never stranded.
 	b.mu.Lock()
 	b.closed = true
+	batch := b.buf
+	b.buf = nil
+	b.weight = 0
 	b.mu.Unlock()
-	//: report the final flush outcome.
-	return err
+	//: nothing buffered — closed-flag flip is the only work to do.
+	if len(batch) == 0 {
+		//: empty-batch fast path (also the idempotent second-Close path).
+		return nil
+	}
+	//: deliver the captured final batch outside the lock.
+	return b.deliverBatch(ctx, batch)
 }
 
 // flushOnce swaps out the pending batch under the lock and delivers it outside
@@ -160,6 +167,14 @@ func (b *Batcher[T]) flushOnce(ctx context.Context) error {
 	b.weight = 0
 	b.mu.Unlock()
 	//: deliver outside the lock so a slow Sink never blocks producers.
+	return b.deliverBatch(ctx, batch)
+}
+
+// deliverBatch runs the Sink on batch outside any lock and wraps a non-nil
+// result as the typed DeliverFailed sentinel (the cause stays reachable via
+// errors.Is). It is the shared delivery tail of flushOnce and Close.
+func (b *Batcher[T]) deliverBatch(ctx context.Context, batch []T) error {
+	//: run the Sink; a slow delivery never holds b.mu.
 	if derr := b.deliver(ctx, batch); derr != nil {
 		//: wrap the cause as the typed DeliverFailed sentinel (errors.Is reaches it).
 		return errs.Wrap(derr, errs.WrapParams{

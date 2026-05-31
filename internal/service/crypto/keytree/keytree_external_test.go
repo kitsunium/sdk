@@ -1,6 +1,11 @@
 package keytree_test
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"testing"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
@@ -158,6 +163,126 @@ func Test_KeyTree_DeriveKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			check(t, tc.algo, tc.path, tc.wantErr)
+		})
+	}
+}
+
+// refEncodePath reconstructs the frozen canonical HKDF info independently of
+// the production encodePath: per segment, a 4-byte big-endian length prefix
+// followed by the segment bytes. Any drift in prefix width, endianness, or
+// layout makes this reference diverge from production and fails the KAT.
+func refEncodePath(path []string) []byte {
+	var buf []byte
+	//: length-prefix each segment exactly as the frozen wire format requires
+	for _, seg := range path {
+		var lp [4]byte
+		binary.BigEndian.PutUint32(lp[:], uint32(len(seg)))
+		buf = append(buf, lp[:]...)
+		buf = append(buf, seg...)
+	}
+	return buf
+}
+
+// refHKDFSHA256 is a stdlib-only RFC 5869 HKDF-SHA256 reference (empty salt),
+// independent of the production deriver. It freezes the extract+expand
+// construction so a change to salt handling or hash choice fails the KAT.
+func refHKDFSHA256(secret, info []byte, length int) []byte {
+	//: extract — empty salt becomes a zero block of the hash size (RFC 5869)
+	salt := make([]byte, sha256.Size)
+	extract := hmac.New(sha256.New, salt)
+	extract.Write(secret)
+	prk := extract.Sum(nil)
+
+	//: expand — T(n) = HMAC(prk, T(n-1) | info | n) concatenated to length
+	out := make([]byte, 0, length)
+	var prev []byte
+	counter := byte(1)
+	//: emit blocks until the requested length is satisfied
+	for len(out) < length {
+		expand := hmac.New(sha256.New, prk)
+		expand.Write(prev)
+		expand.Write(info)
+		expand.Write([]byte{counter})
+		prev = expand.Sum(nil)
+		out = append(out, prev...)
+		counter++
+	}
+	return out[:length]
+}
+
+// Test_KeyTree_DeriveKey_KAT pins a known-answer vector for the derivation.
+//
+// The encodePath layout (4-byte big-endian length prefix per segment) plus the
+// HKDF-SHA256 info construction is a frozen derivation wire format: it
+// determines the AEAD key every downstream consumer receives for a given
+// (master, path). The relative-property tests (determinism, injectivity,
+// stability) all still pass if the prefix width, endianness, or info layout
+// changes -- silently re-keying every existing path. This KAT fixes a literal
+// 32-byte hex master and a literal expected 32-byte hex key, AND cross-checks
+// against an independent stdlib reference (refEncodePath + refHKDFSHA256), so
+// any change to the frozen format breaks it loudly instead of silently.
+func Test_KeyTree_DeriveKey_KAT(t *testing.T) {
+	t.Parallel()
+	//: table-driven cases keep arms isolated; each row is a frozen vector
+	cases := []struct {
+		name      string
+		masterHex string
+		path      []string
+		wantHex   string
+	}{
+		{
+			name:      "svc-db",
+			masterHex: "0708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526",
+			path:      []string{"svc", "db"},
+			wantHex:   "bdc7d469e64e188c7924aacafcb55145d152d3b70f0c3d0b994cc458d13ef384",
+		},
+	}
+	check := func(t *testing.T, masterHex string, path []string, wantHex string) {
+		t.Helper()
+		masterRaw, err := hex.DecodeString(masterHex)
+		//: the pinned master literal must decode cleanly
+		if err != nil {
+			//: a malformed fixture aborts the test
+			t.Fatalf("decode master: %v", err)
+		}
+		master, err := corecrypto.NewKey(masterRaw)
+		//: the fixture master key must construct cleanly
+		if err != nil {
+			//: a broken fixture aborts the test
+			t.Fatalf("NewKey: %v", err)
+		}
+		node := walk(keytree.NewKeyTree(hkdf, master), path)
+		key, err := node.DeriveKey()
+		//: derivation along the registered algo must succeed
+		if err != nil {
+			//: a derivation fault aborts the test
+			t.Fatalf("DeriveKey: %v", err)
+		}
+		got := key.Bytes()
+		want, err := hex.DecodeString(wantHex)
+		//: the pinned expected literal must decode cleanly
+		if err != nil {
+			//: a malformed fixture aborts the test
+			t.Fatalf("decode want: %v", err)
+		}
+		//: the literal vector locks the frozen output byte-for-byte
+		if !bytes.Equal(got, want) {
+			//: any change to encodePath or the HKDF info contract changes this vector
+			t.Fatalf("KAT mismatch: derivation wire format changed\n got=%x\nwant=%x", got, want)
+		}
+		//: the independent reference cross-checks the encodePath + HKDF contract
+		ref := refHKDFSHA256(masterRaw, refEncodePath(path), corecrypto.KeyLen)
+		//: production and the from-scratch reference must agree on the vector
+		if !bytes.Equal(got, ref) {
+			//: a divergence means the production format drifted from RFC 5869
+			t.Fatalf("KAT vs reference mismatch\n got=%x\n ref=%x", got, ref)
+		}
+	}
+	//: iterate cases under a parallel parent
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			check(t, tc.masterHex, tc.path, tc.wantHex)
 		})
 	}
 }

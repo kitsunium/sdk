@@ -274,10 +274,10 @@ func Test_streamReader_readWire(t *testing.T) {
 			if err := r.readHeader(); err != nil {
 				t.Fatalf("readHeader: %v", err)
 			}
-			//: readWire reports whether the first chunk is the final one.
-			wire, atEOF, err := r.readWire()
-			if err != nil || atEOF != c.wantEOF || len(wire) < gcmTagLen {
-				t.Errorf("readWire=(%d bytes,%v,%v) wantEOF=%v", len(wire), atEOF, err, c.wantEOF)
+			//: readWire reports the valid byte count and whether the chunk is final.
+			n, atEOF, err := r.readWire()
+			if err != nil || atEOF != c.wantEOF || n < gcmTagLen {
+				t.Errorf("readWire=(%d bytes,%v,%v) wantEOF=%v", n, atEOF, err, c.wantEOF)
 			}
 		})
 	}
@@ -298,10 +298,11 @@ func Test_streamReader_fillWire(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			r := newReader(rKey(t), bytes.NewReader([]byte(c.src)), nil)
-			//: a source shorter than maxWire ends as the final chunk.
-			wire, atEOF, err := r.fillWire(nil, chunkSize+gcmTagLen)
-			if err != c.wantErr || atEOF != c.wantEOF || string(wire) != c.src {
-				t.Errorf("fillWire=(%q,%v,%v) want (%q,%v,%v)", wire, atEOF, err, c.src, c.wantEOF, c.wantErr)
+			//: a source shorter than a full chunk ends as the final chunk; fill
+			//: reads in place into r.wire from offset 0.
+			n, atEOF, err := r.fillWire(0)
+			if err != c.wantErr || atEOF != c.wantEOF || string(r.wire[:n]) != c.src {
+				t.Errorf("fillWire=(%q,%v,%v) want (%q,%v,%v)", r.wire[:n], atEOF, err, c.src, c.wantEOF, c.wantErr)
 			}
 		})
 	}
@@ -321,8 +322,9 @@ func Test_streamReader_peekNext(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			r := newReader(rKey(t), bytes.NewReader([]byte(c.remaining)), nil)
-			//: peekNext distinguishes a following chunk from EOF.
-			_, atEOF, err := r.peekNext([]byte("full"))
+			//: peekNext distinguishes a following chunk from EOF; the byte count it
+			//: carries through is opaque to this branch.
+			_, atEOF, err := r.peekNext(4)
 			if err != nil || atEOF != c.wantEOF {
 				t.Errorf("peekNext atEOF=%v want %v (err=%v)", atEOF, c.wantEOF, err)
 			}

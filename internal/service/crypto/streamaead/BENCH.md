@@ -34,9 +34,13 @@ BenchmarkStreamOpen_1MiB-12   	726	1644532 ns/op	 637.55 MB/s	3554049 B/op	36 al
 - **Throughput** (`MB/s`) is the headline number for a streaming AEAD: ~400 MB/s
   seal, ~640 MB/s open on this box, dominated by hardware AES-NI + the SHA-256
   HKDF key-derivation done once per stream.
-- **allocs/op** reflects the per-1-MiB stream cost: the 16 chunks each allocate a
-  fresh sealed/opened slice plus the buffered plaintext. The construction favours
-  bounded memory (two chunk-sized buffers) over zero-alloc — the whole point of
-  streaming is to avoid holding the full payload twice.
+- **allocs/op** reflects the per-1-MiB stream cost: the open path holds one
+  reusable wire buffer allocated once after the header verifies (each chunk is
+  read in place into it), and each chunk's `Open` returns a fresh plaintext slice.
+  The construction favours bounded memory (a single chunk-sized wire buffer plus
+  the current chunk's plaintext) over zero-alloc — the whole point of streaming is
+  to avoid holding the full payload twice.
+- Re-run `make bench` on a representative machine to refresh the allocs/op figures
+  above after this in-place-read change; the snapshot below predates it.
 - Numbers are a single-run snapshot; treat as ±5%. Re-run on a representative
   benchmark machine before citing in a release.

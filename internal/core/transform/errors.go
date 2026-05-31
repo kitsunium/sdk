@@ -38,4 +38,12 @@ var (
 		"Compressed frame is malformed or exceeds the safety bound",
 		"core/transform: compressed-frame header is malformed or the decompression-bomb guard tripped",
 		errs.WithExitCode(exitDataErr))
+
+	// DuplicateRegistration is the boot-time panic sentinel for the Compressor
+	// registry: a nil scheme or a distinct scheme claiming a taken Algorithm. Its
+	// reason matches the bracket-header word so code 0.2.5.5 resolves to
+	// DUPLICATE_REGISTRATION — never the unrelated UNKNOWN_COMPRESSOR (0.2.5.1).
+	DuplicateRegistration = errs.Define(CodeDuplicateRegistration, "DUPLICATE_REGISTRATION",
+		"A compressor is already registered under that algorithm",
+		"core/transform.Register: a distinct scheme already claims this algorithm, or a nil scheme was supplied")
 )

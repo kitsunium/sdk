@@ -2,6 +2,7 @@ package batcher
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -204,6 +205,103 @@ func Test_Batcher_concurrentAddFlush(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
+		})
+	}
+}
+
+func Test_Batcher_deliverBatch(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		fail    bool
+		wantErr bool
+	}
+	tests := []tc{
+		{"successful delivery returns nil", false, false},
+		{"failed delivery is wrapped as DeliverFailed", true, true},
+	}
+	runCase := func(t *testing.T, fail, wantErr bool) {
+		t.Helper()
+		boom := errors.New("deliver boom")
+		deliver := func(context.Context, []int) error {
+			//: the fail arm simulates a Sink that errors.
+			if fail {
+				return boom
+			}
+			return nil
+		}
+		b := NewBatcher(deliver, Config[int]{})
+		err := b.deliverBatch(t.Context(), []int{1, 2})
+		//: a nil result is expected only on the success arm.
+		if (err != nil) != wantErr {
+			t.Fatalf("deliverBatch err=%v wantErr=%v", err, wantErr)
+		}
+		//: the failure arm must wrap the cause as the typed sentinel.
+		if wantErr && !errors.Is(err, BatcherDeliverFailed) {
+			t.Errorf("deliverBatch err=%v does not match BatcherDeliverFailed", err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.fail, c.wantErr)
+		})
+	}
+}
+
+func Test_Batcher_closeRaceLosesNoWrite(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		producers int
+	}
+	tests := []tc{{"every Add accepted while Close runs is delivered", 64}}
+	runCase := func(t *testing.T, producers int) {
+		t.Helper()
+		var delivered atomic.Int64
+		deliver := func(_ context.Context, batch []int) error {
+			//: count every delivered item so the total is checkable after Close.
+			delivered.Add(int64(len(batch)))
+			return nil
+		}
+		// A huge cap and no ticker mean the ONLY flush is Close's atomic final
+		// swap, so an Add racing Close must be captured there or be rejected.
+		b := NewBatcher(deliver, Config[int]{MaxItems: 1 << 20})
+		ctx := t.Context()
+
+		var accepted atomic.Int64
+		// add records an accepted item only when Add returns nil; a BatcherClosed
+		// rejection is the legal alternative the producer must honour.
+		add := func(item int) {
+			//: a nil result means the batcher took ownership of this item.
+			if err := b.Add(ctx, item); err == nil {
+				accepted.Add(1)
+			}
+		}
+		// Producer goroutines race the single Close below; each runs add exactly
+		// once via wg.Go, so wg.Wait() bounds their lifetime to this test — none
+		// outlive runCase.
+		var wg sync.WaitGroup
+		for i := range producers {
+			//: spin one producer racing Close; wg.Wait joins it before return.
+			wg.Go(func() { add(i) })
+		}
+
+		//: Close concurrently with the in-flight producers.
+		if err := b.Close(ctx); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		wg.Wait()
+
+		//: every item Add reported as accepted must have been delivered.
+		if got := delivered.Load(); got != accepted.Load() {
+			t.Fatalf("lost write: accepted=%d delivered=%d", accepted.Load(), got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.producers)
 		})
 	}
 }

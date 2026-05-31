@@ -2,10 +2,57 @@ package hmacsha2
 
 import (
 	"bytes"
+	"encoding/hex"
 	"testing"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 )
+
+// runTagKATCase asserts Tag over a KeyLen-padded key + msg reproduces the exact
+// frozen hex tag, so any drift in the construction breaks the build.
+func runTagKATCase(t *testing.T, rawKey, msg []byte, wantHex string) {
+	t.Helper()
+	//: pad the vector key into a KeyLen buffer (the redacting Key pins length).
+	buf := make([]byte, corecrypto.KeyLen)
+	//: leading bytes are the vector key; the remainder stays zero.
+	copy(buf, rawKey)
+	//: a KeyLen buffer always constructs a Key.
+	key, err := corecrypto.NewKey(buf)
+	if err != nil {
+		t.Fatalf("NewKey: %v", err)
+	}
+	//: compare the hex tag against the frozen known answer.
+	if got := hex.EncodeToString((hmacSHA256{}).Tag(key, msg)); got != wantHex {
+		t.Fatalf("Tag hex = %s, want %s", got, wantHex)
+	}
+}
+
+// Test_hmacSHA256_TagKAT pins the frozen HMAC-SHA256 output so a silent change to
+// the wire-visible construction (e.g. a hash swap) fails the build rather than
+// breaking external interop. Keys are zero-padded to KeyLen (the SDK Key pins
+// length), so these vectors freeze THAT documented behaviour.
+func Test_hmacSHA256_TagKAT(t *testing.T) {
+	t.Parallel()
+	//: known-answer vectors over KeyLen-padded keys.
+	tests := []struct {
+		name    string
+		key     []byte
+		msg     []byte
+		wantHex string
+	}{
+		{"padded-0b-hi-there", bytes.Repeat([]byte{0x0b}, 20), []byte("Hi There"), "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"},
+		{"jefe", []byte("Jefe"), []byte("what do ya want for nothing?"), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"},
+	}
+	//: drive every vector through the shared KAT runner.
+	for _, c := range tests {
+		//: each vector is independent and parallel-safe.
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			//: delegate to the shared KAT runner.
+			runTagKATCase(t, c.key, c.msg, c.wantHex)
+		})
+	}
+}
 
 func newKey(t *testing.T, b byte) corecrypto.Key {
 	t.Helper()

@@ -17,13 +17,16 @@ import "io"
 const maxDecompressedBytes int64 = 256 << 20 // 256 MiB
 
 // readAllBounded drains r into a fresh buffer, refusing to materialise more than
-// maxDecompressedBytes. It reads one byte past the cap so an over-cap stream is
+// max plaintext bytes. It reads one byte past max so an over-cap stream is
 // detected as overflow rather than silently truncated; the caller maps overflow
-// to its failure sentinel.
-func readAllBounded(r io.Reader) (plain []byte, overflow bool, err error) {
-	//: LimitReader stops the underlying read at cap+1 so we can tell a
+// to its failure sentinel. max is an explicit parameter (production passes
+// maxDecompressedBytes) so the overflow path can be exercised against a small
+// cap in tests without materialising the production ceiling and without mutating
+// any shared state (keeping the parallel scheme tests race-free).
+func readAllBounded(r io.Reader, max int64) (plain []byte, overflow bool, err error) {
+	//: LimitReader stops the underlying read at max+1 so we can tell a
 	//: legitimately-cap-sized payload from one that wanted to exceed the cap.
-	limited := io.LimitReader(r, maxDecompressedBytes+1)
+	limited := io.LimitReader(r, max+1)
 	//: ReadAll over the bounded reader is the single allocation point.
 	buf, readErr := io.ReadAll(limited)
 	//: a read fault (corrupt stream) is surfaced verbatim for the caller to wrap.
@@ -32,7 +35,7 @@ func readAllBounded(r io.Reader) (plain []byte, overflow bool, err error) {
 		return nil, false, readErr
 	}
 	//: more than the cap means the stream tried to exceed the bomb ceiling.
-	if int64(len(buf)) > maxDecompressedBytes {
+	if int64(len(buf)) > max {
 		//: signal overflow so the caller returns its failure sentinel.
 		return nil, true, nil
 	}

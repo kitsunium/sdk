@@ -23,3 +23,11 @@ const CodeDecompressionFailed errs.Code = 0x00_02_05_03 // 0.2.5.3
 // is owned by the pkg/v1/codec frame layer (a later commit); declared here so
 // the 0.2.5.* block is allocated in one place per ADR 0014.
 const CodeCompressedFrameInvalid errs.Code = 0x00_02_05_04 // 0.2.5.4
+
+// CodeDuplicateRegistration identifies a boot-time collision on the Compressor
+// registry: a nil scheme, or a distinct scheme claiming an already-registered
+// Algorithm. It is surfaced via panic at boot (see registry.go). Its reason is
+// DUPLICATE_REGISTRATION so the bracket header "[<code> <REASON>]" stays a valid
+// (code,reason) pairing per ADR 0005 §Semantics — mirroring the codec registry's
+// CodeDuplicateRegistration (0.2.2.1).
+const CodeDuplicateRegistration errs.Code = 0x00_02_05_05 // 0.2.5.5

@@ -34,11 +34,13 @@ go_test(
     name = "transform_test",
     size = "small",
     srcs = [
+        "codes_external_test.go",
         "registry_external_test.go",
         "registry_internal_test.go",
         "transform_external_test.go",
     ],
     embed = [":transform"],
+    deps = ["//internal/kernel/errs"],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST

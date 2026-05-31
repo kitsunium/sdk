@@ -34,6 +34,9 @@ type streamReader struct {
 	}
 	// aad is the associated data bound into every chunk's tag.
 	aad []byte
+	// wire is the single reusable wire buffer; every chunk's ct||tag is read in
+	// place into it, so the read path holds one chunk-sized buffer for the stream.
+	wire [chunkSize + gcmTagLen]byte
 	// plain holds verified-but-not-yet-returned plaintext from the current chunk.
 	plain []byte
 	// counter is the per-chunk nonce counter, incremented after each open.
@@ -113,19 +116,19 @@ func (r *streamReader) readHeader() error {
 	return nil
 }
 
-// nextChunk reads one wire chunk, decides final vs non-final via a one-byte
-// look-ahead, opens it under the correct flag, and stores the plaintext. It sets
-// the done bit when the final-flag chunk verifies.
+// nextChunk reads one wire chunk into the reusable buffer, decides final vs
+// non-final via a one-byte look-ahead, opens it under the correct flag, and
+// stores the plaintext. It sets the done bit when the final-flag chunk verifies.
 func (r *streamReader) nextChunk() error {
 	//: read up to a full wire chunk (ct of chunkSize || tag), plus the prior peek.
-	wire, atEOF, rerr := r.readWire()
+	n, atEOF, rerr := r.readWire()
 	//: a read fault below EOF is a truncated stream.
 	if rerr != nil {
 		//: surface truncation rather than a generic error.
 		return rerr
 	}
 	//: a wire chunk must carry at least a GCM tag to be openable.
-	if len(wire) < gcmTagLen {
+	if n < gcmTagLen {
 		//: too short to authenticate — the stream was cut mid-chunk.
 		return corecrypto.StreamTruncated
 	}
@@ -136,8 +139,8 @@ func (r *streamReader) nextChunk() error {
 		//: mark this chunk's nonce as the terminal one.
 		flag = flagFinal
 	}
-	//: open under the chosen flag; GCM verifies the whole chunk before returning.
-	return r.openChunk(wire, flag, atEOF)
+	//: open the in-place wire slice; GCM verifies the whole chunk before returning.
+	return r.openChunk(r.wire[:n], flag, atEOF)
 }
 
 // openChunk builds the nonce, opens the wire chunk, and on success stores the
@@ -164,51 +167,50 @@ func (r *streamReader) openChunk(wire []byte, flag byte, atEOF bool) error {
 	return nil
 }
 
-// readWire reads the next wire chunk and reports whether it is the last one. It
-// uses a one-byte look-ahead: a full chunk followed by more data is non-final; a
-// short read or an immediate EOF after a full chunk marks the final chunk.
-func (r *streamReader) readWire() (wire []byte, atEOF bool, err error) {
-	//: the maximum wire chunk is a full plaintext chunk plus the GCM tag.
-	maxWire := chunkSize + gcmTagLen
-	//: start the buffer with any byte peeked past the previous full chunk.
-	buf := make([]byte, 0, maxWire)
-	//: a pending peek byte is the first byte of this chunk.
+// readWire fills the reusable wire buffer with the next chunk and reports how
+// many bytes are valid plus whether it is the last one. It uses a one-byte
+// look-ahead: a full chunk followed by more data is non-final; a short read or an
+// immediate EOF after a full chunk marks the final chunk.
+func (r *streamReader) readWire() (n int, atEOF bool, err error) {
+	//: a pending peek byte is the first byte of this chunk, written in place.
+	off := 0
+	//: seed index 0 with the byte peeked past the previous full chunk, if any.
 	if r.state&statePeeked != 0 {
-		//: consume the held look-ahead byte.
-		buf = append(buf, r.peek[0])
+		//: consume the held look-ahead byte into the front of the wire buffer.
+		r.wire[0] = r.peek[0]
 		r.state &^= statePeeked
+		off = 1
 	}
-	//: fill the rest of the chunk from src up to the max wire size.
-	return r.fillWire(buf, maxWire)
+	//: fill the rest of the chunk from src in place.
+	return r.fillWire(off)
 }
 
-// fillWire reads from src until buf holds maxWire bytes or src is exhausted, then
-// peeks one further byte to distinguish a non-final chunk (more data follows)
-// from the final chunk (EOF). A read error below EOF is a truncated stream.
-func (r *streamReader) fillWire(buf []byte, maxWire int) (wire []byte, atEOF bool, err error) {
-	//: grow buf up to maxWire bytes from the source.
-	tmp := make([]byte, maxWire-len(buf))
-	//: ReadFull tolerates a short final chunk via the EOF branches below.
-	got, rerr := io.ReadFull(r.src, tmp)
-	//: accumulate whatever was read onto the (possibly peek-seeded) buffer.
-	buf = append(buf, tmp[:got]...)
+// fillWire reads into the reusable wire buffer past the seeded offset until it is
+// full or src is exhausted, then peeks one further byte to distinguish a
+// non-final chunk (more data follows) from the final chunk (EOF). A read error
+// below EOF is a truncated stream.
+func (r *streamReader) fillWire(off int) (n int, atEOF bool, err error) {
+	//: read directly into the remainder of the reusable buffer past the peek seed.
+	got, rerr := io.ReadFull(r.src, r.wire[off:])
+	//: total valid bytes are the seeded peek plus whatever was read this call.
+	total := off + got
 	//: a short read means src ended mid- or at-end-of this final chunk.
 	if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
 		//: no more bytes can follow, so this is the final chunk.
-		return buf, true, nil
+		return total, true, nil
 	}
 	//: any other read fault below EOF is a genuine truncation/transport error.
 	if rerr != nil {
 		//: surface truncation rather than a generic error.
-		return nil, false, corecrypto.StreamTruncated
+		return 0, false, corecrypto.StreamTruncated
 	}
 	//: a full chunk was read; peek one byte to see whether another chunk follows.
-	return r.peekNext(buf)
+	return r.peekNext(total)
 }
 
 // peekNext reads a single look-ahead byte after a full wire chunk: its presence
 // means another chunk follows (non-final); EOF means this was the final chunk.
-func (r *streamReader) peekNext(buf []byte) (wire []byte, atEOF bool, err error) {
+func (r *streamReader) peekNext(n int) (valid int, atEOF bool, err error) {
 	//: read exactly one byte past the full chunk.
 	got, perr := io.ReadFull(r.src, r.peek[:])
 	//: a byte present means at least one more chunk follows this one.
@@ -216,13 +218,13 @@ func (r *streamReader) peekNext(buf []byte) (wire []byte, atEOF bool, err error)
 		//: hold the peek so the next chunk read consumes it first.
 		r.state |= statePeeked
 		//: this chunk is non-final — another chunk follows.
-		return buf, false, nil
+		return n, false, nil
 	}
 	//: EOF with no further byte means this full chunk was the final chunk.
 	if perr == io.EOF || perr == io.ErrUnexpectedEOF {
 		//: the full chunk is final.
-		return buf, true, nil
+		return n, true, nil
 	}
 	//: any other fault is a truncation/transport error.
-	return nil, false, corecrypto.StreamTruncated
+	return 0, false, corecrypto.StreamTruncated
 }
