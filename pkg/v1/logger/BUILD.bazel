@@ -13,6 +13,7 @@ go_library(
         "fromconfig.go",
         "levelvar.go",
         "logger.go",
+        "memory.go",
         "sink.go",
         "topology.go",
         "version.go",
@@ -36,6 +37,7 @@ go_library(
         "//internal/service/logger/encoder",
         "//internal/service/logger/middleware/multi",
         "//internal/service/logger/sink/console",
+        "//internal/service/logger/sink/memory",
     ],
 )
 
@@ -57,6 +59,7 @@ go_test(
         "levelvar_external_test.go",
         "logger_bench_test.go",
         "logger_external_test.go",
+        "memory_external_test.go",
         "sink_external_test.go",
         "version_external_test.go",
         "writer_external_test.go",

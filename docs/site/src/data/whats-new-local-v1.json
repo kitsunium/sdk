@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-31T19:55:05.978Z",
+  "generatedAt": "2026-05-31T19:56:53.138Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "WithCaller — opt-in source-location annotation (competitive gaps)",
+      "sha": "cef8058f682897429c788e32f07ce1f9201d7917",
+      "short": "cef8058",
+      "date": "2026-05-31T21:53:58+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -39,15 +48,6 @@
       "sha": "2fd356da784673074cae933fc6d07c968a798695",
       "short": "2fd356d",
       "date": "2026-05-31T11:30:07+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "crypto",
-      "breaking": false,
-      "summary": "KeyEnvelope (pbkdf2) + KeyTree path-addressed derivation (ADR 0014)",
-      "sha": "4872ec0d1fec78cd28c1f460de29f62c764a9130",
-      "short": "4872ec0",
-      "date": "2026-05-31T01:21:15+02:00"
     }
   ]
 }

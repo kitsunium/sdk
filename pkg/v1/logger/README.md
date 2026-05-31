@@ -110,6 +110,8 @@ Construction failures carry typed dotted\-quad codes under range 1.1.0.\* per AD
 
 Inspect via the accessors in github.com/kitsunium/sdk/pkg/v1/errs.
 
+Package logger — exposes the in\-memory test sink \(NewMemorySink\) and its RecordSnapshot element type so consumers can assert on what was logged.
+
 Package logger — exposes the Sink port and the multi\-sink helper alongside the encoder\-aware constructor NewWithSink. Together they let consumers replace the default text\-on\-stderr wiring \(NewText / Default\) with arbitrary fan\-out / async / file / syslog topologies — without reaching into internal/\* packages.
 
 Package logger — declares the TopologyConfig DTO consumed by FromConfig. A TopologyConfig is the decoded shape of a logger config file: a global level plus an ordered list of named writer entries. It is a plain data carrier with no behaviour — the construction logic lives in FromConfig.
@@ -167,7 +169,10 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
   - [func NewText\(cfg Config\) \(lg Logger, err error\)](<#NewText>)
   - [func NewWithSink\(cfg SinkConfig\) \(lg Logger, err error\)](<#NewWithSink>)
   - [func WithCaller\(lg Logger, skip int\) Logger](<#WithCaller>)
+- [type MemorySink](<#MemorySink>)
+  - [func NewMemorySink\(\) \*MemorySink](<#NewMemorySink>)
 - [type Record](<#Record>)
+- [type RecordSnapshot](<#RecordSnapshot>)
 - [type S3Config](<#S3Config>)
 - [type Sink](<#Sink>)
   - [func ConsoleStderr\(\) Sink](<#ConsoleStderr>)
@@ -728,6 +733,24 @@ lg = logger.WithCaller(lg, 0)
 lg.Info(ctx, "ready") // record now carries source=…/main.go:42:main.run
 ```
 
+<a name="MemorySink"></a>
+## type [MemorySink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/memory.go#L20>)
+
+MemorySink is a Sink that buffers a defensive snapshot of every received record in a mutex\-guarded slice. It is intended for tests that assert on what was logged. Pass it to NewWithSink \(it satisfies Sink\), retrieve the buffered records with Records, and clear them with Reset.
+
+```go
+type MemorySink = memory.Memory
+```
+
+<a name="NewMemorySink"></a>
+### func [NewMemorySink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/memory.go#L23>)
+
+```go
+func NewMemorySink() *MemorySink
+```
+
+NewMemorySink returns an empty MemorySink ready to record received records.
+
 <a name="Record"></a>
 ## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L27>)
 
@@ -735,6 +758,15 @@ Record is the stable alias for the internal RecordEvent value passed to Sink.Wri
 
 ```go
 type Record = corelogger.RecordEvent
+```
+
+<a name="RecordSnapshot"></a>
+## type [RecordSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/memory.go#L14>)
+
+RecordSnapshot is a buffered copy of a single recorded log event. It is the element type returned by MemorySink.Records, letting tests assert on a record's Level, Message, and Attrs without parsing an encoder's byte output. It is the same type as Record \(an alias of the core RecordEvent\).
+
+```go
+type RecordSnapshot = corelogger.RecordEvent
 ```
 
 <a name="S3Config"></a>
