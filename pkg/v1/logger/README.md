@@ -10,6 +10,8 @@ Package logger — re\-exports the chainable Builder API and the slice\-overload
 
 Package logger — range 1.1.0.\* \(ADR 0005 pkg/v1/logger block\).
 
+Package logger — adds ergonomic Encoder constructors to the public facade. The Encoder type alias itself lives in sink.go; this file contributes the named constructors \(NewTextEncoder / NewJSONEncoder\) so consumers can build an encoder directly and pass it to NewWithSink without importing internal/\*.
+
 Package logger — declares pkg/v1/logger's sentinels. Each var's name equals its errs.Define Reason in SCREAMING\_SNAKE form.
 
 Package logger — exposes FromConfig, the capstone of the config\-driven writer subsystem \(ADR 0014 §D5\): it builds a fully wired Logger from a config blob with zero Go glue. The blob is decoded by a codec the CONSUMER already registered \(FromConfig imports only the core/codec dispatch surface, never pkg/v1/codec or any service codec, so a pkg/v1/logger consumer inherits no vendor modules\). Each decoded WriterEntry is resolved against the writer registry; a Factory that implements ConfigDecoder translates its own option map, otherwise a default mapping passes the raw map straight to the factory.
@@ -146,6 +148,8 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
 - [type CredentialValue](<#CredentialValue>)
   - [func NewCredentialValue\(accessKeyID, secretAccessKey, sessionToken string\) CredentialValue](<#NewCredentialValue>)
 - [type Encoder](<#Encoder>)
+  - [func NewJSONEncoder\(\) Encoder](<#NewJSONEncoder>)
+  - [func NewTextEncoder\(\) Encoder](<#NewTextEncoder>)
   - [func TextEncoder\(\) Encoder](<#TextEncoder>)
 - [type FileConfig](<#FileConfig>)
 - [type Format](<#Format>)
@@ -509,6 +513,24 @@ Encoder is the stable alias for the internal service encoder interface. The defa
 ```go
 type Encoder = encoder.Encoder
 ```
+
+<a name="NewJSONEncoder"></a>
+### func [NewJSONEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/encoder.go#L25>)
+
+```go
+func NewJSONEncoder() Encoder
+```
+
+NewJSONEncoder returns a structured single\-line JSON encoder, rendering each record as one encoding/json\-compatible object per line: \{"ts":…,"level":…,"msg":…,\<flat attrs\>\}. Grouped attributes flatten to dotted keys \("g1.g2.key"\) to match the text encoder's convention. Pass it to NewWithSink via SinkConfig.Encoder for machine\-readable output.
+
+<a name="NewTextEncoder"></a>
+### func [NewTextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/encoder.go#L15>)
+
+```go
+func NewTextEncoder() Encoder
+```
+
+NewTextEncoder returns the default human\-readable encoder, rendering each record as "TIME LEVEL msg key=val …\\n" with RFC3339\-millisecond timestamps. It is a named peer of TextEncoder bound to the real system clock.
 
 <a name="TextEncoder"></a>
 ### func [TextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L140>)

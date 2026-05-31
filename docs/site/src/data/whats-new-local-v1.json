@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-31T19:51:04.609Z",
+  "generatedAt": "2026-05-31T19:53:10.011Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "runtime-tunable Level — atomic LevelVar + ParseLevel (competitive gaps)",
+      "sha": "52609879eb0203fc924f120cefea3ea91c208051",
+      "short": "5260987",
+      "date": "2026-05-31T21:49:59+02:00"
+    },
     {
       "type": "fix",
       "scope": "logger",
@@ -39,15 +48,6 @@
       "sha": "1154a7150b41cc2070a2310ef53c7dc21fc242e3",
       "short": "1154a71",
       "date": "2026-05-31T00:49:49+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "tee middleware — fan-out with a dead-letter spill seam (ADR 0014)",
-      "sha": "8b1d12be9364b96a71662532a5ba1e1c26380482",
-      "short": "8b1d12b",
-      "date": "2026-05-30T23:39:55+02:00"
     }
   ]
 }

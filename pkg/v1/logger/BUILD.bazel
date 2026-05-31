@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "builder.go",
         "codes.go",
+        "encoder.go",
         "errors.go",
         "fromconfig.go",
         "levelvar.go",
@@ -48,6 +49,7 @@ go_test(
     size = "small",
     srcs = [
         "builder_external_test.go",
+        "encoder_external_test.go",
         "fromconfig_external_test.go",
         "fromconfig_internal_test.go",
         "levelvar_external_test.go",
