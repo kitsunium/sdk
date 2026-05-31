@@ -132,7 +132,7 @@ Package codec — JSON\-bridge promotion path for codecs whose runtime precondit
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Marshal\(f Format, v any\) \(encoded \[\]byte, err error\)](<#Marshal>)
-- [func MarshalCompressed\(f Format, a CompressAlgorithm, v any\) \(box \[\]byte, err error\)](<#MarshalCompressed>)
+- [func MarshalCompressed\(f Format, algo CompressAlgorithm, v any\) \(box \[\]byte, err error\)](<#MarshalCompressed>)
 - [func MarshalMany\(v any, formats ...Format\) \(encodedByFormat map\[Format\]\[\]byte, err error\)](<#MarshalMany>)
 - [func Unmarshal\(f Format, data \[\]byte, v any\) error](<#Unmarshal>)
 - [func UnmarshalCompressed\(box \[\]byte, v any\) error](<#UnmarshalCompressed>)
@@ -218,13 +218,13 @@ func Marshal(f Format, v any) (encoded []byte, err error)
 Marshal serialises v using the codec registered under f. The codec's native input shape is tried first \(fast path, zero overhead\); if the codec rejects v as the wrong shape \(csv requires \[\]\[\]string, pem requires \*pem.Block, etc.\) the facade promotes v via json\-encode \+ codec\-specific wrap so every Format accepts any Go value — see promote.go for the per\-format strategies and the uniform\-contract rationale.
 
 <a name="MarshalCompressed"></a>
-## func [MarshalCompressed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/compressed.go#L63>)
+## func [MarshalCompressed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/compressed.go#L67>)
 
 ```go
-func MarshalCompressed(f Format, a CompressAlgorithm, v any) (box []byte, err error)
+func MarshalCompressed(f Format, algo CompressAlgorithm, v any) (box []byte, err error)
 ```
 
-MarshalCompressed serialises v with the codec registered under f, compresses the result with the transform registered under a, and wraps both in a self\-describing frame so UnmarshalCompressed needs no Format or Algorithm argument. It returns UnknownCompressor when a has no frame id or no registered body, CompressedFrameInvalid when f exceeds the addressable length, and forwards any codec / compressor error untouched \(origin wins\).
+MarshalCompressed serialises v with the codec registered under f, compresses the result with the transform registered under algo, and wraps both in a self\-describing frame so UnmarshalCompressed needs no Format or Algorithm argument. It returns UnknownCompressor when algo has no frame id or no registered body, CompressedFrameInvalid when f exceeds the addressable length, and forwards any codec / compressor error untouched \(origin wins\).
 
 <a name="MarshalMany"></a>
 ## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L287>)
@@ -255,7 +255,7 @@ func Unmarshal(f Format, data []byte, v any) error
 Unmarshal parses data into v using the codec registered under f. As with Marshal, the codec's native target shape is tried first; on shape mismatch the facade promotes via JSON\-bridge so every Format can decode into any Go target.
 
 <a name="UnmarshalCompressed"></a>
-## func [UnmarshalCompressed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/compressed.go#L132>)
+## func [UnmarshalCompressed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/compressed.go#L136>)
 
 ```go
 func UnmarshalCompressed(box []byte, v any) error
@@ -273,7 +273,7 @@ type Codec = corecodec.Codec
 ```
 
 <a name="CompressAlgorithm"></a>
-## type [CompressAlgorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/compressed.go#L48>)
+## type [CompressAlgorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/compressed.go#L52>)
 
 CompressAlgorithm re\-exports core/transform.Algorithm so consumers name a compressor without importing internal/\*. Use the Gzip / Flate constants.
 

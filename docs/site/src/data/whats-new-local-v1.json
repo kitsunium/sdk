@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-31T08:59:42.827Z",
+  "generatedAt": "2026-05-31T14:37:01.522Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "fix",
+      "scope": "crypto",
+      "breaking": false,
+      "summary": "streamaead — reject short writes to the stream sink (PR #57 review)",
+      "sha": "2fd356da784673074cae933fc6d07c968a798695",
+      "short": "2fd356d",
+      "date": "2026-05-31T11:30:07+02:00"
+    },
     {
       "type": "feat",
       "scope": "crypto",
@@ -39,15 +48,6 @@
       "sha": "e8c78b5450e26e658caa2a02d92750027d4bd202",
       "short": "e8c78b5",
       "date": "2026-05-30T00:29:53+02:00"
-    },
-    {
-      "type": "fix",
-      "scope": "docs",
-      "breaking": false,
-      "summary": "make npm test glob node-version-agnostic (#31)",
-      "sha": "dcff33ba199373bcc579168f287bd783aa5b3e1f",
-      "short": "dcff33b",
-      "date": "2026-05-25T09:59:30Z"
     }
   ]
 }

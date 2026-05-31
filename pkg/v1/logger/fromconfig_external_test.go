@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
@@ -52,7 +53,7 @@ func (s *bufferSink) Close() error {
 // records that Decode was the path taken.
 type decoderTestFactory struct {
 	sink         *bufferSink
-	decoderUsed  *bool
+	decoderUsed  *atomic.Bool
 	registeredAs corewriter.Name
 }
 
@@ -75,10 +76,12 @@ func (f *decoderTestFactory) Open(_ corewriter.Config) (corelogger.Sink, error) 
 	return f.sink, nil
 }
 
-// Decode flags that the decoder path ran and echoes the map.
+// Decode flags that the decoder path ran and echoes the map. The flag is atomic
+// because the shared factory is registered once and Decode runs concurrently
+// from the parallel FromConfig subtests.
 func (f *decoderTestFactory) Decode(raw map[string]any) (corewriter.Config, error) {
 	//: mark the decoder branch so the test can assert it was chosen.
-	*f.decoderUsed = true
+	f.decoderUsed.Store(true)
 	//: echo the map back as the opaque Config.
 	return raw, nil
 }
@@ -105,12 +108,22 @@ func (f *plainTestFactory) Open(_ corewriter.Config) (corelogger.Sink, error) {
 // shared test fakes, registered exactly once at package load to avoid the
 // registry's duplicate-registration panic across subtests.
 var (
-	decoderUsedFlag bool
+	decoderUsedFlag atomic.Bool
 	decoderSink     = &bufferSink{buf: &bytes.Buffer{}}
 	plainSink       = &bufferSink{buf: &bytes.Buffer{}}
 
+	// branchDecoderFlag / plainBranchFlag are per-row flags owned solely by
+	// TestFromConfigDecoderBranch's two cases, so its subtests can run in
+	// parallel without sharing flag state with each other or with TestFromConfig.
+	branchDecoderFlag atomic.Bool
+	branchDecoderSink = &bufferSink{buf: &bytes.Buffer{}}
+	plainBranchFlag   atomic.Bool
+	plainBranchSink   = &bufferSink{buf: &bytes.Buffer{}}
+
 	_ = corewriter.Register(&decoderTestFactory{sink: decoderSink, decoderUsed: &decoderUsedFlag, registeredAs: "c14-decoder"})
 	_ = corewriter.Register(&plainTestFactory{sink: plainSink, registeredAs: "c14-plain"})
+	_ = corewriter.Register(&decoderTestFactory{sink: branchDecoderSink, decoderUsed: &branchDecoderFlag, registeredAs: "c14-decoder-branch"})
+	_ = corewriter.Register(&plainTestFactory{sink: plainBranchSink, registeredAs: "c14-plain-branch"})
 )
 
 func TestFromConfig(t *testing.T) {
@@ -141,35 +154,49 @@ func TestFromConfig(t *testing.T) {
 	}
 }
 
+// runDecoderBranchCase builds a single-writer topology naming writerName, runs
+// FromConfig, and asserts the factory's resolution path: flag.Load() must equal
+// wantDecoder (true = Decode path, false = default mapping). Each case owns its
+// own flag, so subtests are parallel-safe.
+func runDecoderBranchCase(t *testing.T, writerName string, flag *atomic.Bool, wantDecoder bool) {
+	t.Helper()
+	//: reset this case's own flag before exercising the branch.
+	flag.Store(false)
+	//: a single-writer topology over the named factory.
+	blob := `{"level":"info","writers":[{"name":"` + writerName + `","config":{"opt":"x"}}]}`
+	//: the topology must build successfully on both branches.
+	if _, err := logger.FromConfig(logger.Format("json"), []byte(blob)); err != nil {
+		t.Fatalf("FromConfig(%s): unexpected error %v", writerName, err)
+	}
+	//: the flag distinguishes the Decode path from the default mapping.
+	if flag.Load() != wantDecoder {
+		t.Errorf("FromConfig(%s): decoderUsed=%v want %v", writerName, flag.Load(), wantDecoder)
+	}
+}
+
+// TestFromConfigDecoderBranch proves a Factory that implements Decoder takes the
+// Decode path while a plain Factory falls back to the default mapping. Each case
+// owns its own writer + flag, so the subtests run in parallel without sharing
+// flag state.
 func TestFromConfigDecoderBranch(t *testing.T) {
-	//: NO t.Parallel here — this test mutates the package-global decoderUsedFlag,
-	//: so it must run serially (KTN-TEST-NOPARALLEL); subtests stay serial too.
-	type tc struct {
+	t.Parallel()
+	//: each row carries its own factory name, dedicated flag, and expectation.
+	cases := []struct {
 		name        string
 		writerName  string
+		flag        *atomic.Bool
 		wantDecoder bool
+	}{
+		{"Decoder factory uses Decode", "c14-decoder-branch", &branchDecoderFlag, true},
+		{"plain factory uses default mapping", "c14-plain-branch", &plainBranchFlag, false},
 	}
-	tests := []tc{
-		{"Decoder factory uses Decode", "c14-decoder", true},
-		{"plain factory uses default mapping", "c14-plain", false},
-	}
-	runCase := func(t *testing.T, writerName string, wantDecoder bool) {
-		t.Helper()
-		decoderUsedFlag = false
-		blob := `{"level":"info","writers":[{"name":"` + writerName + `","config":{"opt":"x"}}]}`
-		_, err := logger.FromConfig(logger.Format("json"), []byte(blob))
-		//: both branches must build successfully.
-		if err != nil {
-			t.Fatalf("FromConfig: unexpected error %v", err)
-		}
-		//: the decoder flag distinguishes the two resolution branches.
-		if decoderUsedFlag != wantDecoder {
-			t.Errorf("decoderUsed=%v want %v", decoderUsedFlag, wantDecoder)
-		}
-	}
-	for _, c := range tests {
+	//: drive each case through the shared runner.
+	for _, c := range cases {
+		//: each case owns its flag, so subtests are parallel-safe.
 		t.Run(c.name, func(t *testing.T) {
-			runCase(t, c.writerName, c.wantDecoder)
+			t.Parallel()
+			//: delegate to the shared decoder-branch runner.
+			runDecoderBranchCase(t, c.writerName, c.flag, c.wantDecoder)
 		})
 	}
 }
