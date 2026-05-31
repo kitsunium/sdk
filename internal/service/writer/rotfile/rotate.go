@@ -46,8 +46,10 @@ func (s *rotatingSink) rotate() error {
 	//: adopt the new descriptor and reset the byte counter.
 	s.f = f
 	s.size = 0
-	//: rotation complete.
-	return nil
+	//: prune rotated siblings older than the calendar cutoff (no-op when
+	//: MaxAgeDays is non-positive); a prune failure surfaces under the rotate
+	//: sentinel without losing the freshly reopened descriptor.
+	return s.pruneByAge()
 }
 
 // shiftBackups renames the rotated siblings down by one (dropping the oldest

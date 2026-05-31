@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -32,6 +33,9 @@ type rotatingSink struct {
 	// size tracks bytes written to the active file since the last open, so the
 	// threshold check needs no per-write stat syscall.
 	size int64
+	// clk is the time source for MaxAgeDays calendar pruning; never nil after
+	// newRotatingSink resolves cfg.Clock (defaulting to clock.System).
+	clk clock.Clock
 }
 
 // openHardened opens path with O_NOFOLLOW (Linux) + 0600 after refusing a
@@ -84,8 +88,9 @@ func refuseSymlink(path string) error {
 
 // newRotatingSink validates cfg, opens the active file through the hardened
 // path, and seeds the size counter from the existing file so a restart does not
-// reset the rotation threshold.
-func newRotatingSink(cfg Config) (sink corelogger.Sink, err error) {
+// reset the rotation threshold. cfg is taken by pointer so the grown Config
+// value (path + caps + clock, >64 bytes) is not copied onto the stack.
+func newRotatingSink(cfg *Config) (sink corelogger.Sink, err error) {
 	//: refuse an empty path so callers detect the misconfiguration immediately.
 	if cfg.Path == "" {
 		//: surface the open sentinel with an explicit private cause.
@@ -110,8 +115,16 @@ func newRotatingSink(cfg Config) (sink corelogger.Sink, err error) {
 		//: existing content counts toward the first rotation threshold.
 		size = fi.Size()
 	}
-	//: hand back the ready sink owning the descriptor.
-	return &rotatingSink{cfg: cfg, f: f, size: size}, nil
+	//: resolve the clock once so age pruning never dereferences a nil source.
+	clk := cfg.Clock
+	//: a nil clock falls back to the shared system wall clock.
+	if clk == nil {
+		//: default keeps the zero-value Config working unchanged.
+		clk = clock.System
+	}
+	//: hand back the ready sink owning the descriptor; store cfg by value so
+	//: the sink is independent of the caller's Config after construction.
+	return &rotatingSink{cfg: *cfg, f: f, size: size, clk: clk}, nil
 }
 
 // Write appends p to the active file under the local mutex, rotating first when

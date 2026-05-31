@@ -19,7 +19,7 @@ var _ corelogger.Sink = (*rotatingSink)(nil)
 func newSink(t *testing.T, cfg Config) *rotatingSink {
 	t.Helper()
 	//: build through the real constructor so size-seeding + hardening run.
-	base, err := newRotatingSink(cfg)
+	base, err := newRotatingSink(&cfg)
 	//: a clean open is the precondition for every white-box case.
 	if err != nil {
 		t.Fatalf("newRotatingSink(%+v): %v", cfg, err)
@@ -147,7 +147,7 @@ func Test_newRotatingSink(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		base, err := newRotatingSink(c.cfg)
+		base, err := newRotatingSink(&c.cfg)
 		//: failure arm — typed open error + nil sink.
 		if c.wantErr {
 			if !errs.HasCode(err, CodeRotFileOpenFailed) || base != nil {

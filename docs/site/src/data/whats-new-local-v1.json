@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-31T19:59:40.658Z",
+  "generatedAt": "2026-05-31T20:01:31.384Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "WithError — decompose a typed SDK error into log fields (competitive gaps)",
+      "sha": "7b97a92f526e172e2dac54a41cf7284729052ee6",
+      "short": "7b97a92",
+      "date": "2026-05-31T21:57:57+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -21,15 +30,6 @@
       "sha": "cef8058f682897429c788e32f07ce1f9201d7917",
       "short": "cef8058",
       "date": "2026-05-31T21:53:58+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "JSON encoder — structured single-line JSON records (competitive gaps)",
-      "sha": "bdb759701273f959db51490bdc2ed7a3ec5c5fd3",
-      "short": "bdb7597",
-      "date": "2026-05-31T21:52:01+02:00"
     },
     {
       "type": "fix",

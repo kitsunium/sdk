@@ -49,8 +49,9 @@ func (*rotFileFactory) Open(cfg writer.Config) (sink logger.Sink, err error) {
 		//: surface the documented config-type-mismatch sentinel.
 		return nil, writer.WriterConfigInvalid
 	}
-	//: open the active file with the hardened, reopen-safe constructor.
-	base, oerr := newRotatingSink(c)
+	//: open the active file with the hardened, reopen-safe constructor;
+	//: pass cfg by pointer so the grown Config value is not copied.
+	base, oerr := newRotatingSink(&c)
 	//: forward the typed open error unchanged (origin wins).
 	if oerr != nil {
 		//: RotFileOpenFailed already carries the right code/reason.
