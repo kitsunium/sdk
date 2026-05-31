@@ -38,6 +38,59 @@ func newTestWriter(t *testing.T, dst io.Writer) *streamWriter {
 	return w.(*streamWriter)
 }
 
+// shortWriter accepts only the first byte of every Write and reports a nil error
+// — the non-conformant short-write sink writeAll must reject.
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) {
+	//: accept at most one byte, claiming success — the short-write hazard.
+	if len(p) == 0 {
+		//: an empty write is trivially complete.
+		return 0, nil
+	}
+	//: under-report the count with no error to model a truncating sink.
+	return 1, nil
+}
+
+// Test_writeAll covers the three writeAll outcomes: a full write, a sink fault,
+// and a short write that must surface io.ErrShortWrite rather than silently
+// truncating a frozen stream frame.
+func Test_writeAll(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		dst     io.Writer
+		wantErr error
+	}{
+		{"full write succeeds", &bytes.Buffer{}, nil},
+		{"sink fault is forwarded", failWriter{}, nil},
+		{"short write is rejected", shortWriter{}, io.ErrShortWrite},
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			//: drive writeAll with a multi-byte payload so a short write truncates.
+			err := writeAll(c.dst, []byte("two-or-more-bytes"))
+			//: the short-write case must surface exactly io.ErrShortWrite.
+			if c.wantErr != nil {
+				//: an explicit sentinel must match.
+				if !errors.Is(err, c.wantErr) {
+					t.Fatalf("writeAll err=%v want %v", err, c.wantErr)
+				}
+				return
+			}
+			//: the healthy buffer must accept the whole payload with no error.
+			if _, ok := c.dst.(*bytes.Buffer); ok && err != nil {
+				t.Fatalf("writeAll(buffer) err=%v want nil", err)
+			}
+			//: the failWriter case must forward its non-nil sink fault.
+			if _, ok := c.dst.(failWriter); ok && err == nil {
+				t.Fatalf("writeAll(failWriter) err=nil want a sink fault")
+			}
+		})
+	}
+}
+
 func Test_newWriterWithSalt(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

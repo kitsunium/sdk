@@ -110,6 +110,28 @@ func (w *streamWriter) Close() error {
 	return w.sealChunk(flagFinal)
 }
 
+// writeAll writes b to dst in full, returning io.ErrShortWrite when the sink
+// accepts fewer than len(b) bytes without reporting an error. A conformant
+// io.Writer never short-writes with a nil error, but the frozen stream framing
+// cannot tolerate even a non-conformant sink silently truncating the header or a
+// sealed chunk — so the byte count is checked explicitly.
+func writeAll(dst io.Writer, b []byte) error {
+	//: a sink fault is surfaced unchanged; n is meaningless on error.
+	n, err := dst.Write(b)
+	//: forward a genuine sink fault.
+	if err != nil {
+		//: the caller aborts the stream on this error.
+		return err
+	}
+	//: a short write with no error violates io.Writer — reject it explicitly.
+	if n != len(b) {
+		//: the stdlib sentinel for an under-length write.
+		return io.ErrShortWrite
+	}
+	//: the full buffer reached the sink.
+	return nil
+}
+
 // ensureHeader writes the [version][algID][salt] header to dst exactly once.
 func (w *streamWriter) ensureHeader() error {
 	//: skip when the header has already been emitted.
@@ -121,8 +143,8 @@ func (w *streamWriter) ensureHeader() error {
 	header := make([]byte, 0, headerLen)
 	header = append(header, streamVersion, algID)
 	header = append(header, w.salt[:]...)
-	//: write it; a short/failed write aborts the stream.
-	if _, err := w.dst.Write(header); err != nil {
+	//: write it in full; a short/failed write aborts the stream.
+	if err := writeAll(w.dst, header); err != nil {
 		//: surface the sink fault unchanged.
 		return err
 	}
@@ -139,8 +161,8 @@ func (w *streamWriter) sealChunk(flag byte) error {
 	nonce := chunkNonce(w.counter, flag)
 	//: seal ct||tag onto a fresh slice; aad is authenticated, not stored.
 	wire := w.gcm.Seal(nil, nonce[:], w.buf, w.aad)
-	//: write the sealed chunk; a sink fault aborts the stream.
-	if _, err := w.dst.Write(wire); err != nil {
+	//: write the sealed chunk in full; a sink fault aborts the stream.
+	if err := writeAll(w.dst, wire); err != nil {
 		//: surface the fault unchanged.
 		return err
 	}
