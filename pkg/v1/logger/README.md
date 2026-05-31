@@ -118,6 +118,8 @@ Package logger — declares the TopologyConfig DTO consumed by FromConfig. A Top
 
 Package logger — exposes the SDK version to the rest of the logger package. The ldflags pipeline injects the real value at build time; local development runs fall back to the "dev" sentinel.
 
+Package logger — WithError decomposes an SDK typed error into structured log Attrs \(error.code / error.reason / error.public \+ wrap\-trail codes\), making the SDK's dotted\-quad errors first\-class structured data rather than a flat string. It lives beside the Attr constructors it produces.
+
 Package logger — exposes the named, config\-driven writer surface \(ADR 0012\): the WriterName / \*Config aliases, the WriterSpec pair, and NewMulti, which resolves each named writer to a Sink and fans records out to all of them via Multi. Built\-in console \+ file writers activate with a blank import of pkg/v1/logger/writer; s3 / cloudwatch activate with a blank import of the matching third\-party/aws/writer package \(which alone pulls the AWS SDK\).
 
 Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A WriterEntryConfig names a registered writer and carries its raw, codec\- decoded option map; FromConfig hands that map to the writer's Decoder \(or a default mapping\) to obtain a typed writer.Config.
@@ -142,6 +144,7 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
   - [func String\(key, val string\) Attr](<#String>)
   - [func Time\(key string, val time.Time\) Attr](<#Time>)
   - [func Uint64\(key string, val uint64\) Attr](<#Uint64>)
+  - [func WithError\(err error\) \[\]Attr](<#WithError>)
 - [type Builder](<#Builder>)
   - [func Build\(lg Logger, lv Level\) Builder](<#Build>)
 - [type CloudWatchConfig](<#CloudWatchConfig>)
@@ -416,6 +419,19 @@ func Uint64(key string, val uint64) Attr
 ```
 
 Uint64 builds an Attr carrying a uint64 value.
+
+<a name="WithError"></a>
+### func [WithError](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/witherror.go#L42>)
+
+```go
+func WithError(err error) []Attr
+```
+
+WithError decomposes err into structured log Attrs so the SDK's dotted\-quad typed errors become first\-class structured data rather than a flat string.
+
+For an SDK error it emits error.code, error.reason and error.public, then one error.trail.\<n\> Attr per wrap\-trail code \(newest wrap last\). Empty metadata fields are skipped. For a plain stdlib error it falls back to a single error.message Attr. A nil err yields no Attrs.
+
+The result is meant to be spread into an emission call, e.g. logger.Error\(ctx, lg, "op failed", logger.WithError\(err\)...\).
 
 <a name="Builder"></a>
 ## type [Builder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/builder.go#L17>)

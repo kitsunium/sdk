@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-31T19:56:53.138Z",
+  "generatedAt": "2026-05-31T19:59:40.658Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "in-memory test sink — buffer records for assertions (competitive gaps)",
+      "sha": "502fd290bf11a468fbd43e0925df959901dd1d55",
+      "short": "502fd29",
+      "date": "2026-05-31T21:55:45+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -21,15 +30,6 @@
       "sha": "bdb759701273f959db51490bdc2ed7a3ec5c5fd3",
       "short": "bdb7597",
       "date": "2026-05-31T21:52:01+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "runtime-tunable Level — atomic LevelVar + ParseLevel (competitive gaps)",
-      "sha": "52609879eb0203fc924f120cefea3ea91c208051",
-      "short": "5260987",
-      "date": "2026-05-31T21:49:59+02:00"
     },
     {
       "type": "fix",
