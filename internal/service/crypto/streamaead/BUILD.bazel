@@ -1,0 +1,46 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "streamaead",
+    srcs = [
+        "reader.go",
+        "streamaead.go",
+        "writer.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/streamaead",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":streamaead",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "streamaead_test",
+    srcs = [
+        "reader_internal_test.go",
+        "streamaead_bench_test.go",
+        "streamaead_external_test.go",
+        "streamaead_internal_test.go",
+        "writer_internal_test.go",
+    ],
+    embed = [":streamaead"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)

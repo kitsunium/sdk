@@ -1,0 +1,30 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "agree",
+    srcs = ["agree.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/agree",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/service/crypto/hkdfsha256",
+        "//internal/service/crypto/x25519",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":agree",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "agree_test",
+    srcs = ["agree_external_test.go"],
+    deps = [
+        ":agree",
+        "//pkg/v1/crypto",
+    ],
+)

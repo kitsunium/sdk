@@ -6,6 +6,7 @@ go_library(
     name = "encoder",
     srcs = [
         "encoder.go",
+        "json.go",
         "text.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/logger/encoder",
@@ -31,6 +32,8 @@ alias(
 go_test(
     name = "encoder_test",
     srcs = [
+        "json_external_test.go",
+        "json_internal_test.go",
         "text_external_test.go",
         "text_internal_test.go",
     ],

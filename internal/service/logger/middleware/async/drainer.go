@@ -16,14 +16,28 @@ import corelogger "github.com/kitsunium/sdk/internal/core/logger"
 // record while preventing unbounded retention.
 const maxSaneCap int = 1 << 16
 
-// drain runs in the background draining ring entries into the downstream
-// sink. Exits when the stop channel is closed AND the queue is empty.
+// drain is the drainer loop body, shared by production and the white-box
+// tests. Production runs it inside a worker.LoopDaemon (whose Stop owns the
+// join); the tests spawn it directly via `go s.drain()` and join on done. It
+// selects on the sink's own stop channel and closes done on exit so the
+// test-path Close (which has no daemon) can join.
 func (s *asyncSink) drain() {
-	//: doneOnce guards close(done) so the drainer's exit is idempotent.
+	//: doneOnce guards close(done) so the test-path drainer exit is idempotent
+	//: and the join signal for the test-path Close fires exactly once.
 	defer s.doneOnce.Do(func() {
-		//: signal Close that the drainer has fully exited.
+		//: signal the test-path Close that the drainer has fully exited.
 		close(s.done)
 	})
+	//: run the shared loop body off the sink's stop channel.
+	s.drainLoop(s.stop)
+}
+
+// drainLoop is the kernel-worker loop body: it drains ring entries into the
+// downstream sink and returns promptly once stop is closed (the worker
+// contract). On stop it flushes the ring via drainRemaining so nothing the
+// producer accepted is lost. No done close here; the caller (drain() or the
+// worker.LoopDaemon) owns the join signal.
+func (s *asyncSink) drainLoop(stop <-chan struct{}) {
 	//: spin-loop drains the ring; sleeps when empty until a stop signal arrives.
 	for {
 		//: read under ringMu so the SPSC ring never sees a concurrent
@@ -41,10 +55,10 @@ func (s *asyncSink) drain() {
 		}
 		//: queue is empty — block on stop or yield to other goroutines.
 		select {
-		case <-s.stop:
+		case <-stop:
 			//: drain remaining entries before returning so the queue is empty.
 			s.drainRemaining()
-			//: drainer's terminal exit — defer above closes the done channel.
+			//: drainer's terminal exit — the caller closes the join channel.
 			return
 		default:
 			//: brief yield avoids burning a full core when idle.

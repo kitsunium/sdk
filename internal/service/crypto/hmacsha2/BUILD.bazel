@@ -1,0 +1,36 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "hmacsha2",
+    srcs = ["hmacsha2.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/hmacsha2",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = ["//internal/core/crypto"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":hmacsha2",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "hmacsha2_test",
+    srcs = [
+        "hmacsha2_external_test.go",
+        "hmacsha2_internal_test.go",
+    ],
+    embed = [":hmacsha2"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)

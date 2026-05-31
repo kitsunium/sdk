@@ -62,3 +62,28 @@ const CodePasswordHashFailed errs.Code = 0x00_02_04_0D // 0.2.4.13
 // CodeInvalidPasswordHash identifies a stored PHC string that cannot be parsed
 // during VerifyPassword — server-side data corruption, not a password mismatch.
 const CodeInvalidPasswordHash errs.Code = 0x00_02_04_0E // 0.2.4.14
+
+// CodeUnknownMACAlgorithm identifies a MACTag/MACVerify call naming a MAC
+// Algorithm that no imported package has registered.
+const CodeUnknownMACAlgorithm errs.Code = 0x00_02_04_0F // 0.2.4.15
+
+// CodeUnknownAgreementAlgorithm identifies a GenerateAgreementKey/AgreementShared
+// call naming a key-agreement Algorithm that no imported package has registered.
+const CodeUnknownAgreementAlgorithm errs.Code = 0x00_02_04_10 // 0.2.4.16
+
+// CodeAgreementFailed identifies an AgreementShared call whose scheme rejected
+// the inputs (e.g. a low-order peer point) — wrapped, never leaking key bytes.
+const CodeAgreementFailed errs.Code = 0x00_02_04_11 // 0.2.4.17
+
+// CodeStreamTruncated identifies a streaming Open that hit EOF before the
+// final-flag chunk — the stream was cut short, not legitimately ended.
+const CodeStreamTruncated errs.Code = 0x00_02_04_12 // 0.2.4.18
+
+// CodeInvalidKeyEnvelope identifies a structurally invalid key-envelope string
+// passed to UnwrapKey — a corrupt $kenv$ frame, NOT a wrong-passphrase oracle.
+const CodeInvalidKeyEnvelope errs.Code = 0x00_02_04_13 // 0.2.4.19
+
+// CodeDigestMismatch identifies a VerifyingReader whose computed digest did not
+// match the expected hex at EOF. The digest is public, so the mismatch is
+// non-oracle — it surfaces only on the terminal read, never mid-stream.
+const CodeDigestMismatch errs.Code = 0x00_02_04_14 // 0.2.4.20

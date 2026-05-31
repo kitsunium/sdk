@@ -24,6 +24,7 @@ go_library(
         "//internal/kernel/errs",
         "//internal/kernel/recycler",
         "//internal/kernel/ring",
+        "//internal/kernel/worker",
     ],
 )
 
@@ -51,5 +52,6 @@ go_test(
         "//internal/core/logger/level",
         "//internal/kernel/errs",
         "//internal/kernel/recycler",
+        "//internal/kernel/worker",
     ],
 )

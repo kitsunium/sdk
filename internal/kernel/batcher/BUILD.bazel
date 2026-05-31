@@ -1,0 +1,46 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "batcher",
+    srcs = [
+        "batcher.go",
+        "codes.go",
+        "config.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/batcher",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":batcher",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "batcher_test",
+    srcs = [
+        "batcher_external_test.go",
+        "batcher_internal_test.go",
+    ],
+    embed = [":batcher"],
+    deps = ["//internal/kernel/errs"],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (//:audit_sources) so its errs.Define call sites are scanned under Bazel.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

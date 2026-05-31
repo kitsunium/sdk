@@ -22,9 +22,27 @@ Code range: `0.2.3.*` (ADR 0012).
 |---|---|
 | `writer.go`   | `Name` (typed key + `String`/`Known`), `Config = any`, `Factory` interface (`Name` / `Open`) |
 | `writer_spec.go` | `Spec` value type (`Name` + `Config`); re-exported as `logger.WriterSpec` |
+| `config_decoder.go` | `Decoder` **optional** Factory extension (`Decode(map[string]any) (Config, error)`) — mirrors codec's `Appender`; detected by type assertion (ADR 0014 §D5) |
 | `registry.go` | `snapshot.Value[map[Name]Factory]` registry: `Register` / `Lookup` / `Open` / `Available` (mirrors `core/codec/registry.go`) |
 | `codes.go`    | `CodeDuplicateRegistration` (0.2.3.1), `CodeWriterUnknownName` (0.2.3.2), `CodeWriterConfigInvalid` (0.2.3.3), `CodeWriterNil` (0.2.3.4), `CodeWriterNameEmpty` (0.2.3.5) |
 | `errors.go`   | `WriterUnknownName` + the shared `WriterConfigInvalid` sentinel (the latter returned by every factory on a wrong-type `Config`) |
+
+## `Decoder` optional extension (ADR 0014 §D5)
+
+`Decoder` is an **optional** Factory extension — the writer peer of codec's
+`Appender`. A Factory MAY implement `Decode(map[string]any) (Config, error)` to
+translate a raw, codec-decoded option map (from a config file) into its typed
+`Config`. The interface is single-method (named per the `-er` convention,
+`KTN-INTERFACE-ERNAME`); the ADR's working name `ConfigDecoder` collapses to
+`Decoder` here. Topology builders (`pkg/v1/logger.FromConfig`) type-assert each
+resolved Factory to `Decoder`: when present, `Decode` owns the translation of its
+own option keys; when absent, the builder falls back to a **default mapping**
+that hands the raw `map[string]any` straight through as the opaque `Config = any`
+(the factory's own `Open` type-assertion then accepts the map or returns
+`WriterConfigInvalid`). No new error code: the interface carries no sentinel of
+its own. **Secret gate:** a `Decode` that parses credentials out of the map MUST
+NOT echo any option value into the error it returns — name only the failure
+kind.
 
 ## Conventions
 

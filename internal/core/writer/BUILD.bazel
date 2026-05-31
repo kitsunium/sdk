@@ -8,6 +8,7 @@ go_library(
         "codes.go",
         "config_cloudwatch.go",
         "config_console.go",
+        "config_decoder.go",
         "config_file.go",
         "config_s3.go",
         "credentials.go",
@@ -41,6 +42,7 @@ alias(
 go_test(
     name = "writer_test",
     srcs = [
+        "config_decoder_external_test.go",
         "credentials_external_test.go",
         "registry_external_test.go",
         "registry_internal_test.go",

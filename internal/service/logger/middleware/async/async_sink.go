@@ -21,6 +21,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/ring"
+	"github.com/kitsunium/sdk/internal/kernel/worker"
 )
 
 // defaultBufferSize is the ring capacity supplied when Config.BufferSize is
@@ -45,15 +46,24 @@ type asyncSink struct {
 	// Surfaces errors that would otherwise be silently swallowed by the
 	// drainer.
 	onError func(err error)
-	// stop signals the drainer goroutine to exit after Close.
+	// stop signals the drainer loop to exit after Close. Closed once by
+	// Close under ringMu so it doubles as the TOCTOU-safe post-Close guard
+	// read by Write. The drainLoop selects on it.
 	stop chan struct{}
 	// stopOnce guards close(stop) so concurrent Close calls never panic.
 	stopOnce sync.Once
-	// done is closed by the drainer once it has exited.
+	// done is closed when the drainer loop returns on the white-box test
+	// path (drain() spawned by hand without a daemon). Production joins the
+	// loop through the worker.LoopDaemon instead and never closes this channel.
 	done chan struct{}
-	// doneOnce guards close(done) — the drainer is the sole closer in
-	// practice but the lint heuristic requires an explicit sync.Once guard.
+	// doneOnce guards close(done) on the test path; the daemon-owned
+	// production drainer never closes done (the daemon owns its own join).
 	doneOnce sync.Once
+	// daemon owns the production drainer goroutine — its idempotent Stop
+	// joins the loop, replacing the former hand-rolled <-done join with the
+	// generic kernel primitive (ADR 0014 §D6). nil on the white-box test
+	// path that spawns drain() by hand.
+	daemon *worker.LoopDaemon
 	// flushSignal fires once after every drainer forward() so Flush can
 	// wait on progress instead of Gosched-spinning. Buffered by 1 so the
 	// drainer never blocks when nobody is flushing; Flush selects on it
@@ -120,8 +130,16 @@ func New(downstream corelogger.Sink, cfg Config) corelogger.Sink {
 		stop:        make(chan struct{}),
 		done:        make(chan struct{}),
 	}
-	//: drainer runs for the lifetime of the sink; Close terminates it.
-	go out.drain()
+	//: the kernel worker.LoopDaemon owns the drainer goroutine + its
+	//: idempotent stop/join; the loop body is drain(), which selects on
+	//: out.stop (Close closes it under ringMu) so Stop's join in Close still
+	//: observes a fully drained ring. drain() is the single shared loop body —
+	//: production runs it here, the white-box tests spawn it directly.
+	out.daemon = worker.Start(func(_ <-chan struct{}) {
+		//: run the drainer; drain() closes out.done on exit (doneOnce-guarded)
+		//: and the daemon closes its own join channel — Close joins the latter.
+		out.drain()
+	})
 	//: hand back the sink behind the public Sink interface.
 	return out
 }
@@ -292,7 +310,8 @@ func (s *asyncSink) waitForDrainerProgress(ctx context.Context) bool {
 
 // Close stops the drainer goroutine and closes the downstream sink. After
 // Close returns, all subsequent Write calls return Stopped. Safe to call
-// multiple times — the sync.Once guard makes close(stop) idempotent.
+// multiple times — the sync.Once guard makes close(stop) idempotent and the
+// worker.LoopDaemon's Stop is itself idempotent.
 func (s *asyncSink) Close() error {
 	//: acquire ringMu: hard join point with every in-flight Write. When Lock returns, no Write is mid-[isClosed..TryWrite]; subsequent Writes
 	//: observe isClosed(stop) under ringMu after our close(stop) below, so drainRemaining sees every record that Write accepted (closes the
@@ -306,8 +325,29 @@ func (s *asyncSink) Close() error {
 	//: release the lock so the drainer's TryRead can progress — the drainer
 	//: holds ringMu for each TryRead call (see drainer.go).
 	s.ringMu.Unlock()
-	//: wait for the drainer goroutine to confirm exit.
-	<-s.done
+	//: join the drainer. Production owns the loop via worker.LoopDaemon, whose
+	//: idempotent Stop blocks until the loop has returned (drainRemaining
+	//: done). The white-box test path has no daemon and joins on done, which
+	//: drain() closes on exit.
+	s.joinDrainer()
 	//: forward to the downstream sink so its own resources release.
 	return s.downstream.Close()
+}
+
+// joinDrainer blocks until the drainer loop has returned. The production sink
+// joins through its worker.LoopDaemon (idempotent Stop); the white-box test
+// path constructs the sink without a daemon and joins on the done channel that
+// drain() closes when it exits.
+func (s *asyncSink) joinDrainer() {
+	//: production path — the daemon's Stop joins the loop, which already saw
+	//: the sink's stop closed above and ran drainRemaining before returning.
+	if s.daemon != nil {
+		//: idempotent join — Stop is safe on repeated Close and blocks until
+		//: drain() has returned.
+		s.daemon.Stop()
+		//: production join complete — skip the test-path done receive.
+		return
+	}
+	//: test path — no daemon; the hand-spawned drain() closes done on exit.
+	<-s.done
 }

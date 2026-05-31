@@ -10,6 +10,16 @@
 // The info label binds each subkey to its purpose, so the two derivations above
 // are cryptographically independent even though they share master and salt.
 //
+// # Hierarchical derivation
+//
+// [NewKeyTree] returns a [KeyTree] — an immutable, path-addressed node over a
+// shared master key. Child appends a path segment; DeriveKey re-derives a
+// 32-byte key from the master with the full canonical path as the HKDF info.
+// The path encoding is injective, so distinct paths never collide:
+//
+//	t := kdf.NewKeyTree(kdf.HKDFSHA256, master)
+//	dbKey, _ := t.Child("svc").Child("db").DeriveKey()
+//
 // # NOT for passwords
 //
 // HKDF assumes a HIGH-ENTROPY input — an AEAD key, a Diffie-Hellman shared
@@ -35,10 +45,15 @@ import (
 	// Activates the stdlib HKDF-SHA256 deriver. Stdlib-only, so importing
 	// pkg/v1/kdf pulls zero non-stdlib dependencies.
 	_ "github.com/kitsunium/sdk/internal/service/crypto/hkdfsha256"
+	"github.com/kitsunium/sdk/internal/service/crypto/keytree"
 )
 
 // Algorithm is the stable identifier of a key-derivation scheme.
 type Algorithm = corecrypto.Algorithm
+
+// Key is an opaque, redacting 256-bit symmetric key — the master a KeyTree
+// derives from and the type DeriveKey returns. Build one with crypto.NewKey.
+type Key = corecrypto.Key
 
 // HKDFSHA256 is HKDF (RFC 5869) over SHA-256 — extract-and-expand for key
 // separation from a strong secret.
@@ -51,4 +66,17 @@ const HKDFSHA256 Algorithm = "hkdf-sha256"
 func Subkey(a Algorithm, secret, salt []byte, info string, length int) (subkey []byte, err error) {
 	//: delegate to the core registry dispatcher.
 	return corecrypto.Subkey(a, secret, salt, info, length)
+}
+
+// KeyTree is the path-addressed hierarchical key-derivation node, re-exported
+// from the service layer. Build one with NewKeyTree; Child descends a path and
+// DeriveKey yields a 32-byte key at the current node.
+type KeyTree = keytree.KeyTree
+
+// NewKeyTree returns the root KeyTree for master, deriving children under algo.
+// The master Key is shared by reference across children — the root owns its
+// Zeroize lifetime, so zeroizing master invalidates every derived node.
+func NewKeyTree(algo Algorithm, master Key) KeyTree {
+	//: delegate to the service constructor; this façade adds no behaviour.
+	return keytree.NewKeyTree(algo, master)
 }

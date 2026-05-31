@@ -1,0 +1,51 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_library(
+    name = "tee",
+    srcs = [
+        "codes.go",
+        "config.go",
+        "doc.go",
+        "errors.go",
+        "tee.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/logger/middleware/tee",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":tee",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "tee_test",
+    srcs = [
+        "tee_external_test.go",
+        "tee_internal_test.go",
+    ],
+    embed = [":tee"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/kernel/errs",
+    ],
+)

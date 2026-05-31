@@ -17,11 +17,16 @@ public. Keyed integrity belongs to the AEAD / signature ports.
 
 | File | Role |
 |---|---|
-| `stdhash.go` | five empty-struct `Hasher` singletons (`Algorithm` / `New`), each self-registering via a package-level `var _ = corecrypto.RegisterHasher(…)`; the shared `castagnoli` CRC-32C table |
+| `stdhash.go` | package doc only |
+| `sha256_hasher.go` / `sha512_hasher.go` / `sha3_hasher.go` / `crc32c_hasher.go` / `fnv_hasher.go` | one empty-struct `Hasher` singleton per file (`Algorithm` / `New`), each self-registering via a package-level `var _ = corecrypto.RegisterHasher(…)`; `crc32c_hasher.go` also owns the shared `castagnoli` CRC-32C table |
+| `digest_writer.go` | `DigestWriter` — tees `Write` into a destination + a running hash; `Sum` / `SumHex` over everything written (`NewDigestWriter`) |
+| `verifying_reader.go` | `VerifyingReader` — hashes a stream and verifies it against an expected hex digest on the final (EOF) read only, surfacing the core `DigestMismatch` sentinel; never fails mid-stream (`NewVerifyingReader`) |
 
-No `codes.go` / `errors.go` — dispatch errors (`UnknownHashAlgorithm`) are minted
-by `core/crypto`; a `Hasher` only constructs stdlib `hash.Hash` values, which do
-not fail.
+No `codes.go` / `errors.go` — dispatch errors (`UnknownHashAlgorithm`) and the
+`DigestMismatch` sentinel are minted by `core/crypto`; the `Hasher` schemes only
+construct stdlib `hash.Hash` values, which do not fail. `DigestWriter` /
+`VerifyingReader` return only those core sentinels (ADR 0014 §D4) — they mint no
+codes of their own.
 
 ## Algorithms
 
@@ -53,7 +58,11 @@ input.
   password ports, not the public-digest Hasher port.
 - Treat `crc32c` / `fnv1a-64` as secure; document any new fast hash as
   non-cryptographic.
-- Mint error codes here — dispatch errors live in `core/crypto`.
+- Mint error codes here — dispatch errors and `DigestMismatch` live in
+  `core/crypto`.
+- Compare the `VerifyingReader` digest mid-stream or distinguish a tampered
+  stream beyond the public, EOF-typed `DigestMismatch` — the check is
+  deliberately terminal-only and non-oracle (ADR 0014 §D4).
 
 ## Verification
 
