@@ -14,6 +14,8 @@ Package logger — declares pkg/v1/logger's sentinels. Each var's name equals it
 
 Package logger — exposes FromConfig, the capstone of the config\-driven writer subsystem \(ADR 0014 §D5\): it builds a fully wired Logger from a config blob with zero Go glue. The blob is decoded by a codec the CONSUMER already registered \(FromConfig imports only the core/codec dispatch surface, never pkg/v1/codec or any service codec, so a pkg/v1/logger consumer inherits no vendor modules\). Each decoded WriterEntry is resolved against the writer registry; a Factory that implements ConfigDecoder translates its own option map, otherwise a default mapping passes the raw map straight to the factory.
 
+Package logger — exposes the runtime\-tunable level surface: ParseLevel \(the strict inverse of a lowercased Level.String\), the Leveler one\-method port, and LevelVar, an atomically mutable threshold holder a custom sink or gate consults on each record to retune a live logger's floor without rebuilding the pipeline.
+
 Package logger is the stable v1 public API for SDK logging.
 
 Consumers import this package; internal/\* paths are compile\-blocked outside the SDK repo. Type signatures exported here are frozen after the first v1.0.0 release; breaking changes land in pkg/v2. Security fixes in internal/\* propagate via a minor bump without touching this façade.
@@ -148,6 +150,10 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
 - [type FileConfig](<#FileConfig>)
 - [type Format](<#Format>)
 - [type Level](<#Level>)
+  - [func ParseLevel\(name string\) \(lvl Level, err error\)](<#ParseLevel>)
+- [type LevelVar](<#LevelVar>)
+  - [func NewLevelVar\(initial Level\) \*LevelVar](<#NewLevelVar>)
+- [type Leveler](<#Leveler>)
 - [type Logger](<#Logger>)
   - [func Default\(\) \(lg Logger, err error\)](<#Default>)
   - [func FromConfig\(format Format, raw \[\]byte\) \(lg Logger, err error\)](<#FromConfig>)
@@ -562,6 +568,44 @@ const LevelInfo Level = level.Info
 
 ```go
 const LevelWarn Level = level.Warn
+```
+
+<a name="ParseLevel"></a>
+### func [ParseLevel](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/levelvar.go#L35>)
+
+```go
+func ParseLevel(name string) (lvl Level, err error)
+```
+
+ParseLevel maps a canonical lowercase level name \(debug / info / warn / error\) to its Level, the strict inverse of a lowercased Level.String. Input is trimmed and lowercased before matching. Unknown names return the zero Level and a redacted LevelUnknown error — the offending input is never echoed.
+
+Unlike the internal best\-effort config path, this surface reports the miss so a caller validating an env/flag value can reject it rather than silently falling back to Info.
+
+<a name="LevelVar"></a>
+## type [LevelVar](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/levelvar.go#L17>)
+
+LevelVar is the stable alias for the atomic Level holder. Its zero value reports LevelInfo; Set and Level are safe for concurrent use, so one goroutine can retune the floor while a sink reads it on the hot path.
+
+```go
+type LevelVar = level.Var
+```
+
+<a name="NewLevelVar"></a>
+### func [NewLevelVar](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/levelvar.go#L22>)
+
+```go
+func NewLevelVar(initial Level) *LevelVar
+```
+
+NewLevelVar returns a LevelVar seeded with initial. Hold the returned pointer where a sink or gate can read its Level, then call Set to raise or lower the live threshold. Pair it with ParseLevel to retune from an env or flag value.
+
+<a name="Leveler"></a>
+## type [Leveler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/levelvar.go#L12>)
+
+Leveler is the stable alias for the internal one\-method level port. A custom Sink reads Level on each record so the threshold can change at runtime; both LevelVar and any constant\-returning type satisfy it.
+
+```go
+type Leveler = level.Leveler
 ```
 
 <a name="Logger"></a>

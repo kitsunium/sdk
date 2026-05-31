@@ -6,7 +6,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-func TestParseLevel(t *testing.T) {
+func Test_parseLevel(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
