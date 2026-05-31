@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-31T19:53:10.011Z",
+  "generatedAt": "2026-05-31T19:55:05.978Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "JSON encoder — structured single-line JSON records (competitive gaps)",
+      "sha": "bdb759701273f959db51490bdc2ed7a3ec5c5fd3",
+      "short": "bdb7597",
+      "date": "2026-05-31T21:52:01+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -39,15 +48,6 @@
       "sha": "4872ec0d1fec78cd28c1f460de29f62c764a9130",
       "short": "4872ec0",
       "date": "2026-05-31T01:21:15+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "FromConfig + writer.Decoder — config-driven topology (ADR 0014)",
-      "sha": "1154a7150b41cc2070a2310ef53c7dc21fc242e3",
-      "short": "1154a71",
-      "date": "2026-05-31T00:49:49+02:00"
     }
   ]
 }

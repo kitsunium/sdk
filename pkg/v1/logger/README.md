@@ -8,6 +8,8 @@ import "github.com/kitsunium/sdk/pkg/v1/logger"
 
 Package logger — re\-exports the chainable Builder API and the slice\-overload LogAttrs entry point. Both are routed through the internal service implementation, which owns the recycler that keeps the steady\-state hot\-path at zero allocations.
 
+Package logger — adds the opt\-in caller annotation surface. WithCaller derives a Logger whose records carry a structured "source" attribute \(file:line:function\) resolved from the program counter the front\-end already captures. It is additive: an unwrapped Logger emits no source field, so the frozen record shape is unchanged until a caller opts in.
+
 Package logger — range 1.1.0.\* \(ADR 0005 pkg/v1/logger block\).
 
 Package logger — adds ergonomic Encoder constructors to the public facade. The Encoder type alias itself lives in sink.go; this file contributes the named constructors \(NewTextEncoder / NewJSONEncoder\) so consumers can build an encoder directly and pass it to NewWithSink without importing internal/\*.
@@ -164,6 +166,7 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
   - [func NewMulti\(min Level, specs ...WriterSpec\) \(lg Logger, err error\)](<#NewMulti>)
   - [func NewText\(cfg Config\) \(lg Logger, err error\)](<#NewText>)
   - [func NewWithSink\(cfg SinkConfig\) \(lg Logger, err error\)](<#NewWithSink>)
+  - [func WithCaller\(lg Logger, skip int\) Logger](<#WithCaller>)
 - [type Record](<#Record>)
 - [type S3Config](<#S3Config>)
 - [type Sink](<#Sink>)
@@ -709,6 +712,21 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error)
 ```
 
 NewWithSink builds a Logger forwarding records through cfg.Sink and formatting them with cfg.Encoder. It is the port\-and\-adapter entry point for callers that want full control over both the format \(Encoder\) and the transport \(Sink\); use NewText for the default text\-on\-stderr wiring.
+
+<a name="WithCaller"></a>
+### func [WithCaller](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/caller.go#L22>)
+
+```go
+func WithCaller(lg Logger, skip int) Logger
+```
+
+WithCaller returns a derived Logger whose emitted records carry a "source" attribute resolving the call site into file:line:function. The skip argument is the extra stack\-frame offset reserved for wrapper layers; pass 0 for direct callers. The returned Logger shares the original's sink and encoder; the only change is the added annotation, so the option is safe to layer onto any Logger built by this package.
+
+```
+lg, _ := logger.Default()
+lg = logger.WithCaller(lg, 0)
+lg.Info(ctx, "ready") // record now carries source=…/main.go:42:main.run
+```
 
 <a name="Record"></a>
 ## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L27>)

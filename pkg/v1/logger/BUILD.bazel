@@ -6,6 +6,7 @@ go_library(
     name = "logger",
     srcs = [
         "builder.go",
+        "caller.go",
         "codes.go",
         "encoder.go",
         "errors.go",
@@ -49,6 +50,7 @@ go_test(
     size = "small",
     srcs = [
         "builder_external_test.go",
+        "caller_external_test.go",
         "encoder_external_test.go",
         "fromconfig_external_test.go",
         "fromconfig_internal_test.go",
