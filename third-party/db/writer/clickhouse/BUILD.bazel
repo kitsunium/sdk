@@ -1,0 +1,58 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "clickhouse",
+    srcs = [
+        "clickhouse.go",
+        "clickhousesink.go",
+        "client.go",
+        "codes.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/db/writer/clickhouse",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+        "//internal/service/writer/dbsink",
+        "@com_github_clickhouse_clickhouse_go_v2//:clickhouse-go",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":clickhouse",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "clickhouse_test",
+    srcs = [
+        "clickhouse_external_test.go",
+        "clickhouse_internal_test.go",
+        "clickhousesink_internal_test.go",
+        "client_internal_test.go",
+        "errors_external_test.go",
+        "errors_internal_test.go",
+    ],
+    embed = [":clickhouse"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+        "@com_github_clickhouse_clickhouse_go_v2//:clickhouse-go",
+    ],
+)
+
+# audit_srcs ships this package's *.go to the errs AST audit (ADR 0015); the
+# package defines new dotted-quad codes (0.3.33.*) so it must be listed in the
+# root //:audit_sources filegroup.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

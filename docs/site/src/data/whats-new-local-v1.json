@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-06-02T11:36:26.902Z",
+  "generatedAt": "2026-06-02T11:43:24.167Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "Redis Stream database writer (local-protocol, vendored driver)",
+      "sha": "1b413fb5559e09d3bae4ee2fe3b3a70721f5157e",
+      "short": "1b413fb",
+      "date": "2026-06-02T13:35:49+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -21,15 +30,6 @@
       "sha": "10a55ec53b5833ceeac16b593035aa49ab315099",
       "short": "10a55ec",
       "date": "2026-06-02T13:10:33+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "stdlib network transport (tcp/udp/http) + journald writers",
-      "sha": "3c099abbe792b9608380ef853e988b641e366d1b",
-      "short": "3c099ab",
-      "date": "2026-06-02T13:07:36+02:00"
     },
     {
       "type": "fix",

@@ -40,6 +40,7 @@ use_repo(
     "com_github_aws_aws_sdk_go_v2_service_cloudwatchlogs",
     "com_github_aws_aws_sdk_go_v2_service_s3",
     "com_github_aws_smithy_go",
+    "com_github_clickhouse_clickhouse_go_v2",
     "com_github_fxamacker_cbor_v2",
     "com_github_go_sql_driver_mysql",
     "com_github_kitsunium_sdk_internal_core",
