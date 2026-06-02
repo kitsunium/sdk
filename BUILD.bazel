@@ -57,6 +57,7 @@ filegroup(
         "//third-party/aws/writer/cloudwatch:audit_srcs",
         "//third-party/aws/writer/s3:audit_srcs",
         "//third-party/db/writer/mysql:audit_srcs",
+        "//third-party/db/writer/redis:audit_srcs",
     ],
     visibility = ["//visibility:public"],
 )

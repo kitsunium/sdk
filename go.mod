@@ -18,6 +18,7 @@ require (
 require (
 	github.com/aws/smithy-go v1.25.1
 	github.com/go-sql-driver/mysql v1.10.0
+	github.com/redis/go-redis/v9 v9.20.0
 	golang.org/x/crypto v0.52.0
 )
 
@@ -31,6 +32,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.17 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.24 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.24 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 )
 

@@ -46,6 +46,7 @@ use_repo(
     "com_github_kitsunium_sdk_internal_kernel",
     "com_github_kitsunium_sdk_internal_service",
     "com_github_pelletier_go_toml_v2",
+    "com_github_redis_go_redis_v9",
     "com_github_vmihailenco_msgpack_v5",
     "in_gopkg_yaml_v3",
     "org_golang_x_crypto",

@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-06-02T11:25:58.092Z",
+  "generatedAt": "2026-06-02T11:36:26.902Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "MySQL database writer (local-protocol, vendored driver)",
+      "sha": "c1a612f3c8a016baf7f5ed940f49fe56992568af",
+      "short": "c1a612f",
+      "date": "2026-06-02T13:25:21+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -21,15 +30,6 @@
       "sha": "3c099abbe792b9608380ef853e988b641e366d1b",
       "short": "3c099ab",
       "date": "2026-06-02T13:07:36+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "interval rotation + YAML-reachable rotfile",
-      "sha": "75815c5dba10042ba017e20bc071d492baf32ad3",
-      "short": "75815c5",
-      "date": "2026-06-02T12:35:02+02:00"
     },
     {
       "type": "fix",
