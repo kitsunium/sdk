@@ -39,7 +39,7 @@ Three construction paths, three native sinks, six middleware kinds, nine Attr ct
 ```
 | Group               | Symbols                                                                     | Role |
 |---------------------|------------------------------------------------------------------------------|------|
-| Construction        | Default, NewText(Config), NewWithSink(SinkConfig)                            | Wire a Logger from explicit knobs OR a one-liner. Config has Writer (single) + Writers ([]io.Writer fan-out) — pick one. |
+| Construction        | Default, DefaultMulti(path), NewText(Config), NewWithSink(SinkConfig)        | Wire a Logger from explicit knobs OR a one-liner. Config has Writer (single) + Writers ([]io.Writer fan-out) — pick one. DefaultMulti fans console+file from one call (blank-import the writer pkg). |
 | Sinks (native)      | ConsoleStderr, ConsoleStdout, NewWriterSink(w), Multi(branches…)             | Native + io.Writer adapter + fan-out; bring custom Sink for DB/etc. |
 | Middleware          | multi, async, route, failover, sample, recover                               | Compose around a base Sink; same Sink interface chainable |
 | Encoders            | TextEncoder                                                                  | key=value lines on system clock (JSON/structured: internal today) |
@@ -63,7 +63,7 @@ func main() {
 }
 ```
 
-[Default](<#Default>) returns the stderr one\-liner equivalent in tests \+ scripts. Pass [Config](<#Config>)\{Writer: nil\} and [NewText](<#NewText>) returns the typed sentinel [WriterRequired](<#WriterRequired>) — the pre\-errors API silently defaulted to os.Stderr; that was a breaking change recorded in ADR 0002.
+[Default](<#Default>) returns the stderr one\-liner equivalent in tests \+ scripts. [DefaultMulti](<#DefaultMulti>) is the batteries\-included service default: it fans INFO\-and\-above records to BOTH the console AND a plain \(non\-rotating\) file from a single call — the caller blank\-imports github.com/kitsunium/sdk/pkg/v1/logger/writer to activate the two named writers. Pass [Config](<#Config>)\{Writer: nil\} and [NewText](<#NewText>) returns the typed sentinel [WriterRequired](<#WriterRequired>) — the pre\-errors API silently defaulted to os.Stderr; that was a breaking change recorded in ADR 0002.
 
 ### Custom sink topology
 
@@ -167,6 +167,7 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
 - [type Leveler](<#Leveler>)
 - [type Logger](<#Logger>)
   - [func Default\(\) \(lg Logger, err error\)](<#Default>)
+  - [func DefaultMulti\(path string\) \(lg Logger, err error\)](<#DefaultMulti>)
   - [func FromConfig\(format Format, raw \[\]byte\) \(lg Logger, err error\)](<#FromConfig>)
   - [func NewMulti\(min Level, specs ...WriterSpec\) \(lg Logger, err error\)](<#NewMulti>)
   - [func NewText\(cfg Config\) \(lg Logger, err error\)](<#NewText>)
@@ -277,7 +278,7 @@ var Version string
 ```
 
 <a name="Debug"></a>
-## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L245>)
+## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L280>)
 
 ```go
 func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -286,7 +287,7 @@ func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Debug emits a RecordEvent at LevelDebug through lg.
 
 <a name="Error"></a>
-## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L263>)
+## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L298>)
 
 ```go
 func Error(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -304,7 +305,7 @@ func FrameworkVersion() string
 FrameworkVersion returns the linked\-in SDK version, or "dev" if unset.
 
 <a name="Info"></a>
-## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L251>)
+## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L286>)
 
 ```go
 func Info(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -322,7 +323,7 @@ func LogAttrs(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr
 LogAttrs is the slice\-overload of Logger.Log that avoids the variadic slice allocation imposed by Logger.Log\(... Attr\). Pre\-built attribute slices flow through this entry point without per\-call boxing.
 
 <a name="Warn"></a>
-## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L257>)
+## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L292>)
 
 ```go
 func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -331,7 +332,7 @@ func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Warn emits a RecordEvent at LevelWarn through lg.
 
 <a name="Attr"></a>
-## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L132>)
+## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L137>)
 
 Attr is the stable alias for the internal AttrValue key/value pair.
 
@@ -340,7 +341,7 @@ type Attr = corelogger.AttrValue
 ```
 
 <a name="Any"></a>
-### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L318>)
+### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L353>)
 
 ```go
 func Any(key string, val any) Attr
@@ -349,7 +350,7 @@ func Any(key string, val any) Attr
 Any builds an Attr carrying an opaque payload. Use the typed helpers when possible — Any disables type\-aware rendering.
 
 <a name="Bool"></a>
-### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L281>)
+### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L316>)
 
 ```go
 func Bool(key string, val bool) Attr
@@ -358,7 +359,7 @@ func Bool(key string, val bool) Attr
 Bool builds an Attr carrying a boolean value.
 
 <a name="Duration"></a>
-### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L305>)
+### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L340>)
 
 ```go
 func Duration(key string, val time.Duration) Attr
@@ -367,7 +368,7 @@ func Duration(key string, val time.Duration) Attr
 Duration builds an Attr carrying a time.Duration value.
 
 <a name="Float64"></a>
-### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L287>)
+### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L322>)
 
 ```go
 func Float64(key string, val float64) Attr
@@ -376,7 +377,7 @@ func Float64(key string, val float64) Attr
 Float64 builds an Attr carrying a float64 value.
 
 <a name="Int"></a>
-### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L275>)
+### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L310>)
 
 ```go
 func Int(key string, val int) Attr
@@ -385,7 +386,7 @@ func Int(key string, val int) Attr
 Int builds an Attr carrying an int value.
 
 <a name="Int64"></a>
-### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L293>)
+### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L328>)
 
 ```go
 func Int64(key string, val int64) Attr
@@ -394,7 +395,7 @@ func Int64(key string, val int64) Attr
 Int64 builds an Attr carrying an int64 value.
 
 <a name="String"></a>
-### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L269>)
+### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L304>)
 
 ```go
 func String(key, val string) Attr
@@ -403,7 +404,7 @@ func String(key, val string) Attr
 String builds an Attr carrying a string value.
 
 <a name="Time"></a>
-### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L311>)
+### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L346>)
 
 ```go
 func Time(key string, val time.Time) Attr
@@ -412,7 +413,7 @@ func Time(key string, val time.Time) Attr
 Time builds an Attr carrying a time.Time value.
 
 <a name="Uint64"></a>
-### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L299>)
+### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L334>)
 
 ```go
 func Uint64(key string, val uint64) Attr
@@ -461,7 +462,7 @@ type CloudWatchConfig = corewriter.CloudWatchConfig
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L161-L171>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L166-L176>)
 
 Config carries the construction parameters accepted by NewText. Two destination forms are supported — pick the one that fits:
 
@@ -584,7 +585,7 @@ type Format = corecodec.Format
 ```
 
 <a name="Level"></a>
-## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L135>)
+## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L140>)
 
 Level is the stable alias for the internal severity type.
 
@@ -655,7 +656,7 @@ type Leveler = level.Leveler
 ```
 
 <a name="Logger"></a>
-## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L129>)
+## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L134>)
 
 Logger is the stable alias for the internal core.Logger interface.
 
@@ -664,13 +665,35 @@ type Logger = corelogger.Logger
 ```
 
 <a name="Default"></a>
-### func [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L239>)
+### func [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L244>)
 
 ```go
 func Default() (lg Logger, err error)
 ```
 
 Default returns a Logger writing INFO\-and\-above records to os.Stderr. The stderr Writer is supplied explicitly here; NewText itself no longer silently defaults a nil Writer.
+
+<a name="DefaultMulti"></a>
+### func [DefaultMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L269>)
+
+```go
+func DefaultMulti(path string) (lg Logger, err error)
+```
+
+DefaultMulti returns a Logger that fans INFO\-and\-above records out to BOTH the console \(stdout, the ConsoleConfig zero value\) AND a plain file at path. It is the batteries\-included "perfect default" the SDK recommends for a service: two destinations from one call, with NO rotation surface — the plain "file" writer never rotates, so rotation stays opt\-in \(a caller wanting size/age rotation reaches for the rotating writer explicitly\).
+
+Unlike Default \(stderr\-only, no extra import\), DefaultMulti resolves the "console" and "file" writers through the registry, so the CALLER MUST blank\-import the writer package to activate them:
+
+```
+import (
+    "github.com/kitsunium/sdk/pkg/v1/logger"
+    _ "github.com/kitsunium/sdk/pkg/v1/logger/writer" // console + file
+)
+
+lg, err := logger.DefaultMulti("/var/log/app.log")
+```
+
+Without that import the file/console Names do not resolve and DefaultMulti returns the registry's WriterUnknownName, surfaced through NewMulti.
 
 <a name="FromConfig"></a>
 ### func [FromConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/fromconfig.go#L34>)
@@ -707,7 +730,7 @@ lg, err := logger.NewMulti(logger.LevelInfo,
 ```
 
 <a name="NewText"></a>
-### func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L187>)
+### func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L192>)
 
 ```go
 func NewText(cfg Config) (lg Logger, err error)

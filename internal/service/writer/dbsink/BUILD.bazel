@@ -3,9 +3,12 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
-    name = "file",
-    srcs = ["file.go"],
-    importpath = "github.com/kitsunium/sdk/internal/service/writer/file",
+    name = "dbsink",
+    srcs = [
+        "dbsink.go",
+        "dbsink_config.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/writer/dbsink",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
@@ -13,16 +16,15 @@ go_library(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
-        "//internal/core/writer",
-        "//internal/kernel/errs",
-        "//internal/service/logger/sink/file",
+        "//internal/kernel/batcher",
+        "//internal/service/logger/middleware/async",
         "//internal/service/writer/levelgate",
     ],
 )
 
 alias(
     name = "go_default_library",
-    actual = ":file",
+    actual = ":dbsink",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
@@ -30,15 +32,16 @@ alias(
 )
 
 go_test(
-    name = "file_test",
+    name = "dbsink_test",
     srcs = [
-        "file_external_test.go",
-        "file_internal_test.go",
+        "dbsink_bench_test.go",
+        "dbsink_config_external_test.go",
+        "dbsink_internal_test.go",
     ],
-    embed = [":file"],
+    embed = [":dbsink"],
     deps = [
+        "//internal/core/logger",
         "//internal/core/logger/level",
-        "//internal/core/writer",
         "//internal/kernel/errs",
     ],
 )
