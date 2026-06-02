@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-06-02T11:11:12.214Z",
+  "generatedAt": "2026-06-02T11:25:58.092Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "DB sink config types (mysql/clickhouse/redis)",
+      "sha": "10a55ec53b5833ceeac16b593035aa49ab315099",
+      "short": "10a55ec",
+      "date": "2026-06-02T13:10:33+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -21,15 +30,6 @@
       "sha": "75815c5dba10042ba017e20bc071d492baf32ad3",
       "short": "75815c5",
       "date": "2026-06-02T12:35:02+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "default console+file, YAML-reachable plain writers, dbsink shell + ADR 0015",
-      "sha": "aa828465dce5153f531faaf91938c3eac0b87dd1",
-      "short": "aa82846",
-      "date": "2026-06-02T11:47:54+02:00"
     },
     {
       "type": "fix",
