@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-06-02T11:08:09.878Z",
+  "generatedAt": "2026-06-02T11:11:12.214Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "stdlib network transport (tcp/udp/http) + journald writers",
+      "sha": "3c099abbe792b9608380ef853e988b641e366d1b",
+      "short": "3c099ab",
+      "date": "2026-06-02T13:07:36+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -21,15 +30,6 @@
       "sha": "aa828465dce5153f531faaf91938c3eac0b87dd1",
       "short": "aa82846",
       "date": "2026-06-02T11:47:54+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": null,
-      "breaking": false,
-      "summary": "ADR 0014 — the verb wave (transform tier, crypto ports + compositions, config-driven topology) (#57)",
-      "sha": "98a1257d373a33dd0b3581294694da1ac77a3018",
-      "short": "98a1257",
-      "date": "2026-05-31T23:31:53+02:00"
     },
     {
       "type": "fix",
