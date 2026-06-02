@@ -11,6 +11,7 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/worker"
 )
 
 // defaultFilePerm is the permission bitmask for the active file and every
@@ -36,6 +37,14 @@ type rotatingSink struct {
 	// clk is the time source for MaxAgeDays calendar pruning; never nil after
 	// newRotatingSink resolves cfg.Clock (defaulting to clock.System).
 	clk clock.Clock
+	// daemon is the interval-rotation ticker, non-nil only when cfg.RotateEvery
+	// is positive. Close joins it before locking mu so the ticker goroutine
+	// (which itself locks mu via Rotate) cannot deadlock the join.
+	daemon *worker.LoopDaemon
+	// tickErr stashes a typed error from an interval-driven Rotate so the next
+	// Write surfaces it exactly once (genuine propagation, never discarded);
+	// guarded by mu.
+	tickErr error
 }
 
 // openHardened opens path with O_NOFOLLOW (Linux) + 0600 after refusing a
@@ -122,9 +131,18 @@ func newRotatingSink(cfg *Config) (sink corelogger.Sink, err error) {
 		//: default keeps the zero-value Config working unchanged.
 		clk = clock.System
 	}
-	//: hand back the ready sink owning the descriptor; store cfg by value so
-	//: the sink is independent of the caller's Config after construction.
-	return &rotatingSink{cfg: *cfg, f: f, size: size, clk: clk}, nil
+	//: build the ready sink owning the descriptor; store cfg by value so the
+	//: sink is independent of the caller's Config after construction.
+	s := &rotatingSink{cfg: *cfg, f: f, size: size, clk: clk}
+	//: opt-in interval rotation: a strictly positive RotateEvery starts the
+	//: ticker (worker.Every panics on non-positive, so the guard is mandatory);
+	//: the zero value spawns no goroutine, keeping plain logging cost-free.
+	if cfg.RotateEvery > 0 {
+		//: the ticker forces a rotation each interval until Close joins it.
+		s.daemon = worker.Every(cfg.RotateEvery, s.tickRotate)
+	}
+	//: hand back the ready sink.
+	return s, nil
 }
 
 // Write appends p to the active file under the local mutex, rotating first when
@@ -144,6 +162,17 @@ func (s *rotatingSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 	//: size accounting stays consistent against concurrent producers.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	//: surface a stashed interval-rotation failure exactly once: a failing
+	//: "archive every 24h" policy must reach a caller, not vanish on the daemon
+	//: goroutine. Clearing it after read makes this genuine propagation, not a
+	//: latched error that poisons every subsequent write.
+	if s.tickErr != nil {
+		//: take and clear the pending error so the next Write proceeds normally.
+		terr := s.tickErr
+		s.tickErr = nil
+		//: report the interval-rotation failure to this caller.
+		return 0, terr
+	}
 	//: rotate before the write when adding p would exceed the cap.
 	if rerr := s.maybeRotate(int64(len(p))); rerr != nil {
 		//: a rotation failure is fatal to this write — surface it.
@@ -196,6 +225,14 @@ func (s *rotatingSink) Flush(ctx context.Context) error {
 // Close closes the active file. Subsequent Writes fail with the kernel's "file
 // already closed" error, which we wrap as WriteFailed.
 func (s *rotatingSink) Close() error {
+	//: stop the interval ticker FIRST, before taking mu: Stop joins the daemon
+	//: goroutine, which itself locks mu inside Rotate — joining under mu would
+	//: deadlock. After Stop returns the goroutine has exited, so the subsequent
+	//: lock is uncontended by the ticker.
+	if s.daemon != nil {
+		//: signal + join the ticker so no rotation races the close.
+		s.daemon.Stop()
+	}
 	//: serialise the close against in-flight writes via the same mutex.
 	s.mu.Lock()
 	cerr := s.f.Close()

@@ -19,3 +19,9 @@ const CodeRotFileRotateFailed errs.Code = 0x00_03_1B_02 // 0.3.27.2
 // CodeRotFileWriteFailed identifies a Write whose underlying *os.File
 // returned an error; ExitCode defaults to 74 (EX_IOERR).
 const CodeRotFileWriteFailed errs.Code = 0x00_03_1B_03 // 0.3.27.3
+
+// CodeRotFileDecodeFailed identifies a config-map value of an unexpected shape
+// while decoding a "rotfile" writer entry from a config file (the Decoder
+// path). It is a configuration error (EX_CONFIG 78), distinct from the I/O
+// sentinels, and never echoes the offending value (secret gate).
+const CodeRotFileDecodeFailed errs.Code = 0x00_03_1B_04 // 0.3.27.4

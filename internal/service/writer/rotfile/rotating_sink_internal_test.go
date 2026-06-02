@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/writer"
@@ -315,6 +316,75 @@ func Test_rotatingSink_reopenReappliesHardening(t *testing.T) {
 		//: the refusal must carry the documented open code.
 		if !errs.HasCode(oerr, CodeRotFileOpenFailed) {
 			t.Errorf("reopen err=%v want open-failed", oerr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func Test_rotatingSink_Close_joinsDaemon(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"interval daemon is spawned and joined on close"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		s := newSink(t, Config{
+			Path: filepath.Join(t.TempDir(), "d.log"), MaxBytes: 1 << 30,
+			RotateEvery: time.Hour, Clock: &fakeClock{now: time.Unix(0, 0)},
+		})
+		//: a positive RotateEvery must spawn the ticker daemon.
+		if s.daemon == nil {
+			t.Fatalf("RotateEvery>0 spawned no daemon")
+		}
+		//: Close joins the daemon (Stop blocks on the join) before returning.
+		if cerr := s.Close(); cerr != nil {
+			t.Fatalf("close: %v", cerr)
+		}
+		//: a joined daemon has a closed Done channel — deterministic, no leak.
+		select {
+		//: closed channel proves the ticker goroutine returned.
+		case <-s.daemon.Done():
+		//: still open means Close did not join the goroutine.
+		default:
+			t.Errorf("daemon not joined after Close (Done still open)")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func Test_rotatingSink_Write_tickErr(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"stashed tick error surfaces once then clears"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		s := newSink(t, Config{Path: filepath.Join(t.TempDir(), "te.log")})
+		//: close once the case finishes asserting.
+		defer closeQuiet(t, s)
+		//: stash a typed rotate failure exactly as a failing tick would.
+		s.mu.Lock()
+		s.tickErr = RotFileRotateFailed
+		s.mu.Unlock()
+		//: the first Write must surface the stashed interval-rotation error.
+		if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("x")); !errs.HasCode(werr, CodeRotFileRotateFailed) {
+			t.Fatalf("first Write err=%v want rotate-failed", werr)
+		}
+		//: the second Write proceeds normally — the error is not latched.
+		if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("y")); werr != nil {
+			t.Errorf("second Write err=%v want nil", werr)
 		}
 	}
 	for _, c := range tests {
