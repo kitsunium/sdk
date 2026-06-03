@@ -231,6 +231,62 @@ func Test_EncWriter_concurrentWrites(t *testing.T) {
 	}
 }
 
+// runConstructionZeroizeCase swaps the keyBytes seam for one that retains the
+// exact master-key copy handed into derivation, constructs an EncWriter, then
+// asserts that copy was zeroized before NewEncWriter returned. This is the V29
+// regression: it FAILS before deriveSubkey's defer clear(secret) and PASSES
+// after — verified through the instrumented seam, never raw heap memory.
+func runConstructionZeroizeCase(t *testing.T, info string) {
+	t.Helper()
+	//: capture the next master-key copy the seam hands to deriveSubkey.
+	var captured []byte
+	orig := keyBytes
+	//: restore the production seam regardless of how this case returns.
+	defer func() { keyBytes = orig }()
+	//: wrap the seam so the test retains a reference to the returned copy.
+	keyBytes = func(k corecrypto.Key) []byte {
+		//: delegate to the real Bytes copy, then keep its slice header.
+		captured = orig(k)
+		return captured
+	}
+	down := &countingSink{}
+	s, err := NewEncWriter(Config{Sink: down, Key: newInternalKey(t), Info: info})
+	//: a valid config must construct without error.
+	if err != nil {
+		t.Fatalf("NewEncWriter: %v", err)
+	}
+	//: the seam must have been exercised exactly once during construction.
+	if captured == nil {
+		t.Fatalf("keyBytes seam was not invoked")
+	}
+	//: the master-key copy must be all-zero — deriveSubkey cleared it on return.
+	if !slices.Equal(captured, make([]byte, corecrypto.KeyLen)) {
+		t.Fatalf("master-key copy=%x want all-zero after construction (V29)", captured)
+	}
+	//: Close cleans up the retained keys so the test leaves no live secret.
+	if cerr := s.Close(); cerr != nil {
+		t.Fatalf("Close: %v", cerr)
+	}
+}
+
+func Test_NewEncWriter_masterCopyZeroizedAtConstruction(t *testing.T) {
+	//: not parallel — this case swaps the package-level keyBytes seam.
+	//: table of info labels exercising the construction-time zeroize path.
+	tests := []struct {
+		name string
+		info string
+	}{
+		{"explicit info label", "v29-zeroize"},
+		{"empty info falls back to default", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			//: sequential subtests — the seam swap must not race siblings.
+			runConstructionZeroizeCase(t, tc.info)
+		})
+	}
+}
+
 func Test_EncWriter_keyZeroizedAfterClose(t *testing.T) {
 	t.Parallel()
 	//: table of info labels whose derived subkey must be zeroized by Close.

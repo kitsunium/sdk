@@ -207,8 +207,15 @@ func (s *rotatingSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 func (s *rotatingSink) Flush(ctx context.Context) error {
 	//: honour cancellation early — fsync is not cheap on slow disks.
 	if ctx != nil && ctx.Err() != nil {
-		//: caller already gave up; surface the cancellation cause.
-		return ctx.Err()
+		//: V46: wrap ctx.Err() under the WriteFailed sentinel like Write does, so a
+		//: cancelled Flush carries the dotted-quad code (errs.HasCode works) and
+		//: errors.Is still catches the stdlib cancellation cause.
+		return errs.Wrap(ctx.Err(), errs.WrapParams{
+			Code:    CodeRotFileWriteFailed,
+			Reason:  "ROT_FILE_WRITE_FAILED",
+			Public:  "Rotating file flush failed",
+			Private: "service/writer/rotfile.Flush saw a cancelled context",
+		})
 	}
 	//: serialise the sync against in-flight writes via the same mutex.
 	s.mu.Lock()

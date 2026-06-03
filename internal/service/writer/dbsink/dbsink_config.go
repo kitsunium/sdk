@@ -43,7 +43,12 @@ type Config struct {
 	OnDrop func(dropped int)
 	// OnError, when non-nil, is invoked for every failed batch delivery seen by
 	// the background drainer / ticker. Without it those errors are lost (the
-	// producer cannot be blocked on a database failure).
+	// producer cannot be blocked on a database failure). The cap-flush (drainer
+	// goroutine) and the FlushEvery ticker both route here from distinct
+	// goroutines, so the shell serializes the two paths behind an internal mutex
+	// before invoking this hook: the callback is therefore never entered
+	// concurrently with itself, yet it MUST NOT block for long — the mutex is
+	// held across the call, so a slow OnError stalls the next routed failure.
 	OnError func(err error)
 	// Clock sources the timestamp the sink stamps onto a record whose Time is the
 	// zero value (the "fill at handle time" sentinel) before batching it for the

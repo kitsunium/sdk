@@ -72,8 +72,10 @@ func (ecdsaP256) GenerateKey() (pub, priv []byte, err error) {
 func (ecdsaP256) Sign(priv, message []byte) (sig []byte, err error) {
 	//: parse the SEC1 DER private key; a bad blob is a typed data error.
 	key, perr := x509.ParseECPrivateKey(priv)
-	//: reject a malformed key rather than panicking.
-	if perr != nil {
+	//: reject a malformed key OR a non-P-256 key: this scheme is curve-bound to
+	//: P-256 (Verify rejects anything else), so signing under another curve
+	//: would produce a signature Verify can never validate. Never a panic.
+	if perr != nil || key.Curve != elliptic.P256() {
 		//: surface the typed data error.
 		return nil, corecrypto.SigningFailed
 	}

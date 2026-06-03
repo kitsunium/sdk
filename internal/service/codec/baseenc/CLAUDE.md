@@ -74,3 +74,7 @@ the outer base-N step wraps the JSON.
 ```
 bazel test --config=race //internal/service/codec/baseenc:baseenc_test
 ```
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V62, V64, V65) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

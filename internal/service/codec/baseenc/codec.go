@@ -227,7 +227,6 @@ func (c *baseencCodec) NewEncoder(w io.Writer) codec.Encoder {
 	//: wrap the base-N sink for the requested variant.
 	return &baseencEncoder{
 		base: c.streamWriter(w),
-		v:    c.variant,
 	}
 }
 

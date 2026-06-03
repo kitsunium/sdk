@@ -152,6 +152,8 @@ not the numeric value.)
 | `0.3.33.2` | `CodeClickHouseInsertFailed` | `third-party/db/writer/clickhouse` | `third-party` | **NEW** — ExitCode 74, ADR-gated |
 | `0.3.34.1` | `CodeRedisStreamClientInitFailed` | `third-party/db/writer/redis` | `third-party` | **NEW** — service octet `0x22`, ADR-gated |
 | `0.3.34.2` | `CodeRedisStreamXAddFailed` | `third-party/db/writer/redis` | `third-party` | **NEW** — ExitCode 74, ADR-gated |
+| `0.3.35.2` | `CodeS3ClientInitFailed` | `third-party/aws/writer/s3` | `third-party` | **RE-ALLOCATED** — service octet `0x23`; moved off `0x18` (0.3.24.\*) which collided with `internal/service/codec/baseenc` (V92/V99). Reason `CLIENT_INIT_FAILED` |
+| `0.3.35.20` | `CodeS3PutFailed` | `third-party/aws/writer/s3` | `third-party` | **RE-ALLOCATED** — ExitCode 74 (EX_IOERR), reason `PUT_FAILED` |
 
 `Major=0` (internal), `Layer=3` (service). Each NEW code's `Public` MUST be a
 plain string literal (no `fmt.Sprintf`, no concatenation) so

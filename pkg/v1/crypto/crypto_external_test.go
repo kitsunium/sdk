@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"reflect"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/crypto"
@@ -277,6 +278,40 @@ func TestKey_Redacts(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
+		})
+	}
+}
+
+// TestAlgorithmIsDomainDefinedType_V104 pins the V104 fix: crypto.Algorithm is a
+// DEFINED type owned by this facade, not a bare alias of the shared
+// internal/core/crypto.Algorithm. While Algorithm was an alias, all seven
+// crypto-family facades shared one identical Go type, so a hash or signature
+// constant fed into an AEAD call type-checked and only misrouted at runtime. A
+// defined type makes that cross-domain mix a compile error; reflection witnesses
+// the change because a defined type reports its own package path, whereas an
+// alias reports internal/core/crypto. This test FAILS before the alias→defined-
+// type change and PASSES after.
+func TestAlgorithmIsDomainDefinedType_V104(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		got  string
+		want string
+	}
+	rt := reflect.TypeFor[crypto.Algorithm]()
+	tests := []tc{
+		//: a defined type reports its declaring package; an alias reports corecrypto's.
+		{"package path is this facade", rt.PkgPath(), "github.com/kitsunium/sdk/pkg/v1/crypto"},
+		//: the defined type names itself Algorithm in this package.
+		{"type name is Algorithm", rt.Name(), "Algorithm"},
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			//: a mismatch means Algorithm is still an alias of corecrypto.Algorithm.
+			if c.got != c.want {
+				t.Errorf("crypto.Algorithm %s=%q want %q (still an alias?)", c.name, c.got, c.want)
+			}
 		})
 	}
 }

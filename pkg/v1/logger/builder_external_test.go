@@ -2,6 +2,8 @@ package logger_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -168,6 +170,65 @@ func Test_Build(t *testing.T) {
 			runCase(t, c.level, c.key, c.val, c.want)
 		})
 	}
+}
+
+// TestV116BenchDocRetractsZeroAllocClaim guards the consumer-facing BENCH.md
+// against re-introducing the false zero-alloc framing for the Build path.
+// Regression for V116 — the doc previously asserted that switching to Build
+// "drops to near-zero" the steady-state byte cost, a guarantee the code
+// (1 alloc/op, proven by TestV116BuildSendAllocatesOnePerEmit) does not provide.
+func TestV116BenchDocRetractsZeroAllocClaim(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		forbidden string
+		required  string
+	}{
+		{
+			name:      "Build byte cost no longer claimed near-zero",
+			forbidden: "drops to near-zero",
+			required:  "1 alloc/op",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw, err := os.ReadFile(benchDocPath(t))
+			if err != nil {
+				t.Fatalf("read BENCH.md: %v", err)
+			}
+			doc := string(raw)
+			//: the retracted phrase implied the Build path eliminates the byte cost.
+			if strings.Contains(doc, tc.forbidden) {
+				t.Errorf("BENCH.md still contains forbidden claim %q; the handler clones attrs on every Send (1 alloc/op) — see V116", tc.forbidden)
+			}
+			//: the corrected prose must own the per-Send clone so the doc stays honest.
+			if !strings.Contains(doc, tc.required) {
+				t.Errorf("BENCH.md no longer states %q; the measured reality must be documented — see V116", tc.required)
+			}
+		})
+	}
+}
+
+// benchDocPath resolves pkg/v1/logger/BENCH.md under both run modes. Raw
+// `go test` runs with cwd = package dir, so the bare filename resolves; the
+// Bazel sandbox strips that relationship, so it ships BENCH.md as a runfile
+// reachable via TEST_SRCDIR + TEST_WORKSPACE.
+func benchDocPath(tb testing.TB) (path string) {
+	tb.Helper()
+	//: prefer the cwd-relative file when present (raw go test iteration).
+	if _, err := os.Stat("BENCH.md"); err == nil {
+		return "BENCH.md"
+	}
+	//: fall back to the Bazel runfiles layout where the data file is staged.
+	if srcdir := os.Getenv("TEST_SRCDIR"); srcdir != "" {
+		if wks := os.Getenv("TEST_WORKSPACE"); wks != "" {
+			return filepath.Join(srcdir, wks, "pkg", "v1", "logger", "BENCH.md")
+		}
+	}
+	//: neither layout resolved — the guard cannot run without the doc.
+	tb.Fatalf("BENCH.md not found via cwd or TEST_SRCDIR/TEST_WORKSPACE")
+	return ""
 }
 
 // foreignLogger is a Logger implementation NOT produced by svclogger.New, used

@@ -510,3 +510,180 @@ func TestRecover_Write_RealFileSink(t *testing.T) {
 		})
 	}
 }
+
+// TestRecover_OnPanic_Observes is the V34 regression: an absorbed downstream
+// panic is otherwise invisible under a Logger that swallows handler errors,
+// so NewWithConfig.OnPanic MUST fire exactly once per absorbed panic — across
+// Write / Flush / Close — carrying the same Panicked error returned to the
+// caller. Before the fix the hook did not exist; this test pins the additive
+// observability path (Finding V34).
+func TestRecover_OnPanic_Observes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		//: op invokes one panicking Sink method and returns only its error.
+		op func(context.Context, corelogger.Sink) error
+	}{
+		{"Write fires OnPanic", func(ctx context.Context, s corelogger.Sink) error {
+			_, werr := s.Write(ctx, corelogger.RecordEvent{Level: level.Info}, []byte("x"))
+			return werr
+		}},
+		{"Flush fires OnPanic", func(ctx context.Context, s corelogger.Sink) error {
+			return s.Flush(ctx)
+		}},
+		{"Close fires OnPanic", func(_ context.Context, s corelogger.Sink) error {
+			return s.Close()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: capture every observed panic so we can assert count + identity.
+			var observed []error
+			cfg := recoversink.Config{OnPanic: func(err error) {
+				//: record the error the hook saw for post-call assertions.
+				observed = append(observed, err)
+			}}
+			s, err := recoversink.NewWithConfig(panickingSink{}, cfg)
+			if err != nil {
+				t.Fatalf("NewWithConfig err = %v", err)
+			}
+			got := tc.op(t.Context(), s)
+			//: the absorbed panic must still surface to the caller as Panicked.
+			if !errs.HasCode(got, recoversink.CodeRecoverPanicked) {
+				t.Fatalf("returned err HasCode(Panicked) = false, got %v", got)
+			}
+			//: the hook fires exactly once — no double-observe, no silent absorption.
+			if len(observed) != 1 {
+				t.Fatalf("OnPanic fired %d times, want 1", len(observed))
+			}
+			//: the hook must see the SAME Panicked error returned to the caller.
+			if !errs.HasCode(observed[0], recoversink.CodeRecoverPanicked) {
+				t.Errorf("OnPanic arg HasCode(Panicked) = false, got %v", observed[0])
+			}
+		})
+	}
+}
+
+// TestRecover_OnPanic_NotFiredOnHappyPath is the V34 companion: the hook must
+// NOT fire when the downstream behaves — a successful Write/Flush/Close, or a
+// plain downstream error, leaves OnPanic untouched so it cannot be mistaken
+// for a metric of ordinary I/O failures.
+func TestRecover_OnPanic_NotFiredOnHappyPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		down corelogger.Sink
+		//: op invokes one Sink method and returns only its error component.
+		op func(context.Context, corelogger.Sink) error
+		//: wantErr is the stdlib identity the op must surface (nil on success).
+		wantErr error
+	}{
+		{"quiet Write does not fire OnPanic", quietSink{}, func(ctx context.Context, s corelogger.Sink) error {
+			_, werr := s.Write(ctx, corelogger.RecordEvent{Level: level.Info}, []byte("x"))
+			return werr
+		}, nil},
+		{"downstream error does not fire OnPanic", erringSink{}, func(ctx context.Context, s corelogger.Sink) error {
+			_, werr := s.Write(ctx, corelogger.RecordEvent{Level: level.Info}, []byte("x"))
+			return werr
+		}, io.ErrClosedPipe},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fired := false
+			cfg := recoversink.Config{OnPanic: func(_ error) {
+				//: flip the flag so a spurious invocation is caught.
+				fired = true
+			}}
+			s, err := recoversink.NewWithConfig(tc.down, cfg)
+			if err != nil {
+				t.Fatalf("NewWithConfig err = %v", err)
+			}
+			got := tc.op(t.Context(), s)
+			//: the op error must match the downstream identity, never a Panicked relabel.
+			if !errors.Is(got, tc.wantErr) {
+				t.Errorf("op err = %v, want errors.Is(%v)", got, tc.wantErr)
+			}
+			//: no panic was absorbed, so the observability hook must stay silent.
+			if fired {
+				t.Errorf("OnPanic fired on a non-panic path, want untouched")
+			}
+		})
+	}
+}
+
+// TestNewWithConfig is the V34 constructor guard: a nil downstream is rejected
+// with DownstreamNil regardless of Config, and a valid downstream yields a
+// usable Sink whose default (nil OnPanic) path still absorbs panics into the
+// Panicked sentinel — proving New is NewWithConfig with a zero-value Config.
+func TestNewWithConfig(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		down    corelogger.Sink
+		wantNil bool
+	}{
+		{"nil downstream rejected", nil, true},
+		{"valid downstream accepted", panickingSink{}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s, err := recoversink.NewWithConfig(tc.down, recoversink.Config{})
+			//: a nil downstream must surface the documented DownstreamNil sentinel.
+			if tc.wantNil {
+				if !errs.HasCode(err, recoversink.CodeRecoverDownstreamNil) {
+					t.Fatalf("HasCode(%v, DownstreamNil) = false", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewWithConfig err = %v, want nil", err)
+			}
+			//: the zero-Config sink must still absorb panics exactly like New.
+			_, werr := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
+			if !errs.HasCode(werr, recoversink.CodeRecoverPanicked) {
+				t.Errorf("HasCode(%v, Panicked) = false on zero-Config path", werr)
+			}
+		})
+	}
+}
+
+// TestRecover_New_DefaultUnchanged is the V34 non-breaking guard: New (no
+// Config) must still absorb panics into the Panicked sentinel exactly as
+// before — the additive OnPanic hook changes nothing on the default path.
+func TestRecover_New_DefaultUnchanged(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		//: op invokes one panicking Sink method and returns only its error.
+		op func(context.Context, corelogger.Sink) error
+	}{
+		{"Write default path absorbs panic", func(ctx context.Context, s corelogger.Sink) error {
+			_, werr := s.Write(ctx, corelogger.RecordEvent{Level: level.Info}, []byte("x"))
+			return werr
+		}},
+		{"Flush default path absorbs panic", func(ctx context.Context, s corelogger.Sink) error {
+			return s.Flush(ctx)
+		}},
+		{"Close default path absorbs panic", func(_ context.Context, s corelogger.Sink) error {
+			return s.Close()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s, err := recoversink.New(panickingSink{})
+			if err != nil {
+				t.Fatalf("New err = %v", err)
+			}
+			//: a nil OnPanic must not panic the recover block — default stays safe.
+			got := tc.op(t.Context(), s)
+			//: the absorbed panic still surfaces as Panicked, identical to pre-V34.
+			if !errs.HasCode(got, recoversink.CodeRecoverPanicked) {
+				t.Errorf("HasCode(%v, Panicked) = false on default New path", got)
+			}
+		})
+	}
+}

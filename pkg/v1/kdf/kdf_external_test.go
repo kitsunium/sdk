@@ -2,8 +2,10 @@ package kdf_test
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
+	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/kdf"
 )
 
@@ -70,6 +72,88 @@ func TestSubkeySeparation(t *testing.T) {
 		//: a distinct info label must produce a key independent of the baseline.
 		if err != nil || bytes.Equal(got, ref) {
 			t.Errorf("%s: subkey collided with the reference label (err %v)", c.name, err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestAlgorithmIsDomainDefinedType_V104 pins the V104 fix: kdf.Algorithm is a
+// DEFINED type owned by this facade, not a bare alias of the shared
+// internal/core/crypto.Algorithm. While Algorithm was an alias, all seven
+// crypto-family facades shared one identical Go type, so a hash or MAC constant
+// fed into a KDF call type-checked and only misrouted at runtime. A defined type
+// makes that cross-domain mix a compile error; reflection witnesses the change
+// because a defined type reports its own package path, whereas an alias reports
+// internal/core/crypto. This test FAILS before the alias→defined-type change and
+// PASSES after.
+func TestAlgorithmIsDomainDefinedType_V104(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		got  string
+		want string
+	}
+	rt := reflect.TypeFor[kdf.Algorithm]()
+	tests := []tc{
+		//: a defined type reports its declaring package; an alias reports corecrypto's.
+		{"package path is this facade", rt.PkgPath(), "github.com/kitsunium/sdk/pkg/v1/kdf"},
+		//: the defined type names itself Algorithm in this package.
+		{"type name is Algorithm", rt.Name(), "Algorithm"},
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			//: a mismatch means Algorithm is still an alias of corecrypto.Algorithm.
+			if c.got != c.want {
+				t.Errorf("kdf.Algorithm %s=%q want %q (still an alias?)", c.name, c.got, c.want)
+			}
+		})
+	}
+}
+
+// TestKeyLenAndNewKeyExposed_V105 pins the V105 fix: every Key-aliasing facade
+// re-exports BOTH NewKey and KeyLen uniformly. Before the fix kdf exposed neither
+// NewKey nor KeyLen, so a kdf consumer building the master a KeyTree derives from
+// had to import the unrelated crypto facade. This test references kdf.KeyLen,
+// round-trips kdf.NewKey, and feeds the result to NewKeyTree, so it does not
+// compile before the additions and PASSES after. The wrong-length rejection
+// routes through the errs API, never .Error() string matching.
+func TestKeyLenAndNewKeyExposed_V105(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		raw     []byte
+		wantErr bool
+	}
+	tests := []tc{
+		{"exactly KeyLen bytes builds a usable master", bytes.Repeat([]byte{0x1}, kdf.KeyLen), false},
+		{"a short key is rejected with INVALID_KEY", bytes.Repeat([]byte{0x1}, kdf.KeyLen-1), true},
+	}
+	//: KeyLen is the frozen 256-bit master-key length the KeyTree derives from.
+	if kdf.KeyLen != 32 {
+		t.Fatalf("kdf.KeyLen=%d want 32", kdf.KeyLen)
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		master, err := kdf.NewKey(c.raw)
+		//: a wrong-length key surfaces the typed INVALID_KEY reason, nothing else.
+		if c.wantErr {
+			if !errs.HasReason(err, "INVALID_KEY") {
+				t.Errorf("%s: NewKey reason=%v want INVALID_KEY", c.name, err)
+			}
+			return
+		}
+		//: the locally-built master must drive a KeyTree without an unrelated import.
+		if err != nil {
+			t.Fatalf("%s: NewKey: %v", c.name, err)
+		}
+		if _, derr := kdf.NewKeyTree(kdf.HKDFSHA256, master).Child("svc").DeriveKey(); derr != nil {
+			t.Errorf("%s: DeriveKey from locally-built master: %v", c.name, derr)
 		}
 	}
 	for _, c := range tests {

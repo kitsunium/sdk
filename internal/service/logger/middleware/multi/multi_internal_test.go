@@ -21,6 +21,10 @@ type stubSink struct {
 	closeErr error
 	// writes counts the Write calls — proves no short-circuit on failure.
 	writes int
+	// flushes counts the Flush calls — proves dedup forwards once (V33).
+	flushes int
+	// closes counts the Close calls — proves dedup forwards once (V33).
+	closes int
 }
 
 func (s *stubSink) Write(_ context.Context, _ corelogger.RecordEvent, p []byte) (int, error) {
@@ -31,8 +35,65 @@ func (s *stubSink) Write(_ context.Context, _ corelogger.RecordEvent, p []byte) 
 	return len(p), nil
 }
 
-func (s *stubSink) Flush(_ context.Context) error { return s.flushErr }
-func (s *stubSink) Close() error                  { return s.closeErr }
+func (s *stubSink) Flush(_ context.Context) error { s.flushes++; return s.flushErr }
+func (s *stubSink) Close() error                  { s.closes++; return s.closeErr }
+
+// Test_fanoutSink_Flush_dedupSharedSink is the V33 regression: a single sink
+// instance wired into several branch slots must be flushed exactly once so a
+// non-idempotent terminal sink is not double-fsynced. Before the dedup fix this
+// asserted flushes == 2 and failed.
+func Test_fanoutSink_Flush_dedupSharedSink(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"shared sink across two branches is flushed once (V33)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: one instance referenced by two branch slots — the V33 hazard.
+			shared := &stubSink{}
+			s := &fanoutSink{branches: []corelogger.Sink{shared, shared}}
+			//: a clean Flush must not surface an error and must dedup the sink.
+			if err := s.Flush(t.Context()); err != nil {
+				t.Errorf("Flush err = %v, want nil", err)
+			}
+			//: dedup forwards Flush to the shared instance exactly once.
+			if shared.flushes != 1 {
+				t.Errorf("shared.flushes = %d, want 1", shared.flushes)
+			}
+		})
+	}
+}
+
+// Test_fanoutSink_Close_dedupSharedSink is the V33 regression: a single sink
+// instance wired into several branch slots must be closed exactly once so a
+// non-idempotent terminal sink does not surface a spurious double-close error.
+func Test_fanoutSink_Close_dedupSharedSink(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"shared sink across two branches is closed once (V33)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: one instance referenced by two branch slots — the V33 hazard.
+			shared := &stubSink{}
+			s := &fanoutSink{branches: []corelogger.Sink{shared, shared}}
+			//: a clean Close must not surface a double-close error.
+			if err := s.Close(); err != nil {
+				t.Errorf("Close err = %v, want nil", err)
+			}
+			//: dedup forwards Close to the shared instance exactly once.
+			if shared.closes != 1 {
+				t.Errorf("shared.closes = %d, want 1", shared.closes)
+			}
+		})
+	}
+}
 
 func Test_fanoutSink_zeroValue(t *testing.T) {
 	t.Parallel()

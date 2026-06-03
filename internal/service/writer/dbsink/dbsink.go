@@ -26,6 +26,7 @@ package dbsink
 
 import (
 	"context"
+	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/batcher"
@@ -54,7 +55,11 @@ type dbSink struct {
 	// exec is the driver-supplied deliver seam, captured at construction.
 	exec execBatch
 	// onError surfaces cap-triggered delivery failures seen on the Write path;
-	// never nil after newDBSink (a nil hook degrades to a no-op).
+	// never nil after newDBSink (a nil hook degrades to a no-op). When the caller
+	// supplied a real hook, newDBSink wraps it so this field AND the batcher's
+	// OnError share one serializing mutex: the cap-flush (drainer goroutine) and
+	// the ticker flush invoke the SAME wrapped closure, so the user callback is
+	// never entered from two goroutines at once (V42).
 	onError func(err error)
 	// clk sources the timestamp when RecordEvent.Time is the zero value; never
 	// nil after newDBSink (a nil Config.Clock defaults to clock.System).
@@ -78,6 +83,13 @@ func newDBSink(exec execBatch, maxRows int, cfg Config) *dbSink {
 	if onError == nil {
 		//: discard cap-flush errors when the caller wired no observer.
 		onError = func(error) {}
+	} else {
+		//: the cap-flush (drainer goroutine) and the ticker flush both route to
+		//: this same hook on distinct goroutines (V42); serialize behind a sink-
+		//: owned mutex so the user callback never runs concurrently with itself.
+		//: the mutex is held only across the user call, so a slow callback cannot
+		//: block a producer (Add/Write returns before onError fires).
+		onError = serializeErrorHook(onError)
 	}
 	clk := cfg.Clock
 	//: fall back to the real wall clock so the Write-path timestamp fill is
@@ -96,6 +108,25 @@ func newDBSink(exec execBatch, maxRows int, cfg Config) *dbSink {
 	})
 	//: hand back the constructed batching sink.
 	return s
+}
+
+// serializeErrorHook wraps hook so concurrent callers run it one at a time. The
+// dbsink routes delivery failures to the user OnError from two goroutines — the
+// cap-flush on the async drainer and the FlushEvery ticker — so without this
+// guard a user hook that touches shared state would be entered concurrently
+// (V42). The mutex is captured per wrapped hook (not package-global) and held
+// only across the user call, so independent sinks never contend and a slow hook
+// blocks neither producers nor the other flush path's progress before the call.
+func serializeErrorHook(hook func(error)) func(error) {
+	//: per-hook mutex so two sinks never share a lock.
+	var mu sync.Mutex
+	//: the returned closure is the single entry point both flush paths invoke.
+	return func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		//: run the user callback under the lock so it never overlaps itself.
+		hook(err)
+	}
 }
 
 // Write appends the originating record to the current batch; the batcher flushes

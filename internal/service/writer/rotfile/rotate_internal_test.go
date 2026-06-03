@@ -196,6 +196,142 @@ func Test_rotatingSink_rotate_reopenRefusesSymlink(t *testing.T) {
 	}
 }
 
+// Test_rotatingSink_rotate_selfHealsAfterShiftFailure exercises V45: when
+// rotate() closes the active fd and shiftBackups then fails (transient EACCES on
+// the oldest-backup removal), rotate must reopen Path so the sink self-heals.
+// Before the fix s.f stayed a closed descriptor and every later Write bricked
+// the sink; after the fix a subsequent Write lands the record once the transient
+// condition clears.
+func Test_rotatingSink_rotate_selfHealsAfterShiftFailure(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"rotate reopens Path after a shiftBackups failure so the sink recovers"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: root bypasses the read-only directory bit, so the negative path is moot.
+		if rootBypassesPerms() {
+			return
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, "heal.log")
+		//: MaxBackups=1 makes shiftBackups drop slot .1 first; a frozen parent
+		//: turns that os.Remove into EACCES so the shift aborts the rotate.
+		s := newSink(t, Config{Path: path, MaxBytes: 4, MaxBackups: 1})
+		//: seed the .1 slot so the eviction has a target to remove.
+		if werr := os.WriteFile(path+".1", []byte("old"), 0o600); werr != nil {
+			t.Fatalf("seed .1: %v", werr)
+		}
+		//: freeze the directory so removing .1 fails (restored in cleanup).
+		freezeDirReadOnly(t, dir)
+		//: rotate closes the active fd (ok) then the shift's Remove(.1) fails.
+		s.mu.Lock()
+		rerr := s.rotate()
+		s.mu.Unlock()
+		//: the EACCES on the oldest-backup removal surfaces as rotate-failed.
+		if !errs.HasCode(rerr, CodeRotFileRotateFailed) {
+			t.Fatalf("rotate err=%v want rotate-failed", rerr)
+		}
+		//: V45 core assertion: the reopened descriptor must be live. Before the
+		//: fix s.f was the closed fd and this direct write would fail with EBADF.
+		s.mu.Lock()
+		_, werr := s.f.Write([]byte("x"))
+		s.mu.Unlock()
+		//: a live descriptor accepts the write — the sink self-healed.
+		if werr != nil {
+			t.Fatalf("reopened descriptor rejected write (sink bricked): %v", werr)
+		}
+		//: a full Write through the public path must also succeed after recovery.
+		if _, perr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("z")); perr != nil {
+			t.Errorf("public Write after self-heal: %v", perr)
+		}
+		closeQuiet(t, s)
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_rotatingSink_reopenAfterFailure covers the V45 recovery helper directly:
+// a healthy Path reopens into a live descriptor with size re-seeded from the
+// file, while a reopen that still fails (a symlink planted at Path, refused by
+// the hardening) resets size to 0 and leaves the prior descriptor untouched so
+// the next Write retries the open.
+func Test_rotatingSink_reopenAfterFailure(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		symlink bool
+		wantFD  bool
+		seedDat string
+	}
+	tests := []tc{
+		{"healthy path reopens a live descriptor", false, true, "abcd"},
+		{"refused symlink leaves the closed descriptor and zeroes size", true, false, "abcd"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "ra.log")
+		//: build a sink, then close its descriptor to mimic the post-shift state
+		//: rotate() leaves behind (active fd already closed).
+		s := newSink(t, Config{Path: path, MaxBytes: 5})
+		if cerr := s.f.Close(); cerr != nil {
+			t.Fatalf("seed close: %v", cerr)
+		}
+		closed := s.f
+		//: the failing arm replaces Path with a symlink the hardening refuses; the
+		//: healthy arm seeds real content so a reopen re-seeds a non-zero size.
+		if c.symlink {
+			//: remove the regular file first, then plant the refused symlink.
+			if rerr := os.Remove(path); rerr != nil {
+				t.Fatalf("rm before symlink: %v", rerr)
+			}
+			if lerr := os.Symlink(filepath.Join(dir, "target"), path); lerr != nil {
+				t.Fatalf("plant symlink: %v", lerr)
+			}
+		} else if werr := os.WriteFile(path, []byte(c.seedDat), 0o600); werr != nil {
+			t.Fatalf("seed file: %v", werr)
+		}
+		s.mu.Lock()
+		s.size = 999
+		s.reopenAfterFailure()
+		gotFD := s.f != closed
+		gotSize := s.size
+		s.mu.Unlock()
+		//: a healthy reopen swaps in a fresh descriptor; a failing one keeps the
+		//: closed one so the caller still owns a (dead) fd to retry against.
+		if gotFD != c.wantFD {
+			t.Errorf("%s: descriptor swapped=%v want %v", c.name, gotFD, c.wantFD)
+		}
+		//: a healthy reopen re-seeds size from the file; a failing one zeroes it
+		//: so the next maybeRotate does not thrash rotate() on the dead fd.
+		wantSize := int64(0)
+		//: the healthy arm expects the seeded byte count.
+		if c.wantFD {
+			wantSize = int64(len(c.seedDat))
+		}
+		//: assert the size matches the branch-specific expectation.
+		if gotSize != wantSize {
+			t.Errorf("%s: size=%d want %d", c.name, gotSize, wantSize)
+		}
+		//: close the live descriptor when the reopen succeeded (avoid an fd leak).
+		if gotFD {
+			closeFile(t, s.f)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func Test_rotatingSink_shiftBackups_removeOldestFails(t *testing.T) {
 	t.Parallel()
 	type tc struct {

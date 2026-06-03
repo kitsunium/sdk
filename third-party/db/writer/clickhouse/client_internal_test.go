@@ -65,6 +65,46 @@ func Test_newClient(t *testing.T) {
 	}
 }
 
+// Test_newClient_nilCredentials_V87 locks the adapter's intentional contract:
+// a nil Credentials provider is OPTIONAL (default user, no password) and MUST
+// NOT surface ClientInitFailed. This guards against re-aligning the adapter to
+// the stale core ClickHouseConfig doc, which wrongly claimed nil is rejected
+// (finding V87) — the doc is reconciled to this behaviour, not the reverse.
+func Test_newClient_nilCredentials_V87(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		cfg  writer.ClickHouseConfig
+	}{
+		//: nil Credentials is the default-user path — construction must succeed.
+		{"nil Credentials builds a default-user client", writer.ClickHouseConfig{Address: "h:9000", Database: "d", Table: "logs"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db, exec, err := newClient(tc.cfg)
+			//: no ClientInitFailed (or any error) for the optional-credentials case.
+			if err != nil {
+				t.Fatalf("%s: nil Credentials must not error, got %v", tc.name, err)
+			}
+			//: the default-user path still yields a lazy handle + deliver closure.
+			if db == nil || exec == nil {
+				t.Fatalf("%s: want handle+closure, db=%v execNil=%v", tc.name, db, exec == nil)
+			}
+			//: resolveCreds confirms the default user/password are empty, no error.
+			user, pass, rerr := resolveCreds(tc.cfg.Credentials)
+			//: a nil provider never errors under the optional contract.
+			if rerr != nil || user != "" || pass != "" {
+				t.Errorf("%s: resolveCreds=%q/%q err=%v want empty default user, no error", tc.name, user, pass, rerr)
+			}
+			//: release the lazily-opened pool (no connection was made).
+			if cerr := db.Close(); cerr != nil {
+				t.Errorf("%s: db.Close: %v", tc.name, cerr)
+			}
+		})
+	}
+}
+
 func Test_execClosure(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

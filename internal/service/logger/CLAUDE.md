@@ -72,6 +72,13 @@ Logger ── Handler (genericHandler / TextHandler)
   `Enabled` can short-circuit and so caller-PC capture sees the right frame.
 - Reuse a `RecordEvent` after handing it to `Handle` — the handler may set
   `Time` in place.
+- Restamp a non-zero `RecordEvent.Time` from a sink or encoder. **Time is
+  owned by the handler layer (V25):** `genericHandler.Handle` (and the legacy
+  `TextHandler`) carry an injected `clock.Clock` and stamp `Time` exactly once
+  at the handler boundary when it is zero, so the encoded line and every
+  downstream sink observe one coherent instant. An encoder/sink may fill a
+  zero `Time` only as a backward-compatible fallback; it MUST NOT overwrite a
+  non-zero one.
 - Use a `Builder` after `Send` — it has been returned to the recycler.
 - Re-export anything from this package at `pkg/v1/*` directly. The public
   facade owns its own constructors.
@@ -88,3 +95,7 @@ bazel test --config=race //internal/service/logger/...
 - `encoder/` — `core/logger.Encoder` adapters (text today; ndjson/json later)
 - `middleware/` — chainable `Sink` decorators (multi, async, route, failover, sample, recover)
 - `sink/` — terminal `Sink` implementations (console, file, syslog)
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V27) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

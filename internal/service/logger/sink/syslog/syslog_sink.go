@@ -32,10 +32,15 @@ const netTCP string = "tcp"
 // after the <PRI> token. The trailing space separates header from message.
 const envelopeSuffix string = "1 - - - - - - "
 
+// maxPRITokenLen is the worst-case length of the "<PRI>" token: the angle
+// brackets plus up to three decimal digits ("<255>").
+const maxPRITokenLen int = len("<255>")
+
 // frameHeaderHint is the byte budget reserved for the "<PRI>1 - - - - - - "
-// header so a typical frame fits in a single allocation alongside the
-// payload. PRI is at most 3 digits + 2 brackets + envelopeSuffix's length.
-const frameHeaderHint int = 16
+// header so the frame fits in a single allocation alongside the payload. It is
+// len(envelopeSuffix)+maxPRITokenLen — sized to the worst case so the
+// single-allocation hot path never reallocates for the header.
+const frameHeaderHint int = len(envelopeSuffix) + maxPRITokenLen
 
 // decimalBase is the base passed to strconv.AppendInt when rendering the
 // PRI integer into the frame buffer.

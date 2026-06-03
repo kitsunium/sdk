@@ -1,6 +1,8 @@
 package rotfile
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -511,19 +513,25 @@ func Test_rotatingSink_Flush_cancelledContext(t *testing.T) {
 	type tc struct {
 		name string
 	}
-	tests := []tc{{"a cancelled context short-circuits flush with ctx.Err"}}
+	tests := []tc{{"a cancelled context short-circuits flush with a typed write-failed error"}}
 	runCase := func(t *testing.T, _ tc) {
 		t.Helper()
 		s := newSink(t, Config{Path: filepath.Join(t.TempDir(), "fc.log")})
 		//: close once the case finishes asserting.
 		defer closeQuiet(t, s)
-		//: pre-cancel so Flush returns ctx.Err() before touching fsync.
+		//: pre-cancel so Flush hits the cancellation guard before touching fsync.
 		ctx, cancel := newCancelled(t)
 		cancel()
 		ferr := s.Flush(ctx)
-		//: the early guard returns the raw cancellation cause, not a wrapped code.
-		if ferr == nil || ferr != ctx.Err() {
-			t.Errorf("Flush err=%v want %v", ferr, ctx.Err())
+		//: V46: the guard must surface a typed error carrying the dotted-quad code,
+		//: not the raw stdlib context.Canceled (which has no errs.Code) — mirroring
+		//: Write and the journald/net sinks. Before the fix HasCode was false.
+		if !errs.HasCode(ferr, CodeRotFileWriteFailed) {
+			t.Errorf("Flush err=%v want write-failed code", ferr)
+		}
+		//: errs.Wrap preserves the cause so errors.Is still catches cancellation.
+		if !errors.Is(ferr, context.Canceled) {
+			t.Errorf("Flush err=%v must still wrap context.Canceled", ferr)
 		}
 	}
 	for _, c := range tests {

@@ -75,7 +75,8 @@ allocation-friendly.
 - Pass a consumer-controlled `addr` to `New`; use `NewWithConfig` with a
   dialer that enforces an allowlist.
 - Add structured-data fields without re-thinking the framing budget —
-  `frameHeaderHint` (16 bytes) sizes the single allocation.
+  `frameHeaderHint` (`len(envelopeSuffix)+5` = 19 bytes) sizes the single
+  allocation.
 
 ## Verification
 

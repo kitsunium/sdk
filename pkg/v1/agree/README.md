@@ -38,14 +38,24 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0.
 
 ## Index
 
+- [Constants](<#constants>)
 - [func GenerateKey\(a Algorithm\) \(pub, priv \[\]byte, err error\)](<#GenerateKey>)
 - [type Algorithm](<#Algorithm>)
 - [type Key](<#Key>)
+  - [func NewKey\(raw \[\]byte\) \(key Key, err error\)](<#NewKey>)
   - [func SharedKey\(a Algorithm, priv, peerPub \[\]byte, info string\) \(key Key, err error\)](<#SharedKey>)
 
 
+## Constants
+
+<a name="KeyLen"></a>KeyLen is the required symmetric key length in bytes \(256\-bit\) — the length of the Key SharedKey returns and that [NewKey](<#NewKey>) enforces.
+
+```go
+const KeyLen int = corecrypto.KeyLen
+```
+
 <a name="GenerateKey"></a>
-## func [GenerateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/agree/agree.go#L69>)
+## func [GenerateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/agree/agree.go#L86>)
 
 ```go
 func GenerateKey(a Algorithm) (pub, priv []byte, err error)
@@ -54,12 +64,12 @@ func GenerateKey(a Algorithm) (pub, priv []byte, err error)
 GenerateKey draws a fresh keypair for the named scheme, returning the raw public and private key bytes. An unregistered algorithm returns UnknownAgreementAlgorithm; treat priv as a secret and zero it when done.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/agree/agree.go#L57>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/agree/agree.go#L69>)
 
-Algorithm is the stable identifier of a key\-agreement scheme.
+Algorithm is the stable identifier of a key\-agreement scheme. It is a defined type distinct from the other crypto\-family Algorithm types \(hash, mac, sign, …\), so the compiler rejects feeding a hash or signature constant into an agreement call \(V104\) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 
 ```go
-type Algorithm = corecrypto.Algorithm
+type Algorithm corecrypto.Algorithm
 ```
 
 <a name="X25519"></a>X25519 is Diffie\-Hellman over Curve25519 \(RFC 7748\) — the modern default.
@@ -69,7 +79,7 @@ const X25519 Algorithm = "x25519"
 ```
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/agree/agree.go#L61>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/agree/agree.go#L73>)
 
 Key is an opaque, redacting 256\-bit symmetric key — the same key type the AEAD surface uses. SharedKey returns one; its String output is "\<redacted\>".
 
@@ -77,8 +87,17 @@ Key is an opaque, redacting 256\-bit symmetric key — the same key type the AEA
 type Key = corecrypto.Key
 ```
 
+<a name="NewKey"></a>
+### func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/agree/agree.go#L78>)
+
+```go
+func NewKey(raw []byte) (key Key, err error)
+```
+
+NewKey builds a Key from raw, which must be exactly KeyLen \(32\) bytes. A wrong length returns InvalidKey; the bytes are copied defensively. Use it to round\-trip a SharedKey\-shaped value without importing an unrelated facade.
+
 <a name="SharedKey"></a>
-### func [SharedKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/agree/agree.go#L78>)
+### func [SharedKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/agree/agree.go#L95>)
 
 ```go
 func SharedKey(a Algorithm, priv, peerPub []byte, info string) (key Key, err error)

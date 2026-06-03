@@ -501,6 +501,113 @@ func TestAsync_FlushCancelledContextReturnsCtxCancelled(t *testing.T) {
 	}
 }
 
+// deliverGateSink gates the drainer inside Write (announcing entry on started,
+// blocking on release) and records the count of Writes that have fully
+// returned. delivered lets the V28/V111 test assert that the record is only
+// counted as written downstream after release — i.e. while the drainer is
+// parked, the entry is off the ring (Len()==0) yet must still be in-flight.
+type deliverGateSink struct {
+	started   chan struct{}
+	release   chan struct{}
+	once      sync.Once
+	delivered atomic.Int64
+}
+
+// Write announces entry once, blocks on release, then records the delivery.
+func (g *deliverGateSink) Write(_ context.Context, _ corelogger.RecordEvent, p []byte) (int, error) {
+	//: announce entry exactly once so the test knows the drainer is parked.
+	g.once.Do(func() { close(g.started) })
+	//: block until the test releases us, holding the drainer mid-delivery.
+	<-g.release
+	//: record delivery only after release so the test can prove the record was
+	//: still in-flight (undelivered) while the drainer was parked.
+	g.delivered.Add(1)
+	return len(p), nil
+}
+
+// Flush is a no-op; the gate sink owns no downstream buffer to settle.
+func (g *deliverGateSink) Flush(_ context.Context) error { return nil }
+
+// Close is a no-op; the gate sink owns no resource to release.
+func (g *deliverGateSink) Close() error { return nil }
+
+// TestAsync_FlushWaitsForInFlightDownstreamWrite is the V28/V111 regression:
+// Flush MUST NOT report "drained" while a record accepted before the call is
+// still being written downstream. The drainer TryReads the only entry off the
+// ring (queue.Len()==0) then parks inside the downstream Write; before the
+// in-flight counter fix Flush sampled Len()==0 and returned immediately, while
+// the record had not yet reached the downstream sink. After the fix Flush
+// waits on Len()==0 AND inFlight==0, so it blocks until the downstream Write
+// returns. This test FAILS before the fix (Flush returns early) and PASSES
+// after (Flush returns only post-release, with the record delivered).
+func TestAsync_FlushWaitsForInFlightDownstreamWrite(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"Flush blocks until the in-flight downstream Write completes"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			release := make(chan struct{})
+			down := &deliverGateSink{started: make(chan struct{}), release: release}
+			s := async.New(down, async.Config{BufferSize: 4})
+			t.Cleanup(func() {
+				//: release in case the assertion path bailed before unblocking.
+				select {
+				case <-release:
+					//: already closed by the test body — nothing to do.
+				default:
+					//: unblock the parked drainer so Close can join.
+					close(release)
+				}
+				swallowAsyncClose(s.Close())
+			})
+			//: enqueue exactly one record so the drainer pulls it off the ring
+			//: (Len() drops to 0) and then parks inside the downstream Write.
+			swallowAsyncWrite(s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("A")))
+			//: wait until the drainer is parked inside Write — at this point the
+			//: ring is empty but the record is in-flight, not yet delivered.
+			<-down.started
+			//: run Flush on a goroutine so the test can observe whether it
+			//: returns while the downstream Write is still parked.
+			flushed := make(chan struct{})
+			go func() {
+				//: a live (non-cancelled) ctx so Flush blocks on inFlight, not
+				//: on cancellation — it must return only when delivery completes.
+				swallowAsyncClose(s.Flush(t.Context()))
+				close(flushed)
+			}()
+			//: Flush must NOT complete while the drainer is parked and the
+			//: record is undelivered — a premature return is the V28/V111 bug.
+			select {
+			case <-flushed:
+				t.Fatal("Flush returned while the in-flight downstream Write was still parked (V28/V111)")
+			case <-time.After(100 * time.Millisecond):
+				//: still blocking as required — proceed to release and re-check.
+			}
+			//: the record must not have been delivered downstream yet.
+			if got := down.delivered.Load(); got != 0 {
+				t.Fatalf("delivered = %d before release, want 0", got)
+			}
+			//: release the drainer; the downstream Write now completes.
+			close(release)
+			//: Flush must return promptly once the in-flight Write has finished.
+			select {
+			case <-flushed:
+				//: Flush observed Len()==0 AND inFlight==0 and returned.
+			case <-time.After(2 * time.Second):
+				t.Fatal("Flush did not return after the in-flight Write completed")
+			}
+			//: the accepted record must have reached the downstream sink.
+			if got := down.delivered.Load(); got != 1 {
+				t.Errorf("delivered = %d after Flush, want 1", got)
+			}
+		})
+	}
+}
+
 func TestAsyncSentinels(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

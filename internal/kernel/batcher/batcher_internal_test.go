@@ -306,6 +306,78 @@ func Test_Batcher_closeRaceLosesNoWrite(t *testing.T) {
 	}
 }
 
+// Test_Batcher_deliverSerialized is the V6 regression: the Sink must never run
+// concurrently. A cap-triggered Add and the FlushEvery ticker both reach
+// deliverBatch; before the deliverMu serialization they could both be inside the
+// closure at once. The closure here asserts a non-reentrant invariant: if a
+// second goroutine enters while the first is still inside, inFlight exceeds 1 and
+// the test fails. Run under -race it also flags the unsynchronized concurrent
+// access to the shared maxInFlight without the dedicated mutex.
+func Test_Batcher_deliverSerialized(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		producers int
+		perProd   int
+	}
+	tests := []tc{{"the Sink is never invoked concurrently across flush paths", 8, 400}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var inFlight atomic.Int64
+		var maxInFlight atomic.Int64
+		deliver := func(_ context.Context, _ []int) error {
+			//: record concurrent entries: serial invocation keeps this at 1.
+			cur := inFlight.Add(1)
+			//: track the high-water mark so a single breach is observable post-run.
+			for {
+				prev := maxInFlight.Load()
+				//: stop once the recorded peak already covers this entry.
+				if cur <= prev || maxInFlight.CompareAndSwap(prev, cur) {
+					break
+				}
+			}
+			//: widen the window so a racing flush path has time to enter.
+			time.Sleep(50 * time.Microsecond)
+			inFlight.Add(-1)
+			return nil
+		}
+		// A small MaxItems makes nearly every Add a cap-triggered flush, and the
+		// 1ms ticker adds a second independent flush path; together they maximise
+		// the chance two deliveries overlap absent serialization.
+		b := NewBatcher(deliver, Config[int]{MaxItems: 4, FlushEvery: time.Millisecond})
+		ctx := t.Context()
+		produce := func(base int) {
+			for i := range c.perProd {
+				//: each cap-triggered Add drives a deliver that must not overlap others.
+				if err := b.Add(ctx, base*c.perProd+i); err != nil {
+					t.Errorf("Add: %v", err)
+				}
+			}
+		}
+		// Producer goroutines race each other and the ticker; wg.Wait joins them
+		// before Close so none outlive the test.
+		var wg sync.WaitGroup
+		for p := range c.producers {
+			wg.Go(func() { produce(p) })
+		}
+		wg.Wait()
+		//: Close drains the tail under the same serialized deliver path.
+		if err := b.Close(ctx); err != nil {
+			t.Fatalf("%s: Close: %v", c.name, err)
+		}
+		//: more than one concurrent entry proves the Sink ran unserialized (V6).
+		if got := maxInFlight.Load(); got > 1 {
+			t.Errorf("%s: Sink invoked concurrently: max in-flight=%d want 1", c.name, got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func Test_Batcher_deliverClosureMayReorder(t *testing.T) {
 	t.Parallel()
 	type tc struct {

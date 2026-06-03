@@ -200,6 +200,52 @@ func Test_Memory_Write_Defensive(t *testing.T) {
 	}
 }
 
+// Test_Memory_Write_DeepClonesGroups verifies (V37) that mutating a nested
+// slice handed to GroupValue after Write does not corrupt the recorded
+// snapshot. Before the deep-clone fix the snapshot aliased the caller's nested
+// group slice, so this case observed the mutated value and failed.
+func Test_Memory_Write_DeepClonesGroups(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		wantValue string
+	}{
+		{name: "nested group child survives caller mutation", wantValue: "original"},
+	}
+
+	//: each deep-clone scenario is independent.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			//: the nested slice is the payload the caller hands to GroupValue.
+			nested := []corelogger.AttrValue{{Key: "inner", Value: corelogger.StringValue("original")}}
+			attrs := []corelogger.AttrValue{{Key: "grp", Value: corelogger.GroupValue(nested...)}}
+			m := memory.NewMemory()
+			n, err := m.Write(t.Context(), corelogger.RecordEvent{Message: "msg", Attrs: attrs}, nil)
+			//: Write must accept the record without error.
+			if err != nil {
+				t.Fatalf("Write returned error: %v (n=%d)", err, n)
+			}
+			//: mutate the nested slice the caller still holds a reference to.
+			nested[0] = corelogger.AttrValue{Key: "inner", Value: corelogger.StringValue("mutated")}
+
+			got := m.Records()
+			//: the snapshot's nested group must retain the value present at Write.
+			inner := got[0].Attrs[0].Value.Group()
+			//: the group must round-trip to exactly one child attribute.
+			if len(inner) != 1 {
+				t.Fatalf("nested group len = %d, want 1", len(inner))
+			}
+			//: the child value must be the pre-mutation literal, proving deep clone.
+			if v := inner[0].Value.String(); v != tc.wantValue {
+				t.Fatalf("nested group value = %q, want %q", v, tc.wantValue)
+			}
+		})
+	}
+}
+
 // Test_Memory_Flush verifies that Flush is a no-op on a live context and
 // honours cancellation.
 func Test_Memory_Flush(t *testing.T) {
@@ -397,9 +443,9 @@ func Test_Memory_Concurrent(t *testing.T) {
 	}
 }
 
-// Test_Len verifies that Len reports the number of accepted Write calls and
-// resets to zero after Reset.
-func Test_Len(t *testing.T) {
+// Test_Memory_Len verifies that Len reports the number of accepted Write calls
+// and resets to zero after Reset.
+func Test_Memory_Len(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {

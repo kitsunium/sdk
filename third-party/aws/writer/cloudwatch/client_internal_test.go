@@ -137,8 +137,12 @@ func TestWriteEndToEndOverRealServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: Open: %v", c.name, err)
 		}
+		//: a recent timestamp clears the V85 14d/2h window filter so the event
+		//: survives deliverBatch and reaches the server (truncated to ms, the unit
+		//: the wire carries, so the round-trip assertion is exact).
+		recTime := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
 		//: drive the producer-facing Write end-to-end through async + batcher.
-		if _, werr := sink.Write(t.Context(), corelogger.RecordEvent{Time: time.Unix(1700000000, 0)}, []byte(c.line)); werr != nil {
+		if _, werr := sink.Write(t.Context(), corelogger.RecordEvent{Time: recTime}, []byte(c.line)); werr != nil {
 			t.Fatalf("%s: Write: %v", c.name, werr)
 		}
 		//: Close drains the async ring, flushes the batch, and joins — forcing the
@@ -161,7 +165,7 @@ func TestWriteEndToEndOverRealServer(t *testing.T) {
 				len(got.LogEvents), aws.ToString(got.LogEvents[0].Message))
 		}
 		//: the source timestamp must survive the full chain as epoch milliseconds.
-		want := time.Unix(1700000000, 0).UnixMilli()
+		want := recTime.UnixMilli()
 		if len(got.LogEvents) == 1 && (got.LogEvents[0].Timestamp == nil || *got.LogEvents[0].Timestamp != want) {
 			t.Errorf("%s: server received timestamp=%v want %d", c.name, got.LogEvents[0].Timestamp, want)
 		}

@@ -45,6 +45,8 @@ go_test(
         "//internal/core/logger/level",
         "//internal/kernel/batcher",
         "//internal/kernel/errs",
+        "//internal/service/logger",
+        "//internal/service/logger/encoder",
         "//internal/service/logger/middleware/async",
     ],
 )

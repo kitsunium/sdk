@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -198,6 +199,89 @@ func TestDbSink_Write_OnErrorRouting(t *testing.T) {
 		//: Close drains the remainder and joins any lifecycle goroutine.
 		if cerr := s.Close(); cerr != nil && !errors.Is(cerr, batcher.BatcherDeliverFailed) {
 			t.Fatalf("%s: Close: %v", c.name, cerr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestDbSink_OnError_SerializedAcrossPaths is the V42 regression: Config.OnError
+// is routed from two distinct goroutines — the cap-flush on the async drainer
+// (dbSink.Write) and the FlushEvery ticker — so without serialization a user
+// hook that touches shared state is entered concurrently. The hook here counts
+// concurrent entrants without its own lock; the dbsink's serializing wrapper must
+// keep the observed maximum at 1. Before the fix the two paths overlap (max == 2,
+// and the unguarded counter trips -race); after it they queue behind one mutex.
+func TestDbSink_OnError_SerializedAcrossPaths(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name       string
+		writes     int
+		flushEvery time.Duration
+	}
+	tests := []tc{
+		{"cap-flush vs ticker race over many writes", 200, time.Millisecond},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var (
+			inFlight atomic.Int32
+			maxSeen  atomic.Int32
+			calls    atomic.Int32
+		)
+		onError := func(error) {
+			//: record the peak concurrent entrant count; the wrapper must keep it 1.
+			cur := inFlight.Add(1)
+			//: publish a new peak when this entry exceeds the running maximum.
+			for {
+				prev := maxSeen.Load()
+				//: stop once the recorded peak already covers this entry.
+				if cur <= prev || maxSeen.CompareAndSwap(prev, cur) {
+					break
+				}
+			}
+			//: dwell inside the hook so a second path would overlap if unserialized.
+			time.Sleep(2 * time.Millisecond)
+			calls.Add(1)
+			inFlight.Add(-1)
+		}
+		exec := func(context.Context, []corelogger.RecordEvent) error {
+			//: every batch fails so both flush paths route to onError.
+			return errSentinel("boom")
+		}
+		//: MaxRows 1 makes each Write cap-flush eagerly; FlushEvery keeps the ticker
+		//: firing so the two failing paths race into the shared hook.
+		s := newDBSink(exec, 1, Config{OnError: onError, FlushEvery: c.flushEvery})
+		//: drive the cap-flush path hard from a producer goroutine.
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			//: many cap-flushes give the ticker chances to overlap a Write flush.
+			for range c.writes {
+				//: each Write reaches the cap and eager-flushes a failing batch.
+				if _, err := s.Write(t.Context(), corelogger.RecordEvent{Message: "x"}, []byte("x")); err != nil {
+					t.Errorf("%s: Write: %v", c.name, err)
+					return
+				}
+				//: yield so the ticker goroutine can interleave a flush.
+				time.Sleep(time.Millisecond)
+			}
+		})
+		wg.Wait()
+		//: Close joins the ticker goroutine before the assertions read the counters.
+		if err := s.Close(); err != nil && !errors.Is(err, batcher.BatcherDeliverFailed) {
+			t.Fatalf("%s: Close: %v", c.name, err)
+		}
+		//: the hook fired on the failing flushes — the test is exercising the path.
+		if calls.Load() == 0 {
+			t.Fatalf("%s: onError never fired; the test never exercised the routed path", c.name)
+		}
+		//: the serializing wrapper must keep the user hook single-entrant.
+		if peak := maxSeen.Load(); peak > 1 {
+			t.Fatalf("%s: onError entered concurrently: peak in-flight=%d want 1 (V42)", c.name, peak)
 		}
 	}
 	for _, c := range tests {

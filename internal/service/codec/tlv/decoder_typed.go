@@ -80,7 +80,7 @@ func tryDecodeRootInto(data []byte, target reflect.Value) (handled bool, err err
 	//: Convert dance the untyped projector pays for every scalar.
 	case reflect.Bool,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64,
 		reflect.String:
 		//: typed scalar dispatcher; falls back when wire shape disagrees.
@@ -383,10 +383,31 @@ func assignMapPair(outView reflectView, keyType, valType reflect.Type, keyVal, v
 		//: already wrapped by convertValue.
 		return verr
 	}
+	//: V60 — reject non-comparable keys before SetMapIndex; an untrusted
+	//: payload that decodes a slice/map into an interface key would
+	//: otherwise panic ("hash of unhashable type") and crash the caller.
+	if !mapKeyComparable(kConv) {
+		//: surface the shared sentinel, mirroring the untyped decodeMap guard.
+		return unhashableKeyError()
+	}
 	//: publish the pair into the destination map.
 	out.SetMapIndex(kConv, vConv)
 	//: success.
 	return nil
+}
+
+// mapKeyComparable reports whether key may be safely used as a map index.
+// For an interface-typed key the static type is always comparable, so the
+// dynamic value carried inside the interface is what must be checked — a
+// []any or map[any]any concrete value would panic SetMapIndex (V60).
+func mapKeyComparable(key reflect.Value) bool {
+	//: an interface key hides its real type behind a comparable shell.
+	if key.Kind() == reflect.Interface {
+		//: a nil interface is comparable; otherwise inspect the dynamic value.
+		return key.IsNil() || key.Elem().Type().Comparable()
+	}
+	//: concrete key types report comparability directly.
+	return key.Type().Comparable()
 }
 
 // tryDecodeRootIntoStruct handles the Phase-1 *struct target path.

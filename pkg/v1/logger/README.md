@@ -533,7 +533,7 @@ NewCredentialValue builds a CredentialValue from AWS SigV4 material. An empty se
 <a name="Encoder"></a>
 ## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L33>)
 
-Encoder is the stable alias for the internal service encoder interface. The default text encoder is exposed via TextEncoder; structured codecs \(json / ndjson\) can be injected through NewWithCodec when callers need machine\-readable output.
+Encoder is the stable alias for the internal service encoder interface. The default text encoder is exposed via TextEncoder; structured output is injected through NewWithSink via SinkConfig.Encoder \(see NewJSONEncoder\) when callers need machine\-readable output.
 
 ```go
 type Encoder = encoder.Encoder

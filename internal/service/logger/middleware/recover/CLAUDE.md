@@ -15,13 +15,26 @@ hot path.
 
 | File | Role |
 |---|---|
-| `recover_sink.go` | `recoverSink` + `New`; every method `defer`s its own recover block |
+| `recover_sink.go` | `recoverSink` + `New` / `NewWithConfig`; every method `defer`s its own recover block |
+| `config.go`       | `Config{OnPanic}` — observability hook (V34) |
 | `panic_value.go`  | `panicValue` adapter; `safeString` / `safeTypeName` panic-safe formatters |
 | `codes.go`, `errors.go` | sentinels — range 0.3.21.\* |
 
 ## Behaviour
 
-- `New(downstream)` rejects nil — returns `DownstreamNil`.
+- `New(downstream)` rejects nil — returns `DownstreamNil`. `NewWithConfig`
+  takes the same downstream plus a `Config`; `New` is `NewWithConfig` with a
+  zero-value `Config`, so the default path is byte-for-byte unchanged.
+- **Absorption hazard (V34).** A recovered panic is converted into the
+  `Panicked` error and returned. When this middleware sits under a `Logger`,
+  `Logger.Log` swallows handler errors (`swallowHandlerError`), so an
+  absorbed runtime bug (nil-deref, slice OOB) produces no crash, no log line
+  and no operator signal. Wire `Config.OnPanic` (mirrors async's `OnError`)
+  to count or fall back on every absorbed panic; the hook receives the same
+  `Panicked` error the caller gets and fires once per absorbed panic across
+  `Write` / `Flush` / `Close`. It never fires on a clean call or a plain
+  downstream error. Do NOT block in `OnPanic` — it runs inline on the
+  recovery path.
 - On panic, the deferred recover wraps the value via `errs.Wrap` with the
   `Panicked` sentinel. The `panicValue.Error()` method exposes only
   `"panic of type T"` so the `Source()` chain never leaks the verbatim

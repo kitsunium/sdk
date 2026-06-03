@@ -33,8 +33,9 @@ No `codes.go`/`errors.go` — returns the shared `core/crypto` sentinels
 
 - **GenerateKey** — P-256 keypair from `crypto/rand` (→ `KeyGenerationFailed` on
   an entropy fault), returned as `(PKIX-pub-DER, SEC1-priv-DER)`.
-- **Sign** — parses the SEC1 private key (malformed → `SigningFailed`), SHA-256
-  digests the message, emits a DER signature.
+- **Sign** — parses the SEC1 private key (malformed *or non-P-256* →
+  `SigningFailed`, symmetric with Verify's curve check), SHA-256 digests the
+  message, emits a DER signature.
 - **Verify** — parses the PKIX public key, type-asserts `*ecdsa.PublicKey`, and
   `VerifyASN1`s the digest; any malformed input is `false`, never a panic.
 

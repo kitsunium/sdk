@@ -58,3 +58,7 @@ bazel test --config=race //internal/service/crypto/pbkdf2pw:pbkdf2pw_test
 # Fallback
 cd internal/service && GOWORK=off go test -race -cover ./crypto/pbkdf2pw/...
 ```
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V71, V72) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

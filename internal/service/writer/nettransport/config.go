@@ -26,10 +26,12 @@ type NetConfig struct {
 	// allowlist dialer so an attacker cannot target internal services or the
 	// cloud-metadata endpoint (169.254.169.254). Nil falls back to net.Dial.
 	Dialer func(network, addr string) (conn net.Conn, err error)
-	// HTTPClient, when non-nil, replaces http.DefaultClient for the http
+	// HTTPClient, when non-nil, replaces the default client for the http
 	// protocol. SECURITY: supply a client whose Transport enforces an SSRF
-	// allowlist for consumer-controlled URLs. Nil falls back to a client with
-	// a sane default timeout.
+	// allowlist for consumer-controlled URLs. Nil falls back to a
+	// timeout-bounded client that refuses redirects (CheckRedirect returns
+	// http.ErrUseLastResponse), NOT http.DefaultClient — so a redirect cannot
+	// bypass the validated target.
 	HTTPClient *http.Client
 	// MinLevel is the optional per-writer severity floor; the zero value
 	// (level.Info) inherits the handler-global level.

@@ -230,9 +230,10 @@ func Marshal(f Format, v any) (encoded []byte, err error) {
 	}
 	//: fast path — try the codec's native input shape first.
 	encoded, err = c.Marshal(v)
-	//: slow path — codec rejected v's shape; retry through the
-	//: JSON-bridge promotion so the public contract holds for any v.
-	if err != nil && isValueShapeMismatch(err) {
+	//: slow path — only the constrained codecs have a promotion strategy;
+	//: gating on hasPromotionStrategy keeps a value-rich codec's genuine
+	//: fault routable instead of masking it as PROMOTE_FAILED (V75).
+	if err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(err) {
 		//: promotion handles its own error wrapping.
 		return promoteMarshal(f, c, v)
 	}
@@ -254,9 +255,10 @@ func Unmarshal(f Format, data []byte, v any) error {
 	}
 	//: fast path — try the codec's native target shape first.
 	uErr := c.Unmarshal(data, v)
-	//: slow path — codec rejected v's shape; retry through the
-	//: JSON-bridge promotion so the public contract holds for any v.
-	if uErr != nil && isValueShapeMismatch(uErr) {
+	//: slow path — only the constrained codecs have a promotion strategy;
+	//: gating on hasPromotionStrategy lets a value-rich codec's corrupt-
+	//: bytes UNMARSHAL_FAILED survive instead of being masked (V75).
+	if uErr != nil && hasPromotionStrategy(f) && isValueShapeMismatch(uErr) {
 		//: promotion handles its own error wrapping.
 		return promoteUnmarshal(f, c, data, v)
 	}
@@ -332,9 +334,10 @@ func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, e
 func encodeWithPromotion(f Format, c corecodec.Codec, v any) (encoded []byte, err error) {
 	//: fast path — try the codec's native input shape first.
 	encoded, err = c.Marshal(v)
-	//: slow path — codec rejected v's shape; retry through the
-	//: JSON-bridge promotion so the public contract holds for any v.
-	if err != nil && isValueShapeMismatch(err) {
+	//: slow path — gate on hasPromotionStrategy so MarshalMany matches
+	//: Marshal: only the constrained codecs retry; value-rich codecs
+	//: forward their genuine fault instead of masking it (V75).
+	if err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(err) {
 		//: promotion handles its own error wrapping.
 		return promoteMarshal(f, c, v)
 	}

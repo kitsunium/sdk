@@ -42,6 +42,12 @@ var DeliverFailed *errs.Error // 0.1.5.2 BATCHER_DELIVER_FAILED
 - **Swap-under-lock, deliver-outside-lock.** The pending batch is swapped out
   under `mu` and the `Sink` runs outside it, so a slow delivery never blocks a
   producer. `Add` / `Flush` / `Close` are all safe under concurrent callers.
+- **Serial Sink invocation (V6).** The `Sink` is invoked under a dedicated
+  `deliverMu` held only across the call, separate from `mu`, so two flush paths
+  (a cap-triggered `Add` racing the ticker, or two cap `Add`s) never enter the
+  closure concurrently. A `Sink` may assume serial invocation; cross-batch
+  ordering is still not guaranteed. The separate mutex keeps a slow `Sink` from
+  blocking producers appending into the next batch.
 - **Closure carries the domain bits.** A pre-delivery reorder (CloudWatch's
   chronological `PutLogEvents` requirement) or a per-batch key (S3's object key)
   lives in the deliver closure — never in the batcher.

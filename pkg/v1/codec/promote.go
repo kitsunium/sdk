@@ -284,6 +284,29 @@ func promoteContainerFailed(detail string) error {
 	})
 }
 
+// hasPromotionStrategy reports whether f names a codec the JSON-bridge
+// can actually promote. Only the five constrained codecs (ndjson, csv,
+// pem, flatbuffers, tlv) have a wrap/container pair; the value-rich
+// codecs (json, cbor, msgpack, asn1, xml, toml, yaml) accept any Go
+// value natively, so a decode failure on them is a genuine wire fault —
+// retrying would hit promote.go's default branch and replace the
+// original UNMARSHAL_FAILED with a PROMOTE_FAILED that discards the
+// cause (finding V75). Gating the retry on this predicate keeps the
+// origin reason/code routable for every corrupt-bytes input.
+func hasPromotionStrategy(f Format) bool {
+	//: only the constrained codecs carry a wrap/container promotion pair.
+	switch f {
+	//: the five formats handled by wrapForFormat / containerForFormat.
+	case NDJSON, CSV, PEM, "flatbuffers", "tlv":
+		//: a JSON-bridge strategy exists — promotion retry is valid.
+		return true
+	//: every other Format decodes any value natively; no retry.
+	default:
+		//: no strategy — a codec error is a real fault, forward it.
+		return false
+	}
+}
+
 // isValueShapeMismatch reports whether err indicates the underlying
 // codec rejected the caller's value/target shape, which is the only
 // condition that triggers a promotion retry. Detection is by reason

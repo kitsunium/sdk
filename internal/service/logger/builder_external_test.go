@@ -64,7 +64,7 @@ func TestBuild_ChainedAttrsLandInOutput(t *testing.T) {
 					Any("z", struct{}{}).
 					Send(t.Context(), "wide")
 			},
-			needles: []string{"big=1000", "u=42", `d="1s"`, "t=2026-04-20T12:00:00Z", "z=?", "wide"},
+			needles: []string{"big=1000", "u=42", `d="1s"`, "t=2026-04-20T12:00:00.000Z", "z=?", "wide"},
 		},
 	}
 	for _, tc := range tests {

@@ -18,7 +18,6 @@ import (
 type baseencEncoder struct {
 	base    io.WriteCloser
 	jsonEnc *stdjson.Encoder
-	v       variant
 }
 
 // Encode serialises v as JSON and feeds the bytes through the base-N writer.

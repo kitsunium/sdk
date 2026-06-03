@@ -252,3 +252,59 @@ func Test_failoverSink_Write_shortCircuitMiddle(t *testing.T) {
 		})
 	}
 }
+
+// Test_failoverSink_Close_dedupSharedSink is the V33 regression: a sink instance
+// reused across multiple chain slots must be closed exactly once so a
+// non-idempotent terminal sink does not surface a spurious double-close error.
+// Before the dedup fix this asserted closes == 1 and failed (closes == 2).
+func Test_failoverSink_Close_dedupSharedSink(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"shared sink across two chain slots is closed once (V33)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: one instance referenced by two chain slots — the V33 hazard.
+			shared := &countingBranch{}
+			s := &failoverSink{chain: []corelogger.Sink{shared, shared}}
+			//: a clean Close must not surface a double-close error.
+			if err := s.Close(); err != nil {
+				t.Errorf("Close err = %v, want nil", err)
+			}
+			//: dedup forwards Close to the shared instance exactly once.
+			if shared.closes != 1 {
+				t.Errorf("shared.closes = %d, want 1", shared.closes)
+			}
+		})
+	}
+}
+
+// Test_failoverSink_Flush_dedupSharedSink is the V33 regression for Flush: a
+// sink reused across chain slots must be flushed exactly once (no double fsync).
+func Test_failoverSink_Flush_dedupSharedSink(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"shared sink across two chain slots is flushed once (V33)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: one instance referenced by two chain slots — the V33 hazard.
+			shared := &countingBranch{}
+			s := &failoverSink{chain: []corelogger.Sink{shared, shared}}
+			//: a clean Flush must not surface an error and must dedup the sink.
+			if err := s.Flush(t.Context()); err != nil {
+				t.Errorf("Flush err = %v, want nil", err)
+			}
+			//: dedup forwards Flush to the shared instance exactly once.
+			if shared.flushes != 1 {
+				t.Errorf("shared.flushes = %d, want 1", shared.flushes)
+			}
+		})
+	}
+}

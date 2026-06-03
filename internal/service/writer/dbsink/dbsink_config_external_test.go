@@ -11,6 +11,8 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	servicelogger "github.com/kitsunium/sdk/internal/service/logger"
+	"github.com/kitsunium/sdk/internal/service/logger/encoder"
 	"github.com/kitsunium/sdk/internal/service/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/service/writer/dbsink"
 )
@@ -450,6 +452,148 @@ func TestComposeOnDrop(t *testing.T) {
 		}
 		if !gotDrop {
 			t.Fatalf("%s: dropped=%d want >=1 from a saturated ring", c.name, dropped.Load())
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// capturedRecords is the no-clone deliver-seam sink for the recycle-aliasing
+// repro: it retains each delivered record's Attrs slice header BY REFERENCE
+// (not slices.Clone like recorder), so a later use-after-recycle of the backing
+// array is observable here / by -race.
+type capturedRecords struct {
+	mu   sync.Mutex
+	recs []corelogger.RecordEvent
+}
+
+// exec retains the live RecordEvent values (and their Attrs slice headers) so a
+// use-after-recycle of the backing array would be observable downstream.
+func (c *capturedRecords) exec(_ context.Context, batch []corelogger.RecordEvent) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	//: keep the record headers verbatim — no defensive copy on purpose.
+	c.recs = append(c.recs, batch...)
+	return nil
+}
+
+// snapshotAttrs returns an independent string view of every captured record's
+// attrs so later mutation of the underlying array cannot retroactively change
+// what we compare against.
+func snapshotAttrs(recs []corelogger.RecordEvent) [][]string {
+	out := make([][]string, 0, len(recs))
+	//: stringify each record's attrs into an owned row.
+	for _, r := range recs {
+		row := make([]string, 0, len(r.Attrs))
+		//: copy every key=value into the owned snapshot row.
+		for _, a := range r.Attrs {
+			row = append(row, a.Key+"="+a.Value.String())
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// TestRecycledAttrsNotCorruptedUnderRace is the V101/V43/V118 repro. It warms
+// the producer recordPool, parks a victim record carrying distinctive string
+// attrs in the dbSink batch, then forces many subsequent recycled Build().Send()
+// cycles whose attrs would overwrite an aliased backing array, then flushes and
+// asserts the parked record's attrs survived intact. Run with -race.
+//
+// Result: PASS — genericHandler.Handle reassigns r.Attrs to a FRESH slice on
+// every record before the sink chain sees it (handler.go mergeAttrs clone), so
+// the recycled b.attrs backing array never crosses into async/dbSink. V101 is
+// REFUTED; V118's untested-invariant gap is closed by this -race regression.
+func TestRecycledAttrsNotCorruptedUnderRace(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		warm    int
+		churn   int
+		wantKey string
+		wantVal string
+	}
+	tests := []tc{
+		{"light recycle storm", 64, 512, "victim", "ORIGINAL-VALUE"},
+		{"heavy recycle storm", 256, 2048, "victim", "ORIGINAL-VALUE"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		seam := &capturedRecords{}
+		//: real production sink chain: levelgate(async(dbSink)). A huge MaxRows
+		//: keeps every record parked in the batch until the explicit Flush, so
+		//: the window between "record batched" and "seam reads Attrs" stays open
+		//: across all the recycling churn below — the worst case for aliasing.
+		sink := dbsink.Compose(seam.exec, dbsink.Config{MaxRows: 1 << 30})
+		//: front the sink with the SHIPPED handler — the component the audit says
+		//: the no-clone safety actually depends on (handler.go mergeAttrs clone).
+		h, err := servicelogger.NewHandler(encoder.NewText(nil), sink, level.Debug)
+		if err != nil {
+			t.Fatalf("%s: NewHandler: %v", c.name, err)
+		}
+		lg, err := servicelogger.New(h)
+		if err != nil {
+			t.Fatalf("%s: New: %v", c.name, err)
+		}
+		ctx := t.Context()
+		//: warm the recordPool so the victim Send pulls a recycled builder whose
+		//: b.attrs backing array has already been used (and will be reused).
+		for i := range c.warm {
+			servicelogger.Build(lg, level.Info).Str("warm", "warm").Int("i", i).Send(ctx, "warmup")
+		}
+		//: drain the warmups out of the batch so only the victim + churn remain.
+		if err := sink.Flush(ctx); err != nil {
+			t.Fatalf("%s: Flush warmups: %v", c.name, err)
+		}
+		seam.mu.Lock()
+		seam.recs = seam.recs[:0]
+		seam.mu.Unlock()
+		//: the victim — distinctive attr values we will check survived recycling.
+		servicelogger.Build(lg, level.Info).
+			Str(c.wantKey, c.wantVal).Str("trace", "victim-trace-id").Int("n", 7).
+			Send(ctx, "victim record")
+		//: force many recycled Build().Send() cycles. Each pulls the same recycled
+		//: *chainBuilder (b.attrs[:0]) and re-appends DIFFERENT values onto the SAME
+		//: backing array. If the victim's Attrs aliased that array (V101's claim),
+		//: these appends would overwrite it in place and trip -race.
+		for range c.churn {
+			servicelogger.Build(lg, level.Info).
+				Str("victim", "POISON-OVERWRITE").Str("trace", "poison-trace").Int("n", 9999).
+				Send(ctx, "churn")
+		}
+		//: deliver everything to the seam now (after the churn already happened).
+		if err := sink.Flush(ctx); err != nil {
+			t.Fatalf("%s: Flush: %v", c.name, err)
+		}
+		seam.mu.Lock()
+		got := snapshotAttrs(seam.recs)
+		seam.mu.Unlock()
+		//: at least the victim must have been delivered.
+		if len(got) == 0 {
+			t.Fatalf("%s: no records delivered to the seam", c.name)
+		}
+		//: the FIRST delivered record is the victim; its attrs must be ORIGINAL.
+		victim := got[0]
+		foundVictim := false
+		//: scan the victim's attrs for the original value and any poison overwrite.
+		for _, kv := range victim {
+			//: the original key=value must be present and untouched.
+			if kv == c.wantKey+"="+c.wantVal {
+				foundVictim = true
+			}
+			//: any poison value here means the backing array was aliased.
+			if kv == "victim=POISON-OVERWRITE" || kv == "trace=poison-trace" || kv == "n=9999" {
+				t.Fatalf("%s: CORRUPTION: parked victim attrs overwritten by a "+
+					"recycled producer — got %q (aliased recycled backing array). "+
+					"V101 reproduced.", c.name, victim)
+			}
+		}
+		if !foundVictim {
+			t.Fatalf("%s: victim attr %s=%s missing from delivered record %q", c.name, c.wantKey, c.wantVal, victim)
 		}
 	}
 	for _, c := range tests {

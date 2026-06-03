@@ -68,3 +68,7 @@ bazel test --config=race //pkg/v1/crypto:crypto_test
 # Fallback
 cd pkg/v1 && GOWORK=off go test -race -cover ./crypto/...
 ```
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V82) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

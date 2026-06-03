@@ -157,10 +157,13 @@ func AgreementShared(name Algorithm, priv, peerPub []byte) (secret []byte, err e
 	}
 	//: delegate the derivation to the scheme (it owns the curve arithmetic).
 	out, derr := agreement.Shared(priv, peerPub)
-	//: a scheme fault (e.g. a low-order peer point) wraps into a typed sentinel.
+	//: a scheme fault (e.g. a low-order peer point) relabels to AgreementFailed.
 	if derr != nil {
-		//: wrap rather than relabel so the cause is preserved without key bytes.
-		return nil, errs.Wrap(derr, errs.WrapParams{
+		//: neutralise the cause so errs.Wrap's origin-wins cannot inherit a
+		//: scheme *errs.Error's Code/Public/Private — the facade owns the
+		//: boundary code and the "cause withheld" message regardless of the
+		//: error type a third-party Shared returns (finding V21).
+		return nil, errs.Wrap(neutralizeAgreementCause(derr), errs.WrapParams{
 			Code:    CodeAgreementFailed,
 			Reason:  "AGREEMENT_FAILED",
 			Public:  "Key agreement failed to derive a shared secret",
@@ -169,4 +172,34 @@ func AgreementShared(name Algorithm, priv, peerPub []byte) (secret []byte, err e
 	}
 	//: hand back the raw secret for the caller to KDF.
 	return out, nil
+}
+
+// neutralizeAgreementCause returns a cause safe to hand to errs.Wrap at the
+// AgreementShared boundary. When the scheme returns a stdlib error it passes
+// through unchanged (errs.Wrap takes the stdlib path, so AgreementFailed wins
+// origin). When the scheme returns its own *errs.Error, origin-wins would
+// otherwise inherit that error's Code/Public/Private — possibly leaking a
+// diagnostic message or key bytes — so it is collapsed to an opaque
+// agreementSchemeFault carrying no scheme Public/Private/Fields, forcing the
+// facade's CodeAgreementFailed to stay the origin (finding V21).
+func neutralizeAgreementCause(cause error) error {
+	//: a scheme *errs.Error would win origin under errs.Wrap; collapse it.
+	if _, isSDK := errs.CodeOf(cause); isSDK {
+		//: opaque marker — never the scheme's Public/Private/Fields.
+		return agreementSchemeFault{}
+	}
+	//: a plain stdlib cause is safe — errs.Wrap keeps AgreementFailed as origin.
+	return cause
+}
+
+// agreementSchemeFault is the opaque, non-*errs.Error stand-in attached as the
+// cause when an Agreement scheme returns its own typed error. It carries a
+// fixed redacted message so no scheme diagnostic — and no key material — can
+// ride out through the wrap chain, while still keeping a cause for chain walks.
+type agreementSchemeFault struct{}
+
+// Error reports a fixed redacted marker so the scheme's diagnostic never leaks.
+func (agreementSchemeFault) Error() string {
+	//: constant marker regardless of the scheme's original message.
+	return "agreement scheme fault (cause withheld of key bytes)"
 }

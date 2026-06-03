@@ -48,24 +48,40 @@ import (
 	"github.com/kitsunium/sdk/internal/service/crypto/keytree"
 )
 
-// Algorithm is the stable identifier of a key-derivation scheme.
-type Algorithm = corecrypto.Algorithm
-
-// Key is an opaque, redacting 256-bit symmetric key — the master a KeyTree
-// derives from and the type DeriveKey returns. Build one with crypto.NewKey.
-type Key = corecrypto.Key
+// KeyLen is the required symmetric key length in bytes (256-bit) — the length
+// [NewKey] enforces.
+const KeyLen int = corecrypto.KeyLen
 
 // HKDFSHA256 is HKDF (RFC 5869) over SHA-256 — extract-and-expand for key
 // separation from a strong secret.
 const HKDFSHA256 Algorithm = "hkdf-sha256"
+
+// Algorithm is the stable identifier of a key-derivation scheme. It is a defined
+// type distinct from the other crypto-family Algorithm types (hash, mac, sign,
+// …), so the compiler rejects feeding a hash or MAC constant into a KDF call
+// (V104) — the seven registries are separate keyspaces, and the type system now
+// enforces that separation the way typed Format/Level discipline does elsewhere.
+type Algorithm corecrypto.Algorithm
+
+// Key is an opaque, redacting 256-bit symmetric key — the master a KeyTree
+// derives from and the type DeriveKey returns. Build one with [NewKey].
+type Key = corecrypto.Key
+
+// NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong
+// length returns InvalidKey; the bytes are copied defensively. Use it to build
+// the master a KeyTree derives from without importing an unrelated facade.
+func NewKey(raw []byte) (key Key, err error) {
+	//: delegate to the core constructor; this facade adds no behaviour.
+	return corecrypto.NewKey(raw)
+}
 
 // Subkey derives a length-byte subkey from secret using the named scheme. salt
 // is optional domain randomness (nil is allowed); info is a context label that
 // binds the subkey to its purpose. An unregistered algorithm returns
 // UnknownKDFAlgorithm; an over-long length returns DerivationFailed.
 func Subkey(a Algorithm, secret, salt []byte, info string, length int) (subkey []byte, err error) {
-	//: delegate to the core registry dispatcher.
-	return corecrypto.Subkey(a, secret, salt, info, length)
+	//: convert the domain-typed Algorithm to the core key at the boundary.
+	return corecrypto.Subkey(corecrypto.Algorithm(a), secret, salt, info, length)
 }
 
 // KeyTree is the path-addressed hierarchical key-derivation node, re-exported
@@ -77,6 +93,6 @@ type KeyTree = keytree.KeyTree
 // The master Key is shared by reference across children — the root owns its
 // Zeroize lifetime, so zeroizing master invalidates every derived node.
 func NewKeyTree(algo Algorithm, master Key) KeyTree {
-	//: delegate to the service constructor; this façade adds no behaviour.
-	return keytree.NewKeyTree(algo, master)
+	//: convert the domain-typed Algorithm to the core key at the boundary.
+	return keytree.NewKeyTree(corecrypto.Algorithm(algo), master)
 }

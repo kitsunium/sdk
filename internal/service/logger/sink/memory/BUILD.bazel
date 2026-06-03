@@ -30,9 +30,12 @@ alias(
 
 go_test(
     name = "memory_test",
-    srcs = ["memory_external_test.go"],
+    srcs = [
+        "memory_external_test.go",
+        "memory_internal_test.go",
+    ],
+    embed = [":memory"],
     deps = [
-        ":memory",
         "//internal/core/logger",
         "//internal/core/logger/level",
     ],

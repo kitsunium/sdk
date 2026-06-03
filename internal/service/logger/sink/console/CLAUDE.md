@@ -51,3 +51,7 @@ emit atomic lines. This is the default sink used by
 ```
 bazel test --config=race //internal/service/logger/sink/console:console_test
 ```
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V38) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

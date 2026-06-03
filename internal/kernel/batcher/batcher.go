@@ -13,6 +13,16 @@
 // a mutex guards the pending batch. The batch is swapped out under the lock and
 // the deliver closure runs outside it, so a slow delivery never blocks a
 // producer. Add returns batcher.Closed once Close has run.
+//
+// Sink serialization (V6): the deliver closure is invoked under a dedicated
+// delivery mutex held only across the call, so two flush paths (a cap-triggered
+// Add racing the FlushEvery ticker, or two cap-triggered Adds) never enter the
+// Sink concurrently. A Sink may therefore assume serial invocation — it can
+// append to a shared slice or write to one connection without its own locking.
+// Cross-batch ordering is still NOT guaranteed: serialization bounds concurrency
+// but not the arrival order of the racing batches. The delivery mutex is
+// separate from the pending-batch mutex, so a slow Sink never blocks a producer
+// from appending into the next batch.
 package batcher
 
 import (
@@ -42,6 +52,12 @@ type Batcher[T any] struct {
 	buf    []T
 	weight int64
 	closed bool
+
+	// deliverMu serializes Sink invocations (V6) so two flush paths never enter
+	// the deliver closure concurrently. It is held only across the deliver call
+	// and is deliberately separate from mu so a slow Sink never blocks a producer
+	// appending into the next batch.
+	deliverMu sync.Mutex
 
 	// stop/done drive the optional FlushEvery ticker goroutine; the Once
 	// guards make the channel closes safe under concurrent Close calls.
@@ -170,11 +186,16 @@ func (b *Batcher[T]) flushOnce(ctx context.Context) error {
 	return b.deliverBatch(ctx, batch)
 }
 
-// deliverBatch runs the Sink on batch outside any lock and wraps a non-nil
-// result as the typed DeliverFailed sentinel (the cause stays reachable via
-// errors.Is). It is the shared delivery tail of flushOnce and Close.
+// deliverBatch runs the Sink on batch outside b.mu and wraps a non-nil result
+// as the typed DeliverFailed sentinel (the cause stays reachable via
+// errors.Is). It is the shared delivery tail of flushOnce and Close. The Sink
+// is serialized under deliverMu (V6): concurrent flush paths queue here rather
+// than entering the closure together, so a non-reentrant Sink stays safe.
 func (b *Batcher[T]) deliverBatch(ctx context.Context, batch []T) error {
-	//: run the Sink; a slow delivery never holds b.mu.
+	//: serialize the Sink so two flush paths never invoke it concurrently (V6).
+	b.deliverMu.Lock()
+	defer b.deliverMu.Unlock()
+	//: run the Sink; a slow delivery never holds b.mu, only deliverMu.
 	if derr := b.deliver(ctx, batch); derr != nil {
 		//: wrap the cause as the typed DeliverFailed sentinel (errors.Is reaches it).
 		return errs.Wrap(derr, errs.WrapParams{

@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-06-03T08:27:22.189Z",
+  "generatedAt": "2026-06-03T14:58:48.445Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "fix",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "resolve Qodo review findings on writer subsystem (PR #58)",
+      "sha": "636c793ad4374e5f39c57786e30c1775b90ccfb5",
+      "short": "636c793",
+      "date": "2026-06-03T11:25:46+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -39,15 +48,6 @@
       "sha": "e8c78b5450e26e658caa2a02d92750027d4bd202",
       "short": "e8c78b5",
       "date": "2026-05-30T00:29:53+02:00"
-    },
-    {
-      "type": "fix",
-      "scope": "docs",
-      "breaking": false,
-      "summary": "make npm test glob node-version-agnostic (#31)",
-      "sha": "dcff33ba199373bcc579168f287bd783aa5b3e1f",
-      "short": "dcff33b",
-      "date": "2026-05-25T09:59:30Z"
     }
   ]
 }

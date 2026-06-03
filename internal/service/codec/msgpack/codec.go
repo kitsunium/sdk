@@ -190,8 +190,17 @@ func (*msgpackCodec) NewEncoder(w io.Writer) codec.Encoder {
 	return &msgpackEncoder{inner: gomsgpack.NewEncoder(w)}
 }
 
-// NewDecoder wraps r in a streaming codec.Decoder.
+// NewDecoder wraps r in a streaming codec.Decoder. The reader is funnelled
+// through io.LimitReader(r, maxMsgPackBytes+1) so the streaming path inherits
+// the same untrusted-input cap Unmarshal enforces — a value with a huge
+// declared array / map / bin length truncates at the limit and surfaces as
+// UNMARSHAL_FAILED via Decode's wrap branch instead of pre-allocating those
+// slots (CWE-400 / CWE-1284). The +1 keeps payloads of exactly maxMsgPackBytes
+// decodable while still bounding allocation. Mirrors CBOR's hardened DecMode
+// streaming fix.
 func (*msgpackCodec) NewDecoder(r io.Reader) codec.Decoder {
-	//: wrap the vmihailenco decoder.
-	return &msgpackDecoder{inner: gomsgpack.NewDecoder(r)}
+	//: cap the stream so a single oversized value cannot exhaust RAM.
+	limited := io.LimitReader(r, int64(maxMsgPackBytes)+1)
+	//: wrap the vmihailenco decoder over the bounded reader.
+	return &msgpackDecoder{inner: gomsgpack.NewDecoder(limited)}
 }
