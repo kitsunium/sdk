@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/batcher"
@@ -285,6 +286,68 @@ func TestClose(t *testing.T) {
 			runCase(t, c)
 		})
 	}
+}
+
+// TestDbSink_Write_FillsZeroTime asserts dbSink.Write stamps the injected clock
+// onto a record whose Time is the zero-value "fill at handle time" sentinel
+// before batching, and leaves an already-set Time untouched — so the drivers
+// never persist a year-0001 timestamp. Regression for F2-dbtime.
+func TestDbSink_Write_FillsZeroTime(t *testing.T) {
+	t.Parallel()
+	frozen := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
+	explicit := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
+	type tc struct {
+		name string
+		in   time.Time
+		want time.Time
+	}
+	tests := []tc{
+		{"zero Time is filled from the injected clock", time.Time{}, frozen},
+		{"a set Time is preserved verbatim", explicit, explicit},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var got time.Time
+		exec := func(_ context.Context, batch []corelogger.RecordEvent) error {
+			//: capture the delivered record's Time so the fill can be asserted.
+			got = batch[0].Time
+			return nil
+		}
+		//: inject a frozen clock so the handle-time fill is deterministic.
+		s := newDBSink(exec, 1<<30, Config{Clock: frozenClock{at: frozen}})
+		if _, err := s.Write(t.Context(), corelogger.RecordEvent{Message: "m", Time: c.in}, []byte("p")); err != nil {
+			t.Fatalf("%s: Write: %v", c.name, err)
+		}
+		//: Flush forces the batched record through the seam synchronously.
+		if ferr := s.Flush(t.Context()); ferr != nil {
+			t.Fatalf("%s: Flush: %v", c.name, ferr)
+		}
+		if !got.Equal(c.want) {
+			t.Fatalf("%s: delivered Time=%v want %v", c.name, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// frozenClock is a deterministic test Clock returning a fixed instant so the
+// handle-time timestamp fill can be asserted without wall-clock flakiness.
+type frozenClock struct{ at time.Time }
+
+// Now returns the frozen instant.
+func (f frozenClock) Now() time.Time {
+	//: a fixed instant makes the fill assertion deterministic.
+	return f.at
+}
+
+// Since returns the elapsed duration from t to the frozen instant.
+func (f frozenClock) Since(t time.Time) time.Duration {
+	//: subtraction against the frozen instant keeps the fake self-consistent.
+	return f.at.Sub(t)
 }
 
 // errSentinel is a minimal test-only error type so the relay test can assert

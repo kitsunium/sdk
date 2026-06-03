@@ -69,8 +69,12 @@ sink is reproduced here and, critically, **re-run on every reopen**.
   never pays for a ticker it did not ask for (rotation stays off by default).
 - A failing tick does not log or panic on the daemon goroutine: `tickRotate`
   stashes the typed `RotFileRotateFailed` under the mutex and the **next** `Write`
-  surfaces it exactly once, then clears it (genuine propagation, not a latched
-  error — `KTN-ERROR-DISCARD`).
+  surfaces it exactly once via the `Config.OnError` hook, then clears it (genuine
+  one-shot propagation, not a latched error — `KTN-ERROR-DISCARD`). The
+  triggering record is **still written** on that same `Write`: the hook reports
+  the failure, it does not gate the write, so a rare rotation I/O failure never
+  also costs a dropped log line. `OnError` is optional (`nil` disables it); the
+  field mirrors the `middleware/async` `OnError func(error)` pattern.
 - `Close` joins the ticker **before** taking the mutex (Stop blocks on the join,
   and the tick locks the mutex via `Rotate` — joining under the lock would
   deadlock). The `Write` path stays **0 alloc** with the daemon running (see

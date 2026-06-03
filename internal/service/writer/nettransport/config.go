@@ -41,6 +41,11 @@ type NetConfig struct {
 	// OnDrop, when non-nil, is invoked with the count of records discarded
 	// because the non-blocking ring saturated (network slower than producers).
 	OnDrop func(dropped int)
+	// OnError, when non-nil, is invoked for every downstream send failure the
+	// async drainer observes (dial/write/non-2xx). Nil discards the error — the
+	// async ring is the only failure surface once the producer has handed off.
+	// Code-only, like Dialer/HTTPClient — never decoded from a config blob.
+	OnError func(err error)
 }
 
 // compose builds the network writer chain: the terminal per-record netSink
@@ -53,7 +58,7 @@ func compose(network string, send sendFunc, closer func() error, cfg NetConfig) 
 	//: terminal per-record sink → async (non-block + OnDrop) → levelgate (floor),
 	//: the same ordering dbsink wires so back-pressure precedes the transport.
 	base := newNetSink(network, send, closer)
-	nonblocking := async.New(base, async.Config{BufferSize: cfg.BufferSize, OnDrop: cfg.OnDrop})
+	nonblocking := async.New(base, async.Config{BufferSize: cfg.BufferSize, OnDrop: cfg.OnDrop, OnError: cfg.OnError})
 	//: outermost gate drops below-floor records before they reach the ring.
 	return levelgate.New(nonblocking, cfg.MinLevel)
 }

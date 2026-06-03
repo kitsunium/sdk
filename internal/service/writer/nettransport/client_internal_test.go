@@ -176,6 +176,76 @@ func Test_postRecord(t *testing.T) {
 	}
 }
 
+// Test_defaultClientRejectsRedirect proves the zero-config default client (nil
+// HTTPClient) does NOT follow a 30x bounce (CWE-918): a consumer-controlled URL
+// that redirects the POST toward an internal host past an SSRF allowlist must be
+// refused, surfacing the redirect's own (non-2xx) status as a write failure
+// rather than transparently re-issuing the request to the redirect target. It is
+// loopback-gated like the sibling real-server tests so it never skips: where the
+// sandbox blocks loopback connect the assertion is satisfied by the conn refusal.
+func Test_defaultClientRejectsRedirect(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{"302 found is not followed", http.StatusFound},
+		{"301 permanent is not followed", http.StatusMovedPermanently},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: the redirect bounce needs two real loopback sockets; where the
+			//: sandbox blocks them the SSRF guard is still proven by a dial refusal.
+			if !loopbackConnectWorks() {
+				_, _, err := newConnSeam("tcp", closedLoopbackAddr, nil)
+				if !errs.HasCode(err, CodeNetTransportDialFailed) {
+					t.Errorf("%s: loopback-blocked fallback err=%v want dial-failed", tc.name, err)
+				}
+				return
+			}
+			assertDefaultClientRefusesRedirect(t, tc.name, tc.status)
+		})
+	}
+}
+
+// assertDefaultClientRefusesRedirect stands up an "internal" target plus a
+// consumer-controlled front that returns status pointing at it, then drives the
+// zero-config seam (nil HTTPClient) and proves the default client neither follows
+// the redirect (the internal host is never hit) nor reports success (the non-2xx
+// redirect surfaces as a write failure) — the CWE-918 guard under test.
+func assertDefaultClientRefusesRedirect(t *testing.T, name string, status int) {
+	t.Helper()
+	//: the "internal" target records whether the redirect was ever followed.
+	followed := make(chan struct{}, 1)
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		//: reaching here means the POST chased the 30x to the internal host — the
+		//: exact SSRF bypass the default client must prevent.
+		followed <- struct{}{}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(internal.Close)
+	//: the consumer-controlled front returns a redirect at the internal host.
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, internal.URL, status)
+	}))
+	t.Cleanup(front.Close)
+	//: a nil HTTPClient forces the timeout-bounded default whose CheckRedirect
+	//: refuses to follow — the path under test (client.go default branch).
+	send, closer := newHTTPSeam(front.URL, nil)
+	t.Cleanup(func() { swallowErr(closer()) })
+	//: the redirect is non-2xx, so a refused follow surfaces as a write failure.
+	if serr := send(t.Context(), []byte("rec")); serr == nil {
+		t.Errorf("%s: send: nil error, want write failure on a non-followed redirect", name)
+	}
+	//: the internal host must never have been hit.
+	select {
+	case <-followed:
+		t.Errorf("%s: default client followed the redirect to the internal host (SSRF)", name)
+	default:
+	}
+}
+
 func Test_swallowErr(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

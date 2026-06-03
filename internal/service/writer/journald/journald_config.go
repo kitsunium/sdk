@@ -29,4 +29,7 @@ type Config struct {
 	// OnDrop, when non-nil, is invoked with the count of records discarded
 	// because the non-blocking ring saturated.
 	OnDrop func(dropped int)
+	// OnError, when non-nil, is invoked with each downstream send failure the
+	// async drainer observes; the zero value silently discards them.
+	OnError func(err error)
 }

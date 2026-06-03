@@ -368,19 +368,26 @@ func Test_rotatingSink_Write_tickErr(t *testing.T) {
 	type tc struct {
 		name string
 	}
-	tests := []tc{{"stashed tick error surfaces once then clears"}}
+	tests := []tc{{"stashed tick error surfaces via OnError once then clears"}}
 	runCase := func(t *testing.T, _ tc) {
 		t.Helper()
-		s := newSink(t, Config{Path: filepath.Join(t.TempDir(), "te.log")})
+		//: capture the one-shot OnError surfacing without gating the write.
+		var seen error
+		s := newSink(t, Config{Path: filepath.Join(t.TempDir(), "te.log"), OnError: func(err error) { seen = err }})
 		//: close once the case finishes asserting.
 		defer closeQuiet(t, s)
 		//: stash a typed rotate failure exactly as a failing tick would.
 		s.mu.Lock()
 		s.tickErr = RotFileRotateFailed
 		s.mu.Unlock()
-		//: the first Write must surface the stashed interval-rotation error.
-		if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("x")); !errs.HasCode(werr, CodeRotFileRotateFailed) {
-			t.Fatalf("first Write err=%v want rotate-failed", werr)
+		//: the first Write surfaces the stash via OnError, NOT its return value —
+		//: the triggering record is still written (F6-tickdrop: no dropped line).
+		if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("x")); werr != nil {
+			t.Fatalf("first Write err=%v want nil (record must still be written)", werr)
+		}
+		//: the failure reached the operator hook exactly once with the right code.
+		if !errs.HasCode(seen, CodeRotFileRotateFailed) {
+			t.Fatalf("OnError saw %v want rotate-failed", seen)
 		}
 		//: the second Write proceeds normally — the error is not latched.
 		if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("y")); werr != nil {

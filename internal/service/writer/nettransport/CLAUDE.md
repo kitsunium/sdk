@@ -56,8 +56,8 @@ Recognised keys under a writer entry's `config:` map:
 | `min_level` | string | `MinLevel` via `level.ParseLevel` |
 | `buffer_size` | int | `BufferSize` (async ring capacity) |
 
-The `Dialer` / `HTTPClient` SSRF seams are **code-only** and never decoded from a
-config blob. A malformed shape returns the shared `core/writer.WriterConfigInvalid`
+The `Dialer` / `HTTPClient` SSRF seams and the `OnDrop` / `OnError` callbacks are
+**code-only** and never decoded from a config blob. A malformed shape returns the shared `core/writer.WriterConfigInvalid`
 (no per-package code), tagged with the protocol only — never the value.
 
 ## Error catalogue — range 0.3.30.\*

@@ -68,8 +68,21 @@ func newHTTPSeam(url string, client *http.Client) (send sendFunc, closer func() 
 	c := client
 	//: the fallback is a one-time construction branch, not a hot path.
 	if c == nil {
-		//: a bounded default client preserves zero-config usage.
-		c = &http.Client{Timeout: defaultHTTPTimeout}
+		//: a bounded default client preserves zero-config usage; CheckRedirect
+		//: refuses to follow redirects (CWE-918) so a consumer-controlled URL
+		//: cannot 30x-bounce the POST to an internal host past an allowlist that
+		//: only validated the configured target. A caller-supplied HTTPClient
+		//: owns its own redirect policy and is used as-is.
+		c = &http.Client{
+			Timeout: defaultHTTPTimeout,
+			//: CheckRedirect halts every redirect with the stdlib
+			//: ErrUseLastResponse signal (not an error verdict); a non-2xx last
+			//: response then surfaces downstream as a write failure.
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				//: stop following and hand back the redirect response as-is.
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	//: send POSTs the record body and verifies a 2xx response.
 	send = func(ctx context.Context, p []byte) error {

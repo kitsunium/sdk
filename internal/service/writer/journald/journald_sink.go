@@ -45,10 +45,19 @@ func newJournaldSink(conn net.Conn) *journaldSink {
 // one datagram. The frame is assembled into the reused buffer under the mutex,
 // so steady-state Write allocates nothing.
 func (s *journaldSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte) (n int, err error) {
+	//: the accepted count reports the whole record handed in, independent of
+	//: the cosmetic newline strip below, so callers see a stable byte count.
+	accepted := len(p)
 	//: honour cancellation so a doomed record does not waste a datagram.
 	if ctx != nil && ctx.Err() != nil {
 		//: surface the cancellation under the write sentinel (typed-errors rule).
-		return 0, wrapWrite(ctx.Err(), len(p))
+		return 0, wrapWrite(ctx.Err(), accepted)
+	}
+	//: the text encoder already terminates the line; strip one trailing
+	//: newline so framing does not double it (single-newline MESSAGE frame).
+	if len(p) > 0 && p[len(p)-1] == '\n' {
+		//: drop exactly one terminator; the frame appends its own below.
+		p = p[:len(p)-1]
 	}
 	//: serialise framing + send against Close via the mutex.
 	s.mu.Lock()
@@ -61,10 +70,10 @@ func (s *journaldSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 	//: wrap any socket error with the write sentinel semantics.
 	if werr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
-		return 0, wrapWrite(werr, len(p))
+		return 0, wrapWrite(werr, accepted)
 	}
 	//: happy path — the whole payload was framed and sent.
-	return len(p), nil
+	return accepted, nil
 }
 
 // Flush is a no-op: each record is sent synchronously as its own datagram, so

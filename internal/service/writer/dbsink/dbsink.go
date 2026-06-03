@@ -29,6 +29,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/batcher"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
 // defaultMaxRows bounds the in-memory batch when Config leaves MaxRows at its
@@ -55,6 +56,9 @@ type dbSink struct {
 	// onError surfaces cap-triggered delivery failures seen on the Write path;
 	// never nil after newDBSink (a nil hook degrades to a no-op).
 	onError func(err error)
+	// clk sources the timestamp when RecordEvent.Time is the zero value; never
+	// nil after newDBSink (a nil Config.Clock defaults to clock.System).
+	clk clock.Clock
 	// batch is the generic coalescing buffer; each item is one cloned record.
 	batch *batcher.Batcher[corelogger.RecordEvent]
 }
@@ -75,7 +79,14 @@ func newDBSink(exec execBatch, maxRows int, cfg Config) *dbSink {
 		//: discard cap-flush errors when the caller wired no observer.
 		onError = func(error) {}
 	}
-	s := &dbSink{exec: exec, onError: onError}
+	clk := cfg.Clock
+	//: fall back to the real wall clock so the Write-path timestamp fill is
+	//: always callable; tests inject a fake Clock for deterministic Time.
+	if clk == nil {
+		//: default to the stdlib-backed system clock when none is injected.
+		clk = clock.System
+	}
+	s := &dbSink{exec: exec, onError: onError, clk: clk}
 	//: count-based batching: a DB insert is bounded by row count, not bytes, so
 	//: WeightOf is left nil (every record weighs one slot) and MaxItems caps it.
 	s.batch = batcher.NewBatcher(s.deliver, batcher.Config[corelogger.RecordEvent]{
@@ -91,10 +102,20 @@ func newDBSink(exec execBatch, maxRows int, cfg Config) *dbSink {
 // eagerly once the row cap is reached. It never blocks on the database — the
 // producer is decoupled by the async middleware wrapping this sink — and a
 // cap-triggered batch failure is routed to onError, not returned, so a slow /
-// failing DB never propagates to the logging call site. The payload p is
-// ignored: a DB sink persists the structured record, re-serialising in execBatch
-// per its wire protocol.
+// failing DB never propagates to the logging call site. A zero RecordEvent.Time
+// is the documented "fill at handle time" sentinel; since the DB path persists
+// the structured record (the payload p is ignored, re-serialised per wire
+// protocol in execBatch) it must do the fill itself — the format-side encoder's
+// fill is invisible here — so Write stamps clk.Now() before batching to keep the
+// drivers from persisting a year-0001 timestamp.
 func (s *dbSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte) (n int, err error) {
+	//: fill the handle-time timestamp on this local value copy before batching so
+	//: every driver persists a real instant; r is passed by value, so the stamp
+	//: never escapes back to the caller's record.
+	if r.Time.IsZero() {
+		//: injected clock keeps the fill deterministic under test.
+		r.Time = s.clk.Now()
+	}
 	//: append the record value to the pending batch. r is an immutable snapshot
 	//: by contract (core/logger: RecordEvent is read-only after construction),
 	//: and dbSink.Write already runs on the async drainer goroutine — the

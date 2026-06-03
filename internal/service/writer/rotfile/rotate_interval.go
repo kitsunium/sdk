@@ -6,8 +6,9 @@ package rotfile
 
 // tickRotate is the interval-rotation tick body run on the daemon goroutine. It
 // forces a Rotate and, on failure, stashes the typed error under mu so the next
-// Write surfaces it exactly once — the tick never logs or discards (a silent
-// drop would violate KTN-ERROR-DISCARD and hide a failing archive policy).
+// Write surfaces it exactly once through Config.OnError — the tick never logs or
+// discards (a silent drop would violate KTN-ERROR-DISCARD and hide a failing
+// archive policy), and the next record is still written, not sacrificed.
 func (s *rotatingSink) tickRotate() {
 	//: force the time-triggered rotation (Rotate takes mu itself, so this must
 	//: NOT be called under mu — it never is, the daemon runs free of the lock).

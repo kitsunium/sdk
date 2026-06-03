@@ -77,3 +77,59 @@ func Test_rotatingSink_tickRotate(t *testing.T) {
 		})
 	}
 }
+
+// Test_rotatingSink_tickErr_writesRecord asserts that a Write following a
+// failed interval tick still persists its record (the tick failure must not
+// cost a log line — F6-tickdrop) and reports the failure via Config.OnError
+// exactly once.
+func Test_rotatingSink_tickErr_writesRecord(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{name: "failed tick still writes record and fires OnError once"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "app.log")
+		//: capture the one-shot OnError signal without blocking the write path.
+		var seen error
+		calls := 0
+		s := newSink(t, Config{Path: path, OnError: func(err error) {
+			//: record the surfaced tick error and how many times it fired.
+			seen = err
+			calls++
+		}})
+		defer closeQuiet(t, s)
+		//: stash a typed rotate failure as if a tick had failed on the daemon.
+		s.mu.Lock()
+		s.tickErr = RotFileRotateFailed
+		s.mu.Unlock()
+		//: the next Write must succeed AND persist its record despite the stash.
+		rec := []byte("after-tick-failure\n")
+		if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, rec); werr != nil {
+			t.Fatalf("Write after failed tick: unexpected error %v", werr)
+		}
+		//: the stash must be cleared so subsequent writes are unaffected.
+		if s.tickErr != nil {
+			t.Errorf("tickErr not cleared after Write: %v", s.tickErr)
+		}
+		//: OnError must have fired exactly once with the rotate-failed code.
+		if calls != 1 || !errs.HasCode(seen, CodeRotFileRotateFailed) {
+			t.Errorf("OnError fired %d times with err=%v; want 1 rotate-failed", calls, seen)
+		}
+		//: the record must be on disk — the triggering line was not dropped.
+		got, rerr := os.ReadFile(path)
+		if rerr != nil {
+			t.Fatalf("read back log: %v", rerr)
+		}
+		if string(got) != string(rec) {
+			t.Errorf("log contents = %q, want %q (record dropped on tick-error path)", got, rec)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

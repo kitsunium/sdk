@@ -71,7 +71,7 @@ func (*journaldFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error
 	}
 	//: terminal datagram sink → async (non-block + OnDrop) → levelgate (floor).
 	base := newJournaldSink(conn)
-	nonblocking := async.New(base, async.Config{BufferSize: c.BufferSize, OnDrop: c.OnDrop})
+	nonblocking := async.New(base, async.Config{BufferSize: c.BufferSize, OnDrop: c.OnDrop, OnError: c.OnError})
 	//: outermost gate drops below-floor records before they reach the ring.
 	return levelgate.New(nonblocking, c.MinLevel), nil
 }

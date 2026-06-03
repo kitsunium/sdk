@@ -162,16 +162,22 @@ func (s *rotatingSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 	//: size accounting stays consistent against concurrent producers.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	//: surface a stashed interval-rotation failure exactly once: a failing
-	//: "archive every 24h" policy must reach a caller, not vanish on the daemon
-	//: goroutine. Clearing it after read makes this genuine propagation, not a
-	//: latched error that poisons every subsequent write.
+	//: surface a stashed interval-rotation failure exactly once via the OnError
+	//: hook: a failing "archive every 24h" policy must reach the operator, not
+	//: vanish on the daemon goroutine. Clearing it after read makes this genuine
+	//: one-shot propagation, not a latched error. Crucially we do NOT return
+	//: here — the current record still falls through to the write below so a
+	//: rotation I/O failure never costs a log line (the hook reports it instead
+	//: of the swallowed handler-error return).
 	if s.tickErr != nil {
 		//: take and clear the pending error so the next Write proceeds normally.
 		terr := s.tickErr
 		s.tickErr = nil
-		//: report the interval-rotation failure to this caller.
-		return 0, terr
+		//: report the interval-rotation failure to the operator's hook when wired.
+		if s.cfg.OnError != nil {
+			//: hand the typed rotate error to the callback; it never gates the write.
+			s.cfg.OnError(terr)
+		}
 	}
 	//: rotate before the write when adding p would exceed the cap.
 	if rerr := s.maybeRotate(int64(len(p))); rerr != nil {

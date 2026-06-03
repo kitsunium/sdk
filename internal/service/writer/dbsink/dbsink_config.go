@@ -10,6 +10,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/service/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/service/writer/levelgate"
 )
@@ -44,6 +45,11 @@ type Config struct {
 	// the background drainer / ticker. Without it those errors are lost (the
 	// producer cannot be blocked on a database failure).
 	OnError func(err error)
+	// Clock sources the timestamp the sink stamps onto a record whose Time is the
+	// zero value (the "fill at handle time" sentinel) before batching it for the
+	// driver. The zero value (nil) defaults to clock.System; tests inject a fake
+	// Clock for deterministic timestamps.
+	Clock clock.Clock
 }
 
 // Compose builds the driver-agnostic DB writer chain: the terminal batching

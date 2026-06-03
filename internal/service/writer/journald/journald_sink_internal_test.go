@@ -100,6 +100,54 @@ func Test_journaldSink_Write(t *testing.T) {
 	}
 }
 
+// Test_journaldSink_Write_singleNewline proves the encoder's trailing newline is
+// not doubled by framing: a newline-terminated payload yields exactly one
+// trailing '\n' after the value (single-newline MESSAGE frame). Goroutine
+// lifecycle mirrors Test_journaldSink_Write — one blocking Read, joined by the
+// channel receive, so it cannot leak.
+func Test_journaldSink_Write_singleNewline(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		//: the encoder always hands the sink a newline-terminated line; framing
+		//: must strip it so exactly one trailing '\n' survives.
+		{"newline-terminated line is not doubled", "ping\n", "MESSAGE=ping\n"},
+		//: a bare line (no terminator) still gets exactly one framing newline.
+		{"unterminated line gets one newline", "ping", "MESSAGE=ping\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			clientEnd, serverEnd := net.Pipe()
+			t.Cleanup(func() { ignoreClose(serverEnd.Close()) })
+			s := newJournaldSink(clientEnd)
+			got := make(chan string, 1)
+			go func() {
+				//: one blocking Read publishes the framed datagram, then returns.
+				buf := make([]byte, 64)
+				n, rerr := serverEnd.Read(buf)
+				//: a read failure publishes its diagnostic so the test fails loud.
+				if rerr != nil && n == 0 {
+					got <- "read-err:" + rerr.Error()
+					return
+				}
+				got <- string(buf[:n])
+			}()
+			//: send the payload exactly as the encoder would hand it over.
+			if _, err := s.Write(t.Context(), corelogger.RecordEvent{}, []byte(tc.input)); err != nil {
+				t.Fatalf("%s: Write: %v", tc.name, err)
+			}
+			//: framing must not double the terminator.
+			if frame := <-got; frame != tc.want {
+				t.Errorf("%s: frame=%q want %q", tc.name, frame, tc.want)
+			}
+		})
+	}
+}
+
 func Test_journaldSink_Flush(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
