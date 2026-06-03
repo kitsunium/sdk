@@ -29,8 +29,14 @@ func Test_recoverSink_Write(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s := &recoverSink{downstream: noopDown{}}
-			if _, err := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x")); err != nil {
+			n, err := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
+			if err != nil {
 				t.Errorf("Write err = %v, want nil", err)
+			}
+			//: the wrapper must forward the downstream byte count verbatim;
+			//: a single-byte payload must surface as n == 1, not a swallowed 0.
+			if n != 1 {
+				t.Errorf("Write n = %d, want 1", n)
 			}
 		})
 	}

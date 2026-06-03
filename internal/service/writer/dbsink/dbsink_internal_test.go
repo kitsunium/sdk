@@ -2,9 +2,13 @@ package dbsink
 
 import (
 	"context"
+	"errors"
+	"slices"
+	"sync"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/batcher"
 )
 
 // TestNewDBSink pins newDBSink's two zero-value substitutions: a non-positive
@@ -128,6 +132,71 @@ func TestDbSink_Write(t *testing.T) {
 		}
 		if delivered != 1 {
 			t.Fatalf("%s: delivered=%d want 1", c.name, delivered)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestDbSink_Write_OnErrorRouting asserts that a cap-triggered eager flush whose
+// seam fails routes the wrapped failure to onError while Write still reports the
+// payload accepted — the producer is never blocked nor failed by a slow/failing
+// DB. This exercises the dbSink.Write cap-flush-failure branch (the onError relay).
+func TestDbSink_Write_OnErrorRouting(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		maxRows int
+	}
+	tests := []tc{
+		{"cap-flush failure routes to onError and Write returns accepted", 1},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var (
+			mu   sync.Mutex
+			errc []error
+		)
+		exec := func(context.Context, []corelogger.RecordEvent) error {
+			//: always fail so reaching the cap triggers a routed delivery failure.
+			return errSentinel("cap-boom")
+		}
+		onError := func(err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			//: capture every routed error so the wrap identity can be asserted.
+			errc = append(errc, err)
+		}
+		s := newDBSink(exec, c.maxRows, Config{OnError: onError})
+		first := []byte("one")
+		second := []byte("two")
+		//: first write fills the batch to the cap edge without yet flushing.
+		if n, err := s.Write(t.Context(), corelogger.RecordEvent{Message: "1"}, first); err != nil || n != len(first) {
+			t.Fatalf("%s: first Write=(%d,%v) want (%d,nil)", c.name, n, err, len(first))
+		}
+		//: second write reaches the cap, eager-flushes, and the seam fails — the
+		//: failure must route to onError, never surface to this caller.
+		if n, err := s.Write(t.Context(), corelogger.RecordEvent{Message: "2"}, second); err != nil || n != len(second) {
+			t.Fatalf("%s: second Write=(%d,%v) want (%d,nil)", c.name, n, err, len(second))
+		}
+		mu.Lock()
+		got := slices.Clone(errc)
+		mu.Unlock()
+		//: onError must have fired at least once on the failing cap-flush.
+		if len(got) == 0 {
+			t.Fatalf("%s: onError never fired on the failing cap-flush", c.name)
+		}
+		//: the routed error is the batcher's DeliverFailed wrap (cause reachable).
+		if !errors.Is(got[0], batcher.BatcherDeliverFailed) {
+			t.Fatalf("%s: routed err=%v want errors.Is batcher.BatcherDeliverFailed", c.name, got[0])
+		}
+		//: Close drains the remainder and joins any lifecycle goroutine.
+		if cerr := s.Close(); cerr != nil && !errors.Is(cerr, batcher.BatcherDeliverFailed) {
+			t.Fatalf("%s: Close: %v", c.name, cerr)
 		}
 	}
 	for _, c := range tests {

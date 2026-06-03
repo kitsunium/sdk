@@ -1,8 +1,11 @@
 package async_test
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +14,7 @@ import (
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/logger/middleware/async"
+	"github.com/kitsunium/sdk/internal/service/logger/sink/console"
 )
 
 // recordingSink captures Write/Flush/Close invocations for assertions.
@@ -47,6 +51,48 @@ func (b *blockingSink) Write(_ context.Context, _ corelogger.RecordEvent, p []by
 
 func (b *blockingSink) Flush(_ context.Context) error { return nil }
 func (b *blockingSink) Close() error                  { return nil }
+
+// gateSink signals on started the first time its Write is entered, then blocks
+// on release. The started signal lets a test deterministically wait until the
+// drainer is parked inside Write (so the ring has stabilised non-empty) before
+// asserting, removing the scheduling race a bare blockingSink would carry.
+type gateSink struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gateSink) Write(_ context.Context, _ corelogger.RecordEvent, p []byte) (int, error) {
+	//: announce entry exactly once so the test knows the drainer is parked.
+	g.once.Do(func() { close(g.started) })
+	//: block until the test releases us, holding the drainer off the ring.
+	<-g.release
+	return len(p), nil
+}
+
+func (g *gateSink) Flush(_ context.Context) error { return nil }
+func (g *gateSink) Close() error                  { return nil }
+
+// erringSink always fails its Write so the drainer's OnError path fires.
+type erringSink struct{}
+
+func (erringSink) Write(_ context.Context, _ corelogger.RecordEvent, _ []byte) (int, error) {
+	//: deliberate failure so forwardDownstreamError routes through OnError.
+	return 0, errDownstreamBoom{}
+}
+
+func (erringSink) Flush(_ context.Context) error { return nil }
+func (erringSink) Close() error                  { return nil }
+
+// errDownstreamBoom is the static failure erringSink returns; tests assert on
+// the OnError invocation count, not on this value, so its text is inert.
+type errDownstreamBoom struct{}
+
+// Error renders the diagnostic marker for the erringSink failure.
+func (errDownstreamBoom) Error() (msg string) {
+	//: static marker — content is not asserted.
+	return "downstream boom"
+}
 
 func TestNew(t *testing.T) {
 	t.Parallel()
@@ -365,6 +411,96 @@ func TestAsync_CloseWaitsForInFlightWrites(t *testing.T) {
 	}
 }
 
+func TestAsync_OnErrorCallbackFires(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		want int64
+	}{
+		{"single failing downstream Write fires OnError once", 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var counter atomic.Int64
+			//: erringSink fails every Write so the drainer must route the
+			//: failure through Config.OnError exactly once per forwarded entry.
+			s := async.New(erringSink{}, async.Config{
+				BufferSize: 4,
+				OnError:    func(_ error) { counter.Add(1) },
+			})
+			t.Cleanup(func() { swallowAsyncClose(s.Close()) })
+			rec := corelogger.RecordEvent{Level: level.Info}
+			if _, err := s.Write(t.Context(), rec, []byte("payload")); err != nil {
+				t.Fatalf("Write err = %v", err)
+			}
+			//: Flush forces the drainer to forward the queued entry so the
+			//: OnError wiring runs deterministically before we assert.
+			if ferr := s.Flush(t.Context()); ferr != nil {
+				t.Fatalf("Flush err = %v", ferr)
+			}
+			//: spin-wait up to 2s for the drainer to surface the failure.
+			deadline := time.Now().Add(2 * time.Second)
+			for counter.Load() < tc.want && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+			if got := counter.Load(); got != tc.want {
+				t.Errorf("OnError fired %d times, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAsync_FlushCancelledContextReturnsCtxCancelled(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"Flush with a cancelled ctx on a non-empty ring surfaces CtxCancelled"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			release := make(chan struct{})
+			down := &gateSink{started: make(chan struct{}), release: release}
+			//: small ring + stalled downstream keeps entries queued so Flush
+			//: cannot fast-return on an empty ring and must reach the
+			//: cancellation arm.
+			s := async.New(down, async.Config{
+				BufferSize: 4,
+				Policy:     async.DropOldest,
+			})
+			t.Cleanup(func() {
+				close(release)
+				swallowAsyncClose(s.Close())
+			})
+			rec := corelogger.RecordEvent{Level: level.Info}
+			//: fill the ring beyond capacity so Len() stays > 0 while the
+			//: gateSink holds the drainer.
+			for range 8 {
+				swallowAsyncWrite(s.Write(t.Context(), rec, []byte("x")))
+			}
+			//: wait until the drainer is parked inside the gateSink's Write —
+			//: at that point it has consumed exactly one entry and the ring has
+			//: stabilised non-empty, so Flush is guaranteed to reach the
+			//: cancellation arm rather than the empty-ring fast path.
+			<-down.started
+			ctx, cancel := context.WithCancel(t.Context())
+			//: cancel immediately so Flush observes ctx.Err() on its first
+			//: non-empty iteration.
+			cancel()
+			err := s.Flush(ctx)
+			if !errs.HasCode(err, async.CodeAsyncCtxCancelled) {
+				t.Errorf("Flush err = %v, want CodeAsyncCtxCancelled", err)
+			}
+			//: the typed wrap must preserve the stdlib chain for errors.Is.
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("Flush err = %v, want errors.Is(context.Canceled)", err)
+			}
+		})
+	}
+}
+
 func TestAsyncSentinels(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -374,6 +510,7 @@ func TestAsyncSentinels(t *testing.T) {
 	}{
 		{"Stopped carries 0.3.17.1", async.Stopped, async.CodeAsyncStopped},
 		{"BufferFull carries 0.3.17.2", async.BufferFull, async.CodeAsyncBufferFull},
+		{"CtxCancelled carries 0.3.17.3", async.CtxCancelled, async.CodeAsyncCtxCancelled},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -402,6 +539,136 @@ func swallowAsyncWrite(bytes int, err error) {
 	//: touch both parameters so the unused-param audit treats this no-op as intentional.
 	if bytes < 0 || err == nil {
 		//: nothing to discard on the happy path or on bogus byte counts.
+		return
+	}
+}
+
+// socketLine carries the line the loopback server read plus any read error so
+// the E2E can assert delivery without discarding the ReadString error.
+type socketLine struct {
+	line string
+	err  error
+}
+
+// TestAsync_RealSocketDeliversPayload drives production Write end-to-end
+// through the async middleware in front of a console sink whose io.Writer is a
+// live TCP connection to an in-process loopback server. This proves the async
+// drainer performs genuine network I/O: the bytes the producer hands to Write
+// must arrive verbatim on the accepting socket, having crossed the ring, the
+// drainer goroutine, the console sink, and a real kernel-backed TCP stream.
+func TestAsync_RealSocketDeliversPayload(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"single record crosses the socket verbatim", "async-over-socket\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: bind to an ephemeral loopback port — a real listening socket,
+			//: not an in-memory pipe, so the test exercises genuine TCP I/O.
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("net.Listen err = %v", err)
+			}
+			//: accept on a goroutine and read one line so the producer side
+			//: never deadlocks against an unread socket buffer; the goroutine
+			//: owns the accepted conn for the whole read.
+			got := make(chan socketLine, 1)
+			go acceptOneLine(ln, got)
+			//: dial the server; this conn is the production io.Writer the
+			//: console sink writes through.
+			conn, derr := net.Dial("tcp", ln.Addr().String())
+			if derr != nil {
+				//: listener is live here (closed only at the end), so a dial
+				//: failure is a genuine error, not a teardown race.
+				swallowSocketErr(ln.Close())
+				t.Fatalf("net.Dial err = %v", derr)
+			}
+			//: console sink over the live conn is the terminal downstream;
+			//: async wraps it so Write returns before the drainer forwards.
+			down, cerr := console.New(conn)
+			if cerr != nil {
+				t.Fatalf("console.New err = %v", cerr)
+			}
+			//: surface any drainer-side socket Write failure so a lost record
+			//: fails loudly instead of masquerading as an empty read.
+			var writeErrs atomic.Int64
+			s := async.New(down, async.Config{
+				BufferSize: 8,
+				OnError:    func(_ error) { writeErrs.Add(1) },
+			})
+			rec := corelogger.RecordEvent{Level: level.Info}
+			//: production Write — bytes enter the ring, the drainer forwards
+			//: them through the console sink onto the socket.
+			if _, werr := s.Write(t.Context(), rec, []byte(tc.want)); werr != nil {
+				t.Fatalf("Write err = %v", werr)
+			}
+			//: Flush blocks until the drainer empties the ring, giving the
+			//: server a deterministic checkpoint to observe the bytes.
+			if ferr := s.Flush(t.Context()); ferr != nil {
+				t.Fatalf("Flush err = %v", ferr)
+			}
+			//: read the delivered line BEFORE tearing anything down so no close
+			//: races the server's in-flight ReadString.
+			var res socketLine
+			select {
+			case res = <-got:
+				//: result captured; teardown below is now race-free.
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for the socket to receive the payload")
+			}
+			//: ordered teardown only after the read completed: async first
+			//: (joins the drainer), then the client conn, then the listener.
+			swallowAsyncClose(s.Close())
+			swallowSocketErr(conn.Close())
+			swallowSocketErr(ln.Close())
+			//: a non-nil read error means the line never crossed the wire.
+			if res.err != nil {
+				t.Fatalf("server ReadString err = %v", res.err)
+			}
+			//: the bytes observed on the accepting socket must match exactly
+			//: what production handed to Write.
+			if res.line != tc.want {
+				t.Errorf("socket received %q, want %q", res.line, tc.want)
+			}
+			//: no drainer-side socket Write may have failed — every accepted
+			//: record must have crossed the wire.
+			if n := writeErrs.Load(); n != 0 {
+				t.Errorf("drainer reported %d downstream write errors, want 0", n)
+			}
+		})
+	}
+}
+
+// acceptOneLine accepts a single connection on ln, reads one newline-delimited
+// line, and reports the line plus any read error on got. Used by the
+// real-socket E2E so the producer never stalls on an unread TCP buffer.
+func acceptOneLine(ln net.Listener, got chan<- socketLine) {
+	//: accept the single producer connection; a failed accept is reported so
+	//: the test surfaces it instead of blocking.
+	conn, err := ln.Accept()
+	if err != nil {
+		//: propagate the accept failure to the caller.
+		got <- socketLine{err: err}
+		return
+	}
+	//: read exactly one line — the E2E sends a single newline-terminated
+	//: record — then close our accepted end and report line + error.
+	line, rerr := bufio.NewReader(conn).ReadString('\n')
+	swallowSocketErr(conn.Close())
+	//: propagate both the line and any read error (KTN-ERROR-DISCARD).
+	got <- socketLine{line: line, err: rerr}
+}
+
+// swallowSocketErr drops a net resource Close/Listen error in cleanup paths
+// where the failure is not the assertion target.
+func swallowSocketErr(err error) {
+	//: read the parameter so the unused-param audit treats this no-op as intentional.
+	if err == nil {
+		//: nothing to discard on the happy path.
 		return
 	}
 }

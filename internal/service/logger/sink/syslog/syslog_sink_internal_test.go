@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // localUDPSink dials a free local UDP socket and returns a syslogSink ready
@@ -63,11 +65,12 @@ func Test_syslogSink_Write(t *testing.T) {
 		closed    bool
 		wantErr   bool
 		wantBytes bool
+		wantCode  errs.Code
 	}{
-		{"happy path returns bytes accepted", false, false, false, false, true},
-		{"nil ctx is treated as live and writes", true, false, false, false, true},
-		{"cancelled ctx surfaces ctx.Err", false, true, false, true, false},
-		{"closed conn surfaces WriteFailed", false, false, true, true, false},
+		{"happy path returns bytes accepted", false, false, false, false, true, 0},
+		{"nil ctx is treated as live and writes", true, false, false, false, true, 0},
+		{"cancelled ctx surfaces ctx.Err", false, true, false, true, false, CodeSyslogCtxCancelled},
+		{"closed conn surfaces WriteFailed", false, false, true, true, false, CodeSyslogWriteFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -96,6 +99,10 @@ func Test_syslogSink_Write(t *testing.T) {
 			if tc.wantBytes && n == 0 {
 				t.Errorf("Write n = 0, want >0")
 			}
+			//: failure cases must carry the documented typed code, not a bare error.
+			if tc.wantCode != 0 && !errs.HasCode(err, tc.wantCode) {
+				t.Errorf("HasCode(%v, %d) = false", err, tc.wantCode)
+			}
 		})
 	}
 }
@@ -107,10 +114,11 @@ func Test_syslogSink_Flush(t *testing.T) {
 		nilCtx    bool
 		ctxCancel bool
 		wantErr   bool
+		wantCode  errs.Code
 	}{
-		{"Flush with live ctx returns nil", false, false, false},
-		{"Flush with nil ctx returns nil", true, false, false},
-		{"Flush with cancelled ctx surfaces ctx.Err", false, true, true},
+		{"Flush with live ctx returns nil", false, false, false, 0},
+		{"Flush with nil ctx returns nil", true, false, false, 0},
+		{"Flush with cancelled ctx surfaces ctx.Err", false, true, true, CodeSyslogCtxCancelled},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -131,6 +139,10 @@ func Test_syslogSink_Flush(t *testing.T) {
 			if (err != nil) != tc.wantErr {
 				t.Errorf("Flush err = %v, wantErr = %v", err, tc.wantErr)
 			}
+			//: cancellation must surface the typed CtxCancelled code.
+			if tc.wantCode != 0 && !errs.HasCode(err, tc.wantCode) {
+				t.Errorf("HasCode(%v, %d) = false", err, tc.wantCode)
+			}
 		})
 	}
 }
@@ -138,12 +150,13 @@ func Test_syslogSink_Flush(t *testing.T) {
 func Test_syslogSink_Close(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		closed  bool
-		wantErr bool
+		name     string
+		closed   bool
+		wantErr  bool
+		wantCode errs.Code
 	}{
-		{"Close releases the net.Conn without error", false, false},
-		{"Close on already-closed conn surfaces CloseFailed", true, true},
+		{"Close releases the net.Conn without error", false, false, 0},
+		{"Close on already-closed conn surfaces CloseFailed", true, true, CodeSyslogCloseFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -157,6 +170,56 @@ func Test_syslogSink_Close(t *testing.T) {
 			err := s.Close()
 			if (err != nil) != tc.wantErr {
 				t.Errorf("Close err = %v, wantErr = %v", err, tc.wantErr)
+			}
+			//: a failed close must carry the documented CloseFailed code.
+			if tc.wantCode != 0 && !errs.HasCode(err, tc.wantCode) {
+				t.Errorf("HasCode(%v, %d) = false", err, tc.wantCode)
+			}
+		})
+	}
+}
+
+// Test_syslogSink_ConcurrentWrite drives many producers through a single
+// sink to exercise the Write mutex under the race detector.
+//
+// Lifecycle: each writer goroutine is started via sync.WaitGroup.Go and is
+// joined by wg.Wait before the error channel is drained, so no goroutine
+// outlives the subtest and the buffered channel cannot leak.
+func Test_syslogSink_ConcurrentWrite(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		goroutines   int
+		perGoroutine int
+	}{
+		{"10 goroutines x 10 writes race-free", 10, 10},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := localUDPSink(t)
+			//: collect each goroutine's first error so a data race or a write
+			//: failure under the mutex surfaces as a test failure.
+			errc := make(chan error, tc.goroutines)
+			var wg sync.WaitGroup
+			for range tc.goroutines {
+				wg.Go(func() {
+					for range tc.perGoroutine {
+						//: every write shares the same sink, exercising the mutex path.
+						_, err := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("payload"))
+						if err != nil {
+							//: report the first error and stop this goroutine early.
+							errc <- err
+							return
+						}
+					}
+				})
+			}
+			wg.Wait()
+			close(errc)
+			//: any buffered error means a concurrent write path returned non-nil.
+			for err := range errc {
+				t.Errorf("concurrent Write err = %v, want nil", err)
 			}
 		})
 	}

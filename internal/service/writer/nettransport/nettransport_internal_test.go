@@ -81,6 +81,7 @@ func Test_netFactory_build(t *testing.T) {
 	}{
 		{"http builds a stateless seam", protoHTTP, NetConfig{Address: "http://x/y"}, false},
 		{"tcp dial failure propagates", protoTCP, NetConfig{Address: "x:1", Dialer: failingDialer}, true},
+		{"tcp dial succeeds returns usable sink", protoTCP, NetConfig{Address: "h:1", Dialer: pipeDialer()}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -110,4 +111,19 @@ func Test_netFactory_build(t *testing.T) {
 func failingDialer(_, _ string) (net.Conn, error) {
 	//: a fixed failure drives the dial-error path with no real socket.
 	return nil, errNetBoom{}
+}
+
+// pipeDialer returns a Dialer that hands back one end of an in-memory net.Pipe, so
+// build's dial-succeeds path (nettransport.go:88) runs deterministically with no
+// real socket. The peer end is closed immediately — the test only constructs and
+// closes the sink, never sends, so a live reader is unnecessary and the seam's
+// Close releases the returned end cleanly.
+func pipeDialer() func(network, addr string) (net.Conn, error) {
+	return func(_, _ string) (net.Conn, error) {
+		//: a connected pipe end is a usable net.Conn the seam can wrap and close.
+		clientEnd, serverEnd := net.Pipe()
+		//: drop the peer end up front; nothing reads it in this construction-only test.
+		swallowErr(serverEnd.Close())
+		return clientEnd, nil
+	}
 }

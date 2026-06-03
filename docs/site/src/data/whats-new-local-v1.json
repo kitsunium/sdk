@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-06-02T11:43:24.167Z",
+  "generatedAt": "2026-06-03T08:27:22.189Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "ClickHouse database writer (native protocol, vendored driver)",
+      "sha": "ef2a15aa825ecea3d3b4da995605937b1ac26d19",
+      "short": "ef2a15a",
+      "date": "2026-06-02T13:42:44+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -21,15 +30,6 @@
       "sha": "c1a612f3c8a016baf7f5ed940f49fe56992568af",
       "short": "c1a612f",
       "date": "2026-06-02T13:25:21+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "DB sink config types (mysql/clickhouse/redis)",
-      "sha": "10a55ec53b5833ceeac16b593035aa49ab315099",
-      "short": "10a55ec",
-      "date": "2026-06-02T13:10:33+02:00"
     },
     {
       "type": "fix",

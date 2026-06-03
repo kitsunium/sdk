@@ -37,8 +37,10 @@ go_test(
     ],
     embed = [":file"],
     deps = [
+        "//internal/core/logger",
         "//internal/core/logger/level",
         "//internal/core/writer",
         "//internal/kernel/errs",
+        "//internal/service/logger/sink/file",
     ],
 )

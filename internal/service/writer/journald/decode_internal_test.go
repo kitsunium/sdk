@@ -102,6 +102,9 @@ func Test_decodeLevelKey(t *testing.T) {
 		{"absent keeps seed", map[string]any{}, level.Error, true},
 		{"warn name", map[string]any{"min_level": "warn"}, level.Warn, true},
 		{"unknown fails", map[string]any{"min_level": "loud"}, level.Error, false},
+		//: a non-string min_level hits the type-assertion !ok arm, leaving
+		//: the seed floor untouched (a level name is always a string scalar).
+		{"non-string min_level fails", map[string]any{"min_level": 7}, level.Error, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,6 +130,10 @@ func Test_decodeIntKey(t *testing.T) {
 		{"absent keeps default", map[string]any{}, 0, true},
 		{"int value", map[string]any{"buffer_size": 5}, 5, true},
 		{"non-numeric fails", map[string]any{"buffer_size": "big"}, 0, false},
+		//: int64 (CBOR signed) narrows to int via the int64 switch arm.
+		{"int64 value", map[string]any{"buffer_size": int64(12)}, 12, true},
+		//: float64 (JSON number) truncates toward zero via the float64 arm.
+		{"float64 value", map[string]any{"buffer_size": float64(3.9)}, 3, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

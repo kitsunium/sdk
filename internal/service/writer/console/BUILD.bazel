@@ -37,6 +37,7 @@ go_test(
     ],
     embed = [":console"],
     deps = [
+        "//internal/core/logger",
         "//internal/core/logger/level",
         "//internal/core/writer",
         "//internal/kernel/errs",

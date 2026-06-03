@@ -2,6 +2,7 @@ package journald
 
 import (
 	"net"
+	"path/filepath"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -71,6 +72,43 @@ func Test_journaldFactory_Open(t *testing.T) {
 			//: the dial-failure arm must carry the open code.
 			if tc.fail && !errs.HasCode(err, tc.wantCode) {
 				t.Errorf("%s: err=%v want code %v", tc.name, err, tc.wantCode)
+			}
+		})
+	}
+}
+
+// Test_journaldFactory_Open_defaultDialer covers the nil-Dialer fallback to
+// net.Dial (journald.go:63-64) against a REAL in-process unixgram server. A
+// stream pipe cannot exercise this arm: only a bound unixgram socket lets the
+// default dialer connect for real, so this doubles as the connect-side E2E.
+func Test_journaldFactory_Open_defaultDialer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"nil dialer connects the real unixgram socket"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: bind a real datagram socket so net.Dial has a peer to connect.
+			path := filepath.Join(t.TempDir(), "j.sock")
+			srv, lerr := net.ListenUnixgram(socketNetwork, &net.UnixAddr{Name: path, Net: socketNetwork})
+			//: a private-tempdir unixgram bind is reliable; a failure is a hard
+			//: fault that must fail the test, never silently skip the dial arm.
+			if lerr != nil {
+				t.Fatalf("%s: ListenUnixgram: %v", tc.name, lerr)
+			}
+			t.Cleanup(func() { ignoreClose(srv.Close()) })
+			//: nil Dialer drives the net.Dial fallback against the bound socket.
+			sink, err := (&journaldFactory{}).Open(Config{SocketPath: path})
+			//: the default-dialer arm must build a live sink with no error.
+			if err != nil || sink == nil {
+				t.Fatalf("%s: Open via net.Dial: sink=%v err=%v", tc.name, sink, err)
+			}
+			//: release the connected client end the composed chain owns.
+			if cerr := sink.Close(); cerr != nil {
+				t.Errorf("%s: Close: %v", tc.name, cerr)
 			}
 		})
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/core/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	filesink "github.com/kitsunium/sdk/internal/service/logger/sink/file"
 )
 
 // : compile-time proof the factory satisfies the registry port AND the optional
@@ -126,6 +127,80 @@ func Test_fileFactory_Decode(t *testing.T) {
 		//: the path and floor must reflect the decoded options.
 		if got.Path != c.wantPath || got.MinLevel != c.wantLevel {
 			t.Errorf("%s: got {%q,%v} want {%q,%v}", c.name, got.Path, got.MinLevel, c.wantPath, c.wantLevel)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_fileFactory_Open_ErrorCodes is the white-box complement to the external
+// error-code test: it asserts the exact origin code each Open failure forwards,
+// proving origin-wins (sink's PathEmpty) versus the shared config-type sentinel.
+func Test_fileFactory_Open_ErrorCodes(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		cfg      writer.Config
+		wantCode errs.Code
+	}
+	tests := []tc{
+		//: empty path defers to the sink, so its PathEmpty code wins (origin).
+		{"empty path carries CodePathEmpty", writer.FileConfig{Path: ""}, filesink.CodePathEmpty},
+		//: a wrong concrete type is rejected before delegation with the shared code.
+		{"wrong config type carries CodeWriterConfigInvalid", writer.ConsoleConfig{}, writer.CodeWriterConfigInvalid},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		sink, err := (&fileFactory{}).Open(c.cfg)
+		//: the failure arm must surface a nil sink and a typed error.
+		if err == nil || sink != nil {
+			t.Fatalf("%s: err=%v sink=%v want error+nil", c.name, err, sink)
+		}
+		//: the forwarded error must carry the expected origin code unchanged.
+		if !errs.HasCode(err, c.wantCode) {
+			t.Errorf("%s: err=%v want code %v", c.name, err, c.wantCode)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_decodeMinLevel_AllValidNames round-trips every canonical name ParseLevel
+// recognises onto its Level constant, replacing the weaker absent-key default
+// check with a meaningful name→Level mapping for the full vocabulary.
+func Test_decodeMinLevel_AllValidNames(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		raw  string
+		want level.Level
+	}
+	tests := []tc{
+		//: the lowest canonical name must map to the Debug floor.
+		{"debug name", "debug", level.Debug},
+		//: an explicit info key must still resolve to the Info floor.
+		{"info name", "info", level.Info},
+		//: warn is the mid floor used by the default-active file writer docs.
+		{"warn name", "warn", level.Warn},
+		//: error is the most severe canonical floor.
+		{"error name", "error", level.Error},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: dst starts at the zero (inherit) value like the real Decode path.
+		var dst level.Level
+		err := decodeMinLevel(map[string]any{"min_level": c.raw}, &dst)
+		//: a canonical name must decode cleanly and land on its Level constant.
+		if err != nil || dst != c.want {
+			t.Errorf("%s: err=%v dst=%v want %v", c.name, err, dst, c.want)
 		}
 	}
 	for _, c := range tests {

@@ -29,6 +29,7 @@ go_library(
 go_test(
     name = "encwrite_test",
     srcs = [
+        "codes_internal_test.go",
         "encwrite_external_test.go",
         "encwrite_internal_test.go",
     ],

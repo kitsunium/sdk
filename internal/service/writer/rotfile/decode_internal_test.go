@@ -68,6 +68,10 @@ func Test_decodeRotScalars(t *testing.T) {
 	tests := []tc{
 		{name: "maps size and compress", raw: map[string]any{"max_bytes": 1024, "compress": true}, want: Config{MaxBytes: 1024, Compress: true}},
 		{name: "bad age errors", raw: map[string]any{"max_age_days": "old"}, wantErr: true},
+		//: a non-numeric max_backups must hit the decodeInt branch in decodeRotScalars.
+		{name: "bad max_backups errors", raw: map[string]any{"max_backups": "three"}, wantErr: true},
+		//: a non-bool compress must hit the decodeBool branch in decodeRotScalars.
+		{name: "bad compress errors", raw: map[string]any{"compress": 1}, wantErr: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

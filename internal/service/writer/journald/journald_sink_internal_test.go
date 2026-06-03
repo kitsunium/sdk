@@ -130,21 +130,46 @@ func Test_journaldSink_Flush(t *testing.T) {
 	}
 }
 
+// failingConn embeds net.Conn so it satisfies the interface, but overrides Close
+// to return a fixed error. Only Close is ever called by journaldSink.Close, so
+// the embedded nil net.Conn is never dereferenced — this isolates the close
+// error-wrap branch without a real socket that refuses to fail on demand.
+type failingConn struct {
+	net.Conn
+}
+
+// Close always fails, driving journaldSink.Close down its error-wrap branch.
+func (failingConn) Close() error {
+	//: a fixed failure exercises the close-error path deterministically.
+	return errJournaldBoom{}
+}
+
 func Test_journaldSink_Close(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
+		fail bool
 	}{
-		{"close releases the connection"},
+		{"close releases the connection", false},
+		//: a failing conn.Close must surface the wrapped write sentinel.
+		{"close error surfaces write code", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: the failing arm swaps in a conn whose Close returns an error so
+			//: the journald_sink.go:89-91 wrap branch is exercised directly.
+			if tc.fail {
+				s := newJournaldSink(failingConn{})
+				if cerr := s.Close(); !errs.HasCode(cerr, CodeJournaldWriteFailed) {
+					t.Errorf("%s: Close()=%v want write-failed", tc.name, cerr)
+				}
+				return
+			}
 			clientEnd, serverEnd := net.Pipe()
 			t.Cleanup(func() { ignoreClose(serverEnd.Close()) })
 			s := newJournaldSink(clientEnd)
-			//: a clean close on a live connection must succeed (the Close
-			//: error-wrap branch is covered by the closed-socket Write case).
+			//: a clean close on a live connection must succeed.
 			if cerr := s.Close(); cerr != nil {
 				t.Errorf("%s: close: %v", tc.name, cerr)
 			}

@@ -61,8 +61,14 @@ func freshSink(t testing.TB, policy DropPolicy) *asyncSink {
 		pool:       pool,
 		policy:     policy,
 		onDrop:     noopOnDrop,
-		stop:       make(chan struct{}),
-		done:       done,
+		//: wire the no-op onError so any future test routing through forward
+		//: with a failing downstream cannot nil-deref the callback.
+		onError: noopOnError,
+		stop:    make(chan struct{}),
+		//: pre-equip a valid flushSignal so the channel is always non-nil;
+		//: rows that need a pre-closed signal overwrite it explicitly.
+		flushSignal: make(chan struct{}, 1),
+		done:        done,
 	}
 }
 

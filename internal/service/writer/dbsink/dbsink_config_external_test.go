@@ -4,12 +4,14 @@ import (
 	"context"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/service/writer/dbsink"
 )
 
@@ -356,6 +358,156 @@ func TestComposeDefaultRowCap(t *testing.T) {
 		}
 		if !got {
 			t.Fatalf("delivered=%d want >=%d from default-cap eager flush", rec.total(), c.wantAtLeast)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestComposeFlushEvery_HappyPath asserts the FlushEvery ticker delivers a
+// partial sub-cap batch on its own — without any explicit Flush or Close — so a
+// trickle of records still reaches the database within the interval bound.
+func TestComposeFlushEvery_HappyPath(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name       string
+		flushEvery time.Duration
+	}
+	tests := []tc{
+		{"ticker delivers a partial batch without explicit Flush or Close", 5 * time.Millisecond},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		rec := &recorder{}
+		//: a cap that is never hit isolates the ticker as the sole delivery trigger.
+		sink := dbsink.Compose(rec.exec, dbsink.Config{MaxRows: 1 << 30, FlushEvery: c.flushEvery})
+		writeN(t, sink, 1)
+		//: only the background ticker can flush this sub-cap batch; poll for it.
+		if !waitFor(func() bool { return rec.total() == 1 }) {
+			t.Fatalf("%s: ticker delivered=%d want 1", c.name, rec.total())
+		}
+		//: Close joins the ticker goroutine so the test leaves no drainer running.
+		if err := sink.Close(); err != nil {
+			t.Fatalf("%s: Close: %v", c.name, err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestComposeOnDrop asserts a saturated async ring fires Config.OnDrop: when the
+// deliver seam blocks so the ring cannot drain, writes past its capacity are
+// dropped and the back-pressure count surfaces to the observer rather than
+// blocking the producer on a stalled database.
+func TestComposeOnDrop(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		writes int
+	}
+	tests := []tc{
+		{"saturated ring fires OnDrop", 10},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		release := make(chan struct{})
+		blocking := func(context.Context, []corelogger.RecordEvent) error {
+			//: stall the drainer until released so the single-slot ring saturates.
+			<-release
+			return nil
+		}
+		var dropped atomic.Int64
+		onDrop := func(missed int) {
+			//: accumulate the dropped count the saturated ring reports.
+			dropped.Add(int64(missed))
+		}
+		//: BufferSize 1 plus a blocked seam guarantees the ring cannot absorb the
+		//: burst, so back-pressure must surface as drops.
+		sink := dbsink.Compose(blocking, dbsink.Config{MaxRows: 1 << 30, BufferSize: 1, OnDrop: onDrop})
+		//: drive the burst directly (not writeN): the default DropNewest policy
+		//: surfaces BufferFull on the saturating writes, which is the back-pressure
+		//: contract under test, not a test failure — so swallow that sentinel here.
+		for range c.writes {
+			//: a saturated ring returns BufferFull (typed); any OTHER error is a bug.
+			if _, err := sink.Write(t.Context(), corelogger.RecordEvent{Message: "x"}, []byte("x")); err != nil && !errs.HasCode(err, async.CodeAsyncBufferFull) {
+				t.Fatalf("%s: Write surfaced unexpected error: %v", c.name, err)
+			}
+		}
+		//: a saturated ring under a blocked seam must have dropped at least once.
+		gotDrop := waitFor(func() bool { return dropped.Load() >= 1 })
+		//: release the seam so the drainer can finish and Close can join it.
+		close(release)
+		if err := sink.Close(); err != nil {
+			t.Fatalf("%s: Close: %v", c.name, err)
+		}
+		if !gotDrop {
+			t.Fatalf("%s: dropped=%d want >=1 from a saturated ring", c.name, dropped.Load())
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestComposeWriteAfterClose pins the real post-Close contract of the composed
+// chain: the OUTERMOST async middleware (Compose wraps levelgate(async(dbSink)))
+// owns the Close lifecycle, so a Write after Close is rejected at the async layer
+// with the typed ASYNC_STOPPED sentinel returned to the caller — it never reaches
+// the inner dbSink batcher, so Config.OnError (which only observes batcher/drainer
+// failures) is correctly NOT invoked, and no record is delivered. (The dbSink-level
+// BATCHER_CLOSED → onError relay is exercised white-box in the internal test, where
+// the bare batcher is reachable without the async interceptor.)
+func TestComposeWriteAfterClose(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{
+		{"Write after Close returns ASYNC_STOPPED and does not invoke OnError"},
+	}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		var (
+			mu       sync.Mutex
+			errSeen  int
+			rec      = &recorder{}
+			onErrorf = func(error) {
+				mu.Lock()
+				defer mu.Unlock()
+				//: count any routed error so its absence on this path is provable.
+				errSeen++
+			}
+		)
+		sink := dbsink.Compose(rec.exec, dbsink.Config{MaxRows: 1 << 30, OnError: onErrorf})
+		//: close first so the subsequent Write hits the stopped async layer.
+		if err := sink.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		//: the late Write must surface the typed ASYNC_STOPPED to the caller.
+		_, err := sink.Write(t.Context(), corelogger.RecordEvent{Message: "late"}, []byte("late"))
+		if !errs.HasCode(err, async.CodeAsyncStopped) {
+			t.Fatalf("post-Close Write err=%v want HasCode ASYNC_STOPPED", err)
+		}
+		//: the rejected record must never have reached the deliver seam.
+		if rec.total() != 0 {
+			t.Fatalf("delivered=%d want 0: a post-Close record must not be delivered", rec.total())
+		}
+		//: OnError observes batcher/drainer failures only; this path bypasses it.
+		mu.Lock()
+		defer mu.Unlock()
+		if errSeen != 0 {
+			t.Fatalf("OnError fired %d times: the async-stopped path must not route to OnError", errSeen)
 		}
 	}
 	for _, c := range tests {

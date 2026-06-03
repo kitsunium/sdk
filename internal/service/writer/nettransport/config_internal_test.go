@@ -12,11 +12,13 @@ import (
 func Test_compose(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		level level.Level
-		want  int
+		name     string
+		minLevel level.Level
+		level    level.Level
+		want     int
 	}{
-		{"record at floor reaches the seam", level.Error, 1},
+		{"record at floor reaches the seam", level.Info, level.Error, 1},
+		{"below-floor record is dropped", level.Error, level.Debug, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -29,7 +31,7 @@ func Test_compose(t *testing.T) {
 				mu.Unlock()
 				return nil
 			}
-			sink := compose("tcp", send, func() error { return nil }, NetConfig{})
+			sink := compose("tcp", send, func() error { return nil }, NetConfig{MinLevel: tc.minLevel})
 			//: compose must return a usable chain.
 			if sink == nil {
 				t.Fatal("compose returned nil sink")

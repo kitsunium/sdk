@@ -126,6 +126,7 @@ func Test_decodeIntKey(t *testing.T) {
 	}{
 		{"absent keeps default", map[string]any{}, 0, true},
 		{"int value", map[string]any{"buffer_size": 5}, 5, true},
+		{"int64 value", map[string]any{"buffer_size": int64(9)}, 9, true},
 		{"float64 value", map[string]any{"buffer_size": float64(6)}, 6, true},
 		{"non-numeric fails", map[string]any{"buffer_size": "big"}, 0, false},
 	}

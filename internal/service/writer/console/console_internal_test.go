@@ -97,6 +97,35 @@ func Test_pickStream(t *testing.T) {
 	}
 }
 
+func Test_pickStream_correctness(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"stdout and stderr selectors yield distinct sinks"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: resolve both canonical stream selectors independently.
+		got1 := pickStream(writer.ConsoleStdout)
+		got2 := pickStream(writer.ConsoleStderr)
+		//: both arms must produce a usable sink — a nil here is a routing bug.
+		if got1 == nil || got2 == nil {
+			t.Fatalf("pickStream returned nil: stdout=%v stderr=%v", got1, got2)
+		}
+		//: distinct selectors must not collapse to the same sink — this catches
+		//: a stdout/stderr swap or a constructor that ignores the selector.
+		if got1 == got2 {
+			t.Errorf("pickStream(stdout)==pickStream(stderr): both %v want distinct", got1)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func Test_consoleFactory_Decode(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -204,7 +233,10 @@ func Test_decodeMinLevel(t *testing.T) {
 	}
 	tests := []tc{
 		{"absent key inherits zero", map[string]any{}, false, level.Info},
+		{"debug name", map[string]any{"min_level": "debug"}, false, level.Debug},
+		{"info name", map[string]any{"min_level": "info"}, false, level.Info},
 		{"warn name", map[string]any{"min_level": "warn"}, false, level.Warn},
+		{"error name", map[string]any{"min_level": "error"}, false, level.Error},
 		{"unknown name rejected", map[string]any{"min_level": "trace"}, true, 0},
 		{"non-string rejected", map[string]any{"min_level": 4}, true, 0},
 	}

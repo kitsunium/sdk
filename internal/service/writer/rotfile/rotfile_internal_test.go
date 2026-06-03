@@ -52,6 +52,33 @@ func assertPerm0600(t *testing.T, name, path string) {
 	}
 }
 
+// rootBypassesPerms reports whether the process is the superuser, who ignores
+// the 0555 directory mode the permission-injection cases rely on. Callers
+// early-return on true so the EACCES assertion is never a false negative under
+// root — without t.Skip(), which KTN-TEST-NOSKIP forbids.
+func rootBypassesPerms() bool {
+	//: root ignores the read-only directory bit, so the negative path is moot.
+	return os.Getuid() == 0
+}
+
+// freezeDirReadOnly chmods dir to 0555 (no write) so create/rename/remove of an
+// entry inside it fails with EACCES, then restores 0700 in cleanup so t.TempDir
+// teardown can delete the tree. It is the single injection seam for the rotate /
+// prune failure branches that need a non-removable on-disk slot.
+func freezeDirReadOnly(t *testing.T, dir string) {
+	t.Helper()
+	//: drop write permission so the kernel refuses mutations of dir's entries.
+	if cerr := os.Chmod(dir, 0o555); cerr != nil {
+		t.Fatalf("chmod 0555 %s: %v", dir, cerr)
+	}
+	t.Cleanup(func() {
+		//: restore write so TempDir cleanup can unlink the contents.
+		if cerr := os.Chmod(dir, 0o700); cerr != nil {
+			t.Errorf("restore perms %s: %v", dir, cerr)
+		}
+	})
+}
+
 func Test_rotFileFactory_Name(t *testing.T) {
 	t.Parallel()
 	type tc struct {

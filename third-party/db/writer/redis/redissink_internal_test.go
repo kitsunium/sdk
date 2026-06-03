@@ -16,6 +16,10 @@ var _ corelogger.Sink = (*redisSink)(nil)
 // error-precedence path.
 var errInnerBoom = errors.New("inner boom")
 
+// errClientBoom is a generic client-close failure used to exercise the
+// cmp.Or fallback when the inner chain drains cleanly.
+var errClientBoom = errors.New("client boom")
+
 // recordingSink is a fake inner Sink that counts delegated calls and returns a
 // configurable Close error, so the wrapper is testable with no real client.
 type recordingSink struct {
@@ -102,18 +106,21 @@ func Test_redisSink_Flush(t *testing.T) {
 func Test_redisSink_Close(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		closeErr error
-		wantErr  bool
+		name      string
+		closeErr  error
+		clientErr error
+		wantErr   bool
 	}{
-		{"clean close releases both", nil, false},
-		{"inner error takes precedence", errInnerBoom, true},
+		{"clean close releases both", nil, nil, false},
+		{"inner error takes precedence", errInnerBoom, nil, true},
+		{"closeFn error surfaces when inner succeeds", nil, errClientBoom, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			inner := &recordingSink{closeErr: tc.closeErr}
-			s := newRedisSink(inner, func() error { return nil })
+			//: a per-case closeFn drives the cmp.Or second-argument arm.
+			s := newRedisSink(inner, func() error { return tc.clientErr })
 			err := s.Close()
 			//: the inner chain must always be drained.
 			if !inner.closed {

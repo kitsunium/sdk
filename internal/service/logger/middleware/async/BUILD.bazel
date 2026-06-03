@@ -53,5 +53,6 @@ go_test(
         "//internal/kernel/errs",
         "//internal/kernel/recycler",
         "//internal/kernel/worker",
+        "//internal/service/logger/sink/console",
     ],
 )

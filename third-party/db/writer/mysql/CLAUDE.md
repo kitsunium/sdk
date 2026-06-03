@@ -62,10 +62,23 @@ embeds the password) is never echoed into an error.
 
 ## Testing
 
-Unit tests use a lazy offline handle + fake `CredentialProvider`; no MySQL server
-is contacted (the connection is never established). A live integration test
-against a real socket is a future addition behind a build tag (mirror s3's
-`localstack_test.go`).
+Unit tests (`client_internal_test.go`): an offline lazy handle + a fake
+`CredentialProvider`, plus a hand-written `database/sql/driver` fake registered as
+`mysqlfake`, exercise the `exec` closure's empty-batch guard, the happy INSERT
+path (asserting the bound `ts, level, message` column order), and the `wrapInsert`
+error path — all without a running MySQL server.
+
+Integration test (`mysql_integration_test.go`, `//go:build integration`): spins up
+a real `mysql:8` container via testcontainers-go (bind-mounting its socket dir to
+the host so the local-protocol `SocketPath` resolves), exercises the full
+registered-factory path through `writer.Open("mysql", …)`, writes 3 records,
+flushes + closes, then reads them back via a raw `*sql.DB` and asserts the
+round-trip. It self-skips when Docker is unavailable, so the default lane stays
+green.
+
+```sh
+GOWORK=off go test -tags integration ./third-party/db/writer/mysql/...
+```
 
 ## Do NOT
 

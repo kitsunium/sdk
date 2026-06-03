@@ -65,6 +65,61 @@ func Test_newClient(t *testing.T) {
 	}
 }
 
+func Test_execClosure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		// closeBefore forces ExecContext to fail synchronously by closing the
+		// lazily-opened pool before exec is called.
+		closeBefore bool
+		batch       []corelogger.RecordEvent
+		wantCode    errs.Code
+	}{
+		//: a nil batch short-circuits on the len==0 guard before any DB call.
+		{"nil batch is a no-op", false, nil, 0},
+		//: an empty slice hits the same len==0 guard.
+		{"empty slice is a no-op", false, []corelogger.RecordEvent{}, 0},
+		//: a non-empty batch over a closed pool reaches wrapInsert.
+		{"insert failure wraps as InsertFailed", true, []corelogger.RecordEvent{{Message: "fail", Level: level.Error}}, CodeCHInsertFailed},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: a lazy handle never connects, so neither arm needs a live server.
+			db, exec, err := newClient(writer.ClickHouseConfig{Address: "localhost:9999", Database: "d", Table: "logs"})
+			if err != nil {
+				t.Fatalf("%s: newClient: %v", tc.name, err)
+			}
+			//: closing the pool up front turns the next Exec into a synchronous
+			//: "sql: database is closed" failure — the only arm that touches the DB.
+			if tc.closeBefore {
+				if cerr := db.Close(); cerr != nil {
+					t.Fatalf("%s: db.Close: %v", tc.name, cerr)
+				}
+			} else {
+				t.Cleanup(func() {
+					//: release the still-open lazy pool after the case.
+					if cerr := db.Close(); cerr != nil {
+						t.Errorf("%s: cleanup db.Close: %v", tc.name, cerr)
+					}
+				})
+			}
+			eerr := exec(t.Context(), tc.batch)
+			//: no-op arm — the guard returns nil without touching the DB.
+			if tc.wantCode == 0 {
+				if eerr != nil {
+					t.Errorf("%s: want nil err, got %v", tc.name, eerr)
+				}
+				return
+			}
+			//: failure arm — the insert sentinel surfaces (identity, not string).
+			if !errs.HasCode(eerr, tc.wantCode) {
+				t.Errorf("%s: want code %v, got %v", tc.name, tc.wantCode, eerr)
+			}
+		})
+	}
+}
+
 func Test_resolveCreds(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -132,6 +187,12 @@ func Test_validIdent(t *testing.T) {
 		{"plain identifier", "app_logs", true},
 		{"empty rejected", "", false},
 		{"semicolon rejected", "logs;drop", false},
+		{"uppercase letter accepted", "Logs", true},
+		{"mixed case accepted", "AppLogs", true},
+		//: digits-only is a legal identifier under the current alphabet contract.
+		{"digit only accepted", "123", true},
+		{"dash rejected", "app-logs", false},
+		{"dot rejected", "app.logs", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

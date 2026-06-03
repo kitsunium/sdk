@@ -364,6 +364,42 @@ func Test_cwSink_flushError(t *testing.T) {
 	}
 }
 
+func Test_cwSink_CloseError(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"Close propagates the delivery error to the caller"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		boom := errors.New("close boom")
+		fp := &fakePutter{err: boom}
+		s := newCWSink(fp.putEvents, 0, 0, nil)
+		writeLine(t, s, "x\n")
+		//: Close flushes the final batch; the failed delivery must reach the caller
+		//: (like Flush) rather than being routed to onError.
+		err := s.Close()
+		if !errors.Is(err, boom) {
+			t.Errorf("Close err=%v want %v", err, boom)
+		}
+		//: errors.Is must reach the typed PutFailed sentinel too.
+		if !errors.Is(err, PutFailed) {
+			t.Errorf("Close err=%v does not match PutFailed", err)
+		}
+		//: the wrapped error must carry PutFailed's I/O exit code (74), not the
+		//: default 70 — Close shares deliverBatch's wrap with Flush.
+		if got := errs.ExitCodeOf(err); got != exitIOErr {
+			t.Errorf("ExitCodeOf=%d want %d", got, exitIOErr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func Test_cwSink_ticker(t *testing.T) {
 	t.Parallel()
 	type tc struct {

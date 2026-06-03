@@ -2,7 +2,9 @@ package nettransport
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -107,9 +109,16 @@ func Test_netSink_Flush(t *testing.T) {
 				ctx = cctx
 			}
 			err := s.Flush(ctx)
-			//: the flush verdict must match the cancellation expectation.
-			if (err != nil) != tc.wantErr {
-				t.Errorf("%s: Flush err = %v, wantErr = %v", tc.name, err, tc.wantErr)
+			//: the cancelled arm must carry the write sentinel, not just any error.
+			if tc.wantErr {
+				if !errs.HasCode(err, CodeNetTransportWriteFailed) {
+					t.Errorf("%s: Flush err = %v want write-failed", tc.name, err)
+				}
+				return
+			}
+			//: the live arm must flush clean.
+			if err != nil {
+				t.Errorf("%s: Flush err = %v, want nil", tc.name, err)
 			}
 		})
 	}
@@ -140,6 +149,56 @@ func Test_netSink_Close(t *testing.T) {
 			//: clean close returns nil.
 			if err != nil {
 				t.Errorf("%s: Close err = %v, want nil", tc.name, err)
+			}
+		})
+	}
+}
+
+// Test_netSink_Write_Close_concurrent hammers Write from many goroutines while a
+// late Close races them, proving the mutex serialises send against close (the -race
+// flag is the real assertion: any unsynchronised access fails the build). The send
+// sleeps briefly so a Write is reliably in flight when Close lands. Goroutine
+// lifecycle: a WaitGroup joins all N writers; Close runs on its own goroutine that
+// the WaitGroup also covers, so nothing leaks past the test.
+func Test_netSink_Write_Close_concurrent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		writers int
+	}{
+		{"eight writers race a late close", 8},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: a send that sleeps keeps a Write in flight when Close lands.
+			s := newNetSink("tcp", func(context.Context, []byte) error {
+				time.Sleep(time.Millisecond)
+				return nil
+			}, func() error { return nil })
+			var wg sync.WaitGroup
+			//: N concurrent writers plus the single closer goroutine.
+			wg.Add(tc.writers + 1)
+			for range tc.writers {
+				go func() {
+					defer wg.Done()
+					//: each Write must complete or fail with the write sentinel only.
+					if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("x")); werr != nil && !errs.HasCode(werr, CodeNetTransportWriteFailed) {
+						t.Errorf("Write err = %v want nil or write-failed", werr)
+					}
+				}()
+			}
+			closeErr := make(chan error, 1)
+			go func() {
+				defer wg.Done()
+				//: a short delay lets writers get in flight before the close.
+				time.Sleep(time.Millisecond / 2)
+				closeErr <- s.Close()
+			}()
+			wg.Wait()
+			//: Close must report nil or the write sentinel — never anything else.
+			if cerr := <-closeErr; cerr != nil && !errs.HasCode(cerr, CodeNetTransportWriteFailed) {
+				t.Errorf("%s: Close err = %v want nil or write-failed", tc.name, cerr)
 			}
 		})
 	}
