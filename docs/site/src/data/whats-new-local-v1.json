@@ -1,44 +1,35 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-06-03T14:58:48.445Z",
+  "generatedAt": "2026-06-04T20:33:54.046Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
     {
-      "type": "fix",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "resolve Qodo review findings on writer subsystem (PR #58)",
-      "sha": "636c793ad4374e5f39c57786e30c1775b90ccfb5",
-      "short": "636c793",
-      "date": "2026-06-03T11:25:46+02:00"
-    },
-    {
       "type": "feat",
       "scope": "logger",
       "breaking": false,
-      "summary": "ClickHouse database writer (native protocol, vendored driver)",
-      "sha": "ef2a15aa825ecea3d3b4da995605937b1ac26d19",
-      "short": "ef2a15a",
-      "date": "2026-06-02T13:42:44+02:00"
+      "summary": "writer subsystem v2 — rotation, transports, DB writers + realistic test suite (ADR 0015) (#58)",
+      "sha": "931b84f97dc37223ecc0b4312cc2145810cfca43",
+      "short": "931b84f",
+      "date": "2026-06-04T22:04:50+02:00"
     },
     {
       "type": "feat",
-      "scope": "logger",
+      "scope": null,
       "breaking": false,
-      "summary": "Redis Stream database writer (local-protocol, vendored driver)",
-      "sha": "1b413fb5559e09d3bae4ee2fe3b3a70721f5157e",
-      "short": "1b413fb",
-      "date": "2026-06-02T13:35:49+02:00"
+      "summary": "ADR 0014 — the verb wave (transform tier, crypto ports + compositions, config-driven topology) (#57)",
+      "sha": "98a1257d373a33dd0b3581294694da1ac77a3018",
+      "short": "98a1257",
+      "date": "2026-05-31T23:31:53+02:00"
     },
     {
       "type": "feat",
-      "scope": "logger",
+      "scope": "crypto",
       "breaking": false,
-      "summary": "MySQL database writer (local-protocol, vendored driver)",
-      "sha": "c1a612f3c8a016baf7f5ed940f49fe56992568af",
-      "short": "c1a612f",
-      "date": "2026-06-02T13:25:21+02:00"
+      "summary": "public crypto tier — hash / sign / kdf / password (ADR 0013) (#56)",
+      "sha": "bfcb793de9bab5008c53b7f514747a1bafb1bcee",
+      "short": "bfcb793",
+      "date": "2026-05-30T14:10:16+02:00"
     },
     {
       "type": "fix",
@@ -48,6 +39,15 @@
       "sha": "e8c78b5450e26e658caa2a02d92750027d4bd202",
       "short": "e8c78b5",
       "date": "2026-05-30T00:29:53+02:00"
+    },
+    {
+      "type": "fix",
+      "scope": "docs",
+      "breaking": false,
+      "summary": "make npm test glob node-version-agnostic (#31)",
+      "sha": "dcff33ba199373bcc579168f287bd783aa5b3e1f",
+      "short": "dcff33b",
+      "date": "2026-05-25T09:59:30Z"
     }
   ]
 }
