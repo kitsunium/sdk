@@ -89,7 +89,8 @@ func (b *queueRing[T]) Len() int {
 
 // TryWrite places item into the ring without blocking.
 func (b *queueRing[T]) TryWrite(item T) error {
-	//: load both cursors with relaxed semantics; the producer is single.
+	//: load both cursors; Go atomics are sequentially consistent (not relaxed),
+	//: which is stronger than this single-producer path needs.
 	tail := b.tail.Load()
 	head := b.head.Load()
 	//: compute the next tail position; ring wraps at cap+1.
@@ -101,7 +102,11 @@ func (b *queueRing[T]) TryWrite(item T) error {
 		//: against the identity-stable pointer.
 		return Full
 	}
-	//: publish the item and bump the tail; consumer reads tail with Acquire.
+	//: ORDERING INVARIANT (release-publish): the slot store MUST precede the
+	//: tail Store. The sequentially-consistent tail.Store publishes the slot
+	//: write to the consumer; reordering these two lines would let TryRead see
+	//: an advanced tail before the item lands. Do not "optimise" to a relaxed
+	//: store here — the SC tail Store is the publication barrier.
 	b.slots[tail] = item
 	b.tail.Store(next)
 	//: happy path — nothing to report.
@@ -110,7 +115,8 @@ func (b *queueRing[T]) TryWrite(item T) error {
 
 // TryRead removes and returns the next item without blocking.
 func (b *queueRing[T]) TryRead() (value T, err error) {
-	//: load both cursors with relaxed semantics; the consumer is single.
+	//: load both cursors; Go atomics are sequentially consistent (not relaxed),
+	//: which is stronger than this single-consumer path needs.
 	head := b.head.Load()
 	tail := b.tail.Load()
 	//: empty when the cursors meet — no item to return.
@@ -122,7 +128,10 @@ func (b *queueRing[T]) TryRead() (value T, err error) {
 		//: hand back the zero value plus the pre-allocated Empty sentinel.
 		return zero, Empty
 	}
-	//: read the item, clear the slot for GC, and bump the head cursor.
+	//: ORDERING INVARIANT (acquire-consume): the slot load MUST follow the tail
+	//: load above. The SC tail.Load is the acquire that guarantees the item the
+	//: producer published before its tail.Store is visible here. Reordering the
+	//: slot read before the tail load would risk reading a stale slot.
 	value = b.slots[head]
 	var zero T
 	b.slots[head] = zero

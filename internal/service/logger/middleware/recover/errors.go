@@ -7,8 +7,9 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 var (
 	// Panicked is returned when the wrapped downstream sink panics during
-	// Write / Flush / Close. The recovered panic value is captured in the
-	// error's Fields metadata for downstream introspection.
+	// Write / Flush / Close. The error's Fields carries panic_type (the
+	// recovered value's dynamic type name); the rendered panic value lives in
+	// the error's log-only Private field, never in Fields.
 	Panicked = errs.Define(CodeRecoverPanicked, "RECOVER_PANICKED",
 		"Wrapped sink panicked",
 		"service/logger/middleware/recover caught a panic from the downstream sink")

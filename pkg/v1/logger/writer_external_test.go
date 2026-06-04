@@ -113,6 +113,58 @@ func TestNewMulti(t *testing.T) {
 	}
 }
 
+func TestDefaultMulti(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		path   func(dir string) string
+		wantOK bool
+	}
+	tests := []tc{
+		{
+			name:   "console and file build a logger that writes to the file",
+			path:   func(dir string) string { return filepath.Join(dir, "default-multi.log") },
+			wantOK: true,
+		},
+		{
+			//: an unwritable directory makes the file writer fail to open, which
+			//: rolls the already-opened console sink back and surfaces an error.
+			name:   "unopenable file path is rejected",
+			path:   func(dir string) string { return filepath.Join(dir, "missing-subdir", "x.log") },
+			wantOK: false,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		path := c.path(t.TempDir())
+		lg, err := logger.DefaultMulti(path)
+		//: the failure arm must surface a non-nil error and no logger.
+		if !c.wantOK {
+			if err == nil {
+				t.Errorf("%s: expected an error, got nil", c.name)
+			}
+			return
+		}
+		//: the happy arm must build a logger.
+		if err != nil || lg == nil {
+			t.Fatalf("%s: err=%v lg=%v want nil+logger", c.name, err, lg)
+		}
+		//: the file branch must actually receive an emitted record.
+		logger.Info(t.Context(), lg, "default-multi-marker")
+		data, rErr := os.ReadFile(path)
+		content := string(data)
+		if rErr != nil || !strings.Contains(content, "default-multi-marker") {
+			t.Errorf("%s: file %s err=%v content=%q want the marker", c.name, path, rErr, content)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func TestNewMultiFanOut(t *testing.T) {
 	t.Parallel()
 	type tc struct {

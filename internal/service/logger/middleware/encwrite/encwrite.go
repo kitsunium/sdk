@@ -27,6 +27,15 @@ const (
 	defaultInfo string = "encwrite-sink"
 )
 
+// keyBytes is the seam through which deriveSubkey obtains a fresh copy of the
+// master key material; it is a package var solely so a white-box test can wrap
+// it and assert the returned copy is zeroized before deriveSubkey returns
+// (finding V29). Production always binds it to corecrypto.Key.Bytes.
+var keyBytes func(k corecrypto.Key) []byte = func(k corecrypto.Key) []byte {
+	//: hand back the cipher-ready master-key copy from the opaque Key value.
+	return k.Bytes()
+}
+
 // EncWriter seals each record's bytes under a per-sink subkey and writes the
 // length-prefixed sealed box to the downstream sink. Safe for concurrent use.
 type EncWriter struct {
@@ -51,32 +60,54 @@ func NewEncWriter(cfg Config) (writer *EncWriter, err error) {
 		//: substitute the package default purpose label.
 		info = defaultInfo
 	}
+	//: derive the per-sink subkey, zeroizing every intermediate secret copy.
+	subkey, derr := deriveSubkey(cfg.Key, info)
+	//: a derivation or materialisation fault aborts construction.
+	if derr != nil {
+		//: propagate the already-typed seal sentinel from the helper unchanged.
+		return nil, derr
+	}
+	//: hand back the ready sink wrapping the configured downstream.
+	return &EncWriter{downstream: cfg.Sink, key: cfg.Key, subkey: subkey}, nil
+}
+
+// deriveSubkey derives the per-sink subkey from master via HKDF-SHA256 under the
+// info label and returns it as a zeroizable Key. It zeroizes both intermediate
+// secret copies — the master-key clone and the raw derived bytes — before
+// returning so no un-zeroized key material lingers on the heap (finding V29).
+func deriveSubkey(master corecrypto.Key, info string) (subkey corecrypto.Key, err error) {
+	//: take a single cipher-ready copy of the master key through the seam.
+	secret := keyBytes(master)
+	//: wipe that master-key copy on every return path — it is never retained.
+	defer clear(secret)
 	//: derive a per-sink subkey so the raw master key never seals directly.
-	raw, derr := corecrypto.Subkey(kdfAlgorithm, cfg.Key.Bytes(), nil, info, corecrypto.KeyLen)
+	raw, derr := corecrypto.Subkey(kdfAlgorithm, secret, nil, info, corecrypto.KeyLen)
 	//: a derivation fault (unknown KDF / over-long length) aborts construction.
 	if derr != nil {
 		//: surface the typed sentinel; consumers HasCode(err, CodeEncWriteSealFailed).
-		return nil, errs.Wrap(derr, errs.WrapParams{
+		return corecrypto.Key{}, errs.Wrap(derr, errs.WrapParams{
 			Code:    CodeEncWriteSealFailed,
 			Reason:  "ENC_WRITE_SEAL_FAILED",
 			Public:  "Encrypting middleware could not seal the record",
 			Private: "service/logger/middleware/encwrite: Subkey derivation failed at construction",
 		})
 	}
+	//: NewKey clones raw, so wipe our copy of the live subkey on every return.
+	defer clear(raw)
 	//: wrap the raw subkey so it is sealable and zeroizable as a Key value.
-	subkey, kerr := corecrypto.NewKey(raw)
+	key, kerr := corecrypto.NewKey(raw)
 	//: an unexpected length from Subkey is a defensive guard, never reached.
 	if kerr != nil {
 		//: same typed sentinel — the subkey could not be materialised.
-		return nil, errs.Wrap(kerr, errs.WrapParams{
+		return corecrypto.Key{}, errs.Wrap(kerr, errs.WrapParams{
 			Code:    CodeEncWriteSealFailed,
 			Reason:  "ENC_WRITE_SEAL_FAILED",
 			Public:  "Encrypting middleware could not seal the record",
 			Private: "service/logger/middleware/encwrite: derived subkey was not KeyLen bytes",
 		})
 	}
-	//: hand back the ready sink wrapping the configured downstream.
-	return &EncWriter{downstream: cfg.Sink, key: cfg.Key, subkey: subkey}, nil
+	//: ready zeroizable subkey; both intermediate copies are wiped on return.
+	return key, nil
 }
 
 // Write seals p under the per-sink subkey, frames it with a length prefix, and

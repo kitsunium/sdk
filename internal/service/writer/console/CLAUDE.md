@@ -13,7 +13,7 @@ The factory is a thin adapter: it delegates to the existing terminal sink in
 
 | File | Role |
 |---|---|
-| `console.go` | `Writer` singleton, `consoleFactory` (`Name` / `Open`), `pickStream` |
+| `console.go` | `Writer` singleton, `consoleFactory` (`Name` / `Open` / `Decode`), `pickStream` + decode helpers |
 
 No `codes.go` — a wrong-type `Config` returns the shared
 `core/writer.WriterConfigInvalid`; the underlying sink owns its own I/O codes
@@ -27,6 +27,22 @@ No `codes.go` — a wrong-type `Config` returns the shared
   (default / zero value).
 - The result is wrapped in `levelgate.New(base, cfg.MinLevel)` — a no-op when
   `MinLevel == Info` (inherit).
+
+### Decoder (YAML-reachable via `FromConfig`)
+
+`consoleFactory` also implements `core/writer.Decoder`, so the default-active
+console writer is reachable from a topology config blob. Recognised option keys
+(under a writer entry's `config:` map):
+
+| Key | Type | Default | Maps to |
+|---|---|---|---|
+| `target` | string | `stdout` | `Stream`: `"stdout"`/`""` → stdout, `"stderr"` → stderr |
+| `min_level` | string | inherit (info) | `MinLevel` via `level.ParseLevel` (`debug`/`info`/`warn`/`error`) |
+
+Unknown `target`, unknown `min_level`, or a non-string value for either key
+returns the shared `core/writer.WriterConfigInvalid` (no new code). **Secret
+gate:** the error names only the writer (`writer=console` field), never the
+offending value.
 
 ## Do NOT
 

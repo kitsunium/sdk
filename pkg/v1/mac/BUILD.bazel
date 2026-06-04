@@ -22,5 +22,8 @@ alias(
 go_test(
     name = "mac_test",
     srcs = ["mac_external_test.go"],
-    deps = [":mac"],
+    deps = [
+        ":mac",
+        "//pkg/v1/errs",
+    ],
 )

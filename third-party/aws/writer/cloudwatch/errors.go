@@ -20,4 +20,12 @@ var (
 		"CloudWatch writer failed to deliver a log batch",
 		"third-party/aws/writer/cloudwatch: PutLogEvents returned an error while flushing a batch",
 		errs.WithExitCode(exitIOErr))
+
+	// EventRejected reports one event dropped before delivery because its
+	// timestamp is outside the PutLogEvents per-event window (older than 14 days
+	// or more than 2 hours ahead). The whole batch still ships; only the
+	// out-of-window event is discarded and routed to OnError.
+	EventRejected = errs.Define(CodeCWEventRejected, "EVENT_REJECTED",
+		"CloudWatch writer dropped a log event with an out-of-range timestamp",
+		"third-party/aws/writer/cloudwatch: event timestamp outside the PutLogEvents 14d-past / 2h-future window")
 )

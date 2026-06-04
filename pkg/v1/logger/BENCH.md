@@ -32,8 +32,8 @@ BenchmarkLogger10Fields-8       	13,755,102	  857.2 ns/op	 768 B/op	1 allocs/op
 ## How to read this
 
 - **Latency.** Static message lands in ~426 ns; structured record with 10 attrs in ~857 ns. The per-attr cost is ~43 ns when you add fields.
-- **Allocations.** The variadic `logger.Info(ctx, lg, "msg", attrs...)` path costs **1 alloc/op** (the variadic slice itself). The CLAUDE.md "zero-alloc" claim describes the chainable **`Build(lg, lv).Str(...).Send(...)`** path, which goes through a `sync.Pool`-backed builder — not this convenience variadic. If your hot path matters more than ergonomics, prefer `Build`.
-- **Bytes per op.** The 768 B on the 10-field scenario is the variadic slice (10 `AttrValue`s × ~76 B each). Once you switch to `Build`, the steady-state byte cost drops to near-zero because the pool reuses buffers.
+- **Allocations.** The variadic `logger.Info(ctx, lg, "msg", attrs...)` path costs **1 alloc/op** (the variadic slice itself). The chainable **`Build(lg, lv).Str(...).Send(...)`** path also costs **1 alloc/op** — the `sync.Pool`-backed builder recycles the `*chainBuilder` and its attrs scratchpad, but the handler clones that scratchpad (`mergeAttrs` / `slices.Clone` of the accumulated attrs) on every `Send`, so one heap slice escapes per emit. `Build` is not allocation-free; it trades the variadic-slice alloc for the handler's clone. Prefer it for ergonomics, not for a zero-alloc guarantee.
+- **Bytes per op.** The 768 B on the 10-field scenario is the variadic slice (10 `AttrValue`s × ~76 B each). Switching to `Build` does NOT drop this to zero: the handler's per-`Send` attrs clone keeps the byte cost at roughly `len(attrs) × sizeof(AttrValue)` (e.g. 10 attrs ≈ a 760 B clone). The pool reuses the builder, not the cloned slice the handler retains.
 
 ## Caveats
 

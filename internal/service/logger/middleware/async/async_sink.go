@@ -69,6 +69,14 @@ type asyncSink struct {
 	// drainer never blocks when nobody is flushing; Flush selects on it
 	// + ctx.Done for cancellation.
 	flushSignal chan struct{}
+	// inFlight counts entries the drainer has TryRead off the ring but not
+	// yet finished delivering to downstream.Write. Incremented under ringMu
+	// the moment a TryRead succeeds (so Len() drops but the record is still
+	// undelivered) and decremented under ringMu once downstream.Write
+	// returns. Flush observes Len()==0 AND inFlight==0 before treating the
+	// queue as drained, closing the V28/V111 lost-flush window where Flush
+	// could report "drained" while a record was mid-delivery downstream.
+	inFlight int
 	// ringMu serialises every access to queue so the SPSC ring's single-
 	// producer / single-consumer contract is not violated by concurrent
 	// goroutines. Held by:
@@ -251,12 +259,16 @@ func (s *asyncSink) Flush(ctx context.Context) error {
 	//: each forward() wakes us via flushSignal so we re-check
 	//: queue.Len() under ringMu and either exit or wait again.
 	for {
-		//: snapshot queue length under ringMu so SPSC safety holds.
+		//: snapshot queue length AND in-flight count under ringMu so SPSC
+		//: safety holds and the two are sampled atomically together.
 		s.ringMu.Lock()
 		remaining := s.queue.Len()
+		inFlight := s.inFlight
 		s.ringMu.Unlock()
-		//: done when the ring is empty — forward to downstream.
-		if remaining == 0 {
+		//: done only when the ring is empty AND no entry is mid-delivery
+		//: downstream — inFlight closes the V28/V111 window where a record
+		//: TryRead off the ring (Len()==0) was still being written downstream.
+		if remaining == 0 && inFlight == 0 {
 			//: also flush the downstream sink so its own buffers settle.
 			return s.downstream.Flush(ctx)
 		}

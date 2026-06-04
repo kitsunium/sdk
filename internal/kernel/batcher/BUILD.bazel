@@ -30,6 +30,7 @@ alias(
 go_test(
     name = "batcher_test",
     srcs = [
+        "batcher_bench_test.go",
         "batcher_external_test.go",
         "batcher_internal_test.go",
     ],

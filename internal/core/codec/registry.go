@@ -83,8 +83,11 @@ func loadAliasIndex(p *snapshot.Value[map[string]Format]) map[string]Format {
 func Register(c Codec) Codec {
 	//: nil registration is always a programming error.
 	if c == nil {
-		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("codec.Register [%d DUPLICATE_REGISTRATION]: nil Codec", CodeDuplicateRegistration))
+		//: panic so the offender is visible at boot. A nil Codec is a
+		//: nil-argument programmer error, not a duplicate — its own dotted-quad
+		//: code (CODEC_NIL) keeps operator triage honest. %s renders the
+		//: canonical dotted-quad via Code.String() (matching the log-parser regex).
+		panic(fmt.Sprintf("codec.Register [%s CODEC_NIL]: nil Codec", CodeCodecNil))
 	}
 	//: the canonical Format is the primary key.
 	name := Format(c.Name())
@@ -117,7 +120,7 @@ func publishCodec(name Format, c Codec) error {
 			//: any prior registration of name is a hard conflict.
 			if _, dup := (*current)[name]; dup {
 				//: wrap the sentinel so errors.Is finds the chain, then abort.
-				dupErr = fmt.Errorf("codec.Register [%d %w]: duplicate Name %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
+				dupErr = fmt.Errorf("codec.Register [%s %w]: duplicate Name %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}
@@ -188,7 +191,7 @@ func publishAlias(dst *snapshot.Value[map[string]Format], key string, name Forma
 					return current
 				}
 				//: distinct-codec conflict — wrap the sentinel, then abort.
-				conflictErr = fmt.Errorf("codec.Register [%d %w]: %s %q already registered by %q (requested by %q)",
+				conflictErr = fmt.Errorf("codec.Register [%s %w]: %s %q already registered by %q (requested by %q)",
 					CodeDuplicateRegistration, errDuplicateRegistration, kind, alias, prev, name)
 				//: no-op publish — republish the current snapshot unchanged.
 				return current

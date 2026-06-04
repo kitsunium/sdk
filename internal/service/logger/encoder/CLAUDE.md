@@ -28,8 +28,11 @@ the `text` encoder; `ndjson` / `json` land in follow-up commits.
   spoofed by attacker-influenced content.
 - Attrs: `key=value` with strings via `strconv.AppendQuote`; durations and
   times also quoted; ints / uints / bool / float64 unquoted; every other
-  `Kind` degrades to `?` until structured encoders land.
-- Group prefix: `g1.g2.…` joined by `groupSeparator` ('.').
+  `Kind` degrades to `?` until structured encoders land. The attribute **key**
+  runs through the same framing-byte scrub as the Message, so an
+  attacker-influenced key cannot inject a frame boundary (V110).
+- Group prefix: `g1.g2.…` joined by `groupSeparator` ('.'); each group **name**
+  segment is also framing-byte-scrubbed (V110).
 
 ## Conventions
 

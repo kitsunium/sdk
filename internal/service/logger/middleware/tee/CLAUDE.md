@@ -56,3 +56,7 @@ Safe for concurrent producers when the primary and spill sinks are. The
 ```
 bazel test --config=race //internal/service/logger/middleware/tee:tee_test
 ```
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V30) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

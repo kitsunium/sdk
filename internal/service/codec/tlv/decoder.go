@@ -52,8 +52,13 @@ func (d *tlvDecoder) More() bool {
 	return !d.done
 }
 
-// readOneRecord reads the tag, the LEB128 length, and the value bytes of
-// a single TLV record from r.
+// readOneRecord reads exactly one independent TLV record from r. A clean
+// io.EOF before the very first tag byte means the stream has drained and is
+// propagated verbatim; any other read failure (including EOF mid-record) is
+// wrapped as TRUNCATED / UNMARSHAL_FAILED. V59: composite records (slice /
+// map / struct) carry an element/pair/field COUNT in their length header,
+// not a byte length, so the body must be parsed by recursing into the
+// declared number of sub-records rather than copying length value bytes.
 func readOneRecord(r io.Reader) (record []byte, err error) {
 	//: tag byte first; EOF here is a clean stream end.
 	tag, terr := readTag(r)
@@ -67,6 +72,19 @@ func readOneRecord(r io.Reader) (record []byte, err error) {
 		//: wrap as an unmarshal failure.
 		return nil, terr
 	}
+	//: tag in hand; read the rest of this record (header + body) at depth 0.
+	return readRecordBody(r, tag, 0)
+}
+
+// readRecordBody reads the LEB128 length header for an already-consumed tag
+// and the record body, returning the reassembled tag+length+value bytes.
+// depth bounds composite recursion against CWE-674 stack exhaustion.
+func readRecordBody(r io.Reader, tag byte, depth int) (record []byte, err error) {
+	//: nesting guard — mirror the buffered decoder's maxTLVDepth cap.
+	if depth > maxTLVDepth {
+		//: surface the documented depth sentinel.
+		return nil, depthExceededError(depth)
+	}
 	//: read the LEB128 length one byte at a time.
 	length, lerr := readUvarint(r)
 	//: surface any varint failure.
@@ -74,13 +92,76 @@ func readOneRecord(r io.Reader) (record []byte, err error) {
 		//: already wrapped.
 		return nil, lerr
 	}
-	//: bound the per-record value length before allocating.
+	//: bound the declared length before allocating or recursing.
 	if length > uint64(maxTLVBytes) {
 		//: surface the documented size sentinel.
 		return nil, sizeExceededError(length)
 	}
-	//: read the value bytes; short read is treated as truncated.
+	//: composite tags carry a sub-record COUNT; scalars carry a byte length.
+	if isCompositeTag(Tag(tag)) {
+		//: recurse into the declared number of sub-records.
+		return readCompositeRecord(r, tag, length, depth)
+	}
+	//: scalar body is exactly length value bytes.
 	return assembleRecord(r, tag, length)
+}
+
+// isCompositeTag reports whether tag's length header is an element / pair /
+// field COUNT (slice, map, struct) rather than a byte length.
+func isCompositeTag(tag Tag) bool {
+	//: slice / map / struct are the only count-prefixed families.
+	return tag == tagSlice || tag == tagMap || tag == tagStruct
+}
+
+// subRecordCount returns how many child TLV records follow a composite
+// header: one per slice element, two per map pair (key+value), two per
+// struct field (name+value). length is the declared family count.
+func subRecordCount(tag Tag, length uint64) uint64 {
+	//: maps and structs frame each entry as two adjacent records.
+	if tag == tagMap || tag == tagStruct {
+		//: key+value or name+value per entry.
+		return length * recordsPerPair
+	}
+	//: slices frame one record per element.
+	return length
+}
+
+// readCompositeRecord reassembles a composite record (slice / map / struct)
+// by reading its declared sub-records recursively, so the streaming reader
+// frames the body identically to the buffered decoder (V59). The rebuilt
+// bytes are tag + length-as-count + the concatenated child records, which
+// decodeRoot then parses exactly as the buffered path does.
+func readCompositeRecord(r io.Reader, tag byte, length uint64, depth int) (record []byte, err error) {
+	//: header carries the family count verbatim — preserve the wire shape.
+	out := make([]byte, 0, 1+maxVarintBytes)
+	out = append(out, tag)
+	out = binary.AppendUvarint(out, length)
+	//: each composite frames a fixed number of child records.
+	for range subRecordCount(Tag(tag), length) {
+		//: a child record opens with its own tag byte.
+		childTag, terr := readTag(r)
+		//: a mid-composite EOF is a truncated record, never a clean end.
+		if errors.Is(terr, io.EOF) {
+			//: surface as TRUNCATED.
+			return nil, truncatedError()
+		}
+		//: any other read failure is wrapped already.
+		if terr != nil {
+			//: surface verbatim.
+			return nil, terr
+		}
+		//: recurse one level deeper to read the child body.
+		child, cerr := readRecordBody(r, childTag, depth+1)
+		//: surface any child failure verbatim.
+		if cerr != nil {
+			//: already wrapped.
+			return nil, cerr
+		}
+		//: append the child record bytes.
+		out = append(out, child...)
+	}
+	//: caller owns the reassembled composite record.
+	return out, nil
 }
 
 // readTag reads exactly one byte (the TLV tag) from r and returns

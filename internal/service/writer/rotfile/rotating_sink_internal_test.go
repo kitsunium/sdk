@@ -1,9 +1,12 @@
 package rotfile
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/writer"
@@ -325,6 +328,246 @@ func Test_rotatingSink_reopenReappliesHardening(t *testing.T) {
 	}
 }
 
+func Test_rotatingSink_Close_joinsDaemon(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"interval daemon is spawned and joined on close"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		s := newSink(t, Config{
+			Path: filepath.Join(t.TempDir(), "d.log"), MaxBytes: 1 << 30,
+			RotateEvery: time.Hour, Clock: &fakeClock{now: time.Unix(0, 0)},
+		})
+		//: a positive RotateEvery must spawn the ticker daemon.
+		if s.daemon == nil {
+			t.Fatalf("RotateEvery>0 spawned no daemon")
+		}
+		//: Close joins the daemon (Stop blocks on the join) before returning.
+		if cerr := s.Close(); cerr != nil {
+			t.Fatalf("close: %v", cerr)
+		}
+		//: a joined daemon has a closed Done channel — deterministic, no leak.
+		select {
+		//: closed channel proves the ticker goroutine returned.
+		case <-s.daemon.Done():
+		//: still open means Close did not join the goroutine.
+		default:
+			t.Errorf("daemon not joined after Close (Done still open)")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func Test_rotatingSink_Write_tickErr(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"stashed tick error surfaces via OnError once then clears"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: capture the one-shot OnError surfacing without gating the write.
+		var seen error
+		s := newSink(t, Config{Path: filepath.Join(t.TempDir(), "te.log"), OnError: func(err error) { seen = err }})
+		//: close once the case finishes asserting.
+		defer closeQuiet(t, s)
+		//: stash a typed rotate failure exactly as a failing tick would.
+		s.mu.Lock()
+		s.tickErr = RotFileRotateFailed
+		s.mu.Unlock()
+		//: the first Write surfaces the stash via OnError, NOT its return value —
+		//: the triggering record is still written (F6-tickdrop: no dropped line).
+		if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("x")); werr != nil {
+			t.Fatalf("first Write err=%v want nil (record must still be written)", werr)
+		}
+		//: the failure reached the operator hook exactly once with the right code.
+		if !errs.HasCode(seen, CodeRotFileRotateFailed) {
+			t.Fatalf("OnError saw %v want rotate-failed", seen)
+		}
+		//: the second Write proceeds normally — the error is not latched.
+		if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("y")); werr != nil {
+			t.Errorf("second Write err=%v want nil", werr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // : compile-time proof the factory satisfies the registry port (kept in a
 // : white-box file per KTN-IFACE-ASSERT-PLACEMENT).
 var _ writer.Factory = (*rotFileFactory)(nil)
+
+func Test_openHardened_openFails(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"missing parent directory yields the open sentinel"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: a path whose parent does not exist makes os.OpenFile fail with ENOENT,
+		//: exercising the wrap branch distinct from the symlink refusal.
+		path := filepath.Join(t.TempDir(), "nosuchdir", "x.log")
+		f, err := openHardened(path)
+		//: the failed open must hand back the typed sentinel and no descriptor.
+		if !errs.HasCode(err, CodeRotFileOpenFailed) || f != nil {
+			//: release a surprise descriptor so the test never leaks one.
+			if f != nil {
+				closeFile(t, f)
+			}
+			t.Errorf("openHardened err=%v f=%v want open-failed+nil", err, f)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func Test_rotatingSink_Write_rotationFails(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a failing rotate surfaces under the rotate sentinel"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		s := newSink(t, Config{Path: filepath.Join(t.TempDir(), "rf.log"), MaxBytes: 4})
+		//: seed size > 0 so the next write's projected size trips maybeRotate.
+		if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("12345")); werr != nil {
+			t.Fatalf("seed write: %v", werr)
+		}
+		//: close the descriptor behind the sink's back so rotate()'s first
+		//: s.f.Close() fails with the kernel already-closed error.
+		s.mu.Lock()
+		closeErr := s.f.Close()
+		s.mu.Unlock()
+		//: the sabotage close must itself have succeeded for the next close to fail.
+		if closeErr != nil {
+			t.Fatalf("sabotage close: %v", closeErr)
+		}
+		//: the next write trips maybeRotate, whose rotate() close fails → rotate-failed.
+		_, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("67"))
+		//: a failing rotation is fatal to this write under the rotate sentinel.
+		if !errs.HasCode(werr, CodeRotFileRotateFailed) {
+			t.Errorf("Write err=%v want rotate-failed", werr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func Test_rotatingSink_Write_underlyingWriteFails(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a closed descriptor fails the direct write path"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: MaxBytes=0 disables rotation so Write reaches s.f.Write directly with
+		//: no rotate() interposed — the failure must come from the underlying fd.
+		s := newSink(t, Config{Path: filepath.Join(t.TempDir(), "uw.log")})
+		//: close the descriptor behind the sink's back so s.f.Write errors.
+		s.mu.Lock()
+		s.size = 0
+		closeErr := s.f.Close()
+		s.mu.Unlock()
+		//: the sabotage close must succeed so the later Write hits a closed fd.
+		if closeErr != nil {
+			t.Fatalf("sabotage close: %v", closeErr)
+		}
+		n, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("data"))
+		//: a closed fd surfaces the write sentinel; the count may be zero.
+		if !errs.HasCode(werr, CodeRotFileWriteFailed) || n != 0 {
+			t.Errorf("Write n=%d err=%v want 0+write-failed", n, werr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func Test_rotatingSink_Flush_cancelledContext(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a cancelled context short-circuits flush with a typed write-failed error"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		s := newSink(t, Config{Path: filepath.Join(t.TempDir(), "fc.log")})
+		//: close once the case finishes asserting.
+		defer closeQuiet(t, s)
+		//: pre-cancel so Flush hits the cancellation guard before touching fsync.
+		ctx, cancel := newCancelled(t)
+		cancel()
+		ferr := s.Flush(ctx)
+		//: V46: the guard must surface a typed error carrying the dotted-quad code,
+		//: not the raw stdlib context.Canceled (which has no errs.Code) — mirroring
+		//: Write and the journald/net sinks. Before the fix HasCode was false.
+		if !errs.HasCode(ferr, CodeRotFileWriteFailed) {
+			t.Errorf("Flush err=%v want write-failed code", ferr)
+		}
+		//: errs.Wrap preserves the cause so errors.Is still catches cancellation.
+		if !errors.Is(ferr, context.Canceled) {
+			t.Errorf("Flush err=%v must still wrap context.Canceled", ferr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+func Test_rotatingSink_Flush_syncFails(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a closed descriptor fails fsync under the write sentinel"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		s := newSink(t, Config{Path: filepath.Join(t.TempDir(), "fs.log")})
+		//: close the descriptor behind the sink's back so Sync() errors.
+		s.mu.Lock()
+		closeErr := s.f.Close()
+		s.mu.Unlock()
+		//: the sabotage close must succeed so the later Flush hits a closed fd.
+		if closeErr != nil {
+			t.Fatalf("sabotage close: %v", closeErr)
+		}
+		//: a failing fsync surfaces the write sentinel (Sync shares it with Write).
+		if ferr := s.Flush(t.Context()); !errs.HasCode(ferr, CodeRotFileWriteFailed) {
+			t.Errorf("Flush err=%v want write-failed", ferr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

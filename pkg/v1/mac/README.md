@@ -35,6 +35,7 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0 — a tag produc
 
 ## Index
 
+- [Constants](<#constants>)
 - [func Tag\(a Algorithm, key Key, message \[\]byte\) \(tag \[\]byte, err error\)](<#Tag>)
 - [func Verify\(a Algorithm, key Key, message, tag \[\]byte\) \(ok bool, err error\)](<#Verify>)
 - [type Algorithm](<#Algorithm>)
@@ -42,8 +43,16 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0 — a tag produc
   - [func NewKey\(raw \[\]byte\) \(key Key, err error\)](<#NewKey>)
 
 
+## Constants
+
+<a name="KeyLen"></a>KeyLen is the required symmetric key length in bytes \(256\-bit\) — the length [NewKey](<#NewKey>) enforces.
+
+```go
+const KeyLen int = corecrypto.KeyLen
+```
+
 <a name="Tag"></a>
-## func [Tag](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L66>)
+## func [Tag](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L74>)
 
 ```go
 func Tag(a Algorithm, key Key, message []byte) (tag []byte, err error)
@@ -52,7 +61,7 @@ func Tag(a Algorithm, key Key, message []byte) (tag []byte, err error)
 Tag returns the authentication tag over message under key for the named scheme. An unregistered algorithm returns UnknownMACAlgorithm; a registered scheme cannot fail \(the redacting Key pins the length\).
 
 <a name="Verify"></a>
-## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L74>)
+## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L82>)
 
 ```go
 func Verify(a Algorithm, key Key, message, tag []byte) (ok bool, err error)
@@ -61,12 +70,12 @@ func Verify(a Algorithm, key Key, message, tag []byte) (ok bool, err error)
 Verify reports whether tag authenticates message under key for the named scheme, using a constant\-time comparison. An unregistered algorithm returns \(false, UnknownMACAlgorithm\); a bad tag is \(false, nil\).
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L47>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L58>)
 
-Algorithm is the stable identifier of a MAC scheme.
+Algorithm is the stable identifier of a MAC scheme. It is a defined type distinct from the other crypto\-family Algorithm types \(hash, sign, kdf, …\), so the compiler rejects feeding a hash or signature constant into a MAC call \(V104\) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 
 ```go
-type Algorithm = corecrypto.Algorithm
+type Algorithm corecrypto.Algorithm
 ```
 
 <a name="HMACSHA256"></a>HMACSHA256 is HMAC \(RFC 2104\) over SHA\-256 — the detached\-MAC default.
@@ -76,7 +85,7 @@ const HMACSHA256 Algorithm = "hmac-sha256"
 ```
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L51>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L62>)
 
 Key is an opaque, redacting 256\-bit symmetric key — the same key type used by the AEAD surface. Build one with [NewKey](<#NewKey>); its String output is "\<redacted\>".
 
@@ -85,7 +94,7 @@ type Key = corecrypto.Key
 ```
 
 <a name="NewKey"></a>
-### func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L58>)
+### func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mac/mac.go#L66>)
 
 ```go
 func NewKey(raw []byte) (key Key, err error)

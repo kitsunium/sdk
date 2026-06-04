@@ -34,6 +34,7 @@ go_test(
     srcs = [
         "console_external_test.go",
         "console_internal_test.go",
+        "errors_external_test.go",
     ],
     embed = [":console"],
     deps = [

@@ -6,10 +6,13 @@ go_library(
     name = "writer",
     srcs = [
         "codes.go",
+        "config_clickhouse.go",
         "config_cloudwatch.go",
         "config_console.go",
         "config_decoder.go",
         "config_file.go",
+        "config_mysql.go",
+        "config_redis.go",
         "config_s3.go",
         "credentials.go",
         "errors.go",

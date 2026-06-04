@@ -60,20 +60,29 @@ func (s *routerSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 	return 0, NoMatch
 }
 
-// Flush forwards to every entry + fallback and aggregates per-sink errors.
+// Flush forwards to every distinct entry sink + fallback and aggregates
+// per-sink errors. A sink shared across entries (or an entry and the fallback,
+// V33) is flushed once so a non-idempotent terminal sink is not double-fsynced.
 func (s *routerSink) Flush(ctx context.Context) error {
 	//: collect per-sink errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.entries)+1)
+	//: dedup so a sink wired into several routes is flushed exactly once.
+	seen := make(map[corelogger.Sink]struct{}, len(s.entries)+1)
 	//: walk every entry in order; failures are captured but never short-circuit.
 	for _, entry := range s.entries {
-		//: every entry sees the flush regardless of upstream failures.
+		//: skip an entry sink already flushed via an earlier route.
+		if _, dup := seen[entry.Sink]; dup {
+			continue
+		}
+		seen[entry.Sink] = struct{}{}
+		//: every distinct entry sees the flush regardless of upstream failures.
 		if ferr := entry.Sink.Flush(ctx); ferr != nil {
 			//: append the failure to the join set.
 			collected = append(collected, ferr)
 		}
 	}
-	//: also flush the fallback when it exists.
-	if s.fallback != nil {
+	//: also flush the fallback when it exists and was not already flushed.
+	if _, dup := seen[s.fallback]; s.fallback != nil && !dup {
 		//: include the fallback in the joined error set.
 		if ferr := s.fallback.Flush(ctx); ferr != nil {
 			//: append the fallback failure too.
@@ -89,20 +98,30 @@ func (s *routerSink) Flush(ctx context.Context) error {
 	return nil
 }
 
-// Close forwards to every entry + fallback and aggregates per-sink errors.
+// Close forwards to every distinct entry sink + fallback and aggregates
+// per-sink errors. A sink shared across entries (or an entry and the fallback,
+// V33) is closed once so a non-idempotent terminal sink does not surface a
+// spurious double-close error.
 func (s *routerSink) Close() error {
 	//: collect per-sink errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.entries)+1)
+	//: dedup so a sink wired into several routes is closed exactly once.
+	seen := make(map[corelogger.Sink]struct{}, len(s.entries)+1)
 	//: walk every entry in order; failures are captured but never short-circuit.
 	for _, entry := range s.entries {
-		//: every entry sees the close regardless of upstream failures.
+		//: skip an entry sink already closed via an earlier route.
+		if _, dup := seen[entry.Sink]; dup {
+			continue
+		}
+		seen[entry.Sink] = struct{}{}
+		//: every distinct entry sees the close regardless of upstream failures.
 		if cerr := entry.Sink.Close(); cerr != nil {
 			//: append the failure to the join set.
 			collected = append(collected, cerr)
 		}
 	}
-	//: also close the fallback when it exists.
-	if s.fallback != nil {
+	//: also close the fallback when it exists and was not already closed.
+	if _, dup := seen[s.fallback]; s.fallback != nil && !dup {
 		//: include the fallback in the joined error set.
 		if cerr := s.fallback.Close(); cerr != nil {
 			//: append the fallback failure too.

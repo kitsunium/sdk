@@ -35,7 +35,7 @@
 //
 //	| Group               | Symbols                                                                     | Role |
 //	|---------------------|------------------------------------------------------------------------------|------|
-//	| Construction        | Default, NewText(Config), NewWithSink(SinkConfig)                            | Wire a Logger from explicit knobs OR a one-liner. Config has Writer (single) + Writers ([]io.Writer fan-out) — pick one. |
+//	| Construction        | Default, DefaultMulti(path), NewText(Config), NewWithSink(SinkConfig)        | Wire a Logger from explicit knobs OR a one-liner. Config has Writer (single) + Writers ([]io.Writer fan-out) — pick one. DefaultMulti fans console+file from one call (blank-import the writer pkg). |
 //	| Sinks (native)      | ConsoleStderr, ConsoleStdout, NewWriterSink(w), Multi(branches…)             | Native + io.Writer adapter + fan-out; bring custom Sink for DB/etc. |
 //	| Middleware          | multi, async, route, failover, sample, recover                               | Compose around a base Sink; same Sink interface chainable |
 //	| Encoders            | TextEncoder                                                                  | key=value lines on system clock (JSON/structured: internal today) |
@@ -57,9 +57,14 @@
 //	}
 //
 // [Default] returns the stderr one-liner equivalent in tests + scripts.
-// Pass [Config]{Writer: nil} and [NewText] returns the typed sentinel
-// [WriterRequired] — the pre-errors API silently defaulted to
-// os.Stderr; that was a breaking change recorded in ADR 0002.
+// [DefaultMulti] is the batteries-included service default: it fans
+// INFO-and-above records to BOTH the console AND a plain (non-rotating)
+// file from a single call — the caller blank-imports
+// github.com/kitsunium/sdk/pkg/v1/logger/writer to activate the two
+// named writers. Pass [Config]{Writer: nil} and [NewText] returns the
+// typed sentinel [WriterRequired] — the pre-errors API silently
+// defaulted to os.Stderr; that was a breaking change recorded in
+// ADR 0002.
 //
 // # Custom sink topology
 //
@@ -239,6 +244,36 @@ func NewText(cfg Config) (lg Logger, err error) {
 func Default() (lg Logger, err error) {
 	//: supply os.Stderr explicitly so NewText's WriterRequired check passes.
 	return NewText(Config{Writer: os.Stderr})
+}
+
+// DefaultMulti returns a Logger that fans INFO-and-above records out to BOTH
+// the console (stdout, the ConsoleConfig zero value) AND a plain file at path.
+// It is the batteries-included "perfect default" the SDK recommends for a
+// service: two destinations from one call, with NO rotation surface — the
+// plain "file" writer never rotates, so rotation stays opt-in (a caller wanting
+// size/age rotation reaches for the rotating writer explicitly).
+//
+// Unlike Default (stderr-only, no extra import), DefaultMulti resolves the
+// "console" and "file" writers through the registry, so the CALLER MUST
+// blank-import the writer package to activate them:
+//
+//	import (
+//	    "github.com/kitsunium/sdk/pkg/v1/logger"
+//	    _ "github.com/kitsunium/sdk/pkg/v1/logger/writer" // console + file
+//	)
+//
+//	lg, err := logger.DefaultMulti("/var/log/app.log")
+//
+// Without that import the file/console Names do not resolve and DefaultMulti
+// returns the registry's WriterUnknownName, surfaced through NewMulti.
+func DefaultMulti(path string) (lg Logger, err error) {
+	//: defer entirely to NewMulti so the rollback-on-failure + framework_version
+	//: stamping pipeline applies identically; this is a named-default convenience.
+	return NewMulti(
+		LevelInfo,
+		WriterSpec{Name: "console", Config: ConsoleConfig{}},
+		WriterSpec{Name: "file", Config: FileConfig{Path: path}},
+	)
 }
 
 // Debug emits a RecordEvent at LevelDebug through lg.

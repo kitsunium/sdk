@@ -1,53 +1,53 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-05-31T20:01:31.384Z",
+  "generatedAt": "2026-06-03T14:58:48.445Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
     {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "WithError — decompose a typed SDK error into log fields (competitive gaps)",
-      "sha": "7b97a92f526e172e2dac54a41cf7284729052ee6",
-      "short": "7b97a92",
-      "date": "2026-05-31T21:57:57+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "in-memory test sink — buffer records for assertions (competitive gaps)",
-      "sha": "502fd290bf11a468fbd43e0925df959901dd1d55",
-      "short": "502fd29",
-      "date": "2026-05-31T21:55:45+02:00"
-    },
-    {
-      "type": "feat",
-      "scope": "logger",
-      "breaking": false,
-      "summary": "WithCaller — opt-in source-location annotation (competitive gaps)",
-      "sha": "cef8058f682897429c788e32f07ce1f9201d7917",
-      "short": "cef8058",
-      "date": "2026-05-31T21:53:58+02:00"
-    },
-    {
       "type": "fix",
       "scope": "logger",
       "breaking": false,
-      "summary": "race-free FromConfig test + regenerate drifted READMEs (PR #57 CI)",
-      "sha": "bf4c7d2ee1ef359e5f9801181338aa573bef99f7",
-      "short": "bf4c7d2",
-      "date": "2026-05-31T16:36:30+02:00"
+      "summary": "resolve Qodo review findings on writer subsystem (PR #58)",
+      "sha": "636c793ad4374e5f39c57786e30c1775b90ccfb5",
+      "short": "636c793",
+      "date": "2026-06-03T11:25:46+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "ClickHouse database writer (native protocol, vendored driver)",
+      "sha": "ef2a15aa825ecea3d3b4da995605937b1ac26d19",
+      "short": "ef2a15a",
+      "date": "2026-06-02T13:42:44+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "Redis Stream database writer (local-protocol, vendored driver)",
+      "sha": "1b413fb5559e09d3bae4ee2fe3b3a70721f5157e",
+      "short": "1b413fb",
+      "date": "2026-06-02T13:35:49+02:00"
+    },
+    {
+      "type": "feat",
+      "scope": "logger",
+      "breaking": false,
+      "summary": "MySQL database writer (local-protocol, vendored driver)",
+      "sha": "c1a612f3c8a016baf7f5ed940f49fe56992568af",
+      "short": "c1a612f",
+      "date": "2026-06-02T13:25:21+02:00"
     },
     {
       "type": "fix",
-      "scope": "crypto",
+      "scope": "errs",
       "breaking": false,
-      "summary": "streamaead — reject short writes to the stream sink (PR #57 review)",
-      "sha": "2fd356da784673074cae933fc6d07c968a798695",
-      "short": "2fd356d",
-      "date": "2026-05-31T11:30:07+02:00"
+      "summary": "scan third-party/ in the AST audit so ADR-0012 writer codes are enforced (#53)",
+      "sha": "e8c78b5450e26e658caa2a02d92750027d4bd202",
+      "short": "e8c78b5",
+      "date": "2026-05-30T00:29:53+02:00"
     }
   ]
 }

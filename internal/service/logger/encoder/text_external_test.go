@@ -65,10 +65,10 @@ func TestTextEncoder_Append(t *testing.T) {
 			wantSuffixN: true,
 		},
 		{
-			name:        "time renders RFC3339Nano",
+			name:        "time renders with the header timestampLayout (RFC3339-with-millis)",
 			groups:      nil,
 			rec:         corelogger.RecordEvent{Level: level.Info, Message: "x", Attrs: []corelogger.AttrValue{{Key: "t", Value: corelogger.TimeValue(time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC))}}},
-			wantInLine:  []string{"t=2026-04-20T12:00:00Z"},
+			wantInLine:  []string{"t=2026-04-20T12:00:00.000Z"},
 			wantSuffixN: true,
 		},
 		{
@@ -145,6 +145,65 @@ func TestTextEncoder_Append_StripsFramingSensitiveBytes(t *testing.T) {
 			//: recoverable in the line ordering; no collapse / no deletion.
 			if !strings.Contains(payload, tc.want) {
 				t.Errorf("sanitizer did not replace framing bytes with space: got %q, want substring %q", payload, tc.want)
+			}
+		})
+	}
+}
+
+// TestTextEncoder_Append_StripsFramingBytesFromKeysAndGroups is the V110
+// regression: attribute KEYS and GROUP names were appended verbatim, so a raw
+// CR/LF/NUL in either field forged a second RFC5424/file-tail frame even though
+// the Message and string values were already scrubbed. It FAILS before the fix
+// (the framing byte leaks into the payload) and PASSES after.
+func TestTextEncoder_Append_StripsFramingBytesFromKeysAndGroups(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		groups []string
+		key    string
+	}{
+		{
+			name: "LF in attribute key cannot forge a frame",
+			//: a naive append of this key sprays a newline straight into the frame.
+			groups: nil,
+			key:    "user\nadmin",
+		},
+		{
+			name:   "CR in attribute key cannot forge a frame",
+			groups: nil,
+			key:    "user\radmin",
+		},
+		{
+			name:   "NUL in attribute key cannot forge a frame",
+			groups: nil,
+			key:    "user\x00admin",
+		},
+		{
+			name:   "LF in group name cannot forge a frame",
+			groups: []string{"http\ninjected"},
+			key:    "method",
+		},
+		{
+			name:   "CR + NUL across group and key are both scrubbed",
+			groups: []string{"svc\rauth"},
+			key:    "id\x00leak",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			enc := encoder.NewText(clock.System)
+			rec := corelogger.RecordEvent{
+				Level:   level.Info,
+				Message: "m",
+				Attrs:   []corelogger.AttrValue{{Key: tc.key, Value: corelogger.StringValue("v")}},
+			}
+			line := string(enc.Append(nil, tc.groups, rec))
+			//: the sole legitimate newline is the record terminator; strip it so a
+			//: framing byte that leaked from the key or group name is caught here.
+			payload := strings.TrimSuffix(line, "\n")
+			if strings.ContainsAny(payload, "\n\r\x00") {
+				t.Errorf("V110: framing byte leaked from key/group into frame: %q", payload)
 			}
 		})
 	}

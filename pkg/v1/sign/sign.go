@@ -49,8 +49,12 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/crypto/ed25519sig"
 )
 
-// Algorithm is the stable identifier of a signature scheme.
-type Algorithm = corecrypto.Algorithm
+// Algorithm is the stable identifier of a signature scheme. It is a defined type
+// distinct from the other crypto-family Algorithm types (hash, mac, kdf, …), so
+// the compiler rejects feeding a hash or MAC constant into a signature call
+// (V104) — the seven registries are separate keyspaces, and the type system now
+// enforces that separation the way typed Format/Level discipline does elsewhere.
+type Algorithm corecrypto.Algorithm
 
 // Ed25519 is the EdDSA signature scheme over Curve25519 (RFC 8032): a 256-bit
 // public key, fast constant-time verification, and no parameter choices.
@@ -64,22 +68,22 @@ const ECDSAP256 Algorithm = "ecdsa-p256"
 // and private key bytes. An unregistered algorithm returns
 // UnknownSignatureAlgorithm; treat priv as a secret.
 func GenerateKey(a Algorithm) (pub, priv []byte, err error) {
-	//: delegate to the core registry dispatcher.
-	return corecrypto.GenerateKey(a)
+	//: convert the domain-typed Algorithm to the core key at the boundary.
+	return corecrypto.GenerateKey(corecrypto.Algorithm(a))
 }
 
 // Sign returns a detached signature over message using priv under the named
 // scheme. An unregistered algorithm returns UnknownSignatureAlgorithm; a
 // malformed priv returns SigningFailed.
 func Sign(a Algorithm, priv, message []byte) (sig []byte, err error) {
-	//: delegate to the core registry dispatcher.
-	return corecrypto.Sign(a, priv, message)
+	//: convert the domain-typed Algorithm to the core key at the boundary.
+	return corecrypto.Sign(corecrypto.Algorithm(a), priv, message)
 }
 
 // Verify reports whether sig is a valid signature for message under pub for the
 // named scheme. An unregistered algorithm returns
 // (false, UnknownSignatureAlgorithm); an invalid signature is (false, nil).
 func Verify(a Algorithm, pub, message, sig []byte) (ok bool, err error) {
-	//: delegate to the core registry dispatcher.
-	return corecrypto.Verify(a, pub, message, sig)
+	//: convert the domain-typed Algorithm to the core key at the boundary.
+	return corecrypto.Verify(corecrypto.Algorithm(a), pub, message, sig)
 }

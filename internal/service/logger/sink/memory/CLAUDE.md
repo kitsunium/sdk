@@ -21,9 +21,10 @@ output. Mirrors apex/log's memory handler.
   (int, error)` / `Flush(ctx) error` / `Close() error`. `Write` ignores the
   encoder bytes `p` (it retains the structured record) but returns `len(p)`
   so the Handler's byte accounting stays consistent.
-- **Defensive snapshot.** `Write` stores a struct copy of the record with
-  `slices.Clone(r.Attrs)`, so later mutation of the caller's `Attrs` slice
-  cannot corrupt recorded history.
+- **Defensive snapshot.** `Write` stores a struct copy of the record with a
+  deep clone of `r.Attrs` (`deepCloneAttrs`) that recurses into nested
+  `KindGroup` payloads, so later mutation of the caller's `Attrs` slice — or
+  any slice handed to `GroupValue` — cannot corrupt recorded history (V37).
 - **RWMutex-guarded.** `Write` / `Reset` take the write lock; `Records` /
   `Len` take the read lock so concurrent assertions never block each other.
   `Len` returns the accepted-Write count (a second field beyond the guarded
@@ -52,3 +53,7 @@ Stdlib otherwise.
 ```
 bazel test --config=race //internal/service/logger/sink/memory:memory_test
 ```
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V41) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

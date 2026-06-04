@@ -2,13 +2,35 @@ package memory_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/service/logger/sink/memory"
 )
+
+const (
+	// kindCancelled cancels the context outright (context.Canceled).
+	kindCancelled cancelKind = iota
+	// kindDeadline gives the context a deadline already in the past
+	// (context.DeadlineExceeded) without sleeping.
+	kindDeadline
+)
+
+// cancelKind selects which flavour of context expiry a cancellation-identity
+// case exercises, so each row builds its own dead context deterministically.
+type cancelKind int
+
+// nilCtx is a typed nil context the nil-context contract tests pass to Write and
+// Flush; routing the untyped nil through a variable keeps the literal out of the
+// call site while still exercising the production ctx != nil guard.
+func nilCtx() context.Context {
+	//: returning a nil interface value drives the non-cancelled nil-ctx path.
+	return nil
+}
 
 // Test_NewMemory verifies that NewMemory returns an empty sink across the
 // construction scenarios.
@@ -173,6 +195,52 @@ func Test_Memory_Write_Defensive(t *testing.T) {
 			//: the stored level must match what was written.
 			if got[0].Level != tc.wantLevel {
 				t.Fatalf("level = %v, want %v", got[0].Level, tc.wantLevel)
+			}
+		})
+	}
+}
+
+// Test_Memory_Write_DeepClonesGroups verifies (V37) that mutating a nested
+// slice handed to GroupValue after Write does not corrupt the recorded
+// snapshot. Before the deep-clone fix the snapshot aliased the caller's nested
+// group slice, so this case observed the mutated value and failed.
+func Test_Memory_Write_DeepClonesGroups(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		wantValue string
+	}{
+		{name: "nested group child survives caller mutation", wantValue: "original"},
+	}
+
+	//: each deep-clone scenario is independent.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			//: the nested slice is the payload the caller hands to GroupValue.
+			nested := []corelogger.AttrValue{{Key: "inner", Value: corelogger.StringValue("original")}}
+			attrs := []corelogger.AttrValue{{Key: "grp", Value: corelogger.GroupValue(nested...)}}
+			m := memory.NewMemory()
+			n, err := m.Write(t.Context(), corelogger.RecordEvent{Message: "msg", Attrs: attrs}, nil)
+			//: Write must accept the record without error.
+			if err != nil {
+				t.Fatalf("Write returned error: %v (n=%d)", err, n)
+			}
+			//: mutate the nested slice the caller still holds a reference to.
+			nested[0] = corelogger.AttrValue{Key: "inner", Value: corelogger.StringValue("mutated")}
+
+			got := m.Records()
+			//: the snapshot's nested group must retain the value present at Write.
+			inner := got[0].Attrs[0].Value.Group()
+			//: the group must round-trip to exactly one child attribute.
+			if len(inner) != 1 {
+				t.Fatalf("nested group len = %d, want 1", len(inner))
+			}
+			//: the child value must be the pre-mutation literal, proving deep clone.
+			if v := inner[0].Value.String(); v != tc.wantValue {
+				t.Fatalf("nested group value = %q, want %q", v, tc.wantValue)
 			}
 		})
 	}
@@ -375,9 +443,9 @@ func Test_Memory_Concurrent(t *testing.T) {
 	}
 }
 
-// Test_Len verifies that Len reports the number of accepted Write calls and
-// resets to zero after Reset.
-func Test_Len(t *testing.T) {
+// Test_Memory_Len verifies that Len reports the number of accepted Write calls
+// and resets to zero after Reset.
+func Test_Memory_Len(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -411,6 +479,241 @@ func Test_Len(t *testing.T) {
 			//: Len must report the expected post-condition count.
 			if got := m.Len(); got != tc.wantAfter {
 				t.Fatalf("Len() = %d, want %d", got, tc.wantAfter)
+			}
+		})
+	}
+}
+
+// deadCtx returns a context already expired in the manner kind selects, so the
+// identity tests assert on the exact sentinel the production guard surfaces.
+func deadCtx(t *testing.T, kind cancelKind) context.Context {
+	t.Helper()
+	//: branch on the requested expiry flavour so the row controls the sentinel.
+	switch kind {
+	case kindCancelled:
+		//: cancel immediately so ctx.Err() is context.Canceled.
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		return ctx
+	case kindDeadline:
+		//: a past deadline makes ctx.Err() context.DeadlineExceeded without a sleep.
+		ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+		t.Cleanup(cancel)
+		return ctx
+	default:
+		//: an unknown kind is a test-author bug, not a runtime condition.
+		t.Fatalf("unknown cancelKind %d", kind)
+		return nil
+	}
+}
+
+// Test_Memory_Write_CancelledErrorIdentity verifies that Write surfaces the
+// exact cancellation cause of the supplied context, not a relabelled error, so
+// errors.Is keeps matching the stdlib sentinel.
+func Test_Memory_Write_CancelledErrorIdentity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		kind    cancelKind
+		wantErr error
+	}{
+		{name: "cancelled context returns context.Canceled", kind: kindCancelled, wantErr: context.Canceled},
+		{name: "deadline-exceeded context returns context.DeadlineExceeded", kind: kindDeadline, wantErr: context.DeadlineExceeded},
+	}
+
+	//: each cancellation flavour must surface its own sentinel.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := memory.NewMemory()
+			n, err := m.Write(deadCtx(t, tc.kind), corelogger.RecordEvent{Message: "dropped"}, []byte("ignored"))
+			//: the surfaced error must preserve the context's cancellation identity.
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Write err = %v, want errors.Is(%v)", err, tc.wantErr)
+			}
+			//: a cancelled Write must report zero bytes written.
+			if n != 0 {
+				t.Fatalf("n = %d, want 0 on cancellation", n)
+			}
+			//: a cancelled Write must skip the append entirely.
+			if got := m.Records(); got != nil {
+				t.Fatalf("expected no records after cancelled Write, got %v", got)
+			}
+		})
+	}
+}
+
+// Test_Memory_Flush_CancelledErrorIdentity verifies that Flush surfaces the
+// exact cancellation cause of the supplied context, mirroring Write's contract.
+func Test_Memory_Flush_CancelledErrorIdentity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		kind    cancelKind
+		wantErr error
+	}{
+		{name: "cancelled context returns context.Canceled", kind: kindCancelled, wantErr: context.Canceled},
+		{name: "deadline-exceeded context returns context.DeadlineExceeded", kind: kindDeadline, wantErr: context.DeadlineExceeded},
+	}
+
+	//: each cancellation flavour must surface its own sentinel.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := memory.NewMemory()
+			err := m.Flush(deadCtx(t, tc.kind))
+			//: the surfaced error must preserve the context's cancellation identity.
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Flush err = %v, want errors.Is(%v)", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// Test_Memory_Write_NilContext verifies that a nil context is treated as
+// non-cancelled, pinning the ctx != nil guard so Write buffers the record.
+func Test_Memory_Write_NilContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		payload []byte
+		message string
+	}{
+		{name: "nil context is treated as non-cancelled", payload: []byte("payload"), message: "kept"},
+	}
+
+	//: each nil-context scenario is independent.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := memory.NewMemory()
+			//: nil ctx must take the non-cancelled path rather than panic.
+			n, err := m.Write(nilCtx(), corelogger.RecordEvent{Message: tc.message}, tc.payload)
+			//: a nil context must not produce an error.
+			if err != nil {
+				t.Fatalf("Write err = %v, want nil for nil ctx", err)
+			}
+			//: the reported byte count must equal the payload length.
+			if n != len(tc.payload) {
+				t.Fatalf("n = %d, want %d", n, len(tc.payload))
+			}
+			got := m.Records()
+			//: the record must be buffered exactly once.
+			if len(got) != 1 {
+				t.Fatalf("expected 1 record, got %d", len(got))
+			}
+			//: the buffered record must carry the written message.
+			if got[0].Message != tc.message {
+				t.Fatalf("Records()[0].Message = %q, want %q", got[0].Message, tc.message)
+			}
+		})
+	}
+}
+
+// Test_Memory_Flush_NilContext verifies that Flush treats a nil context as
+// non-cancelled and returns no error.
+func Test_Memory_Flush_NilContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "nil context is treated as non-cancelled"},
+	}
+
+	//: each nil-context scenario is independent.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := memory.NewMemory()
+			//: nil ctx must take the non-cancelled path rather than panic.
+			err := m.Flush(nilCtx())
+			//: a nil context must not produce an error.
+			if err != nil {
+				t.Fatalf("Flush err = %v, want nil for nil ctx", err)
+			}
+		})
+	}
+}
+
+// Test_NewMemory_Len verifies that a freshly constructed sink reports a zero
+// write counter, pinning the writes-counter zero value.
+func Test_NewMemory_Len(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		wantLen int
+	}{
+		{name: "fresh sink has a zero write counter", wantLen: 0},
+	}
+
+	//: each construction scenario is independent.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := memory.NewMemory()
+			//: a never-written sink must report a zero accepted-write count.
+			if got := m.Len(); got != tc.wantLen {
+				t.Fatalf("Len() = %d, want %d", got, tc.wantLen)
+			}
+		})
+	}
+}
+
+// Test_Memory_ResetThenWrite verifies that the sink is fully reusable after
+// Reset: a second batch of writes neither inherits the pre-Reset records nor
+// the pre-Reset counter.
+func Test_Memory_ResetThenWrite(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		first   int
+		second  int
+		wantLen int
+	}{
+		{name: "sink is fully reusable after Reset", first: 5, second: 2, wantLen: 2},
+	}
+
+	//: each lifecycle scenario is independent.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := memory.NewMemory()
+			//: seed the pre-Reset batch that Reset must discard.
+			for range tc.first {
+				n, err := m.Write(t.Context(), corelogger.RecordEvent{Message: "before"}, nil)
+				//: each pre-Reset write must succeed.
+				if err != nil {
+					t.Fatalf("pre-Reset Write returned error: %v (n=%d)", err, n)
+				}
+			}
+			m.Reset()
+			//: write the post-Reset batch whose count the sink must report.
+			for range tc.second {
+				n, err := m.Write(t.Context(), corelogger.RecordEvent{Message: "after"}, nil)
+				//: each post-Reset write must succeed.
+				if err != nil {
+					t.Fatalf("post-Reset Write returned error: %v (n=%d)", err, n)
+				}
+			}
+			//: Records must hold only the post-Reset batch, not the sum of both.
+			if got := m.Records(); len(got) != tc.wantLen {
+				t.Fatalf("expected %d records after Reset+write, got %d", tc.wantLen, len(got))
+			}
+			//: the write counter must also reflect only the post-Reset batch.
+			if got := m.Len(); got != tc.wantLen {
+				t.Fatalf("Len() = %d, want %d after Reset+write", got, tc.wantLen)
 			}
 		})
 	}

@@ -11,6 +11,7 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/buffer"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/logger/encoder"
 )
@@ -29,6 +30,10 @@ type genericHandler struct {
 	groups []string
 	// min is the minimum level the handler emits; records below are dropped.
 	min level.Level
+	// clk sources the timestamp when RecordEvent.Time is the zero value. The
+	// handler owns the Time fill so the encoded line and any downstream sink
+	// share one coherent instant (V25).
+	clk clock.Clock
 }
 
 // NewHandler composes enc with sink and gates emission on the supplied
@@ -45,8 +50,8 @@ func NewHandler(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h c
 		//: caller supplied no sink — return the documented sentinel.
 		return nil, SinkRequired
 	}
-	//: hand back the configured handler behind the public Handler interface.
-	return &genericHandler{enc: enc, sink: sink, min: min}, nil
+	//: hand back the configured handler bound to the real wall clock.
+	return &genericHandler{enc: enc, sink: sink, min: min, clk: clock.System}, nil
 }
 
 // Enabled reports whether the handler would emit a record at r.Level, taking
@@ -75,6 +80,13 @@ func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) e
 			Private: "service/logger.genericHandler.Handle saw a cancelled context",
 		})
 	}
+	//: stamp Time once at the handler boundary when the caller left it zero so
+	//: the encoded line and any downstream sink observe one coherent instant
+	//: (V25). Sinks MUST NOT restamp a non-zero Time.
+	if r.Time.IsZero() {
+		//: source the instant from the injected clock so tests can freeze it.
+		r.Time = h.clk.Now()
+	}
 	//: borrow a buffer so the encoder writes into a recycled scratchpad.
 	bp := buffer.Get()
 	defer buffer.Put(bp)
@@ -95,8 +107,8 @@ func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) e
 func (h *genericHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler {
 	//: copy-on-write — child must not alias the parent's attrs slice.
 	cp := mergeAttrs(h.attrs, attrs)
-	//: share encoder/sink/min/groups, own a private attrs slice.
-	return &genericHandler{enc: h.enc, sink: h.sink, attrs: cp, groups: h.groups, min: h.min}
+	//: share encoder/sink/min/groups/clk, own a private attrs slice.
+	return &genericHandler{enc: h.enc, sink: h.sink, attrs: cp, groups: h.groups, min: h.min, clk: h.clk}
 }
 
 // WithGroup returns a derived genericHandler with the supplied group name
@@ -111,8 +123,8 @@ func (h *genericHandler) WithGroup(name string) corelogger.Handler {
 	cp := make([]string, len(h.groups)+1)
 	copy(cp, h.groups)
 	cp[len(h.groups)] = name
-	//: share encoder/sink/min/attrs, own a private groups slice.
-	return &genericHandler{enc: h.enc, sink: h.sink, attrs: h.attrs, groups: cp, min: h.min}
+	//: share encoder/sink/min/attrs/clk, own a private groups slice.
+	return &genericHandler{enc: h.enc, sink: h.sink, attrs: h.attrs, groups: cp, min: h.min, clk: h.clk}
 }
 
 // mergeAttrs returns a fresh slice combining parent and child attributes

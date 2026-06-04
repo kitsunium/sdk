@@ -44,7 +44,7 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0 — a signature 
 
 
 <a name="GenerateKey"></a>
-## func [GenerateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L66>)
+## func [GenerateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L70>)
 
 ```go
 func GenerateKey(a Algorithm) (pub, priv []byte, err error)
@@ -53,7 +53,7 @@ func GenerateKey(a Algorithm) (pub, priv []byte, err error)
 GenerateKey draws a fresh keypair for the named scheme, returning the public and private key bytes. An unregistered algorithm returns UnknownSignatureAlgorithm; treat priv as a secret.
 
 <a name="Sign"></a>
-## func [Sign](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L74>)
+## func [Sign](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L78>)
 
 ```go
 func Sign(a Algorithm, priv, message []byte) (sig []byte, err error)
@@ -62,7 +62,7 @@ func Sign(a Algorithm, priv, message []byte) (sig []byte, err error)
 Sign returns a detached signature over message using priv under the named scheme. An unregistered algorithm returns UnknownSignatureAlgorithm; a malformed priv returns SigningFailed.
 
 <a name="Verify"></a>
-## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L82>)
+## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L86>)
 
 ```go
 func Verify(a Algorithm, pub, message, sig []byte) (ok bool, err error)
@@ -71,12 +71,12 @@ func Verify(a Algorithm, pub, message, sig []byte) (ok bool, err error)
 Verify reports whether sig is a valid signature for message under pub for the named scheme. An unregistered algorithm returns \(false, UnknownSignatureAlgorithm\); an invalid signature is \(false, nil\).
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L53>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sign/sign.go#L57>)
 
-Algorithm is the stable identifier of a signature scheme.
+Algorithm is the stable identifier of a signature scheme. It is a defined type distinct from the other crypto\-family Algorithm types \(hash, mac, kdf, …\), so the compiler rejects feeding a hash or MAC constant into a signature call \(V104\) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 
 ```go
-type Algorithm = corecrypto.Algorithm
+type Algorithm corecrypto.Algorithm
 ```
 
 <a name="ECDSAP256"></a>ECDSAP256 is ECDSA over NIST P\-256 with SHA\-256 and ASN.1/DER signatures — the interoperable choice for JWT/X.509 ecosystems. Keys are DER\-marshalled.

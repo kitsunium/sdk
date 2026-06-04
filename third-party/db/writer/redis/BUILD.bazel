@@ -1,0 +1,57 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "redis",
+    srcs = [
+        "client.go",
+        "codes.go",
+        "errors.go",
+        "redis.go",
+        "redissink.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/db/writer/redis",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+        "//internal/service/writer/dbsink",
+        "@com_github_redis_go_redis_v9//:go-redis",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":redis",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "redis_test",
+    srcs = [
+        "client_internal_test.go",
+        "errors_external_test.go",
+        "errors_internal_test.go",
+        "redis_external_test.go",
+        "redis_internal_test.go",
+        "redissink_internal_test.go",
+    ],
+    embed = [":redis"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's *.go to the errs AST audit (ADR 0015); the
+# package defines new dotted-quad codes (0.3.34.*) so it must be listed in the
+# root //:audit_sources filegroup.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

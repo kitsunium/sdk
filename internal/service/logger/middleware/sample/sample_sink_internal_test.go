@@ -26,16 +26,27 @@ func Test_sampleSink_Write(t *testing.T) {
 	}{
 		{"rate 1 keeps every write", 1, 3},
 		{"rate 4 over 8 writes keeps 2", 4, 8},
+		{"rate 4 over 8 writes keeps 2 — verify returned n", 4, 8},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s := &sampleSink{downstream: noopDownstream{}, rate: tc.rate}
 			rec := corelogger.RecordEvent{Level: level.Info}
+			//: count kept writes — noopDownstream returns len(p), drops return 0.
+			var kept int
 			for range tc.writes {
-				if _, err := s.Write(t.Context(), rec, []byte("x")); err != nil {
+				n, err := s.Write(t.Context(), rec, []byte("x"))
+				if err != nil {
 					t.Errorf("Write err = %v", err)
 				}
+				if n > 0 {
+					kept++
+				}
+			}
+			//: deterministic 1-of-N selection must keep exactly writes/rate records.
+			if want := tc.writes / int(tc.rate); kept != want {
+				t.Errorf("kept writes (n>0) = %d, want %d", kept, want)
 			}
 		})
 	}

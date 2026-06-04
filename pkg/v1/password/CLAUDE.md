@@ -65,3 +65,7 @@ bazel test --config=race //pkg/v1/password:password_test
 # Fallback
 cd pkg/v1 && GOWORK=off go test -race -cover ./password/...
 ```
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V83) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

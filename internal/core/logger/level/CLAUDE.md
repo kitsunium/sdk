@@ -42,3 +42,7 @@ bazel test --config=race //internal/core/logger/level:level_test
 cd internal/core && GOWORK=off go test -race -cover ./logger/level/...
 # expected: 100% line coverage.
 ```
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V14) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

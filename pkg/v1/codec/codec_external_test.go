@@ -1819,3 +1819,57 @@ func TestMain(m *testing.M) {
 	//: run the regular test/bench suite; propagate the harness exit code.
 	os.Exit(m.Run())
 }
+
+// TestUnmarshal_CorruptBytesForwardsOriginReason_V75 asserts that decoding
+// genuinely corrupt wire bytes through a value-rich codec surfaces the codec's
+// own UNMARSHAL_FAILED reason (and a routable origin code), not the
+// PROMOTE_FAILED sentinel that masked it before the hasPromotionStrategy gate
+// (finding V75). The seven codecs below have no JSON-bridge promotion strategy,
+// so a wire fault must propagate untouched.
+func TestUnmarshal_CorruptBytesForwardsOriginReason_V75(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		format  codec.Format
+		corrupt []byte
+	}
+	//: one row per strategy-less codec; each input is malformed at the wire
+	//: level, so the codec emits UNMARSHAL_FAILED, never a value-shape miss.
+	tests := []tc{
+		{"json", codec.JSON, []byte("{ this is not json")},
+		{"cbor", codec.CBOR, []byte{0xff, 0xff, 0xff}},
+		{"msgpack", codec.MsgPack, []byte{0xc1}},
+		{"asn1", codec.ASN1DER, []byte{0x30, 0x80, 0x01}},
+		{"xml", codec.XML, []byte("<a><b></a>")},
+		{"toml", codec.TOML, []byte("key = = =")},
+		{"yaml", codec.YAML, []byte("a: b: c:\n  - [unbalanced")},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: decode malformed bytes into an arbitrary map target.
+		var out map[string]any
+		err := codec.Unmarshal(tc.format, tc.corrupt, &out)
+		//: a fault must be returned — corrupt bytes never decode clean.
+		if err == nil {
+			t.Fatalf("%s: expected an error decoding corrupt bytes, got nil", tc.name)
+		}
+		//: the origin reason must survive the dispatch unmasked (V75).
+		if !errs.HasReason(err, "UNMARSHAL_FAILED") {
+			t.Fatalf("%s: want origin reason UNMARSHAL_FAILED, missing", tc.name)
+		}
+		//: the masking sentinel must be absent — promotion never ran.
+		if errs.HasReason(err, "PROMOTE_FAILED") {
+			t.Fatalf("%s: PROMOTE_FAILED masked the origin error (V75)", tc.name)
+		}
+		//: a typed origin code must stay reachable for dotted-quad routing.
+		if _, ok := errs.CodeOf(err); !ok {
+			t.Fatalf("%s: origin code unreachable via errs.CodeOf", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}

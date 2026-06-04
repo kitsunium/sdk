@@ -26,3 +26,7 @@ path before closing the downstream sink.
 ## Error codes
 
 Slot 0x1c. See `codes.go`.
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V32) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

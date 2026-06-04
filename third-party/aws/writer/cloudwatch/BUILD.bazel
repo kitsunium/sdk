@@ -40,6 +40,7 @@ go_test(
         "client_internal_test.go",
         "cloudwatch_external_test.go",
         "cloudwatch_internal_test.go",
+        "codes_external_test.go",
         "cred_adapter_internal_test.go",
         "cwsink_internal_test.go",
     ],

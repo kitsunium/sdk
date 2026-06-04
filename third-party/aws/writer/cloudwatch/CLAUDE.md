@@ -19,7 +19,7 @@ only two places the AWS SDK enters a build — declared in the **root umbrella
 | `cw_event.go`    | `cwEvent` value type (timestamp + message) |
 | `client.go`      | `newDeliverFunc` — returns the AWS PutLogEvents closure (**only** AWS-importing file) |
 | `cred_adapter.go`| `credAdapter` — bridges `writer.CredentialProvider` → `aws.CredentialsProvider` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.25.\* (`ClientInitFailed`, `PutFailed`) |
+| `codes.go`, `errors.go` | sentinels — range 0.3.25.\* (`ClientInitFailed`, `PutFailed`, `EventRejected`) |
 
 ## Delivery model
 
@@ -28,7 +28,17 @@ only two places the AWS SDK enters a build — declared in the **root umbrella
 - `cwSink` turns each record into one `InputLogEvent` (carrying its
   `RecordEvent.Time`, falling back to now when zero) and coalesces events into a
   single `PutLogEvents` call — flushed at the event cap (default 1000, under the
-  CloudWatch 10000 ceiling), on the `FlushEvery` ticker, or on Flush/Close.
+  CloudWatch 10000 ceiling), at the **1 MiB summed-payload cap** (each event
+  weighs `len(msg)+26`, the AWS accounting — V84), on the `FlushEvery` ticker, or
+  on Flush/Close.
+- `deliverBatch` enforces the remaining `PutLogEvents` constraints before
+  delivery (V85): it **drops** any event whose timestamp is outside the per-event
+  window (older than 14 days or more than 2 hours in the future), surfacing each
+  drop to `OnError` as `EventRejected` rather than failing the whole batch; it
+  then stable-sorts the survivors chronologically and **splits** them into
+  sub-batches that each stay within the 1000-event, ~1 MiB-byte, and 24h-span
+  ceilings. A backfill mixing very old and fresh timestamps therefore ships as
+  several in-window sub-batches instead of one batch AWS rejects wholesale.
 - `async` (middleware) gives the non-blocking ring + producer-side `OnDrop`.
 - `levelgate` applies the per-writer `MinLevel` floor.
 

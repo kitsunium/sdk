@@ -1,0 +1,52 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "dbsink",
+    srcs = [
+        "dbsink.go",
+        "dbsink_config.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/writer/dbsink",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/batcher",
+        "//internal/kernel/clock",
+        "//internal/service/logger/middleware/async",
+        "//internal/service/writer/levelgate",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":dbsink",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "dbsink_test",
+    srcs = [
+        "dbsink_bench_test.go",
+        "dbsink_config_external_test.go",
+        "dbsink_internal_test.go",
+    ],
+    embed = [":dbsink"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/kernel/batcher",
+        "//internal/kernel/errs",
+        "//internal/service/logger",
+        "//internal/service/logger/encoder",
+        "//internal/service/logger/middleware/async",
+    ],
+)

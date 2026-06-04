@@ -6,7 +6,6 @@ package encoder
 
 import (
 	"strconv"
-	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
@@ -100,9 +99,11 @@ func appendHeader(dst []byte, r corelogger.RecordEvent) []byte {
 }
 
 // appendSanitizedMessage copies msg onto dst replacing '\n', '\r', and NUL
-// with a single space so Message content can never inject a new frame in a
+// with a single space so the content can never inject a new frame in a
 // line-framed downstream sink. Other control characters are preserved to
 // keep the rendering faithful; only framing-sensitive bytes are stripped.
+// It scrubs every attacker-influenceable textual field — the Message, group
+// names, and attribute keys — not just the Message (V110).
 func appendSanitizedMessage(dst []byte, msg string) []byte {
 	//: walk msg byte-by-byte; ASCII control-char check is cheap and the
 	//: allocation cost matches the existing append pattern in this file.
@@ -128,12 +129,16 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) [
 	dst = append(dst, ' ')
 	//: walk the group stack to emit "g1.g2.…" before the attribute key.
 	for _, g := range groups {
-		//: append each group name followed by the canonical separator.
-		dst = append(dst, g...)
+		//: scrub framing bytes from the group name — an attacker-influenced
+		//: group segment must not inject a second line into a syslog/file frame
+		//: any more than the Message can (V110).
+		dst = appendSanitizedMessage(dst, g)
 		dst = append(dst, groupSeparator)
 	}
-	//: render the attribute key followed by '=' and the typed value.
-	dst = append(dst, a.Key...)
+	//: render the attribute key followed by '=' and the typed value; the key
+	//: runs through the same framing-byte scrub as Message and group names so
+	//: no attacker-influenceable field can forge a frame boundary (V110).
+	dst = appendSanitizedMessage(dst, a.Key)
 	dst = append(dst, '=')
 	//: hand back the buffer with the encoded attribute appended.
 	return appendValueOnly(dst, a)
@@ -169,8 +174,9 @@ func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 		return strconv.AppendQuote(dst, a.Value.Duration().String())
 	//: timestamps render as RFC3339-with-millis to match the header format.
 	case corelogger.KindTime:
-		//: AppendFormat reuses the same layout as the line header.
-		return a.Value.Time().AppendFormat(dst, time.RFC3339Nano)
+		//: AppendFormat reuses timestampLayout — the SAME layout as the line
+		//: header — so a Time attr and the record timestamp share one shape.
+		return a.Value.Time().AppendFormat(dst, timestampLayout)
 	//: every other Kind degrades to '?' until structured encoders ship.
 	default:
 		//: '?' is the documented placeholder for unsupported variants.

@@ -27,9 +27,9 @@ type Sink = corelogger.Sink
 type Record = corelogger.RecordEvent
 
 // Encoder is the stable alias for the internal service encoder interface.
-// The default text encoder is exposed via TextEncoder; structured codecs
-// (json / ndjson) can be injected through NewWithCodec when callers need
-// machine-readable output.
+// The default text encoder is exposed via TextEncoder; structured output is
+// injected through NewWithSink via SinkConfig.Encoder (see NewJSONEncoder)
+// when callers need machine-readable output.
 type Encoder = encoder.Encoder
 
 // SinkConfig carries the construction parameters accepted by NewWithSink.

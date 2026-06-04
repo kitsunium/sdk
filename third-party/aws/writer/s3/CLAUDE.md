@@ -17,7 +17,7 @@ requires the root module — so `pkg/v1` consumers keep a zero-AWS module graph.
 | `s3sink.go`      | `s3Sink` batching terminal sink + `uploadFunc` seam (AWS-free, unit-tested) |
 | `client.go`      | `newUploadFunc` — returns the AWS PutObject closure (**only** AWS-importing file) |
 | `cred_adapter.go`| `credAdapter` — bridges `writer.CredentialProvider` → `aws.CredentialsProvider` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.24.\* (`ClientInitFailed`, `PutFailed`) |
+| `codes.go`, `errors.go` | sentinels — range 0.3.35.\* (`ClientInitFailed`, `PutFailed`) |
 
 ## Delivery model
 

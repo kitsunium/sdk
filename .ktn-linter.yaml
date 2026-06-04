@@ -145,6 +145,22 @@ rules:
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
 
+  # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
+  #
+  # console_external_test.go redirects the process-global os.Stdout / os.Stderr
+  # FD via a helper: captureStream(t, &os.Stdout, fn) performs `*target = wr`.
+  # These two tests (TestConsoleOpen_Write / TestConsoleOpen_WriteStderr) MUST
+  # stay serial — t.Parallel() would race concurrent FD swaps across sibling
+  # capture tests. The #379 "safe serial mutator" detection only recognises a
+  # DIRECT `os.Stdout = x` selector write in the test body; it does not see the
+  # global mutated through `&os.Stdout` passed to a helper, so it wrongly
+  # requires t.Parallel(). Filed kodflow/ktn-linter#388 proposing the heuristic
+  # be extended to exempt a test that lets `&<package-scope var>` escape into a
+  # call. RETIRE this block once #388 ships (mirror the 2026-05-28 retirements).
+  KTN-TEST-PARALLEL:
+    exclude:
+      - "**/internal/service/writer/console/console_external_test.go"
+
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on
   # v1.34.5 (current latest). With v1.34.5 + one code refactor, ALL FIVE are gone;

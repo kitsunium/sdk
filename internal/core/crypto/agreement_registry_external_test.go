@@ -56,6 +56,29 @@ func (failingAgreement) Shared(_, _ []byte) (secret []byte, err error) {
 	return nil, agreementStubErr{}
 }
 
+// leakyAgreement models a third-party scheme whose Shared returns its OWN
+// *errs.Error carrying a diagnostic Public/Private. It exercises finding V21:
+// errs.Wrap's origin-wins must NOT let a scheme *errs.Error inherit the public
+// boundary — the facade keeps CodeAgreementFailed and the "cause withheld"
+// message regardless of the cause's type.
+type leakyAgreement struct {
+	name crypto.Algorithm
+}
+
+func (f leakyAgreement) Algorithm() crypto.Algorithm { return f.name }
+
+func (leakyAgreement) GenerateKey() (pub, priv []byte, err error) { return nil, nil, nil }
+
+func (leakyAgreement) Shared(_, _ []byte) (secret []byte, err error) {
+	//: a typed sentinel whose Public/Private would leak under origin-wins.
+	return nil, errs.Wrap(agreementStubErr{}, errs.WrapParams{
+		Code:    crypto.CodeInvalidKey,
+		Reason:  "INVALID_KEY",
+		Public:  "scheme-leaked public detail",
+		Private: "scheme-leaked private detail with key=0xdeadbeef",
+	})
+}
+
 func TestRegisterAgreement(t *testing.T) {
 	type tc struct {
 		name string
@@ -205,6 +228,76 @@ func TestGenerateAgreementKey(t *testing.T) {
 		if err != nil || len(pub) == 0 || len(priv) == 0 {
 			t.Errorf("%s: GenerateAgreementKey=(%d,%d,%v)", c.name, len(pub), len(priv), err)
 		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestAgreementSharedRelabelsSchemeError is the V21 regression: when a scheme's
+// Shared returns its OWN *errs.Error, AgreementShared must still relabel to the
+// facade-owned CodeAgreementFailed at the public boundary and must NOT surface
+// the scheme's diagnostic Public/Private (which could carry key bytes). Before
+// the fix, errs.Wrap origin-wins inherited the scheme's Code/Public/Private and
+// the "cause withheld" guarantee was bypassed.
+func TestAgreementSharedRelabelsSchemeError(t *testing.T) {
+	crypto.RegisterAgreement(leakyAgreement{name: "shr-leaky-a"})
+	//: derive once; every case asserts a different property of the same error.
+	secret, err := crypto.AgreementShared("shr-leaky-a", []byte("priv"), []byte("peer"))
+	type tc struct {
+		name  string
+		check func(t *testing.T)
+	}
+	tests := []tc{
+		{
+			"no secret escapes the fault path",
+			func(t *testing.T) {
+				//: a leaked secret would defeat the whole guarantee.
+				if secret != nil {
+					t.Errorf("AgreementShared leaked secret %q on the fault path", secret)
+				}
+			},
+		},
+		{
+			"boundary code is the facade AgreementFailed",
+			func(t *testing.T) {
+				//: the facade owns the public boundary code, not the scheme.
+				if !errs.HasCode(err, crypto.CodeAgreementFailed) {
+					t.Errorf("AgreementShared err=%v want CodeAgreementFailed origin", err)
+				}
+			},
+		},
+		{
+			"scheme code is NOT inherited via origin-wins",
+			func(t *testing.T) {
+				//: origin-wins must not have inherited the scheme's InvalidKey code.
+				if errs.HasCode(err, crypto.CodeInvalidKey) {
+					t.Errorf("AgreementShared inherited scheme code CodeInvalidKey: %v", err)
+				}
+			},
+		},
+		{
+			"scheme Public does not leak",
+			func(t *testing.T) {
+				//: the boundary Public is the facade's withheld message.
+				if pub := errs.PublicOf(err); pub != "Key agreement failed to derive a shared secret" {
+					t.Errorf("AgreementShared leaked scheme Public %q", pub)
+				}
+			},
+		},
+		{
+			"scheme Private does not leak",
+			func(t *testing.T) {
+				//: the scheme's diagnostic Private must never surface.
+				if priv := errs.PrivateOf(err); priv == "scheme-leaked private detail with key=0xdeadbeef" {
+					t.Errorf("AgreementShared leaked scheme Private %q", priv)
+				}
+			},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		c.check(t)
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })

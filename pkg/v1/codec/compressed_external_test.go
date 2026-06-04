@@ -2,6 +2,9 @@
 package codec_test
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/binary"
 	"testing"
 
 	codec "github.com/kitsunium/sdk/pkg/v1/codec"
@@ -127,4 +130,94 @@ func Test_UnmarshalCompressed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_UnmarshalCompressed_CorruptInnerPayloadForwardsOrigin_V76 locks the
+// compressed.go doc contract ("codec and compressor faults are forwarded
+// untouched (origin wins)"). The frame's gzip body is valid and decompresses
+// cleanly to corrupt JSON, so the inner json codec — not the gzip transform —
+// rejects it. That fault must surface as UNMARSHAL_FAILED, not the
+// PROMOTE_FAILED that masked it before the V75 root-cause fix.
+func Test_UnmarshalCompressed_CorruptInnerPayloadForwardsOrigin_V76(t *testing.T) {
+	t.Parallel()
+	//: each row pairs an inner Format with a corrupt payload that the inner
+	//: codec — reached after a clean decompress — must reject.
+	cases := []struct {
+		name   string
+		format string
+		inner  []byte
+	}{
+		{"corrupt-inner-json", "json", []byte("{ this is not json")},
+	}
+	//: drive every framed corrupt payload through UnmarshalCompressed.
+	for _, tc := range cases {
+		//: the inner codec fault must reach the caller unmasked.
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: assemble a frame whose decompression succeeds so the inner
+			//: codec is the component that rejects the payload.
+			frame := buildCompressedFrameV76(tc.format, gzipPayloadV76(t, tc.inner))
+			//: decode target is irrelevant; the inner decode fails first.
+			var sink map[string]any
+			//: capture the forwarded fault once.
+			uerr := codec.UnmarshalCompressed(frame, &sink)
+			//: a fault must be returned — the inner payload is corrupt.
+			if uerr == nil {
+				//: silent success means the corruption was swallowed.
+				t.Fatalf("%s: expected an error, got nil", tc.name)
+			}
+			//: the inner codec's origin reason must survive (V76).
+			if !errs.HasReason(uerr, "UNMARSHAL_FAILED") {
+				//: a missing origin reason means it was replaced en route.
+				t.Fatalf("%s: want forwarded UNMARSHAL_FAILED, got %v", tc.name, uerr)
+			}
+			//: the masking sentinel must not leak through the wrapper.
+			if errs.HasReason(uerr, "PROMOTE_FAILED") {
+				//: PROMOTE_FAILED here is the V76 transitive regression.
+				t.Fatalf("%s: PROMOTE_FAILED masked the inner fault (V76)", tc.name)
+			}
+		})
+	}
+}
+
+// gzipPayloadV76 returns raw compressed with stdlib gzip, the same body shape
+// MarshalCompressed writes for the gzip algorithm, so a hand-built frame
+// decompresses cleanly and exercises the inner codec directly.
+func gzipPayloadV76(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	//: collect the compressed bytes in memory.
+	var buf bytes.Buffer
+	//: standard gzip writer matches the SDK's gzip transform body.
+	w := gzip.NewWriter(&buf)
+	//: write the raw inner bytes into the compressor.
+	if _, err := w.Write(raw); err != nil {
+		//: a write failure is a harness fault, not the contract.
+		t.Fatalf("gzip write failed: %v", err)
+	}
+	//: Close flushes the gzip trailer — required for a valid stream.
+	if err := w.Close(); err != nil {
+		//: a close failure is likewise a harness fault.
+		t.Fatalf("gzip close failed: %v", err)
+	}
+	//: the buffered bytes are a complete gzip stream.
+	return buf.Bytes()
+}
+
+// buildCompressedFrameV76 assembles the frozen self-describing frame layout
+// (magic 0xC7, version 0x01, gzip algID 0x01, 2-byte BE inner-Format length,
+// inner Format, compressed body) so a test controls the body independently of
+// MarshalCompressed.
+func buildCompressedFrameV76(format string, body []byte) []byte {
+	//: magic + frame version + gzip algorithm id.
+	frame := []byte{0xC7, 0x01, 0x01}
+	//: 2-byte big-endian inner-Format length field.
+	lenField := make([]byte, 2)
+	//: stamp the inner Format name length.
+	binary.BigEndian.PutUint16(lenField, uint16(len(format)))
+	//: append the length field, then the inner Format, then the body.
+	frame = append(frame, lenField...)
+	//: inner Format string travels next so Unmarshal needs no Format arg.
+	frame = append(frame, []byte(format)...)
+	//: compressed body closes the frame.
+	return append(frame, body...)
 }
