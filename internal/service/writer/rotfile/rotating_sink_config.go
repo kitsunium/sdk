@@ -3,6 +3,8 @@
 package rotfile
 
 import (
+	"time"
+
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
@@ -24,6 +26,13 @@ import (
 // either policy. The numeric .N backup naming is unchanged; calendar pruning
 // reads each sibling's on-disk mtime rather than a name-embedded stamp, so the
 // retention knobs are purely additive over the existing on-disk format.
+//
+// RotateEvery additionally drives a TIME-triggered rotation independent of
+// MaxBytes: when positive, a background ticker forces a rotation on each
+// interval (the "archive every 24h" policy), composing with the size threshold
+// and the MaxBackups / MaxAgeDays retention caps. It is opt-in — the zero value
+// keeps the prior size/manual-only behaviour, so plain file logging never spins
+// a goroutine it did not ask for.
 type Config struct {
 	// Path is the active destination file; it is opened
 	// O_APPEND|O_CREATE|O_WRONLY (+ O_NOFOLLOW on Linux) with mode 0600.
@@ -46,6 +55,20 @@ type Config struct {
 	// value (nil) falls back to clock.System. Injectable so tests prune
 	// deterministically without sleeping.
 	Clock clock.Clock
+	// RotateEvery, when strictly positive, starts a background ticker that
+	// forces a rotation on each interval regardless of size — the "archive
+	// every 24h" policy. A non-positive value (the zero default) disables the
+	// ticker entirely: no goroutine is spawned and rotation stays size- and
+	// manual-triggered. The ticker is joined on Close.
+	RotateEvery time.Duration
+	// OnError is invoked once for an interval-rotation (tick) failure, surfaced
+	// on the next Write under the mutex. A failing tick happens on the daemon
+	// goroutine where no caller can see it, so without this hook the operator
+	// has no signal an "archive every 24h" policy is broken; the callback gives
+	// a path to emit a counter or log to a fallback sink. nil disables the
+	// callback. The triggering record is still written either way — the hook
+	// reports the failure, it does not gate the write.
+	OnError func(err error)
 	// MinLevel is the optional per-writer severity floor; the zero value
 	// inherits the handler-global level.
 	MinLevel level.Level

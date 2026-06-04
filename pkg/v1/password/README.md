@@ -43,7 +43,7 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0; the PHC id segm
 
 
 <a name="Hash"></a>
-## func [Hash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L56>)
+## func [Hash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L60>)
 
 ```go
 func Hash(a Algorithm, password []byte) (phc string, err error)
@@ -52,7 +52,7 @@ func Hash(a Algorithm, password []byte) (phc string, err error)
 Hash returns a PHC\-string hash of password using the named scheme, with a fresh random salt and the scheme's current cost parameters. An unregistered algorithm returns UnknownPasswordAlgorithm. Store the returned string as\-is.
 
 <a name="NeedsRehash"></a>
-## func [NeedsRehash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L72>)
+## func [NeedsRehash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L76>)
 
 ```go
 func NeedsRehash(phc string) bool
@@ -61,7 +61,7 @@ func NeedsRehash(phc string) bool
 NeedsRehash reports whether the stored PHC hash was produced with cost parameters weaker than its scheme's current policy — call it after a successful Verify to transparently upgrade the stored hash.
 
 <a name="Verify"></a>
-## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L64>)
+## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L68>)
 
 ```go
 func Verify(password []byte, phc string) (ok bool, err error)
@@ -70,12 +70,12 @@ func Verify(password []byte, phc string) (ok bool, err error)
 Verify reports whether password matches the stored PHC hash, comparing in constant time. The scheme is read from phc. A malformed phc or unregistered scheme returns an error; a genuine mismatch is \(false, nil\).
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L48>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L52>)
 
-Algorithm is the stable identifier of a password\-hashing scheme; it is also the PHC id segment of hashes that scheme produces.
+Algorithm is the stable identifier of a password\-hashing scheme; it is also the PHC id segment of hashes that scheme produces. It is a defined type distinct from the other crypto\-family Algorithm types \(hash, mac, kdf, …\), so the compiler rejects feeding a hash or KDF constant into a password call \(V104\) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 
 ```go
-type Algorithm = corecrypto.Algorithm
+type Algorithm corecrypto.Algorithm
 ```
 
 <a name="PBKDF2SHA256"></a>PBKDF2SHA256 is PBKDF2\-SHA256 — the stdlib password stretcher \(RFC 8018\).

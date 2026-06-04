@@ -69,14 +69,21 @@ func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p 
 	}, errs.Int("attempts", len(s.chain)), errs.Int("level", int(rec.Level)))
 }
 
-// Flush forwards to every branch and aggregates per-branch errors via
-// errors.Join.
+// Flush forwards to every distinct branch and aggregates per-branch errors via
+// errors.Join. A sink reused across multiple chain slots (V33) is flushed once.
 func (s *failoverSink) Flush(ctx context.Context) error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.chain))
+	//: dedup so a shared sink instance is not double-flushed (double fsync).
+	seen := make(map[corelogger.Sink]struct{}, len(s.chain))
 	//: walk every branch in order; failures are captured but never short-circuit.
 	for _, branch := range s.chain {
-		//: every branch sees the flush regardless of upstream failures.
+		//: skip a branch pointer already flushed via an earlier slot.
+		if _, dup := seen[branch]; dup {
+			continue
+		}
+		seen[branch] = struct{}{}
+		//: every distinct branch sees the flush regardless of upstream failures.
 		if ferr := branch.Flush(ctx); ferr != nil {
 			//: append the failure to the join set without short-circuiting.
 			collected = append(collected, ferr)
@@ -91,14 +98,22 @@ func (s *failoverSink) Flush(ctx context.Context) error {
 	return nil
 }
 
-// Close forwards to every branch and aggregates per-branch errors via
-// errors.Join.
+// Close forwards to every distinct branch and aggregates per-branch errors via
+// errors.Join. A sink reused across multiple chain slots (V33) is closed once so
+// a non-idempotent terminal sink does not surface a spurious double-close error.
 func (s *failoverSink) Close() error {
 	//: collect per-branch errors so callers see every failure, not just the first.
 	collected := make([]error, 0, len(s.chain))
+	//: dedup so a shared sink instance is not double-closed (os.ErrClosed).
+	seen := make(map[corelogger.Sink]struct{}, len(s.chain))
 	//: walk every branch in order; failures are captured but never short-circuit.
 	for _, branch := range s.chain {
-		//: every branch sees the close regardless of upstream failures.
+		//: skip a branch pointer already closed via an earlier slot.
+		if _, dup := seen[branch]; dup {
+			continue
+		}
+		seen[branch] = struct{}{}
+		//: every distinct branch sees the close regardless of upstream failures.
 		if cerr := branch.Close(); cerr != nil {
 			//: append the failure to the join set without short-circuiting.
 			collected = append(collected, cerr)

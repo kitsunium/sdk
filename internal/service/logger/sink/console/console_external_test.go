@@ -1,9 +1,11 @@
 package console_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"testing"
 
@@ -238,6 +240,66 @@ func TestErrorsCarryConsoleCodes(t *testing.T) {
 			t.Parallel()
 			if !errs.HasCode(tc.err, tc.code) {
 				t.Errorf("HasCode(%v, %d) = false", tc.err, tc.code)
+			}
+		})
+	}
+}
+
+// TestConsoleSink_Write_RealPipe drives production Write through a real
+// os.Pipe (a kernel-backed file descriptor pair, not a bytes.Buffer) and reads
+// the bytes back from the other end, proving the sink performs genuine I/O.
+//
+// Lifecycle: spawns a single reader goroutine that blocks on the read FD and
+// exits when the producer closes the write end (EOF) — it always sends exactly
+// one value on the buffered channel, so it never leaks or orphans.
+func TestConsoleSink_Write_RealPipe(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"single record crosses the pipe verbatim", "real-pipe-line\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: os.Pipe yields real FDs; the write end is the production io.Writer.
+			rd, wr, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("os.Pipe err = %v", err)
+			}
+			t.Cleanup(func() {
+				if cerr := rd.Close(); cerr != nil {
+					t.Errorf("read end Close err = %v", cerr)
+				}
+			})
+			s, nerr := console.New(wr)
+			if nerr != nil {
+				t.Fatalf("New err = %v", nerr)
+			}
+			got := make(chan string, 1)
+			//: lifecycle: this goroutine blocks on the read FD until the producer
+			//: closes the write end (EOF below); it always terminates and reports
+			//: its single line on the buffered channel — no leak, no orphan.
+			go func() {
+				line, rerr := bufio.NewReader(rd).ReadString('\n')
+				if rerr != nil {
+					got <- ""
+					return
+				}
+				got <- line
+			}()
+			rec := corelogger.RecordEvent{Level: level.Info}
+			if _, werr := s.Write(t.Context(), rec, []byte(tc.want)); werr != nil {
+				t.Fatalf("Write err = %v", werr)
+			}
+			//: closing the write end flushes EOF so the reader unblocks deterministically.
+			if cerr := wr.Close(); cerr != nil {
+				t.Fatalf("write end Close err = %v", cerr)
+			}
+			//: the bytes observed on the read FD must match what production emitted.
+			if line := <-got; line != tc.want {
+				t.Errorf("pipe received %q, want %q", line, tc.want)
 			}
 		})
 	}

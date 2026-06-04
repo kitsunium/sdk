@@ -27,8 +27,8 @@ This package is for content IDs, cache keys, and dedup keys — NOT message auth
 
 Importing this package activates all of them with zero non\-stdlib deps:
 
-- [SHA256](<#SHA256>), [SHA512](<#SHA256>), [SHA3256](<#SHA256>) — cryptographic\-strength digests for content addressing and integrity \(collision\-resistant\).
-- [CRC32C](<#SHA256>), [FNV1a64](<#SHA256>) — fast NON\-cryptographic checksums/fingerprints for cache keys and in\-memory dedup; do NOT use them where collision resistance matters.
+- [SHA256](<#SHA256>), [SHA512](<#SHA512>), [SHA3256](<#SHA3256>) — cryptographic\-strength digests for content addressing and integrity \(collision\-resistant\).
+- [CRC32C](<#CRC32C>), [FNV1a64](<#FNV1a64>) — fast NON\-cryptographic checksums/fingerprints for cache keys and in\-memory dedup; do NOT use them where collision resistance matters.
 
 ### Stable algorithm strings
 
@@ -47,7 +47,7 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0 — a SumHex val
 
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L93>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L99>)
 
 ```go
 func New(a Algorithm) (h hash.Hash, err error)
@@ -56,7 +56,7 @@ func New(a Algorithm) (h hash.Hash, err error)
 New returns a fresh streaming hash.Hash for the named algorithm, for io.Copy over large inputs. An unregistered algorithm returns UnknownHashAlgorithm.
 
 <a name="Sum"></a>
-## func [Sum](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L79>)
+## func [Sum](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L85>)
 
 ```go
 func Sum(a Algorithm, data []byte) (digest []byte, err error)
@@ -65,7 +65,7 @@ func Sum(a Algorithm, data []byte) (digest []byte, err error)
 Sum returns the digest of data under the named algorithm. An unregistered algorithm returns UnknownHashAlgorithm.
 
 <a name="SumHex"></a>
-## func [SumHex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L86>)
+## func [SumHex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L92>)
 
 ```go
 func SumHex(a Algorithm, data []byte) (digest string, err error)
@@ -74,33 +74,46 @@ func SumHex(a Algorithm, data []byte) (digest string, err error)
 SumHex returns Sum as canonical lowercase hex — the frozen string form for content IDs and cache keys.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L54>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L73>)
 
-Algorithm is the stable identifier of a hash scheme.
+Algorithm is the stable identifier of a hash scheme. It is a defined type distinct from the other crypto\-family Algorithm types \(mac, sign, kdf, …\), so the compiler rejects feeding a MAC or signature constant into a hash call \(V104\) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 
 ```go
-type Algorithm = corecrypto.Algorithm
+type Algorithm corecrypto.Algorithm
 ```
 
-<a name="SHA256"></a>
+<a name="CRC32C"></a>CRC32C is CRC\-32C \(Castagnoli\): a fast NON\-cryptographic checksum.
 
 ```go
-const (
-    // SHA256 is SHA-256: a 256-bit cryptographic digest for content addressing.
-    SHA256 Algorithm = "sha256"
-    // SHA512 is SHA-512: a 512-bit cryptographic digest.
-    SHA512 Algorithm = "sha512"
-    // SHA3256 is SHA3-256: the Keccak-family 256-bit cryptographic digest.
-    SHA3256 Algorithm = "sha3-256"
-    // CRC32C is CRC-32C (Castagnoli): a fast NON-cryptographic checksum.
-    CRC32C Algorithm = "crc32c"
-    // FNV1a64 is FNV-1a 64-bit: a fast NON-cryptographic fingerprint.
-    FNV1a64 Algorithm = "fnv1a-64"
-)
+const CRC32C Algorithm = "crc32c"
+```
+
+<a name="FNV1a64"></a>FNV1a64 is FNV\-1a 64\-bit: a fast NON\-cryptographic fingerprint.
+
+```go
+const FNV1a64 Algorithm = "fnv1a-64"
+```
+
+<a name="SHA256"></a>SHA256 is SHA\-256: a 256\-bit cryptographic digest for content addressing.
+
+```go
+const SHA256 Algorithm = "sha256"
+```
+
+<a name="SHA3256"></a>SHA3256 is SHA3\-256: the Keccak\-family 256\-bit cryptographic digest.
+
+```go
+const SHA3256 Algorithm = "sha3-256"
+```
+
+<a name="SHA512"></a>SHA512 is SHA\-512: a 512\-bit cryptographic digest.
+
+```go
+const SHA512 Algorithm = "sha512"
 ```
 
 <a name="DigestWriter"></a>
-## type [DigestWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L71>)
+## type [DigestWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L77>)
 
 DigestWriter tees writes into both a destination io.Writer and a running hash, exposing the digest of everything written so far. See [NewDigestWriter](<#NewDigestWriter>).
 
@@ -109,7 +122,7 @@ type DigestWriter = stdhash.DigestWriter
 ```
 
 <a name="NewDigestWriter"></a>
-### func [NewDigestWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L102>)
+### func [NewDigestWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L108>)
 
 ```go
 func NewDigestWriter(a Algorithm, dst io.Writer) (writer *DigestWriter, err error)
@@ -118,7 +131,7 @@ func NewDigestWriter(a Algorithm, dst io.Writer) (writer *DigestWriter, err erro
 NewDigestWriter returns a DigestWriter that tees writes into dst while hashing them under the named algorithm, so the content\-address digest of everything written is available via Sum/SumHex. An unregistered algorithm returns UnknownHashAlgorithm.
 
 <a name="VerifyingReader"></a>
-## type [VerifyingReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L75>)
+## type [VerifyingReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L81>)
 
 VerifyingReader wraps a source reader and verifies its digest against an expected value on the final \(EOF\) read. See [NewVerifyingReader](<#NewVerifyingReader>).
 
@@ -127,7 +140,7 @@ type VerifyingReader = stdhash.VerifyingReader
 ```
 
 <a name="NewVerifyingReader"></a>
-### func [NewVerifyingReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L112>)
+### func [NewVerifyingReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/hash/hash.go#L118>)
 
 ```go
 func NewVerifyingReader(a Algorithm, src io.Reader, wantHex string) (reader *VerifyingReader, err error)

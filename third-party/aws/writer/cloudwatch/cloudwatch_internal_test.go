@@ -77,6 +77,16 @@ func Test_cwFactory_Open(t *testing.T) {
 			if !errs.HasCode(err, c.wantCode) {
 				t.Errorf("%s: HasCode(%v)=false, err=%v", c.name, c.wantCode, err)
 			}
+			//: the ClientInitFailed sentinel is Defined without WithExitCode, so its
+			//: wrap decays to the sysexits default EX_SOFTWARE (70). Pinning it here
+			//: means a future errs.WithExitCode on that sentinel would break this
+			//: assertion deliberately, forcing the change to be reviewed.
+			const wantClientInitExit int = 70
+			if c.wantCode == CodeCWClientInitFailed {
+				if got := errs.ExitCodeOf(err); got != wantClientInitExit {
+					t.Errorf("%s: ExitCodeOf=%d want %d", c.name, got, wantClientInitExit)
+				}
+			}
 			return
 		}
 		//: happy arm — a usable sink with no error (no network at build time).

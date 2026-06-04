@@ -92,8 +92,13 @@ const XChaCha20Poly1305 Algorithm = "xchacha20poly1305"
 // defaultAlgorithm is the scheme Seal uses when the caller does not pick one.
 const defaultAlgorithm Algorithm = AESGCM
 
-// Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs.
-type Algorithm = corecrypto.Algorithm
+// Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs. It
+// is a defined type distinct from the other crypto-family Algorithm types (hash,
+// mac, sign, …), so the compiler rejects feeding a hash or signature constant
+// into an AEAD call (V104) — the seven registries are separate keyspaces, and
+// the type system now enforces that separation the way typed Format/Level
+// discipline does elsewhere.
+type Algorithm corecrypto.Algorithm
 
 // Key is an opaque, redacting 256-bit symmetric key. Build one with NewKey; its
 // String output is always "<redacted>".
@@ -110,15 +115,15 @@ func NewKey(raw []byte) (key Key, err error) {
 // binding aad, and returns a self-describing box. The nonce is generated and
 // embedded for you. Pass nil aad when unused.
 func Seal(k Key, plaintext, aad []byte) (box []byte, err error) {
-	//: dispatch to the default scheme via the core registry.
-	return corecrypto.Seal(defaultAlgorithm, k, plaintext, aad)
+	//: convert the domain-typed Algorithm to the core key at the boundary.
+	return corecrypto.Seal(corecrypto.Algorithm(defaultAlgorithm), k, plaintext, aad)
 }
 
 // SealAs is Seal with an explicit algorithm — e.g. a scheme activated by its own
 // blank import. An unregistered algorithm returns UnknownAlgorithm.
 func SealAs(a Algorithm, k Key, plaintext, aad []byte) (box []byte, err error) {
-	//: caller-chosen scheme; UnknownAlgorithm if its package was not imported.
-	return corecrypto.Seal(a, k, plaintext, aad)
+	//: convert the domain-typed Algorithm to the core key at the boundary.
+	return corecrypto.Seal(corecrypto.Algorithm(a), k, plaintext, aad)
 }
 
 // Open decrypts a box produced by Seal/SealAs under k, verifying aad, and
@@ -134,8 +139,8 @@ func Open(k Key, box, aad []byte) (plaintext []byte, err error) {
 // they fill; Close writes the final authenticated chunk and MUST be called to
 // produce a valid stream. Pass nil aad when unused.
 func SealStream(dst io.Writer, k Key, aad []byte) (sealed io.WriteCloser, err error) {
-	//: dispatch to the stdlib streaming scheme via the core registry.
-	return corecrypto.SealStream(streamAlgorithm, k, dst, aad)
+	//: convert the domain-typed Algorithm to the core key at the boundary.
+	return corecrypto.SealStream(corecrypto.Algorithm(streamAlgorithm), k, dst, aad)
 }
 
 // OpenStream wraps src so reads are opened under k with aad, decrypting the
@@ -144,8 +149,8 @@ func SealStream(dst io.Writer, k Key, aad []byte) (sealed io.WriteCloser, err er
 // chunk verifies, and surfaces a truncated stream as StreamTruncated. Pass nil
 // aad when unused.
 func OpenStream(src io.Reader, k Key, aad []byte) (opened io.Reader, err error) {
-	//: dispatch to the stdlib streaming scheme via the core registry.
-	return corecrypto.OpenStream(streamAlgorithm, k, src, aad)
+	//: convert the domain-typed Algorithm to the core key at the boundary.
+	return corecrypto.OpenStream(corecrypto.Algorithm(streamAlgorithm), k, src, aad)
 }
 
 // WrapKey seals the data key dek at rest under passphrase, returning the frozen

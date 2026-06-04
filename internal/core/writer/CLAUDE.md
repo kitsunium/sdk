@@ -44,6 +44,55 @@ its own. **Secret gate:** a `Decode` that parses credentials out of the map MUST
 NOT echo any option value into the error it returns — name only the failure
 kind.
 
+## `depTier` — a first-class writer property (ADR 0015)
+
+Every writer has exactly one **`depTier`** — the property that tells a consumer
+what turning the writer on costs the dependency graph. It is **documented, not
+encoded**: a column in the table below and a sentence in each writer package's
+`CLAUDE.md`, never a Go field on `Factory` (encoding it would re-couple core to
+the very vendor tiers the tier exists to quarantine — ADR 0015 §"Why not encode
+`depTier`…"). Three values:
+
+| `depTier` | The writer's package imports… | Where it lives | Activation |
+|---|---|---|---|
+| `stdlib` | only the Go stdlib (+ kernel/core/service) | `internal/service/writer/*` (in-tree) | blank-import of the in-tree package, wired by `pkg/v1/logger` |
+| `vendor-root` | a vendor dep already in the **root** `go.mod` (nothing requires root) | `third-party/*` (root module) | opt-in blank import of the `third-party/*` package |
+| `third-party` | a vendor SDK quarantined so it never reaches `pkg/v1` | `third-party/*` (root module or own module) | opt-in blank import of the `third-party/*` package |
+
+**The never-in-tree rule (mechanical placement):** a writer whose `depTier` is
+anything other than `stdlib` MUST NOT have its factory package under
+`internal/service/writer/*`. The in-tree tree is **stdlib-only by
+construction**, so `go list -deps ./pkg/v1/...` is provably free of vendor SDKs
+without auditing every file. Enforced by the existing dep-light check (zero
+`x/crypto` / cloud / DB SDKs in `pkg/v1` deps) + Bazel visibility — not a new
+test.
+
+**Writer taxonomy (classes are documentation, not code — there is no class enum,
+field, or per-class interface; the registry stays a flat `Name → Factory` map):**
+
+| Class | Name(s) | Placement | depTier |
+|---|---|---|---|
+| console | `"console"` | `internal/service/writer/console` | `stdlib` |
+| file | `"file"`, `"rotfile"` | `internal/service/writer/{file,rotfile}` | `stdlib` |
+| transport | `"net"`, `"journald"` | `internal/service/writer/{nettransport,journald}` | `stdlib` |
+| api | `"s3"`, `"cloudwatch"` | `third-party/aws/writer/{s3,cloudwatch}` | `third-party` |
+| db | `"mysql"`, `"clickhouse"`, `"redis-stream"` | `third-party/db/writer/{mysql,clickhouse,redis}` | `third-party` |
+
+A `Decoder` (above) makes a writer's knobs **YAML-reachable** regardless of its
+tier. Adding a class is an ADR-level act (ADR 0015 §D1).
+
+### Middleware placement (transport behaviour is NOT a Factory concern)
+
+Batching, retries, async fan-out, encrypt-at-rest, rotation, and network I/O are
+**middleware / Sink behaviour**, not `Factory` behaviour. `Factory.Open` runs
+once and returns a `Sink`; everything stateful lives in the `Sink` it produces or
+in a reused `internal/service/logger/middleware/*`. A batching Sink that hands
+the payload across an async boundary **MUST copy** the caller's slice
+(`slices.Clone(p)` in `Write`) — the deliberate ownership-transfer copy the
+shipped `third-party/aws/writer/s3` sink already pays. Such a `Write` therefore
+makes **no 0-alloc claim**; the SDK's 0-alloc invariant is scoped to the producer
+hot path (`Build().Send()`), never to a batching `Write` (ADR 0015 §D5).
+
 ## Conventions
 
 - **`snapshot.Value`, not `sync.Map`** — factories register once at import, then
@@ -68,6 +117,11 @@ kind.
   themselves on import; core stays unaware of which writers exist.
 - Put transport behaviour (batching, retries, network I/O) in a `Factory` — that
   belongs in the `Sink` it produces (or a reused middleware).
+- Place a non-`stdlib` `depTier` writer under `internal/service/writer/*` — vendor-
+  backed writers live in `third-party/*` and are reached by opt-in blank import
+  only (the never-in-tree rule, ADR 0015 §D2).
+- Encode `depTier` as a `Factory` field — it is documented, never runtime data
+  (ADR 0015 §"Why not encode `depTier`…").
 
 ## Verification
 

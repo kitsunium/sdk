@@ -41,11 +41,19 @@ func (s *asyncSink) drainLoop(stop <-chan struct{}) {
 	//: spin-loop drains the ring; sleeps when empty until a stop signal arrives.
 	for {
 		//: read under ringMu so the SPSC ring never sees a concurrent
-		//: producer (async.Write under DropOldest also reads). Held for
-		//: the TryRead only — forward runs outside the lock to avoid
-		//: holding it across the downstream Write.
+		//: producer (async.Write under DropOldest also reads). On success
+		//: bump inFlight before releasing the lock so the record is never
+		//: invisible to Flush — Len() drops but inFlight rises atomically.
+		//: Held for the TryRead+incr only — forward runs outside the lock to
+		//: avoid holding it across the downstream Write.
 		s.ringMu.Lock()
 		ent, err := s.queue.TryRead()
+		//: count the just-read entry as in-flight before unlocking so a
+		//: concurrent Flush cannot sample Len()==0 with inFlight==0 yet.
+		if err == nil {
+			//: entry left the ring but is not yet delivered downstream.
+			s.inFlight++
+		}
 		s.ringMu.Unlock()
 		//: empty queue → fall through to the stop-channel select.
 		if err == nil {
@@ -74,6 +82,13 @@ func (s *asyncSink) forward(ent *recordEntry) {
 	//: through the configured OnError callback (or no-op default).
 	n, err := s.downstream.Write(asyncCtx(), ent.rec, ent.data)
 	s.forwardDownstreamError(n, err)
+	//: delivery is complete (written downstream or surfaced via OnError) —
+	//: drop the in-flight count under ringMu so Flush can observe the record
+	//: as fully accounted for. Done before flushSignal so a woken Flush
+	//: re-sampling inFlight sees the decremented value.
+	s.ringMu.Lock()
+	s.inFlight--
+	s.ringMu.Unlock()
 	//: signal any Flush waiter that progress was made — non-blocking send
 	//: so an idle-Flush-less sink never stalls the drainer.
 	select {
@@ -103,9 +118,16 @@ func (s *asyncSink) drainRemaining() {
 	//: keep reading until TryRead reports Empty.
 	for {
 		//: pull the next entry without blocking, under ringMu for SPSC
-		//: safety (DropOldest's producer-side TryRead shares the ring).
+		//: safety (DropOldest's producer-side TryRead shares the ring). On
+		//: success bump inFlight before unlocking so a concurrent Flush sees
+		//: the entry as undelivered even after Len() drops to zero.
 		s.ringMu.Lock()
 		ent, err := s.queue.TryRead()
+		//: count the just-read entry as in-flight before unlocking.
+		if err == nil {
+			//: entry left the ring but is not yet delivered downstream.
+			s.inFlight++
+		}
 		s.ringMu.Unlock()
 		//: empty queue ends the close-time flush.
 		if err != nil {

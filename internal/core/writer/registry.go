@@ -56,7 +56,7 @@ func Register(f Factory) Factory {
 	//: nil registration is always a programming error.
 	if f == nil {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("writer.Register [%d WRITER_NIL]: nil Factory", CodeWriterNil))
+		panic(fmt.Sprintf("writer.Register [%s WRITER_NIL]: nil Factory", CodeWriterNil))
 	}
 	//: the canonical Name is the primary key.
 	name := f.Name()
@@ -64,7 +64,7 @@ func Register(f Factory) Factory {
 	//: boot so it can never leak into Lookup / Open / Available.
 	if name == "" {
 		//: panic so the offending factory is visible at boot.
-		panic(fmt.Sprintf("writer.Register [%d WRITER_NAME_EMPTY]: empty Name", CodeWriterNameEmpty))
+		panic(fmt.Sprintf("writer.Register [%s WRITER_NAME_EMPTY]: empty Name", CodeWriterNameEmpty))
 	}
 	//: publish the factory under the writer lock; duplicate Name is a hard conflict.
 	if err := publishFactory(name, f); err != nil {
@@ -96,7 +96,7 @@ func publishFactory(name Name, f Factory) error {
 				}
 				//: a DISTINCT factory under a taken Name is the hard conflict;
 				//: wrap the sentinel so errors.Is finds the chain, then abort.
-				dupErr = fmt.Errorf("writer.Register [%d %w]: duplicate Name %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
+				dupErr = fmt.Errorf("writer.Register [%s %w]: duplicate Name %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}

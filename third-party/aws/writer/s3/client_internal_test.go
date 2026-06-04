@@ -91,6 +91,61 @@ func stubPutObject(capture *awss3.PutObjectInput, retErr error) func(*awss3.Opti
 	}
 }
 
+// captureOptions returns an s3 client option that records the final
+// *awss3.Options into dst after every earlier option func has run. It is
+// appended last so the test reads the fully-resolved endpoint state.
+func captureOptions(dst *awss3.Options) func(*awss3.Options) {
+	return func(o *awss3.Options) {
+		//: snapshot the resolved options so the test can assert endpoint wiring.
+		*dst = *o
+	}
+}
+
+func Test_newUploadFunc_endpoint(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		endpoint string
+		wantBase string
+		wantPath bool
+	}
+	tests := []tc{
+		//: a custom endpoint drives the path-style override (client.go:37-40).
+		{"custom endpoint forces base + path-style", "http://localhost:9999", "http://localhost:9999", true},
+		//: the empty default leaves BaseEndpoint unset and path-style off.
+		{"empty endpoint leaves defaults", "", "", false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var capturedOpts awss3.Options
+		var captured awss3.PutObjectInput
+		cfg := writer.S3Config{Bucket: "bucket", Region: "eu-west-3", Endpoint: c.endpoint, Credentials: fakeProvider{}}
+		//: the capture option runs after the endpoint branch; the stub keeps it offline.
+		up, err := newUploadFunc(cfg, captureOptions(&capturedOpts), stubPutObject(&captured, nil))
+		if err != nil {
+			t.Fatalf("%s: newUploadFunc: %v", c.name, err)
+		}
+		//: BaseEndpoint must reflect the configured endpoint (or stay unset).
+		if got := aws.ToString(capturedOpts.BaseEndpoint); got != c.wantBase {
+			t.Errorf("%s: BaseEndpoint=%q want %q", c.name, got, c.wantBase)
+		}
+		//: path-style is required for non-AWS endpoints; the empty arm must not set it.
+		if capturedOpts.UsePathStyle != c.wantPath {
+			t.Errorf("%s: UsePathStyle=%v want %v", c.name, capturedOpts.UsePathStyle, c.wantPath)
+		}
+		//: the stub short-circuits the real PutObject, proving the closure still runs.
+		if uerr := up(t.Context(), "k", []byte("body")); uerr != nil {
+			t.Errorf("%s: upload err=%v want nil", c.name, uerr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func TestUploadFuncContract(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("put boom")

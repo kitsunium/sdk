@@ -58,6 +58,10 @@ const (
 
 	// decimalBase is the base used to format diagnostic numbers.
 	decimalBase int = 10
+
+	// recordsPerPair is the number of child TLV records a map pair or a
+	// struct field frames on the wire (key+value, or name+value).
+	recordsPerPair uint64 = 2
 )
 
 // Wire-format tag constants — assigned in stable byte ranges grouped by

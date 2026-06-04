@@ -33,6 +33,11 @@ func (s *rotatingSink) rotate() error {
 	}
 	//: shift Path.N-1 -> Path.N … and rename Path -> Path.1 (+ optional gzip).
 	if serr := s.shiftBackups(); serr != nil {
+		//: V45: the active fd is already closed; without a reopen s.f stays a dead
+		//: descriptor and every later Write re-enters rotate() -> Close-on-closed ->
+		//: bricked sink. Reopen Path + re-seed s.size so the sink self-heals on the
+		//: next Write while still surfacing this transient shift failure.
+		s.reopenAfterFailure()
 		//: the shift already wrapped its own diagnostic.
 		return serr
 	}
@@ -40,7 +45,12 @@ func (s *rotatingSink) rotate() error {
 	f, oerr := openHardened(s.cfg.Path)
 	//: a reopen failure leaves the sink unusable — surface it.
 	if oerr != nil {
-		//: origin wins — RotFileOpenFailed already set the code/reason.
+		//: V45: re-seed size to 0 so the next maybeRotate does not immediately
+		//: re-enter rotate() on the still-closed descriptor; the next Write retries
+		//: the open via reopenAfterFailure and the sink self-heals once the transient
+		//: condition clears. origin wins — RotFileOpenFailed already set code/reason.
+		s.reopenAfterFailure()
+		//: surface the reopen failure; the sink will retry the open next Write.
 		return oerr
 	}
 	//: adopt the new descriptor and reset the byte counter.
@@ -50,6 +60,35 @@ func (s *rotatingSink) rotate() error {
 	//: MaxAgeDays is non-positive); a prune failure surfaces under the rotate
 	//: sentinel without losing the freshly reopened descriptor.
 	return s.pruneByAge()
+}
+
+// reopenAfterFailure best-effort reopens Path through openHardened after a
+// rotation step failed with the active descriptor already closed, so the sink
+// self-heals on the next Write instead of latching into a permanently-closed
+// state (V45). It re-seeds s.size from the reopened file; on a still-failing
+// reopen it resets s.size to 0 so the next maybeRotate does not immediately
+// re-enter rotate() on the dead descriptor — the next Write retries the open.
+// The caller holds s.mu and returns the original (more informative) error.
+func (s *rotatingSink) reopenAfterFailure() {
+	//: try the same hardened open the happy path uses; failure is non-fatal here.
+	f, oerr := openHardened(s.cfg.Path)
+	//: a still-failing reopen leaves no usable descriptor — reset size so the
+	//: next Write retries the open rather than thrashing rotate() on a dead fd.
+	if oerr != nil {
+		//: keep s.f as-is (already closed) but neutralise the size trigger.
+		s.size = 0
+		//: nothing more to recover here; the next Write retries the open.
+		return
+	}
+	//: adopt the recovered descriptor in place of the closed one.
+	s.f = f
+	//: re-seed size from the reopened file so the next threshold check is honest.
+	s.size = 0
+	//: an existing file (e.g. a Path.1 rename that never happened) still counts.
+	if fi, serr := f.Stat(); serr == nil {
+		//: existing content counts toward the next rotation threshold.
+		s.size = fi.Size()
+	}
 }
 
 // shiftBackups renames the rotated siblings down by one (dropping the oldest

@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"testing"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
@@ -178,6 +179,77 @@ func Test_mergeAttrs(t *testing.T) {
 	}
 }
 
+// Test_genericHandler_Handle_timeOwnership is the V25 regression: Time is
+// owned by the handler layer. A zero RecordEvent.Time MUST be stamped once
+// from the injected clock (so the sink observes that instant, not the zero
+// value — fails pre-fix when genericHandler held no clock), and a non-zero
+// Time MUST NOT be restamped (guards against the V24 reintroduction).
+func Test_genericHandler_Handle_timeOwnership(t *testing.T) {
+	t.Parallel()
+	clockInstant := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
+	callerInstant := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name       string
+		recorder   time.Time
+		wantInSink time.Time
+	}{
+		{"zero Time is stamped from the injected clock", time.Time{}, clockInstant},
+		{"non-zero Time is preserved (no restamp)", callerInstant, callerInstant},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTimeOwnershipCase(t, clockInstant, tc.recorder, tc.wantInSink)
+		})
+	}
+}
+
+// runTimeOwnershipCase drives one V25 Time-ownership scenario: it builds a
+// handler bound to a frozen clock, hands it a record carrying recorder, and
+// asserts the capturing sink observed wantInSink.
+func runTimeOwnershipCase(tb testing.TB, clockInstant, recorder, wantInSink time.Time) {
+	tb.Helper()
+	sink := &timeCaptureSink{}
+	h := &genericHandler{
+		enc:  encoder.NewText(frozenClock{at: clockInstant}),
+		sink: sink,
+		min:  level.Debug,
+		clk:  frozenClock{at: clockInstant},
+	}
+	if err := h.Handle(context.Background(), corelogger.RecordEvent{Time: recorder, Level: level.Info, Message: "m"}); err != nil {
+		tb.Fatalf("Handle err = %v", err)
+	}
+	if !sink.seen.Equal(wantInSink) {
+		tb.Errorf("sink observed Time = %v, want %v", sink.seen, wantInSink)
+	}
+}
+
+// Test_NewHandler_defaultsClockToSystem is the default-clock half of V25:
+// NewHandler must wire clock.System so a zero-Time record is stamped with a
+// live, non-zero instant.
+func Test_NewHandler_defaultsClockToSystem(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"NewHandler wires a live system clock"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := mustNewGeneric(t, level.Debug)
+			//: NewHandler must default clk to clock.System, never leave it nil.
+			if h.clk == nil {
+				t.Fatal("NewHandler left clk nil; want clock.System default")
+			}
+			//: a live clock yields a non-zero instant on Now.
+			if h.clk.Now().IsZero() {
+				t.Error("default clock returned zero time; want live system instant")
+			}
+		})
+	}
+}
+
 func mustNewGeneric(tb testing.TB, min level.Level) *genericHandler {
 	tb.Helper()
 	enc := encoder.NewText(clock.System)
@@ -199,3 +271,36 @@ func mustNewGeneric(tb testing.TB, min level.Level) *genericHandler {
 type discardWriter struct{}
 
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+// frozenClock returns a fixed instant so V25 timestamp ownership can be
+// asserted deterministically.
+type frozenClock struct {
+	// at is the constant instant Now reports.
+	at time.Time
+}
+
+// Now returns the frozen instant.
+func (f frozenClock) Now() time.Time { return f.at }
+
+// Since returns the gap between the frozen instant and t.
+func (f frozenClock) Since(t time.Time) time.Duration { return f.at.Sub(t) }
+
+// timeCaptureSink records the RecordEvent.Time it last observed so a test can
+// assert which layer stamped the instant (V25).
+type timeCaptureSink struct {
+	// seen is the Time of the most recent record handed to Write.
+	seen time.Time
+}
+
+// Write records the observed Time and discards the bytes.
+func (s *timeCaptureSink) Write(_ context.Context, r corelogger.RecordEvent, p []byte) (int, error) {
+	//: capture the instant the sink observed so the test can compare it.
+	s.seen = r.Time
+	return len(p), nil
+}
+
+// Flush is a no-op for the capture sink.
+func (s *timeCaptureSink) Flush(_ context.Context) error { return nil }
+
+// Close is a no-op for the capture sink.
+func (s *timeCaptureSink) Close() error { return nil }

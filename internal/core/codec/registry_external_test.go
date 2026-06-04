@@ -1,6 +1,9 @@
 package codec_test
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -298,5 +301,132 @@ func TestRegistryEmptyMisses(t *testing.T) {
 	//: Available must return the documented nil slice when nothing is registered.
 	if got := codec.Available(); got != nil {
 		t.Errorf("Available() = %v, want nil on empty registry", got)
+	}
+}
+
+// recoverPanicMessage runs fn and returns the recovered panic value rendered
+// as a string. Register panics with a string payload by design (the dotted-quad
+// boot message), so the rendered form IS the contract under audit for findings
+// V16 / V18 — there is no *errs.Error value to route on.
+func recoverPanicMessage(t *testing.T, fn func()) (msg string) {
+	t.Helper()
+	//: classic recover isolated in a helper so the assertion stays flat.
+	defer func() {
+		//: capture and stringify the panic payload for inspection.
+		if r := recover(); r != nil {
+			//: %v renders both string and error payloads uniformly.
+			msg = fmt.Sprintf("%v", r)
+		}
+	}()
+	//: execute under observation.
+	fn()
+	//: no panic — empty result signals the missing-panic failure to the caller.
+	return ""
+}
+
+// TestRegister_NilUsesCodecNilCode is the V18 regression: Register(nil) must
+// report the dedicated CODEC_NIL code (0.2.2.5), NOT the misleading
+// DUPLICATE_REGISTRATION reason/code it conflated before the fix. Pre-fix the
+// message read "[131585 DUPLICATE_REGISTRATION]"; this asserts the dotted-quad
+// CodeCodecNil and the CODEC_NIL reason, and the absence of the wrong reason.
+func TestRegister_NilUsesCodecNilCode(t *testing.T) {
+	//: clean slate so an unrelated leftover cannot satisfy the assertion.
+	codec.ResetForTest()
+	type tc struct {
+		name      string
+		substr    string
+		wantFound bool
+	}
+	tests := []tc{
+		//: the dedicated dotted-quad code must appear (0.2.2.5 via Code.String()).
+		{"dotted-quad CodeCodecNil present", codec.CodeCodecNil.String(), true},
+		//: the dedicated reason must appear so operator triage is not misled.
+		{"CODEC_NIL reason present", "CODEC_NIL", true},
+		//: the OLD wrong reason must be gone — proves the conflation was removed.
+		{"DUPLICATE_REGISTRATION reason absent", "DUPLICATE_REGISTRATION", false},
+	}
+	msg := recoverPanicMessage(t, func() { codec.Register(nil) })
+	//: missing panic is an outright failure — Register(nil) must always abort.
+	if msg == "" {
+		t.Fatal("V18: Register(nil) did not panic")
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: assert presence or absence of the substring per the row's intent.
+		if got := strings.Contains(msg, c.substr); got != c.wantFound {
+			t.Errorf("V18 %s: Contains(%q)=%v, want %v (msg=%q)", c.name, c.substr, got, c.wantFound, msg)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestRegister_PanicsRenderDottedQuad is the V16 regression: every Register
+// boot-failure message must render the Code as its canonical dotted-quad
+// (Code.String()), never the raw decimal an integer-underlying %d emits.
+// Pre-fix the duplicate-Name message read "[131585 DUPLICATE_REGISTRATION]";
+// this asserts the dotted form is present and the decimal form is absent so
+// the CLAUDE.md rule-4 log-parser regex matches.
+func TestRegister_PanicsRenderDottedQuad(t *testing.T) {
+	type tc struct {
+		name    string
+		run     func()
+		wantDot string
+		notDec  string
+	}
+	tests := []tc{
+		{
+			//: nil path → CodeCodecNil rendered dotted, never its decimal.
+			name:    "nil panic renders dotted-quad",
+			run:     func() { codec.Register(nil) },
+			wantDot: codec.CodeCodecNil.String(),
+			notDec:  strconv.FormatUint(uint64(codec.CodeCodecNil), 10),
+		},
+		{
+			//: duplicate Name path → CodeDuplicateRegistration dotted, not decimal.
+			name: "duplicate Name panic renders dotted-quad",
+			run: func() {
+				dup := &mockCodec{name: "v16-dup", mime: []string{"m/v16"}, ext: []string{".v16"}}
+				codec.Register(dup)
+				codec.Register(dup)
+			},
+			wantDot: codec.CodeDuplicateRegistration.String(),
+			notDec:  strconv.FormatUint(uint64(codec.CodeDuplicateRegistration), 10),
+		},
+		{
+			//: alias-conflict path → same dotted-quad rendering requirement.
+			name: "alias conflict panic renders dotted-quad",
+			run: func() {
+				a := &mockCodec{name: "v16-a", mime: []string{"application/x-v16"}}
+				b := &mockCodec{name: "v16-b", mime: []string{"application/x-v16"}}
+				codec.Register(a)
+				codec.Register(b)
+			},
+			wantDot: codec.CodeDuplicateRegistration.String(),
+			notDec:  strconv.FormatUint(uint64(codec.CodeDuplicateRegistration), 10),
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: each case mutates the process-wide registry — reset for isolation.
+		codec.ResetForTest()
+		msg := recoverPanicMessage(t, c.run)
+		//: a missing panic fails the case — the boot guard must fire.
+		if msg == "" {
+			t.Fatalf("%s: expected panic, got none", c.name)
+		}
+		//: the dotted-quad form must be present (Code.String()).
+		if !strings.Contains(msg, c.wantDot) {
+			t.Errorf("%s: panic %q missing dotted-quad %q", c.name, msg, c.wantDot)
+		}
+		//: the raw decimal must be ABSENT — its presence is the V16 bug.
+		if strings.Contains(msg, c.notDec) {
+			t.Errorf("%s: panic %q still renders raw decimal %q (want dotted-quad)", c.name, msg, c.notDec)
+		}
+	}
+	for _, c := range tests {
+		//: sequential — Register mutates the process-wide registry.
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }

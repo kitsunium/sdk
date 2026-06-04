@@ -6,6 +6,7 @@ go_library(
     name = "recover",
     srcs = [
         "codes.go",
+        "config.go",
         "errors.go",
         "panic_value.go",
         "recover_sink.go",
@@ -42,5 +43,6 @@ go_test(
         "//internal/core/logger",
         "//internal/core/logger/level",
         "//internal/kernel/errs",
+        "//internal/service/logger/sink/file",
     ],
 )

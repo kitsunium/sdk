@@ -55,3 +55,7 @@ $argon2id$v=19$m=19456,t=2,p=1$<b64-salt>$<b64-digest>
 ```sh
 bazel test --config=race //third-party/x-crypto/argon2id:argon2id_test
 ```
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V90, V91) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

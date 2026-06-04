@@ -27,3 +27,7 @@ prefix-free, so `Child("a/b").Child("c")` and `Child("a").Child("b/c")` derive
   receiver is untouched. The master Key is shared by reference; the **root
   owns the Zeroize lifetime** — zeroizing the master invalidates all nodes.
 - **Self-activating.** Blank-imports `hkdfsha256` so the deriver is registered.
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V69) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

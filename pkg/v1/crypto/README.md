@@ -63,7 +63,7 @@ const KeyLen int = corecrypto.KeyLen
 ```
 
 <a name="Open"></a>
-## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L127>)
+## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L132>)
 
 ```go
 func Open(k Key, box, aad []byte) (plaintext []byte, err error)
@@ -72,7 +72,7 @@ func Open(k Key, box, aad []byte) (plaintext []byte, err error)
 Open decrypts a box produced by Seal/SealAs under k, verifying aad, and returns the plaintext. The algorithm is read from the box — the caller never names it. Any failure returns the single non\-oracle DecryptionFailed.
 
 <a name="OpenStream"></a>
-## func [OpenStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L146>)
+## func [OpenStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L151>)
 
 ```go
 func OpenStream(src io.Reader, k Key, aad []byte) (opened io.Reader, err error)
@@ -81,7 +81,7 @@ func OpenStream(src io.Reader, k Key, aad []byte) (opened io.Reader, err error)
 OpenStream wraps src so reads are opened under k with aad, decrypting the chunked stream produced by SealStream. The returned io.Reader never surfaces a chunk's plaintext before it authenticates, returns EOF only after the final chunk verifies, and surfaces a truncated stream as StreamTruncated. Pass nil aad when unused.
 
 <a name="Seal"></a>
-## func [Seal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L112>)
+## func [Seal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L117>)
 
 ```go
 func Seal(k Key, plaintext, aad []byte) (box []byte, err error)
@@ -90,7 +90,7 @@ func Seal(k Key, plaintext, aad []byte) (box []byte, err error)
 Seal encrypts plaintext under k using the default algorithm \(AES\-256\-GCM\), binding aad, and returns a self\-describing box. The nonce is generated and embedded for you. Pass nil aad when unused.
 
 <a name="SealAs"></a>
-## func [SealAs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L119>)
+## func [SealAs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L124>)
 
 ```go
 func SealAs(a Algorithm, k Key, plaintext, aad []byte) (box []byte, err error)
@@ -99,7 +99,7 @@ func SealAs(a Algorithm, k Key, plaintext, aad []byte) (box []byte, err error)
 SealAs is Seal with an explicit algorithm — e.g. a scheme activated by its own blank import. An unregistered algorithm returns UnknownAlgorithm.
 
 <a name="SealStream"></a>
-## func [SealStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L136>)
+## func [SealStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L141>)
 
 ```go
 func SealStream(dst io.Writer, k Key, aad []byte) (sealed io.WriteCloser, err error)
@@ -108,7 +108,7 @@ func SealStream(dst io.Writer, k Key, aad []byte) (sealed io.WriteCloser, err er
 SealStream wraps dst so writes are sealed under k with aad in fixed 64 KiB authenticated chunks. The returned io.WriteCloser buffers and seals chunks as they fill; Close writes the final authenticated chunk and MUST be called to produce a valid stream. Pass nil aad when unused.
 
 <a name="WrapKey"></a>
-## func [WrapKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L155>)
+## func [WrapKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L160>)
 
 ```go
 func WrapKey(passphrase []byte, dek Key) (envelope string, err error)
@@ -117,12 +117,12 @@ func WrapKey(passphrase []byte, dek Key) (envelope string, err error)
 WrapKey seals the data key dek at rest under passphrase, returning the frozen "$kenv$" envelope string. The KEK is stretched from passphrase with PBKDF2\-SHA256 and the dek is sealed under AES\-256\-GCM; the envelope header is bound as AAD so tampering is detected on UnwrapKey.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L96>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L101>)
 
-Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs.
+Algorithm is the stable identifier of an AEAD scheme. Use it with SealAs. It is a defined type distinct from the other crypto\-family Algorithm types \(hash, mac, sign, …\), so the compiler rejects feeding a hash or signature constant into an AEAD call \(V104\) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 
 ```go
-type Algorithm = corecrypto.Algorithm
+type Algorithm corecrypto.Algorithm
 ```
 
 <a name="AESGCM"></a>AESGCM is the default algorithm: AES\-256\-GCM. Active out of the box.
@@ -143,7 +143,7 @@ const XChaCha20Poly1305 Algorithm = "xchacha20poly1305"
 ```
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L100>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L105>)
 
 Key is an opaque, redacting 256\-bit symmetric key. Build one with NewKey; its String output is always "\<redacted\>".
 
@@ -152,7 +152,7 @@ type Key = corecrypto.Key
 ```
 
 <a name="NewKey"></a>
-### func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L104>)
+### func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L109>)
 
 ```go
 func NewKey(raw []byte) (key Key, err error)
@@ -161,7 +161,7 @@ func NewKey(raw []byte) (key Key, err error)
 NewKey builds a Key from raw, which must be exactly KeyLen \(32\) bytes. A wrong length returns InvalidKey; the bytes are copied defensively.
 
 <a name="UnwrapKey"></a>
-### func [UnwrapKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L163>)
+### func [UnwrapKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/crypto.go#L168>)
 
 ```go
 func UnwrapKey(passphrase []byte, envelope string) (dek Key, err error)

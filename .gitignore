@@ -164,6 +164,9 @@ docs/site/src/content/docs/*/
 core.*
 .taskmaster/
 
+# Local competitive-gap roadmap (generated artifact, kept out of git on purpose)
+ROADMAP.md
+
 # Bazel symlinks
 /bazel-bin
 /bazel-out

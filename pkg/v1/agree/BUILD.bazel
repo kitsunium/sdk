@@ -26,5 +26,6 @@ go_test(
     deps = [
         ":agree",
         "//pkg/v1/crypto",
+        "//pkg/v1/errs",
     ],
 )

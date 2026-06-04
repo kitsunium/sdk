@@ -200,7 +200,7 @@ or `Private` (log-only) field.
 | `internal/core/writer` | `0.2.3.*` | `CodeDuplicateRegistration=0.2.3.1`, `CodeWriterUnknownName=0.2.3.2`, `CodeWriterConfigInvalid=0.2.3.3`, `CodeWriterNil=0.2.3.4`, `CodeWriterNameEmpty=0.2.3.5` |
 | `internal/service/writer/console` | `0.3.22.*` | reserved — delegates to `sink/console`; returns the shared `core/writer.WriterConfigInvalid` on a wrong-type config |
 | `internal/service/writer/file` | `0.3.23.*` | reserved — delegates to `sink/file`; returns the shared `core/writer.WriterConfigInvalid` |
-| `third-party/aws/writer/s3` | `0.3.24.*` | `CodePutFailed=0.3.24.20`, `CodeFlushFailed=0.3.24.30`, `CodeCloseFailed=0.3.24.40` (config errors reuse the shared `WriterConfigInvalid`) |
+| `third-party/aws/writer/s3` | `0.3.35.*` | `CodeS3ClientInitFailed=0.3.35.2`, `CodeS3PutFailed=0.3.35.20` (config errors reuse the shared `WriterConfigInvalid`). **Re-allocated off `0.3.24.*` (V92/V99 collision with `baseenc`); the authoritative row now lives in ADR 0015's table.** `FlushFailed`/`CloseFailed` were never minted — Flush/Close propagate the existing `CodeS3PutFailed`. |
 | `third-party/aws/writer/cloudwatch` | `0.3.25.*` | `CodePutFailed=0.3.25.20`, `CodeFlushFailed=0.3.25.30`, `CodeCloseFailed=0.3.25.40` |
 | `pkg/v1/logger` (writer facade) | `1.1.0.*` | `CodeWriterSpecInvalid=1.1.0.3` |
 

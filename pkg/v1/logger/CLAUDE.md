@@ -98,3 +98,7 @@ cd pkg/v1 && GOWORK=off go test -race -cover ./logger/...
 ```
 
 `logger_external_test.go` covers the happy path + `WriterRequired`; `sink_external_test.go` covers `NewWithSink` / `SinkConfigRequired` / `Multi` / `Build` / `LogAttrs` / `WithGroup`; `builder_external_test.go` exercises the chainable hot path; `version_external_test.go` pins `FrameworkVersion()` non-empty contract.
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V102, V107) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

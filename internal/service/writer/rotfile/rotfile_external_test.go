@@ -1,6 +1,9 @@
 package rotfile_test
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -200,6 +203,116 @@ func TestRotFileCompressProduces0600Gz(t *testing.T) {
 		//: the uncompressed .1 must not linger alongside the .gz.
 		if _, perr := os.Stat(path + ".1"); !os.IsNotExist(perr) {
 			t.Errorf("expected uncompressed %s.1 removed, stat err=%v", path, perr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// writeRecords drives count distinct payloads through the production Write path
+// and returns the exact bytes handed to each call so the caller can reconcile
+// them against what actually landed on the real filesystem. Not a test — a
+// deterministic end-to-end driver over the live registry sink.
+func writeRecords(t *testing.T, sink corelogger.Sink, payloads [][]byte) {
+	t.Helper()
+	//: each Write may rotate; a failure aborts the end-to-end reconciliation.
+	for _, p := range payloads {
+		if _, werr := sink.Write(t.Context(), corelogger.RecordEvent{}, p); werr != nil {
+			t.Fatalf("write %q: %v", p, werr)
+		}
+	}
+}
+
+// readGzip decompresses the gzip artefact at path and returns its plaintext, so
+// a compressing rotation can be reconciled against the original record bytes.
+func readGzip(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, rerr := os.ReadFile(path)
+	//: the .gz must be readable before it can be decompressed.
+	if rerr != nil {
+		t.Fatalf("read %s: %v", path, rerr)
+	}
+	zr, zerr := gzip.NewReader(bytes.NewReader(raw))
+	//: a malformed gzip header means the compaction wrote garbage.
+	if zerr != nil {
+		t.Fatalf("gzip reader %s: %v", path, zerr)
+	}
+	got, derr := io.ReadAll(zr)
+	//: the trailer must decompress cleanly for the bytes to be trustworthy.
+	if derr != nil {
+		t.Fatalf("gunzip %s: %v", path, derr)
+	}
+	return got
+}
+
+// TestRotFileEndToEndBytesLandOnDisk is the real-I/O end-to-end: it drives the
+// production registry sink across a size-triggered rotation and asserts the
+// exact record bytes landed where rotation routes them — the pre-rotation record
+// in the .1 backup, the post-rotation record in the freshly reopened active
+// file — by reading the real files back, not by trusting return values.
+func TestRotFileEndToEndBytesLandOnDisk(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"rotation routes each record to its real on-disk destination"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "e2e.log")
+		//: MaxBytes=6 so an 8-byte first record fills, then the second rotates.
+		sink := openRot(t, rotfile.Config{Path: path, MaxBytes: 6})
+		first, second := []byte("AAAAAAAA"), []byte("BBBB")
+		//: drive both records through the live Write path in order.
+		writeRecords(t, sink, [][]byte{first, second})
+		backup, berr := os.ReadFile(path + ".1")
+		//: the pre-rotation record must be exactly what the .1 backup holds.
+		if berr != nil || !bytes.Equal(backup, first) {
+			t.Fatalf("backup=%q err=%v want %q", backup, berr, first)
+		}
+		active, aerr := os.ReadFile(path)
+		//: only the post-rotation record may live in the reopened active file.
+		if aerr != nil || !bytes.Equal(active, second) {
+			t.Fatalf("active=%q err=%v want %q", active, aerr, second)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestRotFileEndToEndCompressedBytesRoundTrip drives the production sink with
+// Compress on and asserts the rotated record survives as a real, decompressible
+// gzip artefact whose plaintext equals the original bytes — proving the
+// compaction is lossless end-to-end, not merely that a .gz file appeared.
+func TestRotFileEndToEndCompressedBytesRoundTrip(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a compressing rotation preserves the record bytes through gzip"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "e2ez.log")
+		//: MaxBytes=6 trips one compressing rotation after the first record.
+		sink := openRot(t, rotfile.Config{Path: path, MaxBytes: 6, Compress: true})
+		first, second := []byte("payload!!"), []byte("tail")
+		//: drive both records so the first is rotated and gzipped.
+		writeRecords(t, sink, [][]byte{first, second})
+		//: the rotated record must decompress back to the exact original bytes.
+		if got := readGzip(t, path+".1.gz"); !bytes.Equal(got, first) {
+			t.Errorf("gunzip=%q want %q", got, first)
+		}
+		active, aerr := os.ReadFile(path)
+		//: the post-rotation record must live uncompressed in the active file.
+		if aerr != nil || !bytes.Equal(active, second) {
+			t.Errorf("active=%q err=%v want %q", active, aerr, second)
 		}
 	}
 	for _, c := range tests {

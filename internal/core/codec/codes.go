@@ -19,3 +19,8 @@ const CodeTargetInvalid errs.Code = 0x00_02_02_03 // 0.2.2.3
 // CodeValueInvalid identifies Marshal being called on a value the codec
 // cannot serialise (channel, function, unsupported map key).
 const CodeValueInvalid errs.Code = 0x00_02_02_04 // 0.2.2.4
+
+// CodeCodecNil identifies a Register call made with a nil Codec — a
+// nil-argument programmer error distinct from a duplicate registration.
+// Surfaced via panic at boot (see registry.go), mirroring writer.CodeWriterNil.
+const CodeCodecNil errs.Code = 0x00_02_02_05 // 0.2.2.5

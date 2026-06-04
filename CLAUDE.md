@@ -119,5 +119,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0012 — logger writer registry (named, config-driven Sink factories) — `docs/adr/0012-logger-writer-registry.md`
 - ADR 0013 — crypto domain (AEAD Seal/Open, hidden nonce; AES-256-GCM default) — `docs/adr/0013-sdk-crypto-domain.md`
 - ADR 0014 — the verb wave (core/transform 5th sibling; crypto MAC/Agreement/StreamSealer ports + KeyEnvelope/KeyTree; logger.FromConfig + ConfigDecoder; single-MR sequencing) — `docs/adr/0014-sdk-transform-crypto-ports-config-topology.md`
+- ADR 0015 — writer taxonomy + depTier as a first-class property; default writers console+file; rotation off-by-default → compress + 24h archive + 7-day retention; dep-light DB/transport gate (WI-9..WI-11) — `docs/adr/0015-sdk-logger-writer-taxonomy-and-rotation.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

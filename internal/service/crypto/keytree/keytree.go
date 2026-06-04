@@ -52,7 +52,13 @@ func (t KeyTree) Child(segment string) KeyTree {
 // DerivationFailed — both forwarded verbatim from the core dispatcher.
 func (t KeyTree) DeriveKey() (key corecrypto.Key, err error) {
 	info := encodePath(t.path)
-	raw, derr := corecrypto.Subkey(t.algo, t.master.Bytes(), nil, info, corecrypto.KeyLen)
+	//: V66 — clone the master into a local and wipe it after the KDF reads it,
+	//: so no uncleared copy of the master secret outlives this call on the heap.
+	var raw []byte
+	var derr error
+	t.withMasterBytes(func(master []byte) {
+		raw, derr = corecrypto.Subkey(t.algo, master, nil, info, corecrypto.KeyLen)
+	})
 	//: a derivation failure forwards the core sentinel verbatim
 	if derr != nil {
 		//: surface the derivation fault to the caller
@@ -62,6 +68,17 @@ func (t KeyTree) DeriveKey() (key corecrypto.Key, err error) {
 	defer clear(raw)
 	//: wrap the derived bytes into a redacting Key
 	return corecrypto.NewKey(raw)
+}
+
+// withMasterBytes hands fn a fresh clone of the master key material and wipes
+// that clone the instant fn returns. Key.Bytes mints a heap copy of the full
+// secret on every call; routing the copy through this seam guarantees it is
+// cleared before the GC can scatter it, instead of being abandoned live.
+func (t KeyTree) withMasterBytes(fn func(master []byte)) {
+	master := t.master.Bytes()
+	//: wipe the clone before returning — the secret must not outlive the call.
+	defer clear(master)
+	fn(master)
 }
 
 // encodePath builds the injective canonical HKDF info: for each segment, a

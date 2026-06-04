@@ -1,0 +1,57 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "mysql",
+    srcs = [
+        "client.go",
+        "codes.go",
+        "errors.go",
+        "mysql.go",
+        "mysqlsink.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/db/writer/mysql",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+        "//internal/service/writer/dbsink",
+        "@com_github_go_sql_driver_mysql//:mysql",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":mysql",
+    visibility = ["//visibility:public"],
+)
+
+# audit_srcs ships this package's *.go to the errs AST audit (ADR 0015); the
+# package defines new dotted-quad codes (0.3.32.*) so it must be listed in the
+# root //:audit_sources filegroup.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_test(
+    name = "mysql_test",
+    srcs = [
+        "client_internal_test.go",
+        "errors_external_test.go",
+        "errors_internal_test.go",
+        "mysql_external_test.go",
+        "mysql_internal_test.go",
+        "mysqlsink_internal_test.go",
+    ],
+    embed = [":mysql"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+    ],
+)

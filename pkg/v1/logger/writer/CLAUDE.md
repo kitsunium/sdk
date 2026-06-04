@@ -3,16 +3,16 @@
 ## Purpose
 
 Blank-import activation package for the **dependency-free** logger writers —
-`"console"` and `"file"` (ADR 0012). A single
-`import _ "github.com/kitsunium/sdk/pkg/v1/logger/writer"` registers both
-factories so `logger.NewMulti` resolves those names. Mirrors the
+`"console"`, `"file"`, and `"rotfile"` (ADR 0012; rotfile per ADR 0014). A
+single `import _ "github.com/kitsunium/sdk/pkg/v1/logger/writer"` registers all
+three factories so `logger.NewMulti` resolves those names. Mirrors the
 `import _ ".../pkg/v1/codec"` pattern.
 
 ## Contents
 
 | File | Role |
 |---|---|
-| `writer.go` | package doc + blank imports of `internal/service/writer/{console,file}` |
+| `writer.go` | package doc + blank imports of `internal/service/writer/{console,file,rotfile}` |
 
 No exported symbols — the package exists purely for its registration
 side-effects. `README.md` is generated from the package doc comment via

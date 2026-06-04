@@ -2,6 +2,7 @@ package file_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -194,6 +195,128 @@ func TestFileSink_WriteFlushClose(t *testing.T) {
 			}
 			if !strings.Contains(string(got), string(tc.payload)) {
 				t.Errorf("file content = %q, want to contain %q", got, tc.payload)
+			}
+		})
+	}
+}
+
+// TestFileSink_AppendSemantics exercises O_APPEND end-to-end: two distinct
+// payloads written in sequence must land in write order, not be truncated or
+// reordered by the kernel's append handling.
+func TestFileSink_AppendSemantics(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		first []byte
+		//: second is written after first; its bytes must follow first on disk.
+		second []byte
+	}{
+		{"two distinct lines append in order", []byte("alpha\n"), []byte("bravo\n")},
+		{"non-newline payloads still append in order", []byte("first"), []byte("second")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "append.log")
+			s, err := file.New(path)
+			if err != nil {
+				t.Fatalf("New err = %v", err)
+			}
+			ctx := t.Context()
+			rec := corelogger.RecordEvent{Level: level.Info}
+			if _, werr := s.Write(ctx, rec, tc.first); werr != nil {
+				t.Fatalf("first Write err = %v", werr)
+			}
+			if _, werr := s.Write(ctx, rec, tc.second); werr != nil {
+				t.Fatalf("second Write err = %v", werr)
+			}
+			if ferr := s.Flush(ctx); ferr != nil {
+				t.Fatalf("Flush err = %v", ferr)
+			}
+			if cerr := s.Close(); cerr != nil {
+				t.Fatalf("Close err = %v", cerr)
+			}
+			got, rerr := os.ReadFile(path)
+			if rerr != nil {
+				t.Fatalf("ReadFile err = %v", rerr)
+			}
+			content := string(got)
+			firstAt := strings.Index(content, string(tc.first))
+			secondAt := strings.Index(content, string(tc.second))
+			if firstAt < 0 || secondAt < 0 {
+				t.Fatalf("content %q missing a payload (first@%d second@%d)", content, firstAt, secondAt)
+			}
+			//: O_APPEND guarantees the second write starts past the first.
+			if firstAt >= secondAt {
+				t.Errorf("append order wrong: first@%d not before second@%d", firstAt, secondAt)
+			}
+		})
+	}
+}
+
+// TestFileSink_FlushCtxCancelledReturnsCtxErr documents the intentional
+// asymmetry vs Write: Flush returns ctx.Err() unwrapped, so errors.Is holds
+// but the CtxCancelled dotted-quad code is deliberately absent.
+func TestFileSink_FlushCtxCancelledReturnsCtxErr(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"cancelled flush yields bare context.Canceled"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "flush.log")
+			s, err := file.New(path)
+			if err != nil {
+				t.Fatalf("New err = %v", err)
+			}
+			t.Cleanup(func() { closeIgnore(t, s) })
+			cancelled, cancel := context.WithCancel(t.Context())
+			cancel()
+			ferr := s.Flush(cancelled)
+			//: stdlib Is() must hold — the cancellation cause is preserved.
+			if !errors.Is(ferr, context.Canceled) {
+				t.Errorf("errors.Is(%v, context.Canceled) = false", ferr)
+			}
+			//: but Flush does NOT wrap, so the dotted-quad code is absent by design.
+			if errs.HasCode(ferr, file.CodeCtxCancelled) {
+				t.Errorf("HasCode(%v, CodeCtxCancelled) = true, want false (Flush returns bare ctx.Err)", ferr)
+			}
+		})
+	}
+}
+
+// TestFileSink_WriteCtxCancelledCodeIdentity documents the Write wrap chain:
+// a cancelled context surfaces BOTH the CtxCancelled dotted-quad code AND the
+// stdlib context.Canceled cause via the errs.Wrap chain.
+func TestFileSink_WriteCtxCancelledCodeIdentity(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"cancelled write carries code and cause"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "write.log")
+			s, err := file.New(path)
+			if err != nil {
+				t.Fatalf("New err = %v", err)
+			}
+			t.Cleanup(func() { closeIgnore(t, s) })
+			cancelled, cancel := context.WithCancel(t.Context())
+			cancel()
+			rec := corelogger.RecordEvent{Level: level.Info}
+			_, werr := s.Write(cancelled, rec, []byte("dropped"))
+			//: Write wraps ctx.Err() under CtxCancelled — both identities hold.
+			if !errs.HasCode(werr, file.CodeCtxCancelled) {
+				t.Errorf("HasCode(%v, CodeCtxCancelled) = false", werr)
+			}
+			if !errors.Is(werr, context.Canceled) {
+				t.Errorf("errors.Is(%v, context.Canceled) = false", werr)
 			}
 		})
 	}

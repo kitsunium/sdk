@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // fakeClock is a manually set clock for deterministic age-pruning tests.
@@ -148,6 +150,80 @@ func Test_rotatingSink_pruneSlotByAge(t *testing.T) {
 			if gone != tc.wantGone {
 				t.Fatalf("slot gone = %v, want %v (stat err %v)", gone, tc.wantGone, serr)
 			}
+		})
+	}
+}
+
+// Test_rotatingSink_pruneByAge_slotRemoveFails proves an EACCES on an aged slot
+// aborts the sweep under the rotate sentinel rather than being swallowed.
+func Test_rotatingSink_pruneByAge_slotRemoveFails(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"an unremovable aged backup fails the sweep"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: root bypasses the read-only directory bit, so the negative path is moot.
+		if rootBypassesPerms() {
+			return
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, "app.log")
+		now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+		//: a 3-day cap with a 30-day-old backup guarantees the slot is past cutoff.
+		rs := newAgedSink(t, path, 3, now)
+		seedBackup(t, path, 1, now.AddDate(0, 0, -30))
+		//: freeze the directory so removing the aged .1 fails (restored in cleanup).
+		freezeDirReadOnly(t, dir)
+		//: the removal EACCES surfaces under the rotate sentinel.
+		if perr := rs.pruneByAge(); !errs.HasCode(perr, CodeRotFileRotateFailed) {
+			t.Errorf("pruneByAge err=%v want rotate-failed", perr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_rotatingSink_pruneSlotByAge_removeFails proves the per-slot decision
+// returns (false, err) under the rotate sentinel when the aged slot is
+// unremovable, rather than reporting "continue" with a swallowed error.
+func Test_rotatingSink_pruneSlotByAge_removeFails(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"an unremovable aged slot returns false and the rotate sentinel"}}
+	runCase := func(t *testing.T, _ tc) {
+		t.Helper()
+		//: root bypasses the read-only directory bit, so the negative path is moot.
+		if rootBypassesPerms() {
+			return
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, "app.log")
+		now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+		rs := newAgedSink(t, path, 5, now)
+		//: seed an aged .1 so a far-future cutoff classifies it as prunable.
+		seedBackup(t, path, 1, now.AddDate(0, 0, -30))
+		//: freeze the directory so removing the slot fails (restored in cleanup).
+		freezeDirReadOnly(t, dir)
+		//: a far-future cutoff forces the prune branch regardless of mtime.
+		cutoff := now.AddDate(10, 0, 0)
+		more, perr := rs.pruneSlotByAge(1, cutoff)
+		//: a removal failure must stop the sweep and surface the rotate sentinel.
+		if more || !errs.HasCode(perr, CodeRotFileRotateFailed) {
+			t.Errorf("pruneSlotByAge more=%v err=%v want false+rotate-failed", more, perr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
 		})
 	}
 }

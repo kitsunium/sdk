@@ -1,0 +1,70 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "nettransport",
+    srcs = [
+        "client.go",
+        "codes.go",
+        "config.go",
+        "decode.go",
+        "errors.go",
+        "netsink.go",
+        "nettransport.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/writer/nettransport",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+        "//internal/service/logger/middleware/async",
+        "//internal/service/writer/levelgate",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":nettransport",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "nettransport_test",
+    srcs = [
+        "client_internal_test.go",
+        "config_external_test.go",
+        "config_internal_test.go",
+        "decode_internal_test.go",
+        "errors_external_test.go",
+        "errors_internal_test.go",
+        "netsink_bench_test.go",
+        "netsink_internal_test.go",
+        "nettransport_external_test.go",
+        "nettransport_internal_test.go",
+    ],
+    embed = [":nettransport"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/core/logger/level",
+        "//internal/core/writer",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's *.go to the errs AST audit (ADR 0015); the
+# package defines new dotted-quad codes so it must be listed in the root
+# //:audit_sources filegroup.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

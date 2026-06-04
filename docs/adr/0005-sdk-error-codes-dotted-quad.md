@@ -87,7 +87,7 @@ a follow-up CI wave; this MR ships prose)
 | `internal/kernel/buffer` | `0.1.1.*` | reserved |
 | `internal/kernel/clock` | `0.1.2.*` | reserved |
 | `internal/core/logger` | `0.2.1.*` | reserved |
-| `internal/core/logger/level` | `0.2.0.*` | reserved |
+| `internal/core/logger/level` | `0.2.17.*` | `CodeLevelUnknown=0.2.17.1` |
 | `internal/core/codec` | `0.2.2.*` | `CodeDuplicateRegistration=0.2.2.1`, `CodeEmptyInput=0.2.2.2`, `CodeTargetInvalid=0.2.2.3`, `CodeValueInvalid=0.2.2.4` |
 | `internal/service/logger` | `0.3.1.*` | `CodeWriterNil=0.3.1.1`, `CodeHandlerNil=0.3.1.2`, `CodeCtxCancelled=0.3.1.10`, `CodeWriteFailed=0.3.1.20` |
 | `internal/service/codec/json` | `0.3.2.*` | 2 codes |

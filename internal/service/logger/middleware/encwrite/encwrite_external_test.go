@@ -265,6 +265,42 @@ func Test_EncWriter_RoundTrip(t *testing.T) {
 	}
 }
 
+func Test_EncWriter_writeAfterClose(t *testing.T) {
+	t.Parallel()
+	//: the post-Close contract: EncWriter adds no guard, so a Write after Close
+	//: still reaches the (now closed) downstream exactly once.
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{"post-close write reaches downstream", "post-close"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			down := &recordingSink{}
+			s := newSink(t, down)
+			//: closing the sink zeroizes the keys and closes the downstream once.
+			if cerr := s.Close(); cerr != nil {
+				t.Fatalf("Close: %v", cerr)
+			}
+			//: EncWriter does not guard post-Close writes — the call still reaches
+			//: the (now closed) downstream. This documents the current contract.
+			if _, err := s.Write(t.Context(), corelogger.RecordEvent{}, []byte(tc.payload)); err != nil {
+				t.Fatalf("Write after Close: %v", err)
+			}
+			//: the downstream must have been closed exactly once.
+			if down.closes != 1 {
+				t.Fatalf("closes=%d want=1", down.closes)
+			}
+			//: the post-Close write must still have reached the downstream.
+			if down.writes != 1 {
+				t.Fatalf("writes=%d want=1", down.writes)
+			}
+		})
+	}
+}
+
 func Test_Sentinels(t *testing.T) {
 	t.Parallel()
 	//: table asserting each sentinel carries its dotted-quad code.

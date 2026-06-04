@@ -10,6 +10,10 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // generic internal software error (70).
 const exitIOErr int = 74
 
+// exitConfigErr matches sysexits EX_CONFIG — used by the config-decode sentinel
+// so a malformed config map is classified as a configuration problem, not I/O.
+const exitConfigErr int = 78
+
 var (
 	// RotFileOpenFailed wraps an os.OpenFile failure (or a refused symlink)
 	// at construction time and on every reopen after a rotation.
@@ -31,6 +35,14 @@ var (
 		"Rotating file write failed",
 		"service/writer/rotfile: underlying *os.File returned an error",
 		errs.WithExitCode(exitIOErr))
+
+	// RotFileDecodeFailed flags a config-map value of an unexpected shape while
+	// decoding a "rotfile" writer entry from a config file. It is redacted —
+	// the offending value is never echoed (secret gate).
+	RotFileDecodeFailed = errs.Define(CodeRotFileDecodeFailed, "ROT_FILE_DECODE_FAILED",
+		"Rotating file sink could not decode its configuration",
+		"service/writer/rotfile: a config map value had an unexpected shape",
+		errs.WithExitCode(exitConfigErr))
 )
 
 // wrapRotate wraps cause under the RotFileRotateFailed sentinel with a private

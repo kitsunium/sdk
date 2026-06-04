@@ -1224,3 +1224,198 @@ func TestStreamingEncodeErrors(t *testing.T) {
 		})
 	}
 }
+
+// compositeStreamPayload is a struct mixing scalars with every composite
+// family so the V59 streaming round-trip matrix exercises tagStruct nesting
+// tagSlice and tagMap in one record.
+type compositeStreamPayload struct {
+	A int64            `json:"a"`
+	B string           `json:"b"`
+	C []int64          `json:"c"`
+	D map[string]int64 `json:"d"`
+}
+
+// TestStreamingCompositeRoundTrip is the V59 regression: the streaming
+// Decoder previously read a composite record's length header as a BYTE count
+// instead of an element/pair/field COUNT, truncating every struct, slice, and
+// map frame. Before the fix each composite case below returned
+// [0.3.22.6 TRUNCATED]; after the fix the value round-trips byte-for-byte.
+// Scalars are kept in the matrix to prove the length-as-byte-count path
+// (where count == byte length) is unaffected (back-compat).
+func TestStreamingCompositeRoundTrip(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		value any
+	}
+	tests := []tc{
+		//: scalar back-compat — length already equals the byte count.
+		{"scalar int64", int64(7)},
+		{"scalar string", "hello"},
+		//: composite arms — length is a COUNT the streaming reader must recurse.
+		{"slice of int", []any{int64(1), int64(2), int64(3)}},
+		{"slice of string", []any{"x", "y", "z"}},
+		{"empty slice", []any{}},
+		{"map string→int", map[string]any{"k": int64(5)}},
+		{"nested slice", []any{[]any{int64(1)}, []any{int64(2), int64(3)}}},
+		{"struct composite", compositeStreamPayload{
+			A: 11,
+			B: "field",
+			C: []int64{4, 5, 6},
+			D: map[string]int64{"n": 9},
+		}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		sc, ok := tlv.New().(codec.StreamingCodec)
+		//: the package advertises streaming support; assert it.
+		if !ok {
+			t.Fatalf("%s: codec does not implement StreamingCodec", tc.name)
+		}
+		//: encode the value as a single streaming record.
+		var buf bytes.Buffer
+		enc := sc.NewEncoder(&buf)
+		//: marshal one record.
+		if err := enc.Encode(tc.value); err != nil {
+			t.Fatalf("%s: Encode err=%v", tc.name, err)
+		}
+		//: flush the stream.
+		if err := enc.Close(); err != nil {
+			t.Errorf("%s: Close err=%v", tc.name, err)
+		}
+		//: decode the record straight back from the stream.
+		dec := sc.NewDecoder(&buf)
+		//: read into a fresh any so the wire shape drives the result type.
+		var got any
+		//: V59: this returned TRUNCATED for every composite before the fix.
+		if err := dec.Decode(&got); err != nil {
+			t.Fatalf("%s: Decode err=%v", tc.name, err)
+		}
+		//: the buffered Marshal/Unmarshal pair is the oracle — Marshal emits
+		//: the same single record one streaming Encode does, so the streaming
+		//: decode must match the buffered decode of those bytes exactly.
+		canonical, merr := tlv.New().Marshal(tc.value)
+		//: marshalling the oracle value must succeed.
+		if merr != nil {
+			t.Fatalf("%s: oracle Marshal err=%v", tc.name, merr)
+		}
+		//: buffered Unmarshal of the canonical bytes is the oracle.
+		var want any
+		if err := tlv.New().Unmarshal(canonical, &want); err != nil {
+			t.Fatalf("%s: oracle Unmarshal err=%v", tc.name, err)
+		}
+		//: streaming decode must match the buffered decode exactly.
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: streaming decode mismatch\n got=%#v\nwant=%#v", tc.name, got, want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestStreamingMalformedCount is the V59 negative arm: a composite header
+// that declares more sub-records than the stream actually carries must
+// surface TRUNCATED, never hang or silently truncate. The composite reader
+// now recurses by count, so a missing child record is detected mid-frame.
+func TestStreamingMalformedCount(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		data    []byte
+		wantErr string
+	}
+	tests := []tc{
+		//: tagSlice declares 3 elements but only one int8 record follows.
+		{"slice count > records", []byte{0x50, 0x03, 0x10, 0x01, 0x2a}, "TRUNCATED"},
+		//: tagMap declares 1 pair but only the key record is present.
+		{"map missing value record", []byte{0x60, 0x01, 0x10, 0x01, 0x01}, "TRUNCATED"},
+		//: tagStruct declares 1 field but the value record is absent.
+		{"struct missing value record", []byte{0x70, 0x01, 0x40, 0x01, 'a'}, "TRUNCATED"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		sc, ok := tlv.New().(codec.StreamingCodec)
+		//: streaming surface required.
+		if !ok {
+			t.Fatalf("%s: codec does not implement StreamingCodec", tc.name)
+		}
+		//: feed the crafted bytes through the streaming decoder.
+		dec := sc.NewDecoder(bytes.NewReader(tc.data))
+		//: decode into a throwaway target.
+		var out any
+		err := dec.Decode(&out)
+		//: route-API assertion — never .Error() string matching.
+		if !errs.HasReason(err, tc.wantErr) {
+			t.Errorf("%s: expected reason %s, got %v", tc.name, tc.wantErr, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// nestedMapField is the V60 nested target: a map-typed struct field reached
+// through the typed field-recursion path (tryTypedFieldRecursion →
+// decodeNestedMap → decodeMapInto → assignMapPair). The interface key type
+// (map[any]int64) is what lets a crafted slice key reach SetMapIndex. The
+// concrete int64 value type keeps the field on the typed path rather than
+// the untyped projector.
+type nestedMapField struct {
+	M map[any]int64
+}
+
+// TestTypedMapUnhashableKey is the V60 regression: the typed map decode path
+// (assignMapPair) called SetMapIndex with no comparability check, so a
+// crafted payload whose map key decoded to a slice panicked with
+// "hash of unhashable type []interface {}" and crashed the caller (DoS).
+// Both the top-level *map[any]any target and a nested map-typed struct field
+// must now return UNMARSHAL_FAILED cleanly. Before the fix these panicked.
+func TestTypedMapUnhashableKey(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		data   []byte
+		target func() any
+	}
+	//: one map pair whose KEY is an empty slice (unhashable) and whose VALUE
+	//: is int8(42): 0x60 0x01 | key 0x50 0x00 | value 0x10 0x01 0x2a.
+	topLevel := []byte{0x60, 0x01, 0x50, 0x00, 0x10, 0x01, 0x2a}
+	//: a struct with one field whose value is the unhashable-key map. The
+	//: wire field name is the Go field name "M" (the encoder emits the Go
+	//: identifier, not a json tag), so the typed field-recursion path
+	//: engages: 0x70 0x01 | name 0x40 0x01 'M' | value <topLevel map>.
+	nested := []byte{0x70, 0x01, 0x40, 0x01, 'M', 0x60, 0x01, 0x50, 0x00, 0x10, 0x01, 0x2a}
+	tests := []tc{
+		{"top-level *map[any]any", topLevel, func() any { return &map[any]any{} }},
+		{"nested map-typed field", nested, func() any { return &nestedMapField{} }},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: a panic here is the V60 failure mode — recover and fail the test.
+		defer func() {
+			//: any recovered value means the guard did not engage.
+			if r := recover(); r != nil {
+				t.Errorf("%s: Unmarshal panicked instead of returning an error: %v", tc.name, r)
+			}
+		}()
+		//: decode the crafted payload into the typed target.
+		err := tlv.New().Unmarshal(tc.data, tc.target())
+		//: must reject the unhashable key via the routing API.
+		if !errs.HasReason(err, "UNMARSHAL_FAILED") {
+			t.Errorf("%s: expected UNMARSHAL_FAILED, got %v", tc.name, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}

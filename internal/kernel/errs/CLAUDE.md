@@ -94,3 +94,7 @@ cd internal/kernel && GOWORK=off go test -race -cover ./errs
 Tests: `error_external_test.go` (Define/Wrap/getters/Error() invariants), `accessors_external_test.go` (every Of-accessor against sdk/stdlib/nil), `field_external_test.go` + `field_internal_test.go` (closed FieldValue union), `code_external_test.go` (dotted-quad packing + masks), `parse_external_test.go` (`ParseCode` string→Code), `prefix_matcher_external_test.go` (CIDR matching over origin + trail), `trail_internal_test.go` (cap + truncation), `validate_internal_test.go` (every structural rule), `registry_external_test.go` (SDK-wide AST audit).
 
 A longer-form companion lives in `README.md`.
+
+## Accepted audit findings
+
+- Deferred/accepted low+info audit findings (V2, V3, V4, V5) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

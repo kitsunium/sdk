@@ -53,6 +53,7 @@ go_test(
     size = "small",
     srcs = [
         "builder_external_test.go",
+        "builder_integration_test.go",
         "caller_external_test.go",
         "encoder_external_test.go",
         "fromconfig_external_test.go",
@@ -67,6 +68,8 @@ go_test(
         "witherror_internal_test.go",
         "writer_external_test.go",
     ],
+    # keep: BENCH.md is read at test time by the V116 doc-guard (TestV116BenchDocRetractsZeroAllocClaim).
+    data = ["BENCH.md"],
     embed = [":logger"],
     deps = [
         "//internal/core/logger",
