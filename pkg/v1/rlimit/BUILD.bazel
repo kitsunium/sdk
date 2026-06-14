@@ -1,0 +1,30 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "rlimit",
+    srcs = ["rlimit.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/rlimit",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/service/proc/rlimit",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":rlimit",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "rlimit_test",
+    srcs = ["rlimit_external_test.go"],
+    deps = [
+        ":rlimit",
+        "//internal/core/proc",
+        "//internal/kernel/errs",
+    ],
+)
