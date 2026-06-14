@@ -1,0 +1,41 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "cgroup",
+    srcs = [
+        "cgroup.go",
+        "cgroup_linux.go",
+        "cgroup_other.go",
+        "option.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/cgroup",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/proc",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":cgroup",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "cgroup_test",
+    srcs = ["cgroup_external_test.go"],
+    embed = [":cgroup"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/kernel/errs",
+    ],
+)
