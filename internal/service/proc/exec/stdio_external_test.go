@@ -1,3 +1,5 @@
+//go:build unix
+
 // Package exec_test — black-box acceptance tests for per-process stdio wiring
 // (issue #73): capture delivers 100% of stdout/stderr, large output exercises
 // pipe backpressure, null discards, stdin is fed from a reader, a nil capture

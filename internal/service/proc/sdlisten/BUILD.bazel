@@ -88,7 +88,10 @@ alias(
 
 go_test(
     name = "sdlisten_test",
-    srcs = ["sdlisten_external_test.go"],
+    srcs = [
+        "sdlisten_external_test.go",
+        "sdlisten_other_test.go",
+    ],
     deps = select({
         "@rules_go//go/platform:aix": [
             ":sdlisten",
@@ -125,6 +128,11 @@ go_test(
             "//internal/core/proc",
             "//internal/service/proc/exec",
         ],
+        "@rules_go//go/platform:js": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
         "@rules_go//go/platform:linux": [
             ":sdlisten",
             "//internal/core/proc",
@@ -140,10 +148,30 @@ go_test(
             "//internal/core/proc",
             "//internal/service/proc/exec",
         ],
+        "@rules_go//go/platform:osx": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:plan9": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:qnx": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
         "@rules_go//go/platform:solaris": [
             ":sdlisten",
             "//internal/core/proc",
             "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:windows": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
         ],
         "//conditions:default": [],
     }),

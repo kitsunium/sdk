@@ -21,6 +21,33 @@ alias(
 
 go_test(
     name = "signal_test",
-    srcs = ["signal_external_test.go"],
-    deps = [":signal"],
+    srcs = [
+        "signal_external_test.go",
+        "signal_other_test.go",
+    ],
+    deps = [
+        ":signal",
+    ] + select({
+        "@rules_go//go/platform:js": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:osx": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:windows": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "//conditions:default": [],
+    }),
 )

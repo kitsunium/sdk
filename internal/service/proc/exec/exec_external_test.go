@@ -1,3 +1,5 @@
+//go:build unix
+
 // Package exec_test — black-box acceptance tests for the spawn primitive: a
 // normal-exit Wait, a group-kill-with-survivor check, and the SIGTERM→SIGKILL
 // escalation, plus the typed-error contracts. Unix-only behaviour is gated on a
@@ -7,7 +9,6 @@ package exec_test
 import (
 	"context"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -26,11 +27,6 @@ const shPath = "/bin/sh"
 // /bin/sh, while still leaving the typed-error tests to assert the contract.
 func requireShell(t *testing.T) {
 	t.Helper()
-	//: the spawn behaviour under test is Unix-only.
-	if runtime.GOOS == "windows" {
-		//: nothing to exercise on a platform that returns UnsupportedPlatform.
-		t.Skip("spawn tests require a Unix host")
-	}
 	//: a missing shell means the fixture commands cannot run.
 	if _, err := os.Stat(shPath); err != nil {
 		//: skip rather than fail when the container has no /bin/sh.
@@ -400,11 +396,6 @@ func TestStartLimitsHonoured(t *testing.T) {
 // caller could not distinguish from a legitimate target exit.
 func TestStartTrampolineApplyFailureTyped(t *testing.T) {
 	t.Parallel()
-	//: the trampoline is Unix-only; non-Unix Start returns UnsupportedPlatform.
-	if runtime.GOOS == "windows" {
-		//: nothing to exercise where there is no trampoline.
-		t.Skip("trampoline is Unix-only")
-	}
 
 	spec := coreproc.Spec{
 		Path: shPath,
@@ -428,11 +419,6 @@ func TestStartTrampolineApplyFailureTyped(t *testing.T) {
 // contract instead of a bare 127 child exit.
 func TestStartTrampolineExecFailureTyped(t *testing.T) {
 	t.Parallel()
-	//: the trampoline is Unix-only; non-Unix Start returns UnsupportedPlatform.
-	if runtime.GOOS == "windows" {
-		//: nothing to exercise where there is no trampoline.
-		t.Skip("trampoline is Unix-only")
-	}
 
 	//: a Umask routes the spawn through the trampoline; the bad Path makes the
 	//: trampoline's execve fail after the umask is applied.

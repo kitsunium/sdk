@@ -47,10 +47,10 @@ Socket activation relies on Unix file\-descriptor inheritance. Off Unix every fu
 
 ## Index
 
-- [func Files\(unsetEnv bool\) \(\[\]\*os.File, error\)](<#Files>)
-- [func Listeners\(unsetEnv bool\) \(\[\]net.Listener, error\)](<#Listeners>)
+- [func Files\(unsetEnv bool\) \(files \[\]\*os.File, err error\)](<#Files>)
+- [func Listeners\(unsetEnv bool\) \(listeners \[\]net.Listener, err error\)](<#Listeners>)
 - [func Prepare\(child \*Spec, named map\[string\]net.Listener\) error](<#Prepare>)
-- [func WithNames\(unsetEnv bool\) \(map\[string\]\[\]\*os.File, error\)](<#WithNames>)
+- [func WithNames\(unsetEnv bool\) \(named map\[string\]\[\]\*os.File, err error\)](<#WithNames>)
 - [type Spec](<#Spec>)
 
 
@@ -58,7 +58,7 @@ Socket activation relies on Unix file\-descriptor inheritance. Off Unix every fu
 ## func [Files](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sdlisten/sdlisten.go#L69>)
 
 ```go
-func Files(unsetEnv bool) ([]*os.File, error)
+func Files(unsetEnv bool) (files []*os.File, err error)
 ```
 
 Files returns the inherited listening sockets \(fd 3..3\+LISTEN\_FDS\) as \*os.File, honouring LISTEN\_PID. When unsetEnv is true the activation environment is cleared so a grandchild does not re\-inherit it. An empty or foreign activation set yields nil with no error; off Unix it returns UnsupportedPlatform.
@@ -67,7 +67,7 @@ Files returns the inherited listening sockets \(fd 3..3\+LISTEN\_FDS\) as \*os.F
 ## func [Listeners](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sdlisten/sdlisten.go#L77>)
 
 ```go
-func Listeners(unsetEnv bool) ([]net.Listener, error)
+func Listeners(unsetEnv bool) (listeners []net.Listener, err error)
 ```
 
 Listeners returns the inherited stream sockets wrapped as net.Listener \(the underlying \*os.File is closed after the dup\). Same gating and platform behaviour as Files.
@@ -85,7 +85,7 @@ Prepare \(activator side\) appends each named listener's socket to child as an i
 ## func [WithNames](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sdlisten/sdlisten.go#L84>)
 
 ```go
-func WithNames(unsetEnv bool) (map[string][]*os.File, error)
+func WithNames(unsetEnv bool) (named map[string][]*os.File, err error)
 ```
 
 WithNames returns the inherited sockets grouped by their LISTEN\_FDNAMES name; duplicate names group several fds under one key.
