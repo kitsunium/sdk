@@ -31,7 +31,7 @@ Code range: `0.2.6.*` (ADR 0016).
 | `notification.go` | `NotificationValue` — parsed sd_notify datagram; `Ready`/`Reloading`/`Stopping`/`Watchdog` read `State` |
 | `process.go` | `Process` interface — `PID` / `Wait` / `Signal` / `SignalGroup` / `Stop` |
 | `reaper.go` | `Reaper` interface — `Start` / `Stop` / `ReapOnce` |
-| `group.go` | `Group` interface — cgroup v2 `SetMemoryMax` / `SetCPUMax` / `SetPidsMax` / `SetIOMax` / `Add` / `Delete` |
+| `group.go` | `Group` interface — cgroup v2 `SetMemoryMax` / `SetCPUMax` / `SetPidsMax` / `SetIOMax` / `Add` / `Kill` / `Freeze` / `Thaw` / `Delete` |
 | `listener.go` | `Listener` interface — sd_notify supervisor side `Recv` / `Close` |
 | `codes.go` | `Code*` constants — range `0.2.6.*` |
 | `errors.go` | the 22 domain sentinels (`UnsupportedPlatform` … `CredentialMismatch`) |

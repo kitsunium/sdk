@@ -35,6 +35,12 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
   numeric value writes the literal `"max"` (no limit). Failure →
   `CgroupWriteFailed`.
 - **Add(pid)** — write `pid` to `cgroup.procs`. Failure → `CgroupWriteFailed`.
+- **Kill()** — write `"1"` to `cgroup.kill` (kernel ≥ 5.14): atomic, race-free
+  SIGKILL of every member, **including `setsid` escapees** that `SignalGroup`
+  misses. An absent feature file (older kernel) → `UnsupportedPlatform` so the
+  caller can fall back; any other write fault → `CgroupWriteFailed`.
+- **Freeze() / Thaw()** — write `"1"` / `"0"` to `cgroup.freeze` (kernel ≥ 5.2):
+  quiesce/resume the whole tree (idempotent). Absent file → `UnsupportedPlatform`.
 - **Delete()** — `rmdir` the group; the kernel refuses (EBUSY) until every
   process has left it → `CgroupDeleteFailed`.
 
