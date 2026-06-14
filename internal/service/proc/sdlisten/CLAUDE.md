@@ -25,10 +25,13 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
   `LISTEN_PID`: an absent value is accepted (trusted parent), a present value must
   equal `getpid()`, else no fds are returned (not an error). `unsetEnv` clears the
   three variables so a grandchild does not re-inherit them.
-- **Activator side.** `Prepare(child, named)` appends each listener's dup'd socket
-  to `child.ExtraFiles` (inherited at fd 3+ by the exec service) and sets
-  `LISTEN_FDS` + `LISTEN_FDNAMES` in `child.Env`, in sorted-name order so the
-  fd↔name pairing is deterministic. It omits `LISTEN_PID` (unknowable pre-fork).
+- **Activator side.** `Prepare(child, named)` **prepends** each listener's dup'd
+  socket to `child.ExtraFiles` so the activation sockets occupy fd `3..3+N` (the
+  protocol fixes them there); any `ExtraFiles` the caller already set shift to
+  after them. It sets `LISTEN_FDS` + `LISTEN_FDNAMES` in `child.Env`, in
+  sorted-name order so the fd↔name pairing is deterministic, and omits
+  `LISTEN_PID` (unknowable pre-fork). `Files` clears `FD_CLOEXEC` on each
+  recovered fd (via `fcntl(F_SETFD, 0)`) so the socket survives a re-exec.
 
 ## Platform
 

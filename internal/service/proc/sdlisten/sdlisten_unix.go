@@ -47,6 +47,19 @@ func dropErr(err error) {
 	//: the error concerns a best-effort cleanup step — nothing to do.
 }
 
+// clearCloexec clears FD_CLOEXEC on fd via fcntl(F_SETFD, 0) so the inherited
+// socket survives a subsequent re-exec (e.g. a zero-downtime self-restart). A
+// fcntl failure is non-fatal: the fd is still usable for the immediate service,
+// just not guaranteed across a re-exec.
+func clearCloexec(fd int) {
+	_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, 0)
+	//: a fcntl failure leaves the fd usable now, just not across a re-exec.
+	if errno != 0 {
+		//: non-fatal — the socket still works for the immediate service.
+		return
+	}
+}
+
 // wrapListen wraps an fd/socket cause onto the central ListenFailed sentinel.
 func wrapListen(cause error, fields ...errs.FieldValue) error {
 	//: restate the LISTEN_FAILED sentinel fields so the cause inherits them.
@@ -155,8 +168,9 @@ func Files(unsetEnv bool) (files []*os.File, err error) {
 	//: re-exec keeps the socket.
 	for i := range n {
 		fd := listenFdStart + i
-		//: clear CLOEXEC so the fd survives a subsequent exec if the caller re-execs.
-		syscall.CloseOnExec(fd)
+		//: clear FD_CLOEXEC so the socket survives a subsequent re-exec (e.g. a
+		//: zero-downtime self-restart); syscall.CloseOnExec would SET it instead.
+		clearCloexec(fd)
 		//: os.NewFile adopts the inherited descriptor under its protocol name.
 		out = append(out, os.NewFile(uintptr(fd), names[i]))
 	}
@@ -222,6 +236,7 @@ func Prepare(child *coreproc.Spec, named map[string]net.Listener) error {
 	}
 	//: iterate in sorted-name order so the fd↔name pairing is deterministic.
 	names := slices.Sorted(maps.Keys(named))
+	acts := make([]*os.File, 0, len(names))
 	//: collect each listener's socket fd in the same order as its name.
 	for _, name := range names {
 		f, ferr := listenerFile(named[name])
@@ -230,8 +245,12 @@ func Prepare(child *coreproc.Spec, named map[string]net.Listener) error {
 			//: propagate the typed LISTEN_FAILED verbatim.
 			return ferr
 		}
-		child.ExtraFiles = append(child.ExtraFiles, f)
+		acts = append(acts, f)
 	}
+	//: the sd_listen_fds protocol fixes the activation sockets at fd 3..3+N, so
+	//: PREPEND them — any ExtraFiles the caller already set shift to after them
+	//: (the child's Files() reads exactly the activation sockets at fd 3+).
+	child.ExtraFiles = append(acts, child.ExtraFiles...)
 	//: publish the count and names so the child's Files() recovers them.
 	child.Env = append(envWithout(child.Env, envFds, envPID, envFdNames),
 		envFds+"="+strconv.Itoa(len(names)),
