@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -17,4 +17,37 @@ alias(
     name = "go_default_library",
     actual = ":sdlisten",
     visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "sdlisten_test",
+    srcs = ["sdlisten_other_test.go"],
+    deps = select({
+        "@rules_go//go/platform:js": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:osx": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:plan9": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:qnx": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:windows": [
+            ":sdlisten",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "//conditions:default": [],
+    }),
 )

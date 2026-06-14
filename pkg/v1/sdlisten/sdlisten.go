@@ -66,7 +66,7 @@ type Spec = coreproc.Spec
 // honouring LISTEN_PID. When unsetEnv is true the activation environment is
 // cleared so a grandchild does not re-inherit it. An empty or foreign activation
 // set yields nil with no error; off Unix it returns UnsupportedPlatform.
-func Files(unsetEnv bool) ([]*os.File, error) {
+func Files(unsetEnv bool) (files []*os.File, err error) {
 	//: delegate verbatim to the service implementation.
 	return svcsdlisten.Files(unsetEnv)
 }
@@ -74,14 +74,14 @@ func Files(unsetEnv bool) ([]*os.File, error) {
 // Listeners returns the inherited stream sockets wrapped as net.Listener (the
 // underlying *os.File is closed after the dup). Same gating and platform
 // behaviour as Files.
-func Listeners(unsetEnv bool) ([]net.Listener, error) {
+func Listeners(unsetEnv bool) (listeners []net.Listener, err error) {
 	//: delegate verbatim to the service implementation.
 	return svcsdlisten.Listeners(unsetEnv)
 }
 
 // WithNames returns the inherited sockets grouped by their LISTEN_FDNAMES name;
 // duplicate names group several fds under one key.
-func WithNames(unsetEnv bool) (map[string][]*os.File, error) {
+func WithNames(unsetEnv bool) (named map[string][]*os.File, err error) {
 	//: delegate verbatim to the service implementation.
 	return svcsdlisten.WithNames(unsetEnv)
 }
