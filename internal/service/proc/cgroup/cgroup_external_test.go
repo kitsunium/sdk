@@ -16,6 +16,14 @@ import (
 // and assert, short enough that a leaked child self-reaps quickly.
 const childGrace time.Duration = 200 * time.Millisecond
 
+// killDrainDeadline bounds how long the no-survivor check polls Delete after a
+// Kill before declaring a surviving child a regression.
+const killDrainDeadline time.Duration = 3 * time.Second
+
+// killPollInterval is the gap between Delete attempts while the kernel finishes
+// reaping the killed subtree.
+const killPollInterval time.Duration = 50 * time.Millisecond
+
 // TestCreateConfinement runs the full create+confine+attach+delete cycle when
 // cgroup v2 is delegated, and otherwise asserts Create returns the typed
 // CgroupUnavailable / UnsupportedPlatform error without panicking — the issue's
@@ -232,11 +240,23 @@ func TestKillTerminatesSetsidDescendant(t *testing.T) {
 		//: an error here contradicts Available() reporting true.
 		t.Fatalf("Create: %v", err)
 	}
-	//: tear the group down at the end.
+	//: tear the group down at the end (no-op once Kill emptied it).
 	defer deleteGroup(t, g)
-	//: the leader setsid's a grandchild (which leaves the process group), then
-	//: itself sleeps; both inherit the leader's cgroup once it is attached.
-	cmd := exec.Command("sh", "-c", "setsid sleep 60 >/dev/null 2>&1 & exec sleep 60")
+	//: probe cgroup.kill on the still-EMPTY group FIRST, so an old kernel without
+	//: the feature skips here — before any helper tree is spawned, never leaking it.
+	if kerr := g.Kill(); kerr != nil {
+		//: an absent cgroup.kill is the documented fallback; skip cleanly.
+		if errs.HasCode(kerr, coreproc.CodeUnsupportedPlatform) {
+			//: nothing was spawned yet, so there is nothing to clean up.
+			t.Skip("cgroup.kill absent on this kernel (UnsupportedPlatform)")
+		}
+		//: any other failure on an empty group is a real fault.
+		t.Fatalf("Kill(empty): %v", kerr)
+	}
+	//: cgroup.kill is supported. The leader setsid's a grandchild (which LEAVES the
+	//: process group) and keeps forking short-lived children — exercising both the
+	//: setsid escape AND the late-fork race against the kill.
+	cmd := exec.Command("sh", "-c", "setsid sleep 30 >/dev/null 2>&1 & while :; do sleep 1 & done")
 	//: the tree must start before it can be attached and killed.
 	if serr := cmd.Start(); serr != nil {
 		//: no shell/sleep means the live escape path cannot run here.
@@ -247,12 +267,43 @@ func TestKillTerminatesSetsidDescendant(t *testing.T) {
 		//: an attach failure means cgroup.procs is not writable.
 		t.Fatalf("Add(leader): %v", aerr)
 	}
-	//: cgroup.kill must take down the whole subtree, setsid escapee included.
-	assertFeature(t, "Kill", g.Kill())
+	//: let the loop fork a few children so the kill races live forks.
+	time.Sleep(childGrace)
+	//: cgroup.kill must take down the whole subtree atomically — setsid escapee and
+	//: any in-flight forks included.
+	if kerr := g.Kill(); kerr != nil {
+		//: a kill failure here is a real fault (feature was probed available above).
+		t.Fatalf("Kill(tree): %v", kerr)
+	}
 	//: reap the leader so it does not linger as a zombie.
 	if _, werr := cmd.Process.Wait(); werr != nil {
-		//: a reap log is sufficient — the kill assertion already stands.
+		//: a reap log is sufficient — the no-survivor assertion stands below.
 		t.Logf("leader wait after Kill: %v", werr)
+	}
+	//: a successful Delete proves the group is EMPTY: any survivor (setsid escapee
+	//: or late fork) would hold it EBUSY. Poll briefly for the kernel to reap.
+	assertGroupDrains(t, g)
+}
+
+// assertGroupDrains polls Delete until it succeeds (the group is empty, so no
+// child survived the kill) or the deadline fails the test. A successful Delete
+// is the black-box proof of zero survivors.
+func assertGroupDrains(t *testing.T, g coreproc.Group) {
+	t.Helper()
+	deadline := time.Now().Add(killDrainDeadline)
+	//: poll until the now-childless group rmdir's, or fail on a lingering survivor.
+	for {
+		//: a clean Delete means cgroup.procs is empty — no survivor.
+		if derr := g.Delete(); derr == nil {
+			//: the whole tree is gone; the escape-proof + late-fork kill held.
+			return
+		}
+		//: past the deadline with a populated group is a survivor regression.
+		if time.Now().After(deadline) {
+			//: a still-EBUSY group means cgroup.kill missed a child.
+			t.Fatalf("group still populated after Kill — a child survived")
+		}
+		time.Sleep(killPollInterval)
 	}
 }
 
