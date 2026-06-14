@@ -56,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for mod in internal/kernel internal/core internal/service pkg .; do
+          for mod in internal/kernel internal/core internal/service pkg . e2e; do
             echo "::group::$mod ($GOOS/$GOARCH)"
             if (cd "$mod" && go build ./...); then
               echo "ok"
