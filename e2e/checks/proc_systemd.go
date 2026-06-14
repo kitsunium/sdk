@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strconv"
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -52,10 +53,12 @@ const (
 // under; also the expected LISTEN_FDNAMES value the child would recover.
 const prepareFdName string = "http"
 
-// foreignPID is a PID that is not this process's, used to stage a foreign
-// activation environment so the LISTEN_PID gate (not absence) drives the empty
-// result in the empty-set check.
-const foreignPID string = "1"
+// foreignPID is a PID guaranteed different from this process's (getpid()+1), used
+// to stage a foreign activation environment so the LISTEN_PID gate (not absence)
+// drives the empty result in the empty-set check — even when the harness itself
+// runs as PID 1 (a container init), where a hardcoded "1" would no longer be
+// foreign and the gate's rejection path would go unexercised.
+var foreignPID = strconv.Itoa(os.Getpid() + 1)
 
 // Package-level state maps. Hoisted out of the check bodies because a map literal
 // inside a function is a KTN-VAR-CONSTMAP violation; grouped in one var block per

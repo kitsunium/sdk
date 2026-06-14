@@ -127,7 +127,7 @@ func report(out io.Writer, results []Result) int {
 	//: print one row per check and tally the outcomes.
 	for _, r := range results {
 		//: a fixed-width row keeps the table readable across terminals.
-		stderrf(out, "%-11s %-7s %-34s %s\n", r.Domain, r.Status, r.Name, r.Detail)
+		stderrf(out, "%-11s %-11s %-34s %s\n", r.Domain, r.Status, r.Name, r.Detail)
 		//: tally each outcome for the summary line.
 		switch r.Status {
 		//: a correct behaviour.

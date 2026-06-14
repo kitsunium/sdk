@@ -280,6 +280,16 @@ func Reaper() harness.Suite {
 	}}
 }
 
+// nativeReaperGOOS is the set of platforms whose kernels implement a descendant
+// subreaper (Linux prctl(PR_SET_CHILD_SUBREAPER); FreeBSD/DragonFly
+// procctl(PROC_REAP_ACQUIRE)). On these, SetChildSubreaper must succeed —
+// UnsupportedPlatform there is a regression, not the expected degradation.
+var nativeReaperGOOS = map[string]bool{
+	"linux":     true,
+	"freebsd":   true,
+	"dragonfly": true,
+}
+
 // reaperSubreaper exercises SetChildSubreaper and classifies the outcome by GOOS:
 // on Linux/FreeBSD/DragonFly it must arm subreaper mode and return nil (Pass);
 // where the platform has no prctl/procctl equivalent it returns the uniform
@@ -294,9 +304,15 @@ func reaperSubreaper() harness.Result {
 		//: subreaper mode is armed — the supervisor will collect orphans.
 		return harness.Passed(reaperDomain, "set-child-subreaper", detail+": armed (nil)")
 	}
-	//: off the supported platforms the facade returns UnsupportedPlatform.
+	//: a platform with a native subreaper (prctl/procctl) must NOT report
+	//: UnsupportedPlatform — that would be a regression, so fail it there.
 	if perrs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
-		//: the expected off-platform degradation, a success not a failure.
+		//: on a native-reaper kernel, UnsupportedPlatform means the call broke.
+		if nativeReaperGOOS[runtime.GOOS] {
+			//: a regression: this kernel implements the subreaper but reported none.
+			return harness.Failed(reaperDomain, "set-child-subreaper", detail+": UnsupportedPlatform on a native-reaper platform (regression)")
+		}
+		//: off the native platforms it is the expected, correct degradation.
 		return harness.NotSupported(reaperDomain, "set-child-subreaper", detail+": UnsupportedPlatform")
 	}
 	//: a non-nil, non-Unsupported error on a platform that should arm is a failure.

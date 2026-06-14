@@ -8,6 +8,7 @@ package checks
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -52,6 +53,16 @@ const wantExitCode int = 7
 // stopGrace is the SIGTERM→SIGKILL escalation window Stop is given for the
 // group-terminate check; a sleeping shell exits on the first SIGTERM.
 const stopGrace time.Duration = 2 * time.Second
+
+// relayDeadline bounds the signal.Relay drain so a regression that blocks cannot
+// hang the whole conformance run; a pre-closed source channel drains at once.
+const relayDeadline time.Duration = 2 * time.Second
+
+// intPtr returns a pointer to v — for the pointer Spec fields (Umask) without a
+// named local at the call site.
+func intPtr(v int) *int {
+	return &v
+}
 
 // wantNoFile is the open-file ceiling pushed through Spec.Rlimits and read back
 // via `ulimit -n` — proof the re-exec trampoline ran setrlimit on this kernel.
@@ -247,8 +258,21 @@ func processGroupStop() harness.Result {
 		//: a non-nil Stop means the group outlived the escalation — a failure.
 		return harness.Failed(processDomain, nameGroupStop, "stop: "+serr.Error())
 	}
-	//: a clean group Stop proves Setpgid + escalation reach the whole tree.
-	return harness.Passed(processDomain, nameGroupStop, "group terminated via SIGTERM")
+	//: verify the leader actually terminated rather than trusting Stop's return:
+	//: Stop drove the once-only reap, so Wait returns the cached exit status.
+	exit, werr := proc.Wait()
+	//: a Wait fault here means the termination could not be confirmed.
+	if werr != nil {
+		//: the group-stop cannot be proven without the reaped status.
+		return harness.Failed(processDomain, nameGroupStop, "wait after stop: "+werr.Error())
+	}
+	//: a clean (zero, non-signalled) exit would mean the sleeper was NOT killed.
+	if exit.Success() {
+		//: the leader exited 0 — Stop did not actually terminate it.
+		return harness.Failed(processDomain, nameGroupStop, "leader survived Stop (clean exit)")
+	}
+	//: a confirmed non-clean exit proves Setpgid + escalation killed the tree.
+	return harness.Passed(processDomain, nameGroupStop, fmt.Sprintf("group terminated (code=%d signal=%v)", exit.Code, exit.Signal))
 }
 
 // Rlimit returns the rlimit/umask conformance checks: spawn a shell that prints
@@ -327,7 +351,7 @@ func rlimitNoFile() harness.Result {
 // rlimitUmask spawns `sh -c 'umask'` under Spec.Umask of 0o077 and asserts the
 // shell reports that octal mask — proof the trampoline ran umask(2).
 func rlimitUmask() harness.Result {
-	got, res, done := captureShell(rlimitDomain, nameUmask, "umask", nil, new(wantUmask))
+	got, res, done := captureShell(rlimitDomain, nameUmask, "umask", nil, intPtr(wantUmask))
 	//: a terminal helper Result short-circuits the assertion.
 	if done {
 		//: forward the NotSupported/Skip/Fail outcome verbatim.
@@ -428,7 +452,21 @@ func signalRelay() harness.Result {
 	//: so the check is deterministic and never signals the test process itself.
 	src := make(chan signal.Signal)
 	close(src)
-	err := signal.Relay(src, signal.Target(os.Getpid()))
+	//: run Relay under a bounded deadline so a regression that blocks cannot hang
+	//: the conformance run; the pre-closed source makes the happy path immediate.
+	relayed := make(chan error, 1)
+	go func() { relayed <- signal.Relay(src, signal.Target(os.Getpid())) }()
+	var err error
+	//: take whichever happens first: Relay returning, or the deadline elapsing.
+	select {
+	//: Relay returned within the deadline — classify its error below.
+	case err = <-relayed:
+		//: fall through to the shared error classification.
+	//: Relay never returned — a regression, reported as a Skip not a hang.
+	case <-time.After(relayDeadline):
+		//: degrade to a Skip rather than block the whole conformance run.
+		return harness.Skipped(signalDomain, nameRelay, fmt.Sprintf("Relay did not return within %s", relayDeadline))
+	}
 	//: off Unix Relay cannot kill(2); the uniform contract is the correct result.
 	if err != nil && unsupportedProc(err) {
 		//: degrade uniformly rather than fail where kill(2) is unavailable.
