@@ -1,0 +1,82 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "reaper",
+    srcs = ["reaper.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/reaper",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/service/proc/reaper",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":reaper",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "reaper_test",
+    srcs = [
+        "reaper_external_nonunix_test.go",
+        "reaper_external_test.go",
+        "reaper_external_unix_test.go",
+    ],
+    deps = [
+        ":reaper",
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:android": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:js": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:osx": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:windows": [
+            "//pkg/v1/errs",
+        ],
+        "//conditions:default": [],
+    }),
+)
