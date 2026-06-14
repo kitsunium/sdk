@@ -145,6 +145,36 @@ rules:
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
 
+  # KTN-VAR-NILSLICE (info) — "prefer a nil slice to an empty one".
+  #
+  # Inverted-semantics exception: os.StartProcess inherits the PARENT environment
+  # exactly when os.ProcAttr.Env is nil. The proc port guarantees Spec.Env is
+  # "explicit, never inherited", so a nil Spec.Env MUST be mapped to a non-nil
+  # zero-length slice before reaching StartProcess — a nil slice would leak the
+  # supervisor's environment (secrets included) into the child. Here the
+  # lint-preferred nil is the security bug, so the non-nil empty slice is
+  # deliberate. Scoped to the spawn implementation ONLY.
+  KTN-VAR-NILSLICE:
+    exclude:
+      - "**/internal/service/proc/exec/**"
+
+  # KTN-VAR-BIGSTRUCT (phase 4, warning) — contract-required value type.
+  #
+  # The pkg/v1/process facade's exported entry point is, by ADR 0016 design,
+  # `func Start(ctx, spec Spec)` where Spec is a TYPE ALIAS of the core port's
+  # immutable coreproc.Spec (176 bytes). The public surface is deliberately an
+  # alias of the port value type — pointers would (a) diverge the public API
+  # from the port, (b) let a caller mutate the spec after Start, defeating the
+  # "immutable spawn specification" guarantee. The single by-value copy happens
+  # once per spawn, immediately before a fork/exec that dwarfs it, so the
+  # performance concern the rule guards is moot here. This is the same
+  # contract-required-type class as the retired snapshot.Value / AEAD Key cases.
+  # Scoped to the process facade ONLY; the service layer consumes Spec by value
+  # too but is not flagged (it is not a pure forwarder).
+  KTN-VAR-BIGSTRUCT:
+    exclude:
+      - "**/pkg/v1/process/**"
+
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #
   # console_external_test.go redirects the process-global os.Stdout / os.Stderr
