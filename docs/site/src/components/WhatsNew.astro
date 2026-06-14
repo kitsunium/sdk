@@ -11,6 +11,8 @@
 // its anchor's first commit. Best-effort dynamic import; a missing file (fresh
 // clone, no history) renders nothing.
 
+import { withBase } from "../../scripts/lib/base.mjs";
+
 interface Feature {
   id: string;
   domain: string;
@@ -38,6 +40,12 @@ interface Props {
 }
 const { release, major, changelogHref } = Astro.props;
 
+//: Internal absolute hrefs must carry the project-page base (e.g. "/sdk") or
+//: they 404 under GitHub Pages. External/relative hrefs pass through untouched.
+const resolvedChangelogHref = changelogHref.startsWith("/")
+  ? withBase(changelogHref)
+  : changelogHref;
+
 let payload: Payload | null = null;
 try {
   //: Astro/Vite resolves these dynamic imports at build time when the
@@ -55,7 +63,7 @@ const fmtDay = (iso: string) => (iso ?? "").slice(0, 10);
   <section class="whats-new" aria-labelledby="whats-new-heading">
     <header>
       <h2 id="whats-new-heading">What's new<span class="release-tag">in <code>{release}</code></span></h2>
-      <a href={changelogHref} class="whats-new-cta">Full catalog →</a>
+      <a href={resolvedChangelogHref} class="whats-new-cta">Full catalog →</a>
     </header>
     <ul>
       {recent.map(f => {

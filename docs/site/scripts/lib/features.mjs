@@ -91,6 +91,12 @@ export function buildFeaturePayload(
   registry,
   { release, major, repoUrl, provByAnchor, recentN = 5 },
 ) {
+  //: newest-first by `added`, then title. Compare parsed timestamps — `added`
+  //: is `%cI` (ISO 8601 with timezone offset), so lexicographic string order
+  //: misranks commits whose offsets differ. Date.parse normalises to epoch ms.
+  const byAddedDescThenTitle = (a, b) =>
+    Date.parse(b.added) - Date.parse(a.added) || a.title.localeCompare(b.title);
+
   const enriched = [];
   for (const f of registry) {
     const prov = provByAnchor[f.anchor];
@@ -125,26 +131,12 @@ export function buildFeaturePayload(
     seen.add(d);
     const features = byDomain.get(d);
     if (!features || features.length === 0) continue;
-    features.sort((a, b) =>
-      a.added < b.added
-        ? 1
-        : a.added > b.added
-          ? -1
-          : a.title.localeCompare(b.title),
-    );
+    features.sort(byAddedDescThenTitle);
     domains.push({ domain: d, label: DOMAIN_LABEL[d] ?? d, features });
   }
 
   //: recent = the most-recently-added capabilities across all domains.
-  const recent = [...enriched]
-    .sort((a, b) =>
-      a.added < b.added
-        ? 1
-        : a.added > b.added
-          ? -1
-          : a.title.localeCompare(b.title),
-    )
-    .slice(0, recentN);
+  const recent = [...enriched].sort(byAddedDescThenTitle).slice(0, recentN);
 
   return {
     release,

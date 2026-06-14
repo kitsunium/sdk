@@ -169,11 +169,16 @@ async function materialiseChangelog(
 ) {
   //: Provenance ("added" date) is the anchor file's first commit, derived at
   //: HEAD — a feature's birth date is historical and ref-independent. Derive
-  //: once per distinct anchor. A bad anchor throws (fail-loud).
-  //: TODO: when tagged releases exist, filter a feature out of a tag's catalog
-  //: when its anchor was not yet present at that tag.
+  //: once per distinct anchor.
+  //: An anchor absent from this snapshot (a feature added after the tag being
+  //: materialised) is skipped, not fatal: buildFeaturePayload already omits
+  //: features with no provenance, so the tag's catalog naturally excludes
+  //: capabilities that did not yet exist. Forcing every current anchor through
+  //: deriveProvenance would make it throw and abort the whole prebuild the
+  //: first time a new catalog entry lands after a tag.
   const provByAnchor = {};
   for (const anchor of uniqueAnchors(featureRegistry)) {
+    if (!existsSync(join(sourceRoot, anchor))) continue;
     provByAnchor[anchor] = await deriveProvenance(sourceRoot, anchor, "HEAD");
   }
   const payload = buildFeaturePayload(featureRegistry, {
