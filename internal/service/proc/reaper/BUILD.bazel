@@ -1,0 +1,42 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "reaper",
+    srcs = [
+        "reaper.go",
+        "reaper_other.go",
+        "reaper_unix.go",
+        "subreaper_linux.go",
+        "subreaper_other.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/reaper",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/proc",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":reaper",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "reaper_test",
+    srcs = ["reaper_internal_test.go"],
+    embed = [":reaper"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/kernel/errs",
+    ],
+)

@@ -1,0 +1,29 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "reaper",
+    srcs = ["reaper.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/reaper",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/service/proc/reaper",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":reaper",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "reaper_test",
+    srcs = ["reaper_external_test.go"],
+    deps = [
+        ":reaper",
+        "//pkg/v1/errs",
+    ],
+)
