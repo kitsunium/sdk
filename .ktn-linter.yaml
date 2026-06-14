@@ -69,6 +69,11 @@ exclude:
   # Rule 8 exemption in /workspace/CLAUDE.md, these are tooling, not
   # library code, and stay out of the per-package doc-style gates.
   - "tools/**"
+  # The e2e conformance binary (e2e/**) is a runtime test harness, not shipped
+  # library code — same category as tools/. Its job is to exercise the public
+  # API on real kernels, so library-shape rules (role-suffixed structs, one
+  # struct per file, per-package doc gates) do not apply.
+  - "e2e/**"
   # Go module cache occasionally shows up in IDE-driven scans.
   - "**/.cache/**"
   # Protocol Buffers and gRPC generated code.

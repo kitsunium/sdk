@@ -61,7 +61,7 @@ package **always compiles**; only behaviour degrades.
 
 - **Build bar** is gated on every PR by `scripts/cross-platform-audit.sh` (local:
   cross-compiles **94 packages × 8 platforms** per module with `GOWORK=off`, exits
-  non-zero on any failing cell) and its CI mirror `.github/workflows/cross-platform.yml`
+  non-zero on any failing cell) and its CI mirror the `cross-build` job in `.github/workflows/bazel-ci.yml`
   (a GitHub-hosted `GOOS/GOARCH` matrix, no infra dependency, `CGO_ENABLED=0`). A
   new platform-specific call that drops a package fails the matrix before merge.
 - **Runtime bar** is validated by `.github/workflows/e2e-vm.yml` on **real OS
@@ -175,7 +175,7 @@ behind one Go API — a model for the `Group` port's native backends, not a depe
 
 - ADR 0016 (process-supervision domain), ADR 0004 (Bazel / Linux CI), ADR 0005 (`UnsupportedPlatform` sentinel)
 - `scripts/cross-platform-audit.sh` — local build-bar matrix
-- `.github/workflows/cross-platform.yml` — build-bar CI gate
+- the `cross-build` job in `.github/workflows/bazel-ci.yml` — build-bar CI gate
 - `.github/workflows/e2e-vm.yml` — runtime-bar real-kernel gate
 - FreeBSD `rctl(8)` / RACCT/RCTL; `procctl(2)` `PROC_REAP_ACQUIRE`
 - Windows Job Objects — `SetInformationJobObject`, `JOBOBJECT_EXTENDED_LIMIT_INFORMATION`, `JOBOBJECT_CPU_RATE_CONTROL_INFORMATION`
