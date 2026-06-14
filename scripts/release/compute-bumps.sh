@@ -63,6 +63,9 @@ need_bump=0
 # pkg/go.mod. (BUILD.bazel / CLAUDE.md churn alone does not warrant a release.)
 while IFS= read -r path; do
   case "$path" in
+    # Maintainer-only metadata that ships in the module zip but carries no
+    # consumer-visible change — its churn alone must not cut a release.
+    */CLAUDE.md|*/BUILD.bazel) continue ;;
     pkg/v*/*|pkg/go.mod) need_bump=1; break ;;
   esac
 done < <(git diff --name-only "$RANGE" || true)

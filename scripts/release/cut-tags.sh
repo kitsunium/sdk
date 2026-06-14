@@ -74,8 +74,16 @@ bump_for_pkg() {
   case "$trailer" in
     minor) next_minor "$last" ;;
     major)
-      echo "cut-tags: 'Release-bump: major' rejected — a breaking v2 needs a real …/pkg/v2 module path (deferred — ADR 0009)" >&2
-      return 1
+      # v0.x → v1.0.0 is the normal stabilization step on the SAME bare module
+      # (both majors are bare-module-path-legal). Only a breaking v2+ needs a
+      # real …/pkg/v2 module path (deferred — ADR 0009).
+      case "$last" in
+        pkg/v0.*) echo "pkg/v1.0.0" ;;
+        *)
+          echo "cut-tags: 'Release-bump: major' rejected — a breaking v2 needs a real …/pkg/v2 module path (deferred — ADR 0009)" >&2
+          return 1
+          ;;
+      esac
       ;;
     *) next_patch "$last" ;;
   esac

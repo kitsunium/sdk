@@ -93,11 +93,18 @@ version_sort() {
   fi
 }
 
-# Find the highest valid pkg tag. Echoes empty if none. Internal tags
-# (internal/<mod>/v…) are excluded by the `pkg/v*` glob.
+# Find the highest valid STABLE pkg tag. Echoes empty if none. Internal tags
+# (internal/<mod>/v…) are excluded by the `pkg/v*` glob. Pre-release tags are
+# skipped: they are not a valid bump base (next_patch/minor refuse them), and
+# the BSD `version_sort` fallback only compares X.Y.Z — so pkg/v0.2.0 and
+# pkg/v0.2.0-rc.1 would tie and `tail -n1` could hand back the rc.
 latest_pkg_tag() {
   git tag -l 'pkg/v*' |
-    while IFS= read -r t; do is_valid_tag "$t" && echo "$t"; done |
+    while IFS= read -r t; do
+      is_valid_tag "$t" || continue
+      case "$t" in *-*) continue ;; esac
+      echo "$t"
+    done |
     version_sort |
     tail -n1
 }
