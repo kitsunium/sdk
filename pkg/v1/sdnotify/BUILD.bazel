@@ -21,6 +21,69 @@ alias(
 
 go_test(
     name = "sdnotify_test",
-    srcs = ["sdnotify_external_test.go"],
-    deps = [":sdnotify"],
+    srcs = [
+        "sdnotify_external_test.go",
+        "sdnotify_other_test.go",
+    ],
+    deps = [
+        ":sdnotify",
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:js": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:osx": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:windows": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "//conditions:default": [],
+    }),
 )

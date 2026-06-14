@@ -38,7 +38,10 @@ alias(
 
 go_test(
     name = "rlimit_test",
-    srcs = ["rlimit_external_test.go"],
+    srcs = [
+        "rlimit_external_test.go",
+        "rlimit_other_test.go",
+    ],
     deps = [
         ":rlimit",
         "//internal/core/proc",

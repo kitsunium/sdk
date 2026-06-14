@@ -47,6 +47,7 @@ go_test(
     name = "exec_test",
     srcs = [
         "exec_external_test.go",
+        "exec_other_test.go",
         "stdio_external_test.go",
     ],
     deps = select({
@@ -85,6 +86,11 @@ go_test(
             "//internal/core/proc",
             "//internal/kernel/errs",
         ],
+        "@rules_go//go/platform:js": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
         "@rules_go//go/platform:linux": [
             ":exec",
             "//internal/core/proc",
@@ -100,7 +106,27 @@ go_test(
             "//internal/core/proc",
             "//internal/kernel/errs",
         ],
+        "@rules_go//go/platform:osx": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:plan9": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:qnx": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
         "@rules_go//go/platform:solaris": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:windows": [
             ":exec",
             "//internal/core/proc",
             "//internal/kernel/errs",
