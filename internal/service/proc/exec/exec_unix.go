@@ -62,17 +62,21 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		return nil, wrapSpawn(sErr, errs.String("path", spec.Path))
 	}
 
-	//: the child now owns dups of its fds — close the parent's child-side ends and
-	//: launch the capture copiers.
-	sio.afterStart()
 	live := newHandle(started, spec.Setpgid, sio)
-	//: best-effort scheduling attributes run post-start on the live pid.
+	//: best-effort scheduling attributes run post-start on the live pid. They run
+	//: BEFORE the capture copiers launch, so a teardown here never blocks on a
+	//: caller's sink: with no copiers started, Wait's copier-join is a no-op.
 	if pErr := applyPostStart(live.pid, spec); pErr != nil {
-		//: a refused attribute tears the child down so nothing half-configured leaks.
+		//: kill + reap the child; no copiers are running, so this cannot hang.
 		teardown(live)
+		//: release the (still-unstarted) stdio fds so nothing leaks.
+		sio.closeAll()
 		//: propagate the typed RLIMIT_FAILED from the attribute application.
 		return nil, pErr
 	}
+	//: the child is fully configured — close the parent's child-side ends and
+	//: launch the capture copiers (joined by Wait for 100% delivery).
+	sio.afterStart()
 	//: a fully-configured, running process handle.
 	return live, nil
 }

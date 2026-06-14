@@ -8,14 +8,25 @@ package exec_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcexec "github.com/kitsunium/sdk/internal/service/proc/exec"
 )
+
+// errWriter fails every Write, simulating a capture sink that errors mid-stream.
+type errWriter struct{}
+
+// Write always fails, so the output copier records a writer error.
+func (errWriter) Write(_ []byte) (int, error) {
+	//: a sink that rejects every byte exercises the StdioCaptureFailed path.
+	return 0, errors.New("sink write failed")
+}
 
 // startAndWait spawns spec, drives Wait, and fails the test on any spawn/wait
 // fault — the common path for the stdio cases below.
@@ -154,6 +165,35 @@ func TestStdioNull(t *testing.T) {
 	//: null wiring must not perturb the exit status.
 	if exit.Code != 0 {
 		t.Fatalf("exit Code = %d, want 0", exit.Code)
+	}
+}
+
+// TestStdioCaptureWriterFailureSurfaces asserts that a capture writer which
+// errors mid-stream is surfaced from Wait as StdioCaptureFailed rather than
+// silently swallowed, while the child's real exit status is still reported.
+func TestStdioCaptureWriterFailureSurfaces(t *testing.T) {
+	t.Parallel()
+	requireShell(t)
+
+	spec := coreproc.Spec{
+		Path:   shPath,
+		Args:   []string{"sh", "-c", "echo hello"},
+		Stdio:  coreproc.StdioCapture,
+		Stdout: errWriter{},
+	}
+	p, err := svcexec.Start(context.Background(), spec)
+	//: a clean spawn is the precondition.
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	exit, wErr := p.Wait()
+	//: the writer failure must surface as the typed capture error, not silence.
+	if !errs.HasCode(wErr, coreproc.CodeStdioCaptureFailed) {
+		t.Fatalf("Wait err = %v, want StdioCaptureFailed", wErr)
+	}
+	//: the real exit status still stands alongside the capture error.
+	if exit.Code != 0 {
+		t.Fatalf("exit Code = %d, want 0 (the child itself ran fine)", exit.Code)
 	}
 }
 

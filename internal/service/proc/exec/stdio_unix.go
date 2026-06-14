@@ -59,6 +59,33 @@ type stdioState struct {
 	inDst      *os.File               // stdin pipe write end (nil when no capture stdin)
 	inSrc      io.Reader              // caller's stdin source
 	wg         sync.WaitGroup
+	copyMu     sync.RWMutex // guards copyErr
+	copyErr    error        // first output-copier failure (a caller writer erroring), surfaced by Wait
+}
+
+// recordCopyErr latches the first output-copier failure so Wait can surface it.
+func (s *stdioState) recordCopyErr(err error) {
+	//: a nil copy error is the success path — nothing to record.
+	if err == nil {
+		//: the writer accepted every byte the child produced.
+		return
+	}
+	s.copyMu.Lock()
+	//: keep the first failure; later copiers usually report the same cause.
+	if s.copyErr == nil {
+		//: latch the first writer failure.
+		s.copyErr = err
+	}
+	s.copyMu.Unlock()
+}
+
+// copyError returns the latched first output-copier failure, or nil when capture
+// delivered cleanly. Read it after wait() has joined the copiers.
+func (s *stdioState) copyError() error {
+	s.copyMu.RLock()
+	defer s.copyMu.RUnlock()
+	//: the latched first writer failure, or nil on a clean capture.
+	return s.copyErr
 }
 
 // buildStdio assembles the stdioState for spec.Stdio. Any fd-setup failure
@@ -226,14 +253,15 @@ func (s *stdioState) afterStart() {
 }
 
 // drainOutput copies the pipe read end src into sink until EOF, then releases src
-// and signals the WaitGroup.
+// and signals the WaitGroup. A writer failure is latched (recordCopyErr) so Wait
+// can surface it as StdioCaptureFailed — output is not silently truncated.
 func (s *stdioState) drainOutput(src io.ReadCloser, sink io.Writer) {
 	//: signal completion so wait() can join once the pipe drains.
 	defer s.wg.Done()
 	//: copy every byte the child emits into the caller's sink.
 	_, cerr := io.Copy(sink, src)
-	//: a drained-pipe copy fault is non-actionable cleanup detail.
-	swallowErr(cerr)
+	//: latch a writer failure (e.g. a full disk) so Wait reports it, not silence.
+	s.recordCopyErr(cerr)
 	//: the child has closed its write end; release the read end.
 	swallowErr(src.Close())
 }

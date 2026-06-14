@@ -102,6 +102,12 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 		}
 		//: a clean reap yields the translated exit outcome.
 		h.waitVal = exitValueFrom(state)
+		//: a clean exit whose capture writer failed surfaces the typed capture
+		//: error (os/exec semantics) — the exit status still stands in waitVal.
+		if cErr := h.stdio.copyError(); cErr != nil {
+			//: wrap the writer failure under the central STDIO_CAPTURE_FAILED fields.
+			h.waitErr = wrapStdioCapture(cErr, errs.Int("pid", h.pid))
+		}
 	})
 	//: every caller observes the memoised outcome of the single reap.
 	return h.waitVal, h.waitErr
