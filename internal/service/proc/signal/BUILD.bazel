@@ -1,0 +1,43 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "signal",
+    srcs = [
+        "relay_other.go",
+        "relay_unix.go",
+        "signal.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/signal",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/proc",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":signal",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "signal_test",
+    srcs = [
+        "relay_other_test.go",
+        "signal_external_test.go",
+    ],
+    embed = [":signal"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/kernel/errs",
+    ],
+)

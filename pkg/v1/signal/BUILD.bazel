@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "signal",
+    srcs = ["signal.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/signal",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/service/proc/signal",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":signal",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "signal_test",
+    srcs = ["signal_external_test.go"],
+    deps = [":signal"],
+)
