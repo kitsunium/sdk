@@ -37,9 +37,18 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		return nil, lErr
 	}
 
-	attr, aErr := buildProcAttr(spec)
+	sio, ioErr := buildStdio(spec)
+	//: a stdio fd-setup failure (pipe/null) aborts before credential work.
+	if ioErr != nil {
+		//: propagate the typed SPAWN_FAILED from the stdio setup verbatim.
+		return nil, ioErr
+	}
+
+	attr, aErr := buildProcAttr(spec, sio.files[:])
 	//: a credential-resolution failure aborts before fork/exec.
 	if aErr != nil {
+		//: release the stdio fds so the aborted spawn leaks nothing.
+		sio.closeAll()
 		//: propagate the typed UNKNOWN_USER / UNKNOWN_GROUP verbatim.
 		return nil, aErr
 	}
@@ -47,18 +56,27 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 	started, sErr := os.StartProcess(spec.Path, buildArgv(spec), attr)
 	//: a fork/exec failure is a typed SPAWN_FAILED wrapping the OS cause.
 	if sErr != nil {
+		//: release the stdio fds before surfacing the spawn failure.
+		sio.closeAll()
 		//: wrap the StartProcess cause under the central SPAWN_FAILED fields.
 		return nil, wrapSpawn(sErr, errs.String("path", spec.Path))
 	}
 
-	live := newHandle(started, spec.Setpgid)
-	//: best-effort scheduling attributes run post-start on the live pid.
+	live := newHandle(started, spec.Setpgid, sio)
+	//: best-effort scheduling attributes run post-start on the live pid. They run
+	//: BEFORE the capture copiers launch, so a teardown here never blocks on a
+	//: caller's sink: with no copiers started, Wait's copier-join is a no-op.
 	if pErr := applyPostStart(live.pid, spec); pErr != nil {
-		//: a refused attribute tears the child down so nothing half-configured leaks.
+		//: kill + reap the child; no copiers are running, so this cannot hang.
 		teardown(live)
+		//: release the (still-unstarted) stdio fds so nothing leaks.
+		sio.closeAll()
 		//: propagate the typed RLIMIT_FAILED from the attribute application.
 		return nil, pErr
 	}
+	//: the child is fully configured — close the parent's child-side ends and
+	//: launch the capture copiers (joined by Wait for 100% delivery).
+	sio.afterStart()
 	//: a fully-configured, running process handle.
 	return live, nil
 }
@@ -85,7 +103,7 @@ func teardown(live *handle) {
 // the explicit environment (empty, never inherited, when Spec.Env is nil), the
 // inherited std streams, and the SysProcAttr carrying credentials and the
 // group/session topology.
-func buildProcAttr(spec coreproc.Spec) (attr *os.ProcAttr, err error) {
+func buildProcAttr(spec coreproc.Spec, files []*os.File) (attr *os.ProcAttr, err error) {
 	cred, cErr := resolveCredential(spec)
 	//: a credential-resolution failure aborts attr assembly.
 	if cErr != nil {
@@ -111,9 +129,8 @@ func buildProcAttr(spec coreproc.Spec) (attr *os.ProcAttr, err error) {
 		env = make([]string, 0)
 	}
 
-	//: inherit the supervisor's std streams; redirection is a caller concern.
-	files := []*os.File{os.Stdin, os.Stdout, os.Stderr}
-	//: the assembled attr is ready for os.StartProcess.
+	//: the child's std streams were wired by buildStdio per Spec.Stdio (inherit,
+	//: null, or capture); the assembled attr is ready for os.StartProcess.
 	return &os.ProcAttr{Dir: spec.Dir, Env: env, Files: files, Sys: sysAttr}, nil
 }
 

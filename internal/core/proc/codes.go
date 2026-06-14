@@ -94,3 +94,9 @@ const CodeInvalidNotification errs.Code = 0x00_02_06_15 // 0.2.6.21
 // CodeCredentialMismatch identifies a received datagram whose kernel-verified
 // sender credentials did not match the expected supervised process.
 const CodeCredentialMismatch errs.Code = 0x00_02_06_16 // 0.2.6.22
+
+// CodeStdioCaptureFailed identifies a StdioCapture spawn whose output copier
+// could not deliver the child's stdout/stderr to the caller's writer (the writer
+// itself returned an error). Surfaced from Wait when the process otherwise
+// exited cleanly.
+const CodeStdioCaptureFailed errs.Code = 0x00_02_06_17 // 0.2.6.23
