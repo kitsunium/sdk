@@ -23,6 +23,13 @@ name: E2E VM tests (real OS kernels)
 on:
   workflow_dispatch:
 
+# The matrix entries roll back + drive fixed persistent VMIDs in place, so two
+# concurrent dispatches must never touch the same guest — serialise the whole
+# workflow (never cancel a run mid-rollback).
+concurrency:
+  group: e2e-vm-proxmox
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -114,6 +121,8 @@ jobs:
     name: ${{ matrix.name }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
         with:
@@ -132,7 +141,9 @@ jobs:
           compile() { # module  pkg-list
             local mod="$1"; shift
             for pkg in $@; do
-              local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__')${{ matrix.ext }}.test"
+              # Suffix order matters: the executable extension MUST be last, so a
+              # Windows binary is <name>.test.exe (runnable), not <name>.exe.test.
+              local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__').test${{ matrix.ext }}"
               # A package with no _test.go produces no binary; tolerate that.
               if (cd "$mod" && go test -c -o "$GITHUB_WORKSPACE/$out" "$pkg") 2>/tmp/c.log; then
                 [ -f "$out" ] && echo "built $out" || echo "no tests in $mod/$pkg (skip)"
@@ -153,9 +164,17 @@ jobs:
           curl -sk -X POST -H "Authorization: $PVE_AUTH" \
             "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/status/stop" || true
           sleep 5
-          curl -sk -X POST -H "Authorization: $PVE_AUTH" \
-            "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/snapshot/base/rollback"
-          sleep 3
+          # Rollback is async: it returns a UPID. Poll the task to completion
+          # before starting, else the VM boots mid-rollback (a race / corruption).
+          UPID=$(curl -sk -X POST -H "Authorization: $PVE_AUTH" \
+            "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/snapshot/base/rollback" | jq -r '.data')
+          for i in $(seq 1 60); do
+            st=$(curl -sk -H "Authorization: $PVE_AUTH" \
+              "${PROXMOX_API_URL}/nodes/${NODE}/tasks/${UPID}/status" | jq -r '.data.status' 2>/dev/null || true)
+            [ "$st" = "stopped" ] && break
+            sleep 2
+          done
+          [ "$st" = "stopped" ] || { echo "::error::rollback task did not finish ($UPID)"; exit 1; }
           curl -sk -X POST -H "Authorization: $PVE_AUTH" \
             "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/status/start"
 
@@ -186,18 +205,30 @@ jobs:
 
       # ── 4. Ship the test binaries to the VM and run them on the real kernel ──
       - name: Run test suites on ${{ matrix.name }}
+        shell: bash
         run: |
           set -uo pipefail
+          shopt -s nullglob
           IP=${{ steps.ip.outputs.ip }}
           USER=${{ matrix.user }}
-          scp ${SSH_OPTS} bins/*.test "${USER}@${IP}:" || { echo "::error::scp failed"; exit 1; }
+          EXT='${{ matrix.ext }}'
+          bins=(bins/*.test"${EXT}")
+          # A target with no platform-relevant tests produces no binaries — that
+          # is a clean skip, not a failure (e.g. a package whose only suite is
+          # Unix-only when this lane is Windows).
+          if [ ${#bins[@]} -eq 0 ]; then
+            echo "no test binaries for ${{ matrix.name }} — nothing to run"; exit 0
+          fi
+          scp ${SSH_OPTS} "${bins[@]}" "${USER}@${IP}:" || { echo "::error::scp failed"; exit 1; }
           fail=0
-          for bin in bins/*.test; do
+          for bin in "${bins[@]}"; do
             name=$(basename "$bin")
             echo "::group::$name on ${{ matrix.name }}"
+            # Unix runs ./name; Windows runs the .exe by name (cmd/ssh default).
+            if [ -n "$EXT" ]; then run="$name"; else run="./$name"; fi
             # -test.short keeps the per-OS run quick; the suites gate Unix-only
             # cases on a /bin/sh probe and skip cleanly where unsupported.
-            if ssh ${SSH_OPTS} "${USER}@${IP}" "./${name} -test.v -test.short 2>&1"; then
+            if ssh ${SSH_OPTS} "${USER}@${IP}" "$run -test.v -test.short 2>&1"; then
               echo "PASS $name"
             else
               echo "::error::$name failed on ${{ matrix.name }}"; fail=1
