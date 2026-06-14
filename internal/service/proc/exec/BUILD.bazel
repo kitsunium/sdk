@@ -39,8 +39,8 @@ alias(
 go_test(
     name = "exec_test",
     srcs = ["exec_external_test.go"],
-    embed = [":exec"],
     deps = [
+        ":exec",
         "//internal/core/proc",
         "//internal/kernel/errs",
     ],

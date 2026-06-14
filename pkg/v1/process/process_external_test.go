@@ -89,7 +89,7 @@ func TestStartAndStop(t *testing.T) {
 
 	spec := process.Spec{
 		Path:    shPath,
-		Args:    []string{"sh", "-c", "sleep 1000 & wait"},
+		Args:    []string{"sh", "-c", "sleep 30 & wait"},
 		Setpgid: true,
 	}
 	p, err := process.Start(context.Background(), spec)

@@ -99,7 +99,7 @@ func TestWaitSignaledExit(t *testing.T) {
 
 	spec := coreproc.Spec{
 		Path:    shPath,
-		Args:    []string{"sh", "-c", "sleep 1000"},
+		Args:    []string{"sh", "-c", "sleep 30"},
 		Setpgid: true,
 	}
 	p, err := svcexec.Start(context.Background(), spec)
@@ -140,7 +140,7 @@ func TestStopGroupNoSurvivor(t *testing.T) {
 	//: survivor risk a leader-only kill would leave behind.
 	spec := coreproc.Spec{
 		Path:    shPath,
-		Args:    []string{"sh", "-c", "sleep 1000 & echo $! ; wait"},
+		Args:    []string{"sh", "-c", "sleep 30 & echo $! ; wait"},
 		Setpgid: true,
 	}
 	p, err := svcexec.Start(context.Background(), spec)
@@ -190,7 +190,7 @@ func TestStopEscalatesToKill(t *testing.T) {
 	//: trap-ignore SIGTERM, then sleep; only SIGKILL can take this child down.
 	spec := coreproc.Spec{
 		Path:    shPath,
-		Args:    []string{"sh", "-c", "trap '' TERM; sleep 1000"},
+		Args:    []string{"sh", "-c", "trap '' TERM; sleep 30"},
 		Setpgid: true,
 	}
 	p, err := svcexec.Start(context.Background(), spec)
