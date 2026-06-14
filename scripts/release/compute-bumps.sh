@@ -41,11 +41,25 @@ EOF
   esac
 done
 
-# Shallow-clone safe range (plan B2). git describe fails silently on
-# repos without tags; fall back to the root commit (always present).
+# Range to diff for "what changed since the last release".
+#
+# cut-tags.sh publishes each release on a DETACHED commit that is a *child* of
+# the main commit it was cut from (ADR 0009 — the dev branch is never touched).
+# That release commit is therefore NOT reachable from HEAD, so `git describe
+# --tags` cannot see the release tags and silently falls back to root..HEAD —
+# which makes compute-bumps emit `pkg` on EVERY main build and cut a spurious
+# patch each time. Instead, baseline on the latest pkg tag's FIRST PARENT (the
+# main commit that release was cut from): the range then captures only the
+# commits added to main since that release (empty ⇒ no bump). Falls back to the
+# root commit on a bootstrap repo that has no pkg tag yet.
 if [ -z "$RANGE" ]; then
-  if last_tag="$(git describe --tags --abbrev=0 2>/dev/null)"; then
-    RANGE="${last_tag}..HEAD"
+  last_pkg="$(latest_pkg_tag 2>/dev/null || true)"
+  last_base=""
+  if [ -n "$last_pkg" ]; then
+    last_base="$(git rev-parse -q --verify "${last_pkg}^1^{commit}" 2>/dev/null || true)"
+  fi
+  if [ -n "$last_base" ]; then
+    RANGE="${last_base}..HEAD"
   elif [ "$(git rev-list --count HEAD)" -eq 1 ]; then
     # Single-commit repo: root == HEAD, so root..HEAD is empty and the
     # initial commit's paths would be invisible. Diff against the empty

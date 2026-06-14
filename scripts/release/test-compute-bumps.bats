@@ -85,3 +85,41 @@ teardown() { rm -rf "$REPO"; }
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+# Regression: the release tag lives on a DETACHED child of main (how cut-tags.sh
+# publishes it), so `git describe` can't see it. compute-bumps must baseline on
+# the tag's first parent, not fall back to root..HEAD and emit a spurious bump.
+@test "detached release tag + no new main commits emits nothing (no spurious bump)" {
+  cd "$(mktemp -d)"
+  git init -q -b main
+  git config user.email "ci@example.invalid"; git config user.name "ci"
+  mkdir -p pkg/v1
+  printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
+  : > pkg/v1/codec.go
+  git add -A; git commit -q -m "init"
+  base="$(git rev-parse HEAD)"
+  # cut-tags-style: a detached commit whose parent is main HEAD, tagged, not on a branch.
+  rel="$(git commit-tree "HEAD^{tree}" -p "$base" -m "release v0.1.0")"
+  git tag pkg/v0.1.0 "$rel"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "detached release tag + a real pkg change after the base emits pkg" {
+  cd "$(mktemp -d)"
+  git init -q -b main
+  git config user.email "ci@example.invalid"; git config user.name "ci"
+  mkdir -p pkg/v1
+  printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
+  : > pkg/v1/codec.go
+  git add -A; git commit -q -m "init"
+  base="$(git rev-parse HEAD)"
+  rel="$(git commit-tree "HEAD^{tree}" -p "$base" -m "release v0.1.0")"
+  git tag pkg/v0.1.0 "$rel"
+  echo "// new" >> pkg/v1/codec.go
+  git commit -aq -m "feat(v1): real change after release"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pkg" ]
+}
