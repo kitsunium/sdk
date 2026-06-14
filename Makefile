@@ -167,7 +167,7 @@ release-dry-run:
 # package's Go doc comment via the `gomarkdoc` binary (ADR 0008).
 # The binary is installed by the devcontainer Go feature
 # (.devcontainer/features/languages/go/install.sh) so it lives on
-# $PATH without polluting pkg/v1/go.mod with ~50 indirect deps.
+# $PATH without polluting pkg/go.mod with ~50 indirect deps.
 docs-readme:
 	@command -v gomarkdoc >/dev/null 2>&1 \
 	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0 (or rebuild devcontainer)"; exit 1; }
@@ -191,14 +191,14 @@ BEFORE ?= baseline
 AFTER ?= $(WAVE)
 profile:
 	@mkdir -p .bench/profiles/$(WAVE)
-	cd pkg/v1 && GOWORK=off go test -run='^$$' -bench=. -benchmem \
+	cd pkg && GOWORK=off go test -run='^$$' -bench=. -benchmem \
 	  -count=$${COUNT:-10} -benchtime=$${BENCHTIME:-5s} \
 	  -cpu=1,2,4,8,16 \
 	  -cpuprofile=$(CURDIR)/.bench/profiles/$(WAVE)/cpu.out \
 	  -memprofile=$(CURDIR)/.bench/profiles/$(WAVE)/mem.out \
 	  -blockprofile=$(CURDIR)/.bench/profiles/$(WAVE)/block.out \
 	  -mutexprofile=$(CURDIR)/.bench/profiles/$(WAVE)/mutex.out \
-	  ./codec/... \
+	  ./v1/codec/... \
 	  | tee $(CURDIR)/.bench/profiles/$(WAVE)/bench.txt
 	@echo "→ .bench/profiles/$(WAVE)/ {cpu,mem,block,mutex}.out + bench.txt"
 

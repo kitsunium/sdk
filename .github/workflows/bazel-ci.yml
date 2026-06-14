@@ -47,9 +47,9 @@ jobs:
       # toolchain on $PATH. SHA matches sdk-release.yml's pin.
       - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
         with:
-          go-version-file: pkg/v1/go.mod
+          go-version-file: pkg/go.mod
           cache: true
-          cache-dependency-path: pkg/v1/go.sum
+          cache-dependency-path: pkg/go.sum
 
       - name: drift check — bazel mod tidy + gazelle
         run: |

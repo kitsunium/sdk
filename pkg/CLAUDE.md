@@ -3,7 +3,9 @@
 
 ## Purpose
 
-The SDK's stable public API surface. Each subdirectory is a major version (`v1`, `v2`, …). Consumers import `pkg/<major>/*`; `internal/*` is blocked by Go's `internal/` rule AND by Bazel layer visibility (ADR 0004).
+The SDK's public API surface. It is a **single Go module** — the bare `github.com/kitsunium/sdk/pkg` (`go.mod` at `pkg/go.mod`); Go forbids a `/v1` module-path suffix, so the module cannot be `…/pkg/v1` (ADR 0017). Consumer packages live under the `v1/` directory and are imported as `pkg/v1/*`; the `v1/` is a directory, not a separate module. `internal/*` is blocked by Go's `internal/` rule AND by Bazel layer visibility (ADR 0004).
+
+The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at first stable. A future breaking change becomes a real second module `…/pkg/v2` (legal `/v2` suffix, `go.mod` at `pkg/v2/`), coexisting with this one.
 
 ## Contents
 
@@ -13,9 +15,9 @@ The SDK's stable public API surface. Each subdirectory is a major version (`v1`,
 
 ## Versioning policy
 
-- `pkg/v1` signatures are **frozen post-v1.0.0**. Any breaking change goes into a new `pkg/v2` (coexists with v1 until deprecation).
+- `pkg/v1` signatures are **frozen at the semver `v1.0.0` tag** (not the `v1/` directory name). Pre-1.0 (`v0.x.x` alpha) breaking changes are allowed; post-1.0 any breaking change goes into a new `…/pkg/v2` module (coexists with v1 until deprecation).
 - Security fixes in `internal/*` propagate via minor bumps on the module concerned — no `pkg/v1` changes required because it only re-exports.
-- Adding a new `pkg/vN` is a dedicated ADR.
+- Adding a `…/pkg/v2` module is a dedicated ADR.
 
 ## Conventions
 
@@ -43,5 +45,5 @@ The SDK's stable public API surface. Each subdirectory is a major version (`v1`,
 ```
 bazel test --config=race //pkg/...
 # Fallback per-module:
-cd pkg/v1 && GOWORK=off go test -race -cover ./...
+cd pkg && GOWORK=off go test -race -cover ./...
 ```

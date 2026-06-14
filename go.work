@@ -5,5 +5,5 @@ use (
 	./internal/core
 	./internal/kernel
 	./internal/service
-	./pkg/v1
+	./pkg
 )
