@@ -13,6 +13,7 @@ const (
 	exitNoUser      int = 67 // EX_NOUSER — a named user/group did not resolve.
 	exitUnavailable int = 69 // EX_UNAVAILABLE — a required facility is absent.
 	exitOSErr       int = 71 // EX_OSERR — an OS-level operation failed.
+	exitIOErr       int = 74 // EX_IOERR — an I/O error occurred.
 	exitNoPerm      int = 77 // EX_NOPERM — a permission/credential check failed.
 )
 
@@ -170,4 +171,12 @@ var (
 		"Datagram sender credentials did not match",
 		"service/proc/sdnotify.Recv: SO_PASSCRED sender pid is not the expected supervised process",
 		errs.WithExitCode(exitNoPerm))
+
+	// StdioCaptureFailed is returned from Wait when a StdioCapture copier could
+	// not deliver the child's stdout/stderr to the caller's writer (the writer
+	// itself errored), even though the process exited cleanly.
+	StdioCaptureFailed = errs.Define(CodeStdioCaptureFailed, "STDIO_CAPTURE_FAILED",
+		"Could not deliver the captured output to the writer",
+		"service/proc/exec: a StdioCapture copier failed writing the child's stdout/stderr to the caller's sink",
+		errs.WithExitCode(exitIOErr))
 )

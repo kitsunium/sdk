@@ -27,6 +27,10 @@ Spec.Rlimits                   Limit*=       (see Limitations)
 
 A nil Spec.Env yields an empty environment — the child never silently inherits the supervisor's, so a spawned service starts from a known state. Pass an explicit slice \(including os.Environ\(\)\) to inherit deliberately.
 
+### Standard streams
+
+Spec.Stdio selects how the child's stdin/stdout/stderr are wired: StdioInherit \(the default\) shares the parent's streams; StdioNull discards the child's output and gives it an immediate\-EOF stdin; StdioCapture connects Spec.Stdout and Spec.Stderr \(any io.Writer\) and Spec.Stdin \(any io.Reader\), with a nil stream falling back to the null device for that one stream. In capture mode every byte the child writes reaches the writers before Wait returns, and the copier goroutines terminate at EOF \(no leak\). It composes with Setpgid/Setsid and credential drop. Stdin should be EOF\-terminating.
+
 ### Stopping a process group
 
 Stop sends the chosen signal to the entire process group, waits up to grace for exit, then escalates to SIGKILL on the group. Because the child leads its own group \(Spec.Setpgid\), forked grandchildren are reached too — no survivor is left behind.
@@ -70,6 +74,7 @@ Package process — ergonomic re\-exports: the handful of signal constants and r
 - [type Resource](<#Resource>)
 - [type Signal](<#Signal>)
 - [type Spec](<#Spec>)
+- [type StdioMode](<#StdioMode>)
 
 
 ## Constants
@@ -91,8 +96,25 @@ const (
 )
 ```
 
+<a name="StdioInherit"></a>
+
+```go
+const (
+    // StdioInherit shares the parent's stdin/stdout/stderr with the child — the
+    // default and the only behaviour before per-process wiring existed.
+    StdioInherit = coreproc.StdioInherit
+    // StdioNull connects every stream to the null device: output is discarded and
+    // the child's stdin returns EOF immediately.
+    StdioNull = coreproc.StdioNull
+    // StdioCapture connects the child to Spec.Stdout/Stderr (io.Writer) and
+    // Spec.Stdin (io.Reader); a nil stream falls back to the null device for that
+    // one stream. The systemd analogue is StandardOutput=/StandardError=/StandardInput=.
+    StdioCapture = coreproc.StdioCapture
+)
+```
+
 <a name="ExitResult"></a>
-## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L88>)
+## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L99>)
 
 ExitResult is the outcome of a finished process — exit code, terminating signal, and resource usage. It is an alias of the core port's ExitValue.
 
@@ -101,7 +123,7 @@ type ExitResult = coreproc.ExitValue
 ```
 
 <a name="Limit"></a>
-## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L100>)
+## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L111>)
 
 Limit is a soft/hard resource\-limit pair for setrlimit\(2\). It is an alias of the core port's LimitValue.
 
@@ -110,7 +132,7 @@ type Limit = coreproc.LimitValue
 ```
 
 <a name="Process"></a>
-## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L84>)
+## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L95>)
 
 Process is the handle to a spawned process: PID, Wait, Signal, SignalGroup, and a group\-aware Stop. It is an alias of the core port interface.
 
@@ -119,7 +141,7 @@ type Process = coreproc.Process
 ```
 
 <a name="Start"></a>
-### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L105>)
+### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L116>)
 
 ```go
 func Start(ctx context.Context, spec Spec) (proc Process, err error)
@@ -128,7 +150,7 @@ func Start(ctx context.Context, spec Spec) (proc Process, err error)
 Start spawns the process described by spec and returns a live Process handle. It delegates to internal/service/proc/exec; ctx is honoured up to the fork/exec boundary. On non\-Unix platforms it returns UnsupportedPlatform.
 
 <a name="Resource"></a>
-## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L96>)
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L107>)
 
 Resource identifies a per\-process resource governed by setrlimit\(2\). It is an alias of the core port type.
 
@@ -152,7 +174,7 @@ const (
 ```
 
 <a name="Signal"></a>
-## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L92>)
+## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L103>)
 
 Signal is a typed, platform\-portable OS signal. It is an alias of the core port type, so process.SIGTERM and a signal parsed elsewhere compare equal.
 
@@ -161,12 +183,21 @@ type Signal = coreproc.Signal
 ```
 
 <a name="Spec"></a>
-## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L80>)
+## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L91>)
 
 Spec is the immutable description of a process to spawn — executable, environment, credentials, isolation topology, and scheduling attributes. It is an alias of the core port type.
 
 ```go
 type Spec = coreproc.Spec
+```
+
+<a name="StdioMode"></a>
+## type [StdioMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/stdio.go#L8>)
+
+StdioMode selects how a spawned child's standard streams \(stdin, stdout, stderr\) are wired. It is an alias of the core port type; set it on Spec.Stdio. The zero value is StdioInherit.
+
+```go
+type StdioMode = coreproc.StdioMode
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

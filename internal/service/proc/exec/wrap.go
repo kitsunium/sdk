@@ -14,6 +14,7 @@ import (
 const (
 	exitNoUser int = 67 // EX_NOUSER — a named user/group did not resolve.
 	exitOSErr  int = 71 // EX_OSERR — an OS-level operation failed.
+	exitIOErr  int = 74 // EX_IOERR — an I/O error occurred (capture writer failed).
 )
 
 // wrapSpawn wraps a fork/exec cause onto the central SpawnFailed sentinel.
@@ -74,6 +75,19 @@ func wrapRlimit(cause error, fields ...errs.FieldValue) error {
 		Public:   "Could not apply the resource limit",
 		Private:  "service/proc/rlimit.Apply: setrlimit(2) failed",
 		ExitCode: exitOSErr,
+	}, fields...)
+}
+
+// wrapStdioCapture wraps a StdioCapture writer failure onto the central
+// StdioCaptureFailed sentinel.
+func wrapStdioCapture(cause error, fields ...errs.FieldValue) error {
+	//: restate the STDIO_CAPTURE_FAILED sentinel fields so the cause inherits them.
+	return errs.Wrap(cause, errs.WrapParams{
+		Code:     coreproc.CodeStdioCaptureFailed,
+		Reason:   "STDIO_CAPTURE_FAILED",
+		Public:   "Could not deliver the captured output to the writer",
+		Private:  "service/proc/exec.Wait: a StdioCapture copier failed writing the child's output to the caller's sink",
+		ExitCode: exitIOErr,
 	}, fields...)
 }
 

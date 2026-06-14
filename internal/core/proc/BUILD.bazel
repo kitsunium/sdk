@@ -19,6 +19,7 @@ go_library(
         "signal_other.go",
         "signal_unix.go",
         "spec.go",
+        "stdio.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/proc",
     visibility = [

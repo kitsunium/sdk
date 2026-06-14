@@ -14,7 +14,10 @@ type Process interface {
 	// PID reports the process identifier of the leader.
 	PID() int
 	// Wait blocks until the process exits and returns its ExitValue. It is safe
-	// to call once; concurrent or repeated calls observe the same outcome.
+	// to call once; concurrent or repeated calls observe the same outcome. Under
+	// StdioCapture it returns only after every captured byte has reached the
+	// caller's writers; if a writer itself failed, the ExitValue still reports the
+	// real exit status and the error is StdioCaptureFailed.
 	Wait() (ExitValue, error)
 	// Signal delivers sig to the leader process only.
 	Signal(sig Signal) error

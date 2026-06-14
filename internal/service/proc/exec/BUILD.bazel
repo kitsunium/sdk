@@ -14,6 +14,7 @@ go_library(
         "limits_unix.go",
         "limittable_unix.go",
         "procfile_unix.go",
+        "stdio_unix.go",
         "wrap.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/exec",
@@ -38,7 +39,10 @@ alias(
 
 go_test(
     name = "exec_test",
-    srcs = ["exec_external_test.go"],
+    srcs = [
+        "exec_external_test.go",
+        "stdio_external_test.go",
+    ],
     deps = [
         ":exec",
         "//internal/core/proc",
