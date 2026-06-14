@@ -13,6 +13,11 @@ import (
 	"github.com/kitsunium/sdk/internal/service/proc/rlimit"
 )
 
+// foreignPid is a pid chosen to be absent on any realistic host so the
+// foreign-pid prlimit64 path fails deterministically (ESRCH/EPERM) and lets the
+// test assert the failing-syscall annotation.
+const foreignPid int = 0x7fff_fffe
+
 // applyCase is one row of the Apply table: a pid, a limit set, and the code the
 // call is expected to return (zero means success on Linux).
 type applyCase struct {
@@ -179,6 +184,51 @@ func nonLinuxOrZero() errs.Code {
 	}
 	//: off Linux even an empty map returns the stub's typed error.
 	return coreproc.CodeUnsupportedPlatform
+}
+
+// fieldValue walks err's attached fields and returns the StringValue of the
+// first one keyed key, or "" when absent.
+func fieldValue(err error, key string) (val string) {
+	//: scan every field merged along the wrap chain.
+	for _, f := range errs.FieldsOf(err) {
+		//: return the first match for the requested key.
+		if f.Key() == key {
+			//: hand back the recorded string annotation.
+			return f.StringValue()
+		}
+	}
+	//: no field carried the requested key.
+	return ""
+}
+
+// TestForeignPidNamesPrlimit64 asserts that a failure on the foreign-pid path
+// surfaces RLIMIT_FAILED annotated with syscall=prlimit64, so logs reflect the
+// actual failing operation rather than always reading "setrlimit".
+func TestForeignPidNamesPrlimit64(t *testing.T) {
+	//: the prlimit64 path and its annotation exist only on Linux.
+	if runtime.GOOS != "linux" {
+		//: nothing to assert about the syscall field off Linux.
+		t.Skip("prlimit64 path is Linux-only")
+	}
+	err := rlimit.Apply(foreignPid, map[coreproc.Resource]coreproc.LimitValue{
+		//: any mapped resource reaches the foreign-pid syscall before failing.
+		coreproc.ResourceNoFile: {Soft: 1024, Hard: 1024},
+	})
+	//: an absent foreign pid must fail rather than silently succeed.
+	if err == nil {
+		//: a nil result means the foreign-pid path did not run as expected.
+		t.Fatalf("Apply(foreign absent pid) = nil, want RLIMIT_FAILED")
+	}
+	//: the failure must carry the central RLIMIT_FAILED code.
+	if !errs.HasCode(err, coreproc.CodeRlimitFailed) {
+		//: a different code means the foreign-pid path did not classify correctly.
+		t.Fatalf("Apply(foreign) = %v, want code RLIMIT_FAILED", err)
+	}
+	//: the recorded syscall must name the foreign-pid entry point.
+	if got := fieldValue(err, "syscall"); got != "prlimit64" {
+		//: a missing or "setrlimit" value is the misleading-message bug.
+		t.Fatalf("syscall field = %q, want %q", got, "prlimit64")
+	}
 }
 
 // TestPrepareSysProcAttr asserts the no-syscall validator rejects an unmapped

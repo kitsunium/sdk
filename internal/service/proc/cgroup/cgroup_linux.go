@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -42,6 +43,11 @@ const exitUnavailable int = 69
 // write / delete sentinels carry; restated for the same reason.
 const exitOSErr int = 71
 
+// exitUsage is sysexits.h EX_USAGE (64), the exit status the INVALID_SPEC
+// sentinel carries; restated to wrap a rejected name without re-Defining the
+// central code.
+const exitUsage int = 64
+
 // controlGroup is a handle to one cgroup v2 control group: its on-disk
 // directory under the unified hierarchy. It satisfies coreproc.Group; all
 // methods write the matching controller interface file or rmdir the directory.
@@ -60,14 +66,15 @@ func available() bool {
 		//: no unified hierarchy here.
 		return false
 	}
-	probe := filepath.Join(mountRoot, ".sdk-cgroup-probe")
-	//: mkdir is the only reliable delegation test; a read-only root rejects it.
-	if err := os.Mkdir(probe, controllerPerm); err != nil {
+	//: a unique temp name is the only reliable delegation test that never
+	//: false-negatives on a leftover probe directory; a read-only root rejects it.
+	probe, err := os.MkdirTemp(mountRoot, ".sdk-cgroup-probe-")
+	if err != nil {
 		//: not delegated/writable to the caller.
 		return false
 	}
-	//: best-effort cleanup of the probe directory; a stale probe is harmless.
-	if err := os.Remove(probe); err != nil {
+	//: best-effort cleanup of the probe directory; a leaked probe is harmless.
+	if rerr := os.Remove(probe); rerr != nil {
 		//: the directory was created, so the caller can still create groups.
 		return true
 	}
@@ -94,12 +101,23 @@ func cgroupUnavailable(cause error, pathKey, pathVal string) error {
 // hierarchy to CgroupUnavailable and a failed mkdir to CgroupCreateFailed.
 func createGroup(name string, opts ...Option) (g coreproc.Group, err error) {
 	cfg := applyOptions(opts)
-	//: refuse early when the unified hierarchy is absent or not delegated.
-	if _, serr := os.Stat(filepath.Join(cfg.root, controllersFile)); serr != nil {
-		//: an absent controllers marker means there is nothing to delegate.
-		return nil, cgroupUnavailable(serr, "root", cfg.root)
+	root := filepath.Clean(cfg.root)
+	//: reject a name that is not a single safe element before touching the FS.
+	if verr := validateName(name); verr != nil {
+		//: a traversing or empty name must never reach filepath.Join.
+		return nil, verr
 	}
-	dir := filepath.Join(cfg.root, name)
+	//: refuse early when the unified hierarchy is absent or not delegated.
+	if _, serr := os.Stat(filepath.Join(root, controllersFile)); serr != nil {
+		//: an absent controllers marker means there is nothing to delegate.
+		return nil, cgroupUnavailable(serr, "root", root)
+	}
+	dir := filepath.Join(root, name)
+	//: defence in depth — the cleaned join must stay inside the cleaned root.
+	if !withinRoot(root, dir) {
+		//: a dir that escaped the root is a rejected spec, not a create fault.
+		return nil, invalidName(name)
+	}
 	//: mkdir under the hierarchy materialises the new control group.
 	if merr := os.Mkdir(dir, controllerPerm); merr != nil {
 		//: a permission/read-only denial here means the root was not delegated.
@@ -107,6 +125,50 @@ func createGroup(name string, opts ...Option) (g coreproc.Group, err error) {
 	}
 	//: the directory now exists — hand back a bound handle.
 	return &controlGroup{dir: dir}, nil
+}
+
+// validateName rejects a control-group name that is not a single safe path
+// element: empty, ".", "..", or one carrying a path separator or traversal
+// segment could resolve outside the delegated root, so it returns the bare
+// INVALID_SPEC sentinel rather than letting filepath.Join escape the subtree.
+func validateName(name string) error {
+	//: empty, dot-aliases, separators, and any non-canonical form can escape or
+	//: alias the parent, so reject anything that is not a single literal element.
+	if name == "" || name == "." || name == ".." ||
+		strings.ContainsRune(name, os.PathSeparator) ||
+		filepath.Clean(name) != name {
+		//: nothing here is a safe single element — reject before the FS sees it.
+		return invalidName(name)
+	}
+	//: the name is a single safe element.
+	return nil
+}
+
+// withinRoot reports whether dir, already cleaned, is root itself or a strict
+// descendant of root. It guards the post-join path so a crafted name can never
+// land a control group outside the delegated subtree.
+func withinRoot(root, dir string) bool {
+	//: the root itself is never a valid leaf group directory.
+	if dir == root {
+		//: a name that collapsed to the root escaped the intended subtree.
+		return false
+	}
+	//: a strict descendant carries the root plus a separator as its prefix.
+	return strings.HasPrefix(dir, root+string(os.PathSeparator))
+}
+
+// invalidName wraps the central INVALID_SPEC sentinel annotated with the
+// offending name. It restates the sentinel's fields verbatim; the code is never
+// re-Defined here.
+func invalidName(name string) error {
+	//: restate the central INVALID_SPEC fields; never re-Define the code.
+	return errs.Wrap(coreproc.InvalidSpec, errs.WrapParams{
+		Code:     coreproc.CodeInvalidSpec,
+		Reason:   "INVALID_SPEC",
+		Public:   "Process specification is invalid",
+		Private:  "service/proc/exec.Start: Spec is malformed (empty Path or contradictory attributes)",
+		ExitCode: exitUsage,
+	}, errs.String("name", name))
 }
 
 // notDelegated reports whether a mkdir failure means the cgroup root was not

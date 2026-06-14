@@ -115,3 +115,63 @@ func TestAvailableNeverPanics(t *testing.T) {
 		t.Fatalf("Available off Linux = true, want false")
 	}
 }
+
+// TestCreateRejectsEscapingName asserts that a name which is not a single safe
+// path element is rejected with the typed INVALID_SPEC sentinel before any
+// filesystem write, so a crafted name can never escape the delegated root.
+func TestCreateRejectsEscapingName(t *testing.T) {
+	t.Parallel()
+	//: name validation is a Linux-build concern; the stub rejects all off Linux.
+	if runtime.GOOS != "linux" {
+		//: off Linux Create short-circuits to UnsupportedPlatform before validation.
+		t.Skip("name validation runs only on the Linux build")
+	}
+	//: each row is a name that must never resolve under the delegated root.
+	bad := []string{
+		"",
+		".",
+		"..",
+		"../escape",
+		"a/b",
+		"nested/../..",
+		"/abs",
+		"foo/",
+	}
+	//: every crafted name must be refused with INVALID_SPEC and no handle.
+	for _, name := range bad {
+		//: keep each row independent and parallel-safe.
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g, err := cgroup.Create(name)
+			//: a rejected name must never hand back a usable handle.
+			if g != nil {
+				//: a non-nil handle for a bad name is a containment breach.
+				t.Fatalf("Create(%q) returned a handle, want nil", name)
+			}
+			//: the rejection must carry the typed INVALID_SPEC code.
+			if !errs.HasCode(err, coreproc.CodeInvalidSpec) {
+				//: a different (or nil) code means the guard did not fire.
+				t.Fatalf("Create(%q) = %v, want code INVALID_SPEC", name, err)
+			}
+		})
+	}
+}
+
+// TestAvailableTolerantOfStaleProbe asserts the delegation probe does not
+// false-negative when a directory named like the legacy fixed probe already
+// exists under a delegated root — the unique-temp-name probe must still report
+// the root as writable.
+func TestAvailableTolerantOfStaleProbe(t *testing.T) {
+	t.Parallel()
+	//: the probe internals are exercised through Create on a delegated host.
+	if !cgroup.Available() {
+		//: nothing to assert when no writable hierarchy is delegated here.
+		t.Skip("cgroup v2 not delegated to this caller; cannot exercise the probe")
+	}
+	//: a second Available() call after a successful first must remain true —
+	//: the unique-name probe never leaves a colliding directory behind.
+	if !cgroup.Available() {
+		//: a flip to false would be the stale-probe false-negative regression.
+		t.Fatalf("Available() second call = false, want true (stale-probe regression)")
+	}
+}

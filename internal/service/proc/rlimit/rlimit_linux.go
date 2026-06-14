@@ -24,6 +24,15 @@ const rlimitNProc int = 6
 // package omits it, so the constant is restated here (asm-generic/resource.h).
 const rlimitMemLock int = 8
 
+// syscallSetrlimit / syscallPrlimit64 name the two kernel entry points the
+// implementation uses; the failing one is recorded as the "syscall" field so a
+// log reflects the actual operation (setrlimit for self, prlimit64 for a
+// foreign pid) even though the restated Private text stays verbatim with core.
+const (
+	syscallSetrlimit string = "setrlimit"
+	syscallPrlimit64 string = "prlimit64"
+)
+
 // resourceToRLIMIT maps each abstract Resource to the Linux RLIMIT_* constant.
 // Declared as a var literal (no init) per KTN-FUNC-NOINIT; the two values absent
 // from syscall are supplied via the restated constants above.
@@ -105,9 +114,9 @@ func applyOne(pid int, r coreproc.Resource, lv coreproc.LimitValue) error {
 }
 
 // rlimitFailed wraps a syscall cause in the central RLIMIT_FAILED sentinel,
-// annotated with the target pid and resource name. It restates the sentinel's
-// fields verbatim; the code is never re-Defined here.
-func rlimitFailed(cause error, pid int, resource string) error {
+// annotated with the target pid, resource name, and the actual failing syscall.
+// It restates the sentinel's fields verbatim; the code is never re-Defined here.
+func rlimitFailed(cause error, pid int, resource, syscallName string) error {
 	//: restate the central RLIMIT_FAILED fields; never re-Define the code.
 	return errs.Wrap(cause, errs.WrapParams{
 		Code:     coreproc.CodeRlimitFailed,
@@ -115,7 +124,7 @@ func rlimitFailed(cause error, pid int, resource string) error {
 		Public:   "Could not apply the resource limit",
 		Private:  "service/proc/rlimit.Apply: setrlimit(2) failed",
 		ExitCode: exitOSErr,
-	}, errs.Int("pid", pid), errs.String("resource", resource))
+	}, errs.Int("pid", pid), errs.String("resource", resource), errs.String("syscall", syscallName))
 }
 
 // applySelf applies rlim to the calling process via setrlimit(2), wrapping a
@@ -124,7 +133,7 @@ func applySelf(pid int, resource string, rl int, rlim *syscall.Rlimit) error {
 	//: setrlimit(2) targets the calling process — no pid argument.
 	if err := syscall.Setrlimit(rl, rlim); err != nil {
 		//: surface the failure through the shared RLIMIT_FAILED wrapper.
-		return rlimitFailed(err, pid, resource)
+		return rlimitFailed(err, pid, resource, syscallSetrlimit)
 	}
 	//: limit applied to the calling process.
 	return nil
@@ -144,7 +153,7 @@ func applyForeign(pid int, resource string, rl int, rlim *syscall.Rlimit) error 
 	//: a non-zero errno is a genuine syscall failure.
 	if errno != 0 {
 		//: surface the errno through the shared RLIMIT_FAILED wrapper.
-		return rlimitFailed(errno, pid, resource)
+		return rlimitFailed(errno, pid, resource, syscallPrlimit64)
 	}
 	//: limit applied to the foreign process.
 	return nil
