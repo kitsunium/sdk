@@ -39,6 +39,7 @@ type handle struct {
 	pid     int
 	pgid    int
 	setpgid bool
+	stdio   *stdioState
 
 	waitOnce sync.Once
 	waitVal  coreproc.ExitValue
@@ -48,11 +49,12 @@ type handle struct {
 
 // newHandle wraps a freshly started *os.Process as a handle. setpgid records
 // whether the child leads its own process group (Spec.Setpgid): only then is the
-// leader pid a valid pgid for group-directed kills.
-func newHandle(p *os.Process, setpgid bool) *handle {
+// leader pid a valid pgid for group-directed kills. stdio owns the capture
+// copiers that Wait joins so no output is lost and no goroutine leaks.
+func newHandle(p *os.Process, setpgid bool, stdio *stdioState) *handle {
 	//: with Setpgid the leader pid IS the group id; without it there is no private
 	//: group and group operations degrade to the leader (see groupTarget).
-	return &handle{proc: p, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, done: make(chan struct{})}
+	return &handle{proc: p, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, stdio: stdio, done: make(chan struct{})}
 }
 
 // groupTarget returns the kill(2) target for group-directed operations: the
@@ -87,6 +89,10 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 		state, wErr := h.proc.Wait()
 		//: signal late Stop goroutines that the process has been reaped.
 		close(h.done)
+		//: join the capture copiers so every byte the child wrote has reached the
+		//: caller's writers before Wait returns, and no copier goroutine leaks.
+		//: the child's exit closed its write ends, so the copiers drain to EOF.
+		h.stdio.wait()
 		//: a wait4 host fault (not a non-zero exit) is a typed WAIT_FAILED.
 		if wErr != nil {
 			//: wrap the os.Process.Wait cause under the central WAIT_FAILED fields.

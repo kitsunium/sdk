@@ -27,6 +27,17 @@
 // the supervisor's, so a spawned service starts from a known state. Pass an
 // explicit slice (including os.Environ()) to inherit deliberately.
 //
+// # Standard streams
+//
+// Spec.Stdio selects how the child's stdin/stdout/stderr are wired:
+// StdioInherit (the default) shares the parent's streams; StdioNull discards the
+// child's output and gives it an immediate-EOF stdin; StdioCapture connects
+// Spec.Stdout and Spec.Stderr (any io.Writer) and Spec.Stdin (any io.Reader),
+// with a nil stream falling back to the null device for that one stream. In
+// capture mode every byte the child writes reaches the writers before Wait
+// returns, and the copier goroutines terminate at EOF (no leak). It composes
+// with Setpgid/Setsid and credential drop. Stdin should be EOF-terminating.
+//
 // # Stopping a process group
 //
 // Stop sends the chosen signal to the entire process group, waits up to grace

@@ -1,6 +1,8 @@
 // Package proc — the Spec value type: an immutable process spawn specification.
 package proc
 
+import "io"
+
 // Spec is the immutable description of a process to spawn: the executable and
 // its environment, the credentials and isolation topology to apply, and the
 // resource/scheduling attributes to set between fork and exec. It carries no
@@ -47,4 +49,21 @@ type Spec struct {
 	// (systemd Limit*=); resources unsupported on the platform surface a typed
 	// error rather than silently no-op.
 	Rlimits map[Resource]LimitValue
+
+	// Stdio selects how the child's standard streams are wired: StdioInherit
+	// (default — share the parent's), StdioNull (discard to the null device), or
+	// StdioCapture (use the Stdout/Stderr/Stdin members below). systemd
+	// StandardOutput=/StandardError=/StandardInput= is the analogue.
+	Stdio StdioMode
+	// Stdout, when Stdio is StdioCapture, receives the child's standard output;
+	// a nil writer discards that stream to the null device.
+	Stdout io.Writer
+	// Stderr, when Stdio is StdioCapture, receives the child's standard error;
+	// a nil writer discards that stream to the null device.
+	Stderr io.Writer
+	// Stdin, when Stdio is StdioCapture, is copied to the child's standard input;
+	// a nil reader gives the child an immediate-EOF stdin. The reader should be
+	// EOF-terminating (a buffer, file, or strings.Reader); the copier closes the
+	// child's stdin at EOF and never blocks Wait.
+	Stdin io.Reader
 }
