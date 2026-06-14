@@ -129,9 +129,26 @@ func buildProcAttr(spec coreproc.Spec, files []*os.File) (attr *os.ProcAttr, err
 		env = make([]string, 0)
 	}
 
-	//: the child's std streams were wired by buildStdio per Spec.Stdio (inherit,
-	//: null, or capture); the assembled attr is ready for os.StartProcess.
-	return &os.ProcAttr{Dir: spec.Dir, Env: env, Files: files, Sys: sysAttr}, nil
+	//: the child's std streams (fd 0-2) were wired by buildStdio per Spec.Stdio;
+	//: any ExtraFiles inherit after them at fd 3+ (socket activation — the same
+	//: order os/exec.Cmd.ExtraFiles uses), then the attr is ready to spawn.
+	return &os.ProcAttr{Dir: spec.Dir, Env: env, Files: appendExtraFiles(files, spec.ExtraFiles), Sys: sysAttr}, nil
+}
+
+// appendExtraFiles returns std (the three std fds) followed by the caller's
+// extra inherited files at fd 3+, without mutating either input slice.
+func appendExtraFiles(std, extra []*os.File) []*os.File {
+	//: no extras means the child inherits only its three standard streams.
+	if len(extra) == 0 {
+		//: return the std slice unchanged.
+		return std
+	}
+	//: a fresh slice fd 0-2 = std, fd 3+ = extra; neither input is aliased.
+	out := make([]*os.File, 0, len(std)+len(extra))
+	out = append(out, std...)
+	out = append(out, extra...)
+	//: the child now inherits std streams plus the activator's sockets.
+	return out
 }
 
 // buildArgv returns the argv for the spawn: the caller-supplied Args verbatim,
