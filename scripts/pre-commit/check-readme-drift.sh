@@ -14,7 +14,7 @@ cd "$(dirname "$0")/../.."
 
 # gomarkdoc must be on PATH — shipped by the devcontainer Go feature
 # (.devcontainer/features/languages/go/install.sh). Avoiding the
-# `tool` directive in pkg/v1/go.mod keeps the consumer dep graph
+# `tool` directive in pkg/go.mod keeps the consumer dep graph
 # clean (was 54 indirect deps, now 9).
 if ! command -v gomarkdoc >/dev/null 2>&1; then
     echo "✗ gomarkdoc not on PATH. Install via:" >&2
