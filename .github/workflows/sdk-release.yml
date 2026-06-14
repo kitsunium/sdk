@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       force_bumps:
-        description: 'Space-separated majors to bump (e.g. "v1 v2"). Empty = use compute-bumps.sh output.'
+        description: 'Force the public-module bump token "pkg" (empty = use compute-bumps.sh output).'
         required: false
         default: ""
 
@@ -68,7 +68,7 @@ jobs:
           set -euo pipefail
           if [ -n "${{ inputs.force_bumps }}" ]; then
             echo "majors<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${{ inputs.force_bumps }}" | tr ' ' '\n' | grep -E '^v[0-9]+$' >> "$GITHUB_OUTPUT"
+            echo "${{ inputs.force_bumps }}" | tr ' ' '\n' | grep -E '^(pkg|v[0-9]+)$' >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           else
             echo "majors<<EOF" >> "$GITHUB_OUTPUT"

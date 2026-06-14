@@ -24,6 +24,8 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0013-sdk-crypto-domain.md` | Crypto domain — `AEAD` `Seal`/`Open` with hidden nonce; stdlib AES-256-GCM default, x/crypto schemes under third-party/ | Accepted (amends core purpose + 0005 §Registry) |
 | `0014-sdk-transform-crypto-ports-config-topology.md` | The verb wave — `core/transform` (5th sibling), crypto MAC/Agreement/StreamSealer ports + KeyEnvelope/KeyTree, `logger.FromConfig` + `ConfigDecoder`, single-MR sequencing | Accepted (amends core purpose + 0012/0013 + 0005 §Registry) |
 | `0015-sdk-logger-writer-taxonomy-and-rotation.md` | Writer taxonomy + `depTier` first-class property; default console+file (`DefaultMulti`); rotation off-by-default → compress + 24h archive + 7-day retention; dep-light DB/transport gate (WI-9 `dbsink` shell shipped; WI-10/WI-11 vendored writers gated) | Accepted (amends `core/writer` purpose + 0005 §Registry) |
+| `0016-sdk-process-supervision-domain.md` | OS process-supervision domain (`proc`): 6th core sibling; `process`/`signal`/`reaper`/`rlimit`/`cgroup`/`sdnotify` facades; central error block `0.2.6.*`; build-tag platform selection | Accepted |
+| `0017-pkg-bare-module-path.md` | Public module is the bare `…/pkg` (Go forbids the `/v1` suffix); code stays under `v1/`, imports unchanged; tag `pkg/vX.Y.Z`, first release `v0.1.0` alpha | Accepted (amends 0009 path / 0007 tag shape / 0001 module path) |
 
 ## Conventions
 

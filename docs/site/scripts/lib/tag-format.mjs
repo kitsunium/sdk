@@ -25,8 +25,13 @@
 // "local" is reserved — it represents the working tree / HEAD and is
 // only emitted in bootstrap mode (no published releases for the major).
 
+// Two shapes are accepted (ADR 0017):
+//   - bare:   pkg/vX.Y.Z         — the public module …/pkg (major 0|1); the
+//             docs "major" axis is the SEMVER major ("v0"/"v1").
+//   - legacy: pkg/vN/vX.Y.Z      — reserved for a future real …/pkg/vN module
+//             (N≥2); the path-major must equal the semver major.
 export const TAG_REGEX =
-  /^pkg\/v[0-9]+\/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
+  /^pkg\/(?:v[0-9]+\/)?v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
 export const LOCAL_RELEASE = "local";
 
 export function isValidTag(tag) {
@@ -35,18 +40,27 @@ export function isValidTag(tag) {
 
 export function parseTag(tag) {
   if (!isValidTag(tag)) return null;
-  const [, major, semverWithV] = tag.split("/");
+  const segs = tag.split("/");
+  //: bare pkg/vX.Y.Z has 2 segments (no path-major); legacy pkg/vN/vX.Y.Z has 3.
+  let major;
+  const semverWithV = segs.length === 2 ? segs[1] : segs[2];
   const semver = semverWithV.slice(1);
   const dash = semver.indexOf("-");
   const core = dash === -1 ? semver : semver.slice(0, dash);
   const prerelease = dash === -1 ? null : semver.slice(dash + 1);
   const parts = core.split(".").map(Number);
-  //: reject malformed cores and tags whose PATH major (pkg/vN) disagrees with
-  //: the SEMVER major (e.g. pkg/v1/v2.0.0) — the regex alone accepts them, and
-  //: a mismatch silently misgroups releases (ADR 0007 §1: the tag major is
-  //: load-bearing). Edited in lockstep with tag-format.sh's is_valid_tag.
   if (parts.length !== 3) return null;
-  if (Number(major.slice(1)) !== parts[0]) return null;
+  if (segs.length === 2) {
+    //: bare module: the grouping major is the SEMVER major (v0 alpha, v1 stable).
+    major = `v${parts[0]}`;
+  } else {
+    //: legacy/v2+ form: reject tags whose PATH major (pkg/vN) disagrees with the
+    //: SEMVER major (e.g. pkg/v2/v1.2.3) — the regex alone accepts them, and a
+    //: mismatch silently misgroups releases (ADR 0007 §1: the tag major is
+    //: load-bearing). Edited in lockstep with tag-format.sh.
+    major = segs[1];
+    if (Number(major.slice(1)) !== parts[0]) return null;
+  }
   return { major, semver, parts, prerelease };
 }
 

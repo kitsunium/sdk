@@ -1,6 +1,6 @@
 # ADR 0009 — Public module must be `go get`-resolvable and accessible
 
-**Status**: Accepted; release-layer mechanism implemented (first-release validation pending)
+**Status**: Accepted; release-layer mechanism implemented. **Amended by ADR 0017** — the module *path* `pkg/v1` is itself unpublishable (Go forbids the `/v1` suffix); the public module is the bare `…/pkg`. First release `pkg/v0.1.0` validated via clean-room `go get`.
 **Date**: 2026-05-25
 **Deciders**: kitsunium maintainers
 **Supersedes**: —

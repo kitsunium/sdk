@@ -17,7 +17,7 @@ The `codec/` sub-package was added since the original CLAUDE.md. The legacy `cod
 
 ## Module
 
-Single Go module `github.com/kitsunium/sdk/pkg/v1` — one `go.mod`, one `go.sum`. Built and tested under Bazel via `//pkg/v1/...`; `cd pkg/v1 && GOWORK=off go test ./...` works for local iteration.
+Single Go module `github.com/kitsunium/sdk/pkg` — one `go.mod` (at `pkg/go.mod`), one `go.sum`. The consumer packages live under this `v1/` directory, so import paths stay `github.com/kitsunium/sdk/pkg/v1/*`; only the module declaration sits one level up. Go forbids a `/v1` module-path suffix, so the module itself is the bare `…/pkg` (ADR 0017). Built and tested under Bazel via `//pkg/v1/...`; `cd pkg && GOWORK=off go test ./...` works for local iteration.
 
 ## Public surface contract
 

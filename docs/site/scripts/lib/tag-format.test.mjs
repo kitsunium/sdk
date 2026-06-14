@@ -110,3 +110,23 @@ test("parseTag rejects path-major ≠ semver-major (pkg/v1/v2.0.0)", () => {
   assert.equal(ok?.major, "v2");
   assert.deepEqual(ok?.parts, [2, 1, 0]);
 });
+
+test("parseTag accepts the bare pkg/vX.Y.Z shape (ADR 0017)", () => {
+  //: the public module is …/pkg (no path-major); the grouping major is the
+  //: SEMVER major. v0 = alpha, v1 = stable.
+  const alpha = parseTag("pkg/v0.1.0");
+  assert.equal(alpha?.major, "v0");
+  assert.deepEqual(alpha?.parts, [0, 1, 0]);
+  assert.equal(alpha?.prerelease, null);
+
+  const stable = parseTag("pkg/v1.0.0");
+  assert.equal(stable?.major, "v1");
+  assert.deepEqual(stable?.parts, [1, 0, 0]);
+
+  const pre = parseTag("pkg/v0.2.0-rc.1");
+  assert.equal(pre?.major, "v0");
+  assert.equal(pre?.prerelease, "rc.1");
+
+  //: garbage after the semver is still rejected (anchored regex).
+  assert.equal(parseTag("pkg/v0.1.0;rm -rf /"), null);
+});

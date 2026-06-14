@@ -24,6 +24,8 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0013-sdk-crypto-domain.md` | Crypto domain — `AEAD` `Seal`/`Open` with hidden nonce; stdlib AES-256-GCM default, x/crypto schemes under third-party/ | Accepted (amends core purpose + ADR 0005 §Registry) |
 | `adr/0014-sdk-transform-crypto-ports-config-topology.md` | The verb wave — `core/transform` (5th sibling), crypto MAC/Agreement/StreamSealer ports + KeyEnvelope/KeyTree, `logger.FromConfig` + `ConfigDecoder` | Accepted (amends core purpose + ADR 0012/0013 + ADR 0005 §Registry) |
 | `adr/0015-sdk-logger-writer-taxonomy-and-rotation.md` | Writer taxonomy + `depTier` as a first-class property; default writers console+file; rotation off-by-default → compress + 24h archive + 7-day retention; dep-light DB/transport gate (WI-9 dbsink shipped; WI-10/WI-11 gated) | Accepted (amends `core/writer` purpose + ADR 0005 §Registry) |
+| `adr/0016-sdk-process-supervision-domain.md` | OS process-supervision domain (`proc`): 6th core sibling; `process`/`signal`/`reaper`/`rlimit`/`cgroup`/`sdnotify` facades; central error block `0.2.6.*`; build-tag platform selection | Accepted |
+| `adr/0017-pkg-bare-module-path.md` | Public module is the bare `…/pkg` (Go forbids the `/v1` suffix); code stays under `v1/`, imports unchanged; tag shape `pkg/vX.Y.Z`, first release `v0.1.0` alpha | Accepted (amends ADR 0009 path, ADR 0007 tag shape, ADR 0001 module path) |
 
 ## ADR conventions
 
