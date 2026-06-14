@@ -1,9 +1,18 @@
 {
   "release": "local",
   "major": "v1",
-  "generatedAt": "2026-06-04T20:33:54.046Z",
+  "generatedAt": "2026-06-14T01:10:19.351Z",
   "repoUrl": "https://github.com/kitsunium/sdk",
   "entries": [
+    {
+      "type": "fix",
+      "scope": "ci",
+      "breaking": false,
+      "summary": "hold-bootstrap release no longer fails the job (errexit swallowed exit 3) (#59)",
+      "sha": "14c67ddc1caac3e33665ab55d7e3aadfa930f223",
+      "short": "14c67dd",
+      "date": "2026-06-14T02:05:11+02:00"
+    },
     {
       "type": "feat",
       "scope": "logger",
@@ -39,15 +48,6 @@
       "sha": "e8c78b5450e26e658caa2a02d92750027d4bd202",
       "short": "e8c78b5",
       "date": "2026-05-30T00:29:53+02:00"
-    },
-    {
-      "type": "fix",
-      "scope": "docs",
-      "breaking": false,
-      "summary": "make npm test glob node-version-agnostic (#31)",
-      "sha": "dcff33ba199373bcc579168f287bd783aa5b3e1f",
-      "short": "dcff33b",
-      "date": "2026-05-25T09:59:30Z"
     }
   ]
 }

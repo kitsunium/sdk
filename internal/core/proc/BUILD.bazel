@@ -1,0 +1,59 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "proc",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "exit.go",
+        "group.go",
+        "limit.go",
+        "listener.go",
+        "notification.go",
+        "proc.go",
+        "process.go",
+        "reaper.go",
+        "signal.go",
+        "signal_other.go",
+        "signal_unix.go",
+        "spec.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/proc",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":proc",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "proc_test",
+    srcs = [
+        "proc_external_test.go",
+        "signal_external_test.go",
+    ],
+    deps = [
+        ":proc",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's *.go to the errs AST audit (ADR 0016); proc
+# owns the whole 0.2.6.* code block (every domain sentinel is defined here), so
+# it must be listed in the root //:audit_sources filegroup.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
