@@ -1,4 +1,4 @@
-module github.com/kitsunium/sdk/pkg/v1
+module github.com/kitsunium/sdk/pkg
 
 go 1.26
 
@@ -19,8 +19,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace (
-	github.com/kitsunium/sdk/internal/core => ../../internal/core
-	github.com/kitsunium/sdk/internal/kernel => ../../internal/kernel
-	github.com/kitsunium/sdk/internal/service => ../../internal/service
-)
+replace github.com/kitsunium/sdk/internal/core => ../internal/core
+
+replace github.com/kitsunium/sdk/internal/kernel => ../internal/kernel
+
+replace github.com/kitsunium/sdk/internal/service => ../internal/service

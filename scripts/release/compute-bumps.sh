@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# scripts/release/compute-bumps.sh — emit the list of `pkg/vN` majors
-# whose docs/code changed since the previous release tag and therefore
-# need a patch bump.
+# scripts/release/compute-bumps.sh — decide whether the single public module
+# `pkg` (github.com/kitsunium/sdk/pkg) needs a patch bump since the previous
+# release tag, and emit the token `pkg` if so.
 #
-# Decision matrix (plan v2 §4, ADR 0007):
-#   change under pkg/<major>/**      -> bump <major>
-#   change under internal/**         -> bump every <major> whose
-#                                       bazel rdeps depend on it
-#   no relevant change               -> emit nothing (exit 0)
+# Decision matrix (ADR 0007, updated for the bare-`pkg` module — ADR 0009):
+#   change under pkg/v*/** or pkg/go.mod  -> bump pkg
+#   change under internal/**              -> bump pkg iff its bazel rdeps
+#                                            reach //pkg/...
+#   no relevant change                    -> emit nothing (exit 0)
 #
-# Output: one major per line ("v1", "v2", ...). Sorted, deduped.
-# Stable contract — consumed by cut-tags.sh and CI.
+# Output: the literal token "pkg" on a single line, or nothing. (Before the
+# bare-`pkg` migration this emitted one "vN" major per line; there is now a
+# single public module, so there is a single token.) Stable contract —
+# consumed by cut-tags.sh and CI.
 
 set -euo pipefail
 shopt -s nullglob
@@ -27,7 +29,7 @@ for arg in "$@"; do
     --range=*) RANGE="${arg#--range=}" ;;
     --help|-h)
       cat <<EOF
-compute-bumps.sh — list pkg/<major> dirs needing a patch bump.
+compute-bumps.sh — emit "pkg" if the public module needs a patch bump.
 
 Usage: $0 [--dry-run] [--range=<rev>..HEAD]
 
@@ -55,47 +57,46 @@ if [ -z "$RANGE" ]; then
   fi
 fi
 
-# Empty diff is a legitimate no-op (merge commit, docs-only push).
-declare -A bump
+need_bump=0
 
-# 1. Direct pkg/<major>/ changes. Process substitution keeps the
-# associative array alive in the parent shell (plan B1).
+# 1. Direct public-module changes: source under pkg/v*/ or the module file
+# pkg/go.mod. (BUILD.bazel / CLAUDE.md churn alone does not warrant a release.)
 while IFS= read -r path; do
   case "$path" in
-    pkg/v*/*)
-      m="$(awk -F/ '{print $2}' <<<"$path")"
-      [ -n "$m" ] && bump["$m"]=1
-      ;;
+    # Maintainer-only metadata that ships in the module zip but carries no
+    # consumer-visible change — its churn alone must not cut a release.
+    */CLAUDE.md|*/BUILD.bazel) continue ;;
+    pkg/v*/*|pkg/go.mod) need_bump=1; break ;;
   esac
 done < <(git diff --name-only "$RANGE" || true)
 
-# 2. internal/* changes - rdeps per package, not per file. Bazel is
-# invoked once per touched internal package, never once per file.
-mapfile -t changed_internal < <(
-  git diff --name-only "$RANGE" 2>/dev/null \
-    | awk -F/ '/^internal\//{print $1"/"$2"/"$3}' \
-    | sort -u
-)
-
-if [ "${#changed_internal[@]}" -gt 0 ] && command -v bazel >/dev/null 2>&1; then
-  for major_dir in pkg/v*; do
-    [ -d "$major_dir" ] || continue
-    major="$(basename "$major_dir")"
-    for pkgpath in "${changed_internal[@]}"; do
-      [ -z "$pkgpath" ] && continue
-      if bazel query "rdeps(//${major_dir}/..., //${pkgpath}/...)" 2>/dev/null | grep -q .; then
-        bump["$major"]=1
+# 2. internal/* changes — rdeps at the MODULE root. A changed file is reduced to
+# its module dir (internal/<mod>), so a go.mod / go.sum change maps to a valid
+# Bazel subtree //internal/<mod>/... rather than a bogus //internal/<mod>/go.mod/...
+# label (which fails the query and would silently drop the bump). If any reaches
+# //pkg/..., the public module must re-release.
+if [ "$need_bump" -eq 0 ]; then
+  mapfile -t changed_internal < <(
+    git diff --name-only "$RANGE" 2>/dev/null \
+      | awk -F/ '/^internal\//{print $1"/"$2}' \
+      | sort -u
+  )
+  if [ "${#changed_internal[@]}" -gt 0 ] && command -v bazel >/dev/null 2>&1; then
+    for modpath in "${changed_internal[@]}"; do
+      [ -z "$modpath" ] && continue
+      if bazel query "rdeps(//pkg/..., //${modpath}/...)" 2>/dev/null | grep -q .; then
+        need_bump=1
+        break
       fi
     done
-  done
+  fi
 fi
 
-# 3. Emit sorted majors. Dry-run echoes the same payload to stdout, no
-# side effects either way (compute is pure).
-if [ "${#bump[@]}" -eq 0 ]; then
+# 3. Emit the single token. Dry-run echoes the same payload, no side effects.
+if [ "$need_bump" -eq 0 ]; then
   exit 0
 fi
-for k in "${!bump[@]}"; do echo "$k"; done | sort
+echo "pkg"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "(dry-run: $RANGE)" >&2
 fi

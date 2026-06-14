@@ -31,7 +31,7 @@ pkg/
         └── baseenc/   (base16/32/64 wrappers, not a codec)
 ```
 
-- Five independent Go modules held together by `go.work`: root (umbrella — also hosts the opt-in, vendor-dependent integrations under `third-party/*`, e.g. the AWS writers; see ADR 0012), `internal/kernel`, `internal/core`, `internal/service`, `pkg/v1`. Each module-local `go.mod` carries `replace` directives so `GOWORK=off go build ./...` per-module still works. Heavy vendor deps (AWS SDK) live in the **root** `go.mod` only — nothing requires the root module, so `pkg/v1` consumers stay dep-light.
+- Five independent Go modules held together by `go.work`: root (umbrella — also hosts the opt-in, vendor-dependent integrations under `third-party/*`, e.g. the AWS writers; see ADR 0012), `internal/kernel`, `internal/core`, `internal/service`, and the public `pkg` (module `github.com/kitsunium/sdk/pkg`, `go.mod` at `pkg/go.mod`; its consumer packages live under `pkg/v1/` and import as `…/pkg/v1/*`, but the *module* is the bare `…/pkg` because Go forbids a `/v1` module-path suffix — ADR 0017). Each module-local `go.mod` carries `replace` directives so `GOWORK=off go build ./...` per-module still works. Heavy vendor deps (AWS SDK) live in the **root** `go.mod` only — nothing requires the root module, so `pkg` consumers stay dep-light.
 - Dependency direction is strictly top-down: kernel → core → service → pkg/v1. Enforced by Bazel `package_group` + `visibility` (see ADR 0004). A rogue import fails `bazel build` before it ever reaches the linter.
 - Consumers import only `pkg/v1/*`; `internal/*` is blocked by Go's `internal/` firewall AND by the Bazel layer visibility.
 - Build / test / lint go through **Bazel 9** — see ADR 0004. `go test ./...` still works locally for quick iteration but CI only runs `bazel`.
@@ -121,5 +121,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0014 — the verb wave (core/transform 5th sibling; crypto MAC/Agreement/StreamSealer ports + KeyEnvelope/KeyTree; logger.FromConfig + ConfigDecoder; single-MR sequencing) — `docs/adr/0014-sdk-transform-crypto-ports-config-topology.md`
 - ADR 0015 — writer taxonomy + depTier as a first-class property; default writers console+file; rotation off-by-default → compress + 24h archive + 7-day retention; dep-light DB/transport gate (WI-9..WI-11) — `docs/adr/0015-sdk-logger-writer-taxonomy-and-rotation.md`
 - ADR 0016 — OS process-supervision domain (`proc`): 6th core sibling; `process`/`signal`/`reaper`/`rlimit`/`cgroup`/`sdnotify` facades; central error block `0.2.6.*`; build-tag platform selection, no registry — `docs/adr/0016-sdk-process-supervision-domain.md`
+- ADR 0017 — public module is the bare `…/pkg` (Go forbids the `/v1` module-path suffix); code stays under `pkg/v1/` so imports are unchanged; tag shape `pkg/vX.Y.Z`, first release `v0.1.0` alpha — `docs/adr/0017-pkg-bare-module-path.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

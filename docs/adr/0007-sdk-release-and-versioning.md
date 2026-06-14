@@ -1,6 +1,6 @@
 # ADR 0007 — SDK release workflow and versioning policy
 
-**Status**: Accepted
+**Status**: Accepted. **Tag shape amended by ADR 0017** — the public module is the bare `…/pkg`, so its tag is `pkg/vX.Y.Z` (major 0|1), not `pkg/<major>/vX.Y.Z` (the latter is reserved for a future `…/pkg/v2`).
 **Date**: 2026-05-22
 **Deciders**: kitsunium maintainers
 **Supersedes**: —
