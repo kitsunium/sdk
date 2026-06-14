@@ -1,0 +1,208 @@
+name: E2E VM tests (real OS kernels)
+
+# Runs the platform-sensitive test suites on REAL operating systems — not
+# cross-compile-only. The proc domain (spawn, cgroup, rlimit, signals, reaper,
+# sd_notify) exercises live syscalls whose behaviour only a real kernel can
+# validate, so a green `go build` is necessary but not sufficient.
+#
+# Mechanism (kodflow/labs infra — see labs/docs/ci-runner-usage.md):
+#   1. A `[self-hosted, proxmox]` runner cross-compiles a standalone test binary
+#      per package per GOOS with `go test -c` (no Go needed on the target VM).
+#   2. Each target OS has a persistent Proxmox test VM with a `base` ZFS snapshot;
+#      the runner rolls it back (~3s), boots it, finds its IP via the dnsmasq
+#      lease, SCPs the test binaries in, and runs them over SSH on the real kernel.
+#
+# Prerequisites (provisioned by the org owner, not this repo):
+#   - The labs self-hosted runners registered to this repo's org (label
+#     `[self-hosted, proxmox]`), with ~/.ssh/id_rsa_vms reachable to the VM subnet.
+#   - Secrets: CI_RUNNER_API_TOKEN_ID, CI_RUNNER_API_TOKEN_SECRET, PROXMOX_NODE,
+#     ADMIN_USERNAME.
+# Manual-trigger only (workflow_dispatch) so a missing-infra org never hard-fails
+# every PR; promote to `pull_request` once the runners are wired.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROXMOX_API_URL: "https://192.168.100.1:8006/api2/json"
+  PVE_AUTH: "PVEAPIToken=${{ secrets.CI_RUNNER_API_TOKEN_ID }}=${{ secrets.CI_RUNNER_API_TOKEN_SECRET }}"
+  NODE: ${{ secrets.PROXMOX_NODE }}
+  SSH_OPTS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+  # Platform-sensitive packages whose runtime behaviour must be validated on a
+  # real kernel. Pure-Go packages (codec/crypto/logger/errs) behave identically
+  # everywhere and are covered by the Linux Bazel lane, so they are excluded.
+  PROC_PKGS_CORE: "./proc"
+  PROC_PKGS_SERVICE: "./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal ./logger/sink/file ./writer/rotfile"
+
+jobs:
+  e2e:
+    runs-on: [self-hosted, proxmox]
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          # name : Proxmox test VMID (template+100) : GOOS/GOARCH : SSH user : exe suffix
+          - {
+              name: debian-systemd,
+              vmid: 204,
+              goos: linux,
+              goarch: amd64,
+              user: root,
+              ext: "",
+            }
+          - {
+              name: alpine-openrc,
+              vmid: 200,
+              goos: linux,
+              goarch: amd64,
+              user: root,
+              ext: "",
+            }
+          - {
+              name: arch-systemd,
+              vmid: 202,
+              goos: linux,
+              goarch: amd64,
+              user: root,
+              ext: "",
+            }
+          - {
+              name: fedora-systemd,
+              vmid: 206,
+              goos: linux,
+              goarch: amd64,
+              user: root,
+              ext: "",
+            }
+          - {
+              name: freebsd,
+              vmid: 209,
+              goos: freebsd,
+              goarch: amd64,
+              user: root,
+              ext: "",
+            }
+          - {
+              name: openbsd,
+              vmid: 210,
+              goos: openbsd,
+              goarch: amd64,
+              user: root,
+              ext: "",
+            }
+          - {
+              name: netbsd,
+              vmid: 211,
+              goos: netbsd,
+              goarch: amd64,
+              user: root,
+              ext: "",
+            }
+          - {
+              name: windows-11,
+              vmid: 213,
+              goos: windows,
+              goarch: amd64,
+              user: kodflow,
+              ext: ".exe",
+            }
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
+        with:
+          go-version-file: pkg/go.mod
+
+      # ── 1. Cross-compile standalone test binaries (no Go on the VM) ──────────
+      - name: Compile test binaries for ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p bins
+          compile() { # module  pkg-list
+            local mod="$1"; shift
+            for pkg in $@; do
+              local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__')${{ matrix.ext }}.test"
+              # A package with no _test.go produces no binary; tolerate that.
+              if (cd "$mod" && go test -c -o "$GITHUB_WORKSPACE/$out" "$pkg") 2>/tmp/c.log; then
+                [ -f "$out" ] && echo "built $out" || echo "no tests in $mod/$pkg (skip)"
+              else
+                echo "::error::compile $mod/$pkg for $GOOS failed"; cat /tmp/c.log; exit 1
+              fi
+            done
+          }
+          compile internal/core    $PROC_PKGS_CORE
+          compile internal/service $PROC_PKGS_SERVICE
+          ls -la bins/
+
+      # ── 2. Roll the VM back to its clean base snapshot ──────────────────────
+      - name: Rollback ${{ matrix.name }} to base snapshot
+        run: |
+          set -euo pipefail
+          VMID=${{ matrix.vmid }}
+          curl -sk -X POST -H "Authorization: $PVE_AUTH" \
+            "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/status/stop" || true
+          sleep 5
+          curl -sk -X POST -H "Authorization: $PVE_AUTH" \
+            "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/snapshot/base/rollback"
+          sleep 3
+          curl -sk -X POST -H "Authorization: $PVE_AUTH" \
+            "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/status/start"
+
+      # ── 3. Detect the VM IP via the dnsmasq lease + wait for SSH ────────────
+      - name: Detect VM IP
+        id: ip
+        run: |
+          set -euo pipefail
+          VMID=${{ matrix.vmid }}
+          MAC=$(curl -sk -H "Authorization: $PVE_AUTH" \
+            "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/config" \
+            | jq -r '.data.net0' | grep -oiE '([0-9a-f]{2}:){5}[0-9a-f]{2}')
+          for i in $(seq 1 30); do
+            IP=$(ssh ${SSH_OPTS} root@192.168.100.1 \
+              "grep -i '${MAC}' /var/lib/misc/dnsmasq.leases 2>/dev/null | awk '{print \$3}'" 2>/dev/null || true)
+            [ -n "$IP" ] && { echo "ip=${IP}" >> "$GITHUB_OUTPUT"; echo "IP=$IP"; break; }
+            sleep 5
+          done
+          [ -n "${IP:-}" ] || { echo "::error::no IP after 150s"; exit 1; }
+
+      - name: Wait for SSH
+        run: |
+          for i in $(seq 1 30); do
+            ssh ${SSH_OPTS} ${{ matrix.user }}@${{ steps.ip.outputs.ip }} true 2>/dev/null && exit 0
+            sleep 5
+          done
+          echo "::error::SSH never came up"; exit 1
+
+      # ── 4. Ship the test binaries to the VM and run them on the real kernel ──
+      - name: Run test suites on ${{ matrix.name }}
+        run: |
+          set -uo pipefail
+          IP=${{ steps.ip.outputs.ip }}
+          USER=${{ matrix.user }}
+          scp ${SSH_OPTS} bins/*.test "${USER}@${IP}:" || { echo "::error::scp failed"; exit 1; }
+          fail=0
+          for bin in bins/*.test; do
+            name=$(basename "$bin")
+            echo "::group::$name on ${{ matrix.name }}"
+            # -test.short keeps the per-OS run quick; the suites gate Unix-only
+            # cases on a /bin/sh probe and skip cleanly where unsupported.
+            if ssh ${SSH_OPTS} "${USER}@${IP}" "./${name} -test.v -test.short 2>&1"; then
+              echo "PASS $name"
+            else
+              echo "::error::$name failed on ${{ matrix.name }}"; fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail
+      # VM stays running; the next run rolls back to the base snapshot first.

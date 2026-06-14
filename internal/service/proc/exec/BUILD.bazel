@@ -13,6 +13,8 @@ go_library(
         "handle_unix.go",
         "handshake_unix.go",
         "limits_unix.go",
+        "limittable_as.go",
+        "limittable_openbsd.go",
         "limittable_unix.go",
         "procfile_unix.go",
         "rlimit_value_default.go",
@@ -47,9 +49,62 @@ go_test(
         "exec_external_test.go",
         "stdio_external_test.go",
     ],
-    deps = [
-        ":exec",
-        "//internal/core/proc",
-        "//internal/kernel/errs",
-    ],
+    deps = select({
+        "@rules_go//go/platform:aix": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:android": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:darwin": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:illumos": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:ios": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:linux": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:solaris": [
+            ":exec",
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "//conditions:default": [],
+    }),
 )
