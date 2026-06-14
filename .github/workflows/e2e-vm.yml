@@ -6,15 +6,16 @@ name: E2E VM tests (real OS kernels)
 # validate, so a green `go build` is necessary but not sufficient.
 #
 # Mechanism (kodflow/labs infra — see labs/docs/ci-runner-usage.md):
-#   1. A `[self-hosted, proxmox]` runner cross-compiles a standalone test binary
+#   1. A `kitsunium-runner` ARC runner cross-compiles a standalone test binary
 #      per package per GOOS with `go test -c` (no Go needed on the target VM).
 #   2. Each target OS has a persistent Proxmox test VM with a `base` ZFS snapshot;
 #      the runner rolls it back (~3s), boots it, finds its IP via the dnsmasq
 #      lease, SCPs the test binaries in, and runs them over SSH on the real kernel.
 #
 # Prerequisites (provisioned by the org owner, not this repo):
-#   - The labs self-hosted runners registered to this repo's org (label
-#     `[self-hosted, proxmox]`), with ~/.ssh/id_rsa_vms reachable to the VM subnet.
+#   - The labs ARC runner scale set registered for this repo (label
+#     `kitsunium-runner`, added by kodflow/labs arc_orgs), with ~/.ssh/id_rsa_vms
+#     reachable to the VM subnet.
 #   - Secrets: CI_RUNNER_API_TOKEN_ID, CI_RUNNER_API_TOKEN_SECRET, PROXMOX_NODE,
 #     ADMIN_USERNAME.
 # Manual-trigger only (workflow_dispatch) so a missing-infra org never hard-fails
@@ -46,7 +47,7 @@ env:
 
 jobs:
   e2e:
-    runs-on: [self-hosted, proxmox]
+    runs-on: kitsunium-runner
     timeout-minutes: 25
     strategy:
       fail-fast: false
