@@ -26,7 +26,7 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0015-sdk-logger-writer-taxonomy-and-rotation.md` | Writer taxonomy + `depTier` first-class property; default console+file (`DefaultMulti`); rotation off-by-default → compress + 24h archive + 7-day retention; dep-light DB/transport gate (WI-9 `dbsink` shell shipped; WI-10/WI-11 vendored writers gated) | Accepted (amends `core/writer` purpose + 0005 §Registry) |
 | `0016-sdk-process-supervision-domain.md` | OS process-supervision domain (`proc`): 6th core sibling; `process`/`signal`/`reaper`/`rlimit`/`cgroup`/`sdnotify` facades; central error block `0.2.6.*`; build-tag platform selection | Accepted |
 | `0017-pkg-bare-module-path.md` | Public module is the bare `…/pkg` (Go forbids the `/v1` suffix); code stays under `v1/`, imports unchanged; tag `pkg/vX.Y.Z`, first release `v0.1.0` alpha | Accepted (amends 0009 path / 0007 tag shape / 0001 module path) |
-| `0018-sdk-cross-platform-portability.md` | Cross-platform portability strategy — build bar + runtime bar; uniform `UnsupportedPlatform` contract; `_linux`/`_unix`/`_bsd`/`_windows`/`_other` split convention; `cross-platform.yml` + `e2e-vm.yml` gates; OpenBSD `RLIMIT_AS` precedent; native-backend roadmap (FreeBSD `rctl`, Windows Job Objects, BSD `procctl`) | Accepted |
+| `0018-sdk-cross-platform-portability.md` | Cross-platform portability strategy — build bar + runtime bar; uniform `UnsupportedPlatform` contract; `_linux`/`_unix`/`_bsd`/`_windows`/`_other` split convention; `bazel-ci.yml` cross-build + `e2e-vm.yml` gates; OpenBSD `RLIMIT_AS` precedent; native-backend roadmap (FreeBSD `rctl`, Windows Job Objects, BSD `procctl`) | Accepted |
 
 ## Conventions
 

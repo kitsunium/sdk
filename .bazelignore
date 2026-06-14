@@ -1,8 +1,9 @@
-.claude
-.devcontainer
-docs
-node_modules
 bazel-bin
 bazel-out
 bazel-sdk
 bazel-testlogs
+.claude
+.devcontainer
+docs
+e2e
+node_modules
