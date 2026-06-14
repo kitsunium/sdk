@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "sdnotify",
+    srcs = ["sdnotify.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/sdnotify",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/service/proc/sdnotify",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":sdnotify",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "sdnotify_test",
+    srcs = ["sdnotify_external_test.go"],
+    deps = [":sdnotify"],
+)
