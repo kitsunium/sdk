@@ -34,6 +34,24 @@ const controllerPerm os.FileMode = 0o755
 // decimalBase is the radix used when rendering pids and limit values.
 const decimalBase int = 10
 
+// killFile is the cgroup v2 interface file that, written "1", atomically SIGKILLs
+// every member of the group and its subtree (kernel >= 5.14).
+const killFile string = "cgroup.kill"
+
+// freezeFile is the cgroup v2 interface file that quiesces ("1") or resumes ("0")
+// the whole group (kernel >= 5.2).
+const freezeFile string = "cgroup.freeze"
+
+// killTrigger is the value written to cgroup.kill to fire the atomic kill.
+const killTrigger string = "1"
+
+// freezeOn / freezeOff are the values written to cgroup.freeze to stop or resume
+// the group.
+const (
+	freezeOn  string = "1"
+	freezeOff string = "0"
+)
+
 // exitUnavailable is sysexits.h EX_UNAVAILABLE (69), the exit status the
 // CGROUP_UNAVAILABLE sentinel carries; restated to wrap a cause with matching
 // semantics without re-Defining the central code.
@@ -239,6 +257,72 @@ func (g *controlGroup) SetIOMax(spec string) error {
 func (g *controlGroup) Add(pid int) error {
 	//: cgroup.procs takes one pid per write to attach a process.
 	return g.writeController(procsFile, strconv.Itoa(pid))
+}
+
+// Kill atomically SIGKILLs every process in the group by writing "1" to
+// cgroup.kill. Membership is tracked by control group, not process group, so a
+// member that called setsid is still killed — nothing escapes. An absent
+// cgroup.kill (kernel < 5.14) surfaces UnsupportedPlatform so callers can fall
+// back to a process-group kill.
+func (g *controlGroup) Kill() error {
+	//: cgroup.kill SIGKILLs the whole subtree in one atomic, race-free write.
+	return g.writeFeature(killFile, killTrigger)
+}
+
+// Freeze quiesces the whole group by writing "1" to cgroup.freeze, stopping every
+// member so a consistent signal sweep or snapshot can run. An absent
+// cgroup.freeze (kernel < 5.2) surfaces UnsupportedPlatform.
+func (g *controlGroup) Freeze() error {
+	//: cgroup.freeze "1" stops every member so a snapshot/sweep sees a quiet tree.
+	return g.writeFeature(freezeFile, freezeOn)
+}
+
+// Thaw resumes a frozen group by writing "0" to cgroup.freeze. An absent
+// cgroup.freeze surfaces UnsupportedPlatform.
+func (g *controlGroup) Thaw() error {
+	//: cgroup.freeze "0" resumes a previously frozen tree.
+	return g.writeFeature(freezeFile, freezeOff)
+}
+
+// writeFeature writes value to a kernel-version-gated interface file (cgroup.kill
+// / cgroup.freeze). An absent file (ENOENT) means the running kernel predates the
+// feature, surfaced as UnsupportedPlatform so callers can fall back; any other
+// failure is a CgroupWriteFailed.
+func (g *controlGroup) writeFeature(name, value string) error {
+	path := filepath.Join(g.dir, name)
+	//: a single write drives the feature file; perm is ignored by sysfs.
+	if err := os.WriteFile(path, []byte(value), controllerPerm); err != nil {
+		//: an absent interface file means the kernel is too old for this feature.
+		if errors.Is(err, os.ErrNotExist) {
+			//: surface UnsupportedPlatform so the caller can fall back.
+			return cgroupUnsupported(err, name)
+		}
+		//: any other failure is a controller write fault.
+		return errs.Wrap(err, errs.WrapParams{
+			Code:     coreproc.CodeCgroupWriteFailed,
+			Reason:   "CGROUP_WRITE_FAILED",
+			Public:   "Could not write the cgroup controller file",
+			Private:  "service/proc/cgroup: writing a feature file (cgroup.kill/cgroup.freeze) failed",
+			ExitCode: exitOSErr,
+		}, errs.String("file", name))
+	}
+	//: the feature write took effect.
+	return nil
+}
+
+// cgroupUnsupported wraps cause in the central UNSUPPORTED_PLATFORM sentinel,
+// annotated with the absent feature file: the running kernel predates cgroup.kill
+// / cgroup.freeze, so the caller should fall back. It restates the sentinel's
+// fields verbatim; the code is never re-Defined here.
+func cgroupUnsupported(cause error, file string) error {
+	//: restate the central UNSUPPORTED_PLATFORM fields; never re-Define.
+	return errs.Wrap(cause, errs.WrapParams{
+		Code:     coreproc.CodeUnsupportedPlatform,
+		Reason:   "UNSUPPORTED_PLATFORM",
+		Public:   "This operation is not supported on this platform",
+		Private:  "service/proc/cgroup: the cgroup.kill/cgroup.freeze interface file is absent (kernel too old)",
+		ExitCode: exitUnavailable,
+	}, errs.String("file", file))
 }
 
 // Delete removes the (empty) control-group directory. Callers move processes
