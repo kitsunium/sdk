@@ -30,15 +30,16 @@ import {
   buildVersionsJson,
   localOnlyVersions,
   stitchVersions,
-  changelogRefSpec,
   LOCAL_RELEASE,
 } from "./lib/tag-format.mjs";
 import { RESERVED } from "./lib/page-catalog.mjs";
 import {
-  classifyCommit,
-  gitLogCommits,
-  buildWhatsNewPayload,
-} from "./lib/whats-new.mjs";
+  deriveProvenance,
+  buildFeaturePayload,
+  renderCatalogMarkdown,
+  uniqueAnchors,
+} from "./lib/features.mjs";
+import featureRegistry from "../src/data/features.mjs";
 
 const execFile = promisify(_execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -155,60 +156,8 @@ function stripGomarkdocIndex(body) {
 // For tagged releases: window = previous-tag..current-tag.
 // For "local": window = last 30 commits (no tags yet on this repo).
 
-const GROUP_LABEL = {
-  feat: "Features",
-  fix: "Fixes",
-  perf: "Performance",
-  refactor: "Refactors",
-  docs: "Documentation",
-  build: "Build",
-  ci: "CI",
-  test: "Tests",
-  chore: "Chores",
-  style: "Style",
-  misc: "Other",
-};
-
-const GROUP_ORDER_FOR_CHANGELOG = [
-  "feat",
-  "fix",
-  "perf",
-  "refactor",
-  "docs",
-  "build",
-  "ci",
-  "test",
-  "style",
-  "chore",
-  "misc",
-];
-
-function renderChangelogMarkdown(commits, release, major, repoUrl) {
-  const grouped = new Map();
-  for (const c of commits) {
-    const meta = classifyCommit(c.subject);
-    if (meta.type === "chore" && !meta.breaking) continue; //: drop chore noise from public changelog
-    if (!grouped.has(meta.type)) grouped.set(meta.type, []);
-    grouped.get(meta.type).push({ ...c, ...meta });
-  }
-  const lines = [];
-  for (const t of GROUP_ORDER_FOR_CHANGELOG) {
-    const rows = grouped.get(t);
-    if (!rows || rows.length === 0) continue;
-    lines.push(`### ${GROUP_LABEL[t]}`);
-    lines.push("");
-    for (const r of rows) {
-      const scope = r.scope ? `**${r.scope}**: ` : "";
-      const breaking = r.breaking ? " · ⚠️ breaking" : "";
-      const commitLink = repoUrl
-        ? `[\`${r.short}\`](${repoUrl}/commit/${r.sha})`
-        : `\`${r.short}\``;
-      lines.push(`- ${commitLink} ${scope}${r.summary}${breaking}`);
-    }
-    lines.push("");
-  }
-  return lines.join("\n");
-}
+// The catalog page + banner are rendered from the curated registry; the
+// per-feature provenance + grouping live in lib/features.mjs.
 
 async function materialiseChangelog(
   major,
@@ -216,40 +165,58 @@ async function materialiseChangelog(
   sourceRoot,
   dest,
   repoUrl,
-  tag,
+  _tag,
 ) {
-  //: Window = last 30 commits for "local"; for a tagged release, commits
-  //: reachable from the TAG (a real git ref) — never the bare semver version.
-  //: A future refinement is `<prev-tag>..<this-tag>`; the tooling is ready.
-  const refSpec = changelogRefSpec(release, tag);
-  const commits = await gitLogCommits(sourceRoot, refSpec);
-  const body = renderChangelogMarkdown(commits, release, major, repoUrl);
+  //: Provenance ("added" date) is the anchor file's first commit, derived at
+  //: HEAD — a feature's birth date is historical and ref-independent. Derive
+  //: once per distinct anchor.
+  //: An anchor absent from this snapshot (a feature added after the tag being
+  //: materialised) is skipped, not fatal: buildFeaturePayload already omits
+  //: features with no provenance, so the tag's catalog naturally excludes
+  //: capabilities that did not yet exist. Forcing every current anchor through
+  //: deriveProvenance would make it throw and abort the whole prebuild the
+  //: first time a new catalog entry lands after a tag.
+  const provByAnchor = {};
+  for (const anchor of uniqueAnchors(featureRegistry)) {
+    if (!existsSync(join(sourceRoot, anchor))) continue;
+    provByAnchor[anchor] = await deriveProvenance(sourceRoot, anchor, "HEAD");
+  }
+  const payload = buildFeaturePayload(featureRegistry, {
+    release,
+    major,
+    repoUrl,
+    provByAnchor,
+  });
+
+  //: Catalog page — every public capability grouped by domain, each with its
+  //: added-date + anchor commit. Lives at the `changelog` slug (the banner CTA
+  //: links here) but is a curated capability list, not a commit log.
   const title = RESERVED.changelog?.label ?? "Changelog";
+  const totalFeatures = payload.domains.reduce(
+    (n, d) => n + d.features.length,
+    0,
+  );
   await writeFile(
     join(dest, "changelog.md"),
     frontmatter({
       title,
-      description: `What changed in ${release}`,
-      source: `git log`,
+      description: `Public capabilities in ${release}`,
+      source: `src/data/features.mjs`,
     }) +
       `# ${title}\n\n` +
-      `_Generated from git log (${commits.length} commit${commits.length === 1 ? "" : "s"} ` +
-      `${release === LOCAL_RELEASE ? "in the last 30 on this branch" : "in this release"}). ` +
-      `Conventional-commit prefixes drive the grouping; bare \`chore:\` ` +
-      `entries are omitted to keep the log signal-rich._\n\n` +
-      body,
+      `_The ${totalFeatures} public capabilities in \`${release}\`, grouped by domain. ` +
+      `Each is dated by the first commit that introduced it (curated catalog — ` +
+      `not a commit log)._\n\n` +
+      renderCatalogMarkdown(payload),
   );
 
-  //: WhatsNew banner data — top 3 feat + top 2 fix, most recent first.
-  //: Banner shown ABOVE the article on the Home page only. JSON lives in
-  //: src/data/ rather than content/docs/ because Astro content collections
-  //: don't index JSON — we import it dynamically in WhatsNew.astro. The
-  //: selection rule is shared with the pre-commit regenerator via lib.
-  const wnPayload = buildWhatsNewPayload(commits, { release, major, repoUrl });
+  //: Banner data — the most recently added capabilities. Shown ABOVE the
+  //: article on the Home page only. JSON lives in src/data/ (Astro content
+  //: collections don't index JSON; WhatsNew.astro imports it dynamically).
   await mkdir(join(SITE_ROOT, "src", "data"), { recursive: true });
   await writeFile(
-    join(SITE_ROOT, "src", "data", `whats-new-${release}-${major}.json`),
-    JSON.stringify(wnPayload, null, 2) + "\n",
+    join(SITE_ROOT, "src", "data", `features-${release}-${major}.json`),
+    JSON.stringify(payload, null, 2) + "\n",
   );
 }
 
