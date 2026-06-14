@@ -85,6 +85,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
+          # GitHub invokes this step as `bash -e`, which re-enables errexit even
+          # though the line above deliberately omits it. Disable it explicitly:
+          # the cut-tags pipeline below may exit 3 (a HELD bootstrap, not a
+          # failure) and errexit would abort before the rc==3 handler runs.
+          # Real failures still fail the job via the explicit `exit "$rc"` below.
+          set +e
           # A manual workflow_dispatch authorises the bootstrap (very first)
           # release; automatic runs must NOT blind-cut it — cut-tags exits 3 to
           # signal a held bootstrap (ADR 0009: validate go.sum + clean-room
