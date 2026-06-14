@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "sdlisten",
+    srcs = ["sdlisten.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/sdlisten",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/service/proc/sdlisten",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":sdlisten",
+    visibility = ["//visibility:public"],
+)

@@ -1,7 +1,10 @@
 // Package proc — the Spec value type: an immutable process spawn specification.
 package proc
 
-import "io"
+import (
+	"io"
+	"os"
+)
 
 // Spec is the immutable description of a process to spawn: the executable and
 // its environment, the credentials and isolation topology to apply, and the
@@ -66,4 +69,11 @@ type Spec struct {
 	// EOF-terminating (a buffer, file, or strings.Reader); the copier closes the
 	// child's stdin at EOF and never blocks Wait.
 	Stdin io.Reader
+
+	// ExtraFiles are additional open files inherited by the child, in order,
+	// starting at file descriptor 3 (after stdin/stdout/stderr). This is the
+	// mechanism behind socket activation (sd_listen_fds): an activator binds
+	// listening sockets and passes them here, then sets LISTEN_FDS/LISTEN_PID in
+	// Env so the child finds them at fd 3..3+len-1. nil means no extra fds.
+	ExtraFiles []*os.File
 }
