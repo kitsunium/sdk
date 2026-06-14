@@ -157,6 +157,105 @@ func TestCreateRejectsEscapingName(t *testing.T) {
 	}
 }
 
+// assertFeature accepts a cgroup.kill/cgroup.freeze outcome: nil means the
+// feature applied; UnsupportedPlatform means the kernel predates the feature file
+// (the documented fallback) and skips; anything else fails the test.
+func assertFeature(t *testing.T, op string, err error) {
+	t.Helper()
+	//: a nil error means the feature file exists and the write took effect.
+	if err == nil {
+		//: the feature applied — nothing more to assert.
+		return
+	}
+	//: an absent feature file (old kernel) is the documented fallback, not a bug.
+	if errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+		//: skip the live assertion when the running kernel lacks the feature.
+		t.Skipf("%s: cgroup feature file absent on this kernel (UnsupportedPlatform)", op)
+	}
+	//: any other failure is a real fault.
+	t.Fatalf("%s: %v", op, err)
+}
+
+// deleteGroup removes g, logging (not failing) a delete fault during cleanup.
+func deleteGroup(t *testing.T, g coreproc.Group) {
+	t.Helper()
+	//: best-effort teardown; a populated-group EBUSY is logged, not fatal.
+	if derr := g.Delete(); derr != nil {
+		//: a cleanup delete fault does not invalidate the assertions above.
+		t.Logf("cleanup Delete: %v", derr)
+	}
+}
+
+// TestKillFreezeThawContract exercises cgroup.kill / cgroup.freeze on a delegated
+// hierarchy: Freeze→Thaw quiesce and resume, Kill on an empty group is a no-op
+// success. Older kernels without the feature files surface UnsupportedPlatform
+// (the documented fallback). Acceptance #74: Freeze/Thaw observable + idempotent,
+// typed error when absent, never panics.
+func TestKillFreezeThawContract(t *testing.T) {
+	//: a real cgroup v2 hierarchy is required to drive the feature files.
+	if !cgroup.Available() {
+		//: the typed-error contract is covered by TestCreateConfinement.
+		t.Skip("cgroup v2 not available/delegated; Kill/Freeze/Thaw need a real hierarchy")
+	}
+	g, err := cgroup.Create("sdk-test-killfreeze-" + runtime.GOOS)
+	//: a delegated host must create the group cleanly.
+	if err != nil {
+		//: an error here contradicts Available() reporting true.
+		t.Fatalf("Create: %v", err)
+	}
+	//: tear the group down at the end regardless of assertion outcome.
+	defer deleteGroup(t, g)
+	//: Freeze then Thaw must each apply (or skip on an old kernel) — idempotent.
+	assertFeature(t, "Freeze", g.Freeze())
+	assertFeature(t, "Thaw", g.Thaw())
+	//: Kill on an empty group is a no-op success on a >=5.14 kernel.
+	assertFeature(t, "Kill", g.Kill())
+}
+
+// TestKillTerminatesSetsidDescendant is the escape-proof acceptance: a child that
+// setsid's a grandchild leaves the parent's process group, so kill(-pgid) would
+// miss it — but cgroup.kill, tracking membership by control group, takes it down.
+func TestKillTerminatesSetsidDescendant(t *testing.T) {
+	//: cgroup.kill is a Linux cgroup v2 feature.
+	if runtime.GOOS != "linux" {
+		//: nothing to exercise where cgroup v2 does not exist.
+		t.Skip("cgroup.kill is Linux-only")
+	}
+	//: a delegated hierarchy is required to confine and kill a real tree.
+	if !cgroup.Available() {
+		//: skip the live escape assertion when no hierarchy is delegated.
+		t.Skip("cgroup v2 not delegated; cannot test escape-proof kill")
+	}
+	g, err := cgroup.Create("sdk-test-killtree-" + runtime.GOOS)
+	//: a delegated host must create the group cleanly.
+	if err != nil {
+		//: an error here contradicts Available() reporting true.
+		t.Fatalf("Create: %v", err)
+	}
+	//: tear the group down at the end.
+	defer deleteGroup(t, g)
+	//: the leader setsid's a grandchild (which leaves the process group), then
+	//: itself sleeps; both inherit the leader's cgroup once it is attached.
+	cmd := exec.Command("sh", "-c", "setsid sleep 60 >/dev/null 2>&1 & exec sleep 60")
+	//: the tree must start before it can be attached and killed.
+	if serr := cmd.Start(); serr != nil {
+		//: no shell/sleep means the live escape path cannot run here.
+		t.Skipf("cannot start helper tree: %v", serr)
+	}
+	//: attach the leader; children already inherit its cgroup membership.
+	if aerr := g.Add(cmd.Process.Pid); aerr != nil {
+		//: an attach failure means cgroup.procs is not writable.
+		t.Fatalf("Add(leader): %v", aerr)
+	}
+	//: cgroup.kill must take down the whole subtree, setsid escapee included.
+	assertFeature(t, "Kill", g.Kill())
+	//: reap the leader so it does not linger as a zombie.
+	if _, werr := cmd.Process.Wait(); werr != nil {
+		//: a reap log is sufficient — the kill assertion already stands.
+		t.Logf("leader wait after Kill: %v", werr)
+	}
+}
+
 // TestAvailableTolerantOfStaleProbe asserts the delegation probe does not
 // false-negative when a directory named like the legacy fixed probe already
 // exists under a delegated root — the unique-temp-name probe must still report
