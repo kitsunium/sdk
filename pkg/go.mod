@@ -3,9 +3,9 @@ module github.com/kitsunium/sdk/pkg
 go 1.26
 
 require (
-	github.com/kitsunium/sdk/internal/core v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/internal/service v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal/core v0.1.3
+	github.com/kitsunium/sdk/internal/kernel v0.1.3
+	github.com/kitsunium/sdk/internal/service v0.1.3
 )
 
 require (
@@ -18,9 +18,3 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/kitsunium/sdk/internal/core => ../internal/core
-
-replace github.com/kitsunium/sdk/internal/kernel => ../internal/kernel
-
-replace github.com/kitsunium/sdk/internal/service => ../internal/service
