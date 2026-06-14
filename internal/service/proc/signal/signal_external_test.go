@@ -7,6 +7,7 @@ package signal_test
 import (
 	"os/exec"
 	"runtime"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -192,6 +193,56 @@ func TestRelayToProcessGroup(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("child did not exit after group-relayed SIGTERM")
 	}
+}
+
+// TestRelayRejectsReservedTargets asserts Relay refuses the reserved kill(2)
+// targets 0 (the caller's own process group) and -1 (every permitted process)
+// with the typed RELAY_FAILED code and without delivering anything — guarding
+// against a default-initialised or mis-computed Target fanning a signal out to
+// unintended recipients.
+func TestRelayRejectsReservedTargets(t *testing.T) {
+	t.Parallel()
+
+	//: both reserved values must be refused identically.
+	for _, target := range []svcsignal.Target{0, -1} {
+		//: a source that, if Relay did not guard, would hand SIGTERM to kill(2)
+		//: against the dangerous target.
+		src := make(chan coreproc.Signal, 1)
+		src <- coreproc.Signal(syscall.SIGTERM)
+		close(src)
+
+		err := svcsignal.Relay(src, target)
+		//: the refusal must carry the central RELAY_FAILED code, not nil.
+		if !errs.HasCode(err, coreproc.CodeRelayFailed) {
+			t.Fatalf("Relay(target=%d) err = %v, want CodeRelayFailed", target, err)
+		}
+	}
+}
+
+// TestNotifyStopConcurrent asserts the stop function is safe under concurrent
+// invocation: many goroutines calling it at once must not double-close the
+// channel (which would panic) nor race — proving the sync.Once guard. Run under
+// -race this fails loudly if the guard regresses to an unsynchronised bool.
+func TestNotifyStopConcurrent(t *testing.T) {
+	t.Parallel()
+
+	_, stop := svcsignal.Notify(coreproc.Signal(syscall.SIGUSR2))
+
+	const callers int = 32
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	//: launch many concurrent stop callers racing on the same teardown closure.
+	for range callers {
+		//: each goroutine invokes stop; only one may close the channel.
+		go func() {
+			defer wg.Done()
+			stop()
+		}()
+	}
+	wg.Wait()
+
+	//: a further call after the storm must still be a safe no-op.
+	stop()
 }
 
 // TestRelayFailsTyped asserts a delivery failure surfaces the typed RELAY_FAILED

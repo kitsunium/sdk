@@ -8,6 +8,7 @@ package signal
 import (
 	"os"
 	ossignal "os/signal"
+	"sync"
 	"syscall"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -59,18 +60,17 @@ func Notify(sigs ...coreproc.Signal) (<-chan coreproc.Signal, func()) {
 	//: block until the goroutine has registered so an immediate signal is caught.
 	<-ready
 
-	//: guard stop so a second call neither double-closes nor re-stops.
-	stopped := false
+	//: sync.Once makes stop idempotent AND race-safe: concurrent or repeated
+	//: teardown calls cannot double-close done (a plain bool guard would race
+	//: and could panic on a second close under concurrency).
+	var once sync.Once
 	stop := func() {
-		//: ignore every call after the first to keep stop idempotent.
-		if stopped {
-			//: already torn down — nothing further to do.
-			return
-		}
-		stopped = true
-		//: ending done makes the goroutine return; its defer runs signal.Stop and
-		//: closes out for readers.
-		close(done)
+		//: only the first caller closes done; every later call is a no-op.
+		once.Do(func() {
+			//: ending done makes the goroutine return; its defer runs signal.Stop
+			//: and closes out for readers.
+			close(done)
+		})
 	}
 
 	//: hand back the receive-only view and the teardown handle.
