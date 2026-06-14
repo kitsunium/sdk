@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -293,36 +294,100 @@ func TestStartUnknownResource(t *testing.T) {
 	}
 }
 
-// TestStartRlimitUnhonourable asserts a mappable Rlimit, which stdlib cannot
-// apply in-child, surfaces RlimitFailed rather than a silent drop.
-func TestStartRlimitUnhonourable(t *testing.T) {
-	t.Parallel()
+// TestStartLimitsHonoured asserts that a mappable Rlimit and a Umask are actually
+// applied to the child — not rejected — via the re-exec trampoline. Each case
+// spawns a shell that prints the effective limit and the captured stdout (#73
+// StdioCapture) is compared against the requested value. The trampoline re-execs
+// this very test binary, whose linked exec package applies the limit before
+// exec'ing /bin/sh, so these cases exercise the full pre-exec path.
+func TestStartLimitsHonoured(t *testing.T) {
+	requireShell(t)
 
-	spec := coreproc.Spec{
-		Path: shPath,
-		Rlimits: map[coreproc.Resource]coreproc.LimitValue{
-			coreproc.ResourceNoFile: {Soft: 1024, Hard: 1024},
+	type limitCase struct {
+		name   string
+		probe  string
+		mutate func(spec *coreproc.Spec)
+		want   int64
+		base   int
+	}
+	//: cover the soft NOFILE limit, a zeroed core limit, and the umask — each
+	//: applied in the child by the trampoline and read back from the shell.
+	cases := []limitCase{
+		{
+			name:  "nofile_soft",
+			probe: "ulimit -n",
+			mutate: func(spec *coreproc.Spec) {
+				//: lower NOFILE well below any default so the readback is unambiguous.
+				spec.Rlimits = map[coreproc.Resource]coreproc.LimitValue{
+					coreproc.ResourceNoFile: {Soft: 48, Hard: 48},
+				}
+			},
+			want: 48,
+			base: 10,
+		},
+		{
+			name:  "core_zero",
+			probe: "ulimit -c",
+			mutate: func(spec *coreproc.Spec) {
+				//: a zero core limit disables core dumps for the child.
+				spec.Rlimits = map[coreproc.Resource]coreproc.LimitValue{
+					coreproc.ResourceCore: {Soft: 0, Hard: 0},
+				}
+			},
+			want: 0,
+			base: 10,
+		},
+		{
+			name:  "umask",
+			probe: "umask",
+			mutate: func(spec *coreproc.Spec) {
+				//: the shell prints the umask in octal; 0o077 reads back as 63.
+				spec.Umask = new(0o077)
+			},
+			want: 0o077,
+			base: 8,
 		},
 	}
-	_, err := svcexec.Start(context.Background(), spec)
-	//: a valid-but-unhonourable rlimit must surface RLIMIT_FAILED, not silence.
-	if !errs.HasCode(err, coreproc.CodeRlimitFailed) {
-		t.Fatalf("Start(rlimit) err = %v, want CodeRlimitFailed", err)
+
+	runCase := func(t *testing.T, tc limitCase) {
+		t.Helper()
+		var out strings.Builder
+		spec := coreproc.Spec{
+			Path:   shPath,
+			Args:   []string{"sh", "-c", tc.probe},
+			Stdio:  coreproc.StdioCapture,
+			Stdout: &out,
+		}
+		tc.mutate(&spec)
+		p, err := svcexec.Start(t.Context(), spec)
+		//: a clean spawn through the trampoline is the precondition for the readback.
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		exit, wErr := p.Wait()
+		//: a normal exit is not a wait4 fault.
+		if wErr != nil {
+			t.Fatalf("Wait: %v", wErr)
+		}
+		//: the probe shell must itself exit cleanly for its output to be trusted.
+		if !exit.Success() {
+			t.Fatalf("%s: probe shell exit %d", tc.name, exit.Code)
+		}
+		got := strings.TrimSpace(out.String())
+		gotN, pErr := strconv.ParseInt(got, tc.base, 64)
+		//: the probe must print a parseable number in the documented base.
+		if pErr != nil {
+			t.Fatalf("%s: unparseable probe output %q: %v", tc.name, got, pErr)
+		}
+		//: the effective limit in the child must equal the requested value.
+		if gotN != tc.want {
+			t.Fatalf("%s: %q = %q (%d), want %d", tc.name, tc.probe, got, gotN, tc.want)
+		}
 	}
-}
 
-// TestStartUmaskUnhonourable asserts a non-nil Umask, which stdlib cannot apply
-// in-child, surfaces RlimitFailed rather than a silent drop.
-func TestStartUmaskUnhonourable(t *testing.T) {
-	t.Parallel()
-
-	mask := new(int)
-	*mask = 0o077
-	spec := coreproc.Spec{Path: shPath, Umask: mask}
-	_, err := svcexec.Start(context.Background(), spec)
-	//: a non-nil Umask must surface RLIMIT_FAILED, never be silently ignored.
-	if !errs.HasCode(err, coreproc.CodeRlimitFailed) {
-		t.Fatalf("Start(umask) err = %v, want CodeRlimitFailed", err)
+	//: each limit case spawns its own probe shell through the trampoline.
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
 	}
 }
 

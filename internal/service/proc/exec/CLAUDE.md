@@ -64,23 +64,38 @@ under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
 `*syscall.Rusage` → `UserTime`/`SystemTime` (from `Utime`/`Stime`) and `MaxRSS`
 (`ru.Maxrss`, kilobytes).
 
-## Limitations (honest, not silent)
+## Rlimits & Umask: the re-exec trampoline
 
 The Go runtime exposes **no** `SysProcAttr` hook to run `setrlimit(2)` or
-`umask(2)` in the child between fork and exec. So:
+`umask(2)` in the child between fork and exec. `Start` therefore honours them via
+a **re-exec trampoline** (`trampoline_unix.go`), stdlib-pure and dependency-free:
 
-- A `Spec` setting **any** `Rlimits` (mappable resource) or a non-nil **`Umask`**
-  is rejected with `RlimitFailed` **before** the spawn — never silently dropped.
+- When a `Spec` sets a mappable `Rlimits` entry or a non-nil `Umask`, `Start`
+  spawns `os.Executable()` (this binary) with argv `[self, target, argv…]` and a
+  sentinel env var carrying the encoded limits. A package-level var initialiser
+  (`var _ = installTrampoline()` — the no-init idiom) fires before `main` in that
+  child, detects the sentinel, applies the limits via `setrlimit`/`umask`, strips
+  the sentinel, then `syscall.Exec`s the real target. The pid is preserved across
+  the `execve`, so `Wait`/`Signal`/`Stop` and the stdio pipes all still apply.
 - An `Rlimits` key naming a resource with no stdlib `RLIMIT_*` mapping
   (`ResourceNProc`, `ResourceMemLock` — only in `golang.org/x/sys`, banned) is
-  rejected with `UnknownResource`.
-- `Nice` and `OOMScoreAdj` **are** honoured: applied post-start on the live pid
+  rejected with `UnknownResource` **before** the spawn (`checkLimits`).
+- A limit the kernel **refuses** (e.g. raising a hard cap unprivileged) makes the
+  trampoline child exit non-zero rather than running the target unconfined; a
+  failure to locate `os.Executable()` surfaces `RlimitFailed` before any spawn.
+- `Nice` and `OOMScoreAdj` are honoured post-start on the live pid
   (`setpriority(2)` / `/proc/<pid>/oom_score_adj`). A host refusal surfaces
   `RlimitFailed` and the half-configured child is killed + reaped (`teardown`).
 
-A future iteration can honour Rlimits/Umask via a re-exec trampoline (a tiny
-self-invocation that sets the limits then `execve`s the target); it was kept out
-of this keystone to stay stdlib-pure and dependency-free.
+Cross-platform: the trampoline is `//go:build unix` (Linux, Darwin, the BSDs);
+the only platform-divergent piece is the `syscall.Rlimit` field type — `int64` on
+FreeBSD/DragonFly (`rlimit_value_signed.go`), `uint64` elsewhere
+(`rlimit_value_default.go`). Non-Unix targets never reach it (`exec_other.go`
+returns `UnsupportedPlatform`).
+
+Footgun: a binary linking this package that is run with the sentinel env var set
+will re-exec. `Start` sets it only on the trampoline child and strips it before
+the `execve`, so a normal run never has it; do not set it by hand.
 
 ## Tests
 

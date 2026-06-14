@@ -44,22 +44,11 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		return nil, ioErr
 	}
 
-	attr, aErr := buildProcAttr(spec, sio.files[:])
-	//: a credential-resolution failure aborts before fork/exec.
-	if aErr != nil {
-		//: release the stdio fds so the aborted spawn leaks nothing.
-		sio.closeAll()
-		//: propagate the typed UNKNOWN_USER / UNKNOWN_GROUP verbatim.
-		return nil, aErr
-	}
-
-	started, sErr := os.StartProcess(spec.Path, buildArgv(spec), attr)
-	//: a fork/exec failure is a typed SPAWN_FAILED wrapping the OS cause.
+	started, sErr := spawn(spec, sio)
+	//: a resolve/attr/fork-exec failure already released the stdio fds.
 	if sErr != nil {
-		//: release the stdio fds before surfacing the spawn failure.
-		sio.closeAll()
-		//: wrap the StartProcess cause under the central SPAWN_FAILED fields.
-		return nil, wrapSpawn(sErr, errs.String("path", spec.Path))
+		//: propagate the typed RLIMIT_FAILED / UNKNOWN_USER / SPAWN_FAILED verbatim.
+		return nil, sErr
 	}
 
 	live := newHandle(started, spec.Setpgid, sio)
@@ -99,11 +88,64 @@ func teardown(live *handle) {
 	}
 }
 
+// spawn resolves the spawn target (direct or via the limits trampoline),
+// assembles the os.ProcAttr, and forks/execs. On any failure it releases the
+// stdio fds (so the aborted spawn leaks nothing) and returns the typed error; on
+// success it returns the live OS process, still awaiting post-start attributes.
+func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, err error) {
+	path, argv, envAddon, rErr := resolveSpawn(spec)
+	//: a trampoline-setup failure (no self-path for the limits) aborts the spawn.
+	if rErr != nil {
+		//: release the stdio fds so the aborted spawn leaks nothing.
+		sio.closeAll()
+		//: propagate the typed RLIMIT_FAILED from the trampoline resolution.
+		return nil, rErr
+	}
+	attr, aErr := buildProcAttr(spec, sio.files[:], envAddon)
+	//: a credential-resolution failure aborts before fork/exec.
+	if aErr != nil {
+		//: release the stdio fds so the aborted spawn leaks nothing.
+		sio.closeAll()
+		//: propagate the typed UNKNOWN_USER / UNKNOWN_GROUP verbatim.
+		return nil, aErr
+	}
+	proc, sErr := os.StartProcess(path, argv, attr)
+	//: a fork/exec failure is a typed SPAWN_FAILED wrapping the OS cause.
+	if sErr != nil {
+		//: release the stdio fds before surfacing the spawn failure.
+		sio.closeAll()
+		//: wrap the StartProcess cause under the central SPAWN_FAILED fields.
+		return nil, wrapSpawn(sErr, errs.String("path", spec.Path))
+	}
+	//: the forked, live OS process, still awaiting post-start attributes.
+	return proc, nil
+}
+
+// resolveSpawn returns the (path, argv, envAddon) for os.StartProcess. A spec
+// with no pre-exec limits spawns the target verbatim with no env addon; a spec
+// setting an Rlimit or a Umask spawns the re-exec trampoline (this binary)
+// carrying the encoded limits, which applies them then execs the real target.
+func resolveSpawn(spec coreproc.Spec) (path string, argv, envAddon []string, err error) {
+	//: no rlimit/umask requested — spawn the target directly, no trampoline.
+	if !needsTrampoline(spec) {
+		//: direct spawn: target path, its argv, and no extra environment.
+		return spec.Path, buildArgv(spec), nil, nil
+	}
+	self, tArgv, addon, tErr := trampolineSpawn(spec)
+	//: a missing self-path means the limits cannot be honoured pre-exec.
+	if tErr != nil {
+		//: wrap the os.Executable failure as the central RlimitFailed sentinel.
+		return "", nil, nil, wrapRlimit(tErr, errs.String("path", spec.Path))
+	}
+	//: trampoline spawn: this binary, argv [self, target, argv...], + sentinel env.
+	return self, tArgv, addon, nil
+}
+
 // buildProcAttr assembles the os.ProcAttr for the spawn: the working directory,
-// the explicit environment (empty, never inherited, when Spec.Env is nil), the
-// inherited std streams, and the SysProcAttr carrying credentials and the
-// group/session topology.
-func buildProcAttr(spec coreproc.Spec, files []*os.File) (attr *os.ProcAttr, err error) {
+// the explicit environment (empty, never inherited, when Spec.Env is nil) plus
+// any trampoline sentinel entry from envAddon, the inherited std streams, and the
+// SysProcAttr carrying credentials and the group/session topology.
+func buildProcAttr(spec coreproc.Spec, files []*os.File, envAddon []string) (attr *os.ProcAttr, err error) {
 	cred, cErr := resolveCredential(spec)
 	//: a credential-resolution failure aborts attr assembly.
 	if cErr != nil {
@@ -117,17 +159,17 @@ func buildProcAttr(spec coreproc.Spec, files []*os.File) (attr *os.ProcAttr, err
 		Credential: cred,
 	}
 
-	//: os.StartProcess inherits the parent environment ONLY when Env is nil. A nil
-	//: Spec.Env must therefore become a non-nil zero-length slice to honour the
-	//: port's "explicit, never inherited" guarantee — a genuinely nil slice here
-	//: would leak the supervisor's environment (secrets included) into the child,
-	//: so make() is deliberate over the lint-preferred nil.
-	env := spec.Env
-	//: map a nil Env to a non-nil empty slice (see the security note above).
-	if env == nil {
-		//: force an empty-but-non-nil environment so nothing is inherited.
-		env = make([]string, 0)
-	}
+	//: os.StartProcess inherits the parent environment ONLY when Env is nil, so the
+	//: child's environment is always built on a fresh non-nil slice — even an empty
+	//: one — to honour the port's "explicit, never inherited" guarantee (a nil here
+	//: would leak the supervisor's environment, secrets included). Building anew
+	//: also keeps the trampoline's sentinel entry from mutating the caller's
+	//: immutable Spec.Env backing array.
+	env := make([]string, 0, len(spec.Env)+len(envAddon))
+	//: the caller's explicit environment first (a nil Spec.Env appends nothing).
+	env = append(env, spec.Env...)
+	//: then the trampoline sentinel entry (if any); it is stripped before execve.
+	env = append(env, envAddon...)
 
 	//: the child's std streams were wired by buildStdio per Spec.Stdio (inherit,
 	//: null, or capture); the assembled attr is ready for os.StartProcess.

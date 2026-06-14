@@ -77,7 +77,10 @@ lint:
 		echo "gofumpt drift in the following files (run 'make build' to fix):"; \
 		echo "$$drift"; exit 1; \
 	fi
-	ktn-linter lint --phases=all ./...
+	# Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
+	# the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
+	# style-only test rules (TEST-TABLE/TEST-CONTEXT) that block no CI lane.
+	ktn-linter lint --skip-phases=tests ./...
 
 # `bench` regenerates pkg/v1/codec/BENCH.md by running the full bench
 # matrix programmatically (testing.Benchmark per row, no text-format

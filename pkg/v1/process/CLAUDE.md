@@ -26,9 +26,11 @@ handle that waits, signals (leader or group), and stops the group gracefully.
   environment — nil `Spec.Env` is an empty environment by design.
 - **Do** set `Setpgid` when you want `Stop`/`SignalGroup` to reach the whole
   tree (the common case for supervising a shell or a process that forks).
-- **Do not** expect `Spec.Umask` / `Spec.Rlimits` to apply — the stdlib spawn
-  cannot run `setrlimit`/`umask` in the child, so these return `RlimitFailed`
-  rather than lying. `Nice` and `OOMScoreAdj` *do* apply (post-start).
+- **Do** rely on `Spec.Umask` / `Spec.Rlimits` being applied — the stdlib spawn
+  cannot run `setrlimit`/`umask` in the child, so `Start` routes through a
+  re-exec trampoline that applies them before the target execs. A kernel-refused
+  limit fails the spawn (`RlimitFailed`); an unmappable resource is rejected up
+  front (`UnknownResource`). `Nice` and `OOMScoreAdj` apply post-start.
 - **Do not** add new exported types here — the public surface is aliases only.
 
 ## Errors

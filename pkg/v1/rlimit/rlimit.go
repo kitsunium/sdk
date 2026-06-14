@@ -31,12 +31,13 @@
 //
 // # Spec integration
 //
-// Go's os/exec SysProcAttr carries no rlimit field, so limits cannot be applied
-// declaratively before exec. The honest model is: apply limits from the child
-// after fork (a pid-0 Apply in the child) or, when supervising, apply them to
-// the spawned pid via prlimit64. PrepareSysProcAttr validates a limit set
-// without any syscall — call it at Spec-construction time to fail fast on a
-// Resource this platform cannot honour, before a process is ever spawned.
+// Go's os/exec SysProcAttr carries no rlimit field. process.Start applies a
+// Spec.Rlimits set to the child it spawns via a re-exec trampoline; this package
+// is the standalone primitive for the other cases: apply limits from the child
+// after fork (a pid-0 Apply in the child) or, when supervising, apply them to the
+// spawned pid via prlimit64. PrepareSysProcAttr validates a limit set without any
+// syscall — call it at Spec-construction time to fail fast on a Resource this
+// platform cannot honour, before a process is ever spawned.
 //
 // # Platform notes
 //
