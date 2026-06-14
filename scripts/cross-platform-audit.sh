@@ -50,7 +50,7 @@ for mod in "${MODULES[@]}"; do
     ALL_PKGS+=("$pkg")
     for plat in "${PLATFORMS[@]}"; do
       os="${plat%/*}"; arch="${plat#*/}"
-      if out=$(cd "$mod" && GOWORK=off GOOS="$os" GOARCH="$arch" go build "$pkg" 2>&1); then
+      if out=$(cd "$mod" && GOWORK=off GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build "$pkg" 2>&1); then
         results["$pkg|$plat"]=OK
       else
         results["$pkg|$plat"]=FAIL
