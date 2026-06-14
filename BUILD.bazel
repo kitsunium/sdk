@@ -23,6 +23,7 @@ filegroup(
         "//internal/core/crypto:audit_srcs",
         "//internal/core/logger:audit_srcs",
         "//internal/core/logger/level:audit_srcs",
+        "//internal/core/proc:audit_srcs",
         "//internal/core/transform:audit_srcs",
         "//internal/core/writer:audit_srcs",
         "//internal/kernel/batcher:audit_srcs",
