@@ -8,21 +8,20 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// TestParseRoundTrip asserts Parse(s.String()) == s for every signal the
-// platform table knows, the central round-trip contract of issue #62.
+// TestParseRoundTrip asserts Parse(s.String()) == s for the signals present in
+// EVERY platform table, so the test compiles and runs on non-Unix targets too
+// (Windows's syscall lacks SIGUSR1/SIGWINCH/etc.). The full Unix table is
+// round-tripped in signal_unix_external_test.go. Central contract of issue #62.
 func TestParseRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	//: exercise a representative spread of the Unix table; each must round-trip.
+	//: only signals in both the unix and non-unix tables round-trip everywhere.
 	cases := []proc.Signal{
 		proc.Signal(syscall.SIGHUP),
 		proc.Signal(syscall.SIGINT),
 		proc.Signal(syscall.SIGTERM),
 		proc.Signal(syscall.SIGKILL),
 		proc.Signal(syscall.SIGQUIT),
-		proc.Signal(syscall.SIGUSR1),
-		proc.Signal(syscall.SIGUSR2),
-		proc.Signal(syscall.SIGWINCH),
 	}
 
 	runCase := func(t *testing.T, want proc.Signal) {

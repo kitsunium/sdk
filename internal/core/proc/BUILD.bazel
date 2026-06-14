@@ -42,6 +42,7 @@ go_test(
     srcs = [
         "proc_external_test.go",
         "signal_external_test.go",
+        "signal_unix_external_test.go",
     ],
     deps = [
         ":proc",
