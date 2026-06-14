@@ -1,10 +1,12 @@
 //go:build unix
 
-// Package exec — Unix umask / rlimit handling for the spawn. The Go runtime
+// Package exec — Unix umask / rlimit validation for the spawn. The Go runtime
 // exposes no SysProcAttr hook to run setrlimit(2)/umask(2) in the child between
-// fork and exec, so a Spec that requests these is honoured precisely where
-// stdlib allows and otherwise surfaces a typed error rather than being silently
-// dropped (the SDK's "no silent field loss" rule). See CLAUDE.md §Limitations.
+// fork and exec, so Start honours both via the re-exec trampoline
+// (trampoline_unix.go): a Spec requesting a mapped Rlimit or a Umask is spawned
+// through a self-invocation that applies the limits then execs the target. This
+// validator therefore only rejects a Resource with no platform RLIMIT_* mapping
+// (the SDK's "no silent field loss" rule) — every mappable field is honoured.
 package exec
 
 import (
@@ -17,27 +19,22 @@ import (
 var resourceLimits = buildResourceLimits()
 
 // checkLimits validates the rlimit/umask fields of spec before the spawn and
-// returns the typed error the caller must surface. An unmapped Resource is
-// UnknownResource; any honourable-only-in-child field (a mapped Rlimit or a
-// non-nil Umask) is RlimitFailed because the stdlib spawn cannot run
-// setrlimit/umask in the child between fork and exec. A spec requesting none of
-// these returns nil and spawns unaffected.
+// returns the typed error the caller must surface. An Rlimits key naming a
+// resource with no stdlib RLIMIT_* mapping (ResourceNProc / ResourceMemLock) is
+// UnknownResource. Every mappable Rlimit and a non-nil Umask are honourable via
+// the trampoline, so they pass validation here and are applied pre-exec. A spec
+// requesting none of these returns nil and spawns unaffected.
 func checkLimits(spec coreproc.Spec) error {
-	//: every requested resource must first name a real platform RLIMIT_*.
+	//: every requested resource must name a real platform RLIMIT_*; an unmapped
+	//: resource is a caller error surfaced before the spawn rather than dropped.
 	for res := range spec.Rlimits {
-		//: an undefined or unmapped resource is a caller error, checked first.
+		//: an undefined or unmapped resource names nothing this platform can set.
 		if _, ok := resourceLimits[res]; !ok {
-			//: bare sentinel: the resource names nothing this platform can set.
+			//: bare sentinel: the resource is not settable on this platform.
 			return coreproc.UnknownResource
 		}
 	}
-	//: a mapped Rlimit or a Umask can only be honoured by running setrlimit/umask
-	//: in the child between fork and exec, which the stdlib spawn cannot do — so
-	//: fail with a typed error rather than silently dropping the requested field.
-	if len(spec.Rlimits) > 0 || spec.Umask != nil {
-		//: bare sentinel: the field is valid but unhonourable on this runtime.
-		return coreproc.RlimitFailed
-	}
-	//: no in-child-only attributes requested — the spawn proceeds unaffected.
+	//: mapped Rlimits and a non-nil Umask are applied pre-exec by the re-exec
+	//: trampoline (see trampoline_unix.go), so no honourable field is rejected.
 	return nil
 }

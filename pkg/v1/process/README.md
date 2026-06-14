@@ -19,8 +19,8 @@ Spec.Setpgid                   KillMode=control-group (group-killable tree)
 Spec.Setsid                    a new session, detached from the parent tty
 Spec.Nice                      Nice=
 Spec.OOMScoreAdj               OOMScoreAdjust=
-Spec.Umask                     UMask=        (see Limitations)
-Spec.Rlimits                   Limit*=       (see Limitations)
+Spec.Umask                     UMask=        (applied via trampoline)
+Spec.Rlimits                   Limit*=       (applied via trampoline)
 ```
 
 ### Environment
@@ -56,9 +56,9 @@ exit, err := p.Wait()
 _ = exit // exit.Code / exit.Signal / exit.UserTime / exit.MaxRSS
 ```
 
-### Limitations
+### Resource limits and umask
 
-The Go runtime exposes no hook to run setrlimit\(2\) or umask\(2\) in the child between fork and exec, so Spec.Umask and Spec.Rlimits cannot be honoured by this stdlib spawn: a Spec that sets either is rejected with a typed error \(RlimitFailed\) rather than silently ignored. An Rlimit naming a resource with no RLIMIT\_\* mapping on the platform \(NPROC, MEMLOCK — absent from stdlib syscall\) is rejected with UnknownResource. Nice and OOMScoreAdj are applied post\-start on the live pid and surface a typed error if the host refuses.
+The Go runtime exposes no hook to run setrlimit\(2\) or umask\(2\) in the child between fork and exec, so Start honours Spec.Rlimits and Spec.Umask via a re\-exec trampoline: when either is set, Start spawns this binary as a tiny self\-trampoline that applies the limits in the fresh child, then execs the real target — so the target starts already under its limits, with no cgo and no dependency. An Rlimit naming a resource with no RLIMIT\_\* mapping on the platform \(NPROC, MEMLOCK — absent from stdlib syscall\) is still rejected up front with UnknownResource; a limit the kernel refuses to set \(e.g. raising a hard cap unprivileged\) fails the spawn rather than running the child unconfined. Nice and OOMScoreAdj are applied post\-start on the live pid and surface a typed error if the host refuses.
 
 On non\-Unix platforms Start returns UnsupportedPlatform; the package compiles everywhere but only supervises on Unix.
 
@@ -114,7 +114,7 @@ const (
 ```
 
 <a name="ExitResult"></a>
-## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L99>)
+## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L103>)
 
 ExitResult is the outcome of a finished process — exit code, terminating signal, and resource usage. It is an alias of the core port's ExitValue.
 
@@ -123,7 +123,7 @@ type ExitResult = coreproc.ExitValue
 ```
 
 <a name="Limit"></a>
-## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L111>)
+## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L115>)
 
 Limit is a soft/hard resource\-limit pair for setrlimit\(2\). It is an alias of the core port's LimitValue.
 
@@ -132,7 +132,7 @@ type Limit = coreproc.LimitValue
 ```
 
 <a name="Process"></a>
-## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L95>)
+## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L99>)
 
 Process is the handle to a spawned process: PID, Wait, Signal, SignalGroup, and a group\-aware Stop. It is an alias of the core port interface.
 
@@ -141,7 +141,7 @@ type Process = coreproc.Process
 ```
 
 <a name="Start"></a>
-### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L116>)
+### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L120>)
 
 ```go
 func Start(ctx context.Context, spec Spec) (proc Process, err error)
@@ -150,7 +150,7 @@ func Start(ctx context.Context, spec Spec) (proc Process, err error)
 Start spawns the process described by spec and returns a live Process handle. It delegates to internal/service/proc/exec; ctx is honoured up to the fork/exec boundary. On non\-Unix platforms it returns UnsupportedPlatform.
 
 <a name="Resource"></a>
-## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L107>)
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L111>)
 
 Resource identifies a per\-process resource governed by setrlimit\(2\). It is an alias of the core port type.
 
@@ -174,7 +174,7 @@ const (
 ```
 
 <a name="Signal"></a>
-## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L103>)
+## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L107>)
 
 Signal is a typed, platform\-portable OS signal. It is an alias of the core port type, so process.SIGTERM and a signal parsed elsewhere compare equal.
 
@@ -183,7 +183,7 @@ type Signal = coreproc.Signal
 ```
 
 <a name="Spec"></a>
-## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L91>)
+## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L95>)
 
 Spec is the immutable description of a process to spawn — executable, environment, credentials, isolation topology, and scheduling attributes. It is an alias of the core port type.
 

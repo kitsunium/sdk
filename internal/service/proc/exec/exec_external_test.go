@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -293,36 +294,156 @@ func TestStartUnknownResource(t *testing.T) {
 	}
 }
 
-// TestStartRlimitUnhonourable asserts a mappable Rlimit, which stdlib cannot
-// apply in-child, surfaces RlimitFailed rather than a silent drop.
-func TestStartRlimitUnhonourable(t *testing.T) {
-	t.Parallel()
+// TestStartLimitsHonoured asserts that a mappable Rlimit and a Umask are actually
+// applied to the child — not rejected — via the re-exec trampoline. Each case
+// spawns a shell that prints the effective limit and the captured stdout (#73
+// StdioCapture) is compared against the requested value. The trampoline re-execs
+// this very test binary, whose linked exec package applies the limit before
+// exec'ing /bin/sh, so these cases exercise the full pre-exec path.
+func TestStartLimitsHonoured(t *testing.T) {
+	requireShell(t)
 
-	spec := coreproc.Spec{
-		Path: shPath,
-		Rlimits: map[coreproc.Resource]coreproc.LimitValue{
-			coreproc.ResourceNoFile: {Soft: 1024, Hard: 1024},
+	type limitCase struct {
+		name   string
+		probe  string
+		mutate func(spec *coreproc.Spec)
+		want   int64
+		base   int
+	}
+	//: cover the soft NOFILE limit, a zeroed core limit, and the umask — each
+	//: applied in the child by the trampoline and read back from the shell.
+	cases := []limitCase{
+		{
+			name:  "nofile_soft",
+			probe: "ulimit -n",
+			mutate: func(spec *coreproc.Spec) {
+				//: lower NOFILE well below any default so the readback is unambiguous.
+				spec.Rlimits = map[coreproc.Resource]coreproc.LimitValue{
+					coreproc.ResourceNoFile: {Soft: 48, Hard: 48},
+				}
+			},
+			want: 48,
+			base: 10,
+		},
+		{
+			name:  "core_zero",
+			probe: "ulimit -c",
+			mutate: func(spec *coreproc.Spec) {
+				//: a zero core limit disables core dumps for the child.
+				spec.Rlimits = map[coreproc.Resource]coreproc.LimitValue{
+					coreproc.ResourceCore: {Soft: 0, Hard: 0},
+				}
+			},
+			want: 0,
+			base: 10,
+		},
+		{
+			name:  "umask",
+			probe: "umask",
+			mutate: func(spec *coreproc.Spec) {
+				//: the shell prints the umask in octal; 0o077 reads back as 63.
+				//: new(expr) is the Go 1.26 pointer-to-value form (ktn-linter requires
+				//: it over a named local; CI compiles it).
+				spec.Umask = new(0o077)
+			},
+			want: 0o077,
+			base: 8,
 		},
 	}
-	_, err := svcexec.Start(context.Background(), spec)
-	//: a valid-but-unhonourable rlimit must surface RLIMIT_FAILED, not silence.
-	if !errs.HasCode(err, coreproc.CodeRlimitFailed) {
-		t.Fatalf("Start(rlimit) err = %v, want CodeRlimitFailed", err)
+
+	runCase := func(t *testing.T, tc limitCase) {
+		t.Helper()
+		var out strings.Builder
+		spec := coreproc.Spec{
+			Path:   shPath,
+			Args:   []string{"sh", "-c", tc.probe},
+			Stdio:  coreproc.StdioCapture,
+			Stdout: &out,
+		}
+		tc.mutate(&spec)
+		p, err := svcexec.Start(t.Context(), spec)
+		//: a clean spawn through the trampoline is the precondition for the readback.
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		exit, wErr := p.Wait()
+		//: a normal exit is not a wait4 fault.
+		if wErr != nil {
+			t.Fatalf("Wait: %v", wErr)
+		}
+		//: the probe shell must itself exit cleanly for its output to be trusted.
+		if !exit.Success() {
+			t.Fatalf("%s: probe shell exit %d", tc.name, exit.Code)
+		}
+		got := strings.TrimSpace(out.String())
+		gotN, pErr := strconv.ParseInt(got, tc.base, 64)
+		//: the probe must print a parseable number in the documented base.
+		if pErr != nil {
+			t.Fatalf("%s: unparseable probe output %q: %v", tc.name, got, pErr)
+		}
+		//: the effective limit in the child must equal the requested value.
+		if gotN != tc.want {
+			t.Fatalf("%s: %q = %q (%d), want %d", tc.name, tc.probe, got, gotN, tc.want)
+		}
+	}
+
+	//: each limit case spawns its own probe shell through the trampoline.
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
 	}
 }
 
-// TestStartUmaskUnhonourable asserts a non-nil Umask, which stdlib cannot apply
-// in-child, surfaces RlimitFailed rather than a silent drop.
-func TestStartUmaskUnhonourable(t *testing.T) {
+// TestStartTrampolineApplyFailureTyped asserts that when the trampoline cannot
+// apply a requested limit — here an invalid Soft>Hard pair, which setrlimit
+// rejects with EINVAL regardless of privilege — Start surfaces the typed
+// RlimitFailed through the handshake pipe, not a silent non-zero child exit the
+// caller could not distinguish from a legitimate target exit.
+func TestStartTrampolineApplyFailureTyped(t *testing.T) {
 	t.Parallel()
+	//: the trampoline is Unix-only; non-Unix Start returns UnsupportedPlatform.
+	if runtime.GOOS == "windows" {
+		//: nothing to exercise where there is no trampoline.
+		t.Skip("trampoline is Unix-only")
+	}
 
-	mask := new(int)
-	*mask = 0o077
-	spec := coreproc.Spec{Path: shPath, Umask: mask}
-	_, err := svcexec.Start(context.Background(), spec)
-	//: a non-nil Umask must surface RLIMIT_FAILED, never be silently ignored.
+	spec := coreproc.Spec{
+		Path: shPath,
+		Args: []string{"sh", "-c", "true"},
+		//: Soft above Hard is an invalid pair setrlimit refuses with EINVAL; the
+		//: trampoline fails before exec, so /bin/sh need not even be present.
+		Rlimits: map[coreproc.Resource]coreproc.LimitValue{
+			coreproc.ResourceNoFile: {Soft: 100, Hard: 50},
+		},
+	}
+	_, err := svcexec.Start(t.Context(), spec)
+	//: a trampoline apply failure must surface the typed RLIMIT_FAILED.
 	if !errs.HasCode(err, coreproc.CodeRlimitFailed) {
-		t.Fatalf("Start(umask) err = %v, want CodeRlimitFailed", err)
+		t.Fatalf("Start(invalid rlimit pair) err = %v, want CodeRlimitFailed", err)
+	}
+}
+
+// TestStartTrampolineExecFailureTyped asserts that when the trampoline applies
+// the limits but cannot execve the target (a non-existent path), Start surfaces
+// the typed SpawnFailed through the handshake — matching the direct-spawn path's
+// contract instead of a bare 127 child exit.
+func TestStartTrampolineExecFailureTyped(t *testing.T) {
+	t.Parallel()
+	//: the trampoline is Unix-only; non-Unix Start returns UnsupportedPlatform.
+	if runtime.GOOS == "windows" {
+		//: nothing to exercise where there is no trampoline.
+		t.Skip("trampoline is Unix-only")
+	}
+
+	//: a Umask routes the spawn through the trampoline; the bad Path makes the
+	//: trampoline's execve fail after the umask is applied.
+	spec := coreproc.Spec{
+		Path:  "/nonexistent/kitsunium-proc-exec-test",
+		Umask: new(0o022),
+	}
+	_, err := svcexec.Start(t.Context(), spec)
+	//: a trampoline exec failure must surface the typed SPAWN_FAILED.
+	if !errs.HasCode(err, coreproc.CodeSpawnFailed) {
+		t.Fatalf("Start(trampoline bad path) err = %v, want CodeSpawnFailed", err)
 	}
 }
 
