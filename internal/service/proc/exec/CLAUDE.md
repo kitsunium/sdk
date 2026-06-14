@@ -1,0 +1,92 @@
+# internal/service/proc/exec
+
+The keystone spawn primitive of the process-supervision domain (ADR 0016).
+`Start` turns an immutable `coreproc.Spec` into a running, supervised process and
+returns a `coreproc.Process` handle. This is the only package in the domain that
+forks a process; the others (signal, reaper, rlimit, cgroup, sdnotify) act on a
+process that already exists.
+
+## Layering & deps
+
+- Imports: stdlib (`os`, `os/user`, `syscall`, `context`, `sync`, `time`,
+  `strconv`, `errors`) + `internal/core/proc` + `internal/kernel/errs`. No
+  `golang.org/x/sys`, no `pkg/*`.
+- Returns `coreproc.Process` (the port interface); the concrete `handle` type is
+  unexported.
+- Every error is a central `coreproc` sentinel — wrapped via the local
+  `wrap*` helpers in `wrap.go`, never re-`Define`d.
+
+## File map
+
+| File | Build tag | Role |
+|---|---|---|
+| `exec.go` | all | package doc + `validateSpec` (empty Path ⇒ `InvalidSpec`) |
+| `exec_unix.go` | `unix` | `Start`: validate → check limits → resolve creds → `SysProcAttr` → `os.StartProcess` → post-start attrs; `teardown` on attr failure |
+| `exec_other.go` | `!unix` | `Start` ⇒ `UnsupportedPlatform` (compiles everywhere) |
+| `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, once-only reap, exit translation |
+| `creds_unix.go` | `unix` | `Spec.User/Group/Groups` → `syscall.Credential` via `os/user` |
+| `attrs_unix.go` | `unix` | best-effort `Nice` (setpriority) + `OOMScoreAdj` (procfs); ESRCH detection |
+| `limits_unix.go` | `unix` | `checkLimits`: `UnknownResource` for unmapped, `RlimitFailed` for unhonourable |
+| `limittable_unix.go` | `unix` | `Resource` → `RLIMIT_*` table (stdlib constants only) |
+| `procfile_unix.go` | `unix` | `os.WriteFile` shim for `oom_score_adj` |
+| `wrap.go` | all | `wrap{Spawn,Wait,Signal,Stop,Rlimit,UnknownUser,UnknownGroup}` — restate each sentinel's exact fields once |
+
+## Spawn semantics
+
+- **Environment.** `Spec.Env == nil` spawns with an **empty** environment, never
+  the supervisor's — the port's known-state guarantee. A non-nil slice is used
+  verbatim (pass `os.Environ()` to inherit deliberately).
+- **argv.** Empty `Spec.Args` defaults argv to `[Path]`; otherwise `Args` is the
+  full argv (including argv[0]).
+- **Topology.** `Setpgid` makes the child a process-group leader (its pid is the
+  pgid), so `SignalGroup`/`Stop` reach forked grandchildren. `Setsid` starts a
+  new session detached from the controlling tty.
+- **Credentials.** User/Group/Groups accept names or numeric ids. A numeric uid
+  with no passwd entry is honoured (gid 0); a name that does not resolve is
+  `UnknownUser`/`UnknownGroup`.
+
+## Stop: group-aware SIGTERM → SIGKILL escalation
+
+`Stop(ctx, grace, sig)` sends `sig` to the whole group (`kill(-pgid, sig)`),
+waits up to `grace` for exit, then escalates to `SIGKILL` on the group. It
+returns `nil` once the group is gone, `ctx.Err()` if cancelled first, or
+`StopFailed` if the group survives the SIGKILL escalation for a non-ESRCH reason.
+A group that vanished (`ESRCH`) at any phase is treated as success. The reap runs
+under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
+`close(done)`.
+
+## Exit translation
+
+`Wait` returns `coreproc.ExitValue` built from `*os.ProcessState`:
+`WaitStatus.Exited()/ExitStatus()` → `Code` (−1 when signalled),
+`WaitStatus.Signaled()/Signal()` → `Signal`/`Signaled`, and the wait4
+`*syscall.Rusage` → `UserTime`/`SystemTime` (from `Utime`/`Stime`) and `MaxRSS`
+(`ru.Maxrss`, kilobytes).
+
+## Limitations (honest, not silent)
+
+The Go runtime exposes **no** `SysProcAttr` hook to run `setrlimit(2)` or
+`umask(2)` in the child between fork and exec. So:
+
+- A `Spec` setting **any** `Rlimits` (mappable resource) or a non-nil **`Umask`**
+  is rejected with `RlimitFailed` **before** the spawn — never silently dropped.
+- An `Rlimits` key naming a resource with no stdlib `RLIMIT_*` mapping
+  (`ResourceNProc`, `ResourceMemLock` — only in `golang.org/x/sys`, banned) is
+  rejected with `UnknownResource`.
+- `Nice` and `OOMScoreAdj` **are** honoured: applied post-start on the live pid
+  (`setpriority(2)` / `/proc/<pid>/oom_score_adj`). A host refusal surfaces
+  `RlimitFailed` and the half-configured child is killed + reaped (`teardown`).
+
+A future iteration can honour Rlimits/Umask via a re-exec trampoline (a tiny
+self-invocation that sets the limits then `execve`s the target); it was kept out
+of this keystone to stay stdlib-pure and dependency-free.
+
+## Tests
+
+`exec_external_test.go` (black-box) covers the ADR acceptance criteria:
+group-kill leaves no survivor, `Stop` escalates `SIGTERM`→`SIGKILL` for a child
+that ignores `SIGTERM`, `Wait` reports the exact normal/signalled status, plus
+the typed-error contracts (`InvalidSpec`, `UnknownUser/Group`,
+`UnknownResource`, `RlimitFailed`, context cancellation). Spawn tests are gated
+on a `/bin/sh` probe and skip cleanly where the host cannot run them; the
+typed-error tests hold on every platform.
