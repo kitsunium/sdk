@@ -159,6 +159,7 @@ docs/site/dist/
 docs/site/.astro/
 docs/site/src/data/versions.json
 docs/site/src/data/build-info.json
+docs/site/src/data/features-*.json
 docs/site/public/_search/
 docs/site/src/content/docs/*/
 core.*
