@@ -44,6 +44,10 @@ const exitDataErr int = 65
 // matches the NotifyFailed / ListenFailed sentinels' exit code in core/proc.
 const exitOSErr int = 71
 
+// exitNoPerm mirrors EX_NOPERM (sysexits.h): a credential check failed. It
+// matches the CredentialMismatch sentinel's exit code in core/proc.
+const exitNoPerm int = 77
+
 // decimalBase is the radix for parsing protocol integer fields (MAINPID,
 // WATCHDOG_USEC), all base-10 per the sd_notify spec.
 const decimalBase int = 10
@@ -79,13 +83,26 @@ func resolveAddr(raw string) string {
 }
 
 // encodePayload joins a NAME=value state map into the newline-separated datagram
-// body sd_notify expects. Order is not significant to the protocol.
-func encodePayload(state map[string]string) string {
+// body sd_notify expects. Order is not significant to the protocol. A name or
+// value carrying the '\n' field delimiter (or a name carrying '=', the
+// name/value delimiter) would forge extra fields in the datagram, so such a
+// state is rejected with InvalidNotification rather than encoded.
+func encodePayload(state map[string]string) (body string, err error) {
 	//: pre-size the builder roughly to avoid repeated growth on small maps.
 	var b strings.Builder
 	//: emit one "NAME=value" line per entry; the trailing newline per line is
 	//: harmless and matches systemd's own framing.
 	for name, value := range state {
+		//: a name containing '\n' or '=' would split into forged extra fields.
+		if strings.ContainsAny(name, "\n=") {
+			//: reject the field-injecting name as a malformed notification.
+			return "", wrapInvalid(nil, errs.String("name", name))
+		}
+		//: a value containing '\n' would inject additional NAME=value lines.
+		if strings.ContainsRune(value, '\n') {
+			//: reject the field-injecting value as a malformed notification.
+			return "", wrapInvalid(nil, errs.String("value", value))
+		}
 		//: each field is its own line in the environment-block-style body.
 		b.WriteString(name)
 		b.WriteByte('=')
@@ -93,7 +110,7 @@ func encodePayload(state map[string]string) string {
 		b.WriteByte('\n')
 	}
 	//: the assembled multi-line body is the datagram payload.
-	return b.String()
+	return b.String(), nil
 }
 
 // parsePayload splits a received datagram body into a NotificationValue, lifting

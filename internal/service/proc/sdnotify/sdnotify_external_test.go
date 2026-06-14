@@ -4,6 +4,7 @@ package sdnotify_test
 import (
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -127,6 +128,43 @@ func TestRoundTrip(t *testing.T) {
 	if n.SenderPID != os.Getpid() {
 		//: report the credential mismatch.
 		t.Fatalf("SenderPID = %d, want %d (this process)", n.SenderPID, os.Getpid())
+	}
+}
+
+// TestRoundTripTruncationRejected (Linux only) sends a datagram larger than the
+// listener's receive buffer and asserts Recv surfaces InvalidNotification rather
+// than silently parsing a clipped, partial payload.
+func TestRoundTripTruncationRejected(t *testing.T) {
+	//: the credential round-trip is Linux-specific.
+	if runtime.GOOS != "linux" {
+		//: skip where the listener is unavailable.
+		t.Skip("sd_notify listener (SO_PASSCRED) is linux-only")
+	}
+	//: stand up the listener.
+	l, path, err := sdnotify.Listen()
+	//: degrade to a skip if the host cannot provide the socket.
+	if err != nil {
+		//: skip the test on hosts without the facility.
+		t.Skipf("Listen unavailable on this host: %v", err)
+	}
+	//: release the listener at the end.
+	defer l.Close()
+	//: aim the notifier at the listener.
+	t.Setenv("NOTIFY_SOCKET", path)
+	//: a STATUS value far larger than the 4 KiB receive buffer forces the kernel
+	//: to truncate the datagram, setting MSG_TRUNC on the listener's read.
+	big := strings.Repeat("x", 8192)
+	//: send the oversized datagram; the send itself succeeds.
+	if nerr := sdnotify.Notify(map[string]string{"STATUS": big}); nerr != nil {
+		//: a send failure aborts the test.
+		t.Fatalf("Notify() = %v, want nil", nerr)
+	}
+	//: receiving the clipped datagram must be rejected, not silently parsed.
+	_, rerr := l.Recv()
+	//: a truncated datagram must surface the typed InvalidNotification.
+	if !errs.HasCode(rerr, coreproc.CodeInvalidNotification) {
+		//: report the wrong/absent error.
+		t.Fatalf("Recv() of truncated datagram = %v, want InvalidNotification", rerr)
 	}
 }
 

@@ -115,12 +115,20 @@ func (l *listener) Recv() (value coreproc.NotificationValue, err error) {
 	//: size buffers for the small text payload plus its OOB credential cmsg.
 	buf := make([]byte, payloadBufSize)
 	oob := make([]byte, oobBufSize)
-	//: ReadMsgUnix returns both the payload and the credential control message.
-	n, oobn, _, _, err := l.conn.ReadMsgUnix(buf, oob)
+	//: ReadMsgUnix returns the payload, the credential control message, and the
+	//: kernel recv flags (MSG_TRUNC is set when the datagram overran buf).
+	n, oobn, recvFlags, _, err := l.conn.ReadMsgUnix(buf, oob)
 	//: a read fault (including a Close-induced unblock) is reported as ListenFailed.
 	if err != nil {
 		//: wrap the read fault as ListenFailed.
 		return coreproc.NotificationValue{}, wrapListen(err, l.path)
+	}
+	//: a truncated datagram (MSG_TRUNC, or a payload that exactly filled buf)
+	//: would parse into a partial NAME=value body — reject it as malformed
+	//: rather than acting on a silently-clipped notification.
+	if recvFlags&syscall.MSG_TRUNC != 0 || n == len(buf) {
+		//: surface InvalidNotification for the truncated datagram.
+		return coreproc.NotificationValue{}, wrapInvalid(nil, errs.String("reason", "datagram truncated"))
 	}
 	//: parse the newline-separated NAME=value body.
 	value, err = parsePayload(string(buf[:n]))
@@ -130,25 +138,47 @@ func (l *listener) Recv() (value coreproc.NotificationValue, err error) {
 		return coreproc.NotificationValue{}, err
 	}
 	//: extract the kernel-verified sender PID from the control message.
-	value.SenderPID = senderPID(oob[:oobn])
+	pid, ok := senderPID(oob[:oobn])
+	//: missing/unparseable credentials must NOT be accepted as a valid PID 0;
+	//: SO_PASSCRED guarantees a ucred, so its absence is a credential failure.
+	if !ok {
+		//: surface the central CredentialMismatch sentinel for the unattributable datagram.
+		return coreproc.NotificationValue{}, wrapCredMismatch()
+	}
+	//: record the kernel-verified sender PID on the notification.
+	value.SenderPID = pid
 	//: hand back the fully populated notification.
 	return value, nil
 }
 
+// wrapCredMismatch restates the central CredentialMismatch sentinel fields for a
+// datagram that arrived without parseable SO_PASSCRED credentials.
+func wrapCredMismatch() error {
+	//: copy the exact sentinel strings so the error matches CodeCredentialMismatch.
+	return errs.Wrap(nil, errs.WrapParams{
+		Code:     coreproc.CodeCredentialMismatch,
+		Reason:   "CREDENTIAL_MISMATCH",
+		Public:   "Datagram sender credentials did not match",
+		Private:  "service/proc/sdnotify.Recv: SO_PASSCRED sender pid is not the expected supervised process",
+		ExitCode: exitNoPerm,
+	})
+}
+
 // senderPID extracts the SO_PASSCRED sender PID from a datagram's OOB control
-// data, returning 0 when no SCM_CREDENTIALS message is present or parseable.
-func senderPID(oob []byte) int {
+// data. ok is false when no parseable SCM_CREDENTIALS message is present, so the
+// caller can reject an unattributable datagram rather than trust a zero PID.
+func senderPID(oob []byte) (pid int, ok bool) {
 	//: an empty control buffer carries no credentials.
 	if len(oob) == 0 {
-		//: report the conventional zero PID.
-		return 0
+		//: signal "no credentials" so the caller does not accept PID 0.
+		return 0, false
 	}
 	//: split the OOB blob into individual socket control messages.
 	scms, err := syscall.ParseSocketControlMessage(oob)
 	//: malformed control data yields no credentials rather than an error here.
 	if err != nil {
-		//: report the conventional zero PID.
-		return 0
+		//: signal "no credentials" so the caller does not accept PID 0.
+		return 0, false
 	}
 	//: scan for the first SCM_CREDENTIALS message and read its ucred.
 	for i := range scms {
@@ -160,10 +190,10 @@ func senderPID(oob []byte) int {
 			continue
 		}
 		//: the kernel-stamped PID is exactly what we want to surface.
-		return int(cred.Pid)
+		return int(cred.Pid), true
 	}
 	//: no credential message was found.
-	return 0
+	return 0, false
 }
 
 // Close releases the socket, unblocks any in-flight Recv, and removes the backing

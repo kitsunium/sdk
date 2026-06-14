@@ -40,8 +40,14 @@ func Notify(state map[string]string) (err error) {
 			err = wrapNotify(closeErr, raw)
 		}
 	}()
-	//: encode the state map into the newline-separated datagram body.
-	payload := encodePayload(state)
+	//: encode the state map into the newline-separated datagram body, rejecting
+	//: any name/value that would forge extra fields via the line delimiters.
+	payload, err := encodePayload(state)
+	//: a field-injecting name/value is InvalidNotification, not a send fault.
+	if err != nil {
+		//: propagate the typed InvalidNotification produced by encodePayload.
+		return err
+	}
 	//: a single Write delivers the whole datagram.
 	_, err = conn.Write([]byte(payload))
 	//: a write fault means the supervisor did not receive the notification.

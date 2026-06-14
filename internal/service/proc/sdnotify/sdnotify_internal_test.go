@@ -134,6 +134,64 @@ func TestParsePayload(t *testing.T) {
 	}
 }
 
+// encodeCase is one encodePayload expectation.
+type encodeCase struct {
+	name    string
+	state   map[string]string
+	wantErr bool
+}
+
+// TestEncodePayloadInjection verifies encodePayload rejects names/values that
+// would forge extra fields via the '\n' / '=' delimiters, and accepts clean
+// state. A newline in a value previously injected additional NAME=value lines
+// (e.g. a forged READY=1), so such input must surface InvalidNotification.
+func TestEncodePayloadInjection(t *testing.T) {
+	t.Parallel()
+	//: each case maps a state map to "encodes cleanly" or "rejected as malformed".
+	cases := []encodeCase{
+		//: a clean single-line value encodes without error.
+		{name: "clean", state: map[string]string{"STATUS": "serving"}},
+		//: a value carrying '\n' would inject a forged extra field.
+		{name: "value_newline", state: map[string]string{"STATUS": "up\nREADY=1"}, wantErr: true},
+		//: a value carrying a trailing '\n' is still field injection.
+		{name: "value_trailing_newline", state: map[string]string{"STATUS": "up\n"}, wantErr: true},
+		//: a name carrying '\n' would split into a forged field.
+		{name: "name_newline", state: map[string]string{"BAD\nREADY": "1"}, wantErr: true},
+		//: a name carrying '=' would forge the name/value boundary.
+		{name: "name_eq", state: map[string]string{"A=B": "1"}, wantErr: true},
+	}
+	//: runCase exercises one encodePayload expectation.
+	runCase := func(t *testing.T, tc encodeCase) {
+		t.Helper()
+		//: encode the state map.
+		_, err := encodePayload(tc.state)
+		//: the error branch asserts the typed InvalidNotification.
+		if tc.wantErr {
+			//: an injecting name/value must yield InvalidNotification.
+			if !errs.HasCode(err, coreproc.CodeInvalidNotification) {
+				//: report the wrong/absent error.
+				t.Fatalf("encodePayload(%v) err = %v, want InvalidNotification", tc.state, err)
+			}
+			//: the error case is fully checked.
+			return
+		}
+		//: the success branch must not error.
+		if err != nil {
+			//: report the unexpected error.
+			t.Fatalf("encodePayload(%v) unexpected err = %v", tc.state, err)
+		}
+	}
+	//: drive every case as a parallel subtest.
+	for _, tc := range cases {
+		//: run this case under its own name.
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: delegate to the shared helper.
+			runCase(t, tc)
+		})
+	}
+}
+
 // TestWatchdogInterval verifies $WATCHDOG_USEC microsecond parsing.
 func TestWatchdogInterval(t *testing.T) {
 	t.Parallel()
