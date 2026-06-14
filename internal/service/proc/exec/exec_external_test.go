@@ -339,3 +339,60 @@ func TestStartContextCancelled(t *testing.T) {
 		t.Fatalf("Start(cancelled) err = %v, want context.Canceled", err)
 	}
 }
+
+// TestStartEmptyEnvNoLeak asserts a nil Spec.Env spawns an EMPTY environment:
+// the supervisor's variables (a canary here) must never leak into the child.
+// Regression for the nil-Env inheritance bug.
+func TestStartEmptyEnvNoLeak(t *testing.T) {
+	requireShell(t)
+	//: a canary in the supervisor env must not reach a nil-Env child.
+	t.Setenv("PROC_ENV_LEAK_CANARY", "leaked")
+
+	spec := coreproc.Spec{
+		Path: shPath,
+		//: the shell exits 0 only when the canary is absent (empty environment).
+		Args: []string{"sh", "-c", "[ -z \"$PROC_ENV_LEAK_CANARY\" ]"},
+	}
+	p, err := svcexec.Start(context.Background(), spec)
+	//: a clean spawn is the precondition for the leak check.
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	exit, wErr := p.Wait()
+	//: a normal exit is not a wait4 fault.
+	if wErr != nil {
+		t.Fatalf("Wait: %v", wErr)
+	}
+	//: a non-zero status means the canary leaked into the child environment.
+	if exit.Code != 0 {
+		t.Fatalf("nil Env leaked the supervisor environment (child exit %d)", exit.Code)
+	}
+}
+
+// TestStopWithoutSetpgid asserts Stop terminates a child that does NOT lead its
+// own group: the group operation degrades to the leader instead of no-oping on a
+// missing group (which would leak the child). Regression for the pgid==pid bug.
+func TestStopWithoutSetpgid(t *testing.T) {
+	t.Parallel()
+	requireShell(t)
+
+	spec := coreproc.Spec{
+		Path: shPath,
+		Args: []string{"sh", "-c", "sleep 30"},
+		//: deliberately NOT a group leader — exercises the degrade-to-leader path.
+		Setpgid: false,
+	}
+	p, err := svcexec.Start(context.Background(), spec)
+	//: a clean spawn is the precondition for the stop check.
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	//: Stop must actually terminate the leader, not silently no-op on -pid ESRCH.
+	if sErr := p.Stop(context.Background(), time.Second, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
+		t.Fatalf("Stop: %v", sErr)
+	}
+	//: after Stop the leader must be gone — kill(pid, 0) reports ESRCH.
+	if err := syscall.Kill(p.PID(), 0); err == nil {
+		t.Fatalf("child %d survived Stop without Setpgid", p.PID())
+	}
+}

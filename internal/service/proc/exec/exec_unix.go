@@ -51,7 +51,7 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		return nil, wrapSpawn(sErr, errs.String("path", spec.Path))
 	}
 
-	live := newHandle(started)
+	live := newHandle(started, spec.Setpgid)
 	//: best-effort scheduling attributes run post-start on the live pid.
 	if pErr := applyPostStart(live.pid, spec); pErr != nil {
 		//: a refused attribute tears the child down so nothing half-configured leaks.
@@ -99,14 +99,16 @@ func buildProcAttr(spec coreproc.Spec) (attr *os.ProcAttr, err error) {
 		Credential: cred,
 	}
 
-	//: nil Env yields an empty environment (the port's known-state guarantee),
-	//: never the supervisor's; a non-nil slice is used verbatim. A nil slice and
-	//: an explicit empty slice both spawn with no environment, which is the intent.
-	var env []string
-	//: a non-nil Env is honoured exactly; nil stays the empty-environment default.
-	if spec.Env != nil {
-		//: use the caller's explicit environment verbatim.
-		env = spec.Env
+	//: os.StartProcess inherits the parent environment ONLY when Env is nil. A nil
+	//: Spec.Env must therefore become a non-nil zero-length slice to honour the
+	//: port's "explicit, never inherited" guarantee — a genuinely nil slice here
+	//: would leak the supervisor's environment (secrets included) into the child,
+	//: so make() is deliberate over the lint-preferred nil.
+	env := spec.Env
+	//: map a nil Env to a non-nil empty slice (see the security note above).
+	if env == nil {
+		//: force an empty-but-non-nil environment so nothing is inherited.
+		env = make([]string, 0)
 	}
 
 	//: inherit the supervisor's std streams; redirection is a caller concern.

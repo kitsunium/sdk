@@ -35,9 +35,10 @@ func maxRSSKB(ru *syscall.Rusage) int64 {
 // single Wait outcome so PID/Wait/Signal/SignalGroup/Stop satisfy the
 // coreproc.Process port. It is safe for concurrent use.
 type handle struct {
-	proc *os.Process
-	pid  int
-	pgid int
+	proc    *os.Process
+	pid     int
+	pgid    int
+	setpgid bool
 
 	waitOnce sync.Once
 	waitVal  coreproc.ExitValue
@@ -45,11 +46,28 @@ type handle struct {
 	done     chan struct{}
 }
 
-// newHandle wraps a freshly started *os.Process as a handle, recording the
-// leader pid as the process-group id (the child led its own group via Setpgid).
-func newHandle(p *os.Process) *handle {
-	//: the leader pid is the pgid because the child was made a group leader.
-	return &handle{proc: p, pid: p.Pid, pgid: p.Pid, done: make(chan struct{})}
+// newHandle wraps a freshly started *os.Process as a handle. setpgid records
+// whether the child leads its own process group (Spec.Setpgid): only then is the
+// leader pid a valid pgid for group-directed kills.
+func newHandle(p *os.Process, setpgid bool) *handle {
+	//: with Setpgid the leader pid IS the group id; without it there is no private
+	//: group and group operations degrade to the leader (see groupTarget).
+	return &handle{proc: p, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, done: make(chan struct{})}
+}
+
+// groupTarget returns the kill(2) target for group-directed operations: the
+// negated pgid when the child leads its own group (Setpgid), otherwise the leader
+// pid. Without a private group, -pgid would address no group (ESRCH, silently
+// swallowed) or, worse, the supervisor's own inherited group — so a non-grouped
+// child is only ever signalled at its leader.
+func (h *handle) groupTarget() int {
+	//: a private group is addressable as -pgid in a single kill(2).
+	if h.setpgid {
+		//: negative pid fans the signal out to every group member.
+		return -h.pgid
+	}
+	//: no private group — degrade to the single leader pid.
+	return h.pid
 }
 
 // PID reports the leader process identifier.
@@ -95,14 +113,19 @@ func (h *handle) Signal(sig coreproc.Signal) error {
 }
 
 // SignalGroup delivers sig to the leader's entire process group via
-// kill(-pgid, sig), reaching forked grandchildren (the control-group analogue).
+// kill(-pgid, sig) when the child leads its own group (Spec.Setpgid), reaching
+// forked grandchildren (the control-group analogue). Without a private group it
+// degrades to the leader process alone, so it never signals the supervisor's
+// inherited group.
 func (h *handle) SignalGroup(sig coreproc.Signal) error {
-	//: a negative pid addresses the whole process group in one kill(2).
-	if err := syscall.Kill(-h.pgid, syscall.Signal(sig.Int())); err != nil {
+	//: resolve the group target (-pgid with Setpgid, else the leader pid).
+	target := h.groupTarget()
+	//: one kill(2) reaches the whole group (negative) or the leader (positive).
+	if err := syscall.Kill(target, syscall.Signal(sig.Int())); err != nil {
 		//: wrap the group kill(2) cause under the central SIGNAL_FAILED fields.
-		return wrapSignal(err, errs.Int("pgid", h.pgid), errs.Int("signal", sig.Int()))
+		return wrapSignal(err, errs.Int("target", target), errs.Int("signal", sig.Int()))
 	}
-	//: the group signal was accepted for delivery to every member.
+	//: the signal was accepted for delivery to the resolved target.
 	return nil
 }
 

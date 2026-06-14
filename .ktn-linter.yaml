@@ -145,6 +145,19 @@ rules:
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
 
+  # KTN-VAR-NILSLICE (info) — "prefer a nil slice to an empty one".
+  #
+  # Inverted-semantics exception: os.StartProcess inherits the PARENT environment
+  # exactly when os.ProcAttr.Env is nil. The proc port guarantees Spec.Env is
+  # "explicit, never inherited", so a nil Spec.Env MUST be mapped to a non-nil
+  # zero-length slice before reaching StartProcess — a nil slice would leak the
+  # supervisor's environment (secrets included) into the child. Here the
+  # lint-preferred nil is the security bug, so the non-nil empty slice is
+  # deliberate. Scoped to the spawn implementation ONLY.
+  KTN-VAR-NILSLICE:
+    exclude:
+      - "**/internal/service/proc/exec/**"
+
   # KTN-VAR-BIGSTRUCT (phase 4, warning) — contract-required value type.
   #
   # The pkg/v1/process facade's exported entry point is, by ADR 0016 design,
