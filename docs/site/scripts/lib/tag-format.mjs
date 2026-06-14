@@ -26,12 +26,16 @@
 // only emitted in bootstrap mode (no published releases for the major).
 
 // Two shapes are accepted (ADR 0017):
-//   - bare:   pkg/vX.Y.Z         — the public module …/pkg (major 0|1); the
-//             docs "major" axis is the SEMVER major ("v0"/"v1").
+//   - bare:   pkg/vX.Y.Z         — the public module …/pkg; semver major is
+//             constrained to 0|1 (Go forbids a /v1 module-path suffix). Its
+//             docs "major" axis is the on-disk API directory "v1" (the code
+//             lives under pkg/v1/), NOT the semver major — sync-versions uses
+//             `major` to select the pkg/<major>/ source directory, and pkg/v0
+//             does not exist.
 //   - legacy: pkg/vN/vX.Y.Z      — reserved for a future real …/pkg/vN module
 //             (N≥2); the path-major must equal the semver major.
 export const TAG_REGEX =
-  /^pkg\/(?:v[0-9]+\/)?v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
+  /^pkg\/(?:v[0-9]+\/v[0-9]+|v[01])\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
 export const LOCAL_RELEASE = "local";
 
 export function isValidTag(tag) {
@@ -51,8 +55,10 @@ export function parseTag(tag) {
   const parts = core.split(".").map(Number);
   if (parts.length !== 3) return null;
   if (segs.length === 2) {
-    //: bare module: the grouping major is the SEMVER major (v0 alpha, v1 stable).
-    major = `v${parts[0]}`;
+    //: bare module …/pkg: the grouping major is the on-disk API directory,
+    //: which is always "v1" (code lives under pkg/v1/; there is no pkg/v0).
+    //: The semver major (0 alpha → 1 stable) lives in `parts`/`semver`, not here.
+    major = "v1";
   } else {
     //: legacy/v2+ form: reject tags whose PATH major (pkg/vN) disagrees with the
     //: SEMVER major (e.g. pkg/v2/v1.2.3) — the regex alone accepts them, and a

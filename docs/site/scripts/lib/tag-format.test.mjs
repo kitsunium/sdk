@@ -112,11 +112,13 @@ test("parseTag rejects path-major ≠ semver-major (pkg/v1/v2.0.0)", () => {
 });
 
 test("parseTag accepts the bare pkg/vX.Y.Z shape (ADR 0017)", () => {
-  //: the public module is …/pkg (no path-major); the grouping major is the
-  //: SEMVER major. v0 = alpha, v1 = stable.
+  //: the public module is …/pkg (no path-major). The docs grouping major is
+  //: ALWAYS the on-disk API directory "v1" (code lives under pkg/v1/); the
+  //: semver major (0 alpha → 1 stable) lives in parts/semver, not in `major`.
   const alpha = parseTag("pkg/v0.1.0");
-  assert.equal(alpha?.major, "v0");
+  assert.equal(alpha?.major, "v1");
   assert.deepEqual(alpha?.parts, [0, 1, 0]);
+  assert.equal(alpha?.semver, "0.1.0");
   assert.equal(alpha?.prerelease, null);
 
   const stable = parseTag("pkg/v1.0.0");
@@ -124,8 +126,13 @@ test("parseTag accepts the bare pkg/vX.Y.Z shape (ADR 0017)", () => {
   assert.deepEqual(stable?.parts, [1, 0, 0]);
 
   const pre = parseTag("pkg/v0.2.0-rc.1");
-  assert.equal(pre?.major, "v0");
+  assert.equal(pre?.major, "v1");
+  assert.equal(pre?.semver, "0.2.0-rc.1");
   assert.equal(pre?.prerelease, "rc.1");
+
+  //: bare v2+ is NOT a valid bare tag (a real v2 needs the …/pkg/v2 module and
+  //: the legacy pkg/v2/v2.0.0 shape); reject it here too.
+  assert.equal(parseTag("pkg/v2.0.0"), null);
 
   //: garbage after the semver is still rejected (anchored regex).
   assert.equal(parseTag("pkg/v0.1.0;rm -rf /"), null);

@@ -67,18 +67,21 @@ while IFS= read -r path; do
   esac
 done < <(git diff --name-only "$RANGE" || true)
 
-# 2. internal/* changes — rdeps per package. Bazel is invoked once per touched
-# internal package; if any reaches //pkg/..., the public module must re-release.
+# 2. internal/* changes — rdeps at the MODULE root. A changed file is reduced to
+# its module dir (internal/<mod>), so a go.mod / go.sum change maps to a valid
+# Bazel subtree //internal/<mod>/... rather than a bogus //internal/<mod>/go.mod/...
+# label (which fails the query and would silently drop the bump). If any reaches
+# //pkg/..., the public module must re-release.
 if [ "$need_bump" -eq 0 ]; then
   mapfile -t changed_internal < <(
     git diff --name-only "$RANGE" 2>/dev/null \
-      | awk -F/ '/^internal\//{print $1"/"$2"/"$3}' \
+      | awk -F/ '/^internal\//{print $1"/"$2}' \
       | sort -u
   )
   if [ "${#changed_internal[@]}" -gt 0 ] && command -v bazel >/dev/null 2>&1; then
-    for pkgpath in "${changed_internal[@]}"; do
-      [ -z "$pkgpath" ] && continue
-      if bazel query "rdeps(//pkg/..., //${pkgpath}/...)" 2>/dev/null | grep -q .; then
+    for modpath in "${changed_internal[@]}"; do
+      [ -z "$modpath" ] && continue
+      if bazel query "rdeps(//pkg/..., //${modpath}/...)" 2>/dev/null | grep -q .; then
         need_bump=1
         break
       fi

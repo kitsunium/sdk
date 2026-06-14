@@ -55,9 +55,9 @@ Single Go module `github.com/kitsunium/sdk/pkg` — one `go.mod` (at `pkg/go.mod
 # Primary (Bazel)
 bazel test --config=race //pkg/v1/...
 
-# Fallback (per-module)
-cd pkg/v1
-GOWORK=off go test -race -cover ./...
+# Fallback (per-module; go.mod is at pkg/, code under v1/)
+cd pkg
+GOWORK=off go test -race -cover ./v1/...
 ```
 
 ## Subtree

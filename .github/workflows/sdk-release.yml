@@ -64,11 +64,17 @@ jobs:
 
       - name: Compute majors to bump
         id: compute
+        env:
+          # Route the workflow_dispatch input through an env var rather than
+          # interpolating ${{ inputs.force_bumps }} straight into the shell —
+          # direct interpolation is a template-injection sink (a value like
+          # 'pkg"; rm -rf /; echo "' would execute before the grep filter).
+          FORCE_BUMPS: ${{ inputs.force_bumps }}
         run: |
           set -euo pipefail
-          if [ -n "${{ inputs.force_bumps }}" ]; then
+          if [ -n "$FORCE_BUMPS" ]; then
             echo "majors<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${{ inputs.force_bumps }}" | tr ' ' '\n' | grep -E '^(pkg|v[0-9]+)$' >> "$GITHUB_OUTPUT"
+            echo "$FORCE_BUMPS" | tr ' ' '\n' | grep -E '^(pkg|v[0-9]+)$' >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           else
             echo "majors<<EOF" >> "$GITHUB_OUTPUT"
