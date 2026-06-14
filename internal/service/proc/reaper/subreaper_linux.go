@@ -15,7 +15,7 @@ import (
 // ancestor subreaper instead of PID1, so a non-init supervisor still receives
 // their SIGCHLD and can wait(2) them. The value is 36 on Linux and is not
 // exported by the standard syscall package, so it is named here. It is typed
-// uintptr to feed syscall.Syscall directly.
+// uintptr to feed syscall.Syscall6 directly.
 const prSetChildSubreaper uintptr = 36
 
 // SetChildSubreaper marks the calling process as a child subreaper via
@@ -24,8 +24,10 @@ const prSetChildSubreaper uintptr = 36
 // is Linux-only; other Unix platforms have no equivalent and report
 // UnsupportedPlatform.
 func SetChildSubreaper() error {
-	//: arg2=1 enables subreaper mode; the remaining prctl args are unused (0).
-	_, _, errno := syscall.Syscall(syscall.SYS_PRCTL, prSetChildSubreaper, 1, 0)
+	//: prctl(2) takes five args; arg2=1 arms subreaper mode and arg3..arg5 must
+	//: be passed as explicit zeros (Syscall6) so the unused slots are never
+	//: left to stale register contents that can fail the call with EINVAL.
+	_, _, errno := syscall.Syscall6(syscall.SYS_PRCTL, prSetChildSubreaper, 1, 0, 0, 0, 0)
 	//: a zero errno is success — subreaper mode is now armed.
 	if errno == 0 {
 		//: nothing to report on success.

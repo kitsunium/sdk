@@ -166,6 +166,51 @@ func TestStartStopNoGoroutineLeak(t *testing.T) {
 	}
 }
 
+// TestConcurrentStopIsFullBarrier asserts that when several goroutines call Stop
+// at once, every caller blocks until the loop goroutine has actually exited —
+// not just the one that closes done. A concurrent Stop that returned early (on
+// the old running=false-first path) could let a later Start race a still-running
+// loop; here all callers must observe the loop gone before returning.
+func TestConcurrentStopIsFullBarrier(t *testing.T) {
+	//: serial — process-global SIGCHLD handler and goroutine accounting.
+	r := New().(*unixReaper)
+	//: bring the background loop up so there is a goroutine to join.
+	r.Start()
+	//: record the goroutine count while the loop is provably live.
+	base := runtime.NumGoroutine()
+	var wg sync.WaitGroup
+	//: several goroutines race to Stop the same live loop.
+	const stoppers int = 8
+	//: each stopper must block until the loop has exited, never return early.
+	for range stoppers {
+		//: a concurrent Stop joins the same teardown barrier.
+		wg.Go(func() {
+			//: Stop must not return until the loop goroutine is gone.
+			r.Stop()
+		})
+	}
+	//: every concurrent Stop has returned.
+	wg.Wait()
+	//: after all Stops returned the loop goroutine must be gone, proving the
+	//: barrier held for every caller and not only the closing one.
+	if grew := runtime.NumGoroutine() - base; grew > 0 {
+		t.Fatalf("loop goroutine survived concurrent Stop: count grew by %d", grew)
+	}
+	//: the reaper must be fully idle, so a fresh Start brings a clean loop up.
+	r.mu.RLock()
+	//: neither running nor stopping may linger once every Stop has returned.
+	stillRunning, stillStopping := r.running, r.stopping
+	r.mu.RUnlock()
+	//: a lingering running/stopping flag would block a legitimate later Start.
+	if stillRunning || stillStopping {
+		t.Fatalf("after concurrent Stop: running=%v stopping=%v, want both false", stillRunning, stillStopping)
+	}
+	//: a later Start after a full-barrier Stop must launch a fresh loop cleanly.
+	r.Start()
+	//: tear the fresh loop down.
+	r.Stop()
+}
+
 // TestStartIdempotentAndStopWithoutStart asserts Start is idempotent and Stop is
 // safe without a prior Start.
 func TestStartIdempotentAndStopWithoutStart(t *testing.T) {

@@ -31,8 +31,15 @@ type unixReaper struct {
 	// kernel-serialised and needs no extra lock.
 	mu sync.RWMutex
 	// running reports whether the background loop goroutine is live; it makes
-	// Start idempotent and Stop safe without a prior Start.
+	// Start idempotent and Stop safe without a prior Start. It stays true until
+	// the goroutine has fully exited so a concurrent Stop cannot observe a torn
+	// state and return before the loop is gone.
 	running bool
+	// stopping reports that a Stop for the current cycle is already in flight; a
+	// second concurrent Stop joins the same stopped channel instead of issuing a
+	// duplicate close, and Start refuses to launch a new loop until shutdown
+	// completes so a fresh cycle can never overlap a draining one.
+	stopping bool
 	// sigCh receives SIGCHLD notifications from os/signal while running; the loop
 	// owns its lifecycle and detaches it via defer signal.Stop on exit.
 	sigCh chan os.Signal
@@ -68,9 +75,10 @@ func (r *unixReaper) Start() {
 	r.mu.Lock()
 	//: release the lock on every Start path.
 	defer r.mu.Unlock()
-	//: a second Start while running must not install a second handler.
-	if r.running {
-		//: already running — return without side effects.
+	//: a second Start while running, or a Start racing an in-flight Stop, must
+	//: not install a second handler or overlap a draining cycle.
+	if r.running || r.stopping {
+		//: already running or still tearing down — return without side effects.
 		return
 	}
 	//: fresh per-cycle channels so a later Start after Stop starts clean.
@@ -93,8 +101,14 @@ func (r *unixReaper) loop(sigCh chan os.Signal, done, stopped chan struct{}) {
 	signal.Notify(sigCh, syscall.SIGCHLD)
 	//: detach the SIGCHLD handler when the loop returns so it never leaks.
 	defer signal.Stop(sigCh)
-	//: announce exit exactly once so Stop can block until we have returned.
+	//: announce exit exactly once so Stop can block until we have returned. The
+	//: defers run LIFO, so this close fires AFTER markStopped clears the cycle
+	//: flags — every Stop waiter therefore observes a fully idle reaper on wake.
 	defer close(stopped)
+	//: clear running/stopping under the lock before the close above unblocks any
+	//: Stop caller, so the very first waiter to wake sees a clean cycle and a
+	//: later Start can launch a fresh loop without racing this one.
+	defer r.markStopped()
 	//: an initial drain catches children that exited before we subscribed.
 	r.drain()
 	//: react to signals until shutdown is requested.
@@ -124,27 +138,56 @@ func (r *unixReaper) loop(sigCh chan os.Signal, done, stopped chan struct{}) {
 func (r *unixReaper) Stop() {
 	//: serialise against Start and concurrent Stop, capturing the stopped chan.
 	r.mu.Lock()
-	//: a Stop with no live loop (never started, or already stopped) is a no-op.
+	//: a Stop with no live loop (never started, or already fully stopped) is a
+	//: no-op. running stays true through teardown, so this only fires when no
+	//: cycle is active.
 	if !r.running {
 		//: nothing to tear down — release and return without side effects.
 		r.mu.Unlock()
 		//: no live loop to stop.
 		return
 	}
-	//: capture the per-cycle channel and closer before releasing the lock.
+	//: capture the per-cycle channel so every caller blocks on the same barrier.
 	stopped := r.stopped
+	//: a Stop is already draining this cycle — join its barrier rather than
+	//: issue a duplicate close, and return only once the loop has truly exited.
+	if r.stopping {
+		//: release before blocking so the initiating Stop can finish teardown.
+		r.mu.Unlock()
+		//: wait for the in-flight Stop's loop to exit — a full barrier.
+		<-stopped
+		//: the loop is gone; this concurrent Stop has synchronised with exit.
+		return
+	}
+	//: this is the initiating Stop for the cycle — capture done and its closer.
 	done := r.done
 	closeDone := r.closeDone
-	//: flip running off so a concurrent Stop sees nothing to do.
-	r.running = false
+	//: mark the cycle as tearing down so concurrent Starts and Stops defer to
+	//: this one; running stays true until the goroutine is actually joined.
+	r.stopping = true
 	r.mu.Unlock()
 	//: request the loop's final drain and exit; the Once guards double-close.
 	closeDone.Do(func() {
 		//: close exactly once for this cycle.
 		close(done)
 	})
-	//: block until the loop has finished its final drain (no goroutine leak).
+	//: block until the loop has finished its final drain (no goroutine leak); the
+	//: loop clears running/stopping before it closes stopped, so on wake the
+	//: cycle is already idle and a later Start can launch cleanly.
 	<-stopped
+}
+
+// markStopped clears the per-cycle running/stopping flags under the lock. The
+// loop runs it via defer just before it closes stopped, so every Stop caller
+// that wakes on <-stopped observes a fully idle reaper rather than a torn,
+// mid-teardown state.
+func (r *unixReaper) markStopped() {
+	//: take the lock so the flag clear is atomic against Start/Stop/LastError.
+	r.mu.Lock()
+	//: the loop is exiting — the cycle is no longer running or stopping.
+	r.running = false
+	r.stopping = false
+	r.mu.Unlock()
 }
 
 // ReapOnce performs a single non-blocking drain sweep and reports how many

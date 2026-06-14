@@ -21,9 +21,62 @@ alias(
 
 go_test(
     name = "reaper_test",
-    srcs = ["reaper_external_test.go"],
+    srcs = [
+        "reaper_external_nonunix_test.go",
+        "reaper_external_test.go",
+        "reaper_external_unix_test.go",
+    ],
     deps = [
         ":reaper",
-        "//pkg/v1/errs",
-    ],
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:android": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:js": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:osx": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:windows": [
+            "//pkg/v1/errs",
+        ],
+        "//conditions:default": [],
+    }),
 )

@@ -1,12 +1,12 @@
 // Package reaper — black-box facade tests: alias identity, no-op-safe lifecycle,
-// and the typed-error contract of SetChildSubreaper.
+// and the typed-error contract of SetChildSubreaper. Platform-specific
+// assertions live in the build-tagged _unix / _nonunix siblings so they track
+// the same unix / !unix split as the implementation, not a runtime.GOOS guess.
 package reaper_test
 
 import (
-	"runtime"
 	"testing"
 
-	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/reaper"
 )
 
@@ -35,7 +35,8 @@ func TestNewLifecycleIsSafe(t *testing.T) {
 }
 
 // TestWithOnReapObserves asserts the WithOnReap option is accepted and the
-// reaper constructed with it remains lifecycle-safe.
+// post-sweep observer fires on every platform — including the non-Unix no-op,
+// where the documented contract still calls the hook with a zero-child sweep.
 func TestWithOnReapObserves(t *testing.T) {
 	//: serial — see TestNewLifecycleIsSafe rationale.
 	called := false
@@ -48,36 +49,10 @@ func TestWithOnReapObserves(t *testing.T) {
 	if _, err := r.ReapOnce(); err != nil {
 		t.Fatalf("ReapOnce returned error: %v", err)
 	}
-	//: on Unix the hook fires on every sweep; on the no-op platform it never
-	//: runs, so only assert the negative when the reaper actually reaps.
-	if runtime.GOOS != "windows" && !called {
-		t.Fatalf("WithOnReap observer was not invoked on a Unix sweep")
-	}
-}
-
-// TestSetChildSubreaperContract asserts SetChildSubreaper honours its typed
-// contract: nil or SubreaperFailed on Unix, UnsupportedPlatform off Unix. The
-// error, when present, is always one of the central proc sentinels.
-func TestSetChildSubreaperContract(t *testing.T) {
-	//: serial — alters this process's subreaper attribute.
-	err := reaper.SetChildSubreaper()
-	//: success is a valid outcome on a capable Unix host.
-	if err == nil {
-		//: nothing more to assert on the success path.
-		return
-	}
-	//: off Unix the only permitted error is UnsupportedPlatform.
-	if runtime.GOOS == "windows" {
-		//: the no-op stub must return exactly the platform sentinel.
-		if !errs.HasCode(err, reaper.UnsupportedPlatform.Code()) {
-			t.Fatalf("non-Unix SetChildSubreaper = %v, want UnsupportedPlatform", err)
-		}
-		//: contract satisfied for the unsupported platform.
-		return
-	}
-	//: on Unix a failure must be the SubreaperFailed sentinel, never raw.
-	if !errs.HasCode(err, reaper.SubreaperFailed.Code()) {
-		t.Fatalf("Unix SetChildSubreaper failed with unexpected error: %v", err)
+	//: the WithOnReap contract is platform-consistent: the hook fires on every
+	//: sweep (including zero) on Unix and on the non-Unix no-op alike.
+	if !called {
+		t.Fatalf("WithOnReap observer was not invoked on a sweep")
 	}
 }
 
