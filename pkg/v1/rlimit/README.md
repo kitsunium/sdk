@@ -31,7 +31,7 @@ A pid of 0 targets the calling process via setrlimit\(2\). Any other pid targets
 
 ### Spec integration
 
-Go's os/exec SysProcAttr carries no rlimit field, so limits cannot be applied declaratively before exec. The honest model is: apply limits from the child after fork \(a pid\-0 Apply in the child\) or, when supervising, apply them to the spawned pid via prlimit64. PrepareSysProcAttr validates a limit set without any syscall — call it at Spec\-construction time to fail fast on a Resource this platform cannot honour, before a process is ever spawned.
+Go's os/exec SysProcAttr carries no rlimit field. process.Start applies a Spec.Rlimits set to the child it spawns via a re\-exec trampoline; this package is the standalone primitive for the other cases: apply limits from the child after fork \(a pid\-0 Apply in the child\) or, when supervising, apply them to the spawned pid via prlimit64. PrepareSysProcAttr validates a limit set without any syscall — call it at Spec\-construction time to fail fast on a Resource this platform cannot honour, before a process is ever spawned.
 
 ### Platform notes
 
@@ -55,7 +55,7 @@ const LimitInfinity uint64 = coreproc.LimitInfinity
 ```
 
 <a name="Apply"></a>
-## func [Apply](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/rlimit/rlimit.go#L98>)
+## func [Apply](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/rlimit/rlimit.go#L99>)
 
 ```go
 func Apply(pid int, limits map[Resource]Limit) error
@@ -64,7 +64,7 @@ func Apply(pid int, limits map[Resource]Limit) error
 Apply sets the soft/hard ceilings in limits on the process identified by pid. A pid of 0 targets the calling process; any other pid targets that process via prlimit64\(2\) and needs CAP\_SYS\_RESOURCE. It returns UnknownResource for an unmapped resource, RlimitFailed on a syscall failure, and UnsupportedPlatform off Linux.
 
 <a name="PrepareSysProcAttr"></a>
-## func [PrepareSysProcAttr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/rlimit/rlimit.go#L108>)
+## func [PrepareSysProcAttr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/rlimit/rlimit.go#L109>)
 
 ```go
 func PrepareSysProcAttr(limits map[Resource]Limit) error
@@ -73,7 +73,7 @@ func PrepareSysProcAttr(limits map[Resource]Limit) error
 PrepareSysProcAttr validates limits without issuing any syscall and reports whether they can be applied on this platform, returning the same typed errors Apply would \(UnknownResource / UnsupportedPlatform\). Use it to fail fast at Spec\-construction time; Go's SysProcAttr has no rlimit field, so the actual application happens post\-fork via Apply.
 
 <a name="Limit"></a>
-## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/rlimit/rlimit.go#L91>)
+## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/rlimit/rlimit.go#L92>)
 
 Limit is an immutable soft/hard setrlimit\(2\) pair. It aliases the core proc LimitValue type.
 
@@ -82,7 +82,7 @@ type Limit = coreproc.LimitValue
 ```
 
 <a name="Resource"></a>
-## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/rlimit/rlimit.go#L87>)
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/rlimit/rlimit.go#L88>)
 
 Resource is the abstract, platform\-portable resource enum mapped to a RLIMIT\_\* constant by the service layer. It aliases the core proc type.
 
