@@ -4,32 +4,37 @@
 # counterpart at docs/site/scripts/lib/tag-format.mjs re-exports the same
 # regex so the docs sync stays in sync with the release pipeline.
 #
-# Tag shape (load-bearing — also enforced in ADR 0007):
-#     pkg/<major>/v<X>.<Y>.<Z>(-<prerelease>)?
-# Example: pkg/v1/v1.32.1   pkg/v1/v1.32.0-rc.1   pkg/v2/v2.0.0
+# Tag shape (load-bearing — also enforced in ADR 0007 / ADR 0009):
+#     pkg/v<X>.<Y>.<Z>(-<prerelease>)?
+# Example: pkg/v0.1.0   pkg/v0.2.0-rc.1   pkg/v1.0.0
+#
+# The public module is github.com/kitsunium/sdk/pkg — a BARE module path with
+# NO /vN suffix. Go forbids /v0 and /v1 suffixes (v0/v1 are the suffix-free
+# major; only /v2+ carry one), so the proxy rejects a `…/pkg/v1` module path at
+# any version. The consumer-facing packages live under the pkg/v1/ directory
+# (import paths stay github.com/kitsunium/sdk/pkg/v1/*) but the module — and its
+# tag — is bare `pkg`. The semver major is therefore held to 0|1 here; a future
+# breaking v2 adopts a real `…/pkg/v2` module path with a `pkg/v2/v2.0.0` tag
+# (deferred — ADR 0009), at which point this lib grows a second shape.
 
 set -euo pipefail
 
-# Public regex used by every consumer. Anchored.
-TAG_REGEX='^pkg/v[0-9]+/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+# Public regex used by every consumer. Anchored. Major constrained to 0|1
+# (bare module path — see header); v2+ deferred.
+TAG_REGEX='^pkg/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
 
-# Test a tag name against the canonical shape. Exits 0 on match.
+# Test a tag name against the canonical shape. Exits 0 on match. The major
+# bound (0|1) lives in the regex, so no path-major/semver-major cross-check is
+# needed: the module path is bare and there is no path-major to disagree with.
 is_valid_tag() {
-  [[ "$1" =~ $TAG_REGEX ]] || return 1
-  # Path major (pkg/vN) MUST equal the semver major (vN.…). The regex alone
-  # accepts mismatches like pkg/v2/v1.2.3, which break release invariants
-  # (ADR 0007 §1). Kept in lockstep with tag-format.mjs's parseTag.
-  local path_major ver_major
-  path_major="$(awk -F/ '{sub(/^v/, "", $2); print $2}' <<<"$1")"
-  ver_major="$(awk -F/ '{split($3, a, "."); sub(/^v/, "", a[1]); print a[1]}' <<<"$1")"
-  [[ "$path_major" == "$ver_major" ]]
+  [[ "$1" =~ $TAG_REGEX ]]
 }
 
 # Internal-module resolution tags (ADR 0009): `internal/<mod>/vX.Y.Z`. These are
-# cut alongside the pkg/<major> tag so the published module graph resolves
-# without `replace`; Go's internal/ rule still blocks direct consumer import.
-# Bare module paths only carry major 0/1, so the semver major is held to 0|1
-# (v2+ would need internal/<mod>/vN paths — deferred per ADR 0009).
+# cut alongside the pkg tag so the published module graph resolves without
+# `replace`; Go's internal/ rule still blocks direct consumer import. Bare
+# module paths only carry major 0/1, so the semver major is held to 0|1 (v2+
+# would need internal/<mod>/vN paths — deferred per ADR 0009).
 INTERNAL_TAG_REGEX='^internal/[a-z][a-z0-9]*/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
 
 # Test an internal-module tag against the canonical shape. Exits 0 on match.
@@ -37,15 +42,9 @@ is_valid_internal_tag() {
   [[ "$1" =~ $INTERNAL_TAG_REGEX ]]
 }
 
-# Extract the "vN" major from a full tag. Echo only; never exits non-zero
-# on bad input — caller must gate with is_valid_tag first.
-major_from_tag() {
-  awk -F/ '{print $2}' <<<"$1"
-}
-
-# Extract the bare semver X.Y.Z(-rc)? from a full tag.
+# Extract the bare semver X.Y.Z(-rc)? from a pkg tag. "pkg/v0.1.0" -> "0.1.0".
 version_from_tag() {
-  awk -F/ '{sub(/^v/, "", $3); print $3}' <<<"$1"
+  awk -F/ '{sub(/^v/, "", $2); print $2}' <<<"$1"
 }
 
 # Strip a pre-release suffix from a semver. "1.0.0-rc.1" -> "1.0.0".
@@ -65,7 +64,7 @@ next_patch() {
   esac
   local major minor patch
   IFS=. read -r major minor patch <<<"$ver"
-  printf 'pkg/%s/v%s.%s.%s\n' "$(major_from_tag "$tag")" "$major" "$minor" "$((patch + 1))"
+  printf 'pkg/v%s.%s.%s\n' "$major" "$minor" "$((patch + 1))"
 }
 
 # Bump the minor component (resets patch to 0). Same pre-release guard.
@@ -79,7 +78,7 @@ next_minor() {
   esac
   local major minor _patch
   IFS=. read -r major minor _patch <<<"$ver"
-  printf 'pkg/%s/v%s.%s.0\n' "$(major_from_tag "$tag")" "$major" "$((minor + 1))"
+  printf 'pkg/v%s.%s.0\n' "$major" "$((minor + 1))"
 }
 
 # Cross-platform version sort. GNU `sort -V` ships on Linux; BSD `sort`
@@ -88,16 +87,16 @@ version_sort() {
   if sort -V </dev/null >/dev/null 2>&1; then
     sort -V "$@"
   else
-    # Fallback: lexicographic on the dotted-quad after stripping the
-    # "pkg/vN/v" prefix. Good enough for X.Y.Z up to 99999.
-    sort -t. -k1,1n -k2,2n -k3,3n "$@"
+    # Fallback: numeric on the dotted-quad after the shared "pkg/v" prefix.
+    # Good enough for X.Y.Z up to 99999.
+    sort -t. -k1.6,1n -k2,2n -k3,3n "$@"
   fi
 }
 
-# Find the highest valid tag for a major ("v1"). Echoes empty if none.
-latest_tag_for() {
-  local major="$1"
-  git tag -l "pkg/${major}/v*" |
+# Find the highest valid pkg tag. Echoes empty if none. Internal tags
+# (internal/<mod>/v…) are excluded by the `pkg/v*` glob.
+latest_pkg_tag() {
+  git tag -l 'pkg/v*' |
     while IFS= read -r t; do is_valid_tag "$t" && echo "$t"; done |
     version_sort |
     tail -n1

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# scripts/release/cut-tags.sh — given a list of majors on stdin (one per
-# line, from compute-bumps.sh), compute the next patch tag for each, then
-# publish a `go get`-able tag chain (ADR 0009): rewrite every chain module's
-# go.mod to drop `replace` and pin its intra-repo deps to the release version,
-# commit that on a detached release commit, and tag internal/{kernel,core,
-# service} + pkg/<major> at the same version so a consumer resolves the whole
-# graph from the proxy with no local context.
+# scripts/release/cut-tags.sh — read the bump token `pkg` on stdin (from
+# compute-bumps.sh), compute the next patch tag, then publish a `go get`-able
+# tag chain (ADR 0009): rewrite every chain module's go.mod to drop `replace`
+# and pin its intra-repo deps to the release version, commit that on a detached
+# release commit, and tag internal/{kernel,core,service} + pkg at the same
+# version so a consumer resolves the whole graph from the proxy with no local
+# context.
+#
+# The public module is the bare `github.com/kitsunium/sdk/pkg` (no /vN suffix —
+# Go forbids it; the consumer packages live under the pkg/v1/ directory). Its
+# tag is `pkg/vX.Y.Z` (major 0|1). See lib/tag-format.sh + ADR 0009.
 #
 # The dev branch is untouched — only the published tags carry the replace-free,
 # cross-pinned go.mods. go.work + `replace` keep local dev working as before.
@@ -25,10 +29,10 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/tag-format.sh
 . "$here/lib/tag-format.sh"
 
-# Internal modules in pkg/<major>'s publish chain (ADR 0001 fixes this set).
-# They are tagged + cross-pinned at release so pkg/<major> resolves without
-# `replace`; Go's internal/ rule still blocks direct consumer import — these
-# tags exist only for module-graph resolution. Leaves first.
+# Internal modules in pkg's publish chain (ADR 0001 fixes this set). They are
+# tagged + cross-pinned at release so pkg resolves without `replace`; Go's
+# internal/ rule still blocks direct consumer import — these tags exist only
+# for module-graph resolution. Leaves first.
 INTERNAL_MODULES=(internal/kernel internal/core internal/service)
 
 DRY_RUN=0
@@ -39,12 +43,12 @@ for arg in "$@"; do
     --allow-bootstrap) ALLOW_BOOTSTRAP=1 ;;
     --help | -h)
       cat <<EOF
-cut-tags.sh — read majors (vN) on stdin, publish next patch tag chain per major.
+cut-tags.sh — read the bump token 'pkg' on stdin, publish the next patch tag chain.
 
-Usage: $0 [--dry-run] < majors.txt
+Usage: $0 [--dry-run] [--allow-bootstrap] < bump.txt
 
 Honors a 'Release-bump: minor' trailer on the latest merge commit, but
-only if that commit actually touches pkg/<major>/.
+only if that commit actually touches pkg/.
 EOF
       exit 0
       ;;
@@ -58,19 +62,19 @@ done
 # Inspect the *merge commit* (HEAD on main is the squash/merge commit in the
 # standard PR flow) and parse its Release-bump trailer once.
 trailer_raw="$(git log -1 --format='%(trailers:key=Release-bump,valueonly,separator=,)' HEAD 2>/dev/null || true)"
-# Files actually touched by that commit — used to scope the trailer (plan B4:
-# prevents gaming v1's version via a trailer in a commit that only touches v2).
+# Files actually touched by that commit — used to scope the trailer so a
+# Release-bump trailer only counts when the commit really touched pkg/.
 merge_touched_paths="$(git log -1 --name-only --format= HEAD 2>/dev/null || true)"
 
-# bump_for_major <major> <last-tag> — echo the next full tag. Pre-release tags
-# refuse to bump (plan B7; the shared lib rejects them in next_patch/minor).
-bump_for_major() {
-  local major="$1" last="$2" trailer
-  trailer="$(grep -F "/$major/" <<<"$merge_touched_paths" >/dev/null 2>&1 && echo "$trailer_raw" || echo)"
+# bump_for_pkg <last-tag> — echo the next full tag. Pre-release tags refuse to
+# bump (the shared lib rejects them in next_patch/minor).
+bump_for_pkg() {
+  local last="$1" trailer
+  trailer="$(grep -E '^pkg/' <<<"$merge_touched_paths" >/dev/null 2>&1 && echo "$trailer_raw" || echo)"
   case "$trailer" in
     minor) next_minor "$last" ;;
     major)
-      echo "cut-tags: 'Release-bump: major' rejected — create pkg/v$((${major#v} + 1))/" >&2
+      echo "cut-tags: 'Release-bump: major' rejected — a breaking v2 needs a real …/pkg/v2 module path (deferred — ADR 0009)" >&2
       return 1
       ;;
     *) next_patch "$last" ;;
@@ -85,7 +89,7 @@ internal_deps_of() {
 }
 
 # rewrite_publishable <go.mod> <sem> — drop every intra-repo `replace` and pin
-# every intra-repo `require` to <sem> (e.g. v1.0.0). After this the module
+# every intra-repo `require` to <sem> (e.g. v0.1.0). After this the module
 # resolves from the proxy with no local `replace`.
 rewrite_publishable() {
   local gomod="$1" sem="$2" dep
@@ -115,30 +119,30 @@ assert_publishable() {
   fi
 }
 
-# publish_chain <pkg-major> <sem> — on a detached worktree, rewrite every chain
-# go.mod to the publishable form, then either (DRY_RUN) print the form + planned
-# tags, or commit the rewrite on a detached release commit, tag the whole chain
-# at <sem>, and atomic-push. The dev branch is never modified.
+# publish_chain <sem> — on a detached worktree, rewrite every chain go.mod to
+# the publishable form, then either (DRY_RUN) print the form + planned tags, or
+# commit the rewrite on a detached release commit, tag the whole chain at <sem>,
+# and atomic-push. The dev branch is never modified.
 publish_chain() {
-  local major="$1" sem="$2"
-  # Lockstep: every chain module is tagged at the same semver. internal/* use
-  # bare module paths (major 0/1); a v2+ release would need internal/*/vN paths
-  # — deferred (ADR 0009). Fail loud rather than mint an invalid internal tag.
+  local sem="$1"
+  # Lockstep: every chain module is tagged at the same semver. internal/* + pkg
+  # use bare module paths (major 0/1); a v2+ release would need /vN module paths
+  # — deferred (ADR 0009). Fail loud rather than mint an invalid tag.
   case "$sem" in
     v0.* | v1.*) ;;
     *)
-      echo "cut-tags: chain lockstep at $sem needs internal/* /vN module paths (deferred — ADR 0009)" >&2
+      echo "cut-tags: chain lockstep at $sem needs /vN module paths (deferred — ADR 0009)" >&2
       return 1
       ;;
   esac
 
-  local -a chain_dirs=("${INTERNAL_MODULES[@]}" "pkg/$major")
+  local -a chain_dirs=("${INTERNAL_MODULES[@]}" "pkg")
   local -a tags=()
   local d t
   for d in "${chain_dirs[@]}"; do tags+=("$d/$sem"); done
 
-  # Validate every tag before touching the repo: pkg/<major> via the canonical
-  # regex, internal/* via the internal regex.
+  # Validate every tag before touching the repo: pkg via the canonical regex,
+  # internal/* via the internal regex.
   for t in "${tags[@]}"; do
     case "$t" in
       pkg/*) is_valid_tag "$t" ;;
@@ -177,23 +181,26 @@ publish_chain() {
   return "$rc"
 }
 
-while IFS= read -r major; do
-  [ -z "$major" ] && continue
-  case "$major" in
-    v[0-9]*) ;;
+while IFS= read -r token; do
+  [ -z "$token" ] && continue
+  case "$token" in
+    pkg) ;;
+    # Backward-compat: a legacy "vN" major token (pre bare-`pkg` migration)
+    # now maps to the single public module.
+    v[0-9]*) token="pkg" ;;
     *)
-      echo "cut-tags: bad major '$major'" >&2
+      echo "cut-tags: unexpected bump token '$token' (expected 'pkg')" >&2
       exit 1
       ;;
   esac
 
-  last="$(latest_tag_for "$major" || true)"
+  last="$(latest_pkg_tag || true)"
   if [ -z "$last" ]; then
-    # First release for this major: seed the major-aligned v<N>.0.0 directly
-    # (e.g. v2 → pkg/v2/v2.0.0). `$major` already carries the leading "v".
-    next="pkg/${major}/${major}.0.0"
+    # First release: seed the alpha v0.1.0 directly. The bare `pkg` module path
+    # carries major 0, so v0 is the correct (and only Go-legal) starting major.
+    next="pkg/v0.1.0"
     if ! is_valid_tag "$next"; then
-      echo "cut-tags: computed invalid first tag '$next' for $major" >&2
+      echo "cut-tags: computed invalid first tag '$next'" >&2
       exit 1
     fi
     # Bootstrap guard (ADR 0009): the very first release publishes the chain's
@@ -209,24 +216,24 @@ while IFS= read -r major; do
       echo "cut-tags: refusing pre-release or malformed: $last" >&2
       exit 1
     fi
-    next="$(bump_for_major "$major" "$last")"
+    next="$(bump_for_pkg "$last")"
   fi
 
-  # Semver of the release (e.g. "v1.0.0"), shared by the whole chain.
+  # Semver of the release (e.g. "v0.1.0"), shared by the whole chain.
   sem="v$(version_from_tag "$next")"
 
   # Race window close (plan B3): re-read latest tag immediately before the push
   # and abort if another job tagged in between.
-  latest_now="$(latest_tag_for "$major" || true)"
+  latest_now="$(latest_pkg_tag || true)"
   if [ -n "$latest_now" ] && [ "$latest_now" != "$last" ]; then
-    echo "cut-tags: race detected — $major moved from $last to $latest_now during prep; aborting" >&2
+    echo "cut-tags: race detected — pkg moved from $last to $latest_now during prep; aborting" >&2
     exit 2
   fi
 
-  publish_chain "$major" "$sem"
+  publish_chain "$sem"
 
-  # Echo only the pkg/<major> tag: it is the consumer-facing release (the
-  # internal/* tags are resolution-only and get no GitHub Release).
+  # Echo only the pkg tag: it is the consumer-facing release (the internal/*
+  # tags are resolution-only and get no GitHub Release).
   if [ "$DRY_RUN" -eq 0 ]; then
     echo "$next"
   fi

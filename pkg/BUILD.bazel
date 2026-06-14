@@ -1,0 +1,13 @@
+# gazelle:prefix github.com/kitsunium/sdk/pkg
+# gazelle:go_visibility //visibility:public
+# gazelle:default_visibility //visibility:public
+
+# pkg/ is the root of the SDK's public module (github.com/kitsunium/sdk/pkg).
+# The consumer-facing source lives under v1/ (and any future vN/); this BUILD
+# only marks pkg/ as a Bazel package so gazelle's go_deps extension can load
+# //pkg:go.mod. The go.mod moved here from pkg/v1/ when the public module path
+# was made proxy-publishable — Go forbids a /v1 module-path suffix, so the
+# module is github.com/kitsunium/sdk/pkg with packages under the v1/ directory
+# (import paths stay github.com/kitsunium/sdk/pkg/v1/*). See ADR 0009.
+
+package(default_visibility = ["//visibility:public"])
