@@ -101,10 +101,21 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, err error)
 		//: propagate the typed RLIMIT_FAILED from the trampoline resolution.
 		return nil, rErr
 	}
-	attr, aErr := buildProcAttr(spec, sio.files[:], envAddon)
+
+	files, hs, hErr := spawnFiles(spec, sio)
+	//: a handshake-pipe setup failure aborts before fork/exec.
+	if hErr != nil {
+		//: release the stdio fds so the aborted spawn leaks nothing.
+		sio.closeAll()
+		//: propagate the typed RLIMIT_FAILED wrapping the pipe cause.
+		return nil, hErr
+	}
+
+	attr, aErr := buildProcAttr(spec, files, envAddon)
 	//: a credential-resolution failure aborts before fork/exec.
 	if aErr != nil {
-		//: release the stdio fds so the aborted spawn leaks nothing.
+		//: release the handshake pipe and stdio fds so nothing leaks.
+		closeHandshake(hs)
 		sio.closeAll()
 		//: propagate the typed UNKNOWN_USER / UNKNOWN_GROUP verbatim.
 		return nil, aErr
@@ -112,13 +123,47 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, err error)
 	proc, sErr := os.StartProcess(path, argv, attr)
 	//: a fork/exec failure is a typed SPAWN_FAILED wrapping the OS cause.
 	if sErr != nil {
-		//: release the stdio fds before surfacing the spawn failure.
+		//: release the handshake pipe and stdio fds before surfacing the failure.
+		closeHandshake(hs)
 		sio.closeAll()
 		//: wrap the StartProcess cause under the central SPAWN_FAILED fields.
 		return nil, wrapSpawn(sErr, errs.String("path", spec.Path))
 	}
+	//: a trampolined spawn blocks on the handshake until the child execs the
+	//: target (EOF) or reports a pre-exec failure (typed RLIMIT_FAILED/SPAWN_FAILED).
+	if hs != nil {
+		//: surface a trampoline pre-exec failure as the typed sentinel.
+		if awaitErr := hs.await(); awaitErr != nil {
+			//: reap the exited trampoline child so it leaves no zombie.
+			_, wErr := proc.Wait()
+			swallowErr(wErr)
+			//: release the stdio fds so the aborted spawn leaks nothing.
+			sio.closeAll()
+			//: surface the trampoline's typed RLIMIT_FAILED / SPAWN_FAILED.
+			return nil, awaitErr
+		}
+	}
 	//: the forked, live OS process, still awaiting post-start attributes.
 	return proc, nil
+}
+
+// spawnFiles returns the child's file table and, for a trampolined spawn, the
+// handshake pipe whose write end follows the three std streams (so the child sees
+// it as handshakeFD). A direct spawn returns the stdio files and a nil handshake.
+func spawnFiles(spec coreproc.Spec, sio *stdioState) (files []*os.File, hs *handshake, err error) {
+	//: a direct spawn carries only the three wired std streams.
+	if !needsTrampoline(spec) {
+		//: no trampoline, so no handshake pipe is needed.
+		return sio.files[:], nil, nil
+	}
+	pipe, hErr := newHandshake()
+	//: a pipe-setup failure means the trampoline outcome cannot be observed.
+	if hErr != nil {
+		//: wrap the os.Pipe cause as the central RLIMIT_FAILED sentinel.
+		return nil, nil, wrapRlimit(hErr, errs.String("path", spec.Path))
+	}
+	//: append the write end after stdio so the child inherits it as handshakeFD.
+	return append(sio.files[:], pipe.childFile()), pipe, nil
 }
 
 // resolveSpawn returns the (path, argv, envAddon) for os.StartProcess. A spec

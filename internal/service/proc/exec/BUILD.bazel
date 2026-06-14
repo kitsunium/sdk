@@ -11,6 +11,7 @@ go_library(
         "exec_other.go",
         "exec_unix.go",
         "handle_unix.go",
+        "handshake_unix.go",
         "limits_unix.go",
         "limittable_unix.go",
         "procfile_unix.go",

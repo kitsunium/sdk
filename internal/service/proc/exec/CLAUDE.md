@@ -80,9 +80,16 @@ a **re-exec trampoline** (`trampoline_unix.go`), stdlib-pure and dependency-free
 - An `Rlimits` key naming a resource with no stdlib `RLIMIT_*` mapping
   (`ResourceNProc`, `ResourceMemLock` — only in `golang.org/x/sys`, banned) is
   rejected with `UnknownResource` **before** the spawn (`checkLimits`).
-- A limit the kernel **refuses** (e.g. raising a hard cap unprivileged) makes the
-  trampoline child exit non-zero rather than running the target unconfined; a
-  failure to locate `os.Executable()` surfaces `RlimitFailed` before any spawn.
+- A limit the kernel **refuses** (e.g. an invalid soft>hard pair, or raising a
+  hard cap unprivileged), or a failed `execve` of the target, is reported through
+  a **handshake pipe** (`handshake_unix.go`): the trampoline inherits the pipe
+  write end as fd 3, writes a status byte (`'A'` apply / `'E'` exec) on failure,
+  and arms it close-on-exec so a clean `execve` closes it (the parent reads EOF =
+  success). `Start` blocks on that read and surfaces a typed `RlimitFailed`
+  (apply) or `SpawnFailed` (exec) — matching the direct-spawn contract instead of
+  a bare 126/127 child exit. This is the same self-pipe + cloexec trick `os/exec`
+  uses for its own errpipe. A failure to locate `os.Executable()` likewise
+  surfaces `RlimitFailed` before any spawn.
 - `Nice` and `OOMScoreAdj` are honoured post-start on the live pid
   (`setpriority(2)` / `/proc/<pid>/oom_score_adj`). A host refusal surfaces
   `RlimitFailed` and the half-configured child is killed + reaped (`teardown`).

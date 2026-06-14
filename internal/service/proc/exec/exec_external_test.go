@@ -342,6 +342,8 @@ func TestStartLimitsHonoured(t *testing.T) {
 			probe: "umask",
 			mutate: func(spec *coreproc.Spec) {
 				//: the shell prints the umask in octal; 0o077 reads back as 63.
+				//: new(expr) is the Go 1.26 pointer-to-value form (ktn-linter requires
+				//: it over a named local; CI compiles it).
 				spec.Umask = new(0o077)
 			},
 			want: 0o077,
@@ -388,6 +390,60 @@ func TestStartLimitsHonoured(t *testing.T) {
 	//: each limit case spawns its own probe shell through the trampoline.
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
+	}
+}
+
+// TestStartTrampolineApplyFailureTyped asserts that when the trampoline cannot
+// apply a requested limit — here an invalid Soft>Hard pair, which setrlimit
+// rejects with EINVAL regardless of privilege — Start surfaces the typed
+// RlimitFailed through the handshake pipe, not a silent non-zero child exit the
+// caller could not distinguish from a legitimate target exit.
+func TestStartTrampolineApplyFailureTyped(t *testing.T) {
+	t.Parallel()
+	//: the trampoline is Unix-only; non-Unix Start returns UnsupportedPlatform.
+	if runtime.GOOS == "windows" {
+		//: nothing to exercise where there is no trampoline.
+		t.Skip("trampoline is Unix-only")
+	}
+
+	spec := coreproc.Spec{
+		Path: shPath,
+		Args: []string{"sh", "-c", "true"},
+		//: Soft above Hard is an invalid pair setrlimit refuses with EINVAL; the
+		//: trampoline fails before exec, so /bin/sh need not even be present.
+		Rlimits: map[coreproc.Resource]coreproc.LimitValue{
+			coreproc.ResourceNoFile: {Soft: 100, Hard: 50},
+		},
+	}
+	_, err := svcexec.Start(t.Context(), spec)
+	//: a trampoline apply failure must surface the typed RLIMIT_FAILED.
+	if !errs.HasCode(err, coreproc.CodeRlimitFailed) {
+		t.Fatalf("Start(invalid rlimit pair) err = %v, want CodeRlimitFailed", err)
+	}
+}
+
+// TestStartTrampolineExecFailureTyped asserts that when the trampoline applies
+// the limits but cannot execve the target (a non-existent path), Start surfaces
+// the typed SpawnFailed through the handshake — matching the direct-spawn path's
+// contract instead of a bare 127 child exit.
+func TestStartTrampolineExecFailureTyped(t *testing.T) {
+	t.Parallel()
+	//: the trampoline is Unix-only; non-Unix Start returns UnsupportedPlatform.
+	if runtime.GOOS == "windows" {
+		//: nothing to exercise where there is no trampoline.
+		t.Skip("trampoline is Unix-only")
+	}
+
+	//: a Umask routes the spawn through the trampoline; the bad Path makes the
+	//: trampoline's execve fail after the umask is applied.
+	spec := coreproc.Spec{
+		Path:  "/nonexistent/kitsunium-proc-exec-test",
+		Umask: new(0o022),
+	}
+	_, err := svcexec.Start(t.Context(), spec)
+	//: a trampoline exec failure must surface the typed SPAWN_FAILED.
+	if !errs.HasCode(err, coreproc.CodeSpawnFailed) {
+		t.Fatalf("Start(trampoline bad path) err = %v, want CodeSpawnFailed", err)
 	}
 }
 

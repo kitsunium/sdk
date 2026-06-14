@@ -72,18 +72,30 @@ func installTrampoline() struct{} {
 
 // runTrampoline applies the encoded limits then execve()s the real target
 // (os.Args[1] with argv os.Args[2:]). It never returns on success; on any failure
-// it writes a diagnostic to stderr and exits with a distinct status.
+// it reports a status byte to the parent (handshakeFD), writes a diagnostic to
+// stderr, and exits with a distinct status.
 func runTrampoline(payload string) {
 	//: apply every limit token; a failure must not run the target unconfined.
 	if msg := applyTrampoline(payload); msg != "" {
-		//: report which limit could not be applied, then fail the spawn.
+		//: signal the apply failure to the parent, then fail the spawn.
+		reportHandshake(handshakeApplyFail)
 		stderrLine("sdk trampoline: " + msg)
 		os.Exit(trampolineApplyExit)
 	}
 	//: the trampoline argv is [self, target, targetArgv...]; need at least 2.
 	if len(os.Args) < trampolineMinArgs {
-		//: a malformed trampoline invocation cannot locate the target.
+		//: a malformed invocation cannot locate the target — signal exec failure.
+		reportHandshake(handshakeExecFail)
 		stderrLine("sdk trampoline: missing target in argv")
+		os.Exit(trampolineExecExit)
+	}
+	//: arm the handshake fd to close on a successful execve so the parent reads
+	//: EOF; if it cannot be armed, fail rather than risk the parent blocking on a
+	//: descriptor the target would inherit.
+	if !armHandshakeClose() {
+		//: report the exec failure and exit instead of execing un-armed.
+		reportHandshake(handshakeExecFail)
+		stderrLine("sdk trampoline: could not arm handshake fd")
 		os.Exit(trampolineExecExit)
 	}
 	target := os.Args[1]
@@ -91,10 +103,33 @@ func runTrampoline(payload string) {
 	env := environWithout(os.Environ(), trampolineEnv)
 	//: replace this process image with the real target, now under its limits.
 	if err := syscall.Exec(target, os.Args[trampolineMinArgs:], env); err != nil {
-		//: the execve failed (e.g. target not found) — report and fail.
+		//: the execve failed (e.g. target not found) — signal and report.
+		reportHandshake(handshakeExecFail)
 		stderrLine("sdk trampoline exec " + target + ": " + err.Error())
 		os.Exit(trampolineExecExit)
 	}
+}
+
+// reportHandshake writes a single status byte to the handshake fd so the parent's
+// Start surfaces a typed error. Best-effort: a write fault changes nothing before
+// the imminent exit (the parent then falls back to the child's exit code).
+func reportHandshake(code byte) {
+	//: best-effort one-byte status; the parent maps it to a typed sentinel.
+	if _, err := syscall.Write(handshakeFD, []byte{code}); err != nil {
+		//: nothing to do — the process exits next regardless.
+		return
+	}
+}
+
+// armHandshakeClose marks the handshake fd close-on-exec so a successful execve
+// closes it (the parent reads EOF = success) while a failed execve leaves it open
+// for the failure byte. It reports whether the fd was armed.
+func armHandshakeClose() bool {
+	//: set FD_CLOEXEC on the handshake fd via fcntl; errno 0 means it is armed.
+	_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(handshakeFD),
+		syscall.F_SETFD, syscall.FD_CLOEXEC)
+	//: a non-zero errno (only on an invalid fd) leaves the handshake un-armed.
+	return errno == 0
 }
 
 // stderrLine writes a single diagnostic line to standard error, ignoring any
