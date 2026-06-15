@@ -43,3 +43,9 @@ go_test(
         "//internal/service/logger/sink/file",
     ],
 )
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

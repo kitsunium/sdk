@@ -27,6 +27,8 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0016-sdk-process-supervision-domain.md` | OS process-supervision domain (`proc`): 6th core sibling; `process`/`signal`/`reaper`/`rlimit`/`cgroup`/`sdnotify` facades; central error block `0.2.6.*`; build-tag platform selection | Accepted |
 | `0017-pkg-bare-module-path.md` | Public module is the bare `…/pkg` (Go forbids the `/v1` suffix); code stays under `v1/`, imports unchanged; tag `pkg/vX.Y.Z`, first release `v0.1.0` alpha | Accepted (amends 0009 path / 0007 tag shape / 0001 module path) |
 | `0018-sdk-cross-platform-portability.md` | Cross-platform portability strategy — build bar + runtime bar; uniform `UnsupportedPlatform` contract; `_linux`/`_unix`/`_bsd`/`_windows`/`_other` split convention; `bazel-ci.yml` cross-build + `e2e-vm.yml` gates; OpenBSD `RLIMIT_AS` precedent; native-backend roadmap (FreeBSD `rctl`, Windows Job Objects, BSD `procctl`) | Accepted |
+| `0019-pkg-errs-public-construction.md` | Public error construction API (`pkg/v1/errs.New`/`Wrap`/`Field` via non-panicking `kernel/errs.NewRuntime`) + third-party Major reservation `0x40–0x7F` (`MinAppMajor`/`MaxMajor`) | Accepted (amends 0002 / 0005 §Registry) |
+| `0020-errs-audit-dual-reason-derivation.md` | errs AST audit accepts `screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")`; closes the `//:audit_sources` gap excluding ~10 namespaced emitters | Accepted (amends 0005 §Semantics / formalises 0006) |
 
 ## Conventions
 
