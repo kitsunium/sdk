@@ -1,0 +1,154 @@
+name: Cross-platform runtime tests (real kernels, no lab)
+
+# ADR 0018 runtime bar WITHOUT the Proxmox lab. Every platform-sensitive proc
+# package's unit tests + the e2e conformance binary run on the REAL kernel of
+# each target OS, driven by `go test` — the uniform cross-platform driver,
+# because Bazel cannot host the BSDs (bazelisk #150 refuses freebsd; bazel
+# #9397/#10250 OpenBSD port unresolved). Bazel stays the canonical Linux gate in
+# bazel-ci.yml; this lane is the off-Linux runtime proof, never a duplicate unit
+# matrix.
+#
+#   - Linux / macOS / Windows : GitHub-hosted native runners (Go preinstalled),
+#     `go test` runs in place — Go auto-selects the build-tag variant per GOOS.
+#   - FreeBSD / OpenBSD / NetBSD : cross-platform-actions boots a real BSD kernel
+#     VM on the ubuntu host. We cross-compile `go test -c` binaries + conformance
+#     on the host (fast, exact Go version) and execute them inside the VM, so the
+#     guest needs no Go toolchain. (DragonFly intentionally omitted.)
+#
+# fail-fast: false everywhere — the point is to see ALL platforms' real behaviour
+# in one run, not stop at the first divergence.
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-cross-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Platform-sensitive packages whose RUNTIME behaviour must be proven per kernel.
+  # Pure-Go packages (codec/crypto/logger/errs) behave identically everywhere and
+  # are covered by the Linux Bazel gate, so they stay off this lane.
+  CORE_PKGS: "./proc"
+  SERVICE_PKGS: "./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal ./logger/sink/file ./writer/rotfile"
+
+jobs:
+  # ── Native hosted runners: Go runs in place, no cross-compile ──────────────
+  native:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, runs-on: ubuntu-latest }
+          - { name: macos-arm64, runs-on: macos-15 }
+          - { name: macos-intel, runs-on: macos-13 }
+          - { name: windows, runs-on: windows-latest }
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: pkg/go.mod
+
+      - name: Unit tests — platform-sensitive packages on ${{ matrix.name }}
+        shell: bash
+        env:
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          set -uo pipefail
+          fail=0
+          echo "::group::internal/core $CORE_PKGS"
+          (cd internal/core    && go test -count=1 -short $CORE_PKGS)    || fail=1
+          echo "::endgroup::"
+          echo "::group::internal/service $SERVICE_PKGS"
+          (cd internal/service && go test -count=1 -short $SERVICE_PKGS) || fail=1
+          echo "::endgroup::"
+          exit $fail
+
+      - name: E2E conformance — whole public API on ${{ matrix.name }}
+        shell: bash
+        env:
+          GOWORK: "off"
+        run: |
+          set -uo pipefail
+          cd e2e && go run .
+
+  # ── BSD via cross-platform-actions: cross-compile on host, run in the VM ────
+  bsd:
+    name: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: freebsd, version: "15.0" }
+          - { os: openbsd, version: "7.9" }
+          - { os: netbsd, version: "10.1" }
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: pkg/go.mod
+
+      - name: Cross-compile test binaries + conformance for ${{ matrix.os }}
+        shell: bash
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: amd64
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p bins
+          compile() { # module  pkg-list
+            local mod="$1"; shift
+            for pkg in $@; do
+              local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__').test"
+              # A package with no _test.go produces no binary; tolerate that.
+              if (cd "$mod" && go test -c -o "$GITHUB_WORKSPACE/$out" "$pkg") 2>/tmp/c.log; then
+                [ -f "$out" ] && echo "built $out" || echo "no tests in $mod/$pkg (skip)"
+              else
+                echo "::error::compile $mod/$pkg for $GOOS failed"; cat /tmp/c.log; exit 1
+              fi
+            done
+          }
+          compile internal/core    $CORE_PKGS
+          compile internal/service $SERVICE_PKGS
+          # Conformance is a real program (not a -c suite): build it normally.
+          (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
+          ls -la bins/
+
+      # Boots a real ${{ matrix.os }} kernel VM and syncs the workspace (incl.
+      # bins/) into it. pin to a SHA before promoting this lane to a PR gate.
+      - name: Run on real ${{ matrix.os }} kernel
+        uses: cross-platform-actions/action@v1.2.0
+        with:
+          operating_system: ${{ matrix.os }}
+          version: ${{ matrix.version }}
+          shell: bash
+          run: |
+            set -uo pipefail
+            fail=0
+            echo "== conformance on ${{ matrix.os }} =="
+            ./bins/conformance.run || fail=1
+            for b in bins/*.test; do
+              echo "== $b =="
+              # -test.short keeps each per-OS run quick; suites self-gate on
+              # UnsupportedPlatform / missing /bin/sh and skip cleanly.
+              ./"$b" -test.v -test.short || fail=1
+            done
+            exit $fail
