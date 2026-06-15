@@ -86,11 +86,15 @@ a **re-exec trampoline** (`trampoline_unix.go`), stdlib-pure and dependency-free
 - A limit the kernel **refuses** (e.g. an invalid soft>hard pair, or raising a
   hard cap unprivileged), or a failed `execve` of the target, is reported through
   a **handshake pipe** (`handshake_unix.go`): the trampoline inherits the pipe
-  write end as fd 3, writes a status byte (`'A'` apply / `'E'` exec) on failure,
-  and arms it close-on-exec so a clean `execve` closes it (the parent reads EOF =
-  success). `Start` blocks on that read and surfaces a typed `RlimitFailed`
-  (apply) or `SpawnFailed` (exec) — matching the direct-spawn contract instead of
-  a bare 126/127 child exit. This is the same self-pipe + cloexec trick `os/exec`
+  write end and writes a status byte (`'A'` apply / `'C'` cgroup / `'E'` exec) on
+  failure, then arms it close-on-exec so a clean `execve` closes it (the parent
+  reads EOF = success). The pipe is appended **after** any `Spec.ExtraFiles`, so
+  the extras keep their contracted fd 3.. (socket activation) and the handshake
+  lands at fd `3+len(ExtraFiles)`; the parent passes that descriptor to the
+  trampoline via `__KITSUNIUM_SDK_PROC_HSFD` (`childHandshakeFD`, default 3 when
+  there are no extras). `Start` blocks on that read and surfaces a typed
+  `RlimitFailed` (apply) / `CgroupWriteFailed` (cgroup) / `SpawnFailed` (exec) —
+  matching the direct-spawn contract instead of a bare 126/127 child exit. This is the same self-pipe + cloexec trick `os/exec`
   uses for its own errpipe. A failure to locate `os.Executable()` likewise
   surfaces `RlimitFailed` before any spawn.
 - `Nice` and `OOMScoreAdj` are honoured post-start on the live pid

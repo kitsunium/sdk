@@ -464,6 +464,63 @@ func TestStartCgroupPathUnavailableTyped(t *testing.T) {
 	}
 }
 
+// TestStartExtraFilesSurviveTrampoline proves the fd-ordering fix that #91's
+// trampoline-forcing CgroupPath made load-bearing: when a spawn routes through
+// the re-exec trampoline AND carries ExtraFiles, the extras must still land at
+// fd 3.. (the socket-activation contract), with the handshake pipe appended
+// AFTER them. The child reads its fd 3 directly; if the handshake had taken fd 3
+// (the old bug) the read would see the parent-closed pipe (EOF) instead.
+func TestStartExtraFilesSurviveTrampoline(t *testing.T) {
+	t.Parallel()
+	//: the child is a real shell; skip cleanly where the host has none.
+	if _, statErr := os.Stat(shPath); statErr != nil {
+		//: no /bin/sh — the fd-inheritance behaviour cannot be exercised here.
+		t.Skip("no /bin/sh to exercise fd inheritance")
+	}
+	//: an ExtraFile carrying a known payload the child must read back from fd 3.
+	r, w, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatalf("os.Pipe: %v", pipeErr)
+	}
+	const want = "fd3-payload"
+	//: write the small payload synchronously (it fits the pipe buffer, no block)
+	//: then close to give the child's `cat <&3` an EOF — no goroutine needed.
+	if _, wErr := w.WriteString(want); wErr != nil {
+		t.Fatalf("write payload: %v", wErr)
+	}
+	if wcErr := w.Close(); wcErr != nil {
+		t.Fatalf("close payload writer: %v", wcErr)
+	}
+	var out strings.Builder
+	spec := coreproc.Spec{
+		Path: shPath,
+		//: read everything from fd 3 (the first ExtraFile) and echo it to stdout.
+		Args: []string{"sh", "-c", "cat <&3"},
+		//: a non-nil Umask forces the spawn through the trampoline + handshake pipe.
+		Umask:      new(0o022),
+		ExtraFiles: []*os.File{r},
+		Stdio:      coreproc.StdioCapture,
+		Stdout:     &out,
+	}
+	proc, err := svcexec.Start(t.Context(), spec)
+	//: close the parent's copy of the read end; the child inherited its own.
+	if rcErr := r.Close(); rcErr != nil {
+		t.Fatalf("close ExtraFile read end: %v", rcErr)
+	}
+	if err != nil {
+		t.Fatalf("Start(trampoline + ExtraFiles): %v", err)
+	}
+	//: Wait joins the capture copier, so out holds the child's full stdout.
+	if _, werr := proc.Wait(); werr != nil {
+		t.Fatalf("Wait: %v", werr)
+	}
+	//: the child must have read the payload from fd 3 — proof the ExtraFile kept
+	//: fd 3 through the trampoline rather than being shifted to 4 by the handshake.
+	if got := strings.TrimSpace(out.String()); got != want {
+		t.Fatalf("child read %q from fd 3, want %q — ExtraFile was shifted by the trampoline handshake", got, want)
+	}
+}
+
 // TestStartContextCancelled asserts an already-cancelled context aborts the
 // spawn before any OS work.
 func TestStartContextCancelled(t *testing.T) {
