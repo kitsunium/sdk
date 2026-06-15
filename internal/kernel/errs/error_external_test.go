@@ -847,3 +847,73 @@ func TestHasCode_MultiUnwrap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// TestNewRuntime covers the non-panicking runtime constructor: valid args
+// yield a usable origin error; structurally invalid args return the SPECIFIC
+// typed validation error rather than panicking (the external-consumer path).
+func TestNewRuntime(t *testing.T) {
+	t.Parallel()
+	//: app-range code (Major 0x40) so the success case mirrors a real consumer.
+	const appCode errs.Code = 0x40_01_01_01
+	type tc struct {
+		name       string
+		code       errs.Code
+		reason     string
+		public     string
+		private    string
+		wantCode   errs.Code
+		wantReason string
+	}
+	tests := []tc{
+		//: happy path — the constructed error carries exactly what was passed.
+		{"valid app error", appCode, "USER_NOT_FOUND", "user not found", "lookup miss id=42", appCode, "USER_NOT_FOUND"},
+		//: over-cap public collapses to the specific INVALID_PUBLIC verdict.
+		{"public over 120 runes", appCode, "BAD", strings.Repeat("x", 121), "detail", 0x00_00_00_03, "INVALID_PUBLIC"},
+		//: newline in public is rejected with the same INVALID_PUBLIC code.
+		{"public with newline", appCode, "BAD", "line\nbreak", "detail", 0x00_00_00_03, "INVALID_PUBLIC"},
+		//: zero code is structurally invalid → INVALID_CODE.
+		{"zero code", 0, "BAD", "ok", "detail", 0x00_00_00_01, "INVALID_CODE"},
+		//: lowercase reason violates SCREAMING_SNAKE → INVALID_REASON.
+		{"bad reason", appCode, "lower", "ok", "detail", 0x00_00_00_02, "INVALID_REASON"},
+		//: empty private is rejected → INVALID_PRIVATE.
+		{"empty private", appCode, "BAD", "ok", "", 0x00_00_00_04, "INVALID_PRIVATE"},
+	}
+	//: runCase executes one row directly so the analyser credits the branch.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: NewRuntime must never panic — even on the malformed rows.
+		err := errs.NewRuntime(tc.code, tc.reason, tc.public, tc.private)
+		//: the constructor always returns a non-nil, introspectable error.
+		if err == nil {
+			t.Fatalf("NewRuntime returned nil")
+		}
+		//: verify the resolved code matches the success/validation expectation.
+		if got, _ := errs.CodeOf(err); got != tc.wantCode {
+			t.Errorf("CodeOf = %s, want %s", got, tc.wantCode)
+		}
+		//: verify the reason mirrors the code (origin or validation verdict).
+		if got, _ := errs.ReasonOf(err); got != tc.wantReason {
+			t.Errorf("ReasonOf = %q, want %q", got, tc.wantReason)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// TestNewRuntimeFieldsCopied proves NewRuntime defensively clones the fields
+// slice — a post-construction mutation of the caller's slice must not be
+// observable through the returned error.
+func TestNewRuntimeFieldsCopied(t *testing.T) {
+	t.Parallel()
+	//: build a one-field slice, hand it to NewRuntime, then mutate it.
+	fields := []errs.FieldValue{errs.String("k", "original")}
+	err := errs.NewRuntime(0x40_01_01_02, "FIELDED", "ok", "detail", fields...)
+	//: mutate the caller-side slice element after construction.
+	fields[0] = errs.String("k", "tampered")
+	//: the error's own field must still read the original value.
+	got := errs.FieldsOf(err)
+	if len(got) != 1 || got[0].StringValue() != "original" {
+		t.Errorf("FieldsOf = %v, want one field valued %q", got, "original")
+	}
+}

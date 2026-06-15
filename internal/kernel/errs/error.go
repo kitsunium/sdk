@@ -75,6 +75,30 @@ func NewError(code Code, reason, public, private string, opts ...DefineOption) *
 	return Define(code, reason, public, private, opts...)
 }
 
+// NewRuntime constructs an *Error at RUNTIME without panicking. It is the
+// counterpart to Define for callers that get no build-time AST audit —
+// principally external SDK consumers reaching this through pkg/v1/errs.New.
+// Where Define panics at package init on a malformed sentinel (caught by the
+// registry AST audit before the binary ships), NewRuntime mirrors Wrap's
+// runtime policy: a structural failure returns a typed validation *Error
+// (CodeInvalidCode / Reason / Public / Private) preserving the specific rule
+// that failed, so the result is always a usable, introspectable SDK error and
+// never nil. Fields are defensively copied. HTTP/exit overrides default
+// (500 / 70); use Wrap with WrapParams.ExitCode or a sibling Define sentinel
+// when an override is needed.
+func NewRuntime(code Code, reason, public, private string, fields ...FieldValue) *Error {
+	//: runtime policy — bad args MUST surface as a typed error, never a panic.
+	if bad := validateDefineArgs(code, reason, public, private); bad != nil {
+		//: hand back the specific CodeInvalid* validation error verbatim so the
+		//: caller learns exactly which rule failed (e.g. INVALID_PUBLIC).
+		return bad
+	}
+	//: defensive copy so a caller mutating its slice post-hoc cannot reach in.
+	copied := slices.Clone(fields)
+	//: structurally valid — build the fresh origin error (no cause, empty trail).
+	return &Error{code: code, reason: reason, public: public, private: private, fields: copied}
+}
+
 // Define registers a sentinel-style *Error at package init. It panics
 // (with a message citing one of the documentary meta-codes 0.0.0.1..6)
 // when validateDefineArgs returns non-nil, so structural mistakes surface
