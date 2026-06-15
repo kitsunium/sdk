@@ -9,6 +9,7 @@ package exec_test
 import (
 	"context"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -430,6 +431,36 @@ func TestStartTrampolineExecFailureTyped(t *testing.T) {
 	//: a trampoline exec failure must surface the typed SPAWN_FAILED.
 	if !errs.HasCode(err, coreproc.CodeSpawnFailed) {
 		t.Fatalf("Start(trampoline bad path) err = %v, want CodeSpawnFailed", err)
+	}
+}
+
+// TestStartCgroupPathUnavailableTyped asserts the pre-spawn CgroupPath check
+// (issue #91): a path that is not a usable cgroup v2 directory surfaces a typed
+// error BEFORE any child is spawned — there is no unconfined window — and the
+// error is platform-correct: CGROUP_UNAVAILABLE on Linux, UNSUPPORTED_PLATFORM
+// on a non-Linux Unix host (cgroup v2 has no equivalent there).
+func TestStartCgroupPathUnavailableTyped(t *testing.T) {
+	t.Parallel()
+
+	spec := coreproc.Spec{
+		Path: shPath,
+		Args: []string{"sh", "-c", "true"},
+		//: a path that is not a cgroup v2 directory; validation fails pre-spawn so
+		//: /bin/sh need not even be present.
+		CgroupPath: "/nonexistent/kitsunium-proc-cgroup-test",
+	}
+	_, err := svcexec.Start(t.Context(), spec)
+	//: Linux maps a missing / non-cgroup / non-delegated path to CGROUP_UNAVAILABLE.
+	if runtime.GOOS == "linux" {
+		//: the typed CGROUP_UNAVAILABLE proves the pre-spawn guard fired.
+		if !errs.HasCode(err, coreproc.CodeCgroupUnavailable) {
+			t.Fatalf("Start(bad CgroupPath) on linux err = %v, want CodeCgroupUnavailable", err)
+		}
+		return
+	}
+	//: every other Unix has no cgroup v2 → the uniform UNSUPPORTED_PLATFORM contract.
+	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+		t.Fatalf("Start(CgroupPath) on %s err = %v, want CodeUnsupportedPlatform", runtime.GOOS, err)
 	}
 }
 

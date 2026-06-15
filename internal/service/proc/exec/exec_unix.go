@@ -36,6 +36,12 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		//: propagate the typed UNKNOWN_RESOURCE / RLIMIT_FAILED verbatim.
 		return nil, lErr
 	}
+	//: reject a missing / non-cgroup / off-platform CgroupPath before spawning,
+	//: so a placement that cannot succeed never starts an unconfined child.
+	if cErr := validateCgroupPath(spec.CgroupPath); cErr != nil {
+		//: propagate the typed CGROUP_UNAVAILABLE / UNSUPPORTED_PLATFORM verbatim.
+		return nil, cErr
+	}
 
 	sio, ioErr := buildStdio(spec)
 	//: a stdio fd-setup failure (pipe/null) aborts before credential work.

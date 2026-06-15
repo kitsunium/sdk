@@ -53,6 +53,17 @@ type Spec struct {
 	// error rather than silently no-op.
 	Rlimits map[Resource]LimitValue
 
+	// CgroupPath, when non-empty, is an already-created cgroup v2 directory the
+	// child is placed into BEFORE exec, so controller limits (MemoryMax/TasksMax/
+	// …) apply from its first instruction — closing the unconfined window that a
+	// post-spawn Group.Add(pid) leaves open (systemd places the unit's payload in
+	// its cgroup the same way). The service writes the child's pid to
+	// <CgroupPath>/cgroup.procs in the pre-exec trampoline. Linux-only: a non-empty
+	// value on any other GOOS surfaces UnsupportedPlatform; a path that is missing,
+	// not a cgroup v2 directory, or not delegated surfaces a typed cgroup error
+	// rather than spawning unconfined.
+	CgroupPath string
+
 	// Stdio selects how the child's standard streams are wired: StdioInherit
 	// (default — share the parent's), StdioNull (discard to the null device), or
 	// StdioCapture (use the Stdout/Stderr/Stdin members below). systemd

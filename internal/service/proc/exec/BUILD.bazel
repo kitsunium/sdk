@@ -6,6 +6,8 @@ go_library(
     name = "exec",
     srcs = [
         "attrs_unix.go",
+        "cgroup_placement_linux.go",
+        "cgroup_placement_other.go",
         "creds_unix.go",
         "exec.go",
         "exec_other.go",
