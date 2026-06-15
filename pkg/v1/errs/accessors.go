@@ -1,14 +1,17 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/errs .
 
-// Package errs is the read-only introspection facade for SDK errors.
+// Package errs is the public facade for SDK errors — both introspection
+// (this file) and construction ([New], [Wrap], the Field helpers, and the
+// application Code range, in construct.go).
 //
-// The concrete error type, constructors ([github.com/kitsunium/sdk/internal/kernel/errs].Define,
-// Wrap), and Field helpers live in internal/kernel/errs and are
-// intentionally NOT re-exported. Consumers receive [error] values from
-// the SDK and query them via the Of-family accessors below. This keeps
-// callers from forging SDK errors while still enabling dashboards,
-// retries, and structured logs to branch on Code / Reason / HTTPStatus
-// / ExitCode.
+// Consumers receive [error] values from the SDK and query them via the
+// Of-family accessors below, and — since ADR 0019 — mint their own typed
+// errors in the same model with [New] / [Wrap]. The concrete error type
+// stays internal (callers see [error], never *errs.Error), so it cannot be
+// forged by struct literal; construction goes through the validated
+// constructors, which return a typed validation error on malformed input
+// rather than panicking. Dashboards, retries, and structured logs branch on
+// Code / Reason / HTTPStatus / ExitCode regardless of who built the error.
 //
 // # Goals
 //
@@ -19,9 +22,10 @@
 //   - Public / Private split. PublicOf returns a wire-safe message
 //     (≤120 runes, no newline). PrivateOf returns the diagnostic
 //     envelope — never surface it to consumers.
-//   - Read-only introspection. Consumer code never forges an SDK error;
-//     the constructors live in internal/kernel/errs. You receive error
-//     and query through the Of-accessors.
+//   - Validated construction + introspection. Consumers mint typed errors
+//     through [New] / [Wrap] (runtime-validated, never panicking) and query
+//     received errors through the Of-accessors; the concrete *errs.Error type
+//     stays unexported, so it can be built and inspected but never forged.
 //   - HTTP / exit-code mapping. Each error has an HTTPStatusOf
 //     (default 500) and ExitCodeOf (default 70 / EX_SOFTWARE) so HTTP
 //     handlers and CLI binaries can return an SDK error verbatim.

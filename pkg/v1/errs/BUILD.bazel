@@ -4,7 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "errs",
-    srcs = ["accessors.go"],
+    srcs = [
+        "accessors.go",
+        "construct.go",
+    ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/errs",
     visibility = ["//visibility:public"],
     deps = ["//internal/kernel/errs"],
@@ -22,6 +25,7 @@ go_test(
     srcs = [
         "accessors_bench_test.go",
         "accessors_external_test.go",
+        "construct_external_test.go",
     ],
     deps = [
         ":errs",

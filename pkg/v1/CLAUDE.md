@@ -11,7 +11,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 |---|---|---|
 | `logger/` | Logger facade: `Config` / `NewText` / `Default` / `NewWithSink`, `Info|Warn|Error|Debug`, `Build` builder, `String|Int|…` attr ctors, `Version` (ldflags injection point) | `pkg/v1/logger/README.md` |
 | `codec/` | Universal codec dispatch: `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` over a `Format` registry; blank-imports 13 service codecs covering 18 Format names — text/binary/base-N reached identically (asn1-der, baseenc family [base64/base64url/base32/base16/hex/ascii85], cbor, csv, flatbuffers, json, msgpack, ndjson, pem, tlv, toml, xml, yaml) | _(no README)_ |
-| `errs/` | Read-only error introspection: `CodeOf` / `ReasonOf` / `PublicOf` / `PrivateOf` / `HTTPStatusOf` / `ExitCodeOf` / `HasCode` / `HasReason` / `NewPrefixMatcher` / `Pack` / `ParseCode` + `Code` / `Major` / `Layer` / `PkgCode` / `Serial` / `PrefixMatcher` type aliases + `MaskBy*` constants. Octets are composable on the typed `Code` (e.g. `code.Layer()`). | `pkg/v1/errs/README.md` |
+| `errs/` | Error introspection **and construction** (ADR 0019): read — `CodeOf` / `ReasonOf` / `PublicOf` / `PrivateOf` / `HTTPStatusOf` / `ExitCodeOf` / `HasCode` / `HasReason` / `NewPrefixMatcher`; build — `New` / `Wrap` (+ `WrapParams`) / `Field` helpers (`String` / `Int` / `Int64` / `Bool` / `Float` / `NewFieldValue`); codes — `Pack` / `ParseCode` / `MinAppMajor` / `MaxMajor` + `Code` / `Major` / `Layer` / `PkgCode` / `Serial` / `Field` / `PrefixMatcher` type aliases + `MaskBy*` constants. Octets are composable on the typed `Code` (e.g. `code.Layer()`). | `pkg/v1/errs/README.md` |
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -23,8 +23,8 @@ Single Go module `github.com/kitsunium/sdk/pkg` — one `go.mod` (at `pkg/go.mod
 
 - **Stable identifiers.** Every exported name / type / const in `pkg/v1/*` is frozen until `pkg/v2` cuts. New helpers can be added; existing signatures cannot move.
 - **Aliases, not new types.** Public types are `type X = internalPkg.X` so consumers and SDK code share the type identity (a `pkg/v1/logger.Attr` passes anywhere `corelogger.AttrValue` is expected).
-- **No constructors for internal types.** `pkg/v1/errs` exposes `Of`-accessors only — consumers receive `error` and introspect; they cannot forge `*errs.Error`. `errs.Define` and `errs.Wrap` are intentionally NOT re-exported.
-- **No pass-through of `FieldValue`** at v1: if consumer demand surfaces we add `FieldsOfAsMap(err) map[string]string` in a minor bump.
+- **Error model is constructable; other internal types are not.** Since ADR 0019, `pkg/v1/errs` exposes `New` / `Wrap` (+ `WrapParams`) and the `Field` helpers alongside the `Of`-accessors. Consumers receive `error`, introspect it, AND mint their own typed errors in the same model — but the concrete `*errs.Error` stays unexported, so they cannot forge one by struct literal; construction routes through the runtime-validated constructors (which return a typed `CodeInvalid*` error, never panic). The kernel `errs.Define` (panic-at-init, AST-audited) stays internal; the public path is the non-panicking `New`/`Wrap`. This exception is `errs`-only — logger/codec internals keep their constructors private.
+- **`FieldValue` is passed through** (as the `Field` alias) since ADR 0019, so consumers attach structured metadata at construction. The previously-deferred `FieldsOfAsMap(err) map[string]string` read-side helper is still add-on-demand.
 
 ## Version freeze policy
 
@@ -45,7 +45,7 @@ Single Go module `github.com/kitsunium/sdk/pkg` — one `go.mod` (at `pkg/go.mod
 ## Do NOT
 
 - Expose `errs.PrivateOf(err)` output in HTTP / gRPC responses, error pages, or any user-facing surface. Diagnostic-only — documented in the godoc and `pkg/v1/errs/README.md`.
-- Try to construct a `*errs.Error` from consumer code. Go's `internal/` rule blocks it AND the design is deliberate.
+- Build a typed error with raw `errors.New` / `fmt.Errorf` when adopting the SDK error model — use `errs.New` / `errs.Wrap` (ADR 0019) so the result carries a `Code` + Public/Private split. Do NOT reach for the internal `errs.Define` (it panics at init and is `internal/`-blocked); the public `New`/`Wrap` are the runtime-validated path. Assign consumer codes a Major in `[errs.MinAppMajor, errs.MaxMajor]` (`0x40–0x7F`) to stay collision-free with the SDK.
 - Set `Version` at runtime from application code — use the ldflags recipe (or Bazel `--stamp`) so every binary commits its version at link time.
 - Reach for a byte-level base-N API in `pkg/v1`. There is none — `codec.Marshal("base64", v)` (or stdlib `encoding/base64` directly when you have raw bytes already) is the only path.
 
