@@ -98,9 +98,13 @@ func Register(c Codec) Codec {
 	}
 	//: split alias indexing into a helper so Register stays linear; otherwise
 	//: the conflict-detection branches push the cyclomatic complexity past budget.
-	indexAliases(&mimeIndex, c.MIMETypes(), name, "MIME")
-	//: extensions share the same shape.
-	indexAliases(&extIndex, c.Extensions(), name, "extension")
+	//: MIME keys are normalised with normalizeMIME — the SAME reduction LookupMIME
+	//: applies — so a registered MIME is always reachable (issue #36): a
+	//: parameter-only alias (e.g. "application/x;p=1") normalises to its bare
+	//: media type and would collide with the bare form rather than hide behind it.
+	indexAliases(&mimeIndex, c.MIMETypes(), name, "MIME", normalizeMIME)
+	//: extensions share the same shape but only need case-folding.
+	indexAliases(&extIndex, c.Extensions(), name, "extension", strings.ToLower)
 	//: returning the codec lets callers bind it to a typed singleton var.
 	return c
 }
@@ -159,18 +163,38 @@ func cloneFormatMap(src *map[Format]Codec, name Format, c Codec) map[Format]Code
 }
 
 // indexAliases stores every alias (MIME or extension) in dst, panicking
-// when a distinct codec already claims the same key.
-func indexAliases(dst *snapshot.Value[map[string]Format], aliases []string, name Format, kind string) {
+// when a distinct codec already claims the same key. normalize reduces each
+// raw alias to its index key — strings.ToLower for extensions, normalizeMIME
+// for MIME types so registration and LookupMIME agree on the key (issue #36).
+func indexAliases(dst *snapshot.Value[map[string]Format], aliases []string, name Format, kind string, normalize func(string) string) {
 	//: iterate over every alias and publish it atomically.
 	for _, alias := range aliases {
-		//: normalise so lookups are case-insensitive.
-		key := strings.ToLower(alias)
+		//: reduce to the canonical index key the matching Lookup* will compute.
+		key := normalize(alias)
 		//: publishAlias handles the conflict + atomic publish semantics.
 		if err := publishAlias(dst, key, name, kind, alias); err != nil {
 			//: distinct codec conflict — loud failure at boot.
 			panic(err.Error())
 		}
 	}
+}
+
+// normalizeMIME reduces a raw MIME string to the canonical index key shared by
+// registration and LookupMIME: the media type alone (parameters stripped),
+// lowercased and trimmed. Sharing this between the two paths is what guarantees
+// a registered MIME is reachable — the asymmetry it removes was issue #36.
+func normalizeMIME(raw string) string {
+	//: parse parameters away; ParseMediaType lowercases the media type itself.
+	mediaType, _, perr := mime.ParseMediaType(raw)
+	//: fall back to a manual strip when the header is malformed.
+	if perr != nil {
+		//: strings.Cut returns the part before the first ';' (or the full string).
+		before, _, _ := strings.Cut(raw, ";")
+		//: normalise to lowercase trimmed form for index parity.
+		mediaType = strings.ToLower(strings.TrimSpace(before))
+	}
+	//: the canonical key both Register and LookupMIME index on.
+	return mediaType
 }
 
 // publishAlias inserts (key → name) into an alias index snapshot under the
@@ -260,15 +284,9 @@ func LookupMIME(raw string) (c Codec, ok bool) {
 		//: caller supplied nothing to match.
 		return nil, false
 	}
-	//: parse parameters away; ParseMediaType lowercases the media type itself.
-	mediaType, _, perr := mime.ParseMediaType(raw)
-	//: fall back to a manual strip when the header is malformed.
-	if perr != nil {
-		//: strings.Cut returns the part before the first ';' (or the full string).
-		before, _, _ := strings.Cut(raw, ";")
-		//: normalise to lowercase trimmed form for index lookup.
-		mediaType = strings.ToLower(strings.TrimSpace(before))
-	}
+	//: reduce to the canonical key via the SAME helper registration indexes on,
+	//: so any registered MIME (parameters and case notwithstanding) resolves.
+	mediaType := normalizeMIME(raw)
 	//: snapshot-pointer read + map lookup.
 	m := loadAliasIndex(&mimeIndex)
 	//: absence path.
