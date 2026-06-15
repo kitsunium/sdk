@@ -23,6 +23,17 @@ const docs = defineCollection({
   loader: glob({
     pattern: "**/*.md",
     base: "./src/content/docs",
+    //: The default glob `generateId` slugifies every path segment, which
+    //: strips the dots out of a release coordinate: "0.1.5/v1/index.md"
+    //: collapses to the id "015/v1/index", so Astro publishes that page at
+    //: /015/v1/ instead of /0.1.5/v1/. Everything that *links* to a release
+    //: — the version dropdown, the per-release redirect (/<release>/ →
+    //: /<release>/<major>/), the canonical URLs — uses the DOTTED coordinate
+    //: from versions.json ("0.1.5"), so the slugified path 404s and the
+    //: dropdown can't resolve the page's own release. Preserve the directory
+    //: path verbatim (only drop the ".md") so entry.id === the on-disk
+    //: "<release>/<major>/…" coordinate the rest of the site links to.
+    generateId: ({ entry }) => entry.replace(/\.md$/, ""),
   }),
   schema: z
     .object({
