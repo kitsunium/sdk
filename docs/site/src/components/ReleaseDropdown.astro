@@ -1,13 +1,23 @@
 ---
 // ReleaseDropdown — custom combobox (no browser <select>). The button
-// renders the active build coordinate "<sha>+ · <version>"; clicking
-// (or Enter / Space / ArrowDown) reveals a styled listbox of every
-// release for the current major. Closes on click-outside or Escape.
+// renders the PAGE'S OWN release coordinate (the version it was built
+// for); clicking (or Enter / Space / ArrowDown) reveals a styled
+// listbox of every release for the current major. Closes on
+// click-outside or Escape.
+//
+// The build SHA is build provenance, not a release coordinate: it is
+// the commit the WHOLE site was generated from (always HEAD). Stamping
+// it next to a historical tag (e.g. "7b00a34 · v0.1.1") wrongly implies
+// that commit produced that release. So the SHA is only shown for the
+// "local" coordinate — the one snapshot that genuinely IS HEAD. Every
+// tagged release shows just its own label, derived from the page
+// coordinate, never a single global "latest" constant.
 //
 // Accessibility: roles + aria-expanded + aria-activedescendant follow
 // the WAI-ARIA combobox / listbox pattern. Keyboard: Up / Down move
 // focus, Enter activates, Escape closes.
 import { withBase } from "../../scripts/lib/base.mjs";
+import { LOCAL_RELEASE } from "../../scripts/lib/tag-format.mjs";
 
 interface Release {
   version: string;
@@ -36,6 +46,10 @@ const releases = current?.releases ?? [];
 const shaText = buildSha ? buildSha + (buildDirty ? "+" : "") : null;
 const activeLabel =
   releases.find(r => r.version === currentRelease)?.label ?? currentRelease;
+//: SHA is only meaningful for "local" (it IS HEAD). Show it on the
+//: active pill only when the page being viewed is the local snapshot;
+//: tagged releases render their version label alone.
+const pillSha = currentRelease === LOCAL_RELEASE ? shaText : null;
 ---
 
 {releases.length > 0 && (
@@ -47,9 +61,9 @@ const activeLabel =
       aria-expanded="false"
       aria-label={`Release: ${activeLabel}. Click to switch.`}
     >
-      {shaText && (
+      {pillSha && (
         <span class="pill-sha">
-          {shaText}
+          {pillSha}
           <span class="pill-sep" aria-hidden="true">·</span>
         </span>
       )}
@@ -65,7 +79,7 @@ const activeLabel =
           class:list={[r.version === currentRelease && "active"]}
         >
           <a href={withBase(`/${r.version}/${currentMajor}/`)}>
-            {shaText && (
+            {shaText && r.version === LOCAL_RELEASE && (
               <>
                 <span class="opt-sha">{shaText}</span>
                 <span class="opt-sep" aria-hidden="true">·</span>
