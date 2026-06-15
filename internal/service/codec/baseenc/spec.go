@@ -21,10 +21,15 @@ var variantSpecs = [...]variantSpec{
 		mimeTypes:  []string{"application/base64", "text/base64"},
 		extensions: []string{".b64", ".base64"},
 	},
-	//: variantBase64URL — URL-safe base64.
+	//: variantBase64URL — URL-safe base64. Only the distinct "application/base64url"
+	//: media type is registered: the former "application/base64;url=true" alias
+	//: differed from base64's "application/base64" by a parameter alone, which
+	//: LookupMIME strips before indexing — so it was unreachable at lookup AND
+	//: collided with base64 once registration normalises params symmetrically
+	//: (issue #36). base64url stays routable by name and the .b64url extension.
 	{
 		name:       "base64url",
-		mimeTypes:  []string{"application/base64url", "application/base64;url=true"},
+		mimeTypes:  []string{"application/base64url"},
 		extensions: []string{".b64url"},
 	},
 	//: variantBase32 — standard base32.

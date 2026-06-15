@@ -13,7 +13,7 @@ registered Name, not a tagged enum.
 | Variant | Name | MIME types | Extensions | Streaming | Appender |
 |---|---|---|---|---|---|
 | Base64 (std) | `"base64"` | `application/base64`, `text/base64` | `.b64`, `.base64` | yes | yes |
-| Base64URL | `"base64url"` | `application/base64url`, `application/base64;url=true` | `.b64url` | yes | yes |
+| Base64URL | `"base64url"` | `application/base64url` | `.b64url` | yes | yes |
 | Base32 (std) | `"base32"` | `application/base32` | `.b32` | yes | yes |
 | Base16 (upper) | `"base16"` | `application/base16` | `.b16` | yes (buffered) | yes |
 | Hex (lower) | `"hex"` | `application/hex` | `.hex` | yes | yes |

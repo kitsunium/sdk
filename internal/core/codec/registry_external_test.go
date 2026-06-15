@@ -203,7 +203,11 @@ func TestRegistryHitPaths(t *testing.T) {
 	codec.ResetForTest()
 	mc := &mockCodec{
 		name: "cov-hit",
-		mime: []string{"application/x-cov"},
+		//: the second MIME carries a parameter — issue #36: registration must
+		//: normalise it to the bare media type so LookupMIME (which strips
+		//: parameters) can reach it. Pre-fix, registration stored the raw
+		//: "…;v=1" key and the bare-type lookup missed.
+		mime: []string{"application/x-cov", "application/x-cov-param;v=1"},
 		ext:  []string{".cov"},
 	}
 	codec.Register(mc)
@@ -224,6 +228,12 @@ func TestRegistryHitPaths(t *testing.T) {
 		}, true},
 		{"LookupMIME on a malformed header falls back and resolves", func() (codec.Codec, bool) {
 			return codec.LookupMIME("application/x-cov; =bad")
+		}, true},
+		//: issue #36 — a MIME registered WITH a parameter is reachable via its
+		//: bare media type because registration normalises the key the same way
+		//: LookupMIME does. Pre-fix this missed (raw "…;v=1" key was indexed).
+		{"LookupMIME reaches a param-registered MIME via its bare type", func() (codec.Codec, bool) {
+			return codec.LookupMIME("application/x-cov-param")
 		}, true},
 		{"LookupExt resolves the registered extension", func() (codec.Codec, bool) {
 			return codec.LookupExt(".cov")
