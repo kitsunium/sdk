@@ -26,8 +26,9 @@ const handshakeFD int = 3
 
 // Status bytes the trampoline writes to handshakeFD before it exits on failure.
 const (
-	handshakeApplyFail byte = 'A' // a setrlimit/umask application failed.
-	handshakeExecFail  byte = 'E' // the execve of the real target failed.
+	handshakeApplyFail  byte = 'A' // a setrlimit/umask application failed.
+	handshakeExecFail   byte = 'E' // the execve of the real target failed.
+	handshakeCgroupFail byte = 'C' // the pre-exec cgroup.procs placement failed.
 )
 
 // handshake is the parent side of the trampoline status pipe: the child inherits
@@ -106,6 +107,10 @@ func handshakeError(code byte) error {
 	case handshakeApplyFail:
 		//: an unhonourable limit is the central RlimitFailed sentinel.
 		return coreproc.RlimitFailed
+	//: the trampoline could not place the child into the requested cgroup.
+	case handshakeCgroupFail:
+		//: a refused cgroup.procs write is the central CgroupWriteFailed sentinel.
+		return coreproc.CgroupWriteFailed
 	//: the trampoline could not execve the real target.
 	case handshakeExecFail:
 		//: a failed execve is the central SpawnFailed sentinel.

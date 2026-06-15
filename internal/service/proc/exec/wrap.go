@@ -12,9 +12,10 @@ import (
 // sysexits exit-code constants mirrored from internal/core/proc/codes.go so the
 // wrapped Errors carry the same status as their bare-sentinel siblings.
 const (
-	exitNoUser int = 67 // EX_NOUSER — a named user/group did not resolve.
-	exitOSErr  int = 71 // EX_OSERR — an OS-level operation failed.
-	exitIOErr  int = 74 // EX_IOERR — an I/O error occurred (capture writer failed).
+	exitNoUser      int = 67 // EX_NOUSER — a named user/group did not resolve.
+	exitUnavailable int = 69 // EX_UNAVAILABLE — a required facility is absent.
+	exitOSErr       int = 71 // EX_OSERR — an OS-level operation failed.
+	exitIOErr       int = 74 // EX_IOERR — an I/O error occurred (capture writer failed).
 )
 
 // wrapSpawn wraps a fork/exec cause onto the central SpawnFailed sentinel.
@@ -75,6 +76,20 @@ func wrapRlimit(cause error, fields ...errs.FieldValue) error {
 		Public:   "Could not apply the resource limit",
 		Private:  "service/proc/rlimit.Apply: setrlimit(2) failed",
 		ExitCode: exitOSErr,
+	}, fields...)
+}
+
+// wrapCgroupUnavailable wraps a stat/validation cause onto the central
+// CgroupUnavailable sentinel — the pre-spawn check that Spec.CgroupPath names an
+// existing, delegated cgroup v2 directory.
+func wrapCgroupUnavailable(cause error, fields ...errs.FieldValue) error {
+	//: restate the CGROUP_UNAVAILABLE sentinel fields so the cause inherits them.
+	return errs.Wrap(cause, errs.WrapParams{
+		Code:     coreproc.CodeCgroupUnavailable,
+		Reason:   "CGROUP_UNAVAILABLE",
+		Public:   "cgroup v2 is not available or not delegated",
+		Private:  "service/proc/exec.Start: Spec.CgroupPath is missing, not a cgroup v2 directory, or not delegated",
+		ExitCode: exitUnavailable,
 	}, fields...)
 }
 
