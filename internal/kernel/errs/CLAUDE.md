@@ -53,11 +53,11 @@ Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf 
 - **Trail cap 16, origin-preserving truncation.** `appendTrail` keeps `[origin] + last (cap-2) entries + newest`; `trailTruncated` is monotonic. A `next == 0` is silently dropped (poison-pill defence).
 - **`Error()` format (ADR 0005).** `"[<origin>[ <- <wrap1>[ <- <wrap2>...]][ (truncated)] <REASON>] <public>"`. Regex: `\[[\d.]+(?: <- [\d.]+)*(?: \(truncated\))? \w+\]`. NEVER contains Private or Fields — safe to bubble across any boundary.
 - **`Is` protocol three-way dispatch.** `*PrefixMatcher` → CIDR match over origin + trail. `*Error` with non-zero Code → semantic equality by (Code, Reason). Anything else → pointer equality.
-- **AST audit (`registry_external_test.go`).** Enforces three invariants across `internal/` + `pkg/`:
+- **AST audit (`registry_external_test.go`).** Enforces three invariants across `internal/` + `pkg/` + `third-party/` — over every package shipped in the `//:audit_sources` filegroup, which since ADR 0020 is the COMPLETE set of `errs.Define` emitters (ring + every logger middleware/sink were previously excluded — issue #35):
   1. Every `errs.Define` Public is a string literal (no `fmt.Sprintf`, no concat).
-  2. Reason == `screamingSnake(varName)` (`WriterNil` ↔ `"WRITER_NIL"`).
+  2. Reason mirrors EITHER `screamingSnake(varName)` (bare style, `WriterNil` ↔ `"WRITER_NIL"`) OR `screamingSnake(CodeConst − "Code")` (namespaced style per ADR 0006, `CodeRingFull` ↔ `"RING_FULL"` while the short var `Full` would not). Either derivation passes — ADR 0020.
   3. Code identifiers are unique across the SDK.
-  Failure fails `bazel test //internal/kernel/errs:errs_test` (also run by `make test`).
+  Failure fails `bazel test //internal/kernel/errs:errs_test` (also run by `make test`). **Adding a new `errs.Define` emitter requires an `audit_srcs` filegroup in its `BUILD.bazel` AND an entry in `//:audit_sources`** — otherwise it ships unaudited under Bazel.
 - **Meta-codes are documentary.** 0.0.0.1..6 (`CodeInvalidCode / Reason / Public / Private / CodeString / WrapParams`) appear in Define panic messages and in `newValidationError` outputs; they are NEVER returned to callers as sentinel `*Error` values.
 
 ## How to declare a sentinel (emitter packages)
