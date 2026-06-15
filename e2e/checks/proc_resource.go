@@ -169,7 +169,14 @@ func cgroupPlacementExercise(dir string) harness.Result {
 			//: the expected off-platform refusal, a success not a failure.
 			return harness.NotSupported(cgroupDomain, "placement", "Start(CgroupPath) returned UnsupportedPlatform")
 		}
-		//: no /bin/sh (or no delegation) — environmental, make no claim.
+		//: the group was just Created + delegated, so a placement-path error
+		//: (CgroupUnavailable/CgroupWriteFailed) is a REAL regression — fail loudly
+		//: rather than masking it as an environmental skip.
+		if perrs.HasCode(serr, coreproc.CodeCgroupWriteFailed) || perrs.HasCode(serr, coreproc.CodeCgroupUnavailable) {
+			//: a confinement failure on a known-good group is a genuine bug.
+			return harness.Failed(cgroupDomain, "placement", fmt.Sprintf("Start placement failed on a delegated group: %v", serr))
+		}
+		//: anything else (no /bin/sh ⇒ SpawnFailed) is environmental — make no claim.
 		return harness.Skipped(cgroupDomain, "placement", fmt.Sprintf("Start: %v", serr))
 	}
 	pid := strconv.Itoa(proc.PID())

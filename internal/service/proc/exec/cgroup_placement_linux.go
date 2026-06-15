@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -22,15 +23,23 @@ import (
 // group when its pid is written (one pid per write).
 const cgroupProcsFile string = "cgroup.procs"
 
+// cgroup2SuperMagic is the statfs f_type of the unified cgroup v2 filesystem
+// (CGROUP2_SUPER_MAGIC, the ASCII "cgrp"). Compared against int64(st.Type) so the
+// arch-dependent Statfs_t.Type field (int64 / uint32) widens cleanly.
+const cgroup2SuperMagic int64 = 0x63677270
+
 // cgroupProcsPerm is the perm passed to os.WriteFile; cgroup.procs always exists
 // so the mode is never used to create it — it mirrors the cgroup package's
 // controllerPerm for consistency.
 const cgroupProcsPerm os.FileMode = 0o755
 
 // validateCgroupPath checks, before any spawn, that a non-empty Spec.CgroupPath
-// names an existing cgroup v2 directory the child can be placed into. An empty
-// path is a no-op (nil). A missing path, a non-directory, or a directory lacking
-// the cgroup.procs control file surfaces CgroupUnavailable. The writability
+// names an existing directory that ACTUALLY lives on the cgroup v2 filesystem.
+// An empty path is a no-op (nil). A missing path, a non-directory, or a directory
+// not on a cgroup2 mount surfaces CgroupUnavailable. The statfs magic check is
+// load-bearing: a plain directory (even one containing a file literally named
+// cgroup.procs) must NOT pass, or the trampoline's pid-write would silently no-op
+// and the child would run UNCONFINED while Start reported success. The writability
 // ("delegated") check is deferred to the trampoline write, which surfaces
 // CgroupWriteFailed — a stat cannot reliably predict a cgroupfs write refusal.
 func validateCgroupPath(path string) error {
@@ -46,13 +55,20 @@ func validateCgroupPath(path string) error {
 		//: surface CgroupUnavailable with the offending path for diagnosis.
 		return wrapCgroupUnavailable(err, errs.String("cgroup_path", path))
 	}
-	//: every cgroup v2 directory exposes a cgroup.procs control file; its absence
-	//: means this is not a delegated cgroup v2 node.
-	if _, perr := os.Stat(filepath.Join(path, cgroupProcsFile)); perr != nil {
-		//: no cgroup.procs — not a cgroup v2 directory; typed refusal pre-spawn.
-		return wrapCgroupUnavailable(perr, errs.String("cgroup_path", path))
+	var st syscall.Statfs_t
+	//: a statfs failure (path vanished, permission) is itself a usability refusal.
+	if serr := syscall.Statfs(path, &st); serr != nil {
+		//: surface CgroupUnavailable wrapping the statfs cause.
+		return wrapCgroupUnavailable(serr, errs.String("cgroup_path", path))
 	}
-	//: the path is a usable cgroup v2 directory; the trampoline will place the pid.
+	//: the directory must sit on the cgroup2 filesystem — a normal directory that
+	//: merely contains a cgroup.procs file is NOT confinement and is rejected here.
+	if st.Type != cgroup2SuperMagic {
+		//: not a cgroup2 mount — refuse rather than spawn an unconfined child.
+		return wrapCgroupUnavailable(nil, errs.String("cgroup_path", path),
+			errs.String("reason", "path is not on a cgroup2 filesystem"))
+	}
+	//: the path is a real cgroup v2 directory; the trampoline will place the pid.
 	return nil
 }
 
