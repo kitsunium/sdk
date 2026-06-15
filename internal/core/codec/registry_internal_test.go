@@ -24,6 +24,11 @@ func Test_indexAliases(t *testing.T) {
 		{"new alias stores silently", nil, "", "application/x-a", Format("a"), "MIME", false},
 		{"same codec re-registers alias", []string{"application/x-b"}, Format("b"), "application/x-b", Format("b"), "MIME", false},
 		{"conflicting codec panics", []string{"application/x-c"}, Format("c"), "application/x-c", Format("d"), "MIME", true},
+		//: issue #36 — a parameter-only alias now normalises to its bare media
+		//: type, so registering "application/base64;url=true" after a distinct
+		//: codec owns "application/base64" is a loud collision, not a silent,
+		//: lookup-unreachable coexistence.
+		{"param-only alias collides with bare form", []string{"application/base64"}, Format("base64"), "application/base64;url=true", Format("base64url"), "MIME", true},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -64,8 +69,9 @@ func callRecoverAliases(dst *snapshot.Value[map[string]Format], aliases []string
 			recovered = r
 		}
 	}()
-	//: execute the helper under observation.
-	indexAliases(dst, aliases, name, kind)
+	//: execute the helper under observation (MIME normalizer — every case here
+	//: is a MIME alias; param-free inputs key identically under normalizeMIME).
+	indexAliases(dst, aliases, name, kind, normalizeMIME)
 	//: no panic path.
 	return false, nil
 }
