@@ -22,9 +22,10 @@
 //   - Public / Private split. PublicOf returns a wire-safe message
 //     (≤120 runes, no newline). PrivateOf returns the diagnostic
 //     envelope — never surface it to consumers.
-//   - Read-only introspection. Consumer code never forges an SDK error;
-//     the constructors live in internal/kernel/errs. You receive error
-//     and query through the Of-accessors.
+//   - Validated construction + introspection. Consumers mint typed errors
+//     through [New] / [Wrap] (runtime-validated, never panicking) and query
+//     received errors through the Of-accessors; the concrete *errs.Error type
+//     stays unexported, so it can be built and inspected but never forged.
 //   - HTTP / exit-code mapping. Each error has an HTTPStatusOf
 //     (default 500) and ExitCodeOf (default 70 / EX_SOFTWARE) so HTTP
 //     handlers and CLI binaries can return an SDK error verbatim.
