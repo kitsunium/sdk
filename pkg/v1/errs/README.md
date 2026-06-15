@@ -6,9 +6,9 @@
 import "github.com/kitsunium/sdk/pkg/v1/errs"
 ```
 
-Package errs is the read\-only introspection facade for SDK errors.
+Package errs is the public facade for SDK errors — both introspection \(this file\) and construction \([New](<#New>), [Wrap](<#String>), the Field helpers, and the application Code range, in construct.go\).
 
-The concrete error type, constructors \([github.com/kitsunium/sdk/internal/kernel/errs](<https://pkg.go.dev/github.com/kitsunium/sdk/internal/kernel/errs/>).Define, Wrap\), and Field helpers live in internal/kernel/errs and are intentionally NOT re\-exported. Consumers receive \[error\] values from the SDK and query them via the Of\-family accessors below. This keeps callers from forging SDK errors while still enabling dashboards, retries, and structured logs to branch on Code / Reason / HTTPStatus / ExitCode.
+Consumers receive \[error\] values from the SDK and query them via the Of\-family accessors below, and — since ADR 0019 — mint their own typed errors in the same model with [New](<#New>) / [Wrap](<#String>). The concrete error type stays internal \(callers see \[error\], never \*errs.Error\), so it cannot be forged by struct literal; construction goes through the validated constructors, which return a typed validation error on malformed input rather than panicking. Dashboards, retries, and structured logs branch on Code / Reason / HTTPStatus / ExitCode regardless of who built the error.
 
 ### Goals
 
@@ -101,17 +101,45 @@ fmt.Println("HTTP status:", errs.HTTPStatusOf(err))
 
 [NewPrefixMatcher](<#CodeOf>) returns a sentinel that classifies any wrapped error by Code prefix when used through errors.Is. Combine with [MaskByMajor](<#MaskByMajor>) / [MaskByLayer](<#MaskByMajor>) / [MaskByPackage](<#MaskByMajor>) / [MaskExact](<#MaskByMajor>) for CIDR\-style code routing in dashboards / middleware. Single\-code matching uses [HasCode](<#CodeOf>) which is cheaper.
 
+Package errs — construction half of the public error API.
+
+accessors.go re\-exports the read\-only introspection surface; this file re\-exports the \*construction\* surface so an external consumer \(any module adopting this SDK, with no internal/ access\) can mint typed SDK errors rather than only inspecting SDK\-origin ones. Together they let a downstream codebase migrate off fmt.Errorf / errors.New onto the SDK error model wholesale — every error carrying a dotted\-quad Code, a wire\-safe Public message, and a log\-only Private envelope.
+
+### Construction vs. Define
+
+SDK\-internal packages mint sentinels with internal/kernel/errs.Define, which panics at init on a malformed sentinel — safe because a build\-time AST audit proves every Define call well\-formed before the binary ships. External consumers get no such audit, so [New](<#New>) and [Wrap](<#String>) follow a runtime policy instead: a structural failure \(bad code, non\-SCREAMING\_SNAKE reason, empty/over\-long/multiline public, empty private\) returns a typed validation error \(CodeInvalidCode / Reason / Public / Private\) — the result is always a usable, introspectable SDK error, never nil and never a panic.
+
+### Code space for third\\\-party modules
+
+The dotted\-quad MM.LL.PP.SS taxonomy \(ADR 0005\) assumes a coordinated Major \(MM\) octet. The SDK only ever allocates Major in the range \[0, MinAppMajor\) — 0 for internal codes, then the public semver major \(1 for pkg/v1, 2 for a future pkg/v2, …\). To stay collision\-free with the SDK now and across every future SDK release, a consumer assigns its own codes a Major in \[MinAppMajor, MaxMajor\] \(0x40–0x7F\). Declare them as hex literals exactly as the SDK does internally:
+
+```
+// myapp/errcodes.go — Major 0x40 is application-owned, never SDK-issued.
+const (
+    CodeUserNotFound errs.Code = 0x40_01_01_01 // 64.1.1.1
+    CodeOrderExpired errs.Code = 0x40_01_02_01 // 64.1.2.1
+)
+
+var ErrUserNotFound = errs.New(CodeUserNotFound, "USER_NOT_FOUND",
+    "user not found", "lookup miss in users table")
+```
+
+The Major ceiling is 0x7F because every Code must round\-trip through a positive int32 \(the kernel keeps the top uint32 bit clear\); 64 application majors is far more than the SDK's semver line will ever consume.
+
 ## Index
 
 - [Variables](<#variables>)
 - [func HasAnyCode\(err error, codes ...Code\) bool](<#HasAnyCode>)
 - [func HasAnyReason\(err error, reasons ...string\) bool](<#HasAnyReason>)
+- [func New\(code Code, reason, public, private string, fields ...Field\) error](<#New>)
 - [type Code](<#Code>)
+- [type Field](<#Field>)
 - [type Layer](<#Layer>)
 - [type Major](<#Major>)
 - [type PkgCode](<#PkgCode>)
 - [type PrefixMatcher](<#PrefixMatcher>)
 - [type Serial](<#Serial>)
+- [type WrapParams](<#WrapParams>)
 
 
 ## Variables
@@ -161,8 +189,42 @@ var (
 )
 ```
 
+<a name="String"></a>Re\-exported construction helpers. Grouped to satisfy the repo var\-grouping convention while keeping each helper's godoc on its own line.
+
+```go
+var (
+    // String builds a Field holding a string value.
+    String = kerrs.String
+
+    // Int builds a Field from a plain int (widened to int64 internally),
+    // matching the slog / zap Int(key, int) convention.
+    Int = kerrs.Int
+
+    // Int64 builds a Field from a 64-bit integer (no upcast at the call site).
+    Int64 = kerrs.Int64
+
+    // Bool builds a Field holding a boolean value.
+    Bool = kerrs.Bool
+
+    // Float builds a Field holding a float64 value (shortest round-trip render).
+    Float = kerrs.Float
+
+    // NewFieldValue builds a string-typed Field. Provided for tooling that
+    // expects a New-prefixed factory; prefer String for the common case.
+    NewFieldValue = kerrs.NewFieldValue
+
+    // Wrap attaches a cause to a new error with origin-wins semantics and
+    // preserves the chain (errors.Is / errors.Unwrap walk through it). When the
+    // cause is already an SDK error (directly or behind a fmt.Errorf("%w") wrap)
+    // the result inherits its Code/Reason/Public/Private and appends params.Code
+    // to the trail; otherwise params.Code becomes the origin. Bad params at
+    // runtime do not panic — the returned error carries a typed validation code.
+    Wrap = kerrs.Wrap
+)
+```
+
 <a name="HasAnyCode"></a>
-## func [HasAnyCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L234>)
+## func [HasAnyCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L237>)
 
 ```go
 func HasAnyCode(err error, codes ...Code) bool
@@ -181,7 +243,7 @@ retryable := errs.HasAnyCode(err,
 ```
 
 <a name="HasAnyReason"></a>
-## func [HasAnyReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L257>)
+## func [HasAnyReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L260>)
 
 ```go
 func HasAnyReason(err error, reasons ...string) bool
@@ -197,8 +259,27 @@ if errs.HasAnyReason(err, "UNKNOWN_FORMAT", "STREAMING_UNSUPPORTED") {
 }
 ```
 
+<a name="New"></a>
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L122>)
+
+```go
+func New(code Code, reason, public, private string, fields ...Field) error
+```
+
+New constructs a typed SDK error at runtime. On success the returned error carries code / reason / public / private plus any fields. On a structural failure it returns a typed validation error \(CodeInvalidCode / Reason / Public / Private\) identifying the exact rule broken — the result is always a non\-nil, introspectable SDK error, never a panic.
+
+Arguments mirror the kernel sentinel contract:
+
+- code: a dotted\-quad Code; use a Major in \[MinAppMajor, MaxMajor\] to stay collision\-free with the SDK \(see the package doc and ADR 0019\).
+- reason: a stable SCREAMING\_SNAKE identifier \(^\[A\-Z\]\[A\-Z0\-9\_\]\*$\).
+- public: the wire\-safe message — non\-empty, ≤120 runes, no newline. Validated here; an over\-cap or multiline public yields a typed CodeInvalidPublic error rather than the error you intended.
+- private: the log\-only diagnostic envelope — non\-empty, never surfaced.
+- fields: optional structured metadata \(defensively copied\).
+
+HTTP status defaults to 500 and exit code to 70 \(EX\_SOFTWARE\); a per\-error exit override is available through Wrap's WrapParams.ExitCode.
+
 <a name="Code"></a>
-## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L148>)
+## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L151>)
 
 Code is the dotted\-quad error identifier packed into uint32. See ADR 0005 for the registry and layout.
 
@@ -221,8 +302,17 @@ const (
 )
 ```
 
+<a name="Field"></a>
+## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L64>)
+
+Field is a single typed key/value pair attached to an error. Build one with String / Int / Int64 / Bool / Float \(or NewFieldValue\); the zero value is invalid and must never be passed across the API.
+
+```go
+type Field = kerrs.FieldValue
+```
+
 <a name="Layer"></a>
-## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L155>)
+## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L158>)
 
 Layer is the second octet of Code — SDK layer \(0 = meta, 1 = kernel, 2 = core, 3 = service,...\). See ADR 0005.
 
@@ -231,7 +321,7 @@ type Layer = kerrs.Layer
 ```
 
 <a name="Major"></a>
-## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L152>)
+## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L155>)
 
 Major is the top octet of Code — SemVer major version \(0 = internal, 1 = v1,...\). See ADR 0005.
 
@@ -239,8 +329,20 @@ Major is the top octet of Code — SemVer major version \(0 = internal, 1 = v1,.
 type Major = kerrs.Major
 ```
 
+<a name="MaxMajor"></a>MaxMajor is the largest legal Major octet. Codes must round\-trip through a positive int32 \(the kernel rule that keeps the deprecated int accessor from wrapping negative\), so the top uint32 bit stays clear and the Major octet caps at 0x7F.
+
+```go
+const MaxMajor Major = 0x7F // 127
+```
+
+<a name="MinAppMajor"></a>MinAppMajor is the lowest Major octet reserved for third\-party / application error codes. The SDK only ever allocates Major \< MinAppMajor \(0 = internal, 1.. = the public semver major\). A consumer that builds every Code with a Major in \[MinAppMajor, MaxMajor\] is guaranteed never to collide with an SDK code, now or in any future SDK release. See ADR 0019.
+
+```go
+const MinAppMajor Major = 0x40 // 64
+```
+
 <a name="PkgCode"></a>
-## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L157>)
+## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L160>)
 
 PkgCode is the third octet of Code — per\-layer package slot. See ADR 0005 / 0006.
 
@@ -249,7 +351,7 @@ type PkgCode = kerrs.PkgCode
 ```
 
 <a name="PrefixMatcher"></a>
-## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L163>)
+## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L166>)
 
 PrefixMatcher is the errors.Is target for CIDR\-style Code matching. Construct via NewPrefixMatcher.
 
@@ -258,12 +360,21 @@ type PrefixMatcher = kerrs.PrefixMatcher
 ```
 
 <a name="Serial"></a>
-## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L159>)
+## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L162>)
 
 Serial is the low octet of Code — per\-package serial. See ADR 0005.
 
 ```go
 type Serial = kerrs.Serial
+```
+
+<a name="WrapParams"></a>
+## type [WrapParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L70>)
+
+WrapParams groups the metadata Wrap stamps onto the wrapping error when the cause is NOT already an SDK error. When the cause IS an SDK error, origin wins: Code/Reason/Public/Private are inherited from the cause and only params.Code is appended to the wrap trail \(ADR 0005\).
+
+```go
+type WrapParams = kerrs.WrapParams
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

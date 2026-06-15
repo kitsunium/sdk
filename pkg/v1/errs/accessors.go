@@ -1,14 +1,17 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/errs .
 
-// Package errs is the read-only introspection facade for SDK errors.
+// Package errs is the public facade for SDK errors — both introspection
+// (this file) and construction ([New], [Wrap], the Field helpers, and the
+// application Code range, in construct.go).
 //
-// The concrete error type, constructors ([github.com/kitsunium/sdk/internal/kernel/errs].Define,
-// Wrap), and Field helpers live in internal/kernel/errs and are
-// intentionally NOT re-exported. Consumers receive [error] values from
-// the SDK and query them via the Of-family accessors below. This keeps
-// callers from forging SDK errors while still enabling dashboards,
-// retries, and structured logs to branch on Code / Reason / HTTPStatus
-// / ExitCode.
+// Consumers receive [error] values from the SDK and query them via the
+// Of-family accessors below, and — since ADR 0019 — mint their own typed
+// errors in the same model with [New] / [Wrap]. The concrete error type
+// stays internal (callers see [error], never *errs.Error), so it cannot be
+// forged by struct literal; construction goes through the validated
+// constructors, which return a typed validation error on malformed input
+// rather than panicking. Dashboards, retries, and structured logs branch on
+// Code / Reason / HTTPStatus / ExitCode regardless of who built the error.
 //
 // # Goals
 //
