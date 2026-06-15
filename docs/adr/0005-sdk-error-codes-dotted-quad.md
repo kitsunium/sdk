@@ -4,6 +4,7 @@
 **Date**: 2026-04-23
 **Deciders**: @kodflow
 **Supersedes**: ADR 0002 (Registry table only; all other sections of 0002 remain authoritative)
+**Amended by**: ADR 0020 (§Enforcement / §Semantics — the AST audit's reason invariant now accepts a second derivation, `screamingSnake(CodeConst − "Code")`, alongside `screamingSnake(varName)`; this ADR's body is preserved verbatim as the original record per the ADR-immutability rule)
 **Related**: ADR 0001 (multi-module layout)
 
 ## Context

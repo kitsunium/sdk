@@ -27,6 +27,8 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0016-sdk-process-supervision-domain.md` | OS process-supervision domain (`proc`): 6th core sibling; `process`/`signal`/`reaper`/`rlimit`/`cgroup`/`sdnotify` facades; central error block `0.2.6.*`; build-tag platform selection | Accepted |
 | `adr/0017-pkg-bare-module-path.md` | Public module is the bare `…/pkg` (Go forbids the `/v1` suffix); code stays under `v1/`, imports unchanged; tag shape `pkg/vX.Y.Z`, first release `v0.1.0` alpha | Accepted (amends ADR 0009 path, ADR 0007 tag shape, ADR 0001 module path) |
 | `adr/0018-sdk-cross-platform-portability.md` | Cross-platform portability strategy — two bars (build + runtime); uniform `UnsupportedPlatform` contract; `_linux`/`_unix`/`_bsd`/`_windows`/`_other` split; `bazel-ci.yml` cross-build job (build) + `e2e-vm.yml` (runtime, real kernels) gates; OpenBSD `RLIMIT_AS` precedent; native-backend roadmap (FreeBSD `rctl`, Windows Job Objects, BSD `procctl`) | Accepted |
+| `adr/0019-pkg-errs-public-construction.md` | Public error construction API (`pkg/v1/errs.New`/`Wrap`/`Field` via non-panicking `kernel/errs.NewRuntime`) + third-party Major reservation `0x40–0x7F` (`MinAppMajor`/`MaxMajor`) | Accepted (amends ADR 0002 / 0005 §Registry) |
+| `adr/0020-errs-audit-dual-reason-derivation.md` | errs AST audit accepts `screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")`; closes the `//:audit_sources` gap excluding ~10 namespaced emitters (ring + logger middleware/sinks) | Accepted (amends ADR 0005 §Semantics / formalises ADR 0006) |
 
 ## ADR conventions
 
@@ -38,7 +40,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 
 ## Registry coupling
 
-The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-…` is the **documentary source of truth**; the AST audit test in `internal/kernel/errs/registry_external_test.go` embeds the same table as the **executable source of truth**. Keep the two in sync manually on every change — the audit catches drift on uniqueness and `reason = screamingSnake(varName)`.
+The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-…` is the **documentary source of truth**; the AST audit test in `internal/kernel/errs/registry_external_test.go` embeds the same table as the **executable source of truth**. Keep the two in sync manually on every change — the audit catches drift on uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (ADR 0006/0020) over every package in `//:audit_sources`.
 
 ## Do NOT
 
@@ -49,4 +51,4 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 
 ## Subtree
 
-- `adr/` — Architecture Decision Records (eighteen accepted to date — see table above)
+- `adr/` — Architecture Decision Records (twenty accepted to date — see table above)

@@ -306,10 +306,21 @@ func TestAuditReasonMatchesVarName(t *testing.T) {
 					continue
 				}
 				reason := strings.Trim(reasonLit.Value, `"`)
-				want := camelToScreamingSnake(dc.varName)
-				if reason != want {
-					t.Errorf("%s: var %q reason %q, want %q",
-						dc.pos, dc.varName, reason, want)
+				//: a Reason may mirror EITHER the sentinel var name (bare style,
+				//: e.g. MarshalFailed→MARSHAL_FAILED) OR the Code constant minus
+				//: its "Code" prefix (namespaced style per ADR 0006, e.g.
+				//: CodeRingFull→RING_FULL while the short var Full→FULL would not).
+				//: Accept both so namespaced emitters (ring, every logger
+				//: middleware + sink) are audited, not silently excluded from
+				//: audit_sources — ADR 0020 / issue #35.
+				wantVar := camelToScreamingSnake(dc.varName)
+				wantCode, hasCode := screamingSnakeOfCodeArg(dc.call)
+				//: valid when the reason matches EITHER derivation; the negated
+				//: form (De Morgan) is "differs from var AND (no code derivation
+				//: OR differs from it)".
+				if reason != wantVar && (!hasCode || reason != wantCode) {
+					t.Errorf("%s: var %q reason %q matches neither screamingSnake(var)=%q nor screamingSnake(Code−%q)",
+						dc.pos, dc.varName, reason, wantVar, "Code")
 				}
 			}
 		})
@@ -601,6 +612,67 @@ func camelToScreamingSnake(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// screamingSnakeOfCodeArg derives the namespaced Reason expected from a Define
+// call's first argument — the Code constant identifier minus its "Code" prefix,
+// SCREAMING_SNAKE-cased (CodeRingFull → RING_FULL). ok is false when the argument
+// is not a bare identifier (e.g. a hex literal or selector), in which case only
+// the var-name derivation applies. This is the second accepted derivation that
+// lets ADR 0006 namespaced reasons pass the audit — issue #35 / ADR 0020.
+func screamingSnakeOfCodeArg(call *ast.CallExpr) (reason string, ok bool) {
+	//: defensive: the reason-match caller already guarantees >=2 args, but keep
+	//: this helper self-contained for any future caller.
+	if len(call.Args) < 1 {
+		//: no code argument to derive from.
+		return "", false
+	}
+	//: only a bare identifier (the Code constant) carries a derivable name;
+	//: literal/selector code arguments fall back to the var-name rule.
+	ident, isIdent := call.Args[0].(*ast.Ident)
+	if !isIdent {
+		//: non-identifier code arg — no second derivation available.
+		return "", false
+	}
+	//: strip the conventional "Code" prefix, then SCREAMING_SNAKE the remainder.
+	return camelToScreamingSnake(strings.TrimPrefix(ident.Name, "Code")), true
+}
+
+// TestScreamingSnakeOfCodeArg pins the second (namespaced) Reason derivation:
+// the Code constant minus its "Code" prefix, SCREAMING_SNAKE-cased; non-ident
+// code arguments yield "" so only the var-name rule applies to them.
+func TestScreamingSnakeOfCodeArg(t *testing.T) {
+	t.Parallel()
+	mk := func(arg ast.Expr) *ast.CallExpr { return &ast.CallExpr{Args: []ast.Expr{arg}} }
+	type tc struct {
+		name   string
+		call   *ast.CallExpr
+		want   string
+		wantOK bool
+	}
+	tests := []tc{
+		//: the canonical namespaced case — CodeRingFull → RING_FULL.
+		{"code ident strips prefix", mk(&ast.Ident{Name: "CodeRingFull"}), "RING_FULL", true},
+		//: middleware case with a longer namespace — CodeAsyncStopped → ASYNC_STOPPED.
+		{"code ident multi-segment", mk(&ast.Ident{Name: "CodeAsyncStopped"}), "ASYNC_STOPPED", true},
+		//: an identifier lacking the "Code" prefix is screaming-snaked as-is.
+		{"ident without Code prefix", mk(&ast.Ident{Name: "AsyncStopped"}), "ASYNC_STOPPED", true},
+		//: a hex-literal code argument has no derivable name → ok=false (var rule only).
+		{"non-ident literal yields not-ok", mk(&ast.BasicLit{Kind: token.INT, Value: "0x01020304"}), "", false},
+		//: a malformed Define with no args → ok=false, never a panic.
+		{"no args yields not-ok", &ast.CallExpr{}, "", false},
+	}
+	//: runCase executes one row directly so the static analyser credits the branch.
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got, ok := screamingSnakeOfCodeArg(tc.call)
+		if got != tc.want || ok != tc.wantOK {
+			t.Errorf("%s: got (%q,%v), want (%q,%v)", tc.name, got, ok, tc.want, tc.wantOK)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
 }
 
 func TestRegistryMarker(t *testing.T) {
