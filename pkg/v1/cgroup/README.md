@@ -50,6 +50,7 @@ cgroup v2 is Linux\-only. Off Linux, Available returns false and Create returns 
 - [func Available\(\) bool](<#Available>)
 - [type Group](<#Group>)
   - [func Create\(name string, opts ...Option\) \(g Group, err error\)](<#Create>)
+  - [func MustCreate\(name string, opts ...Option\) Group](<#MustCreate>)
 - [type Option](<#Option>)
   - [func WithRoot\(root string\) Option](<#WithRoot>)
 
@@ -80,6 +81,15 @@ func Create(name string, opts ...Option) (g Group, err error)
 ```
 
 Create makes a new control group named name under the delegated cgroup v2 root and returns a Group bound to it. It returns CgroupUnavailable when the hierarchy is absent or not delegated, CgroupCreateFailed when mkdir fails, and UnsupportedPlatform off Linux.
+
+<a name="MustCreate"></a>
+### func [MustCreate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L100>)
+
+```go
+func MustCreate(name string, opts ...Option) Group
+```
+
+MustCreate is like [Create](<#Create>) but panics with the typed error when creation fails — UnsupportedPlatform off Linux/Windows, or CgroupUnavailable when the hierarchy is not delegated. It is the idiomatic Go MustX opt\-in \(like [regexp.MustCompile](<https://pkg.go.dev/regexp/#MustCompile>)\) for a consumer that chooses crash\-on\-unsupported at its own startup; the SDK itself never panics, and [Create](<#Create>) is the non\-panicking form for normal use. The panic value is the typed error, so a top\-level recover\(\) can classify it via errs.CodeOf / HasCode.
 
 <a name="Option"></a>
 ## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L67>)
