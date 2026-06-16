@@ -9,7 +9,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/proc",
-        "//internal/kernel/errs",
+        "//pkg/v1/errs",
     ],
 )
 

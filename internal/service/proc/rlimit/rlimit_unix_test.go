@@ -25,6 +25,15 @@ func TestApplyNoFileObservableUnix(t *testing.T) {
 		//: a host that cannot read its own rlimit cannot run this assertion.
 		t.Skipf("getrlimit(NOFILE): %v", err)
 	}
+	//: restore the process-global ceiling after the test so a later test in the
+	//: same binary does not inherit the lowered NOFILE (deterministic isolation).
+	defer func() {
+		//: best-effort restore; log a failure rather than fail the assertion above.
+		if rerr := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &before); rerr != nil {
+			//: a restore fault is non-fatal but worth surfacing in the test log.
+			t.Logf("restore NOFILE: %v", rerr)
+		}
+	}()
 	curSoft, curHard := rlimFields(before)
 	//: a soft ceiling under 16 leaves no room to lower and observe the change.
 	if curSoft < 16 {

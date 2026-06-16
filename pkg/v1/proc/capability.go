@@ -59,7 +59,7 @@ import (
 	"strings"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
-	errs "github.com/kitsunium/sdk/internal/kernel/errs"
+	errs "github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
 // maxPublicLen is the wire-safe Public ceiling (ADR 0005: ≤120 runes); the panic
@@ -207,9 +207,9 @@ func unsupportedError(missing []Capability) error {
 		//: a capability-less message still names the platform and stays bounded.
 		public = "required process capability unsupported on " + platform
 	}
-	//: reuse the central UNSUPPORTED_PLATFORM code (NewRuntime never panics);
-	//: Private + the field always carry the full capability list.
-	return errs.NewRuntime(coreproc.CodeUnsupportedPlatform, "UNSUPPORTED_PLATFORM",
+	//: reuse the central UNSUPPORTED_PLATFORM code via the public errs constructor
+	//: (runtime-validated, never panics); Private + the field carry the full list.
+	return errs.New(coreproc.CodeUnsupportedPlatform, "UNSUPPORTED_PLATFORM",
 		public,
 		"proc.MustSupport: missing ["+list+"] on "+platform,
 		errs.String("missing", list), errs.String("platform", platform))
