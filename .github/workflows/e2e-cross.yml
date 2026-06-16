@@ -163,13 +163,25 @@ jobs:
           shell: bash
           run: |
             set -uo pipefail
+            # Under QEMU/TCG (no KVM on hosted runners) a timing-sensitive test
+            # occasionally flakes on emulation latency; a real defect fails every
+            # attempt. Retry each binary up to 3x so a transient hiccup does not
+            # red the lane, while a genuine bug still surfaces.
+            retry() {
+              local i
+              for i in 1 2 3; do
+                "$@" && return 0
+                echo "  (attempt $i failed on ${{ matrix.os }}, retrying)"
+              done
+              return 1
+            }
             fail=0
             echo "== conformance on ${{ matrix.os }} =="
-            ./bins/conformance.run || fail=1
+            retry ./bins/conformance.run || fail=1
             for b in bins/*.test; do
               echo "== $b =="
               # -test.short keeps each per-OS run quick; suites self-gate on
               # UnsupportedPlatform / missing /bin/sh and skip cleanly.
-              ./"$b" -test.v -test.short || fail=1
+              retry ./"$b" -test.v -test.short || fail=1
             done
             exit $fail

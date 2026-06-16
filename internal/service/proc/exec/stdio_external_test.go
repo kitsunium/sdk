@@ -89,8 +89,10 @@ func TestStdioCaptureLargeOutput(t *testing.T) {
 	const want int = 256 * 1024
 	var out bytes.Buffer
 	spec := coreproc.Spec{
-		Path:   shPath,
-		Args:   []string{"sh", "-c", "head -c " + strconv.Itoa(want) + " /dev/zero"},
+		Path: shPath,
+		//: dd (not `head -c`, which OpenBSD's head lacks) emits exactly want bytes
+		//: portably: bs=1024 * count=(want/1024) = want, with stderr silenced.
+		Args:   []string{"sh", "-c", "dd if=/dev/zero bs=1024 count=" + strconv.Itoa(want/1024) + " 2>/dev/null"},
 		Stdio:  coreproc.StdioCapture,
 		Stdout: &out,
 	}
