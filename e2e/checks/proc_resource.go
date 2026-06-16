@@ -90,6 +90,13 @@ func Cgroup() harness.Suite {
 // the kernel's view back to prove enforcement, freeze/thaws, Kills the empty
 // tree, and always Deletes in cleanup.
 func cgroupConformance() harness.Result {
+	//: Windows has a Job Object cgroup backend, but this harness proves the effect
+	//: via the cgroup v2 filesystem (Linux-only); the Job Object mechanics are
+	//: covered on the real Windows kernel by the cgroup unit tests instead.
+	if runtime.GOOS == "windows" {
+		//: make no fs-based end-to-end claim on Windows — unit-tested separately.
+		return harness.NotSupported(cgroupDomain, "lifecycle", "Windows Job Object backend covered by unit tests; harness is cgroup-v2-fs specific")
+	}
 	//: cgroup v2 must be mounted AND delegated to us, else there is nothing to test.
 	if !cgroup.Available() {
 		//: the honest delegation probe failed — Linux without v2, or no write access.
@@ -125,6 +132,12 @@ func cgroupConformance() harness.Result {
 // kernel's own <dir>/cgroup.procs back and requires the child's pid to be listed
 // — membership proven by the controller, never by a nil error.
 func cgroupPreExecPlacement() harness.Result {
+	//: pre-exec cgroup placement rides the Unix re-exec trampoline + cgroup.procs;
+	//: neither exists on Windows (Job Objects assign post-create), so make no claim.
+	if runtime.GOOS == "windows" {
+		//: Windows job-assignment is covered by the cgroup unit tests instead.
+		return harness.NotSupported(cgroupDomain, "placement", "pre-exec cgroup.procs placement is Linux-only; Windows uses Job Object assignment")
+	}
 	//: cgroup v2 must be mounted AND delegated, else there is nowhere to place into.
 	if !cgroup.Available() {
 		//: no delegated v2 hierarchy (also the non-Linux path) — make no claim.
