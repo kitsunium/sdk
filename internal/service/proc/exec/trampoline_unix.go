@@ -29,6 +29,19 @@ import (
 // it never collides with a real variable.
 const trampolineEnv string = "__KITSUNIUM_SDK_PROC_TRAMPOLINE"
 
+// trampolineCgroupEnv carries the cgroup v2 directory the trampoline must place
+// its pid into (write to <dir>/cgroup.procs) before execve. Kept in its own
+// sentinel var rather than the ';'-delimited payload so a path containing any
+// byte never needs escaping. Stripped before the target execs, like trampolineEnv.
+const trampolineCgroupEnv string = "__KITSUNIUM_SDK_PROC_CGROUP"
+
+// trampolineHsFdEnv carries the descriptor number the parent placed the handshake
+// pipe's write end at. The pipe is appended AFTER any Spec.ExtraFiles, so its fd
+// is 3+len(ExtraFiles), not a fixed 3 — keeping ExtraFiles at their documented fd
+// 3.. for socket activation. Absent (legacy/no-extras spawns) the trampoline
+// falls back to defaultHandshakeFD.
+const trampolineHsFdEnv string = "__KITSUNIUM_SDK_PROC_HSFD"
+
 // Trampoline child exit codes (distinct from any the target could use before it
 // execs, so a supervisor can tell a trampoline failure from a target failure).
 const (
@@ -82,6 +95,14 @@ func runTrampoline(payload string) {
 		stderrLine("sdk trampoline: " + msg)
 		os.Exit(trampolineApplyExit)
 	}
+	//: place this process — and the target it is about to exec — into the cgroup
+	//: AFTER limits, BEFORE execve, so controller caps bind from instruction one.
+	if msg := applyCgroupPlacement(os.Getenv(trampolineCgroupEnv)); msg != "" {
+		//: a refused placement is a distinct handshake byte → CgroupWriteFailed.
+		reportHandshake(handshakeCgroupFail)
+		stderrLine("sdk trampoline: " + msg)
+		os.Exit(trampolineApplyExit)
+	}
 	//: the trampoline argv is [self, target, targetArgv...]; need at least 2.
 	if len(os.Args) < trampolineMinArgs {
 		//: a malformed invocation cannot locate the target — signal exec failure.
@@ -92,15 +113,14 @@ func runTrampoline(payload string) {
 	//: arm the handshake fd to close on a successful execve so the parent reads
 	//: EOF; if it cannot be armed, fail rather than risk the parent blocking on a
 	//: descriptor the target would inherit.
-	if !armHandshakeClose() {
-		//: report the exec failure and exit instead of execing un-armed.
-		reportHandshake(handshakeExecFail)
-		stderrLine("sdk trampoline: could not arm handshake fd")
-		os.Exit(trampolineExecExit)
-	}
+	//: arm the handshake fd close-on-exec so a clean execve closes it (the parent
+	//: reads EOF = success); CloseOnExec is libc-routed and ENOSYS-safe on OpenBSD.
+	armHandshakeClose()
 	target := os.Args[1]
-	//: strip the sentinel var so the target never sees it (no re-trampoline).
-	env := environWithout(os.Environ(), trampolineEnv)
+	//: strip ALL sentinel vars so the target never sees them (no re-trampoline,
+	//: no stray cgroup hint, no leaked handshake-fd number).
+	env := environWithout(environWithout(environWithout(os.Environ(),
+		trampolineEnv), trampolineCgroupEnv), trampolineHsFdEnv)
 	//: replace this process image with the real target, now under its limits.
 	if err := syscall.Exec(target, os.Args[trampolineMinArgs:], env); err != nil {
 		//: the execve failed (e.g. target not found) — signal and report.
@@ -110,12 +130,33 @@ func runTrampoline(payload string) {
 	}
 }
 
+// childHandshakeFD returns the descriptor the parent placed the handshake pipe's
+// write end at: the value of trampolineHsFdEnv when set (the pipe sits after
+// Spec.ExtraFiles at fd 3+len(ExtraFiles)), else defaultHandshakeFD (no extras).
+func childHandshakeFD() int {
+	//: the parent passes the real fd only when ExtraFiles shifted it past 3.
+	raw := os.Getenv(trampolineHsFdEnv)
+	//: absent env ⇒ the legacy "right after stdio" position, fd 3.
+	if raw == "" {
+		//: no ExtraFiles offset; the pipe is at the default descriptor.
+		return defaultHandshakeFD
+	}
+	fd, err := strconv.Atoi(raw)
+	//: a malformed value falls back to the default rather than a bad descriptor.
+	if err != nil {
+		//: never trust an unparseable fd; use the known-safe default.
+		return defaultHandshakeFD
+	}
+	//: the parent-computed descriptor carrying the handshake pipe write end.
+	return fd
+}
+
 // reportHandshake writes a single status byte to the handshake fd so the parent's
 // Start surfaces a typed error. Best-effort: a write fault changes nothing before
 // the imminent exit (the parent then falls back to the child's exit code).
 func reportHandshake(code byte) {
 	//: best-effort one-byte status; the parent maps it to a typed sentinel.
-	if _, err := syscall.Write(handshakeFD, []byte{code}); err != nil {
+	if _, err := syscall.Write(childHandshakeFD(), []byte{code}); err != nil {
 		//: nothing to do — the process exits next regardless.
 		return
 	}
@@ -123,13 +164,14 @@ func reportHandshake(code byte) {
 
 // armHandshakeClose marks the handshake fd close-on-exec so a successful execve
 // closes it (the parent reads EOF = success) while a failed execve leaves it open
-// for the failure byte. It reports whether the fd was armed.
-func armHandshakeClose() bool {
-	//: set FD_CLOEXEC on the handshake fd via fcntl; errno 0 means it is armed.
-	_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(handshakeFD),
-		syscall.F_SETFD, syscall.FD_CLOEXEC)
-	//: a non-zero errno (only on an invalid fd) leaves the handshake un-armed.
-	return errno == 0
+// for the failure byte. It uses syscall.CloseOnExec rather than a raw
+// Syscall(SYS_FCNTL, …): OpenBSD's kernel rejects an fcntl issued outside libc
+// (the pinsyscalls hardening) with ENOSYS, whereas CloseOnExec routes through the
+// platform's libc-backed fcntl and works on every Unix target. It cannot fail for
+// the live pipe descriptor the parent just created and the child inherited.
+func armHandshakeClose() {
+	//: set FD_CLOEXEC via the libc-routed helper (OpenBSD raw-fcntl is ENOSYS).
+	syscall.CloseOnExec(childHandshakeFD())
 }
 
 // stderrLine writes a single diagnostic line to standard error, ignoring any
@@ -216,8 +258,10 @@ func applyRlimitToken(s string) string {
 	//: setrlimit applies the soft/hard pair to the resource pre-exec; new() takes
 	//: the address of the platform-typed Rlimit without a named temporary.
 	if err := syscall.Setrlimit(num, new(makeRlimit(soft, hard))); err != nil {
-		//: a refused limit (e.g. raising the hard cap unprivileged) fails the spawn.
-		return "setrlimit(" + numStr + "): " + err.Error()
+		//: a refused limit (e.g. raising the hard cap unprivileged) fails the spawn;
+		//: name the soft/hard pair so a per-kernel rejection is diagnosable.
+		return "setrlimit(" + numStr + ",soft=" + softStr + ",hard=" + hardStr +
+			"): " + err.Error()
 	}
 	//: the resource limit is in effect for the child.
 	return ""
@@ -243,8 +287,9 @@ func environWithout(env []string, key string) []string {
 // Umask) that the stdlib spawn cannot apply directly, so Start must route through
 // the re-exec trampoline.
 func needsTrampoline(spec coreproc.Spec) bool {
-	//: a mapped Rlimit or a non-nil Umask is honourable only via the trampoline.
-	return len(spec.Rlimits) > 0 || spec.Umask != nil
+	//: a mapped Rlimit, a non-nil Umask, or a cgroup placement is honourable only
+	//: in the child between fork and exec — i.e. via the re-exec trampoline.
+	return len(spec.Rlimits) > 0 || spec.Umask != nil || spec.CgroupPath != ""
 }
 
 // encodeTrampoline builds the payload env value for spec: a ';'-separated list of
@@ -282,6 +327,11 @@ func trampolineSpawn(spec coreproc.Spec) (path string, argv, envAddon []string, 
 	argv = append([]string{self, spec.Path}, buildArgv(spec)...)
 	//: the sentinel env entry carries the encoded rlimit/umask payload.
 	envAddon = []string{trampolineEnv + "=" + encodeTrampoline(spec)}
+	//: a cgroup placement rides in its own sentinel var (no payload escaping).
+	if spec.CgroupPath != "" {
+		//: the trampoline writes its pid to <CgroupPath>/cgroup.procs pre-exec.
+		envAddon = append(envAddon, trampolineCgroupEnv+"="+spec.CgroupPath)
+	}
 	//: re-exec this binary as the trampoline.
 	return self, argv, envAddon, nil
 }

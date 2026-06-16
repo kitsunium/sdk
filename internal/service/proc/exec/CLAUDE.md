@@ -28,6 +28,8 @@ process that already exists.
 | `creds_unix.go` | `unix` | `Spec.User/Group/Groups` → `syscall.Credential` via `os/user` |
 | `attrs_unix.go` | `unix` | best-effort `Nice` (setpriority) + `OOMScoreAdj` (procfs); ESRCH detection |
 | `limits_unix.go` | `unix` | `checkLimits`: `UnknownResource` for unmapped, `RlimitFailed` for unhonourable |
+| `cgroup_placement_linux.go` | `linux` | `validateCgroupPath` (pre-spawn: missing/not-a-cgroup ⇒ `CgroupUnavailable`) + `applyCgroupPlacement` (trampoline writes pid → `cgroup.procs`) |
+| `cgroup_placement_other.go` | `unix && !linux` | `validateCgroupPath` rejects a non-empty path with `UnsupportedPlatform`; no cgroup v2 off Linux |
 | `limittable_unix.go` | `unix` | `Resource` → `RLIMIT_*` table (stdlib constants only) |
 | `procfile_unix.go` | `unix` | `os.WriteFile` shim for `oom_score_adj` |
 | `wrap.go` | all | `wrap{Spawn,Wait,Signal,Stop,Rlimit,UnknownUser,UnknownGroup}` — restate each sentinel's exact fields once |
@@ -70,7 +72,8 @@ The Go runtime exposes **no** `SysProcAttr` hook to run `setrlimit(2)` or
 `umask(2)` in the child between fork and exec. `Start` therefore honours them via
 a **re-exec trampoline** (`trampoline_unix.go`), stdlib-pure and dependency-free:
 
-- When a `Spec` sets a mappable `Rlimits` entry or a non-nil `Umask`, `Start`
+- When a `Spec` sets a mappable `Rlimits` entry, a non-nil `Umask`, **or a
+  non-empty `CgroupPath`**, `Start`
   spawns `os.Executable()` (this binary) with argv `[self, target, argv…]` and a
   sentinel env var carrying the encoded limits. A package-level var initialiser
   (`var _ = installTrampoline()` — the no-init idiom) fires before `main` in that
@@ -83,16 +86,32 @@ a **re-exec trampoline** (`trampoline_unix.go`), stdlib-pure and dependency-free
 - A limit the kernel **refuses** (e.g. an invalid soft>hard pair, or raising a
   hard cap unprivileged), or a failed `execve` of the target, is reported through
   a **handshake pipe** (`handshake_unix.go`): the trampoline inherits the pipe
-  write end as fd 3, writes a status byte (`'A'` apply / `'E'` exec) on failure,
-  and arms it close-on-exec so a clean `execve` closes it (the parent reads EOF =
-  success). `Start` blocks on that read and surfaces a typed `RlimitFailed`
-  (apply) or `SpawnFailed` (exec) — matching the direct-spawn contract instead of
-  a bare 126/127 child exit. This is the same self-pipe + cloexec trick `os/exec`
+  write end and writes a status byte (`'A'` apply / `'C'` cgroup / `'E'` exec) on
+  failure, then arms it close-on-exec so a clean `execve` closes it (the parent
+  reads EOF = success). The pipe is appended **after** any `Spec.ExtraFiles`, so
+  the extras keep their contracted fd 3.. (socket activation) and the handshake
+  lands at fd `3+len(ExtraFiles)`; the parent passes that descriptor to the
+  trampoline via `__KITSUNIUM_SDK_PROC_HSFD` (`childHandshakeFD`, default 3 when
+  there are no extras). `Start` blocks on that read and surfaces a typed
+  `RlimitFailed` (apply) / `CgroupWriteFailed` (cgroup) / `SpawnFailed` (exec) —
+  matching the direct-spawn contract instead of a bare 126/127 child exit. This is the same self-pipe + cloexec trick `os/exec`
   uses for its own errpipe. A failure to locate `os.Executable()` likewise
   surfaces `RlimitFailed` before any spawn.
 - `Nice` and `OOMScoreAdj` are honoured post-start on the live pid
   (`setpriority(2)` / `/proc/<pid>/oom_score_adj`). A host refusal surfaces
   `RlimitFailed` and the half-configured child is killed + reaped (`teardown`).
+- **`CgroupPath` (cgroup v2 pre-exec placement, issue #91).** A non-empty
+  `Spec.CgroupPath` rides in its own sentinel env var (`__KITSUNIUM_SDK_PROC_CGROUP`,
+  separate from the `;`-delimited limits payload so the path never needs escaping).
+  After the rlimit/umask step and **before** `execve`, the trampoline writes its
+  own pid to `<CgroupPath>/cgroup.procs` (`applyCgroupPlacement`), so the target
+  is a member of the group from its first instruction — closing the unconfined
+  window a post-spawn `Group.Add(pid)` leaves open. `Start` validates the path
+  up front (`validateCgroupPath`): a missing path / non-cgroup directory ⇒
+  `CgroupUnavailable` before any spawn; a write the kernel refuses (not delegated,
+  controller off) surfaces `CgroupWriteFailed` through a distinct handshake byte
+  (`'C'`). Linux-only — `cgroup_placement_other.go` rejects a non-empty path with
+  `UnsupportedPlatform` on every other Unix, never running the target unconfined.
 
 Cross-platform: the trampoline is `//go:build unix` (Linux, Darwin, the BSDs);
 the only platform-divergent piece is the `syscall.Rlimit` field type — `int64` on

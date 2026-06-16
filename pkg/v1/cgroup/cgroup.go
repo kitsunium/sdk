@@ -5,10 +5,11 @@
 //
 // It is the thin public facade over internal/service/proc/cgroup: Group is an
 // alias of the core proc.Group port and the functions delegate straight to the
-// service implementation. Only the unified cgroup v2 hierarchy is supported; the
-// facade degrades gracefully — on a non-Linux host, a cgroup v1 host, or an
-// unprivileged/non-delegated Linux host it returns the typed UnsupportedPlatform
-// or CgroupUnavailable error rather than panicking.
+// service implementation. The kernel-enforced control-group backend is the
+// unified cgroup v2 hierarchy on Linux and a Job Object on Windows; the facade
+// degrades gracefully — on a platform with no such backend (darwin, the BSDs), a
+// cgroup v1 host, or an unprivileged/non-delegated Linux host it returns the
+// typed UnsupportedPlatform or CgroupUnavailable error rather than panicking.
 //
 // # Usage
 //
@@ -49,8 +50,12 @@
 //
 // # Platform notes
 //
-// cgroup v2 is Linux-only. Off Linux, Available returns false and Create
-// returns UnsupportedPlatform.
+// The backend is cgroup v2 on Linux and a Job Object on Windows. On those two,
+// Available reports true (Linux additionally requires the hierarchy delegated)
+// and Create returns a usable Group. On every other platform (darwin, the BSDs)
+// Available returns false and Create returns UnsupportedPlatform. The Group
+// surface is uniform; SetIOMax / Freeze / Thaw degrade to UnsupportedPlatform on
+// the Job Object backend, which has no equivalent for them.
 package cgroup
 
 import (
@@ -73,19 +78,41 @@ func WithRoot(root string) Option {
 	return svccgroup.WithRoot(root)
 }
 
-// Available reports whether the unified cgroup v2 hierarchy is mounted AND a
-// sub-group can be created under it by the caller. It returns false off Linux,
-// on cgroup v1, and on a Linux host where the hierarchy is read-only.
+// Available reports whether a kernel-enforced control-group backend is usable: on
+// Linux, that the unified cgroup v2 hierarchy is mounted AND a sub-group can be
+// created under it by the caller; on Windows, that Job Objects are available
+// (always true). It returns false on platforms with no backend (darwin, the
+// BSDs), on cgroup v1, and on a Linux host where the hierarchy is read-only.
 func Available() bool {
 	//: delegate verbatim to the service probe.
 	return svccgroup.Available()
 }
 
-// Create makes a new control group named name under the delegated cgroup v2 root
-// and returns a Group bound to it. It returns CgroupUnavailable when the
-// hierarchy is absent or not delegated, CgroupCreateFailed when mkdir fails, and
-// UnsupportedPlatform off Linux.
+// Create makes a new control group named name and returns a Group bound to it —
+// a cgroup v2 sub-group under the delegated root on Linux, a Job Object on
+// Windows. It returns CgroupUnavailable when the Linux hierarchy is absent or not
+// delegated, CgroupCreateFailed when creation fails, and UnsupportedPlatform on a
+// platform with no control-group backend (darwin, the BSDs).
 func Create(name string, opts ...Option) (g Group, err error) {
 	//: delegate verbatim to the service constructor.
 	return svccgroup.Create(name, opts...)
+}
+
+// MustCreate is like [Create] but panics with the typed error when creation
+// fails — UnsupportedPlatform on a platform with no control-group backend
+// (darwin, the BSDs), or CgroupUnavailable when the Linux hierarchy is not
+// delegated. It is the idiomatic Go MustX opt-in (like
+// [regexp.MustCompile]) for a consumer that chooses crash-on-unsupported at its
+// own startup; the SDK itself never panics, and [Create] is the non-panicking
+// form for normal use. The panic value is the typed error, so a top-level
+// recover() can classify it via errs.CodeOf / HasCode.
+func MustCreate(name string, opts ...Option) Group {
+	grp, err := Create(name, opts...)
+	//: a failed Create is the consumer's chosen crash point.
+	if err != nil {
+		//: panic with the typed error value, never a bare string.
+		panic(err)
+	}
+	//: the live group on success.
+	return grp
 }

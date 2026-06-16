@@ -1,4 +1,4 @@
-//go:build !unix
+//go:build !unix && !windows
 
 // Package exec_test — non-Unix contract mirror of exec_external_test.go: the
 // fork/exec spawn primitive has no portable equivalent off Unix, so Start must

@@ -1,6 +1,9 @@
-//go:build !linux
+//go:build !linux && !windows
 
-// Package cgroup — non-Linux stub: cgroup v2 is Linux-only.
+// Package cgroup — degrade stub for platforms with no control-group facility:
+// cgroup v2 is Linux-only and Windows has its own Job Object backend
+// (cgroup_windows.go), so this covers darwin and the BSDs, where no equivalent
+// exists.
 package cgroup
 
 import (

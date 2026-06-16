@@ -9,6 +9,7 @@ package exec
 import (
 	"context"
 	"os"
+	"strconv"
 	"syscall"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -35,6 +36,12 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 	if lErr := checkLimits(spec); lErr != nil {
 		//: propagate the typed UNKNOWN_RESOURCE / RLIMIT_FAILED verbatim.
 		return nil, lErr
+	}
+	//: reject a missing / non-cgroup / off-platform CgroupPath before spawning,
+	//: so a placement that cannot succeed never starts an unconfined child.
+	if cErr := validateCgroupPath(spec.CgroupPath); cErr != nil {
+		//: propagate the typed CGROUP_UNAVAILABLE / UNSUPPORTED_PLATFORM verbatim.
+		return nil, cErr
 	}
 
 	sio, ioErr := buildStdio(spec)
@@ -111,7 +118,10 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, err error)
 		return nil, hErr
 	}
 
-	attr, aErr := buildProcAttr(spec, files, envAddon)
+	//: assemble stdio + ExtraFiles + handshake (last) and the handshake-fd env so
+	//: ExtraFiles keep fd 3.. and the trampoline still reports through the pipe.
+	childFiles, hsAddon := childFileTable(files, spec.ExtraFiles, hs)
+	attr, aErr := buildProcAttr(spec, childFiles, append(envAddon, hsAddon...))
 	//: a credential-resolution failure aborts before fork/exec.
 	if aErr != nil {
 		//: release the handshake pipe and stdio fds so nothing leaks.
@@ -147,9 +157,10 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, err error)
 	return proc, nil
 }
 
-// spawnFiles returns the child's file table and, for a trampolined spawn, the
-// handshake pipe whose write end follows the three std streams (so the child sees
-// it as handshakeFD). A direct spawn returns the stdio files and a nil handshake.
+// spawnFiles returns the stdio file table and, for a trampolined spawn, the
+// handshake pipe. It deliberately does NOT place the pipe in the table: spawn
+// appends it AFTER any Spec.ExtraFiles so the extras keep their documented fd 3..
+// positions (socket activation), with the handshake landing at fd 3+len(extras).
 func spawnFiles(spec coreproc.Spec, sio *stdioState) (files []*os.File, hs *handshake, err error) {
 	//: a direct spawn carries only the three wired std streams.
 	if !needsTrampoline(spec) {
@@ -162,8 +173,30 @@ func spawnFiles(spec coreproc.Spec, sio *stdioState) (files []*os.File, hs *hand
 		//: wrap the os.Pipe cause as the central RLIMIT_FAILED sentinel.
 		return nil, nil, wrapRlimit(hErr, errs.String("path", spec.Path))
 	}
-	//: append the write end after stdio so the child inherits it as handshakeFD.
-	return append(sio.files[:], pipe.childFile()), pipe, nil
+	//: hand back stdio + the pipe handle; spawn positions the pipe after ExtraFiles.
+	return sio.files[:], pipe, nil
+}
+
+// childFileTable assembles the child's full fd table — stdio (0-2), then
+// Spec.ExtraFiles at fd 3.. (socket activation), then the handshake pipe LAST so
+// the extras keep their contracted positions. When a handshake is present it
+// also returns the env entry carrying the pipe's descriptor (3+len(ExtraFiles))
+// so the trampoline reports through the right fd; the slice has no handshake and
+// the addon is empty for a direct spawn.
+func childFileTable(stdio, extra []*os.File, hs *handshake) (files []*os.File, hsAddon []string) {
+	//: extras inherit at fd 3+ exactly as os/exec.Cmd.ExtraFiles documents.
+	files = appendExtraFiles(stdio, extra)
+	//: a direct spawn has no handshake pipe and needs no fd addon.
+	if hs == nil {
+		//: stdio+extras only; no sentinel fd entry.
+		return files, nil
+	}
+	//: the pipe goes last; its fd is the current length (3+len(ExtraFiles)).
+	hsAddon = []string{trampolineHsFdEnv + "=" + strconv.Itoa(len(files))}
+	//: append the write end after the extras so they keep fd 3...
+	files = append(files, hs.childFile())
+	//: the full table plus the fd addon for the trampoline.
+	return files, hsAddon
 }
 
 // resolveSpawn returns the (path, argv, envAddon) for os.StartProcess. A spec
@@ -216,10 +249,9 @@ func buildProcAttr(spec coreproc.Spec, files []*os.File, envAddon []string) (att
 	//: then the trampoline sentinel entry (if any); it is stripped before execve.
 	env = append(env, envAddon...)
 
-	//: the child's std streams (fd 0-2) were wired by buildStdio per Spec.Stdio;
-	//: any ExtraFiles inherit after them at fd 3+ (socket activation — the same
-	//: order os/exec.Cmd.ExtraFiles uses), then the attr is ready to spawn.
-	return &os.ProcAttr{Dir: spec.Dir, Env: env, Files: appendExtraFiles(files, spec.ExtraFiles), Sys: sysAttr}, nil
+	//: files is the already-assembled child table (stdio + ExtraFiles + any
+	//: handshake), built by childFileTable; the attr is ready to spawn.
+	return &os.ProcAttr{Dir: spec.Dir, Env: env, Files: files, Sys: sysAttr}, nil
 }
 
 // appendExtraFiles returns std (the three std fds) followed by the caller's

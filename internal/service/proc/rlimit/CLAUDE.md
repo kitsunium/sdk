@@ -13,8 +13,11 @@ syscall, wrapping failures in the central `core/proc` sentinels. **Stdlib-only**
 | File | Role |
 |---|---|
 | `rlimit.go` | platform-neutral surface: `Apply`, `PrepareSysProcAttr` delegating to the build-tagged impls |
-| `rlimit_linux.go` | Linux impl: `Resource → RLIMIT_*` table, `setrlimit`/`prlimit64`, error wrapping |
-| `rlimit_other.go` | `!linux` stub: every entry point returns `UnsupportedPlatform` |
+| `rlimit_linux.go` | Linux impl: full `Resource → RLIMIT_*` table (incl. `NPROC`/`MEMLOCK`), `setrlimit`/`prlimit64`, error wrapping |
+| `rlimit_unix.go` | Darwin/BSD impl (`unix && !linux`): native `setrlimit(2)` on self; a foreign pid → `UnsupportedPlatform` (no portable `prlimit64`) |
+| `rlimit_table_as.go` / `rlimit_table_openbsd.go` | per-platform `RLIMIT_AS` split — present everywhere except OpenBSD (absent from its ABI → `UnknownResource`) |
+| `rlimit_value_signed.go` / `rlimit_value_default.go` | `syscall.Rlimit` constructor: `int64` fields on FreeBSD/DragonFly, `uint64` elsewhere |
+| `rlimit_other.go` | `!unix` stub (Windows, plan9, js/wasm): every entry point returns `UnsupportedPlatform` |
 
 No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
 (`UnknownResource`, `RlimitFailed`, `UnsupportedPlatform`); this package mints no
@@ -37,11 +40,19 @@ codes and never calls `errs.Define`.
 
 ## Platform notes
 
-- Linux only. `RLIMIT_NPROC` (6) and `RLIMIT_MEMLOCK` (8) are **absent** from
-  Go's `syscall` package and are restated as constants from the kernel generic
-  ABI (`asm-generic/resource.h`). The other seven come from `syscall`.
-- Off Linux the stub returns `UnsupportedPlatform` — it never acts, never
-  panics. Every GOOS compiles.
+- **Native on every Unix target** (linux, darwin, freebsd, netbsd, openbsd,
+  dragonfly). `setrlimit(2)` on the calling process is the shared mechanic; a
+  lowered ceiling is observable via `getrlimit(2)` (`rlimit_unix_test.go`) on all
+  of them, and via `/proc/self/limits` additionally on Linux.
+- **Linux-only extras.** `RLIMIT_NPROC` (6) and `RLIMIT_MEMLOCK` (8) are absent
+  from Go's `syscall` package and are restated from the kernel generic ABI
+  (`asm-generic/resource.h`); off Linux they live in `golang.org/x/sys` (banned),
+  so those two resources stay unmapped → `UnknownResource`. The Linux-only
+  `prlimit64(2)` makes a **foreign pid** settable on Linux; off Linux a foreign
+  pid yields `UnsupportedPlatform` (self-pid still works).
+- **OpenBSD.** No `RLIMIT_AS` in its ABI → `ResourceAS` unmapped → `UnknownResource`.
+- **Non-Unix** (Windows, plan9, js/wasm): the `!unix` stub returns
+  `UnsupportedPlatform` — never acts, never panics. Every GOOS compiles.
 
 ## Do NOT
 

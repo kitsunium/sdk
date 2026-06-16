@@ -1,4 +1,4 @@
-//go:build !unix
+//go:build !unix && !windows
 
 // Package exec — non-Unix degrade: process supervision via fork/exec with
 // credentials and process groups is a Unix facility, so Start returns the typed
