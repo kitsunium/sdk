@@ -269,12 +269,16 @@ func TestReapOnceConcurrentWithLoop(t *testing.T) {
 func TestSubreaperReapsOrphanedGrandchild(t *testing.T) {
 	//: serial — spawns processes and reaps ANY child of this test process.
 	if err := SetChildSubreaper(); err != nil {
-		//: subreaper unavailable (unprivileged/odd kernel) — assert the typed
-		//: contract, then skip the behavioural half honestly.
-		if !errs.HasCode(err, coreproc.CodeSubreaperFailed) {
+		//: subreaper unavailable — either no facility on this platform
+		//: (darwin/openbsd/netbsd → UnsupportedPlatform) or an arming failure on a
+		//: platform that has one (linux prctl / freebsd-dragonfly procctl →
+		//: SubreaperFailed). Both are honest typed contracts: assert one, then skip
+		//: the behavioural half.
+		if !errs.HasCode(err, coreproc.CodeSubreaperFailed) &&
+			!errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
 			t.Fatalf("SetChildSubreaper failed with unexpected error: %v", err)
 		}
-		t.Skip("PR_SET_CHILD_SUBREAPER unavailable on this host; typed-error contract verified")
+		t.Skip("subreaper unavailable on this host; typed-error contract verified")
 	}
 	//: count reaped children via the observer so we can detect the grandchild.
 	var (
