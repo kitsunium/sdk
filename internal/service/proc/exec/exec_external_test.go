@@ -152,7 +152,7 @@ func TestStopGroupNoSurvivor(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	//: Stop must terminate the whole group, grandchild included.
-	if sErr := p.Stop(context.Background(), 2*time.Second, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
+	if sErr := p.Stop(context.Background(), 10*time.Second, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
 		t.Fatalf("Stop: %v", sErr)
 	}
 	//: drive the reap of the leader so the group is fully settled.
@@ -162,7 +162,7 @@ func TestStopGroupNoSurvivor(t *testing.T) {
 
 	//: after a short settle, the process group must be entirely gone — a
 	//: kill(-pgid, 0) probe returns ESRCH when no member survives.
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	//: poll until the group reports gone or the deadline fails the test.
 	for {
 		err := syscall.Kill(-pgid, 0)

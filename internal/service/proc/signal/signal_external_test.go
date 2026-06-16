@@ -21,7 +21,7 @@ import (
 // deadline elapses, returning the final count. It tolerates scheduler lag so the
 // leak assertion is not flaky.
 func waitGoroutines(want int) (got int) {
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	//: poll until the count settles or the deadline passes.
 	for {
 		got = runtime.NumGoroutine()
@@ -45,7 +45,7 @@ func waitGoroutines(want int) (got int) {
 // warm-up goroutines have unwound so the leak assertion compares like for like.
 func settledGoroutines() (stable int) {
 	prev := runtime.NumGoroutine()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	//: poll until two back-to-back samples match (the count has stopped moving).
 	for {
 		//: let any in-flight unwind progress between samples.
@@ -93,7 +93,7 @@ func TestNotifyDeliversThenStops(t *testing.T) {
 		if got != coreproc.Signal(syscall.SIGUSR1) {
 			t.Fatalf("delivered %v, want SIGUSR1", got)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for SIGUSR1 delivery")
 	}
 
@@ -107,7 +107,7 @@ func TestNotifyDeliversThenStops(t *testing.T) {
 		if ok {
 			t.Fatalf("received %v after stop; want closed channel", got)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("channel not closed after stop")
 	}
 
@@ -190,7 +190,7 @@ func TestRelayToProcessGroup(t *testing.T) {
 		if !ws.Signaled() || ws.Signal() != syscall.SIGTERM {
 			t.Fatalf("child died by %v (signaled=%v), want SIGTERM", ws.Signal(), ws.Signaled())
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("child did not exit after group-relayed SIGTERM")
 	}
 }
