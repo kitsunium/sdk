@@ -139,6 +139,13 @@ jobs:
         with:
           operating_system: ${{ matrix.os }}
           version: ${{ matrix.version }}
+          # The BSD guests run under QEMU/TCG (no KVM on hosted runners), so they
+          # execute far slower than a native kernel. Give them the runner's full
+          # core count + memory to keep timing-sensitive proc tests (stdio
+          # pumping, the trampoline handshake, signal-relay deadlines) from
+          # flaking on emulation latency rather than a real defect.
+          cpu_count: 4
+          memory: 6G
           shell: bash
           run: |
             set -uo pipefail
