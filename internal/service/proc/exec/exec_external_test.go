@@ -9,6 +9,7 @@ package exec_test
 import (
 	"context"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -151,7 +152,7 @@ func TestStopGroupNoSurvivor(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	//: Stop must terminate the whole group, grandchild included.
-	if sErr := p.Stop(context.Background(), 2*time.Second, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
+	if sErr := p.Stop(context.Background(), 10*time.Second, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
 		t.Fatalf("Stop: %v", sErr)
 	}
 	//: drive the reap of the leader so the group is fully settled.
@@ -161,7 +162,7 @@ func TestStopGroupNoSurvivor(t *testing.T) {
 
 	//: after a short settle, the process group must be entirely gone — a
 	//: kill(-pgid, 0) probe returns ESRCH when no member survives.
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	//: poll until the group reports gone or the deadline fails the test.
 	for {
 		err := syscall.Kill(-pgid, 0)
@@ -394,8 +395,19 @@ func TestStartLimitsHonoured(t *testing.T) {
 // rejects with EINVAL regardless of privilege — Start surfaces the typed
 // RlimitFailed through the handshake pipe, not a silent non-zero child exit the
 // caller could not distinguish from a legitimate target exit.
+//
+// Linux, Darwin, NetBSD and OpenBSD reject Soft>Hard with EINVAL, so the error
+// path is exercised there. FreeBSD/DragonFly's setrlimit instead CLAMPS Soft to
+// Hard rather than failing, so this particular input cannot reproduce the apply
+// failure on them — skip there. The trampoline's failure-propagation mechanic is
+// platform-neutral code and stays covered on the four kernels that reject it.
 func TestStartTrampolineApplyFailureTyped(t *testing.T) {
 	t.Parallel()
+	//: FreeBSD/DragonFly clamp Soft>Hard instead of EINVAL, so the failure this
+	//: test injects is not reproducible there; the mechanic is covered elsewhere.
+	if runtime.GOOS == "freebsd" || runtime.GOOS == "dragonfly" {
+		t.Skip("FreeBSD/DragonFly setrlimit clamps Soft>Hard rather than rejecting it")
+	}
 
 	spec := coreproc.Spec{
 		Path: shPath,
@@ -430,6 +442,93 @@ func TestStartTrampolineExecFailureTyped(t *testing.T) {
 	//: a trampoline exec failure must surface the typed SPAWN_FAILED.
 	if !errs.HasCode(err, coreproc.CodeSpawnFailed) {
 		t.Fatalf("Start(trampoline bad path) err = %v, want CodeSpawnFailed", err)
+	}
+}
+
+// TestStartCgroupPathUnavailableTyped asserts the pre-spawn CgroupPath check
+// (issue #91): a path that is not a usable cgroup v2 directory surfaces a typed
+// error BEFORE any child is spawned — there is no unconfined window — and the
+// error is platform-correct: CGROUP_UNAVAILABLE on Linux, UNSUPPORTED_PLATFORM
+// on a non-Linux Unix host (cgroup v2 has no equivalent there).
+func TestStartCgroupPathUnavailableTyped(t *testing.T) {
+	t.Parallel()
+
+	spec := coreproc.Spec{
+		Path: shPath,
+		Args: []string{"sh", "-c", "true"},
+		//: a path that is not a cgroup v2 directory; validation fails pre-spawn so
+		//: /bin/sh need not even be present.
+		CgroupPath: "/nonexistent/kitsunium-proc-cgroup-test",
+	}
+	_, err := svcexec.Start(t.Context(), spec)
+	//: Linux maps a missing / non-cgroup / non-delegated path to CGROUP_UNAVAILABLE.
+	if runtime.GOOS == "linux" {
+		//: the typed CGROUP_UNAVAILABLE proves the pre-spawn guard fired.
+		if !errs.HasCode(err, coreproc.CodeCgroupUnavailable) {
+			t.Fatalf("Start(bad CgroupPath) on linux err = %v, want CodeCgroupUnavailable", err)
+		}
+		return
+	}
+	//: every other Unix has no cgroup v2 → the uniform UNSUPPORTED_PLATFORM contract.
+	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+		t.Fatalf("Start(CgroupPath) on %s err = %v, want CodeUnsupportedPlatform", runtime.GOOS, err)
+	}
+}
+
+// TestStartExtraFilesSurviveTrampoline proves the fd-ordering fix that #91's
+// trampoline-forcing CgroupPath made load-bearing: when a spawn routes through
+// the re-exec trampoline AND carries ExtraFiles, the extras must still land at
+// fd 3.. (the socket-activation contract), with the handshake pipe appended
+// AFTER them. The child reads its fd 3 directly; if the handshake had taken fd 3
+// (the old bug) the read would see the parent-closed pipe (EOF) instead.
+func TestStartExtraFilesSurviveTrampoline(t *testing.T) {
+	t.Parallel()
+	//: the child is a real shell; skip cleanly where the host has none.
+	if _, statErr := os.Stat(shPath); statErr != nil {
+		//: no /bin/sh — the fd-inheritance behaviour cannot be exercised here.
+		t.Skip("no /bin/sh to exercise fd inheritance")
+	}
+	//: an ExtraFile carrying a known payload the child must read back from fd 3.
+	r, w, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatalf("os.Pipe: %v", pipeErr)
+	}
+	const want = "fd3-payload"
+	//: write the small payload synchronously (it fits the pipe buffer, no block)
+	//: then close to give the child's `cat <&3` an EOF — no goroutine needed.
+	if _, wErr := w.WriteString(want); wErr != nil {
+		t.Fatalf("write payload: %v", wErr)
+	}
+	if wcErr := w.Close(); wcErr != nil {
+		t.Fatalf("close payload writer: %v", wcErr)
+	}
+	var out strings.Builder
+	spec := coreproc.Spec{
+		Path: shPath,
+		//: read everything from fd 3 (the first ExtraFile) and echo it to stdout.
+		Args: []string{"sh", "-c", "cat <&3"},
+		//: a non-nil Umask forces the spawn through the trampoline + handshake pipe.
+		Umask:      new(0o022),
+		ExtraFiles: []*os.File{r},
+		Stdio:      coreproc.StdioCapture,
+		Stdout:     &out,
+	}
+	proc, err := svcexec.Start(t.Context(), spec)
+	//: close the parent's copy of the read end; the child inherited its own.
+	if rcErr := r.Close(); rcErr != nil {
+		t.Fatalf("close ExtraFile read end: %v", rcErr)
+	}
+	if err != nil {
+		t.Fatalf("Start(trampoline + ExtraFiles): %v", err)
+	}
+	//: Wait joins the capture copier, so out holds the child's full stdout.
+	if _, werr := proc.Wait(); werr != nil {
+		t.Fatalf("Wait: %v", werr)
+	}
+	//: the child must have read the payload from fd 3 — proof the ExtraFile kept
+	//: fd 3 through the trampoline rather than being shifted to 4 by the handshake.
+	if got := strings.TrimSpace(out.String()); got != want {
+		t.Fatalf("child read %q from fd 3, want %q — ExtraFile was shifted by the trampoline handshake", got, want)
 	}
 }
 

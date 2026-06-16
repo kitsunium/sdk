@@ -24,7 +24,7 @@ Code range: `0.2.6.*` (ADR 0016).
 |---|---|
 | `proc.go` | package doc + `Resource` enum (`NoFile`/`NProc`/`Core`/`AS`/`CPU`/`FSize`/`Data`/`Stack`/`MemLock`) + `String`/`Known` |
 | `signal.go` (+ `signal_unix.go` / `signal_other.go`) | `Signal` value type: `Parse` / `String` / `OS` / `Int` / `Known`; platform name table |
-| `spec.go` | `Spec` — process spawn spec (path/args/dir/env, creds, pgroup/session, rlimit/nice/umask/oom, **stdio**, **ExtraFiles** for socket activation) |
+| `spec.go` | `Spec` — process spawn spec (path/args/dir/env, creds, pgroup/session, rlimit/nice/umask/oom, **CgroupPath** for pre-exec cgroup v2 placement, **stdio**, **ExtraFiles** for socket activation) |
 | `stdio.go` | `StdioMode` — how a child's stdin/stdout/stderr are wired (`StdioInherit`/`StdioNull`/`StdioCapture`) + `String`/`Known` |
 | `exit.go` | `ExitValue` — exit code, terminating signal, CPU times, max RSS + `Success` |
 | `limit.go` | `LimitValue` — soft/hard rlimit pair + `LimitInfinity` |

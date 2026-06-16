@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix || windows
 
 // Package exec — per-process stdio wiring. buildStdio turns a Spec's Stdio mode
 // into the three *os.File the spawn passes as ProcAttr.Files, plus the

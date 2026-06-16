@@ -117,10 +117,11 @@ func assertUnavailable(t *testing.T) {
 func TestAvailableNeverPanics(t *testing.T) {
 	t.Parallel()
 	got := cgroup.Available()
-	//: off Linux the probe must report false unconditionally.
-	if runtime.GOOS != "linux" && got {
-		//: a true result off Linux means the stub is mis-wired.
-		t.Fatalf("Available off Linux = true, want false")
+	//: cgroup-equivalent facilities exist on Linux (cgroup v2) and Windows (Job
+	//: Objects); every other target has none, so the probe must report false there.
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" && got {
+		//: a true result on a platform with no facility means the stub is mis-wired.
+		t.Fatalf("Available on %s = true, want false", runtime.GOOS)
 	}
 }
 

@@ -19,15 +19,18 @@ import (
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 )
 
-// handshakeFD is the child file descriptor carrying the trampoline status. It is
-// the descriptor after the three std streams (0,1,2), since Start appends the
-// pipe write end right after stdio in the child's file table.
-const handshakeFD int = 3
+// defaultHandshakeFD is the fallback descriptor for the trampoline status pipe
+// when no fd number was passed (a spawn with no ExtraFiles): the pipe follows the
+// three std streams at fd 3. With ExtraFiles present the parent appends the pipe
+// AFTER them (so ExtraFiles keep fd 3..) and passes the real fd via
+// trampolineHsFdEnv; the trampoline reads it through childHandshakeFD.
+const defaultHandshakeFD int = 3
 
 // Status bytes the trampoline writes to handshakeFD before it exits on failure.
 const (
-	handshakeApplyFail byte = 'A' // a setrlimit/umask application failed.
-	handshakeExecFail  byte = 'E' // the execve of the real target failed.
+	handshakeApplyFail  byte = 'A' // a setrlimit/umask application failed.
+	handshakeExecFail   byte = 'E' // the execve of the real target failed.
+	handshakeCgroupFail byte = 'C' // the pre-exec cgroup.procs placement failed.
 )
 
 // handshake is the parent side of the trampoline status pipe: the child inherits
@@ -106,6 +109,10 @@ func handshakeError(code byte) error {
 	case handshakeApplyFail:
 		//: an unhonourable limit is the central RlimitFailed sentinel.
 		return coreproc.RlimitFailed
+	//: the trampoline could not place the child into the requested cgroup.
+	case handshakeCgroupFail:
+		//: a refused cgroup.procs write is the central CgroupWriteFailed sentinel.
+		return coreproc.CgroupWriteFailed
 	//: the trampoline could not execve the real target.
 	case handshakeExecFail:
 		//: a failed execve is the central SpawnFailed sentinel.

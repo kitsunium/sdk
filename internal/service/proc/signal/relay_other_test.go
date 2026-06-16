@@ -1,4 +1,4 @@
-//go:build !unix
+//go:build !unix && !windows
 
 // Package signal_test — non-Unix Relay contract: the stub must return the typed
 // UnsupportedPlatform sentinel rather than acting or panicking.

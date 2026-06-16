@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "relay_other.go",
         "relay_unix.go",
+        "relay_windows.go",
         "signal.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/signal",
@@ -50,6 +51,9 @@ go_library(
         "@rules_go//go/platform:solaris": [
             "//internal/kernel/errs",
         ],
+        "@rules_go//go/platform:windows": [
+            "//internal/kernel/errs",
+        ],
         "//conditions:default": [],
     }),
 )
@@ -67,6 +71,7 @@ go_test(
     name = "signal_test",
     srcs = [
         "relay_other_test.go",
+        "relay_windows_test.go",
         "signal_external_test.go",
     ],
     deps = select({

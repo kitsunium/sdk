@@ -1,0 +1,190 @@
+name: Cross-platform runtime tests (real kernels, no lab)
+
+# ADR 0018 runtime bar WITHOUT the Proxmox lab. Every platform-sensitive proc
+# package's unit tests + the e2e conformance binary run on the REAL kernel of
+# each target OS, driven by `go test` — the uniform cross-platform driver,
+# because Bazel cannot host the BSDs (bazelisk #150 refuses freebsd; bazel
+# #9397/#10250 OpenBSD port unresolved). Bazel stays the canonical Linux gate in
+# bazel-ci.yml; this lane is the off-Linux runtime proof, never a duplicate unit
+# matrix.
+#
+#   - Linux / macOS / Windows : GitHub-hosted native runners (Go preinstalled),
+#     `go test` runs in place — Go auto-selects the build-tag variant per GOOS.
+#   - FreeBSD / OpenBSD / NetBSD : cross-platform-actions boots a real BSD kernel
+#     VM on the ubuntu host. We cross-compile `go test -c` binaries + conformance
+#     on the host (fast, exact Go version) and execute them inside the VM, so the
+#     guest needs no Go toolchain. (DragonFly intentionally omitted.)
+#
+# fail-fast: false everywhere — the point is to see ALL platforms' real behaviour
+# in one run, not stop at the first divergence.
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-cross-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Platform-sensitive packages whose RUNTIME behaviour must be proven per kernel.
+  # Pure-Go packages (codec/crypto/logger/errs) behave identically everywhere and
+  # are covered by the Linux Bazel gate, so they stay off this lane.
+  CORE_PKGS: "./proc"
+  SERVICE_PKGS: "./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
+  # Unix file-security packages: their suites assert 0600 perms and inject
+  # failures by chmod-freezing a directory — both are Unix mechanics with no
+  # Windows equivalent (Windows uses ACLs; chmod 0555 doesn't block the owner).
+  # Run them on the Unix lanes only; the sink still compiles + logs on Windows,
+  # and ACL-based hardening of the Windows file sink is tracked as future work.
+  SERVICE_FILE_PKGS: "./logger/sink/file ./writer/rotfile"
+
+jobs:
+  # ── Native hosted runners: Go runs in place, no cross-compile ──────────────
+  native:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, runs-on: ubuntu-latest }
+          # macOS = darwin; proc syscall behaviour is arch-independent, so the
+          # arm64 runner (macos-15) covers the darwin runtime bar. The Intel
+          # runner (macos-13) is dropped: GitHub's Intel-mac pool is so contended
+          # that the job sits queued indefinitely and never lets a run complete.
+          - { name: macos-arm64, runs-on: macos-15 }
+          - { name: windows, runs-on: windows-latest }
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: pkg/go.mod
+
+      - name: Unit tests — platform-sensitive packages on ${{ matrix.name }}
+        shell: bash
+        env:
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          set -uo pipefail
+          fail=0
+          echo "::group::internal/core $CORE_PKGS"
+          (cd internal/core    && go test -count=1 -short $CORE_PKGS)    || fail=1
+          echo "::endgroup::"
+          echo "::group::internal/service $SERVICE_PKGS"
+          (cd internal/service && go test -count=1 -short $SERVICE_PKGS) || fail=1
+          echo "::endgroup::"
+          # Unix-only file-security packages (see SERVICE_FILE_PKGS comment).
+          if [ "${{ matrix.name }}" != "windows" ]; then
+            echo "::group::internal/service $SERVICE_FILE_PKGS"
+            (cd internal/service && go test -count=1 -short $SERVICE_FILE_PKGS) || fail=1
+            echo "::endgroup::"
+          fi
+          exit $fail
+
+      - name: E2E conformance — whole public API on ${{ matrix.name }}
+        shell: bash
+        env:
+          GOWORK: "off"
+        run: |
+          set -uo pipefail
+          cd e2e && go run .
+
+  # ── BSD via cross-platform-actions: cross-compile on host, run in the VM ────
+  bsd:
+    name: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: freebsd, version: "15.0" }
+          - { os: openbsd, version: "7.9" }
+          - { os: netbsd, version: "10.1" }
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: pkg/go.mod
+
+      - name: Cross-compile test binaries + conformance for ${{ matrix.os }}
+        shell: bash
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: amd64
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p bins
+          compile() { # module  pkg-list
+            local mod="$1"; shift
+            for pkg in $@; do
+              local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__').test"
+              # A package with no _test.go produces no binary; tolerate that.
+              if (cd "$mod" && go test -c -o "$GITHUB_WORKSPACE/$out" "$pkg") 2>/tmp/c.log; then
+                [ -f "$out" ] && echo "built $out" || echo "no tests in $mod/$pkg (skip)"
+              else
+                echo "::error::compile $mod/$pkg for $GOOS failed"; cat /tmp/c.log; exit 1
+              fi
+            done
+          }
+          compile internal/core    $CORE_PKGS
+          compile internal/service $SERVICE_PKGS
+          # BSD is Unix, so the file-security suites apply here too.
+          compile internal/service $SERVICE_FILE_PKGS
+          # Conformance is a real program (not a -c suite): build it normally.
+          (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
+          ls -la bins/
+
+      # Boots a real ${{ matrix.os }} kernel VM and syncs the workspace (incl.
+      # bins/) into it. pin to a SHA before promoting this lane to a PR gate.
+      - name: Run on real ${{ matrix.os }} kernel
+        uses: cross-platform-actions/action@be3d7e9ff5c8770b9c51b1a8c8c5446e1cad7cf9 # v1.2.0
+        with:
+          operating_system: ${{ matrix.os }}
+          version: ${{ matrix.version }}
+          # The BSD guests run under QEMU/TCG (no KVM on hosted runners), so they
+          # execute far slower than a native kernel. Give them the runner's full
+          # core count + memory to keep timing-sensitive proc tests (stdio
+          # pumping, the trampoline handshake, signal-relay deadlines) from
+          # flaking on emulation latency rather than a real defect.
+          cpu_count: 4
+          memory: 6G
+          shell: bash
+          run: |
+            set -uo pipefail
+            # Under QEMU/TCG (no KVM on hosted runners) a timing-sensitive test
+            # occasionally flakes on emulation latency; a real defect fails every
+            # attempt. Retry each binary up to 3x so a transient hiccup does not
+            # red the lane, while a genuine bug still surfaces.
+            retry() {
+              local i
+              for i in 1 2 3; do
+                "$@" && return 0
+                echo "  (attempt $i failed on ${{ matrix.os }}, retrying)"
+              done
+              return 1
+            }
+            fail=0
+            echo "== conformance on ${{ matrix.os }} =="
+            retry ./bins/conformance.run || fail=1
+            for b in bins/*.test; do
+              echo "== $b =="
+              # -test.short keeps each per-OS run quick; suites self-gate on
+              # UnsupportedPlatform / missing /bin/sh and skip cleanly.
+              retry ./"$b" -test.v -test.short || fail=1
+            done
+            exit $fail

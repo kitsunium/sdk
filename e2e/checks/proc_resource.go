@@ -81,7 +81,7 @@ var orphanArgs = []string{"sh", "-c", orphanScript}
 func Cgroup() harness.Suite {
 	//: a single end-to-end run holds the group handle across every sub-check, so
 	//: the create/limits/freeze/kill/delete results all observe one real group.
-	return harness.Suite{Domain: cgroupDomain, Checks: []harness.Check{cgroupConformance}}
+	return harness.Suite{Domain: cgroupDomain, Checks: []harness.Check{cgroupConformance, cgroupPreExecPlacement}}
 }
 
 // cgroupConformance runs the whole cgroup lifecycle against one real control
@@ -90,6 +90,13 @@ func Cgroup() harness.Suite {
 // the kernel's view back to prove enforcement, freeze/thaws, Kills the empty
 // tree, and always Deletes in cleanup.
 func cgroupConformance() harness.Result {
+	//: Windows has a Job Object cgroup backend, but this harness proves the effect
+	//: via the cgroup v2 filesystem (Linux-only); the Job Object mechanics are
+	//: covered on the real Windows kernel by the cgroup unit tests instead.
+	if runtime.GOOS == "windows" {
+		//: make no fs-based end-to-end claim on Windows — unit-tested separately.
+		return harness.NotSupported(cgroupDomain, "lifecycle", "Windows Job Object backend covered by unit tests; harness is cgroup-v2-fs specific")
+	}
 	//: cgroup v2 must be mounted AND delegated to us, else there is nothing to test.
 	if !cgroup.Available() {
 		//: the honest delegation probe failed — Linux without v2, or no write access.
@@ -118,6 +125,119 @@ func cgroupConformance() harness.Result {
 	defer cgroupCleanup(group)
 	//: prove each controller write reached the kernel and freeze/kill behave.
 	return cgroupExercise(group, dir)
+}
+
+// cgroupPreExecPlacement proves issue #91: a child spawned with Spec.CgroupPath
+// is a member of that cgroup at exec time, not a few syscalls later. It reads the
+// kernel's own <dir>/cgroup.procs back and requires the child's pid to be listed
+// — membership proven by the controller, never by a nil error.
+func cgroupPreExecPlacement() harness.Result {
+	//: pre-exec cgroup placement rides the Unix re-exec trampoline + cgroup.procs;
+	//: neither exists on Windows (Job Objects assign post-create), so make no claim.
+	if runtime.GOOS == "windows" {
+		//: Windows job-assignment is covered by the cgroup unit tests instead.
+		return harness.NotSupported(cgroupDomain, "placement", "pre-exec cgroup.procs placement is Linux-only; Windows uses Job Object assignment")
+	}
+	//: cgroup v2 must be mounted AND delegated, else there is nowhere to place into.
+	if !cgroup.Available() {
+		//: no delegated v2 hierarchy (also the non-Linux path) — make no claim.
+		return harness.NotSupported(cgroupDomain, "placement", "cgroup v2 not mounted / not delegated / not Linux")
+	}
+	name := "sdk-e2e-place-" + strconv.Itoa(os.Getpid())
+	//: a freshly created group gives a known path to place the child into.
+	group, err := cgroup.Create(name)
+	if err != nil {
+		//: a missing-delegation create fault is environmental, not a bug.
+		if cgroupEnvironmental(err) {
+			//: CI commonly lacks delegation — skip rather than fail.
+			return harness.Skipped(cgroupDomain, "placement", fmt.Sprintf("Create: %v", err))
+		}
+		//: off Linux the facade returns the uniform UnsupportedPlatform contract.
+		if perrs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+			//: the expected off-platform degradation, a success not a failure.
+			return harness.NotSupported(cgroupDomain, "placement", "Create returned UnsupportedPlatform")
+		}
+		//: any other create fault on a host that claimed Available is a real failure.
+		return harness.Failed(cgroupDomain, "placement", fmt.Sprintf("Create: %v", err))
+	}
+	//: always rmdir the group once the child is gone.
+	defer cgroupCleanup(group)
+	//: spawn into the group and verify membership against the kernel's view.
+	return cgroupPlacementExercise(filepath.Join(cgroupMountRoot, name))
+}
+
+// cgroupPlacementExercise spawns a short-lived child directly INTO dir via
+// Spec.CgroupPath, then requires its pid to appear in dir/cgroup.procs before
+// stopping it — the proof that placement happened at exec, with no post-spawn Add.
+func cgroupPlacementExercise(dir string) harness.Result {
+	//: a child that sleeps briefly stays alive long enough to read membership back.
+	proc, serr := process.Start(context.Background(), process.Spec{
+		Path:       "/bin/sh",
+		Args:       []string{"sh", "-c", "sleep 1"},
+		CgroupPath: dir,
+	})
+	if serr != nil {
+		//: off Linux Start rejects CgroupPath with UnsupportedPlatform — expected.
+		if perrs.HasCode(serr, coreproc.CodeUnsupportedPlatform) {
+			//: the expected off-platform refusal, a success not a failure.
+			return harness.NotSupported(cgroupDomain, "placement", "Start(CgroupPath) returned UnsupportedPlatform")
+		}
+		//: the group was just Created + delegated, so a placement-path error
+		//: (CgroupUnavailable/CgroupWriteFailed) is a REAL regression — fail loudly
+		//: rather than masking it as an environmental skip.
+		if perrs.HasCode(serr, coreproc.CodeCgroupWriteFailed) || perrs.HasCode(serr, coreproc.CodeCgroupUnavailable) {
+			//: a confinement failure on a known-good group is a genuine bug.
+			return harness.Failed(cgroupDomain, "placement", fmt.Sprintf("Start placement failed on a delegated group: %v", serr))
+		}
+		//: anything else (no /bin/sh ⇒ SpawnFailed) is environmental — make no claim.
+		return harness.Skipped(cgroupDomain, "placement", fmt.Sprintf("Start: %v", serr))
+	}
+	pid := strconv.Itoa(proc.PID())
+	//: read the kernel's membership list for the group while the child is alive.
+	procs, rerr := os.ReadFile(filepath.Join(dir, "cgroup.procs"))
+	//: stop + reap the child regardless of the read outcome so nothing lingers.
+	swallowStop(proc)
+	if rerr != nil {
+		//: an unreadable cgroup.procs is an environmental fault on the read path.
+		return harness.Failed(cgroupDomain, "placement", fmt.Sprintf("read cgroup.procs: %v", rerr))
+	}
+	//: membership is proven only if the child's pid is one of the listed pids.
+	if !containsPID(string(procs), pid) {
+		//: pid absent ⇒ the child ran OUTSIDE the group — the exact bug #91 closes.
+		return harness.Failed(cgroupDomain, "placement",
+			fmt.Sprintf("pid %s absent from cgroup.procs %q — child was NOT placed at exec time",
+				pid, strings.TrimSpace(string(procs))))
+	}
+	//: the child was a member from its first instruction — no unconfined window.
+	return harness.Passed(cgroupDomain, "placement", "child pid present in cgroup.procs at exec time (no post-spawn Add)")
+}
+
+// swallowStop terminates and reaps a placement-check child, ignoring faults: the
+// check's verdict is the membership read, not the teardown.
+func swallowStop(proc process.Process) {
+	//: SIGTERM the group with a short grace, then reap; a sleeping shell exits at once.
+	if err := proc.Stop(context.Background(), time.Second, process.SIGTERM); err != nil {
+		//: a stop fault is best-effort cleanup, not the check's verdict.
+		_, _ = proc.Wait()
+		return
+	}
+	//: reap the exited child so it does not linger as a zombie.
+	_, _ = proc.Wait()
+}
+
+// containsPID reports whether procs (a newline-separated cgroup.procs body)
+// lists want as one of its pids.
+func containsPID(procs, want string) bool {
+	//: each line is one pid; a trimmed exact match is membership.
+	for _, line := range strings.Split(procs, "\n") {
+		//: compare the trimmed line to the wanted pid.
+		if strings.TrimSpace(line) == want {
+			//: the child's pid is in the group's process list.
+			return true
+		}
+	}
+	//: the pid was not found among the group's members.
+	return false
 }
 
 // cgroupExercise runs the limit-readback, freeze/thaw, and kill steps against the
