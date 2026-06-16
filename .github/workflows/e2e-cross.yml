@@ -34,7 +34,13 @@ env:
   # Pure-Go packages (codec/crypto/logger/errs) behave identically everywhere and
   # are covered by the Linux Bazel gate, so they stay off this lane.
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal ./logger/sink/file ./writer/rotfile"
+  SERVICE_PKGS: "./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
+  # Unix file-security packages: their suites assert 0600 perms and inject
+  # failures by chmod-freezing a directory — both are Unix mechanics with no
+  # Windows equivalent (Windows uses ACLs; chmod 0555 doesn't block the owner).
+  # Run them on the Unix lanes only; the sink still compiles + logs on Windows,
+  # and ACL-based hardening of the Windows file sink is tracked as future work.
+  SERVICE_FILE_PKGS: "./logger/sink/file ./writer/rotfile"
 
 jobs:
   # ── Native hosted runners: Go runs in place, no cross-compile ──────────────
@@ -73,6 +79,12 @@ jobs:
           echo "::group::internal/service $SERVICE_PKGS"
           (cd internal/service && go test -count=1 -short $SERVICE_PKGS) || fail=1
           echo "::endgroup::"
+          # Unix-only file-security packages (see SERVICE_FILE_PKGS comment).
+          if [ "${{ matrix.name }}" != "windows" ]; then
+            echo "::group::internal/service $SERVICE_FILE_PKGS"
+            (cd internal/service && go test -count=1 -short $SERVICE_FILE_PKGS) || fail=1
+            echo "::endgroup::"
+          fi
           exit $fail
 
       - name: E2E conformance — whole public API on ${{ matrix.name }}
@@ -128,6 +140,8 @@ jobs:
           }
           compile internal/core    $CORE_PKGS
           compile internal/service $SERVICE_PKGS
+          # BSD is Unix, so the file-security suites apply here too.
+          compile internal/service $SERVICE_FILE_PKGS
           # Conformance is a real program (not a -c suite): build it normally.
           (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
           ls -la bins/
