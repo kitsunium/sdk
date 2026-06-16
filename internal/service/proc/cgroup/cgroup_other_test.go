@@ -1,11 +1,10 @@
-//go:build !linux
+//go:build !linux && !windows
 
-// Package cgroup_test — non-Linux contract mirror: cgroup v2 is Linux-only, so
-// the stub reports Available() == false and Create returns the central
-// UnsupportedPlatform sentinel on every non-Linux target. The full lifecycle is
-// covered by cgroup_external_test.go on Linux; this complement is built and run
-// off Linux (darwin/windows/the BSDs) so the e2e-vm CI binary validates the
-// off-platform degrade on a real non-Linux kernel.
+// Package cgroup_test — degrade contract mirror for targets with no control-group
+// facility: cgroup v2 is Linux-only and Windows has a Job Object backend
+// (cgroup_windows_test.go), so this covers darwin and the BSDs, where the stub
+// reports Available() == false and Create returns the central UnsupportedPlatform
+// sentinel. The full Linux lifecycle is covered by cgroup_external_test.go.
 package cgroup_test
 
 import (

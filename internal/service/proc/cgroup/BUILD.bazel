@@ -8,6 +8,7 @@ go_library(
         "cgroup.go",
         "cgroup_linux.go",
         "cgroup_other.go",
+        "cgroup_windows.go",
         "option.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/cgroup",
@@ -22,6 +23,9 @@ go_library(
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:linux": [
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:windows": [
             "//internal/kernel/errs",
         ],
         "//conditions:default": [],
@@ -42,6 +46,7 @@ go_test(
     srcs = [
         "cgroup_external_test.go",
         "cgroup_other_test.go",
+        "cgroup_windows_test.go",
     ],
     deps = [
         ":cgroup",
