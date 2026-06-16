@@ -395,8 +395,19 @@ func TestStartLimitsHonoured(t *testing.T) {
 // rejects with EINVAL regardless of privilege — Start surfaces the typed
 // RlimitFailed through the handshake pipe, not a silent non-zero child exit the
 // caller could not distinguish from a legitimate target exit.
+//
+// Linux, Darwin, NetBSD and OpenBSD reject Soft>Hard with EINVAL, so the error
+// path is exercised there. FreeBSD/DragonFly's setrlimit instead CLAMPS Soft to
+// Hard rather than failing, so this particular input cannot reproduce the apply
+// failure on them — skip there. The trampoline's failure-propagation mechanic is
+// platform-neutral code and stays covered on the four kernels that reject it.
 func TestStartTrampolineApplyFailureTyped(t *testing.T) {
 	t.Parallel()
+	//: FreeBSD/DragonFly clamp Soft>Hard instead of EINVAL, so the failure this
+	//: test injects is not reproducible there; the mechanic is covered elsewhere.
+	if runtime.GOOS == "freebsd" || runtime.GOOS == "dragonfly" {
+		t.Skip("FreeBSD/DragonFly setrlimit clamps Soft>Hard rather than rejecting it")
+	}
 
 	spec := coreproc.Spec{
 		Path: shPath,
