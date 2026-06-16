@@ -197,9 +197,18 @@ func (g *controlGroupWindows) SetPidsMax(n int64) error {
 		//: re-apply the cleared cap.
 		return g.applyExtended()
 	}
-	//: arm the active-process cap at n.
+	//: arm the active-process cap at n, clamped to the field's uint32 ceiling so a
+	//: value beyond it caps at the maximum the Job Object can express rather than
+	//: silently wrapping to a small (wrong) limit.
 	g.ext.basicLimitInformation.limitFlags |= jobLimitActiveProcess
-	g.ext.basicLimitInformation.activeProcessLimit = uint32(n)
+	//: clamp n to the uint32 max the ActiveProcessLimit field can hold.
+	if n > int64(^uint32(0)) {
+		//: cap at the largest representable limit instead of wrapping.
+		g.ext.basicLimitInformation.activeProcessLimit = ^uint32(0)
+	} else {
+		//: n fits the field — use it verbatim.
+		g.ext.basicLimitInformation.activeProcessLimit = uint32(n)
+	}
 	//: push the updated struct.
 	return g.applyExtended()
 }

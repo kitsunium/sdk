@@ -152,7 +152,7 @@ jobs:
       # Boots a real ${{ matrix.os }} kernel VM and syncs the workspace (incl.
       # bins/) into it. pin to a SHA before promoting this lane to a PR gate.
       - name: Run on real ${{ matrix.os }} kernel
-        uses: cross-platform-actions/action@v1.2.0
+        uses: cross-platform-actions/action@be3d7e9ff5c8770b9c51b1a8c8c5446e1cad7cf9 # v1.2.0
         with:
           operating_system: ${{ matrix.os }}
           version: ${{ matrix.version }}
