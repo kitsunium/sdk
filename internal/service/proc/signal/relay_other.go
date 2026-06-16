@@ -1,4 +1,4 @@
-//go:build !unix
+//go:build !unix && !windows
 
 // Package signal — non-Unix Relay stub: kill(2)-style group/pid delivery is not
 // available off Unix, so Relay degrades to the typed UnsupportedPlatform
