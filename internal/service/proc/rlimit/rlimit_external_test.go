@@ -65,14 +65,15 @@ func readSoftNoFile(t *testing.T) uint64 {
 
 // TestApplyNoFileObservable applies a lowered RLIMIT_NOFILE to the current
 // process and asserts the new soft ceiling is observable via /proc/self/limits —
-// the issue's primary acceptance criterion.
+// the issue's primary acceptance criterion. The /proc readback is Linux-specific;
+// the portable getrlimit(2) readback in rlimit_unix_test.go proves the same
+// native effect on every other Unix target.
 func TestApplyNoFileObservable(t *testing.T) {
-	//: only Linux provides setrlimit + procfs observability.
+	//: /proc/self/limits exists only on Linux; other Unix targets prove the
+	//: setrlimit effect via getrlimit(2) in rlimit_unix_test.go.
 	if runtime.GOOS != "linux" {
-		//: assert the stub contract instead of the syscall behaviour.
-		assertUnsupported(t)
-		//: nothing further to observe off Linux.
-		return
+		//: nothing to observe through procfs off Linux.
+		t.Skip("/proc/self/limits observability is Linux-only")
 	}
 	before := readSoftNoFile(t)
 	//: a soft ceiling under 16 is implausible and would make the test moot.
@@ -95,21 +96,6 @@ func TestApplyNoFileObservable(t *testing.T) {
 	if got != target {
 		//: the limit did not take effect — the core assertion failed.
 		t.Fatalf("soft nofile = %d, want %d", got, target)
-	}
-}
-
-// assertUnsupported asserts that off Linux every entry point returns the typed
-// UnsupportedPlatform sentinel and never panics.
-func assertUnsupported(t *testing.T) {
-	t.Helper()
-	err := rlimit.Apply(0, map[coreproc.Resource]coreproc.LimitValue{
-		//: any resource will do; the stub rejects before mapping.
-		coreproc.ResourceNoFile: {Soft: 1024, Hard: 1024},
-	})
-	//: the stub must surface UNSUPPORTED_PLATFORM, not nil.
-	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
-		//: a missing typed error breaks the degrade-gracefully contract.
-		t.Fatalf("Apply off Linux = %v, want UnsupportedPlatform", err)
 	}
 }
 
@@ -140,9 +126,9 @@ func TestApplyTable(t *testing.T) {
 	t.Parallel()
 	//: choose the expected code for the unknown-resource row by platform.
 	unknownWant := coreproc.CodeUnknownResource
-	//: off Linux the stub short-circuits to UNSUPPORTED_PLATFORM before mapping.
-	if runtime.GOOS != "linux" {
-		//: the non-Linux stub never reaches the resource table.
+	//: a non-Unix target degrades to UNSUPPORTED_PLATFORM before the table.
+	if !nativeRlimit {
+		//: the non-Unix stub never reaches the resource table.
 		unknownWant = coreproc.CodeUnsupportedPlatform
 	}
 	cases := []applyCase{
@@ -150,7 +136,7 @@ func TestApplyTable(t *testing.T) {
 			name:    "empty-limits",
 			pid:     0,
 			limits:  map[coreproc.Resource]coreproc.LimitValue{},
-			wantErr: nonLinuxOrZero(),
+			wantErr: emptyLimitsWant(),
 		},
 		{
 			name: "unknown-resource",
@@ -174,15 +160,16 @@ func TestApplyTable(t *testing.T) {
 	}
 }
 
-// nonLinuxOrZero returns UnsupportedPlatform off Linux and the success sentinel
-// (0) on Linux, so the empty-limits row asserts the right outcome per platform.
-func nonLinuxOrZero() errs.Code {
-	//: an empty map is a no-op success on Linux.
-	if runtime.GOOS == "linux" {
+// emptyLimitsWant returns the success sentinel (0) where rlimits apply natively
+// (every Unix target) and UnsupportedPlatform on a non-Unix target, so the
+// empty-limits row asserts the right outcome per platform.
+func emptyLimitsWant() errs.Code {
+	//: an empty map is a no-op success wherever rlimit acts natively.
+	if nativeRlimit {
 		//: zero marks the success expectation in the table.
 		return 0
 	}
-	//: off Linux even an empty map returns the stub's typed error.
+	//: off Unix even an empty map returns the stub's typed error.
 	return coreproc.CodeUnsupportedPlatform
 }
 
@@ -239,10 +226,11 @@ func TestPrepareSysProcAttr(t *testing.T) {
 	err := rlimit.PrepareSysProcAttr(map[coreproc.Resource]coreproc.LimitValue{
 		coreproc.ResourceUnknown: {Soft: 1, Hard: 1},
 	})
-	//: off Linux the stub returns UNSUPPORTED_PLATFORM; on Linux UNKNOWN_RESOURCE.
+	//: on a non-Unix target the stub returns UNSUPPORTED_PLATFORM; natively the
+	//: unmapped resource surfaces UNKNOWN_RESOURCE.
 	want := coreproc.CodeUnknownResource
 	//: select the platform-correct expectation.
-	if runtime.GOOS != "linux" {
+	if !nativeRlimit {
 		//: the stub short-circuits before the resource table.
 		want = coreproc.CodeUnsupportedPlatform
 	}

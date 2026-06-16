@@ -1,11 +1,10 @@
-//go:build !linux
+//go:build !unix
 
-// Package rlimit_test — non-Linux contract mirror: setrlimit/prlimit64 semantics
-// and the RLIMIT_* table exist only on the Linux build, so every entry point
-// degrades to the central UnsupportedPlatform sentinel off Linux. The Linux
-// behaviour is covered by rlimit_external_test.go; this complement is built and
-// run off Linux (darwin/windows/the BSDs) so the e2e-vm CI binary validates the
-// off-platform degrade on a real non-Linux kernel.
+// Package rlimit_test — non-Unix contract mirror: setrlimit(2) is a Unix mechanic
+// with no equivalent on these targets (Windows, plan9, js/wasm), so every entry
+// point degrades to the central UnsupportedPlatform sentinel. Native Unix
+// behaviour is covered by rlimit_unix_test.go; this complement runs on the
+// non-Unix CI lanes so the off-platform degrade is validated on a real kernel.
 package rlimit_test
 
 import (
@@ -16,9 +15,9 @@ import (
 	"github.com/kitsunium/sdk/internal/service/proc/rlimit"
 )
 
-// TestApplyUnsupportedOffLinux asserts Apply degrades to UnsupportedPlatform off
-// Linux for any resource — the stub rejects before reaching the RLIMIT_* table.
-func TestApplyUnsupportedOffLinux(t *testing.T) {
+// TestApplyUnsupportedOffUnix asserts Apply degrades to UnsupportedPlatform on a
+// non-Unix target for any resource — the stub rejects before any RLIMIT_* table.
+func TestApplyUnsupportedOffUnix(t *testing.T) {
 	t.Parallel()
 
 	err := rlimit.Apply(0, map[coreproc.Resource]coreproc.LimitValue{
@@ -27,23 +26,23 @@ func TestApplyUnsupportedOffLinux(t *testing.T) {
 	})
 	//: the stub must surface the central UNSUPPORTED_PLATFORM code.
 	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
-		//: a missing code breaks the degrade-gracefully contract off Linux.
-		t.Fatalf("Apply off Linux = %v, want CodeUnsupportedPlatform", err)
+		//: a missing code breaks the degrade-gracefully contract off Unix.
+		t.Fatalf("Apply off Unix = %v, want CodeUnsupportedPlatform", err)
 	}
 }
 
-// TestPrepareUnsupportedOffLinux asserts the no-syscall validator likewise
-// reports UnsupportedPlatform off Linux, matching what Apply would return.
-func TestPrepareUnsupportedOffLinux(t *testing.T) {
+// TestPrepareUnsupportedOffUnix asserts the no-syscall validator likewise reports
+// UnsupportedPlatform on a non-Unix target, matching what Apply would return.
+func TestPrepareUnsupportedOffUnix(t *testing.T) {
 	t.Parallel()
 
 	err := rlimit.PrepareSysProcAttr(map[coreproc.Resource]coreproc.LimitValue{
-		//: the validator must short-circuit before the platform table off Linux.
+		//: the validator must short-circuit before the platform table off Unix.
 		coreproc.ResourceNoFile: {Soft: 1024, Hard: 1024},
 	})
 	//: the stub validator must surface the central UNSUPPORTED_PLATFORM code.
 	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
-		//: a missing code breaks the fail-fast contract off Linux.
-		t.Fatalf("PrepareSysProcAttr off Linux = %v, want CodeUnsupportedPlatform", err)
+		//: a missing code breaks the fail-fast contract off Unix.
+		t.Fatalf("PrepareSysProcAttr off Unix = %v, want CodeUnsupportedPlatform", err)
 	}
 }
