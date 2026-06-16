@@ -17,6 +17,7 @@ go_library(
         "handle_unix.go",
         "handle_windows.go",
         "handshake_unix.go",
+        "joblimits_windows.go",
         "limits_unix.go",
         "limittable_as.go",
         "limittable_openbsd.go",

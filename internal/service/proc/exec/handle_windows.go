@@ -25,6 +25,7 @@ type handle struct {
 	pid     int
 	setpgid bool
 	stdio   *stdioState
+	job     *jobLimit
 
 	waitOnce sync.Once
 	waitVal  coreproc.ExitValue
@@ -34,10 +35,11 @@ type handle struct {
 
 // newHandle wraps a freshly started *os.Process. setpgid records whether the
 // child leads its own (console) process group; stdio owns the capture copiers
-// Wait joins.
-func newHandle(p *os.Process, setpgid bool, stdio *stdioState) *handle {
+// Wait joins; job (may be nil) is the rlimit Job Object released once the child
+// is reaped.
+func newHandle(p *os.Process, setpgid bool, stdio *stdioState, job *jobLimit) *handle {
 	//: capture the pid once; Windows reuses pids only after the handle closes.
-	return &handle{proc: p, pid: p.Pid, setpgid: setpgid, stdio: stdio, done: make(chan struct{})}
+	return &handle{proc: p, pid: p.Pid, setpgid: setpgid, stdio: stdio, job: job, done: make(chan struct{})}
 }
 
 // PID reports the process identifier.
@@ -56,6 +58,8 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 		close(h.done)
 		//: join the capture copiers so every byte reached the caller's writers.
 		h.stdio.wait()
+		//: release the rlimit Job Object now the child is reaped (no-op when nil).
+		h.job.close()
 		//: a Wait host fault (not a non-zero exit) is a typed WAIT_FAILED.
 		if wErr != nil {
 			//: wrap the os.Process.Wait cause under the central WAIT_FAILED fields.
