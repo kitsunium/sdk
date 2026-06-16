@@ -113,10 +113,11 @@ func runTrampoline(payload string) {
 	//: arm the handshake fd to close on a successful execve so the parent reads
 	//: EOF; if it cannot be armed, fail rather than risk the parent blocking on a
 	//: descriptor the target would inherit.
-	if !armHandshakeClose() {
+	if fd, errno := armHandshakeClose(); errno != 0 {
 		//: report the exec failure and exit instead of execing un-armed.
 		reportHandshake(handshakeExecFail)
-		stderrLine("sdk trampoline: could not arm handshake fd")
+		stderrLine("sdk trampoline: could not arm handshake fd " + strconv.Itoa(fd) +
+			": " + errno.Error())
 		os.Exit(trampolineExecExit)
 	}
 	target := os.Args[1]
@@ -167,13 +168,15 @@ func reportHandshake(code byte) {
 
 // armHandshakeClose marks the handshake fd close-on-exec so a successful execve
 // closes it (the parent reads EOF = success) while a failed execve leaves it open
-// for the failure byte. It reports whether the fd was armed.
-func armHandshakeClose() bool {
+// for the failure byte. It returns the fd it acted on and the fcntl errno (0 when
+// armed) so the caller's diagnostic can name both on failure.
+func armHandshakeClose() (fd int, errno syscall.Errno) {
 	//: set FD_CLOEXEC on the handshake fd via fcntl; errno 0 means it is armed.
-	_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(childHandshakeFD()),
+	fd = childHandshakeFD()
+	_, _, errno = syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd),
 		syscall.F_SETFD, syscall.FD_CLOEXEC)
-	//: a non-zero errno (only on an invalid fd) leaves the handshake un-armed.
-	return errno == 0
+	//: hand back the fd + errno; a non-zero errno leaves the handshake un-armed.
+	return fd, errno
 }
 
 // stderrLine writes a single diagnostic line to standard error, ignoring any
@@ -260,8 +263,10 @@ func applyRlimitToken(s string) string {
 	//: setrlimit applies the soft/hard pair to the resource pre-exec; new() takes
 	//: the address of the platform-typed Rlimit without a named temporary.
 	if err := syscall.Setrlimit(num, new(makeRlimit(soft, hard))); err != nil {
-		//: a refused limit (e.g. raising the hard cap unprivileged) fails the spawn.
-		return "setrlimit(" + numStr + "): " + err.Error()
+		//: a refused limit (e.g. raising the hard cap unprivileged) fails the spawn;
+		//: name the soft/hard pair so a per-kernel rejection is diagnosable.
+		return "setrlimit(" + numStr + ",soft=" + softStr + ",hard=" + hardStr +
+			"): " + err.Error()
 	}
 	//: the resource limit is in effect for the child.
 	return ""
