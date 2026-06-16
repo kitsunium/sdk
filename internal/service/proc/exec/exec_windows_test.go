@@ -85,22 +85,49 @@ func TestWindowsStdioCapture(t *testing.T) {
 	}
 }
 
-// TestWindowsRlimitsUnsupported asserts a Spec requesting rlimits degrades to the
-// uniform sentinel — resource limits are the Job Object cgroup backend's concern,
-// not silently dropped at spawn.
-func TestWindowsRlimitsUnsupported(t *testing.T) {
+// TestWindowsRlimitMemoryMapped asserts a mappable rlimit (address-space →
+// ProcessMemoryLimit) confines the child via a Job Object: the spawn succeeds and
+// the child runs to a clean exit under the cap.
+func TestWindowsRlimitMemoryMapped(t *testing.T) {
+	t.Parallel()
+	p, err := svcexec.Start(t.Context(), coreproc.Spec{
+		Path: comspec(t),
+		Args: []string{"cmd", "/c", "exit 0"},
+		Rlimits: map[coreproc.Resource]coreproc.LimitValue{
+			//: a generous 512 MiB address-space cap the child stays well under.
+			coreproc.ResourceAS: {Soft: 512 << 20, Hard: 512 << 20},
+		},
+	})
+	//: a mappable rlimit must confine the child, not reject the spawn.
+	if err != nil {
+		t.Fatalf("Start with mappable rlimit: %v", err)
+	}
+	exit, werr := p.Wait()
+	//: the confined child must still run to its normal exit.
+	if werr != nil {
+		t.Fatalf("Wait: %v", werr)
+	}
+	//: the child under the memory cap exits cleanly.
+	if exit.Code != 0 {
+		t.Fatalf("exit Code = %d, want 0", exit.Code)
+	}
+}
+
+// TestWindowsRlimitUnmappable asserts a Resource with no Job Object analogue
+// (RLIMIT_NOFILE) is rejected before any spawn with the typed UnknownResource.
+func TestWindowsRlimitUnmappable(t *testing.T) {
 	t.Parallel()
 	_, err := svcexec.Start(t.Context(), coreproc.Spec{
 		Path: comspec(t),
 		Args: []string{"cmd", "/c", "exit 0"},
 		Rlimits: map[coreproc.Resource]coreproc.LimitValue{
-			//: any resource triggers the honest degrade on the Windows spawn.
+			//: NOFILE has no Job Object equivalent — it must be refused.
 			coreproc.ResourceNoFile: {Soft: 64, Hard: 64},
 		},
 	})
-	//: rlimits at spawn must surface UNSUPPORTED_PLATFORM on Windows.
-	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
-		t.Fatalf("Start with rlimits = %v, want CodeUnsupportedPlatform", err)
+	//: an unmappable resource surfaces UNKNOWN_RESOURCE before the spawn.
+	if !errs.HasCode(err, coreproc.CodeUnknownResource) {
+		t.Fatalf("Start with unmappable rlimit = %v, want CodeUnknownResource", err)
 	}
 }
 

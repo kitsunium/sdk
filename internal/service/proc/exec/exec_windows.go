@@ -49,24 +49,66 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		//: propagate the typed UNSUPPORTED_PLATFORM verbatim.
 		return nil, cErr
 	}
+	//: build the Job Object confinement from the requested rlimits before the
+	//: spawn so an unmappable resource fails fast (UnknownResource), never a child.
+	job, jErr := newJobLimit(spec)
+	//: propagate an unmappable-resource / job-create failure verbatim.
+	if jErr != nil {
+		//: the typed UNKNOWN_RESOURCE / RLIMIT_FAILED, no process spawned.
+		return nil, jErr
+	}
 	sio, ioErr := buildStdio(spec)
 	//: a stdio fd-setup failure aborts before the spawn.
 	if ioErr != nil {
+		//: release the (still-empty) job before surfacing the failure.
+		job.close()
 		//: propagate the typed SPAWN_FAILED from the stdio setup verbatim.
 		return nil, ioErr
 	}
 	p, sErr := spawnWindows(spec, sio)
 	//: a CreateProcess failure already left the stdio fds for cleanup.
 	if sErr != nil {
-		//: release the half-wired stdio fds before surfacing the failure.
+		//: release the half-wired stdio fds + the job before surfacing the failure.
 		sio.closeAll()
+		job.close()
 		//: propagate the typed SPAWN_FAILED verbatim.
 		return nil, sErr
 	}
+	//: confine the freshly spawned child; a failed assign kills + reaps it so no
+	//: unconfined process escapes (a tiny assign-after-spawn window remains, as
+	//: os.StartProcess cannot CREATE_SUSPENDED).
+	if aErr := confine(job, p); aErr != nil {
+		//: release the stdio fds (no copiers started yet) and surface the failure.
+		sio.closeAll()
+		//: the typed RLIMIT_FAILED from the assignment.
+		return nil, aErr
+	}
 	//: the child owns its fd dups now — close the parent copies and start copiers.
 	sio.afterStart()
-	//: hand back the live supervision handle.
-	return newHandle(p, spec.Setpgid, sio), nil
+	//: hand back the live supervision handle, owning the job for its lifetime.
+	return newHandle(p, spec.Setpgid, sio, job), nil
+}
+
+// confine assigns p to job (when a job was requested). On failure it kills and
+// reaps the child and releases the job, so no unconfined process is left running.
+func confine(job *jobLimit, p *os.Process) error {
+	//: no job requested — the spawn is intentionally unconfined.
+	if job == nil {
+		//: nothing to assign.
+		return nil
+	}
+	//: bind the child to the job's limits.
+	if aErr := job.assign(p.Pid); aErr != nil {
+		//: kill + reap the child so it never runs outside its requested limits.
+		swallowErr(p.Kill())
+		_, _ = p.Wait()
+		//: release the job handle now the spawn is aborted.
+		job.close()
+		//: surface the typed RLIMIT_FAILED.
+		return aErr
+	}
+	//: the child is confined.
+	return nil
 }
 
 // spawnWindows builds the os.ProcAttr and starts the process via CreateProcess.
@@ -130,11 +172,9 @@ func buildArgv(spec coreproc.Spec) []string {
 // limits are confined via the Job Object cgroup backend, not at spawn here.
 func checkUnsupportedSpec(spec coreproc.Spec) error {
 	//: dispatch on the first unsupported field so the caller learns it failed.
+	//: Rlimits are NOT rejected here — newJobLimit confines the child via a Job
+	//: Object (mappable resources) or fails with UnknownResource (unmappable).
 	switch {
-	//: rlimits map to a Job Object, applied through the cgroup port, not at spawn.
-	case len(spec.Rlimits) > 0:
-		//: the bare sentinel carries the no-cause UNSUPPORTED_PLATFORM error.
-		return coreproc.UnsupportedPlatform
 	//: umask is a Unix file-mode concept with no Windows equivalent.
 	case spec.Umask != nil:
 		//: degrade honestly rather than ignore the requested umask.
