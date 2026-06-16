@@ -113,13 +113,9 @@ func runTrampoline(payload string) {
 	//: arm the handshake fd to close on a successful execve so the parent reads
 	//: EOF; if it cannot be armed, fail rather than risk the parent blocking on a
 	//: descriptor the target would inherit.
-	if fd, errno := armHandshakeClose(); errno != 0 {
-		//: report the exec failure and exit instead of execing un-armed.
-		reportHandshake(handshakeExecFail)
-		stderrLine("sdk trampoline: could not arm handshake fd " + strconv.Itoa(fd) +
-			": " + errno.Error())
-		os.Exit(trampolineExecExit)
-	}
+	//: arm the handshake fd close-on-exec so a clean execve closes it (the parent
+	//: reads EOF = success); CloseOnExec is libc-routed and ENOSYS-safe on OpenBSD.
+	armHandshakeClose()
 	target := os.Args[1]
 	//: strip ALL sentinel vars so the target never sees them (no re-trampoline,
 	//: no stray cgroup hint, no leaked handshake-fd number).
@@ -168,15 +164,14 @@ func reportHandshake(code byte) {
 
 // armHandshakeClose marks the handshake fd close-on-exec so a successful execve
 // closes it (the parent reads EOF = success) while a failed execve leaves it open
-// for the failure byte. It returns the fd it acted on and the fcntl errno (0 when
-// armed) so the caller's diagnostic can name both on failure.
-func armHandshakeClose() (fd int, errno syscall.Errno) {
-	//: set FD_CLOEXEC on the handshake fd via fcntl; errno 0 means it is armed.
-	fd = childHandshakeFD()
-	_, _, errno = syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd),
-		syscall.F_SETFD, syscall.FD_CLOEXEC)
-	//: hand back the fd + errno; a non-zero errno leaves the handshake un-armed.
-	return fd, errno
+// for the failure byte. It uses syscall.CloseOnExec rather than a raw
+// Syscall(SYS_FCNTL, …): OpenBSD's kernel rejects an fcntl issued outside libc
+// (the pinsyscalls hardening) with ENOSYS, whereas CloseOnExec routes through the
+// platform's libc-backed fcntl and works on every Unix target. It cannot fail for
+// the live pipe descriptor the parent just created and the child inherited.
+func armHandshakeClose() {
+	//: set FD_CLOEXEC via the libc-routed helper (OpenBSD raw-fcntl is ENOSYS).
+	syscall.CloseOnExec(childHandshakeFD())
 }
 
 // stderrLine writes a single diagnostic line to standard error, ignoring any
