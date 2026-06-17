@@ -24,9 +24,11 @@ import (
 const cgroupProcsFile string = "cgroup.procs"
 
 // cgroup2SuperMagic is the statfs f_type of the unified cgroup v2 filesystem
-// (CGROUP2_SUPER_MAGIC, the ASCII "cgrp"). Compared against int64(st.Type) so the
-// arch-dependent Statfs_t.Type field (int64 / uint32) widens cleanly.
-const cgroup2SuperMagic int64 = 0x63677270
+// (CGROUP2_SUPER_MAGIC, the ASCII "cgrp"). Typed uint64 and compared against
+// uint64(st.Type) so the arch-dependent Statfs_t.Type field (int64 on amd64/arm64,
+// int32 on 386/arm) widens cleanly — the conversion is real on every GOARCH (the
+// source is signed, the target unsigned), so it is never a redundant cast.
+const cgroup2SuperMagic uint64 = 0x63677270
 
 // cgroupProcsPerm is the perm passed to os.WriteFile; cgroup.procs always exists
 // so the mode is never used to create it — it mirrors the cgroup package's
@@ -63,7 +65,7 @@ func validateCgroupPath(path string) error {
 	}
 	//: the directory must sit on the cgroup2 filesystem — a normal directory that
 	//: merely contains a cgroup.procs file is NOT confinement and is rejected here.
-	if st.Type != cgroup2SuperMagic {
+	if uint64(st.Type) != cgroup2SuperMagic {
 		//: not a cgroup2 mount — refuse rather than spawn an unconfined child.
 		return wrapCgroupUnavailable(nil, errs.String("cgroup_path", path),
 			errs.String("reason", "path is not on a cgroup2 filesystem"))
