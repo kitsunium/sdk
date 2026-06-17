@@ -139,6 +139,11 @@ jobs:
         target:
           - { goos: linux, goarch: amd64 }
           - { goos: linux, goarch: arm64 }
+          # 32-bit guard (issue #94): the packed-uint32 Code type is
+          # arch-portable, so the whole SDK must build on 386/arm; these cells
+          # keep it from regressing back to a 64-bit-only build constraint.
+          - { goos: linux, goarch: "386" }
+          - { goos: linux, goarch: arm }
           - { goos: darwin, goarch: arm64 }
           - { goos: windows, goarch: amd64 }
           - { goos: freebsd, goarch: amd64 }

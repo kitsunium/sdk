@@ -261,3 +261,40 @@ func TestNewCredentialValue(t *testing.T) {
 		})
 	}
 }
+
+// TestNewMultiRotFileRotates proves the consumer-facing path that issue #93
+// exists to enable: a logger.RotFileConfig resolved through
+// NewMulti(Name:"rotfile") actually rotates at MaxBytes and retains at most
+// MaxBackups rotated siblings. The rotfile factory resolves only because the
+// public pkg/v1/logger/writer blank import (top of file) self-registers it.
+func TestNewMultiRotFileRotates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rot.log")
+	//: MaxBackups=2 caps the rotated siblings at rot.log.1 / rot.log.2.
+	lg, err := logger.NewMulti(logger.LevelInfo, logger.WriterSpec{
+		Name:   "rotfile",
+		Config: logger.RotFileConfig{Path: path, MaxBytes: 64, MaxBackups: 2},
+	})
+	//: the rotfile factory must resolve from the public writer blank import.
+	if err != nil || lg == nil {
+		t.Fatalf("NewMulti(rotfile) err=%v lg=%v want nil+logger", err, lg)
+	}
+	//: emit well past MaxBytes (each record far exceeds 64 bytes) so the sink
+	//: is forced through several rotations.
+	for range 8 {
+		logger.Info(t.Context(), lg, "rotfile-marker-with-enough-bytes-to-exceed-the-cap")
+	}
+	//: the active file must exist after the run.
+	if _, sErr := os.Stat(path); sErr != nil {
+		t.Fatalf("active file %s missing: %v", path, sErr)
+	}
+	//: at least the first rotated sibling must exist — rotation happened.
+	if _, sErr := os.Stat(path + ".1"); sErr != nil {
+		t.Errorf("expected rotated backup %s.1 to exist: %v", path, sErr)
+	}
+	//: MaxBackups=2 must be honoured — no third sibling survives the cap.
+	if _, sErr := os.Stat(path + ".3"); sErr == nil {
+		t.Errorf("backup %s.3 exists but MaxBackups=2 should have evicted it", path)
+	}
+}
