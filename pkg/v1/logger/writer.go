@@ -43,9 +43,10 @@ type CloudWatchConfig = corewriter.CloudWatchConfig
 // RotFileConfig configures the "rotfile" writer — a size- and/or age-capped,
 // optionally gzip-compressed on-disk file that rotates Path -> Path.1 … up to
 // MaxBackups (Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery
-// / MinLevel). Usable as a value once internal/service/writer/rotfile is imported
-// (it self-registers the "rotfile" factory); pass it via WriterSpec{Name:
-// "rotfile", Config: cfg} to NewMulti.
+// / MinLevel). Usable as a value once
+// github.com/kitsunium/sdk/pkg/v1/logger/writer is blank-imported (it
+// self-registers the "rotfile" factory alongside console and file); pass it via
+// WriterSpec{Name: "rotfile", Config: cfg} to NewMulti.
 type RotFileConfig = corewriter.RotFileConfig
 
 // ConsoleStream selects which standard stream the console writer targets.
