@@ -496,7 +496,7 @@ type ConsoleConfig = corewriter.ConsoleConfig
 ```
 
 <a name="ConsoleStream"></a>
-## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L52>)
+## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L53>)
 
 ConsoleStream selects which standard stream the console writer targets.
 
@@ -505,7 +505,7 @@ type ConsoleStream = corewriter.ConsoleStream
 ```
 
 <a name="CredentialProvider"></a>
-## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L56>)
+## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L57>)
 
 CredentialProvider yields short\-lived credentials on demand for the network writers; the SDK never logs or wraps the returned material.
 
@@ -514,7 +514,7 @@ type CredentialProvider = corewriter.CredentialProvider
 ```
 
 <a name="CredentialValue"></a>
-## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L60>)
+## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L61>)
 
 CredentialValue is the opaque, redacting credential set returned by a CredentialProvider; its String output is always "\<redacted\>".
 
@@ -523,7 +523,7 @@ type CredentialValue = corewriter.CredentialValue
 ```
 
 <a name="NewCredentialValue"></a>
-### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L64>)
+### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L65>)
 
 ```go
 func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue
@@ -708,7 +708,7 @@ FromConfig builds a Logger from raw, a config blob in the wire format named by f
 FromConfig returns TopologyInvalid \(1.1.0.4\) when format is unregistered, the blob is undecodable, the topology has no writers, a writer Name is unknown, or a writer rejects its options. The error is redacted: it names only the writer and the failure kind, never a decoded credential or option value.
 
 <a name="NewMulti"></a>
-### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L94>)
+### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L95>)
 
 ```go
 func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error)
@@ -810,9 +810,9 @@ type RecordSnapshot = corelogger.RecordEvent
 ```
 
 <a name="RotFileConfig"></a>
-## type [RotFileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L49>)
+## type [RotFileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L50>)
 
-RotFileConfig configures the "rotfile" writer — a size\- and/or age\-capped, optionally gzip\-compressed on\-disk file that rotates Path \-\> Path.1 … up to MaxBackups \(Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery / MinLevel\). Usable as a value once internal/service/writer/rotfile is imported \(it self\-registers the "rotfile" factory\); pass it via WriterSpec\{Name: "rotfile", Config: cfg\} to NewMulti.
+RotFileConfig configures the "rotfile" writer — a size\- and/or age\-capped, optionally gzip\-compressed on\-disk file that rotates Path \-\> Path.1 … up to MaxBackups \(Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery / MinLevel\). Usable as a value once github.com/kitsunium/sdk/pkg/v1/logger/writer is blank\-imported \(it self\-registers the "rotfile" factory alongside console and file\); pass it via WriterSpec\{Name: "rotfile", Config: cfg\} to NewMulti.
 
 ```go
 type RotFileConfig = corewriter.RotFileConfig
@@ -936,7 +936,7 @@ type WriterName = corewriter.Name
 ```
 
 <a name="WriterSpec"></a>
-## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L73>)
+## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L74>)
 
 WriterSpec names a writer and carries its concrete config. Read at call sites as logger.WriterSpec\{Name: "file", Config: logger.FileConfig\{Path: …\}\}. It is a type alias onto internal/core/writer, so the public type is identity\-equal to the internal writer model \(alias\-based public surface, zero runtime cost\).
 
