@@ -129,12 +129,12 @@ func Start(ctx context.Context, spec Spec) (proc Process, err error) {
 // [Start] is the non-panicking form for normal use. The panic value is the typed
 // error, so a top-level recover() can classify it via errs.CodeOf / HasCode.
 func MustStart(ctx context.Context, spec Spec) Process {
-	p, err := Start(ctx, spec)
+	live, err := Start(ctx, spec)
 	//: a failed spawn is the consumer's chosen crash point.
 	if err != nil {
 		//: panic with the typed error value, never a bare string.
 		panic(err)
 	}
 	//: the live process handle on success.
-	return p
+	return live
 }

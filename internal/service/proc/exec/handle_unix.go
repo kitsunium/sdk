@@ -22,13 +22,11 @@ import (
 // termination; the port reserves -1 for "died by signal, no status".
 const signalledCode int = -1
 
-// maxRSSKB reports the peak resident set size in kilobytes from the wait4
-// rusage. ru.Maxrss is already int64 on every Unix target, so it is read
-// directly without a conversion.
-func maxRSSKB(ru *syscall.Rusage) int64 {
-	//: the kernel reports peak RSS in kilobytes on Unix; pass it through.
-	return ru.Maxrss
-}
+// maxRSSKB (in maxrss_rss64_unix.go / maxrss_rss32_unix.go) reports the peak
+// resident set size in kilobytes from the wait4 rusage. Rusage.Maxrss is int64
+// on a 64-bit GOARCH but int32 on 386/arm, so the widening lives in a per-width
+// file: the 64-bit path passes the value through (no redundant cast), the 32-bit
+// path widens to int64.
 
 // handle is the live supervision handle for one spawned process. It owns the
 // *os.Process, remembers the leader pid and process-group id, and memoises the

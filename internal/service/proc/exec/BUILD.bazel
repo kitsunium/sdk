@@ -22,6 +22,8 @@ go_library(
         "limittable_as.go",
         "limittable_openbsd.go",
         "limittable_unix.go",
+        "maxrss_rss32_unix.go",
+        "maxrss_rss64_unix.go",
         "procfile_unix.go",
         "rlimit_value_default.go",
         "rlimit_value_signed.go",

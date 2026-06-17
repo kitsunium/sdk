@@ -164,8 +164,9 @@ func (s *EncWriter) Close() error {
 // [len(box) as uint32 big-endian || box]. A box too large for a uint32 length
 // returns FramingFailed.
 func frame(box []byte) (framed []byte, err error) {
-	//: reject boxes too large for the 32-bit length prefix.
-	if len(box) > math.MaxUint32 {
+	//: reject boxes too large for the 32-bit length prefix; widen to uint64 first
+	//: so the MaxUint32 constant does not overflow int on a 32-bit GOARCH.
+	if uint64(len(box)) > math.MaxUint32 {
 		//: no underlying cause — return the framing sentinel directly.
 		return nil, FramingFailed
 	}

@@ -1,14 +1,16 @@
-//go:build amd64 || arm64 || riscv64 || ppc64 || ppc64le || s390x
-
 // Package errs — defines the dotted-quad Code type introduced by
 // ADR 0005. Layout: MM.LL.PP.SS over uint32 — Major.Layer.Package.Serial.
 // Codes are comparable, ordered, map-keyable, and const-expressible via
 // hex literals (Pack is a runtime constructor only).
+//
+// Code is a packed uint32 (shifts/masks only), so it is fully portable across
+// 32- and 64-bit GOARCH — there is no build constraint here. Validation bounds
+// every Code to uint32 ≤ 0x7FFFFFFF (validate.go), so the rare int(code) cast
+// round-trips losslessly even where int is 32-bit.
 package errs
 
 import (
 	"strconv"
-	"unsafe"
 )
 
 // Shift values are WIRE-STABLE. Changing them breaks every persisted Code.
@@ -27,11 +29,6 @@ const (
 	MaskByPackage Code = 0xFF_FF_FF_00 // /24 — all codes sharing Major+Layer+Package
 	MaskExact     Code = 0xFF_FF_FF_FF // /32 — exact match only
 )
-
-// requiredIntSize is the expected size of `int` in bytes on supported
-// 64-bit GOARCH targets. Used by the compile-time guard below so the
-// magic number "8" stays named at its single point of use.
-const requiredIntSize uintptr = 8
 
 // padThreshold10 is the cutoff below which itoaPadded3 must emit two
 // leading zeros ("00X"). Named to avoid a bare magic literal.
@@ -54,12 +51,6 @@ type (
 	PkgCode uint8
 	Serial  uint8
 )
-
-// Compile-time guard — int must be `requiredIntSize` bytes so Code()/Layer()
-// int accessors never lose information via int(uint32) casting. The build
-// tag above enforces 64-bit GOARCH; this static assertion is belt-and-braces
-// for exotic build configurations that might bypass the tag.
-var _ [requiredIntSize - unsafe.Sizeof(int(0))]struct{}
 
 // Pack constructs a Code from its four octets. RUNTIME only — sentinel
 // constants MUST use hex literals so they stay const-expressible.
