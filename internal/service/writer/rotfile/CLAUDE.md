@@ -18,7 +18,7 @@ sink is reproduced here and, critically, **re-run on every reopen**.
 | File | Role |
 |---|---|
 | `rotfile.go` | `Writer` singleton, `rotFileFactory` (`Name` / `Open`) |
-| `rotating_sink_config.go` | `Config` value type (the one exported struct), incl. `RotateEvery` |
+| `rotating_sink_config.go` | `Config` — an **alias** of `core/writer.RotFileConfig` (moved there for issue #93 so `pkg/v1/logger` can re-export it); type identity unchanged |
 | `rotating_sink.go` | `rotatingSink` + `Write` / `Flush` / `Close` + `openHardened` / `refuseSymlink` / `newRotatingSink` (wires the interval daemon) |
 | `rotate_interval.go` | `tickRotate` — the `worker.Every` daemon tick body |
 | `decode.go` | `rotFileFactory.Decode` (`core/writer.Decoder`) + key-coercion helpers |

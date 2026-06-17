@@ -177,6 +177,7 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
   - [func NewMemorySink\(\) \*MemorySink](<#NewMemorySink>)
 - [type Record](<#Record>)
 - [type RecordSnapshot](<#RecordSnapshot>)
+- [type RotFileConfig](<#RotFileConfig>)
 - [type S3Config](<#S3Config>)
 - [type Sink](<#Sink>)
   - [func ConsoleStderr\(\) Sink](<#ConsoleStderr>)
@@ -495,7 +496,7 @@ type ConsoleConfig = corewriter.ConsoleConfig
 ```
 
 <a name="ConsoleStream"></a>
-## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L44>)
+## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L52>)
 
 ConsoleStream selects which standard stream the console writer targets.
 
@@ -504,7 +505,7 @@ type ConsoleStream = corewriter.ConsoleStream
 ```
 
 <a name="CredentialProvider"></a>
-## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L48>)
+## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L56>)
 
 CredentialProvider yields short\-lived credentials on demand for the network writers; the SDK never logs or wraps the returned material.
 
@@ -513,7 +514,7 @@ type CredentialProvider = corewriter.CredentialProvider
 ```
 
 <a name="CredentialValue"></a>
-## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L52>)
+## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L60>)
 
 CredentialValue is the opaque, redacting credential set returned by a CredentialProvider; its String output is always "\<redacted\>".
 
@@ -522,7 +523,7 @@ type CredentialValue = corewriter.CredentialValue
 ```
 
 <a name="NewCredentialValue"></a>
-### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L56>)
+### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L64>)
 
 ```go
 func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue
@@ -707,7 +708,7 @@ FromConfig builds a Logger from raw, a config blob in the wire format named by f
 FromConfig returns TopologyInvalid \(1.1.0.4\) when format is unregistered, the blob is undecodable, the topology has no writers, a writer Name is unknown, or a writer rejects its options. The error is redacted: it names only the writer and the failure kind, never a decoded credential or option value.
 
 <a name="NewMulti"></a>
-### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L86>)
+### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L94>)
 
 ```go
 func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error)
@@ -806,6 +807,15 @@ RecordSnapshot is a buffered copy of a single recorded log event. It is the elem
 
 ```go
 type RecordSnapshot = corelogger.RecordEvent
+```
+
+<a name="RotFileConfig"></a>
+## type [RotFileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L49>)
+
+RotFileConfig configures the "rotfile" writer — a size\- and/or age\-capped, optionally gzip\-compressed on\-disk file that rotates Path \-\> Path.1 … up to MaxBackups \(Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery / MinLevel\). Usable as a value once internal/service/writer/rotfile is imported \(it self\-registers the "rotfile" factory\); pass it via WriterSpec\{Name: "rotfile", Config: cfg\} to NewMulti.
+
+```go
+type RotFileConfig = corewriter.RotFileConfig
 ```
 
 <a name="S3Config"></a>
@@ -919,14 +929,14 @@ type WriterEntryConfig struct {
 <a name="WriterName"></a>
 ## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L27>)
 
-WriterName is the stable alias for a registered writer key \("console" / "file" / "s3" / "cloudwatch"\).
+WriterName is the stable alias for a registered writer key \("console" / "file" / "rotfile" / "s3" / "cloudwatch"\).
 
 ```go
 type WriterName = corewriter.Name
 ```
 
 <a name="WriterSpec"></a>
-## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L65>)
+## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L73>)
 
 WriterSpec names a writer and carries its concrete config. Read at call sites as logger.WriterSpec\{Name: "file", Config: logger.FileConfig\{Path: …\}\}. It is a type alias onto internal/core/writer, so the public type is identity\-equal to the internal writer model \(alias\-based public surface, zero runtime cost\).
 

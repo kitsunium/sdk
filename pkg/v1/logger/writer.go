@@ -23,7 +23,7 @@ const (
 )
 
 // WriterName is the stable alias for a registered writer key
-// ("console" / "file" / "s3" / "cloudwatch").
+// ("console" / "file" / "rotfile" / "s3" / "cloudwatch").
 type WriterName = corewriter.Name
 
 // ConsoleConfig configures the "console" writer (stream + optional MinLevel).
@@ -39,6 +39,14 @@ type S3Config = corewriter.S3Config
 // CloudWatchConfig configures the "cloudwatch" writer. Same import-gated
 // resolution as S3Config.
 type CloudWatchConfig = corewriter.CloudWatchConfig
+
+// RotFileConfig configures the "rotfile" writer — a size- and/or age-capped,
+// optionally gzip-compressed on-disk file that rotates Path -> Path.1 … up to
+// MaxBackups (Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery
+// / MinLevel). Usable as a value once internal/service/writer/rotfile is imported
+// (it self-registers the "rotfile" factory); pass it via WriterSpec{Name:
+// "rotfile", Config: cfg} to NewMulti.
+type RotFileConfig = corewriter.RotFileConfig
 
 // ConsoleStream selects which standard stream the console writer targets.
 type ConsoleStream = corewriter.ConsoleStream

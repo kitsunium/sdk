@@ -13,6 +13,7 @@ go_library(
         "config_file.go",
         "config_mysql.go",
         "config_redis.go",
+        "config_rotfile.go",
         "config_s3.go",
         "credentials.go",
         "errors.go",
@@ -28,6 +29,7 @@ go_library(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/kernel/snapshot",
     ],
