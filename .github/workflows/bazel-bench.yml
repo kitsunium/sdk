@@ -1,0 +1,85 @@
+name: Kernel Benchmarks
+
+# Kernel benchmarks are NOT part of the PR gate (bazel-ci.yml is). The bench
+# targets are tagged `manual` in Bazel, and `make sdk-bench` runs them via
+# `go test`, so they never run on a normal push. This workflow gives CI-driven
+# bench runs three ways: on demand, on a weekly cron (rolling baseline), and
+# opt-in per-PR via the `run-bench` label for performance-sensitive changes.
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "go test -count value (bench samples)"
+        required: false
+        default: "10"
+  schedule:
+    - cron: "0 6 * * 0" # Sunday 06:00 UTC — rolling baseline
+  pull_request:
+    types: [labeled]
+    # The job-level `if` gates this to the 'run-bench' label only.
+
+# Prevent concurrent bench runs on the same ref — parallel runs corrupt the
+# bazel/go caches and upload duplicate artifacts. Matches bazel-ci.yml policy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    # Run only for: manual dispatch, the weekly schedule, or a PR that just had
+    # the 'run-bench' label applied. A regular push or an unlabeled PR is a
+    # no-op — this workflow is never the PR gate.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'run-bench')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # SHA-pinned per .github/workflows/CLAUDE.md — version comments track the
+      # resolved human-readable tag (same pins as bazel-ci.yml).
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}-${{ hashFiles('.bazelrc', '.bazelversion', 'MODULE.bazel', '**/go.mod', '**/go.sum') }}
+          repository-cache: true
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: internal/kernel/go.mod
+          cache: true
+
+      - name: install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: run kernel benches
+        env:
+          COUNT: ${{ github.event.inputs.count || '10' }}
+        run: |
+          cd internal/kernel
+          GOWORK=off go test -run=^$ -bench=. -benchmem -count="$COUNT" ./... \
+              > "${GITHUB_WORKSPACE}/bench-current.txt"
+          cat "${GITHUB_WORKSPACE}/bench-current.txt"
+
+      - name: publish bench output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bench-${{ github.run_number }}
+          path: bench-current.txt
+          retention-days: 90
+
+      # benchstat A/B is a placeholder until baseline storage is decided (see the
+      # follow-up in #22). It must never fail the run, hence continue-on-error.
+      - name: benchstat A/B (when baseline available)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          # Future: download the latest main-branch bench-*.txt artefact via
+          # gh api, then `benchstat main.txt bench-current.txt`. Baseline
+          # storage is an open follow-up — see issue #22.
+          echo "benchstat A/B not wired yet — baseline storage is a follow-up (see #22)."
