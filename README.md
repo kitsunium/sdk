@@ -77,6 +77,21 @@ make lint    # drift check (read-only): mod tidy + gazelle + gofumpt + ktn-linte
 make bench   # regenerate codec BENCH.md from real Go benchmarks
 ```
 
+## Benchmarks
+
+Kernel hot-path benchmarks live next to their source as
+`internal/kernel/*/*_bench_test.go`. Run them via:
+
+```bash
+make sdk-bench          # steady-state numbers → .bench.out (benchstat-friendly)
+make sdk-bench-profile  # CPU / mem / block / mutex profiles → profiles/
+make sdk-bench-compare  # benchstat A/B comparison vs a recorded .bench.main.out
+```
+
+See `docs/BENCHMARK-TEMPLATE.md` for the bench conventions (white-box package,
+`b.Loop()`, mandatory `b.ReportAllocs()`, `_Parallel` variants, and the
+zero-alloc claims the CI gate enforces).
+
 ## License
 
 MIT — see [LICENSE](./LICENSE) for the full text.
