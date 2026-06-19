@@ -29,6 +29,7 @@ alias(
 go_test(
     name = "ring_test",
     srcs = [
+        "ring_bench_test.go",
         "ring_external_test.go",
         "ring_internal_test.go",
     ],
