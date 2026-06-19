@@ -1,3 +1,5 @@
+load("@rules_go//go:def.bzl", "go_test")
+
 # gazelle:prefix github.com/kitsunium/sdk/internal/kernel
 # gazelle:go_visibility //internal/kernel:kernel_consumers
 # gazelle:default_visibility //internal/kernel:kernel_consumers
@@ -19,5 +21,19 @@ package_group(
         "//internal/service/...",
         "//pkg/v1/...",
         "//third-party/...",
+    ],
+)
+
+go_test(
+    name = "kernel_test",
+    srcs = [
+        "zeroalloc_gate_race_test.go",
+        "zeroalloc_gate_test.go",
+    ],
+    deps = [
+        "//internal/kernel/buffer",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/kernel/ring",
     ],
 )
