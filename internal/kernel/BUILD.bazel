@@ -26,7 +26,10 @@ package_group(
 
 go_test(
     name = "kernel_test",
-    srcs = ["zeroalloc_gate_test.go"],
+    srcs = [
+        "zeroalloc_gate_race_test.go",
+        "zeroalloc_gate_test.go",
+    ],
     deps = [
         "//internal/kernel/buffer",
         "//internal/kernel/clock",
