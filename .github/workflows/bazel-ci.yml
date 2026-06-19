@@ -100,11 +100,12 @@ jobs:
       - name: test
         run: bazel test --config=ci //...
 
-      # The per-codec allocation-budget tests carry //go:build !race
-      # (testing.AllocsPerRun reports +1 under -race), so the race suite
+      # The per-codec allocation-budget tests AND the kernel zero-alloc
+      # invariant gate carry //go:build !race (testing.AllocsPerRun /
+      # testing.Benchmark report a spurious +1 under -race), so the race suite
       # above never compiles them. This race-off pass is their only gate.
-      - name: alloc-budget gate (race off)
-        run: bazel test --config=alloc //internal/service/codec/...
+      - name: alloc + zero-alloc gates (race off)
+        run: bazel test --config=alloc //internal/service/codec/... //internal/kernel:kernel_test
 
       - name: coverage
         run: |
