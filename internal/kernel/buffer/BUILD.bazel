@@ -20,6 +20,7 @@ go_test(
     name = "buffer_test",
     size = "small",
     srcs = [
+        "buffer_bench_test.go",
         "buffer_external_test.go",
         "buffer_internal_test.go",
     ],
