@@ -67,14 +67,18 @@ var gatedBenches = []struct {
 }
 
 // TestZeroAllocInvariant runs each gated probe programmatically via
-// testing.Benchmark and asserts AllocsPerOp == 0. Go's adaptive N keeps each
-// probe in the millisecond range, so the whole gate finishes well under the
-// 30-second budget — safe for the regular (race-off) CI lane.
+// testing.Benchmark and asserts AllocsPerOp == 0.
+//
+// Subtests run SERIALLY (no t.Parallel) on purpose: testing.Benchmark derives
+// AllocsPerOp from runtime.MemStats, a process-global allocation counter, so
+// two probes measuring concurrently would attribute each other's allocations
+// and could flake the == 0 assertion. This mirrors the codec allocation-budget
+// gate, which omits t.Parallel for the same reason. Go's adaptive N keeps each
+// probe in the millisecond range, so the serial gate still finishes well under
+// the 30-second budget.
 func TestZeroAllocInvariant(t *testing.T) {
-	t.Parallel()
 	for _, g := range gatedBenches {
 		t.Run(g.name, func(t *testing.T) {
-			t.Parallel()
 			//: programmatic bench — adaptive N amortises GC events to ~0/op.
 			result := testing.Benchmark(g.fn)
 			if got := result.AllocsPerOp(); got != 0 {
