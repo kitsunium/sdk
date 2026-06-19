@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// benchSentinel is a representative origin *Error: a fully populated sentinel
-// with Code/Reason/Public/Private and one field. The Of-accessors walk a chain
-// down to the deepest *Error, so a realistic fixture is a stdlib error wrapped
-// twice over this sentinel.
+// benchSentinel is a representative origin *Error: a sentinel with
+// Code/Reason/Public/Private (no Fields — Define attaches none; fields are a
+// Wrap/runtime concern). The Of-accessors walk a chain down to the deepest
+// *Error, so a realistic fixture is a stdlib error wrapped over this sentinel.
 var benchSentinel = Define(
 	Pack(2, 3, 4, 5),
 	"BENCH_SENTINEL",
@@ -20,6 +20,18 @@ var benchSentinel = Define(
 // behind an fmt.Errorf("%w") wrapper, so each accessor exercises a real
 // errors.AsType walk rather than a single direct assertion.
 var errBenchChain = fmt.Errorf("outer context: %w", benchSentinel)
+
+// errBenchFieldsChain is a separate fixture for the FieldsOf benchmarks: the
+// sentinel Wrapped with one structured field, behind a stdlib wrapper. Because
+// the underlying *Error actually carries a field, FieldsOf exercises the
+// allocating defensive copy (slices.Clone of a non-empty slice) it is meant to
+// quantify — errBenchChain's origin has no fields and would only hit the
+// nil/empty fast path.
+var errBenchFieldsChain = fmt.Errorf("outer context: %w", Wrap(
+	benchSentinel,
+	WrapParams{Code: Pack(2, 3, 4, 6), Reason: "BENCH_FIELDS", Public: "p", Private: "pr"},
+	String("bench_key", "bench_val"),
+))
 
 // Per-result sinks keep the benched reads alive without cross-file collisions.
 var (
@@ -129,7 +141,7 @@ func BenchmarkFieldsOf(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		//: collect a defensive copy of the chain's fields (slice allocation).
-		sinkOfFields = FieldsOf(errBenchChain)
+		sinkOfFields = FieldsOf(errBenchFieldsChain)
 	}
 }
 
@@ -140,7 +152,7 @@ func BenchmarkFieldsOf_Parallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		//: each P produces its own defensive copy — no aliasing across P.
 		for pb.Next() {
-			sinkOfFields = FieldsOf(errBenchChain)
+			sinkOfFields = FieldsOf(errBenchFieldsChain)
 		}
 	})
 }
