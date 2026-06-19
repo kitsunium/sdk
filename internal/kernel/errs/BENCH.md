@@ -51,8 +51,8 @@ BenchmarkPublicOf-8                        	166904718	         7.209 ns/op	     
 BenchmarkPublicOf_Parallel-8               	65529159	        20.79 ns/op	       0 B/op	       0 allocs/op
 BenchmarkPrivateOf-8                       	158231680	         7.523 ns/op	       0 B/op	       0 allocs/op
 BenchmarkPrivateOf_Parallel-8              	62388438	        22.50 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldsOf-8                        	184098621	         6.476 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldsOf_Parallel-8               	65643416	        18.74 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFieldsOf-8                        	23323880	        51.47 ns/op	      64 B/op	       1 allocs/op
+BenchmarkFieldsOf_Parallel-8               	14983602	        73.96 ns/op	      64 B/op	       1 allocs/op
 BenchmarkHTTPStatusOf-8                    	159004490	         7.510 ns/op	       0 B/op	       0 allocs/op
 BenchmarkHTTPStatusOf_Parallel-8           	59106262	        17.68 ns/op	       0 B/op	       0 allocs/op
 BenchmarkExitCodeOf-8                      	158743946	         7.525 ns/op	       0 B/op	       0 allocs/op
@@ -135,7 +135,10 @@ ok  	github.com/kitsunium/sdk/internal/kernel/errs	92.161s
   `NewRuntime`, `Wrap_*`) — the heap `*Error` is the unavoidable allocation;
   `Wrap` with an SDK cause or fields adds the trail/field slices. This is the
   floor a call site pays to *create* an error, not to inspect one.
-- **String rendering / formatting allocate** (`Code_String`, `Code_Padded`,
+- **Rendering / defensive-copy paths allocate** (`Code_String`, `Code_Padded`,
   `Error_Error_*`, `PrefixMatcher_String`/`Error`, `ParseCode_Invalid`,
-  `FieldValue_StringValue_*`, `TrailOf`) — they build result strings/slices, so
-  non-zero B/op and allocs/op are expected and documented here rather than hidden.
+  `FieldValue_StringValue_*`, `TrailOf`, `FieldsOf`, `Error_Fields`) — they build
+  result strings or clone slices, so non-zero B/op and allocs/op are expected and
+  documented here rather than hidden. `FieldsOf` / `Error_Fields` are benched
+  against a fixture that actually carries a field, so they measure the real
+  `slices.Clone` cost (1 alloc) rather than the nil/empty fast path.
