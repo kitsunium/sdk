@@ -179,3 +179,7 @@ ROADMAP.md
 # Local artifacts only — bench.txt summaries are cited inline in
 # commit messages, raw .out files stay per-machine.
 /.bench/
+
+# Kernel bench artifacts (`make sdk-bench` / `sdk-bench-profile`).
+# .bench.out is already covered by *.out above; profiles/ is the pprof dir.
+/profiles/

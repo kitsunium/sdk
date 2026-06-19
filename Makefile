@@ -1,4 +1,4 @@
-.PHONY: help build test lint bench cover docs serve release-dry-run docs-readme profile benchstat-install benchstat-diff
+.PHONY: help build test lint bench cover docs serve release-dry-run docs-readme profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -35,6 +35,9 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate pkg/v1/{codec,crypto,errs,hash,sign,kdf,password,logger,logger/writer}/README.md from doc comments (see ADR 0008)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench-profile" "$(DIM)capture cpu+mem+block+mutex pprof across the kernel → profiles/$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench-compare" "$(DIM)benchstat .bench.main.out vs .bench.out (A/B vs main)$(RST)"
 
 # ── Wrappers ───────────────────────────────────────────────────────────
 # Every target shells to bazel (+ housekeeping tools). The .bazelrc named
@@ -221,3 +224,44 @@ benchstat-diff: benchstat-install
 	benchstat -confidence=0.95 -delta-test=mannwhitney \
 	  .bench/profiles/$(BEFORE)/bench.txt \
 	  .bench/profiles/$(AFTER)/bench.txt
+
+# ── Kernel benchmarks (tracker #16 / tooling #21) ───────────────────────
+# `sdk-bench` runs every kernel *_bench_test.go via go test (NOT bazel) so the
+# output stays benchstat-friendly, teeing into .bench.out for A/B comparison.
+# A kernel package with no bench file is not a failure — go test just reports
+# "no tests to run" and exits 0. Override the sample count with COUNT=N.
+sdk-bench:
+	@echo "::group::kernel benches"
+	@cd internal/kernel && GOWORK=off go test -run=^$$ -bench=. -benchmem \
+	    -count=$${COUNT:-10} ./... | tee $(CURDIR)/.bench.out
+	@echo "::endgroup::"
+	@echo "Output: .bench.out (feed to benchstat for A/B comparison)"
+
+# `sdk-bench-profile` captures cpu+mem+block+mutex pprof across the kernel.
+# Takes several minutes; the block/mutex profiles need the benches that
+# exercise sync primitives (ring, async) to register meaningful samples.
+sdk-bench-profile:
+	@mkdir -p $(CURDIR)/profiles
+	@cd internal/kernel && GOWORK=off go test -run=^$$ -bench=. -benchmem \
+	    -cpuprofile=$(CURDIR)/profiles/cpu.prof \
+	    -memprofile=$(CURDIR)/profiles/mem.prof \
+	    -blockprofile=$(CURDIR)/profiles/block.prof \
+	    -mutexprofile=$(CURDIR)/profiles/mutex.prof \
+	    ./...
+	@echo "Profiles saved to profiles/ — open with 'go tool pprof -http=:8080 profiles/cpu.prof'"
+
+# `sdk-bench-compare` runs benchstat on the recorded baseline vs the current
+# tree. Record the baseline first:
+#   git checkout main && make sdk-bench && mv .bench.out .bench.main.out
+sdk-bench-compare:
+	@command -v benchstat >/dev/null 2>&1 || { \
+	    echo "benchstat not found. Install: make benchstat-install"; \
+	    exit 1; }
+	@test -f .bench.main.out || { \
+	    echo "Missing .bench.main.out — record the baseline first:"; \
+	    echo "  git checkout main && make sdk-bench && mv .bench.out .bench.main.out"; \
+	    exit 1; }
+	@test -f .bench.out || { \
+	    echo "Missing .bench.out — run make sdk-bench on the branch you want to compare."; \
+	    exit 1; }
+	@benchstat .bench.main.out .bench.out
