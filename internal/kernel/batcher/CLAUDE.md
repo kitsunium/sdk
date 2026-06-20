@@ -25,13 +25,13 @@ type Config[T any] struct {
 }
 
 func NewBatcher[T any](deliver Sink[T], cfg Config[T]) *Batcher[T]
-func (b *Batcher[T]) Add(ctx context.Context, item T) error  // eager flush on cap; Closed after Close
+func (b *Batcher[T]) Add(ctx context.Context, item T) error  // eager flush on cap; BatcherClosed after Close
 func (b *Batcher[T]) Flush(ctx context.Context) error        // synchronous; propagates deliver error
 func (b *Batcher[T]) Close(ctx context.Context) error        // stop ticker + final flush; idempotent
 
 // Sentinels (errs.Define-backed, kernel-range codes).
-var Closed        *errs.Error // 0.1.5.1 BATCHER_CLOSED
-var DeliverFailed *errs.Error // 0.1.5.2 BATCHER_DELIVER_FAILED
+var BatcherClosed        *errs.Error // 0.1.5.1 BATCHER_CLOSED
+var BatcherDeliverFailed *errs.Error // 0.1.5.2 BATCHER_DELIVER_FAILED
 ```
 
 ## Conventions
@@ -53,18 +53,18 @@ var DeliverFailed *errs.Error // 0.1.5.2 BATCHER_DELIVER_FAILED
   lives in the deliver closure — never in the batcher.
 - **`WeightOf` is the byte-vs-count axis.** Nil = count-only (each item weighs 1,
   `MaxWeight` ignored). Set it to a byte-size function for byte-capped batching.
-- **Two codes only.** `Closed` (Add/Flush after Close) and `DeliverFailed`
+- **Two codes only.** `BatcherClosed` (Add/Flush after Close) and `BatcherDeliverFailed`
   (the closure errored, wrapped so `errors.Is` reaches the cause).
 
 ## Sentinels
 
 | Var | Code | Reason | Returned by |
 |---|---|---|---|
-| `Closed` | `0x00_01_05_01` (0.1.5.1) | `BATCHER_CLOSED` | `Add` / `Flush` after `Close` |
-| `DeliverFailed` | `0x00_01_05_02` (0.1.5.2) | `BATCHER_DELIVER_FAILED` | `Add` / `Flush` / `Close` when the `Sink` errors |
+| `BatcherClosed` | `0x00_01_05_01` (0.1.5.1) | `BATCHER_CLOSED` | `Add` / `Flush` after `Close` |
+| `BatcherDeliverFailed` | `0x00_01_05_02` (0.1.5.2) | `BATCHER_DELIVER_FAILED` | `Add` / `Flush` / `Close` when the `Sink` errors |
 
 Match with `errs.HasCode(err, batcher.CodeBatcherDeliverFailed)` or
-`errors.Is(err, batcher.DeliverFailed)`.
+`errors.Is(err, batcher.BatcherDeliverFailed)`.
 
 ## Do NOT
 

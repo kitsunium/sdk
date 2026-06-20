@@ -1,6 +1,6 @@
-// Package level defines severity levels for log records.
-// Signatures mirror log/slog for ergonomic familiarity while remaining
-// kernel-only (stdlib dependencies forbidden beyond the Go standard library).
+// Package level defines severity levels for log records. It is a core/logger
+// sub-package (logger-domain vocabulary, so not kernel) and remains stdlib-only:
+// no dependency beyond the Go standard library, and specifically never log/slog.
 package level
 
 // Level represents the importance of a log record; higher values are more severe.
