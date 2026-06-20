@@ -170,6 +170,16 @@ export default defineConfig({
         codeFontFamily:
           "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
       },
+      //: Shiki has no go.mod grammar, so a ```gomod fence (used in ADR 0009,
+      //: snapshotted into every historical version under src/content/docs/*)
+      //: would log "language could not be found" and fall back to plain text.
+      //: Alias it to `go` — the closest bundled grammar — so module paths and
+      //: pseudo-versions still get reasonable colouring and the build is clean.
+      shiki: {
+        langAlias: {
+          gomod: "go",
+        },
+      },
     }),
     //: Emits sitemap.xml + a sitemap-index for SEO discoverability.
     //: Pages with `noindex` frontmatter can be excluded later via
