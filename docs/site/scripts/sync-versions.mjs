@@ -550,6 +550,19 @@ async function materialiseTag(major, version, tag) {
   const wt = `/tmp/wt-${major}-${version}-${Date.now()}`;
   try {
     await shellSafe("git", ["worktree", "prune"]);
+    //: A clone made before this release was tagged (or a shallow/partial
+    //: clone) can list the release via `gh` yet lack the tag ref locally,
+    //: which would make `worktree add` fail. Fetch the tag on demand so the
+    //: build self-heals instead of silently skipping a published version.
+    const haveTag = await shellSafe("git", [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/tags/${tag}`,
+    ]);
+    if (typeof haveTag !== "string" || haveTag.trim() === "") {
+      await shellSafe("git", ["fetch", "--quiet", "origin", "tag", tag]);
+    }
     const add = await shellSafe("git", [
       "worktree",
       "add",
@@ -558,7 +571,9 @@ async function materialiseTag(major, version, tag) {
       tag,
     ]);
     if (typeof add !== "string") {
-      console.warn(`[sync-versions] worktree add failed for ${tag}; skipping`);
+      console.warn(
+        `[sync-versions] worktree add failed for ${tag} (tag not found even after fetch); skipping`,
+      );
       return;
     }
     console.log(`[sync-versions] ${major}/${version} <- ${tag}`);
