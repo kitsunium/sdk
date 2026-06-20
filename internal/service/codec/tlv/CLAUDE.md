@@ -64,8 +64,16 @@ here: decoded values outlive the `Unmarshal` call while the caller may
 reuse the input `data`, so aliasing it risks a use-after-free — the
 `string(rest[:length])` copy is correct and stays. The realised wins are
 the cached `structTypeInfo`, inline-scalar dispatch, pre-computed name
-prefixes, and typed root decode (Phases 6-8). The buffer pool is
-mutualised via `internal/core/codec/scratch`.
+prefixes, and typed root decode (Phases 6-8).
+
+The encode scratch is a **local** `sync.Pool` of `*[]byte` (`scratchPool`,
+`encoder.go`), capped at `maxRetainedScratchBytes = 256 << 10`. It is
+deliberately NOT part of the shared `internal/core/codec/scratch`
+mutualisation: that package pools `*bytes.Buffer` / `*bytes.Reader` (the shape
+the ten library-mediated codecs share), whereas TLV's varint encoder grows a
+raw `[]byte` and would gain nothing from a `bytes.Buffer` wrapper. The shared
+`256 << 10` retain threshold is matched intentionally — it is the project-wide
+oversize-discard ceiling, not copied pool boilerplate.
 
 ## Verification
 
