@@ -1,4 +1,4 @@
-.PHONY: help build test lint bench cover docs serve release-dry-run docs-readme profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare
+.PHONY: help build test lint bench cover docs docs-dev serve release-dry-run docs-readme profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -30,6 +30,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "bench"  "Regenerate every BENCH.md $(DIM)(CPU/RAM/OS/Go/git SHA envelope)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs"   "Build the SDK documentation portal $(DIM)(→ docs/site/dist/, 15 pages)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "serve"  "kill / rebuild / re-serve docs on http://localhost:$(DIM)\$${PORT:-4321}$(RST)$(DIM)/$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-dev" "$(DIM)hot-reloading docs dev server (astro dev, no full rebuild — fast iteration)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate pkg/v1/{codec,crypto,errs,hash,sign,kdf,password,logger,logger/writer}/README.md from doc comments (see ADR 0008)$(RST)"
@@ -155,6 +156,15 @@ serve: docs
 	done; \
 	echo "→ serving docs/site/dist on http://localhost:$$port/ (Ctrl+C to stop)"; \
 	cd docs/site && npx --yes serve dist -l $$port --no-clipboard
+
+# `docs-dev` is the fast iteration loop. `serve` does a full PRODUCTION build
+# (~135s: 40s types + 95s render + pagefind) on every restart; `docs-dev` runs
+# the prebuild once, then `astro dev` with hot-module reload — edits to
+# src/pages/*.astro, styles, ADRs, or package docs reflect live with NO rebuild.
+# Use this while iterating; use `make serve` only to preview the real built site.
+# Dev server: http://localhost:4321/ (astro dev default).
+docs-dev:
+	cd docs/site && npm install --silent && npm run dev
 
 # `release-dry-run` previews the auto-bump pipeline without pushing
 # any tag. compute-bumps.sh emits the list of pkg/<major> dirs that
