@@ -9,13 +9,14 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 
 | Package | Purpose | Code range |
 |---|---|---|
-| `errs/` | SDK-wide typed error + dotted-quad registry (ADR 0005) | 1000-1099 (meta-codes, documentary only) |
+| `errs/` | SDK-wide typed error + dotted-quad registry (ADR 0005) | `0.0.0.*` (meta-codes 0.0.0.1-6, documentary only) |
 | `recycler/` | generic `Pool[T]` + `CappedPool[T]` object pools (ADR 0010) | (none — panics on programmer error) |
 | `snapshot/` | generic `Value[T]` copy-on-write container (ADR 0011) | (none — never returns errors) |
-| `buffer/` | `sync.Pool` of `[]byte` — a `recycler.CappedPool[*[]byte]` specialisation | 1200-1299 (reserved) |
-| `clock/` | `Clock` interface (`Now` + `Since`) for testable time | 1300-1399 (reserved) |
-| `ring/` | SPSC lock-free bounded queue (ADR 0006) | 1400-1499 (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
-| `batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014) | 0.1.5.* (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
+| `buffer/` | `sync.Pool` of `[]byte` — a `recycler.CappedPool[*[]byte]` specialisation | `0.1.1.*` (reserved) |
+| `clock/` | `Clock` interface (`Now` + `Since`) for testable time | `0.1.2.*` (reserved) |
+| `ring/` | SPSC lock-free bounded queue (ADR 0006) | `0.1.3.*` (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
+| `batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014) | `0.1.5.*` (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
+| `worker/` | generic goroutine-lifecycle daemon (`LoopDaemon`, `Start`/`Every`/`Stop`) | (none — emits no codes) |
 
 Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
 

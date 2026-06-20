@@ -9,19 +9,19 @@ Thirteen wire-format codecs covering 18 registered Format names, one Go package 
 
 | Package | Format(s) | `PP` slot | Streaming | Appender |
 |---|---|---|---|---|
-| `asn1/`        | ASN.1 DER (BER accepted on Unmarshal)         | `0.3.9.*`  | no  | no  |
+| `asn1/`        | ASN.1 DER (BER accepted on Unmarshal)         | `0.3.9.*`  | no  | yes |
 | `baseenc/`     | base64, base64url, base32, base16, hex, ascii85 — 6 Format names, JSON-mediated pipeline | `0.3.24.*` | yes | yes |
-| `cbor/`        | CBOR (RFC 8949) — fxamacker/cbor/v2           | `0.3.6.*`  | yes | no  |
-| `csv/`         | CSV (RFC 4180) — `[][]string`                 | `0.3.8.*`  | no  | no  |
+| `cbor/`        | CBOR (RFC 8949) — fxamacker/cbor/v2           | `0.3.6.*`  | yes | yes |
+| `csv/`         | CSV (RFC 4180) — `[][]string`                 | `0.3.8.*`  | no  | yes |
 | `flatbuffers/` | FlatBuffers passthrough (already-encoded `[]byte`) | `0.3.23.*` | no  | yes |
 | `json/`        | JSON (RFC 8259) — encoding/json               | `0.3.2.*`  | yes | yes |
-| `msgpack/`     | MessagePack — vmihailenco/msgpack/v5          | `0.3.7.*`  | yes | no  |
+| `msgpack/`     | MessagePack — vmihailenco/msgpack/v5          | `0.3.7.*`  | yes | yes |
 | `ndjson/`      | Newline-delimited JSON                        | `0.3.11.*` | no  | yes |
-| `pem/`         | PEM block (RFC 7468) — encoding/pem           | `0.3.10.*` | no  | no  |
+| `pem/`         | PEM block (RFC 7468) — encoding/pem           | `0.3.10.*` | no  | yes |
 | `tlv/`         | Self-describing TLV (reflection-driven binary)| `0.3.22.*` | yes | yes |
-| `toml/`        | TOML — pelletier/go-toml/v2                   | `0.3.5.*`  | yes | no  |
-| `xml/`         | XML — encoding/xml                            | `0.3.3.*`  | yes | no  |
-| `yaml/`        | YAML — gopkg.in/yaml.v3                       | `0.3.4.*`  | yes | no  |
+| `toml/`        | TOML — pelletier/go-toml/v2                   | `0.3.5.*`  | yes | yes |
+| `xml/`         | XML — encoding/xml                            | `0.3.3.*`  | yes | yes |
+| `yaml/`        | YAML — gopkg.in/yaml.v3                       | `0.3.4.*`  | yes | yes |
 
 The `PP` slots above are authoritative — verified against each `codes.go`. New codecs claim a fresh slot in ADR 0005's registry (or its ADR 0006 extension) before being added.
 

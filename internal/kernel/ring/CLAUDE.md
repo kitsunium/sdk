@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Lock-free single-producer / single-consumer (SPSC) bounded queue built on `sync/atomic`. Admitted to the kernel by ADR 0006 — domain-neutral by construction (any future metrics batcher, codec stream, event bus, or hot-path FIFO can plug in). Today the only consumer is `internal/service/logger/middleware/async`; the surface is generic so other domains can adopt without a refactor. Code range `0x00_01_03_*` (`1400-1499` slot).
+Lock-free single-producer / single-consumer (SPSC) bounded queue built on `sync/atomic`. Admitted to the kernel by ADR 0006 — domain-neutral by construction (any future metrics batcher, codec stream, event bus, or hot-path FIFO can plug in). Today the only consumer is `internal/service/logger/middleware/async`; the surface is generic so other domains can adopt without a refactor. Code range `0x00_01_03_*` (`0.1.3.*`).
 
 ## Surface
 
