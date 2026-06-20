@@ -21,8 +21,8 @@ The deliver closure carries every sink-specific concern: a pre-delivery
 reorder, a per-batch key, or a byte-vs-count weight. A nil `WeightOf` means
 count-only batching (each item weighs 1, `MaxWeight` is ignored).
 
-Errors are typed: `Add` / `Flush` after `Close` return `batcher.Closed`; a
-deliver-closure failure is wrapped as `batcher.DeliverFailed` with the original
+Errors are typed: `Add` / `Flush` after `Close` return `batcher.BatcherClosed`; a
+deliver-closure failure is wrapped as `batcher.BatcherDeliverFailed` with the original
 cause reachable via `errors.Is`.
 
 stdlib-only, domain-neutral, kernel-layer. See `CLAUDE.md` for the full

@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Minimal time-abstraction so higher layers can inject a fake clock in tests without coupling to `time.Now`. Stdlib-only, domain-neutral. Code range `1300-1399` reserved (no sentinels emitted today).
+Minimal time-abstraction so higher layers can inject a fake clock in tests without coupling to `time.Now`. Stdlib-only, domain-neutral. Code range `0.1.2.*` reserved (ADR 0005; no sentinels emitted today).
 
 ## Surface
 
