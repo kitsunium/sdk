@@ -3,7 +3,7 @@
 
 ## Purpose
 
-SDK-wide typed-error meta-infrastructure. Every error returned from SDK code is a `*errs.Error` carrying a dotted-quad `Code`, a stable `Reason`, a wire-safe `Public` message, a log-only `Private` message, optional structured `Fields`, and an intrinsic wrap trail. Consumers introspect via `pkg/v1/errs` (read-only) — only emitter packages call `Define` / `Wrap`. Code range `1000-1099` is reserved for documentary meta-codes (0.0.0.1..6, never instantiated as `*Error` sentinels).
+SDK-wide typed-error meta-infrastructure. Every error returned from SDK code is a `*errs.Error` carrying a dotted-quad `Code`, a stable `Reason`, a wire-safe `Public` message, a log-only `Private` message, optional structured `Fields`, and an intrinsic wrap trail. Consumers introspect via `pkg/v1/errs` (read-only) — only emitter packages call `Define` / `Wrap`. Code range `0.0.0.*` is reserved for documentary meta-codes (`0.0.0.1`..`0.0.0.6`, never instantiated as `*Error` sentinels).
 
 ## Surface
 

@@ -12,7 +12,7 @@
 // Concurrency: Add, Flush and Close are safe to call from multiple goroutines;
 // a mutex guards the pending batch. The batch is swapped out under the lock and
 // the deliver closure runs outside it, so a slow delivery never blocks a
-// producer. Add returns batcher.Closed once Close has run.
+// producer. Add returns BatcherClosed once Close has run.
 //
 // Sink serialization (V6): the deliver closure is invoked under a dedicated
 // delivery mutex held only across the call, so two flush paths (a cap-triggered
@@ -96,7 +96,7 @@ func NewBatcher[T any](deliver Sink[T], cfg Config[T]) *Batcher[T] {
 }
 
 // Add appends item to the pending batch and eagerly flushes when the batch
-// reaches MaxItems or MaxWeight. It returns batcher.Closed if Close has run; a
+// reaches MaxItems or MaxWeight. It returns BatcherClosed if Close has run; a
 // cap-triggered deliver failure is returned wrapped as DeliverFailed.
 func (b *Batcher[T]) Add(ctx context.Context, item T) error {
 	//: append under the lock; the ticker / Flush share the pending batch.
@@ -122,7 +122,7 @@ func (b *Batcher[T]) Add(ctx context.Context, item T) error {
 }
 
 // Flush delivers the pending batch synchronously, returning any deliver error.
-// It returns batcher.Closed if Close has run.
+// It returns BatcherClosed if Close has run.
 func (b *Batcher[T]) Flush(ctx context.Context) error {
 	//: reject Flush after Close so the contract matches Add.
 	b.mu.Lock()
