@@ -60,6 +60,8 @@ var expectedAppenders = []string{
 	"hex",
 	"ascii85",
 	"base45",
+	"base58",
+	"base62",
 }
 
 // registeredAppenders is the package-level Appender registry snapshot
@@ -765,6 +767,10 @@ func codecAdapters() map[codec.Format]codecAdapter {
 		codec.Format("hex"):       universalAdapter("hex"),
 		codec.Format("ascii85"):   universalAdapter("ascii85"),
 		codec.Format("base45"):    universalAdapter("base45"),
+		//: base58/62 are O(n²) base-conversion with a 4 KiB cap — the 8 KiB
+		//: complexRT fixture would exceed it, so they round-trip a short value.
+		codec.Format("base58"): shortConvAdapter("base58"),
+		codec.Format("base62"): shortConvAdapter("base62"),
 	}
 }
 
@@ -795,6 +801,40 @@ func universalAdapter(name string) codecAdapter {
 			if !complexEqual(got, want) {
 				//: surface a compact diff hint.
 				t.Errorf("%s: round-trip mismatch\n  got:  %#v\n  want: %#v", name, got, want)
+			}
+		},
+	}
+}
+
+// shortConvAdapter builds the round-trip adapter for the O(n²) base-conversion
+// codecs (Base58/Base62). They cap input at 4 KiB, so they round-trip a short
+// map rather than the ~8 KiB complexRT fixture the universal adapter uses.
+func shortConvAdapter(name string) codecAdapter {
+	//: capture the format; the short payload stays well under maxConvBytes.
+	f := codec.Format(name)
+	//: a fresh value per call keeps encode/decode independent.
+	value := func() map[string]any {
+		//: tiny, JSON-stable payload (numbers decode back as float64).
+		return map[string]any{"id": "kitsunium", "n": float64(42)}
+	}
+	return codecAdapter{
+		encode: func() ([]byte, error) {
+			//: dispatch the short value through the facade.
+			return codec.Marshal(f, value())
+		},
+		decodeAndCheck: func(t *testing.T, name string, data []byte) {
+			t.Helper()
+			//: decode into a fresh map.
+			var got map[string]any
+			if err := codec.Unmarshal(f, data, &got); err != nil {
+				//: codec rejected its own output — hard failure.
+				t.Fatalf("%s: Unmarshal err=%v", name, err)
+			}
+			//: compare the two stable fields.
+			want := value()
+			if got["id"] != want["id"] || got["n"] != want["n"] {
+				//: surface the diff.
+				t.Errorf("%s: round-trip mismatch got=%v want=%v", name, got, want)
 			}
 		},
 	}
@@ -1468,6 +1508,32 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 					if !complexEqual(got, val) {
 						//: surface the diff.
 						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: Base58/Base62 are O(n²) base-conversion with a 4 KiB cap — the
+		//: ~8 KiB complexRT fixture would exceed it, so they append a short
+		//: map payload instead.
+		case "base58", "base62":
+			//: tiny JSON-stable payload (numbers decode back as float64).
+			short := map[string]any{"id": "kitsunium", "n": float64(7)}
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    short,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					//: decode into a fresh map.
+					var got map[string]any
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						//: hard failure on decode.
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					//: compare the stable id field.
+					if got["id"] != short["id"] {
+						//: surface the diff.
+						t.Errorf("%s: append round-trip mismatch got=%v", name, got)
 					}
 				},
 			})

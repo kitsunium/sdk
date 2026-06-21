@@ -213,6 +213,12 @@ const (
 	ASCII85 Format = "ascii85"
 	// Base45 denotes the JSON-mediated RFC 9285 Base45 wrap (QR-code safe).
 	Base45 Format = "base45"
+	// Base58 denotes the JSON-mediated Bitcoin Base58 wrap (short inputs;
+	// base-conversion is O(n²) so a 4 KiB input cap applies).
+	Base58 Format = "base58"
+	// Base62 denotes the JSON-mediated Base62 wrap (short inputs; same O(n²)
+	// 4 KiB input cap as Base58).
+	Base62 Format = "base62"
 )
 
 // Marshal serialises v using the codec registered under f. The codec's

@@ -5,8 +5,9 @@
 Family of `core/codec.Codec` implementations behind the universal
 Marshal/Unmarshal dispatch. Most wrap the stdlib byte encodings
 (`encoding/base64`, `encoding/base32`, `encoding/hex`, `encoding/ascii85`);
-`base45` (RFC 9285) has no stdlib backing and is hand-rolled in `base45.go`.
-Seven variants, seven distinct registered Formats — the discriminator is the
+`base45` (RFC 9285), `base58` (Bitcoin) and `base62` have no stdlib backing
+and are hand-rolled (`base45.go`, `base_convert.go` + `base58.go`/`base62.go`).
+Nine variants, nine distinct registered Formats — the discriminator is the
 registered Name, not a tagged enum.
 
 ## Surface
@@ -20,12 +21,22 @@ registered Name, not a tagged enum.
 | Hex (lower) | `"hex"` | `application/hex` | `.hex` | yes | yes |
 | Ascii85 | `"ascii85"` | `application/ascii85` | `.a85` | yes | yes |
 | Base45 (RFC 9285) | `"base45"` | `application/base45` | `.b45` | yes (buffered) | yes |
+| Base58 (Bitcoin) | `"base58"` | `application/base58` | `.b58` | yes (buffered) | yes |
+| Base62 | `"base62"` | `application/base62` | `.b62` | yes (buffered) | yes |
 
-Seven singletons exported (`Base64`, `Base64URL`, `Base32`, `Base16`,
-`Hex`, `Ascii85`, `Base45`) — registered via package-level var initialisers,
-no `init()` function. Base45 is a block transform (2 bytes → 3 chars), O(n),
-so it shares the 10 MiB `maxBaseEncBytes` cap; its decode errors reuse the
-`BaseEncDecodeFailed` code.
+Nine singletons exported (`Base64`, `Base64URL`, `Base32`, `Base16`, `Hex`,
+`Ascii85`, `Base45`, `Base58`, `Base62`) — registered via package-level var
+initialisers, no `init()` function.
+
+- **Base45** is a block transform (2 bytes → 3 chars), O(n), so it shares the
+  10 MiB `maxBaseEncBytes` cap; decode errors reuse `BaseEncDecodeFailed`.
+- **Base58 / Base62** are big-endian **base-conversion** encodings (whole input
+  treated as one integer, divided down by the radix) — inherently **O(n²)**, so
+  they carry a tight `maxConvBytes` (4 KiB) input cap enforced at
+  Marshal/Append (raw bytes) and Unmarshal (encoded text), surfacing
+  `BaseEncSizeExceeded` above it. They are for **short identifiers** (keys,
+  hashes, IDs); use base64 for bulk data. Decode errors reuse
+  `BaseEncDecodeFailed`. Leading zero bytes map to leading `alphabet[0]` chars.
 
 ## Marshal/Unmarshal pipeline
 
