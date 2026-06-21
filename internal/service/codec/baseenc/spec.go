@@ -62,6 +62,18 @@ var variantSpecs = [...]variantSpec{
 		mimeTypes:  []string{"application/base45"},
 		extensions: []string{".b45"},
 	},
+	//: variantBase58 — Bitcoin Base58 (base-conversion, short inputs).
+	{
+		name:       "base58",
+		mimeTypes:  []string{"application/base58"},
+		extensions: []string{".b58"},
+	},
+	//: variantBase62 — Base62 (base-conversion, short inputs).
+	{
+		name:       "base62",
+		mimeTypes:  []string{"application/base62"},
+		extensions: []string{".b62"},
+	},
 }
 
 // spec returns the variantSpec for c.variant. Bounds are guaranteed by

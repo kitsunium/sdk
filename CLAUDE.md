@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Six domains ship today — a structured **logger** (zero-alloc, multi-sink), a universal **codec** (19 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), and OS **proc** supervision. New domains land in the same 4-layer shape (ADR 0001).
+Go SDK providing a normed, performant toolbox for downstream applications. Six domains ship today — a structured **logger** (zero-alloc, multi-sink), a universal **codec** (21 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), and OS **proc** supervision. New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.26.2 (pinned in `MODULE.bazel`)
 
