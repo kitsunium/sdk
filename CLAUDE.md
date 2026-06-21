@@ -128,5 +128,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0020 — errs AST audit accepts two Reason derivations (`screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")`); closes the `//:audit_sources` coverage gap that silently excluded ~10 namespaced emitters (ring + every logger middleware/sink) — `docs/adr/0020-errs-audit-dual-reason-derivation.md`
 - ADR 0021 — BSON codec (M5) over `go.mongodb.org/mongo-driver/bson` in `internal/service/codec/bson` (library-backed codec precedent, not third-party quarantine); non-streaming + Appender; error block `0.3.36.*` — `docs/adr/0021-sdk-codec-bson.md`
 - ADR 0022 — HCL codec (M5) quarantined in `third-party/codec/hcl` (root module) because `hcl/v2`+`go-cty` downgrade `x/sys` in `internal/service`; opt-in, not in `pkg/v1/codec`; first `third-party/codec/` subtree; error block `0.3.37.*` — `docs/adr/0022-sdk-codec-hcl.md`
+- ADR 0023 — schema codecs (M6): opt-in under `third-party/codec/` (schema-bound, can't honour the universal round-trip contract); Protobuf concrete (`0.3.38.*`), Avro/Cap'n Proto deferred — `docs/adr/0023-sdk-schema-codecs.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

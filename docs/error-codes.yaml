@@ -658,6 +658,18 @@ codes:
     const: CodeHCLSizeExceeded
     hex: "0x00_03_25_03"
     package: third-party/codec/hcl
+  - code: "0.3.38.1"
+    const: CodeProtobufMarshalFailed
+    hex: "0x00_03_26_01"
+    package: third-party/codec/protobuf
+  - code: "0.3.38.2"
+    const: CodeProtobufUnmarshalFailed
+    hex: "0x00_03_26_02"
+    package: third-party/codec/protobuf
+  - code: "0.3.38.3"
+    const: CodeProtobufSizeExceeded
+    hex: "0x00_03_26_03"
+    package: third-party/codec/protobuf
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
