@@ -10,7 +10,7 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 | Sub-tree | Purpose | Code prefix |
 |---|---|---|
 | `logger/` | v2 zero-alloc multi-sink architecture (`builder`, `encoder`, `sink/{console,file,syslog,memory}`, `middleware/{multi,async,route,failover,sample,recover,encwrite,tee}`) realising `core/logger.Handler` + `Logger` | `0.3.1.*` (and per-component slots, see logger CLAUDE.md) |
-| `codec/` | 13 wire-format codecs over 18 Format names (asn1, baseenc[6], cbor, csv, flatbuffers, json, msgpack, ndjson, pem, tlv, toml, xml, yaml), each implementing `core/codec.Codec`; all satisfy `Appender`, most also `StreamingCodec` | `0.3.2.*` … `0.3.24.*` (one PP slot per codec) |
+| `codec/` | 14 wire-format codecs over 22 Format names (asn1, baseenc[9], bson, cbor, csv, flatbuffers, json, msgpack, ndjson, pem, tlv, toml, xml, yaml), each implementing `core/codec.Codec`; all satisfy `Appender`, most also `StreamingCodec` | `0.3.2.*` … `0.3.24.*` (one PP slot per codec) |
 
 ## Module
 
@@ -35,7 +35,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 ## Subtree
 
 - `logger/` — see `internal/service/logger/README.md` (full contract, error catalogue, output format)
-- `codec/` — see `internal/service/codec/CLAUDE.md` (13 codec packages + per-codec error ranges)
+- `codec/` — see `internal/service/codec/CLAUDE.md` (14 codec packages + per-codec error ranges)
 
 ## Verification
 

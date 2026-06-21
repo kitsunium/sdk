@@ -1,10 +1,12 @@
-//go:build !linux && !windows
+//go:build !linux && !windows && !freebsd
 
 // Package cgroup_test — degrade contract mirror for targets with no control-group
-// facility: cgroup v2 is Linux-only and Windows has a Job Object backend
-// (cgroup_windows_test.go), so this covers darwin and the BSDs, where the stub
-// reports Available() == false and Create returns the central UnsupportedPlatform
-// sentinel. The full Linux lifecycle is covered by cgroup_external_test.go.
+// facility: cgroup v2 is Linux-only, Windows has a Job Object backend
+// (cgroup_windows_test.go), and FreeBSD has an rctl backend
+// (cgroup_freebsd_test.go), so this covers darwin and the remaining BSDs, where
+// the stub reports Available() == false and Create returns the central
+// UnsupportedPlatform sentinel. The full Linux lifecycle is covered by
+// cgroup_external_test.go.
 package cgroup_test
 
 import (
