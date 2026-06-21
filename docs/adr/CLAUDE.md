@@ -31,6 +31,7 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0020-errs-audit-dual-reason-derivation.md` | errs AST audit accepts `screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")`; closes the `//:audit_sources` gap excluding ~10 namespaced emitters | Accepted (amends 0005 §Semantics / formalises 0006) |
 | `0021-sdk-codec-bson.md` | BSON codec (M5) in `internal/service/codec/bson` over `mongo-driver/bson` (library-backed precedent); non-streaming + Appender; block `0.3.36.*` | Accepted (extends 0003 §M5) |
 | `0022-sdk-codec-hcl.md` | HCL codec (M5) quarantined in `third-party/codec/hcl` (`hcl/v2`+`go-cty` downgrade `x/sys` in service); opt-in, not in `pkg/v1/codec`; block `0.3.37.*` | Accepted (extends 0003 §M5; follows 0012, contrasts 0021) |
+| `0023-sdk-schema-codecs.md` | Schema codecs (M6) opt-in under `third-party/codec/` (schema-bound, break universal round-trip); Protobuf concrete `0.3.38.*`; Avro/Cap'n Proto deferred | Accepted (extends 0003 §M6) |
 
 ## Conventions
 

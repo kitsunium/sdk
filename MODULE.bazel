@@ -56,6 +56,7 @@ use_repo(
     "com_github_testcontainers_testcontainers_go_modules_redis",
     "com_github_vmihailenco_msgpack_v5",
     "in_gopkg_yaml_v3",
+    "org_golang_google_protobuf",
     "org_golang_x_crypto",
     "org_mongodb_go_mongo_driver",
 )

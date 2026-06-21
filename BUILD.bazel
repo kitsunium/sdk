@@ -69,6 +69,7 @@ filegroup(
         "//third-party/aws/writer/cloudwatch:audit_srcs",
         "//third-party/aws/writer/s3:audit_srcs",
         "//third-party/codec/hcl:audit_srcs",
+        "//third-party/codec/protobuf:audit_srcs",
         "//third-party/db/writer/clickhouse:audit_srcs",
         "//third-party/db/writer/mysql:audit_srcs",
         "//third-party/db/writer/redis:audit_srcs",
