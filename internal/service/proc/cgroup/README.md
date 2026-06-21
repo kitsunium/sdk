@@ -31,6 +31,14 @@ All typed `core/proc` sentinels — match with `errs.HasCode`:
 
 ## Platform
 
-Linux only; the `!linux` build returns `UnsupportedPlatform` and `Available()`
-is always `false`. Unprivileged / non-delegated Linux hosts degrade to
-`CgroupUnavailable` without panicking.
+Three native backends implement the `Group` port:
+
+- **Linux** — cgroup v2 (`/sys/fs/cgroup`). Unprivileged / non-delegated hosts
+  degrade to `CgroupUnavailable` without panicking.
+- **Windows** — Job Objects (memory / CPU / pids caps; IO + Freeze/Thaw return
+  `UnsupportedPlatform`).
+- **FreeBSD** — rctl (per-process memory / CPU rules; pids / IO + Freeze/Thaw
+  return `UnsupportedPlatform`).
+
+On every other GOOS (darwin, OpenBSD, NetBSD, DragonFly) `Available()` is
+`false` and `Create` returns `UnsupportedPlatform`.

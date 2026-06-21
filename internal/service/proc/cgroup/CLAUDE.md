@@ -15,7 +15,9 @@ implements the `core/proc.Group` port against the unified cgroup v2 hierarchy at
 | `cgroup.go` | platform-neutral surface: `Available`, `Create` delegating to the build-tagged impls |
 | `option.go` | `Option` functional-option type, `WithRoot`, `groupConfig` accumulator |
 | `cgroup_linux.go` | Linux impl: `controlGroup` (satisfies `core/proc.Group`), controller writes, mkdir/rmdir |
-| `cgroup_other.go` | `!linux` stub: `Available() == false`, `Create` returns `UnsupportedPlatform` |
+| `cgroup_windows.go` | Windows impl via **Job Objects** (kernel32 `CreateJobObjectW` / `SetInformationJobObject` / `AssignProcessToJobObject` / `TerminateJobObject`); memory/CPU/pids caps; IO + Freeze/Thaw → `UnsupportedPlatform` |
+| `cgroup_freebsd.go` | FreeBSD impl via **rctl** (`rctl_add_rule`/`rctl_remove_rule` syscalls); per-process `vmemoryuse`/`pcpu` rules (memory/CPU caps); pids/IO + Freeze/Thaw → `UnsupportedPlatform` |
+| `cgroup_other.go` | `!linux && !windows && !freebsd` stub (darwin + remaining BSDs): `Available() == false`, `Create` returns `UnsupportedPlatform` |
 
 No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
 (`CgroupUnavailable`, `CgroupCreateFailed`, `CgroupWriteFailed`,
@@ -46,8 +48,21 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
 
 ## Platform notes
 
-- cgroup v2 (unified hierarchy) is **Linux-only**. Off Linux the stub reports
-  `Available() == false` and `Create` returns `UnsupportedPlatform`. Every GOOS
+- cgroup v2 (unified hierarchy) is **Linux-only**, but two platforms have a
+  native equivalent with its own backend (ADR 0018 native-backend roadmap):
+  - **Windows** — Job Objects (`cgroup_windows.go`): memory/CPU/pids caps via
+    `SetInformationJobObject`; IO and Freeze/Thaw have no stable Job Object
+    analogue and return `UnsupportedPlatform`.
+  - **FreeBSD** — rctl (`cgroup_freebsd.go`): a group is a tracked PID set and
+    limits are per-process `process:PID:vmemoryuse|pcpu:deny=…` rules applied via
+    `rctl_add_rule(2)` (re-applied on `Add`). `SetPidsMax` (rctl `maxproc` is a
+    user/loginclass/jail resource, not per-process), `SetIOMax` (cgroup-format
+    spec), and Freeze/Thaw have no rctl mapping → `UnsupportedPlatform`. Built
+    dep-light via raw `syscall.Syscall6` (no `golang.org/x/sys`), the same
+    discipline the reaper subreaper backends use. Cross-compile-verified; the
+    rule-applying verbs are exercised on the e2e VM lane (real RACCT kernel).
+- Off Linux/Windows/FreeBSD the stub reports `Available() == false` and `Create`
+  returns `UnsupportedPlatform` (darwin, OpenBSD, NetBSD, DragonFly). Every GOOS
   compiles.
 - Unprivileged hosts without cgroup delegation degrade gracefully to
   `CgroupUnavailable` — never a panic. The acceptance test gates the live

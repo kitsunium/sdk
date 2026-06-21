@@ -1,9 +1,10 @@
-//go:build !linux && !windows
+//go:build !linux && !windows && !freebsd
 
 // Package cgroup — degrade stub for platforms with no control-group facility:
-// cgroup v2 is Linux-only and Windows has its own Job Object backend
-// (cgroup_windows.go), so this covers darwin and the BSDs, where no equivalent
-// exists.
+// cgroup v2 is Linux-only, Windows has its own Job Object backend
+// (cgroup_windows.go), and FreeBSD has its own rctl backend
+// (cgroup_freebsd.go), so this covers darwin and the remaining BSDs
+// (OpenBSD/NetBSD/DragonFly), where no equivalent exists.
 package cgroup
 
 import (
