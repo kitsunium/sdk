@@ -1,0 +1,44 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "hcl",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/codec/hcl",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+        "@com_github_hashicorp_hcl_v2//gohcl",
+        "@com_github_hashicorp_hcl_v2//hclsimple",
+        "@com_github_hashicorp_hcl_v2//hclwrite",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":hcl",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "hcl_test",
+    srcs = ["codec_external_test.go"],
+    deps = [
+        ":hcl",
+        "//internal/core/codec",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (errs.Define emitters must be in //:audit_sources).
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

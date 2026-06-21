@@ -35,7 +35,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 ## Subtree
 
 - `logger/` — see `internal/service/logger/README.md` (full contract, error catalogue, output format)
-- `codec/` — see `internal/service/codec/CLAUDE.md` (13 codec packages + per-codec error ranges)
+- `codec/` — see `internal/service/codec/CLAUDE.md` (14 codec packages + per-codec error ranges)
 
 ## Verification
 
