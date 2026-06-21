@@ -1199,8 +1199,13 @@ func TestStreamingRoundTrip_AllCodecs(t *testing.T) {
 		//:   - tlv : decodes structs into map[string]any so reflect-based
 		//:           equality on complexRT cannot work without a per-codec
 		//:           comparison oracle.
+		//:   - base58/base62 : O(n²) base-conversion with a small (4 KiB raw /
+		//:           ~8 KiB encoded) cap — the ~8 KiB complexRT fixture exceeds
+		//:           it (by design; these are short-identifier codecs, not bulk
+		//:           streams). Their non-streaming round-trip is covered by the
+		//:           short-fixture adapters in TestRoundTrip_AllCodecs.
 		switch strings.ToLower(string(f)) {
-		case "xml", "toml", "tlv":
+		case "xml", "toml", "tlv", "base58", "base62":
 			//: documented limitation — surface as a skip below in runCase.
 			continue
 		}
@@ -1565,8 +1570,9 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 						//: hard failure on decode.
 						t.Fatalf("%s: Unmarshal err=%v", name, err)
 					}
-					//: compare the stable id field.
-					if got["id"] != bdoc["id"] {
+					//: compare every stable fixture field so a regression in any
+					//: one (not just id) is caught.
+					if got["id"] != bdoc["id"] || got["n"] != bdoc["n"] || got["ok"] != bdoc["ok"] {
 						//: surface the diff.
 						t.Errorf("%s: append round-trip mismatch got=%v", name, got)
 					}
@@ -1591,8 +1597,8 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 						//: hard failure on decode.
 						t.Fatalf("%s: Unmarshal err=%v", name, err)
 					}
-					//: compare the stable id field.
-					if got["id"] != short["id"] {
+					//: compare every stable fixture field, not just id.
+					if got["id"] != short["id"] || got["n"] != short["n"] {
 						//: surface the diff.
 						t.Errorf("%s: append round-trip mismatch got=%v", name, got)
 					}

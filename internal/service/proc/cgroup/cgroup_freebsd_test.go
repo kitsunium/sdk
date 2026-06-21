@@ -33,16 +33,15 @@ func TestCreateSucceedsFreeBSD(t *testing.T) {
 	}
 }
 
-// TestAvailableTrueFreeBSD asserts the probe reports true — rctl is the native
-// FreeBSD facility, present on a stock kernel.
-func TestAvailableTrueFreeBSD(t *testing.T) {
+// TestAvailableProbeFreeBSD exercises the RACCT probe without asserting a fixed
+// value: availability now depends on whether the kernel was built with
+// `options RACCT`/`RCTL`, so the contract is "probe without panicking", not a
+// hard true. (A RACCT-enabled VM is covered by the e2e confinement lane.)
+func TestAvailableProbeFreeBSD(t *testing.T) {
 	t.Parallel()
 
-	//: rctl is the native facility — the probe reports it present.
-	if !cgroup.Available() {
-		//: false would wrongly hide the rctl backend.
-		t.Fatal("Available on FreeBSD = false, want true")
-	}
+	//: the probe must return a boolean without panicking on any kernel config.
+	_ = cgroup.Available()
 }
 
 // TestDegradeVerbsFreeBSD asserts the non-mappable verbs return the uniform

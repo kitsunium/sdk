@@ -23,6 +23,8 @@
 package cgroup
 
 import (
+	"errors"
+	"os"
 	"strconv"
 	"sync"
 	"syscall"
@@ -35,6 +37,7 @@ import (
 // FreeBSD syscall numbers (sys/kern/syscalls.master). Hand-declared to keep the
 // package dep-light, mirroring the Windows backend's hand-cited kernel32 ABI.
 const (
+	sysRctlGetRacct   uintptr = 525
 	sysRctlAddRule    uintptr = 528
 	sysRctlRemoveRule uintptr = 529
 )
@@ -55,11 +58,28 @@ type controlGroupFreeBSD struct {
 	cpuPct int64 // percent; negative = unset
 }
 
-// available reports whether the platform offers control groups. rctl ships with
-// FreeBSD (gated on a RACCT/RCTL-enabled kernel); we report true and surface a
-// per-rule error if the facility is disabled, rather than hiding it here.
+// available reports whether the platform offers control groups by probing RACCT:
+// it queries the current process's resource accounting via rctl_get_racct(2). A
+// kernel built without `options RACCT`/`RCTL` reports the facility unsupported,
+// so available() returns false rather than lying (a later Create would then have
+// every rule fail). Any other outcome — success, ERANGE on the tiny probe
+// buffer, EPERM — means rctl exists, so it defaults to true and never hides a
+// working backend.
 func available() bool {
-	//: rctl is the native FreeBSD facility — present on a stock kernel.
+	//: NUL-terminated "process:<pid>" filter for this process's accounting.
+	filter := append([]byte("process:"+strconv.Itoa(os.Getpid())), 0)
+	//: a 1-byte sink is intentionally too small — we only care about the errno.
+	var out [1]byte
+	//: rctl_get_racct(filter, len, out, len).
+	_, _, errno := syscall.Syscall6(sysRctlGetRacct,
+		uintptr(unsafe.Pointer(&filter[0])), uintptr(len(filter)),
+		uintptr(unsafe.Pointer(&out[0])), uintptr(len(out)), 0, 0)
+	//: ENOSYS / EOPNOTSUPP mean RACCT is not compiled in — unsupported.
+	if errno == syscall.ENOSYS || errno == syscall.EOPNOTSUPP {
+		//: honestly report the facility absent.
+		return false
+	}
+	//: every other outcome means rctl exists — default to supported.
 	return true
 }
 
@@ -130,15 +150,22 @@ func (g *controlGroupFreeBSD) applyTo(pid int) error {
 
 // reapply pushes a freshly-stored limit to every current member.
 func (g *controlGroupFreeBSD) reapply() error {
-	//: walk each tracked member and re-apply the stored rules.
+	//: walk each tracked member and reconcile its rules with the stored limits.
 	for _, pid := range g.pids {
-		//: apply the current limit set to this member.
+		//: drop the member's existing rules FIRST so a lowered or cleared cap
+		//: takes effect — rctl_add_rule only adds, it never replaces, so without
+		//: this a reduced limit would leave the prior (larger) rule in force.
+		if err := removeRule("process:" + strconv.Itoa(pid)); err != nil {
+			//: stop at the first removal the kernel rejects.
+			return err
+		}
+		//: re-apply the current (possibly reduced or empty) limit set.
 		if err := g.applyTo(pid); err != nil {
 			//: stop at the first member the kernel rejects.
 			return err
 		}
 	}
-	//: all members carry the updated limits.
+	//: all members now carry exactly the stored limits.
 	return nil
 }
 
@@ -188,23 +215,38 @@ func (g *controlGroupFreeBSD) SetIOMax(_ string) error {
 func (g *controlGroupFreeBSD) Add(pid int) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	//: record the member so later Set* calls re-apply to it.
+	//: bind the current limit set BEFORE tracking pid, so a failed apply never
+	//: leaves a half-joined member that Kill/Delete would later act on.
+	if err := g.applyTo(pid); err != nil {
+		//: surface the typed write failure without recording membership.
+		return err
+	}
+	//: only a successfully-confined process becomes a tracked member.
 	g.pids = append(g.pids, pid)
-	//: bind the current limit set to the new member.
-	return g.applyTo(pid)
+	//: pid now carries every stored limit.
+	return nil
 }
 
 // Kill SIGKILLs every member (rctl has no atomic group-kill primitive).
 func (g *controlGroupFreeBSD) Kill() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	//: firstErr keeps the first genuine kill failure so the sweep still
+	//: attempts every member before returning.
+	var firstErr error
 	//: walk each member and deliver SIGKILL.
 	for _, pid := range g.pids {
-		//: a kill error on an already-dead member is ignored (best-effort sweep).
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+		//: ESRCH (already gone) is the only benign outcome; surface anything
+		//: else (EPERM/EINVAL) rather than reporting a false success.
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) && firstErr == nil {
+			//: capture the first real failure with the typed cgroup sentinel.
+			firstErr = cgroupErr(err, coreproc.CodeCgroupWriteFailed, "CGROUP_WRITE_FAILED",
+				"Could not write the cgroup controller file",
+				"service/proc/cgroup.Kill: syscall.Kill failed")
+		}
 	}
-	//: every member has been signalled.
-	return nil
+	//: nil when every member was signalled (or already gone).
+	return firstErr
 }
 
 // Freeze has no rctl equivalent, so it degrades to UnsupportedPlatform.

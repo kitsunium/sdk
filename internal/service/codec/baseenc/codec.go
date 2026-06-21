@@ -230,10 +230,11 @@ func (c *baseencCodec) Unmarshal(data []byte, v any) error {
 		})
 	}
 	//: base-conversion variants are O(n²) — apply the tighter cap on the
-	//: encoded text before the quadratic decode runs.
-	if isBaseConversion(c.variant) && len(data) > maxConvBytes {
+	//: encoded text before the quadratic decode runs. The encoded cap accounts
+	//: for the ~1.37× raw→encoded expansion so a Marshalled value round-trips.
+	if isBaseConversion(c.variant) && len(data) > maxConvEncodedBytes {
 		//: surface the size cap with the dedicated reason.
-		return convSizeExceeded("service/codec/baseenc.Unmarshal: base-conversion input exceeds maxConvBytes")
+		return convSizeExceeded("service/codec/baseenc.Unmarshal: base-conversion input exceeds maxConvEncodedBytes")
 	}
 	//: undo the base-N wrap; jsonBytes is the inner payload.
 	jsonBytes, derr := c.decodeBytes(data)

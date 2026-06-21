@@ -20,18 +20,20 @@ if [ ! -f "$committed" ]; then
 fi
 
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
-
-# Regenerate to a temp by pointing the generator's output at it via a copy of
-# the logic: simplest is to run the generator then compare, restoring after.
+# Snapshot the committed file, then ALWAYS restore it on exit — this gate is
+# read-only. The trap covers every exit path including a generator failure
+# under `set -e` (which would otherwise leave docs/error-codes.yaml modified
+# in a check-only hook).
 cp "$committed" "$tmp"
+trap 'cp "$tmp" "$committed" 2>/dev/null; rm -f "$tmp"' EXIT
+
+# Regenerate in place (the generator writes $committed); compare against the
+# snapshot to detect drift, then the trap restores the snapshot.
 bash scripts/gen-error-codes.sh >/dev/null
 
 if ! diff -u "$tmp" "$committed" >/dev/null 2>&1; then
 	echo "✗ docs/error-codes.yaml is stale — error codes changed but the YAML" >&2
 	echo "  mirror was not regenerated. Run 'make error-codes' and commit." >&2
 	diff -u "$tmp" "$committed" >&2 || true
-	# Restore the committed copy so the working tree is unchanged on failure.
-	cp "$tmp" "$committed"
 	exit 1
 fi
