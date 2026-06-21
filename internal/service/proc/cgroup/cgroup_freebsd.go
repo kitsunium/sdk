@@ -85,7 +85,16 @@ func available() bool {
 
 // createGroup creates an empty rctl-backed group. name/opts are cgroup-v2 path
 // concepts with no rctl analogue, so they are accepted for parity and ignored.
+// It gates on available(): when the kernel lacks RACCT/RCTL there is no facility
+// to confine with, so it returns the typed UnsupportedPlatform sentinel and no
+// handle — the cross-platform Create contract (every Set*/Add would otherwise
+// fail at the first rctl call).
 func createGroup(_ string, _ ...Option) (g coreproc.Group, err error) {
+	//: no RACCT/RCTL kernel means no control-group facility — honest degrade.
+	if !available() {
+		//: the bare sentinel carries the no-cause UNSUPPORTED_PLATFORM error.
+		return nil, coreproc.UnsupportedPlatform
+	}
 	//: a fresh group starts with no members and no stored limits.
 	return &controlGroupFreeBSD{memMax: -1, cpuPct: -1}, nil
 }

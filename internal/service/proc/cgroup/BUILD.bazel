@@ -49,7 +49,6 @@ go_test(
     name = "cgroup_test",
     srcs = [
         "cgroup_external_test.go",
-        "cgroup_freebsd_test.go",
         "cgroup_other_test.go",
         "cgroup_windows_test.go",
     ],
