@@ -147,7 +147,13 @@ docs:
 # 4. Start a fresh static server. The PORT env var lets you switch
 #    from the default 4321 (`PORT=5173 make serve`) without editing
 #    the Makefile.
-serve: docs
+# NOTE: serve builds with DOCS_BASE=/ so the site is ROOT-served. The default
+# build bakes base=/<repo> (for the GitHub Pages project page), under which the
+# root index redirects to /<repo>/… — which `serve dist` can't resolve locally
+# (files live at dist/, not dist/<repo>/), so the page comes up blank. Forcing
+# base=/ for the local preview makes http://localhost:<port>/ work.
+serve:
+	@DOCS_BASE=/ $(MAKE) --no-print-directory docs
 	@port=$${PORT:-4321}; \
 	pkill -f "serve.*dist.*-l $$port" 2>/dev/null || true; \
 	for i in 1 2 3 4 5; do \
@@ -162,9 +168,10 @@ serve: docs
 # the prebuild once, then `astro dev` with hot-module reload — edits to
 # src/pages/*.astro, styles, ADRs, or package docs reflect live with NO rebuild.
 # Use this while iterating; use `make serve` only to preview the real built site.
-# Dev server: http://localhost:4321/ (astro dev default).
+# DOCS_BASE=/ so the dev server is root-served (default base=/<repo> would put
+# the app under /<repo>/ and leave / blank). Dev server: http://localhost:4321/.
 docs-dev:
-	cd docs/site && npm install --silent && npm run dev
+	cd docs/site && npm install --silent && DOCS_BASE=/ npm run dev
 
 # `release-dry-run` previews the auto-bump pipeline without pushing
 # any tag. compute-bumps.sh emits the list of pkg/<major> dirs that
