@@ -32,11 +32,15 @@ initialisers, no `init()` function.
   10 MiB `maxBaseEncBytes` cap; decode errors reuse `BaseEncDecodeFailed`.
 - **Base58 / Base62** are big-endian **base-conversion** encodings (whole input
   treated as one integer, divided down by the radix) — inherently **O(n²)**, so
-  they carry a tight `maxConvBytes` (4 KiB) input cap enforced at
-  Marshal/Append (raw bytes) and Unmarshal (encoded text), surfacing
-  `BaseEncSizeExceeded` above it. They are for **short identifiers** (keys,
-  hashes, IDs); use base64 for bulk data. Decode errors reuse
-  `BaseEncDecodeFailed`. Leading zero bytes map to leading `alphabet[0]` chars.
+  they carry a tight cap enforced on **every** path: `maxConvBytes` (4 KiB) on
+  the raw bytes at Marshal/Append and at the streaming encode (`bufferingWriter`
+  Close), and `maxConvEncodedBytes` (8 KiB — the ~1.37× raw→encoded expansion)
+  on the encoded text at Unmarshal and at the streaming decode
+  (`decodeAllReader`); all surface `BaseEncSizeExceeded`. They are for **short
+  identifiers** (keys, hashes, IDs); use base64 for bulk data and they are
+  excluded from the bulk streaming round-trip test for that reason. Decode
+  errors reuse `BaseEncDecodeFailed`. Leading zero bytes map to leading
+  `alphabet[0]` chars.
 
 ## Marshal/Unmarshal pipeline
 

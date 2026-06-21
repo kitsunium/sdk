@@ -35,6 +35,13 @@ func (b *bufferingWriter) Write(p []byte) (n int, err error) {
 // "encoded payload was partially written" diagnostic instead of a silent
 // truncation.
 func (b *bufferingWriter) Close() error {
+	//: base-conversion variants are O(n²) — refuse an oversized buffered
+	//: payload before the quadratic encode runs, matching the Marshal cap so
+	//: streaming cannot bypass it (CWE-400).
+	if isBaseConversion(b.codec.variant) && b.buf.Len() > maxConvBytes {
+		//: surface the shared size sentinel.
+		return convSizeExceeded("service/codec/baseenc.bufferingWriter.Close: base-conversion buffered input exceeds maxConvBytes")
+	}
 	//: encode the accumulated bytes through the variant's path.
 	encoded := b.codec.encodeBytes(b.buf.Bytes())
 	//: flush to the caller's writer.
