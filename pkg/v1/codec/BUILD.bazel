@@ -26,6 +26,7 @@ go_library(
         "//internal/kernel/errs",
         "//internal/service/codec/asn1",
         "//internal/service/codec/baseenc",
+        "//internal/service/codec/bson",
         "//internal/service/codec/cbor",
         "//internal/service/codec/csv",
         "//internal/service/codec/flatbuffers",

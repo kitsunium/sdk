@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Six domains ship today — a structured **logger** (zero-alloc, multi-sink), a universal **codec** (21 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), and OS **proc** supervision. New domains land in the same 4-layer shape (ADR 0001).
+Go SDK providing a normed, performant toolbox for downstream applications. Six domains ship today — a structured **logger** (zero-alloc, multi-sink), a universal **codec** (22 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), and OS **proc** supervision. New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.26.2 (pinned in `MODULE.bazel`)
 
@@ -126,5 +126,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0018 — cross-platform portability strategy: build bar (compiles on all 8 GOOS) + runtime bar (correct on the real kernel); uniform typed `UnsupportedPlatform` where no native mechanic exists; `_linux`/`_unix`/`_bsd`/`_windows`/`_other` split convention; `cross-platform.yml` (build) + `e2e-vm.yml` (real-kernel) gates; OpenBSD `RLIMIT_AS` precedent; native-backend roadmap (FreeBSD `rctl`, Windows Job Objects, BSD `procctl`) — `docs/adr/0018-sdk-cross-platform-portability.md`
 - ADR 0019 — public error construction API (`pkg/v1/errs.New`/`Wrap`/`Field` helpers via non-panicking `kernel/errs.NewRuntime`) + third-party Major-byte reservation `0x40–0x7F` (`MinAppMajor`/`MaxMajor`); reverses the `errs` "no constructors" rule so downstreams adopt the error model wholesale — `docs/adr/0019-pkg-errs-public-construction.md`
 - ADR 0020 — errs AST audit accepts two Reason derivations (`screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")`); closes the `//:audit_sources` coverage gap that silently excluded ~10 namespaced emitters (ring + every logger middleware/sink) — `docs/adr/0020-errs-audit-dual-reason-derivation.md`
+- ADR 0021 — BSON codec (M5) over `go.mongodb.org/mongo-driver/bson` in `internal/service/codec/bson` (library-backed codec precedent, not third-party quarantine); non-streaming + Appender; error block `0.3.36.*` — `docs/adr/0021-sdk-codec-bson.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

@@ -62,6 +62,7 @@ var expectedAppenders = []string{
 	"base45",
 	"base58",
 	"base62",
+	"bson",
 }
 
 // registeredAppenders is the package-level Appender registry snapshot
@@ -771,6 +772,9 @@ func codecAdapters() map[codec.Format]codecAdapter {
 		//: complexRT fixture would exceed it, so they round-trip a short value.
 		codec.Format("base58"): shortConvAdapter("base58"),
 		codec.Format("base62"): shortConvAdapter("base62"),
+		//: BSON needs a top-level document and has no uint64/sub-ms-time
+		//: support, so it uses a dedicated document fixture (not complexRT).
+		codec.Format("bson"): bsonAdapter(),
 	}
 }
 
@@ -835,6 +839,38 @@ func shortConvAdapter(name string) codecAdapter {
 			if got["id"] != want["id"] || got["n"] != want["n"] {
 				//: surface the diff.
 				t.Errorf("%s: round-trip mismatch got=%v want=%v", name, got, want)
+			}
+		},
+	}
+}
+
+// bsonAdapter builds the round-trip adapter for the BSON codec. BSON requires a
+// top-level document and lacks uint64 / sub-ms time, so it round-trips a small
+// document map rather than the complexRT fixture.
+func bsonAdapter() codecAdapter {
+	//: tiny document; BSON decodes ints back as int64 in a bson.M map.
+	value := func() map[string]any {
+		//: stable scalar fields a document map round-trips losslessly.
+		return map[string]any{"id": "kitsunium", "n": int64(42), "ok": true}
+	}
+	return codecAdapter{
+		encode: func() ([]byte, error) {
+			//: dispatch the document through the facade.
+			return codec.Marshal(codec.BSON, value())
+		},
+		decodeAndCheck: func(t *testing.T, name string, data []byte) {
+			t.Helper()
+			//: decode into a fresh map.
+			var got map[string]any
+			if err := codec.Unmarshal(codec.BSON, data, &got); err != nil {
+				//: codec rejected its own output — hard failure.
+				t.Fatalf("%s: Unmarshal err=%v", name, err)
+			}
+			//: compare the three stable fields.
+			want := value()
+			if got["id"] != want["id"] || got["n"] != want["n"] || got["ok"] != want["ok"] {
+				//: surface the diff.
+				t.Errorf("%s: round-trip mismatch got=%v", name, got)
 			}
 		},
 	}
@@ -1508,6 +1544,31 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 					if !complexEqual(got, val) {
 						//: surface the diff.
 						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
+		//: BSON needs a top-level document (no scalar root) and lacks uint64 /
+		//: sub-ms time, so it appends a small document map.
+		case "bson":
+			//: stable document fields (ints decode back as int64).
+			bdoc := map[string]any{"id": "kitsunium", "n": int64(7), "ok": true}
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    bdoc,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					//: decode into a fresh map.
+					var got map[string]any
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						//: hard failure on decode.
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					//: compare the stable id field.
+					if got["id"] != bdoc["id"] {
+						//: surface the diff.
+						t.Errorf("%s: append round-trip mismatch got=%v", name, got)
 					}
 				},
 			})
