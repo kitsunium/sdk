@@ -3,12 +3,12 @@
 
 ## Purpose
 
-Public facade for the universal codec dispatch. Consumers address a codec by `Format` (string alias) and call `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` — the package looks the format up in the `internal/core/codec` registry, type-asserts the streaming extension when needed, and forwards. Blank-imports the 13 service codec packages (covering 18 Format names — `baseenc` alone registers 6) so a single `import _ ".../pkg/v1/codec"` activates the full registry.
+Public facade for the universal codec dispatch. Consumers address a codec by `Format` (string alias) and call `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` — the package looks the format up in the `internal/core/codec` registry, type-asserts the streaming extension when needed, and forwards. Blank-imports the 13 service codec packages (covering 19 Format names — `baseenc` alone registers 7) so a single `import _ ".../pkg/v1/codec"` activates the full registry.
 
 ## Contents
 
 ```
-codec.go      — Format alias, 18 Format constants, Marshal/Unmarshal/NewEncoder/NewDecoder,
+codec.go      — Format alias, 19 Format constants, Marshal/Unmarshal/NewEncoder/NewDecoder,
                 Available/FromMIME/FromExtension, resolveStreaming + unknownFormat helpers,
                 blank imports for asn1|baseenc|cbor|csv|flatbuffers|json|msgpack|ndjson|pem|tlv|toml|xml|yaml
 compressed.go — MarshalCompressed / UnmarshalCompressed verbs + CompressAlgorithm alias
@@ -44,7 +44,7 @@ is a type alias so consumers name a compressor without importing `internal/*`.
 
 ## Conventions
 
-- **`Format` is the public dispatch key.** It's `type Format = corecodec.Format` — a string alias, but the 18 named constants (`JSON`, `NDJSON`, `XML`, `CSV`, `ASN1DER`, `PEM`, `YAML`, `TOML`, `CBOR`, `MsgPack`, `TLV`, `FlatBuffers`, `Base64`, `Base64URL`, `Base32`, `Base16`, `Hex`, `ASCII85`) are the contract. Their string values are frozen post-v1.0.0.
+- **`Format` is the public dispatch key.** It's `type Format = corecodec.Format` — a string alias, but the 19 named constants (`JSON`, `NDJSON`, `XML`, `CSV`, `ASN1DER`, `PEM`, `YAML`, `TOML`, `CBOR`, `MsgPack`, `TLV`, `FlatBuffers`, `Base64`, `Base64URL`, `Base32`, `Base16`, `Hex`, `ASCII85`, `Base45`) are the contract. Their string values are frozen post-v1.0.0.
 - **Lookup is `// IFACE-PLUGIN`.** `corecodec.Lookup`, `LookupMIME`, `LookupExt`, and `Available` (the implementations behind the four facade entry points) are the canonical plugin discovery surface. The 13 service codec packages register themselves via package-level `var` side-effects driven by the blank imports in `codec.go`.
 - **Origin wins.** When the underlying codec returns an `*errs.Error`, this package forwards it untouched. Only dispatch-level failures (unknown format, non-streaming codec) get a new sentinel built in this package.
 - **Error codes use range 1.2.0.*** per ADR 0005:

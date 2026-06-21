@@ -32,6 +32,7 @@ var codecs = []codecTC{
 	{"base16", "application/base16", ".b16"},
 	{"hex", "application/hex", ".hex"},
 	{"ascii85", "application/ascii85", ".a85"},
+	{"base45", "application/base45", ".b45"},
 }
 
 // TestMarshalUnmarshalRoundTrip verifies that every registered codec can
@@ -343,6 +344,7 @@ func TestSingletonsExported(t *testing.T) {
 		{"Base16", baseenc.Base16, "base16"},
 		{"Hex", baseenc.Hex, "hex"},
 		{"ASCII85", baseenc.ASCII85, "ascii85"},
+		{"Base45", baseenc.Base45, "base45"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

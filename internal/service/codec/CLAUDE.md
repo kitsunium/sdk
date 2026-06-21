@@ -3,14 +3,14 @@
 
 ## Purpose
 
-Thirteen wire-format codecs covering 18 registered Format names, one Go package each, all implementing `internal/core/codec.Codec`. Blank-importing a package registers its singleton(s) with the core registry so it becomes resolvable by Name / MIME type / file extension. `pkg/v1/codec` blank-imports all thirteen in one shot; downstream applications can import only the formats they need. The `baseenc` package registers 6 distinct Format names (base64, base64url, base32, base16, hex, ascii85) under a single Go package so swapping base-N variants is a Format-string change, identical to swapping json↔cbor.
+Thirteen wire-format codecs covering 19 registered Format names, one Go package each, all implementing `internal/core/codec.Codec`. Blank-importing a package registers its singleton(s) with the core registry so it becomes resolvable by Name / MIME type / file extension. `pkg/v1/codec` blank-imports all thirteen in one shot; downstream applications can import only the formats they need. The `baseenc` package registers 7 distinct Format names (base64, base64url, base32, base16, hex, ascii85, base45) under a single Go package so swapping base-N variants is a Format-string change, identical to swapping json↔cbor.
 
 ## Contents
 
 | Package | Format(s) | `PP` slot | Streaming | Appender |
 |---|---|---|---|---|
 | `asn1/`        | ASN.1 DER (BER accepted on Unmarshal)         | `0.3.9.*`  | no  | yes |
-| `baseenc/`     | base64, base64url, base32, base16, hex, ascii85 — 6 Format names, JSON-mediated pipeline | `0.3.24.*` | yes | yes |
+| `baseenc/`     | base64, base64url, base32, base16, hex, ascii85, base45 — 7 Format names, JSON-mediated pipeline | `0.3.24.*` | yes | yes |
 | `cbor/`        | CBOR (RFC 8949) — fxamacker/cbor/v2           | `0.3.6.*`  | yes | yes |
 | `csv/`         | CSV (RFC 4180) — `[][]string`                 | `0.3.8.*`  | no  | yes |
 | `flatbuffers/` | FlatBuffers passthrough (already-encoded `[]byte`) | `0.3.23.*` | no  | yes |
