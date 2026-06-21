@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Fourteen wire-format codecs covering 22 registered Format names, one Go package each, all implementing `internal/core/codec.Codec`. Blank-importing a package registers its singleton(s) with the core registry so it becomes resolvable by Name / MIME type / file extension. `pkg/v1/codec` blank-imports all fourteen in one shot; downstream applications can import only the formats they need. The `baseenc` package registers 9 distinct Format names (base64, base64url, base32, base16, hex, ascii85, base45) under a single Go package so swapping base-N variants is a Format-string change, identical to swapping json↔cbor.
+Fourteen wire-format codecs covering 22 registered Format names, one Go package each, all implementing `internal/core/codec.Codec`. Blank-importing a package registers its singleton(s) with the core registry so it becomes resolvable by Name / MIME type / file extension. `pkg/v1/codec` blank-imports all fourteen in one shot; downstream applications can import only the formats they need. The `baseenc` package registers 9 distinct Format names (base64, base64url, base32, base16, hex, ascii85, base45, base58, base62) under a single Go package so swapping base-N variants is a Format-string change, identical to swapping json↔cbor.
 
 ## Contents
 

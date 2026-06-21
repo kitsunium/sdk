@@ -646,6 +646,18 @@ codes:
     const: CodeBSONSizeExceeded
     hex: "0x00_03_24_03"
     package: internal/service/codec/bson
+  - code: "0.3.37.1"
+    const: CodeHCLMarshalFailed
+    hex: "0x00_03_25_01"
+    package: third-party/codec/hcl
+  - code: "0.3.37.2"
+    const: CodeHCLUnmarshalFailed
+    hex: "0x00_03_25_02"
+    package: third-party/codec/hcl
+  - code: "0.3.37.3"
+    const: CodeHCLSizeExceeded
+    hex: "0x00_03_25_03"
+    package: third-party/codec/hcl
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

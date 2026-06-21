@@ -29,6 +29,8 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0018-sdk-cross-platform-portability.md` | Cross-platform portability strategy — build bar + runtime bar; uniform `UnsupportedPlatform` contract; `_linux`/`_unix`/`_bsd`/`_windows`/`_other` split convention; `bazel-ci.yml` cross-build + `e2e-vm.yml` gates; OpenBSD `RLIMIT_AS` precedent; native-backend roadmap (FreeBSD `rctl`, Windows Job Objects, BSD `procctl`) | Accepted |
 | `0019-pkg-errs-public-construction.md` | Public error construction API (`pkg/v1/errs.New`/`Wrap`/`Field` via non-panicking `kernel/errs.NewRuntime`) + third-party Major reservation `0x40–0x7F` (`MinAppMajor`/`MaxMajor`) | Accepted (amends 0002 / 0005 §Registry) |
 | `0020-errs-audit-dual-reason-derivation.md` | errs AST audit accepts `screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")`; closes the `//:audit_sources` gap excluding ~10 namespaced emitters | Accepted (amends 0005 §Semantics / formalises 0006) |
+| `0021-sdk-codec-bson.md` | BSON codec (M5) in `internal/service/codec/bson` over `mongo-driver/bson` (library-backed precedent); non-streaming + Appender; block `0.3.36.*` | Accepted (extends 0003 §M5) |
+| `0022-sdk-codec-hcl.md` | HCL codec (M5) quarantined in `third-party/codec/hcl` (`hcl/v2`+`go-cty` downgrade `x/sys` in service); opt-in, not in `pkg/v1/codec`; block `0.3.37.*` | Accepted (extends 0003 §M5; follows 0012, contrasts 0021) |
 
 ## Conventions
 
