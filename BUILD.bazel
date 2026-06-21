@@ -35,6 +35,7 @@ filegroup(
         "//internal/kernel/snapshot:audit_srcs",
         "//internal/service/codec/asn1:audit_srcs",
         "//internal/service/codec/baseenc:audit_srcs",
+        "//internal/service/codec/bson:audit_srcs",
         "//internal/service/codec/cbor:audit_srcs",
         "//internal/service/codec/csv:audit_srcs",
         "//internal/service/codec/flatbuffers:audit_srcs",

@@ -29,6 +29,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0018-sdk-cross-platform-portability.md` | Cross-platform portability strategy — two bars (build + runtime); uniform `UnsupportedPlatform` contract; `_linux`/`_unix`/`_bsd`/`_windows`/`_other` split; `bazel-ci.yml` cross-build job (build) + `e2e-vm.yml` (runtime, real kernels) gates; OpenBSD `RLIMIT_AS` precedent; native-backend roadmap (FreeBSD `rctl`, Windows Job Objects, BSD `procctl`) | Accepted |
 | `adr/0019-pkg-errs-public-construction.md` | Public error construction API (`pkg/v1/errs.New`/`Wrap`/`Field` via non-panicking `kernel/errs.NewRuntime`) + third-party Major reservation `0x40–0x7F` (`MinAppMajor`/`MaxMajor`) | Accepted (amends ADR 0002 / 0005 §Registry) |
 | `adr/0020-errs-audit-dual-reason-derivation.md` | errs AST audit accepts `screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")`; closes the `//:audit_sources` gap excluding ~10 namespaced emitters (ring + logger middleware/sinks) | Accepted (amends ADR 0005 §Semantics / formalises ADR 0006) |
+| `adr/0021-sdk-codec-bson.md` | BSON codec (M5) over `go.mongodb.org/mongo-driver/bson` in `internal/service/codec/bson` (library-backed codec precedent, not third-party quarantine); non-streaming + Appender; error block `0.3.36.*` | Accepted (extends ADR 0003 §M5) |
 
 ## ADR conventions
 
@@ -51,4 +52,4 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 
 ## Subtree
 
-- `adr/` — Architecture Decision Records (twenty accepted to date — see table above)
+- `adr/` — Architecture Decision Records (twenty-one accepted to date — see table above)

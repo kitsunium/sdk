@@ -13,6 +13,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.1
 	github.com/pelletier/go-toml/v2 v2.3.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
+	go.mongodb.org/mongo-driver v1.17.4
 )
 
 require (

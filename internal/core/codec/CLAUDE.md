@@ -5,7 +5,7 @@
 
 Declares the domain contract every wire-format codec in the SDK satisfies (`Codec`), the optional streaming extension (`StreamingCodec`), the optional append-into-buffer extension (`Appender`), and the **process-wide registry** that maps `Format` / MIME / file extension to the registered codec. ADR 0003.
 
-No format-specific knowledge lives here — concrete codecs live under `internal/service/codec/<format>/` and self-register at package import. `pkg/v1/codec` blank-imports all thirteen of them (21 Format names) and re-exports `Marshal` / `Unmarshal` / `Lookup*` against this package.
+No format-specific knowledge lives here — concrete codecs live under `internal/service/codec/<format>/` and self-register at package import. `pkg/v1/codec` blank-imports all fourteen of them (22 Format names) and re-exports `Marshal` / `Unmarshal` / `Lookup*` against this package.
 
 ## Contents
 
