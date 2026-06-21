@@ -23,22 +23,23 @@ Code range: `0.2.4.*` (ADR 0013).
 | `algorithm.go` | `Algorithm` typed string (`String` / `Known`) |
 | `key.go`       | `Key` — opaque, redacting 256-bit key (`NewKey` / `Bytes` / `Zeroize`); `KeyLen` |
 | `aead.go`      | `AEAD` interface (`Algorithm` / `ID` / `Seal` / `Open`) |
-| `registry.go`  | `snapshot.Value`-backed AEAD registry + id index: `Register` / `Lookup` / `Available` |
+| `registry_generic.go` | `schemeRegistry[V comparable]` — the shared read-mostly registry (publish / lookup / available / clone) backing all eight capabilities; collapses what were eight duplicated publish*/clone* helpers |
+| `registry.go`  | AEAD registry: name side on the shared `schemeRegistry[AEAD]`, plus a bespoke `snapshot.Value` wire-id index (Open dispatches by byte id): `Register` / `Lookup` / `Available` + `lookupByID` |
 | `seal.go`      | `Seal` / `Open` dispatch + the frozen box `Version` byte |
 | `hasher.go`    | `Hasher` interface (`Algorithm` / `New`) — the **non-authenticated** fingerprint port |
-| `hash_registry.go` | second `snapshot.Value`-backed registry mapping an `Algorithm` to a `Hasher`: `RegisterHasher` / `LookupHasher` / `AvailableHashers` + `Sum` / `SumHex` / `NewHash` dispatch |
+| `hash_registry.go` | second `schemeRegistry`-backed registry mapping an `Algorithm` to a `Hasher`: `RegisterHasher` / `LookupHasher` / `AvailableHashers` + `Sum` / `SumHex` / `NewHash` dispatch |
 | `signer.go`    | `Signer` interface (`Algorithm` / `GenerateKey` / `Sign` / `Verify`) — the **digital-signature** port (public-key authenticity) |
-| `signer_registry.go` | third `snapshot.Value`-backed registry mapping an `Algorithm` to a `Signer`: `RegisterSigner` / `LookupSigner` / `AvailableSigners` + `GenerateKey` / `Sign` / `Verify` dispatch |
+| `signer_registry.go` | third `schemeRegistry`-backed registry mapping an `Algorithm` to a `Signer`: `RegisterSigner` / `LookupSigner` / `AvailableSigners` + `GenerateKey` / `Sign` / `Verify` dispatch |
 | `deriver.go`   | `Deriver` interface (`Algorithm` / `Derive`) — the **key-separation KDF** port (NOT password stretching) |
-| `deriver_registry.go` | fourth `snapshot.Value`-backed registry mapping an `Algorithm` to a `Deriver`: `RegisterDeriver` / `LookupDeriver` / `AvailableDerivers` + `Subkey` dispatch |
+| `deriver_registry.go` | fourth `schemeRegistry`-backed registry mapping an `Algorithm` to a `Deriver`: `RegisterDeriver` / `LookupDeriver` / `AvailableDerivers` + `Subkey` dispatch |
 | `password_hasher.go` | `PasswordHasher` interface (`Algorithm` / `Hash` / `Verify` / `NeedsRehash`) — the **password-storage** port (deliberately slow, salted, PHC-string) |
-| `password_registry.go` | fifth `snapshot.Value`-backed registry: `RegisterPasswordHasher` / `LookupPasswordHasher` / `AvailablePasswordHashers` + `HashPassword` / `VerifyPassword` / `NeedsRehash` dispatch (the latter two resolve the scheme from the PHC id via `phcID`) |
+| `password_registry.go` | fifth `schemeRegistry`-backed registry: `RegisterPasswordHasher` / `LookupPasswordHasher` / `AvailablePasswordHashers` + `HashPassword` / `VerifyPassword` / `NeedsRehash` dispatch (the latter two resolve the scheme from the PHC id via `phcID`) |
 | `mac.go`       | `MAC` interface (`Algorithm` / `Tag` / `Verify` / `New`) — the **keyed detached-authentication** port; a tag IS secret-comparison-sensitive (route through `Verify`, never `==`) |
-| `mac_registry.go` | sixth `snapshot.Value`-backed registry mapping an `Algorithm` to a `MAC`: `RegisterMAC` / `LookupMAC` / `AvailableMACs` + `MACTag` / `MACVerify` dispatch (named `MAC*` so they never collide with the signer/verifier verbs) |
+| `mac_registry.go` | sixth `schemeRegistry`-backed registry mapping an `Algorithm` to a `MAC`: `RegisterMAC` / `LookupMAC` / `AvailableMACs` + `MACTag` / `MACVerify` dispatch (named `MAC*` so they never collide with the signer/verifier verbs) |
 | `agreement.go` | `Agreement` interface (`Algorithm` / `GenerateKey` / `Shared`) — the **DH-style key-agreement** port; raw `Shared` output MUST be KDF'd before use |
-| `agreement_registry.go` | seventh `snapshot.Value`-backed registry mapping an `Algorithm` to an `Agreement`: `RegisterAgreement` / `LookupAgreement` / `AvailableAgreements` + `GenerateAgreementKey` / `AgreementShared` dispatch (a scheme `Shared` fault wraps into `AgreementFailed`, leaking no key bytes) |
+| `agreement_registry.go` | seventh `schemeRegistry`-backed registry mapping an `Algorithm` to an `Agreement`: `RegisterAgreement` / `LookupAgreement` / `AvailableAgreements` + `GenerateAgreementKey` / `AgreementShared` dispatch (a scheme `Shared` fault wraps into `AgreementFailed`, leaking no key bytes) |
 | `stream.go`    | `StreamSealer` interface (`Algorithm` / `Writer` / `Reader`) — the **chunked streaming-AEAD** port with the hold-back contract; truncation surfaces as `StreamTruncated` |
-| `stream_registry.go` | eighth `snapshot.Value`-backed registry mapping an `Algorithm` to a `StreamSealer`: `RegisterStreamSealer` / `LookupStreamSealer` / `AvailableStreamSealers` + `SealStream` / `OpenStream` dispatch (a lookup miss reuses the AEAD `UnknownAlgorithm` sentinel — streaming extends the AEAD domain) |
+| `stream_registry.go` | eighth `schemeRegistry`-backed registry mapping an `Algorithm` to a `StreamSealer`: `RegisterStreamSealer` / `LookupStreamSealer` / `AvailableStreamSealers` + `SealStream` / `OpenStream` dispatch (a lookup miss reuses the AEAD `UnknownAlgorithm` sentinel — streaming extends the AEAD domain) |
 | `codes.go`     | `Code*` constants — range 0.2.4.\* |
 | `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9), `UnknownKDFAlgorithm` (0.2.4.10), `DerivationFailed` (0.2.4.11), `UnknownPasswordAlgorithm` (0.2.4.12), `PasswordHashFailed` (0.2.4.13), `InvalidPasswordHash` (0.2.4.14), `UnknownMACAlgorithm` (0.2.4.15), `UnknownAgreementAlgorithm` (0.2.4.16), `AgreementFailed` (0.2.4.17), `StreamTruncated` (0.2.4.18), `DigestMismatch` (0.2.4.20) |
 
@@ -73,8 +74,13 @@ known from the alg-id, so the reader strips it without a length prefix. Each
 ## Conventions
 
 - **`snapshot.Value`, not `sync.Map`** — schemes register once at import, then
-  it is read-many (ADR 0011). `Register` publishes via `Value.Update`
-  (mutex-serialised); `Lookup` / `lookupByID` are lock-free.
+  it is read-many (ADR 0011). The eight capability registries share one generic
+  `schemeRegistry[V comparable]` (`registry_generic.go`) that owns the
+  publish/clone/lookup/available logic; each `*_registry.go` is a thin
+  `Register*`/`Lookup*`/`Available*` delegation plus its dispatch verbs. The AEAD
+  wire-id index stays bespoke (it is keyed by byte, not `Algorithm`). `Register`
+  publishes via `Value.Update` (mutex-serialised); `Lookup` / `lookupByID` are
+  lock-free.
 - **Registration is a package-level `var`, never `init()`** (`KTN-FUNC-NOINIT`):
   `var AEAD = crypto.Register(aesGCM{})` in each scheme package.
 - **Idempotent re-registration** of the same scheme is fine; a *distinct* scheme

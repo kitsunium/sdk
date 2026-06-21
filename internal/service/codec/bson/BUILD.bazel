@@ -1,0 +1,49 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "bson",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/codec/bson",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/codec",
+        "//internal/kernel/errs",
+        "@org_mongodb_go_mongo_driver//bson",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":bson",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (errs.Define emitters must be in //:audit_sources). Kept out of the
+# gazelle-managed rules above so a re-run preserves it.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_test(
+    name = "bson_test",
+    srcs = ["codec_external_test.go"],
+    deps = [
+        ":bson",
+        "//internal/core/codec",
+    ],
+)

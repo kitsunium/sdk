@@ -29,6 +29,9 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0018-sdk-cross-platform-portability.md` | Cross-platform portability strategy — two bars (build + runtime); uniform `UnsupportedPlatform` contract; `_linux`/`_unix`/`_bsd`/`_windows`/`_other` split; `bazel-ci.yml` cross-build job (build) + `e2e-vm.yml` (runtime, real kernels) gates; OpenBSD `RLIMIT_AS` precedent; native-backend roadmap (FreeBSD `rctl`, Windows Job Objects, BSD `procctl`) | Accepted |
 | `adr/0019-pkg-errs-public-construction.md` | Public error construction API (`pkg/v1/errs.New`/`Wrap`/`Field` via non-panicking `kernel/errs.NewRuntime`) + third-party Major reservation `0x40–0x7F` (`MinAppMajor`/`MaxMajor`) | Accepted (amends ADR 0002 / 0005 §Registry) |
 | `adr/0020-errs-audit-dual-reason-derivation.md` | errs AST audit accepts `screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")`; closes the `//:audit_sources` gap excluding ~10 namespaced emitters (ring + logger middleware/sinks) | Accepted (amends ADR 0005 §Semantics / formalises ADR 0006) |
+| `adr/0021-sdk-codec-bson.md` | BSON codec (M5) over `go.mongodb.org/mongo-driver/bson` in `internal/service/codec/bson` (library-backed codec precedent, not third-party quarantine); non-streaming + Appender; error block `0.3.36.*` | Accepted (extends ADR 0003 §M5) |
+| `adr/0022-sdk-codec-hcl.md` | HCL codec (M5) **quarantined** in `third-party/codec/hcl` (root module) because `hcl/v2`+`go-cty` downgrade `x/sys` in `internal/service`; opt-in, NOT in `pkg/v1/codec`; first `third-party/codec/` subtree; error block `0.3.37.*` | Accepted (extends ADR 0003 §M5; follows ADR 0012 quarantine, contrasts ADR 0021) |
+| `adr/0023-sdk-schema-codecs.md` | Schema codecs (M6): opt-in, under `third-party/codec/` — schema-bound (can't honour the universal round-trip contract); Protobuf concrete (`0.3.38.*`); Avro/Cap'n Proto deferred | Accepted (extends ADR 0003 §M6) |
 
 ## ADR conventions
 
@@ -42,6 +45,8 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 
 The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-…` is the **documentary source of truth**; the AST audit test in `internal/kernel/errs/registry_external_test.go` embeds the same table as the **executable source of truth**. Keep the two in sync manually on every change — the audit catches drift on uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (ADR 0006/0020) over every package in `//:audit_sources`.
 
+`docs/error-codes.yaml` is the **generated human-readable mirror** of every `errs.Code` constant in the tree (one entry per code: dotted-quad, const name, hex, package). Regenerate with `make error-codes` (`scripts/gen-error-codes.sh`); the `scripts/pre-commit/check-error-codes-drift.sh` guard fails the commit when it is stale. It is a convenience index, not authoritative — the AST audit remains the executable gate.
+
 ## Do NOT
 
 - Put feature documentation here. Packages document themselves via `README.md` next to their code.
@@ -51,4 +56,4 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 
 ## Subtree
 
-- `adr/` — Architecture Decision Records (twenty accepted to date — see table above)
+- `adr/` — Architecture Decision Records (twenty-three accepted to date — see table above)

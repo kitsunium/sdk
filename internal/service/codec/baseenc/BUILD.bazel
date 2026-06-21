@@ -5,9 +5,14 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "baseenc",
     srcs = [
+        "base45.go",
+        "base58.go",
+        "base62.go",
+        "base_convert.go",
         "buffering_writer.go",
         "codec.go",
         "codes.go",
+        "decode_all_reader.go",
         "decoder.go",
         "encoder.go",
         "errors.go",
@@ -33,6 +38,8 @@ go_test(
     name = "baseenc_test",
     size = "small",
     srcs = [
+        "base45_internal_test.go",
+        "base_convert_internal_test.go",
         "buffering_writer_internal_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",

@@ -50,6 +50,14 @@ const (
 	variantHex
 	// variantASCII85 is Adobe's Ascii85 encoding.
 	variantASCII85
+	// variantBase45 is RFC 9285 Base45 (QR-code alphanumeric safe). No stdlib
+	// backing — see base45.go for the transform.
+	variantBase45
+	// variantBase58 is Bitcoin Base58 — a base-conversion (O(n²)) encoding for
+	// short identifiers; see base58.go / base_convert.go.
+	variantBase58
+	// variantBase62 is Base62 (0-9A-Za-z) — base-conversion (O(n²)), like base58.
+	variantBase62
 )
 
 // variant enumerates the supported base-N variants. The values are an
@@ -73,7 +81,53 @@ var (
 	Hex codec.Codec = codec.Register(&baseencCodec{variant: variantHex})
 	// ASCII85 is the Adobe Ascii85 codec.
 	ASCII85 codec.Codec = codec.Register(&baseencCodec{variant: variantASCII85})
+	// Base45 is the RFC 9285 Base45 codec (QR-code alphanumeric safe).
+	Base45 codec.Codec = codec.Register(&baseencCodec{variant: variantBase45})
+	// Base58 is the Bitcoin Base58 codec (base-conversion; short inputs only).
+	Base58 codec.Codec = codec.Register(&baseencCodec{variant: variantBase58})
+	// Base62 is the Base62 codec (base-conversion; short inputs only).
+	Base62 codec.Codec = codec.Register(&baseencCodec{variant: variantBase62})
 )
+
+// isBaseConversion reports whether v is one of the O(n²) base-conversion
+// variants (Base58/Base62), which carry the tighter maxConvBytes input cap.
+func isBaseConversion(v variant) bool {
+	//: only Base58 and Base62 use the quadratic base-conversion path.
+	return v == variantBase58 || v == variantBase62
+}
+
+// convAlphabet returns the base-conversion alphabet for a Base58/Base62 codec.
+func (c *baseencCodec) convAlphabet() string {
+	//: Base58 vs Base62 alphabet selection.
+	if c.variant == variantBase58 {
+		//: Bitcoin alphabet.
+		return base58Alphabet
+	}
+	//: Base62 alphabet.
+	return base62Alphabet
+}
+
+// convRadix returns the base-conversion radix for a Base58/Base62 codec.
+func (c *baseencCodec) convRadix() int {
+	//: Base58 vs Base62 radix selection.
+	if c.variant == variantBase58 {
+		//: 58.
+		return base58Radix
+	}
+	//: 62.
+	return base62Radix
+}
+
+// convReverse returns the base-conversion reverse table for a Base58/Base62 codec.
+func (c *baseencCodec) convReverse() *[base45TableSize]int {
+	//: Base58 vs Base62 reverse-table selection.
+	if c.variant == variantBase58 {
+		//: Base58 reverse lookup.
+		return &base58Reverse
+	}
+	//: Base62 reverse lookup.
+	return &base62Reverse
+}
 
 // baseencCodec is the concrete codec.Codec implementation; one instance
 // per variant. Stateless — safe for concurrent use.
@@ -117,6 +171,13 @@ func (c *baseencCodec) Marshal(v any) (encoded []byte, err error) {
 			Public:  "base-N encoding failed",
 			Private: "service/codec/baseenc.Marshal: encoding/json.Marshal returned an error",
 		})
+	}
+	//: base-conversion variants are O(n²) — refuse oversized JSON pre-encode.
+	if isBaseConversion(c.variant) && len(jsonBytes) > maxConvBytes {
+		//: release the pooled buffer before bailing.
+		scratch.ReleaseBuffer(buf)
+		//: surface the size cap with the dedicated reason.
+		return nil, convSizeExceeded("service/codec/baseenc.Marshal: base-conversion input exceeds maxConvBytes")
 	}
 	//: encode produces a fresh []byte we own — the pooled buffer can
 	//: go back as soon as we've consumed jsonBytes.
@@ -168,6 +229,13 @@ func (c *baseencCodec) Unmarshal(data []byte, v any) error {
 			Private: "service/codec/baseenc.Unmarshal: len(data) > maxBaseEncBytes",
 		})
 	}
+	//: base-conversion variants are O(n²) — apply the tighter cap on the
+	//: encoded text before the quadratic decode runs. The encoded cap accounts
+	//: for the ~1.37× raw→encoded expansion so a Marshalled value round-trips.
+	if isBaseConversion(c.variant) && len(data) > maxConvEncodedBytes {
+		//: surface the size cap with the dedicated reason.
+		return convSizeExceeded("service/codec/baseenc.Unmarshal: base-conversion input exceeds maxConvEncodedBytes")
+	}
 	//: undo the base-N wrap; jsonBytes is the inner payload.
 	jsonBytes, derr := c.decodeBytes(data)
 	//: propagate base-N decode failures verbatim — they are already wrapped.
@@ -211,6 +279,14 @@ func (c *baseencCodec) Append(dst []byte, v any) (appended []byte, err error) {
 			Public:  "base-N encoding failed",
 			Private: "service/codec/baseenc.Append: encoding/json.Marshal returned an error",
 		})
+	}
+	//: base-conversion variants are O(n²) — refuse oversized JSON pre-encode,
+	//: restoring dst to its original length.
+	if isBaseConversion(c.variant) && len(jsonBytes) > maxConvBytes {
+		//: release the pooled buffer before bailing.
+		scratch.ReleaseBuffer(buf)
+		//: leave dst exactly as the caller passed it.
+		return dst[:origLen], convSizeExceeded("service/codec/baseenc.Append: base-conversion input exceeds maxConvBytes")
 	}
 	//: base-N append uses the variant-specific AppendEncode where possible.
 	out := c.appendEncode(dst, jsonBytes)
@@ -277,6 +353,14 @@ func (c *baseencCodec) encodeBytes(raw []byte) []byte {
 		n := ascii85.Encode(buf, raw)
 		//: slice off any trailing capacity past n.
 		return buf[:n]
+	//: RFC 9285 Base45 — no stdlib backing, hand-rolled block transform.
+	case variantBase45:
+		//: 2 bytes → 3 chars; O(n), fresh slice.
+		return encodeBase45(raw)
+	//: Base58/Base62 — big-endian base-conversion (input pre-capped, O(n²)).
+	case variantBase58, variantBase62:
+		//: Marshal/Append cap the input at maxConvBytes first.
+		return encodeBaseN(raw, c.convAlphabet(), c.convRadix())
 	}
 	//: unreachable — Register only stores known variants.
 	return nil
@@ -310,9 +394,34 @@ func (c *baseencCodec) decodeBytes(data []byte) (decoded []byte, err error) {
 	case variantASCII85:
 		//: ascii85 needs a reader; drain it into a buffer.
 		return decodeASCII85(data)
+	//: RFC 9285 Base45 — hand-rolled; ok=false maps to the decode sentinel.
+	case variantBase45:
+		//: wrap a malformed (length/char/range) input.
+		return wrapMalformed(decodeBase45(data))
+	//: Base58/Base62 — base-conversion decode (input pre-capped in Unmarshal).
+	case variantBase58, variantBase62:
+		//: wrap a malformed (illegal-char) input with the decode sentinel.
+		return wrapMalformed(decodeBaseN(data, c.convReverse(), c.convRadix()))
 	}
 	//: unreachable — Register only stores known variants.
 	return nil, nil
+}
+
+// wrapMalformed adapts a (bytes, ok) base-conversion decode result to the
+// shared decode sentinel: ok=false becomes CodeBaseEncDecodeFailed.
+func wrapMalformed(out []byte, ok bool) (decoded []byte, err error) {
+	//: success fast-path.
+	if ok {
+		//: hand back the decoded bytes verbatim.
+		return out, nil
+	}
+	//: malformed input — surface the shared decode reason.
+	return nil, errs.Wrap(nil, errs.WrapParams{
+		Code:    CodeBaseEncDecodeFailed,
+		Reason:  "BASE_ENC_DECODE_FAILED",
+		Public:  "base-N decoding failed",
+		Private: "service/codec/baseenc: malformed base-conversion input (char outside the alphabet)",
+	})
 }
 
 // encodeHex emits the hex encoding of raw as a fresh slice. base16 gets
@@ -403,6 +512,11 @@ func (c *baseencCodec) appendEncode(dst, raw []byte) []byte {
 	case variantASCII85:
 		//: delegate to the dedicated helper to keep the cyclo budget healthy.
 		return appendEncodeASCII85(dst, raw)
+	//: Base45/Base58/Base62 — no stdlib AppendEncode helper; encode the
+	//: fresh bytes via encodeBytes and append them onto dst.
+	case variantBase45, variantBase58, variantBase62:
+		//: c.encodeBytes returns a fresh slice; append it onto dst.
+		return append(dst, c.encodeBytes(raw)...)
 	}
 	//: unreachable — Register only stores known variants.
 	return dst
@@ -427,8 +541,9 @@ func (c *baseencCodec) streamWriter(w io.Writer) io.WriteCloser {
 	case variantBase32:
 		//: stdlib returns an io.WriteCloser.
 		return base32.NewEncoder(base32.StdEncoding, w)
-	//: uppercase hex — buffer through encodeBytes since hex.NewEncoder is lowercase.
-	case variantBase16:
+	//: uppercase hex + base45 + base58/62 — no streaming stdlib encoder;
+	//: buffer then encode the whole payload on Close via encodeBytes.
+	case variantBase16, variantBase45, variantBase58, variantBase62:
 		//: bufferingWriter accumulates writes then encodes on Close.
 		return &bufferingWriter{dst: w, codec: c}
 	//: lowercase hex.
@@ -468,9 +583,26 @@ func (c *baseencCodec) streamReader(r io.Reader) io.Reader {
 	case variantASCII85:
 		//: stdlib returns an io.Reader.
 		return ascii85.NewDecoder(r)
+	//: Base45/Base58/Base62 have no streaming decoder — drain + decode the
+	//: whole input lazily on first Read (see decodeAllReader).
+	case variantBase45, variantBase58, variantBase62:
+		//: buffered reader serves the decoded bytes once.
+		return &decodeAllReader{src: r, v: c.variant}
 	}
 	//: unreachable — Register only stores known variants.
 	return r
+}
+
+// convSizeExceeded builds the size-cap error for the O(n²) base-conversion
+// variants; where names the call site for the Private field.
+func convSizeExceeded(where string) error {
+	//: reuse the shared size sentinel — the cap differs, the reason does not.
+	return errs.Wrap(nil, errs.WrapParams{
+		Code:    CodeBaseEncSizeExceeded,
+		Reason:  "BASE_ENC_SIZE_EXCEEDED",
+		Public:  "base-N input exceeds size limit",
+		Private: where,
+	})
 }
 
 // wrapDecode adapts a (bytes, error) pair to the base-N decode sentinel.

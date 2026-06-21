@@ -1,4 +1,4 @@
-.PHONY: help build test lint bench cover docs docs-dev serve release-dry-run docs-readme profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare
+.PHONY: help build test lint bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -198,6 +198,14 @@ docs-readme:
 	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0 (or rebuild devcontainer)"; exit 1; }
 	cd pkg/v1 && go generate ./codec ./crypto ./errs ./hash ./sign ./kdf ./password ./logger ./logger/writer
 	@echo "→ pkg/v1/{codec,crypto,errs,hash,sign,kdf,password,logger,logger/writer}/README.md regenerated"
+
+# `error-codes` regenerates docs/error-codes.yaml — the human-readable mirror of
+# the dotted-quad error-code registry (ADR 0005/0006), extracted from every
+# errs.Code constant in the tree. The executable source of truth stays the AST
+# audit (internal/kernel/errs:errs_test); this YAML is for humans. The
+# check-error-codes-drift pre-commit guard fails the commit when it is stale.
+error-codes:
+	bash scripts/gen-error-codes.sh
 
 # `profile WAVE=<slug>` captures CPU + memory + block + mutex pprof
 # alongside a bench.txt summary for the named wave. Output lives under

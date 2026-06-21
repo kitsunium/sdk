@@ -139,6 +139,7 @@ import (
 	//: blank imports drive each codec's self-registration side-effect.
 	_ "github.com/kitsunium/sdk/internal/service/codec/asn1"
 	_ "github.com/kitsunium/sdk/internal/service/codec/baseenc"
+	_ "github.com/kitsunium/sdk/internal/service/codec/bson"
 	_ "github.com/kitsunium/sdk/internal/service/codec/cbor"
 	_ "github.com/kitsunium/sdk/internal/service/codec/csv"
 	_ "github.com/kitsunium/sdk/internal/service/codec/flatbuffers"
@@ -211,6 +212,17 @@ const (
 	Hex Format = "hex"
 	// ASCII85 denotes the JSON-mediated Adobe Ascii85 text-safe wrap.
 	ASCII85 Format = "ascii85"
+	// Base45 denotes the JSON-mediated RFC 9285 Base45 wrap (QR-code safe).
+	Base45 Format = "base45"
+	// Base58 denotes the JSON-mediated Bitcoin Base58 wrap (short inputs;
+	// base-conversion is O(n²) so a 4 KiB input cap applies).
+	Base58 Format = "base58"
+	// Base62 denotes the JSON-mediated Base62 wrap (short inputs; same O(n²)
+	// 4 KiB input cap as Base58).
+	Base62 Format = "base62"
+	// BSON denotes the MongoDB binary document format (top-level must be a
+	// document — struct or map — not a scalar). ADR 0021.
+	BSON Format = "bson"
 )
 
 // Marshal serialises v using the codec registered under f. The codec's
