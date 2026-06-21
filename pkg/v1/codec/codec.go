@@ -211,6 +211,8 @@ const (
 	Hex Format = "hex"
 	// ASCII85 denotes the JSON-mediated Adobe Ascii85 text-safe wrap.
 	ASCII85 Format = "ascii85"
+	// Base45 denotes the JSON-mediated RFC 9285 Base45 wrap (QR-code safe).
+	Base45 Format = "base45"
 )
 
 // Marshal serialises v using the codec registered under f. The codec's

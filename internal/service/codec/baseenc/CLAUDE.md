@@ -2,10 +2,11 @@
 
 ## Purpose
 
-Family of `core/codec.Codec` implementations that wrap the stdlib byte
-encodings (`encoding/base64`, `encoding/base32`, `encoding/hex`,
-`encoding/ascii85`) behind the universal Marshal/Unmarshal dispatch.
-Six variants, six distinct registered Formats — the discriminator is the
+Family of `core/codec.Codec` implementations behind the universal
+Marshal/Unmarshal dispatch. Most wrap the stdlib byte encodings
+(`encoding/base64`, `encoding/base32`, `encoding/hex`, `encoding/ascii85`);
+`base45` (RFC 9285) has no stdlib backing and is hand-rolled in `base45.go`.
+Seven variants, seven distinct registered Formats — the discriminator is the
 registered Name, not a tagged enum.
 
 ## Surface
@@ -18,10 +19,13 @@ registered Name, not a tagged enum.
 | Base16 (upper) | `"base16"` | `application/base16` | `.b16` | yes (buffered) | yes |
 | Hex (lower) | `"hex"` | `application/hex` | `.hex` | yes | yes |
 | Ascii85 | `"ascii85"` | `application/ascii85` | `.a85` | yes | yes |
+| Base45 (RFC 9285) | `"base45"` | `application/base45` | `.b45` | yes (buffered) | yes |
 
-Six singletons exported (`Base64`, `Base64URL`, `Base32`, `Base16`,
-`Hex`, `Ascii85`) — registered via package-level var initialisers, no
-`init()` function.
+Seven singletons exported (`Base64`, `Base64URL`, `Base32`, `Base16`,
+`Hex`, `Ascii85`, `Base45`) — registered via package-level var initialisers,
+no `init()` function. Base45 is a block transform (2 bytes → 3 chars), O(n),
+so it shares the 10 MiB `maxBaseEncBytes` cap; its decode errors reuse the
+`BaseEncDecodeFailed` code.
 
 ## Marshal/Unmarshal pipeline
 

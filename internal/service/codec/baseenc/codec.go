@@ -50,6 +50,9 @@ const (
 	variantHex
 	// variantASCII85 is Adobe's Ascii85 encoding.
 	variantASCII85
+	// variantBase45 is RFC 9285 Base45 (QR-code alphanumeric safe). No stdlib
+	// backing — see base45.go for the transform.
+	variantBase45
 )
 
 // variant enumerates the supported base-N variants. The values are an
@@ -73,6 +76,8 @@ var (
 	Hex codec.Codec = codec.Register(&baseencCodec{variant: variantHex})
 	// ASCII85 is the Adobe Ascii85 codec.
 	ASCII85 codec.Codec = codec.Register(&baseencCodec{variant: variantASCII85})
+	// Base45 is the RFC 9285 Base45 codec (QR-code alphanumeric safe).
+	Base45 codec.Codec = codec.Register(&baseencCodec{variant: variantBase45})
 )
 
 // baseencCodec is the concrete codec.Codec implementation; one instance
@@ -277,6 +282,10 @@ func (c *baseencCodec) encodeBytes(raw []byte) []byte {
 		n := ascii85.Encode(buf, raw)
 		//: slice off any trailing capacity past n.
 		return buf[:n]
+	//: RFC 9285 Base45 — no stdlib backing, hand-rolled block transform.
+	case variantBase45:
+		//: 2 bytes → 3 chars; O(n), fresh slice.
+		return encodeBase45(raw)
 	}
 	//: unreachable — Register only stores known variants.
 	return nil
@@ -310,6 +319,21 @@ func (c *baseencCodec) decodeBytes(data []byte) (decoded []byte, err error) {
 	case variantASCII85:
 		//: ascii85 needs a reader; drain it into a buffer.
 		return decodeASCII85(data)
+	//: RFC 9285 Base45 — hand-rolled; map a malformed input to the sentinel.
+	case variantBase45:
+		dec, ok := decodeBase45(data)
+		//: decodeBase45 reports ok=false for illegal length/char/range.
+		if !ok {
+			//: malformed Base45 input — surface the shared decode reason.
+			return nil, errs.Wrap(nil, errs.WrapParams{
+				Code:    CodeBaseEncDecodeFailed,
+				Reason:  "BASE_ENC_DECODE_FAILED",
+				Public:  "base-N decoding failed",
+				Private: "service/codec/baseenc: malformed base45 input (length class, alphabet, or range)",
+			})
+		}
+		//: hand back the decoded bytes.
+		return dec, nil
 	}
 	//: unreachable — Register only stores known variants.
 	return nil, nil
@@ -403,6 +427,10 @@ func (c *baseencCodec) appendEncode(dst, raw []byte) []byte {
 	case variantASCII85:
 		//: delegate to the dedicated helper to keep the cyclo budget healthy.
 		return appendEncodeASCII85(dst, raw)
+	//: RFC 9285 Base45 — encode then append (no in-place stdlib helper).
+	case variantBase45:
+		//: encodeBase45 returns a fresh slice; append it onto dst.
+		return append(dst, encodeBase45(raw)...)
 	}
 	//: unreachable — Register only stores known variants.
 	return dst
@@ -427,8 +455,9 @@ func (c *baseencCodec) streamWriter(w io.Writer) io.WriteCloser {
 	case variantBase32:
 		//: stdlib returns an io.WriteCloser.
 		return base32.NewEncoder(base32.StdEncoding, w)
-	//: uppercase hex — buffer through encodeBytes since hex.NewEncoder is lowercase.
-	case variantBase16:
+	//: uppercase hex + base45 — no streaming stdlib encoder; buffer then
+	//: encode the whole payload on Close via encodeBytes.
+	case variantBase16, variantBase45:
 		//: bufferingWriter accumulates writes then encodes on Close.
 		return &bufferingWriter{dst: w, codec: c}
 	//: lowercase hex.
@@ -468,6 +497,11 @@ func (c *baseencCodec) streamReader(r io.Reader) io.Reader {
 	case variantASCII85:
 		//: stdlib returns an io.Reader.
 		return ascii85.NewDecoder(r)
+	//: Base45 has no streaming decoder — drain + decode the whole input
+	//: lazily on first Read (see decodeAllReader).
+	case variantBase45:
+		//: buffered reader serves the decoded bytes once.
+		return &decodeAllReader{src: r, v: c.variant}
 	}
 	//: unreachable — Register only stores known variants.
 	return r

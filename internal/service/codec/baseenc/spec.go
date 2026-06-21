@@ -56,6 +56,12 @@ var variantSpecs = [...]variantSpec{
 		mimeTypes:  []string{"application/ascii85"},
 		extensions: []string{".a85"},
 	},
+	//: variantBase45 — RFC 9285 Base45 (QR-code alphanumeric safe).
+	{
+		name:       "base45",
+		mimeTypes:  []string{"application/base45"},
+		extensions: []string{".b45"},
+	},
 }
 
 // spec returns the variantSpec for c.variant. Bounds are guaranteed by

@@ -59,6 +59,7 @@ var expectedAppenders = []string{
 	"base16",
 	"hex",
 	"ascii85",
+	"base45",
 }
 
 // registeredAppenders is the package-level Appender registry snapshot
@@ -763,6 +764,7 @@ func codecAdapters() map[codec.Format]codecAdapter {
 		codec.Format("base16"):    universalAdapter("base16"),
 		codec.Format("hex"):       universalAdapter("hex"),
 		codec.Format("ascii85"):   universalAdapter("ascii85"),
+		codec.Format("base45"):    universalAdapter("base45"),
 	}
 }
 
@@ -1446,7 +1448,7 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 		//: Universal-any group: json + yaml + toml + cbor + msgpack +
 		//: every baseenc variant (baseenc is JSON-mediated). All accept
 		//: complexRT natively without going through the promotion path.
-		case "json", "yaml", "toml", "cbor", "msgpack", "base64", "base64url", "base32", "base16", "hex", "ascii85":
+		case "json", "yaml", "toml", "cbor", "msgpack", "base64", "base64url", "base32", "base16", "hex", "ascii85", "base45":
 			//: capture the codec + fixture + decode hook.
 			val := tweakForCodec(string(f), sampleComplex())
 			tests = append(tests, tc{
