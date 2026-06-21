@@ -43,6 +43,8 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 
 The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-…` is the **documentary source of truth**; the AST audit test in `internal/kernel/errs/registry_external_test.go` embeds the same table as the **executable source of truth**. Keep the two in sync manually on every change — the audit catches drift on uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (ADR 0006/0020) over every package in `//:audit_sources`.
 
+`docs/error-codes.yaml` is the **generated human-readable mirror** of every `errs.Code` constant in the tree (one entry per code: dotted-quad, const name, hex, package). Regenerate with `make error-codes` (`scripts/gen-error-codes.sh`); the `scripts/pre-commit/check-error-codes-drift.sh` guard fails the commit when it is stale. It is a convenience index, not authoritative — the AST audit remains the executable gate.
+
 ## Do NOT
 
 - Put feature documentation here. Packages document themselves via `README.md` next to their code.
