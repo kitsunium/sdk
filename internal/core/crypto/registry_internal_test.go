@@ -8,14 +8,14 @@ package crypto
 // iteration panics on a duplicate. Test-only.
 func ResetForTest() {
 	//: store nil snapshots; Lookup / lookupByID then report empty.
-	registry.Store(nil)
+	aeads.store.Store(nil)
 	idIndex.Store(nil)
 	//: also clear the separate Hasher registry so hash tests isolate too.
-	hashers.Store(nil)
+	hashers.store.Store(nil)
 	//: and the Signer registry, so signature tests isolate as well.
-	signers.Store(nil)
+	signers.store.Store(nil)
 	//: and the Deriver registry, so KDF tests isolate too.
-	derivers.Store(nil)
+	derivers.store.Store(nil)
 	//: and the PasswordHasher registry, so password tests isolate as well.
-	passwordHashers.Store(nil)
+	passwordHashers.store.Store(nil)
 }
