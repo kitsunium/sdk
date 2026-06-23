@@ -1,0 +1,49 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "metrics",
+    srcs = [
+        "counter.go",
+        "exporter_text.go",
+        "gauge.go",
+        "histogram.go",
+        "kind.go",
+        "meter.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/metrics",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/metrics",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":metrics",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "metrics_test",
+    srcs = ["metrics_external_test.go"],
+    deps = [
+        ":metrics",
+        "//internal/core/metrics",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
