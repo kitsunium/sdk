@@ -1,0 +1,34 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "cache",
+    srcs = [
+        "cache.go",
+        "config.go",
+        "entry.go",
+        "stats.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/cache",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+    deps = ["//internal/kernel/clock"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":cache",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "cache_test",
+    srcs = ["cache_external_test.go"],
+    deps = [":cache"],
+)
