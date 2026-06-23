@@ -32,6 +32,7 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0021-sdk-codec-bson.md` | BSON codec (M5) in `internal/service/codec/bson` over `mongo-driver/bson` (library-backed precedent); non-streaming + Appender; block `0.3.36.*` | Accepted (extends 0003 §M5) |
 | `0022-sdk-codec-hcl.md` | HCL codec (M5) quarantined in `third-party/codec/hcl` (`hcl/v2`+`go-cty` downgrade `x/sys` in service); opt-in, not in `pkg/v1/codec`; block `0.3.37.*` | Accepted (extends 0003 §M5; follows 0012, contrasts 0021) |
 | `0023-sdk-schema-codecs.md` | Schema codecs (M6) opt-in under `third-party/codec/` (schema-bound, break universal round-trip); Protobuf concrete `0.3.38.*`; Avro/Cap'n Proto deferred | Accepted (extends 0003 §M6) |
+| `0024-sdk-id-domain.md` | Identifier-generation domain (`id`): 7th core sibling, `Generator`/`Scheme` registry (UUIDv4/v7, ULID, snowflake), canonical-string output, stdlib-only/cross-OS; opens Phase-B; blocks `0.2.7.*`/`0.3.39.*` | Accepted (amends core purpose; opens Phase B) |
 
 ## Conventions
 
