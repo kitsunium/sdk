@@ -14,6 +14,7 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 | `id/` | identifier generators (UUIDv4/v7, ULID, snowflake) implementing `core/id.Generator`; stdlib-only, cross-OS, self-registered (ADR 0024) | `0.3.39.*` |
 | `resilience/` | concrete reliability policies (retry/circuit-breaker/rate-limit/bulkhead/timeout) implementing `core/resilience.Runner`; stdlib + kernel clock, cross-OS (ADR 0026) | (emits core sentinels `0.2.8.*`) |
 | `metrics/` | in-memory Meter + lock-free instruments + stdlib text exporter, implementing `core/metrics`; stdlib-only, cross-OS (ADR 0027) | (emits core sentinels `0.2.9.*`) |
+| `config/` | env+file sources, merge+decode+validate `Load[T]`, cross-OS poll watcher, implementing `core/config`; codec-dispatched file parse (ADR 0028) | (emits core sentinels `0.2.10.*`) |
 
 ## Module
 
@@ -42,6 +43,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 - `id/` — see `internal/service/id/CLAUDE.md` (UUIDv4/v7, ULID, snowflake — ADR 0024)
 - `resilience/` — see `internal/service/resilience/CLAUDE.md` (retry/breaker/ratelimit/bulkhead/timeout — ADR 0026)
 - `metrics/` — see `internal/service/metrics/CLAUDE.md` (in-memory meter + text exporter — ADR 0027)
+- `config/` — see `internal/service/config/CLAUDE.md` (env+file loader + poll watcher — ADR 0028)
 
 ## Verification
 
