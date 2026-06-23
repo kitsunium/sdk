@@ -1,0 +1,34 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "resilience",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "resilience.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/resilience",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":resilience",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

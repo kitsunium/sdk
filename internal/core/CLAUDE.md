@@ -17,6 +17,7 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `logger/level/` | `Level int8` + `Debug`/`Info`/`Warn`/`Error` constants + `String()` | `0.2.17.*` (reserved) |
 | `proc/` | OS process-supervision foundation: `Process` / `Reaper` / `Group` / `Listener` ports + `Spec` / `ExitValue` / `LimitValue` / `NotificationValue` / `Signal` / `Resource` value types; no registry (build-tag selection) (ADR 0016) | `0.2.6.*` |
 | `id/` | `Generator` port + `Scheme` registry (UUIDv4/v7, ULID, snowflake); canonical-string output (ADR 0024) | `0.2.7.*` |
+| `resilience/` | `Runner` port + 5 concrete policies (retry/circuit-breaker/rate-limit/bulkhead/timeout); **no registry** (ADR 0026) | `0.2.8.*` |
 
 `Major=0` (internal), `Layer=2` (core). The codec registry ships codes today (`CodeDuplicateRegistration` 0.2.2.1, plus 0.2.2.2-4 reserved for future Marshal/Unmarshal sentinels); the writer registry ships `0.2.3.*` (ADR 0012). Logger codes will land alongside service-layer wiring.
 
@@ -58,5 +59,6 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `transform/` — see `internal/core/transform/CLAUDE.md`
 - `proc/` — see `internal/core/proc/CLAUDE.md` (OS process-supervision foundation, ADR 0016)
 - `id/` — see `internal/core/id/CLAUDE.md` (identifier generation, ADR 0024)
+- `resilience/` — see `internal/core/resilience/CLAUDE.md` (reliability policies, ADR 0026)
 - `logger/` — see `internal/core/logger/CLAUDE.md` (README is the human-readable surface doc)
 - `logger/level/` — see `internal/core/logger/level/CLAUDE.md`

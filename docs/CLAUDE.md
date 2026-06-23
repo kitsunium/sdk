@@ -34,6 +34,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0023-sdk-schema-codecs.md` | Schema codecs (M6): opt-in, under `third-party/codec/` — schema-bound (can't honour the universal round-trip contract); Protobuf concrete (`0.3.38.*`); Avro/Cap'n Proto deferred | Accepted (extends ADR 0003 §M6) |
 | `adr/0024-sdk-id-domain.md` | Identifier-generation domain (`id`): 7th core sibling, `Generator`/`Scheme` registry (UUIDv4/v7, ULID, snowflake); stdlib-only, cross-OS; opens the Phase-B new-domain wave; error block `0.2.7.*`/`0.3.39.*` | Accepted (amends `internal/core` purpose) |
 | `adr/0025-sdk-cache-kernel.md` | Generic LRU+TTL `Cache[K,V]` as a **kernel** primitive (domain-neutral, stdlib-only, reuses `clock` for testable TTL); `Fetch` not `Get`; no error codes; `pkg/v1/cache` type aliases | Accepted (kernel primitive, Phase B) |
+| `adr/0026-sdk-resilience-domain.md` | Reliability domain (`resilience`): 8th core sibling (no registry), composable `Runner` policies — retry/circuit-breaker/rate-limit/bulkhead/timeout; error block `0.2.8.*` | Accepted (Phase B) |
 
 ## ADR conventions
 
@@ -58,4 +59,4 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 
 ## Subtree
 
-- `adr/` — Architecture Decision Records (twenty-five accepted to date — see table above)
+- `adr/` — Architecture Decision Records (twenty-six accepted to date — see table above)

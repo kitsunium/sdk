@@ -202,8 +202,8 @@ release-dry-run:
 docs-readme:
 	@command -v gomarkdoc >/dev/null 2>&1 \
 	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0 (or rebuild devcontainer)"; exit 1; }
-	cd pkg/v1 && go generate ./cache ./codec ./crypto ./errs ./hash ./id ./sign ./kdf ./password ./logger ./logger/writer
-	@echo "→ pkg/v1/{cache,codec,crypto,errs,hash,id,sign,kdf,password,logger,logger/writer}/README.md regenerated"
+	cd pkg/v1 && go generate ./cache ./codec ./crypto ./errs ./hash ./id ./resilience ./sign ./kdf ./password ./logger ./logger/writer
+	@echo "→ pkg/v1/{cache,codec,crypto,errs,hash,id,resilience,sign,kdf,password,logger,logger/writer}/README.md regenerated"
 
 # `error-codes` regenerates docs/error-codes.yaml — the human-readable mirror of
 # the dotted-quad error-code registry (ADR 0005/0006), extracted from every
