@@ -218,8 +218,11 @@ jobs:
           # over 150s before the first DHCP lease lands (measured live: leases
           # granted ~2 min after the old 150s window closed).
           for i in $(seq 1 60); do
-            IP=$(ssh ${SSH_OPTS} root@192.168.100.1 \
-              "grep -i '${MAC}' /var/lib/misc/dnsmasq.leases 2>/dev/null | awk '{print \$3}'" 2>/dev/null || true)
+            # The bench bastion key runs behind a forced-command allowlist that
+            # permits `cat /var/lib/misc/dnsmasq.leases` but NOT grep/awk — read
+            # the raw file remotely and parse locally.
+            IP=$(ssh ${SSH_OPTS} root@192.168.100.1 "cat /var/lib/misc/dnsmasq.leases" 2>/dev/null \
+              | grep -i "${MAC}" | awk '{print $3}' | head -1 || true)
             [ -n "$IP" ] && { echo "ip=${IP}" >> "$GITHUB_OUTPUT"; echo "IP=$IP"; break; }
             sleep 5
           done
