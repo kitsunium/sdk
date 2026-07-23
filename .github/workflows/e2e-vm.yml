@@ -127,13 +127,22 @@ jobs:
       - name: Open Proxmox API tunnel (bench host)
         run: |
           set -euo pipefail
-          ssh ${SSH_OPTS} -f -N -L 18006:127.0.0.1:8006 root@192.168.100.1
+          # Control socket so the always() cleanup can terminate the forward
+          # deterministically (a bare `ssh -f -N` would leak past the job).
+          ssh ${SSH_OPTS} -f -N -M -S /tmp/pve-tunnel.sock \
+            -L 18006:127.0.0.1:8006 root@192.168.100.1
+          code=000
           for i in $(seq 1 10); do
-            code=$(curl -sk -o /dev/null -w '%{http_code}' "${PROXMOX_API_URL}/version" -H "Authorization: $PVE_AUTH" || true)
-            [ "$code" = "200" ] && { echo "tunnel up (API version=200)"; exit 0; }
+            code=$(curl -sk -o /dev/null -w '%{http_code}' "${PROXMOX_API_URL}/version" -H "Authorization: $PVE_AUTH" || echo 000)
+            [ "$code" = "200" ] && { echo "tunnel up, API auth OK"; exit 0; }
             sleep 2
           done
-          echo "::error::Proxmox API tunnel never came up"; exit 1
+          case "$code" in
+            000) echo "::error::tunnel never came up (no TCP path to the bench API)";;
+            401|403) echo "::error::tunnel is up but the PVE token was refused (HTTP $code) — check CI_RUNNER_API_TOKEN_*";;
+            *) echo "::error::unexpected API answer through the tunnel (HTTP $code)";;
+          esac
+          exit 1
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
@@ -265,5 +274,26 @@ jobs:
       - name: Stop VM (always)
         if: always()
         run: |
-          curl -sk -X POST -H "Authorization: $PVE_AUTH" \
-            "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${{ matrix.vmid }}/status/stop" || true
+          # stop is async (returns a UPID): poll it to completion so the runner
+          # never releases while the VM is still stopping (bench nightly race).
+          # Best-effort by design — a dead tunnel must not fail the cleanup.
+          VMID=${{ matrix.vmid }}
+          UPID=$(curl -sk -X POST -H "Authorization: $PVE_AUTH" \
+            "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/status/stop" | jq -r '.data // empty' 2>/dev/null || true)
+          if [ -n "$UPID" ]; then
+            for i in $(seq 1 30); do
+              st=$(curl -sk -H "Authorization: $PVE_AUTH" \
+                "${PROXMOX_API_URL}/nodes/${NODE}/tasks/${UPID}/status" | jq -r '.data.status' 2>/dev/null || true)
+              [ "$st" = "stopped" ] && break
+              sleep 2
+            done
+            final=$(curl -sk -H "Authorization: $PVE_AUTH" \
+              "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/status/current" | jq -r '.data.status' 2>/dev/null || true)
+            echo "VM ${VMID} final status: ${final:-unknown}"
+          else
+            echo "stop request not accepted (tunnel down?) — leaving VM as-is"
+          fi
+
+      - name: Close API tunnel (always)
+        if: always()
+        run: ssh -S /tmp/pve-tunnel.sock -O exit root@192.168.100.1 2>/dev/null || true
