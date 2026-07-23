@@ -214,21 +214,24 @@ jobs:
           MAC=$(curl -sk -H "Authorization: $PVE_AUTH" \
             "${PROXMOX_API_URL}/nodes/${NODE}/qemu/${VMID}/config" \
             | jq -r '.data.net0' | grep -oiE '([0-9a-f]{2}:){5}[0-9a-f]{2}')
-          for i in $(seq 1 30); do
+          # 300s: a cold base-snapshot boot of 4+ VMs in parallel takes well
+          # over 150s before the first DHCP lease lands (measured live: leases
+          # granted ~2 min after the old 150s window closed).
+          for i in $(seq 1 60); do
             IP=$(ssh ${SSH_OPTS} root@192.168.100.1 \
               "grep -i '${MAC}' /var/lib/misc/dnsmasq.leases 2>/dev/null | awk '{print \$3}'" 2>/dev/null || true)
             [ -n "$IP" ] && { echo "ip=${IP}" >> "$GITHUB_OUTPUT"; echo "IP=$IP"; break; }
             sleep 5
           done
-          [ -n "${IP:-}" ] || { echo "::error::no IP after 150s"; exit 1; }
+          [ -n "${IP:-}" ] || { echo "::error::no IP after 300s"; exit 1; }
 
       - name: Wait for SSH
         run: |
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             ssh ${SSH_OPTS} ${{ matrix.user }}@${{ steps.ip.outputs.ip }} true 2>/dev/null && exit 0
             sleep 5
           done
-          echo "::error::SSH never came up"; exit 1
+          echo "::error::SSH never came up after 300s"; exit 1
 
       # ── 4. Ship the binaries to the VM and run them on the real kernel ──────
       - name: Run conformance + test suites on ${{ matrix.name }}
