@@ -115,9 +115,8 @@ func applyOne(pid int, r coreproc.Resource, lv coreproc.LimitValue) error {
 		//: hand back the UNKNOWN_RESOURCE sentinel verbatim.
 		return err
 	}
-	rlim := makeRlimit(lv.Soft, lv.Hard)
 	//: setrlimit(2) operates on the calling process only.
-	if serr := syscall.Setrlimit(rl, &rlim); serr != nil {
+	if serr := syscall.Setrlimit(rl, new(makeRlimit(lv.Soft, lv.Hard))); serr != nil {
 		//: surface the failure through the shared RLIMIT_FAILED wrapper.
 		return rlimitFailed(serr, pid, r.String())
 	}
