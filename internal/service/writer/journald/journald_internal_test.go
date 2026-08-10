@@ -2,11 +2,45 @@ package journald
 
 import (
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// sunPathMax bounds a unix socket path: sockaddr_un.sun_path is a fixed-size
+// field, and a path that fills it makes bind(2) fail with EINVAL.
+const sunPathMax int = 104
+
+// shortSocketPath returns a bindable unix socket path under a temp directory.
+// t.TempDir() embeds the full subtest name, which on macOS pushes the path
+// under /var/folders past sunPathMax and breaks the bind before the test runs.
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+	//: "jd" keeps the generated component down to a handful of bytes.
+	dir, err := os.MkdirTemp("", "jd")
+	if err != nil {
+		//: without a directory there is no socket to bind; fail loud.
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	//: t.TempDir() would have removed itself; match that.
+	t.Cleanup(func() {
+		//: cleanup runs past assertion time, so a stuck directory is reported
+		//: rather than allowed to mask the real result.
+		if rerr := os.RemoveAll(dir); rerr != nil {
+			t.Logf("RemoveAll %s: %v", dir, rerr)
+		}
+	})
+
+	path := filepath.Join(dir, "j.sock")
+	//: report the length rather than let bind(2) fail with an opaque EINVAL.
+	if len(path) >= sunPathMax {
+		t.Fatalf("socket path is %d bytes, over the sun_path limit: %s", len(path), path)
+	}
+
+	return path
+}
 
 // errJournaldBoom is a sentinel transport failure injected by the white-box
 // tests to exercise the error-wrapping branches without a real socket.
@@ -92,7 +126,7 @@ func Test_journaldFactory_Open_defaultDialer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			//: bind a real datagram socket so net.Dial has a peer to connect.
-			path := filepath.Join(t.TempDir(), "j.sock")
+			path := shortSocketPath(t)
 			srv, lerr := net.ListenUnixgram(socketNetwork, &net.UnixAddr{Name: path, Net: socketNetwork})
 			//: a private-tempdir unixgram bind is reliable; a failure is a hard
 			//: fault that must fail the test, never silently skip the dial arm.

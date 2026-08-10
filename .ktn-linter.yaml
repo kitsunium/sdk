@@ -196,6 +196,54 @@ rules:
     exclude:
       - "**/internal/service/writer/console/console_external_test.go"
 
+  # KTN-FUNC-DEADCODE / KTN-CONST-UNUSED (error) — build-tag blind spot.
+  #
+  # TEMPORARY false-positive exception. The linter analyses ONE build
+  # configuration: the host's. On a non-Linux host every *_linux.go is excluded
+  # by its build constraint, so a helper that lives in an untagged file and is
+  # called only from the Linux backend looks uncalled and the rules fire. Each
+  # of the four below is called exactly once, from a *_linux.go:
+  #
+  #   • applyOptions          (proc/cgroup/option.go)  ← cgroup_linux.go
+  #   • wrapCgroupUnavailable (proc/exec/wrap.go)      ← cgroup_placement_linux.go
+  #   • parsePayload          (proc/sdnotify/…)        ← listen_linux.go
+  #   • exitNoPerm            (proc/sdnotify/…)        ← listen_linux.go
+  #
+  # Without this block `make lint` cannot pass on macOS at all, on a pristine
+  # tree, so the repo is only developable from the Linux devcontainer. Moving
+  # the helpers under //go:build linux would silence the rules but is the wrong
+  # shape: parsePayload is pure string parsing with a portable test, and a
+  # tagged copy would drop that coverage everywhere but Linux.
+  #
+  # Scoped to the three platform-split proc files ONLY — real dead code anywhere
+  # else in the SDK still fails the gate. RETIRE this block once the rules
+  # resolve references across every build configuration rather than the host's
+  # alone (mirror the 2026-05-28 retirements).
+  KTN-FUNC-DEADCODE:
+    exclude:
+      - "**/internal/service/proc/cgroup/option.go"
+      - "**/internal/service/proc/exec/wrap.go"
+      - "**/internal/service/proc/sdnotify/sdnotify.go"
+
+  KTN-CONST-UNUSED:
+    exclude:
+      - "**/internal/service/proc/sdnotify/sdnotify.go"
+
+  # KTN-FUNC-BLANKPARAM (info) — same build-tag blind spot, other direction.
+  #
+  # cgroup_other.go is the degrade stub for platforms with no control-group
+  # facility, so createGroup(_ string, _ ...Option) discards both parameters by
+  # design: there is nothing to create and nothing to configure. The rule's own
+  # message ("not required by any interface") is the giveaway — the signature is
+  # fixed by the //go:build seam that pairs it with cgroup_linux.go, which the
+  # rule cannot see from a non-Linux host. Naming the parameters would only
+  # trade this for an unused-parameter complaint.
+  #
+  # Scoped to that one stub. RETIRE alongside the block above.
+  KTN-FUNC-BLANKPARAM:
+    exclude:
+      - "**/internal/service/proc/cgroup/cgroup_other.go"
+
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on
   # v1.34.5 (current latest). With v1.34.5 + one code refactor, ALL FIVE are gone;

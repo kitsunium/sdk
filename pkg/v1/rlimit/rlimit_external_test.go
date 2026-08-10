@@ -2,7 +2,6 @@
 package rlimit_test
 
 import (
-	"runtime"
 	"testing"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -11,7 +10,8 @@ import (
 )
 
 // TestApplyDelegates asserts the facade forwards to the service: an unmapped
-// resource yields UnknownResource on Linux and UnsupportedPlatform off it.
+// resource yields UnknownResource wherever rlimits are native, and
+// UnsupportedPlatform where they are not.
 func TestApplyDelegates(t *testing.T) {
 	t.Parallel()
 	err := rlimit.Apply(0, map[rlimit.Resource]rlimit.Limit{
@@ -20,9 +20,12 @@ func TestApplyDelegates(t *testing.T) {
 	})
 	//: select the platform-correct expectation.
 	want := coreproc.CodeUnknownResource
-	//: off Linux the stub short-circuits before mapping.
-	if runtime.GOOS != "linux" {
-		//: the non-Linux stub returns UNSUPPORTED_PLATFORM.
+	//: only off Unix does the stub short-circuit before mapping. Keyed on the
+	//: build-tagged nativeRlimit rather than a runtime.GOOS == "linux" guess,
+	//: which wrongly claimed darwin and the BSDs unsupported when the service
+	//: implements them through setrlimit(2).
+	if !nativeRlimit {
+		//: the non-Unix stub returns UNSUPPORTED_PLATFORM.
 		want = coreproc.CodeUnsupportedPlatform
 	}
 	//: the facade must surface the same typed code the service returns.
