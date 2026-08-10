@@ -32,8 +32,8 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: kodflow/devcontainer-template
-  BASE_IMAGE_NAME: kodflow/devcontainer-base
+  IMAGE_NAME: ${{ github.repository }}
+  BASE_IMAGE_NAME: ${{ github.repository_owner }}/devcontainer-base
 
 jobs:
   # =============================================================================
@@ -41,7 +41,7 @@ jobs:
   # =============================================================================
   build-base:
     if: >-
-      github.repository == 'kodflow/devcontainer-template' && (
+      github.event.repository.fork != true && (
         github.event.schedule == '0 3 * * 0' ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.rebuild_base == 'true') ||
         (github.event_name == 'push' && contains(github.event.head_commit.message, '[base]'))
@@ -106,7 +106,7 @@ jobs:
 
   # Merge base architectures into multi-arch manifest
   merge-base:
-    if: github.repository == 'kodflow/devcontainer-template'
+    if: github.event.repository.fork != true
     runs-on: ubuntu-latest
     needs: build-base
     permissions:
@@ -147,7 +147,7 @@ jobs:
     needs: merge-base
     if: >-
       always() &&
-      github.repository == 'kodflow/devcontainer-template' &&
+      github.event.repository.fork != true &&
       github.event.schedule != '0 3 * * 0' &&
       (needs.merge-base.result == 'success' || needs.merge-base.result == 'skipped') &&
       !failure() && !cancelled()
@@ -267,7 +267,7 @@ jobs:
   merge:
     if: >-
       always() &&
-      github.repository == 'kodflow/devcontainer-template' &&
+      github.event.repository.fork != true &&
       github.event_name != 'pull_request' &&
       needs.build.result == 'success'
     runs-on: ubuntu-latest
