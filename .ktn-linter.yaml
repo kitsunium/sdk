@@ -246,8 +246,11 @@ rules:
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on
-  # v1.34.5 (current latest). With v1.34.5 + one code refactor, ALL FIVE are gone;
-  # only the KTN-INTERFACE-ANYUSE domain exception above remains.
+  # v1.34.5 (current latest). With v1.34.5 + one code refactor, ALL FIVE are gone.
+  # This audit covers only the five listed below; the exclusions still active
+  # above (KTN-INTERFACE-ANYUSE, KTN-TEST-PARALLEL, and the build-tag trio
+  # KTN-FUNC-DEADCODE / KTN-CONST-UNUSED / KTN-FUNC-BLANKPARAM) were added after
+  # it and carry their own retirement conditions.
   #
   # • KTN-VAR-PTRINTF — false positive on a generic `*T` (kodflow/ktn-linter#365).
   #   v1.34.5 no longer flags internal/kernel/snapshot's Value[T] *T signatures.
