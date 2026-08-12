@@ -8,6 +8,7 @@ package logger
 
 import (
 	"errors"
+	"slices"
 
 	corewriter "github.com/kitsunium/sdk/internal/core/writer"
 )
@@ -107,9 +108,9 @@ func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error) {
 	rollback := func(cause error) error {
 		closeErrs := make([]error, 0, len(branches))
 		//: walk in reverse so the most recently opened sink unwinds first.
-		for i := len(branches) - 1; i >= 0; i-- {
+		for _, branch := range slices.Backward(branches) {
 			//: check each close — a failure joins the returned chain, never drops.
-			if cErr := branches[i].Close(); cErr != nil {
+			if cErr := branch.Close(); cErr != nil {
 				closeErrs = append(closeErrs, cErr)
 			}
 		}
