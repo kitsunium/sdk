@@ -30,12 +30,14 @@ USER root
 # =============================================================================
 # Dynamic Binary Tools (rtk) — kubectl/helm/bazelisk/yq are in base
 # =============================================================================
-RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
-    RTK_LATEST=$(curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: token ${GITHUB_TOKEN}"} "https://api.github.com/repos/rtk-ai/rtk/releases/latest" | jq -r '.tag_name') && \
+RUN RTK_RELEASE=$(curl -fsSL --retry 5 --retry-delay 5 ${GITHUB_TOKEN:+-H "Authorization: token ${GITHUB_TOKEN}"} "https://api.github.com/repos/rtk-ai/rtk/releases/latest") && \
+    RTK_LATEST=$(printf '%s' "$RTK_RELEASE" | jq -r '.tag_name') && \
     echo "Installing rtk ${RTK_LATEST}..." && \
     RTK_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64-unknown-linux-gnu" || echo "x86_64-unknown-linux-musl") && \
-    curl -fsSL "https://github.com/rtk-ai/rtk/releases/download/${RTK_LATEST}/rtk-${RTK_ARCH}.tar.gz" | \
-    tar xz -C /usr/local/bin rtk
+    RTK_URL=$(printf '%s' "$RTK_RELEASE" | jq -r --arg n "rtk-${RTK_ARCH}.tar.gz" '.assets[] | select(.name == $n) | .url') && \
+    curl -fsSL --retry 5 --retry-delay 5 -H "Accept: application/octet-stream" ${GITHUB_TOKEN:+-H "Authorization: token ${GITHUB_TOKEN}"} "$RTK_URL" -o /tmp/rtk.tar.gz && \
+    tar xzf /tmp/rtk.tar.gz -C /usr/local/bin rtk && \
+    rm -f /tmp/rtk.tar.gz
 
 # =============================================================================
 # Claude Code (standalone installation - no Node.js required)
@@ -112,7 +114,40 @@ USER vscode
 # =============================================================================
 # CodeRabbit CLI (AI-powered code review)
 # =============================================================================
-RUN curl -fsSL https://cli.coderabbit.ai/install.sh | sh
+# Two installer quirks are handled here:
+#
+# 1. mkdir -p "$HOME/.local/bin" — without it the installer aborts before
+#    even attempting to write the binary (parent directory ENOENT).
+#
+# 2. The installer prints "[SUCCESS] Installation verified" + "[SUCCESS]
+#    Installation complete" and then exits non-zero anyway. Trusting the
+#    exit code rejects a working install, so we verify the binary
+#    artefact ($HOME/.local/bin/coderabbit is executable) and consider
+#    that the source of truth. `sh ... || true` keeps the pipeline
+#    going; the post-condition is what decides success.
+#
+# Retry loop is still useful for transient 5xx during download — those
+# fail before [SUCCESS] is printed, so the post-condition catches them.
+# hadolint ignore=DL4006
+RUN mkdir -p "$HOME/.local/bin" && \
+    for attempt in 1 2 3 4 5; do \
+      rm -f /tmp/cr-install.sh; \
+      if curl -fsSL --retry 3 --retry-delay 2 https://cli.coderabbit.ai/install.sh -o /tmp/cr-install.sh; then \
+        sh /tmp/cr-install.sh || true; \
+      fi; \
+      if [ -x "$HOME/.local/bin/coderabbit" ]; then \
+        echo "CodeRabbit CLI installed (attempt $attempt)" >&2; \
+        rm -f /tmp/cr-install.sh; \
+        exit 0; \
+      fi; \
+      if [ "$attempt" = "5" ]; then \
+        echo "CodeRabbit CLI binary missing after 5 attempts" >&2; \
+        rm -f /tmp/cr-install.sh; \
+        exit 1; \
+      fi; \
+      echo "CodeRabbit CLI binary missing after attempt $attempt, retrying in $((attempt * 5))s..." >&2; \
+      sleep $((attempt * 5)); \
+    done
 
 # =============================================================================
 # Qodo Command CLI (AI-powered code review + agents)
@@ -130,10 +165,15 @@ RUN NODE_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "x64") && \
 # =============================================================================
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
     mkdir -p ~/.local/bin && \
-    echo "Installing status-line (latest)..." && \
-    curl -fsSL "https://github.com/kodflow/status-line/releases/latest/download/status-line-linux-${ARCH}" \
+    SL_RELEASE=$(curl -fsSL --retry 5 --retry-delay 5 ${GITHUB_TOKEN:+-H "Authorization: token ${GITHUB_TOKEN}"} "https://api.github.com/repos/kodflow/status-line/releases/latest") && \
+    SL_TAG=$(printf '%s' "$SL_RELEASE" | jq -r '.tag_name') && \
+    [ -n "$SL_TAG" ] && [ "$SL_TAG" != "null" ] && \
+    echo "Installing status-line (${SL_TAG})..." && \
+    SL_BIN_URL=$(printf '%s' "$SL_RELEASE" | jq -r --arg n "status-line-linux-${ARCH}" '.assets[] | select(.name == $n) | .url') && \
+    SL_SHA_URL=$(printf '%s' "$SL_RELEASE" | jq -r --arg n "status-line-linux-${ARCH}.sha256" '.assets[] | select(.name == $n) | .url') && \
+    curl -fsSL --retry 5 --retry-delay 5 -H "Accept: application/octet-stream" ${GITHUB_TOKEN:+-H "Authorization: token ${GITHUB_TOKEN}"} "$SL_BIN_URL" \
       -o ~/.local/bin/status-line && \
-    curl -fsSL "https://github.com/kodflow/status-line/releases/latest/download/status-line-linux-${ARCH}.sha256" \
+    curl -fsSL --retry 5 --retry-delay 5 -H "Accept: application/octet-stream" ${GITHUB_TOKEN:+-H "Authorization: token ${GITHUB_TOKEN}"} "$SL_SHA_URL" \
       -o /tmp/status-line.sha256 && \
     sed -i "s|status-line-linux-${ARCH}|$HOME/.local/bin/status-line|" /tmp/status-line.sha256 && \
     sha256sum -c /tmp/status-line.sha256 && rm -f /tmp/status-line.sha256 && \
