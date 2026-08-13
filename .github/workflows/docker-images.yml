@@ -240,6 +240,19 @@ jobs:
             echo "value=stable" >> $GITHUB_OUTPUT
           fi
 
+      # Stage .devcontainer/features/ + image-template-version.json into the
+      # build context (.devcontainer/images/): the Dockerfile COPYs both, but
+      # they live one level up and are not committed inside the context.
+      - name: Stage template features into build context
+        if: steps.base-check.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          cp -r .devcontainer/features .devcontainer/images/features
+          SHA="$(echo "${{ github.sha }}" | cut -c1-7)"
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '{"commit": "%s", "updated": "%s"}\n' "$SHA" "$NOW" \
+            > .devcontainer/images/image-template-version.json
+
       # PR: Build only (no push)
       - name: Build image (PR)
         if: github.event_name == 'pull_request' && steps.base-check.outputs.available == 'true'
