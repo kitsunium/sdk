@@ -943,6 +943,16 @@ func seedStream(stream corecodec.StreamingCodec, records []any) ([]byte, error) 
 // test run (codec_test target) or trip KTN-TEST-FILES (no matching source).
 // KTN-TEST-SUFFIX is excluded for this file for that reason (see .ktn-linter.yaml).
 func TestGenerateBenchMD(t *testing.T) {
+	//: opt-in guard. Bazel keeps this orchestrator off `bazel test //...` via
+	//: the BUILD args' `-test.run=^$`, but a plain `go test ./...` — the
+	//: quick-iteration loop /workspace/CLAUDE.md advertises — carries no such
+	//: default and would drive the FULL matrix, blowing past the 10-minute
+	//: default timeout and failing the package. Require the caller to name
+	//: this test explicitly (what `make bench` already does) so both build
+	//: systems honour the same contract instead of only Bazel.
+	if !strings.Contains(benchRunPattern(), "TestGenerateBenchMD") {
+		t.Skip("bench matrix generator — run `make bench` (or pass -run TestGenerateBenchMD) to regenerate BENCH.md")
+	}
 	//: drive the whole matrix programmatically via testing.Benchmark — this
 	//: direct call is the driver edge KTN-TEST-SUFFIX's IsBenchOrchestrator
 	//: (kodflow/ktn-linter#377) traces to exempt the Test from the bench-file
@@ -961,6 +971,23 @@ func TestGenerateBenchMD(t *testing.T) {
 		panic(fmt.Sprintf("codec bench: write %s: %v", outPath, werr))
 	}
 	t.Logf("wrote %s (%d rows)", outPath, len(rows))
+}
+
+// benchRunPattern returns the value of the -test.run flag, or "" when the
+// flag is absent (it is registered by testing.Init, so a nil lookup only
+// happens outside a normal test binary). It exists so TestGenerateBenchMD can
+// tell "the caller asked for me by name" from "the caller ran everything":
+// the zero value matches every test, which is precisely the case that must
+// NOT drive the multi-minute benchmark matrix.
+func benchRunPattern() string {
+	//: testing registers -test.run on the default FlagSet during Init.
+	f := flag.Lookup("test.run")
+	if f == nil {
+		//: no flag registered — treat as "no explicit selection".
+		return ""
+	}
+	//: hand back the raw pattern for the caller to match against.
+	return f.Value.String()
 }
 
 // resolveBenchOutputPath returns the absolute path where BENCH.md will

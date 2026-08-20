@@ -100,12 +100,22 @@ jobs:
       - name: test
         run: bazel test --config=ci //...
 
-      # The per-codec allocation-budget tests AND the kernel zero-alloc
-      # invariant gate carry //go:build !race (testing.AllocsPerRun /
-      # testing.Benchmark report a spurious +1 under -race), so the race suite
-      # above never compiles them. This race-off pass is their only gate.
+      # Every target below carries at least one //go:build !race test
+      # (testing.AllocsPerRun / testing.Benchmark report a spurious +1 under
+      # -race), so the race suite above never compiles them. This race-off pass
+      # is their ONLY gate — a `!race` test in a package missing from the list
+      # runs nowhere at all. The list is shared with `make test-alloc` and with
+      # check-alloc-lane-coverage.sh, which fails the build on an orphan.
       - name: alloc + zero-alloc gates (race off)
-        run: bazel test --config=alloc //internal/service/codec/... //internal/kernel:kernel_test
+        run: |
+          targets=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' tools/alloc-lane-targets.txt | tr '\n' ' ')
+          echo "alloc lane targets: $targets"
+          bazel test --config=alloc $targets
+
+      # Guards the invariant the step above depends on: no //go:build !race
+      # test may exist outside the alloc lane's target list.
+      - name: exemption invariant — alloc lane covers every !race test
+        run: bash scripts/pre-commit/check-alloc-lane-coverage.sh
 
       - name: coverage
         run: |

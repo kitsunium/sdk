@@ -77,7 +77,7 @@ func main() {
 }
 ```
 
-For the zero-allocation hot path use the chainable builder:
+For a more readable hot path use the chainable builder (same 1 alloc/emit as the variadic form — it buys ergonomics, not allocations):
 
 ```go
 logger.Build(lg, logger.LevelInfo).
@@ -86,7 +86,7 @@ logger.Build(lg, logger.LevelInfo).
     Send(ctx, "service started")
 ```
 
-See the [logger page](../logger/) for sink composition (multi / async / route / failover / sample / recover) and the perf rows that back the zero-alloc claim.
+See the [logger page](../logger/) for sink composition (multi / async / route / failover / sample / recover / tee / encwrite) and the perf rows that back the 1-alloc-per-emit figure.
 
 ## Hello, errs
 

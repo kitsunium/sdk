@@ -7,7 +7,7 @@ package logger
 // Encoder formats a RecordEvent into a byte slice. Implementations MUST be
 // safe for concurrent use by multiple goroutines and SHOULD avoid allocating
 // beyond the caller-supplied buffer (typically borrowed from the
-// kernel/buffer pool) so the hot path stays zero-allocation.
+// kernel/buffer pool) so the encoding step itself does not allocate.
 type Encoder interface {
 	// Name returns the canonical encoder identifier ("text", "ndjson",
 	// "json"). Useful for diagnostic dumps and metrics tagging.

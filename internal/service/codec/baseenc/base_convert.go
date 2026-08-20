@@ -4,6 +4,8 @@
 // transforms are O(n²) — callers MUST cap input at maxConvBytes first.
 package baseenc
 
+import "slices"
+
 // byteBase is the radix of the input/output byte stream (one byte = base 256).
 const byteBase int = 256
 
@@ -123,11 +125,10 @@ func assembleBaseN(zeroChar byte, zeros int, digits []byte) []byte {
 		//: leading zero byte → leading alphabet[0] char.
 		out = append(out, zeroChar)
 	}
-	//: append digits most-significant first (they were collected reversed).
-	for i := len(digits) - 1; i >= 0; i-- {
-		//: copy the next most-significant digit.
-		out = append(out, digits[i])
-	}
+	//: append digits (least-significant first), then flip that segment so
+	//: the encoding reads most-significant first.
+	out = append(out, digits...)
+	slices.Reverse(out[zeros:])
 	//: hand back the assembled encoding.
 	return out
 }

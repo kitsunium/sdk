@@ -10,9 +10,14 @@
 //
 // # Goals
 //
-//   - Zero-allocation hot path. The chainable Build(lg, lv).Str(...).
-//     Send(...) builder is backed by a sync.Pool; steady-state per-call
-//     cost is 0 allocations.
+//   - One-allocation hot path. The chainable Build(lg, lv).Str(...).
+//     Send(...) builder is backed by a sync.Pool that recycles the
+//     builder and its attrs scratchpad, but the handler clones that
+//     scratchpad on every Send — so steady-state cost is exactly 1
+//     heap allocation per emit, not 0. The variadic Info/Warn/... path
+//     costs the same 1 (its variadic slice). Prefer Build for
+//     ergonomics; it is not an allocation-free guarantee. Measured in
+//     BENCH.md and pinned by TestV116BuildSendAllocatesOnePerEmit.
 //   - Composable transport. A Logger is wired from a Sink (where bytes
 //     go) + an Encoder (how bytes are formatted). Fan-out, async, route,
 //     failover, sample, recover middleware compose around a Sink —
@@ -84,9 +89,11 @@
 // # Builder hot path
 //
 // [Build] returns a chainable, sync.Pool-backed [Builder] whose
-// steady-state per-call cost is zero heap allocations after the pool
-// warms. Callers MUST NOT use a Builder after [Builder.Send] — it
-// returns to the recycler.
+// steady-state per-call cost is one heap allocation per emit: the pool
+// recycles the Builder and its attrs scratchpad, but the handler clones
+// that scratchpad on every [Builder.Send], so one slice escapes.
+// Callers MUST NOT use a Builder after [Builder.Send] — it returns to
+// the recycler.
 //
 //	logger.Build(lg, logger.LevelInfo).
 //	    Str("user", u.Name).

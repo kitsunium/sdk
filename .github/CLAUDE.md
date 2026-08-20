@@ -9,7 +9,7 @@ GitHub-side configuration for the SDK repo: the Bazel CI lane and Dependabot. Th
 
 | Path | Role |
 |---|---|
-| `workflows/bazel-ci.yml`        | SDK CI lane (drift check, build, test, coverage) — see `workflows/CLAUDE.md` |
+| `workflows/bazel-ci.yml`        | SDK CI lane (drift check, build, test, alloc lane + exemption guard, coverage, cross-build matrix) — see `workflows/CLAUDE.md` |
 | `workflows/docker-images.yml`   | Template-inherited; gated on `.devcontainer/images/**` |
 | `workflows/publish-features.yml`| Template-inherited; gated on `.devcontainer/features/**` |
 | `workflows/release.yml`         | Template-inherited; gated on `.devcontainer/**` |
