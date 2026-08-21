@@ -17,6 +17,7 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 | `ring/` | SPSC lock-free bounded queue (ADR 0006) | `0.1.3.*` (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
 | `batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014) | `0.1.5.*` (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
 | `worker/` | generic goroutine-lifecycle daemon (`LoopDaemon`, `Start`/`Every`/`Stop`) | (none — emits no codes) |
+| `cache/` | generic `Cache[K,V]` LRU + TTL cache (ADR 0025); reuses `clock` for testable expiry | (none — `Fetch` returns `(V, bool)`) |
 
 Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
 
@@ -76,3 +77,4 @@ GOWORK=off go test -race -cover ./...
 - `ring/` — see `internal/kernel/ring/CLAUDE.md`
 - `batcher/` — see `internal/kernel/batcher/CLAUDE.md`
 - `worker/` — see `internal/kernel/worker/CLAUDE.md`
+- `cache/` — see `internal/kernel/cache/CLAUDE.md`

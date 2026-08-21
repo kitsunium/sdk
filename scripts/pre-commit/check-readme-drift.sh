@@ -38,4 +38,4 @@ fi
     --repository.url 'https://github.com/kitsunium/sdk' \
     --repository.default-branch main \
     --repository.path '/pkg/v1' \
-    ./codec ./errs ./logger )
+    ./cache ./codec ./errs ./id ./logger )
