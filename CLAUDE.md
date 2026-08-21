@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Six domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (22 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), and OS **proc** supervision. New domains land in the same 4-layer shape (ADR 0001).
+Go SDK providing a normed, performant toolbox for downstream applications. Seven domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (22 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), OS **proc** supervision, and **id** generation (UUIDv4/v7, ULID, snowflake — ADR 0024, the first Phase-B new-domain). New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.26.2 (pinned in `MODULE.bazel`)
 
@@ -15,7 +15,7 @@ internal/
 │                  batcher, buffer, clock, errs, recycler, ring,
 │                  snapshot, worker
 ├── core/          domain interfaces + domain values
-│                  codec (+ scratch), crypto, logger, logger/level,
+│                  codec (+ scratch), crypto, id, logger, logger/level,
 │                  proc, transform, writer
 └── service/       concrete implementations
                    logger (+ encoder, sink/{console,file,memory,syslog},
@@ -31,6 +31,7 @@ internal/
                            yaml)
                    proc   (cgroup, exec, reaper, rlimit, sdlisten,
                            sdnotify, signal)
+                   id     (uuidv4, uuidv7, ulid, snowflake)
                    transform
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
@@ -38,6 +39,7 @@ pkg/
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
     ├── codec/     (blank-imports all 14 service codecs + transform)
     ├── crypto/    (+ agree, hash, kdf, mac, password, sign)
+    ├── id/        (UUIDv4/v7, ULID, snowflake — ADR 0024)
     └── proc/      (+ cgroup, process, reaper, rlimit, sdlisten,
                       sdnotify, signal)
 third-party/       opt-in vendor integrations (root module only)
@@ -157,5 +159,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0021 — BSON codec (M5) over `go.mongodb.org/mongo-driver/bson` in `internal/service/codec/bson` (library-backed codec precedent, not third-party quarantine); non-streaming + Appender; error block `0.3.36.*` — `docs/adr/0021-sdk-codec-bson.md`
 - ADR 0022 — HCL codec (M5) quarantined in `third-party/codec/hcl` (root module) because `hcl/v2`+`go-cty` downgrade `x/sys` in `internal/service`; opt-in, not in `pkg/v1/codec`; first `third-party/codec/` subtree; error block `0.3.37.*` — `docs/adr/0022-sdk-codec-hcl.md`
 - ADR 0023 — schema codecs (M6): opt-in under `third-party/codec/` (schema-bound, can't honour the universal round-trip contract); Protobuf concrete (`0.3.38.*`), Avro/Cap'n Proto deferred — `docs/adr/0023-sdk-schema-codecs.md`
+- ADR 0024 — identifier-generation domain (`id`): 7th core sibling, `Generator`/`Scheme` registry (UUIDv4/v7, ULID, snowflake), canonical-string output, stdlib-only/cross-OS; opens the Phase-B new-domain wave; error block `0.2.7.*`/`0.3.39.*` — `docs/adr/0024-sdk-id-domain.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

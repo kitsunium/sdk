@@ -11,6 +11,7 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 |---|---|---|
 | `logger/` | v2 one-alloc-per-emit multi-sink architecture (`builder`, `encoder`, `sink/{console,file,syslog,memory}`, `middleware/{multi,async,route,failover,sample,recover,encwrite,tee}`) realising `core/logger.Handler` + `Logger` | `0.3.1.*` (and per-component slots, see logger CLAUDE.md) |
 | `codec/` | 14 wire-format codecs over 22 Format names (asn1, baseenc[9], bson, cbor, csv, flatbuffers, json, msgpack, ndjson, pem, tlv, toml, xml, yaml), each implementing `core/codec.Codec`; all satisfy `Appender`, most also `StreamingCodec` | `0.3.2.*` … `0.3.24.*` (one PP slot per codec) |
+| `id/` | identifier generators (UUIDv4/v7, ULID, snowflake) implementing `core/id.Generator`; stdlib-only, cross-OS, self-registered (ADR 0024) | `0.3.39.*` |
 
 ## Module
 
@@ -36,6 +37,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 
 - `logger/` — see `internal/service/logger/README.md` (full contract, error catalogue, output format)
 - `codec/` — see `internal/service/codec/CLAUDE.md` (14 codec packages + per-codec error ranges)
+- `id/` — see `internal/service/id/CLAUDE.md` (UUIDv4/v7, ULID, snowflake — ADR 0024)
 
 ## Verification
 

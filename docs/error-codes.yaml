@@ -258,6 +258,14 @@ codes:
     const: CodeStdioCaptureFailed
     hex: "0x00_02_06_17"
     package: internal/core/proc
+  - code: "0.2.7.1"
+    const: CodeUnknownScheme
+    hex: "0x00_02_07_01"
+    package: internal/core/id
+  - code: "0.2.7.5"
+    const: CodeDuplicateRegistration
+    hex: "0x00_02_07_05"
+    package: internal/core/id
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"
@@ -670,6 +678,18 @@ codes:
     const: CodeProtobufSizeExceeded
     hex: "0x00_03_26_03"
     package: third-party/codec/protobuf
+  - code: "0.3.39.1"
+    const: CodeIDEntropyFailed
+    hex: "0x00_03_27_01"
+    package: internal/service/id
+  - code: "0.3.39.2"
+    const: CodeIDClockBackwards
+    hex: "0x00_03_27_02"
+    package: internal/service/id
+  - code: "0.3.39.3"
+    const: CodeIDClockStalled
+    hex: "0x00_03_27_03"
+    package: internal/service/id
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

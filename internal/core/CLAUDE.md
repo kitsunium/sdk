@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Domain **interfaces** and immutable domain **value types** for the SDK's domains — **codecs, the logger, log-transport writers, cryptographic schemes, byte transforms, and OS process supervision** (ADR 0012, ADR 0013, ADR 0014, ADR 0016). Core describes "what the SDK's domains are" without prescribing how they are realised — every method body belongs in `internal/service/*`, every public alias belongs in `pkg/v1/*`. Plug-in registries (codec, writer, crypto, transform) are the deliberate exception: they carry routing state, no domain logic. `proc` is the deliberate counter-example — no registry: each primitive has a single canonical OS implementation chosen at build time by platform tag.
+Domain **interfaces** and immutable domain **value types** for the SDK's domains — **codecs, the logger, log-transport writers, cryptographic schemes, byte transforms, OS process supervision, and identifier generation** (ADR 0012, ADR 0013, ADR 0014, ADR 0016, ADR 0024). Core describes "what the SDK's domains are" without prescribing how they are realised — every method body belongs in `internal/service/*`, every public alias belongs in `pkg/v1/*`. Plug-in registries (codec, writer, crypto, transform, id) are the deliberate exception: they carry routing state, no domain logic. `proc` is the deliberate counter-example — no registry: each primitive has a single canonical OS implementation chosen at build time by platform tag. ADR 0024 opens the **Phase-B new-domain wave** (identity now; observability/reliability/configuration to follow in ADR 0025–0028).
 
 ## Contents
 
@@ -16,6 +16,7 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `logger/` | `Logger` / `Handler` / `Sink` / `Encoder` interfaces, `RecordEvent`, `AttrValue`, `Value`, `Kind` | `0.2.16.*` (reserved) |
 | `logger/level/` | `Level int8` + `Debug`/`Info`/`Warn`/`Error` constants + `String()` | `0.2.17.*` (reserved) |
 | `proc/` | OS process-supervision foundation: `Process` / `Reaper` / `Group` / `Listener` ports + `Spec` / `ExitValue` / `LimitValue` / `NotificationValue` / `Signal` / `Resource` value types; no registry (build-tag selection) (ADR 0016) | `0.2.6.*` |
+| `id/` | `Generator` port + `Scheme` registry (UUIDv4/v7, ULID, snowflake); canonical-string output (ADR 0024) | `0.2.7.*` |
 
 `Major=0` (internal), `Layer=2` (core). The codec registry ships codes today (`CodeDuplicateRegistration` 0.2.2.1, plus 0.2.2.2-4 reserved for future Marshal/Unmarshal sentinels); the writer registry ships `0.2.3.*` (ADR 0012). Logger codes will land alongside service-layer wiring.
 
@@ -32,10 +33,10 @@ Single Go module `github.com/kitsunium/sdk/internal/core` — one `go.mod`, one 
 
 ## Do NOT
 
-- Add concrete runtime types with stateful methods here. The `codec` / `writer` / `crypto` / `transform` registries' `snapshot.Value`-backed lookups are the deliberate exceptions — they carry no domain logic, only routing.
+- Add concrete runtime types with stateful methods here. The `codec` / `writer` / `crypto` / `transform` / `id` registries' `snapshot.Value`-backed lookups are the deliberate exceptions — they carry no domain logic, only routing.
 - Import `context` outside of interface signatures.
 - Reach upward into `internal/service/*` or `pkg/*`.
-- Grow a **seventh** sibling beside `codec/`, `writer/`, `crypto/`, `logger/`, `transform/`, and `proc/` without first widening the layer's purpose statement (the `writer` sibling was admitted by ADR 0012; `crypto` by ADR 0013; `transform` by ADR 0014; `proc` by ADR 0016).
+- Grow a **new** sibling without first widening the layer's purpose statement (the `writer` sibling was admitted by ADR 0012; `crypto` by ADR 0013; `transform` by ADR 0014; `proc` by ADR 0016; `id` by ADR 0024, which opens the Phase-B new-domain wave — observability/reliability/configuration land in ADR 0025–0028).
 
 ## Verification
 
@@ -56,5 +57,6 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `crypto/` — see `internal/core/crypto/CLAUDE.md`
 - `transform/` — see `internal/core/transform/CLAUDE.md`
 - `proc/` — see `internal/core/proc/CLAUDE.md` (OS process-supervision foundation, ADR 0016)
+- `id/` — see `internal/core/id/CLAUDE.md` (identifier generation, ADR 0024)
 - `logger/` — see `internal/core/logger/CLAUDE.md` (README is the human-readable surface doc)
 - `logger/level/` — see `internal/core/logger/level/CLAUDE.md`
