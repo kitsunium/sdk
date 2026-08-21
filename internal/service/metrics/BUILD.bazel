@@ -34,11 +34,12 @@ alias(
 
 go_test(
     name = "metrics_test",
-    srcs = ["metrics_external_test.go"],
-    deps = [
-        ":metrics",
-        "//internal/core/metrics",
+    srcs = [
+        "exporter_text_internal_test.go",
+        "metrics_external_test.go",
     ],
+    embed = [":metrics"],
+    deps = ["//internal/core/metrics"],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

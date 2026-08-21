@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"sync"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -26,7 +27,15 @@ const (
 var Text = coremetrics.RegisterExporter(newTextExporter(textExporterName, os.Stdout))
 
 // textExporter renders a Snapshot as newline-delimited "kind name value" lines.
+//
+// mu serialises the single dst.Write. core/metrics.Exporter documents that
+// implementations MUST be safe for concurrent use, and dst is caller-supplied:
+// os.Stdout tolerates concurrent writes on most platforms, but a bytes.Buffer
+// or a plain os.File does not. Rendering happens outside the lock — only the
+// write is guarded — so a slow writer serialises callers without also
+// serialising the formatting work.
 type textExporter struct {
+	mu   sync.Mutex
 	name coremetrics.ExporterName
 	dst  io.Writer
 }
@@ -70,8 +79,11 @@ func (e *textExporter) Export(snap coremetrics.SnapshotValue) error {
 		//: "histogram_count <name> <count>".
 		buf = appendLine(buf, "histogram_count ", name, strconv.FormatUint(snap.Histograms[name].Count, decimalBase))
 	}
-	//: single write — the only error surface.
+	//: single write — the only error surface — serialised so concurrent
+	//: Exports cannot interleave partial lines into a non-atomic dst.
+	e.mu.Lock()
 	_, err := e.dst.Write(buf)
+	e.mu.Unlock()
 	//: success fast-path.
 	if err == nil {
 		//: snapshot written.

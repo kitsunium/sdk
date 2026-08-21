@@ -37,7 +37,7 @@ the `metrics` domain.
 - 9th core sibling (with registry, like writer). `pkg/v1` gains a dep-light
   facade. Docs + `error-codes.yaml` updated per rule 11.
 
-## Alternatives considered
+## Why not
 
 - **OpenTelemetry SDK wrapper** — rejected for v1: heavy dep; the in-house
   instruments + exporter registry keep the core dep-light, and an OTLP exporter
@@ -46,6 +46,20 @@ the `metrics` domain.
   cardinality control; v1 is name-keyed to ship the core value first.
 - **Separate `Collector` interface** — rejected: putting `Collect` on `Meter`
   avoids a single-method interface and a second type.
+
+## Breaking changes
+
+None. `metrics` is a new domain in this change set — there is no prior
+published surface to break.
+
+One contract was tightened during review, before any release: the text
+`Exporter` now serialises its single `dst.Write` behind a mutex.
+`core/metrics.Exporter` documents that implementations MUST be safe for
+concurrent use, and `NewTextExporter` accepts an arbitrary `io.Writer` —
+`os.Stdout` tolerates concurrent writes on most platforms, but a
+`bytes.Buffer` does not, and `-race` reports the data race. Rendering stays
+outside the lock so a slow writer serialises callers without also serialising
+the formatting work.
 
 ## Deferred
 
