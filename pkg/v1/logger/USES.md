@@ -100,7 +100,7 @@ lg, err := logger.NewWithSink(logger.SinkConfig{
 
 <div role="tabpanel" id="lg-build" aria-labelledby="lg-build-btn" hidden>
 
-**Best for:** the zero-allocation hot path. The chainable builder is backed by a `sync.Pool`; steady-state per-call cost is 0 allocs once the pool is warm. Don't reuse the builder after `Send` — it returns to the recycler.
+**Best for:** ergonomics on the hot path. The chainable builder is backed by a `sync.Pool`; steady-state per-call cost is **1 alloc** per emit once the pool is warm — the pool recycles the builder and its attrs scratchpad, but the handler clones that scratchpad on every `Send`, so one slice escapes. That is the same cost as the variadic `Info(...)` form, so pick `Build` for readability, not for an allocation win. See `BENCH.md`. Don't reuse the builder after `Send` — it returns to the recycler.
 
 ```go
 logger.Build(lg, logger.LevelInfo).

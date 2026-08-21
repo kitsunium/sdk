@@ -63,15 +63,18 @@ build:
 test:
 	bazel test --config=race //...
 
-# `test-alloc` runs the race-off allocation gates: the per-codec
-# allocation-budget regression tests AND the kernel zero-alloc invariant gate
-# (//internal/kernel:kernel_test). Both carry `//go:build !race`
-# (testing.AllocsPerRun / testing.Benchmark report +1 under -race), so they are
-# invisible to the race suite above and need this race-off pass. CI runs it as a
-# dedicated step; run it locally before touching a codec or kernel hot path's
-# allocation profile.
+# `test-alloc` runs the race-off allocation gates. Every target here carries at
+# least one `//go:build !race` test file (testing.AllocsPerRun /
+# testing.Benchmark report a spurious +1 under -race), so the race suite above
+# never compiles them — this pass is their ONLY gate. The target list lives in
+# tools/alloc-lane-targets.txt so the Makefile, CI and the coverage guard read
+# the same source of truth; check-alloc-lane-coverage.sh fails the build if a
+# `!race` test exists in a package absent from that list. Run this locally
+# before touching a codec, kernel or logger hot path's allocation profile.
+ALLOC_TARGETS = $(shell sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' tools/alloc-lane-targets.txt)
+
 test-alloc:
-	bazel test --config=alloc //internal/service/codec/... //internal/kernel:kernel_test
+	bazel test --config=alloc $(ALLOC_TARGETS)
 
 # `lint` is the read-only counterpart of `build`: same checks, but it
 # REFUSES to write — it asserts the tree is already consistent.
@@ -87,6 +90,9 @@ lint:
 	# the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
 	# style-only test rules (TEST-TABLE/TEST-CONTEXT) that block no CI lane.
 	ktn-linter lint --skip-phases=tests ./...
+	# Exemption invariant: a `//go:build !race` test is invisible to the race
+	# suite, so the alloc lane is its only gate. Fail if one runs in no lane.
+	bash scripts/pre-commit/check-alloc-lane-coverage.sh
 
 # `bench` regenerates pkg/v1/codec/BENCH.md by running the full bench
 # matrix programmatically (testing.Benchmark per row, no text-format

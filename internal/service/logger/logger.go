@@ -114,8 +114,9 @@ func swallowHandlerError(err error) {
 }
 
 // Build returns a chainable Builder bound to this Logger at the supplied
-// level. The Builder is recycled through a sync.Pool so the steady-state
-// per-call cost is zero heap allocations once the pool is warm.
+// level. The Builder is recycled through a sync.Pool, so the steady-state
+// per-call cost is one heap allocation per emit once the pool is warm —
+// the handler clones the accumulated attrs on Send and that clone escapes.
 // IFACE-PLUGIN: returns the chainable Builder contract so callers depend on
 // the fluent API surface rather than the recycled concrete type.
 func (l *loggerImpl) Build(lv level.Level) Builder {

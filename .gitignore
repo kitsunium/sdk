@@ -169,11 +169,11 @@ core.*
 ROADMAP.md
 
 # Bazel symlinks
-/bazel-bin
-/bazel-out
-/bazel-testlogs
-/bazel-workspace
-/bazel-sdk
+# Bazel convenience symlinks. The last one is named after the checkout
+# directory, which is NOT always "sdk" — a git worktree yields e.g.
+# bazel-sdk-my-feature-branch. Glob rather than enumerate, or the symlink
+# shows up as untracked for everyone working in a worktree.
+/bazel-*
 
 # pprof bench profiles (captured by `make profile WAVE=<slug>`).
 # Local artifacts only — bench.txt summaries are cited inline in

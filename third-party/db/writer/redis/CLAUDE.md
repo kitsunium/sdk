@@ -61,6 +61,18 @@ bazel test --config=race //third-party/db/writer/redis:redis_test
 go test -race ./third-party/db/writer/redis/...
 ```
 
+### Opt-in integration test (no CI lane — run it by hand)
+
+`redis_integration_test.go` carries `//go:build integration`, so **no CI lane
+runs it**: `Test_Integration_RedisWriter` needs a Docker-compatible runtime to
+spin up a real Redis via testcontainers-go. Per rule 12 this is a *declared*
+exemption, not an oversight — run it before shipping a change to the factory or
+the batching chain:
+
+```sh
+GOWORK=off go test -tags integration -timeout 180s ./third-party/db/writer/redis/...
+```
+
 ## Accepted audit findings
 
 - Deferred/accepted low+info audit findings (V89) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

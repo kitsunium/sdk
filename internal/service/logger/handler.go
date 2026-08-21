@@ -68,7 +68,8 @@ func (h *genericHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) 
 
 // Handle encodes r through the configured encoder and forwards the bytes to
 // the configured sink. Borrows a scratch buffer from kernel/buffer so the
-// hot path stays allocation-free.
+// ENCODING step itself does not allocate; the record's attrs clone is a
+// separate cost (one slice per emit — see pkg/v1/logger/BENCH.md).
 func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) error {
 	//: honour context cancellation early so the encoder step never runs.
 	if ctx != nil && ctx.Err() != nil {

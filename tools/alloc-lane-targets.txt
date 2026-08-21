@@ -1,0 +1,38 @@
+# Bazel targets for the race-off allocation lane (`--config=alloc`).
+#
+# Single source of truth, consumed by three call sites so they cannot drift:
+#   - Makefile              → `make test-alloc`
+#   - .github/workflows/bazel-ci.yml → the "alloc + zero-alloc gates" step
+#   - scripts/pre-commit/check-alloc-lane-coverage.sh → the drift guard
+#
+# WHY this lane exists: a test file carrying `//go:build !race` is NOT compiled
+# by the race suite (`bazel test --config=ci //...`, race on by default). Such a
+# file therefore runs in EXACTLY ONE place — here. A `!race` test whose package
+# is missing from this list runs nowhere at all, silently: it compiles, it is
+# never executed, and no lane reports it as skipped.
+#
+# That is not hypothetical. Before this file existed the list held only the two
+# entries below marked (original), and four `!race` files ran in zero lanes —
+# including `pkg/v1/logger`'s regression test pinning the "Build().Send() is NOT
+# allocation-free" contract, i.e. the very guard against the doc claim it exists
+# to police.
+#
+# INVARIANT (enforced by check-alloc-lane-coverage.sh, wired into `make lint`):
+#   every directory containing a `//go:build !race` *_test.go file must be
+#   covered by an entry below, either directly or via a `/...` prefix.
+# Adding a `!race` test to a new package? Add its go_test target here in the
+# same commit, or the guard fails the build.
+
+# Per-codec allocation-budget regression tests.        (original)
+//internal/service/codec/...
+# Kernel zero-alloc invariant gate (buffer/clock/errs/ring). (original)
+//internal/kernel:kernel_test
+# Recycler zero-alloc invariant (ADR 0010) — Pool/CappedPool Get+Put.
+//internal/kernel/recycler:recycler_test
+# Snapshot zero-alloc invariant (ADR 0011) — Load/Store/Swap.
+//internal/kernel/snapshot:snapshot_test
+# encwrite frame-overflow probe (AllocsPerRun-based).
+//internal/service/logger/middleware/encwrite:encwrite_test
+# Build().Send() one-alloc-per-emit contract — the guard behind the
+# "zero-allocation logger" claim in README.md / CLAUDE.md.
+//pkg/v1/logger:logger_test

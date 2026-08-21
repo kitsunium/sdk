@@ -68,3 +68,18 @@ bazel test --config=race //third-party/db/writer/clickhouse:clickhouse_test
 # Fallback
 go test -race ./third-party/db/writer/clickhouse/...
 ```
+
+### Opt-in integration test (no CI lane — run it by hand)
+
+`clickhouse_integration_test.go` carries `//go:build integration`, so **no CI
+lane runs it**: it needs a Docker-compatible runtime to spin up
+`clickhouse/clickhouse-server:24-alpine` via testcontainers-go.
+`TestIntegration_clickhouseFactory_roundtrip` drives the real registered factory
+(`writer.Open("clickhouse", …)`) through Open → Write N → Flush → Close and reads
+the rows back. It self-skips when no runtime is reachable, so the default lane
+stays green either way. Per rule 12 this is a *declared* exemption, not an
+oversight — run it before shipping a change to the factory or the batching chain:
+
+```sh
+GOWORK=off go test -tags integration -timeout 180s ./third-party/db/writer/clickhouse/...
+```

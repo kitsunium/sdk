@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Single-purpose scripts and small Go programs the build tooling calls into. Two tools live here today: `workspace_status.sh` (feeds `bazel build --stamp`) and `genindex/` (emits the symbol search index for the docs site).
+Single-purpose scripts, data files and small Go programs the build tooling calls into. Three entries live here today: `workspace_status.sh` (feeds `bazel build --stamp`), `genindex/` (emits the symbol search index for the docs site), and `alloc-lane-targets.txt` (the shared target list for the race-off allocation lane).
 
 ## Contents
 
@@ -11,6 +11,13 @@ Single-purpose scripts and small Go programs the build tooling calls into. Two t
 |---|---|---|
 | `workspace_status.sh` | `bazel build --stamp` (via `workspace_status_command` in `.bazelrc`) | `STABLE_VERSION <git-sha>` to stdout, falling back to `STABLE_VERSION dev` outside a git checkout |
 | `genindex/` (Go program, stdlib-only) | `docs/site/scripts/gen-symbols.mjs` during `npm run prebuild` | `public/_search/symbols-<major>.json` — flat list of every exported Go symbol (kind, signature, doc synopsis, URL, source URL) consumed by the docs-site search modal |
+| `alloc-lane-targets.txt` (plain list, `#` comments) | `make test-alloc`, the `bazel-ci.yml` alloc step, and `scripts/pre-commit/check-alloc-lane-coverage.sh` | nothing — it IS the data: one Bazel test target per line for `bazel test --config=alloc` |
+
+### `alloc-lane-targets.txt`
+
+A test file carrying `//go:build !race` is dropped at compile time by the race suite (`bazel test --config=ci //...`, race on by default), so it runs in exactly one place: the race-off alloc lane. A `!race` test whose package is missing from this list therefore runs in **no lane at all** — it compiles, it is never executed, and nothing reports it as skipped.
+
+Keeping the list in one file (rather than duplicated in the Makefile and the workflow) is what lets `check-alloc-lane-coverage.sh` verify the invariant mechanically: every directory holding a `//go:build !race` test must be covered by an entry here, directly or via a `/...` prefix. The guard runs in the pre-commit chain, in `make lint`, and as its own CI step.
 
 ## How they wire in
 
@@ -40,6 +47,8 @@ Single-purpose scripts and small Go programs the build tooling calls into. Two t
 - Rename `workspace_status.sh` — `.bazelrc` references it by exact path.
 - Echo unrelated content from `workspace_status.sh`. Bazel treats unexpected lines as build failures when `--stamp` is enabled.
 - Add `genindex/` to `go.work`. It must stay out of the umbrella so `GOWORK=off go run` works from a clean checkout and the SDK's 5-module count stays accurate.
+- Inline the alloc-lane target list into the `Makefile` or `bazel-ci.yml`. All three call sites MUST read `alloc-lane-targets.txt`, or `check-alloc-lane-coverage.sh` starts verifying a list nobody runs.
+- Silence `check-alloc-lane-coverage.sh` by deleting the offending entry. If a `!race` test genuinely should not run, drop the `!race` constraint or the test — do not leave it compiling but ungated.
 
 ## Verification
 

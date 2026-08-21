@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/pkg/v1/logger"
 ```
 
-Package logger — re\-exports the chainable Builder API and the slice\-overload LogAttrs entry point. Both are routed through the internal service implementation, which owns the recycler that keeps the steady\-state hot\-path at zero allocations.
+Package logger — re\-exports the chainable Builder API and the slice\-overload LogAttrs entry point. Both are routed through the internal service implementation, which owns the recycler that holds the steady\-state hot\-path at one allocation per emit.
 
 Package logger — adds the opt\-in caller annotation surface. WithCaller derives a Logger whose records carry a structured "source" attribute \(file:line:function\) resolved from the program counter the front\-end already captures. It is additive: an unwrapped Logger emits no source field, so the frozen record shape is unchanged until a caller opts in.
 
@@ -26,7 +26,7 @@ Consumers import this package; internal/\* paths are compile\-blocked outside th
 
 ### Goals
 
-- Zero\-allocation hot path. The chainable Build\(lg, lv\).Str\(...\). Send\(...\) builder is backed by a sync.Pool; steady\-state per\-call cost is 0 allocations.
+- One\-allocation hot path. The chainable Build\(lg, lv\).Str\(...\). Send\(...\) builder is backed by a sync.Pool that recycles the builder and its attrs scratchpad, but the handler clones that scratchpad on every Send — so steady\-state cost is exactly 1 heap allocation per emit, not 0. The variadic Info/Warn/... path costs the same 1 \(its variadic slice\). Prefer Build for ergonomics; it is not an allocation\-free guarantee. Measured in BENCH.md and pinned by TestV116BuildSendAllocatesOnePerEmit.
 - Composable transport. A Logger is wired from a Sink \(where bytes go\) \+ an Encoder \(how bytes are formatted\). Fan\-out, async, route, failover, sample, recover middleware compose around a Sink — bring your own topology.
 - Typed Attrs at the call site. 9 typed constructors \(String, Int, Bool, Float64, Int64, Uint64, Duration, Time, Any\) — no any\-untyped key/value pairs that error at runtime.
 - Build\-time version stamping. Version is the single ldflags injection point. FrameworkVersion\(\) is added as "framework\_version" to every emitted record — set under go build \-ldflags "\-X .../logger.Version=…" or Bazel \-\-stamp.
@@ -81,7 +81,7 @@ A nil Sink returns [SinkConfigRequired](<#WriterRequired>). Both [NewText](<#New
 
 ### Builder hot path
 
-[Build](<#Build>) returns a chainable, sync.Pool\-backed [Builder](<#Builder>) whose steady\-state per\-call cost is zero heap allocations after the pool warms. Callers MUST NOT use a Builder after \[Builder.Send\] — it returns to the recycler.
+[Build](<#Build>) returns a chainable, sync.Pool\-backed [Builder](<#Builder>) whose steady\-state per\-call cost is one heap allocation per emit: the pool recycles the Builder and its attrs scratchpad, but the handler clones that scratchpad on every \[Builder.Send\], so one slice escapes. Callers MUST NOT use a Builder after \[Builder.Send\] — it returns to the recycler.
 
 ```
 logger.Build(lg, logger.LevelInfo).
@@ -279,7 +279,7 @@ var Version string
 ```
 
 <a name="Debug"></a>
-## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L280>)
+## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L287>)
 
 ```go
 func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -288,7 +288,7 @@ func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Debug emits a RecordEvent at LevelDebug through lg.
 
 <a name="Error"></a>
-## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L298>)
+## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L305>)
 
 ```go
 func Error(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -306,7 +306,7 @@ func FrameworkVersion() string
 FrameworkVersion returns the linked\-in SDK version, or "dev" if unset.
 
 <a name="Info"></a>
-## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L286>)
+## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L293>)
 
 ```go
 func Info(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -315,7 +315,7 @@ func Info(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Info emits a RecordEvent at LevelInfo through lg.
 
 <a name="LogAttrs"></a>
-## func [LogAttrs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/builder.go#L30>)
+## func [LogAttrs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/builder.go#L31>)
 
 ```go
 func LogAttrs(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr)
@@ -324,7 +324,7 @@ func LogAttrs(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr
 LogAttrs is the slice\-overload of Logger.Log that avoids the variadic slice allocation imposed by Logger.Log\(... Attr\). Pre\-built attribute slices flow through this entry point without per\-call boxing.
 
 <a name="Warn"></a>
-## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L292>)
+## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L299>)
 
 ```go
 func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -333,7 +333,7 @@ func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Warn emits a RecordEvent at LevelWarn through lg.
 
 <a name="Attr"></a>
-## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L137>)
+## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L144>)
 
 Attr is the stable alias for the internal AttrValue key/value pair.
 
@@ -342,7 +342,7 @@ type Attr = corelogger.AttrValue
 ```
 
 <a name="Any"></a>
-### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L353>)
+### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L360>)
 
 ```go
 func Any(key string, val any) Attr
@@ -351,7 +351,7 @@ func Any(key string, val any) Attr
 Any builds an Attr carrying an opaque payload. Use the typed helpers when possible — Any disables type\-aware rendering.
 
 <a name="Bool"></a>
-### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L316>)
+### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L323>)
 
 ```go
 func Bool(key string, val bool) Attr
@@ -360,7 +360,7 @@ func Bool(key string, val bool) Attr
 Bool builds an Attr carrying a boolean value.
 
 <a name="Duration"></a>
-### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L340>)
+### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L347>)
 
 ```go
 func Duration(key string, val time.Duration) Attr
@@ -369,7 +369,7 @@ func Duration(key string, val time.Duration) Attr
 Duration builds an Attr carrying a time.Duration value.
 
 <a name="Float64"></a>
-### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L322>)
+### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L329>)
 
 ```go
 func Float64(key string, val float64) Attr
@@ -378,7 +378,7 @@ func Float64(key string, val float64) Attr
 Float64 builds an Attr carrying a float64 value.
 
 <a name="Int"></a>
-### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L310>)
+### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L317>)
 
 ```go
 func Int(key string, val int) Attr
@@ -387,7 +387,7 @@ func Int(key string, val int) Attr
 Int builds an Attr carrying an int value.
 
 <a name="Int64"></a>
-### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L328>)
+### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L335>)
 
 ```go
 func Int64(key string, val int64) Attr
@@ -396,7 +396,7 @@ func Int64(key string, val int64) Attr
 Int64 builds an Attr carrying an int64 value.
 
 <a name="String"></a>
-### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L304>)
+### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L311>)
 
 ```go
 func String(key, val string) Attr
@@ -405,7 +405,7 @@ func String(key, val string) Attr
 String builds an Attr carrying a string value.
 
 <a name="Time"></a>
-### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L346>)
+### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L353>)
 
 ```go
 func Time(key string, val time.Time) Attr
@@ -414,7 +414,7 @@ func Time(key string, val time.Time) Attr
 Time builds an Attr carrying a time.Time value.
 
 <a name="Uint64"></a>
-### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L334>)
+### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L341>)
 
 ```go
 func Uint64(key string, val uint64) Attr
@@ -445,13 +445,13 @@ type Builder = svclogger.Builder
 ```
 
 <a name="Build"></a>
-### func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/builder.go#L22>)
+### func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/builder.go#L23>)
 
 ```go
 func Build(lg Logger, lv Level) Builder
 ```
 
-Build returns a chainable Builder bound to lg at the supplied level. Builders are recycled through a sync.Pool so the steady\-state per\-call cost is zero heap allocations once the pool is warm.
+Build returns a chainable Builder bound to lg at the supplied level. Builders are recycled through a sync.Pool, so the steady\-state per\-call cost is one heap allocation per emit — the handler clones the accumulated attrs on Send, and that clone escapes. See BENCH.md.
 
 <a name="CloudWatchConfig"></a>
 ## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L42>)
@@ -463,7 +463,7 @@ type CloudWatchConfig = corewriter.CloudWatchConfig
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L166-L176>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L173-L183>)
 
 Config carries the construction parameters accepted by NewText. Two destination forms are supported — pick the one that fits:
 
@@ -586,7 +586,7 @@ type Format = corecodec.Format
 ```
 
 <a name="Level"></a>
-## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L140>)
+## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L147>)
 
 Level is the stable alias for the internal severity type.
 
@@ -657,7 +657,7 @@ type Leveler = level.Leveler
 ```
 
 <a name="Logger"></a>
-## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L134>)
+## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L141>)
 
 Logger is the stable alias for the internal core.Logger interface.
 
@@ -666,7 +666,7 @@ type Logger = corelogger.Logger
 ```
 
 <a name="Default"></a>
-### func [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L244>)
+### func [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L251>)
 
 ```go
 func Default() (lg Logger, err error)
@@ -675,7 +675,7 @@ func Default() (lg Logger, err error)
 Default returns a Logger writing INFO\-and\-above records to os.Stderr. The stderr Writer is supplied explicitly here; NewText itself no longer silently defaults a nil Writer.
 
 <a name="DefaultMulti"></a>
-### func [DefaultMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L269>)
+### func [DefaultMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L276>)
 
 ```go
 func DefaultMulti(path string) (lg Logger, err error)
@@ -731,7 +731,7 @@ lg, err := logger.NewMulti(logger.LevelInfo,
 ```
 
 <a name="NewText"></a>
-### func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L192>)
+### func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L199>)
 
 ```go
 func NewText(cfg Config) (lg Logger, err error)

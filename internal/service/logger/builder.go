@@ -1,8 +1,10 @@
-// Package logger — declares the chainable Builder API — the
-// zero-allocation hot path for callers that care about per-call cost.
-// Pulled from a recycler.Pool[*chainBuilder], the builder accumulates
-// attrs without allocating beyond the pre-sized scratchpad and returns to
-// the pool on Send.
+// Package logger — declares the chainable Builder API — the low-allocation
+// hot path for callers that care about per-call cost. Pulled from a
+// recycler.Pool[*chainBuilder], the builder accumulates attrs without
+// allocating beyond the pre-sized scratchpad and returns to the pool on
+// Send. It is NOT allocation-free end to end: the handler clones the
+// accumulated attrs on every Send, so exactly one slice escapes per emit
+// (see pkg/v1/logger/BENCH.md).
 package logger
 
 import (
@@ -43,7 +45,9 @@ type Builder interface {
 }
 
 // chainBuilder is the default Builder implementation, recycled across Log
-// calls via recordPool to keep the steady-state cost at zero allocations.
+// calls via recordPool. Recycling removes the builder + scratchpad from the
+// allocation profile; the handler's per-Send attrs clone keeps the
+// steady-state cost at one heap allocation per emit.
 type chainBuilder struct {
 	// owner is the loggerImpl that produced this builder; used to forward
 	// the eventual Log call once the chain terminates.

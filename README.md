@@ -1,14 +1,16 @@
 # kitsunium/sdk
 
-A Go SDK providing a normed, performant toolbox for downstream applications: structured logging, universal codec dispatch, and typed errors with stable wire codes.
+A Go SDK providing a normed, performant toolbox for downstream applications: structured logging, universal codec dispatch, typed errors with stable wire codes, a crypto suite, and OS process supervision.
 
 ## Packages
 
 | Package | What it does |
 |---|---|
-| [`pkg/v1/logger`](./pkg/v1/logger) | Zero-allocation structured logger. Multi-sink (console / file / syslog), middleware chain (multi, async, route, failover, sample, recover), build-time version stamping. |
-| [`pkg/v1/codec`](./pkg/v1/codec) | Universal codec dispatch over a `Format` registry. 18 formats covered by a single `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` API — `asn1-der`, `cbor`, `csv`, `flatbuffers`, `json`, `msgpack`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 6 base-N encodings. |
-| [`pkg/v1/errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + Public/Private split. Read-only introspection: `CodeOf`, `ReasonOf`, `HasCode`, `NewPrefixMatcher`. |
+| [`pkg/v1/logger`](./pkg/v1/logger) | Structured logger with a one-allocation-per-emit hot path (see its BENCH.md — the `sync.Pool` recycles the builder, the handler still clones the attrs). Multi-sink (console / file / syslog / memory), middleware chain (multi, async, route, failover, sample, recover, tee, encwrite), build-time version stamping. |
+| [`pkg/v1/codec`](./pkg/v1/codec) | Universal codec dispatch over a `Format` registry. 22 formats covered by a single `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` API — `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `json`, `msgpack`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings (`base16`, `base32`, `base45`, `base58`, `base62`, `base64`, `base64url`, `hex`, `ascii85`). |
+| [`pkg/v1/errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + Public/Private split. Construction (`New`, `Wrap`, `Field`) and read-only introspection: `CodeOf`, `ReasonOf`, `HasCode`, `NewPrefixMatcher`. |
+| [`pkg/v1/crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/hash), [`sign`](./pkg/v1/sign), [`mac`](./pkg/v1/mac), [`kdf`](./pkg/v1/kdf), [`agree`](./pkg/v1/agree), [`password`](./pkg/v1/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement and password hashing behind scheme registries. |
+| [`pkg/v1/proc`](./pkg/v1/proc) + [`process`](./pkg/v1/process), [`signal`](./pkg/v1/signal), [`reaper`](./pkg/v1/reaper), [`rlimit`](./pkg/v1/rlimit), [`cgroup`](./pkg/v1/cgroup), [`sdnotify`](./pkg/v1/sdnotify), [`sdlisten`](./pkg/v1/sdlisten) | OS process supervision: spawn, signals, subreaping, resource limits, cgroups and systemd integration. Uniform typed `UnsupportedPlatform` where a kernel offers no native mechanism (ADR 0018). |
 
 ## Install
 
@@ -43,7 +45,7 @@ func main() {
 - **Layered architecture** — `kernel` (stdlib-only primitives) → `core` (interfaces + values) → `service` (implementations) → `pkg/v1` (stable public alias layer). Dependency direction enforced by Bazel `visibility` rules.
 - **Typed errors throughout** — `fmt.Errorf` / `errors.New` are banned in production code. Every error carries a wire-safe `Public` message and a log-only `Private` envelope. AST audit gates the build.
 - **One Marshal/Unmarshal for everything** — text, binary, base-encoded — `codec.Marshal(format, v)` works the same way regardless of the underlying wire shape.
-- **Multi-module workspace** — `internal/kernel`, `internal/core`, `internal/service`, `pkg/v1`, root. Each can be built standalone with `GOWORK=off`; `go.work` is the umbrella.
+- **Multi-module workspace** — `internal/kernel`, `internal/core`, `internal/service`, `pkg`, root. Each can be built standalone with `GOWORK=off`; `go.work` is the umbrella over exactly those five. `e2e/` and `tools/genindex/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
 
 ## Releases
 
@@ -65,16 +67,18 @@ internal/        stdlib-only primitives (kernel) + domain interfaces (core) + co
 pkg/v1/          stable public API — type aliases + ergonomic helpers
 docs/            ADRs + the Astro-based docs site
 scripts/release/ release tooling — see ADR 0007
-tools/           build-time helpers (workspace_status, genindex)
+tools/           build-time helpers (workspace_status, genindex, alloc-lane-targets)
+e2e/             real-kernel conformance harness (auxiliary module, GOWORK=off)
 ```
 
 ## Verification
 
 ```bash
-make build   # bazel mod tidy + gazelle + gofumpt + bazel build //...
-make test    # every *_test target green incl. AST audits
-make lint    # drift check (read-only): mod tidy + gazelle + gofumpt + ktn-linter
-make bench   # regenerate codec BENCH.md from real Go benchmarks
+make build       # bazel mod tidy + gazelle + gofumpt + bazel build //...
+make test        # every *_test target green incl. AST audits
+make test-alloc  # race-off allocation gates (the only lane running //go:build !race tests)
+make lint        # drift check (read-only): mod tidy + gazelle + gofumpt + ktn-linter + alloc-lane coverage
+make bench       # regenerate codec BENCH.md from real Go benchmarks
 ```
 
 ## Benchmarks
@@ -90,7 +94,13 @@ make sdk-bench-compare  # benchstat A/B comparison vs a recorded .bench.main.out
 
 See `docs/BENCHMARK-TEMPLATE.md` for the bench conventions (white-box package,
 `b.Loop()`, mandatory `b.ReportAllocs()`, `_Parallel` variants, and the
-zero-alloc claims the CI gate enforces).
+allocation budgets the CI gate enforces).
+
+Those budgets are checked by the race-off allocation lane — `make test-alloc`,
+whose target list lives in `tools/alloc-lane-targets.txt`. A test carrying
+`//go:build !race` is invisible to the race suite, so that lane is its only
+gate; `scripts/pre-commit/check-alloc-lane-coverage.sh` fails the build if such
+a test exists in a package the lane does not cover.
 
 ## License
 
