@@ -43,6 +43,15 @@ func Register(g Generator) Generator {
 // error when name is already registered to a different generator; re-registering
 // the same generator is an idempotent no-op.
 func publishGenerator(name Scheme, g Generator) error {
+	//: Scheme("") is the reserved invalid zero value (see Scheme.Known, which
+	//: hard-codes false for it). Publishing under it would create an entry the
+	//: registry resolves via Lookup/New but Known() reports as absent — two
+	//: accessors disagreeing about the same key. Reject at the boundary.
+	if name == "" {
+		//: DuplicateRegistration is the registry's boot-time sentinel; its code
+		//: doc already covers "a nil scheme". The field names the offender.
+		return errs.Wrap(DuplicateRegistration, errs.WrapParams{}, errs.String("scheme", "<empty>"))
+	}
 	//: dupErr escapes the Update closure to signal a conflicting registration.
 	var dupErr error
 	//: Update serialises writers so the check + publish are atomic.

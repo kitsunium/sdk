@@ -57,8 +57,24 @@ from hostname+pid via an inline FNV-1a — no syscall, no MAC address.
   registry, `docs/error-codes.yaml`) updated per rule 11.
 - `Generator.New` returning `string` (not a typed `ID`) is a deliberate
   simplification: raw-byte accessors are deferred (see below).
+- `core/id.Register` rejects `Scheme("")`. The empty Scheme is the documented
+  reserved zero value and `Scheme.Known()` hard-codes `false` for it, so
+  publishing under it would leave `Lookup`/`New` and `Known` disagreeing about
+  the same key. Registration returns `DUPLICATE_REGISTRATION` (whose code doc
+  already covered "a nil scheme"), which `Register` turns into a boot panic.
+- The snowflake same-millisecond overflow wait is bounded. It runs under the
+  generator's mutex, so a clock regression below the exhausted millisecond
+  surfaces `ID_CLOCK_BACKWARDS` instead of spinning and stalling every
+  concurrent `New`.
 
-## Alternatives considered
+## Breaking changes
+
+None. `id` is a new domain in this change set — there is no prior published
+surface to break. The two hardening rules above (empty-Scheme rejection,
+bounded overflow wait) constrain behaviour that was never reachable through a
+released API.
+
+## Why not
 
 - **`string`-returning vs a typed `ID` value** — a typed `ID` (16-byte array +
   accessors) was rejected for v1: schemes render differently (UUID dashed-hex,

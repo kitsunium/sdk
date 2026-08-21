@@ -1,6 +1,7 @@
 package id_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/id"
@@ -39,9 +40,11 @@ func TestNewDispatch(t *testing.T) {
 	if s, err := id.New(id.UUIDv7Scheme); err != nil || s == "" {
 		t.Fatalf("New(uuidv7) got=%q err=%v", s, err)
 	}
-	//: an unknown scheme surfaces UnknownScheme.
-	if _, err := id.New("nope"); err == nil {
-		t.Fatal("New(nope) err=nil, want UnknownScheme")
+	//: an unknown scheme surfaces UnknownScheme — assert the exact sentinel,
+	//: not merely "some error", so a different failure cannot pass silently.
+	_, err := id.New("nope")
+	if !errors.Is(err, id.UnknownScheme) {
+		t.Fatalf("New(nope) err=%v, want UnknownScheme", err)
 	}
 }
 
@@ -56,11 +59,20 @@ func TestNewSnowflakeExplicitNode(t *testing.T) {
 	}
 }
 
-// TestAvailable confirms the four schemes are listed.
+// TestAvailable confirms the four built-in schemes are listed.
 func TestAvailable(t *testing.T) {
 	t.Parallel()
-	//: Available lists at least the four built-in schemes.
-	if len(id.Available()) < 4 {
-		t.Fatalf("Available=%v, want >= 4 schemes", id.Available())
+	got := id.Available()
+	//: index the registry listing so membership is O(1) per assertion.
+	present := make(map[id.Scheme]bool, len(got))
+	for _, s := range got {
+		present[s] = true
+	}
+	//: assert membership, not just a count — a count alone passes even when a
+	//: built-in scheme is missing and an unrelated one took its place.
+	for _, want := range []id.Scheme{id.UUIDv4Scheme, id.UUIDv7Scheme, id.ULIDScheme, id.SnowflakeScheme} {
+		if !present[want] {
+			t.Errorf("Available()=%v is missing built-in scheme %q", got, want)
+		}
 	}
 }

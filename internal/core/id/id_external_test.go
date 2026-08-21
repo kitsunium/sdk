@@ -58,6 +58,42 @@ func TestRegisterDuplicatePanics(t *testing.T) {
 	id.Register(stubGen2{name: "dup-scheme"})
 }
 
+// TestRegisterEmptySchemePanics pins the reserved-zero-value contract:
+// Scheme("") is documented invalid and Scheme.Known() hard-codes false for it,
+// so the registry must refuse to publish under it. Registering an empty scheme
+// would otherwise leave Lookup/New resolving a key that Known() reports as
+// absent — two accessors disagreeing about the same scheme.
+func TestRegisterEmptySchemePanics(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		//: Register turns the registry error into a boot-time panic.
+		if recover() == nil {
+			t.Error("Register(Scheme(\"\")) did not panic")
+		}
+	}()
+	//: the empty scheme must never reach the registry map.
+	id.Register(stubGen{name: ""})
+}
+
+// TestEmptySchemeStaysUnresolvable confirms the state after a refused
+// registration: neither Lookup nor Known may report the empty scheme, and New
+// must still answer UnknownScheme rather than dispatching to a ghost entry.
+func TestEmptySchemeStaysUnresolvable(t *testing.T) {
+	t.Parallel()
+	//: the refused registration left no entry behind.
+	if _, ok := id.Lookup(""); ok {
+		t.Error("Lookup(\"\") resolved — the empty scheme reached the registry")
+	}
+	//: Known stays false, matching its documented hard-coded contract.
+	if id.Scheme("").Known() {
+		t.Error("Scheme(\"\").Known() = true")
+	}
+	//: dispatch surfaces the typed sentinel, not a ghost generator.
+	if _, err := id.New(""); !errs.HasCode(err, id.CodeUnknownScheme) {
+		t.Errorf("New(\"\") err=%v, want CodeUnknownScheme", err)
+	}
+}
+
 // stubGen2 is a distinct comparable type so the dup check sees a conflict.
 type stubGen2 struct{ name id.Scheme }
 

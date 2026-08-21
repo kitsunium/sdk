@@ -89,7 +89,20 @@ func (g *snowflakeGen) New() (newID string, err error) {
 		g.seq = (g.seq + 1) & maxSeq
 		//: a wrapped sequence means this ms is exhausted — wait for the next.
 		if g.seq == 0 {
-			now = g.tillNext(now)
+			//: the wait runs under g.mu, so it must be bounded — see tillNext.
+			next, waitErr := g.tillNext(now)
+			//: a regression during the wait cannot be waited out.
+			if waitErr != nil {
+				//: restore the sequence to its pre-wrap value. Leaving it at 0
+				//: would let a retry inside this same millisecond hand out
+				//: seq=1, which was already issued — a duplicate id. At maxSeq
+				//: the retry wraps again and re-enters the bounded wait.
+				g.seq = maxSeq
+				//: surface the clock fault instead of spinning forever.
+				return "", waitErr
+			}
+			//: the clock ticked over; issue in the new millisecond.
+			now = next
 		}
 	} else {
 		//: a new millisecond resets the sequence.
@@ -103,8 +116,16 @@ func (g *snowflakeGen) New() (newID string, err error) {
 	return strconv.FormatInt(packed, decimalBase), nil
 }
 
-// tillNext spins until the clock advances past prev (same-ms sequence overflow).
-func (g *snowflakeGen) tillNext(prev int64) int64 {
+// tillNext spins until the clock advances past prev (same-ms sequence
+// overflow), returning the new epoch-relative millisecond.
+//
+// The wait is bounded by construction: the caller holds g.mu for the whole
+// spin, so an unbounded loop would stall every concurrent New. A clock that
+// regresses BELOW prev can never satisfy `now > prev` by waiting — only by the
+// operator fixing the clock — so that case returns ClockBackwards rather than
+// spinning. Staying AT prev is the normal sub-millisecond remainder and keeps
+// spinning.
+func (g *snowflakeGen) tillNext(prev int64) (next int64, err error) {
 	//: busy-wait the sub-millisecond remainder until the clock ticks over.
 	for {
 		//: re-read the epoch-relative millisecond.
@@ -112,7 +133,12 @@ func (g *snowflakeGen) tillNext(prev int64) int64 {
 		//: return as soon as we are strictly past the exhausted millisecond.
 		if now > prev {
 			//: the next millisecond is available.
-			return now
+			return now, nil
+		}
+		//: a regression below the exhausted millisecond is unrecoverable here.
+		if now < prev {
+			//: fail honestly instead of holding g.mu forever.
+			return 0, ClockBackwards
 		}
 	}
 }
