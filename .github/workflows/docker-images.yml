@@ -240,6 +240,19 @@ jobs:
             echo "value=stable" >> $GITHUB_OUTPUT
           fi
 
+      # Stage .devcontainer/features/ + image-template-version.json into the
+      # build context (.devcontainer/images/): the Dockerfile COPYs both, but
+      # they live one level up and are not committed inside the context.
+      - name: Stage template features into build context
+        if: steps.base-check.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          cp -r .devcontainer/features .devcontainer/images/features
+          SHA="$(echo "${{ github.sha }}" | cut -c1-7)"
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '{"commit": "%s", "updated": "%s"}\n' "$SHA" "$NOW" \
+            > .devcontainer/images/image-template-version.json
+
       # PR: Build only (no push)
       - name: Build image (PR)
         if: github.event_name == 'pull_request' && steps.base-check.outputs.available == 'true'
@@ -344,12 +357,25 @@ jobs:
             type=raw,value=${{ steps.date.outputs.tag }}
             type=sha,prefix=
 
+      # Build jobs skip every step (and upload no digest) when the base
+      # image is missing from GHCR. Guard instead of crashing on a missing
+      # working-directory: exit green with a notice so the scheduled run
+      # does not page, and skip the inspect step that would also fail.
       - name: Create manifest list and push
-        working-directory: /tmp/digests
+        id: merge-manifest
         run: |
+          mkdir -p /tmp/digests
+          cd /tmp/digests
+          if [ -z "$(ls -A .)" ]; then
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No digests to merge — build steps were skipped (base image unavailable). Dispatch this workflow with rebuild_base=true."
+            exit 0
+          fi
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          echo "merged=true" >> "$GITHUB_OUTPUT"
 
       - name: Inspect image
+        if: steps.merge-manifest.outputs.merged == 'true'
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest

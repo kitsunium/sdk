@@ -454,7 +454,7 @@ func Build(lg Logger, lv Level) Builder
 Build returns a chainable Builder bound to lg at the supplied level. Builders are recycled through a sync.Pool so the steady\-state per\-call cost is zero heap allocations once the pool is warm.
 
 <a name="CloudWatchConfig"></a>
-## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L41>)
+## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L42>)
 
 CloudWatchConfig configures the "cloudwatch" writer. Same import\-gated resolution as S3Config.
 
@@ -487,7 +487,7 @@ type Config struct {
 ```
 
 <a name="ConsoleConfig"></a>
-## type [ConsoleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L30>)
+## type [ConsoleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L31>)
 
 ConsoleConfig configures the "console" writer \(stream \+ optional MinLevel\).
 
@@ -496,7 +496,7 @@ type ConsoleConfig = corewriter.ConsoleConfig
 ```
 
 <a name="ConsoleStream"></a>
-## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L53>)
+## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L54>)
 
 ConsoleStream selects which standard stream the console writer targets.
 
@@ -505,7 +505,7 @@ type ConsoleStream = corewriter.ConsoleStream
 ```
 
 <a name="CredentialProvider"></a>
-## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L57>)
+## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L58>)
 
 CredentialProvider yields short\-lived credentials on demand for the network writers; the SDK never logs or wraps the returned material.
 
@@ -514,7 +514,7 @@ type CredentialProvider = corewriter.CredentialProvider
 ```
 
 <a name="CredentialValue"></a>
-## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L61>)
+## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L62>)
 
 CredentialValue is the opaque, redacting credential set returned by a CredentialProvider; its String output is always "\<redacted\>".
 
@@ -523,7 +523,7 @@ type CredentialValue = corewriter.CredentialValue
 ```
 
 <a name="NewCredentialValue"></a>
-### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L65>)
+### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L66>)
 
 ```go
 func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue
@@ -568,7 +568,7 @@ func TextEncoder() Encoder
 TextEncoder returns a fresh text Encoder bound to the real system clock. Callers passing a custom Encoder to NewWithSink usually want this as a starting point — it is the same encoder NewText / Default rely on.
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L33>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L34>)
 
 FileConfig configures the "file" writer \(path \+ optional MinLevel\).
 
@@ -708,7 +708,7 @@ FromConfig builds a Logger from raw, a config blob in the wire format named by f
 FromConfig returns TopologyInvalid \(1.1.0.4\) when format is unregistered, the blob is undecodable, the topology has no writers, a writer Name is unknown, or a writer rejects its options. The error is redacted: it names only the writer and the failure kind, never a decoded credential or option value.
 
 <a name="NewMulti"></a>
-### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L95>)
+### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L96>)
 
 ```go
 func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error)
@@ -810,7 +810,7 @@ type RecordSnapshot = corelogger.RecordEvent
 ```
 
 <a name="RotFileConfig"></a>
-## type [RotFileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L50>)
+## type [RotFileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L51>)
 
 RotFileConfig configures the "rotfile" writer — a size\- and/or age\-capped, optionally gzip\-compressed on\-disk file that rotates Path \-\> Path.1 … up to MaxBackups \(Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery / MinLevel\). Usable as a value once github.com/kitsunium/sdk/pkg/v1/logger/writer is blank\-imported \(it self\-registers the "rotfile" factory alongside console and file\); pass it via WriterSpec\{Name: "rotfile", Config: cfg\} to NewMulti.
 
@@ -819,7 +819,7 @@ type RotFileConfig = corewriter.RotFileConfig
 ```
 
 <a name="S3Config"></a>
-## type [S3Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L37>)
+## type [S3Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L38>)
 
 S3Config configures the "s3" writer. Usable as a value without the AWS SDK; it resolves to a working sink only once third\-party/aws/writer/s3 is imported.
 
@@ -927,7 +927,7 @@ type WriterEntryConfig struct {
 ```
 
 <a name="WriterName"></a>
-## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L27>)
+## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L28>)
 
 WriterName is the stable alias for a registered writer key \("console" / "file" / "rotfile" / "s3" / "cloudwatch"\).
 
@@ -936,7 +936,7 @@ type WriterName = corewriter.Name
 ```
 
 <a name="WriterSpec"></a>
-## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L74>)
+## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L75>)
 
 WriterSpec names a writer and carries its concrete config. Read at call sites as logger.WriterSpec\{Name: "file", Config: logger.FileConfig\{Path: …\}\}. It is a type alias onto internal/core/writer, so the public type is identity\-equal to the internal writer model \(alias\-based public surface, zero runtime cost\).
 
