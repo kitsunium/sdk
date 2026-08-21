@@ -1,0 +1,47 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "id",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "id.go",
+        "registry.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/id",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = [
+        "//internal/kernel/errs",
+        "//internal/kernel/snapshot",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":id",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "id_test",
+    srcs = ["id_external_test.go"],
+    deps = [
+        ":id",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

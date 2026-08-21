@@ -32,6 +32,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0021-sdk-codec-bson.md` | BSON codec (M5) over `go.mongodb.org/mongo-driver/bson` in `internal/service/codec/bson` (library-backed codec precedent, not third-party quarantine); non-streaming + Appender; error block `0.3.36.*` | Accepted (extends ADR 0003 §M5) |
 | `adr/0022-sdk-codec-hcl.md` | HCL codec (M5) **quarantined** in `third-party/codec/hcl` (root module) because `hcl/v2`+`go-cty` downgrade `x/sys` in `internal/service`; opt-in, NOT in `pkg/v1/codec`; first `third-party/codec/` subtree; error block `0.3.37.*` | Accepted (extends ADR 0003 §M5; follows ADR 0012 quarantine, contrasts ADR 0021) |
 | `adr/0023-sdk-schema-codecs.md` | Schema codecs (M6): opt-in, under `third-party/codec/` — schema-bound (can't honour the universal round-trip contract); Protobuf concrete (`0.3.38.*`); Avro/Cap'n Proto deferred | Accepted (extends ADR 0003 §M6) |
+| `adr/0024-sdk-id-domain.md` | Identifier-generation domain (`id`): 7th core sibling, `Generator`/`Scheme` registry (UUIDv4/v7, ULID, snowflake); stdlib-only, cross-OS; opens the Phase-B new-domain wave; error block `0.2.7.*`/`0.3.39.*` | Accepted (amends `internal/core` purpose) |
 
 ## ADR conventions
 
@@ -56,4 +57,4 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 
 ## Subtree
 
-- `adr/` — Architecture Decision Records (twenty-three accepted to date — see table above)
+- `adr/` — Architecture Decision Records (twenty-four accepted to date — see table above)
