@@ -16,6 +16,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `cache/` | Generic LRU + TTL `Cache[K,V]` (ADR 0025): `New` + `Fetch` / `Set` / `SetTTL` / `Delete` / `Len` / `Purge` / `Stats`; type aliases onto `kernel/cache`; stdlib-only, cross-OS | `pkg/v1/cache/README.md` |
 | `resilience/` | Reliability policies (ADR 0026): `NewRetry` / `NewCircuitBreaker` / `NewRateLimiter` / `NewBulkhead` / `NewTimeout` returning composable `Runner`s; `Operation`/`Runner` + `*Config` aliases; outcome sentinels; stdlib-only, cross-OS | `pkg/v1/resilience/README.md` |
 | `metrics/` | Observability (ADR 0027): `NewMeter` → lock-free Counter/Gauge/Histogram; `Collect` → `Snapshot`; `Export`/`RegisterExporter`/`NewTextExporter`/`AvailableExporters`; default stdout text exporter; stdlib-only, cross-OS | `pkg/v1/metrics/README.md` |
+| `config/` | Configuration (ADR 0028): generic `Load[T]` merging `EnvSource`/`FileSource` (later wins) + decode + `Validator`; `PollWatcher` cross-OS hot-reload; stdlib-only | `pkg/v1/config/README.md` |
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -73,3 +74,4 @@ GOWORK=off go test -race -cover ./v1/...
 - `cache/` — see `pkg/v1/cache/CLAUDE.md`
 - `resilience/` — see `pkg/v1/resilience/CLAUDE.md`
 - `metrics/` — see `pkg/v1/metrics/CLAUDE.md`
+- `config/` — see `pkg/v1/config/CLAUDE.md`
