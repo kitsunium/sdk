@@ -14,6 +14,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `errs/` | Error introspection **and construction** (ADR 0019): read — `CodeOf` / `ReasonOf` / `PublicOf` / `PrivateOf` / `HTTPStatusOf` / `ExitCodeOf` / `HasCode` / `HasReason` / `NewPrefixMatcher`; build — `New` / `Wrap` (+ `WrapParams`) / `Field` helpers (`String` / `Int` / `Int64` / `Bool` / `Float` / `NewFieldValue`); codes — `Pack` / `ParseCode` / `MinAppMajor` / `MaxMajor` + `Code` / `Major` / `Layer` / `PkgCode` / `Serial` / `Field` / `PrefixMatcher` type aliases + `MaskBy*` constants. Octets are composable on the typed `Code` (e.g. `code.Layer()`). | `pkg/v1/errs/README.md` |
 | `id/` | Identifier generation (ADR 0024): `New(scheme)` dispatch + helpers `UUIDv4` / `UUIDv7` / `ULID` / `Snowflake` / `NewSnowflake(node)` / `Available`; `Scheme` constants; stdlib-only, cross-OS | `pkg/v1/id/README.md` |
 | `cache/` | Generic LRU + TTL `Cache[K,V]` (ADR 0025): `New` + `Fetch` / `Set` / `SetTTL` / `Delete` / `Len` / `Purge` / `Stats`; type aliases onto `kernel/cache`; stdlib-only, cross-OS | `pkg/v1/cache/README.md` |
+| `resilience/` | Reliability policies (ADR 0026): `NewRetry` / `NewCircuitBreaker` / `NewRateLimiter` / `NewBulkhead` / `NewTimeout` returning composable `Runner`s; `Operation`/`Runner` + `*Config` aliases; outcome sentinels; stdlib-only, cross-OS | `pkg/v1/resilience/README.md` |
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -69,3 +70,4 @@ GOWORK=off go test -race -cover ./v1/...
 - `errs/` — see `pkg/v1/errs/CLAUDE.md`
 - `id/` — see `pkg/v1/id/CLAUDE.md`
 - `cache/` — see `pkg/v1/cache/CLAUDE.md`
+- `resilience/` — see `pkg/v1/resilience/CLAUDE.md`

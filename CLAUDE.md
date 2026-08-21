@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Seven domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (22 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), OS **proc** supervision, and **id** generation (UUIDv4/v7, ULID, snowflake — ADR 0024, the first Phase-B new-domain). New domains land in the same 4-layer shape (ADR 0001).
+Go SDK providing a normed, performant toolbox for downstream applications. Eight domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (22 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake — ADR 0024), and **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout — ADR 0026). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.26.2 (pinned in `MODULE.bazel`)
 
@@ -161,5 +161,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0023 — schema codecs (M6): opt-in under `third-party/codec/` (schema-bound, can't honour the universal round-trip contract); Protobuf concrete (`0.3.38.*`), Avro/Cap'n Proto deferred — `docs/adr/0023-sdk-schema-codecs.md`
 - ADR 0024 — identifier-generation domain (`id`): 7th core sibling, `Generator`/`Scheme` registry (UUIDv4/v7, ULID, snowflake), canonical-string output, stdlib-only/cross-OS; opens the Phase-B new-domain wave; error block `0.2.7.*`/`0.3.39.*` — `docs/adr/0024-sdk-id-domain.md`
 - ADR 0025 — generic LRU+TTL `Cache[K,V]` as a **kernel** primitive (`internal/kernel/cache`): domain-neutral, stdlib-only, reuses `clock` for testable TTL; `Fetch` (not `Get`) since a hit mutates LRU; no error codes; `pkg/v1/cache` aliases — `docs/adr/0025-sdk-cache-kernel.md`
+- ADR 0026 — reliability domain (`resilience`): 8th core sibling, **no registry** (concrete composable `Runner` policies — retry/circuit-breaker/rate-limit/bulkhead/timeout); error block `0.2.8.*` — `docs/adr/0026-sdk-resilience-domain.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`
