@@ -39,9 +39,12 @@ alias(
 
 go_test(
     name = "resilience_test",
-    srcs = ["resilience_external_test.go"],
+    srcs = [
+        "resilience_external_test.go",
+        "timeout_internal_test.go",
+    ],
+    embed = [":resilience"],
     deps = [
-        ":resilience",
         "//internal/core/resilience",
         "//internal/kernel/errs",
     ],

@@ -32,8 +32,13 @@ func (t timeoutRunner) Run(ctx context.Context, op coreres.Operation) error {
 	defer cancel()
 	//: run the operation against the deadline-bound context.
 	err := op(dctx)
-	//: a deadline hit (and op surfacing it) maps to the typed timeout sentinel.
-	if errors.Is(err, context.DeadlineExceeded) || (err != nil && dctx.Err() == context.DeadlineExceeded) {
+	//: the deadline is authoritative regardless of what op returned. An op that
+	//: ignores ctx and reports success AFTER the deadline expired must not be
+	//: relabelled as success — that silently voids the policy, which is exactly
+	//: the "op granularity" precision the doc promises to degrade to, not to
+	//: abandon. Checking dctx.Err() unconditionally (rather than only when
+	//: err != nil) is what makes the late-success case fail honestly.
+	if dctx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded) {
 		//: relabel as TIMEOUT_EXCEEDED, keeping the cause in the trail.
 		return wrapAs(coreres.TimeoutExceeded, err)
 	}

@@ -35,7 +35,7 @@ Single Go module `github.com/kitsunium/sdk/internal/core` — one `go.mod`, one 
 ## Do NOT
 
 - Add concrete runtime types with stateful methods here. The `codec` / `writer` / `crypto` / `transform` / `id` registries' `snapshot.Value`-backed lookups are the deliberate exceptions — they carry no domain logic, only routing.
-- Import `context` outside of interface signatures.
+- Import `context` outside of interface signatures — **except for a single-method function port**, i.e. a named `func(ctx context.Context) …` type that IS the contract (`resilience.Operation`, ADR 0026). Such a type is a declaration, not plumbing: it is the function-shaped equivalent of a one-method interface, and the Go stdlib uses the same shape (`http.HandlerFunc`). Forcing it into an interface would make every call site write an adapter for no gain. This exception does NOT admit `context` in struct fields, value types, or package-level state.
 - Reach upward into `internal/service/*` or `pkg/*`.
 - Grow a **new** sibling without first widening the layer's purpose statement (the `writer` sibling was admitted by ADR 0012; `crypto` by ADR 0013; `transform` by ADR 0014; `proc` by ADR 0016; `id` by ADR 0024, which opens the Phase-B new-domain wave — observability/reliability/configuration land in ADR 0025–0028).
 
