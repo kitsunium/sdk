@@ -6,9 +6,15 @@
 //
 //	c := cache.New[string, int](cache.Config[string, int]{MaxEntries: 1024, DefaultTTL: time.Minute})
 //	c.Set("answer", 42)
-//	v, ok := c.Get("answer") // 42, true
+//	v, ok := c.Fetch("answer") // 42, true
 //
-// The cache is safe for concurrent use; Get on a hit is allocation-free.
+// The read verb is [Cache.Fetch], not Get: a hit mutates state (it promotes the
+// entry to most-recently-used and bumps the hit counter), so naming it Get
+// would promise a pure read the cache does not offer.
+//
+// The cache is safe for concurrent use; Fetch on a hit is allocation-free. An
+// OnEvict observer runs AFTER the internal lock is released, so it may re-enter
+// the cache without deadlocking.
 package cache
 
 import kcache "github.com/kitsunium/sdk/internal/kernel/cache"

@@ -38,19 +38,31 @@ func NewCache[K comparable, V any](cfg Config[K, V]) *Cache[K, V] {
 		//: the system clock is the production default.
 		clk = clock.System
 	}
+	//: a negative MaxEntries is a bad option, not a capacity. Clamp it to 0 —
+	//: the value evictIfNeeded already reads as "unbounded". Note this is NOT
+	//: crash avoidance: make(map, n) silently clamps a negative hint to 0 (only
+	//: make([]T, n) panics), so the old code worked by accident. The clamp makes
+	//: ADR 0025's "bad options clamp to sane defaults" explicit in the field
+	//: itself, instead of leaning on an undocumented runtime detail — and Purge
+	//: re-pre-sizes from this same field, so it inherits the guarantee.
+	maxEntries := max(cfg.MaxEntries, 0)
 	//: a fresh cache starts with a pre-sized map and no list nodes.
 	return &Cache[K, V]{
 		clk:        clk,
-		maxEntries: cfg.MaxEntries,
+		maxEntries: maxEntries,
 		defaultTTL: cfg.DefaultTTL,
 		onEvict:    cfg.OnEvict,
-		items:      make(map[K]*entry[K, V], cfg.MaxEntries),
+		items:      make(map[K]*entry[K, V], maxEntries),
 	}
 }
 
 // Fetch returns the value for key and whether it was present and unexpired. A
 // hit promotes the entry to most-recently-used (hence Fetch, not a pure Get).
 func (c *Cache[K, V]) Fetch(key K) (value V, ok bool) {
+	//: registered BEFORE the unlock defer so LIFO runs it AFTER the unlock —
+	//: OnEvict is user code and must never see the lock held.
+	var pending []evictionValue[K, V]
+	defer func() { c.notifyEvicted(pending) }()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	//: absence is a clean miss.
@@ -65,8 +77,8 @@ func (c *Cache[K, V]) Fetch(key K) (value V, ok bool) {
 	}
 	//: a lazily-expired entry is evicted and reported as a miss.
 	if c.expired(ent) {
-		//: drop it (firing OnEvict) and count the miss.
-		c.removeEvict(ent)
+		//: drop it (queuing OnEvict for after the unlock) and count the miss.
+		c.removeEvict(ent, &pending)
 		c.misses++
 		var zero V
 		//: hand back the zero value on the expired miss.
@@ -95,6 +107,9 @@ func (c *Cache[K, V]) SetTTL(key K, val V, ttl time.Duration) {
 // setTTL inserts or updates key=val, computing the absolute expiry and applying
 // LRU eviction when the capacity is exceeded.
 func (c *Cache[K, V]) setTTL(key K, val V, ttl time.Duration) {
+	//: registered BEFORE the unlock defer so LIFO runs it AFTER the unlock.
+	var pending []evictionValue[K, V]
+	defer func() { c.notifyEvicted(pending) }()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	//: a positive ttl becomes an absolute deadline; otherwise no expiry.
@@ -118,7 +133,7 @@ func (c *Cache[K, V]) setTTL(key K, val V, ttl time.Duration) {
 	c.items[key] = ent
 	c.pushFront(ent)
 	//: enforce the capacity bound after the insert.
-	c.evictIfNeeded()
+	c.evictIfNeeded(&pending)
 }
 
 // Delete removes key if present. An explicit Delete does NOT fire OnEvict (that
@@ -174,26 +189,47 @@ func (c *Cache[K, V]) expired(ent *entry[K, V]) bool {
 
 // evictIfNeeded removes least-recently-used entries while over capacity. Caller
 // holds mu.
-func (c *Cache[K, V]) evictIfNeeded() {
+func (c *Cache[K, V]) evictIfNeeded(pending *[]evictionValue[K, V]) {
 	//: a non-positive max means unbounded — nothing to evict.
 	for c.maxEntries > 0 && len(c.items) > c.maxEntries {
 		//: the tail is the least-recently-used victim.
-		c.removeEvict(c.tail)
+		c.removeEvict(c.tail, pending)
 	}
 }
 
-// removeEvict unlinks ent, drops it from the map, counts an eviction, and fires
-// OnEvict. Caller holds mu.
-func (c *Cache[K, V]) removeEvict(ent *entry[K, V]) {
+// removeEvict unlinks ent, drops it from the map, counts an eviction, and
+// QUEUES the evicted pair onto pending. Caller holds mu.
+//
+// OnEvict is deliberately NOT invoked here. Every caller holds c.mu and
+// sync.Mutex is not reentrant, so a callback that touches the cache would
+// deadlock outright, and a merely slow one would hold every other operation
+// off for its whole duration — turning eviction into an unbounded critical
+// section. Callers drain pending through notifyEvicted after unlocking.
+func (c *Cache[K, V]) removeEvict(ent *entry[K, V], pending *[]evictionValue[K, V]) {
 	//: detach from the list and the map.
 	c.unlink(ent)
 	delete(c.items, ent.key)
 	//: record the eviction.
 	c.evictions++
-	//: notify the observer when one is configured.
+	//: queue the notification only when an observer is configured.
 	if c.onEvict != nil {
-		//: hand the evicted key+value to the callback.
-		c.onEvict(ent.key, ent.val)
+		//: carry the pair out of the locked section by value; ent is recycled.
+		*pending = append(*pending, evictionValue[K, V]{key: ent.key, val: ent.val})
+	}
+}
+
+// notifyEvicted fires OnEvict for every queued pair. It MUST be called with
+// c.mu released — the callback is user code and may re-enter the cache.
+func (c *Cache[K, V]) notifyEvicted(pending []evictionValue[K, V]) {
+	//: the overwhelmingly common case is "nothing evicted" — exit cheaply.
+	if len(pending) == 0 {
+		//: no eviction happened, or no observer is configured.
+		return
+	}
+	//: hand each evicted key+value to the observer, outside the lock.
+	for _, ev := range pending {
+		//: user code runs here; a panic propagates to the caller unchanged.
+		c.onEvict(ev.key, ev.val)
 	}
 }
 

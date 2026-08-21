@@ -1,6 +1,7 @@
 package cache_test
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -134,5 +135,107 @@ func TestConcurrent(t *testing.T) {
 	//: the cache stayed within its capacity bound.
 	if c.Len() > 64 {
 		t.Errorf("Len=%d exceeds MaxEntries=64", c.Len())
+	}
+}
+
+// TestNegativeMaxEntriesClamps pins ADR 0025's "bad options clamp to sane
+// defaults" contract for the capacity field.
+//
+// This is a contract pin, NOT a crash regression: make(map, n) silently clamps
+// a negative hint to 0 (only make([]T, n) panics), so the pre-clamp code
+// already behaved correctly — by accident, via an undocumented runtime detail.
+// The test fixes the observable behaviour (unbounded, Purge-safe) so a future
+// refactor toward a slice-backed or hint-validating store cannot regress it
+// silently.
+func TestNegativeMaxEntriesClamps(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name       string
+		maxEntries int
+	}
+	tests := []tc{
+		{"negative-one", -1},
+		{"large-negative", -4096},
+		{"zero-means-unbounded", 0},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: construction must not panic on a bad capacity.
+		c := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: tc.maxEntries})
+		//: the cache stays usable and unbounded (nothing is evicted).
+		for i := range 100 {
+			c.Set("k"+strconv.Itoa(i), i)
+		}
+		if got := c.Len(); got != 100 {
+			t.Errorf("%s: Len=%d after 100 Sets, want 100 (clamped to unbounded)", tc.name, got)
+		}
+		//: Purge re-pre-sizes the map from the same field — it must not panic.
+		c.Purge()
+		if got := c.Len(); got != 0 {
+			t.Errorf("%s: Len=%d after Purge, want 0", tc.name, got)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// TestOnEvictRunsOutsideLock pins the eviction-callback contract: OnEvict must
+// run with the cache mutex released. It previously fired from removeEvict with
+// c.mu held, so a callback touching the cache deadlocked on the non-reentrant
+// mutex. Re-entering from the callback is the direct probe — under the old code
+// this test hangs until the package timeout.
+func TestOnEvictRunsOutsideLock(t *testing.T) {
+	t.Parallel()
+	var reentered bool
+	var c *cache.Cache[string, int]
+	c = cache.NewCache[string, int](cache.Config[string, int]{
+		MaxEntries: 1,
+		OnEvict: func(key string, val int) {
+			//: re-enter the cache from inside the callback. With OnEvict fired
+			//: under c.mu this call blocks forever on the same mutex.
+			c.Len()
+			_, _ = c.Fetch(key)
+			reentered = true
+		},
+	})
+	//: two inserts at capacity 1 force exactly one eviction.
+	c.Set("a", 1)
+	c.Set("b", 2)
+	//: the callback ran to completion, so the lock was not held.
+	if !reentered {
+		t.Fatal("OnEvict did not complete — the callback could not re-enter the cache")
+	}
+	//: the eviction is still accounted for.
+	if got := c.Stats().Evictions; got != 1 {
+		t.Errorf("Evictions=%d, want 1", got)
+	}
+}
+
+// TestOnEvictFiresOnExpiry covers the second removeEvict call site: a lazily
+// expired entry found by Fetch. The callback must fire, and must likewise run
+// outside the lock.
+func TestOnEvictFiresOnExpiry(t *testing.T) {
+	t.Parallel()
+	var gotKey string
+	var c *cache.Cache[string, int]
+	clk := &fakeClock{now: time.Unix(0, 0)}
+	c = cache.NewCache[string, int](cache.Config[string, int]{
+		Clock: clk,
+		OnEvict: func(key string, val int) {
+			//: re-entering here proves the expiry path also released the lock.
+			c.Len()
+			gotKey = key
+		},
+	})
+	c.SetTTL("gone", 7, time.Second)
+	//: push the clock past the deadline so the next Fetch reaps the entry.
+	clk.advance(2 * time.Second)
+	if _, ok := c.Fetch("gone"); ok {
+		t.Fatal("Fetch returned a hit on an expired entry")
+	}
+	//: the expiry eviction notified the observer with the right key.
+	if gotKey != "gone" {
+		t.Errorf("OnEvict key=%q, want \"gone\"", gotKey)
 	}
 }

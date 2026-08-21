@@ -8,6 +8,7 @@ go_library(
         "cache.go",
         "config.go",
         "entry.go",
+        "eviction.go",
         "stats.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/cache",
