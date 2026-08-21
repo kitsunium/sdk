@@ -302,6 +302,22 @@ codes:
     const: CodeDuplicateRegistration
     hex: "0x00_02_09_05"
     package: internal/core/metrics
+  - code: "0.2.10.1"
+    const: CodeConfigSourceFailed
+    hex: "0x00_02_0A_01"
+    package: internal/core/config
+  - code: "0.2.10.2"
+    const: CodeConfigDecodeFailed
+    hex: "0x00_02_0A_02"
+    package: internal/core/config
+  - code: "0.2.10.3"
+    const: CodeConfigValidationFailed
+    hex: "0x00_02_0A_03"
+    package: internal/core/config
+  - code: "0.2.10.4"
+    const: CodeConfigWatchFailed
+    hex: "0x00_02_0A_04"
+    package: internal/core/config
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"

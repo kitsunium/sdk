@@ -36,6 +36,7 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0025-sdk-cache-kernel.md` | Generic LRU+TTL `Cache[K,V]` as a **kernel** primitive (domain-neutral, stdlib-only, reuses `clock`); `Fetch` not `Get`; no error codes; `pkg/v1/cache` aliases | Accepted (kernel primitive, Phase B) |
 | `0026-sdk-resilience-domain.md` | Reliability domain (`resilience`): 8th core sibling, **no registry** (concrete `Runner` policies: retry/breaker/ratelimit/bulkhead/timeout); composable; block `0.2.8.*` | Accepted (Phase B; proc-style no-registry sibling) |
 | `0027-sdk-metrics-domain.md` | Observability domain (`metrics`): 9th core sibling, instruments + `Meter` + exporter registry (writer-registry model); in-mem meter + text exporter; block `0.2.9.*`; labels/Prometheus/OTLP deferred | Accepted (Phase B) |
+| `0028-sdk-config-domain.md` | Configuration domain (`config`): 10th core sibling, `Source`/`Validator`/`Watcher` ports; env+file loader + cross-OS **poll** watcher; closes the Phase-B wave; block `0.2.10.*` | Accepted (Phase B; closes the wave) |
 
 ## Conventions
 
