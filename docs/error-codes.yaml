@@ -266,6 +266,26 @@ codes:
     const: CodeDuplicateRegistration
     hex: "0x00_02_07_05"
     package: internal/core/id
+  - code: "0.2.8.1"
+    const: CodeRetryExhausted
+    hex: "0x00_02_08_01"
+    package: internal/core/resilience
+  - code: "0.2.8.2"
+    const: CodeCircuitOpen
+    hex: "0x00_02_08_02"
+    package: internal/core/resilience
+  - code: "0.2.8.3"
+    const: CodeRateLimited
+    hex: "0x00_02_08_03"
+    package: internal/core/resilience
+  - code: "0.2.8.4"
+    const: CodeBulkheadFull
+    hex: "0x00_02_08_04"
+    package: internal/core/resilience
+  - code: "0.2.8.5"
+    const: CodeTimeoutExceeded
+    hex: "0x00_02_08_05"
+    package: internal/core/resilience
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"

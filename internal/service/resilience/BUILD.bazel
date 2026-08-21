@@ -1,0 +1,58 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "resilience",
+    srcs = [
+        "breaker.go",
+        "breaker_config.go",
+        "breaker_state.go",
+        "bulkhead.go",
+        "ratelimit.go",
+        "ratelimit_config.go",
+        "retry.go",
+        "retry_config.go",
+        "timeout.go",
+        "wrap.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/resilience",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/resilience",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":resilience",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "resilience_test",
+    srcs = [
+        "resilience_external_test.go",
+        "timeout_internal_test.go",
+    ],
+    embed = [":resilience"],
+    deps = [
+        "//internal/core/resilience",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

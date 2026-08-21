@@ -32,7 +32,7 @@ gen() {
       --repository.url 'https://github.com/kitsunium/sdk' \
       --repository.default-branch main \
       --repository.path '/pkg/v1' \
-      ./cache ./codec ./errs ./id ./logger ) >/dev/null
+      ./cache ./codec ./errs ./id ./logger ./resilience ) >/dev/null
 }
 
 gen "$a"
