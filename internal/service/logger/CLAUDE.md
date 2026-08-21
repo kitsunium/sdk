@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Logger v2 — zero-allocation, multi-sink, decorator-friendly. Realises the
+Logger v2 — one allocation per emit, multi-sink, decorator-friendly. Realises the
 `core/logger.Handler` + `core/logger.Logger` ports declared in
 `internal/core/logger`. Consumers import `pkg/v1/logger` rather than this
 package; the public facade stamps `framework_version` onto every record and
@@ -24,8 +24,13 @@ Logger ── Handler (genericHandler / TextHandler)
   handler kept for backward compatibility; it still mutexes its writer and
   ships the same RFC3339-ms output as `encoder/text`.
 - The `Builder` (builder.go) is the chainable, recycler-backed fluent API
-  returned by `Build(lg, lv)`. Per-call cost in steady state: zero heap
-  allocations once `recordPool` is warm.
+  returned by `Build(lg, lv)`. Per-call cost in steady state: **one** heap
+  allocation per emit once `recordPool` is warm — the pool recycles the
+  `*chainBuilder` and its attrs scratchpad, but the handler clones that
+  scratchpad (`mergeAttrs` / `slices.Clone`) on every `Send`, so one slice
+  escapes. Measured in `pkg/v1/logger/BENCH.md`; pinned by
+  `TestV116BuildSendAllocatesOnePerEmit` (which runs only in the race-off
+  alloc lane — see root `CLAUDE.md` rule 12).
 
 ## Contents
 

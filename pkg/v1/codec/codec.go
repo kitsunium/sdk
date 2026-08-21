@@ -2,11 +2,11 @@
 
 // Package codec is the universal encoder/decoder dispatch facade.
 //
-// One verb, eighteen formats. [Marshal] and [Unmarshal] reach every
-// encoding the SDK ships — JSON, YAML, CBOR, MessagePack, NDJSON, XML,
-// TOML, CSV, ASN.1 DER, PEM, TLV, FlatBuffers, plus the six base-N
-// variants (base64, base64url, base32, base16, hex, ascii85).
-// Format-swap at runtime is a single string change.
+// One verb, twenty-two formats. [Marshal] and [Unmarshal] reach every
+// encoding the SDK ships — JSON, YAML, CBOR, MessagePack, BSON, NDJSON,
+// XML, TOML, CSV, ASN.1 DER, PEM, TLV, FlatBuffers, plus the nine base-N
+// variants (base64, base64url, base32, base16, base45, base58, base62,
+// hex, ascii85). Format-swap at runtime is a single string change.
 //
 // # Goals
 //
@@ -19,7 +19,7 @@
 //   - Streaming when it pays. Codecs that implement StreamingCodec
 //     get NewEncoder / NewDecoder automatically — no need to buffer
 //     megabytes.
-//   - Zero registration code. Blank-import the package; the 13
+//   - Zero registration code. Blank-import the package; the 14
 //     service codecs self-register via init(). No Register() calls
 //     in consumer code.
 //   - Append for hot paths. Codecs implementing Appender let you
@@ -28,33 +28,37 @@
 //     same value to N formats at once — content negotiation, replication,
 //     multi-protocol message buses.
 //
-// # What's shipped — all 18 formats
+// # What's shipped — all 22 formats
 //
 // Single blank import (`import _ "github.com/kitsunium/sdk/pkg/v1/codec"`)
 // activates the entire list. The Streaming column marks codecs that
 // implement core/codec.StreamingCodec and unlock NewEncoder /
-// NewDecoder.
+// NewDecoder. Every codec implements core/codec.Appender.
 //
-//	| Format       | Go constant    | MIME                       | Extension       | Streaming | Best for |
-//	|--------------|----------------|----------------------------|-----------------|:---------:|----------|
-//	| json         | codec.JSON     | application/json           | .json           | yes       | API responses, public configs |
-//	| ndjson       | codec.NDJSON   | application/x-ndjson       | .ndjson         | yes       | streaming logs, line-oriented batches |
-//	| xml          | codec.XML      | application/xml            | .xml            | yes       | legacy integrations |
-//	| csv          | codec.CSV      | text/csv                   | .csv            | yes       | tabular exports |
-//	| asn1-der     | codec.ASN1DER  | application/pkix-cert      | .der            | —         | crypto / X.509 artefacts |
-//	| pem          | codec.PEM      | application/x-pem-file     | .pem            | —         | block-wrapped DER (certs, keys) |
-//	| yaml         | codec.YAML     | application/yaml           | .yaml / .yml    | yes       | human-edited configs |
-//	| toml         | codec.TOML     | application/toml           | .toml           | yes       | app configs (strict typing) |
-//	| cbor         | codec.CBOR     | application/cbor           | .cbor           | yes       | IoT / mobile (RFC 8949) |
-//	| msgpack      | codec.MsgPack  | application/msgpack        | .msgpack        | yes       | RPC payloads |
-//	| tlv          | "tlv"          | application/x-tlv          | —               | —         | custom binary streams, self-describing |
-//	| flatbuffers  | "flatbuffers"  | application/x-flatbuffers  | .fbs            | —         | zero-copy passthrough |
-//	| base64       | "base64"       | —                          | —               | —         | text-safe wrap (JSON → base-N) |
-//	| base64url    | "base64url"    | —                          | —               | —         | URL-safe base64 |
-//	| base32       | "base32"       | —                          | —               | —         | larger alphabet for human-typed tokens |
-//	| base16       | "base16"       | —                          | —               | —         | hex-like text |
-//	| hex          | "hex"          | —                          | —               | —         | classic hex pair encoding |
-//	| ascii85      | "ascii85"      | —                          | —               | —         | 4-byte to 5-char text packing |
+//	| Format       | Go constant       | MIME                       | Extension           | Streaming | Best for |
+//	|--------------|-------------------|----------------------------|---------------------|:---------:|----------|
+//	| json         | codec.JSON        | application/json           | .json               | yes       | API responses, public configs |
+//	| ndjson       | codec.NDJSON      | application/x-ndjson       | .ndjson / .jsonl    | —         | streaming logs, line-oriented batches |
+//	| xml          | codec.XML         | application/xml            | .xml                | yes       | legacy integrations |
+//	| csv          | codec.CSV         | text/csv                   | .csv                | —         | tabular exports |
+//	| asn1-der     | codec.ASN1DER     | application/pkix-cert      | .der / .cer         | —         | crypto / X.509 artefacts |
+//	| pem          | codec.PEM         | application/x-pem-file     | .pem / .crt / .key  | —         | block-wrapped DER (certs, keys) |
+//	| yaml         | codec.YAML        | application/yaml           | .yaml / .yml        | yes       | human-edited configs |
+//	| toml         | codec.TOML        | application/toml           | .toml               | yes       | app configs (strict typing) |
+//	| cbor         | codec.CBOR        | application/cbor           | .cbor               | yes       | IoT / mobile (RFC 8949) |
+//	| msgpack      | codec.MsgPack     | application/msgpack        | .msgpack / .mpk     | yes       | RPC payloads |
+//	| bson         | codec.BSON        | application/bson           | .bson               | —         | MongoDB documents (top level must be a document) |
+//	| tlv          | codec.TLV         | application/x-tlv          | .tlv                | yes       | custom binary streams, self-describing |
+//	| flatbuffers  | codec.FlatBuffers | application/x-flatbuffers  | .fbs / .bin         | —         | zero-copy passthrough |
+//	| base64       | codec.Base64      | application/base64         | .b64 / .base64      | yes       | text-safe wrap (JSON → base-N) |
+//	| base64url    | codec.Base64URL   | application/base64url      | .b64url             | yes       | URL-safe base64 |
+//	| base32       | codec.Base32      | application/base32         | .b32                | yes       | larger alphabet for human-typed tokens |
+//	| base16       | codec.Base16      | application/base16         | .b16                | yes       | hex-like text (uppercase) |
+//	| base45       | codec.Base45      | application/base45         | .b45                | yes       | QR-code alphanumeric payloads (RFC 9285) |
+//	| base58       | codec.Base58      | application/base58         | .b58                | yes       | Bitcoin-style short IDs (4 KiB input cap) |
+//	| base62       | codec.Base62      | application/base62         | .b62                | yes       | alphanumeric short IDs (4 KiB input cap) |
+//	| hex          | codec.Hex         | application/hex            | .hex                | yes       | classic hex pair encoding (lowercase) |
+//	| ascii85      | codec.ASCII85     | application/ascii85        | .a85                | yes       | 4-byte to 5-char text packing |
 //
 // Runtime introspection: codec.Available() returns the live registry
 // list, codec.FromMIME and codec.FromExtension resolve from external
@@ -100,7 +104,9 @@
 // A registered codec MAY implement one or both of these optional
 // interfaces (assert at the call site):
 //
-//	// Append into a caller-supplied buffer — zero-alloc fast path.
+//	// Append into a caller-supplied buffer — drops the fresh-slice
+//	// allocation Marshal returns (see BENCH.md for per-codec numbers;
+//	// the remaining allocs are the encoder's, not the facade's).
 //	type Appender interface {
 //	    Append(dst []byte, v any) ([]byte, error)
 //	}

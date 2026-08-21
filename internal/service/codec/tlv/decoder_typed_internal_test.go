@@ -403,7 +403,7 @@ func Test_decodeSliceElement(t *testing.T) {
 			t.Fatalf("%s: err=%v", tc.name, err)
 		}
 		//: contract: returned reflect.Value carries the expected element.
-		got, ok := ev.Interface().(inner)
+		got, ok := reflect.TypeAssert[inner](ev)
 		if !ok || got != tc.want {
 			t.Errorf("%s: got=%+v want=%+v", tc.name, got, tc.want)
 		}

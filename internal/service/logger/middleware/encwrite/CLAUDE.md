@@ -27,6 +27,23 @@ path before closing the downstream sink.
 
 Slot 0x1c. See `codes.go`.
 
+## Test lanes
+
+| File | Tag | Lane that runs it |
+|---|---|---|
+| `encwrite_external_test.go`, `encwrite_internal_test.go` | — | `bazel test --config=race //...` (default) |
+| `codes_internal_test.go` | `//go:build !race` | race-off alloc lane — `make test-alloc` (listed in `tools/alloc-lane-targets.txt`) |
+| `encwrite_integration_test.go` | `//go:build integration` | **none** — opt-in, run by hand (below) |
+
+`Test_EncWriter_Integration_RealSocket` drives a sealed-frame round trip over a
+real `net` socket with the AES-GCM + HKDF-SHA256 schemes registered, so it is
+excluded from the default build. Per rule 12 this is a *declared* exemption, not
+an oversight — run it before shipping a change to the framing or the seal path:
+
+```sh
+GOWORK=off go test -tags integration ./internal/service/logger/middleware/encwrite/...
+```
+
 ## Accepted audit findings
 
 - Deferred/accepted low+info audit findings (V32) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.
