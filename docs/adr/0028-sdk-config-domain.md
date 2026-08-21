@@ -54,7 +54,7 @@ so typed fields populate from the environment.
 - `FileSource` depends on the codec registry — consumers blank-import the format
   (e.g. `pkg/v1/codec`); an unregistered format is a `CONFIG_SOURCE_FAILED`.
 
-## Alternatives considered
+## Why not
 
 - **viper-style all-in-one dep** — rejected: heavy, opinionated; the SDK composes
   its own codec + stdlib instead, staying dep-light.
@@ -62,6 +62,31 @@ so typed fields populate from the environment.
   codec/struct-tag machinery already in the tree with no new dep.
 - **inotify/kqueue watch in v1** — deferred: poll meets both ADR 0018 bars now;
   native backends are additive behind `Watcher`.
+
+## Breaking changes
+
+None. `config` is a new domain in this change set — there is no prior published
+surface to break.
+
+Three contracts were tightened during review, all before any release:
+
+- **Env numeric coercion keeps integers integral.** The package promised that
+  `"8080"` becomes an integer, but decoding into a bare `any` makes
+  `encoding/json` widen every numeric token to `float64` — losing integrality
+  and, past 2^53, exactness. Decoding now uses `UseNumber` and converts
+  integral tokens to `int64`.
+- **`Watch` validates its inputs.** A non-positive interval panicked inside
+  `time.NewTicker`, and a nil `onChange` panicked on the first detected change.
+  Both now return `CONFIG_WATCH_FAILED`.
+- **The merge never aliases a source-owned map.** A nested map arriving where
+  the destination had none was stored by reference, so a later layer merging
+  the same key mutated the earlier source's own map. Nested maps are cloned.
+
+Additionally, `Load` normalises a foreign `Source`'s error onto
+`CONFIG_SOURCE_FAILED`. `Source` is a public interface, so a third-party
+implementation could otherwise leak an unrelated dotted-quad code through the
+loader's typed contract. An error already carrying the sentinel's code
+propagates untouched rather than being double-wrapped.
 
 ## Deferred
 

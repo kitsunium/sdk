@@ -38,13 +38,13 @@ File parsing dispatches through the codec registry — blank\-import the format'
 ```go
 var (
     // SourceFailed is returned when a source cannot be read.
-    SourceFailed = coreconfig.SourceFailed
+    SourceFailed = coreconfig.ConfigSourceFailed
     // DecodeFailed is returned when the merged config cannot decode into the target.
-    DecodeFailed = coreconfig.DecodeFailed
+    DecodeFailed = coreconfig.ConfigDecodeFailed
     // ValidationFailed is returned when the decoded config fails Validate().
-    ValidationFailed = coreconfig.ValidationFailed
+    ValidationFailed = coreconfig.ConfigValidationFailed
     // WatchFailed is returned when the watcher cannot observe its source.
-    WatchFailed = coreconfig.WatchFailed
+    WatchFailed = coreconfig.ConfigWatchFailed
 )
 ```
 
