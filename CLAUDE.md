@@ -5,7 +5,7 @@
 
 Go SDK providing a normed, performant toolbox for downstream applications. Ten domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (22 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout — ADR 0026), **metrics** (counter/gauge/histogram + exporter registry — ADR 0027), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
 
-**Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.26.2 (pinned in `MODULE.bazel`)
+**Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.27.0 (pinned in `MODULE.bazel`)
 
 ## Architecture at a glance
 
@@ -103,7 +103,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 ├── .devcontainer/         devcontainer infrastructure (template-seeded; leave alone)
 ├── .github/               CI workflows — bazel-ci.yml is the SDK lane
 ├── go.work, go.mod        workspace + umbrella module (read by Bazel via from_file)
-├── MODULE.bazel           Bzlmod entry point (rules_go 0.60.0 + gazelle 0.50.0 + go_sdk 1.26.2 + go_deps)
+├── MODULE.bazel           Bzlmod entry point (rules_go 0.60.0 + gazelle 0.50.0 + go_sdk 1.27.0 + go_deps)
 ├── BUILD.bazel            root gazelle target + audit_sources filegroup
 ├── .bazelrc               race-on by default; named configs: race / pure / ci / alloc
 ├── .bazelversion          pins Bazel to 9.0.2

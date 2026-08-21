@@ -4,7 +4,7 @@ This page walks you from "I have a fresh Go project" to running code that uses *
 
 ## Requirements
 
-- Go **1.26 or newer — mandatory**. The SDK is built and tested against 1.26.2 (pinned in `MODULE.bazel`) and uses language features (`for b.Loop()`, `b.Context()`, range-over-int) that older toolchains will refuse to compile.
+- Go **1.27 or newer — mandatory**. Every SDK module declares `go 1.27` and `MODULE.bazel` pins the toolchain to 1.27.0, so an older toolchain refuses the build outright — the `go` directive is the requirement, not any single language feature. (The features the SDK does use — `for b.Loop()`, `b.Context()`, range-over-int — landed in 1.22/1.24 and are not what sets the floor.)
 - A Go module to import from: `go mod init github.com/<you>/<project>` if you don't have one yet
 
 ## Install
@@ -48,7 +48,7 @@ func main() {
 }
 ```
 
-Eighteen Format names are registered out of the box (`asn1-der`, `cbor`, `csv`, `flatbuffers`, `json`, `msgpack`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml`, and the `base16`/`base32`/`base64`/`base64url`/`hex`/`ascii85` family). See the [codec page](../codec/) for the full surface.
+Twenty-two Format names are registered out of the box (`asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `json`, `msgpack`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml`, and the nine base-N variants `base16`/`base32`/`base45`/`base58`/`base62`/`base64`/`base64url`/`hex`/`ascii85`). `codec.Available()` returns the live list if you would rather ask the registry than trust this page. See the [codec page](../codec/) for the full surface.
 
 ## Hello, logger
 
