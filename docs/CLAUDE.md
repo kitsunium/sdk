@@ -35,6 +35,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0024-sdk-id-domain.md` | Identifier-generation domain (`id`): 7th core sibling, `Generator`/`Scheme` registry (UUIDv4/v7, ULID, snowflake); stdlib-only, cross-OS; opens the Phase-B new-domain wave; error block `0.2.7.*`/`0.3.39.*` | Accepted (amends `internal/core` purpose) |
 | `adr/0025-sdk-cache-kernel.md` | Generic LRU+TTL `Cache[K,V]` as a **kernel** primitive (domain-neutral, stdlib-only, reuses `clock` for testable TTL); `Fetch` not `Get`; no error codes; `pkg/v1/cache` type aliases | Accepted (kernel primitive, Phase B) |
 | `adr/0026-sdk-resilience-domain.md` | Reliability domain (`resilience`): 8th core sibling (no registry), composable `Runner` policies — retry/circuit-breaker/rate-limit/bulkhead/timeout; error block `0.2.8.*` | Accepted (Phase B) |
+| `adr/0027-sdk-metrics-domain.md` | Observability domain (`metrics`): 9th core sibling, Counter/Gauge/Histogram + `Meter` + `Exporter` registry; in-memory meter + stdlib text exporter; error block `0.2.9.*`; labels + Prometheus/OTLP deferred | Accepted (Phase B) |
 
 ## ADR conventions
 
@@ -59,4 +60,4 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 
 ## Subtree
 
-- `adr/` — Architecture Decision Records (twenty-six accepted to date — see table above)
+- `adr/` — Architecture Decision Records (twenty-seven accepted to date — see table above)
