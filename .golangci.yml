@@ -2,7 +2,7 @@ version: "2"
 
 run:
   timeout: 5m
-  go: "1.26"
+  go: "1.27"
 
 # The layer dependency firewall (kernel → core → service → pkg/v1) is now
 # enforced by Bazel visibility rules in the per-layer BUILD.bazel files.

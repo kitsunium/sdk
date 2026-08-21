@@ -44,9 +44,16 @@ func TestAllocBudget(t *testing.T) {
 		ceil float64
 		fn   func()
 	}
-	//: ceilings captured on the race-off lane at the scratch-migration commit.
+	//: Ceilings captured on the race-off lane. Re-pinned on the Go 1.27.0 bump:
+	//: marshal 9 -> 12 and append 8 -> 11 across this 3-record batch, i.e.
+	//: exactly +1 allocation PER RECORD from the toolchain's encoding/json —
+	//: ndjson is stdlib-only, and the same code on go1.26.7 still measures the
+	//: old figures, so the move is the toolchain, not this package. The sibling
+	//: json codec is unaffected, which is why the delta tracks ndjson's
+	//: per-record Marshal loop rather than a blanket encoder change.
+	//: Unmarshal is untouched (measures 5, ceiling 17).
 	tests := []tc{
-		{"marshal", 9, func() {
+		{"marshal", 12, func() {
 			out, merr := c.Marshal(recs)
 			if merr != nil {
 				t.Fatalf("Marshal: %v", merr)
@@ -60,7 +67,7 @@ func TestAllocBudget(t *testing.T) {
 			}
 			allocSink = dst
 		}},
-		{"append", 8, func() {
+		{"append", 11, func() {
 			out, aerr := appender.Append(appendDst[:0], recs)
 			if aerr != nil {
 				t.Fatalf("Append: %v", aerr)

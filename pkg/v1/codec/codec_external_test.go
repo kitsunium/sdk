@@ -1868,7 +1868,7 @@ type universalRoundtripUser struct {
 // codec.Marshal(F, User) + codec.Unmarshal(F, data, &back) MUST yield
 // back == User for every Format the registry knows. Failure here means
 // the facade promotion path regressed for at least one codec —
-// previously 5/18 codecs rejected this very call shape.
+// previously 5/22 codecs rejected this very call shape.
 func TestUniversalRoundtripAllCodecs(t *testing.T) {
 	t.Parallel()
 	//: canonical fixture; struct intentionally small so the binary

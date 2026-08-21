@@ -1,3 +1,3 @@
 module github.com/kitsunium/sdk/tools/genindex
 
-go 1.26
+go 1.27
