@@ -13,3 +13,8 @@ const CodeIDEntropyFailed errs.Code = 0x00_03_27_01 // 0.3.39.1
 // clock moved backwards past the last-issued timestamp beyond the recoverable
 // same-millisecond sequence space.
 const CodeIDClockBackwards errs.Code = 0x00_03_27_02 // 0.3.39.2
+
+// CodeIDClockStalled identifies a snowflake same-millisecond overflow wait that
+// gave up because the clock stopped advancing. Distinct from ClockBackwards: the
+// clock did not regress, it simply never ticked, so the wait could not complete.
+const CodeIDClockStalled errs.Code = 0x00_03_27_03 // 0.3.39.3

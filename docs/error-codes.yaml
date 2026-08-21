@@ -686,6 +686,10 @@ codes:
     const: CodeIDClockBackwards
     hex: "0x00_03_27_02"
     package: internal/service/id
+  - code: "0.3.39.3"
+    const: CodeIDClockStalled
+    hex: "0x00_03_27_03"
+    package: internal/service/id
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

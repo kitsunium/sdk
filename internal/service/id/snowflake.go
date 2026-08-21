@@ -3,6 +3,7 @@ package id
 
 import (
 	"os"
+	"runtime"
 	"strconv"
 	"sync"
 
@@ -32,6 +33,16 @@ const (
 	fnvOffset uint64 = 14695981039346656037
 	// fnvPrime is the FNV-1a 64-bit prime.
 	fnvPrime uint64 = 1099511628211
+	// maxTillNextSpins bounds the same-millisecond overflow wait. The wait runs
+	// under the generator's mutex, so it MUST terminate: a clock that stops
+	// advancing (suspended VM, broken clocksource, a fake pinned in a test)
+	// would otherwise stall every concurrent New forever. A healthy clock
+	// crosses a millisecond boundary in well under 10^5 reads, so this budget
+	// is ~an order of magnitude of headroom, not a tuning knob.
+	maxTillNextSpins int = 1 << 20
+	// goschedEvery yields the P periodically during the spin so a single-
+	// threaded runtime is not starved while we wait.
+	goschedEvery int = 1 << 10
 )
 
 // Snowflake is the default-node snowflake generator, registered for the
@@ -119,15 +130,23 @@ func (g *snowflakeGen) New() (newID string, err error) {
 // tillNext spins until the clock advances past prev (same-ms sequence
 // overflow), returning the new epoch-relative millisecond.
 //
-// The wait is bounded by construction: the caller holds g.mu for the whole
-// spin, so an unbounded loop would stall every concurrent New. A clock that
-// regresses BELOW prev can never satisfy `now > prev` by waiting — only by the
-// operator fixing the clock — so that case returns ClockBackwards rather than
-// spinning. Staying AT prev is the normal sub-millisecond remainder and keeps
-// spinning.
+// The caller holds g.mu for the whole spin, so the wait MUST terminate in every
+// direction the clock can misbehave:
+//
+//   - moves FORWARD past prev — the normal exit.
+//   - regresses BELOW prev — unreachable by waiting (only the operator can fix
+//     it), so it returns ClockBackwards immediately.
+//   - STALLS at prev — indistinguishable from the normal sub-millisecond
+//     remainder for a short while, so it keeps spinning, but only up to
+//     maxTillNextSpins. Past that budget it returns ClockStalled rather than
+//     holding the mutex indefinitely.
+//
+// The bound is a spin count rather than a duration on purpose: the thing that
+// may be broken here IS the clock, so a deadline derived from it could never
+// fire.
 func (g *snowflakeGen) tillNext(prev int64) (next int64, err error) {
-	//: busy-wait the sub-millisecond remainder until the clock ticks over.
-	for {
+	//: busy-wait the sub-millisecond remainder, under a finite budget.
+	for spins := range maxTillNextSpins {
 		//: re-read the epoch-relative millisecond.
 		now := g.clk.Now().UnixMilli() - snowflakeEpoch
 		//: return as soon as we are strictly past the exhausted millisecond.
@@ -140,7 +159,14 @@ func (g *snowflakeGen) tillNext(prev int64) (next int64, err error) {
 			//: fail honestly instead of holding g.mu forever.
 			return 0, ClockBackwards
 		}
+		//: yield periodically so a single-P runtime still makes progress.
+		if spins%goschedEvery == goschedEvery-1 {
+			//: hand the processor to another goroutine for a turn.
+			runtime.Gosched()
+		}
 	}
+	//: budget exhausted with the clock pinned at prev — give the mutex back.
+	return 0, ClockStalled
 }
 
 // defaultNode derives a stable 10-bit node id from the hostname and pid via an

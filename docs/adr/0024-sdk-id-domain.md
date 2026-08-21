@@ -62,10 +62,14 @@ from hostname+pid via an inline FNV-1a — no syscall, no MAC address.
   publishing under it would leave `Lookup`/`New` and `Known` disagreeing about
   the same key. Registration returns `DUPLICATE_REGISTRATION` (whose code doc
   already covered "a nil scheme"), which `Register` turns into a boot panic.
-- The snowflake same-millisecond overflow wait is bounded. It runs under the
-  generator's mutex, so a clock regression below the exhausted millisecond
-  surfaces `ID_CLOCK_BACKWARDS` instead of spinning and stalling every
-  concurrent `New`.
+- The snowflake same-millisecond overflow wait is bounded in every direction
+  the clock can misbehave, because it runs under the generator's mutex. A
+  regression below the exhausted millisecond surfaces `ID_CLOCK_BACKWARDS`
+  immediately (waiting can never satisfy it). A clock that STALLS at that
+  millisecond keeps spinning only up to a finite budget, then surfaces
+  `ID_CLOCK_STALLED`. The budget is a spin count rather than a duration on
+  purpose: the component that may be broken is the clock itself, so a deadline
+  derived from it could never fire.
 
 ## Breaking changes
 

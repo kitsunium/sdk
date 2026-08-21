@@ -1,6 +1,7 @@
 package id
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -47,19 +48,21 @@ func (c *steppedClock) Since(t time.Time) time.Duration {
 func Test_tillNext_ClockRegressionDoesNotSpin(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name    string
-		script  []int64
-		prev    int64
-		wantErr bool
-		wantMS  int64
+		name     string
+		script   []int64
+		prev     int64
+		wantSent error // nil = expect success
+		wantMS   int64
 	}
 	tests := []tc{
 		//: the clock ticks forward — normal overflow wait, returns the new ms.
-		{"advances past prev", []int64{100, 100, 101}, 100, false, 101},
+		{"advances past prev", []int64{100, 100, 101}, 100, nil, 101},
 		//: the clock regresses below prev — unwaitable, must fail fast.
-		{"regresses below prev", []int64{100, 99}, 100, true, 0},
+		{"regresses below prev", []int64{100, 99}, 100, ClockBackwards, 0},
 		//: a regression on the very first read is caught immediately.
-		{"regresses immediately", []int64{50}, 100, true, 0},
+		{"regresses immediately", []int64{50}, 100, ClockBackwards, 0},
+		//: the clock STALLS at prev forever — the spin budget must end the wait.
+		{"stalls at prev", []int64{100}, 100, ClockStalled, 0},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -67,10 +70,11 @@ func Test_tillNext_ClockRegressionDoesNotSpin(t *testing.T) {
 		//: the wait must terminate; a hang here fails the whole package by
 		//: timeout, which is the observable form of the original defect.
 		got, err := g.tillNext(tc.prev)
-		//: contract: a backward clock yields ClockBackwards, never a spin.
-		if tc.wantErr {
-			if err == nil {
-				t.Fatalf("%s: tillNext returned (%d, nil), want ClockBackwards", tc.name, got)
+		//: contract: each misbehaviour maps to its OWN documented sentinel —
+		//: asserting "some error" would let a regression swap one for the other.
+		if tc.wantSent != nil {
+			if !errors.Is(err, tc.wantSent) {
+				t.Fatalf("%s: tillNext=(%d, %v), want %v", tc.name, got, err, tc.wantSent)
 			}
 			return
 		}
@@ -107,9 +111,9 @@ func Test_New_SequenceOverflowClockRegression(t *testing.T) {
 	//: a regressed clock so the wait can never be satisfied.
 	g.clk = &steppedClock{script: []int64{499}}
 	_, err := g.New()
-	//: contract: fail fast rather than spin under the held mutex.
-	if err == nil {
-		t.Fatal("New after overflow with a regressed clock returned nil error, want ClockBackwards")
+	//: contract: fail fast with the documented sentinel, not just "some error".
+	if !errors.Is(err, ClockBackwards) {
+		t.Fatalf("New after overflow with a regressed clock: err=%v, want ClockBackwards", err)
 	}
 	//: contract: the sequence is restored to its pre-wrap value so a retry in
 	//: this same millisecond re-enters the wait instead of reissuing seq=1.
