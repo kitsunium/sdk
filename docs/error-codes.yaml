@@ -286,6 +286,22 @@ codes:
     const: CodeTimeoutExceeded
     hex: "0x00_02_08_05"
     package: internal/core/resilience
+  - code: "0.2.9.1"
+    const: CodeUnknownExporter
+    hex: "0x00_02_09_01"
+    package: internal/core/metrics
+  - code: "0.2.9.2"
+    const: CodeExportFailed
+    hex: "0x00_02_09_02"
+    package: internal/core/metrics
+  - code: "0.2.9.3"
+    const: CodeInstrumentKindConflict
+    hex: "0x00_02_09_03"
+    package: internal/core/metrics
+  - code: "0.2.9.5"
+    const: CodeDuplicateRegistration
+    hex: "0x00_02_09_05"
+    package: internal/core/metrics
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"
