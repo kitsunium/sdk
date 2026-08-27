@@ -14,7 +14,10 @@ name: post-commit
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # ready_for_review matters: a failed run puts the pull request back into
+    # draft, so marking it ready is how you ask for another verdict. Without
+    # this type that second attempt would never be judged.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main, master]
   # On demand: the gate reads the whole history, so its verdict can change
@@ -22,6 +25,13 @@ on:
   # or the history is rewritten under it. Without this you cannot ask a quiet
   # repository whether it is still clean; you have to push something to find out.
   workflow_dispatch:
+
+# One verdict at a time, per branch. Without this the ready_for_review retry
+# path lets an older run finish after a newer one: the stale failure would put
+# a pull request back into draft that the newer commit already fixed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -38,3 +48,42 @@ jobs:
           # on purpose — one human commits across the whole fleet, so the
           # stub stays byte-identical everywhere.
           authors: kodflow
+
+  # The block of last resort, deliberately a SEPARATE job.
+  #
+  # A red status only refuses a merge where a ruleset can require it, and GitHub
+  # declines rulesets outright on a private repository in a Free-plan org. Draft
+  # state has no such hole: GitHub refuses to merge a draft on every plan and
+  # for admins too. So when the gate fails, put the pull request back into
+  # draft; `ready_for_review` above is what lets you ask for a new verdict.
+  #
+  # Why a second job rather than a step inside the action: the write permission
+  # has to live somewhere, and a workflow- or job-level grant on the job above
+  # would hand a pull-request-write token to kodflow/post-commit@main — a
+  # mutable external reference — on every trigger, push and manual runs
+  # included. Here the token never reaches it. This job runs no action at all.
+  block-merge:
+    needs: post-commit
+    if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          JUDGED: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Cancellation narrows the race but does not close it: this job can
+          # already be running when a newer commit lands. Only act if the head
+          # this run judged is still the head, or a stale failure would undo a
+          # ready state that a later, passing commit earned.
+          CURRENT="$(gh pr view "$PR" -R "$REPO" --json headRefOid --jq .headRefOid)"
+          if [ "$CURRENT" != "$JUDGED" ]; then
+              echo "::notice::head moved on from ${JUDGED:0:8} to ${CURRENT:0:8}; the newer run owns the verdict. Not drafting."
+              exit 0
+          fi
+          gh pr ready --undo "$PR" -R "$REPO"
+          echo "::notice::post-commit failed — pull request put back into draft. Fix the history, then mark it ready: that re-runs the gate."
