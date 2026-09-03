@@ -57,8 +57,10 @@ alias(
 go_test(
     name = "server_test",
     srcs = [
+        "batch_bench_test.go",
         "batch_internal_test.go",
         "packet_external_test.go",
+        "server_bench_test.go",
         "server_external_test.go",
     ],
     embed = [":server"],
