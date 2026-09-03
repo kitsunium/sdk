@@ -330,3 +330,76 @@ func TestBodyReadFailureIsTyped(t *testing.T) {
 		t.Fatalf("expected CALL_FAILED, got an untyped %T: %v", err, err)
 	}
 }
+
+// TestCallHookReportsTheBodySize pins that the observation record carries a byte
+// count at all.
+//
+// CallValue.Bytes was documented, re-exported as part of the public CallInfo,
+// and assigned nowhere in the tree: every record reported zero. The hook fired
+// as soon as the response headers arrived, which is strictly before the body
+// exists to be measured, so no value could have been correct there.
+func TestCallHookReportsTheBodySize(t *testing.T) {
+	t.Parallel()
+	const payload string = "0123456789"
+	srv, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeOrFail(t, w, payload)
+	})
+	calls := make(chan corenet.CallValue, 4)
+	c, err := client.New(corenet.ClientConfig{BaseURL: srv.URL}, corenet.IdentityValue{},
+		buildReadOnly(t), func(call corenet.CallValue) { calls <- call })
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if _, gerr := c.Get(context.Background(), "/v1/subscribers", nil); gerr != nil {
+		t.Fatalf("unexpected error: %v", gerr)
+	}
+	close(calls)
+	observed := drain(calls)
+	if len(observed) != 1 {
+		t.Fatalf("hook fired %d times, want 1", len(observed))
+	}
+	//: the whole point of the field.
+	if got := observed[0].Bytes; got != int64(len(payload)) {
+		t.Fatalf("CallInfo.Bytes = %d for a %d-byte body — the record cannot "+
+			"report a size the hook fired before knowing", got, len(payload))
+	}
+	//: a body read in full is not a failure.
+	if observed[0].Err != nil {
+		t.Fatalf("a complete body was recorded as a failure: %v", observed[0].Err)
+	}
+}
+
+// TestCallHookReportsABodyFailure pins that a call which fails ON ITS BODY is
+// recorded as a failure rather than as a clean 2xx.
+//
+// The ceiling refusal is produced strictly after the response headers, so a
+// record emitted at the headers reported the exact opposite of what happened:
+// status 200, no error, zero bytes, for a call that returned RESPONSE_TOO_LARGE
+// to its caller. An audit trail that disagrees with the outcome is worse than
+// none, because it is the one thing an operator will trust.
+func TestCallHookReportsABodyFailure(t *testing.T) {
+	t.Parallel()
+	srv, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeOrFail(t, w, strings.Repeat("x", 4096))
+	})
+	calls := make(chan corenet.CallValue, 4)
+	c, err := client.New(corenet.ClientConfig{BaseURL: srv.URL, MaxResponseSize: 128},
+		corenet.IdentityValue{}, buildReadOnly(t),
+		func(call corenet.CallValue) { calls <- call })
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if _, gerr := c.Get(context.Background(), "/v1/subscribers", nil); gerr == nil {
+		t.Fatal("an oversized body was accepted")
+	}
+	close(calls)
+	observed := drain(calls)
+	if len(observed) != 1 {
+		t.Fatalf("hook fired %d times, want 1", len(observed))
+	}
+	//: the record must agree with what the caller was told.
+	if !errs.HasCode(observed[0].Err, codeOf(t, corenet.ResponseTooLarge)) {
+		t.Fatalf("the refused call was recorded as %v, want RESPONSE_TOO_LARGE — "+
+			"the audit trail disagrees with the outcome", observed[0].Err)
+	}
+}

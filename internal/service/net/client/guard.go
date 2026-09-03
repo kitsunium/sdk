@@ -57,10 +57,25 @@ func (g *guard) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 			errs.String("method", req.Method))
 	}
 	call.Status = resp.StatusCode
-	g.observe(call)
 	//: the ceiling is installed on the body handed back, so it holds even for a
 	//: caller that reads the response itself through the escape hatch.
-	resp.Body = &cappedBody{inner: resp.Body, limit: g.maxBytes}
+	//
+	//: observation is installed WITH it rather than fired here. A body's size is
+	//: only known once it has been read, so a record emitted now could never
+	//: carry one — CallValue.Bytes was documented and permanently zero. And an
+	//: over-sized body or a failed close happens strictly after this point, so
+	//: firing here recorded both as clean successes. The body reports itself
+	//: exactly once, on whichever of EOF, a read failure or Close comes first,
+	//: which observes the escape hatch on the same terms as Do.
+	resp.Body = &cappedBody{
+		inner: resp.Body,
+		limit: g.maxBytes,
+		done: func(read int64, err error) {
+			call.Bytes = read
+			call.Err = err
+			g.observe(call)
+		},
+	}
 	//: the response is handed back with its body already bounded.
 	return resp, nil
 }

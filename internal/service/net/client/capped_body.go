@@ -2,7 +2,9 @@
 package client
 
 import (
+	"errors"
 	"io"
+	"sync"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -21,6 +23,28 @@ type cappedBody struct {
 	limit int64
 	// read counts what has been handed to the caller so far.
 	read int64
+	// done reports the finished body exactly once, with the byte count and
+	// whatever ended it. It is how the observation hook learns a size at all:
+	// a body's length is only known once it has been read, so a record emitted
+	// when the headers arrive can never carry one.
+	done func(read int64, err error)
+	// once keeps that report to exactly one per body, whether the body ended at
+	// EOF, at a read failure, or at Close.
+	once sync.Once
+}
+
+// finish reports the completed body to the observer, at most once.
+func (c *cappedBody) finish(err error) {
+	//: a body with no observer costs one comparison.
+	if c.done == nil {
+		//: nothing observes this body.
+		return
+	}
+	//: EOF, a read failure and Close all end the body; whichever happens first
+	//: is the one that reports it, and the others are then no-ops.
+	c.once.Do(func() {
+		c.done(c.read, err)
+	})
 }
 
 // Read implements io.Reader.
@@ -53,11 +77,29 @@ func (c *cappedBody) Read(p []byte) (n int, err error) {
 	c.read += int64(n)
 	//: the probe byte arrived, so the body genuinely exceeds the ceiling.
 	if c.read > c.limit {
+		refusal := c.tooLarge()
+		//: the observer sees the refusal, not a clean 2xx with no bytes.
+		c.finish(refusal)
 		//: refuse rather than hand back a truncated body.
-		return 0, c.tooLarge()
+		return 0, refusal
+	}
+	//: the body is over, successfully or not; this is where its size is known.
+	if err != nil {
+		c.finish(readOutcome(err))
 	}
 	//: propagate the transport's own outcome, including io.EOF.
 	return n, err
+}
+
+// readOutcome maps a terminal read result onto what the observer should record.
+func readOutcome(err error) error {
+	//: io.EOF is how a complete body ends, not a failure to report.
+	if errors.Is(err, io.EOF) {
+		//: the body was read in full.
+		return nil
+	}
+	//: anything else ended the body early and belongs in the audit trail.
+	return err
 }
 
 // tooLarge reports the refusal, naming the ceiling but never the body.
@@ -69,6 +111,11 @@ func (c *cappedBody) tooLarge() error {
 
 // Close implements io.Closer.
 func (c *cappedBody) Close() error {
+	err := c.inner.Close()
+	//: a body closed before it was read is still a completed call, and it is
+	//: the last chance to record one — a caller using the escape hatch may
+	//: never read to EOF at all.
+	c.finish(err)
 	//: closing the inner body is what releases the connection.
-	return c.inner.Close()
+	return err
 }

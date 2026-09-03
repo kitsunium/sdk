@@ -100,7 +100,9 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) (resp c
 //
 // It returns a value rather than an *http.Response so the caller cannot leak a
 // connection by forgetting to close the body, and so the byte count is known —
-// which is what lets the observation hook report an accurate size.
+// which is what lets the observation hook report an accurate size. The hook
+// fires from the body itself, so a caller using the escape hatch is observed on
+// exactly the same terms.
 func (c *Client) Do(req *http.Request) (resp corenet.ResponseValue, err error) {
 	c.applyHeaders(req)
 	raw, derr := c.http.Do(req)
