@@ -18,11 +18,7 @@ import (
 func startEcho(t *testing.T) (srv *server.Server, addr string) {
 	t.Helper()
 	srv = server.New()
-	srv.Group("echo", server.Listen("tcp", "127.0.0.1:0")).
-		HandleFunc(func(_ context.Context, c corenet.Conn) error {
-			_, err := io.Copy(c, c)
-			return err
-		})
+	srv.Group("echo", server.Listen("tcp", "127.0.0.1:0")).HandleFunc(echoHandler)
 	if err := srv.Start(context.Background()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -287,6 +283,12 @@ func TestPanickingHandlerClosesOnlyItsConnection(t *testing.T) {
 	if cerr := second.Close(); cerr != nil {
 		t.Errorf("close: %v", cerr)
 	}
+}
+
+// echoHandler copies whatever it receives straight back.
+func echoHandler(_ context.Context, c corenet.Conn) error {
+	_, err := io.Copy(c, c)
+	return err
 }
 
 // noopHandler is a handler that does nothing, for declaration-error tests.

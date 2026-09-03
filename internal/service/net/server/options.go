@@ -92,3 +92,17 @@ func BatchSize(n int) GroupOption {
 		g.limits.BatchSize = n
 	}
 }
+
+// Shards sets how many listeners to open on each of the group's addresses.
+//
+// Several listeners on one address is what SO_REUSEPORT buys: the kernel
+// load-balances incoming connections across them, so N accept loops never
+// contend on one accept queue. Zero selects one per core; one disables sharding.
+// Where the platform or the socket family cannot shard, the count collapses to
+// one and State reports why rather than staying silent.
+func Shards(n int) GroupOption {
+	//: the option is applied by the constructor, in declaration order.
+	return func(g *StreamGroup) {
+		g.limits.Shards = n
+	}
+}

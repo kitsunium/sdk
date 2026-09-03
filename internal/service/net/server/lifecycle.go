@@ -174,18 +174,39 @@ func (s *Server) bindAll(ctx context.Context, groups []*StreamGroup) error {
 }
 
 // bindGroup binds one group's addresses and starts their accept loops.
+func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
+	handler := group.resolved()
+	//: one shard set per address, each shard with its own accept goroutine.
+	for _, addr := range group.addrs {
+		//: propagate the first bind failure with the address that caused it.
+		if err := s.bindShards(ctx, group, addr, handler); err != nil {
+			//: abort startup; Start unwinds whatever is already bound.
+			return err
+		}
+	}
+	//: every address in the group is bound.
+	return nil
+}
+
+// bindShards opens one address's listeners and starts an accept loop per shard.
 //
-// Goroutine lifecycle: it starts exactly one acceptLoop per address. Each is
+// Several listeners on one address is the whole point of SO_REUSEPORT: the
+// kernel load-balances incoming connections across them, so N accept loops
+// never contend on a single accept queue. Where the option is unavailable the
+// count collapses to one and State reports why.
+//
+// Goroutine lifecycle: it starts exactly one acceptLoop per shard. Each is
 // owned by the Server, holds an inFlight token released on exit, and terminates
 // when Close or Shutdown closes its listener — the only signal that reliably
 // interrupts a blocking Accept.
-func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
-	handler := group.resolved()
-	//: each address gets its own listener and its own accept goroutine.
-	//: one listener and one accept goroutine per address.
-	for _, addr := range group.addrs {
-		ln, err := listen(ctx, addr, group.identity)
-		//: surface the bind failure with the address that caused it.
+func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corenet.AddressValue, handler corenet.ConnHandler) error {
+	count, degraded, reason := resolveShards(group.limits.Shards, addr.Network)
+	opened := 0
+	//: every shard binds the same address; the kernel spreads accepts across them.
+	for range count {
+		ln, err := listen(ctx, addr, group.identity, count > 1)
+		//: a shard that will not bind aborts startup rather than serving a
+		//: quietly smaller set than the operator asked for.
 		if err != nil {
 			//: surface the address that could not be bound.
 			return err
@@ -193,17 +214,24 @@ func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
 		bound := &boundListener{group: group.name, addr: addr, ln: ln}
 		s.mu.Lock()
 		s.listeners = append(s.listeners, bound)
-		s.states = append(s.states, corenet.ListenerStateValue{
-			Group:   group.name,
-			Address: ln.Addr().String(),
-			Network: addr.Network,
-			Shards:  1,
-		})
+		//: only the first shard is reported, carrying the real shard count — N
+		//: rows for one address would read as N separate addresses.
+		if opened == 0 {
+			s.states = append(s.states, corenet.ListenerStateValue{
+				Group:          group.name,
+				Address:        ln.Addr().String(),
+				Network:        addr.Network,
+				Shards:         count,
+				Degraded:       degraded,
+				DegradedReason: reason,
+			})
+		}
 		s.mu.Unlock()
+		opened++
 		s.inFlight.Add(1)
 		go s.acceptLoop(bound, group, handler)
 	}
-	//: every address in the group is bound.
+	//: every shard for this address is accepting.
 	return nil
 }
 

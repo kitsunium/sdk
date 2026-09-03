@@ -26,6 +26,9 @@ go_library(
         "packet_loop.go",
         "pool.go",
         "raw_conn_provider_linux.go",
+        "reuseport_bsd.go",
+        "reuseport_linux.go",
+        "reuseport_other.go",
         "server.go",
         "sockaddr_linux.go",
         "stream_group.go",
@@ -62,6 +65,8 @@ go_test(
         "packet_external_test.go",
         "server_bench_test.go",
         "server_external_test.go",
+        "shards_external_test.go",
+        "shards_internal_test.go",
     ],
     embed = [":server"],
     deps = [

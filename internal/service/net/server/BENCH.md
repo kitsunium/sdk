@@ -3,9 +3,10 @@
 
 ADR 0029 §D9 commits this domain to *proving* its performance claims rather than
 asserting them, and to reporting a measurement that contradicts the design.
-These numbers discharge that commitment. Two of the three results are "no
-measurable difference", and one optimisation is smaller than the ADR implied —
-both are stated plainly below.
+These numbers discharge that commitment. Three of the four results are "no
+measurable difference" — including one optimisation that buys nothing at all
+here — and the fourth is smaller than the ADR implied. All four are stated
+plainly below.
 
 Every comparison runs the **identical handler body** on both sides, so the delta
 is the domain's overhead and nothing else.
@@ -24,9 +25,9 @@ is the domain's overhead and nothing else.
 | Architecture | amd64 |
 | Go toolchain | go1.27.0 linux/amd64 |
 | Git branch | feat/server-domain |
-| Git commit | f9a0bb2 |
+| Git commit | 841988a |
 | Generated (UTC) | 2026-09-03 |
-| Bench wall-clock | `-benchtime=3000x` (stream/HTTP), `-benchtime=2000x` (datagram), `-count=5` |
+| Bench wall-clock | `-benchtime=3000x` (stream/HTTP/accept), `-benchtime=2000x` (datagram), `-count=5` |
 
 Five runs are reported per benchmark because a single run on a loopback socket
 is dominated by scheduler noise — the first three-run attempt showed the HTTP
@@ -94,18 +95,43 @@ fifth, not a multiple. The honest reading:
   overhead compresses the measured difference. The real-world gap is therefore
   at least this large, not smaller.
 
+### 4. `SO_REUSEPORT` sharded accept vs a single listener
+
+One accept → serve → close cycle under `RunParallel`, so the clients actually
+contend for the accept path. The only difference between the two is the shard
+count.
+
+| Benchmark | ns/op (5 runs) | median | B/op | allocs/op |
+|---|---|---|---|---|
+| `Accept_SingleListener` | 9358, 9553, 9621, 9744, 14705 | **9 621** | 1059 | 25 |
+| `Accept_Sharded` (one listener per core) | 9396, 9397, 9474, 9563, 9569 | **9 474** | 1059 | 25 |
+
+**No measurable gain on this machine, and ADR 0029 §D9 requires saying so.**
+The medians differ by ~1.5 %, inside the noise — and the single-listener column
+contains a 14 705 ns warm-up outlier that is itself larger than the entire
+claimed difference.
+
+This is a **real null result, not a broken comparison.** Sharding is genuinely
+active during the run: `TestShardedListenerReportsItsShardCount` asserts that a
+request for four shards is honoured and reported as four, and
+`TestShardedListenerStillServes` proves the four listeners actually serve.
+Without those, "no gain" could simply have meant the shards silently collapsed
+to one and the benchmark was comparing a server against itself.
+
+The honest interpretation: `SO_REUSEPORT` removes contention on a *single accept
+queue*, and on a 12-core laptop driving loopback connections there is not enough
+accept pressure for that contention to be the bottleneck. The mechanism is
+sound — the kernel-level spike bound two listeners to one port, and the option
+is genuinely set before bind — but **on this hardware it buys nothing, and the
+default should not be assumed to be free elsewhere either.** It stays available
+and off-by-default-sized (`Shards(0)` = one per core) rather than being removed,
+because the regime it targets (a saturated NIC with many short-lived
+connections) is one this laptop cannot produce.
+
 ## What is NOT measured here
 
-**`SO_REUSEPORT` sharded accept is not implemented yet**, so there is no number
-for it. ADR 0029 §D5 lists it as an optimisation to implement *and* measure, and
-§D9 promises that if it shows no gain on this machine, the report will say so.
-Neither the implementation nor the measurement exists as of commit `f9a0bb2`;
-the `Shards` limit is accepted and reported through `State` as a single shard.
-This section will state the result — including a null one — when it lands.
-
-The kernel-level spike that validated the mechanism did run green (two listeners
-bound to one port), so the mechanism is known to work; what is missing is the
-engine integration and the throughput comparison.
+Nothing outstanding: every optimisation ADR 0029 §D5 lists now has a number
+above, including the one that turned out not to help.
 
 ## How to read a regression here
 
@@ -117,3 +143,6 @@ engine integration and the throughput comparison.
 - `DatagramRead_Batched` converging on `DatagramRead_Portable` means
   `newDatagramSource` silently fell back — `TestLinuxSelectsTheBatchedReader` is
   the guard that fails first.
+- `Accept_Sharded` is only meaningful while `TestShardedListenerReportsItsShardCount`
+  passes. If sharding collapses to one listener, this benchmark measures nothing
+  and will happily report parity.

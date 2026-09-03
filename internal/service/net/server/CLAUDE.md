@@ -31,6 +31,7 @@ Public façade: `pkg/v1/server`.
 | `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
 | `http_adapter.go` | the `net/http` adapter (ADR 0029 D3) |
 | `http_listener.go` | the channel-fed bridge listener |
+| `reuseport_{linux,bsd,other}.go` | the cited `SO_REUSEPORT` constant per family |
 
 ## Why-this-shape
 
@@ -135,6 +136,29 @@ Two things about it were got wrong first and are worth keeping wrong-proof:
 - **`Shutdown` stops the embedded `http.Server` before draining.** Without it an
   idle keep-alive connection holds `ServeConn` open for the whole drain budget;
   `TestHTTPAdapterDrainsOnShutdown` fails if the drain takes more than 3s.
+
+## Sharded accept
+
+`Shards(n)` opens n listeners on one address with `SO_REUSEPORT`, each with its
+own accept loop, so the kernel load-balances connections instead of N loops
+contending on one accept queue. Zero means one per core; one disables it.
+
+- **The constant is hand-defined per family and cited**, because it is absent
+  from the stdlib `syscall` package and `golang.org/x/sys` is banned SDK-wide.
+  Linux says 15, the BSDs say 0x200 — different values, which is why they are
+  declared separately rather than once.
+- **It must be set before `bind`**, which is what `net.ListenConfig.Control`
+  exists for. Setting it afterwards silently does nothing.
+- **Windows returns false rather than substituting `SO_REUSEADDR`**, whose
+  semantics are not equivalent: it permits *hijacking* a bound port rather than
+  load-balancing across sockets.
+- **A Unix socket is not shardable and says so** — but only when sharding was
+  explicitly asked for. Auto-sizing on a Unix socket disappoints no expectation,
+  so it is not reported as a degradation.
+- **Only the first shard appears in `State`**, carrying the real shard count. N
+  rows for one address would read as N addresses.
+- **On this machine it buys nothing.** `BENCH.md` §4 reports the null result and
+  the two tests that prove it is a null result rather than a broken comparison.
 
 ## Concurrency
 

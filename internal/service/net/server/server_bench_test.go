@@ -185,3 +185,45 @@ func discard(err error) {
 	}
 	//: the error concerns a socket or server that is already finished with.
 }
+
+// benchSharded runs the accept-cycle benchmark with a given shard count, so the
+// only difference between the two variants below is SO_REUSEPORT.
+func benchSharded(b *testing.B, shards int) {
+	b.Helper()
+	srv := server.New()
+	srv.Group("bench",
+		server.Listen("tcp", "127.0.0.1:0"),
+		server.Shards(shards),
+	).HandleFunc(func(_ context.Context, c corenet.Conn) error {
+		echoOnce(c)
+		return nil
+	})
+	if err := srv.Start(context.Background()); err != nil {
+		b.Fatalf("start: %v", err)
+	}
+	b.Cleanup(func() { discard(srv.Close()) })
+	addr := srv.State().Listeners[0].Address
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	//: parallel, because accept contention is the thing being measured and a
+	//: serial client cannot produce any.
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			roundTripOnce(b, addr)
+		}
+	})
+}
+
+// BenchmarkAccept_SingleListener is the baseline: every connection arrives on
+// one accept queue, so all accept loops contend for it.
+func BenchmarkAccept_SingleListener(b *testing.B) {
+	benchSharded(b, 1)
+}
+
+// BenchmarkAccept_Sharded opens one listener per core with SO_REUSEPORT, so the
+// kernel spreads connections across independent accept queues. ADR 0029 §D9
+// requires this comparison to be reported even if it shows no gain.
+func BenchmarkAccept_Sharded(b *testing.B) {
+	benchSharded(b, 0)
+}
