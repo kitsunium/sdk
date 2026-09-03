@@ -4,8 +4,8 @@ go 1.27
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.3
-	github.com/kitsunium/sdk/internal/core v0.1.16
-	github.com/kitsunium/sdk/internal/kernel v0.1.16
+	github.com/kitsunium/sdk/internal/core v0.1.24
+	github.com/kitsunium/sdk/internal/kernel v0.1.24
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	go.mongodb.org/mongo-driver v1.17.9
@@ -18,9 +18,4 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
-)
-
-replace (
-	github.com/kitsunium/sdk/internal/core => ../core
-	github.com/kitsunium/sdk/internal/kernel => ../kernel
 )
