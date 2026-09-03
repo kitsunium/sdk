@@ -43,6 +43,23 @@ func (c *conn) Buffer() []byte {
 	return *c.scratch
 }
 
+// Close closes the underlying socket, tolerating a wrapper the pool has already
+// reset.
+//
+// net/http can close a connection after the engine has reclaimed its wrapper —
+// on a drain, where the adapter releases the waiter without waiting for
+// net/http to finish. Embedding net.Conn would make that a nil dereference, so
+// the guard is what keeps a late close from panicking a serving goroutine.
+func (c *conn) Close() error {
+	//: already reset by the pool; there is nothing left to close.
+	if c.Conn == nil {
+		//: already reset by the pool; there is nothing left to close.
+		return nil
+	}
+	//: the socket's own close result, which the caller decides what to do with.
+	return c.Conn.Close()
+}
+
 // reset clears the connection so the pool can hand it out again. It is the
 // recycler's reset hook, and it must drop every reference or a pooled entry
 // would pin a closed socket for as long as the pool lives.

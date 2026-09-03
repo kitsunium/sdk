@@ -35,7 +35,7 @@ const (
 // wiring a server down to a handful of readable lines.
 type Server struct {
 	// mu guards the declaration-time fields below.
-	mu sync.Mutex
+	mu sync.RWMutex
 	// groups preserves declaration order so listeners bind predictably.
 	groups []*StreamGroup
 	// packetGroups preserves declaration order for the datagram side.
@@ -178,9 +178,9 @@ func (s *Server) recordDeclError(err error) {
 
 // State returns a snapshot of the server's lifecycle and listeners.
 func (s *Server) State() corenet.StateValue {
-	s.mu.Lock()
+	s.mu.RLock()
 	listeners := slices.Clone(s.states)
-	s.mu.Unlock()
+	s.mu.RUnlock()
 	//: a copied slice so the caller cannot observe a listener set mutating
 	//: underneath it, and cannot mutate ours.
 	return corenet.StateValue{

@@ -316,6 +316,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.phase.Store(uint32(corenet.PhaseDraining))
 	//: closing the listeners is what ends the accept loops.
 	s.closeListeners()
+	//: stop any embedded http.Server first, so its keep-alive connections are
+	//: released instead of holding the drain open to its full budget.
+	s.shutdownHTTP(ctx)
 	err := s.waitIdle(ctx)
 	//: cancelling the run context asks every handler still running to stop.
 	if s.stop != nil {
@@ -336,6 +339,20 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.phase.Store(uint32(corenet.PhaseStopped))
 	//: the drain completed within its budget.
 	return nil
+}
+
+// shutdownHTTP stops every group's embedded http.Server, if it has one.
+func (s *Server) shutdownHTTP(ctx context.Context) {
+	s.mu.RLock()
+	groups := slices.Clone(s.groups)
+	s.mu.RUnlock()
+	//: only groups that were given an http.Handler carry an adapter.
+	for _, group := range groups {
+		//: a plain ConnHandler group has no embedded http.Server to stop.
+		if group.httpAdapter != nil {
+			group.httpAdapter.shutdown(ctx)
+		}
+	}
 }
 
 // waitIdle blocks until no connection is in flight or ctx expires.

@@ -29,6 +29,8 @@ Public façade: `pkg/v1/server`.
 | `multireader_linux.go` | `recvmmsg` batched reader |
 | `multireader_mmsghdr_linux.go` | the cited `struct mmsghdr` layout |
 | `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
+| `http_adapter.go` | the `net/http` adapter (ADR 0029 D3) |
+| `http_listener.go` | the channel-fed bridge listener |
 
 ## Why-this-shape
 
@@ -100,6 +102,39 @@ Public façade: `pkg/v1/server`.
   send and an allocation per packet, undoing the batching this path exists for.
   A handler that must block should copy the payload and hand it to its own
   worker — which is why `Packet.Data` documents its lifetime.
+
+## The HTTP adapter
+
+`net/http` can only be driven through `Serve(net.Listener)`; there is no public
+per-connection entry point. The adapter therefore hands `http.Server` a bridge
+listener whose `Accept` pops from a channel our accept loop fills. The cost is
+one hand-off per **connection**, not per request —
+`TestHTTPAdapterKeepsAliveAcrossRequests` pins that three keep-alive requests
+count as one accept.
+
+Two things about it were got wrong first and are worth keeping wrong-proof:
+
+- **The connection handed to `net/http` is the raw socket, never our pooled
+  wrapper.** Wrapping it was the obvious design and it fails twice over. It puts
+  the pooled wrapper in two goroutines at once — the race detector caught the
+  engine resetting it while `net/http` was closing it — and it hides the
+  concrete `*tls.Conn` that `net/http` type-asserts on to populate
+  `Request.TLS`, so every request on an HTTPS listener arrived looking like
+  plaintext. `TestHTTPAdapterOverTLS` asserts `r.TLS != nil` for exactly that
+  reason.
+- **Completion is tracked through `http.Server.ConnState`**, not by wrapping
+  `Close`. Only `StateClosed` and `StateHijacked` are terminal; acting on
+  `StateIdle` would release the connection between two keep-alive requests.
+- **`conn.Close` is nil-safe** because `net/http` can close a connection after
+  the engine has reclaimed the wrapper — on a drain, where the adapter releases
+  its waiter without waiting for `net/http` to finish.
+- **The serving goroutine is a `kernel/worker.LoopDaemon`**, so its owner and
+  termination are explicit and `shutdown` has a `Done()` channel to bound its
+  wait on. `http.Server` is interrupted by closing its listener, not by a stop
+  signal, which is why the loop ignores the stop channel.
+- **`Shutdown` stops the embedded `http.Server` before draining.** Without it an
+  idle keep-alive connection holds `ServeConn` open for the whole drain budget;
+  `TestHTTPAdapterDrainsOnShutdown` fails if the drain takes more than 3s.
 
 ## Concurrency
 

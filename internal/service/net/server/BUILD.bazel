@@ -12,6 +12,8 @@ go_library(
         "conn_compliance.go",
         "datagram_source_linux.go",
         "datagram_source_other.go",
+        "http_adapter.go",
+        "http_listener.go",
         "lifecycle.go",
         "linux_compliance.go",
         "listen.go",
@@ -39,6 +41,7 @@ go_library(
         "//internal/kernel/buffer",
         "//internal/kernel/errs",
         "//internal/kernel/recycler",
+        "//internal/kernel/worker",
     ],
 )
 

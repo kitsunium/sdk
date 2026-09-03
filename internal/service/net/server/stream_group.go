@@ -2,6 +2,8 @@
 package server
 
 import (
+	"net/http"
+
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
@@ -24,6 +26,9 @@ type StreamGroup struct {
 	limits corenet.LimitsValue
 	// timeouts bounds each phase of a connection.
 	timeouts corenet.TimeoutsValue
+	// httpAdapter is set when the group serves an http.Handler, so the engine
+	// can shut the embedded http.Server down with the rest of the group.
+	httpAdapter *httpAdapter
 }
 
 // Name returns the group's name.
@@ -45,6 +50,19 @@ func (g *StreamGroup) Handle(h corenet.ConnHandler) *StreamGroup {
 func (g *StreamGroup) HandleFunc(f corenet.ConnHandlerFunc) *StreamGroup {
 	//: the func adapter already satisfies the port.
 	return g.Handle(f)
+}
+
+// HandleHTTP serves an http.Handler over this group's listeners.
+//
+// The group keeps its own limits, TLS identity and drain; net/http only does
+// the protocol. That split is ADR 0029 D3: reimplementing HTTP would mean
+// owning request smuggling defences, HTTP/2 flow control and HPACK to lose,
+// not gain, throughput.
+func (g *StreamGroup) HandleHTTP(h http.Handler) *StreamGroup {
+	adapter := newHTTPAdapter(h)
+	g.httpAdapter = adapter
+	//: the adapter IS a ConnHandler, so the rest of the engine is unchanged.
+	return g.Handle(adapter)
 }
 
 // Use appends middlewares, outermost first.

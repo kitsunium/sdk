@@ -51,10 +51,9 @@ func (s *Server) release(c *conn) {
 	delete(s.live, c.id)
 	s.liveMu.Unlock()
 	//: closing here rather than in the handler means a handler that forgets —
-	//: or panics — still cannot leak a descriptor.
-	if c.Conn != nil {
-		swallowErr(c.Close())
-	}
+	//: or panics — still cannot leak a descriptor. Close is nil-safe, so a
+	//: connection net/http already closed costs nothing here.
+	swallowErr(c.Close())
 	//: hand the scratch buffer back before dropping the reference to it.
 	if c.scratch != nil {
 		buffer.Put(c.scratch)

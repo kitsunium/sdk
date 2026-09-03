@@ -71,6 +71,10 @@ import (
 type Server = svcserver.Server
 
 // Group is a set of listeners sharing one handler, middleware chain and policy.
+//
+// Group.HandleHTTP mounts an http.Handler on the group's listeners: the group
+// keeps its own limits, TLS identity and drain, and net/http only does the
+// protocol.
 type Group = svcserver.StreamGroup
 
 // Conn is one accepted stream connection. It embeds net.Conn.
