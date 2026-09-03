@@ -127,7 +127,7 @@ New builds a guarded client. A nil policy is refused rather than defaulted to "a
 Config describes an outbound client. Durations accept "5s" as well as a raw nanosecond count, so a configuration file stays readable.
 
 ```go
-type Config = svcclient.Config
+type Config = corenet.ClientConfig
 ```
 
 <a name="Duration"></a>

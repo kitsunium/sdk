@@ -4,10 +4,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "tlsid",
-    srcs = [
-        "file_params.go",
-        "tlsid.go",
-    ],
+    srcs = ["tlsid.go"],
     importpath = "github.com/kitsunium/sdk/internal/service/net/tlsid",
     visibility = [
         "//:__subpackages__",

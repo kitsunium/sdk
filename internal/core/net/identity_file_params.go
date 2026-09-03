@@ -1,10 +1,15 @@
-// Package tlsid — the on-disk TLS material description.
-package tlsid
+// Package net — the on-disk TLS material description.
+package net
 
-// FileParams names TLS material to read from the filesystem. Every path is
-// optional on its own; the combination is validated by Load, which delegates to
-// the core constructor once the bytes are in hand.
-type FileParams struct {
+// IdentityFileParams names TLS material to read from the filesystem. Every path
+// is optional on its own; the combination is validated once the bytes are in
+// hand, by the same core constructor that validates in-memory material.
+//
+// It is the disk-sourced twin of IdentityParams and lives beside it on purpose:
+// the two describe one domain concept — the material an identity is built from
+// — and splitting them across layers would let the rules that govern them drift
+// apart, which is exactly what this domain refuses for TLS.
+type IdentityFileParams struct {
 	// CertFile is the PEM leaf certificate followed by any intermediates.
 	// Supplying it without KeyFile is always a configuration slip, never an
 	// intention, and is refused: an mTLS client that silently degrades to plain

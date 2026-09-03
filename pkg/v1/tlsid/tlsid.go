@@ -78,7 +78,7 @@ type Identity = corenet.IdentityValue
 type Params = corenet.IdentityParams
 
 // FileParams names TLS material to read from the filesystem.
-type FileParams = svctlsid.FileParams
+type FileParams = corenet.IdentityFileParams
 
 // Sentinels returned by this package. Match with errors.Is or errs.HasCode.
 var (

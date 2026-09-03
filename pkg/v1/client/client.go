@@ -71,7 +71,7 @@ type Client = svcclient.Client
 
 // Config describes an outbound client. Durations accept "5s" as well as a raw
 // nanosecond count, so a configuration file stays readable.
-type Config = svcclient.Config
+type Config = corenet.ClientConfig
 
 // Response is a fully-read outbound response.
 type Response = corenet.ResponseValue

@@ -18,7 +18,7 @@ import (
 // field, never a silently skipped one: a trust bundle that fails to load must
 // not degrade into "trust the platform", and a client keypair that fails to
 // load must not degrade into an anonymous connection.
-func Load(p FileParams) (id corenet.IdentityValue, err error) {
+func Load(p corenet.IdentityFileParams) (id corenet.IdentityValue, err error) {
 	certPEM, err := readMaterial(p.CertFile, "cert_file")
 	//: a configured-but-unreadable file must not be skipped silently.
 	if err != nil {

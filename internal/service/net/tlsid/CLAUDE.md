@@ -13,11 +13,14 @@ accept what the other refuses.
 ## Surface
 
 ```go
-type FileParams struct { CertFile, KeyFile, RootsFile, ClientCAFile, ServerName string
-                         MinVersion uint16; NextProtos []string; RequireClientCert bool }
-
-func Load(p FileParams) (corenet.IdentityValue, error)
+func Load(p corenet.IdentityFileParams) (corenet.IdentityValue, error)
 ```
+
+The parameter type lives in `internal/core/net`, beside `IdentityParams`, its
+in-memory twin. Both describe the material an identity is built from, which is
+core's vocabulary; this package contributes the filesystem I/O and nothing else.
+Declaring the on-disk half here would have put one domain concept on both sides
+of the layer boundary and left the two free to drift.
 
 Public façade: `pkg/v1/tlsid`.
 

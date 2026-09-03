@@ -60,6 +60,27 @@ facades. Service implementations and facades declare **zero** new codes; they
 implementation per primitive; a runtime plug-in registry would be
 over-abstraction.
 
+**Where the line falls, precisely.** "Every value type" is meant literally, and
+it is the half of D1 easiest to let slide. `ClientConfig` and
+`IdentityFileParams` are declared in `internal/core/net`, not in the service
+packages that consume them: a consumer decodes a network stanza against the
+contract layer alone, and `IdentityFileParams` stays beside `IdentityParams` so
+disk- and memory-sourced material cannot be held to different standards — the
+very split this domain exists to prevent. Both started in `internal/service/net`
+and were moved once the asymmetry was pointed out.
+
+The **engine handles do not follow them**, and that is not a concession. `Client`
+and `Server`, the `StreamGroup` / `PacketGroup` handles, and the `Option` /
+`GroupOption` closures are the implementation itself — the `*http.Client`, the
+listener set, the lifecycle state. Core has no counterpart for them to alias.
+Creating one would mean hoisting `net/http` and the listener engine into the
+contract layer, which erases the core/service boundary instead of enforcing it,
+or returning interfaces from `New` and cascading that through `Group`'s fluent
+builder into a `pkg/v1` surface that cannot gain a method after v1.0.0. So
+`pkg/v1/{client,server}` alias those five names out of `internal/service/net`
+deliberately, exactly as `pkg/v1/logger` aliases `Builder` and `pkg/v1/cgroup`
+aliases `Option`. `pkg/CLAUDE.md` §Conventions states the general rule.
+
 Inside `internal/core/net` the stdlib is imported as `stdnet "net"` so a reader
 never has to disambiguate the package's own name.
 
@@ -286,13 +307,11 @@ type Params struct {
     RequireClientCert bool   // server side: turns TLS into mTLS
 }
 
-type FileParams struct {
-    CertFile, KeyFile, RootsFile, ClientCAFile string
-    ServerName                                 string
-    MinVersion                                 uint16
-    NextProtos                                 []string
-    RequireClientCert                          bool
-}
+// Declared in core beside Params, not in the service package that reads the
+// files: both describe the material an identity is built from (D1).
+type FileParams = corenet.IdentityFileParams // { CertFile, KeyFile, RootsFile,
+//   ClientCAFile, ServerName string; MinVersion uint16; NextProtos []string;
+//   RequireClientCert bool }
 
 func New(p Params) (Identity, error)      // in-memory material
 func Load(p FileParams) (Identity, error) // from disk
@@ -311,16 +330,14 @@ type Policy      = corenet.Policy       // interface { Allow(RequestInfo) error 
 type PolicyFunc  = corenet.PolicyFunc
 type CallHook    = corenet.CallHook     // func(CallInfo)
 
-type Config struct {
-    BaseURL         string   `json:"base_url"`
-    DialTimeout     Duration `json:"dial_timeout"`
-    HandshakeTimeout Duration `json:"handshake_timeout"`
-    ResponseTimeout Duration `json:"response_timeout"` // response headers
-    TotalTimeout    Duration `json:"total_timeout"`
-    MaxResponseSize int64    `json:"max_response_size"`
-    MaxRedirects    int      `json:"max_redirects"`
-    DefaultHeaders  map[string]string `json:"default_headers"`
-}
+// Declared in core beside the inbound half's LimitsValue / TimeoutsValue (D1).
+type Config = corenet.ClientConfig
+// { BaseURL string; DialTimeout, HandshakeTimeout, ResponseTimeout,
+//   TotalTimeout Duration; MaxResponseSize int64; MaxRedirects int;
+//   DefaultHeaders map[string]string }
+
+// The handle itself stays in the service layer, aliased here (D1).
+type Client = svcclient.Client
 
 type Option func(*options)
 func WithIdentity(id tlsid.Identity) Option

@@ -28,6 +28,8 @@ name.
 | `wrap.go` | `wrapAs(sentinel, cause, fields...)` — origin-wins sentinel wrapping |
 | `identity.go` | `IdentityValue` — the opaque, redacting TLS identity + `NewIdentity` |
 | `identity_params.go` | `IdentityParams` — in-memory TLS material |
+| `identity_file_params.go` | `IdentityFileParams` — on-disk TLS material; the twin of `IdentityParams`, loaded by `service/net/tlsid` |
+| `client_config.go` | `ClientConfig` — the outbound client's knobs, beside the inbound `LimitsValue` / `TimeoutsValue` |
 | `material.go` | PEM parsing helpers; **the `AppendCertsFromPEM` trap is closed here** |
 | `duration.go` | `DurationValue` — config-friendly duration (`"30s"` or nanoseconds) |
 | `address.go` | `AddressValue` — one socket to bind |

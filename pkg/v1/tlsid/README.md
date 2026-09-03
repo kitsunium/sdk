@@ -84,7 +84,7 @@ var (
 FileParams names TLS material to read from the filesystem.
 
 ```go
-type FileParams = svctlsid.FileParams
+type FileParams = corenet.IdentityFileParams
 ```
 
 <a name="Identity"></a>

@@ -27,7 +27,7 @@ func newServer(t *testing.T, handler http.HandlerFunc) (srv *httptest.Server, re
 }
 
 // newClient builds a guarded client against srv carrying the read-only policy.
-func newClient(t *testing.T, srv *httptest.Server, cfg client.Config) *client.Client {
+func newClient(t *testing.T, srv *httptest.Server, cfg corenet.ClientConfig) *client.Client {
 	t.Helper()
 	cfg.BaseURL = srv.URL
 	c, err := client.New(cfg, corenet.IdentityValue{}, buildReadOnly(t), nil)
@@ -50,7 +50,7 @@ func TestPolicyIsEnforcedInTheTransport(t *testing.T) {
 	srv, reached := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	c := newClient(t, srv, client.Config{})
+	c := newClient(t, srv, corenet.ClientConfig{})
 
 	//: forge a request through the raw client, deliberately bypassing Do.
 	req, err := http.NewRequestWithContext(
@@ -77,7 +77,7 @@ func TestPolicyIsEnforcedInTheTransport(t *testing.T) {
 // unguarded egress path wearing the name of a guarded one is worse than none.
 func TestNilPolicyIsRefused(t *testing.T) {
 	t.Parallel()
-	if _, err := client.New(client.Config{}, corenet.IdentityValue{}, nil, nil); err == nil {
+	if _, err := client.New(corenet.ClientConfig{}, corenet.IdentityValue{}, nil, nil); err == nil {
 		t.Fatal("a client was built with no policy")
 	}
 }
@@ -90,7 +90,7 @@ func TestNoContentIsNotAnError(t *testing.T) {
 	srv, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	c := newClient(t, srv, client.Config{})
+	c := newClient(t, srv, corenet.ClientConfig{})
 	resp, err := c.Get(context.Background(), "/v1/subscribers", nil)
 	if err != nil {
 		t.Fatalf("204 reported as an error: %v", err)
@@ -112,7 +112,7 @@ func TestNonSuccessReturnsBodyAndError(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 		writeOrFail(t, w, `{"detail":"enable and disable are exclusive"}`)
 	})
-	c := newClient(t, srv, client.Config{})
+	c := newClient(t, srv, corenet.ClientConfig{})
 	resp, err := c.Get(context.Background(), "/v1/subscribers", url.Values{"enable": {"true"}})
 	if err == nil {
 		t.Fatal("a 400 was reported as success")
@@ -133,7 +133,7 @@ func TestOversizedBodyFailsRatherThanTruncating(t *testing.T) {
 	srv, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		writeOrFail(t, w, string(make([]byte, 4096)))
 	})
-	c := newClient(t, srv, client.Config{MaxResponseSize: 128})
+	c := newClient(t, srv, corenet.ClientConfig{MaxResponseSize: 128})
 	_, err := c.Get(context.Background(), "/v1/subscribers", nil)
 	if err == nil {
 		t.Fatal("an oversized body was accepted")
@@ -152,7 +152,7 @@ func TestQueryIsEncodedByTheClient(t *testing.T) {
 		seen <- r.URL.RawQuery
 		w.WriteHeader(http.StatusOK)
 	})
-	c := newClient(t, srv, client.Config{})
+	c := newClient(t, srv, corenet.ClientConfig{})
 	_, err := c.Get(context.Background(), "/v1/subscribers", url.Values{"profileId": {"P tenant/a"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -170,7 +170,7 @@ func TestCallHookReportsTheCall(t *testing.T) {
 		writeOrFail(t, w, "0123456789")
 	})
 	calls := make(chan corenet.CallValue, 4)
-	c, err := client.New(client.Config{BaseURL: srv.URL}, corenet.IdentityValue{},
+	c, err := client.New(corenet.ClientConfig{BaseURL: srv.URL}, corenet.IdentityValue{},
 		buildReadOnly(t), func(call corenet.CallValue) { calls <- call })
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -199,7 +199,7 @@ func TestRefusedCallIsObservedWithoutAStatus(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 	calls := make(chan corenet.CallValue, 4)
-	c, err := client.New(client.Config{BaseURL: srv.URL}, corenet.IdentityValue{},
+	c, err := client.New(corenet.ClientConfig{BaseURL: srv.URL}, corenet.IdentityValue{},
 		buildReadOnly(t), func(call corenet.CallValue) { calls <- call })
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -286,7 +286,7 @@ func runBodySizeCase(t *testing.T, tc bodySizeCase, ceiling int64) {
 	srv, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		writeOrFail(t, w, strings.Repeat("x", tc.size))
 	})
-	c := newClient(t, srv, client.Config{MaxResponseSize: ceiling})
+	c := newClient(t, srv, corenet.ClientConfig{MaxResponseSize: ceiling})
 	resp, err := c.Get(context.Background(), "/v1/subscribers", nil)
 	//: only a body PAST the ceiling may be refused.
 	if tc.wantErr {
@@ -320,7 +320,7 @@ func TestBodyReadFailureIsTyped(t *testing.T) {
 		w.Header().Set("Content-Length", "4096")
 		writeOrFail(t, w, "partial")
 	})
-	c := newClient(t, srv, client.Config{})
+	c := newClient(t, srv, corenet.ClientConfig{})
 	_, err := c.Get(context.Background(), "/v1/subscribers", nil)
 	if err == nil {
 		t.Fatal("a body cut short was reported as success")

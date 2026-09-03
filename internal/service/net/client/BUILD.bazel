@@ -7,7 +7,6 @@ go_library(
     srcs = [
         "capped_body.go",
         "client.go",
-        "config.go",
         "conjunction.go",
         "defaults.go",
         "deny_policy.go",

@@ -33,7 +33,7 @@ type Client struct {
 //
 // A nil policy is refused rather than defaulted to "allow everything": an
 // unguarded egress path wearing the name of a guarded one is worse than none.
-func New(cfg Config, id corenet.IdentityValue, policy corenet.Policy, hook corenet.CallHook) (c *Client, err error) {
+func New(cfg corenet.ClientConfig, id corenet.IdentityValue, policy corenet.Policy, hook corenet.CallHook) (c *Client, err error) {
 	//: refuse instead of defaulting open.
 	if policy == nil {
 		//: a missing policy is a configuration error, not permission.
@@ -211,7 +211,7 @@ func parseBase(raw string) (base *url.URL, err error) {
 }
 
 // newTransport builds the per-phase-bounded transport.
-func newTransport(cfg Config, id corenet.IdentityValue) *http.Transport {
+func newTransport(cfg corenet.ClientConfig, id corenet.IdentityValue) *http.Transport {
 	//: each phase is bounded separately so a slow peer is distinguishable from
 	//: a large body, which a single overall timeout cannot tell apart.
 	return &http.Transport{

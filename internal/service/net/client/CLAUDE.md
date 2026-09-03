@@ -22,7 +22,7 @@ Public façade: `pkg/v1/client`.
 | `guard.go` | the policy-enforcing `http.RoundTripper` |
 | `capped_body.go` | the response ceiling; fails rather than truncating |
 | `policies.go` | `AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies` |
-| `config.go`, `defaults.go` | typed configuration and its safe defaults |
+| `defaults.go` | the safe defaults filled into `corenet.ClientConfig`, whose type core declares beside the inbound half's `LimitsValue` / `TimeoutsValue` |
 | `path.go` | `checkPath` / `hasDotSegment` / `hasEncodedSeparator` — safety checks run *before* patterns |
 
 ## Why-this-shape

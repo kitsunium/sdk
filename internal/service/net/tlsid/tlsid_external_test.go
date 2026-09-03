@@ -76,7 +76,7 @@ func write(t *testing.T, path string, data []byte) {
 // loadCase describes one Load scenario.
 type loadCase struct {
 	name    string
-	params  func(md materialDir) tlsid.FileParams
+	params  func(md materialDir) corenet.IdentityFileParams
 	wantErr bool
 }
 
@@ -90,52 +90,52 @@ func TestLoadRefusesUnusableMaterial(t *testing.T) {
 	cases := []loadCase{
 		{
 			name:   "no material at all is a verify-only identity",
-			params: func(materialDir) tlsid.FileParams { return tlsid.FileParams{} },
+			params: func(materialDir) corenet.IdentityFileParams { return corenet.IdentityFileParams{} },
 		},
 		{
 			name: "a real CA bundle loads",
-			params: func(md materialDir) tlsid.FileParams {
-				return tlsid.FileParams{RootsFile: md.Cert}
+			params: func(md materialDir) corenet.IdentityFileParams {
+				return corenet.IdentityFileParams{RootsFile: md.Cert}
 			},
 		},
 		{
 			name: "a text file as CA bundle",
-			params: func(md materialDir) tlsid.FileParams {
-				return tlsid.FileParams{RootsFile: md.Junk}
+			params: func(md materialDir) corenet.IdentityFileParams {
+				return corenet.IdentityFileParams{RootsFile: md.Junk}
 			},
 			wantErr: true,
 		},
 		{
 			name: "an empty CA bundle must not widen trust silently",
-			params: func(md materialDir) tlsid.FileParams {
-				return tlsid.FileParams{RootsFile: md.Empty}
+			params: func(md materialDir) corenet.IdentityFileParams {
+				return corenet.IdentityFileParams{RootsFile: md.Empty}
 			},
 			wantErr: true,
 		},
 		{
 			name: "a missing CA bundle",
-			params: func(md materialDir) tlsid.FileParams {
-				return tlsid.FileParams{RootsFile: md.Cert + ".absent"}
+			params: func(md materialDir) corenet.IdentityFileParams {
+				return corenet.IdentityFileParams{RootsFile: md.Cert + ".absent"}
 			},
 			wantErr: true,
 		},
 		{
 			name: "certificate without key must not degrade to plain TLS",
-			params: func(md materialDir) tlsid.FileParams {
-				return tlsid.FileParams{CertFile: md.Cert}
+			params: func(md materialDir) corenet.IdentityFileParams {
+				return corenet.IdentityFileParams{CertFile: md.Cert}
 			},
 			wantErr: true,
 		},
 		{
 			name: "a full client keypair loads",
-			params: func(md materialDir) tlsid.FileParams {
-				return tlsid.FileParams{CertFile: md.Cert, KeyFile: md.Key}
+			params: func(md materialDir) corenet.IdentityFileParams {
+				return corenet.IdentityFileParams{CertFile: md.Cert, KeyFile: md.Key}
 			},
 		},
 		{
 			name: "mutual TLS without a client CA bundle",
-			params: func(md materialDir) tlsid.FileParams {
-				return tlsid.FileParams{CertFile: md.Cert, KeyFile: md.Key, RequireClientCert: true}
+			params: func(md materialDir) corenet.IdentityFileParams {
+				return corenet.IdentityFileParams{CertFile: md.Cert, KeyFile: md.Key, RequireClientCert: true}
 			},
 			wantErr: true,
 		},
@@ -171,7 +171,7 @@ func runLoadCase(t *testing.T, tc loadCase, md materialDir) {
 func TestLoadCarriesServerName(t *testing.T) {
 	t.Parallel()
 	md := writeMaterial(t)
-	id, err := tlsid.Load(tlsid.FileParams{RootsFile: md.Cert, ServerName: "sdm.core.svc"})
+	id, err := tlsid.Load(corenet.IdentityFileParams{RootsFile: md.Cert, ServerName: "sdm.core.svc"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestLoadCarriesServerName(t *testing.T) {
 func TestLoadedIdentityStaysRedacted(t *testing.T) {
 	t.Parallel()
 	md := writeMaterial(t)
-	id, err := tlsid.Load(tlsid.FileParams{CertFile: md.Cert, KeyFile: md.Key})
+	id, err := tlsid.Load(corenet.IdentityFileParams{CertFile: md.Cert, KeyFile: md.Key})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

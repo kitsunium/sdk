@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "address.go",
         "call.go",
+        "client_config.go",
         "codes.go",
         "conn.go",
         "conn_handler.go",
@@ -15,6 +16,7 @@ go_library(
         "handler_compliance.go",
         "hook.go",
         "identity.go",
+        "identity_file_params.go",
         "identity_params.go",
         "limits.go",
         "listener_state.go",

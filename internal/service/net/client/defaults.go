@@ -33,7 +33,7 @@ const (
 // It takes and returns a value rather than mutating through a pointer so the
 // caller's own Config is never modified behind its back: a client must not be
 // able to change the configuration its caller still holds.
-func withDefaults(cfg Config) Config {
+func withDefaults(cfg corenet.ClientConfig) corenet.ClientConfig {
 	//: a zero duration means "unset", so each field falls back independently.
 	if cfg.DialTimeout == 0 {
 		cfg.DialTimeout = corenet.DurationValue(defaultDialTimeout)
