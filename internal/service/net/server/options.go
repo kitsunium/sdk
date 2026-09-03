@@ -73,3 +73,22 @@ func ReadBufferSize(n int) GroupOption {
 		g.limits.ReadBufferSize = n
 	}
 }
+
+// MaxPacketSize caps the datagram size a group accepts. A larger datagram is
+// truncated by the kernel, so the ceiling is also the read buffer size.
+func MaxPacketSize(n int) GroupOption {
+	//: the option is applied by the constructor, in declaration order.
+	return func(g *StreamGroup) {
+		g.limits.MaxPacketSize = n
+	}
+}
+
+// BatchSize sets how many datagrams one read attempts to collect. One disables
+// batching explicitly; zero selects the platform default. Where the platform
+// cannot batch, State reports the degradation rather than hiding it.
+func BatchSize(n int) GroupOption {
+	//: the option is applied by the constructor, in declaration order.
+	return func(g *StreamGroup) {
+		g.limits.BatchSize = n
+	}
+}

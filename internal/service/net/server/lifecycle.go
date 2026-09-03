@@ -37,6 +37,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.phase.Store(uint32(corenet.PhaseStarting))
 	groups := slices.Clone(s.groups)
+	packetGroups := slices.Clone(s.packetGroups)
 	s.mu.Unlock()
 
 	//: the run context outlives the caller's ctx so cancelling the caller does
@@ -45,7 +46,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.runCtx = runCtx
 	s.stop = cancel
 	//: a failed bind must not leave earlier listeners open.
-	if err := s.bindAll(ctx, groups); err != nil {
+	if err := s.bindEverything(ctx, groups, packetGroups); err != nil {
 		//: closing here is best-effort cleanup; the bind error is what matters.
 		if cerr := s.Close(); cerr != nil {
 			//: report both, so a cleanup failure never hides the bind failure.
@@ -58,6 +59,92 @@ func (s *Server) Start(ctx context.Context) error {
 	s.phase.Store(uint32(corenet.PhaseServing))
 	//: every listener is bound and accepting.
 	return nil
+}
+
+// bindEverything binds both natures, streams first so a mixed server's ports
+// come up in declaration order.
+func (s *Server) bindEverything(ctx context.Context, groups []*StreamGroup, packetGroups []*PacketGroup) error {
+	//: streams first, then datagrams.
+	if err := s.bindAll(ctx, groups); err != nil {
+		//: abort before binding any datagram socket.
+		return err
+	}
+	//: datagram groups bind the same way, minus the accept step.
+	return s.bindPacketAll(ctx, packetGroups)
+}
+
+// bindPacketAll binds every datagram group, starting a read loop per socket.
+func (s *Server) bindPacketAll(ctx context.Context, groups []*PacketGroup) error {
+	//: bind in declaration order so a failure is reproducible.
+	for _, group := range groups {
+		//: a group with no handler would read datagrams and drop them.
+		if group.handler == nil {
+			//: refuse rather than discard traffic silently.
+			return errs.Wrap(corenet.HandlerMissing, errs.WrapParams{},
+				errs.String("group", group.name))
+		}
+		//: a group with no address is almost always a wiring mistake.
+		if len(group.addrs) == 0 {
+			//: refuse rather than start a group that listens nowhere.
+			return errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+				errs.String("group", group.name), errs.String("why", "no listen address"))
+		}
+		//: propagate the first bind failure.
+		if err := s.bindPacketGroup(ctx, group); err != nil {
+			//: abort startup; Start unwinds whatever is already bound.
+			return err
+		}
+	}
+	//: every datagram group is bound.
+	return nil
+}
+
+// bindPacketGroup binds one datagram group and starts its read loops.
+//
+// Goroutine lifecycle: it starts exactly one readLoop per address. Each is
+// owned by the Server, holds an inFlight token released on exit, and terminates
+// when Close or Shutdown closes its socket.
+func (s *Server) bindPacketGroup(ctx context.Context, group *PacketGroup) error {
+	handler := group.resolved()
+	//: one socket and one read goroutine per address.
+	for _, addr := range group.addrs {
+		pc, err := listenPacket(ctx, addr)
+		//: surface the address that could not be bound.
+		if err != nil {
+			//: abort startup; Start unwinds whatever is already bound.
+			return err
+		}
+		bound := &boundPacketConn{group: group.name, addr: addr, pc: pc}
+		degraded, reason := batchDegradation(group.limits)
+		s.mu.Lock()
+		s.packetConns = append(s.packetConns, bound)
+		s.states = append(s.states, corenet.ListenerStateValue{
+			Group:          group.name,
+			Address:        pc.LocalAddr().String(),
+			Network:        addr.Network,
+			Shards:         1,
+			Degraded:       degraded,
+			DegradedReason: reason,
+		})
+		s.mu.Unlock()
+		s.inFlight.Add(1)
+		go s.readLoop(bound, group, handler)
+	}
+	//: every address in the group is bound.
+	return nil
+}
+
+// batchDegradation reports whether batched reading was asked for and is
+// unavailable, and why. A silent fallback is indistinguishable from a working
+// one, so it is surfaced through State rather than logged once at startup.
+func batchDegradation(limits corenet.LimitsValue) (degraded bool, reason string) {
+	//: only a group that actually asked for batching is degraded by its absence.
+	if batchAvailable() || batchSize(limits) <= 1 {
+		//: got what it asked for, so there is nothing to report.
+		return false, ""
+	}
+	//: name the fallback in plain words for whoever reads State.
+	return true, "batched datagram read unavailable on this platform; reading one per syscall"
 }
 
 // bindAll binds every group, starting an accept loop per listener.
@@ -299,7 +386,13 @@ func (s *Server) closeListeners() {
 	s.mu.Lock()
 	listeners := s.listeners
 	s.listeners = nil
+	packetConns := s.packetConns
+	s.packetConns = nil
 	s.mu.Unlock()
+	//: closing a datagram socket is what ends its read loop.
+	for _, bound := range packetConns {
+		swallowErr(bound.Close())
+	}
 	//: close every listener that was still open.
 	//: close every listener that was still open.
 	for _, bound := range listeners {

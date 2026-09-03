@@ -38,6 +38,12 @@ type Server struct {
 	mu sync.Mutex
 	// groups preserves declaration order so listeners bind predictably.
 	groups []*StreamGroup
+	// packetGroups preserves declaration order for the datagram side.
+	packetGroups []*PacketGroup
+	// packetByName rejects a duplicate datagram group name.
+	packetByName map[string]*PacketGroup
+	// packetConns are the live bound datagram sockets.
+	packetConns []*boundPacketConn
 	// byName rejects a duplicate group name at declaration time.
 	byName map[string]*StreamGroup
 	// declErr is the first declaration error, surfaced by Start.
@@ -87,6 +93,7 @@ func newPooledConn() *conn {
 func New(opts ...Option) *Server {
 	s := &Server{
 		byName:       make(map[string]*StreamGroup, expectedGroups),
+		packetByName: make(map[string]*PacketGroup, expectedGroups),
 		live:         make(map[uint64]stdnet.Conn, expectedLiveConns),
 		drainTimeout: defaultDrainTimeout,
 		connPool:     recycler.NewPool(newPooledConn),
@@ -126,6 +133,37 @@ func (s *Server) Group(name string, opts ...GroupOption) *StreamGroup {
 	}
 	s.byName[name] = group
 	s.groups = append(s.groups, group)
+	//: returned so the caller can attach a handler in the same expression.
+	return group
+}
+
+// PacketGroup declares a datagram listener group and returns it for handler
+// attachment. It mirrors Group deliberately: the point of the domain is that a
+// UDP service is declared the same way a TCP one is.
+func (s *Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	//: names are shared across both natures, so one group cannot shadow another
+	//: in logs, metrics or State.
+	_, streamTaken := s.byName[name]
+	_, packetTaken := s.packetByName[name]
+	//: a name shared with either nature would make logs and State ambiguous.
+	if streamTaken || packetTaken {
+		s.recordDeclError(errs.Wrap(corenet.GroupDuplicate, errs.WrapParams{},
+			errs.String("group", name)))
+		//: a detached group keeps the caller's chained calls safe.
+		return &PacketGroup{name: name}
+	}
+	group := &PacketGroup{name: name}
+	shim := &StreamGroup{}
+	//: the option set is shared, so apply it to a shim and copy what applies.
+	for _, opt := range opts {
+		opt(shim)
+	}
+	group.addrs = shim.addrs
+	group.limits = shim.limits
+	s.packetByName[name] = group
+	s.packetGroups = append(s.packetGroups, group)
 	//: returned so the caller can attach a handler in the same expression.
 	return group
 }

@@ -53,8 +53,10 @@ One option covers both. A [github.com/kitsunium/sdk/pkg/v1/tlsid.Identity](<http
 - [type Conn](<#Conn>)
 - [type Group](<#Group>)
 - [type GroupOption](<#GroupOption>)
+  - [func BatchSize\(n int\) GroupOption](<#BatchSize>)
   - [func IdleTimeout\(d time.Duration\) GroupOption](<#IdleTimeout>)
   - [func Listen\(network, addr string\) GroupOption](<#Listen>)
+  - [func MaxPacketSize\(n int\) GroupOption](<#MaxPacketSize>)
   - [func ReadBufferSize\(n int\) GroupOption](<#ReadBufferSize>)
   - [func ReadTimeout\(d time.Duration\) GroupOption](<#ReadTimeout>)
   - [func TLS\(id tlsid.Identity\) GroupOption](<#TLS>)
@@ -66,6 +68,12 @@ One option covers both. A [github.com/kitsunium/sdk/pkg/v1/tlsid.Identity](<http
 - [type Middleware](<#Middleware>)
 - [type Option](<#Option>)
   - [func WithDrainTimeout\(d time.Duration\) Option](<#WithDrainTimeout>)
+- [type Packet](<#Packet>)
+- [type PacketGroup](<#PacketGroup>)
+- [type PacketHandler](<#PacketHandler>)
+  - [func ChainPacket\(h PacketHandler, middlewares ...PacketMiddleware\) PacketHandler](<#ChainPacket>)
+- [type PacketHandlerFunc](<#PacketHandlerFunc>)
+- [type PacketMiddleware](<#PacketMiddleware>)
 - [type Phase](<#Phase>)
 - [type Server](<#Server>)
   - [func New\(opts ...Option\) \*Server](<#New>)
@@ -124,6 +132,15 @@ GroupOption configures a Group.
 type GroupOption = svcserver.GroupOption
 ```
 
+<a name="BatchSize"></a>
+### func [BatchSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L228>)
+
+```go
+func BatchSize(n int) GroupOption
+```
+
+BatchSize sets how many datagrams one read attempts to collect. One disables batching; zero selects the platform default. Where the platform cannot batch, State reports the degradation rather than hiding it.
+
 <a name="IdleTimeout"></a>
 ### func [IdleTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L183>)
 
@@ -141,6 +158,15 @@ func Listen(network, addr string) GroupOption
 ```
 
 Listen adds an address to a group. Repeat it to bind several addresses to one handler — a TCP port and a Unix socket, for instance.
+
+<a name="MaxPacketSize"></a>
+### func [MaxPacketSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L220>)
+
+```go
+func MaxPacketSize(n int) GroupOption
+```
+
+MaxPacketSize caps the datagram size a group accepts. A larger datagram is truncated by the kernel, so the ceiling is also the read buffer size.
 
 <a name="ReadBufferSize"></a>
 ### func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L191>)
@@ -242,6 +268,60 @@ func WithDrainTimeout(d time.Duration) Option
 ```
 
 WithDrainTimeout bounds how long Shutdown waits for in\-flight connections before severing them.
+
+<a name="Packet"></a>
+## type [Packet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L207>)
+
+Packet is one received datagram.
+
+```go
+type Packet = corenet.Packet
+```
+
+<a name="PacketGroup"></a>
+## type [PacketGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L204>)
+
+PacketGroup is a set of datagram sockets sharing one handler and chain.
+
+```go
+type PacketGroup = svcserver.PacketGroup
+```
+
+<a name="PacketHandler"></a>
+## type [PacketHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L210>)
+
+PacketHandler serves one received datagram.
+
+```go
+type PacketHandler = corenet.PacketHandler
+```
+
+<a name="ChainPacket"></a>
+### func [ChainPacket](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L234>)
+
+```go
+func ChainPacket(h PacketHandler, middlewares ...PacketMiddleware) PacketHandler
+```
+
+ChainPacket applies middlewares to a datagram handler, outermost first.
+
+<a name="PacketHandlerFunc"></a>
+## type [PacketHandlerFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L213>)
+
+PacketHandlerFunc adapts a plain function to PacketHandler.
+
+```go
+type PacketHandlerFunc = corenet.PacketHandlerFunc
+```
+
+<a name="PacketMiddleware"></a>
+## type [PacketMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L216>)
+
+PacketMiddleware decorates a datagram handler.
+
+```go
+type PacketMiddleware = corenet.Middleware[corenet.PacketHandler]
+```
 
 <a name="Phase"></a>
 ## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L95>)

@@ -20,6 +20,15 @@ Public façade: `pkg/v1/server`.
 | `conn.go` | the pooled `corenet.Conn` implementation |
 | `pool.go` | per-connection recycling + the live-socket registry |
 | `options.go` | `Option` / `GroupOption` |
+| `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
+| `packet.go` | the pooled `corenet.Packet` implementation |
+| `packet_listen.go` | datagram socket construction; family validation; ceilings |
+| `packet_loop.go` | the datagram read loop and dispatch |
+| `batch.go` | the `datagramSource` seam + reusable read slots |
+| `batch_portable.go` | one datagram per syscall — the floor everywhere |
+| `multireader_linux.go` | `recvmmsg` batched reader |
+| `multireader_mmsghdr_linux.go` | the cited `struct mmsghdr` layout |
+| `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
 
 ## Why-this-shape
 
@@ -57,6 +66,40 @@ Public façade: `pkg/v1/server`.
   panics still cannot leak a descriptor or a pooled wrapper.
 - **`reset` drops every reference.** A pooled entry that kept its `net.Conn`
   would pin a closed socket for as long as the pool lives.
+
+## The datagram path
+
+- **One `datagramSource` seam, two implementations.** The read loop is written
+  once against "give me up to N datagrams"; the platform decides how many
+  syscalls that costs. On Linux it is one `recvmmsg`; elsewhere it is a
+  `ReadFrom` per datagram. The loop above does not change either way.
+- **`golang.org/x/net/ipv4.PacketConn.ReadBatch` is unavailable to us**: it
+  transitively imports `golang.org/x/sys`, banned SDK-wide (ADR 0016/0018). The
+  ABI is therefore declared in-tree and cited, the same discipline `proc`
+  already uses. `struct mmsghdr` lives in `multireader_mmsghdr_linux.go` with
+  its header quoted; `syscall.Msghdr`, `Iovec`, `SYS_RECVMMSG` and
+  `MSG_WAITFORONE` are all in the stdlib.
+- **The syscall is driven inside `RawConn.Read`.** Returning false on `EAGAIN`
+  parks the goroutine on the **netpoller**, exactly as a blocking `ReadFrom`
+  would. Batching does not cost us runtime integration.
+- **The read slots are allocated once per socket** and wired into the kernel's
+  message array in lockstep, so a steady-state read allocates nothing. This is
+  why the slice-preallocation rules are excluded for this package: the arrays
+  are indexed, never appended to, and rebuilding them would break the lockstep.
+- **`newDatagramSource` falls back rather than fails** when a `PacketConn`
+  exposes no raw descriptor — a wrapper or a test double. Correctness is
+  identical; only the syscall count differs.
+- **The fallback is reported, never silent.** `batchDegradation` returns both a
+  flag and a reason, and they reach `State().Listeners[i]`. A degradation nobody
+  notices is the failure mode the field exists to prevent.
+- **`TestLinuxSelectsTheBatchedReader` is the only test that proves the batched
+  path is in use.** Every behavioural datagram test passes identically on the
+  portable fallback, so without it a broken type assertion would degrade the
+  engine to one syscall per datagram with the whole suite still green.
+- **Handlers run inline on the read goroutine.** A hand-off would cost a channel
+  send and an allocation per packet, undoing the batching this path exists for.
+  A handler that must block should copy the payload and hand it to its own
+  worker — which is why `Packet.Data` documents its lifetime.
 
 ## Concurrency
 

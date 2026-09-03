@@ -199,3 +199,39 @@ func WithDrainTimeout(d time.Duration) Option {
 	//: forwarded unchanged.
 	return svcserver.WithDrainTimeout(d)
 }
+
+// PacketGroup is a set of datagram sockets sharing one handler and chain.
+type PacketGroup = svcserver.PacketGroup
+
+// Packet is one received datagram.
+type Packet = corenet.Packet
+
+// PacketHandler serves one received datagram.
+type PacketHandler = corenet.PacketHandler
+
+// PacketHandlerFunc adapts a plain function to PacketHandler.
+type PacketHandlerFunc = corenet.PacketHandlerFunc
+
+// PacketMiddleware decorates a datagram handler.
+type PacketMiddleware = corenet.Middleware[corenet.PacketHandler]
+
+// MaxPacketSize caps the datagram size a group accepts. A larger datagram is
+// truncated by the kernel, so the ceiling is also the read buffer size.
+func MaxPacketSize(n int) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.MaxPacketSize(n)
+}
+
+// BatchSize sets how many datagrams one read attempts to collect. One disables
+// batching; zero selects the platform default. Where the platform cannot batch,
+// State reports the degradation rather than hiding it.
+func BatchSize(n int) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.BatchSize(n)
+}
+
+// ChainPacket applies middlewares to a datagram handler, outermost first.
+func ChainPacket(h PacketHandler, middlewares ...PacketMiddleware) PacketHandler {
+	//: the same generic core helper serves both handler natures.
+	return corenet.Chain(h, middlewares...)
+}

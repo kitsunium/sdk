@@ -5,13 +5,27 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "server",
     srcs = [
+        "batch.go",
+        "batch_compliance.go",
+        "batch_portable.go",
         "conn.go",
         "conn_compliance.go",
+        "datagram_source_linux.go",
+        "datagram_source_other.go",
         "lifecycle.go",
+        "linux_compliance.go",
         "listen.go",
+        "multireader_linux.go",
+        "multireader_mmsghdr_linux.go",
         "options.go",
+        "packet.go",
+        "packet_group.go",
+        "packet_listen.go",
+        "packet_loop.go",
         "pool.go",
+        "raw_conn_provider_linux.go",
         "server.go",
+        "sockaddr_linux.go",
         "stream_group.go",
         "swallow.go",
     ],
@@ -39,9 +53,13 @@ alias(
 
 go_test(
     name = "server_test",
-    srcs = ["server_external_test.go"],
+    srcs = [
+        "batch_internal_test.go",
+        "packet_external_test.go",
+        "server_external_test.go",
+    ],
+    embed = [":server"],
     deps = [
-        ":server",
         "//internal/core/net",
         "//internal/kernel/errs",
     ],

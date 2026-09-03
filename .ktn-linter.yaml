@@ -186,6 +186,36 @@ rules:
   # supervisor's environment (secrets included) into the child. Here the
   # lint-preferred nil is the security bug, so the non-nil empty slice is
   # deliberate. Scoped to the spawn implementation ONLY.
+  # KTN-VAR-SLICECAP / KTN-VAR-MAKEAPPEND / KTN-VAR-SYNCPOOL (phase 4) —
+  # the datagram read path allocates by LENGTH on purpose.
+  #
+  # newSlots and multiReader.wire build fixed-size arrays that are then INDEXED
+  # in lockstep — never appended to. The length is the batch size, and the
+  # buffers are wired into the kernel's mmsghdr array once and reused for the
+  # life of the socket, which is exactly what makes a batched read allocate
+  # nothing. Rebuilding them with make([]T, 0, n)+append would break the
+  # lockstep the kernel relies on; routing them through a sync.Pool would hand
+  # the kernel a buffer that another goroutine may reclaim mid-read.
+  KTN-VAR-SLICECAP:
+    exclude:
+      - "**/internal/service/net/server/**"
+  KTN-VAR-MAKEAPPEND:
+    exclude:
+      - "**/internal/service/net/server/**"
+  KTN-VAR-SYNCPOOL:
+    exclude:
+      - "**/internal/service/net/server/**"
+
+  # KTN-FUNC-EMPTYSENTINEL (phase 5) — "" is a domain value here, not a sentinel.
+  #
+  # zoneOf returns the IPv6 zone, where "" is the correct net.UDPAddr.Zone for a
+  # datagram with no scope — the overwhelming majority. batchDegradation returns
+  # the reason a listener fell back, where "" means "it did not". Pairing either
+  # with a bool would force every caller to discard it.
+  KTN-FUNC-EMPTYSENTINEL:
+    exclude:
+      - "**/internal/service/net/server/**"
+
   # KTN-STRUCT-CTOR (phase 4) — Effective Go's own naming rule wins.
   #
   # The rule wants a struct named Client to be built by NewClient(). This package
