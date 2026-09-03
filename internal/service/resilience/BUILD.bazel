@@ -42,6 +42,7 @@ alias(
 go_test(
     name = "resilience_test",
     srcs = [
+        "misconfigured_internal_test.go",
         "resilience_external_test.go",
         "retryable_internal_test.go",
         "timeout_internal_test.go",

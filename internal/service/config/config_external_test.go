@@ -289,20 +289,39 @@ type sliceConf struct {
 // SD=0A0A01 becoming 0, TIMEOUT=1500ms becoming 1500. The second is the worse
 // one, because the configuration looks accepted.
 func TestEnvTruncationEndToEnd(t *testing.T) {
-	t.Setenv("SLICE_SD", "0A0A01")
-	t.Setenv("SLICE_HOST", "5gc.svc.cluster.local")
-	t.Setenv("SLICE_TIMEOUT", "1500ms")
-	t.Setenv("SLICE_RETRIES", "3")
+	//: a realistic 5G-core environment, set in one loop.
+	for k, v := range map[string]string{
+		"SLICE_SD":      "0A0A01",
+		"SLICE_HOST":    "5gc.svc.cluster.local",
+		"SLICE_TIMEOUT": "1500ms",
+		"SLICE_RETRIES": "3",
+	} {
+		t.Setenv(k, v)
+	}
 	var got sliceConf
 	//: the whole load must succeed — a truncated string field used to abort it.
 	if err := cfg.Load(&got, cfg.EnvSource("SLICE")); err != nil {
 		t.Fatalf("Load: %v, want nil", err)
 	}
-	want := sliceConf{SD: "0A0A01", Host: "5gc.svc.cluster.local", Timeout: "1500ms", Retries: 3}
-	//: each field must carry exactly what the operator set, and the genuinely
-	//: numeric one must still coerce.
-	if got != want {
-		t.Errorf("Load = %+v, want %+v", got, want)
+	type tc struct {
+		name string
+		got  any
+		want any
+	}
+	tests := []tc{
+		{"slice differentiator survives", got.SD, "0A0A01"},
+		{"service name survives", got.Host, "5gc.svc.cluster.local"},
+		{"duration survives", got.Timeout, "1500ms"},
+		//: the genuinely numeric field must still coerce.
+		{"real integer still coerces", got.Retries, 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			//: each field carries exactly what the operator set.
+			if tc.got != tc.want {
+				t.Errorf("got %v (%T), want %v (%T)", tc.got, tc.got, tc.want, tc.want)
+			}
+		})
 	}
 }
 
@@ -387,13 +406,30 @@ func TestEnvSourcePrefixSpelling(t *testing.T) {
 // a trailing underscore must not turn an all-variables source into a prefixed
 // one, since "" and "_" are different intents.
 func TestEnvSourceEmptyPrefixStillReadsEverything(t *testing.T) {
-	t.Setenv("UNPREFIXED_MARKER", "present")
-	m, err := cfg.EnvSource("").Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	type tc struct {
+		name string
+		key  string
+		want any
 	}
-	//: an empty prefix reads the whole environment, keys lower-cased as-is.
-	if m["unprefixed_marker"] != "present" {
-		t.Errorf("unprefixed_marker=%v, want \"present\"", m["unprefixed_marker"])
+	tests := []tc{
+		//: an empty prefix reads the whole environment, key lower-cased as-is.
+		{"unprefixed variable is read", "unprefixed_marker", "present"},
+		//: and the underscore is part of the key, not a stripped separator.
+		{"prefixed variable keeps its full key", "pfx_marker", "also-present"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		t.Setenv("UNPREFIXED_MARKER", "present")
+		t.Setenv("PFX_MARKER", "also-present")
+		m, err := cfg.EnvSource("").Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if m[tc.key] != tc.want {
+			t.Errorf("%s=%v, want %v", tc.key, m[tc.key], tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
 	}
 }
