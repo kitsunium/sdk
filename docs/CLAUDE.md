@@ -37,6 +37,8 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0026-sdk-resilience-domain.md` | Reliability domain (`resilience`): 8th core sibling (no registry), composable `Runner` policies — retry/circuit-breaker/rate-limit/bulkhead/timeout; error block `0.2.8.*` | Accepted (Phase B) |
 | `adr/0027-sdk-metrics-domain.md` | Observability domain (`metrics`): 9th core sibling, Counter/Gauge/Histogram + `Meter` + `Exporter` registry; in-memory meter + stdlib text exporter; error block `0.2.9.*`; labels + Prometheus/OTLP deferred | Accepted (Phase B) |
 | `adr/0028-sdk-config-domain.md` | Configuration domain (`config`): 10th core sibling, `Source`/`Validator`/`Watcher` ports; env+file layering, JSON round-trip decode, cross-OS poll watcher; closes Phase B; error block `0.2.10.*` | Accepted (Phase B) |
+| `adr/0030-stdout-is-a-protocol-channel.md` | No SDK default writes to `os.Stdout`: the registered `text` metrics exporter targets stderr, `ConsoleStderr` becomes the `ConsoleStream` zero value (and an absent or empty `target` maps to it); stdout stays reachable by naming it | Accepted (amends ADR 0027 §Decision 2 / ADR 0015 §D3) |
+| `adr/0031-policy-zero-values-are-never-inert.md` | A policy constructor never returns an inert policy: **clamp** where a working default needs no explanation (`BreakerConfig.OpenDuration` → 30s), **refuse** where any SDK-chosen value would be arbitrary (`RateLimiterConfig.Rate`, `NewTimeout`) via the `PolicyMisconfigured` sentinel `0.2.8.6` | Accepted (amends ADR 0026 §Decision 2) |
 
 ## ADR conventions
 
@@ -61,4 +63,4 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 
 ## Subtree
 
-- `adr/` — Architecture Decision Records (twenty-eight accepted to date — see table above)
+- `adr/` — Architecture Decision Records (see the table above; it is the count, so no separate number goes stale here)
