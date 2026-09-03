@@ -239,3 +239,40 @@ func ChainPacket(h PacketHandler, middlewares ...PacketMiddleware) PacketHandler
 	//: the same generic core helper serves both handler natures.
 	return corenet.Chain(h, middlewares...)
 }
+
+// MaxConns caps how many connections a group serves at once.
+//
+// The budget is per group, not per socket: a group listening on a TCP port and
+// a Unix socket, or sharded across several listeners, shares one ceiling —
+// which is what an operator sizing a server actually means. Beyond it a
+// connection is accepted and closed immediately with ConnLimitReached, because
+// a refusal the peer can observe beats a timeout it cannot tell from a hang.
+// Zero means no ceiling.
+func MaxConns(n int) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.MaxConns(n)
+}
+
+// Shards sets how many listeners to open on each of the group's addresses.
+//
+// Zero selects one per core; one disables sharding. Where the platform or the
+// socket family cannot shard, the count collapses to one and State reports why.
+func Shards(n int) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.Shards(n)
+}
+
+// Adopt takes over a socket inherited from a supervisor instead of binding one.
+//
+// Socket activation is what makes a zero-downtime restart possible: the
+// supervisor holds the bound socket across the exec, so no connection is lost
+// and no bind races. The name is the one the unit file publishes in
+// LISTEN_FDNAMES. Repeat the option to adopt several sockets into one group.
+//
+// A named socket the supervisor did not pass is SocketAdoptFailed, never a
+// silent fallback to binding: a service that quietly binds its own port has
+// lost exactly the property activation exists to provide.
+func Adopt(names ...string) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.Adopt(names...)
+}

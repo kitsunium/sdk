@@ -106,6 +106,11 @@ func (s *Server) bindPacketAll(ctx context.Context, groups []*PacketGroup) error
 // when Close or Shutdown closes its socket.
 func (s *Server) bindPacketGroup(ctx context.Context, group *PacketGroup) error {
 	handler := group.resolved()
+	//: inherited sockets are taken over before any address is bound.
+	if err := s.adoptPacketSockets(group, handler); err != nil {
+		//: an activation mismatch aborts startup.
+		return err
+	}
 	//: one socket and one read goroutine per address.
 	for _, addr := range group.addrs {
 		pc, err := listenPacket(ctx, addr)
@@ -134,6 +139,44 @@ func (s *Server) bindPacketGroup(ctx context.Context, group *PacketGroup) error 
 	return nil
 }
 
+// adoptPacketSockets takes over the group's inherited datagram sockets.
+//
+// Goroutine lifecycle: one readLoop per adopted socket, owned by the Server
+// exactly as a bound one is.
+func (s *Server) adoptPacketSockets(group *PacketGroup, handler corenet.PacketHandler) error {
+	//: each name may publish several descriptors.
+	for _, name := range group.adopt {
+		conns, err := adoptPacket(name)
+		//: an activation mismatch aborts startup rather than binding instead.
+		if err != nil {
+			//: the error already names the socket.
+			return err
+		}
+		degraded, reason := batchDegradation(group.limits)
+		//: one read goroutine per adopted descriptor.
+		for _, pc := range conns {
+			addr := corenet.AddressValue{Network: pc.LocalAddr().Network(), Addr: pc.LocalAddr().String()}
+			bound := &boundPacketConn{group: group.name, addr: addr, pc: pc}
+			s.mu.Lock()
+			s.packetConns = append(s.packetConns, bound)
+			s.states = append(s.states, corenet.ListenerStateValue{
+				Group:          group.name,
+				Address:        pc.LocalAddr().String(),
+				Network:        addr.Network,
+				Shards:         1,
+				Adopted:        true,
+				Degraded:       degraded,
+				DegradedReason: reason,
+			})
+			s.mu.Unlock()
+			s.inFlight.Add(1)
+			go s.readLoop(bound, group, handler)
+		}
+	}
+	//: every named socket was taken over.
+	return nil
+}
+
 // batchDegradation reports whether batched reading was asked for and is
 // unavailable, and why. A silent fallback is indistinguishable from a working
 // one, so it is surfaced through State rather than logged once at startup.
@@ -157,8 +200,9 @@ func (s *Server) bindAll(ctx context.Context, groups []*StreamGroup) error {
 			return errs.Wrap(corenet.HandlerMissing, errs.WrapParams{},
 				errs.String("group", group.name))
 		}
-		//: a group with no address is almost always a wiring mistake.
-		if len(group.addrs) == 0 {
+		//: a group with neither an address nor an inherited socket is almost
+		//: always a wiring mistake.
+		if len(group.addrs) == 0 && len(group.adopt) == 0 {
 			//: refuse rather than start a server that listens nowhere.
 			return errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
 				errs.String("group", group.name), errs.String("why", "no listen address"))
@@ -176,6 +220,15 @@ func (s *Server) bindAll(ctx context.Context, groups []*StreamGroup) error {
 // bindGroup binds one group's addresses and starts their accept loops.
 func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
 	handler := group.resolved()
+	//: built once per group, so the ceiling is shared by every shard and
+	//: every address the group listens on — one budget, not one per socket.
+	group.limiter = newConnLimiter(group.limits)
+	//: inherited sockets are taken over before any address is bound, so an
+	//: activation mismatch fails startup rather than half-binding.
+	if err := s.adoptStreamSockets(group, handler); err != nil {
+		//: an activation mismatch aborts startup.
+		return err
+	}
 	//: one shard set per address, each shard with its own accept goroutine.
 	for _, addr := range group.addrs {
 		//: propagate the first bind failure with the address that caused it.
@@ -185,6 +238,43 @@ func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
 		}
 	}
 	//: every address in the group is bound.
+	return nil
+}
+
+// adoptStreamSockets takes over the group's inherited stream listeners.
+//
+// Goroutine lifecycle: one acceptLoop per adopted listener, owned by the Server
+// exactly as a bound one is — adoption changes where the socket came from, not
+// how it is served.
+func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHandler) error {
+	//: each name may publish several descriptors.
+	for _, name := range group.adopt {
+		listeners, err := adoptStream(name)
+		//: an activation mismatch aborts startup; binding instead would lose
+		//: the very property socket activation exists to provide.
+		if err != nil {
+			//: the error already names the socket.
+			return err
+		}
+		//: one accept goroutine per adopted descriptor.
+		for _, ln := range listeners {
+			addr := corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}
+			bound := &boundListener{group: group.name, addr: addr, ln: ln}
+			s.mu.Lock()
+			s.listeners = append(s.listeners, bound)
+			s.states = append(s.states, corenet.ListenerStateValue{
+				Group:   group.name,
+				Address: ln.Addr().String(),
+				Network: addr.Network,
+				Shards:  1,
+				Adopted: true,
+			})
+			s.mu.Unlock()
+			s.inFlight.Add(1)
+			go s.acceptLoop(bound, group, handler)
+		}
+	}
+	//: every named socket was taken over.
 	return nil
 }
 
@@ -281,7 +371,9 @@ func (s *Server) serve(raw stdnet.Conn, group *StreamGroup, handler corenet.Conn
 	//: the handler's error ends this connection and nothing else. It is
 	//: deliberately not propagated: there is nobody above a connection
 	//: goroutine to return it to, and one peer's failure is not the server's.
-	swallowErr(handler.ServeConn(s.runCtx, c))
+	//: A ceiling rejection lands here too, and closes the connection the same
+	//: way — which is the intended answer to "we are full".
+	swallowErr(s.admit(s.runCtx, group.limiter, c, handler))
 }
 
 // recoverHandler swallows a handler panic so it cannot unwind past the

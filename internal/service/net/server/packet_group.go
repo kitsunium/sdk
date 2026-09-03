@@ -19,6 +19,8 @@ type PacketGroup struct {
 	middlewares []corenet.Middleware[corenet.PacketHandler]
 	// limits bounds what the group may consume.
 	limits corenet.LimitsValue
+	// adopt names inherited sockets to take over instead of binding.
+	adopt []string
 }
 
 // Name returns the group's name.

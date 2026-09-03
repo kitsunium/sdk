@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "server",
     srcs = [
+        "adopt.go",
         "batch.go",
         "batch_compliance.go",
         "batch_portable.go",
@@ -32,6 +33,7 @@ go_library(
         "server.go",
         "sockaddr_linux.go",
         "stream_group.go",
+        "stream_group_limiter.go",
         "swallow.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/net/server",
@@ -41,10 +43,13 @@ go_library(
     ],
     deps = [
         "//internal/core/net",
+        "//internal/core/resilience",
         "//internal/kernel/buffer",
         "//internal/kernel/errs",
         "//internal/kernel/recycler",
         "//internal/kernel/worker",
+        "//internal/service/proc/sdlisten",
+        "//internal/service/resilience",
     ],
 )
 
@@ -60,8 +65,10 @@ alias(
 go_test(
     name = "server_test",
     srcs = [
+        "adopt_external_test.go",
         "batch_bench_test.go",
         "batch_internal_test.go",
+        "limiter_external_test.go",
         "packet_external_test.go",
         "server_bench_test.go",
         "server_external_test.go",
@@ -69,6 +76,11 @@ go_test(
         "shards_internal_test.go",
     ],
     embed = [":server"],
+    # keep: these tests bind a loopback socket. Bazel's linux-sandbox gives the
+    # action its own network namespace, so bind and dial fail inside it. Running
+    # the test locally is the only mechanism that restores a usable loopback;
+    # the `requires-network` tag alone does not (measured, both ways).
+    local = True,
     deps = [
         "//internal/core/net",
         "//internal/kernel/errs",

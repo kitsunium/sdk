@@ -29,6 +29,10 @@ type StreamGroup struct {
 	// httpAdapter is set when the group serves an http.Handler, so the engine
 	// can shut the embedded http.Server down with the rest of the group.
 	httpAdapter *httpAdapter
+	// limiter caps concurrent connections; nil when the group has no ceiling.
+	limiter *connLimiter
+	// adopt names inherited sockets to take over instead of binding.
+	adopt []string
 }
 
 // Name returns the group's name.

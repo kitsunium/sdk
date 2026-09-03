@@ -162,6 +162,7 @@ func (s *Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup {
 	}
 	group.addrs = shim.addrs
 	group.limits = shim.limits
+	group.adopt = shim.adopt
 	s.packetByName[name] = group
 	s.packetGroups = append(s.packetGroups, group)
 	//: returned so the caller can attach a handler in the same expression.

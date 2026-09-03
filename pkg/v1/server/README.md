@@ -53,12 +53,15 @@ One option covers both. A [github.com/kitsunium/sdk/pkg/v1/tlsid.Identity](<http
 - [type Conn](<#Conn>)
 - [type Group](<#Group>)
 - [type GroupOption](<#GroupOption>)
+  - [func Adopt\(names ...string\) GroupOption](<#Adopt>)
   - [func BatchSize\(n int\) GroupOption](<#BatchSize>)
   - [func IdleTimeout\(d time.Duration\) GroupOption](<#IdleTimeout>)
   - [func Listen\(network, addr string\) GroupOption](<#Listen>)
+  - [func MaxConns\(n int\) GroupOption](<#MaxConns>)
   - [func MaxPacketSize\(n int\) GroupOption](<#MaxPacketSize>)
   - [func ReadBufferSize\(n int\) GroupOption](<#ReadBufferSize>)
   - [func ReadTimeout\(d time.Duration\) GroupOption](<#ReadTimeout>)
+  - [func Shards\(n int\) GroupOption](<#Shards>)
   - [func TLS\(id tlsid.Identity\) GroupOption](<#TLS>)
   - [func WriteTimeout\(d time.Duration\) GroupOption](<#WriteTimeout>)
 - [type Handler](<#Handler>)
@@ -134,6 +137,19 @@ GroupOption configures a Group.
 type GroupOption = svcserver.GroupOption
 ```
 
+<a name="Adopt"></a>
+### func [Adopt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L275>)
+
+```go
+func Adopt(names ...string) GroupOption
+```
+
+Adopt takes over a socket inherited from a supervisor instead of binding one.
+
+Socket activation is what makes a zero\-downtime restart possible: the supervisor holds the bound socket across the exec, so no connection is lost and no bind races. The name is the one the unit file publishes in LISTEN\_FDNAMES. Repeat the option to adopt several sockets into one group.
+
+A named socket the supervisor did not pass is SocketAdoptFailed, never a silent fallback to binding: a service that quietly binds its own port has lost exactly the property activation exists to provide.
+
 <a name="BatchSize"></a>
 ### func [BatchSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L232>)
 
@@ -161,6 +177,17 @@ func Listen(network, addr string) GroupOption
 
 Listen adds an address to a group. Repeat it to bind several addresses to one handler — a TCP port and a Unix socket, for instance.
 
+<a name="MaxConns"></a>
+### func [MaxConns](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L251>)
+
+```go
+func MaxConns(n int) GroupOption
+```
+
+MaxConns caps how many connections a group serves at once.
+
+The budget is per group, not per socket: a group listening on a TCP port and a Unix socket, or sharded across several listeners, shares one ceiling — which is what an operator sizing a server actually means. Beyond it a connection is accepted and closed immediately with ConnLimitReached, because a refusal the peer can observe beats a timeout it cannot tell from a hang. Zero means no ceiling.
+
 <a name="MaxPacketSize"></a>
 ### func [MaxPacketSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L224>)
 
@@ -187,6 +214,17 @@ func ReadTimeout(d time.Duration) GroupOption
 ```
 
 ReadTimeout bounds one read from the peer.
+
+<a name="Shards"></a>
+### func [Shards](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L260>)
+
+```go
+func Shards(n int) GroupOption
+```
+
+Shards sets how many listeners to open on each of the group's addresses.
+
+Zero selects one per core; one disables sharding. Where the platform or the socket family cannot shard, the count collapses to one and State reports why.
 
 <a name="TLS"></a>
 ### func [TLS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L169>)

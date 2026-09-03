@@ -32,6 +32,8 @@ Public façade: `pkg/v1/server`.
 | `http_adapter.go` | the `net/http` adapter (ADR 0029 D3) |
 | `http_listener.go` | the channel-fed bridge listener |
 | `reuseport_{linux,bsd,other}.go` | the cited `SO_REUSEPORT` constant per family |
+| `stream_group_limiter.go` | the per-group connection ceiling |
+| `adopt.go` | adoption of listeners inherited from a supervisor |
 
 ## Why-this-shape
 
@@ -159,6 +161,50 @@ contending on one accept queue. Zero means one per core; one disables it.
   rows for one address would read as N addresses.
 - **On this machine it buys nothing.** `BENCH.md` §4 reports the null result and
   the two tests that prove it is a null result rather than a broken comparison.
+
+## Connection ceiling
+
+`MaxConns(n)` reuses `resilience.NewBulkhead` rather than reimplementing a
+semaphore — a reject-mode channel semaphore *is* a connection ceiling, and
+reusing it means the rejection semantics are the ones the SDK already documents.
+
+- **The budget is per group, not per socket.** A group on a TCP port and a Unix
+  socket, or sharded across listeners, shares one ceiling; that is what an
+  operator sizing a server means.
+- **A rejection is translated to `ConnLimitReached`**, never surfaced as the
+  resilience domain's `BulkheadFull` — a `net` consumer has no reason to meet a
+  sentinel from a domain it did not import.
+- **No ceiling means no closure on the hot path.** `admit` calls the handler
+  directly when `limiter == nil`, so the policy costs nothing when unused.
+- **A slot is released when the handler returns**, which is *after* the client
+  has seen its response and closed. A client reconnecting immediately against a
+  ceiling of one can therefore meet a still-occupied server, and that rejection
+  is correct. `TestConnLimitReleasesItsSlot` uses a ceiling of four for exactly
+  this reason — an earlier version asserted zero rejections at a ceiling of one
+  and failed about one run in three.
+
+## Socket adoption
+
+`Adopt(name)` takes over a socket the supervisor already bound, which is what
+makes a zero-downtime restart possible: the socket survives the exec, so no
+connection is lost and no bind races.
+
+- **A named socket the supervisor did not pass fails startup.** Binding one
+  instead would lose the very property activation provides, and lose it
+  invisibly — the process would look healthy while dropping the connections the
+  outgoing one still held.
+- **Datagram adoption goes through the raw descriptors.** `sdlisten.Listeners`
+  only wraps stream sockets, so `adoptPacket` uses `WithNames` and
+  `net.FilePacketConn`. This is done here rather than by widening `sdlisten`,
+  which is another domain and would need another ADR.
+- **`unsetEnv` is false.** A group may adopt several names; clearing the
+  environment on the first lookup would make every later one come back empty.
+- **The end-to-end test runs across a real exec.** It cannot be staged
+  in-process: `sd_listen_fds(3)` reads from descriptor 3 and a Go test binary
+  already holds it. `exec.Cmd.ExtraFiles` places the socket at exactly fd 3 in
+  the child, which is what a supervisor does. `LISTEN_PID` is omitted because a
+  parent cannot know its child's pid beforehand — the same choice
+  `sdlisten.Prepare` makes.
 
 ## Concurrency
 
