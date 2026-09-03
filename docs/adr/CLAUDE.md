@@ -43,6 +43,16 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 ## Conventions
 
 - File name: `NNNN-<short-slug>.md` where `NNNN` is the next zero-padded number.
+- **Two branches writing ADRs at once: claim distinct numbers, then merge in
+  numeric order.** The number is claimed when the file is committed on a branch,
+  not when the branch merges, so a second branch reads the first one's claim and
+  takes the number after it. Merging low-to-high keeps `main` contiguous at every
+  point in time, which is what the check below verifies. Merging high-first
+  leaves `main` with a real gap until the other branch lands — legal in the end,
+  but the check fails in between, so do not do it. **Renumbering to close that
+  window is the one wrong answer**: the branch that already holds the lower
+  number would then collide with it, and a number is cited from ADR headers,
+  package docs and source comments long before it merges.
 - Header block: **Status**, **Date**, **Deciders**, plus **Supersedes** / **Superseded by** / **Amends** / **Related** where they apply.
 - Standard sections, in this order: **Context**, **Decision**, **Consequences / Semantics**, **Breaking changes**, **Alternatives considered** and/or **Why not <option>**, **Deferred**, **References**. This is the same list as `docs/CLAUDE.md` §ADR conventions — keep the two in step; when they disagree, the two are both wrong until they agree.
 - A standard section with nothing to say says so rather than being dropped — `Breaking changes` → "None. `<domain>` is a new domain in this change set" is the house form (ADR 0026/0027/0028). A missing heading reads as an oversight; an explicit "None" reads as a decision.
@@ -61,4 +71,12 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 ```
 ls docs/adr/ | grep -E '^[0-9]{4}-' | sort
 # every ADR must follow the NNNN-slug.md pattern; no gaps in the numeric sequence.
+
+# On a branch, a gap is expected when a lower number is claimed on another
+# branch — check before blaming the sequence, and merge low-to-high:
+git ls-remote --heads origin | awk '{print $2}' | sed 's#refs/heads/##' \
+  | while read -r b; do
+      git ls-tree --name-only "origin/$b" docs/adr/ 2>/dev/null \
+        | grep -oE '^docs/adr/[0-9]{4}' | sed "s#docs/adr/#$b #"
+    done | sort -k2
 ```
