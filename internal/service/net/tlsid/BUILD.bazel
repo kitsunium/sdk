@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "tlsid",
+    srcs = [
+        "file_params.go",
+        "tlsid.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/net/tlsid",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":tlsid",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "tlsid_test",
+    srcs = ["tlsid_external_test.go"],
+    deps = [
+        ":tlsid",
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)
