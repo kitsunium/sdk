@@ -22,7 +22,12 @@
 // every non-nil error as transient: the retry spends its whole budget on it and
 // hides it behind RetryExhausted, and the breaker counts it towards tripping.
 // Set the Retryable predicate on either config to tell the two apart. It takes
-// the same shape in both, so a nested Retry(Breaker(op)) shares one classifier:
+// the same shape in both, so a nested Retry(Breaker(op)) shares one classifier.
+// The sentinel is the caller's own — this package exports none to classify
+// against, because only the caller knows which of their failures are
+// deterministic:
+//
+//	var ErrBadRequest = errors.New("bad request") // declared by the caller
 //
 //	transient := func(err error) bool { return !errors.Is(err, ErrBadRequest) }
 //	r := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3, Retryable: transient})
