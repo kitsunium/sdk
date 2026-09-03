@@ -13,7 +13,8 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// textExporterName is the registered name of the default stdout text exporter.
+// textExporterName is the registered name of the default text exporter, which
+// writes to stderr (ADR 0030).
 const textExporterName coremetrics.ExporterName = "text"
 
 // decimalBase / floatBitSize are the strconv formatting parameters.
