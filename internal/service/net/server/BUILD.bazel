@@ -67,8 +67,10 @@ go_test(
     name = "server_test",
     srcs = [
         "adopt_external_test.go",
+        "adopt_internal_test.go",
         "batch_bench_test.go",
         "batch_internal_test.go",
+        "http_adapter_internal_test.go",
         "kernel_len_internal_test.go",
         "limiter_external_test.go",
         "packet_external_test.go",
@@ -86,5 +88,6 @@ go_test(
     deps = [
         "//internal/core/net",
         "//internal/kernel/errs",
+        "//internal/kernel/worker",
     ],
 )

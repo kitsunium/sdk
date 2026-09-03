@@ -146,7 +146,7 @@ func (s *Server) bindPacketGroup(ctx context.Context, group *PacketGroup) error 
 func (s *Server) adoptPacketSockets(group *PacketGroup, handler corenet.PacketHandler) error {
 	//: each name may publish several descriptors.
 	for _, name := range group.adopt {
-		conns, err := adoptPacket(name)
+		conns, err := s.adoptPacket(name)
 		//: an activation mismatch aborts startup rather than binding instead.
 		if err != nil {
 			//: the error already names the socket.
@@ -249,7 +249,7 @@ func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
 func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHandler) error {
 	//: each name may publish several descriptors.
 	for _, name := range group.adopt {
-		listeners, err := adoptStream(name)
+		listeners, err := s.adoptStream(name)
 		//: an activation mismatch aborts startup; binding instead would lose
 		//: the very property socket activation exists to provide.
 		if err != nil {
@@ -475,6 +475,21 @@ func (s *Server) shutdownHTTP(ctx context.Context) {
 	}
 }
 
+// closeHTTP stops every group's embedded http.Server immediately, matching
+// Close's contract rather than Shutdown's.
+func (s *Server) closeHTTP() {
+	s.mu.RLock()
+	groups := slices.Clone(s.groups)
+	s.mu.RUnlock()
+	//: only groups that were given an http.Handler carry an adapter.
+	for _, group := range groups {
+		//: a plain ConnHandler group has no embedded http.Server to close.
+		if group.httpAdapter != nil {
+			group.httpAdapter.closeNow()
+		}
+	}
+}
+
 // waitIdle blocks until no connection is in flight or ctx expires.
 func (s *Server) waitIdle(ctx context.Context) error {
 	ticker := time.NewTicker(drainPollInterval)
@@ -502,6 +517,10 @@ func (s *Server) waitIdle(ctx context.Context) error {
 // without draining.
 func (s *Server) Close() error {
 	s.closeListeners()
+	//: an HTTP group's embedded server runs on a bridge listener the engine
+	//: does not otherwise know about, so closing the bound listeners does not
+	//: reach it. Without this it outlived the server on every Close.
+	s.closeHTTP()
 	//: cancelling asks in-flight handlers to stop; it does not wait for them.
 	if s.stop != nil {
 		s.stop()

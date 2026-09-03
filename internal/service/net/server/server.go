@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	stdnet "net"
+	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -79,6 +80,13 @@ type Server struct {
 	// Shutdown block forever, which is precisely what a budget exists to
 	// prevent.
 	live map[uint64]stdnet.Conn
+	// inheritOnce reads the supervisor's socket table at most once per server.
+	inheritOnce sync.Once
+	// inherited is that table, held for the server's lifetime so no wrapper is
+	// ever collected and no finaliser closes a descriptor still to be adopted.
+	inherited map[string][]*os.File
+	// inheritErr is the failure to read it, reported to every adoption.
+	inheritErr error
 	// stop cancels every in-flight handler when the server shuts down.
 	stop context.CancelFunc
 	// runCtx is handed to every handler. It deliberately outlives the caller's
