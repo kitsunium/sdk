@@ -3,12 +3,12 @@ package tlsid_test
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"io"
 	"math/big"
 	"net"
 	"os"
@@ -22,7 +22,7 @@ import (
 // mint returns PEM certificate and key bytes for a throwaway identity.
 func mint(t *testing.T) (certPEM, keyPEM []byte) {
 	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), nil)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
@@ -42,7 +42,7 @@ func mint(t *testing.T) (certPEM, keyPEM []byte) {
 		DNSNames:    []string{"kitsunium-test"},
 		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	der, err := x509.CreateCertificate(nil, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
 		t.Fatalf("create certificate: %v", err)
 	}
@@ -114,28 +114,38 @@ func TestMutualTLSRoundTrip(t *testing.T) {
 }
 
 // runHandshake dials a real TLS listener and asserts mutual authentication.
+//
+// Goroutine lifecycle: exactly one accept goroutine is started. It is bounded by
+// the listener — it blocks only in Accept, and the deferred ln.Close below
+// unblocks it on every exit path, including t.Fatalf. It reports its single
+// outcome on the buffered done channel, so it can never block on send and can
+// never outlive this function.
 func runHandshake(t *testing.T, server, client tlsid.Identity) {
 	t.Helper()
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", server.ServerConfig())
+	//: without a listener there is nothing to hand-shake against.
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer func() { _ = ln.Close() }()
+	defer closeOrFail(t, ln)
 	done := make(chan error, 1)
 	go func() {
 		conn, aerr := ln.Accept()
+		//: a closed listener ends the goroutine through this path.
 		if aerr != nil {
 			done <- aerr
 			return
 		}
-		defer func() { _ = conn.Close() }()
+		defer closeOrFail(t, conn)
 		done <- conn.(*tls.Conn).Handshake()
 	}()
 	conn, err := tls.Dial("tcp", ln.Addr().String(), client.ClientConfig())
+	//: a dial failure is the assertion this test most often trips.
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer func() { _ = conn.Close() }()
+	defer closeOrFail(t, conn)
+	//: the server side must also have completed the handshake.
 	if err := <-done; err != nil {
 		t.Fatalf("server handshake: %v", err)
 	}
@@ -178,5 +188,15 @@ func TestLoadFromDisk(t *testing.T) {
 	//: the operator-points-at-the-wrong-file case must fail loudly.
 	if _, err := tlsid.Load(tlsid.FileParams{RootsFile: junkFile}); !errors.Is(err, tlsid.MaterialInvalid) {
 		t.Fatalf("expected MaterialInvalid for a junk CA file, got %v", err)
+	}
+}
+
+// closeOrFail closes c and reports a close error rather than discarding it — a
+// silently dropped Close can mask a socket leak that only shows up under load.
+func closeOrFail(t *testing.T, c io.Closer) {
+	t.Helper()
+	//: a close failure is reported, never swallowed.
+	if err := c.Close(); err != nil {
+		t.Errorf("close: %v", err)
 	}
 }

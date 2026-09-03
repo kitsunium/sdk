@@ -11,7 +11,7 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 func wrapAs(sentinel *errs.Error, cause error, fields ...errs.FieldValue) error {
 	//: a nil cause contributes no field — keep only what the caller supplied.
 	if cause == nil {
-		//: no cause to describe, so wrap for the fields alone.
+		//: wrap for the caller's fields alone.
 		return errs.Wrap(sentinel, errs.WrapParams{}, fields...)
 	}
 	//: carry the cause message as a field so it stays diagnosable.

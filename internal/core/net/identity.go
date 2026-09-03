@@ -75,7 +75,7 @@ func (i IdentityValue) ClientConfig() *tls.Config {
 // ServerConfig returns a fresh *tls.Config for accepting connections, switching
 // to mutual TLS when the identity requires a client certificate.
 func (i IdentityValue) ServerConfig() *tls.Config {
-	cfg := &tls.Config{
+	built := &tls.Config{
 		Certificates: i.certs,
 		ClientCAs:    i.clientCAs,
 		MinVersion:   i.resolvedMinVersion(),
@@ -83,9 +83,10 @@ func (i IdentityValue) ServerConfig() *tls.Config {
 	}
 	//: mutual TLS means the handshake fails unless the peer chains to clientCAs.
 	if i.requireClientCert {
-		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+		built.ClientAuth = tls.RequireAndVerifyClientCert
 	}
-	return cfg
+	//: the freshly built config is never shared with another caller.
+	return built
 }
 
 // resolvedMinVersion never returns zero, so a zero-value identity still pins a
@@ -93,39 +94,55 @@ func (i IdentityValue) ServerConfig() *tls.Config {
 func (i IdentityValue) resolvedMinVersion() uint16 {
 	//: the zero value carries no explicit floor — apply the domain default.
 	if i.minVersion == 0 {
+		//: the zero value must still pin a modern floor.
 		return defaultMinVersion
 	}
+	//: an explicit floor was validated at construction — honour it.
 	return i.minVersion
 }
 
-// NewIdentity validates in-memory TLS material and returns the opaque identity.
+// NewIdentityValue validates in-memory TLS material and returns the opaque identity.
 // It fails loudly where the standard library is silent: a CA bundle that yields
 // no usable certificate is TLSMaterialInvalid, never an empty pool that would
 // verify nothing.
-func NewIdentity(p IdentityParams) (IdentityValue, error) {
+func NewIdentityValue(p IdentityParams) (id IdentityValue, err error) {
+	//: parse the caller's own keypair, if it holds one.
 	certs, err := parseKeyPair(p.CertPEM, p.KeyPEM)
+	//: an unusable keypair must never degrade to an anonymous connection.
 	if err != nil {
+		//: surface TLS_MATERIAL_INVALID from the parser.
 		return IdentityValue{}, err
 	}
+	//: parse the trust anchors used to verify the peer.
 	roots, err := parsePool(p.RootsPEM, "roots")
+	//: an unusable bundle must never degrade to the platform trust store.
 	if err != nil {
+		//: surface TLS_MATERIAL_INVALID from the parser.
 		return IdentityValue{}, err
 	}
+	//: parse the CAs a server accepts client certificates from.
 	clientCAs, err := parsePool(p.ClientCAPEM, "client_ca")
+	//: an unusable bundle here would silently disable client verification.
 	if err != nil {
+		//: surface TLS_MATERIAL_INVALID from the parser.
 		return IdentityValue{}, err
 	}
+	//: resolve the version floor, applying the domain default.
 	minVersion, err := resolveMinVersion(p.MinVersion)
+	//: a deprecated floor is refused rather than silently raised.
 	if err != nil {
+		//: surface TLS_MATERIAL_INVALID from the resolver.
 		return IdentityValue{}, err
 	}
 	//: a server demanding a client certificate it cannot verify would reject every
 	//: peer at handshake time; refuse the configuration instead of the traffic.
 	if p.RequireClientCert && clientCAs == nil {
+		//: refuse the configuration, not every future peer.
 		return IdentityValue{}, wrapAs(TLSMaterialInvalid, nil,
 			errs.String("field", "client_ca"),
 			errs.String("why", "mutual TLS requires a client CA bundle"))
 	}
+	//: every field was validated above; the value is immutable from here on.
 	return IdentityValue{
 		certs:             certs,
 		roots:             roots,

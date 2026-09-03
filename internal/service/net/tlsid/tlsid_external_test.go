@@ -3,7 +3,6 @@ package tlsid_test
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -32,7 +31,7 @@ type materialDir struct {
 func writeMaterial(t *testing.T) materialDir {
 	t.Helper()
 	dir := t.TempDir()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), nil)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
@@ -45,7 +44,7 @@ func writeMaterial(t *testing.T) materialDir {
 		BasicConstraintsValid: true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	der, err := x509.CreateCertificate(nil, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
 		t.Fatalf("create certificate: %v", err)
 	}

@@ -92,14 +92,14 @@ var (
 
 // New validates TLS material held in memory and returns the opaque identity. It
 // applies exactly the same rules as Load; only the source of the bytes differs.
-func New(p Params) (Identity, error) {
+func New(p Params) (id Identity, err error) {
 	//: validation lives in core so memory- and disk-sourced material match.
-	return corenet.NewIdentity(p)
+	return corenet.NewIdentityValue(p)
 }
 
 // Load reads the named TLS material from disk and returns the opaque identity.
 // A configured-but-unreadable file is an error, never a silently skipped one.
-func Load(p FileParams) (Identity, error) {
+func Load(p FileParams) (id Identity, err error) {
 	//: the service layer does the I/O and delegates every rule back to core.
 	return svctlsid.Load(p)
 }

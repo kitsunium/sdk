@@ -24,6 +24,6 @@ type PolicyFunc func(req RequestValue) error
 
 // Allow implements Policy by calling f.
 func (f PolicyFunc) Allow(req RequestValue) error {
-	//: the function IS the policy — no state to consult.
+	//: the function IS the policy — there is no state to consult.
 	return f(req)
 }

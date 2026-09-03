@@ -1,14 +1,17 @@
-load("@rules_go//go:def.bzl", "go_library", "go_test")
+load("@rules_go//go:def.bzl", "go_library")
 
 package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
-    name = "tlsid",
+    name = "client",
     srcs = [
-        "file_params.go",
-        "tlsid.go",
+        "conjunction.go",
+        "deny_policy.go",
+        "method_policy.go",
+        "path.go",
+        "path_policy.go",
     ],
-    importpath = "github.com/kitsunium/sdk/internal/service/net/tlsid",
+    importpath = "github.com/kitsunium/sdk/internal/service/net/client",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
@@ -21,19 +24,9 @@ go_library(
 
 alias(
     name = "go_default_library",
-    actual = ":tlsid",
+    actual = ":client",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
-    ],
-)
-
-go_test(
-    name = "tlsid_test",
-    srcs = ["tlsid_external_test.go"],
-    deps = [
-        ":tlsid",
-        "//internal/core/net",
-        "//internal/kernel/errs",
     ],
 )

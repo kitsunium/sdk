@@ -70,7 +70,7 @@ func TestNewIdentityRejectsUnusableTrustBundle(t *testing.T) {
 // runTrustCase executes one trustCase against NewIdentity.
 func runTrustCase(t *testing.T, tc trustCase, material pemPair) {
 	t.Helper()
-	id, err := corenet.NewIdentity(corenet.IdentityParams{RootsPEM: tc.bundle(material)})
+	id, err := corenet.NewIdentityValue(corenet.IdentityParams{RootsPEM: tc.bundle(material)})
 	if tc.wantErr {
 		//: an unusable bundle must be refused with the domain's typed sentinel.
 		if err == nil {

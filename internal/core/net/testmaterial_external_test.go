@@ -3,7 +3,6 @@ package net_test
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -22,7 +21,7 @@ type pemPair struct {
 // depend on fixture files that could silently expire.
 func newSelfSigned(t *testing.T) pemPair {
 	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), nil)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
@@ -35,7 +34,7 @@ func newSelfSigned(t *testing.T) pemPair {
 		BasicConstraintsValid: true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	der, err := x509.CreateCertificate(nil, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
 		t.Fatalf("create certificate: %v", err)
 	}
@@ -52,7 +51,7 @@ func newSelfSigned(t *testing.T) pemPair {
 // newSelfSignedKeyOnly returns a PEM private key unrelated to any test
 // certificate, so a pairing test can assert that a mismatched key is refused.
 func newSelfSignedKeyOnly() []byte {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), nil)
 	if err != nil {
 		//: a failing CSPRNG in a test process is unrecoverable and not a case
 		//: under test; returning nil would silently weaken the assertion.

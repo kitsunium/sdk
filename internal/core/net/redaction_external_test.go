@@ -17,7 +17,7 @@ import (
 func TestIdentityRedactsUnderEveryVerb(t *testing.T) {
 	t.Parallel()
 	material := newSelfSigned(t)
-	id, err := corenet.NewIdentity(corenet.IdentityParams{
+	id, err := corenet.NewIdentityValue(corenet.IdentityParams{
 		CertPEM: material.CertPEM, KeyPEM: material.KeyPEM, RootsPEM: material.CertPEM,
 	})
 	if err != nil {
@@ -81,7 +81,7 @@ func TestNewIdentityKeyPairing(t *testing.T) {
 // runKeyPairCase executes one keyPairCase against NewIdentity.
 func runKeyPairCase(t *testing.T, tc keyPairCase, material pemPair) {
 	t.Helper()
-	_, err := corenet.NewIdentity(corenet.IdentityParams{
+	_, err := corenet.NewIdentityValue(corenet.IdentityParams{
 		CertPEM: tc.cert(material), KeyPEM: tc.key(material),
 	})
 	if tc.wantErr {
@@ -114,7 +114,7 @@ func TestIdentityVersionFloor(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			id, err := corenet.NewIdentity(corenet.IdentityParams{MinVersion: tc.in})
+			id, err := corenet.NewIdentityValue(corenet.IdentityParams{MinVersion: tc.in})
 			if tc.wantErr {
 				if !errs.HasCode(err, corenet.CodeTLSMaterialInvalid) {
 					t.Fatalf("expected TLS_MATERIAL_INVALID, got %v", err)
@@ -153,13 +153,13 @@ func TestZeroIdentityStillPinsAModernFloor(t *testing.T) {
 func TestMutualTLSRequiresAClientCABundle(t *testing.T) {
 	t.Parallel()
 	material := newSelfSigned(t)
-	_, err := corenet.NewIdentity(corenet.IdentityParams{
+	_, err := corenet.NewIdentityValue(corenet.IdentityParams{
 		CertPEM: material.CertPEM, KeyPEM: material.KeyPEM, RequireClientCert: true,
 	})
 	if !errs.HasCode(err, corenet.CodeTLSMaterialInvalid) {
 		t.Fatalf("expected TLS_MATERIAL_INVALID, got %v", err)
 	}
-	id, err := corenet.NewIdentity(corenet.IdentityParams{
+	id, err := corenet.NewIdentityValue(corenet.IdentityParams{
 		CertPEM:           material.CertPEM,
 		KeyPEM:            material.KeyPEM,
 		ClientCAPEM:       material.CertPEM,
@@ -177,7 +177,7 @@ func TestMutualTLSRequiresAClientCABundle(t *testing.T) {
 // cannot affect any other user of the same identity.
 func TestConfigsAreFreshPerCall(t *testing.T) {
 	t.Parallel()
-	id, err := corenet.NewIdentity(corenet.IdentityParams{ServerName: "kitsune"})
+	id, err := corenet.NewIdentityValue(corenet.IdentityParams{ServerName: "kitsune"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

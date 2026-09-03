@@ -12,10 +12,10 @@ import (
 func TestPolicyFuncAdaptsAPlainFunction(t *testing.T) {
 	t.Parallel()
 	var seen corenet.RequestValue
-	var policy corenet.Policy = corenet.PolicyFunc(func(req corenet.RequestValue) error {
+	policy := corenet.Policy(corenet.PolicyFunc(func(req corenet.RequestValue) error {
 		seen = req
 		return nil
-	})
+	}))
 	want := corenet.RequestValue{Method: "GET", Scheme: "https", Host: "sdm:8000", EscapedPath: "/v1/subscribers", RawQuery: "purgeFlag=false"}
 	if err := policy.Allow(want); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -29,9 +29,9 @@ func TestPolicyFuncAdaptsAPlainFunction(t *testing.T) {
 // so the transport can relabel it as REQUEST_DENIED without losing the reason.
 func TestPolicyRefusalPropagates(t *testing.T) {
 	t.Parallel()
-	var policy corenet.Policy = corenet.PolicyFunc(func(corenet.RequestValue) error {
+	policy := corenet.Policy(corenet.PolicyFunc(func(corenet.RequestValue) error {
 		return corenet.RequestDenied
-	})
+	}))
 	if err := policy.Allow(corenet.RequestValue{Method: "DELETE"}); err == nil {
 		t.Fatal("expected the refusal to propagate")
 	}

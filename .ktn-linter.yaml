@@ -33,6 +33,13 @@ vocabulary:
     - Source
     - Sink
 
+  # Exact-FQN exemptions for nominal-role interfaces whose domain name is the
+  # documentation. Renaming core/net.Policy to "Allower" would lose the word the
+  # whole feature is discussed in ("the read-only policy"), and the -er form
+  # describes the method rather than the role the type plays.
+  adapter_role_interfaces:
+    - github.com/kitsunium/sdk/internal/core/net.Policy
+
 # ── Global options ────────────────────────────────────────────────────────────
 
 # Full strict mode stays off so test files / testdata keep their ergonomic
@@ -147,6 +154,12 @@ rules:
   # ships interface-awareness (mirror the 2026-05-28 retirement below).
   KTN-API-MINIF:
     exclude:
+      # The tlsid handshake test takes two Identity values and uses BOTH halves
+      # of the type (ServerConfig on one, ClientConfig on the other). Narrowing
+      # each parameter to a one-method interface would replace the single domain
+      # type with two synthetic ones and obscure that both are the same thing.
+      - "**/pkg/v1/tlsid/**"
+
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
 
@@ -179,6 +192,46 @@ rules:
   KTN-VAR-BIGSTRUCT:
     exclude:
       - "**/pkg/v1/process/**"
+      # core/net — value semantics ARE the contract, for three types:
+      #
+      #   IdentityValue (96 B) is the opaque, redacting TLS identity. It copies
+      #   the crypto.Key / writer.CredentialValue precedent, where the value
+      #   receiver is what makes String()/GoString() redaction unavoidable. A
+      #   pointer receiver would (a) add a nil case to every method, (b) let a
+      #   caller mutate an identity AFTER it was validated at construction,
+      #   defeating the guarantee the type exists to provide.
+      #
+      #   IdentityParams (152 B) is copied exactly once per identity, at
+      #   startup, immediately before certificate parsing that dwarfs it.
+      #
+      #   RequestValue (80 B) is handed to a Policy that judges it. Passing a
+      #   pointer would let a policy mutate the very request it is authorising —
+      #   a real bug found in a consumer's hand-rolled version, which took a
+      #   *url.URL. Immutability here is a security property, not a style.
+      - "**/internal/core/net/**"
+      # The tlsid loader and facade forward the same value types unchanged; a
+      # pointer here would diverge the public API from the port it aliases,
+      # exactly as ADR 0016 avoids for process.Spec above.
+      - "**/internal/service/net/tlsid/**"
+      - "**/pkg/v1/tlsid/**"
+
+  # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
+  # — encoding/json forces the asymmetry on core/net.DurationValue.
+  #
+  # MarshalJSON MUST take a value receiver, or a non-pointer struct field of
+  # this type will not marshal through it. UnmarshalJSON MUST take a pointer
+  # receiver, or it cannot assign. There is no receiver set that satisfies both
+  # the rule and encoding/json; the standard library's time.Time carries exactly
+  # the same asymmetry for exactly the same reason. Scoped to core/net.
+  KTN-RECEIVER-MIXPTR:
+    exclude:
+      - "**/internal/core/net/**"
+  KTN-VAR-RECVCONS:
+    exclude:
+      - "**/internal/core/net/**"
+  KTN-STRUCT-RECVTYPE:
+    exclude:
+      - "**/internal/core/net/**"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #
