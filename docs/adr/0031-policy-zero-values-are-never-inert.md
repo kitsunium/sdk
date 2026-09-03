@@ -3,8 +3,8 @@
 - **Status**: Accepted
 - **Date**: 2026-09-03
 - **Deciders**: SDK maintainers
-- **Related**: ADR 0026 (resilience domain), ADR 0030 (stdout is a protocol channel — the same class of defect on a different surface), ADR 0007 (bump semantics), ADR 0005 (error codes)
-- **Amends**: ADR 0026 §Decision 2 (the constructors' handling of non-positive configuration)
+- **Related**: [ADR 0026](0026-sdk-resilience-domain.md) (resilience domain), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (stdout is a protocol channel — the same class of defect on a different surface), [ADR 0007](0007-sdk-release-and-versioning.md) (bump semantics), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (error codes)
+- **Amends**: [ADR 0026](0026-sdk-resilience-domain.md) §Decision 2 (the constructors' handling of non-positive configuration)
 
 ## Context
 

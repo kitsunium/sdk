@@ -73,10 +73,15 @@ ls docs/adr/ | grep -E '^[0-9]{4}-' | sort
 # every ADR must follow the NNNN-slug.md pattern; no gaps in the numeric sequence.
 
 # On a branch, a gap is expected when a lower number is claimed on another
-# branch — check before blaming the sequence, and merge low-to-high:
-git ls-remote --heads origin | awk '{print $2}' | sed 's#refs/heads/##' \
-  | while read -r b; do
-      git ls-tree --name-only "origin/$b" docs/adr/ 2>/dev/null \
-        | grep -oE '^docs/adr/[0-9]{4}' | sed "s#docs/adr/#$b #"
-    done | sort -k2
+# branch — check before blaming the sequence, and merge low-to-high.
+# The fetch is not optional: git ls-remote reads the remote without updating
+# origin/*, so without it git ls-tree silently sees nothing for a branch this
+# clone has never fetched, and the check reports "no one holds it".
+git fetch --prune origin
+git for-each-ref --format='%(refname)' refs/remotes/origin \
+  | grep -v '^refs/remotes/origin/HEAD$' \
+  | while read -r ref; do
+      git ls-tree --name-only "$ref" docs/adr/ \
+        | grep -oE '[0-9]{4}' | sed "s#^#${ref#refs/remotes/origin/} #"
+    done | sort -u -k2
 ```

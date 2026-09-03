@@ -3,8 +3,8 @@
 - **Status**: Accepted
 - **Date**: 2026-09-03
 - **Deciders**: SDK maintainers
-- **Related**: ADR 0007 (bump semantics), ADR 0012 (writer registry), ADR 0015 (writer taxonomy + default-active writers), ADR 0027 (metrics domain)
-- **Amends**: ADR 0027 §Decision 2 (the text exporter's registered destination), ADR 0015 §D3 (the console writer's default stream)
+- **Related**: [ADR 0007](0007-sdk-release-and-versioning.md) (bump semantics), [ADR 0012](0012-logger-writer-registry.md) (writer registry), [ADR 0015](0015-sdk-logger-writer-taxonomy-and-rotation.md) (writer taxonomy + default-active writers), [ADR 0027](0027-sdk-metrics-domain.md) (metrics domain)
+- **Amends**: [ADR 0027](0027-sdk-metrics-domain.md) §Decision 2 (the text exporter's registered destination), [ADR 0015](0015-sdk-logger-writer-taxonomy-and-rotation.md) §D3 (the console writer's default stream)
 
 ## Context
 
