@@ -58,8 +58,8 @@ ln := tls.NewListener(raw, id.ServerConfig())
 - [Variables](<#variables>)
 - [type FileParams](<#FileParams>)
 - [type Identity](<#Identity>)
-  - [func Load\(p FileParams\) \(Identity, error\)](<#Load>)
-  - [func New\(p Params\) \(Identity, error\)](<#New>)
+  - [func Load\(p FileParams\) \(id Identity, err error\)](<#Load>)
+  - [func New\(p Params\) \(id Identity, err error\)](<#New>)
 - [type Params](<#Params>)
 
 
@@ -100,7 +100,7 @@ type Identity = corenet.IdentityValue
 ### func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/tlsid/tlsid.go#L102>)
 
 ```go
-func Load(p FileParams) (Identity, error)
+func Load(p FileParams) (id Identity, err error)
 ```
 
 Load reads the named TLS material from disk and returns the opaque identity. A configured\-but\-unreadable file is an error, never a silently skipped one.
@@ -109,7 +109,7 @@ Load reads the named TLS material from disk and returns the opaque identity. A c
 ### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/tlsid/tlsid.go#L95>)
 
 ```go
-func New(p Params) (Identity, error)
+func New(p Params) (id Identity, err error)
 ```
 
 New validates TLS material held in memory and returns the opaque identity. It applies exactly the same rules as Load; only the source of the bytes differs.

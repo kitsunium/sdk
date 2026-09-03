@@ -33,7 +33,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-dev" "$(DIM)hot-reloading docs dev server (astro dev, no full rebuild — fast iteration)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
-	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate pkg/v1/{codec,crypto,errs,hash,sign,kdf,password,logger,logger/writer}/README.md from doc comments (see ADR 0008)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate every pkg/v1/*/README.md from its doc comment (see ADR 0008)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
@@ -199,11 +199,17 @@ release-dry-run:
 # The binary is installed by the devcontainer Go feature
 # (.devcontainer/features/languages/go/install.sh) so it lives on
 # $PATH without polluting pkg/go.mod with ~50 indirect deps.
+#
+# The package list is NOT enumerated here. It was, and it went stale: the
+# enumeration named 15 packages while 27 carried a //go:generate directive,
+# so client, server and ten others could never be regenerated at all. Letting
+# `go generate ./...` find the directives makes the set self-maintaining — a
+# new pkg/v1 package is covered the moment it declares one.
 docs-readme:
 	@command -v gomarkdoc >/dev/null 2>&1 \
 	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0 (or rebuild devcontainer)"; exit 1; }
-	cd pkg/v1 && go generate ./cache ./codec ./config ./crypto ./errs ./hash ./id ./metrics ./resilience ./sign ./kdf ./password ./tlsid ./logger ./logger/writer
-	@echo "→ pkg/v1/{cache,codec,config,crypto,errs,hash,id,metrics,resilience,sign,kdf,password,tlsid,logger,logger/writer}/README.md regenerated"
+	cd pkg/v1 && go generate ./...
+	@echo "→ every pkg/v1 package declaring //go:generate gomarkdoc regenerated"
 
 # `error-codes` regenerates docs/error-codes.yaml — the human-readable mirror of
 # the dotted-quad error-code registry (ADR 0005/0006), extracted from every
