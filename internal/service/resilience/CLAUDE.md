@@ -14,9 +14,9 @@ ADR 0026.
 |---|---|---|
 | `retry.go` / `retry_config.go` | retry | capped exponential backoff, ctx-aware sleep, `RetryExhausted` |
 | `breaker.go` / `breaker_config.go` / `breaker_state.go` | circuit-breaker | Closed→Open→HalfOpen (injectable clock), `CircuitOpen` |
-| `ratelimit.go` / `ratelimit_config.go` | rate-limit | token bucket (reject mode), `RateLimited` |
+| `ratelimit.go` / `ratelimit_config.go` | rate-limit | token bucket (reject mode), `RateLimited`; non-positive `Rate` refused (ADR 0031) |
 | `bulkhead.go` | bulkhead | buffered-channel semaphore (reject mode), `BulkheadFull` |
-| `timeout.go` | timeout | `context.WithTimeout`, `TimeoutExceeded` |
+| `timeout.go` | timeout | `context.WithTimeout`, `TimeoutExceeded`; non-positive `d` refused (ADR 0031) |
 | `wrap.go` | — | `wrapAs(sentinel, cause)` — sentinel origin-wins + cause as a field |
 | `retryable.go` | — | `isRetryable(pred, err)` — nil-predicate default shared by retry + breaker |
 | `misconfigured.go` | — | `newMisconfigured(policy, knob)` — refuses every call with `PolicyMisconfigured` (ADR 0031) |

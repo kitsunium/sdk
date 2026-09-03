@@ -478,3 +478,52 @@ func TestRateLimiterRejectsAZeroRate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// TestTimeoutRejectsANonPositiveDuration is the second refusal arm of ADR 0031.
+//
+// context.WithTimeout(ctx, 0) hands back an already-expired context, so
+// NewTimeout(0) failed every operation with TimeoutExceeded — including one
+// that returns instantly. Like the zero-Rate limiter it could never admit
+// anything, and it said so with the error it uses when it IS working, so a
+// caller reading TIMEOUT_EXCEEDED had no way to tell a slow dependency from a
+// policy that was never viable.
+func TestTimeoutRejectsANonPositiveDuration(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		d    time.Duration
+		//: whether the policy must refuse itself rather than operate.
+		wantMisconfigured bool
+	}
+	tests := []tc{
+		{"zero duration is refused", 0, true},
+		{"negative duration is refused", -time.Second, true},
+		{"positive duration operates normally", time.Minute, false},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		ran := false
+		//: an operation that returns instantly would succeed under any honest
+		//: deadline, so anything but success here is the policy's own doing.
+		err := res.NewTimeout(tc.d).Run(t.Context(), func(context.Context) error { ran = true; return nil })
+		//: a refused policy never runs the operation.
+		if ran == tc.wantMisconfigured {
+			t.Fatalf("operation ran=%v while misconfigured=%v — the two must be opposite", ran, tc.wantMisconfigured)
+		}
+		//: the refusal must be POLICY_MISCONFIGURED, never TIMEOUT_EXCEEDED.
+		if got := errs.HasCode(err, coreres.CodePolicyMisconfigured); got != tc.wantMisconfigured {
+			t.Fatalf("POLICY_MISCONFIGURED=%v, want %v (err=%v)", got, tc.wantMisconfigured, err)
+		}
+		//: a misconfiguration must not masquerade as the transient outcome.
+		if tc.wantMisconfigured && errs.HasCode(err, coreres.CodeTimeoutExceeded) {
+			t.Errorf("err=%v also carries TIMEOUT_EXCEEDED — a misconfiguration is not a deadline overrun", err)
+		}
+		//: and a viable deadline still lets an instant operation through.
+		if !tc.wantMisconfigured && err != nil {
+			t.Errorf("err=%v, want nil", err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

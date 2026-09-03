@@ -102,7 +102,9 @@ func NewBulkhead(maxConcurrent int) Runner {
 	return svcres.NewBulkhead(maxConcurrent)
 }
 
-// NewTimeout returns a deadline-enforcing Runner.
+// NewTimeout returns a deadline-enforcing Runner. A non-positive d is refused:
+// every call returns PolicyMisconfigured without running the operation, since
+// any deadline chosen for the caller would be a guess (ADR 0031).
 func NewTimeout(d time.Duration) Runner {
 	//: delegate to the service constructor.
 	return svcres.NewTimeout(d)
