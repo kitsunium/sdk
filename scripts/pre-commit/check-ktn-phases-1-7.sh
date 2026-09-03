@@ -60,7 +60,15 @@ linter_output="$(ktn-linter lint --phases=1,2,3,4,5,6,7 ./... 2>&1)" && linter_s
 # where a human most needs to be told.
 issue_count="$(printf '%s\n' "$linter_output" | grep -oE 'Total:[[:space:]]+[0-9]+' | awk '{print $2}' | tail -1 || true)"
 
-if [ -z "$issue_count" ] && ! printf '%s\n' "$linter_output" | grep -q 'No issues found'; then
+# "No issues found" is only trusted alongside a zero exit: the linter can print
+# it and then fail during a later phase, and the message alone would let that
+# partial run stand as a clean verdict — the same failure mode this guard exists
+# to close, one step further along.
+if [ -n "$issue_count" ]; then
+    : # a count was reported: the run completed and the verdict is known
+elif printf '%s\n' "$linter_output" | grep -q 'No issues found' && [ "$linter_status" -eq 0 ]; then
+    exit 0
+else
     cat >&2 <<EOF
 ═══════════════════════════════════════════════════════════════
   ✘ ktn-linter did not complete — gate FAILS CLOSED

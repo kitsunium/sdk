@@ -145,7 +145,15 @@ PRECEDENCE
 - The accepted ADRs under docs/adr/ ARE this repository's rules. Where a generic
   or org-level checklist item contradicts an accepted ADR, the ADR wins: report
   it as compliant and cite the ADR, do not raise a violation.
-- Same for the package CLAUDE.md files, which carry the layer contracts.
+- Precedence, highest first: accepted ADR > package CLAUDE.md > generic or
+  org-level checklist. docs/adr/CLAUDE.md states the first half already ("when an
+  ADR and a CLAUDE.md disagree, the ADR wins and the CLAUDE.md gets corrected");
+  this adds where a checklist sits. A CLAUDE.md that contradicts an accepted ADR
+  is a defect in the CLAUDE.md — worth reporting as such, not a reason to accept
+  the diff.
+- Only a Status: Accepted ADR carries this weight. One still marked Draft or
+  Proposed is a proposal: judge the diff on its merits and say the ADR is not
+  settled yet.
 
 KNOWN CONTRADICTIONS (accepted, do not re-report)
 - Any item requiring stdout as a default destination contradicts ADR 0030

@@ -1,6 +1,6 @@
 # ADR 0029 — Network domain (`net`): unified inbound + outbound transport
 
-- **Status**: Draft
+- **Status**: Accepted
 - **Date**: 2026-09-02
 - **Deciders**: @kodflow
 - **Related**: ADR 0016 (proc — the one-sibling/many-facades precedent), ADR 0018
