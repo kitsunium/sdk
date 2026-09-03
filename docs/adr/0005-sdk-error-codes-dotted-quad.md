@@ -138,6 +138,24 @@ a follow-up CI wave; this MR ships prose)
   reports breakage).
 - Structured-log export of the trail (`"trail": [...]` JSON field) —
   follow-up; v1 ships only the text rendering in `Error()`.
+- **An explicit opt-out from origin-wins when a wrapper PRECISES rather than
+  travesties.** Raised 2026-09-03 by a consumer, recorded here as a design
+  question — deliberately NOT changed as part of a bug-fix batch. Origin-wins
+  (§Semantics, root `CLAUDE.md` rule 6) means a wrapper can add `Fields` but
+  never improve `Public`. Their case: a retry-exhausted error does not say WHAT
+  was unreachable, so wrapping it to name the host produced
+  `[64.1.0.2 <- 64.1.0.2 UPSTREAM_UNREACHABLE] upstream unreachable` — the host,
+  i.e. exactly the added information, is dropped. They had to write
+  `errs.Wrap(nil, …)` and hand-copy the cause's `Private` into their own. **The
+  cost of the rule, stated precisely: to improve a message you must break the
+  `Unwrap` chain**, so `errors.Is`/`errors.As` no longer reach the original
+  cause. The rule protects what it aims at — an intermediary must not
+  misrepresent the nature of an error — but it does not distinguish
+  *misrepresenting* from *specifying*. The `Wrap(nil, …)` workaround already
+  exists in `pkg/v1/codec` for the same reason, so the practice is here; what is
+  missing is a name for it. Minimal path if this is ever reopened: an explicit
+  `WrapParams.OverridePublic bool` — the rule stays the default and the
+  exception becomes visible in review instead of disguised as a nil cause.
 
 ## Why not ...
 
