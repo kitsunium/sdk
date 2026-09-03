@@ -4,6 +4,7 @@ package net
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"slices"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -61,14 +62,22 @@ func (i IdentityValue) IsZero() bool {
 // ClientConfig returns a fresh *tls.Config for dialling a peer. Each call yields
 // a new value so a caller mutating the result cannot affect any other user of
 // the same identity.
+//
+// "Fresh" covers the slices and the trust pool, not only the outer struct. A
+// new *tls.Config whose Certificates and RootCAs still point at the identity's
+// own would leave cfg.Certificates[0] = other and cfg.RootCAs.AddCert(evil)
+// reaching every other configuration the identity has ever minted, including
+// ones already in use — which is the opposite of what an opaque, immutable
+// identity is for. The cost is paid once per config, at construction or at
+// listener setup, never per request.
 func (i IdentityValue) ClientConfig() *tls.Config {
 	//: a zero identity still yields a usable, safe-by-default client config.
 	return &tls.Config{
-		Certificates: i.certs,
-		RootCAs:      i.roots,
+		Certificates: slices.Clone(i.certs),
+		RootCAs:      i.clonedRoots(),
 		ServerName:   i.serverName,
 		MinVersion:   i.resolvedMinVersion(),
-		NextProtos:   i.nextProtos,
+		NextProtos:   slices.Clone(i.nextProtos),
 	}
 }
 
@@ -76,10 +85,10 @@ func (i IdentityValue) ClientConfig() *tls.Config {
 // to mutual TLS when the identity requires a client certificate.
 func (i IdentityValue) ServerConfig() *tls.Config {
 	built := &tls.Config{
-		Certificates: i.certs,
-		ClientCAs:    i.clientCAs,
+		Certificates: slices.Clone(i.certs),
+		ClientCAs:    i.clonedClientCAs(),
 		MinVersion:   i.resolvedMinVersion(),
-		NextProtos:   i.nextProtos,
+		NextProtos:   slices.Clone(i.nextProtos),
 	}
 	//: mutual TLS means the handshake fails unless the peer chains to clientCAs.
 	if i.requireClientCert {
@@ -87,6 +96,30 @@ func (i IdentityValue) ServerConfig() *tls.Config {
 	}
 	//: the freshly built config is never shared with another caller.
 	return built
+}
+
+// clonedRoots copies the peer-verification pool so one configuration's AddCert
+// cannot reach another's. A nil pool means "use the platform trust store" and
+// stays nil, which is deliberately distinct from an empty pool trusting nothing.
+func (i IdentityValue) clonedRoots() *x509.CertPool {
+	//: nil is a meaningful value here, not a missing one.
+	if i.roots == nil {
+		//: keep "use the platform trust store" as it was.
+		return nil
+	}
+	//: an independent pool per configuration.
+	return i.roots.Clone()
+}
+
+// clonedClientCAs copies the client-certificate pool for the same reason.
+func (i IdentityValue) clonedClientCAs() *x509.CertPool {
+	//: nil means the identity accepts no client certificates.
+	if i.clientCAs == nil {
+		//: nothing to copy.
+		return nil
+	}
+	//: an independent pool per configuration.
+	return i.clientCAs.Clone()
 }
 
 // resolvedMinVersion never returns zero, so a zero-value identity still pins a
@@ -142,14 +175,18 @@ func NewIdentityValue(p IdentityParams) (id IdentityValue, err error) {
 			errs.String("field", "client_ca"),
 			errs.String("why", "mutual TLS requires a client CA bundle"))
 	}
-	//: every field was validated above; the value is immutable from here on.
+	//: every field was validated above; the value is immutable from here on —
+	//: which is only true if the caller's slice is copied rather than retained.
+	//: Keeping p.NextProtos would let whoever built the params keep mutating the
+	//: identity's ALPN list after construction, through a value that documents
+	//: itself as opaque.
 	return IdentityValue{
 		certs:             certs,
 		roots:             roots,
 		clientCAs:         clientCAs,
 		serverName:        p.ServerName,
 		minVersion:        minVersion,
-		nextProtos:        p.NextProtos,
+		nextProtos:        slices.Clone(p.NextProtos),
 		requireClientCert: p.RequireClientCert,
 	}, nil
 }

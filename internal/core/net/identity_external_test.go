@@ -89,3 +89,71 @@ func runTrustCase(t *testing.T, tc trustCase, material pemPair) {
 		t.Fatalf("RootCAs installed = %v, want %v", got, tc.wantVerify)
 	}
 }
+
+// TestConfigsDoNotShareMutableState pins the isolation ClientConfig and
+// ServerConfig promise.
+//
+// Minting a fresh *tls.Config is not enough on its own: a new outer struct
+// whose Certificates slice and RootCAs pool still point at the identity's own
+// leaves cfg.Certificates[0] = other and cfg.RootCAs.AddCert(evil) reaching
+// every other configuration that identity has minted, including ones already
+// serving traffic. Trust material is exactly the thing an opaque value must not
+// let a caller reach.
+func TestConfigsDoNotShareMutableState(t *testing.T) {
+	t.Parallel()
+	material := newSelfSigned(t)
+	id, err := corenet.NewIdentityValue(corenet.IdentityParams{
+		CertPEM: material.CertPEM, KeyPEM: material.KeyPEM,
+		RootsPEM: material.CertPEM, ClientCAPEM: material.CertPEM,
+		NextProtos: []string{"h2"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	first := id.ClientConfig()
+	second := id.ClientConfig()
+	//: mutate the first configuration as a careless caller would.
+	first.Certificates[0].Leaf = nil
+	first.Certificates[0].Certificate = nil
+	first.NextProtos[0] = "http/1.1"
+
+	//: the second must be untouched by any of it.
+	if second.Certificates[0].Certificate == nil {
+		t.Fatal("clearing one config's certificate chain emptied another's — " +
+			"the two share a backing array")
+	}
+	if got := second.NextProtos[0]; got != "h2" {
+		t.Fatalf("second config's ALPN = %q after the first was rewritten, want \"h2\"", got)
+	}
+	//: and the trust pools must be independent objects.
+	if first.RootCAs == second.RootCAs {
+		t.Fatal("two configs share one *x509.CertPool — AddCert on either " +
+			"changes what the other verifies")
+	}
+	serverSide := id.ServerConfig()
+	if serverSide.ClientCAs == id.ServerConfig().ClientCAs {
+		t.Fatal("two server configs share one client-CA pool")
+	}
+}
+
+// TestIdentityDoesNotRetainCallerSlices pins that construction copies what the
+// caller handed in.
+//
+// Retaining IdentityParams.NextProtos let whoever built the params keep
+// mutating the identity afterwards, through a value whose whole contract is
+// that it is opaque and immutable once built.
+func TestIdentityDoesNotRetainCallerSlices(t *testing.T) {
+	t.Parallel()
+	protos := []string{"h2", "http/1.1"}
+	id, err := corenet.NewIdentityValue(corenet.IdentityParams{NextProtos: protos})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	//: mutate the slice the caller still holds.
+	protos[0] = "spdy/3"
+	if got := id.ClientConfig().NextProtos[0]; got != "h2" {
+		t.Fatalf("the identity's ALPN became %q when the caller's slice changed, "+
+			"want \"h2\" — construction retained the caller's array", got)
+	}
+}

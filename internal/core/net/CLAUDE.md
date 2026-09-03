@@ -45,7 +45,15 @@ name.
   and **both** `String()` and `GoString()` returning `"<redacted>"`. `GoString`
   is not optional — `fmt` bypasses `String` for `%#v` and would otherwise dump
   the unexported fields. `ClientConfig` / `ServerConfig` mint a **fresh**
-  `*tls.Config` per call so one caller's mutation cannot reach another.
+  `*tls.Config` per call so one caller's mutation cannot reach another — and
+  "fresh" covers the certificate slice, the ALPN slice and the trust pools, not
+  only the outer struct. Sharing those would leave `cfg.Certificates[0] = other`
+  and `cfg.RootCAs.AddCert(evil)` reaching every configuration the identity has
+  ever minted, including ones already serving traffic. The copy is paid once per
+  config — at client construction or listener setup — never per request.
+  `NewIdentityValue` copies the caller's `NextProtos` for the same reason:
+  retaining it let whoever built the params keep mutating an identity that
+  documents itself as opaque and immutable.
 - **`parsePool` exists to close a real trap.** `x509.CertPool.AppendCertsFromPEM`
   reports failure through a boolean that is almost universally discarded, so an
   empty, truncated or key-only bundle yields a pool that parses fine and
