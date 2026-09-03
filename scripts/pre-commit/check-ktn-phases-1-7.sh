@@ -45,11 +45,39 @@ fi
 # Run the linter on the whole tree, restricting to phases 1-7 (the active set
 # documented in .ktn-linter.yaml). --phases is the upstream CLI flag exposed
 # by `ktn-linter lint --help`.
-linter_output="$(ktn-linter lint --phases=1,2,3,4,5,6,7 ./... 2>&1 || true)"
+linter_output="$(ktn-linter lint --phases=1,2,3,4,5,6,7 ./... 2>&1)" && linter_status=0 || linter_status=$?
 
-# The linter returns non-zero when issues are found; we read its stdout
-# regardless and parse the "Total: N issue(s)" footer for the count.
+# The linter exits non-zero when it finds issues AND when it fails to run at
+# all, so the exit code alone cannot tell the two apart. Its output can: a run
+# that completed says either "No issues found" or "Total: N".
+#
+# Reading the count without that check is what let a broken linter pass this
+# gate silently: a binary built for an older Go release fails to scan a newer
+# module, prints no footer, and the count parsed to the empty string — which
+# the old default turned into zero. The gate reported success because it had
+# not managed to look. It failed closed on a missing binary and open on a
+# broken one, which is the wrong way round: a tool that cannot run is the case
+# where a human most needs to be told.
 issue_count="$(printf '%s\n' "$linter_output" | grep -oE 'Total:[[:space:]]+[0-9]+' | awk '{print $2}' | tail -1 || true)"
+
+if [ -z "$issue_count" ] && ! printf '%s\n' "$linter_output" | grep -q 'No issues found'; then
+    cat >&2 <<EOF
+═══════════════════════════════════════════════════════════════
+  ✘ ktn-linter did not complete — gate FAILS CLOSED
+═══════════════════════════════════════════════════════════════
+The linter exited $linter_status and printed neither "No issues found" nor a
+"Total: N" footer, so its verdict is unknown. This is not the same as
+zero issues, and the gate refuses rather than assume.
+
+A common cause is a linter binary built against an older Go release than
+the module it is asked to scan. Check with:
+  ktn-linter --version && go list -m -f '{{.GoVersion}}'
+═══════════════════════════════════════════════════════════════
+EOF
+    printf '%s\n' "$linter_output" >&2
+    exit 1
+fi
+
 issue_count="${issue_count:-0}"
 
 if [ "$issue_count" -eq 0 ]; then

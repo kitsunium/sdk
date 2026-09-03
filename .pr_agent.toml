@@ -31,6 +31,10 @@ SCOPE (DIFF-FIRST)
 
 CONVENTIONS (MUST ENFORCE)
 - Read and enforce CLAUDE.md (and any CONTRIBUTING/ARCHITECTURE docs).
+- Read docs/adr/ before judging a design choice. The accepted ADRs are the
+  rules, not a background document: a diff that follows one is compliant even
+  where a generic guideline would say otherwise, and a diff that silently
+  breaks one is a finding worth raising on its own.
 - Also enforce rules in: .devcontainer/features/languages/<lang>/RULES.md
 - Do NOT provide generic advice. Every comment must reference a concrete file/symbol and a specific fix.
 
@@ -129,7 +133,39 @@ enable_help_text = true
 [pr_compliance]
 enable_codebase_duplication = true
 enable_global_pr_compliance = true
+# The generic checklist is org-level and knows nothing about this repository's
+# accepted decisions. Left on because it does catch real things, but the
+# instructions below tell the reviewer which source wins when the two disagree —
+# without them it re-reports a settled decision on every run, and a finding that
+# cannot be actioned trains people to skim the whole report.
 enable_generic_custom_compliance_checklist = true
+
+extra_instructions = """
+PRECEDENCE
+- The accepted ADRs under docs/adr/ ARE this repository's rules. Where a generic
+  or org-level checklist item contradicts an accepted ADR, the ADR wins: report
+  it as compliant and cite the ADR, do not raise a violation.
+- Same for the package CLAUDE.md files, which carry the layer contracts.
+
+KNOWN CONTRADICTIONS (accepted, do not re-report)
+- Any item requiring stdout as a default destination contradicts ADR 0030
+  "stdout is a protocol channel". No SDK default writes to os.Stdout: the text
+  metrics exporter registers on stderr, ConsoleStderr is the ConsoleStream zero
+  value, and an absent or empty console target maps to stderr. Stdout stays
+  reachable by naming it. The reason is that a daemon whose stdout carries a
+  protocol — an MCP server over stdio, or anything emitting JSON on stdout — is
+  corrupted by a single Export("text", …).
+- Any item requiring a pkg/v1 facade to alias a core or kernel type for EVERY
+  exported name contradicts ADR 0029 D1. Value types do live in core; engine
+  handles (Client, Server, the group and option types) stay in service, because
+  core has no counterpart for them and minting one would hoist net/http into the
+  contract layer. Seven pkg/v1 packages predating that ADR already alias service
+  handles.
+
+WHAT TO DO INSTEAD
+- If an ADR looks wrong, say so as a design comment against the ADR file and
+  argue it. That is reviewable. Re-raising the checklist item is not.
+"""
 
 [github_action_config]
 auto_review = true
