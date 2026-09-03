@@ -81,7 +81,8 @@ codecRange := errs.NewPrefixMatcher(
     errs.MaskByPackage,
 )
 if errors.Is(err, codecRange) {
-    metrics.IncCounter("codec_errors_total")
+    // meter is a metrics.Meter from metrics.NewMeter().
+    meter.Counter("codec_errors_total").Inc()
 }
 ```
 
@@ -92,15 +93,23 @@ if errors.Is(err, codecRange) {
 **Best for:** rendering an SDK error to a consumer-facing channel (HTTP body, gRPC status, CLI). `PublicOf` is wire-safe (≤120 runes, no newline); `PrivateOf` is diagnostic-only — never surface it.
 
 ```go
-// Wire-safe message for the API caller.
+// Wire-safe message for the API caller. HTTPStatusOf / PublicOf / PrivateOf
+// return a single value, so they compose inline.
 w.WriteHeader(errs.HTTPStatusOf(err))
 fmt.Fprintln(w, errs.PublicOf(err))
 
+// CodeOf and ReasonOf return (value, ok) — the ok reports whether the chain
+// carried an SDK error at all. Destructure them; they cannot be passed inline.
+code, hasCode := errs.CodeOf(err)
+reason, hasReason := errs.ReasonOf(err)
+
 // Diagnostic — log only, never expose.
 log.Error("internal failure",
-    "code",    errs.CodeOf(err),
-    "reason",  errs.ReasonOf(err),
-    "private", errs.PrivateOf(err),
+    "code",       code,
+    "has_code",   hasCode,
+    "reason",     reason,
+    "has_reason", hasReason,
+    "private",    errs.PrivateOf(err),
 )
 ```
 
