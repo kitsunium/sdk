@@ -40,11 +40,12 @@ alias(
 go_test(
     name = "client_test",
     srcs = [
+        "capped_body_internal_test.go",
         "guard_external_test.go",
         "policy_external_test.go",
     ],
+    embed = [":client"],
     deps = [
-        ":client",
         "//internal/core/net",
         "//internal/kernel/errs",
     ],

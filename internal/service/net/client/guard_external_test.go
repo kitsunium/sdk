@@ -246,3 +246,62 @@ func closeQuietly(t *testing.T, c io.Closer) {
 		t.Errorf("close: %v", err)
 	}
 }
+
+// bodySizeCase is one response body measured against the ceiling.
+type bodySizeCase struct {
+	// name describes where the body sits relative to the ceiling.
+	name string
+	// size is the body length the upstream sends, in bytes.
+	size int
+	// wantErr is whether the ceiling must refuse that body.
+	wantErr bool
+}
+
+// TestBodySizeCeilingIsInclusive pins all three boundaries around the ceiling.
+//
+// MaxResponseSize is a maximum, so a body OF exactly that size is admissible
+// and only a body past it is refused. Testing one side of the boundary is what
+// let the off-by-one through: a wrapper that stops the moment it has handed
+// back `limit` bytes cannot tell "the body ended exactly here" from "there is
+// one more byte to come", and refuses both.
+func TestBodySizeCeilingIsInclusive(t *testing.T) {
+	t.Parallel()
+	const ceiling int64 = 128
+	cases := []bodySizeCase{
+		{name: "one byte under the ceiling", size: int(ceiling) - 1},
+		{name: "exactly at the ceiling", size: int(ceiling)},
+		{name: "one byte over the ceiling", size: int(ceiling) + 1, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runBodySizeCase(t, tc, ceiling)
+		})
+	}
+}
+
+// runBodySizeCase serves a body of the case's size and checks the verdict.
+func runBodySizeCase(t *testing.T, tc bodySizeCase, ceiling int64) {
+	t.Helper()
+	srv, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeOrFail(t, w, strings.Repeat("x", tc.size))
+	})
+	c := newClient(t, srv, client.Config{MaxResponseSize: ceiling})
+	resp, err := c.Get(context.Background(), "/v1/subscribers", nil)
+	//: only a body PAST the ceiling may be refused.
+	if tc.wantErr {
+		if !errs.HasCode(err, codeOf(t, corenet.ResponseTooLarge)) {
+			t.Fatalf("a %d-byte body under a %d-byte ceiling: expected RESPONSE_TOO_LARGE, got %v",
+				tc.size, ceiling, err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("a %d-byte body under a %d-byte ceiling was refused: %v", tc.size, ceiling, err)
+	}
+	//: an admitted body must arrive whole; the ceiling never truncates.
+	if len(resp.Body) != tc.size {
+		t.Fatalf("Body is %d bytes, want %d — the ceiling truncated instead of admitting",
+			len(resp.Body), tc.size)
+	}
+}
