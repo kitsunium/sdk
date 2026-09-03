@@ -3,6 +3,7 @@ package resilience_test
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -409,8 +410,8 @@ func TestBreakerOpenDurationClamp(t *testing.T) {
 	}
 }
 
-// TestRateLimiterRejectsAZeroRate is the regression guard for the refusal arm of
-// ADR 0031.
+// TestRateLimiterRejectsAnUnusableRate is the regression guard for the refusal
+// arm of ADR 0031.
 //
 // A zero Rate made the token bucket start full and never refill: call one was
 // admitted, and every call after it was rejected with RATE_LIMITED forever. The
@@ -418,7 +419,22 @@ func TestBreakerOpenDurationClamp(t *testing.T) {
 // it IS doing its job — a misconfiguration presented as normal operation. The
 // guard asserts the observable outcome: the operation does not run, and the
 // error is distinguishable from an ordinary rate-limit rejection.
-func TestRateLimiterRejectsAZeroRate(t *testing.T) {
+//
+// The non-finite rows are the same defect reached through IEEE-754 rather than
+// through sign. NaN passes a bare `<= 0` because it compares false against
+// every bound, then poisons the token arithmetic and rejects every call as
+// RATE_LIMITED — the zero-Rate behaviour, restored. +Inf passes because it is
+// positive, and is worse still: the refill term is elapsed*rate, so at exactly
+// zero elapsed time 0*(+Inf) is NaN and the call is rejected, while at any
+// non-zero elapsed it is +Inf and the call is admitted. The outcome tracks
+// clock granularity, and its admitting half fails OPEN.
+//
+// Both rows assert the refusal specifically — POLICY_MISCONFIGURED, and the
+// operation not running — rather than merely that something went wrong. Under
+// the fake clock both non-finite rates happen to surface as RATE_LIMITED
+// without the guard, so an assertion that only checked "an error came back"
+// would pass against the defect.
+func TestRateLimiterRejectsAnUnusableRate(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
@@ -444,6 +460,35 @@ func TestRateLimiterRejectsAZeroRate(t *testing.T) {
 			"negative Rate is refused",
 			res.RateLimiterConfig{Rate: -1},
 			true,
+		},
+		{
+			//: NaN slips past a sign test and rebuilds the zero-Rate defect:
+			//: tokens becomes NaN on the first refill and never reaches 1.
+			"NaN Rate is refused",
+			res.RateLimiterConfig{Rate: math.NaN()},
+			true,
+		},
+		{
+			//: +Inf slips past a sign test the other way — it refills the
+			//: bucket instantly, so the limiter admits everything and the
+			//: caller is unguarded while believing otherwise.
+			"positive infinite Rate is refused",
+			res.RateLimiterConfig{Rate: math.Inf(1)},
+			true,
+		},
+		{
+			//: -Inf is caught by sign too, but pinning it keeps the guard
+			//: honest if the condition is ever rewritten around finiteness.
+			"negative infinite Rate is refused",
+			res.RateLimiterConfig{Rate: math.Inf(-1)},
+			true,
+		},
+		{
+			//: a NaN Burst must not turn a valid Rate into a refusal — Burst
+			//: has a floor and clamps, so only Rate can refuse this policy.
+			"a real Rate with a large Burst operates normally",
+			res.RateLimiterConfig{Rate: 1, Burst: 1000},
+			false,
 		},
 		{
 			//: a real rate still builds a working limiter.

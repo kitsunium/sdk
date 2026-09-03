@@ -3,6 +3,7 @@ package resilience
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 
@@ -25,16 +26,35 @@ type tokenBucket struct {
 }
 
 // NewRateLimiter returns a Runner that admits at most Rate calls/sec (with a
-// Burst allowance), rejecting excess calls with RateLimited. A non-positive
-// Rate is refused rather than defaulted: every call returns
-// PolicyMisconfigured without running the operation (ADR 0031).
+// Burst allowance), rejecting excess calls with RateLimited. A Rate that is not
+// a finite positive number — zero, negative, NaN or infinite — is refused
+// rather than defaulted: every call returns PolicyMisconfigured without running
+// the operation (ADR 0031).
 func NewRateLimiter(cfg RateLimiterConfig) coreres.Runner {
 	//: a rate is the entire content of this policy — there is no SDK-side value
 	//: that is not a guess at the caller's requirement, so refuse rather than
 	//: invent one (ADR 0031). Without this, Rate 0 meant the bucket started
 	//: full and never refilled: call one admitted, every call after it rejected
 	//: forever with RATE_LIMITED, indistinguishable from working normally.
-	if cfg.Rate <= 0 {
+	//:
+	//: The guard is finiteness, not just sign, because IEEE-754 lets two values
+	//: through a bare `<= 0` and both rebuild the inert policy this refusal
+	//: exists to prevent. NaN compares false against every bound, so it reaches
+	//: the bucket, poisons `tokens` on the first refill (x + NaN is NaN) and
+	//: makes `tokens >= 1` false forever: every call rejected with
+	//: RATE_LIMITED, which is the zero-Rate defect exactly.
+	//:
+	//: +Inf is positive, so it reaches the bucket too, and it is the worse of
+	//: the two because its outcome is not even stable. The refill term is
+	//: `elapsed * rate`: at exactly zero elapsed time 0*(+Inf) is NaN and the
+	//: call is rejected, at any non-zero elapsed it is +Inf and the call is
+	//: admitted. The same limiter therefore rejects everything or admits
+	//: everything according to clock granularity between two calls — and the
+	//: admitting half fails OPEN, with the caller believing they are guarded.
+	//:
+	//: A rate arrives non-finite by ordinary arithmetic, not by a caller
+	//: typing it: budget/window is +Inf for a zero window, and 0.0/0.0 is NaN.
+	if math.IsNaN(cfg.Rate) || math.IsInf(cfg.Rate, 0) || cfg.Rate <= 0 {
 		//: fail closed, and say why.
 		return newMisconfigured("ratelimit", "Rate")
 	}

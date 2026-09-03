@@ -62,7 +62,13 @@ the caller's requirement.
   and silently received "100/s" would be worse off than one who is told, because
   they would believe they are limited at their intended rate. `Burst` clamps to
   1 precisely because it *does* have an obvious floor ("admit at least one"),
-  which is the contrast that locates the line.
+  which is the contrast that locates the line. The test is **finiteness, not
+  sign**: NaN and ±Inf pass a `<= 0` comparison and rebuild the very policy
+  this refusal removes — NaN poisons the token arithmetic and rejects every
+  call, and +Inf flips between rejecting everything and admitting everything
+  according to how much time elapsed between two calls. A rate reaches those
+  values by ordinary arithmetic (`budget/window` with a zero window), not by a
+  caller typing them.
 
 ### How a refusal is delivered
 
