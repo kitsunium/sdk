@@ -20,6 +20,13 @@ cross-OS. ADR 0028. Emits the core sentinels `0.2.10.*`.
 
 ## Conventions
 
+- **Key mapping is mechanical**: the JSON tag is the variable name with the
+  prefix removed, lower-cased, underscores kept. `EnvSource("APP")` maps
+  `APP_SDM_SERVER_NAME` to the key `sdm_server_name`, so the field needs
+  `json:"sdm_server_name"`. The separating underscore is supplied by the Source,
+  and a trailing one on the prefix is absorbed — `EnvSource("APP")` and
+  `EnvSource("APP_")` are the same namespace. An empty prefix reads every
+  variable and lower-cases the key as-is.
 - **Env values are JSON-coerced ONLY when the whole value is one complete JSON
   document**: `"8080"`→int64, `"true"`→bool, everything else stays the exact
   string it was. The gate is `json.Valid` over the entire input, because

@@ -53,6 +53,17 @@ func Load[T any](target *T, sources ...Source) error {
 }
 
 // EnvSource returns a Source reading "PREFIX_KEY" env vars (empty prefix = all).
+//
+// The key a field must match is the variable name with the prefix removed and
+// lower-cased, underscores kept: under EnvSource("APP"), the variable
+// APP_SDM_SERVER_NAME feeds a field tagged `json:"sdm_server_name"`. The
+// separating underscore belongs to the Source, and a trailing one on prefix is
+// absorbed, so EnvSource("APP") and EnvSource("APP_") name the same namespace.
+//
+// A value is coerced to a typed Go value only when the WHOLE value is one
+// complete JSON document — "8080" becomes an int64, "true" a bool. Anything
+// else keeps its exact string, so identifiers that merely start like numbers
+// ("0A0A01", "1500ms", "10.45.0.0/16", "2026-09-03") arrive intact.
 func EnvSource(prefix string) Source {
 	//: delegate to the service env source.
 	return svcconfig.EnvSource(prefix)

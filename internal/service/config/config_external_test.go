@@ -344,3 +344,56 @@ func TestEnvTruncationIntoNumericField(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
 	}
 }
+
+// TestEnvSourcePrefixSpelling pins that a trailing underscore on the prefix is
+// absorbed rather than doubled.
+//
+// EnvSource supplies the separator itself, so EnvSource("APP_") used to search
+// for "APP__" — which matches nothing. Load then returned an empty struct and a
+// NIL ERROR: the caller got no configuration and no signal, which reads exactly
+// like "the SDK is broken" rather than "the prefix has one character too many".
+// Both spellings are natural to write, so both name the same namespace.
+func TestEnvSourcePrefixSpelling(t *testing.T) {
+	type tc struct {
+		name   string
+		prefix string
+	}
+	tests := []tc{
+		{"prefix without the separator", "PFX"},
+		{"prefix with a trailing separator", "PFX_"},
+		{"prefix with several trailing separators", "PFX___"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		t.Setenv("PFX_HOST", "sdm.halys.fr")
+		t.Setenv("PFX_PORT", "8000")
+		var got appConf
+		//: whichever spelling the caller used, the same variables must load.
+		if err := cfg.Load(&got, cfg.EnvSource(tc.prefix)); err != nil {
+			t.Fatalf("Load: %v, want nil", err)
+		}
+		want := appConf{Port: 8000, Host: "sdm.halys.fr"}
+		//: the observable contract is the populated struct, not the match string.
+		if got != want {
+			t.Errorf("Load = %+v, want %+v", got, want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
+	}
+}
+
+// TestEnvSourceEmptyPrefixStillReadsEverything guards the other arm: absorbing
+// a trailing underscore must not turn an all-variables source into a prefixed
+// one, since "" and "_" are different intents.
+func TestEnvSourceEmptyPrefixStillReadsEverything(t *testing.T) {
+	t.Setenv("UNPREFIXED_MARKER", "present")
+	m, err := cfg.EnvSource("").Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	//: an empty prefix reads the whole environment, keys lower-cased as-is.
+	if m["unprefixed_marker"] != "present" {
+		t.Errorf("unprefixed_marker=%v, want \"present\"", m["unprefixed_marker"])
+	}
+}

@@ -16,6 +16,13 @@ type envSource struct {
 
 // EnvSource returns a Source reading "PREFIX_KEY=value" env vars, stripping the
 // prefix and lower-casing the key. An empty prefix reads every variable.
+//
+// The separating underscore is supplied by the Source, and a trailing one on
+// prefix is absorbed rather than doubled: EnvSource("APP") and EnvSource("APP_")
+// name the same namespace. Both spellings are natural to write, and the second
+// used to build the prefix "APP__", which matches nothing — Load then returned
+// an empty configuration and a nil error, so a typo cost the caller the whole
+// config with no signal at all.
 func EnvSource(prefix string) coreconfig.Source {
 	//: a stateless reader — safe to share.
 	return envSource{prefix: prefix}
@@ -24,8 +31,9 @@ func EnvSource(prefix string) coreconfig.Source {
 // Load scans the environment for the prefix and returns the stripped map.
 func (s envSource) Load() (values map[string]any, err error) {
 	//: the match prefix is "PREFIX_" (or "" for every variable).
-	match := s.prefix
-	//: a non-empty prefix gains the separating underscore.
+	match := strings.TrimRight(s.prefix, "_")
+	//: a non-empty prefix gains exactly one separating underscore, whether or
+	//: not the caller already wrote it.
 	if match != "" {
 		//: keys look like PREFIX_NAME.
 		match += "_"
