@@ -402,6 +402,56 @@ func TestEnvSourcePrefixSpelling(t *testing.T) {
 	}
 }
 
+// TestEnvSourceUnderscoreOnlyPrefixIsNotEveryVariable is the regression guard
+// for a prefix that normalisation is able to empty.
+//
+// The trailing-separator absorption trimmed EVERY trailing underscore, so
+// EnvSource("_") and EnvSource("___") produced the empty match string — which
+// is the explicit read-everything mode. A caller who asked to be scoped
+// silently received the entire process environment, and every variable in it
+// was then offered to the decoder: one field name colliding with one unrelated
+// variable is all it takes for a value the caller never meant to read,
+// including a secret, to land in the target struct.
+//
+// The guard asserts both halves, because either alone passes against a defect:
+// that an unrelated variable is NOT readable, and that the namespace the prefix
+// does name still resolves — otherwise a source that read nothing at all would
+// look correct.
+func TestEnvSourceUnderscoreOnlyPrefixIsNotEveryVariable(t *testing.T) {
+	type tc struct {
+		name   string
+		prefix string
+	}
+	tests := []tc{
+		{"a single underscore", "_"},
+		{"two underscores", "__"},
+		{"several underscores", "____"},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: a variable that belongs to nobody's namespace.
+		t.Setenv("UNRELATED_SECRET", "must-not-leak")
+		//: and one that genuinely lives under the "_" namespace.
+		t.Setenv("_SCOPED", "in-namespace")
+		m, err := cfg.EnvSource(tc.prefix).Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		//: the whole point — a non-empty prefix must never read the environment.
+		if _, leaked := m["unrelated_secret"]; leaked {
+			t.Errorf("EnvSource(%q) read UNRELATED_SECRET: a non-empty prefix collapsed onto the read-everything mode", tc.prefix)
+		}
+		//: and the namespace it DOES name still resolves, so the guard cannot
+		//: be satisfied by a source that reads nothing.
+		if got := m["scoped"]; got != "in-namespace" {
+			t.Errorf("EnvSource(%q) scoped=%v, want %q", tc.prefix, got, "in-namespace")
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
+	}
+}
+
 // TestEnvSourceEmptyPrefixStillReadsEverything guards the other arm: absorbing
 // a trailing underscore must not turn an all-variables source into a prefixed
 // one, since "" and "_" are different intents.

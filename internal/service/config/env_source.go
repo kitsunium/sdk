@@ -15,7 +15,8 @@ type envSource struct {
 }
 
 // EnvSource returns a Source reading "PREFIX_KEY=value" env vars, stripping the
-// prefix and lower-casing the key. An empty prefix reads every variable.
+// prefix and lower-casing the key. An EMPTY prefix — and only an empty prefix —
+// reads every variable.
 //
 // The separating underscore is supplied by the Source, and a trailing one on
 // prefix is absorbed rather than doubled: EnvSource("APP") and EnvSource("APP_")
@@ -23,6 +24,10 @@ type envSource struct {
 // used to build the prefix "APP__", which matches nothing — Load then returned
 // an empty configuration and a nil error, so a typo cost the caller the whole
 // config with no signal at all.
+//
+// That absorption can never empty a non-empty prefix. "" is not "a namespace
+// whose name is empty", it is the whole environment, so a prefix made only of
+// underscores names the "_" namespace instead of collapsing onto it.
 func EnvSource(prefix string) coreconfig.Source {
 	//: a stateless reader — safe to share.
 	return envSource{prefix: prefix}
@@ -31,13 +36,7 @@ func EnvSource(prefix string) coreconfig.Source {
 // Load scans the environment for the prefix and returns the stripped map.
 func (s envSource) Load() (values map[string]any, err error) {
 	//: the match prefix is "PREFIX_" (or "" for every variable).
-	match := strings.TrimRight(s.prefix, "_")
-	//: a non-empty prefix gains exactly one separating underscore, whether or
-	//: not the caller already wrote it.
-	if match != "" {
-		//: keys look like PREFIX_NAME.
-		match += "_"
-	}
+	match := matchPrefix(s.prefix)
 	//: collect the matching variables into a flat map.
 	out := make(map[string]any, len(os.Environ()))
 	//: each environ entry is "KEY=VALUE".
@@ -67,6 +66,34 @@ func (s envSource) Load() (values map[string]any, err error) {
 	}
 	//: env reads never fail.
 	return out, nil
+}
+
+// matchPrefix turns a caller-supplied prefix into the string every environment
+// key must start with.
+//
+// An empty prefix is the explicit read-everything mode and maps to "". Any
+// other prefix names a namespace and has to keep naming one, which is why the
+// trailing-separator absorption is not a bare TrimRight: trimming "_" or "___"
+// yields "", and "" is not a namespace with an empty name — it matches every
+// key in the process environment. A caller who wrote a prefix asked to be
+// scoped, so an all-underscore prefix resolves to the "_" namespace (the
+// leading-underscore variables) rather than to everything.
+func matchPrefix(prefix string) string {
+	//: the all-variables mode, reachable only by writing no prefix at all.
+	if prefix == "" {
+		//: every key starts with "".
+		return ""
+	}
+	//: absorb trailing separators — the Source supplies exactly one itself.
+	name := strings.TrimRight(prefix, "_")
+	//: an all-underscore prefix has no name part left; it is the "_" namespace,
+	//: and must not fall through to the read-everything mode above.
+	if name == "" {
+		//: the separator itself is the namespace.
+		return "_"
+	}
+	//: keys look like PREFIX_NAME.
+	return name + "_"
 }
 
 // coerceEnvInto parses val as a JSON token and stores it under key in out,
