@@ -317,3 +317,94 @@ func TestBreakerRetryablePredicate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// TestBreakerOpenDurationClamp is the regression guard for ADR 0031: a breaker
+// built without an OpenDuration must still reject calls once it trips.
+//
+// OpenDuration was the one knob in BreakerConfig with no lower bound, so a
+// caller who set only FailureThreshold got a breaker whose cooldown was zero:
+// it tripped, then admitted the very next call, and every call after it. It
+// rejected nothing while the caller believed it was protected. The guard
+// asserts the observable outcome — a call is actually rejected — not the field
+// value, so it fails whatever the clamp looks like internally.
+func TestBreakerOpenDurationClamp(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		cfg  res.BreakerConfig
+		//: how far the clock moves before the post-trip probe.
+		advance time.Duration
+		//: whether that probe must be rejected with CIRCUIT_OPEN.
+		wantOpen bool
+	}
+	tests := []tc{
+		{
+			//: the defect case — no OpenDuration at all.
+			"zero OpenDuration still rejects after tripping",
+			res.BreakerConfig{FailureThreshold: 2},
+			0,
+			true,
+		},
+		{
+			//: the clamped cooldown must actually elapse before recovery.
+			"zero OpenDuration recovers only after the default cooldown",
+			res.BreakerConfig{FailureThreshold: 2},
+			31 * time.Second,
+			false,
+		},
+		{
+			//: just under the default cooldown is still Open.
+			"zero OpenDuration is still open just before the default cooldown",
+			res.BreakerConfig{FailureThreshold: 2},
+			29 * time.Second,
+			true,
+		},
+		{
+			//: an explicit cooldown is honoured, not overridden by the clamp.
+			"explicit OpenDuration is honoured",
+			res.BreakerConfig{FailureThreshold: 2, OpenDuration: time.Minute},
+			31 * time.Second,
+			true,
+		},
+		{
+			//: and it recovers on its own schedule, not the default's.
+			"explicit OpenDuration recovers on its own schedule",
+			res.BreakerConfig{FailureThreshold: 2, OpenDuration: time.Minute},
+			61 * time.Second,
+			false,
+		},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		clk := &fakeClock{now: time.Unix(0, 0)}
+		cfg := tc.cfg
+		cfg.Clock = clk
+		b := res.NewCircuitBreaker(cfg)
+		fail := func(context.Context) error { return errBoom }
+		//: spend the failure budget so the breaker trips Open. Every call in
+		//: this phase must still run the operation and surface its own error —
+		//: a rejection here would mean the breaker tripped early.
+		for range cfg.FailureThreshold {
+			if err := b.Run(t.Context(), fail); !errors.Is(err, errBoom) {
+				t.Fatalf("trip phase: err=%v, want errBoom", err)
+			}
+		}
+		//: move the clock to the moment under test.
+		clk.advance(tc.advance)
+		//: probe with an operation that would succeed if it were admitted; a
+		//: rejected probe never runs it, which is what CIRCUIT_OPEN reports.
+		ran := false
+		err := b.Run(t.Context(), func(context.Context) error { ran = true; return nil })
+		//: the observable contract: rejected fast, and the op did not execute.
+		if got := errs.HasCode(err, coreres.CodeCircuitOpen); got != tc.wantOpen {
+			t.Fatalf("CIRCUIT_OPEN=%v, want %v (err=%v)", got, tc.wantOpen, err)
+		}
+		//: a rejection that still ran the operation would protect nothing.
+		if ran == tc.wantOpen {
+			t.Errorf("operation ran=%v while CIRCUIT_OPEN=%v — the two must be opposite", ran, tc.wantOpen)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

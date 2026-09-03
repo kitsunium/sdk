@@ -25,6 +25,12 @@ ADR 0026.
 - **No `errs.Define` here** — service emits the `core/resilience` sentinels via
   `wrapAs` (origin-wins keeps the policy code even when the cause is an *errs.Error).
 - **Injectable clock** (breaker/ratelimit) for deterministic tests.
+- **No constructor returns an inert policy** (ADR 0031). A non-positive knob is
+  either clamped to a working floor — `MaxAttempts`→1, `Multiplier`→2,
+  `FailureThreshold`→5, `OpenDuration`→30s, `Burst`→1, bulkhead limit→1 — or,
+  where any SDK-chosen value would be arbitrary, refused. A breaker with a zero
+  cooldown admits the next call and so rejects nothing, which is the one failure
+  mode that hands back a false sense of protection.
 - **Retryable classifier** (`RetryConfig.Retryable` / `BreakerConfig.Retryable`,
   ADR 0026 §Deferred, delivered): one `func(error) bool` shape for both policies
   so a nested `Retry(Breaker(op))` shares a single predicate. `nil` keeps the

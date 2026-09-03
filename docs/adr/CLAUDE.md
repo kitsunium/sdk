@@ -38,6 +38,7 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0027-sdk-metrics-domain.md` | Observability domain (`metrics`): 9th core sibling, instruments + `Meter` + exporter registry (writer-registry model); in-mem meter + text exporter; block `0.2.9.*`; labels/Prometheus/OTLP deferred | Accepted (Phase B) |
 | `0028-sdk-config-domain.md` | Configuration domain (`config`): 10th core sibling, `Source`/`Validator`/`Watcher` ports; env+file loader + cross-OS **poll** watcher; closes the Phase-B wave; block `0.2.10.*` | Accepted (Phase B; closes the wave) |
 | `0030-stdout-is-a-protocol-channel.md` | No SDK default writes to `os.Stdout`: the registered `text` metrics exporter targets stderr, `ConsoleStderr` becomes the `ConsoleStream` zero value (and the absent/empty `target` maps to it); stdout stays reachable by naming it | Accepted (amends 0027 §Decision 2 / 0015 §D3) |
+| `0031-policy-zero-values-are-never-inert.md` | A policy constructor never returns an inert policy: **clamp** where a working default needs no explanation (`BreakerConfig.OpenDuration` → 30s), **refuse** where any SDK-chosen value would be arbitrary (`RateLimiterConfig.Rate`, `NewTimeout`) via the new `PolicyMisconfigured` sentinel `0.2.8.6` | Accepted (amends 0026 §Decision 2) |
 
 ## Conventions
 

@@ -14,6 +14,13 @@ import (
 // none is configured.
 const defaultThreshold int = 5
 
+// defaultOpenDuration is the cooldown an Open breaker serves when none is
+// configured. A zero cooldown lets the very next call re-probe the downstream,
+// which is a breaker that rejects nothing — the caller believes it is protected
+// and is not (ADR 0031). Thirty seconds is the same order of arbitrary as the
+// five-failure defaultThreshold above and is the industry-conventional range.
+const defaultOpenDuration time.Duration = 30 * time.Second
+
 // circuitBreaker trips Open after FailureThreshold consecutive failures, rejects
 // for OpenDuration, then half-opens for a trial.
 type circuitBreaker struct {
@@ -28,9 +35,12 @@ type circuitBreaker struct {
 }
 
 // NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen
-// breaker. Open calls return CircuitOpen until OpenDuration elapses. An error
-// rejected by cfg.Retryable is returned verbatim and left out of the state
-// machine entirely, so deterministic failures cannot trip the breaker.
+// breaker. Open calls return CircuitOpen until OpenDuration elapses; a
+// non-positive OpenDuration clamps to defaultOpenDuration, because a breaker
+// whose cooldown is zero admits the next call immediately and therefore
+// protects nothing (ADR 0031). An error rejected by cfg.Retryable is returned
+// verbatim and left out of the state machine entirely, so deterministic
+// failures cannot trip the breaker.
 func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 	//: default the clock to the system source.
 	clk := cfg.Clock
@@ -46,8 +56,15 @@ func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 		//: standard 5-failure trip.
 		threshold = defaultThreshold
 	}
+	//: a non-positive cooldown falls back to the default.
+	openFor := cfg.OpenDuration
+	//: clamp it like every sibling knob — a zero cooldown is not a breaker.
+	if openFor <= 0 {
+		//: standard 30-second cooldown.
+		openFor = defaultOpenDuration
+	}
 	//: a fresh breaker starts Closed.
-	return &circuitBreaker{clk: clk, retryable: cfg.Retryable, threshold: threshold, openFor: cfg.OpenDuration}
+	return &circuitBreaker{clk: clk, retryable: cfg.Retryable, threshold: threshold, openFor: openFor}
 }
 
 // Run rejects fast when Open, else runs op and records the outcome. A
