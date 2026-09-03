@@ -43,7 +43,9 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 ## Conventions
 
 - File name: `NNNN-<short-slug>.md` where `NNNN` is the next zero-padded number.
-- Every ADR has at minimum: **Status**, **Context**, **Decision**, **Consequences**, **Alternatives considered**. Add **Why not <option>** for non-obvious rejects.
+- Header block: **Status**, **Date**, **Deciders**, plus **Supersedes** / **Superseded by** / **Amends** / **Related** where they apply.
+- Standard sections, in this order: **Context**, **Decision**, **Consequences / Semantics**, **Breaking changes**, **Alternatives considered** and/or **Why not <option>**, **Deferred**, **References**. This is the same list as `docs/CLAUDE.md` §ADR conventions — keep the two in step; when they disagree, the two are both wrong until they agree.
+- A standard section with nothing to say says so rather than being dropped — `Breaking changes` → "None. `<domain>` is a new domain in this change set" is the house form (ADR 0026/0027/0028). A missing heading reads as an oversight; an explicit "None" reads as a decision.
 - Mermaid / ASCII diagrams welcome where they reduce reading time.
 - Cross-link with relative paths: `../adr/0005-…md` so links survive a move.
 - Use `1.2.0.3` style for codes in prose, never the hex literal.

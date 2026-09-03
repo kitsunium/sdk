@@ -50,12 +50,32 @@ stream without being told, it picks stderr. Diagnostics on stderr are at worst
 noise; diagnostics on stdout are data corruption. The asymmetry of the two
 failure modes is the whole argument.
 
-## Consequences
+## Consequences / Semantics
 
-- **This is a minor bump, not a patch** (ADR 0007 §Bump semantics: "behavioral
-  change in `internal/**` observable through `pkg/<major>` → minor"). Both
-  changes alter observable behaviour of unchanged caller code. The commits that
-  land them carry the `Release-bump: minor` trailer.
+- **"Unspecified" now means stderr on every surface that has a default.**
+  `ConsoleConfig{}`, an absent `target` key, an explicitly empty `target: ""`,
+  and the exporter that a bare import registers all resolve to `os.Stderr`.
+  Naming a stream still selects it — `ConsoleStdout`, `target: "stdout"`, and
+  `NewTextExporter(name, os.Stdout)` behave exactly as before.
+- **The default is a constant, not a probe.** It does not depend on whether
+  stdout is a terminal, on an environment variable, or on anything else decided
+  at run time; the same binary always starts in the same place.
+- **`ConsoleStdout` keeps its name and its behaviour.** Only its numeric value
+  and its default-ness change, so the pair remains complete and the
+  out-of-range guard in `Open` still rejects anything outside it.
+- The guard against regression is a test per surface, not prose: each pins the
+  default destination by identity and fails naming the stream.
+
+## Breaking changes
+
+Two behavioural changes land under this decision — the registered `text`
+metrics exporter moves from `os.Stdout` to `os.Stderr`, and the `ConsoleStream`
+zero value moves from `ConsoleStdout` to `ConsoleStderr`. Both alter the
+observable behaviour of caller code that did not change, which ADR 0007 §Bump
+semantics classifies as a **minor bump, not a patch** ("behavioral change in
+`internal/**` observable through `pkg/<major>` → minor"); the commits that land
+them carry the `Release-bump: minor` trailer.
+
 - A consumer relying on the old destinations must now say so: `os.Stdout` passed
   to `NewTextExporter`, or `ConsoleConfig{Stream: ConsoleStdout}` /
   `target: "stdout"`. Both are one token, and both are now visible in review —
@@ -72,8 +92,6 @@ failure modes is the whole argument.
   those been false — an enum crossing CBOR, msgpack or ASN.1 changes meaning
   silently for a consumer re-reading old data — the correct move would have been
   a distinct zero-value sentinel rather than a reordering.
-- The guard against regression is a test per surface, not prose: each pins the
-  default destination by identity and fails naming the stream.
 
 ## Alternatives considered
 
@@ -101,6 +119,23 @@ the registry; ADR 0015 still makes console a default-active writer. Only the
 stream each of them picks when nobody names one changes, so this ADR **amends**
 them in the house style (cf. ADR 0012 amending 0005/0006, ADR 0020 amending
 0005) rather than superseding them.
+
+## Deferred
+
+- **A mechanical guard for the rule itself.** What is enforced today is the two
+  destinations, by one regression test each; the *rule* — no SDK default writes
+  to `os.Stdout` — is enforced by review. An audit in the style of the `errs`
+  AST registry check (or a `scripts/pre-commit/` guard) failing on a
+  package-level binding of a writer to `os.Stdout` would close that gap. Not
+  built here: with two subjects, the audit costs more to maintain than it
+  catches. It becomes worth writing at the third surface.
+- **Revisit the zero-value reordering if `ConsoleStream` ever becomes
+  serialisable.** The audit under Breaking changes holds only while no numeric
+  value of the enum crosses a wire or a file. Adding a `MarshalText`,
+  `MarshalJSON`, `MarshalBinary` or codec participation to `ConsoleStream`
+  would make the ordering externally visible, and the `ConsoleUnset` sentinel
+  rejected under Alternatives becomes the correct shape at that point. Nothing
+  in the tree enforces the precondition today.
 
 ## References
 

@@ -79,20 +79,41 @@ This is fail-closed, matchable with `errs.HasCode`, and — the point —
 exit code, not the `EX_TEMPFAIL` (75) the other five resilience sentinels carry:
 a misconfiguration is permanent, and retrying it is pointless.
 
-## Consequences
+## Consequences / Semantics
 
-- **Minor bump** (ADR 0007 §Bump semantics): all three change behaviour
-  observable through `pkg/v1` for unchanged caller code. The commits carry the
-  `Release-bump: minor` trailer.
-- A caller currently passing `Rate: 0` or `NewTimeout(0)` moves from a silent
-  permanent rejection to a named one. Nobody loses a working configuration —
-  none of the three was working.
-- `POLICY_MISCONFIGURED` is the first resilience sentinel that is not transient.
-  Code handling resilience errors as a retryable class must exclude it; that is
-  what the distinct exit code is for.
+- **A constructor's return value is now trustworthy.** A `Runner` handed back by
+  `NewCircuitBreaker`, `NewRateLimiter` or `NewTimeout` either enforces the
+  policy it names or refuses every call saying so. There is no third state in
+  which it runs the work while claiming a protection it does not provide.
+- **`POLICY_MISCONFIGURED` is the first resilience sentinel that is not
+  transient.** Code handling resilience errors as a retryable class must
+  exclude it; that is what the distinct exit code — `EX_CONFIG` (78) rather
+  than the `EX_TEMPFAIL` (75) its five siblings carry — is for.
+- **A refusal names the knob, never the value.** The error carries `policy` and
+  `knob` fields; whatever the caller passed is not echoed, so a refusal is safe
+  to log wherever the other sentinels are.
 - The guard against regression is a test per policy asserting the **observable**
   outcome — a call is actually rejected, the operation did not run — never the
   clamped field value, so it survives a change of mechanism.
+
+## Breaking changes
+
+Three behavioural changes land under this decision: `BreakerConfig.OpenDuration`
+clamps to 30s, `RateLimiterConfig.Rate` is refused when it is not a usable rate,
+and `NewTimeout`'s duration is refused when non-positive. All three change
+behaviour observable through `pkg/v1` for caller code that did not change, so
+each is a **minor bump** under ADR 0007 §Bump semantics and each commit carries
+the `Release-bump: minor` trailer.
+
+- A caller currently passing `Rate: 0` or `NewTimeout(0)` moves from a silent
+  permanent rejection to a named one. Nobody loses a working configuration —
+  none of the three was working.
+- A caller whose breaker was built without an `OpenDuration` moves from a
+  breaker that admitted the call immediately after tripping to one that stays
+  open for 30s. That is the first time the policy actually rejects anything, so
+  a caller who had adapted to the broken behaviour will now see `CIRCUIT_OPEN`.
+- No signature changes. The constructors still return a bare `Runner`, so
+  nothing stops compiling; the change is in what that `Runner` does.
 
 ## Alternatives considered
 
@@ -123,6 +144,26 @@ a misconfiguration is permanent, and retrying it is pointless.
 left alone. Both still execute the caller's work under a meaningful, if
 minimal, policy — one attempt, one concurrent slot. Neither claims a protection
 it does not provide, which is the specific harm this ADR names.
+
+## Deferred
+
+- **Refusal at construction, at the `pkg/v2` cut.** `(Runner, error)` is the
+  textbook shape and is rejected above only because breaking every call site
+  pre-1.0 to report a fault none of them has is a bad trade. At the v2 boundary
+  a signature change costs nothing extra, and reporting a misconfiguration
+  where it is made beats reporting it at first use. Recorded so the v2 design
+  meets the question rather than rediscovering it.
+- **Enforcing "a misconfiguration is never retryable" in code.** This ADR states
+  that code treating resilience errors as a retryable class must exclude
+  `POLICY_MISCONFIGURED`, and the distinct exit code is the marker — but nothing
+  in the SDK enforces it. The `Retryable` classifier consults only the
+  caller-supplied predicate (and treats a nil predicate as "everything is
+  transient"), so a permissive predicate lets an outer retry replay a policy
+  that can never work, and a breaker count the refusal towards its threshold.
+  Short-circuiting the classifier on the sentinel ahead of both the nil default
+  and the predicate would close it. That changes the classifier's published
+  contract — a caller predicate would stop being the last word — so it is
+  recorded as a decision to take, not folded into a fix batch.
 
 ## References
 
