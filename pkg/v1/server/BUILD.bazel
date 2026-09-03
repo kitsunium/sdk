@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "server",
+    srcs = ["server.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/server",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/net",
+        "//internal/service/net/server",
+        "//pkg/v1/tlsid",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":server",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "server_test",
+    srcs = [
+        "http_external_test.go",
+        "options_external_test.go",
+        "server_external_test.go",
+        "tlsmaterial_external_test.go",
+    ],
+    deps = [
+        ":server",
+        "//pkg/v1/tlsid",
+    ],
+)

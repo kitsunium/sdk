@@ -1,0 +1,51 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "client",
+    srcs = [
+        "capped_body.go",
+        "client.go",
+        "conjunction.go",
+        "defaults.go",
+        "deny_policy.go",
+        "guard.go",
+        "method_policy.go",
+        "path.go",
+        "path_policy.go",
+        "policies.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/net/client",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":client",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "client_test",
+    srcs = [
+        "capped_body_internal_test.go",
+        "guard_external_test.go",
+        "policy_external_test.go",
+    ],
+    embed = [":client"],
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)

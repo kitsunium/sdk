@@ -20,6 +20,7 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `resilience/` | `Runner` port + 5 concrete policies (retry/circuit-breaker/rate-limit/bulkhead/timeout); **no registry** (ADR 0026) | `0.2.8.*` |
 | `metrics/` | instrument interfaces (Counter/Gauge/Histogram) + `Meter` + `Exporter` registry; in-mem meter in service (ADR 0027) | `0.2.9.*` |
 | `config/` | `Source` / `Validator` / `Watcher` ports; env+file loader + cross-OS poll watcher in service (ADR 0028) | `0.2.10.*` |
+| `net/` | network domain contract: TLS identity (opaque, redacting), listener/handler ports, outbound `Policy`; **no registry** (ADR 0029) | `0.2.11.*` |
 
 `Major=0` (internal), `Layer=2` (core). The codec registry ships codes today (`CodeDuplicateRegistration` 0.2.2.1, plus 0.2.2.2-4 reserved for future Marshal/Unmarshal sentinels); the writer registry ships `0.2.3.*` (ADR 0012). Logger codes will land alongside service-layer wiring.
 
@@ -64,5 +65,6 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `resilience/` — see `internal/core/resilience/CLAUDE.md` (reliability policies, ADR 0026)
 - `metrics/` — see `internal/core/metrics/CLAUDE.md` (observability, ADR 0027)
 - `config/` — see `internal/core/config/CLAUDE.md` (configuration, ADR 0028)
+- `net/` — see `internal/core/net/CLAUDE.md` (network domain, ADR 0029)
 - `logger/` — see `internal/core/logger/CLAUDE.md` (README is the human-readable surface doc)
 - `logger/level/` — see `internal/core/logger/level/CLAUDE.md`

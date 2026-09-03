@@ -26,6 +26,7 @@ filegroup(
         "//internal/core/logger:audit_srcs",
         "//internal/core/logger/level:audit_srcs",
         "//internal/core/metrics:audit_srcs",
+        "//internal/core/net:audit_srcs",
         "//internal/core/proc:audit_srcs",
         "//internal/core/resilience:audit_srcs",
         "//internal/core/transform:audit_srcs",

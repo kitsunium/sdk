@@ -1,0 +1,88 @@
+// Package net — range 0.2.11.* (ADR 0029 core/net block).
+package net
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+// range: 0.2.11.0 - 0.2.11.255
+
+// CodeListenFailed identifies a listener that could not be bound to its address.
+const CodeListenFailed errs.Code = 0x00_02_0B_01 // 0.2.11.1
+
+// CodeInvalidAddress identifies a listen or dial address that is syntactically
+// unusable (empty host and port, malformed socket path, negative port).
+const CodeInvalidAddress errs.Code = 0x00_02_0B_02 // 0.2.11.2
+
+// CodeUnsupportedNetwork identifies a network name the domain does not serve
+// (anything outside tcp, tcp4, tcp6, udp, udp4, udp6, unix, unixgram, unixpacket).
+const CodeUnsupportedNetwork errs.Code = 0x00_02_0B_03 // 0.2.11.3
+
+// CodeServerClosed identifies work refused because the server already stopped
+// accepting; it is the expected terminal outcome of a graceful shutdown.
+const CodeServerClosed errs.Code = 0x00_02_0B_04 // 0.2.11.4
+
+// CodeAlreadyStarted identifies a Start call on a server that is already serving.
+const CodeAlreadyStarted errs.Code = 0x00_02_0B_05 // 0.2.11.5
+
+// CodeNotStarted identifies an operation that requires a running server on one
+// that has not been started.
+const CodeNotStarted errs.Code = 0x00_02_0B_06 // 0.2.11.6
+
+// CodeHandlerMissing identifies a listener group that was bound without a handler.
+const CodeHandlerMissing errs.Code = 0x00_02_0B_07 // 0.2.11.7
+
+// CodeHandlerPanic identifies a panic recovered inside a handler; the connection
+// is closed but the process survives.
+const CodeHandlerPanic errs.Code = 0x00_02_0B_08 // 0.2.11.8
+
+// CodeConnLimitReached identifies a connection rejected because the group's
+// concurrency ceiling was saturated.
+const CodeConnLimitReached errs.Code = 0x00_02_0B_09 // 0.2.11.9
+
+// CodeDrainTimeout identifies a shutdown whose drain budget expired with
+// connections still in flight; the remainder is closed hard.
+const CodeDrainTimeout errs.Code = 0x00_02_0B_0A // 0.2.11.10
+
+// CodeGroupUnknown identifies a lookup for a listener group that was never declared.
+const CodeGroupUnknown errs.Code = 0x00_02_0B_0B // 0.2.11.11
+
+// CodeGroupDuplicate identifies a second declaration of an already-declared
+// listener group name.
+const CodeGroupDuplicate errs.Code = 0x00_02_0B_0C // 0.2.11.12
+
+// CodeSocketAdoptFailed identifies an inherited socket that could not be adopted
+// from the supervisor.
+const CodeSocketAdoptFailed errs.Code = 0x00_02_0B_0D // 0.2.11.13
+
+// CodePacketTooLarge identifies a datagram longer than the group's accepted size.
+const CodePacketTooLarge errs.Code = 0x00_02_0B_0E // 0.2.11.14
+
+// CodeTLSMaterialInvalid identifies TLS material that is absent, malformed, or
+// yields no usable certificate; it is never downgraded to an empty trust store.
+const CodeTLSMaterialInvalid errs.Code = 0x00_02_0B_0F // 0.2.11.15
+
+// CodeTLSHandshakeFailed identifies a TLS or mTLS handshake that did not complete.
+const CodeTLSHandshakeFailed errs.Code = 0x00_02_0B_10 // 0.2.11.16
+
+// CodeRequestDenied identifies an outbound request refused by the transport
+// policy before it left the process.
+const CodeRequestDenied errs.Code = 0x00_02_0B_11 // 0.2.11.17
+
+// CodeResponseTooLarge identifies a response body that exceeded the configured
+// read ceiling.
+const CodeResponseTooLarge errs.Code = 0x00_02_0B_12 // 0.2.11.18
+
+// CodeCallFailed identifies an outbound call that did not produce a response.
+const CodeCallFailed errs.Code = 0x00_02_0B_13 // 0.2.11.19
+
+// CodeTooManyRedirects identifies an outbound call that exceeded its redirect budget.
+const CodeTooManyRedirects errs.Code = 0x00_02_0B_14 // 0.2.11.20
+
+// CodeInvalidDuration identifies a configuration duration that is neither a Go
+// duration literal nor an integer nanosecond count.
+const CodeInvalidDuration errs.Code = 0x00_02_0B_15 // 0.2.11.21
+
+// CodeUnsafePath identifies an outbound path carrying a dot segment, literal or
+// percent-encoded. Such a path is refused before any allowlist pattern is tried,
+// because an anchored pattern like ^/v1/supi/[^/]+$ happily matches "/v1/supi/.."
+// which the upstream then normalises to a different resource.
+const CodeUnsafePath errs.Code = 0x00_02_0B_16 // 0.2.11.22

@@ -1,0 +1,248 @@
+<!-- updated: 2026-09-03T00:00:00Z -->
+# internal/service/net/server/
+
+## Purpose
+
+The inbound engine of the network domain (ADR 0029): one unified listener for
+TCP, Unix, TLS and mutual TLS, serving handlers grouped behind shared
+middlewares, with an explicit lifecycle and a bounded drain.
+
+Public façade: `pkg/v1/server`.
+
+## Contents
+
+| File | Surface |
+|---|---|
+| `server.go` | `Server`, `New`, `Group`, `State` |
+| `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop, the drain |
+| `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `Use` |
+| `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
+| `conn.go` | the pooled `corenet.Conn` implementation |
+| `pool.go` | per-connection recycling + the live-socket registry |
+| `options.go` | `Option` / `GroupOption` |
+| `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
+| `packet.go` | the pooled `corenet.Packet` implementation |
+| `packet_listen.go` | datagram socket construction; family validation; ceilings |
+| `packet_loop.go` | the datagram read loop and dispatch |
+| `batch.go` | the `datagramSource` seam + reusable read slots |
+| `batch_portable.go` | one datagram per syscall — the floor everywhere |
+| `multireader_linux.go` | `recvmmsg` batched reader |
+| `multireader_mmsghdr_linux.go` | the cited `struct mmsghdr` layout |
+| `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
+| `http_adapter.go` | the `net/http` adapter (ADR 0029 D3) |
+| `http_listener.go` | the channel-fed bridge listener |
+| `reuseport_{linux,bsd,other}.go` | the cited `SO_REUSEPORT` constant per family |
+| `stream_group_limiter.go` | the per-group connection ceiling |
+| `adopt.go` | adoption of listeners inherited from a supervisor |
+
+## Why-this-shape
+
+- **Goroutine per connection on the runtime netpoller** (ADR 0029 D2). Not an
+  event loop: TLS is a hard requirement and `crypto/tls` is written against
+  blocking `net.Conn`, the netpoller already *is* an epoll, and every io helper
+  in the ecosystem speaks `net.Conn`.
+- **`conn` embeds `stdnet.Conn`**, so reads and writes reach the socket with no
+  wrapper on the hot path, and `io.Copy(c, c)` is a working echo server.
+- **`Group` returns the group, not `(group, error)`.** A declaration mistake is
+  recorded in `declErr` and surfaced by `Start`. This is the trade that keeps
+  wiring a server to five statements; it is only acceptable because `Start`
+  reports every recorded error, and `TestDeclarationErrorsSurfaceAtStart` pins
+  that it does.
+- **TLS is applied at the listener, not in the accept loop.** `tls.NewListener`
+  defers the handshake to the connection's own goroutine, so a slow or hostile
+  peer stalls only itself. Doing the handshake inline in `Accept` would let one
+  peer block every pending connection.
+- **`Start` returns only once every listener is bound.** A caller with a nil
+  error knows the ports are open — which is what lets a test dial immediately
+  and a supervisor report readiness honestly.
+- **The accept loop exits on `net.ErrClosed` and continues on anything else.**
+  Closing the listener is the only signal that reliably interrupts a blocking
+  `Accept`; a transient accept error must not stop the server.
+- **The drain has teeth.** `waitIdle` polls the active count against the
+  caller's budget. When the budget expires the engine severs the live sockets
+  through the `live` registry and returns `DRAIN_TIMEOUT` **without** waiting on
+  the WaitGroup. The first implementation did wait, which made the budget
+  meaningless: a handler blocked on something other than its socket hung
+  `Shutdown` forever. `TestShutdownReportsAnExpiredBudget` is the regression
+  guard, and it went from a 120-second hang to 1.1 seconds when fixed.
+- **A handler panic closes only its connection.** One malformed peer must never
+  take the process down.
+- **`release` always runs, via defer.** A handler that returns early, errors, or
+  panics still cannot leak a descriptor or a pooled wrapper.
+- **`reset` drops every reference.** A pooled entry that kept its `net.Conn`
+  would pin a closed socket for as long as the pool lives.
+
+## The datagram path
+
+- **One `datagramSource` seam, two implementations.** The read loop is written
+  once against "give me up to N datagrams"; the platform decides how many
+  syscalls that costs. On Linux it is one `recvmmsg`; elsewhere it is a
+  `ReadFrom` per datagram. The loop above does not change either way.
+- **`golang.org/x/net/ipv4.PacketConn.ReadBatch` is unavailable to us**: it
+  transitively imports `golang.org/x/sys`, banned SDK-wide (ADR 0016/0018). The
+  ABI is therefore declared in-tree and cited, the same discipline `proc`
+  already uses. `struct mmsghdr` lives in `multireader_mmsghdr_linux.go` with
+  its header quoted; `syscall.Msghdr`, `Iovec`, `SYS_RECVMMSG` and
+  `MSG_WAITFORONE` are all in the stdlib.
+- **The syscall is driven inside `RawConn.Read`.** Returning false on `EAGAIN`
+  parks the goroutine on the **netpoller**, exactly as a blocking `ReadFrom`
+  would. Batching does not cost us runtime integration.
+- **The read slots are allocated once per socket** and wired into the kernel's
+  message array in lockstep, so a steady-state read allocates nothing. This is
+  why the slice-preallocation rules are excluded for this package: the arrays
+  are indexed, never appended to, and rebuilding them would break the lockstep.
+- **`newDatagramSource` falls back rather than fails** when a `PacketConn`
+  exposes no raw descriptor — a wrapper or a test double. Correctness is
+  identical; only the syscall count differs.
+- **The fallback is reported, never silent.** `batchDegradation` returns both a
+  flag and a reason, and they reach `State().Listeners[i]`. A degradation nobody
+  notices is the failure mode the field exists to prevent.
+- **`TestLinuxSelectsTheBatchedReader` is the only test that proves the batched
+  path is in use.** Every behavioural datagram test passes identically on the
+  portable fallback, so without it a broken type assertion would degrade the
+  engine to one syscall per datagram with the whole suite still green.
+- **Handlers run inline on the read goroutine.** A hand-off would cost a channel
+  send and an allocation per packet, undoing the batching this path exists for.
+  A handler that must block should copy the payload and hand it to its own
+  worker — which is why `Packet.Data` documents its lifetime.
+
+## The HTTP adapter
+
+`net/http` can only be driven through `Serve(net.Listener)`; there is no public
+per-connection entry point. The adapter therefore hands `http.Server` a bridge
+listener whose `Accept` pops from a channel our accept loop fills. The cost is
+one hand-off per **connection**, not per request —
+`TestHTTPAdapterKeepsAliveAcrossRequests` pins that three keep-alive requests
+count as one accept.
+
+Two things about it were got wrong first and are worth keeping wrong-proof:
+
+- **The connection handed to `net/http` is the raw socket, never our pooled
+  wrapper.** Wrapping it was the obvious design and it fails twice over. It puts
+  the pooled wrapper in two goroutines at once — the race detector caught the
+  engine resetting it while `net/http` was closing it — and it hides the
+  concrete `*tls.Conn` that `net/http` type-asserts on to populate
+  `Request.TLS`, so every request on an HTTPS listener arrived looking like
+  plaintext. `TestHTTPAdapterOverTLS` asserts `r.TLS != nil` for exactly that
+  reason.
+- **Completion is tracked through `http.Server.ConnState`**, not by wrapping
+  `Close`. Only `StateClosed` and `StateHijacked` are terminal; acting on
+  `StateIdle` would release the connection between two keep-alive requests.
+- **`conn.Close` is nil-safe** because `net/http` can close a connection after
+  the engine has reclaimed the wrapper — on a drain, where the adapter releases
+  its waiter without waiting for `net/http` to finish.
+- **The serving goroutine is a `kernel/worker.LoopDaemon`**, so its owner and
+  termination are explicit and `shutdown` has a `Done()` channel to bound its
+  wait on. `http.Server` is interrupted by closing its listener, not by a stop
+  signal, which is why the loop ignores the stop channel.
+- **`Shutdown` stops the embedded `http.Server` before draining.** Without it an
+  idle keep-alive connection holds `ServeConn` open for the whole drain budget;
+  `TestHTTPAdapterDrainsOnShutdown` fails if the drain takes more than 3s.
+
+## Sharded accept
+
+`Shards(n)` opens n listeners on one address with `SO_REUSEPORT`, each with its
+own accept loop, so the kernel load-balances connections instead of N loops
+contending on one accept queue. Zero means one per core; one disables it.
+
+- **The constant is hand-defined per family and cited**, because it is absent
+  from the stdlib `syscall` package and `golang.org/x/sys` is banned SDK-wide.
+  Linux says 15, the BSDs say 0x200 — different values, which is why they are
+  declared separately rather than once.
+- **It must be set before `bind`**, which is what `net.ListenConfig.Control`
+  exists for. Setting it afterwards silently does nothing.
+- **Windows returns false rather than substituting `SO_REUSEADDR`**, whose
+  semantics are not equivalent: it permits *hijacking* a bound port rather than
+  load-balancing across sockets.
+- **A Unix socket is not shardable and says so** — but only when sharding was
+  explicitly asked for. Auto-sizing on a Unix socket disappoints no expectation,
+  so it is not reported as a degradation.
+- **Only the first shard appears in `State`**, carrying the real shard count. N
+  rows for one address would read as N addresses.
+- **On this machine it buys nothing.** `BENCH.md` §4 reports the null result and
+  the two tests that prove it is a null result rather than a broken comparison.
+
+## Connection ceiling
+
+`MaxConns(n)` reuses `resilience.NewBulkhead` rather than reimplementing a
+semaphore — a reject-mode channel semaphore *is* a connection ceiling, and
+reusing it means the rejection semantics are the ones the SDK already documents.
+
+- **The budget is per group, not per socket.** A group on a TCP port and a Unix
+  socket, or sharded across listeners, shares one ceiling; that is what an
+  operator sizing a server means.
+- **A rejection is translated to `ConnLimitReached`**, never surfaced as the
+  resilience domain's `BulkheadFull` — a `net` consumer has no reason to meet a
+  sentinel from a domain it did not import.
+- **No ceiling means no closure on the hot path.** `admit` calls the handler
+  directly when `limiter == nil`, so the policy costs nothing when unused.
+- **A slot is released when the handler returns**, which is *after* the client
+  has seen its response and closed. A client reconnecting immediately against a
+  ceiling of one can therefore meet a still-occupied server, and that rejection
+  is correct. `TestConnLimitReleasesItsSlot` uses a ceiling of four for exactly
+  this reason — an earlier version asserted zero rejections at a ceiling of one
+  and failed about one run in three.
+
+## Socket adoption
+
+`Adopt(name)` takes over a socket the supervisor already bound, which is what
+makes a zero-downtime restart possible: the socket survives the exec, so no
+connection is lost and no bind races.
+
+- **A named socket the supervisor did not pass fails startup.** Binding one
+  instead would lose the very property activation provides, and lose it
+  invisibly — the process would look healthy while dropping the connections the
+  outgoing one still held.
+- **Datagram adoption goes through the raw descriptors.** `sdlisten.Listeners`
+  only wraps stream sockets, so `adoptPacket` uses `WithNames` and
+  `net.FilePacketConn`. This is done here rather than by widening `sdlisten`,
+  which is another domain and would need another ADR.
+- **`unsetEnv` is false.** A group may adopt several names; clearing the
+  environment on the first lookup would make every later one come back empty.
+- **The end-to-end test runs across a real exec.** It cannot be staged
+  in-process: `sd_listen_fds(3)` reads from descriptor 3 and a Go test binary
+  already holds it. `exec.Cmd.ExtraFiles` places the socket at exactly fd 3 in
+  the child, which is what a supervisor does. `LISTEN_PID` is omitted because a
+  parent cannot know its child's pid beforehand — the same choice
+  `sdlisten.Prepare` makes.
+
+## Concurrency
+
+One goroutine per listener (accept) and one per connection (serve). Both hold an
+`inFlight` token released by `defer`. `active` is decremented before the token,
+so `active == 0` can briefly precede `inFlight` reaching zero — which is why the
+clean drain path waits on the WaitGroup and the expired path does not.
+
+`live` is guarded by its own mutex, held only long enough to copy the socket
+slice: `Close` can block, and holding the lock through it would stall every
+connection trying to deregister.
+
+## Error range
+
+None of its own. Every failure is a `internal/core/net` sentinel (`0.2.11.*`),
+wrapped with the offending group or address. Per ADR 0029 the service layer
+declares **no** codes.
+
+## Do NOT
+
+- Perform the TLS handshake in the accept loop.
+- Wait on `inFlight` after the drain budget has expired.
+- Return a `Conn` (or its `Buffer()`) to a caller that outlives `ServeConn` —
+  both are recycled the moment it returns.
+- Let a handler's error or panic reach the accept loop.
+- Add a registry of listener types; one canonical engine per family
+  (the `proc`/`resilience` no-registry precedent).
+
+## Verification
+
+```
+bazel test --config=race //internal/service/net/server:server_test
+# Fallback:
+cd internal/service && GOWORK=off go test -race -cover ./net/server/...
+# expected: coverage ~83%
+```
+
+## Reference
+
+- ADR 0029 — `docs/adr/0029-sdk-net-domain.md`
+- Contract layer — `internal/core/net/CLAUDE.md`

@@ -1,0 +1,75 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "net",
+    srcs = [
+        "address.go",
+        "call.go",
+        "client_config.go",
+        "codes.go",
+        "conn.go",
+        "conn_handler.go",
+        "duration.go",
+        "errors.go",
+        "handler_compliance.go",
+        "hook.go",
+        "identity.go",
+        "identity_file_params.go",
+        "identity_params.go",
+        "limits.go",
+        "listener_state.go",
+        "material.go",
+        "middleware.go",
+        "packet.go",
+        "packet_handler.go",
+        "phase.go",
+        "policy.go",
+        "policy_compliance.go",
+        "request.go",
+        "response.go",
+        "state.go",
+        "timeouts.go",
+        "wrap.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/net",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":net",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "net_test",
+    srcs = [
+        "duration_external_test.go",
+        "identity_external_test.go",
+        "middleware_external_test.go",
+        "policy_external_test.go",
+        "redaction_external_test.go",
+        "state_external_test.go",
+        "testmaterial_external_test.go",
+    ],
+    deps = [
+        ":net",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

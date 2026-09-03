@@ -33,6 +33,19 @@ vocabulary:
     - Source
     - Sink
 
+  # Exact-FQN exemptions for nominal-role interfaces whose domain name is the
+  # documentation. Renaming core/net.Policy to "Allower" would lose the word the
+  # whole feature is discussed in ("the read-only policy"), and the -er form
+  # describes the method rather than the role the type plays.
+  adapter_role_interfaces:
+    - github.com/kitsunium/sdk/internal/core/net.Policy
+    # ConnHandler / PacketHandler follow the stdlib's own precedent: http.Handler
+    # is a single-method interface named <Noun>Handler, and "Handler" names the
+    # role the type plays rather than its method. The -er forms the rule would
+    # impose here ("ServeConner", "ServePacketter") are not words.
+    - github.com/kitsunium/sdk/internal/core/net.ConnHandler
+    - github.com/kitsunium/sdk/internal/core/net.PacketHandler
+
 # ── Global options ────────────────────────────────────────────────────────────
 
 # Full strict mode stays off so test files / testdata keep their ergonomic
@@ -147,6 +160,20 @@ rules:
   # ships interface-awareness (mirror the 2026-05-28 retirement below).
   KTN-API-MINIF:
     exclude:
+      # The tlsid handshake test takes two Identity values and uses BOTH halves
+      # of the type (ServerConfig on one, ClientConfig on the other). Narrowing
+      # each parameter to a one-method interface would replace the single domain
+      # type with two synthetic ones and obscure that both are the same thing.
+      - "**/pkg/v1/tlsid/**"
+      # New takes a tlsid.Identity, the domain's single TLS value type. Narrowing
+      # it to a one-method interface would hide that the client and the server
+      # consume the very same identity, which is the point of sharing it.
+      - "**/internal/service/net/client/**"
+      # The server engine takes a tlsid.Identity for the same reason the client
+      # does: it is the domain's single TLS value type, and narrowing it to a
+      # one-method interface would hide that both ends share it.
+      - "**/internal/service/net/server/**"
+
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
 
@@ -159,6 +186,52 @@ rules:
   # supervisor's environment (secrets included) into the child. Here the
   # lint-preferred nil is the security bug, so the non-nil empty slice is
   # deliberate. Scoped to the spawn implementation ONLY.
+  # KTN-VAR-SLICECAP / KTN-VAR-MAKEAPPEND / KTN-VAR-SYNCPOOL (phase 4) —
+  # the datagram read path allocates by LENGTH on purpose.
+  #
+  # newSlots and multiReader.wire build fixed-size arrays that are then INDEXED
+  # in lockstep — never appended to. The length is the batch size, and the
+  # buffers are wired into the kernel's mmsghdr array once and reused for the
+  # life of the socket, which is exactly what makes a batched read allocate
+  # nothing. Rebuilding them with make([]T, 0, n)+append would break the
+  # lockstep the kernel relies on; routing them through a sync.Pool would hand
+  # the kernel a buffer that another goroutine may reclaim mid-read.
+  KTN-VAR-SLICECAP:
+    exclude:
+      - "**/internal/service/net/server/**"
+  KTN-VAR-MAKEAPPEND:
+    exclude:
+      - "**/internal/service/net/server/**"
+  KTN-VAR-SYNCPOOL:
+    exclude:
+      - "**/internal/service/net/server/**"
+
+  # KTN-FUNC-EMPTYSENTINEL (phase 5) — "" is a domain value here, not a sentinel.
+  #
+  # zoneOf returns the IPv6 zone, where "" is the correct net.UDPAddr.Zone for a
+  # datagram with no scope — the overwhelming majority. batchDegradation returns
+  # the reason a listener fell back, where "" means "it did not". Pairing either
+  # with a bool would force every caller to discard it.
+  KTN-FUNC-EMPTYSENTINEL:
+    exclude:
+      - "**/internal/service/net/server/**"
+
+  # KTN-STRUCT-CTOR (phase 4) — Effective Go's own naming rule wins.
+  #
+  # The rule wants a struct named Client to be built by NewClient(). This package
+  # produces one main type, and Go's convention for that case is a constructor
+  # called New, used qualified as client.New(). Renaming it to client.NewClient()
+  # would stutter, which the same linter's own naming rules discourage elsewhere.
+  KTN-STRUCT-CTOR:
+    exclude:
+      - "**/internal/service/net/client/**"
+      # Same rule, same reason: these packages each produce one main type, and
+      # Go's convention for that case is a constructor called New, used
+      # qualified as server.New(). NewServer()/NewStreamGroup() would stutter,
+      # and StreamGroup is not constructed directly at all — Server.Group mints
+      # it, so a public constructor would be a second, worse way in.
+      - "**/internal/service/net/server/**"
+
   KTN-VAR-NILSLICE:
     exclude:
       - "**/internal/service/proc/exec/**"
@@ -179,6 +252,56 @@ rules:
   KTN-VAR-BIGSTRUCT:
     exclude:
       - "**/pkg/v1/process/**"
+      # core/net — value semantics ARE the contract, for three types:
+      #
+      #   IdentityValue (96 B) is the opaque, redacting TLS identity. It copies
+      #   the crypto.Key / writer.CredentialValue precedent, where the value
+      #   receiver is what makes String()/GoString() redaction unavoidable. A
+      #   pointer receiver would (a) add a nil case to every method, (b) let a
+      #   caller mutate an identity AFTER it was validated at construction,
+      #   defeating the guarantee the type exists to provide.
+      #
+      #   IdentityParams (152 B) is copied exactly once per identity, at
+      #   startup, immediately before certificate parsing that dwarfs it.
+      #
+      #   RequestValue (80 B) is handed to a Policy that judges it. Passing a
+      #   pointer would let a policy mutate the very request it is authorising —
+      #   a real bug found in a consumer's hand-rolled version, which took a
+      #   *url.URL. Immutability here is a security property, not a style.
+      - "**/internal/core/net/**"
+      # The tlsid loader and facade forward the same value types unchanged; a
+      # pointer here would diverge the public API from the port it aliases,
+      # exactly as ADR 0016 avoids for process.Spec above.
+      - "**/internal/service/net/tlsid/**"
+      - "**/pkg/v1/tlsid/**"
+      # The outbound client forwards the same value types. Config (72 B) is
+      # taken and returned BY VALUE by withDefaults precisely so filling the
+      # defaults cannot mutate the Config its caller still holds, and New copies
+      # it exactly once per client, at construction.
+      - "**/internal/service/net/client/**"
+      - "**/pkg/v1/client/**"
+      # StateValue (96 B) is returned by value so a caller can hold, log or
+      # compare a snapshot without racing the server that produced it. A
+      # pointer would hand out a view that mutates underneath the reader.
+      - "**/pkg/v1/server/**"
+
+  # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
+  # — encoding/json forces the asymmetry on core/net.DurationValue.
+  #
+  # MarshalJSON MUST take a value receiver, or a non-pointer struct field of
+  # this type will not marshal through it. UnmarshalJSON MUST take a pointer
+  # receiver, or it cannot assign. There is no receiver set that satisfies both
+  # the rule and encoding/json; the standard library's time.Time carries exactly
+  # the same asymmetry for exactly the same reason. Scoped to core/net.
+  KTN-RECEIVER-MIXPTR:
+    exclude:
+      - "**/internal/core/net/**"
+  KTN-VAR-RECVCONS:
+    exclude:
+      - "**/internal/core/net/**"
+  KTN-STRUCT-RECVTYPE:
+    exclude:
+      - "**/internal/core/net/**"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #
