@@ -23,8 +23,9 @@ No `codes.go` — a wrong-type `Config` returns the shared
 
 - `Open` type-asserts `writer.ConsoleConfig`; a mismatch returns
   `WriterConfigInvalid`.
-- `Stream` selects `console.NewStderr()` (explicit) or `console.NewStdout()`
-  (default / zero value).
+- `Stream` selects `console.NewStdout()` (explicit) or `console.NewStderr()`
+  (default / zero value). ADR 0030: stdout is a protocol channel for many
+  processes, so it is never where an unspecified config lands.
 - The result is wrapped in `levelgate.New(base, cfg.MinLevel)` — a no-op when
   `MinLevel == Info` (inherit).
 
@@ -36,7 +37,7 @@ console writer is reachable from a topology config blob. Recognised option keys
 
 | Key | Type | Default | Maps to |
 |---|---|---|---|
-| `target` | string | `stdout` | `Stream`: `"stdout"`/`""` → stdout, `"stderr"` → stderr |
+| `target` | string | `stderr` | `Stream`: `"stderr"`/`""` → stderr, `"stdout"` → stdout |
 | `min_level` | string | inherit (info) | `MinLevel` via `level.ParseLevel` (`debug`/`info`/`warn`/`error`) |
 
 Unknown `target`, unknown `min_level`, or a non-string value for either key

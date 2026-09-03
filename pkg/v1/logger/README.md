@@ -193,14 +193,16 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
 
 ## Constants
 
-<a name="StreamStdout"></a>StreamStdout targets os.Stdout \(the zero value\); StreamStderr targets stderr. Typed as corewriter.ConsoleStream so the constants stand alone ahead of the type aliases below \(const → type ordering\).
+<a name="StreamStderr"></a>StreamStderr targets os.Stderr \(the zero value\); StreamStdout targets stdout. Typed as corewriter.ConsoleStream so the constants stand alone ahead of the type aliases below \(const → type ordering\).
 
 ```go
 const (
-    // StreamStdout selects os.Stdout for the console writer (zero value).
-    StreamStdout corewriter.ConsoleStream = corewriter.ConsoleStdout
-    // StreamStderr selects os.Stderr for the console writer.
+    // StreamStderr selects os.Stderr for the console writer (zero value, so a
+    // ConsoleConfig{} written without an opinion lands here — ADR 0030).
     StreamStderr corewriter.ConsoleStream = corewriter.ConsoleStderr
+    // StreamStdout selects os.Stdout for the console writer. Because stdout is
+    // a protocol channel for many processes, it is reachable only by name.
+    StreamStdout corewriter.ConsoleStream = corewriter.ConsoleStdout
 )
 ```
 
@@ -279,7 +281,7 @@ var Version string
 ```
 
 <a name="Debug"></a>
-## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L287>)
+## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L288>)
 
 ```go
 func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -288,7 +290,7 @@ func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Debug emits a RecordEvent at LevelDebug through lg.
 
 <a name="Error"></a>
-## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L305>)
+## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L306>)
 
 ```go
 func Error(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -306,7 +308,7 @@ func FrameworkVersion() string
 FrameworkVersion returns the linked\-in SDK version, or "dev" if unset.
 
 <a name="Info"></a>
-## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L293>)
+## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L294>)
 
 ```go
 func Info(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -324,7 +326,7 @@ func LogAttrs(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr
 LogAttrs is the slice\-overload of Logger.Log that avoids the variadic slice allocation imposed by Logger.Log\(... Attr\). Pre\-built attribute slices flow through this entry point without per\-call boxing.
 
 <a name="Warn"></a>
-## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L299>)
+## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L300>)
 
 ```go
 func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -342,7 +344,7 @@ type Attr = corelogger.AttrValue
 ```
 
 <a name="Any"></a>
-### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L360>)
+### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L361>)
 
 ```go
 func Any(key string, val any) Attr
@@ -351,7 +353,7 @@ func Any(key string, val any) Attr
 Any builds an Attr carrying an opaque payload. Use the typed helpers when possible — Any disables type\-aware rendering.
 
 <a name="Bool"></a>
-### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L323>)
+### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L324>)
 
 ```go
 func Bool(key string, val bool) Attr
@@ -360,7 +362,7 @@ func Bool(key string, val bool) Attr
 Bool builds an Attr carrying a boolean value.
 
 <a name="Duration"></a>
-### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L347>)
+### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L348>)
 
 ```go
 func Duration(key string, val time.Duration) Attr
@@ -369,7 +371,7 @@ func Duration(key string, val time.Duration) Attr
 Duration builds an Attr carrying a time.Duration value.
 
 <a name="Float64"></a>
-### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L329>)
+### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L330>)
 
 ```go
 func Float64(key string, val float64) Attr
@@ -378,7 +380,7 @@ func Float64(key string, val float64) Attr
 Float64 builds an Attr carrying a float64 value.
 
 <a name="Int"></a>
-### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L317>)
+### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L318>)
 
 ```go
 func Int(key string, val int) Attr
@@ -387,7 +389,7 @@ func Int(key string, val int) Attr
 Int builds an Attr carrying an int value.
 
 <a name="Int64"></a>
-### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L335>)
+### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L336>)
 
 ```go
 func Int64(key string, val int64) Attr
@@ -396,7 +398,7 @@ func Int64(key string, val int64) Attr
 Int64 builds an Attr carrying an int64 value.
 
 <a name="String"></a>
-### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L311>)
+### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L312>)
 
 ```go
 func String(key, val string) Attr
@@ -405,7 +407,7 @@ func String(key, val string) Attr
 String builds an Attr carrying a string value.
 
 <a name="Time"></a>
-### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L353>)
+### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L354>)
 
 ```go
 func Time(key string, val time.Time) Attr
@@ -414,7 +416,7 @@ func Time(key string, val time.Time) Attr
 Time builds an Attr carrying a time.Time value.
 
 <a name="Uint64"></a>
-### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L341>)
+### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L342>)
 
 ```go
 func Uint64(key string, val uint64) Attr
@@ -454,7 +456,7 @@ func Build(lg Logger, lv Level) Builder
 Build returns a chainable Builder bound to lg at the supplied level. Builders are recycled through a sync.Pool, so the steady\-state per\-call cost is one heap allocation per emit — the handler clones the accumulated attrs on Send, and that clone escapes. See BENCH.md.
 
 <a name="CloudWatchConfig"></a>
-## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L42>)
+## type [CloudWatchConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L45>)
 
 CloudWatchConfig configures the "cloudwatch" writer. Same import\-gated resolution as S3Config.
 
@@ -487,25 +489,25 @@ type Config struct {
 ```
 
 <a name="ConsoleConfig"></a>
-## type [ConsoleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L31>)
+## type [ConsoleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L34>)
 
-ConsoleConfig configures the "console" writer \(stream \+ optional MinLevel\).
+ConsoleConfig configures the "console" writer \(stream \+ optional MinLevel\). The zero value targets os.Stderr \(ADR 0030\).
 
 ```go
 type ConsoleConfig = corewriter.ConsoleConfig
 ```
 
 <a name="ConsoleStream"></a>
-## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L54>)
+## type [ConsoleStream](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L58>)
 
-ConsoleStream selects which standard stream the console writer targets.
+ConsoleStream selects which standard stream the console writer targets. Its zero value is StreamStderr \(ADR 0030\).
 
 ```go
 type ConsoleStream = corewriter.ConsoleStream
 ```
 
 <a name="CredentialProvider"></a>
-## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L58>)
+## type [CredentialProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L62>)
 
 CredentialProvider yields short\-lived credentials on demand for the network writers; the SDK never logs or wraps the returned material.
 
@@ -514,7 +516,7 @@ type CredentialProvider = corewriter.CredentialProvider
 ```
 
 <a name="CredentialValue"></a>
-## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L62>)
+## type [CredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L66>)
 
 CredentialValue is the opaque, redacting credential set returned by a CredentialProvider; its String output is always "\<redacted\>".
 
@@ -523,7 +525,7 @@ type CredentialValue = corewriter.CredentialValue
 ```
 
 <a name="NewCredentialValue"></a>
-### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L66>)
+### func [NewCredentialValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L70>)
 
 ```go
 func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) CredentialValue
@@ -568,7 +570,7 @@ func TextEncoder() Encoder
 TextEncoder returns a fresh text Encoder bound to the real system clock. Callers passing a custom Encoder to NewWithSink usually want this as a starting point — it is the same encoder NewText / Default rely on.
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L34>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L37>)
 
 FileConfig configures the "file" writer \(path \+ optional MinLevel\).
 
@@ -675,13 +677,13 @@ func Default() (lg Logger, err error)
 Default returns a Logger writing INFO\-and\-above records to os.Stderr. The stderr Writer is supplied explicitly here; NewText itself no longer silently defaults a nil Writer.
 
 <a name="DefaultMulti"></a>
-### func [DefaultMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L276>)
+### func [DefaultMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L277>)
 
 ```go
 func DefaultMulti(path string) (lg Logger, err error)
 ```
 
-DefaultMulti returns a Logger that fans INFO\-and\-above records out to BOTH the console \(stdout, the ConsoleConfig zero value\) AND a plain file at path. It is the batteries\-included "perfect default" the SDK recommends for a service: two destinations from one call, with NO rotation surface — the plain "file" writer never rotates, so rotation stays opt\-in \(a caller wanting size/age rotation reaches for the rotating writer explicitly\).
+DefaultMulti returns a Logger that fans INFO\-and\-above records out to BOTH the console \(stderr, the ConsoleConfig zero value — ADR 0030\) AND a plain file at path. It is the batteries\-included "perfect default" the SDK recommends for a service: two destinations from one call, with NO rotation surface — the plain "file" writer never rotates, so rotation stays opt\-in \(a caller wanting size/age rotation reaches for the rotating writer explicitly\).
 
 Unlike Default \(stderr\-only, no extra import\), DefaultMulti resolves the "console" and "file" writers through the registry, so the CALLER MUST blank\-import the writer package to activate them:
 
@@ -708,7 +710,7 @@ FromConfig builds a Logger from raw, a config blob in the wire format named by f
 FromConfig returns TopologyInvalid \(1.1.0.4\) when format is unregistered, the blob is undecodable, the topology has no writers, a writer Name is unknown, or a writer rejects its options. The error is redacted: it names only the writer and the failure kind, never a decoded credential or option value.
 
 <a name="NewMulti"></a>
-### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L96>)
+### func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L100>)
 
 ```go
 func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error)
@@ -810,7 +812,7 @@ type RecordSnapshot = corelogger.RecordEvent
 ```
 
 <a name="RotFileConfig"></a>
-## type [RotFileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L51>)
+## type [RotFileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L54>)
 
 RotFileConfig configures the "rotfile" writer — a size\- and/or age\-capped, optionally gzip\-compressed on\-disk file that rotates Path \-\> Path.1 … up to MaxBackups \(Path / MaxBytes / MaxBackups / MaxAgeDays / Compress / RotateEvery / MinLevel\). Usable as a value once github.com/kitsunium/sdk/pkg/v1/logger/writer is blank\-imported \(it self\-registers the "rotfile" factory alongside console and file\); pass it via WriterSpec\{Name: "rotfile", Config: cfg\} to NewMulti.
 
@@ -819,7 +821,7 @@ type RotFileConfig = corewriter.RotFileConfig
 ```
 
 <a name="S3Config"></a>
-## type [S3Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L38>)
+## type [S3Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L41>)
 
 S3Config configures the "s3" writer. Usable as a value without the AWS SDK; it resolves to a working sink only once third\-party/aws/writer/s3 is imported.
 
@@ -927,7 +929,7 @@ type WriterEntryConfig struct {
 ```
 
 <a name="WriterName"></a>
-## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L28>)
+## type [WriterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L30>)
 
 WriterName is the stable alias for a registered writer key \("console" / "file" / "rotfile" / "s3" / "cloudwatch"\).
 
@@ -936,7 +938,7 @@ type WriterName = corewriter.Name
 ```
 
 <a name="WriterSpec"></a>
-## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L75>)
+## type [WriterSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/writer.go#L79>)
 
 WriterSpec names a writer and carries its concrete config. Read at call sites as logger.WriterSpec\{Name: "file", Config: logger.FileConfig\{Path: …\}\}. It is a type alias onto internal/core/writer, so the public type is identity\-equal to the internal writer model \(alias\-based public surface, zero runtime cost\).
 

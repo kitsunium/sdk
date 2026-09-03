@@ -13,6 +13,7 @@ logger.go      — Logger / Attr / Level aliases, 4 Level constants, Config stru
                  String|Int|Bool|Float64|Int64|Uint64|Duration|Time|Any Attr constructors
 sink.go        — Sink / Record / Encoder aliases, SinkConfig struct, NewWithSink,
                  Multi fan-out helper, ConsoleStderr|ConsoleStdout, TextEncoder
+                 (ConsoleConfig{} / StreamStderr is the zero value — ADR 0030)
 writer.go      — WriterName / *Config aliases, WriterSpec, NewMulti (named writers)
 fromconfig.go  — Format alias, FromConfig (build a Logger from a config blob),
                  + parseLevel / decode / resolve helpers (ADR 0014 §D5)

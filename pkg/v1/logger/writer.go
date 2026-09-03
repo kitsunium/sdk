@@ -13,14 +13,16 @@ import (
 	corewriter "github.com/kitsunium/sdk/internal/core/writer"
 )
 
-// StreamStdout targets os.Stdout (the zero value); StreamStderr targets stderr.
+// StreamStderr targets os.Stderr (the zero value); StreamStdout targets stdout.
 // Typed as corewriter.ConsoleStream so the constants stand alone ahead of the
 // type aliases below (const → type ordering).
 const (
-	// StreamStdout selects os.Stdout for the console writer (zero value).
-	StreamStdout corewriter.ConsoleStream = corewriter.ConsoleStdout
-	// StreamStderr selects os.Stderr for the console writer.
+	// StreamStderr selects os.Stderr for the console writer (zero value, so a
+	// ConsoleConfig{} written without an opinion lands here — ADR 0030).
 	StreamStderr corewriter.ConsoleStream = corewriter.ConsoleStderr
+	// StreamStdout selects os.Stdout for the console writer. Because stdout is
+	// a protocol channel for many processes, it is reachable only by name.
+	StreamStdout corewriter.ConsoleStream = corewriter.ConsoleStdout
 )
 
 // WriterName is the stable alias for a registered writer key
@@ -28,6 +30,7 @@ const (
 type WriterName = corewriter.Name
 
 // ConsoleConfig configures the "console" writer (stream + optional MinLevel).
+// The zero value targets os.Stderr (ADR 0030).
 type ConsoleConfig = corewriter.ConsoleConfig
 
 // FileConfig configures the "file" writer (path + optional MinLevel).
@@ -50,7 +53,8 @@ type CloudWatchConfig = corewriter.CloudWatchConfig
 // WriterSpec{Name: "rotfile", Config: cfg} to NewMulti.
 type RotFileConfig = corewriter.RotFileConfig
 
-// ConsoleStream selects which standard stream the console writer targets.
+// ConsoleStream selects which standard stream the console writer targets. Its
+// zero value is StreamStderr (ADR 0030).
 type ConsoleStream = corewriter.ConsoleStream
 
 // CredentialProvider yields short-lived credentials on demand for the network

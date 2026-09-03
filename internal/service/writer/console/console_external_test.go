@@ -75,12 +75,12 @@ func TestConsoleOpen(t *testing.T) {
 		wantErr bool
 	}
 	tests := []tc{
-		{"stdout default", writer.ConsoleConfig{}, false},
-		{"stderr stream", writer.ConsoleConfig{Stream: writer.ConsoleStderr}, false},
+		{"stderr default", writer.ConsoleConfig{}, false},
+		{"stdout stream", writer.ConsoleConfig{Stream: writer.ConsoleStdout}, false},
 		{"per-writer error floor", writer.ConsoleConfig{MinLevel: level.Error}, false},
 		{"wrong config type rejected", writer.FileConfig{Path: "/x"}, true},
-		//: a stream selector outside {stdout, stderr} must fail fast, not
-		//: silently default to stdout.
+		//: a stream selector outside {stderr, stdout} must fail fast, not
+		//: silently default to stderr.
 		{"out-of-range stream rejected", writer.ConsoleConfig{Stream: writer.ConsoleStream(99)}, true},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -265,5 +265,63 @@ func TestConsoleOpen_Close(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// TestConsoleZeroValueTargetsStderr is the regression guard for ADR 0030: a
+// ConsoleConfig written without an opinion about the stream must reach stderr.
+//
+// A zero value is the choice made by a caller who has not learned the question
+// exists, so it has to be the safe one — for a daemon whose stdout is a
+// protocol channel, a log line on stdout is not noise, it is a corrupt stream.
+// Asserting the destination at the FD (not merely that the two selectors yield
+// distinct sinks) is what makes a stdout/stderr swap detectable.
+func TestConsoleZeroValueTargetsStderr(t *testing.T) {
+	type tc struct {
+		name       string
+		cfg        writer.ConsoleConfig
+		wantStderr bool
+	}
+	tests := []tc{
+		{"zero value writes to stderr", writer.ConsoleConfig{}, true},
+		{"explicit stderr writes to stderr", writer.ConsoleConfig{Stream: writer.ConsoleStderr}, true},
+		{"explicit stdout writes to stdout", writer.ConsoleConfig{Stream: writer.ConsoleStdout}, false},
+	}
+	payload := []byte("zero-value-stream-probe\n")
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var outCap, errCap string
+		//: both streams are redirected around Open AND Write, because the
+		//: console sinks bind the process FD at construction time.
+		outCap = captureStream(t, &os.Stdout, func() {
+			errCap = captureStream(t, &os.Stderr, func() {
+				sink, oerr := writer.Open("console", c.cfg)
+				//: a nil sink would panic the Write below — guard before use.
+				if oerr != nil || sink == nil {
+					t.Errorf("%s: Open err=%v sink=%v want nil+sink", c.name, oerr, sink)
+					return
+				}
+				if _, werr := sink.Write(t.Context(), corelogger.RecordEvent{Level: level.Error}, payload); werr != nil {
+					t.Errorf("%s: Write err=%v want nil", c.name, werr)
+				}
+			})
+		})
+		//: the record must land on exactly one stream — the expected one.
+		got, other := errCap, outCap
+		gotName, otherName := "stderr", "stdout"
+		if !c.wantStderr {
+			got, other = outCap, errCap
+			gotName, otherName = "stdout", "stderr"
+		}
+		if got != string(payload) {
+			t.Errorf("%s: %s=%q want %q", c.name, gotName, got, payload)
+		}
+		//: and it must not leak onto the other one.
+		if other != "" {
+			t.Errorf("%s: %s=%q want empty", c.name, otherName, other)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }

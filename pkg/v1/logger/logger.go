@@ -254,7 +254,8 @@ func Default() (lg Logger, err error) {
 }
 
 // DefaultMulti returns a Logger that fans INFO-and-above records out to BOTH
-// the console (stdout, the ConsoleConfig zero value) AND a plain file at path.
+// the console (stderr, the ConsoleConfig zero value — ADR 0030) AND a plain
+// file at path.
 // It is the batteries-included "perfect default" the SDK recommends for a
 // service: two destinations from one call, with NO rotation surface — the
 // plain "file" writer never rotates, so rotation stays opt-in (a caller wanting

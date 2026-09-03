@@ -7,7 +7,7 @@
 // The factory also satisfies core/writer.Decoder so the default-active console
 // writer is YAML/JSON/TOML-reachable through FromConfig. Recognised option keys:
 //
-//	target     "stdout" (default) | "stderr"
+//	target     "stderr" (default) | "stdout"
 //	min_level  "debug" | "info" | "warn" | "error" (default info)
 //
 // A malformed shape (wrong scalar type, unknown target, unknown level) returns
@@ -57,10 +57,11 @@ func (*consoleFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error)
 
 // Decode translates a raw topology option map into a ConsoleConfig. It is the
 // YAML/JSON/TOML entry point used by FromConfig: it recognises "target" and
-// "min_level" and ignores absent keys (the zero ConsoleConfig is valid). A key
-// present with the wrong scalar type, an unknown target, or an unknown level
-// name returns the shared WriterConfigInvalid sentinel — the offending value is
-// never echoed (secret-gate contract), only the writer name is attached.
+// "min_level" and ignores absent keys (the zero ConsoleConfig is valid, and
+// targets stderr — ADR 0030). A key present with the wrong scalar type, an
+// unknown target, or an unknown level name returns the shared
+// WriterConfigInvalid sentinel — the offending value is never echoed
+// (secret-gate contract), only the writer name is attached.
 func (*consoleFactory) Decode(raw map[string]any) (cfg writer.Config, err error) {
 	//: start from the valid zero config; absent keys keep their defaults.
 	c := writer.ConsoleConfig{}
@@ -79,15 +80,17 @@ func (*consoleFactory) Decode(raw map[string]any) (cfg writer.Config, err error)
 }
 
 // decodeStream maps the optional "target" option onto dst. An absent key keeps
-// the zero value (stdout); "stdout"/"" select stdout, "stderr" selects stderr.
-// A non-string value or an unrecognised name yields the redacted
-// WriterConfigInvalid sentinel — the value is never echoed (secret gate).
+// the zero value (stderr); "stderr"/"" select stderr, "stdout" selects stdout.
+// An empty string is treated as unspecified, so it lands on the same safe
+// default as an absent key rather than on stdout (ADR 0030). A non-string value
+// or an unrecognised name yields the redacted WriterConfigInvalid sentinel —
+// the value is never echoed (secret gate).
 func decodeStream(raw map[string]any, dst *writer.ConsoleStream) error {
-	//: absent target inherits the zero value (stdout).
+	//: absent target inherits the zero value (stderr).
 	v, present := raw["target"]
 	//: nothing to map when the key is absent.
 	if !present {
-		//: leave dst at its stdout default.
+		//: leave dst at its stderr default.
 		return nil
 	}
 	//: the target must be a string scalar; reject any other shape.
@@ -99,12 +102,12 @@ func decodeStream(raw map[string]any, dst *writer.ConsoleStream) error {
 	}
 	//: match the two canonical stream names.
 	switch s {
-	//: explicit stderr selection.
-	case "stderr":
+	//: explicit stderr selection (also the empty/unspecified name).
+	case "stderr", "":
 		//: route to os.Stderr.
 		*dst = writer.ConsoleStderr
-	//: explicit stdout selection (also the empty/default name).
-	case "stdout", "":
+	//: explicit stdout selection — the one path that names the risky stream.
+	case "stdout":
 		//: route to os.Stdout.
 		*dst = writer.ConsoleStdout
 	//: any other token is an unknown target (redacted).
@@ -159,11 +162,11 @@ func configInvalid() error {
 
 // pickStream maps the config stream selector onto the concrete console sink.
 func pickStream(s writer.ConsoleStream) corelogger.Sink {
-	//: stderr is the explicit non-default choice.
-	if s == writer.ConsoleStderr {
-		//: bind to os.Stderr via the canonical convenience constructor.
-		return consolesink.NewStderr()
+	//: stdout is the explicit non-default choice (ADR 0030).
+	if s == writer.ConsoleStdout {
+		//: bind to os.Stdout via the canonical convenience constructor.
+		return consolesink.NewStdout()
 	}
-	//: default (ConsoleStdout / zero value) targets os.Stdout.
-	return consolesink.NewStdout()
+	//: default (ConsoleStderr / zero value) targets os.Stderr.
+	return consolesink.NewStderr()
 }
