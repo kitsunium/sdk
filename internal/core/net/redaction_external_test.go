@@ -95,16 +95,23 @@ func runKeyPairCase(t *testing.T, tc keyPairCase, material pemPair) {
 	}
 }
 
+// versionFloorCase describes one requested TLS floor and its verdict.
+type versionFloorCase struct {
+	// name describes the version being requested.
+	name string
+	// in is the MinVersion the caller asks for; zero means unset.
+	in uint16
+	// want is the floor the identity must report when the request is honoured.
+	want uint16
+	// wantErr is whether the request must be refused outright.
+	wantErr bool
+}
+
 // TestIdentityVersionFloor pins the TLS version policy: unset means 1.3, and the
 // versions deprecated by RFC 8996 are refused rather than warned about.
 func TestIdentityVersionFloor(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name    string
-		in      uint16
-		want    uint16
-		wantErr bool
-	}{
+	cases := []versionFloorCase{
 		{name: "unset defaults to TLS 1.3", in: 0, want: tls.VersionTLS13},
 		{name: "TLS 1.0 refused", in: tls.VersionTLS10, wantErr: true},
 		{name: "TLS 1.1 refused", in: tls.VersionTLS11, wantErr: true},
@@ -114,20 +121,28 @@ func TestIdentityVersionFloor(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			id, err := corenet.NewIdentityValue(corenet.IdentityParams{MinVersion: tc.in})
-			if tc.wantErr {
-				if !errs.HasCode(err, corenet.CodeTLSMaterialInvalid) {
-					t.Fatalf("expected TLS_MATERIAL_INVALID, got %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got := id.ClientConfig().MinVersion; got != tc.want {
-				t.Fatalf("MinVersion = %x, want %x", got, tc.want)
-			}
+			runVersionFloorCase(t, tc)
 		})
+	}
+}
+
+// runVersionFloorCase builds an identity at the requested floor and checks it.
+func runVersionFloorCase(t *testing.T, tc versionFloorCase) {
+	t.Helper()
+	id, err := corenet.NewIdentityValue(corenet.IdentityParams{MinVersion: tc.in})
+	//: a deprecated version is refused at construction, never downgraded.
+	if tc.wantErr {
+		if !errs.HasCode(err, corenet.CodeTLSMaterialInvalid) {
+			t.Fatalf("expected TLS_MATERIAL_INVALID, got %v", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	//: the honoured floor must reach the config the handshake actually uses.
+	if got := id.ClientConfig().MinVersion; got != tc.want {
+		t.Fatalf("MinVersion = %x, want %x", got, tc.want)
 	}
 }
 
