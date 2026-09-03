@@ -318,6 +318,94 @@ codes:
     const: CodeConfigWatchFailed
     hex: "0x00_02_0A_04"
     package: internal/core/config
+  - code: "0.2.11.1"
+    const: CodeListenFailed
+    hex: "0x00_02_0B_01"
+    package: internal/core/net
+  - code: "0.2.11.2"
+    const: CodeInvalidAddress
+    hex: "0x00_02_0B_02"
+    package: internal/core/net
+  - code: "0.2.11.3"
+    const: CodeUnsupportedNetwork
+    hex: "0x00_02_0B_03"
+    package: internal/core/net
+  - code: "0.2.11.4"
+    const: CodeServerClosed
+    hex: "0x00_02_0B_04"
+    package: internal/core/net
+  - code: "0.2.11.5"
+    const: CodeAlreadyStarted
+    hex: "0x00_02_0B_05"
+    package: internal/core/net
+  - code: "0.2.11.6"
+    const: CodeNotStarted
+    hex: "0x00_02_0B_06"
+    package: internal/core/net
+  - code: "0.2.11.7"
+    const: CodeHandlerMissing
+    hex: "0x00_02_0B_07"
+    package: internal/core/net
+  - code: "0.2.11.8"
+    const: CodeHandlerPanic
+    hex: "0x00_02_0B_08"
+    package: internal/core/net
+  - code: "0.2.11.9"
+    const: CodeConnLimitReached
+    hex: "0x00_02_0B_09"
+    package: internal/core/net
+  - code: "0.2.11.10"
+    const: CodeDrainTimeout
+    hex: "0x00_02_0B_0A"
+    package: internal/core/net
+  - code: "0.2.11.11"
+    const: CodeGroupUnknown
+    hex: "0x00_02_0B_0B"
+    package: internal/core/net
+  - code: "0.2.11.12"
+    const: CodeGroupDuplicate
+    hex: "0x00_02_0B_0C"
+    package: internal/core/net
+  - code: "0.2.11.13"
+    const: CodeSocketAdoptFailed
+    hex: "0x00_02_0B_0D"
+    package: internal/core/net
+  - code: "0.2.11.14"
+    const: CodePacketTooLarge
+    hex: "0x00_02_0B_0E"
+    package: internal/core/net
+  - code: "0.2.11.15"
+    const: CodeTLSMaterialInvalid
+    hex: "0x00_02_0B_0F"
+    package: internal/core/net
+  - code: "0.2.11.16"
+    const: CodeTLSHandshakeFailed
+    hex: "0x00_02_0B_10"
+    package: internal/core/net
+  - code: "0.2.11.17"
+    const: CodeRequestDenied
+    hex: "0x00_02_0B_11"
+    package: internal/core/net
+  - code: "0.2.11.18"
+    const: CodeResponseTooLarge
+    hex: "0x00_02_0B_12"
+    package: internal/core/net
+  - code: "0.2.11.19"
+    const: CodeCallFailed
+    hex: "0x00_02_0B_13"
+    package: internal/core/net
+  - code: "0.2.11.20"
+    const: CodeTooManyRedirects
+    hex: "0x00_02_0B_14"
+    package: internal/core/net
+  - code: "0.2.11.21"
+    const: CodeInvalidDuration
+    hex: "0x00_02_0B_15"
+    package: internal/core/net
+  - code: "0.2.11.22"
+    const: CodeUnsafePath
+    hex: "0x00_02_0B_16"
+    package: internal/core/net
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"
