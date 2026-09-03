@@ -9,6 +9,7 @@ go_library(
         "breaker_config.go",
         "breaker_state.go",
         "bulkhead.go",
+        "misconfigured.go",
         "ratelimit.go",
         "ratelimit_config.go",
         "retry.go",

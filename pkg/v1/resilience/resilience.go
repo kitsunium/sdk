@@ -66,6 +66,12 @@ var (
 	BulkheadFull = coreres.BulkheadFull
 	// TimeoutExceeded is returned when an operation outruns its deadline.
 	TimeoutExceeded = coreres.TimeoutExceeded
+	// PolicyMisconfigured is returned by every call to a policy that was built
+	// with a configuration it cannot honour — a non-positive RateLimiterConfig
+	// .Rate, a non-positive NewTimeout duration. The operation is not run.
+	// Unlike the sentinels above it is permanent, not transient: the fix is at
+	// the construction site, never a retry (ADR 0031).
+	PolicyMisconfigured = coreres.PolicyMisconfigured
 )
 
 // NewRetry returns a retry-with-backoff Runner. An error rejected by
@@ -82,7 +88,9 @@ func NewCircuitBreaker(cfg BreakerConfig) Runner {
 	return svcres.NewCircuitBreaker(cfg)
 }
 
-// NewRateLimiter returns a token-bucket rate-limiter Runner.
+// NewRateLimiter returns a token-bucket rate-limiter Runner. A non-positive
+// cfg.Rate is refused: every call returns PolicyMisconfigured without running
+// the operation, because any rate chosen for the caller would be a guess.
 func NewRateLimiter(cfg RateLimiterConfig) Runner {
 	//: delegate to the service constructor.
 	return svcres.NewRateLimiter(cfg)

@@ -25,8 +25,19 @@ type tokenBucket struct {
 }
 
 // NewRateLimiter returns a Runner that admits at most Rate calls/sec (with a
-// Burst allowance), rejecting excess calls with RateLimited.
+// Burst allowance), rejecting excess calls with RateLimited. A non-positive
+// Rate is refused rather than defaulted: every call returns
+// PolicyMisconfigured without running the operation (ADR 0031).
 func NewRateLimiter(cfg RateLimiterConfig) coreres.Runner {
+	//: a rate is the entire content of this policy — there is no SDK-side value
+	//: that is not a guess at the caller's requirement, so refuse rather than
+	//: invent one (ADR 0031). Without this, Rate 0 meant the bucket started
+	//: full and never refilled: call one admitted, every call after it rejected
+	//: forever with RATE_LIMITED, indistinguishable from working normally.
+	if cfg.Rate <= 0 {
+		//: fail closed, and say why.
+		return newMisconfigured("ratelimit", "Rate")
+	}
 	//: default the clock to the system source.
 	clk := cfg.Clock
 	//: a nil clock falls back to the system source.

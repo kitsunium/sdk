@@ -8,6 +8,11 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // transient unavailability, not a generic internal fault.
 const exitUnavailable int = 75
 
+// exitConfig matches sysexits EX_CONFIG (78). PolicyMisconfigured is the one
+// resilience outcome that is NOT transient: retrying a policy that was built
+// with a configuration it cannot honour will never succeed.
+const exitConfig int = 78
+
 var (
 	// RetryExhausted wraps the final attempt's error after the retry budget ran out.
 	RetryExhausted = errs.Define(CodeRetryExhausted, "RETRY_EXHAUSTED",
@@ -32,6 +37,15 @@ var (
 		"The call was rejected because the bulkhead is full",
 		"service/resilience: all bulkhead concurrency slots occupied",
 		errs.WithExitCode(exitUnavailable))
+
+	// PolicyMisconfigured is returned by every call to a policy that was built
+	// with a configuration it cannot honour, in place of running the operation.
+	// Unlike its siblings it is permanent, not transient (ADR 0031): the fix is
+	// a code change at the construction site, never a retry.
+	PolicyMisconfigured = errs.Define(CodePolicyMisconfigured, "POLICY_MISCONFIGURED",
+		"The reliability policy was misconfigured and refused the call",
+		"service/resilience: policy built with a configuration it cannot honour; the fields name the policy and the knob",
+		errs.WithExitCode(exitConfig))
 
 	// TimeoutExceeded is returned when the operation outran the timeout deadline.
 	TimeoutExceeded = errs.Define(CodeTimeoutExceeded, "TIMEOUT_EXCEEDED",

@@ -19,6 +19,7 @@ ADR 0026.
 | `timeout.go` | timeout | `context.WithTimeout`, `TimeoutExceeded` |
 | `wrap.go` | — | `wrapAs(sentinel, cause)` — sentinel origin-wins + cause as a field |
 | `retryable.go` | — | `isRetryable(pred, err)` — nil-predicate default shared by retry + breaker |
+| `misconfigured.go` | — | `newMisconfigured(policy, knob)` — refuses every call with `PolicyMisconfigured` (ADR 0031) |
 
 ## Conventions
 

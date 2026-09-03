@@ -408,3 +408,73 @@ func TestBreakerOpenDurationClamp(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// TestRateLimiterRejectsAZeroRate is the regression guard for the refusal arm of
+// ADR 0031.
+//
+// A zero Rate made the token bucket start full and never refill: call one was
+// admitted, and every call after it was rejected with RATE_LIMITED forever. The
+// policy could never do its job, and said so with the same error it uses when
+// it IS doing its job — a misconfiguration presented as normal operation. The
+// guard asserts the observable outcome: the operation does not run, and the
+// error is distinguishable from an ordinary rate-limit rejection.
+func TestRateLimiterRejectsAZeroRate(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		cfg  res.RateLimiterConfig
+		//: whether the policy must refuse itself rather than operate.
+		wantMisconfigured bool
+	}
+	tests := []tc{
+		{
+			//: the defect case — no Rate at all.
+			"zero Rate is refused",
+			res.RateLimiterConfig{},
+			true,
+		},
+		{
+			//: a Burst without a Rate is still a policy that cannot work.
+			"zero Rate with a Burst is refused",
+			res.RateLimiterConfig{Burst: 10},
+			true,
+		},
+		{
+			//: a negative Rate is no more honourable than a zero one.
+			"negative Rate is refused",
+			res.RateLimiterConfig{Rate: -1},
+			true,
+		},
+		{
+			//: a real rate still builds a working limiter.
+			"positive Rate operates normally",
+			res.RateLimiterConfig{Rate: 1, Burst: 1},
+			false,
+		},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		cfg := tc.cfg
+		cfg.Clock = &fakeClock{now: time.Unix(0, 0)}
+		rl := res.NewRateLimiter(cfg)
+		ran := false
+		err := rl.Run(t.Context(), func(context.Context) error { ran = true; return nil })
+		//: a refused policy never runs the operation.
+		if ran == tc.wantMisconfigured {
+			t.Fatalf("operation ran=%v while misconfigured=%v — the two must be opposite", ran, tc.wantMisconfigured)
+		}
+		//: and the refusal must be POLICY_MISCONFIGURED, never RATE_LIMITED —
+		//: telling a broken policy apart from a working one is the whole point.
+		if got := errs.HasCode(err, coreres.CodePolicyMisconfigured); got != tc.wantMisconfigured {
+			t.Fatalf("POLICY_MISCONFIGURED=%v, want %v (err=%v)", got, tc.wantMisconfigured, err)
+		}
+		//: a misconfiguration is permanent, so it must not masquerade as the
+		//: transient outcome a caller might reasonably retry.
+		if tc.wantMisconfigured && errs.HasCode(err, coreres.CodeRateLimited) {
+			t.Errorf("err=%v also carries RATE_LIMITED — a misconfiguration is not a transient rejection", err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

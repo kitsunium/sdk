@@ -61,6 +61,12 @@ var (
     BulkheadFull = coreres.BulkheadFull
     // TimeoutExceeded is returned when an operation outruns its deadline.
     TimeoutExceeded = coreres.TimeoutExceeded
+    // PolicyMisconfigured is returned by every call to a policy that was built
+    // with a configuration it cannot honour — a non-positive RateLimiterConfig
+    // .Rate, a non-positive NewTimeout duration. The operation is not run.
+    // Unlike the sentinels above it is permanent, not transient: the fix is at
+    // the construction site, never a retry (ADR 0031).
+    PolicyMisconfigured = coreres.PolicyMisconfigured
 )
 ```
 
@@ -110,7 +116,7 @@ type Runner = coreres.Runner
 ```
 
 <a name="NewBulkhead"></a>
-### func [NewBulkhead](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L92>)
+### func [NewBulkhead](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L100>)
 
 ```go
 func NewBulkhead(maxConcurrent int) Runner
@@ -119,7 +125,7 @@ func NewBulkhead(maxConcurrent int) Runner
 NewBulkhead returns a bounded\-concurrency Runner \(reject mode\).
 
 <a name="NewCircuitBreaker"></a>
-### func [NewCircuitBreaker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L80>)
+### func [NewCircuitBreaker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L86>)
 
 ```go
 func NewCircuitBreaker(cfg BreakerConfig) Runner
@@ -128,16 +134,16 @@ func NewCircuitBreaker(cfg BreakerConfig) Runner
 NewCircuitBreaker returns a circuit\-breaker Runner. An error rejected by cfg.Retryable is returned verbatim and left out of the state machine.
 
 <a name="NewRateLimiter"></a>
-### func [NewRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L86>)
+### func [NewRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L94>)
 
 ```go
 func NewRateLimiter(cfg RateLimiterConfig) Runner
 ```
 
-NewRateLimiter returns a token\-bucket rate\-limiter Runner.
+NewRateLimiter returns a token\-bucket rate\-limiter Runner. A non\-positive cfg.Rate is refused: every call returns PolicyMisconfigured without running the operation, because any rate chosen for the caller would be a guess.
 
 <a name="NewRetry"></a>
-### func [NewRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L73>)
+### func [NewRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L79>)
 
 ```go
 func NewRetry(cfg RetryConfig) Runner
@@ -146,7 +152,7 @@ func NewRetry(cfg RetryConfig) Runner
 NewRetry returns a retry\-with\-backoff Runner. An error rejected by cfg.Retryable ends the loop at once and is returned verbatim.
 
 <a name="NewTimeout"></a>
-### func [NewTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L98>)
+### func [NewTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L106>)
 
 ```go
 func NewTimeout(d time.Duration) Runner

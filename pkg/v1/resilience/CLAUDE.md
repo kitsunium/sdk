@@ -15,7 +15,8 @@ the outcome sentinels. Stdlib-only → dep-light; cross-OS portable.
 | `RetryConfig` / `BreakerConfig` / `RateLimiterConfig` | aliases onto `service/resilience` |
 | `RetryConfig.Retryable` / `BreakerConfig.Retryable` | `func(error) bool` — deterministic errors return verbatim (nil = replay/count everything) |
 | `NewRetry` / `NewCircuitBreaker` / `NewRateLimiter` / `NewBulkhead` / `NewTimeout` | constructors |
-| `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` | sentinels (`errs.HasReason`/`HasCode`) |
+| `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` | sentinels (`errs.HasReason`/`HasCode`), all `EX_TEMPFAIL` |
+| `PolicyMisconfigured` | sentinel for a policy that cannot honour its config — **permanent**, `EX_CONFIG`, never retry (ADR 0031) |
 
 ## Conventions
 
