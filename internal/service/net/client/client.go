@@ -115,7 +115,7 @@ func (c *Client) Do(req *http.Request) (resp corenet.ResponseValue, err error) {
 	//: an over-sized body fails here rather than arriving truncated.
 	if berr != nil {
 		//: the status is still reported so the caller can see what happened.
-		return corenet.ResponseValue{Status: raw.StatusCode, Header: raw.Header}, berr
+		return corenet.ResponseValue{Status: raw.StatusCode, Header: raw.Header}, bodyError(berr)
 	}
 	//: a close failure after a complete read cannot change the payload, but it
 	//: does signal a connection the pool should not reuse, so it is not hidden.
@@ -134,6 +134,26 @@ func (c *Client) Do(req *http.Request) (resp corenet.ResponseValue, err error) {
 	}
 	//: a 2xx with no body — 204, typically — is a normal outcome.
 	return out, nil
+}
+
+// bodyError types a failure that happened while reading the response body.
+//
+// The ceiling's own refusal already carries a domain code and is handed back
+// untouched, so errors.Is and errs.HasCode keep matching it. Everything else
+// comes from the transport — a connection reset part-way through the body, a
+// TLS failure, an expired deadline — and would otherwise leave
+// internal/service as a bare stdlib error, which is the one thing the error
+// model does not permit. Its text is deliberately not echoed: a transport
+// message can name the internal address, exactly as on the RoundTrip path.
+func bodyError(err error) error {
+	//: an error already carrying a domain code is one of ours; keep it matchable.
+	if _, ok := errs.CodeOf(err); ok {
+		//: hand the typed refusal back unchanged.
+		return err
+	}
+	//: anything else reached here wearing no code at all.
+	return errs.Wrap(corenet.CallFailed, errs.WrapParams{},
+		errs.String("why", "the response body could not be read"))
 }
 
 // applyHeaders adds the configured defaults without overriding the caller.

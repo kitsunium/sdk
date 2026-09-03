@@ -305,3 +305,28 @@ func runBodySizeCase(t *testing.T, tc bodySizeCase, ceiling int64) {
 			len(resp.Body), tc.size)
 	}
 }
+
+// TestBodyReadFailureIsTyped pins that a transport failure part-way through the
+// body leaves this package as a domain error rather than as a bare stdlib one.
+//
+// The ceiling's own refusal is already typed, which makes it easy to assume
+// every error out of the body read is. It is not: the connection can die after
+// the headers have been accepted, and that error arrives from net/http wearing
+// no code at all.
+func TestBodyReadFailureIsTyped(t *testing.T) {
+	t.Parallel()
+	srv, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		//: promise far more than is delivered, so the body dies mid-read.
+		w.Header().Set("Content-Length", "4096")
+		writeOrFail(t, w, "partial")
+	})
+	c := newClient(t, srv, client.Config{})
+	_, err := c.Get(context.Background(), "/v1/subscribers", nil)
+	if err == nil {
+		t.Fatal("a body cut short was reported as success")
+	}
+	//: an untyped stdlib error escaping internal/service is the actual defect.
+	if !errs.HasCode(err, codeOf(t, corenet.CallFailed)) {
+		t.Fatalf("expected CALL_FAILED, got an untyped %T: %v", err, err)
+	}
+}
