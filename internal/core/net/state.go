@@ -16,6 +16,12 @@ type StateValue struct {
 	TotalConns uint64 `json:"total_conns"`
 	// RejectedConns is the number turned away by the connection ceiling.
 	RejectedConns uint64 `json:"rejected_conns"`
+	// OversizedPackets is the number of datagrams dropped for passing their
+	// group's MaxPacketSize. They are counted rather than delivered because the
+	// kernel has already discarded the tail, and the prefix that survives is
+	// indistinguishable from a complete message to the handler receiving it. A
+	// read loop has nobody to return an error to, so this counter is the report.
+	OversizedPackets uint64 `json:"oversized_packets"`
 }
 
 // Degraded reports whether any listener fell back from a requested

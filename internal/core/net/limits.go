@@ -12,8 +12,10 @@ type LimitsValue struct {
 	// ReadBufferSize sizes the per-connection scratch buffer returned by
 	// Conn.Buffer.
 	ReadBufferSize int `json:"read_buffer_size"`
-	// MaxPacketSize is the largest datagram accepted; larger ones are reported
-	// as PacketTooLarge rather than silently truncated.
+	// MaxPacketSize is the largest datagram accepted. A larger one is DROPPED
+	// and counted in StateValue.OversizedPackets, never delivered truncated:
+	// the kernel discards the tail, so the prefix that survives reads exactly
+	// like a complete message and the handler cannot tell the difference.
 	MaxPacketSize int `json:"max_packet_size"`
 	// Backlog is the listen backlog depth where the platform honours it.
 	Backlog int `json:"backlog"`

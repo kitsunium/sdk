@@ -39,13 +39,21 @@ type datagramSource interface {
 }
 
 // newSlots allocates a read batch sized for the group.
+//
+// Each buffer is ONE BYTE past the group's ceiling, and that probe byte is what
+// makes an oversized datagram detectable at all. The kernel copies as much as
+// the buffer holds and discards the remainder, so a buffer sized exactly at the
+// ceiling cannot tell a datagram that just fits from one that was cut down to
+// fit — both report the same length. Reading one byte further makes the two
+// distinguishable, which is the same reason the outbound body ceiling reads one
+// byte past its own limit.
 func newSlots(count, size int) []datagram {
 	//: indexed, never appended to — the length IS the batch size.
 	slots := make([]datagram, count)
 	//: each slot owns its buffer for the life of the read loop, so a read
 	//: allocates nothing at all once the loop is running.
 	for i := range slots {
-		slots[i].buf = make([]byte, size)
+		slots[i].buf = make([]byte, size+1)
 	}
 	//: ready to be handed to the platform reader.
 	return slots

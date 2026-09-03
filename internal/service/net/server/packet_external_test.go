@@ -308,3 +308,89 @@ func TestStateReportsNoDatagramDegradationOnLinux(t *testing.T) {
 func noopPacket(context.Context, corenet.Packet) error {
 	return nil
 }
+
+// packetSizeCase is one datagram measured against the group's ceiling.
+type packetSizeCase struct {
+	// name describes where the datagram sits relative to the ceiling.
+	name string
+	// size is the payload length sent, in bytes.
+	size int
+	// wantServed is whether the handler must receive it whole.
+	wantServed bool
+}
+
+// TestDatagramCeilingDropsRatherThanTruncates pins the three boundaries around
+// MaxPacketSize, and the property that matters most: an oversized datagram is
+// never delivered as a truncated prefix.
+//
+// Truncation is the dangerous outcome precisely because it is invisible. The
+// kernel discards the tail, so the handler receives bytes that read exactly
+// like a complete message and has no way to know otherwise — a length-prefixed
+// or delimited protocol will simply parse something that was never sent. The
+// drop is observable instead, through State.
+func TestDatagramCeilingDropsRatherThanTruncates(t *testing.T) {
+	t.Parallel()
+	const ceiling int = 64
+	cases := []packetSizeCase{
+		{name: "one byte under the ceiling", size: ceiling - 1, wantServed: true},
+		{name: "exactly at the ceiling", size: ceiling, wantServed: true},
+		{name: "one byte over the ceiling", size: ceiling + 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runPacketSizeCase(t, tc, ceiling)
+		})
+	}
+}
+
+// runPacketSizeCase sends one datagram of the case's size and checks whether it
+// was served whole, dropped, or — the defect — delivered truncated.
+func runPacketSizeCase(t *testing.T, tc packetSizeCase, ceiling int) {
+	t.Helper()
+	seen := make(chan int, 4)
+	srv := server.New()
+	srv.PacketGroup("sized",
+		server.Listen("udp", "127.0.0.1:0"),
+		server.MaxPacketSize(ceiling),
+	).HandleFunc(func(_ context.Context, p corenet.Packet) error {
+		seen <- len(p.Data())
+		return nil
+	})
+	if err := srv.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { closeOrFail(t, srv) })
+
+	c, derr := stdnet.DialTimeout("udp", srv.State().Listeners[0].Address, 2*time.Second)
+	if derr != nil {
+		t.Fatalf("dial: %v", derr)
+	}
+	defer closeOrFail(t, c)
+	if _, werr := c.Write(make([]byte, tc.size)); werr != nil {
+		t.Fatalf("write: %v", werr)
+	}
+
+	select {
+	case got := <-seen:
+		//: an oversized datagram must not reach the handler at all.
+		if !tc.wantServed {
+			t.Fatalf("a %d-byte datagram was delivered as %d bytes under a %d-byte "+
+				"ceiling — a truncated prefix is indistinguishable from a whole message",
+				tc.size, got, ceiling)
+		}
+		//: a datagram within the ceiling must arrive entire.
+		if got != tc.size {
+			t.Fatalf("a %d-byte datagram arrived as %d bytes", tc.size, got)
+		}
+	case <-time.After(2 * time.Second):
+		//: silence is the correct outcome only for an oversized datagram.
+		if tc.wantServed {
+			t.Fatalf("a %d-byte datagram was dropped under a %d-byte ceiling", tc.size, ceiling)
+		}
+		//: and the drop has to be visible, or it is just a quieter truncation.
+		if got := srv.State().OversizedPackets; got != 1 {
+			t.Fatalf("State().OversizedPackets = %d, want 1 — the drop was not reported", got)
+		}
+	}
+}

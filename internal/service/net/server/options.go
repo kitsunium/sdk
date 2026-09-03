@@ -75,7 +75,7 @@ func ReadBufferSize(n int) GroupOption {
 }
 
 // MaxPacketSize caps the datagram size a group accepts. A larger datagram is
-// truncated by the kernel, so the ceiling is also the read buffer size.
+// dropped and counted in State, never delivered as a truncated prefix.
 func MaxPacketSize(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {

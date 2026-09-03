@@ -22,7 +22,8 @@ import (
 // it to its own worker.
 func (s *Server) readLoop(bound *boundPacketConn, group *PacketGroup, handler corenet.PacketHandler) {
 	defer s.inFlight.Done()
-	slots := newSlots(batchSize(group.limits), packetSize(group.limits))
+	ceiling := packetSize(group.limits)
+	slots := newSlots(batchSize(group.limits), ceiling)
 	reader := newDatagramSource(bound.pc)
 	held := &packet{conn: bound.pc, group: group.name}
 	//: read until the socket is closed beneath us.
@@ -38,15 +39,30 @@ func (s *Server) readLoop(bound *boundPacketConn, group *PacketGroup, handler co
 			}
 			continue
 		}
-		s.dispatch(slots[:count], held, handler)
+		s.dispatch(slots[:count], held, handler, ceiling)
 	}
 }
 
-// dispatch serves every datagram in a filled batch.
-func (s *Server) dispatch(slots []datagram, held *packet, handler corenet.PacketHandler) {
+// dispatch serves every datagram in a filled batch, dropping any past the
+// group's ceiling.
+//
+// An oversized datagram is NOT handed on. The kernel has already discarded its
+// tail, so what remains is a prefix that reads exactly like a complete message:
+// the handler has no way to tell it was cut, and a partial payload accepted as
+// whole is a correctness bug rather than a capacity one. It is dropped and
+// counted in State instead — the same answer the accept path gives a connection
+// past its ceiling, because there is nobody above a read loop to return an
+// error to and the counter is therefore the report.
+func (s *Server) dispatch(slots []datagram, held *packet, handler corenet.PacketHandler, ceiling int) {
 	//: serve each datagram in arrival order.
 	for i := range slots {
 		s.total.Add(1)
+		//: the probe byte was filled, so this datagram passed the ceiling and
+		//: whatever the kernel copied is a truncated prefix.
+		if slots[i].n > ceiling {
+			s.oversized.Add(1)
+			continue
+		}
 		held.data = slots[i].payload()
 		held.from = slots[i].addr
 		held.id = s.nextID.Add(1)

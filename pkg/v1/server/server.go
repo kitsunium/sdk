@@ -219,8 +219,12 @@ type PacketHandlerFunc = corenet.PacketHandlerFunc
 // PacketMiddleware decorates a datagram handler.
 type PacketMiddleware = corenet.Middleware[corenet.PacketHandler]
 
-// MaxPacketSize caps the datagram size a group accepts. A larger datagram is
-// truncated by the kernel, so the ceiling is also the read buffer size.
+// MaxPacketSize caps the datagram size a group accepts.
+//
+// A larger datagram is dropped and counted in [State.OversizedPackets], never
+// delivered. Truncating would hand the handler a prefix indistinguishable from
+// a complete message, which is a correctness problem rather than a capacity
+// one; a drop it can observe in State is the honest answer.
 func MaxPacketSize(n int) GroupOption {
 	//: forwarded unchanged.
 	return svcserver.MaxPacketSize(n)

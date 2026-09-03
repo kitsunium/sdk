@@ -59,10 +59,14 @@ type Server struct {
 	phase atomic.Uint32
 	// inFlight tracks connections being served, for the drain.
 	inFlight sync.WaitGroup
-	// active, total and rejected feed State.
+	// active, total, rejected and oversized feed State.
 	active   atomic.Int64
 	total    atomic.Uint64
 	rejected atomic.Uint64
+	// oversized counts datagrams dropped for passing their group's ceiling. A
+	// read loop has nobody to hand an error to, so this counter is how the drop
+	// is reported instead of hidden.
+	oversized atomic.Uint64
 	// connPool recycles the per-connection struct so a steady-state accept
 	// loop allocates nothing per connection.
 	connPool *recycler.Pool[*conn]
@@ -185,10 +189,11 @@ func (s *Server) State() corenet.StateValue {
 	//: a copied slice so the caller cannot observe a listener set mutating
 	//: underneath it, and cannot mutate ours.
 	return corenet.StateValue{
-		Phase:         corenet.Phase(s.phase.Load()),
-		Listeners:     listeners,
-		ActiveConns:   s.active.Load(),
-		TotalConns:    s.total.Load(),
-		RejectedConns: s.rejected.Load(),
+		Phase:            corenet.Phase(s.phase.Load()),
+		Listeners:        listeners,
+		ActiveConns:      s.active.Load(),
+		TotalConns:       s.total.Load(),
+		RejectedConns:    s.rejected.Load(),
+		OversizedPackets: s.oversized.Load(),
 	}
 }

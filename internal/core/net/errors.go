@@ -98,7 +98,11 @@ var (
 		"core/net: a supervisor-passed descriptor could not be turned into a listener",
 		errs.WithExitCode(exitOSErr))
 
-	// PacketTooLarge is returned for a datagram beyond the accepted size.
+	// PacketTooLarge names the reason a datagram beyond the group's accepted
+	// size is dropped. It is deliberately not returned to anyone: a read loop
+	// has no caller, so the drop is reported through
+	// StateValue.OversizedPackets. The sentinel stays because it is what gives
+	// that count a documented name in the registry.
 	PacketTooLarge = errs.Define(CodePacketTooLarge, "PACKET_TOO_LARGE",
 		"The datagram is larger than the accepted size",
 		"core/net: the received datagram exceeded the group's maximum packet size",
