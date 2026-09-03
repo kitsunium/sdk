@@ -57,11 +57,11 @@ func (r *multiReader) wire(slots []datagram) {
 	//: each header borrows its slot's buffer for the socket's whole lifetime.
 	for i := range slots {
 		r.iovecs[i].Base = &slots[i].buf[0]
-		r.iovecs[i].Len = uint64(len(slots[i].buf))
+		setKernelLen(&r.iovecs[i].Len, len(slots[i].buf))
 		r.headers[i].hdr.Name = (*byte)(unsafe.Pointer(&r.names[i]))
 		r.headers[i].hdr.Namelen = syscall.SizeofSockaddrAny
 		r.headers[i].hdr.Iov = &r.iovecs[i]
-		r.headers[i].hdr.Iovlen = 1
+		setKernelLen(&r.headers[i].hdr.Iovlen, 1)
 	}
 	r.wired = count
 }
