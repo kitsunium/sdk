@@ -1,15 +1,21 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "client",
     srcs = [
+        "capped_body.go",
+        "client.go",
+        "config.go",
         "conjunction.go",
+        "defaults.go",
         "deny_policy.go",
+        "guard.go",
         "method_policy.go",
         "path.go",
         "path_policy.go",
+        "policies.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/net/client",
     visibility = [
@@ -28,5 +34,18 @@ alias(
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "client_test",
+    srcs = [
+        "guard_external_test.go",
+        "policy_external_test.go",
+    ],
+    deps = [
+        ":client",
+        "//internal/core/net",
+        "//internal/kernel/errs",
     ],
 )

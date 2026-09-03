@@ -4,11 +4,11 @@
 ## Purpose
 
 The outbound half of the network domain (ADR 0029): the policy-enforcing HTTP
-transport and the concrete policies it evaluates. **Work in progress** — the
-policy layer and the path guard have landed; the guarded `RoundTripper`, the
-per-phase timeouts, the response size cap and the `Client` itself are next.
+transport and the concrete policies it evaluates. The guarded `RoundTripper`, the per-phase
+timeouts, the response size cap, the concrete policies and the `Client` have all
+landed.
 
-Public façade: `pkg/v1/client` (not yet published).
+Public façade: `pkg/v1/client`.
 
 ## Contents
 
@@ -18,7 +18,12 @@ Public façade: `pkg/v1/client` (not yet published).
 | `path_policy.go` | `pathPolicy` — anchored allow patterns |
 | `deny_policy.go` | `denyPolicy` — anchored deny patterns, final |
 | `conjunction.go` | `conjunction` — every member must allow |
-| `path.go` | `checkPath` / `hasDotSegment` — safety checks run *before* patterns |
+| `client.go` | `Client`, `New`, `Get`, `Do`, `HTTP` — per-phase timeouts, redirect cap |
+| `guard.go` | the policy-enforcing `http.RoundTripper` |
+| `capped_body.go` | the response ceiling; fails rather than truncating |
+| `policies.go` | `AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies` |
+| `config.go`, `defaults.go` | typed configuration and its safe defaults |
+| `path.go` | `checkPath` / `hasDotSegment` / `hasEncodedSeparator` — safety checks run *before* patterns |
 
 ## Why-this-shape
 
@@ -48,6 +53,15 @@ Public façade: `pkg/v1/client` (not yet published).
   percent-decoded, so a policy that reads it accepts `%2e%2e`, which the
   upstream reinterprets as `..`. `corenet.RequestValue` therefore carries
   `EscapedPath` and deliberately does not carry the decoded form.
+- **Encoded separators are refused, and that is a consequence of judging the
+  escaped path.** Matching the wire form means `/v1/supi/a%2fb` satisfies
+  `^/v1/supi/[^/]+$` as a *single* segment, while an upstream that decodes
+  before routing sees `/v1/supi/a/b` — two segments and a different resource
+  than the policy believed it authorised. The two ends disagree, so no pattern
+  can authorise it honestly and `hasEncodedSeparator` refuses it (`%2f`, `%5c`,
+  either case). This was found by mutation-testing the dot-segment guard: the
+  mutation did *not* fail, which showed the escaped-path decision was unpinned
+  and pointed straight at the real gap.
 - **A refusal never echoes the path in its public message.** The path is the
   shape of the private API surface; a denial must not leak it into a log line or
   a response. The reason goes in a structured field instead.

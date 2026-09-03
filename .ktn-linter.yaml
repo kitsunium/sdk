@@ -159,6 +159,10 @@ rules:
       # each parameter to a one-method interface would replace the single domain
       # type with two synthetic ones and obscure that both are the same thing.
       - "**/pkg/v1/tlsid/**"
+      # New takes a tlsid.Identity, the domain's single TLS value type. Narrowing
+      # it to a one-method interface would hide that the client and the server
+      # consume the very same identity, which is the point of sharing it.
+      - "**/internal/service/net/client/**"
 
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
@@ -172,6 +176,16 @@ rules:
   # supervisor's environment (secrets included) into the child. Here the
   # lint-preferred nil is the security bug, so the non-nil empty slice is
   # deliberate. Scoped to the spawn implementation ONLY.
+  # KTN-STRUCT-CTOR (phase 4) — Effective Go's own naming rule wins.
+  #
+  # The rule wants a struct named Client to be built by NewClient(). This package
+  # produces one main type, and Go's convention for that case is a constructor
+  # called New, used qualified as client.New(). Renaming it to client.NewClient()
+  # would stutter, which the same linter's own naming rules discourage elsewhere.
+  KTN-STRUCT-CTOR:
+    exclude:
+      - "**/internal/service/net/client/**"
+
   KTN-VAR-NILSLICE:
     exclude:
       - "**/internal/service/proc/exec/**"
@@ -214,6 +228,12 @@ rules:
       # exactly as ADR 0016 avoids for process.Spec above.
       - "**/internal/service/net/tlsid/**"
       - "**/pkg/v1/tlsid/**"
+      # The outbound client forwards the same value types. Config (72 B) is
+      # taken and returned BY VALUE by withDefaults precisely so filling the
+      # defaults cannot mutate the Config its caller still holds, and New copies
+      # it exactly once per client, at construction.
+      - "**/internal/service/net/client/**"
+      - "**/pkg/v1/client/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue.

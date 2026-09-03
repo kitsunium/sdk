@@ -30,8 +30,30 @@ func checkPath(escapedPath string) error {
 		return errs.Wrap(corenet.UnsafePath, errs.WrapParams{},
 			errs.String("why", "path carries a dot segment"))
 	}
-	//: the path is absolute and normalised.
+	//: an encoded separator makes the wire form and the upstream's view of the
+	//: path disagree, so no pattern can authorise it honestly.
+	if hasEncodedSeparator(escapedPath) {
+		//: refuse without echoing the path.
+		return errs.Wrap(corenet.UnsafePath, errs.WrapParams{},
+			errs.String("why", "path carries a percent-encoded separator"))
+	}
+	//: the path is absolute, normalised, and means the same thing on both ends.
 	return nil
+}
+
+// hasEncodedSeparator reports a percent-encoded path separator.
+//
+// This closes the gap that judging the escaped path opens. Patterns are matched
+// against the wire form, so `/v1/supi/a%2fb` satisfies `^/v1/supi/[^/]+$` as a
+// single segment — while an upstream that decodes before routing sees
+// `/v1/supi/a/b`, two segments and a different resource than the policy believed
+// it was authorising. The two views disagree, so the only honest answer is to
+// refuse: a caller with a legitimate slash in an identifier is asking the
+// allowlist a question it cannot answer.
+func hasEncodedSeparator(escapedPath string) bool {
+	lowered := strings.ToLower(escapedPath)
+	//: %2f is "/" and %5c is "\"; both are treated as separators upstream.
+	return strings.Contains(lowered, "%2f") || strings.Contains(lowered, "%5c")
 }
 
 // hasDotSegment reports a "." or ".." segment in literal or percent-encoded
