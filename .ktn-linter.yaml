@@ -39,6 +39,12 @@ vocabulary:
   # describes the method rather than the role the type plays.
   adapter_role_interfaces:
     - github.com/kitsunium/sdk/internal/core/net.Policy
+    # ConnHandler / PacketHandler follow the stdlib's own precedent: http.Handler
+    # is a single-method interface named <Noun>Handler, and "Handler" names the
+    # role the type plays rather than its method. The -er forms the rule would
+    # impose here ("ServeConner", "ServePacketter") are not words.
+    - github.com/kitsunium/sdk/internal/core/net.ConnHandler
+    - github.com/kitsunium/sdk/internal/core/net.PacketHandler
 
 # ── Global options ────────────────────────────────────────────────────────────
 
