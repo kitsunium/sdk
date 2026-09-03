@@ -27,6 +27,12 @@ import (
 type httpAdapter struct {
 	// handler is the application's http.Handler.
 	handler http.Handler
+	// timeouts are the group's per-phase bounds, set at Start and handed to
+	// http.Server so net/http refreshes them per REQUEST. The engine's own
+	// per-operation deadlines cannot do it here: net/http is given the concrete
+	// socket, not the pooled wrapper that carries them, because it type-asserts
+	// on *tls.Conn to populate Request.TLS.
+	timeouts corenet.TimeoutsValue
 	// start guarantees the serving goroutine is launched at most once.
 	start sync.Once
 	// mu guards waiters AND the lifecycle fields below. They are written by the
@@ -152,7 +158,21 @@ func (a *httpAdapter) launch(raw stdnet.Conn) {
 		return
 	}
 	bridge := newChanListener(raw.LocalAddr())
-	srv := &http.Server{Handler: a.handler, ConnState: a.onConnState}
+	srv := &http.Server{
+		Handler:   a.handler,
+		ConnState: a.onConnState,
+		//: net/http applies these per request, refreshing on every one, which
+		//: is what the group's options promise. Left at zero — as they were —
+		//: net/http bounds nothing at all, so a single slow reader could hold a
+		//: request open for as long as it liked on an otherwise bounded group.
+		ReadTimeout:  a.timeouts.Read.Duration(),
+		WriteTimeout: a.timeouts.Write.Duration(),
+		IdleTimeout:  a.timeouts.Idle.Duration(),
+		//: the header phase is the one a slowloris stalls, and net/http only
+		//: bounds it separately; falling back to the read budget means a group
+		//: that set one is defended without having to know that.
+		ReadHeaderTimeout: a.timeouts.Read.Duration(),
+	}
 	a.bridge = bridge
 	a.server = srv
 	//: the daemon owns the goroutine and publishes its termination on Done,

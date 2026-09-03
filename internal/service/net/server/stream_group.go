@@ -78,7 +78,22 @@ func (g *StreamGroup) Use(middlewares ...corenet.Middleware[corenet.ConnHandler]
 
 // resolved returns the handler with the group's middlewares applied.
 func (g *StreamGroup) resolved() corenet.ConnHandler {
+	//: the adapter learns the group's deadlines here, at Start, which is the
+	//: first moment every option is certainly applied and still before any
+	//: accept loop exists to read them.
+	if g.httpAdapter != nil {
+		g.httpAdapter.timeouts = g.timeouts
+	}
 	//: composed once at Start rather than per connection, so the middleware
 	//: chain costs nothing on the hot path.
-	return corenet.Chain(g.handler, g.middlewares...)
+	chained := corenet.Chain(g.handler, g.middlewares...)
+	//: a group with no TLS identity has no negotiation to bound, so it is not
+	//: wrapped at all and pays nothing.
+	if g.identity.IsZero() {
+		//: plaintext: straight to the handler chain.
+		return chained
+	}
+	//: wrapped once per group, so bounding the handshake costs no allocation
+	//: per connection.
+	return handshakeHandler{next: chained, timeouts: g.timeouts}
 }

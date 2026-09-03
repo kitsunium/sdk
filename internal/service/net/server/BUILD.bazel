@@ -13,6 +13,7 @@ go_library(
         "conn_compliance.go",
         "datagram_source_linux.go",
         "datagram_source_other.go",
+        "handshake.go",
         "http_adapter.go",
         "http_listener.go",
         "kernel_len_linux.go",
@@ -70,6 +71,7 @@ go_test(
         "adopt_internal_test.go",
         "batch_bench_test.go",
         "batch_internal_test.go",
+        "handshake_internal_test.go",
         "http_adapter_internal_test.go",
         "kernel_len_internal_test.go",
         "limiter_external_test.go",
@@ -78,6 +80,7 @@ go_test(
         "server_external_test.go",
         "shards_external_test.go",
         "shards_internal_test.go",
+        "timeouts_external_test.go",
     ],
     embed = [":server"],
     # keep: these tests bind a loopback socket. Bazel's linux-sandbox gives the

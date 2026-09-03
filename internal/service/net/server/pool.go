@@ -20,6 +20,7 @@ func (s *Server) acquire(raw stdnet.Conn, group *StreamGroup) *conn {
 	c.Conn = raw
 	c.id = s.nextID.Add(1)
 	c.group = group.name
+	c.timeouts = group.timeouts
 	//: register the socket so an expired drain budget can sever it.
 	s.liveMu.Lock()
 	s.live[c.id] = raw

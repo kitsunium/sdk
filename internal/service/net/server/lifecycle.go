@@ -367,7 +367,6 @@ func (s *Server) serve(raw stdnet.Conn, group *StreamGroup, handler corenet.Conn
 	//: a panicking handler closes its own connection and nothing more; one
 	//: malformed peer must never be able to take the process down.
 	defer recoverHandler()
-	applyDeadlines(raw, group.timeouts)
 	//: the handler's error ends this connection and nothing else. It is
 	//: deliberately not propagated: there is nobody above a connection
 	//: goroutine to return it to, and one peer's failure is not the server's.
@@ -382,27 +381,6 @@ func recoverHandler() {
 	//: a nil recover means the handler returned normally; a non-nil one has
 	//: already been contained by the time this returns.
 	recover()
-}
-
-// applyDeadlines installs the group's per-phase deadlines on a connection.
-//
-// Deadline errors are ignored deliberately: SetDeadline fails only on a
-// connection that is already closed, in which case the handler's first read
-// reports the real problem far more usefully than a setup error would.
-func applyDeadlines(raw stdnet.Conn, timeouts corenet.TimeoutsValue) {
-	//: an idle timeout bounds the whole connection's silence, so it is the
-	//: outermost deadline and the others refine it.
-	if idle := timeouts.Idle.Duration(); idle > 0 {
-		swallowErr(raw.SetDeadline(time.Now().Add(idle)))
-	}
-	//: a read deadline bounds one read from the peer.
-	if read := timeouts.Read.Duration(); read > 0 {
-		swallowErr(raw.SetReadDeadline(time.Now().Add(read)))
-	}
-	//: a write deadline bounds one write to the peer.
-	if write := timeouts.Write.Duration(); write > 0 {
-		swallowErr(raw.SetWriteDeadline(time.Now().Add(write)))
-	}
 }
 
 // Serve starts the server and blocks until ctx is cancelled, then drains.

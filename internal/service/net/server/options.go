@@ -66,6 +66,18 @@ func IdleTimeout(d time.Duration) GroupOption {
 	}
 }
 
+// HandshakeTimeout bounds the TLS negotiation on a group's listeners.
+//
+// Unset does NOT mean unbounded here, unlike the other three: the handshake is
+// the phase a peer can stall before any handler exists to notice, so it falls
+// back to the domain's default rather than to no bound at all.
+func HandshakeTimeout(d time.Duration) GroupOption {
+	//: the option is applied by the constructor, in declaration order.
+	return func(g *StreamGroup) {
+		g.timeouts.Handshake = corenet.DurationValue(d)
+	}
+}
+
 // ReadBufferSize sizes the per-connection scratch buffer handed to the handler.
 func ReadBufferSize(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order.

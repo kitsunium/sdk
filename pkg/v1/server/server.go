@@ -172,21 +172,46 @@ func TLS(id tlsid.Identity) GroupOption {
 }
 
 // ReadTimeout bounds one read from the peer.
+//
+// It is refreshed per read, not installed once when the connection is accepted:
+// a deadline set at accept time would be a budget for the connection's whole
+// life, which a peer trickling one byte at a time stays comfortably inside. On
+// a group serving an http.Handler the same value becomes net/http's own
+// ReadTimeout and ReadHeaderTimeout, so it is refreshed per request there.
 func ReadTimeout(d time.Duration) GroupOption {
 	//: forwarded unchanged.
 	return svcserver.ReadTimeout(d)
 }
 
-// WriteTimeout bounds one write to the peer.
+// WriteTimeout bounds one write to the peer, refreshed per write.
 func WriteTimeout(d time.Duration) GroupOption {
 	//: forwarded unchanged.
 	return svcserver.WriteTimeout(d)
 }
 
 // IdleTimeout bounds how long a connection may sit with no traffic at all.
+//
+// It is enforced on the read side, where silence is observable: a read is
+// bounded by whichever of ReadTimeout and IdleTimeout is tighter. Setting both
+// therefore narrows the bound rather than replacing it, which is what the two
+// options together are asking for.
 func IdleTimeout(d time.Duration) GroupOption {
 	//: forwarded unchanged.
 	return svcserver.IdleTimeout(d)
+}
+
+// HandshakeTimeout bounds the TLS negotiation on the group's listeners.
+//
+// Unset does not mean unbounded, unlike the other three. The handshake runs on
+// the connection's own goroutine — the listener does not negotiate in Accept,
+// which is what keeps one slow peer from stalling the accept path for everyone
+// — so it is the one phase that can be stalled before any handler exists to
+// notice, and a peer that connects and says nothing would otherwise hold a
+// goroutine and a slot under MaxConns indefinitely. It falls back to a domain
+// default instead.
+func HandshakeTimeout(d time.Duration) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.HandshakeTimeout(d)
 }
 
 // ReadBufferSize sizes the per-connection scratch buffer handed to the handler
