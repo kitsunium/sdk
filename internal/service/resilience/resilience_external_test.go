@@ -131,3 +131,189 @@ func TestBulkheadRejectsWhenFull(t *testing.T) {
 		t.Errorf("nested Run: err=%v, want BULKHEAD_FULL", nestedErr)
 	}
 }
+
+// errDeny stands for a deterministic refusal (policy denial, HTTP 400): replaying
+// it cannot change the outcome.
+var errDeny = errors.New("deny")
+
+// notDeny is the classifier the tests share: everything is transient except the
+// deterministic refusal.
+func notDeny(err error) bool { return !errors.Is(err, errDeny) }
+
+// TestRetryRetryablePredicate pins the classifier contract: a rejected error is
+// returned verbatim on the first attempt — no backoff, no budget spent, no
+// RetryExhausted relabel — while a nil predicate keeps replaying everything.
+func TestRetryRetryablePredicate(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name         string
+		retryable    func(error) bool
+		opErrs       []error
+		baseDelay    time.Duration
+		wantCalls    int
+		wantVerbatim error
+	}
+	tests := []tc{
+		{
+			//: no classifier — the pre-classifier behaviour, budget fully spent.
+			"nil predicate exhausts the budget",
+			nil,
+			[]error{errBoom, errBoom, errBoom},
+			0,
+			3,
+			nil,
+		},
+		{
+			//: an accepting classifier is indistinguishable from no classifier.
+			"accepting predicate exhausts the budget",
+			notDeny,
+			[]error{errBoom, errBoom, errBoom},
+			0,
+			3,
+			nil,
+		},
+		{
+			//: the defect case — a deterministic error must cost one attempt.
+			"rejecting predicate returns on the first attempt",
+			notDeny,
+			[]error{errDeny, errDeny, errDeny},
+			time.Second,
+			1,
+			errDeny,
+		},
+		{
+			//: the mixed sequence — transient failures replay, then a refusal stops.
+			"rejecting predicate stops mid-budget",
+			notDeny,
+			[]error{errBoom, errBoom, errDeny},
+			0,
+			3,
+			errDeny,
+		},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: the first-attempt case carries a one-second backoff: the fix never
+		//: sleeps it, so a regression shows up as elapsed time, not a hung test.
+		r := res.NewRetry(res.RetryConfig{MaxAttempts: 3, BaseDelay: tc.baseDelay, Retryable: tc.retryable})
+		calls := 0
+		start := time.Now()
+		//: the op walks the scripted error sequence, one entry per attempt.
+		err := r.Run(t.Context(), func(context.Context) error {
+			calls++
+			return tc.opErrs[calls-1]
+		})
+		//: the classifier decides how much of the budget the failure costs.
+		if calls != tc.wantCalls {
+			t.Fatalf("calls=%d, want %d", calls, tc.wantCalls)
+		}
+		//: a transient-only run still exhausts and wraps as RETRY_EXHAUSTED.
+		if tc.wantVerbatim == nil {
+			if !errs.HasCode(err, coreres.CodeRetryExhausted) {
+				t.Errorf("err=%v, want RETRY_EXHAUSTED", err)
+			}
+			return
+		}
+		//: a rejected error surfaces as itself, never behind RETRY_EXHAUSTED.
+		if !errors.Is(err, tc.wantVerbatim) {
+			t.Errorf("err=%v, want %v verbatim", err, tc.wantVerbatim)
+		}
+		if errs.HasCode(err, coreres.CodeRetryExhausted) {
+			t.Errorf("err=%v was relabelled RETRY_EXHAUSTED", err)
+		}
+		//: stopping early also means the pending backoff was never slept (the
+		//: configured BaseDelay is 1s in that case, so 250ms leaves a 4x margin).
+		if elapsed := time.Since(start); tc.baseDelay > 0 && elapsed > 250*time.Millisecond {
+			t.Errorf("elapsed=%v, want an immediate return (no backoff)", elapsed)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// TestBreakerRetryablePredicate pins the breaker half of the classifier: a
+// deterministic error is neither a failure nor a success, so it can neither trip
+// a Closed breaker nor close a HalfOpen one.
+func TestBreakerRetryablePredicate(t *testing.T) {
+	t.Parallel()
+	//: nil means "the op succeeds"; anything else is the error it returns.
+	type step struct {
+		opErr    error
+		advance  time.Duration
+		wantCode bool
+		wantErr  error
+	}
+	type tc struct {
+		name      string
+		retryable func(error) bool
+		steps     []step
+	}
+	tests := []tc{
+		{
+			//: no classifier — every error counts, so refusals trip the breaker.
+			"nil predicate lets a deterministic error trip the breaker",
+			nil,
+			[]step{
+				{errDeny, 0, false, errDeny},
+				{errDeny, 0, false, errDeny},
+				//: threshold reached: the 3rd call is rejected fast.
+				{errDeny, 0, true, nil},
+			},
+		},
+		{
+			//: the fix — refusals never reach the state machine, so it stays Closed.
+			"rejecting predicate keeps the breaker closed",
+			notDeny,
+			[]step{
+				{errDeny, 0, false, errDeny},
+				{errDeny, 0, false, errDeny},
+				{errDeny, 0, false, errDeny},
+				//: still Closed, so a real call is admitted and succeeds.
+				{nil, 0, false, nil},
+			},
+		},
+		{
+			//: a refusal during a HalfOpen trial is no verdict — stay HalfOpen.
+			"rejecting predicate does not close a half-open breaker",
+			notDeny,
+			[]step{
+				//: one transient failure trips the breaker (threshold 2 below is
+				//: reached on the second).
+				{errBoom, 0, false, errBoom},
+				{errBoom, 0, false, errBoom},
+				//: Open within the cooldown: rejected fast.
+				{nil, 0, true, nil},
+				//: the cooldown elapses, admitting a HalfOpen trial…
+				{errDeny, 2 * time.Minute, false, errDeny},
+				//: …which decided nothing, so the next trial is still admitted.
+				{nil, 0, false, nil},
+				//: the success closed the breaker; a fresh failure counts from zero.
+				{errBoom, 0, false, errBoom},
+			},
+		},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		clk := &fakeClock{now: time.Unix(0, 0)}
+		b := res.NewCircuitBreaker(res.BreakerConfig{
+			FailureThreshold: 2, OpenDuration: time.Minute, Clock: clk, Retryable: tc.retryable,
+		})
+		for i, st := range tc.steps {
+			//: move the injected clock before the call when the step says so.
+			clk.advance(st.advance)
+			err := b.Run(t.Context(), func(context.Context) error { return st.opErr })
+			//: a rejected call carries the policy sentinel instead of an outcome.
+			if got := errs.HasCode(err, coreres.CodeCircuitOpen); got != st.wantCode {
+				t.Fatalf("step %d: CIRCUIT_OPEN=%v, want %v (err=%v)", i, got, st.wantCode, err)
+			}
+			//: an admitted call propagates the operation's own outcome verbatim.
+			if !st.wantCode && !errors.Is(err, st.wantErr) {
+				t.Fatalf("step %d: err=%v, want %v verbatim", i, err, st.wantErr)
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}

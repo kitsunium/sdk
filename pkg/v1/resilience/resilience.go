@@ -13,6 +13,24 @@
 //
 // Rejections surface typed sentinels (RetryExhausted / CircuitOpen / RateLimited
 // / BulkheadFull / TimeoutExceeded) matchable via errs.HasReason / errs.HasCode.
+//
+// # Classifying deterministic failures
+//
+// Retry and the circuit-breaker act on transient failures. A deterministic one —
+// a policy refusal, an HTTP 400, invalid input — gains nothing from a replay and
+// says nothing about a dependency's health, yet by default both policies treat
+// every non-nil error as transient: the retry spends its whole budget on it and
+// hides it behind RetryExhausted, and the breaker counts it towards tripping.
+// Set the Retryable predicate on either config to tell the two apart. It takes
+// the same shape in both, so a nested Retry(Breaker(op)) shares one classifier:
+//
+//	transient := func(err error) bool { return !errors.Is(err, ErrBadRequest) }
+//	r := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3, Retryable: transient})
+//	b := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, Retryable: transient})
+//
+// A rejected error comes back verbatim: the retry stops at that attempt without
+// backoff and without the RetryExhausted relabel, and the breaker leaves its
+// state machine untouched. A nil predicate keeps the historical behaviour.
 package resilience
 
 import (
@@ -50,13 +68,15 @@ var (
 	TimeoutExceeded = coreres.TimeoutExceeded
 )
 
-// NewRetry returns a retry-with-backoff Runner.
+// NewRetry returns a retry-with-backoff Runner. An error rejected by
+// cfg.Retryable ends the loop at once and is returned verbatim.
 func NewRetry(cfg RetryConfig) Runner {
 	//: delegate to the service constructor.
 	return svcres.NewRetry(cfg)
 }
 
-// NewCircuitBreaker returns a circuit-breaker Runner.
+// NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by
+// cfg.Retryable is returned verbatim and left out of the state machine.
 func NewCircuitBreaker(cfg BreakerConfig) Runner {
 	//: delegate to the service constructor.
 	return svcres.NewCircuitBreaker(cfg)

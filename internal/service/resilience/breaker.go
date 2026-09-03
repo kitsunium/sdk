@@ -19,6 +19,7 @@ const defaultThreshold int = 5
 type circuitBreaker struct {
 	mu        sync.Mutex
 	clk       clock.Clock
+	retryable func(error) bool
 	threshold int
 	openFor   time.Duration
 	state     breakerState
@@ -27,7 +28,9 @@ type circuitBreaker struct {
 }
 
 // NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen
-// breaker. Open calls return CircuitOpen until OpenDuration elapses.
+// breaker. Open calls return CircuitOpen until OpenDuration elapses. An error
+// rejected by cfg.Retryable is returned verbatim and left out of the state
+// machine entirely, so deterministic failures cannot trip the breaker.
 func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 	//: default the clock to the system source.
 	clk := cfg.Clock
@@ -44,18 +47,26 @@ func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 		threshold = defaultThreshold
 	}
 	//: a fresh breaker starts Closed.
-	return &circuitBreaker{clk: clk, threshold: threshold, openFor: cfg.OpenDuration}
+	return &circuitBreaker{clk: clk, retryable: cfg.Retryable, threshold: threshold, openFor: cfg.OpenDuration}
 }
 
-// Run rejects fast when Open, else runs op and records the outcome.
+// Run rejects fast when Open, else runs op and records the outcome. A
+// deterministic error (one the classifier rejects) is passed through without
+// touching the state machine.
 func (b *circuitBreaker) Run(ctx context.Context, op coreres.Operation) error {
 	//: gate on the current state; a closed gate rejects fast.
 	if !b.allow() {
 		//: the breaker is Open within its cooldown.
 		return wrapAs(coreres.CircuitOpen, nil)
 	}
-	//: run the guarded operation and record success/failure.
+	//: run the guarded operation.
 	err := op(ctx)
+	//: a deterministic error says nothing about the dependency's health.
+	if err != nil && !isRetryable(b.retryable, err) {
+		//: neither a failure nor a success — the state machine stays untouched.
+		return err
+	}
+	//: fold the health signal into the state machine.
 	b.record(err == nil)
 	//: propagate the operation's own outcome.
 	return err
