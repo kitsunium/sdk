@@ -1,0 +1,201 @@
+//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/server .
+
+// Package server is the inbound half of the SDK's network domain (ADR 0029):
+// one unified listener engine for TCP, Unix, TLS and mutual TLS, serving
+// pluggable handlers grouped behind shared middlewares.
+//
+// # The whole thing
+//
+//	srv := server.New()
+//	srv.Group("echo", server.Listen("tcp", ":8080")).
+//		HandleFunc(func(ctx context.Context, c server.Conn) error {
+//			_, err := io.Copy(c, c)
+//			return err
+//		})
+//	err := srv.Serve(ctx)
+//
+// That is the design target, not a simplified excerpt. [Conn] embeds net.Conn,
+// so a handler reads and writes a connection exactly as it would any socket and
+// every io helper keeps working — io.Copy, bufio, encoding wrappers. Everything
+// the domain adds is additive.
+//
+// # Groups
+//
+// A group is a set of listeners sharing one handler, one middleware chain and
+// one policy. It exists so the same handler can answer on a TCP port and a Unix
+// socket without wiring it twice:
+//
+//	srv.Group("api",
+//		server.Listen("tcp", ":8443"),
+//		server.Listen("unix", "/run/api.sock"),
+//		server.TLS(identity),
+//		server.IdleTimeout(30*time.Second),
+//	).Use(mw).Handle(handler)
+//
+// [Group] returns the group rather than a (group, error) pair on purpose: a
+// declaration mistake — a duplicate name, an unusable address, a missing
+// handler — is recorded and reported by [Server.Start]. The declaration chain
+// stays readable, and nothing is swallowed.
+//
+// # TLS and mutual TLS
+//
+// One option covers both. A [github.com/kitsunium/sdk/pkg/v1/tlsid.Identity]
+// built with RequireClientCert turns the group's listeners into mutual-TLS
+// listeners; the same identity type serves the outbound client, so the two
+// cannot drift apart. The handshake runs on the connection's own goroutine, so
+// a slow or hostile peer cannot stall the accept path for everyone else.
+//
+// # Lifecycle
+//
+// [Server.Start] returns once every listener is bound, so a nil error means the
+// ports are open. [Server.Serve] starts, blocks until the context is cancelled,
+// then drains. [Server.Shutdown] stops accepting and waits for in-flight work
+// within a budget, severing what remains when the budget expires — a shutdown
+// that never returns is worse than one that admits it gave up.
+//
+// [Server.State] reports the phase, the addresses actually bound, and whether
+// any listener fell back from a requested optimisation. A silent degradation is
+// indistinguishable from a working server, so it is surfaced rather than logged
+// once at startup.
+package server
+
+import (
+	"time"
+
+	corenet "github.com/kitsunium/sdk/internal/core/net"
+	svcserver "github.com/kitsunium/sdk/internal/service/net/server"
+	"github.com/kitsunium/sdk/pkg/v1/tlsid"
+)
+
+// Server owns a set of listener groups and their lifecycle.
+type Server = svcserver.Server
+
+// Group is a set of listeners sharing one handler, middleware chain and policy.
+type Group = svcserver.StreamGroup
+
+// Conn is one accepted stream connection. It embeds net.Conn.
+type Conn = corenet.Conn
+
+// Handler serves one accepted stream connection.
+type Handler = corenet.ConnHandler
+
+// HandlerFunc adapts a plain function to Handler.
+type HandlerFunc = corenet.ConnHandlerFunc
+
+// Middleware decorates a handler with another of the same type.
+type Middleware = corenet.Middleware[corenet.ConnHandler]
+
+// State is a snapshot of the server's lifecycle and listeners.
+type State = corenet.StateValue
+
+// ListenerState reports one bound listener, including any fallback.
+type ListenerState = corenet.ListenerStateValue
+
+// Phase is where a server sits in its lifecycle.
+type Phase = corenet.Phase
+
+// The lifecycle phases, in the order a server passes through them. They are
+// re-exported so a caller can compare State().Phase without importing the
+// internal package, which Go's firewall forbids anyway.
+// PhaseNew is a constructed server that has not bound anything yet.
+const PhaseNew Phase = corenet.PhaseNew
+
+// PhaseStarting is binding listeners; some may already be up.
+const PhaseStarting Phase = corenet.PhaseStarting
+
+// PhaseServing is bound and accepting.
+const PhaseServing Phase = corenet.PhaseServing
+
+// PhaseDraining has stopped accepting and is waiting for in-flight work.
+const PhaseDraining Phase = corenet.PhaseDraining
+
+// PhaseStopped has released every listener.
+const PhaseStopped Phase = corenet.PhaseStopped
+
+// Option configures a Server.
+type Option = svcserver.Option
+
+// GroupOption configures a Group.
+type GroupOption = svcserver.GroupOption
+
+// Sentinels returned by this package. Match with errors.Is or errs.HasCode.
+var (
+	// ListenFailed reports a listener that could not be bound.
+	ListenFailed = corenet.ListenFailed
+	// InvalidAddress reports an unusable listen address.
+	InvalidAddress = corenet.InvalidAddress
+	// UnsupportedNetwork reports a socket family the domain does not serve.
+	UnsupportedNetwork = corenet.UnsupportedNetwork
+	// AlreadyStarted reports a second Start on a running server.
+	AlreadyStarted = corenet.AlreadyStarted
+	// HandlerMissing reports a group declared without a handler.
+	HandlerMissing = corenet.HandlerMissing
+	// GroupDuplicate reports a second group declared under one name.
+	GroupDuplicate = corenet.GroupDuplicate
+	// DrainTimeout reports a shutdown whose budget expired with work in flight.
+	DrainTimeout = corenet.DrainTimeout
+	// ConnLimitReached reports a connection turned away by the group ceiling.
+	ConnLimitReached = corenet.ConnLimitReached
+)
+
+// New builds a server.
+func New(opts ...Option) *Server {
+	//: the service layer owns the wiring; this facade only forwards.
+	return svcserver.New(opts...)
+}
+
+// Chain applies middlewares to a handler, outermost first.
+//
+// Chain(h, a, b, c) yields a(b(c(h))): the first middleware listed is the first
+// to see a connection, matching how the list reads at the call site.
+func Chain(h Handler, middlewares ...Middleware) Handler {
+	//: the generic core helper serves both handler natures.
+	return corenet.Chain(h, middlewares...)
+}
+
+// Listen adds an address to a group. Repeat it to bind several addresses to one
+// handler — a TCP port and a Unix socket, for instance.
+func Listen(network, addr string) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.Listen(network, addr)
+}
+
+// TLS turns the group's listeners into TLS listeners, or mutual-TLS ones when
+// the identity requires a client certificate.
+func TLS(id tlsid.Identity) GroupOption {
+	//: one option covers both, so the two cannot drift apart.
+	return svcserver.TLS(id)
+}
+
+// ReadTimeout bounds one read from the peer.
+func ReadTimeout(d time.Duration) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.ReadTimeout(d)
+}
+
+// WriteTimeout bounds one write to the peer.
+func WriteTimeout(d time.Duration) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.WriteTimeout(d)
+}
+
+// IdleTimeout bounds how long a connection may sit with no traffic at all.
+func IdleTimeout(d time.Duration) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.IdleTimeout(d)
+}
+
+// ReadBufferSize sizes the per-connection scratch buffer handed to the handler
+// by Conn.Buffer. It is recycled with the connection, which is what lets a
+// handler read without allocating per connection.
+func ReadBufferSize(n int) GroupOption {
+	//: forwarded unchanged.
+	return svcserver.ReadBufferSize(n)
+}
+
+// WithDrainTimeout bounds how long Shutdown waits for in-flight connections
+// before severing them.
+func WithDrainTimeout(d time.Duration) Option {
+	//: forwarded unchanged.
+	return svcserver.WithDrainTimeout(d)
+}

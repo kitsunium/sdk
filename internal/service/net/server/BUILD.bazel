@@ -1,0 +1,48 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "server",
+    srcs = [
+        "conn.go",
+        "conn_compliance.go",
+        "lifecycle.go",
+        "listen.go",
+        "options.go",
+        "pool.go",
+        "server.go",
+        "stream_group.go",
+        "swallow.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/net/server",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/buffer",
+        "//internal/kernel/errs",
+        "//internal/kernel/recycler",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":server",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "server_test",
+    srcs = ["server_external_test.go"],
+    deps = [
+        ":server",
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)

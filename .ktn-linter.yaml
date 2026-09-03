@@ -169,6 +169,10 @@ rules:
       # it to a one-method interface would hide that the client and the server
       # consume the very same identity, which is the point of sharing it.
       - "**/internal/service/net/client/**"
+      # The server engine takes a tlsid.Identity for the same reason the client
+      # does: it is the domain's single TLS value type, and narrowing it to a
+      # one-method interface would hide that both ends share it.
+      - "**/internal/service/net/server/**"
 
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
@@ -191,6 +195,12 @@ rules:
   KTN-STRUCT-CTOR:
     exclude:
       - "**/internal/service/net/client/**"
+      # Same rule, same reason: these packages each produce one main type, and
+      # Go's convention for that case is a constructor called New, used
+      # qualified as server.New(). NewServer()/NewStreamGroup() would stutter,
+      # and StreamGroup is not constructed directly at all — Server.Group mints
+      # it, so a public constructor would be a second, worse way in.
+      - "**/internal/service/net/server/**"
 
   KTN-VAR-NILSLICE:
     exclude:
@@ -240,6 +250,10 @@ rules:
       # it exactly once per client, at construction.
       - "**/internal/service/net/client/**"
       - "**/pkg/v1/client/**"
+      # StateValue (96 B) is returned by value so a caller can hold, log or
+      # compare a snapshot without racing the server that produced it. A
+      # pointer would hand out a view that mutates underneath the reader.
+      - "**/pkg/v1/server/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue.
