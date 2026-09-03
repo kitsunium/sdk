@@ -11,7 +11,7 @@ func TestFacade(t *testing.T) {
 	t.Parallel()
 	m := metrics.NewMeter()
 	m.Counter("ops").Inc()
-	//: Collect + Export through the default "text" exporter (to stdout) succeeds.
+	//: Collect + Export through the default "text" exporter (to stderr) succeeds.
 	if err := metrics.Export("text", m.Collect()); err != nil {
 		t.Fatalf("Export: %v", err)
 	}

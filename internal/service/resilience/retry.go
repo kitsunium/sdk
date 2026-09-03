@@ -23,6 +23,9 @@ type retryRunner struct {
 // NewRetry returns a Runner that retries op up to cfg.MaxAttempts times,
 // sleeping an exponentially-growing (capped) delay between attempts and aborting
 // early on ctx cancellation. The final attempt's error wraps as RetryExhausted.
+// An error rejected by cfg.Retryable ends the loop at once and is returned
+// verbatim, so a deterministic failure neither spends the budget nor hides
+// behind RetryExhausted.
 func NewRetry(cfg RetryConfig) coreres.Runner {
 	//: clamp the attempt budget to at least one.
 	if cfg.MaxAttempts < minAttempts {
@@ -38,7 +41,8 @@ func NewRetry(cfg RetryConfig) coreres.Runner {
 	return &retryRunner{cfg: cfg}
 }
 
-// Run executes op, retrying on error until the budget is spent.
+// Run executes op, retrying on transient errors until the budget is spent. An
+// error the classifier rejects is returned as-is on the spot.
 func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 	//: track the last error so exhaustion can wrap it.
 	var lastErr error
@@ -63,6 +67,11 @@ func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 		if ctx.Err() != nil {
 			//: surface the cancellation, not RetryExhausted.
 			return ctx.Err()
+		}
+		//: a deterministic error is not worth replaying — hand it back untouched.
+		if !isRetryable(r.cfg.Retryable, lastErr) {
+			//: verbatim: no backoff, no budget spent, no RetryExhausted relabel.
+			return lastErr
 		}
 	}
 	//: budget exhausted — relabel the last error as RetryExhausted.

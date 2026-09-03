@@ -2,6 +2,9 @@ package metrics
 
 import (
 	"bytes"
+	"fmt"
+	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -39,4 +42,55 @@ func Test_textExporter_ConcurrentExport(t *testing.T) {
 	if got != writers {
 		t.Errorf("got %d intact lines, want %d — writes interleaved or were lost", got, writers)
 	}
+}
+
+// Test_Text_DefaultsToStderr pins the destination of the exporter this package
+// registers at import time.
+//
+// Importing a package must not arm a writer on a stream the process may be
+// using as a protocol channel: a stdio JSON-RPC daemon, or any `cmd | jq`, is
+// corrupted by one Export("text", ...) if the default is stdout — and the
+// import that armed it is invisible at the call site. ADR 0030.
+func Test_Text_DefaultsToStderr(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		got  io.Writer
+		want io.Writer
+	}
+	//: reach through the interface to the concrete exporter's bound writer.
+	te, ok := Text.(*textExporter)
+	//: the registered default must be this package's own implementation.
+	if !ok {
+		t.Fatalf("Text is %T, want *textExporter", Text)
+	}
+	tests := []tc{
+		{"registered default writes to stderr", te.dst, os.Stderr},
+		{"custom exporter honours its writer", newTextExporter("custom", os.Stdout).dst, os.Stdout},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: pointer identity — the exporter holds the stream, not a copy.
+			if tc.got != tc.want {
+				t.Errorf("dst = %s, want %s", streamName(tc.got), streamName(tc.want))
+			}
+		})
+	}
+}
+
+// streamName renders a standard stream by name so a failure reads as
+// "dst = os.Stdout, want os.Stderr" instead of two pointer addresses.
+func streamName(w io.Writer) string {
+	//: the two streams this package can legitimately be bound to.
+	switch w {
+	case os.Stderr:
+		//: the safe default.
+		return "os.Stderr"
+	case os.Stdout:
+		//: the protocol channel — never a default.
+		return "os.Stdout"
+	}
+	//: anything else is a caller-supplied writer.
+	return fmt.Sprintf("%T", w)
 }

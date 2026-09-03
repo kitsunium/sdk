@@ -79,8 +79,8 @@ func Test_pickStream(t *testing.T) {
 		stream writer.ConsoleStream
 	}
 	tests := []tc{
-		{"stdout (zero value)", writer.ConsoleStdout},
-		{"stderr", writer.ConsoleStderr},
+		{"stderr (zero value)", writer.ConsoleStderr},
+		{"stdout", writer.ConsoleStdout},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -136,11 +136,11 @@ func Test_consoleFactory_Decode(t *testing.T) {
 		wantLevel  level.Level
 	}
 	tests := []tc{
-		{"empty map yields stdout/info", map[string]any{}, false, writer.ConsoleStdout, level.Info},
+		{"empty map yields stderr/info", map[string]any{}, false, writer.ConsoleStderr, level.Info},
 		{"target stdout explicit", map[string]any{"target": "stdout"}, false, writer.ConsoleStdout, level.Info},
 		{"target stderr", map[string]any{"target": "stderr"}, false, writer.ConsoleStderr, level.Info},
-		{"empty target string defaults stdout", map[string]any{"target": ""}, false, writer.ConsoleStdout, level.Info},
-		{"min_level warn", map[string]any{"min_level": "warn"}, false, writer.ConsoleStdout, level.Warn},
+		{"empty target string defaults stderr", map[string]any{"target": ""}, false, writer.ConsoleStderr, level.Info},
+		{"min_level warn", map[string]any{"min_level": "warn"}, false, writer.ConsoleStderr, level.Warn},
 		{"both keys", map[string]any{"target": "stderr", "min_level": "error"}, false, writer.ConsoleStderr, level.Error},
 		{"unknown target rejected", map[string]any{"target": "syslog"}, true, 0, 0},
 		{"non-string target rejected", map[string]any{"target": 7}, true, 0, 0},
@@ -190,16 +190,16 @@ func Test_decodeStream(t *testing.T) {
 		want    writer.ConsoleStream
 	}
 	tests := []tc{
-		{"absent key keeps stdout", map[string]any{}, false, writer.ConsoleStdout},
+		{"absent key keeps stderr", map[string]any{}, false, writer.ConsoleStderr},
 		{"stdout name", map[string]any{"target": "stdout"}, false, writer.ConsoleStdout},
 		{"stderr name", map[string]any{"target": "stderr"}, false, writer.ConsoleStderr},
-		{"empty name defaults stdout", map[string]any{"target": ""}, false, writer.ConsoleStdout},
+		{"empty name defaults stderr", map[string]any{"target": ""}, false, writer.ConsoleStderr},
 		{"unknown name rejected", map[string]any{"target": "udp"}, true, 0},
 		{"non-string rejected", map[string]any{"target": 1}, true, 0},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		//: dst starts at the zero value (stdout) like the real Decode path.
+		//: dst starts at the zero value (stderr) like the real Decode path.
 		var dst writer.ConsoleStream
 		err := decodeStream(c.raw, &dst)
 		//: failure arm — non-nil error, dst untouched is irrelevant.

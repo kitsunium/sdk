@@ -4,7 +4,10 @@
 // natural twin of the logger. A [Collector] (from [NewMeter]) mints lock-free
 // [Counter]/[Gauge]/[Histogram] instruments by name; [Collector.Collect] takes a
 // [Snapshot] that an [Exporter] ships out. The stdlib text exporter
-// (name "text", stdout) is registered on import; [Export] dispatches by name.
+// (name "text", stderr) is registered on import; [Export] dispatches by name.
+// It writes to stderr so that importing this package never arms a writer on
+// stdout, which a process may be using as a protocol channel (ADR 0030); pass
+// os.Stdout to [NewTextExporter] to opt in explicitly.
 //
 //	m := metrics.NewMeter()
 //	m.Counter("requests").Add(1)

@@ -37,11 +37,25 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 | `0026-sdk-resilience-domain.md` | Reliability domain (`resilience`): 8th core sibling, **no registry** (concrete `Runner` policies: retry/breaker/ratelimit/bulkhead/timeout); composable; block `0.2.8.*` | Accepted (Phase B; proc-style no-registry sibling) |
 | `0027-sdk-metrics-domain.md` | Observability domain (`metrics`): 9th core sibling, instruments + `Meter` + exporter registry (writer-registry model); in-mem meter + text exporter; block `0.2.9.*`; labels/Prometheus/OTLP deferred | Accepted (Phase B) |
 | `0028-sdk-config-domain.md` | Configuration domain (`config`): 10th core sibling, `Source`/`Validator`/`Watcher` ports; env+file loader + cross-OS **poll** watcher; closes the Phase-B wave; block `0.2.10.*` | Accepted (Phase B; closes the wave) |
+| `0030-stdout-is-a-protocol-channel.md` | No SDK default writes to `os.Stdout`: the registered `text` metrics exporter targets stderr, `ConsoleStderr` becomes the `ConsoleStream` zero value (and the absent/empty `target` maps to it); stdout stays reachable by naming it | Accepted (amends 0027 §Decision 2 / 0015 §D3) |
+| `0031-policy-zero-values-are-never-inert.md` | A policy constructor never returns an inert policy: **clamp** where a working default needs no explanation (`BreakerConfig.OpenDuration` → 30s), **refuse** where any SDK-chosen value would be arbitrary (`RateLimiterConfig.Rate`, `NewTimeout`) via the new `PolicyMisconfigured` sentinel `0.2.8.6` | Accepted (amends 0026 §Decision 2) |
 
 ## Conventions
 
 - File name: `NNNN-<short-slug>.md` where `NNNN` is the next zero-padded number.
-- Every ADR has at minimum: **Status**, **Context**, **Decision**, **Consequences**, **Alternatives considered**. Add **Why not <option>** for non-obvious rejects.
+- **Two branches writing ADRs at once: claim distinct numbers, then merge in
+  numeric order.** The number is claimed when the file is committed on a branch,
+  not when the branch merges, so a second branch reads the first one's claim and
+  takes the number after it. Merging low-to-high keeps `main` contiguous at every
+  point in time, which is what the check below verifies. Merging high-first
+  leaves `main` with a real gap until the other branch lands — legal in the end,
+  but the check fails in between, so do not do it. **Renumbering to close that
+  window is the one wrong answer**: the branch that already holds the lower
+  number would then collide with it, and a number is cited from ADR headers,
+  package docs and source comments long before it merges.
+- Header block: **Status**, **Date**, **Deciders**, plus **Supersedes** / **Superseded by** / **Amends** / **Related** where they apply.
+- Standard sections, in this order: **Context**, **Decision**, **Consequences / Semantics**, **Breaking changes**, **Alternatives considered** and/or **Why not <option>**, **Deferred**, **References**. This is the same list as `docs/CLAUDE.md` §ADR conventions — keep the two in step; when they disagree, the two are both wrong until they agree.
+- A standard section with nothing to say says so rather than being dropped — `Breaking changes` → "None. `<domain>` is a new domain in this change set" is the house form (ADR 0026/0027/0028). A missing heading reads as an oversight; an explicit "None" reads as a decision.
 - Mermaid / ASCII diagrams welcome where they reduce reading time.
 - Cross-link with relative paths: `../adr/0005-…md` so links survive a move.
 - Use `1.2.0.3` style for codes in prose, never the hex literal.
@@ -57,4 +71,17 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 ```
 ls docs/adr/ | grep -E '^[0-9]{4}-' | sort
 # every ADR must follow the NNNN-slug.md pattern; no gaps in the numeric sequence.
+
+# On a branch, a gap is expected when a lower number is claimed on another
+# branch — check before blaming the sequence, and merge low-to-high.
+# The fetch is not optional: git ls-remote reads the remote without updating
+# origin/*, so without it git ls-tree silently sees nothing for a branch this
+# clone has never fetched, and the check reports "no one holds it".
+git fetch --prune origin
+git for-each-ref --format='%(refname)' refs/remotes/origin \
+  | grep -v '^refs/remotes/origin/HEAD$' \
+  | while read -r ref; do
+      git ls-tree --name-only "$ref" docs/adr/ \
+        | grep -oE '[0-9]{4}' | sed "s#^#${ref#refs/remotes/origin/} #"
+    done | sort -u -k2
 ```

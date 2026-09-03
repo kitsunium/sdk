@@ -13,7 +13,8 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// textExporterName is the registered name of the default stdout text exporter.
+// textExporterName is the registered name of the default text exporter, which
+// writes to stderr (ADR 0030).
 const textExporterName coremetrics.ExporterName = "text"
 
 // decimalBase / floatBitSize are the strconv formatting parameters.
@@ -22,9 +23,18 @@ const (
 	floatBitSize int = 64
 )
 
-// Text is the default text exporter, registered to write snapshots to stdout.
+// Text is the default text exporter, registered to write snapshots to stderr.
 // Use NewTextExporter for a custom writer/name (not added to the registry).
-var Text = coremetrics.RegisterExporter(newTextExporter(textExporterName, os.Stdout))
+//
+// The destination is stderr, not stdout, because importing a package must never
+// arm a writer on a stream the process may be using as a protocol channel. A
+// daemon that speaks JSON-RPC on stdout (an MCP server in stdio mode), a filter
+// that pipes structured output downstream, any `cmd | jq` — each of them is
+// corrupted by a single Export("text", ...) if the default writer is stdout,
+// and the import that armed it is invisible at the call site. Diagnostics
+// belong on stderr; a caller who genuinely wants stdout asks for it by name
+// with NewTextExporter(name, os.Stdout). ADR 0030.
+var Text = coremetrics.RegisterExporter(newTextExporter(textExporterName, os.Stderr))
 
 // textExporter renders a Snapshot as newline-delimited "kind name value" lines.
 //

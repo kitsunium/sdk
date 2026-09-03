@@ -13,6 +13,29 @@
 //
 // Rejections surface typed sentinels (RetryExhausted / CircuitOpen / RateLimited
 // / BulkheadFull / TimeoutExceeded) matchable via errs.HasReason / errs.HasCode.
+//
+// # Classifying deterministic failures
+//
+// Retry and the circuit-breaker act on transient failures. A deterministic one —
+// a policy refusal, an HTTP 400, invalid input — gains nothing from a replay and
+// says nothing about a dependency's health, yet by default both policies treat
+// every non-nil error as transient: the retry spends its whole budget on it and
+// hides it behind RetryExhausted, and the breaker counts it towards tripping.
+// Set the Retryable predicate on either config to tell the two apart. It takes
+// the same shape in both, so a nested Retry(Breaker(op)) shares one classifier.
+// The sentinel is the caller's own — this package exports none to classify
+// against, because only the caller knows which of their failures are
+// deterministic:
+//
+//	var ErrBadRequest = errors.New("bad request") // declared by the caller
+//
+//	transient := func(err error) bool { return !errors.Is(err, ErrBadRequest) }
+//	r := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3, Retryable: transient})
+//	b := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, Retryable: transient})
+//
+// A rejected error comes back verbatim: the retry stops at that attempt without
+// backoff and without the RetryExhausted relabel, and the breaker leaves its
+// state machine untouched. A nil predicate keeps the historical behaviour.
 package resilience
 
 import (
@@ -48,21 +71,31 @@ var (
 	BulkheadFull = coreres.BulkheadFull
 	// TimeoutExceeded is returned when an operation outruns its deadline.
 	TimeoutExceeded = coreres.TimeoutExceeded
+	// PolicyMisconfigured is returned by every call to a policy that was built
+	// with a configuration it cannot honour — a non-positive RateLimiterConfig
+	// .Rate, a non-positive NewTimeout duration. The operation is not run.
+	// Unlike the sentinels above it is permanent, not transient: the fix is at
+	// the construction site, never a retry (ADR 0031).
+	PolicyMisconfigured = coreres.PolicyMisconfigured
 )
 
-// NewRetry returns a retry-with-backoff Runner.
+// NewRetry returns a retry-with-backoff Runner. An error rejected by
+// cfg.Retryable ends the loop at once and is returned verbatim.
 func NewRetry(cfg RetryConfig) Runner {
 	//: delegate to the service constructor.
 	return svcres.NewRetry(cfg)
 }
 
-// NewCircuitBreaker returns a circuit-breaker Runner.
+// NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by
+// cfg.Retryable is returned verbatim and left out of the state machine.
 func NewCircuitBreaker(cfg BreakerConfig) Runner {
 	//: delegate to the service constructor.
 	return svcres.NewCircuitBreaker(cfg)
 }
 
-// NewRateLimiter returns a token-bucket rate-limiter Runner.
+// NewRateLimiter returns a token-bucket rate-limiter Runner. A non-positive
+// cfg.Rate is refused: every call returns PolicyMisconfigured without running
+// the operation, because any rate chosen for the caller would be a guess.
 func NewRateLimiter(cfg RateLimiterConfig) Runner {
 	//: delegate to the service constructor.
 	return svcres.NewRateLimiter(cfg)
@@ -74,7 +107,9 @@ func NewBulkhead(maxConcurrent int) Runner {
 	return svcres.NewBulkhead(maxConcurrent)
 }
 
-// NewTimeout returns a deadline-enforcing Runner.
+// NewTimeout returns a deadline-enforcing Runner. A non-positive d is refused:
+// every call returns PolicyMisconfigured without running the operation, since
+// any deadline chosen for the caller would be a guess (ADR 0031).
 func NewTimeout(d time.Duration) Runner {
 	//: delegate to the service constructor.
 	return svcres.NewTimeout(d)

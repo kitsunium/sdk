@@ -7,17 +7,20 @@ import "github.com/kitsunium/sdk/internal/core/logger/level"
 type ConsoleStream uint8
 
 const (
-	// ConsoleStdout writes to os.Stdout. It is the zero value, so a
-	// ConsoleConfig{} targets stdout by default.
-	ConsoleStdout ConsoleStream = iota
-	// ConsoleStderr writes to os.Stderr.
-	ConsoleStderr
+	// ConsoleStderr writes to os.Stderr. It is the zero value, so a
+	// ConsoleConfig{} targets stderr by default: a caller who has not named a
+	// stream has not made a choice, and stdout may be the process's protocol
+	// channel (ADR 0030). The order of this block is load-bearing — the zero
+	// value is the contract, not the name that happens to come first.
+	ConsoleStderr ConsoleStream = iota
+	// ConsoleStdout writes to os.Stdout. Reachable only by naming it.
+	ConsoleStdout
 )
 
 // ConsoleConfig configures the "console" writer. The zero value is valid and
-// targets os.Stdout at the handler-global level.
+// targets os.Stderr at the handler-global level.
 type ConsoleConfig struct {
-	// Stream selects stdout (default) or stderr.
+	// Stream selects stderr (default) or stdout.
 	Stream ConsoleStream
 	// MinLevel is the optional per-writer severity floor; the zero value
 	// inherits the handler-global level.

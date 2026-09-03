@@ -286,6 +286,10 @@ codes:
     const: CodeTimeoutExceeded
     hex: "0x00_02_08_05"
     package: internal/core/resilience
+  - code: "0.2.8.6"
+    const: CodePolicyMisconfigured
+    hex: "0x00_02_08_06"
+    package: internal/core/resilience
   - code: "0.2.9.1"
     const: CodeUnknownExporter
     hex: "0x00_02_09_01"

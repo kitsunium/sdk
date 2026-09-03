@@ -77,7 +77,11 @@ Two contracts were tightened during review, both before any release:
 
 ## Deferred
 
-- Retry jitter + a retryable-error classifier.
+- Retry jitter. (The retryable-error classifier that shipped alongside it in
+  this list has since landed as `RetryConfig.Retryable` / `BreakerConfig.Retryable`
+  — a `func(error) bool` whose `nil` value preserves the behaviour decided above.
+  The Decision section is unchanged: the classifier is an opt-in parameter on the
+  two existing policies, not a new policy.)
 - Wait-mode (blocking) bulkhead/rate-limiter (v1 is reject-mode).
 - Half-open concurrency control (v1 admits HalfOpen trials without a probe cap).
 

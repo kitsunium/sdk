@@ -68,13 +68,25 @@ so typed fields populate from the environment.
 None. `config` is a new domain in this change set — there is no prior published
 surface to break.
 
-Three contracts were tightened during review, all before any release:
+Four contracts were tightened during review, all before any release:
 
 - **Env numeric coercion keeps integers integral.** The package promised that
   `"8080"` becomes an integer, but decoding into a bare `any` makes
   `encoding/json` widen every numeric token to `float64` — losing integrality
   and, past 2^53, exactness. Decoding now uses `UseNumber` and converts
   integral tokens to `int64`.
+- **Env coercion applies only to a value that is one whole JSON document.** The
+  decoder returned the FIRST JSON token and reported nothing about what
+  trailed it, so every value that merely *began* like one was silently
+  truncated to that prefix: `0A0A01` arrived as `0`, `10.45.0.0/16` as `10.45`,
+  `1500ms` as `1500`, `2026-09-03` as `2026`. The result was not a parse
+  failure an operator could see, it was a plausible value of the wrong type —
+  the worst shape a configuration defect can take. Coercion is now gated on the
+  whole raw value being valid JSON: `8080` is still `int64`, `true` still
+  `bool`, `[1,2]` still a slice, and anything else keeps the exact string it
+  was. This one changed behaviour observable through `pkg/v1` for unchanged
+  caller code, so unlike its three siblings here it carries a
+  `Release-bump: minor` trailer under ADR 0007 §Bump semantics.
 - **`Watch` validates its inputs.** A non-positive interval panicked inside
   `time.NewTicker`, and a nil `onChange` panicked on the first detected change.
   Both now return `CONFIG_WATCH_FAILED`.

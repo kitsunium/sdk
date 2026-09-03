@@ -24,3 +24,7 @@ const CodeBulkheadFull errs.Code = 0x00_02_08_04 // 0.2.8.4
 // CodeTimeoutExceeded identifies an operation that did not complete within the
 // timeout policy's deadline.
 const CodeTimeoutExceeded errs.Code = 0x00_02_08_05 // 0.2.8.5
+
+// CodePolicyMisconfigured identifies a policy built with a configuration it
+// cannot honour, whose every call is refused without running the operation.
+const CodePolicyMisconfigured errs.Code = 0x00_02_08_06 // 0.2.8.6

@@ -67,7 +67,7 @@ type Source = coreconfig.Source
 ```
 
 <a name="EnvSource"></a>
-### func [EnvSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L56>)
+### func [EnvSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L67>)
 
 ```go
 func EnvSource(prefix string) Source
@@ -75,8 +75,12 @@ func EnvSource(prefix string) Source
 
 EnvSource returns a Source reading "PREFIX\_KEY" env vars \(empty prefix = all\).
 
+The key a field must match is the variable name with the prefix removed and lower\-cased, underscores kept: under EnvSource\("APP"\), the variable APP\_SDM\_SERVER\_NAME feeds a field tagged \`json:"sdm\_server\_name"\`. The separating underscore belongs to the Source, and a trailing one on prefix is absorbed, so EnvSource\("APP"\) and EnvSource\("APP\_"\) name the same namespace.
+
+A value is coerced to a typed Go value only when the WHOLE value is one complete JSON document — "8080" becomes an int64, "true" a bool. Anything else keeps its exact string, so identifiers that merely start like numbers \("0A0A01", "1500ms", "10.45.0.0/16", "2026\-09\-03"\) arrive intact.
+
 <a name="FileSource"></a>
-### func [FileSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L63>)
+### func [FileSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L74>)
 
 ```go
 func FileSource(format, path string) Source
@@ -103,7 +107,7 @@ type Watcher = coreconfig.Watcher
 ```
 
 <a name="PollWatcher"></a>
-### func [PollWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L69>)
+### func [PollWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L80>)
 
 ```go
 func PollWatcher(path string, interval time.Duration) Watcher

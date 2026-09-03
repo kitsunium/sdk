@@ -1,6 +1,6 @@
 # ADR 0027 — Observability domain (`metrics`)
 
-- **Status**: Accepted
+- **Status**: Accepted. **Exporter destination amended by ADR 0030** — the registered `text` exporter writes to stderr, not stdout.
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0024 (Phase-B wave), ADR 0012 (writer registry — the exporter-registry model), ADR 0011 (snapshot), ADR 0005/0006 (codes)

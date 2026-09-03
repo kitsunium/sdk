@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/pkg/v1/metrics"
 ```
 
-Package metrics is the public facade for the SDK's observability domain — the natural twin of the logger. A \[Collector\] \(from [NewMeter](<#NewMeter>)\) mints lock\-free [Counter](<#Counter>)/[Gauge](<#Gauge>)/[Histogram](<#Histogram>) instruments by name; \[Collector.Collect\] takes a [Snapshot](<#Snapshot>) that an [Exporter](<#Exporter>) ships out. The stdlib text exporter \(name "text", stdout\) is registered on import; [Export](<#Export>) dispatches by name.
+Package metrics is the public facade for the SDK's observability domain — the natural twin of the logger. A \[Collector\] \(from [NewMeter](<#NewMeter>)\) mints lock\-free [Counter](<#Counter>)/[Gauge](<#Gauge>)/[Histogram](<#Histogram>) instruments by name; \[Collector.Collect\] takes a [Snapshot](<#Snapshot>) that an [Exporter](<#Exporter>) ships out. The stdlib text exporter \(name "text", stderr\) is registered on import; [Export](<#Export>) dispatches by name. It writes to stderr so that importing this package never arms a writer on stdout, which a process may be using as a protocol channel \(ADR 0030\); pass os.Stdout to [NewTextExporter](<#NewTextExporter>) to opt in explicitly.
 
 ```
 m := metrics.NewMeter()
@@ -50,7 +50,7 @@ var (
 ```
 
 <a name="Export"></a>
-## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L77>)
+## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L80>)
 
 ```go
 func Export(name ExporterName, snap Snapshot) error
@@ -59,7 +59,7 @@ func Export(name ExporterName, snap Snapshot) error
 Export ships snap through the exporter registered as name.
 
 <a name="Counter"></a>
-## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L28>)
+## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L31>)
 
 Counter is the public alias for a monotonic cumulative instrument.
 
@@ -68,7 +68,7 @@ type Counter = coremetrics.Counter
 ```
 
 <a name="Exporter"></a>
-## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L43>)
+## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L46>)
 
 Exporter is the public alias for a snapshot shipper.
 
@@ -77,7 +77,7 @@ type Exporter = coremetrics.Exporter
 ```
 
 <a name="NewTextExporter"></a>
-### func [NewTextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L65>)
+### func [NewTextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L68>)
 
 ```go
 func NewTextExporter(name ExporterName, dst io.Writer) Exporter
@@ -86,7 +86,7 @@ func NewTextExporter(name ExporterName, dst io.Writer) Exporter
 NewTextExporter returns a text Exporter writing to dst under name \(not auto\-registered\).
 
 <a name="RegisterExporter"></a>
-### func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L71>)
+### func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L74>)
 
 ```go
 func RegisterExporter(e Exporter) Exporter
@@ -95,7 +95,7 @@ func RegisterExporter(e Exporter) Exporter
 RegisterExporter adds e to the process\-wide exporter registry.
 
 <a name="ExporterName"></a>
-## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L46>)
+## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L49>)
 
 ExporterName is the public alias for an exporter's registry key.
 
@@ -104,7 +104,7 @@ type ExporterName = coremetrics.ExporterName
 ```
 
 <a name="AvailableExporters"></a>
-### func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L83>)
+### func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L86>)
 
 ```go
 func AvailableExporters() []ExporterName
@@ -113,7 +113,7 @@ func AvailableExporters() []ExporterName
 AvailableExporters returns the sorted list of registered exporter names.
 
 <a name="Gauge"></a>
-## type [Gauge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L31>)
+## type [Gauge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L34>)
 
 Gauge is the public alias for an instantaneous up/down instrument.
 
@@ -122,7 +122,7 @@ type Gauge = coremetrics.Gauge
 ```
 
 <a name="Histogram"></a>
-## type [Histogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L34>)
+## type [Histogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L37>)
 
 Histogram is the public alias for a bucketed distribution instrument.
 
@@ -131,7 +131,7 @@ type Histogram = coremetrics.Histogram
 ```
 
 <a name="HistogramValue"></a>
-## type [HistogramValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L40>)
+## type [HistogramValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L43>)
 
 HistogramValue is the public alias for a per\-histogram snapshot value.
 
@@ -140,7 +140,7 @@ type HistogramValue = coremetrics.HistogramValue
 ```
 
 <a name="Meter"></a>
-## type [Meter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L25>)
+## type [Meter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L28>)
 
 Meter is the public alias for the instrument factory.
 
@@ -149,7 +149,7 @@ type Meter = coremetrics.Meter
 ```
 
 <a name="NewMeter"></a>
-### func [NewMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L58>)
+### func [NewMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L61>)
 
 ```go
 func NewMeter() Meter
@@ -158,7 +158,7 @@ func NewMeter() Meter
 NewMeter returns a fresh in\-memory Meter \(Counter/Gauge/Histogram \+ Collect\).
 
 <a name="Snapshot"></a>
-## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L37>)
+## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L40>)
 
 Snapshot is the public alias for a whole\-meter point\-in\-time copy.
 

@@ -18,6 +18,20 @@ err := r.Run(ctx, func(ctx context.Context) error {
 
 Rejections surface typed sentinels \(RetryExhausted / CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded\) matchable via errs.HasReason / errs.HasCode.
 
+### Classifying deterministic failures
+
+Retry and the circuit\-breaker act on transient failures. A deterministic one — a policy refusal, an HTTP 400, invalid input — gains nothing from a replay and says nothing about a dependency's health, yet by default both policies treat every non\-nil error as transient: the retry spends its whole budget on it and hides it behind RetryExhausted, and the breaker counts it towards tripping. Set the Retryable predicate on either config to tell the two apart. It takes the same shape in both, so a nested Retry\(Breaker\(op\)\) shares one classifier. The sentinel is the caller's own — this package exports none to classify against, because only the caller knows which of their failures are deterministic:
+
+```
+var ErrBadRequest = errors.New("bad request") // declared by the caller
+
+transient := func(err error) bool { return !errors.Is(err, ErrBadRequest) }
+r := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3, Retryable: transient})
+b := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, Retryable: transient})
+```
+
+A rejected error comes back verbatim: the retry stops at that attempt without backoff and without the RetryExhausted relabel, and the breaker leaves its state machine untouched. A nil predicate keeps the historical behaviour.
+
 ## Index
 
 - [Variables](<#variables>)
@@ -49,11 +63,17 @@ var (
     BulkheadFull = coreres.BulkheadFull
     // TimeoutExceeded is returned when an operation outruns its deadline.
     TimeoutExceeded = coreres.TimeoutExceeded
+    // PolicyMisconfigured is returned by every call to a policy that was built
+    // with a configuration it cannot honour — a non-positive RateLimiterConfig
+    // .Rate, a non-positive NewTimeout duration. The operation is not run.
+    // Unlike the sentinels above it is permanent, not transient: the fix is at
+    // the construction site, never a retry (ADR 0031).
+    PolicyMisconfigured = coreres.PolicyMisconfigured
 )
 ```
 
 <a name="BreakerConfig"></a>
-## type [BreakerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L35>)
+## type [BreakerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L58>)
 
 BreakerConfig is the public alias for the circuit\-breaker configuration.
 
@@ -62,7 +82,7 @@ type BreakerConfig = svcres.BreakerConfig
 ```
 
 <a name="Operation"></a>
-## type [Operation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L26>)
+## type [Operation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L49>)
 
 Operation is the public alias for the ctx\-aware unit of guarded work.
 
@@ -71,7 +91,7 @@ type Operation = coreres.Operation
 ```
 
 <a name="RateLimiterConfig"></a>
-## type [RateLimiterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L38>)
+## type [RateLimiterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L61>)
 
 RateLimiterConfig is the public alias for the rate\-limiter configuration.
 
@@ -80,7 +100,7 @@ type RateLimiterConfig = svcres.RateLimiterConfig
 ```
 
 <a name="RetryConfig"></a>
-## type [RetryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L32>)
+## type [RetryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L55>)
 
 RetryConfig is the public alias for the retry policy configuration.
 
@@ -89,7 +109,7 @@ type RetryConfig = svcres.RetryConfig
 ```
 
 <a name="Runner"></a>
-## type [Runner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L29>)
+## type [Runner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L52>)
 
 Runner is the public alias for the composable policy\-executor contract.
 
@@ -98,7 +118,7 @@ type Runner = coreres.Runner
 ```
 
 <a name="NewBulkhead"></a>
-### func [NewBulkhead](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L72>)
+### func [NewBulkhead](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L105>)
 
 ```go
 func NewBulkhead(maxConcurrent int) Runner
@@ -107,39 +127,39 @@ func NewBulkhead(maxConcurrent int) Runner
 NewBulkhead returns a bounded\-concurrency Runner \(reject mode\).
 
 <a name="NewCircuitBreaker"></a>
-### func [NewCircuitBreaker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L60>)
+### func [NewCircuitBreaker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L91>)
 
 ```go
 func NewCircuitBreaker(cfg BreakerConfig) Runner
 ```
 
-NewCircuitBreaker returns a circuit\-breaker Runner.
+NewCircuitBreaker returns a circuit\-breaker Runner. An error rejected by cfg.Retryable is returned verbatim and left out of the state machine.
 
 <a name="NewRateLimiter"></a>
-### func [NewRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L66>)
+### func [NewRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L99>)
 
 ```go
 func NewRateLimiter(cfg RateLimiterConfig) Runner
 ```
 
-NewRateLimiter returns a token\-bucket rate\-limiter Runner.
+NewRateLimiter returns a token\-bucket rate\-limiter Runner. A non\-positive cfg.Rate is refused: every call returns PolicyMisconfigured without running the operation, because any rate chosen for the caller would be a guess.
 
 <a name="NewRetry"></a>
-### func [NewRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L54>)
+### func [NewRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L84>)
 
 ```go
 func NewRetry(cfg RetryConfig) Runner
 ```
 
-NewRetry returns a retry\-with\-backoff Runner.
+NewRetry returns a retry\-with\-backoff Runner. An error rejected by cfg.Retryable ends the loop at once and is returned verbatim.
 
 <a name="NewTimeout"></a>
-### func [NewTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L78>)
+### func [NewTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L113>)
 
 ```go
 func NewTimeout(d time.Duration) Runner
 ```
 
-NewTimeout returns a deadline\-enforcing Runner.
+NewTimeout returns a deadline\-enforcing Runner. A non\-positive d is refused: every call returns PolicyMisconfigured without running the operation, since any deadline chosen for the caller would be a guess \(ADR 0031\).
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

@@ -17,7 +17,7 @@ Code range: `0.2.8.*` (ADR 0026).
 |---|---|
 | `resilience.go` | `Operation func(ctx) error` + `Runner interface { Run(ctx, op) error }` |
 | `codes.go` | `Code*` constants — range 0.2.8.* |
-| `errors.go` | `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` (`errs.Define`) |
+| `errors.go` | `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `PolicyMisconfigured` (`errs.Define`) |
 
 ## Conventions
 
@@ -26,6 +26,11 @@ Code range: `0.2.8.*` (ADR 0026).
 - **`Runner` composes** — a Runner's `Operation` may invoke an inner Runner.
 - **`Operation` MUST honour ctx** — timeout/cancellation propagate through it.
 - Sentinels carry `EX_TEMPFAIL` (75) — rejections are transient unavailability.
+  **The one exception is `PolicyMisconfigured` (`0.2.8.6`), which carries
+  `EX_CONFIG` (78)**: a policy built with a configuration it cannot honour is
+  permanently broken, so retrying it is pointless (ADR 0031). Code that treats
+  resilience errors as a retryable class must exclude it — that is what the
+  distinct exit code is for.
 
 ## Do NOT
 

@@ -1,6 +1,6 @@
 # ADR 0015 — Writer taxonomy, depTier as a first-class writer property, default rotation policy, and a dep-light DB/transport gate
 
-- **Status**: Accepted
+- **Status**: Accepted. **Console default stream amended by ADR 0030** — the `ConsoleStream` zero value is `ConsoleStderr`, so `ConsoleConfig{}` targets stderr.
 - **Date**: 2026-06-02
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0001 (multi-module layout), ADR 0005 (dotted-quad codes), ADR 0006 (registry extension), ADR 0012 (writer registry — the pattern this ADR taxonomises), ADR 0013 (crypto domain — the `third-party/*` quarantine precedent), ADR 0014 (the verb wave — `rotfile`, `transform`, `logger.FromConfig` + the `Decoder` config hook this ADR builds the YAML topology on)
