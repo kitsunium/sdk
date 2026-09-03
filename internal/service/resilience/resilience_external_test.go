@@ -216,7 +216,10 @@ func TestRetryRetryablePredicate(t *testing.T) {
 			return
 		}
 		//: a rejected error surfaces as itself, never behind RETRY_EXHAUSTED.
-		if !errors.Is(err, tc.wantVerbatim) {
+		//: identity, not errors.Is: the contract is that the error comes back
+		//: untouched, and errors.Is is satisfied by a wrapped one — the single
+		//: outcome this assertion exists to rule out.
+		if err != tc.wantVerbatim { //nolint:errorlint // identity is the contract
 			t.Errorf("err=%v, want %v verbatim", err, tc.wantVerbatim)
 		}
 		if errs.HasCode(err, coreres.CodeRetryExhausted) {
@@ -309,7 +312,8 @@ func TestBreakerRetryablePredicate(t *testing.T) {
 				t.Fatalf("step %d: CIRCUIT_OPEN=%v, want %v (err=%v)", i, got, st.wantCode, err)
 			}
 			//: an admitted call propagates the operation's own outcome verbatim.
-			if !st.wantCode && !errors.Is(err, st.wantErr) {
+			//: identity for the same reason as above: verbatim means verbatim.
+			if !st.wantCode && err != st.wantErr { //nolint:errorlint // identity is the contract
 				t.Fatalf("step %d: err=%v, want %v verbatim", i, err, st.wantErr)
 			}
 		}

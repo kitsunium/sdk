@@ -39,8 +39,12 @@ the choice made by someone who has not yet learned the question exists.
    `NewTextExporter(name, os.Stdout)` remains available: stdout becomes
    opt-in, named at the call site, and never a consequence of an import.
 2. `ConsoleStderr` is the zero value of `corewriter.ConsoleStream`, so
-   `ConsoleConfig{}` targets stderr. `ConsoleStdout` keeps its name and its
-   behaviour; only its numeric value and its default-ness change.
+   `ConsoleConfig{}` targets stderr. `corewriter.ConsoleStdout` keeps its name
+   and its behaviour; only its numeric value and its default-ness change.
+   Naming stdout from a consumer is `logger.ConsoleConfig{Stream:
+   logger.StreamStdout}` — note `logger.ConsoleStdout` is a different thing,
+   a constructor returning a `Sink`, so the constant is the one to reach for
+   here.
 3. The `console` writer's `Decode` maps an **absent** `target` key and an
    explicitly empty `target: ""` to the same place as the zero value — stderr.
    A named `target: "stdout"` is honoured, because it is a choice.
