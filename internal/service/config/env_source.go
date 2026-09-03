@@ -48,8 +48,9 @@ func (s envSource) Load() (values map[string]any, err error) {
 		}
 		//: strip the prefix and lower-case the remaining key.
 		short := strings.ToLower(strings.TrimPrefix(key, match))
-		//: coerce: a JSON-parseable value ("8080", "true") adopts its typed form;
-		//: a bare word ("kitsune") stays a string. Map storage of the any is the
+		//: coerce: a value that is one whole JSON document ("8080", "true")
+		//: adopts its typed form; anything else ("kitsune", "0A0A01", "1500ms")
+		//: stays the exact string it was. Map storage of the any is the
 		//: linter-exempt sink for the dynamic value.
 		//: coerceEnvValue keeps integers integral — a plain json.Unmarshal into
 		//: an any yields float64 for EVERY numeric token, which silently breaks
@@ -71,7 +72,25 @@ func (s envSource) Load() (values map[string]any, err error) {
 // float64, so "8080" would become 8080.0 — losing integrality, and with it
 // exact values above 2^53. Integral tokens therefore become int64; only genuine
 // fractions fall through to float64.
+//
+// Coercion is gated on the value being ONE COMPLETE JSON document, because
+// json.Decoder.Decode stops at the end of the first token and reports no error
+// for whatever trails it. Without the gate every value that merely STARTS like
+// a number is silently truncated to that prefix: "0A0A01" becomes 0, "1500ms"
+// becomes 1500, "5gc.svc.cluster.local" becomes 5, "10.45.0.0/16" becomes
+// 10.45. The result is not a parse failure the caller can see — it is a
+// plausible-looking value of the wrong type, which either lands in the target
+// silently or fails the whole Load with a decode error naming nothing.
+// json.Valid spans the entire input, which is exactly the missing property; it
+// still tolerates surrounding whitespace, so " 8080 " keeps coercing as before.
 func coerceEnvInto(out map[string]any, key, val string) {
+	//: anything that is not one complete JSON document keeps its raw text.
+	if !json.Valid([]byte(val)) {
+		//: a partial or trailing-garbage value is a string, never a prefix of one.
+		out[key] = val
+		//: nothing to classify.
+		return
+	}
 	//: decode from the raw bytes with number widening disabled.
 	dec := json.NewDecoder(strings.NewReader(val))
 	dec.UseNumber()

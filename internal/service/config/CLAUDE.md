@@ -11,7 +11,7 @@ cross-OS. ADR 0028. Emits the core sentinels `0.2.10.*`.
 
 | File | Surface |
 |---|---|
-| `env_source.go` | `EnvSource(prefix)` — `PREFIX_KEY` env vars, JSON-coerced values |
+| `env_source.go` | `EnvSource(prefix)` — `PREFIX_KEY` env vars, whole-document-JSON-coerced values |
 | `file_source.go` | `FileSource(format, path)` — codec-dispatched file parse |
 | `merge.go` | `deepMerge` — recursive layer merge (later wins) |
 | `load.go` | `Load[T](target, sources...)` — merge + JSON round-trip decode + Validate |
@@ -20,7 +20,14 @@ cross-OS. ADR 0028. Emits the core sentinels `0.2.10.*`.
 
 ## Conventions
 
-- **Env values are JSON-coerced**: `"8080"`→int, `"true"`→bool, bare words stay strings.
+- **Env values are JSON-coerced ONLY when the whole value is one complete JSON
+  document**: `"8080"`→int64, `"true"`→bool, everything else stays the exact
+  string it was. The gate is `json.Valid` over the entire input, because
+  `json.Decoder.Decode` returns the first token and reports no error for the
+  trailing bytes — without it `0A0A01` becomes `0`, `1500ms` becomes `1500`,
+  `2026-09-03` becomes `2026`, `10.45.0.0/16` becomes `10.45`. Surrounding
+  whitespace is still tolerated (`" 8080 "`→int64), which is why the check spans
+  the raw value rather than a trimmed copy.
 - **Decode via JSON round-trip**: merged map → `json.Marshal` → `json.Unmarshal` into the
   typed target (reuses struct tags; no mapstructure dep).
 - **Cross-OS watch is poll-based** (`os.Stat` mtime+size) — no inotify/kqueue.

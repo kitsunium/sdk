@@ -150,6 +150,40 @@ func TestEnvCoercionKeepsIntegers(t *testing.T) {
 		{"genuine-fraction", "1.5", 1.5},
 		{"bool", "true", true},
 		{"bare-word-stays-string", "kitsune", "kitsune"},
+		//: every case below decodes as a NUMBER PREFIX unless coercion is gated
+		//: on the whole value being one complete JSON document. Each one was
+		//: silently truncated: json.Decoder.Decode returns the first token and
+		//: reports no error for the trailing bytes.
+		{"digit-led hostname keeps its text", "5gc.svc.cluster.local", "5gc.svc.cluster.local"},
+		{"duration suffix keeps its text", "1500ms", "1500ms"},
+		{"semver keeps its text", "1.2.3", "1.2.3"},
+		//: a 5G slice differentiator — hex-ish, digit-led, and business-critical.
+		{"hex-ish identifier keeps its text", "0A0A01", "0A0A01"},
+		{"trailing letters keep their text", "8080abc", "8080abc"},
+		{"CIDR keeps its text", "10.45.0.0/16", "10.45.0.0/16"},
+		{"hex literal keeps its text", "0x1F", "0x1F"},
+		//: a tracking area code — leading zeros are not JSON numbers at all.
+		{"leading-zero identifier keeps its text", "000001", "000001"},
+		{"leading-zero number keeps its text", "08", "08"},
+		{"date keeps its text", "2026-09-03", "2026-09-03"},
+		//: two tokens are not one document, separated by space or comma.
+		{"two tokens keep their text", "1 2", "1 2"},
+		{"comma-separated keeps its text", "1,2", "1,2"},
+		{"trailing dot keeps its text", "1.", "1."},
+		{"leading dot keeps its text", ".5", ".5"},
+		//: guards against over-correcting: these must STILL coerce. The three
+		//: whitespace rows are the ones that rule out trimming BOTH ends before
+		//: the comparison — a leading blank is consumed by the decoder, so
+		//: removing it from the denominator would turn " 8080" back into text.
+		{"leading whitespace still coerces", " 8080", int64(8080)},
+		{"trailing whitespace still coerces", "8080 ", int64(8080)},
+		{"tabs and newlines still coerce", "\t8080\n", int64(8080)},
+		//: guards against over-correcting: these must STILL coerce.
+		{"surrounding whitespace still coerces", " 8080 ", int64(8080)},
+		{"exponent still coerces", "1e9", 1e9},
+		{"dotted hostname stays a string as before", "sdm.halys.fr", "sdm.halys.fr"},
+		{"leading-plus stays a string as before", "+33", "+33"},
+		{"empty stays empty", "", ""},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -234,3 +268,79 @@ func TestMergeDoesNotAliasSourceMaps(t *testing.T) {
 type staticSource struct{ m map[string]any }
 
 func (s staticSource) Load() (map[string]any, error) { return s.m, nil }
+
+// sliceConf mirrors a real 5G-core config: identifiers that look numeric but are
+// text, and one genuinely numeric field.
+type sliceConf struct {
+	SD      string `json:"sd"`
+	Host    string `json:"host"`
+	Timeout string `json:"timeout"`
+	Retries int    `json:"retries"`
+}
+
+// TestEnvTruncationEndToEnd is the regression guard for the env-coercion
+// truncation, asserted where it actually hurts: the value that lands in the
+// caller's struct.
+//
+// The map-level test pins the coercion contract; this one pins the consequence.
+// A truncated value has two ways to reach the operator, and both were silent
+// about the cause: into a string field it aborted the WHOLE load with a decode
+// error naming no variable, and into a numeric field it simply arrived wrong —
+// SD=0A0A01 becoming 0, TIMEOUT=1500ms becoming 1500. The second is the worse
+// one, because the configuration looks accepted.
+func TestEnvTruncationEndToEnd(t *testing.T) {
+	t.Setenv("SLICE_SD", "0A0A01")
+	t.Setenv("SLICE_HOST", "5gc.svc.cluster.local")
+	t.Setenv("SLICE_TIMEOUT", "1500ms")
+	t.Setenv("SLICE_RETRIES", "3")
+	var got sliceConf
+	//: the whole load must succeed — a truncated string field used to abort it.
+	if err := cfg.Load(&got, cfg.EnvSource("SLICE")); err != nil {
+		t.Fatalf("Load: %v, want nil", err)
+	}
+	want := sliceConf{SD: "0A0A01", Host: "5gc.svc.cluster.local", Timeout: "1500ms", Retries: 3}
+	//: each field must carry exactly what the operator set, and the genuinely
+	//: numeric one must still coerce.
+	if got != want {
+		t.Errorf("Load = %+v, want %+v", got, want)
+	}
+}
+
+// TestEnvTruncationIntoNumericField pins the silent arm specifically: when the
+// target field is numeric, a truncated value does not fail the load at all — it
+// arrives as a plausible number the operator never wrote.
+func TestEnvTruncationIntoNumericField(t *testing.T) {
+	type numConf struct {
+		Timeout int `json:"timeout"`
+	}
+	type tc struct {
+		name    string
+		env     string
+		wantErr bool
+		want    int
+	}
+	tests := []tc{
+		//: the defect case — "1500ms" must NOT quietly become the integer 1500.
+		{"duration string is not a number", "1500ms", true, 0},
+		//: a real integer still decodes into the numeric field.
+		{"plain integer still decodes", "1500", false, 1500},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		t.Setenv("NUM_TIMEOUT", tc.env)
+		var got numConf
+		err := cfg.Load(&got, cfg.EnvSource("NUM"))
+		//: a non-numeric value must be REFUSED by the typed decode, not silently
+		//: truncated into the field.
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("Load err=%v, wantErr=%v", err, tc.wantErr)
+		}
+		//: a refused load must leave the field untouched.
+		if got.Timeout != tc.want {
+			t.Errorf("Timeout=%d, want %d", got.Timeout, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
+	}
+}
