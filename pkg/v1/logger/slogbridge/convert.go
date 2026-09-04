@@ -37,19 +37,40 @@ func toLevel(lv slog.Level) logger.Level {
 	return logger.Level(lv)
 }
 
-// qualify prefixes key with the active group chain.
-func qualify(prefix, key string) string {
-	//: no active group — the key stands alone.
+// qualifyGroup extends the group chain with a nested group's name.
+//
+// An empty name inlines the group's members, which slog specifies and which
+// this expresses by handing the prefix back untouched.
+func qualifyGroup(prefix, name string) string {
+	//: an empty name adds no level — the members belong to the parent chain.
+	if name == "" {
+		//: hand the chain back so the members qualify under it directly.
+		return prefix
+	}
+	//: no active chain — this group becomes the first level.
+	if prefix == "" {
+		//: return the bare name rather than allocating a joined copy.
+		return name
+	}
+	//: join the chain and the new level with the encoders' separator.
+	return prefix + groupSeparator + name
+}
+
+// qualifyKey prefixes a leaf attribute's key with the active group chain.
+//
+// An empty KEY is not an empty group: slog's own handlers emit "g.=v" for
+// String("", "v") bound under WithGroup("g"), keeping the separator so the
+// record still shows which group the value came from. Collapsing it to "g"
+// would make a bridged record differ from a native one on the one detail the
+// bridge exists to preserve.
+func qualifyKey(prefix, key string) string {
+	//: no active group — the key stands alone, empty or not.
 	if prefix == "" {
 		//: return the bare key rather than allocating a joined copy.
 		return key
 	}
-	//: an empty key under a group yields the group itself (slog inlines it).
-	if key == "" {
-		//: no separator to add — there is nothing on its right.
-		return prefix
-	}
-	//: join the chain and the key with the encoders' separator.
+	//: join the chain and the key; an empty key keeps the trailing separator,
+	//: matching what slog's TextHandler prints.
 	return prefix + groupSeparator + key
 }
 
@@ -75,7 +96,7 @@ func appendAttr(dst []logger.Attr, prefix string, a slog.Attr) []logger.Attr {
 		return dst
 	}
 	//: convert the leaf under its fully qualified key.
-	return append(dst, convert(qualify(prefix, a.Key), v))
+	return append(dst, convert(qualifyKey(prefix, a.Key), v))
 }
 
 // appendGroup flattens a group's members into dst under the group's name.
@@ -85,9 +106,9 @@ func appendGroup(dst []logger.Attr, prefix, name string, members []slog.Attr) []
 		//: nothing to flatten — leave dst untouched.
 		return dst
 	}
-	//: slog contract: an empty group name inlines its members, which qualify
-	//: expresses by returning the prefix unchanged for an empty key.
-	inner := qualify(prefix, name)
+	//: slog contract: an empty group name inlines its members, which
+	//: qualifyGroup expresses by returning the prefix unchanged.
+	inner := qualifyGroup(prefix, name)
 	//: walk the members; nested groups recurse through appendAttr.
 	for _, m := range members {
 		//: each member is converted under the extended chain.
@@ -133,7 +154,12 @@ func convert(key string, v slog.Value) logger.Attr {
 		return logger.Time(key, v.Time())
 	//: KindAny and KindLogValuer (already resolved above) land here.
 	default:
-		//: Any is the documented fallback; the encoders degrade it to "?".
-		return logger.Any(key, v.Any())
+		//: NOT logger.Any: both bundled encoders render KindAny as "?", so an
+		//: slog.Any("err", err) — the most common slog idiom after strings —
+		//: would reach the log with its value erased. slog.Value.String
+		//: formats any kind the way fmt.Sprint would, which is exactly what
+		//: slog's own handlers print, so the text survives. The payload's Go
+		//: type is lost; a "?" loses the type AND the value.
+		return logger.String(key, v.String())
 	}
 }

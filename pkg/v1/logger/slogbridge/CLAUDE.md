@@ -78,13 +78,34 @@ package needs them (ADR 0033). `slogbridge.New` itself carries a documented
   the bridge drops a zero `Attr`, inlines an empty group name, and drops an
   empty group. `LogValuer` payloads are resolved before conversion — an
   unresolved one would land in `Any` and print as an opaque payload.
-- **Kinds are preserved, not flattened to `Any`.** Routing everything through
-  `Any` would compile and log, but would cost the encoders their type-aware
-  rendering.
+- **Kinds are preserved — except `Any`, which is rendered as text.** Every
+  typed Kind maps to its SDK peer so the encoders keep their type-aware
+  rendering. `slog.KindAny` is the exception, and deliberately so: **both**
+  bundled encoders print `?` for `logger.Any`, so routing `slog.Any("err", err)`
+  — the commonest slog idiom after strings — through it would deliver the
+  record with its value erased. The bridge converts via `slog.Value.String`,
+  which formats any kind exactly as slog's own handlers do. The payload's Go
+  type is lost; a `?` loses the type *and* the value.
+- **An empty key is not an empty group.** slog prints `g.=v` for
+  `String("", "v")` bound under `WithGroup("g")`, keeping the separator so the
+  record still shows which group the value came from. `qualifyKey` reproduces
+  that, while `qualifyGroup` handles the genuinely different case of an empty
+  group *name*, which inlines its members.
 
-## Known limit
+## Known limits
 
-`slog.Record.Time` does NOT cross the bridge. `Logger.Log` takes no timestamp,
+Two things the SDK `Logger.Log` contract cannot carry, both documented rather
+than papered over — closing either means changing the port every handler
+implements, which an adapter has no business doing.
+
+**`slog.Record.PC` does not cross.** The bridge calls the ordinary `Log`, which
+captures a program counter at the bridge itself. A destination built with
+`logger.WithCaller` therefore reports `slogbridge/handler.go` as the source
+rather than the foreign library's actual logging call. If caller attribution
+matters for bridged records, do not enable `WithCaller` on the destination —
+a wrong source is worse than none.
+
+**`slog.Record.Time` does NOT cross the bridge.** `Logger.Log` takes no timestamp,
 so the SDK handler stamps the record from its own clock at emit time. For live
 logging the delta is sub-microsecond; for a **replayed** record (built now,
 handled later) the original instant is lost. Callers replaying records should

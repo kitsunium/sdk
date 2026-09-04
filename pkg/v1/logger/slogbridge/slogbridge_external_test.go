@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -185,7 +186,9 @@ func TestAttrKindsSurviveConversion(t *testing.T) {
 		{"bool", slog.Bool("k", true), logger.KindBool},
 		{"duration", slog.Duration("k", time.Second), logger.KindDuration},
 		{"time", slog.Time("k", time.Unix(0, 0)), logger.KindTime},
-		{"any falls back to Any", slog.Any("k", []int{1}), logger.KindAny},
+		// NOT KindAny: both encoders render that kind as "?", so the value
+		// would reach the log erased. See TestArbitraryValuesSurviveToOutput.
+		{"any is rendered as text", slog.Any("k", []int{1}), logger.KindString},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -299,6 +302,64 @@ func TestGroupsAreEndPositionalNotRetroactive(t *testing.T) {
 	}
 	if _, ok := got["g.after"]; !ok {
 		t.Errorf(`"g.after" missing; got %v`, sink.Records()[0].Attrs)
+	}
+}
+
+// The bridge's fidelity claim is about what reaches the LOG, not about which
+// Kind sits in memory. Asserting the kind alone hid a real defect: slog.Any
+// carries the most common error idiom, and routing it to logger.Any sent it
+// through encoders that print "?" — the value gone, the type gone with it.
+func TestArbitraryValuesSurviveToOutput(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		attr slog.Attr
+		want string
+	}
+	tests := []tc{
+		{"an error keeps its message", slog.Any("err", os.ErrNotExist), "file does not exist"},
+		{"a struct keeps its rendering", slog.Any("v", struct{ A int }{3}), "{3}"},
+		{"a slice keeps its elements", slog.Any("v", []int{1, 2}), "[1 2]"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var buf bytes.Buffer
+		lg, err := logger.NewText(logger.Config{Writer: &buf, MinLevel: logger.LevelInfo})
+		if err != nil {
+			t.Fatalf("NewText: %v", err)
+		}
+		sl, err := slogbridge.New(lg)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		sl.LogAttrs(context.Background(), slog.LevelInfo, "m", c.attr)
+		line := buf.String()
+		if strings.Contains(line, "=?") {
+			t.Errorf("value erased to \"?\": %q", line)
+		}
+		if !strings.Contains(line, c.want) {
+			t.Errorf("output %q does not contain %q", line, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// An empty KEY is not an empty group. slog's own handler prints "g.=v" for
+// String("", "v") bound under WithGroup("g"), keeping the separator so the
+// record still shows which group the value came from.
+func TestEmptyKeyUnderAGroupKeepsTheSeparator(t *testing.T) {
+	t.Parallel()
+	sl, sink := newRecorder(t, logger.LevelDebug)
+
+	sl.WithGroup("g").LogAttrs(context.Background(), slog.LevelInfo, "m", slog.String("", "v"))
+
+	if _, ok := attrsOf(t, sink.Records())["g."]; !ok {
+		t.Errorf(`key "g." missing; got %v`, sink.Records()[0].Attrs)
 	}
 }
 

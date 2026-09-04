@@ -306,33 +306,114 @@ func TestCheckVersionDegradesSilently(t *testing.T) {
 	}
 }
 
-// GOPROXY is read the way the go command reads it, including the settings that
-// mean "do not reach out".
-func TestResolveProxyHonoursGOPROXY(t *testing.T) {
+// GOPROXY is read the way the go command reads it, including the fallback
+// list — returning only the first entry made the documented fallback support a
+// fiction.
+func TestResolveProxiesHonoursGOPROXY(t *testing.T) {
 	type tc struct {
 		name    string
 		env     string
-		want    string
+		want    []string
 		enabled bool
 	}
 	tests := []tc{
-		{"unset falls back to the default", "", defaultProxy, true},
-		{"off disables the probe", "off", "", false},
-		{"direct alone disables it", "direct", "", false},
-		{"first URL of a fallback list wins", "https://a.example,direct", "https://a.example", true},
-		{"pipe-separated list", "https://b.example|https://c.example", "https://b.example", true},
-		{"trailing slash trimmed", "https://d.example/", "https://d.example", true},
-		{"off ahead of a URL still disables", "off,https://e.example", "", false},
+		{"unset falls back to the default", "", []string{defaultProxy}, true},
+		{"off disables the probe", "off", nil, false},
+		{"direct alone disables it", "direct", nil, false},
+		{
+			"a comma list keeps every URL in order",
+			"https://a.example,https://b.example,direct",
+			[]string{"https://a.example", "https://b.example"}, true,
+		},
+		{
+			"a pipe list keeps every URL in order",
+			"https://b.example|https://c.example",
+			[]string{"https://b.example", "https://c.example"}, true,
+		},
+		{"trailing slash trimmed", "https://d.example/", []string{"https://d.example"}, true},
+		{"off ahead of a URL still disables", "off,https://e.example", nil, false},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			// No t.Parallel: these mutate a process-wide environment variable.
 			t.Setenv("GOPROXY", c.env)
-			got, enabled := resolveProxy()
-			if enabled != c.enabled || got != c.want {
-				t.Errorf("resolveProxy() = %q/%v, want %q/%v", got, enabled, c.want, c.enabled)
+			got, enabled := resolveProxies()
+			if enabled != c.enabled || len(got) != len(c.want) {
+				t.Fatalf("resolveProxies() = %v/%v, want %v/%v", got, enabled, c.want, c.enabled)
+			}
+			for i := range c.want {
+				if got[i] != c.want[i] {
+					t.Errorf("proxy[%d] = %q, want %q", i, got[i], c.want[i])
+				}
 			}
 		})
+	}
+}
+
+// A dead primary proxy must fall through to the backup rather than silently
+// losing the freshness check.
+func TestProxyFallbackIsAttempted(t *testing.T) {
+	// No t.Parallel: t.Setenv mutates a process-wide variable.
+	good := proxyStub(t, "v0.1.24")
+	p := probe{client: good.client}
+	t.Setenv("GOPROXY", "http://127.0.0.1:9,"+good.proxy)
+
+	got, err := p.versions(sdkModule)
+	if err != nil {
+		t.Fatalf("versions: %v (fallback not attempted)", err)
+	}
+	if len(got) != 1 || got[0] != "v0.1.24" {
+		t.Errorf("versions = %v, want [v0.1.24]", got)
+	}
+}
+
+// A workspace root has no go.mod of its own, so the documented `sdkguard ./...`
+// form from there would scan every module and warn about none of them. The
+// OLDEST requirement wins: warning about the newest would let a stale module
+// hide behind an up-to-date sibling.
+func TestWorkspaceFreshnessUsesTheOldestModule(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	write("go.work", "go 1.24\n\nuse (\n\t./m1\n\t./m2\n)\n")
+	write("m1/go.mod", "module m1\n\nrequire "+sdkModule+" v0.1.20\n")
+	write("m2/go.mod", "module m2\n\nrequire "+sdkModule+" v0.1.9\n")
+
+	notice, stale := checkVersion(root, proxyStub(t, "v0.1.9", "v0.1.20", "v0.1.24"))
+	if !stale {
+		t.Fatal("workspace freshness silently skipped")
+	}
+	if !strings.Contains(notice, "v0.1.9") {
+		t.Errorf("notice names the wrong module; want the oldest (v0.1.9): %q", notice)
+	}
+}
+
+// A replace anywhere in the workspace means someone is working locally.
+func TestWorkspaceWithAReplaceStaysSilent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "m1"), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for rel, content := range map[string]string{
+		"go.work":   "go 1.24\n\nuse ./m1\n",
+		"m1/go.mod": "module m1\n\nrequire " + sdkModule + " v0.1.9\nreplace " + sdkModule + " => ../sdk/pkg\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	if _, stale := checkVersion(root, proxyStub(t, "v0.1.24")); stale {
+		t.Error("warned despite a workspace-local replace")
 	}
 }
 

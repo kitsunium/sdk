@@ -96,5 +96,5 @@ func (h handler) WithGroup(name string) slog.Handler {
 	}
 	//: extend the chain only; the Logger is shared untouched, so attrs already
 	//: bound on it keep the qualification they were given.
-	return handler{lg: h.lg, prefix: qualify(h.prefix, name)}
+	return handler{lg: h.lg, prefix: qualifyGroup(h.prefix, name)}
 }

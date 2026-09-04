@@ -51,15 +51,29 @@
 //
 // # Faithfulness and its one limit
 //
-// Attributes convert by Kind with no loss: String, Int64, Uint64, Float64,
-// Bool, Duration and Time map onto their SDK peers; anything else lands in
-// [logger.Any]. Groups flatten to dotted keys ("g1.g2.key"), matching what the
-// SDK text and JSON encoders already produce for nested attributes. slog's
-// elision rules are honoured — an empty Attr is dropped, an empty group name
-// inlines its members, and a group with no members is dropped.
+// Attributes convert by Kind: String, Int64, Uint64, Float64, Bool, Duration
+// and Time map onto their SDK peers, keeping the encoders' type-aware
+// rendering. slog.KindAny is the deliberate exception — both bundled encoders
+// print "?" for an Any payload, so an slog.Any("err", err) routed through it
+// would arrive with its value erased. The bridge converts such a value with
+// [log/slog.Value.String], which formats it exactly as slog's own handlers do:
+// the Go type is lost, where a "?" would lose the type and the value both.
+//
+// Groups flatten to dotted keys ("g1.g2.key"), matching what the SDK text and
+// JSON encoders already produce for nested attributes. slog's elision rules
+// are honoured — an empty Attr is dropped, an empty group NAME inlines its
+// members, and a group with no members is dropped. An empty KEY is a different
+// thing and keeps its separator ("g."), which is what slog itself prints.
 // [log/slog.LogValuer] values are resolved before conversion.
 //
-// The one thing that does NOT cross: slog.Record.Time. The SDK's Logger.Log
+// Two things do NOT cross, both because the SDK's Logger.Log contract carries
+// neither. slog.Record.PC is the first: the bridge calls the ordinary Log,
+// which captures a program counter at the bridge, so a destination built with
+// [logger.WithCaller] reports this package as the source rather than the
+// foreign library's own logging call. Do not enable WithCaller on a
+// bridged destination — a wrong source is worse than none.
+//
+// The second is slog.Record.Time. The SDK's Logger.Log
 // contract takes no timestamp, so the record is stamped by the SDK handler's
 // clock at emit time instead. For live logging the difference is sub-
 // microsecond; for a REPLAYED record (one built now and handled later) the

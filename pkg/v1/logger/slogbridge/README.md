@@ -46,9 +46,13 @@ A single consequence worth stating: the SDK Logger's threshold is now the ONLY t
 
 ### Faithfulness and its one limit
 
-Attributes convert by Kind with no loss: String, Int64, Uint64, Float64, Bool, Duration and Time map onto their SDK peers; anything else lands in \[logger.Any\]. Groups flatten to dotted keys \("g1.g2.key"\), matching what the SDK text and JSON encoders already produce for nested attributes. slog's elision rules are honoured — an empty Attr is dropped, an empty group name inlines its members, and a group with no members is dropped. [log/slog.LogValuer](<https://pkg.go.dev/log/slog/#LogValuer>) values are resolved before conversion.
+Attributes convert by Kind: String, Int64, Uint64, Float64, Bool, Duration and Time map onto their SDK peers, keeping the encoders' type\-aware rendering. slog.KindAny is the deliberate exception — both bundled encoders print "?" for an Any payload, so an slog.Any\("err", err\) routed through it would arrive with its value erased. The bridge converts such a value with [log/slog.Value.String](<https://pkg.go.dev/log/slog/#Value.String>), which formats it exactly as slog's own handlers do: the Go type is lost, where a "?" would lose the type and the value both.
 
-The one thing that does NOT cross: slog.Record.Time. The SDK's Logger.Log contract takes no timestamp, so the record is stamped by the SDK handler's clock at emit time instead. For live logging the difference is sub\- microsecond; for a REPLAYED record \(one built now and handled later\) the original time is lost. Callers replaying records should carry the original instant as an explicit attribute.
+Groups flatten to dotted keys \("g1.g2.key"\), matching what the SDK text and JSON encoders already produce for nested attributes. slog's elision rules are honoured — an empty Attr is dropped, an empty group NAME inlines its members, and a group with no members is dropped. An empty KEY is a different thing and keeps its separator \("g."\), which is what slog itself prints. [log/slog.LogValuer](<https://pkg.go.dev/log/slog/#LogValuer>) values are resolved before conversion.
+
+Two things do NOT cross, both because the SDK's Logger.Log contract carries neither. slog.Record.PC is the first: the bridge calls the ordinary Log, which captures a program counter at the bridge, so a destination built with \[logger.WithCaller\] reports this package as the source rather than the foreign library's own logging call. Do not enable WithCaller on a bridged destination — a wrong source is worse than none.
+
+The second is slog.Record.Time. The SDK's Logger.Log contract takes no timestamp, so the record is stamped by the SDK handler's clock at emit time instead. For live logging the difference is sub\- microsecond; for a REPLAYED record \(one built now and handled later\) the original time is lost. Callers replaying records should carry the original instant as an explicit attribute.
 
 ## Index
 
@@ -77,7 +81,7 @@ var LoggerRequired = errs.Define(CodeLoggerRequired, "LOGGER_REQUIRED",
 ```
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/slogbridge/slogbridge.go#L97>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/slogbridge/slogbridge.go#L111>)
 
 ```go
 func New(lg logger.Logger) (sl *slog.Logger, err error)
@@ -88,7 +92,7 @@ New returns a \*slog.Logger writing through lg — the one\-liner a caller hands
 A nil lg returns [LoggerRequired](<#LoggerRequired>) \(1.1.1.1\).
 
 <a name="NewHandler"></a>
-## func [NewHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/slogbridge/slogbridge.go#L82>)
+## func [NewHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/slogbridge/slogbridge.go#L96>)
 
 ```go
 func NewHandler(lg logger.Logger) (h slog.Handler, err error)

@@ -26,6 +26,13 @@ const errorsPath string = "errors"
 // loggerPath is the SDK's public logger facade.
 const loggerPath string = "github.com/kitsunium/sdk/pkg/v1/logger"
 
+// bridgePath is the sanctioned slog adapter (ADR 0032).
+const bridgePath string = "github.com/kitsunium/sdk/pkg/v1/logger/slogbridge"
+
+// bridgeConstructorPath aliases bridgePath for the scanner, which resolves
+// bridge-bound identifiers before any rule runs.
+const bridgeConstructorPath string = bridgePath
+
 // LevelInvariant marks a rule whose violation is a correctness defect: records
 // silently dropped, a protocol stream corrupted, a binary misreporting itself.
 const LevelInvariant string = "invariant"
@@ -115,14 +122,51 @@ func checkSlogPipeline(fc *fileCtx, file *ast.File) []Finding {
 	var out []Finding
 	ast.Inspect(file, func(n ast.Node) bool {
 		for name, why := range slogPipelineCalls {
-			if fc.isCall(n, slogPath, name) {
-				out = append(out, fc.at(n, "SDK001", why+
-					"; hand the SDK Logger over instead: slogbridge.New(lg) (ADR 0032)"))
+			if !fc.isCall(n, slogPath, name) {
+				continue
 			}
+			// slog.New(slogbridge.NewHandler(lg)) composes the sanctioned
+			// bridge by hand. It forwards into the one SDK pipeline, so
+			// flagging it would fail an invariant on the very construction
+			// this rule exists to steer people towards.
+			if fc.wrapsBridge(n) {
+				continue
+			}
+			out = append(out, fc.at(n, "SDK001", why+
+				"; hand the SDK Logger over instead: slogbridge.New(lg) (ADR 0032)"))
 		}
 		return true
 	})
 	return out
+}
+
+// wrapsBridge reports whether a call's arguments come from the slog bridge.
+//
+// Both spellings count. The inline form is rare in practice because
+// NewHandler returns (handler, error), so real code binds it first:
+//
+//	h, err := slogbridge.NewHandler(lg)
+//	sl := slog.New(h)
+//
+// Missing that second form would have left the rule firing on the exact
+// composition it tells people to write.
+func (fc *fileCtx) wrapsBridge(n ast.Node) bool {
+	call, ok := n.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	for _, arg := range call.Args {
+		// Inline: slog.New(slogbridge.NewHandler(lg)).
+		if fc.isCall(arg, bridgePath, "NewHandler") || fc.isCall(arg, bridgePath, "New") {
+			return true
+		}
+		// Bound: the identifier was assigned from a bridge constructor
+		// earlier in this file.
+		if ident, isIdent := arg.(*ast.Ident); isIdent && fc.bridgeBound[ident.Name] {
+			return true
+		}
+	}
+	return false
 }
 
 // untypedErrorCalls are the stdlib error constructors the SDK replaced.

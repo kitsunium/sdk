@@ -87,7 +87,7 @@ func main() {
 		report(findings)
 	}
 
-	stale, err := reportVersion(roots[0], *versionCheck)
+	stale, err := reportVersions(roots, *versionCheck)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sdkguard:", err)
 		os.Exit(exitToolError)
@@ -101,8 +101,34 @@ func main() {
 	}
 }
 
-// reportVersion runs the freshness probe and prints its warning, reporting
-// whether the SDK was found to be behind.
+// reportVersions probes every root, so a stale requirement in the second
+// module of a multi-module invocation is not silently ignored — results must
+// not depend on argument order.
+func reportVersions(roots []string, mode string) (bool, error) {
+	seen := make(map[string]bool, len(roots))
+	stale := false
+	for _, root := range roots {
+		// One warning per go.mod, not per root: several roots inside one
+		// module would otherwise repeat the same advice.
+		dir := normalizeRoot(root)
+		path, found := findGoMod(dir)
+		if found && seen[path] {
+			continue
+		}
+		if found {
+			seen[path] = true
+		}
+		got, err := reportVersion(root, mode)
+		if err != nil {
+			return false, err
+		}
+		stale = stale || got
+	}
+	return stale, nil
+}
+
+// reportVersion runs the freshness probe for one root and prints its warning,
+// reporting whether the SDK was found to be behind.
 func reportVersion(root, mode string) (bool, error) {
 	switch mode {
 	case versionCheckOff:
@@ -146,11 +172,18 @@ func scanRoots(roots []string, rules []Rule, withTests bool) ([]Finding, error) 
 // normalizeRoot accepts the `./...` spelling Go developers already type, so the
 // tool drops into an existing CI line without a new argument convention.
 func normalizeRoot(root string) string {
-	dir := strings.TrimSuffix(strings.TrimSuffix(root, "..."), string(filepath.Separator))
-	if dir == "" {
+	if root == "" {
 		return "."
 	}
-	return dir
+	trimmed := strings.TrimSuffix(root, "...")
+	// "..." on its own means "here and below", not the filesystem root.
+	if trimmed == "" {
+		return "."
+	}
+	// filepath.Clean drops the trailing separator "./..." leaves behind while
+	// preserving "/" itself — trimming the separator blindly turned the
+	// filesystem root into the working directory.
+	return filepath.Clean(trimmed)
 }
 
 // report prints findings in the standard Go diagnostic format so editors and

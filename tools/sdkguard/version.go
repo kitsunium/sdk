@@ -78,6 +78,12 @@ type probe struct {
 // freshness nudge that breaks a build has failed at being a nudge.
 func checkVersion(dir string, p probe) (string, bool) {
 	ref, ok := sdkRequirement(dir)
+	// A workspace root has no go.mod of its own, so the documented
+	// `sdkguard ./...` form from there would scan every module and warn about
+	// none of them.
+	if !ok {
+		ref, ok = workspaceRequirement(dir)
+	}
 	if !ok || ref.Replaced {
 		return "", false
 	}
@@ -190,15 +196,79 @@ func readReplace(ref *moduleRef, entry string) {
 	}
 }
 
+// workspaceRequirement resolves the SDK requirement through a go.work file.
+//
+// It reports the OLDEST requirement across the workspace's modules: that is
+// the one a reader must act on, and warning about the newest would let a stale
+// module hide behind an up-to-date sibling.
+func workspaceRequirement(dir string) (moduleRef, bool) {
+	work, found := findUp(dir, "go.work")
+	if !found {
+		return moduleRef{}, false
+	}
+	data, err := os.ReadFile(work) //nolint:gosec // path comes from walking the scan root, not from input
+	if err != nil {
+		return moduleRef{}, false
+	}
+
+	root := filepath.Dir(work)
+	var oldest moduleRef
+	for _, rel := range workspaceUses(string(data)) {
+		ref, ok := sdkRequirement(filepath.Join(root, rel))
+		if !ok {
+			continue
+		}
+		// A replaced module anywhere means someone is working locally; say
+		// nothing rather than nag about a version the build does not use.
+		if ref.Replaced {
+			return moduleRef{}, false
+		}
+		if oldest.Version == "" || semverLess(ref.Version, oldest.Version) {
+			oldest = ref
+		}
+	}
+	return oldest, oldest.Version != ""
+}
+
+// workspaceUses lists the directories a go.work file declares, handling both
+// the single-line and the parenthesised block forms.
+func workspaceUses(text string) []string {
+	var out []string
+	inBlock := false
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if idx := strings.Index(line, "//"); idx >= 0 {
+			line = strings.TrimSpace(line[:idx])
+		}
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "use ("):
+			inBlock = true
+		case line == ")":
+			inBlock = false
+		case strings.HasPrefix(line, "use "):
+			out = append(out, strings.Trim(strings.TrimPrefix(line, "use "), `"`))
+		case inBlock:
+			out = append(out, strings.Trim(line, `"`))
+		}
+	}
+	return out
+}
+
 // findGoMod walks up from dir looking for a go.mod, so the tool works from a
 // package subdirectory the way every other Go tool does.
 func findGoMod(dir string) (string, bool) {
+	return findUp(dir, "go.mod")
+}
+
+// findUp walks up from dir looking for name.
+func findUp(dir, name string) (string, bool) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return "", false
 	}
 	for {
-		candidate := filepath.Join(abs, "go.mod")
+		candidate := filepath.Join(abs, name)
 		if _, statErr := os.Stat(candidate); statErr == nil {
 			return candidate, true
 		}
@@ -211,21 +281,40 @@ func findGoMod(dir string) (string, bool) {
 	}
 }
 
-// versions lists the module's tagged releases through the proxy.
+// versions lists the module's tagged releases, walking the GOPROXY fallback
+// list until one proxy answers.
+//
+// Trying only the first entry made the documented fallback support a fiction:
+// a configuration whose primary proxy is unreachable would silently lose the
+// freshness check rather than fall through to its backup, which is the entire
+// reason the list exists.
 func (p probe) versions(module string) ([]string, error) {
-	base := p.proxy
-	if base == "" {
-		resolved, enabled := resolveProxy()
+	bases := []string{p.proxy}
+	if p.proxy == "" {
+		resolved, enabled := resolveProxies()
 		if !enabled {
 			return nil, errProxyDisabled
 		}
-		base = resolved
+		bases = resolved
 	}
 	client := p.client
 	if client == nil {
 		client = &http.Client{Timeout: probeTimeout}
 	}
 
+	var lastErr error = errProxyDisabled
+	for _, base := range bases {
+		out, err := fetchVersions(client, base, module)
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// fetchVersions asks one proxy for a module's version list.
+func fetchVersions(client *http.Client, base, module string) ([]string, error) {
 	resp, err := client.Get(base + "/" + module + "/@v/list")
 	if err != nil {
 		return nil, err
@@ -253,28 +342,31 @@ func (p probe) versions(module string) ([]string, error) {
 	return out, nil
 }
 
-// resolveProxy reads GOPROXY the way the go command does, and reports whether
-// a proxy is usable at all.
-func resolveProxy() (string, bool) {
+// resolveProxies reads GOPROXY the way the go command does and returns every
+// usable proxy in order, reporting whether any exists at all.
+func resolveProxies() ([]string, bool) {
 	raw := strings.TrimSpace(os.Getenv("GOPROXY"))
 	if raw == "" {
-		return defaultProxy, true
+		return []string{defaultProxy}, true
 	}
+	var out []string
 	// GOPROXY is a fallback list separated by "," or "|".
 	for _, entry := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '|' }) {
 		entry = strings.TrimSpace(entry)
 		switch {
-		// "off" forbids any module download; honour it rather than reaching out.
+		// "off" forbids any module download; honour it rather than reaching
+		// out, and stop — entries after it are unreachable by the go command
+		// too.
 		case entry == "off":
-			return "", false
+			return nil, false
 		// "direct" means VCS access, which this probe deliberately does not do.
 		case entry == "direct" || entry == "":
 			continue
 		case strings.HasPrefix(entry, "http://") || strings.HasPrefix(entry, "https://"):
-			return strings.TrimSuffix(entry, "/"), true
+			out = append(out, strings.TrimSuffix(entry, "/"))
 		}
 	}
-	return "", false
+	return out, len(out) > 0
 }
 
 // newerThan returns the released versions strictly newer than cur, oldest

@@ -85,6 +85,9 @@ breaks a build has failed at being a nudge:
 | No `go.mod`, or no SDK requirement | silent |
 | A `replace` directive on the SDK | silent — that is a local checkout, not a stale pin |
 | `GOPROXY=off`, or a proxy list with no usable URL | silent, no network call |
+| Primary proxy down, backup listed | falls through to the next entry — the list is walked in order |
+| A workspace root with no `go.mod` | resolved through `go.work`; the OLDEST module's requirement is reported, so a stale module cannot hide behind an up-to-date sibling |
+| Several roots given | each module is probed once; results do not depend on argument order |
 | Proxy unreachable, timeout (3s), non-200, malformed body | silent |
 | Consumer ahead of the proxy (unreleased local tag) | silent |
 
@@ -121,6 +124,16 @@ own `.golangci.yml` drops `misspell` for exactly that reason.
   is the documented price of working without type resolution.
 - **Test files are excluded by default** (`-tests` opts in): fixtures
   legitimately mint throwaway errors.
+- **The sanctioned bridge composition is not a second pipeline.** SDK001 skips
+  `slog.New` when its argument came from `slogbridge.NewHandler` — inline, or
+  bound to a variable first, which is the form real code uses since
+  `NewHandler` returns `(handler, error)`. Firing there would fail an invariant
+  on the very construction the rule points people towards.
+- **Files outside the consumer's control are skipped.** A `//go:build ignore`
+  file is in no build, and a `// Code generated … DO NOT EDIT.` file is not
+  theirs to fix; reporting either is noise they cannot action. A
+  *platform*-constrained file (`//go:build linux`) IS still analysed — its
+  rules apply on the platform it targets.
 - **A dot import is reported, not ignored.** `import . "log/slog"` binds no
   qualifier, so `slog.New` appears as `New` and no selector rule can see it.
   Every rule that watches a dot-imported package emits a finding saying it
@@ -160,12 +173,19 @@ Detection is AST-only, with no type resolution: `go/types` needs a package
 loader, and the usable one (`go/packages`) is in `x/tools`. Import aliases are
 resolved, and a selector only matches when the file actually imports the package
 — so a local named `fmt` in a file that does not import `fmt` is not flagged
-(pinned by a test). Two things AST-only cannot see, both reported rather than hidden:
+(pinned by a test). Three consequences of AST-only analysis:
 
 - A package **re-exported** through an intermediate wrapper: `mylog.New()`
   wrapping `slog.New()` inside another module is invisible here. Silent.
 - A **dot import**, which binds no qualifier at all. Not silent — each affected
   rule says it cannot analyse the file.
+- A **shadowed package name**: `logger := myLog{}` followed by
+  `logger.Version = "x"` is a field assignment on a local, indistinguishable
+  from a write to the SDK's package variable without type resolution. A package
+  whose local name the file also declares stops matching there. Silent, and
+  deliberately so — `logger` is a name consumers bind constantly, and a rule
+  that fires on correct code is the kind people switch off. The cost is a
+  missed finding where a file both shadows the name and violates the rule.
 
 That is the honest trade for staying dependency-free, and it is the right one:
 the rules exist to catch the accidental second pipeline, not to defeat someone

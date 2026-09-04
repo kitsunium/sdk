@@ -4,7 +4,7 @@
 - **Date**: 2026-09-04
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0001](../adr/0001-sdk-go-multimodule-layout.md) (layer shape), [ADR 0002](../adr/0002-sdk-errors-package.md) (explicit construction over silent defaults), [ADR 0005](../adr/0005-sdk-error-codes-dotted-quad.md) (error codes), [ADR 0008](../adr/0008-readme-from-code-generation.md) (README generation), [ADR 0030](../adr/0030-stdout-is-a-protocol-channel.md) (stdout is a protocol channel — the transport this defect is worst on)
-- **Amends**: the "never log/slog" rule stated in `internal/core/logger/level/level.go` — it now binds the domain (kernel/core/service), not the public edge
+- **Amends**: the "never log/slog" rule stated in `internal/core/logger/level/level.go` — it now binds the domain (kernel/core/service), not the public edge; and [ADR 0005](../adr/0005-sdk-error-codes-dotted-quad.md) §Registry, which gains the `1.1.1.*` row for this package. The allocation table is a living registry every package must join, so the row belongs there rather than in a parallel list — but the edit is declared here rather than made silently, since ADR 0005 is Accepted.
 
 ## Context
 
