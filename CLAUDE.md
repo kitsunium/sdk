@@ -109,6 +109,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 ├── .bazelversion          pins Bazel to 9.0.2
 ├── Makefile               build / test / test-alloc / lint / bench / cover / docs / serve / release-dry-run / docs-readme … (run `make` for the full list)
 ├── e2e/                   real-kernel conformance harness — auxiliary module, OUTSIDE go.work (GOWORK=off)
+├── tools/sdkguard/        consumer-facing rule enforcement (stdlib-only CLI — ADR 0033)
 ├── tools/workspace_status.sh  prints STABLE_VERSION (consumed by --stamp + x_defs)
 ├── tools/alloc-lane-targets.txt  target list for the race-off alloc lane (rule 12)
 ├── tools/genindex/        docs-site symbol index — auxiliary module, OUTSIDE go.work (GOWORK=off)
@@ -166,5 +167,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0028 — configuration domain (`config`): 10th core sibling, `Source`/`Validator`/`Watcher` ports; env+file layering + JSON round-trip decode + cross-OS poll watcher; closes the Phase-B wave; error block `0.2.10.*` — `docs/adr/0028-sdk-config-domain.md`
 - ADR 0029 — network domain (`net`): 11th core sibling covering inbound AND outbound over one substrate (TLS/mTLS identity, per-phase deadlines, policy, metrics); goroutine-per-connection on the runtime netpoller (not an event loop); `net/http` adapted, not reimplemented; `recvmmsg` + `SO_REUSEPORT` via raw stdlib `syscall` because `x/net` pulls in the banned `x/sys`; **no registry**; error block `0.2.11.*` — `docs/adr/0029-sdk-net-domain.md`
 - ADR 0032 — `log/slog` is an adapter at the public edge, not a domain dependency: permitted in `pkg/v1/logger/slogbridge` ONLY, so a consumer facing a concrete `*slog.Logger` parameter stops building a second pipeline (two thresholds, two formats, half-stamped records); core keeps its "never log/slog" rule; error block `1.1.1.*` — `docs/adr/0032-logger-slog-bridge.md`
+- ADR 0033 — SDK rules are enforced on consumers at BUILD time by `tools/sdkguard`, a stdlib-only CLI: runtime detection was measured impossible (`log/slog` is not a module, a local `slog.Logger` never touches `slog.Default`), and a vettool would need `x/tools`, which `tools/*` cannot take without breaking its Bazel build; rules are split invariant/convention so adoption is incremental — `docs/adr/0033-consumer-rule-enforcement.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

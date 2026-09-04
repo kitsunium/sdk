@@ -103,5 +103,6 @@ func New(lg logger.Logger) (sl *slog.Logger, err error) {
 		return nil, hErr
 	}
 	//: slog.New adds no policy of its own — the handler owns every decision.
+	//sdkguard:allow SDK001 this package IS the sanctioned bridge (ADR 0032); the handler it wraps forwards to the SDK Logger
 	return slog.New(hdl), nil
 }

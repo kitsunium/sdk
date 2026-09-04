@@ -25,6 +25,20 @@ same stream, and the second pipeline is where the damage lives:
 
 One bridge removes all three at once, because there is only one pipeline left.
 
+## Enforcement
+
+The rule this package exists to serve is checkable in a consumer's repo:
+
+```bash
+go run github.com/kitsunium/sdk/tools/sdkguard@latest -level=invariant ./...
+```
+
+`SDK001` flags `slog.New` / `NewTextHandler` / `NewJSONHandler` / `SetDefault` /
+`Default` — the constructs that build a second destination — while leaving the
+`*slog.Logger` type and the attr constructors alone, since a consumer of this
+package needs them (ADR 0033). `slogbridge.New` itself carries a documented
+`//sdkguard:allow SDK001` directive: this is the one sanctioned bridge.
+
 ## Contents
 
 | File | Role |
