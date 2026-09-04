@@ -83,7 +83,8 @@ e2e/             real-kernel conformance harness (auxiliary module, GOWORK=off)
 make build       # bazel mod tidy + gazelle + gofumpt + bazel build //...
 make test        # every *_test target green incl. AST audits
 make test-alloc  # race-off allocation gates (the only lane running //go:build !race tests)
-make lint        # drift check (read-only): mod tidy + gazelle + gofumpt + ktn-linter + alloc-lane coverage
+make lint        # drift check (read-only): mod tidy + gazelle + gofumpt + ktn-linter + alloc-lane coverage + guard
+make guard       # sdkguard over the SDK's own tree at invariant level (ADR 0033)
 make bench       # regenerate codec BENCH.md from real Go benchmarks
 ```
 
