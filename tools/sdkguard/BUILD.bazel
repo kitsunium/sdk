@@ -4,8 +4,10 @@ go_library(
     name = "sdkguard_lib",
     srcs = [
         "analyze.go",
+        "errors.go",
         "main.go",
         "rules.go",
+        "version.go",
     ],
     importpath = "github.com/kitsunium/sdk/tools/sdkguard",
     visibility = ["//visibility:private"],
@@ -19,6 +21,9 @@ go_binary(
 
 go_test(
     name = "sdkguard_test",
-    srcs = ["sdkguard_test.go"],
+    srcs = [
+        "sdkguard_test.go",
+        "version_test.go",
+    ],
     embed = [":sdkguard_lib"],
 )

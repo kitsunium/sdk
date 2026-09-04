@@ -52,6 +52,51 @@ something the SDK *offers* — ADR 0019 makes the error model available to
 downstreams, it does not oblige them. A team runs `-level=invariant` first and
 turns conventions on when ready, instead of switching the whole tool off.
 
+## Freshness probe
+
+Beside the rules, sdkguard warns when the consumer's `go.mod` pins an SDK older
+than the newest release:
+
+```
+sdkguard: warning: the SDK is 15 patch releases behind — go.mod requires v0.1.9, latest is v0.1.24.
+  A patch is cut whenever an internal package pkg depends on changes (ADR 0007),
+  so releases carry fixes that never alter the public API.
+  Update:  go get github.com/kitsunium/sdk/pkg@v0.1.24
+  Silence: -version-check=off
+```
+
+This exists because of how the SDK versions. Per ADR 0007 a patch is cut
+whenever an `internal/*` package that `pkg` depends on changes — so patches
+carry fixes that never touch the public API. A consumer reading a changelog of
+exported symbols sees nothing and concludes there is nothing to take. That is
+the quiet cousin of the defects the rules catch: nothing fails, and the fix
+simply never arrives.
+
+**It is a warning and never changes the exit code.** Being behind is not a
+violation — it is a fact the maintainer may already know and may have decided to
+live with. `-version-check=error` promotes it for teams that want freshness
+gated; `-version-check=off` skips the probe entirely, making no network call.
+
+**Every failure path degrades to silence**, because a freshness nudge that
+breaks a build has failed at being a nudge:
+
+| Situation | Behaviour |
+|---|---|
+| No `go.mod`, or no SDK requirement | silent |
+| A `replace` directive on the SDK | silent — that is a local checkout, not a stale pin |
+| `GOPROXY=off`, or a proxy list with no usable URL | silent, no network call |
+| Proxy unreachable, timeout (3s), non-200, malformed body | silent |
+| Consumer ahead of the proxy (unreleased local tag) | silent |
+
+`GOPROXY` is read the way the go command reads it — `,`/`|` fallback lists,
+`off`, `direct`. Only strict `vX.Y.Z` tags are candidates: recommending a
+prerelease or a pseudo-version as "the latest" would be wrong advice. Ordering
+is numeric, not lexical, so `v0.1.9` correctly precedes `v0.1.24` — a string
+comparison would invert that and tell an up-to-date consumer to downgrade.
+
+`make guard` passes `-version-check=off`: the SDK is not a consumer of itself,
+and `make lint` must not depend on network egress.
+
 ## Scoping — why each rule is narrower than it looks
 
 The rules are deliberately narrow. A rule that fires on legitimate code teaches
@@ -87,10 +132,13 @@ or the line above it, matching how `//nolint` is already written.
 
 | File | Role |
 |---|---|
-| `main.go` | CLI entry, flags (`-tests`, `-rules`, `-level`, `-list`), exit codes |
+| `main.go` | CLI entry, flags (`-tests`, `-rules`, `-level`, `-version-check`, `-list`), exit codes |
 | `analyze.go` | walking, parsing, import-alias resolution, suppression directives |
 | `rules.go` | the rule table and the five checks |
+| `version.go` | the freshness probe: go.mod reading, GOPROXY resolution, semver ordering |
+| `errors.go` | `errProxyDisabled` — sdkguard cannot use `pkg/v1/errs`, since it must run without pulling the library it audits |
 | `sdkguard_test.go` | one fire + one silence case per rule, plus alias, suppression, level and ordering |
+| `version_test.go` | semver ordering, go.mod shapes, GOPROXY resolution, and the degrade-to-silence paths — served by `httptest`, so no test touches the network |
 
 Exit codes: `0` clean, `1` findings, `2` the tool itself failed — so CI can tell
 "rules broken" from "tool broke".
@@ -114,6 +162,10 @@ pipeline, not to defeat someone determined to hide one.
 - Widen a rule to the whole import. Every rule here targets a *construct*; the
   scoping notes above are the design, not an optimisation.
 - Make a suppression work without a reason.
+- Let the freshness probe fail a run by default, or make any of its failure
+  paths loud. It is a nudge; the moment it can break CI it stops being one.
+- Add the probe to `make lint` without `-version-check=off`. A lint that needs
+  the network is a lint that fails on an airgapped runner.
 - Wire this as a runtime check in the SDK. The measurement at the top of this
   file is why.
 

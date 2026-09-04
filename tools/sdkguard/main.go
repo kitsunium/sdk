@@ -53,6 +53,8 @@ func main() {
 	tests := flag.Bool("tests", false, "include _test.go files")
 	rules := flag.String("rules", "", "comma-separated rule IDs to run (default: all)")
 	level := flag.String("level", "", "run only rules of this level: invariant | convention")
+	versionCheck := flag.String("version-check", versionCheckWarn,
+		"SDK freshness probe: warn (default) | off | error")
 	list := flag.Bool("list", false, "print the rule table and exit")
 	flag.Parse()
 
@@ -81,24 +83,49 @@ func main() {
 		os.Exit(exitToolError)
 	}
 
-	if len(findings) == 0 {
-		return
+	if len(findings) > 0 {
+		report(findings)
 	}
-	report(findings)
-	os.Exit(exitFindings)
+
+	stale, err := reportVersion(roots[0], *versionCheck)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "sdkguard:", err)
+		os.Exit(exitToolError)
+	}
+
+	// Being behind is a warning, so it must not move the exit code — otherwise
+	// it is not a warning, it is a gate wearing a warning's words. Only
+	// -version-check=error promotes it.
+	if len(findings) > 0 || (stale && *versionCheck == versionCheckError) {
+		os.Exit(exitFindings)
+	}
+}
+
+// reportVersion runs the freshness probe and prints its warning, reporting
+// whether the SDK was found to be behind.
+func reportVersion(root, mode string) (bool, error) {
+	switch mode {
+	case versionCheckOff:
+		return false, nil
+	case versionCheckWarn, versionCheckError:
+	default:
+		return false, fmt.Errorf("unknown -version-check %q (want %s, %s or %s)",
+			mode, versionCheckWarn, versionCheckOff, versionCheckError)
+	}
+
+	notice, stale := checkVersion(normalizeRoot(root), probe{})
+	if !stale {
+		return false, nil
+	}
+	fmt.Fprintln(os.Stderr, "\nsdkguard: "+notice)
+	return true, nil
 }
 
 // scanRoots walks every root and collects the findings of every selected rule.
 func scanRoots(roots []string, rules []Rule, withTests bool) ([]Finding, error) {
 	var out []Finding
 	for _, root := range roots {
-		// Accept the `./...` spelling Go developers already type, so the tool
-		// drops into an existing CI line without a new argument convention.
-		dir := strings.TrimSuffix(strings.TrimSuffix(root, "..."), string(filepath.Separator))
-		if dir == "" {
-			dir = "."
-		}
-		found, err := scanDir(dir, rules, withTests)
+		found, err := scanDir(normalizeRoot(root), rules, withTests)
 		if err != nil {
 			return nil, err
 		}
@@ -114,6 +141,16 @@ func scanRoots(roots []string, rules []Rule, withTests bool) ([]Finding, error) 
 		return out[i].Rule < out[j].Rule
 	})
 	return out, nil
+}
+
+// normalizeRoot accepts the `./...` spelling Go developers already type, so the
+// tool drops into an existing CI line without a new argument convention.
+func normalizeRoot(root string) string {
+	dir := strings.TrimSuffix(strings.TrimSuffix(root, "..."), string(filepath.Separator))
+	if dir == "" {
+		return "."
+	}
+	return dir
 }
 
 // report prints findings in the standard Go diagnostic format so editors and

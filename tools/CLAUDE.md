@@ -27,6 +27,7 @@ Keeping the list in one file (rather than duplicated in the Makefile and the wor
 1. A downstream repo that imports the SDK runs `sdkguard ./...` in CI (or from its own `Makefile`).
 2. It parses the consumer's source with `go/parser`, resolves each file's import aliases, and matches the five rules against constructs — not against imports, which is what keeps `*slog.Logger` and `fmt.Fprintln(os.Stdout, …)` legitimate.
 3. Findings print in the standard Go diagnostic format and the process exits 1. `-level=invariant` runs only the rules whose violation is a correctness defect, so a team can adopt the tool before it has adopted every convention.
+4. Separately, it warns when the consumer's `go.mod` pins an SDK older than the newest release — a warning that never moves the exit code, since being behind is a fact rather than a violation. Every failure path (no proxy, `GOPROXY=off`, a `replace` directive, a timeout) degrades to silence. `make guard` passes `-version-check=off` so `make lint` needs no network.
 
 Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime detection was measured to be impossible (`log/slog` is not a module, so it never appears in `debug.ReadBuildInfo`; a locally held `slog.Logger` never touches `slog.Default`), and the vettool protocol lives in `golang.org/x/tools` — a dependency this tree cannot take. See ADR 0033.
 

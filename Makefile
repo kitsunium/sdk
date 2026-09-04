@@ -107,8 +107,11 @@ lint:
 # legacy log package) have legitimate exceptions inside the SDK itself: the errs
 # package cannot construct its own bootstrap-validation errors through itself.
 # Consumers choose their own level; see tools/sdkguard/CLAUDE.md.
+# -version-check=off: the freshness probe reaches a module proxy, and `make
+# lint` must not depend on network egress. The probe is for consumers, and the
+# SDK is not a consumer of itself.
 guard:
-	cd tools/sdkguard && GOWORK=off go run . -level=invariant \
+	cd tools/sdkguard && GOWORK=off go run . -level=invariant -version-check=off \
 	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/tools/...
 
 # `bench` regenerates pkg/v1/codec/BENCH.md by running the full bench

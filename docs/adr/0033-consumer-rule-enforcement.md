@@ -82,7 +82,29 @@ not oblige them. `-level=invariant` is what lets a team adopt the tool before it
 has adopted every convention, instead of switching the tool off because the
 first run printed 21 findings.
 
-**5. A suppression requires a written reason.**
+**5. Being out of date is warned about, never failed on by default.**
+
+The tool also reads the consumer's `go.mod` and warns when the SDK it pins is
+older than the newest release. This belongs here rather than in a changelog
+because of how this SDK versions: ADR 0007 cuts a patch whenever an
+`internal/*` package that `pkg` depends on changes, so patches carry fixes that
+never touch the public API. A consumer reading a changelog of exported symbols
+sees nothing and concludes there is nothing to take — the same silence the
+rules exist to break.
+
+It is a **warning**: it prints, and the exit code does not move. Being behind is
+not a violation, it is a fact the maintainer may already know and may have
+decided to live with; a tool that cannot tell those apart should not be the one
+stopping the build. `-version-check=error` promotes it for teams that want
+freshness gated.
+
+Every failure path degrades to silence — no `go.mod`, a `replace` directive,
+`GOPROXY=off`, an unreachable proxy, a 3s timeout, a malformed body. A
+freshness nudge that breaks a build has failed at being a nudge, and a linter
+that hangs on a firewalled runner is worse than one that skips the check: the
+first blocks a pipeline, the second only misses a nudge.
+
+**6. A suppression requires a written reason.**
 
 `//sdkguard:allow SDK001 <reason>`; a bare directive does not suppress. This
 mirrors `.ktn-linter.yaml`, whose rule-override block already states the
@@ -92,6 +114,10 @@ outlives its reason.
 
 ## Consequences
 
+- The freshness probe makes one network call per invocation, to a module proxy,
+  bounded at 3 seconds. `make lint` passes `-version-check=off`: the SDK is not
+  a consumer of itself, and a lint that needs egress fails on an airgapped
+  runner.
 - Consumers get a checkable contract instead of prose. Run against the service
   that motivated ADR 0032, `-level=invariant` returns exactly two findings, both
   on the line that built the second pipeline, and nothing else.
