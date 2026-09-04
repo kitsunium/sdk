@@ -3,8 +3,8 @@
 - **Status**: Accepted
 - **Date**: 2026-09-04
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0001](../adr/0001-sdk-go-multimodule-layout.md) (layer shape), [ADR 0002](../adr/0002-sdk-errors-package.md) (explicit construction over silent defaults), [ADR 0005](../adr/0005-sdk-error-codes-dotted-quad.md) (error codes), [ADR 0008](../adr/0008-readme-from-code-generation.md) (README generation), [ADR 0030](../adr/0030-stdout-is-a-protocol-channel.md) (stdout is a protocol channel — the transport this defect is worst on)
-- **Amends**: the "never log/slog" rule stated in `internal/core/logger/level/level.go` — it now binds the domain (kernel/core/service), not the public edge; and [ADR 0005](../adr/0005-sdk-error-codes-dotted-quad.md) §Registry, which gains the `1.1.1.*` row for this package. The allocation table is a living registry every package must join, so the row belongs there rather than in a parallel list — but the edit is declared here rather than made silently, since ADR 0005 is Accepted.
+- **Related**: [ADR 0001](../adr/0001-sdk-go-multimodule-layout.md) (layer shape), [ADR 0002](../adr/0002-sdk-errors-package.md) (explicit construction over silent defaults), [ADR 0005](../adr/0005-sdk-error-codes-dotted-quad.md) (error codes — the `1.1.1.*` block is allocated in Decision 5 below, not by editing that ADR), [ADR 0008](../adr/0008-readme-from-code-generation.md) (README generation), [ADR 0030](../adr/0030-stdout-is-a-protocol-channel.md) (stdout is a protocol channel — the transport this defect is worst on)
+- **Amends**: the "never log/slog" rule stated in `internal/core/logger/level/level.go` — it now binds the domain (kernel/core/service), not the public edge
 
 ## Context
 
@@ -81,6 +81,20 @@ text handler applies its final group stack to every bound attr, so delegating
 The bridge therefore tracks the prefix itself and qualifies keys into the dotted
 form both SDK encoders already emit. This also makes the bridge independent of
 which handler or encoder sits underneath.
+
+**5. The error block is allocated here, not by editing ADR 0005.**
+
+`pkg/v1/logger/slogbridge` owns `1.1.1.*`, following the sub-package pattern
+ADR 0005 §Registry already established (`pkg/v1/codec/baseenc` = `1.2.1.*`).
+`CodeLoggerRequired` = `1.1.1.1`.
+
+The allocation is recorded here because ADR 0005 is Accepted and
+`docs/adr/CLAUDE.md` forbids editing a merged ADR's Decision — the rule ADR
+0006 already followed when it extended the same registry. Nothing is lost by
+keeping that table as it was: the executable source of truth is the AST audit
+in `internal/kernel/errs` plus the generated `docs/error-codes.yaml`, which
+enforce uniqueness mechanically and already carry this block. A row in a
+markdown table never was what prevented a collision.
 
 ## Consequences / Semantics
 
