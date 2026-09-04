@@ -18,6 +18,10 @@ Package logger — declares pkg/v1/logger's sentinels. Each var's name equals it
 
 Package logger — exposes FromConfig, the capstone of the config\-driven writer subsystem \(ADR 0014 §D5\): it builds a fully wired Logger from a config blob with zero Go glue. The blob is decoded by a codec the CONSUMER already registered \(FromConfig imports only the core/codec dispatch surface, never pkg/v1/codec or any service codec, so a pkg/v1/logger consumer inherits no vendor modules\). Each decoded WriterEntry is resolved against the writer registry; a Factory that implements ConfigDecoder translates its own option map, otherwise a default mapping passes the raw map straight to the factory.
 
+Package logger — re\-exports the Value payload discriminant so consumers can name what Value.Kind\(\) returns.
+
+Without these aliases MemorySink is only half usable: it hands back RecordSnapshot values whose Attrs carry a Kind, but the Kind type itself lived behind the internal/ firewall, so a consumer test could read the discriminant and still not write it down. The core doc already calls these values "stable across the public API"; this file makes that true.
+
 Package logger — exposes the runtime\-tunable level surface: ParseLevel \(the strict inverse of a lowercased Level.String\), the Leveler one\-method port, and LevelVar, an atomically mutable threshold holder a custom sink or gate consults on each record to retune a live logger's floor without rebuilding the pipeline.
 
 Package logger is the stable v1 public API for SDK logging.
@@ -160,6 +164,7 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
   - [func TextEncoder\(\) Encoder](<#TextEncoder>)
 - [type FileConfig](<#FileConfig>)
 - [type Format](<#Format>)
+- [type Kind](<#Kind>)
 - [type Level](<#Level>)
   - [func ParseLevel\(name string\) \(lvl Level, err error\)](<#ParseLevel>)
 - [type LevelVar](<#LevelVar>)
@@ -585,6 +590,69 @@ Format is the typed wire\-format identifier accepted by FromConfig. It is a stab
 
 ```go
 type Format = corecodec.Format
+```
+
+<a name="Kind"></a>
+## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/kind.go#L16>)
+
+Kind is the stable alias for the internal payload discriminant carried by a Value. Switch on it to select the matching typed accessor \(String, Int64, Float64, …\) instead of paying for an \`any\` assertion at render time.
+
+```go
+type Kind = corelogger.Kind
+```
+
+<a name="KindAny"></a>KindAny tags a Value whose payload is an unconstrained interface. It is also the zero value of Kind, so an unrecognised future variant degrades here rather than panicking.
+
+```go
+const KindAny Kind = corelogger.KindAny
+```
+
+<a name="KindBool"></a>KindBool tags a Value carrying a boolean payload.
+
+```go
+const KindBool Kind = corelogger.KindBool
+```
+
+<a name="KindDuration"></a>KindDuration tags a Value carrying a time.Duration payload.
+
+```go
+const KindDuration Kind = corelogger.KindDuration
+```
+
+<a name="KindFloat64"></a>KindFloat64 tags a Value carrying a float64 payload.
+
+```go
+const KindFloat64 Kind = corelogger.KindFloat64
+```
+
+<a name="KindGroup"></a>KindGroup tags a Value whose payload is a nested \[\]Attr. Producers that target the bundled text and JSON encoders flatten groups into dotted keys instead, since neither encoder renders a group payload directly.
+
+```go
+const KindGroup Kind = corelogger.KindGroup
+```
+
+<a name="KindInt64"></a>KindInt64 tags a Value carrying an int64 payload \(also covers int / int32, which IntValue widens on the way in\).
+
+```go
+const KindInt64 Kind = corelogger.KindInt64
+```
+
+<a name="KindString"></a>KindString tags a Value carrying a string payload.
+
+```go
+const KindString Kind = corelogger.KindString
+```
+
+<a name="KindTime"></a>KindTime tags a Value carrying a time.Time payload.
+
+```go
+const KindTime Kind = corelogger.KindTime
+```
+
+<a name="KindUint64"></a>KindUint64 tags a Value carrying an unsigned 64\-bit integer payload.
+
+```go
+const KindUint64 Kind = corelogger.KindUint64
 ```
 
 <a name="Level"></a>

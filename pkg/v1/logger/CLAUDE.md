@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Stable v1 public API for SDK logging. Everything consumer code needs — `Logger`, `Attr`, `Level`, `Sink`, `Encoder`, `Builder`, `Config`, `NewText`, `Default`, `NewWithSink`, `Build`, `LogAttrs`, the `Info|Warn|Error|Debug` emission helpers, and the `String|Int|Bool|Float64|Int64|Uint64|Duration|Time|Any` `Attr` constructors — is re-exported here as type aliases + thin wrappers onto `internal/core/logger`, `internal/core/logger/level`, and `internal/service/logger`. Signatures freeze post-v1.0.0.
+Stable v1 public API for SDK logging. Everything consumer code needs — `Logger`, `Attr`, `Level`, `Sink`, `Encoder`, `Builder`, `Config`, `NewText`, `Default`, `NewWithSink`, `Build`, `LogAttrs`, the `Info|Warn|Error|Debug` emission helpers, the `String|Int|Bool|Float64|Int64|Uint64|Duration|Time|Any` `Attr` constructors, and the `Kind` discriminant with its nine constants — is re-exported here as type aliases + thin wrappers onto `internal/core/logger`, `internal/core/logger/level`, and `internal/service/logger`. Signatures freeze post-v1.0.0.
 
 ## Contents
 
@@ -20,6 +20,8 @@ fromconfig.go  — Format alias, FromConfig (build a Logger from a config blob),
 topology.go    — TopologyConfig DTO (Level + Writers)
 writer_entry.go — WriterEntryConfig DTO (Name + raw Options map)
 builder.go     — Builder alias, Build (chainable hot path), LogAttrs (slice overload)
+kind.go        — Kind alias + KindAny|Bool|Duration|Float64|Int64|String|Time|Uint64|Group
+                 constants (what Value.Kind() returns; needed to assert on MemorySink records)
 version.go     — Version var (ldflags injection point), FrameworkVersion()
 codes.go       — CodeWriterRequired / CodeSinkConfigRequired / CodeWriterSpecInvalid
                  / CodeTopologyInvalid (range 1.1.0.*)
@@ -68,6 +70,12 @@ sinks via `Multi`, and returns a Logger filtered at the topology's `Level`.
 
 ## Conventions
 
+- **Handing a Logger to an slog-typed API.** A library whose logging knob is the
+  concrete `*slog.Logger` (e.g. `mcp.ServerOptions.Logger`) is served by
+  `pkg/v1/logger/slogbridge`: `slogbridge.New(lg)` returns a `*slog.Logger`
+  writing through `lg`. Do NOT build a second `slog.Handler` beside the SDK
+  Logger — that pattern yields two thresholds, two line formats on one stream,
+  and `framework_version` on half the records (ADR 0032).
 - **Aliases over wrappers.** `Logger` / `Attr` / `Level` / `Sink` / `Encoder` / `Record` / `Builder` are type aliases — same Go type identity as the internal value. Functions (`NewText`, `Default`, `Build`, …) are thin: nil-validate, delegate, decorate with `framework_version`.
 - **Explicit construction.** `NewText(Config{Writer: nil})` returns `(nil, WriterRequired)` — `1.1.0.1`. `NewWithSink(SinkConfig{Sink: nil})` returns `(nil, SinkConfigRequired)` — `1.1.0.2`. The pre-errors API silently defaulted to `os.Stderr`; that was a breaking change (ADR 0002). Callers wanting the stderr one-liner use `Default()`.
 - **`framework_version` on every record.** Both `NewText` and `NewWithSink` finalise their Logger via `base.With(AttrValue{Key: "framework_version", Value: StringValue(FrameworkVersion())})` so every emitted record carries the version. `FrameworkVersion()` returns the link-time `Version` var, or the `"dev"` sentinel when unset.
@@ -80,6 +88,8 @@ sinks via `Multi`, and returns a Logger filtered at the topology's `Level`.
   - `1.1.0.2` `CodeSinkConfigRequired` / `SinkConfigRequired`
   - `1.1.0.3` `CodeWriterSpecInvalid` / `WriterSpecInvalid`
   - `1.1.0.4` `CodeTopologyInvalid` / `TopologyInvalid` (FromConfig; redacted)
+  - The `slogbridge/` subpackage owns the adjacent block `1.1.1.*` — `1.1.1.1`
+    `CodeLoggerRequired` / `LoggerRequired` (ADR 0032).
 
 ## Do NOT
 
@@ -87,6 +97,8 @@ sinks via `Multi`, and returns a Logger filtered at the topology's `Level`.
 - Set `Version` at runtime from application code. Use the ldflags recipe (or Bazel `--stamp`) so every binary commits its version at link time.
 - Use a `Builder` after `Send` — the next caller will reuse the same struct from the `sync.Pool`.
 - Re-export internal sink / middleware constructors here ad hoc. The current convenience helpers (`Multi`, `ConsoleStderr`, `ConsoleStdout`, `TextEncoder`) are deliberate; richer outputs reach into `internal/service/logger/{sink,middleware}` until contracts stabilise enough for a re-export.
+- Build a parallel `slog.Logger` pointed at the same stream as an SDK Logger.
+  Use `slogbridge` so there is one pipeline, one threshold, one format (ADR 0032).
 - Forge SDK errors from consumer code via `errs.Define` — introspect via `pkg/v1/errs` accessors instead.
 
 ## Verification

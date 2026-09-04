@@ -102,6 +102,7 @@ a follow-up CI wave; this MR ships prose)
 | `internal/service/codec/pem` | `0.3.10.*` | 3 codes |
 | `internal/service/codec/ndjson` | `0.3.11.*` | 3 codes |
 | `pkg/v1/logger` | `1.1.0.*` | `CodeWriterRequired=1.1.0.1` |
+| `pkg/v1/logger/slogbridge` | `1.1.1.*` | `CodeLoggerRequired=1.1.1.1` (ADR 0032) |
 | `pkg/v1/codec` | `1.2.0.*` | `CodeUnknownFormat=1.2.0.1`, `CodeCodecUnavailable=1.2.0.2`, `CodeStreamingUnsupported=1.2.0.3` |
 | `pkg/v1/codec/baseenc` | `1.2.1.*` | `CodeInvalidEncoding=1.2.1.1`, `CodeDecodeFailed=1.2.1.2`, `CodeEncodeFailed=1.2.1.3` |
 | `pkg/v2+` | `2.*.*.*` onwards | future |

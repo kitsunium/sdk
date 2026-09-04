@@ -9,6 +9,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 
 | Package | Role | README |
 |---|---|---|
+| `logger/slogbridge/` | `NewHandler` / `New` — adapt an SDK `Logger` to `log/slog` for APIs typed on the concrete `*slog.Logger` (ADR 0032). The one package allowed to import `log/slog` | `pkg/v1/logger/slogbridge/README.md` |
 | `logger/` | Logger facade: `Config` / `NewText` / `Default` / `NewWithSink`, `Info|Warn|Error|Debug`, `Build` builder, `String|Int|…` attr ctors, `Version` (ldflags injection point) | `pkg/v1/logger/README.md` |
 | `codec/` | Universal codec dispatch: `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` over a `Format` registry; blank-imports 14 service codecs covering 22 Format names — text/binary/base-N reached identically (asn1-der, baseenc family [base64/base64url/base32/base16/hex/ascii85/base45/base58/base62], bson, cbor, csv, flatbuffers, json, msgpack, ndjson, pem, tlv, toml, xml, yaml) | _(no README)_ |
 | `errs/` | Error introspection **and construction** (ADR 0019): read — `CodeOf` / `ReasonOf` / `PublicOf` / `PrivateOf` / `HTTPStatusOf` / `ExitCodeOf` / `HasCode` / `HasReason` / `NewPrefixMatcher`; build — `New` / `Wrap` (+ `WrapParams`) / `Field` helpers (`String` / `Int` / `Int64` / `Bool` / `Float` / `NewFieldValue`); codes — `Pack` / `ParseCode` / `MinAppMajor` / `MaxMajor` + `Code` / `Major` / `Layer` / `PkgCode` / `Serial` / `Field` / `PrefixMatcher` type aliases + `MaskBy*` constants. Octets are composable on the typed `Code` (e.g. `code.Layer()`). | `pkg/v1/errs/README.md` |
@@ -68,6 +69,7 @@ GOWORK=off go test -race -cover ./v1/...
 ## Subtree
 
 - `logger/` — see `pkg/v1/logger/CLAUDE.md`
+- `logger/slogbridge/` — see `pkg/v1/logger/slogbridge/CLAUDE.md`
 - `codec/` — see `pkg/v1/codec/CLAUDE.md`
 - `errs/` — see `pkg/v1/errs/CLAUDE.md`
 - `id/` — see `pkg/v1/id/CLAUDE.md`

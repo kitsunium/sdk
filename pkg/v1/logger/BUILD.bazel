@@ -11,6 +11,7 @@ go_library(
         "encoder.go",
         "errors.go",
         "fromconfig.go",
+        "kind.go",
         "levelvar.go",
         "logger.go",
         "memory.go",

@@ -35,7 +35,7 @@ internal/
                    transform
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
-    ├── logger/    (+ ldflags-injected Version, + writer/)
+    ├── logger/    (+ ldflags-injected Version, + writer/, + slogbridge/)
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
     ├── codec/     (blank-imports all 14 service codecs + transform)
     ├── crypto/    (+ agree, hash, kdf, mac, password, sign)
@@ -165,5 +165,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0027 — observability domain (`metrics`): 9th core sibling, Counter/Gauge/Histogram + `Meter` + `Exporter` registry (writer-registry model); in-memory meter + stdlib text exporter; error block `0.2.9.*`; labels/Prometheus/OTLP deferred — `docs/adr/0027-sdk-metrics-domain.md`
 - ADR 0028 — configuration domain (`config`): 10th core sibling, `Source`/`Validator`/`Watcher` ports; env+file layering + JSON round-trip decode + cross-OS poll watcher; closes the Phase-B wave; error block `0.2.10.*` — `docs/adr/0028-sdk-config-domain.md`
 - ADR 0029 — network domain (`net`): 11th core sibling covering inbound AND outbound over one substrate (TLS/mTLS identity, per-phase deadlines, policy, metrics); goroutine-per-connection on the runtime netpoller (not an event loop); `net/http` adapted, not reimplemented; `recvmmsg` + `SO_REUSEPORT` via raw stdlib `syscall` because `x/net` pulls in the banned `x/sys`; **no registry**; error block `0.2.11.*` — `docs/adr/0029-sdk-net-domain.md`
+- ADR 0032 — `log/slog` is an adapter at the public edge, not a domain dependency: permitted in `pkg/v1/logger/slogbridge` ONLY, so a consumer facing a concrete `*slog.Logger` parameter stops building a second pipeline (two thresholds, two formats, half-stamped records); core keeps its "never log/slog" rule; error block `1.1.1.*` — `docs/adr/0032-logger-slog-bridge.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

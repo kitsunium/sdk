@@ -173,6 +173,13 @@ rules:
       # does: it is the domain's single TLS value type, and narrowing it to a
       # one-method interface would hide that both ends share it.
       - "**/internal/service/net/server/**"
+      # The slog bridge converts a stdlib slog.Value, whose type is fixed by the
+      # slog.Handler contract it implements — the same contract-required-type
+      # class as the AEAD Key below. The suggested `interface{ Any() any }` is
+      # actively wrong here: the function's whole job is to switch on Kind() and
+      # preserve the payload's type across the bridge, so narrowing to Any()
+      # would erase exactly what the package exists to keep (ADR 0032).
+      - "**/pkg/v1/logger/slogbridge/**"
 
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
