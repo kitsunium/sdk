@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-04
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0032](0032-logger-slog-bridge.md) (the slog bridge — the rule that prompted this), [ADR 0030](0030-stdout-is-a-protocol-channel.md), [ADR 0019](0019-pkg-errs-public-construction.md) (the error model offered to downstreams), [ADR 0004](0004-sdk-bazel-build-system.md) (why `tools/*` must stay dependency-free)
+- **Related**: [ADR 0032](../adr/0032-logger-slog-bridge.md) (the slog bridge — the rule that prompted this), [ADR 0030](../adr/0030-stdout-is-a-protocol-channel.md), [ADR 0019](../adr/0019-pkg-errs-public-construction.md) (the error model offered to downstreams), [ADR 0004](../adr/0004-sdk-bazel-build-system.md) (why `tools/*` must stay dependency-free)
 
 ## Context
 
@@ -112,7 +112,7 @@ principle — "every entry here is a design choice we committed to, not 'this
 warning is annoying'". An exemption nobody had to justify is the kind that
 outlives its reason.
 
-## Consequences
+## Consequences / Semantics
 
 - The freshness probe makes one network call per invocation, to a module proxy,
   bounded at 3 seconds. `make lint` passes `-version-check=off`: the SDK is not
@@ -179,10 +179,10 @@ outlives its reason.
 
 ## References
 
-- [ADR 0004](0004-sdk-bazel-build-system.md) — why `tools/*` must stay dependency-free
-- [ADR 0007](0007-sdk-release-and-versioning.md) — the patch policy the freshness probe cites
-- [ADR 0019](0019-pkg-errs-public-construction.md) — the error model SDK002 recommends
-- [ADR 0030](0030-stdout-is-a-protocol-channel.md) — the decision SDK003 enforces
-- [ADR 0032](0032-logger-slog-bridge.md) — the decision SDK001 and SDK005 enforce
+- [ADR 0004](../adr/0004-sdk-bazel-build-system.md) — why `tools/*` must stay dependency-free
+- [ADR 0007](../adr/0007-sdk-release-and-versioning.md) — the patch policy the freshness probe cites
+- [ADR 0019](../adr/0019-pkg-errs-public-construction.md) — the error model SDK002 recommends
+- [ADR 0030](../adr/0030-stdout-is-a-protocol-channel.md) — the decision SDK003 enforces
+- [ADR 0032](../adr/0032-logger-slog-bridge.md) — the decision SDK001 and SDK005 enforce
 - `tools/sdkguard/CLAUDE.md` — rule scoping, suppressions, and the known limits
 - `tools/CLAUDE.md` — the stdlib-only constraint on this tree and its reason

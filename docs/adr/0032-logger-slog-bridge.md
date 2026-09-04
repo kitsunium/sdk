@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-04
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0001](0001-sdk-go-multimodule-layout.md) (layer shape), [ADR 0002](0002-sdk-errors-package.md) (explicit construction over silent defaults), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (error codes), [ADR 0008](0008-readme-from-code-generation.md) (README generation), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (stdout is a protocol channel — the transport this defect is worst on)
+- **Related**: [ADR 0001](../adr/0001-sdk-go-multimodule-layout.md) (layer shape), [ADR 0002](../adr/0002-sdk-errors-package.md) (explicit construction over silent defaults), [ADR 0005](../adr/0005-sdk-error-codes-dotted-quad.md) (error codes), [ADR 0008](../adr/0008-readme-from-code-generation.md) (README generation), [ADR 0030](../adr/0030-stdout-is-a-protocol-channel.md) (stdout is a protocol channel — the transport this defect is worst on)
 - **Amends**: the "never log/slog" rule stated in `internal/core/logger/level/level.go` — it now binds the domain (kernel/core/service), not the public edge
 
 ## Context
@@ -82,7 +82,7 @@ The bridge therefore tracks the prefix itself and qualifies keys into the dotted
 form both SDK encoders already emit. This also makes the bridge independent of
 which handler or encoder sits underneath.
 
-## Consequences
+## Consequences / Semantics
 
 - A consumer facing a `*slog.Logger` parameter now has a one-line answer, and
   the three defects above become unreachable rather than merely discouraged.
@@ -156,11 +156,11 @@ which handler or encoder sits underneath.
 
 ## References
 
-- [ADR 0002](0002-sdk-errors-package.md) — explicit construction over silent defaults, the reasoning behind `LoggerRequired`
-- [ADR 0007](0007-sdk-release-and-versioning.md) — patch releases carry `internal/*` fixes
-- [ADR 0017](0017-pkg-bare-module-path.md) — why the public module is the bare `…/pkg`
-- [ADR 0030](0030-stdout-is-a-protocol-channel.md) — the transport where a split log stream hurts most
-- [ADR 0033](0033-consumer-rule-enforcement.md) — how this rule is enforced on consumers
+- [ADR 0002](../adr/0002-sdk-errors-package.md) — explicit construction over silent defaults, the reasoning behind `LoggerRequired`
+- [ADR 0007](../adr/0007-sdk-release-and-versioning.md) — patch releases carry `internal/*` fixes
+- [ADR 0017](../adr/0017-pkg-bare-module-path.md) — why the public module is the bare `…/pkg`
+- [ADR 0030](../adr/0030-stdout-is-a-protocol-channel.md) — the transport where a split log stream hurts most
+- [ADR 0033](../adr/0033-consumer-rule-enforcement.md) — how this rule is enforced on consumers
 - `internal/core/logger/logger.go` — the `Logger` port the bridge forwards to
 - `pkg/v1/logger/slogbridge/CLAUDE.md` — the package's own conventions and limits
 - Go stdlib, [`log/slog.Handler`](https://pkg.go.dev/log/slog#Handler) — the contract implemented, including the attribute elision rules the bridge reproduces
