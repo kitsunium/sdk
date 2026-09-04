@@ -129,6 +129,44 @@ func TestSDKRequirementReadsGoMod(t *testing.T) {
 			"v0.1.9", true, true,
 		},
 		{
+			// The block form is the common one in a monorepo. Reading its lines
+			// as requires turns "pkg => ../sdk/pkg" into a requirement on the
+			// version "=>", which compares older than every real tag and yields
+			// a confident, wrong "you are 25 releases behind".
+			"replace block suppresses the check",
+			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk/pkg v0.1.24\n)\n\n" +
+				"replace (\n\tgithub.com/kitsunium/sdk/pkg => ../sdk/pkg\n)\n",
+			"v0.1.24", true, true,
+		},
+		{
+			// Direction matters: this mentions the SDK without replacing it.
+			// Reading it as a replacement would silently suppress the warning
+			// for a consumer who is genuinely behind.
+			"SDK as the TARGET of a replace is not a replacement of it",
+			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.9\n" +
+				"replace example.com/fork => github.com/kitsunium/sdk/pkg v0.1.24\n",
+			"v0.1.9", false, true,
+		},
+		{
+			"require block with an indirect marker",
+			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk/pkg v0.1.9 // indirect\n)\n",
+			"v0.1.9", false, true,
+		},
+		{
+			// A commented-out directive is not a directive.
+			"commented directives are ignored",
+			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.24\n" +
+				"// replace github.com/kitsunium/sdk/pkg => ../x\n",
+			"v0.1.24", false, true,
+		},
+		{
+			// A malformed entry must not be read as a version; "=>" comparing
+			// older than every tag is exactly how the bug above manifested.
+			"a non-version second field is not a version",
+			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk/pkg => ../x\n)\n",
+			"", false, false,
+		},
+		{
 			"no SDK requirement",
 			"module x\n\nrequire example.com/other v1.0.0\n",
 			"", false, false,

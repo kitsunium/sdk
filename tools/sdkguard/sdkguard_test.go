@@ -68,15 +68,23 @@ func TestRulesFireOnViolations(t *testing.T) {
 			"SDK002",
 		},
 		{
-			"SDK003 stdout as a Writer field",
-			"package p\nimport \"os\"\ntype C struct{ Writer any }\nvar _ = C{Writer: os.Stdout}\n",
+			"SDK003 stdout as a logger Config Writer",
+			"package p\nimport (\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/logger\")\n" +
+				"var _ = logger.Config{Writer: os.Stdout}\n",
 			"SDK003",
 		},
 		{
 			"SDK003 stdout inside a Writers fan-out",
-			"package p\nimport (\"io\"; \"os\")\ntype C struct{ Writers []io.Writer }\n" +
-				"var _ = C{Writers: []io.Writer{os.Stderr, os.Stdout}}\n",
+			"package p\nimport (\"io\"\n\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/logger\")\n" +
+				"var _ = logger.Config{Writers: []io.Writer{os.Stderr, os.Stdout}}\n",
 			"SDK003",
+		},
+		{
+			// A dot import binds no qualifier, so no selector rule can see
+			// through it. Reporting the blind spot beats passing quietly.
+			"SDK001 reports a dot-imported slog as unanalysable",
+			"package p\nimport (\n. \"log/slog\"\n\"os\"\n)\nvar _ = New(NewTextHandler(os.Stderr, nil))\n",
+			"SDK001",
 		},
 		{
 			"SDK004 runtime assignment to logger.Version",
@@ -141,7 +149,16 @@ func TestRulesStaySilentOnLegitimateCode(t *testing.T) {
 		},
 		{
 			"stderr as a Writer field is the correct destination",
-			"package p\nimport \"os\"\ntype C struct{ Writer any }\nvar _ = C{Writer: os.Stderr}\n",
+			"package p\nimport (\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/logger\")\n" +
+				"var _ = logger.Config{Writer: os.Stderr}\n",
+		},
+		{
+			// The field name alone concludes nothing: a Report writing its
+			// result to stdout is a CLI doing its job, which ADR 0030 permits.
+			// Only a logging package's struct makes stdout a log destination.
+			"an Output field on a non-logging struct",
+			"package p\nimport (\"io\"\n\"os\"\n)\ntype Report struct{ Output io.Writer }\n" +
+				"var _ = Report{Output: os.Stdout}\n",
 		},
 	}
 	runCase := func(t *testing.T, c tc) {

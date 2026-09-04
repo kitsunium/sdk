@@ -133,6 +133,14 @@ outlives its reason.
 - Nothing is enforced on a consumer who does not run the tool. This ADR buys a
   check that CAN be run and a reason to run it; it does not buy compliance.
 
+## Breaking changes
+
+- **None for consumers.** `sdkguard` is a new opt-in binary; nothing runs it
+  unless a repository chooses to.
+- **`make lint` now fails on an SDK invariant violation.** This affects SDK
+  contributors, not consumers. The tree is clean at the invariant level today,
+  so the gate starts green.
+
 ## Alternatives considered
 
 - **`init()`-time detection with a panic or a warning.** Rejected on
@@ -150,3 +158,31 @@ outlives its reason.
   `forbidigo` at the identifier — neither knows a `Writer` field from a
   `Fprintln` argument), and has nowhere to record *why* a rule exists. Kept as a
   fallback for teams that want no new binary.
+
+## Deferred
+
+- **Type-resolved detection.** `go/packages` would close the two known blind
+  spots — a call re-exported through a wrapper module, and the field-name
+  heuristic that currently requires a logging package's struct type to fire. It
+  costs `x/tools`, which Decision 2 rules out for this tree. Revisit only if the
+  Bazel constraint changes.
+- **Resolving dot imports.** A dot-imported package binds no qualifier, so no
+  selector rule can see through it. The rules report the blind spot rather than
+  passing quietly; actually analysing such a file needs scope resolution, which
+  is the same dependency as above.
+- **A ktn-linter rule.** The natural home once that project gains a
+  project-rule mechanism; the rules here would move and this binary would
+  shrink to the freshness probe.
+- **Machine-readable output.** `-format=json` for CI annotators. The
+  `file:line:col` text form is already parsed by every annotator in use, so
+  this waits for a concrete need.
+
+## References
+
+- [ADR 0004](0004-sdk-bazel-build-system.md) — why `tools/*` must stay dependency-free
+- [ADR 0007](0007-sdk-release-and-versioning.md) — the patch policy the freshness probe cites
+- [ADR 0019](0019-pkg-errs-public-construction.md) — the error model SDK002 recommends
+- [ADR 0030](0030-stdout-is-a-protocol-channel.md) — the decision SDK003 enforces
+- [ADR 0032](0032-logger-slog-bridge.md) — the decision SDK001 and SDK005 enforce
+- `tools/sdkguard/CLAUDE.md` — rule scoping, suppressions, and the known limits
+- `tools/CLAUDE.md` — the stdlib-only constraint on this tree and its reason

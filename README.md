@@ -73,6 +73,7 @@ pkg/v1/          stable public API — type aliases + ergonomic helpers
 docs/            ADRs + the Astro-based docs site
 scripts/release/ release tooling — see ADR 0007
 tools/           build-time helpers (workspace_status, genindex, alloc-lane-targets)
+                 + sdkguard/ — consumer-facing rule enforcement (ADR 0033)
 e2e/             real-kernel conformance harness (auxiliary module, GOWORK=off)
 ```
 

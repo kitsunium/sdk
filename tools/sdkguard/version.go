@@ -109,24 +109,85 @@ func sdkRequirement(dir string) (moduleRef, bool) {
 		return moduleRef{}, false
 	}
 
+	return parseGoMod(string(data))
+}
+
+// parseGoMod extracts the SDK requirement from go.mod's text.
+//
+// Both the single-line and the parenthesised block forms are handled, and they
+// must be told apart: a naive reader that treats every line as a require turns
+// the block line "github.com/kitsunium/sdk/pkg => ../sdk/pkg" into a
+// requirement on the version "=>", which then compares older than every real
+// tag and produces a confident, wrong "you are 25 releases behind".
+func parseGoMod(text string) (moduleRef, bool) {
 	var ref moduleRef
-	for _, raw := range strings.Split(string(data), "\n") {
+	section := ""
+	for _, raw := range strings.Split(text, "\n") {
+		// go.mod comments start with //; strip them so a "// indirect" marker
+		// or a commented-out directive cannot be read as content.
 		line := strings.TrimSpace(raw)
-		// A replace wins over the require: it is what the build actually uses.
-		if strings.HasPrefix(line, "replace ") && strings.Contains(line, sdkModule) {
-			ref.Replaced = true
+		if idx := strings.Index(line, "//"); idx >= 0 {
+			line = strings.TrimSpace(line[:idx])
+		}
+		if line == "" {
 			continue
 		}
-		fields := strings.Fields(strings.TrimPrefix(line, "require "))
-		// The require block spells "<path> <version>"; the single-line form
-		// spells "require <path> <version>", which the TrimPrefix above folds
-		// into the same shape.
-		if len(fields) < 2 || fields[0] != sdkModule {
-			continue
+
+		switch {
+		// Opening a block sets the context for the lines that follow.
+		case strings.HasPrefix(line, "require ("):
+			section = "require"
+		case strings.HasPrefix(line, "replace ("):
+			section = "replace"
+		// A lone ")" closes whichever block was open.
+		case line == ")":
+			section = ""
+		// The single-line forms carry their own keyword, so they are read
+		// directly and leave the surrounding context untouched.
+		case strings.HasPrefix(line, "require "):
+			readRequire(&ref, strings.TrimPrefix(line, "require "))
+		case strings.HasPrefix(line, "replace "):
+			readReplace(&ref, strings.TrimPrefix(line, "replace "))
+		// Anything else belongs to the open block, if there is one.
+		case section == "require":
+			readRequire(&ref, line)
+		case section == "replace":
+			readReplace(&ref, line)
 		}
-		ref.Version = fields[1]
 	}
 	return ref, ref.Version != ""
+}
+
+// readRequire records the SDK version from a "<path> <version>" entry.
+func readRequire(ref *moduleRef, entry string) {
+	fields := strings.Fields(entry)
+	if len(fields) < 2 || fields[0] != sdkModule {
+		return
+	}
+	// Guard the version's shape: it keeps a malformed line from being read as
+	// a version, which is what would make the comparison silently absurd.
+	if !strings.HasPrefix(fields[1], "v") {
+		return
+	}
+	ref.Version = fields[1]
+}
+
+// readReplace records that the SDK is redirected, but only when it is the
+// LEFT side of the arrow.
+//
+// The direction matters: "replace example.com/fork => github.com/kitsunium/sdk/pkg"
+// mentions the SDK without replacing it, and reading that as a replacement
+// would silently suppress the freshness warning for a consumer who is genuinely
+// behind.
+func readReplace(ref *moduleRef, entry string) {
+	lhs, _, found := strings.Cut(entry, "=>")
+	if !found {
+		return
+	}
+	fields := strings.Fields(lhs)
+	if len(fields) > 0 && fields[0] == sdkModule {
+		ref.Replaced = true
+	}
 }
 
 // findGoMod walks up from dir looking for a go.mod, so the tool works from a

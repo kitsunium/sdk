@@ -64,7 +64,7 @@ every other codec.
 |---|---|
 | New feature or bug fix | `/plan "description"` → `/do` → `/git --commit` → `/git --merge` |
 | Code review | `/review` |
-| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage) |
+| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage + `make guard`) |
 | Local test suite | `make build && make test` (build prep + race tests) |
 | Allocation gates | `make test-alloc` — race-off pass; the ONLY lane that runs `//go:build !race` tests (targets in `tools/alloc-lane-targets.txt`, see rule 12) |
 | Single-package test | `bazel test //<path>:<target>` (e.g. `bazel test //internal/kernel/errs:errs_test`) |
@@ -133,7 +133,8 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 | `make test-alloc` | race-off allocation gates green (19 targets) — the only lane running `//go:build !race` tests |
 | `bash scripts/pre-commit/check-alloc-lane-coverage.sh` | exit 0 — no `!race` test sits outside `tools/alloc-lane-targets.txt` (rule 12) |
 | `cd pkg && go test ./...` | green; `pkg/v1/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
-| `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + ktn-linter + alloc-lane coverage |
+| `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + ktn-linter + alloc-lane coverage + `make guard` |
+| `make guard` | `tools/sdkguard` over the SDK's own tree at invariant level (ADR 0033); no network — `-version-check=off` |
 
 ## Reference
 

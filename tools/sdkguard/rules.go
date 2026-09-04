@@ -106,6 +106,9 @@ var slogPipelineCalls = map[string]string{
 
 // checkSlogPipeline implements SDK001.
 func checkSlogPipeline(fc *fileCtx, file *ast.File) []Finding {
+	if blind := fc.blindSpot(slogPath, "SDK001"); blind != nil {
+		return blind
+	}
 	if !fc.imports(slogPath) {
 		return nil
 	}
@@ -131,6 +134,9 @@ var untypedErrorCalls = map[string]string{
 // checkUntypedErrors implements SDK002.
 func checkUntypedErrors(fc *fileCtx, file *ast.File) []Finding {
 	var out []Finding
+	for path := range untypedErrorCalls {
+		out = append(out, fc.blindSpot(path, "SDK002")...)
+	}
 	ast.Inspect(file, func(n ast.Node) bool {
 		for path, name := range untypedErrorCalls {
 			if !fc.imports(path) || !fc.isCall(n, path, name) {
@@ -160,6 +166,55 @@ var writerFields = map[string]bool{
 	"Writer": true, "Writers": true, "Out": true, "Output": true,
 }
 
+// loggingConfigPkgs are the packages whose struct literals configure logging.
+//
+// The field name alone is NOT enough to conclude anything: a plain
+// `Report{Output: os.Stdout}` is a CLI writing its result, which ADR 0030
+// explicitly permits. Requiring the literal's TYPE to come from a logging
+// package is what keeps this rule on the destinations it is about. The cost is
+// that a consumer's own wrapper struct is missed — the documented price of
+// working without type resolution.
+var loggingConfigPkgs = []string{loggerPath, slogPath, logPath}
+
+// isLoggingConfig reports whether lit constructs a logging package's struct.
+func (fc *fileCtx) isLoggingConfig(lit *ast.CompositeLit) bool {
+	sel, ok := lit.Type.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	for _, path := range loggingConfigPkgs {
+		if local, imported := fc.byPath[path]; imported && ident.Name == local {
+			return true
+		}
+	}
+	return false
+}
+
+// stdoutInConfig reports os.Stdout bound to a destination field of a logging
+// package's struct literal.
+func (fc *fileCtx) stdoutInConfig(lit *ast.CompositeLit) []Finding {
+	if !fc.isLoggingConfig(lit) {
+		return nil
+	}
+	var out []Finding
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := kv.Key.(*ast.Ident)
+		if !ok || !writerFields[key.Name] {
+			continue
+		}
+		out = append(out, fc.stdoutIn(kv.Value, "a "+key.Name+" field")...)
+	}
+	return out
+}
+
 // checkStdoutDestination implements SDK003.
 //
 // It fires only where os.Stdout becomes a LOG destination — a Writer-shaped
@@ -168,15 +223,16 @@ var writerFields = map[string]bool{
 // because a CLI printing its results to stdout is doing its job; ADR 0030 is
 // about stdout carrying a protocol, not about stdout being forbidden.
 func checkStdoutDestination(fc *fileCtx, file *ast.File) []Finding {
+	if blind := fc.blindSpot(osPath, "SDK003"); blind != nil {
+		return blind
+	}
 	if !fc.imports(osPath) {
 		return nil
 	}
 	var out []Finding
 	ast.Inspect(file, func(n ast.Node) bool {
-		if kv, ok := n.(*ast.KeyValueExpr); ok {
-			if key, isIdent := kv.Key.(*ast.Ident); isIdent && writerFields[key.Name] {
-				out = append(out, fc.stdoutIn(kv.Value, "a "+key.Name+" field")...)
-			}
+		if lit, ok := n.(*ast.CompositeLit); ok {
+			out = append(out, fc.stdoutInConfig(lit)...)
 			return true
 		}
 		call, ok := n.(*ast.CallExpr)
@@ -215,6 +271,9 @@ func (fc *fileCtx) stdoutIn(expr ast.Expr, where string) []Finding {
 
 // checkVersionAssignment implements SDK004.
 func checkVersionAssignment(fc *fileCtx, file *ast.File) []Finding {
+	if blind := fc.blindSpot(loggerPath, "SDK004"); blind != nil {
+		return blind
+	}
 	if !fc.imports(loggerPath) {
 		return nil
 	}
@@ -248,6 +307,9 @@ var legacyLogCalls = []string{
 
 // checkLegacyLog implements SDK005.
 func checkLegacyLog(fc *fileCtx, file *ast.File) []Finding {
+	if blind := fc.blindSpot(logPath, "SDK005"); blind != nil {
+		return blind
+	}
 	if !fc.imports(logPath) {
 		return nil
 	}

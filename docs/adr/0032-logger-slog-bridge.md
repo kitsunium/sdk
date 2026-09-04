@@ -4,7 +4,7 @@
 - **Date**: 2026-09-04
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0001](0001-sdk-go-multimodule-layout.md) (layer shape), [ADR 0002](0002-sdk-errors-package.md) (explicit construction over silent defaults), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (error codes), [ADR 0008](0008-readme-from-code-generation.md) (README generation), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (stdout is a protocol channel — the transport this defect is worst on)
-- **Qualifies**: the "never log/slog" rule stated in `internal/core/logger/level/level.go`
+- **Amends**: the "never log/slog" rule stated in `internal/core/logger/level/level.go` — it now binds the domain (kernel/core/service), not the public edge
 
 ## Context
 
@@ -111,6 +111,18 @@ which handler or encoder sits underneath.
     alias and the nine constants the core already documents as "stable across
     the public API".
 
+## Breaking changes
+
+- **`TextHandler` output changes for three `Kind`s.** Attributes of kind
+  Duration, Time and Uint64 used to render as `?` through `logger.NewText`; they
+  now render their value, matching `encoder/text.go`. Any consumer parsing that
+  output for a literal `?` is affected. The old behaviour was a defect — the
+  file carried the value table twice and the copies had drifted — so this is a
+  fix, but it is observable and belongs here rather than in a footnote.
+- **No API is removed or changed.** `slogbridge` is a new opt-in subpackage;
+  `kind.go` only adds aliases the core already documented as stable. Existing
+  call sites compile unchanged.
+
 ## Alternatives considered
 
 - **Put the bridge in `pkg/v1/logger` directly.** Rejected: every consumer of
@@ -126,3 +138,29 @@ which handler or encoder sits underneath.
   that fails silently every time it is used is not a pattern.
 - **Delegate `WithGroup` to `Logger.WithGroup`.** Rejected: it is the shorter
   code and the wrong semantics. See Decision 4.
+
+## Deferred
+
+- **Carrying `slog.Record.Time` across the bridge.** It needs an emission path
+  that accepts a timestamp — `Logger.Log` has none, and adding one touches the
+  core contract every handler implements. Out of scope for an adapter; revisit
+  if a replay or ingestion use case makes the lost instant matter.
+- **A `KindGroup`-aware encoder.** Groups are flattened to dotted keys today
+  because neither bundled encoder renders a group payload. A JSON encoder that
+  nests them would be closer to slog's own JSON output, and would make the
+  flattening a choice rather than a constraint.
+- **Reconsidering the "never log/slog" rule for `core`.** This ADR moves the
+  boundary rather than the rule. If a second foreign ecosystem ever needs the
+  same treatment, the question of whether core should expose a neutral
+  handler-shaped port is worth reopening.
+
+## References
+
+- [ADR 0002](0002-sdk-errors-package.md) — explicit construction over silent defaults, the reasoning behind `LoggerRequired`
+- [ADR 0007](0007-sdk-release-and-versioning.md) — patch releases carry `internal/*` fixes
+- [ADR 0017](0017-pkg-bare-module-path.md) — why the public module is the bare `…/pkg`
+- [ADR 0030](0030-stdout-is-a-protocol-channel.md) — the transport where a split log stream hurts most
+- [ADR 0033](0033-consumer-rule-enforcement.md) — how this rule is enforced on consumers
+- `internal/core/logger/logger.go` — the `Logger` port the bridge forwards to
+- `pkg/v1/logger/slogbridge/CLAUDE.md` — the package's own conventions and limits
+- Go stdlib, [`log/slog.Handler`](https://pkg.go.dev/log/slog#Handler) — the contract implemented, including the attribute elision rules the bridge reproduces

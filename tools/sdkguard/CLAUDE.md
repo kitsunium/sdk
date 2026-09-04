@@ -72,7 +72,7 @@ exported symbols sees nothing and concludes there is nothing to take. That is
 the quiet cousin of the defects the rules catch: nothing fails, and the fix
 simply never arrives.
 
-**It is a warning and never changes the exit code.** Being behind is not a
+**In the default mode it is a warning, and the exit code does not move.** Being behind is not a
 violation — it is a fact the maintainer may already know and may have decided to
 live with. `-version-check=error` promotes it for teams that want freshness
 gated; `-version-check=off` skips the probe entirely, making no network call.
@@ -108,13 +108,24 @@ own `.golangci.yml` drops `misspell` for exactly that reason.
   to pass `slog.String` attrs to a foreign API. Only the constructors
   (`New`, `NewTextHandler`, `NewJSONHandler`) and the process-wide default
   (`SetDefault`, `Default`) create a second destination.
-- **SDK003 does not ban `os.Stdout`.** ADR 0030 is about stdout carrying a
-  protocol, not about stdout being forbidden. The rule fires only where stdout
-  becomes a *log destination* — a `Writer`/`Writers`/`Out`/`Output` field, or an
-  argument to a logging constructor. `fmt.Fprintln(os.Stdout, …)` and
-  `json.NewEncoder(os.Stdout)` are a CLI doing its job and stay silent.
+- **SDK003 does not ban `os.Stdout`, and the field name alone concludes
+  nothing.** ADR 0030 is about stdout carrying a protocol, not about stdout
+  being forbidden. The rule fires only where stdout becomes a *log
+  destination*: a `Writer`/`Writers`/`Out`/`Output` field **of a struct whose
+  type comes from a logging package** (`logger.Config`, `slog.HandlerOptions`,
+  …), or an argument to a logging constructor. `fmt.Fprintln(os.Stdout, …)`,
+  `json.NewEncoder(os.Stdout)` and a plain `Report{Output: os.Stdout}` are a CLI
+  doing its job and stay silent. Requiring the literal's type is what keeps the
+  field-name heuristic from firing on every struct that happens to have an
+  `Output`; the cost is that a consumer's own logging wrapper is missed, which
+  is the documented price of working without type resolution.
 - **Test files are excluded by default** (`-tests` opts in): fixtures
   legitimately mint throwaway errors.
+- **A dot import is reported, not ignored.** `import . "log/slog"` binds no
+  qualifier, so `slog.New` appears as `New` and no selector rule can see it.
+  Every rule that watches a dot-imported package emits a finding saying it
+  cannot analyse the file. A rule that cannot see is not a rule that found
+  nothing, and only the first deserves a clean run.
 
 ## Suppressions
 
@@ -149,11 +160,16 @@ Detection is AST-only, with no type resolution: `go/types` needs a package
 loader, and the usable one (`go/packages`) is in `x/tools`. Import aliases are
 resolved, and a selector only matches when the file actually imports the package
 — so a local named `fmt` in a file that does not import `fmt` is not flagged
-(pinned by a test). What AST-only cannot see is a package **re-exported** through
-an intermediate wrapper: `mylog.New()` that wraps `slog.New()` inside another
-module is invisible here. That is the honest trade for staying dependency-free,
-and it is the right one: the rules exist to catch the accidental second
-pipeline, not to defeat someone determined to hide one.
+(pinned by a test). Two things AST-only cannot see, both reported rather than hidden:
+
+- A package **re-exported** through an intermediate wrapper: `mylog.New()`
+  wrapping `slog.New()` inside another module is invisible here. Silent.
+- A **dot import**, which binds no qualifier at all. Not silent — each affected
+  rule says it cannot analyse the file.
+
+That is the honest trade for staying dependency-free, and it is the right one:
+the rules exist to catch the accidental second pipeline, not to defeat someone
+determined to hide one.
 
 ## Do NOT
 

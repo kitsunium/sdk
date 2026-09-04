@@ -35,6 +35,15 @@ type fileCtx struct {
 	// file. A rule matches selectors against the local name, so an aliased or
 	// renamed import is caught exactly like a plain one.
 	byPath map[string]string
+	// dotImports maps a dot-imported path to the position of its import spec.
+	//
+	// A dot import binds no qualifier, so calls appear unqualified and no
+	// selector match is possible: `. "log/slog"` turns slog.New into New, and
+	// every selector-based rule goes silent on a file that may well be
+	// building a second pipeline. Recording it lets the rules say so instead
+	// of passing quietly, which is the only honest option without type
+	// resolution.
+	dotImports map[string]token.Pos
 	// suppressed records, per line, which rule IDs an inline directive exempts.
 	suppressed map[int]map[string]bool
 }
@@ -91,9 +100,11 @@ func scanFile(path string, rules []Rule) ([]Finding, error) {
 		// ours; staying silent keeps sdkguard usable mid-refactor.
 		return nil, nil
 	}
+	byPath, dotImports := importsOf(file)
 	ctx := &fileCtx{
 		fset:       fset,
-		byPath:     importsOf(file),
+		byPath:     byPath,
+		dotImports: dotImports,
 		suppressed: suppressionsOf(fset, file),
 	}
 
@@ -109,9 +120,11 @@ func scanFile(path string, rules []Rule) ([]Finding, error) {
 	return out, nil
 }
 
-// importsOf maps each imported path to the local name it is bound to.
-func importsOf(file *ast.File) map[string]string {
+// importsOf maps each imported path to the local name it is bound to, and
+// separately records the dot imports no selector can reach.
+func importsOf(file *ast.File) (map[string]string, map[string]token.Pos) {
 	out := make(map[string]string, len(file.Imports))
+	dots := make(map[string]token.Pos)
 	for _, spec := range file.Imports {
 		path, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
@@ -123,14 +136,20 @@ func importsOf(file *ast.File) map[string]string {
 		if spec.Name != nil {
 			name = spec.Name.Name
 		}
+		switch name {
 		// A blank import binds nothing callable, so no selector can reference
 		// it and no rule can fire on it.
-		if name == "_" {
+		case "_":
+			continue
+		// A dot import binds no qualifier at all; the rules cannot see through
+		// it, so record it and let them report the blind spot.
+		case ".":
+			dots[path] = spec.Pos()
 			continue
 		}
 		out[path] = name
 	}
-	return out
+	return out, dots
 }
 
 // suppressionsOf collects the inline exemptions, keyed by line.
@@ -218,4 +237,21 @@ func (fc *fileCtx) imports(path string) bool {
 // at builds a Finding positioned on n.
 func (fc *fileCtx) at(n ast.Node, rule, msg string) Finding {
 	return Finding{Pos: fc.fset.Position(n.Pos()), Rule: rule, Message: msg}
+}
+
+// blindSpot reports a dot import that makes rule unable to analyse this file.
+//
+// Reporting beats staying silent: a rule that cannot see is not a rule that
+// found nothing, and only the first is worth a clean run.
+func (fc *fileCtx) blindSpot(path, rule string) []Finding {
+	pos, dotted := fc.dotImports[path]
+	if !dotted {
+		return nil
+	}
+	return []Finding{{
+		Pos:  fc.fset.Position(pos),
+		Rule: rule,
+		Message: path + " is dot-imported, so its calls carry no qualifier and " +
+			rule + " cannot analyse this file; import it normally so the rule can see it",
+	}}
 }
