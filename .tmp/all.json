@@ -6,11 +6,11 @@
     "version": "1.0.0"
   },
   "summary": {
-    "totalIssues": 619,
+    "totalIssues": 525,
     "byLevel": {
       "error": 0,
       "info": 0,
-      "warning": 619
+      "warning": 525
     }
   },
   "results": [
@@ -70,66 +70,6 @@
       "message": "file 'meter.go' without tests. Create meter_external_test.go and meter_internal_test.go",
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
-        "line": 2,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-FILES",
-      "level": "warning",
-      "message": "file 'breaker.go' without tests. Create breaker_external_test.go and breaker_internal_test.go",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
-        "line": 2,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-FILES",
-      "level": "warning",
-      "message": "file 'bulkhead.go' without tests. Create bulkhead_external_test.go and bulkhead_internal_test.go",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/bulkhead.go",
-        "line": 2,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-FILES",
-      "level": "warning",
-      "message": "file 'ratelimit.go' without tests. Create ratelimit_external_test.go and ratelimit_internal_test.go",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/ratelimit.go",
-        "line": 2,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-FILES",
-      "level": "warning",
-      "message": "file 'retry.go' without tests. Create retry_external_test.go and retry_internal_test.go",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/retry.go",
-        "line": 2,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-FILES",
-      "level": "warning",
-      "message": "file 'timeout.go' without tests. Create timeout_external_test.go",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/timeout.go",
-        "line": 5,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-FILES",
-      "level": "warning",
-      "message": "file 'wrap.go' without tests. Create wrap_internal_test.go",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/wrap.go",
         "line": 2,
         "column": 9
       }
@@ -221,36 +161,6 @@
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/policies.go",
         "line": 2,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-FILES",
-      "level": "warning",
-      "message": "file 'reaper.go' without tests. Create reaper_external_test.go",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper.go",
-        "line": 8,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-FILES",
-      "level": "warning",
-      "message": "file 'reaper_unix.go' without tests. Create reaper_unix_external_test.go",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 5,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-FILES",
-      "level": "warning",
-      "message": "file 'subreaper_linux.go' without tests. Create subreaper_linux_external_test.go",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/subreaper_linux.go",
-        "line": 4,
         "column": 9
       }
     },
@@ -507,16 +417,6 @@
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'NewTextExporter' in 'exporter_text.go' has no test in 'exporter_text_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/exporter_text.go",
-        "line": 61,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
       "message": "function 'NewMeter' in 'meter.go' has no test in 'meter_external_test.go'",
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
@@ -527,40 +427,10 @@
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'memCounter_Add' in 'counter.go' has no test in 'counter_internal_test.go'",
+      "message": "function 'NewTextExporter' in 'exporter_text.go' has no test in 'exporter_text_external_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/counter.go",
-        "line": 16,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'memCounter_load' in 'counter.go' has no test in 'counter_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/counter.go",
-        "line": 25,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'memCounter_Inc' in 'counter.go' has no test in 'counter_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/counter.go",
-        "line": 31,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'memMeter_assertKind' in 'kind.go' has no test in 'kind_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/kind.go",
-        "line": 20,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/exporter_text.go",
+        "line": 61,
         "column": 1
       }
     },
@@ -637,6 +507,76 @@
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
+      "message": "function 'memCounter_Add' in 'counter.go' has no test in 'counter_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/counter.go",
+        "line": 16,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'memCounter_load' in 'counter.go' has no test in 'counter_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/counter.go",
+        "line": 25,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'memCounter_Inc' in 'counter.go' has no test in 'counter_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/counter.go",
+        "line": 31,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'memMeter_Counter' in 'meter.go' has no test in 'meter_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
+        "line": 32,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'memMeter_Gauge' in 'meter.go' has no test in 'meter_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
+        "line": 50,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'memMeter_Histogram' in 'meter.go' has no test in 'meter_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
+        "line": 69,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'memMeter_Collect' in 'meter.go' has no test in 'meter_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
+        "line": 87,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
       "message": "function 'newTextExporter' in 'exporter_text.go' has no test in 'exporter_text_internal_test.go'",
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/exporter_text.go",
@@ -687,40 +627,10 @@
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'memMeter_Counter' in 'meter.go' has no test in 'meter_internal_test.go'",
+      "message": "function 'memMeter_assertKind' in 'kind.go' has no test in 'kind_internal_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
-        "line": 32,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'memMeter_Gauge' in 'meter.go' has no test in 'meter_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
-        "line": 50,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'memMeter_Histogram' in 'meter.go' has no test in 'meter_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
-        "line": 69,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'memMeter_Collect' in 'meter.go' has no test in 'meter_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/meter.go",
-        "line": 87,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/metrics/kind.go",
+        "line": 20,
         "column": 1
       }
     },
@@ -957,46 +867,6 @@
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'AllowMethods' in 'policies.go' has no test in 'policies_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/policies.go",
-        "line": 14,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'AllowPaths' in 'policies.go' has no test in 'policies_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/policies.go",
-        "line": 30,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'DenyPaths' in 'policies.go' has no test in 'policies_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/policies.go",
-        "line": 44,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Policies' in 'policies.go' has no test in 'policies_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/policies.go",
-        "line": 58,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
       "message": "function 'New' in 'client.go' has no test in 'client_external_test.go'",
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/client.go",
@@ -1031,6 +901,46 @@
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/client.go",
         "line": 106,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'AllowMethods' in 'policies.go' has no test in 'policies_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/policies.go",
+        "line": 14,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'AllowPaths' in 'policies.go' has no test in 'policies_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/policies.go",
+        "line": 30,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'DenyPaths' in 'policies.go' has no test in 'policies_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/policies.go",
+        "line": 44,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Policies' in 'policies.go' has no test in 'policies_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/client/policies.go",
+        "line": 58,
         "column": 1
       }
     },
@@ -2055,916 +1965,6 @@
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'WithOnReap' in 'reaper.go' has no test in 'reaper_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper.go",
-        "line": 26,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'New' in 'reaper_unix.go' has no test in 'reaper_unix_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 64,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'IsPID1' in 'reaper_unix.go' has no test in 'reaper_unix_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 305,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'SetChildSubreaper' in 'subreaper_linux.go' has no test in 'subreaper_linux_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/subreaper_linux.go",
-        "line": 26,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_Start' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 73,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_loop' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 99,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_Stop' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 138,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_markStopped' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 184,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_ReapOnce' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 197,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_drain' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 205,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_LastError' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 218,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_drainResult' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 232,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_classifyWaitErr' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 267,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixReaper_fireOnReap' in 'reaper_unix.go' has no test in 'reaper_unix_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 293,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'resolve' in 'reaper.go' has no test in 'reaper_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper.go",
-        "line": 35,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-TABLE",
-      "level": "warning",
-      "message": "test 'TestDrainResultNoChildren' without table-driven pattern",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 84,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-TABLE",
-      "level": "warning",
-      "message": "test 'TestDrainResultCountsChildren' without table-driven pattern",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 102,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-TABLE",
-      "level": "warning",
-      "message": "test 'TestStartStopNoGoroutineLeak' without table-driven pattern",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 147,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-TABLE",
-      "level": "warning",
-      "message": "test 'TestConcurrentStopIsFullBarrier' without table-driven pattern",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 174,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-TABLE",
-      "level": "warning",
-      "message": "test 'TestReapOnceConcurrentWithLoop' without table-driven pattern",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 232,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-TABLE",
-      "level": "warning",
-      "message": "test 'TestSubreaperReapsOrphanedGrandchild' without table-driven pattern",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 269,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-ASSERT",
-      "level": "warning",
-      "message": "test 'TestStartIdempotentAndStopWithoutStart' without assertions. A test must test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 216,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'WithOnReap' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper.go",
-        "line": 26,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'resolve' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper.go",
-        "line": 35,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'New' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 64,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Start' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 73,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'loop' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 99,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Stop' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 138,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'markStopped' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 184,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'ReapOnce' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 197,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'drain' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 205,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'LastError' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 218,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'drainResult' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 232,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'classifyWaitErr' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 267,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'fireOnReap' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 293,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'IsPID1' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_unix.go",
-        "line": 305,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'SetChildSubreaper' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/subreaper_linux.go",
-        "line": 26,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-NOSKIP",
-      "level": "warning",
-      "message": "t.Skip() forbidden in 't.Skip()'. Tests must pass",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 281,
-        "column": 3
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-PARALLEL",
-      "level": "warning",
-      "message": "in 'TestDrainResultNoChildren': test function must call t.Parallel()",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 84,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-PARALLEL",
-      "level": "warning",
-      "message": "in 'TestDrainResultCountsChildren': test function must call t.Parallel()",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 102,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-PARALLEL",
-      "level": "warning",
-      "message": "in 'TestStartStopNoGoroutineLeak': test function must call t.Parallel()",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 147,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-PARALLEL",
-      "level": "warning",
-      "message": "in 'TestConcurrentStopIsFullBarrier': test function must call t.Parallel()",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 174,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-PARALLEL",
-      "level": "warning",
-      "message": "in 'TestReapOnceConcurrentWithLoop': test function must call t.Parallel()",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 232,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-PARALLEL",
-      "level": "warning",
-      "message": "in 'TestSubreaperReapsOrphanedGrandchild': test function must call t.Parallel()",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/reaper/reaper_internal_test.go",
-        "line": 269,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-PLACEMENT",
-      "level": "warning",
-      "message": "test 'TestWatchdogInterval' in 'sdnotify_internal_test.go' tests a public function 'WatchdogInterval'. Must be in 'sdnotify_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 196,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Listen' in 'listen_linux.go' has no test in 'listen_linux_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 39,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Notify' in 'notify.go' has no test in 'notify_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 18,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Ready' in 'notify.go' has no test in 'notify_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 76,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Reloading' in 'notify.go' has no test in 'notify_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 83,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Stopping' in 'notify.go' has no test in 'notify_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 89,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Status' in 'notify.go' has no test in 'notify_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 95,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Watchdog' in 'notify.go' has no test in 'notify_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 101,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'MainPID' in 'notify.go' has no test in 'notify_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 107,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'enablePasscred' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 83,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'listener_Recv' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 114,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'wrapCredMismatch' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 156,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'senderPID' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 170,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'listener_Close' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 201,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'wrapListen' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 225,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'wrapNotify' in 'notify.go' has no test in 'notify_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 64,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'wrapInvalid' in 'sdnotify.go' has no test in 'sdnotify_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify.go",
-        "line": 60,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'encodePayload' in 'sdnotify.go' has no test in 'sdnotify_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify.go",
-        "line": 90,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Listen' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 39,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'enablePasscred' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 83,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Recv' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 114,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'wrapCredMismatch' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 156,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'senderPID' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 170,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Close' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 201,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'wrapListen' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
-        "line": 225,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Notify' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 18,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'wrapNotify' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 64,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Ready' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 76,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Reloading' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 83,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Stopping' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 89,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Status' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 95,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Watchdog' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 101,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'MainPID' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
-        "line": 107,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'wrapInvalid' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify.go",
-        "line": 60,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'encodePayload' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify.go",
-        "line": 90,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestResolveAddr' has unused table field 'raw'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 38,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestResolveAddr' has unused table field 'want'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 38,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestParsePayload' has unused table field 'body'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 73,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestParsePayload' has unused table field 'wantReady'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 73,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestParsePayload' has unused table field 'wantPID'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 73,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestParsePayload' has unused table field 'wantStat'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 73,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestParsePayload' has unused table field 'wantErr'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 73,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestEncodePayloadInjection' has unused table field 'state'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 148,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestEncodePayloadInjection' has unused table field 'wantErr'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 148,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestWatchdogInterval' has unused table field 'raw'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 196,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestWatchdogInterval' has unused table field 'wantDur'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 196,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-UNUSED-FIELDS",
-      "level": "warning",
-      "message": "test 'TestWatchdogInterval' has unused table field 'wantOK'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
-        "line": 196,
-        "column": 1
-      }
-    },
-    {
       "ruleId": "KTN-TEST-FILES",
       "level": "warning",
       "message": "test file 'kernel_len_internal_test.go' has no corresponding source file 'kernel_len.go'",
@@ -2982,6 +1982,176 @@
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/shards_internal_test.go",
         "line": 1,
         "column": 9
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'PacketGroup_Name' in 'packet_group.go' has no test in 'packet_group_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_group.go",
+        "line": 27,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'PacketGroup_Handle' in 'packet_group.go' has no test in 'packet_group_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_group.go",
+        "line": 33,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'PacketGroup_HandleFunc' in 'packet_group.go' has no test in 'packet_group_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_group.go",
+        "line": 40,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'PacketGroup_Use' in 'packet_group.go' has no test in 'packet_group_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_group.go",
+        "line": 46,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'New' in 'server.go' has no test in 'server_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
+        "line": 105,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_Group' in 'server.go' has no test in 'server_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
+        "line": 130,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_PacketGroup' in 'server.go' has no test in 'server_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
+        "line": 155,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_State' in 'server.go' has no test in 'server_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
+        "line": 193,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_Start' in 'lifecycle.go' has no test in 'lifecycle_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/lifecycle.go",
+        "line": 23,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_Serve' in 'lifecycle.go' has no test in 'lifecycle_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/lifecycle.go",
+        "line": 391,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_Shutdown' in 'lifecycle.go' has no test in 'lifecycle_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/lifecycle.go",
+        "line": 408,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_Close' in 'lifecycle.go' has no test in 'lifecycle_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/lifecycle.go",
+        "line": 496,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'StreamGroup_Name' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
+        "line": 39,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'StreamGroup_Handle' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
+        "line": 45,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'StreamGroup_HandleFunc' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
+        "line": 54,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'StreamGroup_HandleHTTP' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
+        "line": 65,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'StreamGroup_Use' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
+        "line": 73,
+        "column": 1
       }
     },
     {
@@ -3117,446 +2287,6 @@
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'StreamGroup_Name' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
-        "line": 39,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'StreamGroup_Handle' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
-        "line": 45,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'StreamGroup_HandleFunc' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
-        "line": 54,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'StreamGroup_HandleHTTP' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
-        "line": 65,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'StreamGroup_Use' in 'stream_group.go' has no test in 'stream_group_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
-        "line": 73,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'PacketGroup_Name' in 'packet_group.go' has no test in 'packet_group_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_group.go",
-        "line": 27,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'PacketGroup_Handle' in 'packet_group.go' has no test in 'packet_group_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_group.go",
-        "line": 33,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'PacketGroup_HandleFunc' in 'packet_group.go' has no test in 'packet_group_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_group.go",
-        "line": 40,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'PacketGroup_Use' in 'packet_group.go' has no test in 'packet_group_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_group.go",
-        "line": 46,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'New' in 'server.go' has no test in 'server_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
-        "line": 105,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_Group' in 'server.go' has no test in 'server_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
-        "line": 130,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_PacketGroup' in 'server.go' has no test in 'server_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
-        "line": 155,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_State' in 'server.go' has no test in 'server_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
-        "line": 193,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_Start' in 'lifecycle.go' has no test in 'lifecycle_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/lifecycle.go",
-        "line": 23,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_Serve' in 'lifecycle.go' has no test in 'lifecycle_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/lifecycle.go",
-        "line": 391,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_Shutdown' in 'lifecycle.go' has no test in 'lifecycle_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/lifecycle.go",
-        "line": 408,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_Close' in 'lifecycle.go' has no test in 'lifecycle_external_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/lifecycle.go",
-        "line": 496,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'packet_Data' in 'packet.go' has no test in 'packet_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
-        "line": 27,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'packet_From' in 'packet.go' has no test in 'packet_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
-        "line": 33,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'packet_To' in 'packet.go' has no test in 'packet_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
-        "line": 39,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'packet_ID' in 'packet.go' has no test in 'packet_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
-        "line": 45,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'packet_Group' in 'packet.go' has no test in 'packet_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
-        "line": 51,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'packet_Reply' in 'packet.go' has no test in 'packet_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
-        "line": 61,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'packet_reset' in 'packet.go' has no test in 'packet_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
-        "line": 68,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'datagram_payload' in 'batch.go' has no test in 'batch_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/batch.go",
-        "line": 21,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'newSlots' in 'batch.go' has no test in 'batch_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/batch.go",
-        "line": 50,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'conn_Read' in 'conn.go' has no test in 'conn_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
-        "line": 33,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'conn_boundRead' in 'conn.go' has no test in 'conn_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
-        "line": 47,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'tighterBudget' in 'conn.go' has no test in 'conn_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
-        "line": 76,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'conn_ID' in 'conn.go' has no test in 'conn_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
-        "line": 92,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'conn_Group' in 'conn.go' has no test in 'conn_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
-        "line": 98,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'conn_Buffer' in 'conn.go' has no test in 'conn_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
-        "line": 104,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'conn_Close' in 'conn.go' has no test in 'conn_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
-        "line": 123,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'conn_reset' in 'conn.go' has no test in 'conn_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
-        "line": 136,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_acquire' in 'pool.go' has no test in 'pool_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/pool.go",
-        "line": 18,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_release' in 'pool.go' has no test in 'pool_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/pool.go",
-        "line": 48,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_closeLive' in 'pool.go' has no test in 'pool_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/pool.go",
-        "line": 72,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'portableReader_readBatch' in 'batch_portable.go' has no test in 'batch_portable_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/batch_portable.go",
-        "line": 24,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'newChanListener' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
-        "line": 30,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'chanListener_Accept' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
-        "line": 41,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'chanListener_Close' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
-        "line": 55,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'chanListener_Addr' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
-        "line": 63,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'chanListener_offer' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
-        "line": 69,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'StreamGroup_resolved' in 'stream_group.go' has no test in 'stream_group_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
-        "line": 80,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
       "message": "function 'Server_adoptedSockets' in 'adopt.go' has no test in 'adopt_internal_test.go'",
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/adopt.go",
@@ -3631,6 +2361,96 @@
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/adopt.go",
         "line": 145,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'resolveShards' in 'listen.go' has no test in 'listen_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/listen.go",
+        "line": 38,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'reusePortControl' in 'listen.go' has no test in 'listen_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/listen.go",
+        "line": 76,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'listen' in 'listen.go' has no test in 'listen_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/listen.go",
+        "line": 94,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'boundListener_Close' in 'listen.go' has no test in 'listen_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/listen.go",
+        "line": 140,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_readLoop' in 'packet_loop.go' has no test in 'packet_loop_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_loop.go",
+        "line": 23,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_dispatch' in 'packet_loop.go' has no test in 'packet_loop_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_loop.go",
+        "line": 56,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_servePacket' in 'packet_loop.go' has no test in 'packet_loop_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_loop.go",
+        "line": 81,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'datagram_payload' in 'batch.go' has no test in 'batch_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/batch.go",
+        "line": 21,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'newSlots' in 'batch.go' has no test in 'batch_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/batch.go",
+        "line": 50,
         "column": 1
       }
     },
@@ -3797,230 +2617,10 @@
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'newMultiReader' in 'multireader_linux.go' has no test in 'multireader_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/multireader_linux.go",
-        "line": 33,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'multiReader_wire' in 'multireader_linux.go' has no test in 'multireader_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/multireader_linux.go",
-        "line": 46,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'multiReader_readBatch' in 'multireader_linux.go' has no test in 'multireader_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/multireader_linux.go",
-        "line": 70,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'multiReader_fill' in 'multireader_linux.go' has no test in 'multireader_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/multireader_linux.go",
-        "line": 106,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_readLoop' in 'packet_loop.go' has no test in 'packet_loop_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_loop.go",
-        "line": 23,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_dispatch' in 'packet_loop.go' has no test in 'packet_loop_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_loop.go",
-        "line": 56,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_servePacket' in 'packet_loop.go' has no test in 'packet_loop_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_loop.go",
-        "line": 81,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
       "message": "function 'setReusePort' in 'reuseport_linux.go' has no test in 'reuseport_linux_internal_test.go'",
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/reuseport_linux.go",
         "line": 24,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'sockaddrToAddr' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
-        "line": 26,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'inet4Addr' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
-        "line": 50,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'inet6Addr' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
-        "line": 60,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'unixAddr' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
-        "line": 72,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'hostPort' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
-        "line": 95,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'zoneOf' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
-        "line": 105,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'newConnLimiter' in 'stream_group_limiter.go' has no test in 'stream_group_limiter_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group_limiter.go",
-        "line": 28,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_admit' in 'stream_group_limiter.go' has no test in 'stream_group_limiter_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group_limiter.go",
-        "line": 48,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'newDatagramSource' in 'datagram_source_linux.go' has no test in 'datagram_source_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/datagram_source_linux.go",
-        "line": 15,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'batchAvailable' in 'datagram_source_linux.go' has no test in 'datagram_source_linux_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/datagram_source_linux.go",
-        "line": 34,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'handshakeHandler_ServeConn' in 'handshake.go' has no test in 'handshake_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/handshake.go",
-        "line": 40,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'boundHandshake' in 'handshake.go' has no test in 'handshake_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/handshake.go",
-        "line": 52,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'handshakeBudget' in 'handshake.go' has no test in 'handshake_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/handshake.go",
-        "line": 71,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'newPooledConn' in 'server.go' has no test in 'server_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
-        "line": 99,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'Server_recordDeclError' in 'server.go' has no test in 'server_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
-        "line": 185,
         "column": 1
       }
     },
@@ -4197,40 +2797,230 @@
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'resolveShards' in 'listen.go' has no test in 'listen_internal_test.go'",
+      "message": "function 'newMultiReader' in 'multireader_linux.go' has no test in 'multireader_linux_internal_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/listen.go",
-        "line": 38,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/multireader_linux.go",
+        "line": 33,
         "column": 1
       }
     },
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'reusePortControl' in 'listen.go' has no test in 'listen_internal_test.go'",
+      "message": "function 'multiReader_wire' in 'multireader_linux.go' has no test in 'multireader_linux_internal_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/listen.go",
-        "line": 76,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/multireader_linux.go",
+        "line": 46,
         "column": 1
       }
     },
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'listen' in 'listen.go' has no test in 'listen_internal_test.go'",
+      "message": "function 'multiReader_readBatch' in 'multireader_linux.go' has no test in 'multireader_linux_internal_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/listen.go",
-        "line": 94,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/multireader_linux.go",
+        "line": 70,
         "column": 1
       }
     },
     {
       "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "function 'boundListener_Close' in 'listen.go' has no test in 'listen_internal_test.go'",
+      "message": "function 'multiReader_fill' in 'multireader_linux.go' has no test in 'multireader_linux_internal_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/listen.go",
-        "line": 140,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/multireader_linux.go",
+        "line": 106,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_acquire' in 'pool.go' has no test in 'pool_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/pool.go",
+        "line": 18,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_release' in 'pool.go' has no test in 'pool_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/pool.go",
+        "line": 48,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_closeLive' in 'pool.go' has no test in 'pool_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/pool.go",
+        "line": 72,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'sockaddrToAddr' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
+        "line": 26,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'inet4Addr' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
+        "line": 50,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'inet6Addr' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
+        "line": 60,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'unixAddr' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
+        "line": 72,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'hostPort' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
+        "line": 95,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'zoneOf' in 'sockaddr_linux.go' has no test in 'sockaddr_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/sockaddr_linux.go",
+        "line": 105,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'StreamGroup_resolved' in 'stream_group.go' has no test in 'stream_group_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group.go",
+        "line": 80,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'portableReader_readBatch' in 'batch_portable.go' has no test in 'batch_portable_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/batch_portable.go",
+        "line": 24,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'handshakeHandler_ServeConn' in 'handshake.go' has no test in 'handshake_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/handshake.go",
+        "line": 40,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'boundHandshake' in 'handshake.go' has no test in 'handshake_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/handshake.go",
+        "line": 52,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'handshakeBudget' in 'handshake.go' has no test in 'handshake_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/handshake.go",
+        "line": 71,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'newChanListener' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
+        "line": 30,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'chanListener_Accept' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
+        "line": 41,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'chanListener_Close' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
+        "line": 55,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'chanListener_Addr' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
+        "line": 63,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'chanListener_offer' in 'http_listener.go' has no test in 'http_listener_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/http_listener.go",
+        "line": 69,
         "column": 1
       }
     },
@@ -4241,6 +3031,216 @@
       "location": {
         "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet_group.go",
         "line": 53,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'newPooledConn' in 'server.go' has no test in 'server_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
+        "line": 99,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_recordDeclError' in 'server.go' has no test in 'server_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/server.go",
+        "line": 185,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'conn_Read' in 'conn.go' has no test in 'conn_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
+        "line": 33,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'conn_boundRead' in 'conn.go' has no test in 'conn_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
+        "line": 47,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'tighterBudget' in 'conn.go' has no test in 'conn_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
+        "line": 76,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'conn_ID' in 'conn.go' has no test in 'conn_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
+        "line": 92,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'conn_Group' in 'conn.go' has no test in 'conn_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
+        "line": 98,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'conn_Buffer' in 'conn.go' has no test in 'conn_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
+        "line": 104,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'conn_Close' in 'conn.go' has no test in 'conn_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
+        "line": 123,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'conn_reset' in 'conn.go' has no test in 'conn_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/conn.go",
+        "line": 136,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'newDatagramSource' in 'datagram_source_linux.go' has no test in 'datagram_source_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/datagram_source_linux.go",
+        "line": 15,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'batchAvailable' in 'datagram_source_linux.go' has no test in 'datagram_source_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/datagram_source_linux.go",
+        "line": 34,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'packet_Data' in 'packet.go' has no test in 'packet_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
+        "line": 27,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'packet_From' in 'packet.go' has no test in 'packet_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
+        "line": 33,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'packet_To' in 'packet.go' has no test in 'packet_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
+        "line": 39,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'packet_ID' in 'packet.go' has no test in 'packet_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
+        "line": 45,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'packet_Group' in 'packet.go' has no test in 'packet_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
+        "line": 51,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'packet_Reply' in 'packet.go' has no test in 'packet_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
+        "line": 61,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'packet_reset' in 'packet.go' has no test in 'packet_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/packet.go",
+        "line": 68,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'newConnLimiter' in 'stream_group_limiter.go' has no test in 'stream_group_limiter_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group_limiter.go",
+        "line": 28,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Server_admit' in 'stream_group_limiter.go' has no test in 'stream_group_limiter_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/net/server/stream_group_limiter.go",
+        "line": 48,
         "column": 1
       }
     },
@@ -5795,412 +4795,472 @@
       }
     },
     {
-      "ruleId": "KTN-TEST-FILES",
+      "ruleId": "KTN-TEST-PLACEMENT",
       "level": "warning",
-      "message": "test file 'resilience_external_test.go' has no corresponding source file 'resilience.go'",
+      "message": "test 'TestWatchdogInterval' in 'sdnotify_internal_test.go' tests a public function 'WatchdogInterval'. Must be in 'sdnotify_external_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/resilience_external_test.go",
-        "line": 1,
-        "column": 9
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-TABLE",
-      "level": "warning",
-      "message": "test 'TestRetrySucceedsThenExhausts' without table-driven pattern",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/resilience_external_test.go",
-        "line": 25,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 196,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-TABLE",
+      "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "test 'TestTimeout' without table-driven pattern",
+      "message": "function 'Listen' in 'listen_linux.go' has no test in 'listen_linux_external_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/resilience_external_test.go",
-        "line": 48,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 39,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-TABLE",
+      "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "test 'TestBreakerTripsAndRecovers' without table-driven pattern",
+      "message": "function 'Notify' in 'notify.go' has no test in 'notify_external_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/resilience_external_test.go",
-        "line": 66,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 18,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-TABLE",
+      "ruleId": "KTN-TEST-SYNC",
       "level": "warning",
-      "message": "test 'TestRateLimiterBurst' without table-driven pattern",
+      "message": "function 'Ready' in 'notify.go' has no test in 'notify_external_test.go'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/resilience_external_test.go",
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 76,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Reloading' in 'notify.go' has no test in 'notify_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 83,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Stopping' in 'notify.go' has no test in 'notify_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 89,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Status' in 'notify.go' has no test in 'notify_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 95,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'Watchdog' in 'notify.go' has no test in 'notify_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 101,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'MainPID' in 'notify.go' has no test in 'notify_external_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 107,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'enablePasscred' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 83,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'listener_Recv' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 114,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'wrapCredMismatch' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 156,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'senderPID' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 170,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'listener_Close' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 201,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'wrapListen' in 'listen_linux.go' has no test in 'listen_linux_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 225,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'wrapNotify' in 'notify.go' has no test in 'notify_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 64,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'wrapInvalid' in 'sdnotify.go' has no test in 'sdnotify_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify.go",
+        "line": 60,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-SYNC",
+      "level": "warning",
+      "message": "function 'encodePayload' in 'sdnotify.go' has no test in 'sdnotify_internal_test.go'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify.go",
         "line": 90,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-TABLE",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "test 'TestBulkheadRejectsWhenFull' without table-driven pattern",
+      "message": "function 'Listen' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/resilience_external_test.go",
-        "line": 115,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 39,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'NewBulkhead' in 'bulkhead.go' has no test in 'bulkhead_external_test.go'",
+      "message": "function 'enablePasscred' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/bulkhead.go",
-        "line": 19,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 83,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'NewRetry' in 'retry.go' has no test in 'retry_external_test.go'",
+      "message": "function 'Recv' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/retry.go",
-        "line": 29,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 114,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'NewTimeout' in 'timeout.go' has no test in 'timeout_external_test.go'",
+      "message": "function 'wrapCredMismatch' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/timeout.go",
-        "line": 29,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 156,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'NewCircuitBreaker' in 'breaker.go' has no test in 'breaker_external_test.go'",
+      "message": "function 'senderPID' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
-        "line": 44,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 170,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'NewRateLimiter' in 'ratelimit.go' has no test in 'ratelimit_external_test.go'",
+      "message": "function 'Close' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/ratelimit.go",
-        "line": 33,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 201,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'timeoutRunner_Run' in 'timeout.go' has no test in 'timeout_internal_test.go'",
+      "message": "function 'wrapListen' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/timeout.go",
-        "line": 41,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/listen_linux.go",
+        "line": 225,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'retryRunner_Run' in 'retry.go' has no test in 'retry_internal_test.go'",
+      "message": "function 'Notify' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/retry.go",
-        "line": 46,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 18,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'retryRunner_wait' in 'retry.go' has no test in 'retry_internal_test.go'",
+      "message": "function 'wrapNotify' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/retry.go",
-        "line": 82,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 64,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'retryRunner_backoff' in 'retry.go' has no test in 'retry_internal_test.go'",
+      "message": "function 'Ready' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/retry.go",
-        "line": 99,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 76,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'tokenBucket_Run' in 'ratelimit.go' has no test in 'ratelimit_internal_test.go'",
+      "message": "function 'Reloading' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/ratelimit.go",
-        "line": 80,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 83,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'tokenBucket_take' in 'ratelimit.go' has no test in 'ratelimit_internal_test.go'",
+      "message": "function 'Stopping' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/ratelimit.go",
-        "line": 91,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 89,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'wrapAs' in 'wrap.go' has no test in 'wrap_internal_test.go'",
+      "message": "function 'Status' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/wrap.go",
-        "line": 11,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 95,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'bulkhead_Run' in 'bulkhead.go' has no test in 'bulkhead_internal_test.go'",
+      "message": "function 'Watchdog' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/bulkhead.go",
-        "line": 30,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 101,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-COVERAGE",
       "level": "warning",
-      "message": "function 'circuitBreaker_Run' in 'breaker.go' has no test in 'breaker_internal_test.go'",
+      "message": "function 'MainPID' without corresponding test",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/notify.go",
+        "line": 107,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-COVERAGE",
+      "level": "warning",
+      "message": "function 'wrapInvalid' without corresponding test",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify.go",
+        "line": 60,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-COVERAGE",
+      "level": "warning",
+      "message": "function 'encodePayload' without corresponding test",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify.go",
+        "line": 90,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
+      "level": "warning",
+      "message": "test 'TestResolveAddr' has unused table field 'raw'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 38,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
+      "level": "warning",
+      "message": "test 'TestResolveAddr' has unused table field 'want'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 38,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
+      "level": "warning",
+      "message": "test 'TestParsePayload' has unused table field 'body'",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
         "line": 73,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-SYNC",
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
       "level": "warning",
-      "message": "function 'circuitBreaker_allow' in 'breaker.go' has no test in 'breaker_internal_test.go'",
+      "message": "test 'TestParsePayload' has unused table field 'wantReady'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
-        "line": 94,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'circuitBreaker_record' in 'breaker.go' has no test in 'breaker_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
-        "line": 112,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-SYNC",
-      "level": "warning",
-      "message": "function 'circuitBreaker_trip' in 'breaker.go' has no test in 'breaker_internal_test.go'",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
-        "line": 140,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-TABLE",
-      "level": "warning",
-      "message": "test 'Test_Timeout_ParentCancelNotRelabelled' without table-driven pattern",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/timeout_internal_test.go",
-        "line": 70,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'NewCircuitBreaker' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
-        "line": 44,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Run' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
         "line": 73,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-COVERAGE",
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
       "level": "warning",
-      "message": "function 'allow' without corresponding test",
+      "message": "test 'TestParsePayload' has unused table field 'wantPID'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
-        "line": 94,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 73,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-COVERAGE",
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
       "level": "warning",
-      "message": "function 'record' without corresponding test",
+      "message": "test 'TestParsePayload' has unused table field 'wantStat'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
-        "line": 112,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 73,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-COVERAGE",
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
       "level": "warning",
-      "message": "function 'trip' without corresponding test",
+      "message": "test 'TestParsePayload' has unused table field 'wantErr'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/breaker.go",
-        "line": 140,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 73,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-COVERAGE",
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
       "level": "warning",
-      "message": "function 'NewBulkhead' without corresponding test",
+      "message": "test 'TestEncodePayloadInjection' has unused table field 'state'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/bulkhead.go",
-        "line": 19,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 148,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-COVERAGE",
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
       "level": "warning",
-      "message": "function 'Run' without corresponding test",
+      "message": "test 'TestEncodePayloadInjection' has unused table field 'wantErr'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/bulkhead.go",
-        "line": 30,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 148,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-COVERAGE",
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
       "level": "warning",
-      "message": "function 'NewRateLimiter' without corresponding test",
+      "message": "test 'TestWatchdogInterval' has unused table field 'raw'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/ratelimit.go",
-        "line": 33,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 196,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-COVERAGE",
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
       "level": "warning",
-      "message": "function 'Run' without corresponding test",
+      "message": "test 'TestWatchdogInterval' has unused table field 'wantDur'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/ratelimit.go",
-        "line": 80,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 196,
         "column": 1
       }
     },
     {
-      "ruleId": "KTN-TEST-COVERAGE",
+      "ruleId": "KTN-TEST-UNUSED-FIELDS",
       "level": "warning",
-      "message": "function 'take' without corresponding test",
+      "message": "test 'TestWatchdogInterval' has unused table field 'wantOK'",
       "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/ratelimit.go",
-        "line": 91,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'NewRetry' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/retry.go",
-        "line": 29,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Run' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/retry.go",
-        "line": 46,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'wait' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/retry.go",
-        "line": 82,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'backoff' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/retry.go",
-        "line": 99,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'NewTimeout' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/timeout.go",
-        "line": 29,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'Run' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/timeout.go",
-        "line": 41,
-        "column": 1
-      }
-    },
-    {
-      "ruleId": "KTN-TEST-COVERAGE",
-      "level": "warning",
-      "message": "function 'wrapAs' without corresponding test",
-      "location": {
-        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/resilience/wrap.go",
-        "line": 11,
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/service/proc/sdnotify/sdnotify_internal_test.go",
+        "line": 196,
         "column": 1
       }
     }
