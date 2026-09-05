@@ -18,12 +18,35 @@ on:
     # draft, so marking it ready is how you ask for another verdict. Without
     # this type that second attempt would never be judged.
     types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches: [main, master]
-  # On demand: the gate reads the whole history, so its verdict can change
-  # without this repository changing — a new rule lands in kodflow/post-commit,
-  # or the history is rewritten under it. Without this you cannot ask a quiet
-  # repository whether it is still clean; you have to push something to find out.
+  # NO push trigger, and that is a decision with a cost. Read this before
+  # putting one back.
+  #
+  # A push or manual run scans every branch AND every tag. Three release
+  # commits reachable only from tags — v0.1.23 through v0.1.25 — are authored
+  # as `kitsunium-bot <ci@kitsunium.com>`. The gate matches GitHub noreply
+  # addresses only, so no `authors` entry can ever accept a domain address,
+  # and those commits cannot be re-authored either: proxy.golang.org has
+  # cached the four module versions each one carries, and twelve published
+  # tags of a public module are not something to move. The verdict on `main`
+  # would therefore be red permanently, over commits nobody is able to fix.
+  #
+  # `history: range` is NOT the way out — it makes it worse. The action hands
+  # push and manual runs an empty range on purpose, and post-commit.sh exits 2
+  # on `range` with no range: still red, and now a usage error rather than a
+  # verdict.
+  #
+  # What is kept is the part that decides something. A pull request is judged
+  # on its own ancestry, which never walks tags, so this stays a real required
+  # status on every merge — that is where the ruleset reads it, and direct
+  # pushes to `main` are refused by branch protection regardless. What is given
+  # up is the retroactive audit of tags. The SOURCE of new taint is closed in
+  # the same change: sdk-release.yml now commits under the owning account's
+  # noreply address, so no future release adds to that list.
+  #
+  # On demand stays, because the gate reads rules that live elsewhere and its
+  # verdict can change without this repository changing. Fire it knowing it
+  # reports those three commits and will keep reporting them; everything else
+  # it says is news.
   workflow_dispatch:
 
 # One verdict at a time. Without this the ready_for_review retry path lets an
@@ -60,6 +83,23 @@ jobs:
           # on purpose — one human commits across the whole fleet, so the
           # stub stays byte-identical everywhere.
           authors: kodflow
+          # This repository BUILDS a devcontainer image from the agent
+          # configuration it tracks: docker-images.yml feeds
+          # `.devcontainer/images` as the context to a Dockerfile that COPYs
+          # `.claude/`, and stages `.devcontainer/features/` into that same
+          # context. They are build inputs, not residue — the `git rm --cached`
+          # the verdict suggests would break the image, not clean the tree.
+          #
+          # This is the case the action's own agent-paths.txt carves out: it
+          # names `.devcontainer/images/.claude/` as where the fleet's template
+          # ships its configuration, and says a repository that distributes it
+          # exempts itself here rather than by weakening the shared rule list.
+          # Keep this list exact. A bare entry exempts a whole subtree, so a
+          # broader one would blind the gate to agent files added elsewhere.
+          agent_files_allow: >-
+            .devcontainer/images/.claude
+            .devcontainer/features/claude/.mcp.json
+            .claude/features.json
 
   # A fallback, deliberately a SEPARATE job — and deliberately not called a gate.
   #
