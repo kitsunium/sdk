@@ -1,3 +1,4 @@
+// Package net_test — the generic handler decorator.
 package net_test
 
 import (
@@ -19,83 +20,90 @@ func tag(log *strings.Builder, name string) corenet.Middleware[corenet.ConnHandl
 	}
 }
 
-// TestChainAppliesOutermostFirst pins the ordering contract. Chain(h, a, b, c)
-// must yield a(b(c(h))): the first middleware listed is the first to see a
-// connection, because that is the only ordering a reader guesses correctly from
-// the call site.
-func TestChainAppliesOutermostFirst(t *testing.T) {
+// TestChain pins the ordering contract and the two edges around it.
+//
+// Chain(h, a, b, c) must yield a(b(c(h))): the first middleware listed is the
+// first to see a connection, because that is the only ordering a reader guesses
+// correctly from the call site. A nil entry is skipped rather than panicking at
+// serve time — conditionally-built middleware lists are common, and a panic
+// there surfaces as a dead connection rather than a clear error.
+//
+// The packet cases pin the reason Middleware is generic at all: one Chain has
+// to serve both handler natures, or the domain would carry two near-identical
+// middleware types that inevitably drift.
+func TestChain(t *testing.T) {
 	t.Parallel()
-	var log strings.Builder
-	base := corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
-		log.WriteString("h")
-		return nil
-	})
-	chained := corenet.Chain[corenet.ConnHandler](base, tag(&log, "a"), tag(&log, "b"), tag(&log, "c"))
-	if err := chained.ServeConn(t.Context(), nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	type tc struct {
+		name string
+		//: names to wrap the base handler with; an empty entry means a nil
+		//: middleware, which must be skipped.
+		names []string
+		want  string
 	}
-	if got := log.String(); got != "abch" {
-		t.Fatalf("order = %q, want \"abch\"", got)
+	tests := []tc{
+		{"no middleware at all", nil, "h"},
+		{"a single middleware", []string{"a"}, "ah"},
+		{"three, outermost first", []string{"a", "b", "c"}, "abch"},
+		{"a nil entry between two real ones", []string{"", "a", ""}, "ah"},
+		{"only nil entries", []string{"", ""}, "h"},
 	}
-}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
 
-// TestChainSkipsNilMiddleware pins that a nil entry is skipped rather than
-// panicking at serve time — a conditionally-built middleware list is common and
-// a panic there would surface as a dead connection, not a clear error.
-func TestChainSkipsNilMiddleware(t *testing.T) {
-	t.Parallel()
-	var log strings.Builder
-	base := corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
-		log.WriteString("h")
-		return nil
-	})
-	chained := corenet.Chain[corenet.ConnHandler](base, nil, tag(&log, "a"), nil)
-	if err := chained.ServeConn(t.Context(), nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := log.String(); got != "ah" {
-		t.Fatalf("order = %q, want \"ah\"", got)
-	}
-}
+		var streamLog strings.Builder
+		streamBase := corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
+			streamLog.WriteString("h")
+			return nil
+		})
+		streamMW := make([]corenet.Middleware[corenet.ConnHandler], 0, len(c.names))
+		for _, name := range c.names {
+			//: an empty name stands for a nil middleware.
+			if name == "" {
+				streamMW = append(streamMW, nil)
+				continue
+			}
+			streamMW = append(streamMW, tag(&streamLog, name))
+		}
+		if err := corenet.Chain(corenet.ConnHandler(streamBase), streamMW...).ServeConn(t.Context(), nil); err != nil {
+			t.Fatalf("ServeConn = %v, want nil", err)
+		}
+		if got := streamLog.String(); got != c.want {
+			t.Errorf("stream order = %q, want %q", got, c.want)
+		}
 
-// TestChainWithNoMiddlewareReturnsTheHandler pins the identity case.
-func TestChainWithNoMiddlewareReturnsTheHandler(t *testing.T) {
-	t.Parallel()
-	var log strings.Builder
-	base := corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
-		log.WriteString("h")
-		return nil
-	})
-	if err := corenet.Chain[corenet.ConnHandler](base).ServeConn(t.Context(), nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := log.String(); got != "h" {
-		t.Fatalf("order = %q, want \"h\"", got)
-	}
-}
-
-// TestChainWorksForPacketHandlersToo pins that one generic Chain serves both
-// handler natures — the reason Middleware is generic at all.
-func TestChainWorksForPacketHandlersToo(t *testing.T) {
-	t.Parallel()
-	var log strings.Builder
-	wrap := func(name string) corenet.Middleware[corenet.PacketHandler] {
-		return func(next corenet.PacketHandler) corenet.PacketHandler {
-			return corenet.PacketHandlerFunc(func(ctx context.Context, p corenet.Packet) error {
-				log.WriteString(name)
-				return next.ServePacket(ctx, p)
-			})
+		//: the same table, through the datagram nature, from the same Chain.
+		var packetLog strings.Builder
+		packetBase := corenet.PacketHandlerFunc(func(context.Context, corenet.Packet) error {
+			packetLog.WriteString("h")
+			return nil
+		})
+		wrap := func(name string) corenet.Middleware[corenet.PacketHandler] {
+			return func(next corenet.PacketHandler) corenet.PacketHandler {
+				return corenet.PacketHandlerFunc(func(ctx context.Context, p corenet.Packet) error {
+					packetLog.WriteString(name)
+					return next.ServePacket(ctx, p)
+				})
+			}
+		}
+		packetMW := make([]corenet.Middleware[corenet.PacketHandler], 0, len(c.names))
+		for _, name := range c.names {
+			if name == "" {
+				packetMW = append(packetMW, nil)
+				continue
+			}
+			packetMW = append(packetMW, wrap(name))
+		}
+		if err := corenet.Chain(corenet.PacketHandler(packetBase), packetMW...).ServePacket(t.Context(), nil); err != nil {
+			t.Fatalf("ServePacket = %v, want nil", err)
+		}
+		if got := packetLog.String(); got != c.want {
+			t.Errorf("packet order = %q, want %q", got, c.want)
 		}
 	}
-	base := corenet.PacketHandlerFunc(func(context.Context, corenet.Packet) error {
-		log.WriteString("h")
-		return nil
-	})
-	chained := corenet.Chain[corenet.PacketHandler](base, wrap("a"), wrap("b"))
-	if err := chained.ServePacket(t.Context(), nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := log.String(); got != "abh" {
-		t.Fatalf("order = %q, want \"abh\"", got)
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

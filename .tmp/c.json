@@ -1,0 +1,58 @@
+{
+  "$schema": "https://ktn-linter.dev/schema/v1/report.json",
+  "version": "1.0.0",
+  "tool": {
+    "name": "ktn-linter",
+    "version": "1.0.0"
+  },
+  "summary": {
+    "totalIssues": 4,
+    "byLevel": {
+      "error": 0,
+      "info": 0,
+      "warning": 4
+    }
+  },
+  "results": [
+    {
+      "ruleId": "KTN-TEST-FILES",
+      "level": "warning",
+      "message": "file 'registry.go' without tests. Create registry_external_test.go and registry_internal_test.go",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/core/id/registry.go",
+        "line": 4,
+        "column": 9
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-TABLE",
+      "level": "warning",
+      "message": "test 'TestRegisterLookupAvailable' without table-driven pattern",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/core/id/id_external_test.go",
+        "line": 17,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-TABLE",
+      "level": "warning",
+      "message": "test 'TestEmptySchemeStaysUnresolvable' without table-driven pattern",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/core/id/id_external_test.go",
+        "line": 78,
+        "column": 1
+      }
+    },
+    {
+      "ruleId": "KTN-TEST-FILES",
+      "level": "warning",
+      "message": "file 'exporter.go' without tests. Create exporter_external_test.go and exporter_internal_test.go",
+      "location": {
+        "file": "/home/florent/kepler/repositories/.worktrees/sdk-jaimerais-que-tu-mexplique-dans-5b7bcb73/internal/core/metrics/exporter.go",
+        "line": 2,
+        "column": 9
+      }
+    }
+  ]
+}
