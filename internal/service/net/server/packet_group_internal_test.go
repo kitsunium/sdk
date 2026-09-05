@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -52,16 +53,11 @@ func Test_PacketGroup_resolved(t *testing.T) {
 		if err := resolved.ServePacket(t.Context(), &packet{conn: &fakePacketConn{}}); err != nil {
 			t.Fatalf("ServePacket = %v, want nil", err)
 		}
-		want := append(append([]string(nil), c.labels...), "handler")
-		if len(order) != len(want) {
+		want := append(slices.Clone(c.labels), "handler")
+		//: the first middleware listed is the first to see the datagram, which is
+		//: the only ordering a reader will guess correctly.
+		if !slices.Equal(order, want) {
 			t.Fatalf("the chain ran %v, want %v", order, want)
-		}
-		//: the first middleware listed is the first to see the datagram, which
-		//: is the only ordering a reader will guess correctly.
-		for i := range want {
-			if order[i] != want[i] {
-				t.Fatalf("the chain ran %v, want %v", order, want)
-			}
 		}
 	}
 	for _, c := range tests {

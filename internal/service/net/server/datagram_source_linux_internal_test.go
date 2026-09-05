@@ -9,6 +9,18 @@ import (
 	"testing"
 )
 
+// socketKind names the three shapes of PacketConn the selection has to handle.
+type socketKind int
+
+const (
+	// socketReal is a genuine UDP socket, which carries a descriptor.
+	socketReal socketKind = iota
+	// socketNoDescriptor is a wrapper that exposes no SyscallConn at all.
+	socketNoDescriptor
+	// socketBrokenDescriptor exposes one that refuses.
+	socketBrokenDescriptor
+)
+
 // wrappedConn is a PacketConn that deliberately exposes no SyscallConn.
 type wrappedConn struct {
 	stdnet.PacketConn
@@ -21,25 +33,13 @@ type brokenRawConn struct {
 }
 
 // brokenRawConn is a rawConnProvider, which is the whole point of the double.
-var _ rawConnProvider = brokenRawConn{}
+var _ rawConnProvider = (*brokenRawConn)(nil)
 
 // SyscallConn implements rawConnProvider by failing.
 func (brokenRawConn) SyscallConn() (syscall.RawConn, error) {
 	//: the descriptor cannot be reached, so there is nothing to batch on.
 	return nil, syscall.EBADF
 }
-
-// socketKind names the three shapes of PacketConn the selection has to handle.
-type socketKind int
-
-const (
-	// socketReal is a genuine UDP socket, which carries a descriptor.
-	socketReal socketKind = iota
-	// socketNoDescriptor is a wrapper that exposes no SyscallConn at all.
-	socketNoDescriptor
-	// socketBrokenDescriptor exposes one that refuses.
-	socketBrokenDescriptor
-)
 
 // packetConnOf builds the socket a case asks for.
 func packetConnOf(t *testing.T, kind socketKind) stdnet.PacketConn {

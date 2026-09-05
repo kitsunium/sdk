@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	stdnet "net"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func (h *recordingHandler) ServePacket(_ context.Context, p corenet.Packet) erro
 func (h *recordingHandler) payloads() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return append([]string(nil), h.seen...)
+	return slices.Clone(h.seen)
 }
 
 // Test_Server_servePacket pins CONTAINMENT: a panicking handler must not take
@@ -190,6 +191,10 @@ func Test_Server_dispatch(t *testing.T) {
 
 // Test_Server_readLoop pins the loop's two ends: it serves what arrives, and it
 // STOPS when its socket closes.
+//
+// Goroutine lifecycle: one goroutine per case runs the loop under test. The case
+// ends it by closing the socket and waits for the goroutine to publish its exit,
+// so none outlives its case.
 //
 // Closing the socket is the only signal that reliably interrupts a blocking
 // read, so a loop that treated the resulting error as transient would spin on a

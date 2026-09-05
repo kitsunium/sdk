@@ -4,6 +4,7 @@ package server
 import (
 	"errors"
 	stdnet "net"
+	"slices"
 	"testing"
 	"time"
 )
@@ -45,7 +46,7 @@ func (f *fakePacketConn) ReadFrom(p []byte) (n int, addr stdnet.Addr, err error)
 
 // WriteTo implements net.PacketConn.
 func (f *fakePacketConn) WriteTo(p []byte, addr stdnet.Addr) (n int, err error) {
-	f.written = append([]byte(nil), p...)
+	f.written = slices.Clone(p)
 	f.writtenTo = addr
 	//: a configured failure stands in for a socket that has gone away.
 	if f.writeErr != nil {

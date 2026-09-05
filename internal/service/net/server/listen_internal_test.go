@@ -18,6 +18,47 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// addrTarget names how a case's address is produced.
+type addrTarget int
+
+const (
+	// addrLiteral uses the case's own address verbatim.
+	addrLiteral addrTarget = iota
+	// addrTempSocket puts a Unix socket in the test's temporary directory.
+	addrTempSocket
+	// addrAlreadyBound holds a real port for the duration of the case, so the
+	// bind under test meets one that is genuinely taken.
+	addrAlreadyBound
+)
+
+// targetAddr produces the address a case binds.
+func targetAddr(t *testing.T, target addrTarget, literal string) string {
+	t.Helper()
+	switch target {
+	//: a socket path inside the test's own directory, cleaned up with it.
+	case addrTempSocket:
+		//: unique per test, so parallel cases cannot collide.
+		return t.TempDir() + "/listen.sock"
+	//: a port held open for the whole case.
+	case addrAlreadyBound:
+		held, err := stdnet.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("holding an address: %v", err)
+		}
+		t.Cleanup(func() {
+			if cerr := held.Close(); cerr != nil {
+				t.Errorf("close: %v", cerr)
+			}
+		})
+		//: the address is taken for as long as the case runs.
+		return held.Addr().String()
+	//: the case supplied the address itself.
+	default:
+		//: verbatim, including the deliberately unusable ones.
+		return literal
+	}
+}
+
 // testIdentity builds a self-signed server identity for the TLS cases.
 func testIdentity(t *testing.T) corenet.IdentityValue {
 	t.Helper()
@@ -231,47 +272,6 @@ func Test_reusePortControl(t *testing.T) {
 	}
 }
 
-// addrTarget names how a case's address is produced.
-type addrTarget int
-
-const (
-	// addrLiteral uses the case's own address verbatim.
-	addrLiteral addrTarget = iota
-	// addrTempSocket puts a Unix socket in the test's temporary directory.
-	addrTempSocket
-	// addrAlreadyBound holds a real port for the duration of the case, so the
-	// bind under test meets one that is genuinely taken.
-	addrAlreadyBound
-)
-
-// targetAddr produces the address a case binds.
-func targetAddr(t *testing.T, target addrTarget, literal string) string {
-	t.Helper()
-	switch target {
-	//: a socket path inside the test's own directory, cleaned up with it.
-	case addrTempSocket:
-		//: unique per test, so parallel cases cannot collide.
-		return t.TempDir() + "/listen.sock"
-	//: a port held open for the whole case.
-	case addrAlreadyBound:
-		held, err := stdnet.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("holding an address: %v", err)
-		}
-		t.Cleanup(func() {
-			if cerr := held.Close(); cerr != nil {
-				t.Errorf("close: %v", cerr)
-			}
-		})
-		//: the address is taken for as long as the case runs.
-		return held.Addr().String()
-	//: the case supplied the address itself.
-	default:
-		//: verbatim, including the deliberately unusable ones.
-		return literal
-	}
-}
-
 // Test_listen pins that an unusable address is refused BEFORE the OS is touched,
 // and that the group's identity decides the listener's nature.
 //
@@ -294,7 +294,7 @@ func Test_listen(t *testing.T) {
 		wantCode errs.Code
 	}
 	tests := []tc{
-		{name: "a tcp address", network: "tcp", addr: "127.0.0.1:0"},
+		{name: "a tcp address", network: "tcp", addr: "127.0.0.1:0", target: addrLiteral},
 		{name: "an IPv4-only address", network: "tcp4", addr: "127.0.0.1:0"},
 		{name: "a unix socket", network: "unix", target: addrTempSocket},
 		{name: "a TLS listener", network: "tcp", addr: "127.0.0.1:0", secured: true},
