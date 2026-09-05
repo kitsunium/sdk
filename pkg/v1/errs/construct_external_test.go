@@ -28,29 +28,69 @@ func TestNewRoundTrip(t *testing.T) {
 	err := errs.New(appCode, "USER_NOT_FOUND",
 		"user not found", "lookup miss in users table id=42",
 		errs.Int("id", 42), errs.String("table", "users"))
-	//: the constructor never returns nil for in-range, well-formed args.
 	if err == nil {
 		t.Fatal("New returned nil for valid args")
 	}
-	//: CodeOf round-trips the exact code we minted.
-	if got, ok := errs.CodeOf(err); !ok || got != appCode {
-		t.Errorf("CodeOf = (%s, %v), want (%s, true)", got, ok, appCode)
+
+	type tc struct {
+		name  string
+		check func(t *testing.T)
 	}
-	//: the typed octets compose off the returned Code.
-	if got, _ := errs.CodeOf(err); got.Major() != errs.MinAppMajor {
-		t.Errorf("Major = %#x, want %#x", got.Major(), errs.MinAppMajor)
+	tests := []tc{
+		{"CodeOf round-trips the minted code", func(t *testing.T) {
+			t.Helper()
+			if got, ok := errs.CodeOf(err); !ok || got != appCode {
+				t.Errorf("CodeOf = (%s, %v), want (%s, true)", got, ok, appCode)
+			}
+		}},
+		{"the typed octets compose off the Code", func(t *testing.T) {
+			t.Helper()
+			if got, _ := errs.CodeOf(err); got.Major() != errs.MinAppMajor {
+				t.Errorf("Major = %#x, want %#x", got.Major(), errs.MinAppMajor)
+			}
+		}},
+		{"PublicOf returns the wire-safe message verbatim", func(t *testing.T) {
+			t.Helper()
+			if got := errs.PublicOf(err); got != "user not found" {
+				t.Errorf("PublicOf = %q, want %q", got, "user not found")
+			}
+		}},
+		{"the private half never leaks into the public one", func(t *testing.T) {
+			t.Helper()
+			//: the whole point of the split: an operator's detail must not
+			//: reach a wire-safe message.
+			if got := errs.PublicOf(err); strings.Contains(got, "users table") {
+				t.Errorf("PublicOf leaked the private detail: %q", got)
+			}
+		}},
+		{"ReasonOf round-trips the identifier", func(t *testing.T) {
+			t.Helper()
+			if got, _ := errs.ReasonOf(err); got != "USER_NOT_FOUND" {
+				t.Errorf("ReasonOf = %q, want %q", got, "USER_NOT_FOUND")
+			}
+		}},
+		{"HasCode finds the minted code", func(t *testing.T) {
+			t.Helper()
+			if !errs.HasCode(err, appCode) {
+				t.Error("HasCode did not find the minted code")
+			}
+		}},
+		{"HasCode does not find a code that is not there", func(t *testing.T) {
+			t.Helper()
+			if errs.HasCode(err, appCode+1) {
+				t.Error("HasCode matched a code the error does not carry")
+			}
+		}},
 	}
-	//: PublicOf returns the wire-safe message verbatim.
-	if got := errs.PublicOf(err); got != "user not found" {
-		t.Errorf("PublicOf = %q, want %q", got, "user not found")
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		c.check(t)
 	}
-	//: ReasonOf round-trips the SCREAMING_SNAKE identifier.
-	if got, _ := errs.ReasonOf(err); got != "USER_NOT_FOUND" {
-		t.Errorf("ReasonOf = %q, want %q", got, "USER_NOT_FOUND")
-	}
-	//: HasCode finds the minted code in the chain.
-	if !errs.HasCode(err, appCode) {
-		t.Error("HasCode did not find the minted code")
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -60,24 +100,55 @@ func TestWrapPreservesChain(t *testing.T) {
 	t.Parallel()
 	//: a plain stdlib cause an external consumer might be migrating from.
 	cause := errors.New("dial tcp: connection refused")
-	//: wrap it into the SDK model with a consumer-owned code.
 	wrapped := errs.Wrap(cause, errs.WrapParams{
 		Code:    appWrapCode,
 		Reason:  "UPSTREAM_UNAVAILABLE",
 		Public:  "service temporarily unavailable",
 		Private: "users-api dial failed",
 	})
-	//: errors.Is must still reach the original cause through the wrap.
-	if !errors.Is(wrapped, cause) {
-		t.Error("errors.Is(wrapped, cause) = false, want true")
+
+	type tc struct {
+		name  string
+		check func(t *testing.T)
 	}
-	//: errors.Unwrap must return the original cause.
-	if errors.Unwrap(wrapped) != cause {
-		t.Error("errors.Unwrap(wrapped) did not return the cause")
+	tests := []tc{
+		{"errors.Is reaches the original cause", func(t *testing.T) {
+			t.Helper()
+			if !errors.Is(wrapped, cause) {
+				t.Error("errors.Is(wrapped, cause) = false, want true")
+			}
+		}},
+		{"errors.Unwrap returns the original cause", func(t *testing.T) {
+			t.Helper()
+			if errors.Unwrap(wrapped) != cause {
+				t.Error("errors.Unwrap(wrapped) did not return the cause")
+			}
+		}},
+		{"the consumer code becomes the origin", func(t *testing.T) {
+			t.Helper()
+			//: a stdlib cause carries no code, so the wrap's is the only one.
+			if got, _ := errs.CodeOf(wrapped); got != appWrapCode {
+				t.Errorf("CodeOf(wrapped) = %s, want %s", got, appWrapCode)
+			}
+		}},
+		{"the cause's text is not promoted to the public message", func(t *testing.T) {
+			t.Helper()
+			//: "dial tcp: connection refused" names an upstream host shape a
+			//: wire-safe message must not carry.
+			if got := errs.PublicOf(wrapped); strings.Contains(got, "dial tcp") {
+				t.Errorf("PublicOf leaked the cause: %q", got)
+			}
+		}},
 	}
-	//: the wrap stamped the consumer code as the origin (stdlib cause path).
-	if got, _ := errs.CodeOf(wrapped); got != appWrapCode {
-		t.Errorf("CodeOf(wrapped) = %s, want %s", got, appWrapCode)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		c.check(t)
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -88,24 +159,41 @@ func TestWrapOriginWins(t *testing.T) {
 	t.Parallel()
 	//: an SDK-model origin error built by the consumer.
 	origin := errs.New(appCode, "USER_NOT_FOUND", "user not found", "id=42")
-	//: wrap it with a different code at a higher layer.
 	wrapped := errs.Wrap(origin, errs.WrapParams{
 		Code:    appCodeOther,
 		Reason:  "REQUEST_FAILED",
 		Public:  "request failed",
 		Private: "handler wrap",
 	})
-	//: origin wins — the observed Code stays the origin's, not the wrap's.
-	if got, _ := errs.CodeOf(wrapped); got != appCode {
-		t.Errorf("CodeOf(wrapped) = %s, want origin %s", got, appCode)
+
+	type tc struct {
+		name  string
+		code  errs.Code
+		want  bool
+		isTop bool
 	}
-	//: HasCode still finds the origin code.
-	if !errs.HasCode(wrapped, appCode) {
-		t.Error("HasCode lost the origin code after wrap")
+	tests := []tc{
+		//: origin wins — the observed Code stays the origin's, not the wrap's.
+		{"the origin code is the observed one", appCode, true, true},
+		{"the wrap code lands in the trail", appCodeOther, true, false},
+		{"a code neither carries is not found", appCode + 0x10, false, false},
 	}
-	//: HasCode also finds the wrap code appended to the trail.
-	if !errs.HasCode(wrapped, appCodeOther) {
-		t.Error("HasCode did not find the trail code after wrap")
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := errs.HasCode(wrapped, c.code); got != c.want {
+			t.Errorf("HasCode(%s) = %v, want %v", c.code, got, c.want)
+		}
+		if c.isTop {
+			if got, _ := errs.CodeOf(wrapped); got != c.code {
+				t.Errorf("CodeOf(wrapped) = %s, want origin %s", got, c.code)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -156,14 +244,39 @@ func TestNewRejectsBadPublic(t *testing.T) {
 // the SDK allocates, so a consumer code can never shadow an SDK code.
 func TestAppMajorRangeIsCollisionFree(t *testing.T) {
 	t.Parallel()
-	//: the reserved boundary is the documented 0x40, ceiling the int32-safe 0x7F.
-	if errs.MinAppMajor != 0x40 || errs.MaxMajor != 0x7F {
-		t.Fatalf("range = [%#x,%#x], want [0x40,0x7F]", errs.MinAppMajor, errs.MaxMajor)
+	type tc struct {
+		name  string
+		major errs.Major
+		want  bool
 	}
-	//: a consumer code packed in-range reports a Major within the reserved band
-	//: — strictly above 0x01, the highest Major the SDK uses today (pkg/v1).
-	got := errs.Pack(errs.MinAppMajor, 0x01, 0x01, 0x01)
-	if m := got.Major(); m < errs.MinAppMajor || m > errs.MaxMajor {
-		t.Errorf("packed Major = %#x, outside reserved [%#x,%#x]", m, errs.MinAppMajor, errs.MaxMajor)
+	tests := []tc{
+		//: the SDK's own Majors sit below the reserved band, which is what
+		//: makes a consumer code unable to collide with one.
+		{"the SDK kernel Major", 0x00, false},
+		{"the SDK pkg/v1 Major", 0x01, false},
+		{"one below the reserved floor", errs.MinAppMajor - 1, false},
+		{"the reserved floor", errs.MinAppMajor, true},
+		{"inside the band", errs.MinAppMajor + 0x10, true},
+		{"the reserved ceiling", errs.MaxMajor, true},
+		{"one above the ceiling", errs.MaxMajor + 1, false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := errs.Pack(c.major, 0x01, 0x01, 0x01).Major()
+		inBand := got >= errs.MinAppMajor && got <= errs.MaxMajor
+		if inBand != c.want {
+			t.Errorf("Major %#x in reserved band = %v, want %v", got, inBand, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+
+	//: the boundary itself is documented, so a silent widening is a defect.
+	if errs.MinAppMajor != 0x40 || errs.MaxMajor != 0x7F {
+		t.Errorf("range = [%#x,%#x], want [0x40,0x7F]", errs.MinAppMajor, errs.MaxMajor)
 	}
 }

@@ -14,45 +14,96 @@ import (
 // usable and safe on every platform: ReapOnce never errors on an idle process,
 // and a Start/Stop cycle completes without panic.
 func TestNewLifecycleIsSafe(t *testing.T) {
-	//: not Parallel — a real Unix reaper reaps ANY child of this process.
-	r := reaper.New()
-	//: Stop before Start must be a harmless no-op.
-	r.Stop()
-	//: start, then a single non-blocking sweep on an idle process.
-	r.Start()
-	//: an idle sweep returns a clean count and no error on every platform.
-	got, err := r.ReapOnce()
-	//: a clean sweep never errors.
-	if err != nil {
-		t.Fatalf("ReapOnce returned error: %v", err)
+	//: safe to run alongside the rest of the package: nothing here spawns a
+	//: child, so the sweeps below have nothing to steal from one another. The
+	//: sub-cases stay serial because each drives one reaper through an ordered
+	//: Start/Stop sequence.
+	t.Parallel()
+	type tc struct {
+		name  string
+		steps func(t *testing.T, r reaper.Reaper)
 	}
-	//: nothing is reaped on an idle process.
-	if got < 0 {
-		t.Fatalf("ReapOnce = %d, want >= 0", got)
+	tests := []tc{
+		{"Stop before Start is a no-op", func(t *testing.T, r reaper.Reaper) {
+			t.Helper()
+			r.Stop()
+		}},
+		{"Start is idempotent", func(t *testing.T, r reaper.Reaper) {
+			t.Helper()
+			r.Start()
+			//: a second Start must not raise a second loop.
+			r.Start()
+			r.Stop()
+		}},
+		{"an idle sweep reaps nothing and errors not at all", func(t *testing.T, r reaper.Reaper) {
+			t.Helper()
+			r.Start()
+			got, err := r.ReapOnce()
+			if err != nil {
+				t.Fatalf("ReapOnce returned error: %v", err)
+			}
+			if got < 0 {
+				t.Fatalf("ReapOnce = %d, want >= 0", got)
+			}
+			r.Stop()
+		}},
+		{"Stop is idempotent", func(t *testing.T, r reaper.Reaper) {
+			t.Helper()
+			r.Start()
+			r.Stop()
+			//: a second Stop must drain nothing and not panic.
+			r.Stop()
+		}},
 	}
-	//: a final Stop drains and tears down cleanly.
-	r.Stop()
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		c.steps(t, reaper.New())
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			//: each sub-case drives its own reaper, so they do not contend.
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
 }
 
 // TestWithOnReapObserves asserts the WithOnReap option is accepted and the
 // post-sweep observer fires on every platform — including the non-Unix no-op,
 // where the documented contract still calls the hook with a zero-child sweep.
 func TestWithOnReapObserves(t *testing.T) {
-	//: serial — see TestNewLifecycleIsSafe rationale.
-	called := false
-	//: an observer that records it ran; it must never block.
-	r := reaper.New(reaper.WithOnReap(func(int) {
-		//: record that the post-sweep hook fired.
-		called = true
-	}))
-	//: a direct sweep fires the observer even with zero children.
-	if _, err := r.ReapOnce(); err != nil {
-		t.Fatalf("ReapOnce returned error: %v", err)
+	//: see TestNewLifecycleIsSafe: the counter below is fed only by this test's
+	//: own synchronous sweeps, never by a background loop.
+	t.Parallel()
+	type tc struct {
+		name   string
+		sweeps int
 	}
-	//: the WithOnReap contract is platform-consistent: the hook fires on every
-	//: sweep (including zero) on Unix and on the non-Unix no-op alike.
-	if !called {
-		t.Fatalf("WithOnReap observer was not invoked on a sweep")
+	tests := []tc{
+		//: the contract is platform-consistent: the hook fires on EVERY sweep
+		//: including a zero-child one, on Unix and on the non-Unix no-op alike.
+		{"one sweep fires the hook once", 1},
+		{"each sweep fires it again", 3},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		calls := 0
+		r := reaper.New(reaper.WithOnReap(func(int) { calls++ }))
+		for range c.sweeps {
+			if _, err := r.ReapOnce(); err != nil {
+				t.Fatalf("ReapOnce returned error: %v", err)
+			}
+		}
+		if calls != c.sweeps {
+			t.Errorf("observer fired %d times for %d sweeps", calls, c.sweeps)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			//: each sub-case drives its own reaper, so they do not contend.
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 

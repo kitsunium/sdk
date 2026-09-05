@@ -74,7 +74,7 @@ func BenchmarkDatagramRead_Batched(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		b.StopTimer()
 		fill(b, client)
 		b.StartTimer()
@@ -91,7 +91,7 @@ func BenchmarkDatagramRead_Portable(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		b.StopTimer()
 		fill(b, client)
 		b.StartTimer()

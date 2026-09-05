@@ -39,13 +39,13 @@ func (c *steppedClock) Since(t time.Time) time.Duration {
 	return c.Now().Sub(t)
 }
 
-// Test_tillNext_ClockRegressionDoesNotSpin pins the liveness contract of the
+// Test_snowflakeGen_tillNext pins the liveness contract of the
 // same-millisecond overflow wait: tillNext holds the caller's g.mu for its
 // whole duration, so a clock that regresses below the exhausted millisecond
 // MUST surface ClockBackwards instead of spinning. Before the fix the loop
 // only broke on `now > prev`, so a backward jump stalled every concurrent
 // New() indefinitely.
-func Test_tillNext_ClockRegressionDoesNotSpin(t *testing.T) {
+func Test_snowflakeGen_tillNext(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name     string
@@ -91,33 +91,173 @@ func Test_tillNext_ClockRegressionDoesNotSpin(t *testing.T) {
 	}
 }
 
-// Test_New_SequenceOverflowClockRegression drives the defect through the
-// public New() path: exhaust the 12-bit sequence inside one millisecond, then
-// regress the clock so the overflow wait cannot complete. New must return
-// ClockBackwards, and must NOT leave the sequence at 0 — a retry inside the
-// same millisecond would then hand out seq=1, an id already issued.
-func Test_New_SequenceOverflowClockRegression(t *testing.T) {
+// Test_snowflakeGen_New drives the sequence-overflow defect through New(): burn
+// the 12-bit sequence inside one millisecond, then regress the clock so the
+// overflow wait cannot complete.
+//
+// The restored sequence is the subtle half. Leaving it at 0 after a failed wait
+// would let a retry inside the SAME millisecond hand out seq=1 — an identifier
+// already issued — so the failure would turn a liveness problem into a
+// correctness one.
+func Test_snowflakeGen_New(t *testing.T) {
 	t.Parallel()
-	//: pin the clock at ms 500 for every read until the regression.
-	clk := &steppedClock{script: []int64{500}}
-	g := &snowflakeGen{clk: clk, node: 1}
-	//: burn the whole sequence space within the pinned millisecond.
-	for i := int64(0); i <= maxSeq; i++ {
-		if _, err := g.New(); err != nil {
-			t.Fatalf("New #%d err=%v, want nil while sequence remains", i, err)
+	type tc struct {
+		name string
+		//: the millisecond the generator is pinned at while the sequence burns.
+		pinned int64
+		//: what the clock reports once the overflow wait begins.
+		afterOverflow int64
+		wantSentinel  error
+	}
+	tests := []tc{
+		{"a clock that regresses during the wait", 500, 499, ClockBackwards},
+		{"a clock that regresses far during the wait", 500, 0, ClockBackwards},
+		//: a clock pinned at the exhausted millisecond is indistinguishable
+		//: from a normal sub-millisecond remainder for a while, so the wait
+		//: only gives up once the spin budget is exhausted.
+		{"a clock stalled at the exhausted millisecond", 500, 500, ClockStalled},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		g := &snowflakeGen{clk: &steppedClock{script: []int64{c.pinned}}, node: 1}
+
+		//: burn the whole sequence space within the pinned millisecond.
+		for i := int64(0); i <= maxSeq; i++ {
+			if _, err := g.New(); err != nil {
+				t.Fatalf("New #%d = %v, want nil while the sequence remains", i, err)
+			}
+		}
+
+		//: the next call wraps the sequence and enters the overflow wait.
+		g.clk = &steppedClock{script: []int64{c.afterOverflow}}
+		_, err := g.New()
+
+		//: each misbehaviour maps to its OWN sentinel; asserting "some error"
+		//: would let a regression swap one for the other.
+		if !errors.Is(err, c.wantSentinel) {
+			t.Fatalf("New after overflow = %v, want %v", err, c.wantSentinel)
+		}
+		//: the sequence is restored to its pre-wrap value so a retry in this
+		//: same millisecond re-enters the wait instead of reissuing seq=1.
+		if g.seq != maxSeq {
+			t.Errorf("seq = %d after the failed wait, want %d — a retry would reissue a used sequence",
+				g.seq, maxSeq)
 		}
 	}
-	//: the next call wraps the sequence and enters the overflow wait; swap in
-	//: a regressed clock so the wait can never be satisfied.
-	g.clk = &steppedClock{script: []int64{499}}
-	_, err := g.New()
-	//: contract: fail fast with the documented sentinel, not just "some error".
-	if !errors.Is(err, ClockBackwards) {
-		t.Fatalf("New after overflow with a regressed clock: err=%v, want ClockBackwards", err)
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
-	//: contract: the sequence is restored to its pre-wrap value so a retry in
-	//: this same millisecond re-enters the wait instead of reissuing seq=1.
-	if g.seq != maxSeq {
-		t.Errorf("seq=%d after failed overflow wait, want %d (else a retry reissues a used sequence)", g.seq, maxSeq)
+}
+
+// Test_snowflakeGen_Scheme pins the registry key. It is what a caller passes to
+// id.New, so a drift here unregisters the generator from every consumer that
+// asks for it by name.
+func Test_snowflakeGen_Scheme(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		gen  *snowflakeGen
+	}
+	tests := []tc{
+		{"the default-node generator", newSnowflake(defaultNode(), &steppedClock{script: []int64{1}})},
+		{"an explicit-node generator", newSnowflake(7, &steppedClock{script: []int64{1}})},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := string(c.gen.Scheme()); got != "snowflake" {
+			t.Errorf("Scheme() = %q, want snowflake", got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_newSnowflake pins the node reduction. An out-of-range node is reduced
+// into the 10-bit space rather than refused, which keeps a misconfigured
+// deployment running — but it also means two nodes 1024 apart collide, so the
+// reduction has to be exactly the documented mask and nothing looser.
+func Test_newSnowflake(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		node int64
+		want int64
+	}
+	tests := []tc{
+		{"zero", 0, 0},
+		{"a mid-range node", 7, 7},
+		{"the highest in-range node", maxNode, maxNode},
+		{"one past the space wraps to zero", maxNode + 1, 0},
+		{"a large node reduces", 1<<40 + 5, 5},
+		//: a negative node still lands inside the space rather than producing
+		//: a negative shift into the packed identifier.
+		{"a negative node", -1, maxNode},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		g := newSnowflake(c.node, &steppedClock{script: []int64{1}})
+		if g.node != c.want {
+			t.Errorf("newSnowflake(%d).node = %d, want %d", c.node, g.node, c.want)
+		}
+		//: whatever the input, the node must fit the field it is packed into.
+		if g.node < 0 || g.node > maxNode {
+			t.Errorf("newSnowflake(%d).node = %d, outside the 10-bit space", c.node, g.node)
+		}
+		//: a fresh generator has issued nothing.
+		if g.lastMS != 0 || g.seq != 0 {
+			t.Errorf("a fresh generator starts at lastMS=%d seq=%d, want 0/0", g.lastMS, g.seq)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_defaultNode pins that the derived node is stable and in range.
+//
+// Stability is what makes it usable at all: the node id is the only thing
+// keeping two processes on different hosts from issuing the same identifier in
+// the same millisecond, so a value that changed between calls within one process
+// would make the sequence counter meaningless.
+func Test_defaultNode(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		calls int
+	}
+	tests := []tc{
+		{"a single derivation", 1},
+		{"ten derivations", 10},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		first := defaultNode()
+		for range c.calls {
+			//: the seed is hostname+pid, neither of which changes within a
+			//: process, so the answer must not either.
+			if got := defaultNode(); got != first {
+				t.Fatalf("defaultNode() returned %d after %d", got, first)
+			}
+		}
+		//: the value must fit the field it is packed into.
+		if first < 0 || first > maxNode {
+			t.Errorf("defaultNode() = %d, outside the 10-bit space", first)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

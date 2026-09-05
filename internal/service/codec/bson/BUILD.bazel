@@ -41,9 +41,13 @@ filegroup(
 
 go_test(
     name = "bson_test",
-    srcs = ["codec_external_test.go"],
+    srcs = [
+        "codec_external_test.go",
+        "codec_internal_test.go",
+    ],
+    embed = [":bson"],
     deps = [
-        ":bson",
         "//internal/core/codec",
+        "//internal/kernel/errs",
     ],
 )

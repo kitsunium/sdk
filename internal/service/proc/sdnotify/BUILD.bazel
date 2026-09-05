@@ -33,6 +33,10 @@ alias(
 go_test(
     name = "sdnotify_test",
     srcs = [
+        "listen_linux_external_test.go",
+        "listen_linux_internal_test.go",
+        "notify_external_test.go",
+        "notify_internal_test.go",
         "sdnotify_external_test.go",
         "sdnotify_internal_test.go",
         "sdnotify_other_test.go",

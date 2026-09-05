@@ -10,56 +10,92 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/cgroup"
 )
 
-// TestCreateDelegates asserts the facade forwards to the service and degrades
-// gracefully: on a non-delegated host Create returns the typed sentinel and no
-// handle, never a panic.
+// Create must agree with Available(): a caller that gates on the predicate and
+// then calls Create should never be told one thing and handed another. Where
+// the hierarchy is missing the facade must degrade to the typed sentinel and NO
+// handle — a non-nil handle beside an error is the breach that matters, because
+// a caller checking only err would then use it.
 func TestCreateDelegates(t *testing.T) {
-	//: the live confinement path needs delegation; assert the contract otherwise.
-	if cgroup.Available() {
-		//: a delegated host is exercised by the service-level test; skip the dup.
-		t.Skip("cgroup v2 delegated; service test covers the live path")
+	t.Parallel()
+	runCase := func(t *testing.T, name string) {
+		t.Helper()
+		g, err := cgroup.Create(name)
+		//: on a delegated host Create genuinely works, and the contract to pin
+		//: is the agreement with the predicate, not a refusal.
+		if cgroup.Available() {
+			if err != nil {
+				t.Fatalf("Create = %v on a host where Available() is true", err)
+			}
+			if g == nil {
+				t.Fatal("Create returned no handle and no error")
+			}
+			//: leave nothing behind; the group is empty, so Delete succeeds.
+			if derr := g.Delete(); derr != nil {
+				t.Errorf("Delete after Create = %v, want nil", derr)
+			}
+			return
+		}
+		if g != nil {
+			t.Fatalf("Create returned a handle on a host where Available() is false")
+		}
+		//: off Linux the stub short-circuits before the hierarchy check.
+		want := coreproc.CodeCgroupUnavailable
+		if runtime.GOOS != "linux" {
+			want = coreproc.CodeUnsupportedPlatform
+		}
+		if !errs.HasCode(err, want) {
+			t.Fatalf("Create = %v, want code %v", err, want)
+		}
 	}
-	g, err := cgroup.Create("sdk-facade-test")
-	//: an unavailable host must not return a usable handle.
-	if g != nil {
-		//: a non-nil handle here is a contract breach.
-		t.Fatalf("Create returned a handle on an unavailable host")
+	type tc struct {
+		name  string
+		group string
 	}
-	//: pick the platform-correct sentinel.
-	want := coreproc.CodeCgroupUnavailable
-	//: off Linux the stub returns UNSUPPORTED_PLATFORM.
-	if runtime.GOOS != "linux" {
-		//: the non-Linux stub never reaches the hierarchy check.
-		want = coreproc.CodeUnsupportedPlatform
+	//: distinct group names so the delegated branch cannot collide with itself.
+	tests := []tc{
+		{"a plain name", "sdk-facade-test-a"},
+		{"a name with a dash", "sdk-facade-test-b"},
 	}
-	//: the facade must surface the same typed code the service returns.
-	if !errs.HasCode(err, want) {
-		//: a mismatch means the facade is not delegating faithfully.
-		t.Fatalf("Create = %v, want code %v", err, want)
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.group)
+		})
 	}
 }
 
-// TestWithRootOption asserts the WithRoot option is wired through to Create and
-// changes which directory is probed: an obviously-absent root yields the typed
-// unavailable error rather than a panic.
+// WithRoot must reach Create and change which directory is probed, rather than
+// being accepted and ignored — an option that silently does nothing is worse
+// than one that errors.
 func TestWithRootOption(t *testing.T) {
 	t.Parallel()
-	g, err := cgroup.Create("g", cgroup.WithRoot("/nonexistent/sdk/cgroup/root"))
-	//: an absent root cannot yield a handle.
-	if g != nil {
-		//: a non-nil handle against a bogus root is a contract breach.
-		t.Fatalf("Create with bogus root returned a handle")
+	type tc struct {
+		name string
+		root string
 	}
-	//: select the platform-correct sentinel.
-	want := coreproc.CodeCgroupUnavailable
-	//: off Linux the stub short-circuits before touching the root.
-	if runtime.GOOS != "linux" {
-		//: the non-Linux stub returns UNSUPPORTED_PLATFORM.
-		want = coreproc.CodeUnsupportedPlatform
+	tests := []tc{
+		{"an absent absolute root", "/nonexistent/sdk/cgroup/root"},
+		{"a root that is a file, not a directory", "/etc/hostname"},
+		{"an empty root", ""},
 	}
-	//: the bogus root must surface the expected typed code.
-	if !errs.HasCode(err, want) {
-		//: a missing code breaks the degrade-gracefully contract.
-		t.Fatalf("Create(bogus root) = %v, want code %v", err, want)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		g, err := cgroup.Create("g", cgroup.WithRoot(c.root))
+		if g != nil {
+			t.Fatalf("Create with root %q returned a handle", c.root)
+		}
+		want := coreproc.CodeCgroupUnavailable
+		if runtime.GOOS != "linux" {
+			want = coreproc.CodeUnsupportedPlatform
+		}
+		if !errs.HasCode(err, want) {
+			t.Fatalf("Create(root %q) = %v, want code %v", c.root, err, want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

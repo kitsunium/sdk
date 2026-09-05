@@ -1,0 +1,29 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "sdkguard_lib",
+    srcs = [
+        "analyze.go",
+        "errors.go",
+        "file_ctx.go",
+        "main.go",
+        "pipeline_call.go",
+        "probe.go",
+        "rules.go",
+        "version.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/tools/sdkguard",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "sdkguard",
+    embed = [":sdkguard_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "sdkguard_test",
+    srcs = ["main_test.go"],
+    embed = [":sdkguard_lib"],
+)

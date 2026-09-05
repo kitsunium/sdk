@@ -1,4 +1,4 @@
-.PHONY: help build test lint bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare
+.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -93,6 +93,26 @@ lint:
 	# Exemption invariant: a `//go:build !race` test is invisible to the race
 	# suite, so the alloc lane is its only gate. Fail if one runs in no lane.
 	bash scripts/pre-commit/check-alloc-lane-coverage.sh
+	# The SDK is bound by the invariants it imposes on consumers. Running the
+	# guard here is what keeps ADR 0033 from being a tool nobody executes.
+	$(MAKE) --no-print-directory guard
+
+# `guard` runs tools/sdkguard over the SDK's own tree at the invariant level.
+#
+# sdkguard is the consumer-facing enforcement of the SDK's ADRs (0033). It is a
+# stdlib-only module OUTSIDE go.work, so it is invoked with GOWORK=off from its
+# own directory with absolute path arguments — the same treatment genindex gets.
+#
+# Only invariants run here. The conventions (SDK002 untyped errors, SDK005 the
+# legacy log package) have legitimate exceptions inside the SDK itself: the errs
+# package cannot construct its own bootstrap-validation errors through itself.
+# Consumers choose their own level; see tools/sdkguard/CLAUDE.md.
+# -version-check=off: the freshness probe reaches a module proxy, and `make
+# lint` must not depend on network egress. The probe is for consumers, and the
+# SDK is not a consumer of itself.
+guard:
+	cd tools/sdkguard && GOWORK=off go run . -level=invariant -version-check=off \
+	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/tools/...
 
 # `bench` regenerates pkg/v1/codec/BENCH.md by running the full bench
 # matrix programmatically (testing.Benchmark per row, no text-format

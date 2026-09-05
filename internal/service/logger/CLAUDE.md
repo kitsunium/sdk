@@ -22,7 +22,15 @@ Logger ── Handler (genericHandler / TextHandler)
 - `genericHandler` (handler.go) composes an Encoder + a Sink — the v2 default.
 - `TextHandler` (text_handler.go) is the legacy fused format+transport
   handler kept for backward compatibility; it still mutexes its writer and
-  ships the same RFC3339-ms output as `encoder/text`.
+  ships the same RFC3339-ms output as `encoder/text`. That last claim was
+  aspirational until 2026-09-04: the file carried the value table **twice**
+  (`appendAttr` and `appendValueOnly`) and both copies had drifted, rendering
+  only String/Int64/Bool/Float64 and degrading Duration, Time and Uint64 to
+  `?` where `encoder/text` rendered them. `appendAttr` now delegates to
+  `appendValueOnly`, so one table remains and it matches the encoder.
+  `KindAny` still degrades to `?` — that is the documented contract, pinned by
+  `text_handler_internal_test.go`; `KindGroup` degrades too, since producers
+  flatten groups into dotted keys rather than emitting a group payload.
 - The `Builder` (builder.go) is the chainable, recycler-backed fluent API
   returned by `Build(lg, lv)`. Per-call cost in steady state: **one** heap
   allocation per emit once `recordPool` is warm — the pool recycles the

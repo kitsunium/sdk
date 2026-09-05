@@ -35,7 +35,7 @@ internal/
                    transform
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
-    ├── logger/    (+ ldflags-injected Version, + writer/)
+    ├── logger/    (+ ldflags-injected Version, + writer/, + slogbridge/)
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
     ├── codec/     (blank-imports all 14 service codecs + transform)
     ├── crypto/    (+ agree, hash, kdf, mac, password, sign)
@@ -64,7 +64,7 @@ every other codec.
 |---|---|
 | New feature or bug fix | `/plan "description"` → `/do` → `/git --commit` → `/git --merge` |
 | Code review | `/review` |
-| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage) |
+| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage + `make guard`) |
 | Local test suite | `make build && make test` (build prep + race tests) |
 | Allocation gates | `make test-alloc` — race-off pass; the ONLY lane that runs `//go:build !race` tests (targets in `tools/alloc-lane-targets.txt`, see rule 12) |
 | Single-package test | `bazel test //<path>:<target>` (e.g. `bazel test //internal/kernel/errs:errs_test`) |
@@ -109,6 +109,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 ├── .bazelversion          pins Bazel to 9.0.2
 ├── Makefile               build / test / test-alloc / lint / bench / cover / docs / serve / release-dry-run / docs-readme … (run `make` for the full list)
 ├── e2e/                   real-kernel conformance harness — auxiliary module, OUTSIDE go.work (GOWORK=off)
+├── tools/sdkguard/        consumer-facing rule enforcement (stdlib-only CLI — ADR 0033)
 ├── tools/workspace_status.sh  prints STABLE_VERSION (consumed by --stamp + x_defs)
 ├── tools/alloc-lane-targets.txt  target list for the race-off alloc lane (rule 12)
 ├── tools/genindex/        docs-site symbol index — auxiliary module, OUTSIDE go.work (GOWORK=off)
@@ -132,7 +133,8 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 | `make test-alloc` | race-off allocation gates green (19 targets) — the only lane running `//go:build !race` tests |
 | `bash scripts/pre-commit/check-alloc-lane-coverage.sh` | exit 0 — no `!race` test sits outside `tools/alloc-lane-targets.txt` (rule 12) |
 | `cd pkg && go test ./...` | green; `pkg/v1/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
-| `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + ktn-linter + alloc-lane coverage |
+| `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + ktn-linter + alloc-lane coverage + `make guard` |
+| `make guard` | `tools/sdkguard` over the SDK's own tree at invariant level (ADR 0033); no network — `-version-check=off` |
 
 ## Reference
 
@@ -165,5 +167,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0027 — observability domain (`metrics`): 9th core sibling, Counter/Gauge/Histogram + `Meter` + `Exporter` registry (writer-registry model); in-memory meter + stdlib text exporter; error block `0.2.9.*`; labels/Prometheus/OTLP deferred — `docs/adr/0027-sdk-metrics-domain.md`
 - ADR 0028 — configuration domain (`config`): 10th core sibling, `Source`/`Validator`/`Watcher` ports; env+file layering + JSON round-trip decode + cross-OS poll watcher; closes the Phase-B wave; error block `0.2.10.*` — `docs/adr/0028-sdk-config-domain.md`
 - ADR 0029 — network domain (`net`): 11th core sibling covering inbound AND outbound over one substrate (TLS/mTLS identity, per-phase deadlines, policy, metrics); goroutine-per-connection on the runtime netpoller (not an event loop); `net/http` adapted, not reimplemented; `recvmmsg` + `SO_REUSEPORT` via raw stdlib `syscall` because `x/net` pulls in the banned `x/sys`; **no registry**; error block `0.2.11.*` — `docs/adr/0029-sdk-net-domain.md`
+- ADR 0032 — `log/slog` is an adapter at the public edge, not a domain dependency: permitted in `pkg/v1/logger/slogbridge` ONLY, so a consumer facing a concrete `*slog.Logger` parameter stops building a second pipeline (two thresholds, two formats, half-stamped records); core keeps its "never log/slog" rule; error block `1.1.1.*` — `docs/adr/0032-logger-slog-bridge.md`
+- ADR 0033 — SDK rules are enforced on consumers at BUILD time by `tools/sdkguard`, a stdlib-only CLI: runtime detection was measured impossible (`log/slog` is not a module, a local `slog.Logger` never touches `slog.Default`), and a vettool would need `x/tools`, which `tools/*` cannot take without breaking its Bazel build; rules are split invariant/convention so adoption is incremental — `docs/adr/0033-consumer-rule-enforcement.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

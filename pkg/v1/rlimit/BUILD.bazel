@@ -23,9 +23,9 @@ go_test(
     name = "rlimit_test",
     srcs = [
         "rlimit_external_test.go",
+        "rlimit_other_external_test.go",
         "rlimit_other_test.go",
-        "rlimit_support_other_test.go",
-        "rlimit_support_unix_test.go",
+        "rlimit_unix_external_test.go",
     ],
     deps = [
         ":rlimit",

@@ -23,6 +23,7 @@ go_test(
     name = "sdnotify_test",
     srcs = [
         "sdnotify_external_test.go",
+        "sdnotify_linux_external_test.go",
         "sdnotify_other_test.go",
     ],
     deps = [

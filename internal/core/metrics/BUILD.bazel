@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//internal/core:core_consumers"])
 
@@ -39,4 +39,14 @@ filegroup(
     name = "audit_srcs",
     srcs = glob(["*.go"]),
     visibility = ["//:__pkg__"],
+)
+
+go_test(
+    name = "metrics_test",
+    srcs = [
+        "exporter_external_test.go",
+        "exporter_internal_test.go",
+    ],
+    embed = [":metrics"],
+    deps = ["//internal/kernel/errs"],
 )

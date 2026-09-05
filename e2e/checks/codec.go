@@ -84,7 +84,7 @@ var (
 
 // Codec returns the codec-domain conformance checks (Marshal/Unmarshal round-trip
 // across every registered Format).
-func Codec() harness.Suite {
+func Codec() harness.CheckGroup {
 	//: one round-trip Check per Format plus a registry-presence Check.
 	checks := make([]harness.Check, 0, len(codecSamples)+1)
 	//: bind each table row into its own Check closure.
@@ -100,7 +100,7 @@ func Codec() harness.Suite {
 	//: assert the registry actually activated via the package import.
 	checks = append(checks, codecRegistryPopulated)
 	//: bundle every round-trip plus the registry check under the codec domain.
-	return harness.Suite{Domain: codecDomain, Checks: checks}
+	return harness.CheckGroup{Domain: codecDomain, Checks: checks}
 }
 
 // codecRoundTrip marshals value under format, unmarshals it back into a fresh

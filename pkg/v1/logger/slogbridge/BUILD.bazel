@@ -1,0 +1,46 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "slogbridge",
+    srcs = [
+        "codes.go",
+        "convert.go",
+        "errors.go",
+        "handler.go",
+        "slogbridge.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/logger/slogbridge",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/kernel/errs",
+        "//pkg/v1/logger",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":slogbridge",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "slogbridge_test",
+    srcs = [
+        "convert_internal_test.go",
+        "handler_internal_test.go",
+        "slogbridge_external_test.go",
+    ],
+    embed = [":slogbridge"],
+    deps = [
+        "//pkg/v1/errs",
+        "//pkg/v1/logger",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

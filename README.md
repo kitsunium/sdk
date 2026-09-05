@@ -45,7 +45,12 @@ func main() {
 - **Layered architecture** — `kernel` (stdlib-only primitives) → `core` (interfaces + values) → `service` (implementations) → `pkg/v1` (stable public alias layer). Dependency direction enforced by Bazel `visibility` rules.
 - **Typed errors throughout** — `fmt.Errorf` / `errors.New` are banned in production code. Every error carries a wire-safe `Public` message and a log-only `Private` envelope. AST audit gates the build.
 - **One Marshal/Unmarshal for everything** — text, binary, base-encoded — `codec.Marshal(format, v)` works the same way regardless of the underlying wire shape.
-- **Multi-module workspace** — `internal/kernel`, `internal/core`, `internal/service`, `pkg`, root. Each can be built standalone with `GOWORK=off`; `go.work` is the umbrella over exactly those five. `e2e/` and `tools/genindex/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
+- **The rules are checkable from outside** — the conventions this SDK states in its ADRs are enforced on *your* codebase too, by a tool the SDK ships:
+  ```sh
+  go run github.com/kitsunium/sdk/tools/sdkguard@latest -level=invariant ./...
+  ```
+  It catches the defects that never announce themselves — a second logging pipeline beside the SDK logger (two thresholds, two formats, half-stamped records), stdout used as a log destination under a stdio protocol, a `logger.Version` assigned at runtime. Rules target *constructs*, never imports, so `*slog.Logger` fields and `fmt.Fprintln(os.Stdout, …)` stay legitimate. It also warns — without failing your build — when your `go.mod` pins an SDK older than the latest release, which matters here because a patch is cut whenever an internal package changes, carrying fixes no public-API changelog would show. See ADR 0033 and `tools/sdkguard/CLAUDE.md`.
+- **Multi-module workspace** — `internal/kernel`, `internal/core`, `internal/service`, `pkg`, root. Each can be built standalone with `GOWORK=off`; `go.work` is the umbrella over exactly those five. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
 
 ## Releases
 
@@ -68,6 +73,7 @@ pkg/v1/          stable public API — type aliases + ergonomic helpers
 docs/            ADRs + the Astro-based docs site
 scripts/release/ release tooling — see ADR 0007
 tools/           build-time helpers (workspace_status, genindex, alloc-lane-targets)
+                 + sdkguard/ — consumer-facing rule enforcement (ADR 0033)
 e2e/             real-kernel conformance harness (auxiliary module, GOWORK=off)
 ```
 
@@ -77,7 +83,8 @@ e2e/             real-kernel conformance harness (auxiliary module, GOWORK=off)
 make build       # bazel mod tidy + gazelle + gofumpt + bazel build //...
 make test        # every *_test target green incl. AST audits
 make test-alloc  # race-off allocation gates (the only lane running //go:build !race tests)
-make lint        # drift check (read-only): mod tidy + gazelle + gofumpt + ktn-linter + alloc-lane coverage
+make lint        # drift check (read-only): mod tidy + gazelle + gofumpt + ktn-linter + alloc-lane coverage + guard
+make guard       # sdkguard over the SDK's own tree at invariant level (ADR 0033)
 make bench       # regenerate codec BENCH.md from real Go benchmarks
 ```
 

@@ -93,9 +93,9 @@ var errPlainNonSDK = errors.New("plain non-sdk error")
 
 // Logger returns the logger-domain conformance checks (Default/NewText, levels,
 // attributes, sinks, framework version).
-func Logger() harness.Suite {
+func Logger() harness.CheckGroup {
 	//: each check exercises one observable logger behaviour on the real host.
-	return harness.Suite{
+	return harness.CheckGroup{
 		Domain: loggerDomain,
 		Checks: []harness.Check{
 			checkLoggerTextToBuffer,
@@ -110,10 +110,10 @@ func Logger() harness.Suite {
 
 // Errs returns the errs-domain conformance checks (CodeOf/ReasonOf/PublicOf/
 // HasCode introspection over real SDK errors).
-func Errs() harness.Suite {
+func Errs() harness.CheckGroup {
 	//: each check exercises one read-only introspection accessor over a real
 	//: SDK error produced by the pure-Go codec/logger facades.
-	return harness.Suite{
+	return harness.CheckGroup{
 		Domain: errsDomain,
 		Checks: []harness.Check{
 			checkErrsCode,

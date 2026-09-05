@@ -960,3 +960,244 @@ func Test_marshalJSONPooled(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// Test_isBaseConversion pins which variants carry the tighter input cap. It is
+// the guard on an O(n²) transform: a variant wrongly reported as a block
+// encoding would be allowed 10 MiB through quadratic arithmetic, which is a
+// denial of service rather than a slow encode.
+func Test_isBaseConversion(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		v    variant
+		want bool
+	}
+	tests := []tc{
+		{"base64", variantBase64, false},
+		{"base64url", variantBase64URL, false},
+		{"base32", variantBase32, false},
+		{"base16", variantBase16, false},
+		{"hex", variantHex, false},
+		{"ascii85", variantASCII85, false},
+		{"base45", variantBase45, false},
+		{"base58", variantBase58, true},
+		{"base62", variantBase62, true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := isBaseConversion(c.v); got != c.want {
+			t.Errorf("isBaseConversion(%v) = %v, want %v", c.v, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_baseencCodec_convAlphabet pins the alphabet selection. Base58 excludes
+// 0, O, I and l on purpose — a human transcribing an identifier confuses them —
+// so handing Base58 the Base62 alphabet would produce identifiers that look
+// right and cannot be read back reliably.
+func Test_baseencCodec_convAlphabet(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		v    variant
+		want string
+	}
+	tests := []tc{
+		{"base58 gets the Bitcoin alphabet", variantBase58, base58Alphabet},
+		{"base62 gets the full alphanumeric alphabet", variantBase62, base62Alphabet},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := (&baseencCodec{variant: c.v}).convAlphabet()
+		if got != c.want {
+			t.Errorf("convAlphabet() = %q, want %q", got, c.want)
+		}
+		//: the radix must match the alphabet it was drawn from, or the
+		//: arithmetic and the digit table disagree.
+		if len(got) != (&baseencCodec{variant: c.v}).convRadix() {
+			t.Errorf("convAlphabet() has %d chars but convRadix() is %d",
+				len(got), (&baseencCodec{variant: c.v}).convRadix())
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+	//: Base58's whole point is the four excluded characters.
+	for _, excluded := range []byte{'0', 'O', 'I', 'l'} {
+		if strings.IndexByte(base58Alphabet, excluded) >= 0 {
+			t.Errorf("the Base58 alphabet contains the excluded character %q", excluded)
+		}
+	}
+}
+
+// Test_baseencCodec_convRadix pins the radix selection against the alphabet
+// length, which is the only value it can correctly be.
+func Test_baseencCodec_convRadix(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		v    variant
+		want int
+	}
+	tests := []tc{
+		{"base58", variantBase58, base58Radix},
+		{"base62", variantBase62, base62Radix},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := (&baseencCodec{variant: c.v}).convRadix(); got != c.want {
+			t.Errorf("convRadix() = %d, want %d", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_baseencCodec_convReverse pins that each variant gets the digit table
+// built from its OWN alphabet. Crossing them would decode silently and wrongly:
+// every Base58 character is also a Base62 character, so nothing would be
+// rejected — the bytes would simply come back different.
+func Test_baseencCodec_convReverse(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		v        variant
+		alphabet string
+	}
+	tests := []tc{
+		{"base58", variantBase58, base58Alphabet},
+		{"base62", variantBase62, base62Alphabet},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		table := (&baseencCodec{variant: c.v}).convReverse()
+		if table == nil {
+			t.Fatal("convReverse() returned no table")
+		}
+		//: every character of this variant's alphabet must map to its index.
+		for i := range c.alphabet {
+			if got := table[c.alphabet[i]]; got != i {
+				t.Errorf("table[%q] = %d, want %d", c.alphabet[i], got, i)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+	//: the two tables must be distinct objects, or one variant's decode would
+	//: silently use the other's digit values.
+	if (&baseencCodec{variant: variantBase58}).convReverse() ==
+		(&baseencCodec{variant: variantBase62}).convReverse() {
+		t.Error("base58 and base62 share one reverse table")
+	}
+}
+
+// Test_wrapMalformed pins the adaptation from the (bytes, ok) shape the
+// base-conversion decoders use to the typed sentinel every caller matches on.
+func Test_wrapMalformed(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		out  []byte
+		ok   bool
+	}
+	tests := []tc{
+		{"a successful decode", []byte{0x01, 0x02}, true},
+		{"a successful decode of nothing", []byte{}, true},
+		{"a malformed input", nil, false},
+		//: ok=false wins even when the decoder handed back bytes, or a partial
+		//: decode would reach the caller as a complete one.
+		{"a malformed input with partial bytes", []byte{0x01}, false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got, err := wrapMalformed(c.out, c.ok)
+		if c.ok {
+			if err != nil {
+				t.Fatalf("wrapMalformed(ok) = %v, want nil", err)
+			}
+			if !bytes.Equal(got, c.out) {
+				t.Errorf("wrapMalformed(ok) = %x, want %x", got, c.out)
+			}
+			return
+		}
+		if !errs.HasCode(err, CodeBaseEncDecodeFailed) {
+			t.Fatalf("wrapMalformed(!ok) = %v, want BASE_ENC_DECODE_FAILED", err)
+		}
+		if got != nil {
+			t.Errorf("wrapMalformed(!ok) returned %x beside the error", got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_convSizeExceeded pins the size-cap error. The Private field names the
+// call site, which is what tells an operator whether the refusal came from
+// Unmarshal, from the buffering writer, or from the streaming reader — three
+// paths that share one public message.
+func Test_convSizeExceeded(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		where string
+		//: an empty call site is itself a programming error: errs refuses a
+		//: wrap with no private half, so the omission is caught rather than
+		//: producing an error nobody can trace back to a line.
+		wantRefused bool
+	}
+	tests := []tc{
+		{name: "the unmarshal path", where: "service/codec/baseenc.Unmarshal: over the cap"},
+		{name: "the streaming path", where: "service/codec/baseenc: streaming decode input exceeds the size cap"},
+		{name: "an empty call site", where: "", wantRefused: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		err := convSizeExceeded(c.where)
+		if c.wantRefused {
+			//: whatever comes back, it must NOT masquerade as a size refusal.
+			if errs.HasCode(err, CodeBaseEncSizeExceeded) {
+				t.Fatalf("convSizeExceeded(\"\") = %v, want the wrap to be refused", err)
+			}
+			return
+		}
+		if !errs.HasCode(err, CodeBaseEncSizeExceeded) {
+			t.Fatalf("convSizeExceeded = %v, want BASE_ENC_SIZE_EXCEEDED", err)
+		}
+		reason, _ := errs.ReasonOf(err)
+		if reason != "BASE_ENC_SIZE_EXCEEDED" {
+			t.Errorf("reason = %q, want BASE_ENC_SIZE_EXCEEDED", reason)
+		}
+		//: the public message must never name the call site; that is what the
+		//: private half is for.
+		if public := errs.PublicOf(err); strings.Contains(public, c.where) {
+			t.Errorf("the public message leaked the call site: %q", public)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

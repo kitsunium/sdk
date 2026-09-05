@@ -8,7 +8,7 @@ import (
 
 // TestResourceString asserts each Resource renders its systemd directive suffix
 // and unknown values degrade to "unknown".
-func TestResourceString(t *testing.T) {
+func Test_Resource_String(t *testing.T) {
 	t.Parallel()
 
 	type resCase struct {
@@ -42,79 +42,35 @@ func TestResourceString(t *testing.T) {
 }
 
 // TestResourceKnown asserts only defined, non-zero resources report Known.
-func TestResourceKnown(t *testing.T) {
+func Test_Resource_Known(t *testing.T) {
 	t.Parallel()
-
-	//: the zero value is never a usable resource.
-	if proc.ResourceUnknown.Known() {
-		t.Fatal("ResourceUnknown.Known() = true, want false")
+	type tc struct {
+		name     string
+		resource proc.Resource
+		want     bool
 	}
-	//: a defined resource is known.
-	if !proc.ResourceNoFile.Known() {
-		t.Fatal("ResourceNoFile.Known() = false, want true")
+	tests := []tc{
+		{"the reserved zero value", proc.ResourceUnknown, false},
+		{"the first defined resource", proc.ResourceNoFile, true},
+		{"a middle resource", proc.ResourceCPU, true},
+		{"the last defined resource", proc.ResourceMemLock, true},
+		{"one past the range", proc.ResourceMemLock + 1, false},
+		{"a negative value", proc.Resource(-1), false},
 	}
-	//: an out-of-range value is not known.
-	if proc.Resource(9999).Known() {
-		t.Fatal("Resource(9999).Known() = true, want false")
-	}
-}
-
-// TestExitSuccess asserts Success only for a clean zero-status exit.
-func TestExitSuccess(t *testing.T) {
-	t.Parallel()
-
-	type exitCase struct {
-		name string
-		exit proc.ExitValue
-		want bool
-	}
-	cases := []exitCase{
-		{name: "clean", exit: proc.ExitValue{Code: 0}, want: true},
-		{name: "nonzero", exit: proc.ExitValue{Code: 1}, want: false},
-		{name: "signalled", exit: proc.ExitValue{Signaled: true}, want: false},
-	}
-
-	runCase := func(t *testing.T, tc exitCase) {
+	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		//: only a non-signalled status-zero exit counts as success.
-		if got := tc.exit.Success(); got != tc.want {
-			t.Fatalf("%s: Success() = %v, want %v", tc.name, got, tc.want)
+		if got := c.resource.Known(); got != c.want {
+			t.Errorf("Known() = %v, want %v", got, c.want)
 		}
 	}
-
-	for _, tc := range cases {
-		//: subtest per outcome keeps a failure attributable.
-		t.Run(tc.name, func(t *testing.T) {
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			runCase(t, tc)
+			runCase(t, c)
 		})
 	}
 }
 
-// TestNotificationFlags asserts the lifecycle accessors read State and tolerate
-// a nil map (the absent-field case).
-func TestNotificationFlags(t *testing.T) {
-	t.Parallel()
-
-	full := proc.NotificationValue{State: map[string]string{
-		"READY":     "1",
-		"RELOADING": "1",
-		"STOPPING":  "1",
-		"WATCHDOG":  "1",
-	}}
-	//: every flag present must read true.
-	if !full.Ready() || !full.Reloading() || !full.Stopping() || !full.Watchdog() {
-		t.Fatalf("full notification flags not all true: %+v", full)
-	}
-
-	var empty proc.NotificationValue
-	//: a nil State must not panic and every flag must read false.
-	if empty.Ready() || empty.Reloading() || empty.Stopping() || empty.Watchdog() {
-		t.Fatalf("empty notification flags not all false: %+v", empty)
-	}
-}
-
-// TestLimitInfinity asserts the sentinel is the all-ones ceiling.
 func TestLimitInfinity(t *testing.T) {
 	t.Parallel()
 

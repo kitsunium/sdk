@@ -41,14 +41,18 @@ alias(
 go_test(
     name = "proc_test",
     srcs = [
+        "exit_external_test.go",
+        "limit_external_test.go",
+        "notification_external_test.go",
         "proc_external_test.go",
+        "proc_internal_test.go",
         "signal_external_test.go",
-        "signal_unix_external_test.go",
+        "signal_unix_internal_test.go",
+        "stdio_external_test.go",
+        "stdio_internal_test.go",
     ],
-    deps = [
-        ":proc",
-        "//internal/kernel/errs",
-    ],
+    embed = [":proc"],
+    deps = ["//internal/kernel/errs"],
 )
 
 # audit_srcs ships this package's *.go to the errs AST audit (ADR 0016); proc

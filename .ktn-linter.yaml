@@ -78,15 +78,12 @@ serialization_tags:
 exclude:
   # Vendored third-party code — never our convention to enforce.
   - "vendor/**"
-  # Build-time tools (single-purpose scripts under tools/) — per the
-  # Rule 8 exemption in /workspace/CLAUDE.md, these are tooling, not
-  # library code, and stay out of the per-package doc-style gates.
-  - "tools/**"
-  # The e2e conformance binary (e2e/**) is a runtime test harness, not shipped
-  # library code — same category as tools/. Its job is to exercise the public
-  # API on real kernels, so library-shape rules (role-suffixed structs, one
-  # struct per file, per-package doc gates) do not apply.
-  - "e2e/**"
+  #
+  # tools/** and e2e/** used to sit here, exempted as "tooling, not library
+  # code". Both are now clean at `--phases all` and are gated like everything
+  # else: the rules turned out to apply perfectly well to a build script and to
+  # a conformance harness, and the exemption was mostly hiding missing tests.
+  # Do not re-add them — fix the finding instead.
   # Go module cache occasionally shows up in IDE-driven scans.
   - "**/.cache/**"
   # Protocol Buffers and gRPC generated code.
@@ -155,9 +152,13 @@ rules:
   # satisfaction (compile error), so the suggestion is unactionable. This is the
   # same class of contract-required-type FP that #366 fixed for snapshot.Value.
   #
-  # Scoped to the AEAD scheme implementations ONLY (stdlib aesgcm under service,
-  # x/crypto schemes under third-party/x-crypto). RETIRE this block once #385
-  # ships interface-awareness (mirror the 2026-05-28 retirement below).
+  # Every entry below is the SAME false positive: a parameter whose type is fixed
+  # by a contract the function implements, so narrowing it breaks interface
+  # satisfaction. The AEAD Key is the original case; tlsid.Identity, the net
+  # engines and the slog bridge's slog.Value are the others, each justified at
+  # its own entry. RETIRE the whole block once #385 ships interface-awareness
+  # (mirror the 2026-05-28 retirement below) — one condition covers them all,
+  # because one rule limitation causes them all.
   KTN-API-MINIF:
     exclude:
       # The tlsid handshake test takes two Identity values and uses BOTH halves
@@ -173,6 +174,13 @@ rules:
       # does: it is the domain's single TLS value type, and narrowing it to a
       # one-method interface would hide that both ends share it.
       - "**/internal/service/net/server/**"
+      # The slog bridge converts a stdlib slog.Value, whose type is fixed by the
+      # slog.Handler contract it implements — the same contract-required-type
+      # class as the AEAD Key below. The suggested `interface{ Any() any }` is
+      # actively wrong here: the function's whole job is to switch on Kind() and
+      # preserve the payload's type across the bridge, so narrowing to Any()
+      # would erase exactly what the package exists to keep (ADR 0032).
+      - "**/pkg/v1/logger/slogbridge/**"
 
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"

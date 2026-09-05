@@ -28,6 +28,7 @@ go_test(
     srcs = [
         "process_external_test.go",
         "process_other_test.go",
+        "process_unix_external_test.go",
     ],
     deps = [
         ":process",

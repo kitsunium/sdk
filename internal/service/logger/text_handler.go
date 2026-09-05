@@ -224,7 +224,21 @@ func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 	case corelogger.KindFloat64:
 		//: 'g' format with -1 precision matches Go's default fmt.Print rendering.
 		return strconv.AppendFloat(dst, a.Value.Float64(), floatFormat, floatPrec, floatBitSize)
-	//: every other Kind degrades to '?' until commit 7's encoder split.
+	//: uint64 renders base-10 unquoted.
+	case corelogger.KindUint64:
+		//: strconv.AppendUint is the alloc-free unsigned integer renderer.
+		return strconv.AppendUint(dst, a.Value.Uint64(), decimalBase)
+	//: durations render via the standard time.Duration String() form.
+	case corelogger.KindDuration:
+		//: AppendQuote keeps the textual form readable next to other quoted attrs.
+		return strconv.AppendQuote(dst, a.Value.Duration().String())
+	//: timestamps render as RFC3339-with-millis to match the header format.
+	case corelogger.KindTime:
+		//: AppendFormat reuses timestampLayout — the SAME layout as the line
+		//: header — so a Time attr and the record timestamp share one shape.
+		return a.Value.Time().AppendFormat(dst, timestampLayout)
+	//: KindAny (opaque payload) and KindGroup (no textual form of its own —
+	//: producers flatten groups into dotted keys) degrade to '?'.
 	default:
 		//: '?' is the documented placeholder for unsupported variants.
 		return append(dst, '?')
@@ -237,25 +251,8 @@ func appendAttr(dst []byte, a corelogger.AttrValue) []byte {
 	dst = append(dst, ' ')
 	dst = append(dst, a.Key...)
 	dst = append(dst, '=')
-	//: dispatch on the typed Kind discriminant — no boxing on the hot path.
-	switch a.Value.Kind() {
-	//: strings are quoted so whitespace in values remains visible.
-	case corelogger.KindString:
-		dst = strconv.AppendQuote(dst, a.Value.String())
-	//: int64 (also covers int / int32 widened by IntValue) renders base-10.
-	case corelogger.KindInt64:
-		dst = strconv.AppendInt(dst, a.Value.Int64(), decimalBase)
-	//: booleans render as "true" or "false".
-	case corelogger.KindBool:
-		dst = strconv.AppendBool(dst, a.Value.Bool())
-	//: floats use Go's default shortest round-trip format.
-	case corelogger.KindFloat64:
-		dst = strconv.AppendFloat(dst, a.Value.Float64(), floatFormat, floatPrec, floatBitSize)
-	//: every other Kind (Any, Time, Duration, Uint64, Group) maps to '?' here; richer rendering lives in the dedicated encoder package so
-	//: this handler stays format-agnostic.
-	default:
-		dst = append(dst, '?')
-	}
-	//: return the (possibly re-allocated) buffer back to the caller.
-	return dst
+	//: delegate the value to appendValueOnly so the grouped and ungrouped
+	//: paths cannot drift apart — they used to carry two copies of this table,
+	//: and the copies had already diverged from the encoder's.
+	return appendValueOnly(dst, a)
 }

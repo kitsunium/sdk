@@ -22,12 +22,7 @@ alias(
 
 go_test(
     name = "server_test",
-    srcs = [
-        "http_external_test.go",
-        "options_external_test.go",
-        "server_external_test.go",
-        "tlsmaterial_external_test.go",
-    ],
+    srcs = ["server_external_test.go"],
     deps = [
         ":server",
         "//pkg/v1/tlsid",

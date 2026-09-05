@@ -1,264 +1,155 @@
 //go:build unix
 
-// Package signal_test — black-box acceptance tests for the service signal
-// toolbox: Notify delivery + leak-free stop, and Relay to a process group.
+// Package signal_test — black-box acceptance tests for Notify: a self-sent
+// signal must arrive typed, and the teardown must be complete and idempotent.
 package signal_test
 
 import (
-	"os/exec"
-	"runtime"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcsignal "github.com/kitsunium/sdk/internal/service/proc/signal"
 )
 
-// waitGoroutines polls runtime.NumGoroutine until it drops to at most want or the
-// deadline elapses, returning the final count. It tolerates scheduler lag so the
-// leak assertion is not flaky.
-func waitGoroutines(want int) (got int) {
-	deadline := time.Now().Add(10 * time.Second)
-	//: poll until the count settles or the deadline passes.
-	for {
-		got = runtime.NumGoroutine()
-		//: the translator has exited once the count is back to baseline.
-		if got <= want {
-			//: settled at or below baseline — no leak.
-			return got
-		}
-		//: give up once the deadline elapses and report the last reading.
-		if time.Now().After(deadline) {
-			//: deadline hit — return whatever we last observed.
-			return got
-		}
-		//: brief yield lets the translator goroutine finish unwinding.
-		time.Sleep(5 * time.Millisecond)
-	}
-}
+// deliveryTimeout bounds every wait on a signal that must already be in flight.
+const deliveryTimeout time.Duration = 10 * time.Second
 
-// settledGoroutines samples runtime.NumGoroutine until two consecutive readings
-// agree, returning that stable count. It establishes a baseline AFTER transient
-// warm-up goroutines have unwound so the leak assertion compares like for like.
-func settledGoroutines() (stable int) {
-	prev := runtime.NumGoroutine()
-	deadline := time.Now().Add(10 * time.Second)
-	//: poll until two back-to-back samples match (the count has stopped moving).
-	for {
-		//: let any in-flight unwind progress between samples.
-		time.Sleep(10 * time.Millisecond)
-		cur := runtime.NumGoroutine()
-		//: two equal consecutive readings mean the count has settled.
-		if cur == prev {
-			//: stable — this is the baseline.
-			return cur
-		}
-		//: bail out at the deadline with the latest reading rather than spin.
-		if time.Now().After(deadline) {
-			//: deadline hit — accept the most recent sample.
-			return cur
-		}
-		prev = cur
-	}
-}
-
-// TestNotifyDeliversThenStops asserts a self-sent signal is delivered as a typed
-// value, then the stop func unregisters the subscription (no further delivery)
-// and leaks no goroutine — the central #62 Notify contract.
-func TestNotifyDeliversThenStops(t *testing.T) {
-	//: not parallel: it measures the process-wide goroutine count.
-
-	//: warm up os/signal first — its internal signal_recv goroutine starts on
-	//: the first Notify ever and never exits; baseline must be taken AFTER it so
-	//: that one-time runtime goroutine is not mistaken for a leak.
-	_, warmStop := svcsignal.Notify(coreproc.Signal(syscall.SIGUSR1))
-	warmStop()
-	//: let the warm-up translator unwind, then sample a settled baseline.
-	base := settledGoroutines()
-
-	ch, stop := svcsignal.Notify(coreproc.Signal(syscall.SIGUSR1))
-
-	//: deliver a signal to ourselves; Notify must surface it on the typed chan.
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGUSR1); err != nil {
-		t.Fatalf("self-kill SIGUSR1: %v", err)
-	}
-
-	//: the delivered value must be the typed SIGUSR1, not an os.Signal.
-	select {
-	case got := <-ch:
-		//: identity check: what we sent is what we receive, typed.
-		if got != coreproc.Signal(syscall.SIGUSR1) {
-			t.Fatalf("delivered %v, want SIGUSR1", got)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for SIGUSR1 delivery")
-	}
-
-	stop()
-
-	//: stop closes the channel; a closed channel reads the zero value, not a
-	//: further signal — proving the subscription was torn down.
-	select {
-	case got, ok := <-ch:
-		//: after stop the channel must be closed (ok == false).
-		if ok {
-			t.Fatalf("received %v after stop; want closed channel", got)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("channel not closed after stop")
-	}
-
-	//: stop must be idempotent: a second call is a safe no-op, never a panic.
-	stop()
-
-	//: the translation goroutine must be gone — no leak after teardown.
-	if got := waitGoroutines(base); got > base {
-		t.Fatalf("goroutine leak: have %d, baseline %d", got, base)
-	}
-}
-
-// TestRelayToProcessGroup asserts Relay forwards a received signal to a process
-// group when the target is negative (-pgid), the #62 Relay contract. The target
-// group is a freshly-forked child in its OWN process group (Setpgid), so the
-// group-wide kill(2) never reaches the test runner's own group.
+// TestNotify asserts a self-sent signal is delivered as a typed value, that the
+// stop function tears the subscription down completely, and that calling it
+// again is a safe no-op.
 //
-// goroutine lifecycle: one goroutine runs cmd.Wait on the child and reports the
-// result on a buffered channel; the test always receives that result (success
-// path) or the deferred Kill+drain forces the child to exit and the goroutine to
-// send, so the goroutine is always joined and never leaks.
-func TestRelayToProcessGroup(t *testing.T) {
+// The closed channel is what proves the teardown: translate closes it from its
+// own defer, so observing the close IS observing the goroutine return. That is a
+// deterministic signal, unlike a runtime.NumGoroutine comparison, which cannot
+// tell this package's goroutine from anyone else's.
+func TestNotify(t *testing.T) {
 	t.Parallel()
-
-	//: a long sleep that does nothing but wait to be signalled.
-	cmd := exec.Command("sleep", "30")
-	//: place the child in its own process group so -pgid targets ONLY it,
-	//: never the test runner's group (which would kill sibling processes).
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	//: a host without a usable sleep binary cannot exercise this path.
-	if err := cmd.Start(); err != nil {
-		t.Skipf("cannot start child: %v", err)
+	type tc struct {
+		name string
+		sig  syscall.Signal
+		//: how many times to send before tearing down; a burst must not be
+		//: dropped, which is what the per-signal buffer slot is for.
+		sends int
 	}
-	//: the child's pid doubles as its process-group id (Setpgid with Pgid 0).
-	pgid := cmd.Process.Pid
-
-	//: a single Wait owner: this goroutine reaps the child and reports how it died.
-	waitErr := make(chan error, 1)
-	//: Wait blocks until the signalled child exits; run it off the deadline path.
-	go func() {
-		//: capture the child's termination so we can inspect the signal.
-		waitErr <- cmd.Wait()
-	}()
-
-	//: on any early failure, force the child dead so the Wait goroutine joins and
-	//: no zombie or goroutine survives the test.
-	defer func() {
-		//: a Kill error means the child already exited — both outcomes are fine.
-		if kerr := cmd.Process.Kill(); kerr != nil {
-			t.Logf("cleanup Kill: %v (child likely already exited)", kerr)
-		}
-	}()
-
-	//: feed Relay a single SIGTERM, then close so Relay drains and returns nil.
-	src := make(chan coreproc.Signal, 1)
-	src <- coreproc.Signal(syscall.SIGTERM)
-	close(src)
-
-	//: forward to -pgid — kill(2) delivers SIGTERM to every process in the
-	//: child's isolated group (just the sleep), proving negative-target routing.
-	if err := svcsignal.Relay(src, svcsignal.Target(-pgid)); err != nil {
-		t.Fatalf("Relay to -pgid returned %v, want nil", err)
+	//: a distinct signal per case. A self-kill is process-wide, so two cases
+	//: subscribed to the SAME signal would each see the other's deliveries and
+	//: the burst assertion would stop meaning anything.
+	tests := []tc{
+		{"a single SIGUSR1", syscall.SIGUSR1, 1},
+		{"a single SIGWINCH", syscall.SIGWINCH, 1},
+		{"a burst of SIGUSR2", syscall.SIGUSR2, 3},
 	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		want := coreproc.Signal(c.sig)
+		ch, stop := svcsignal.Notify(want)
 
-	//: the signalled child must exit promptly; a timeout means delivery failed.
-	select {
-	case err := <-waitErr:
-		//: a process killed by a signal yields an *exec.ExitError.
-		exitErr, ok := err.(*exec.ExitError)
-		//: SIGTERM is fatal by default, so Wait must report a non-nil error.
-		if !ok {
-			t.Fatalf("child Wait err = %v, want *exec.ExitError from SIGTERM", err)
+		for range c.sends {
+			//: Notify has already registered by the time it returns, so a
+			//: self-sent signal here cannot be missed.
+			if err := syscall.Kill(syscall.Getpid(), c.sig); err != nil {
+				t.Fatalf("self-kill %v: %v", c.sig, err)
+			}
+			select {
+			case got := <-ch:
+				//: what we sent is what we receive, typed.
+				if got != want {
+					t.Fatalf("delivered %v, want %v", got, want)
+				}
+			case <-time.After(deliveryTimeout):
+				t.Fatalf("timed out waiting for %v", c.sig)
+			}
 		}
-		ws, ok := exitErr.Sys().(syscall.WaitStatus)
-		//: the wait status must expose how the child died.
-		if !ok {
-			t.Fatalf("wait status type %T, want syscall.WaitStatus", exitErr.Sys())
-		}
-		//: the child must have been killed by exactly the relayed SIGTERM.
-		if !ws.Signaled() || ws.Signal() != syscall.SIGTERM {
-			t.Fatalf("child died by %v (signaled=%v), want SIGTERM", ws.Signal(), ws.Signaled())
-		}
-	case <-time.After(15 * time.Second):
-		t.Fatal("child did not exit after group-relayed SIGTERM")
+
+		stop()
+
+		//: stop closes the channel, and the close only happens in the
+		//: translator's defer — so a closed channel means the goroutine
+		//: returned and the os/signal registration is gone with it.
+		drainUntilClosed(t, ch)
+
+		//: a second stop must be a safe no-op, never a double-close panic.
+		stop()
 	}
-}
-
-// TestRelayRejectsReservedTargets asserts Relay refuses the reserved kill(2)
-// targets 0 (the caller's own process group) and -1 (every permitted process)
-// with the typed RELAY_FAILED code and without delivering anything — guarding
-// against a default-initialised or mis-computed Target fanning a signal out to
-// unintended recipients.
-func TestRelayRejectsReservedTargets(t *testing.T) {
-	t.Parallel()
-
-	//: both reserved values must be refused identically.
-	for _, target := range []svcsignal.Target{0, -1} {
-		//: a source that, if Relay did not guard, would hand SIGTERM to kill(2)
-		//: against the dangerous target.
-		src := make(chan coreproc.Signal, 1)
-		src <- coreproc.Signal(syscall.SIGTERM)
-		close(src)
-
-		err := svcsignal.Relay(src, target)
-		//: the refusal must carry the central RELAY_FAILED code, not nil.
-		if !errs.HasCode(err, coreproc.CodeRelayFailed) {
-			t.Fatalf("Relay(target=%d) err = %v, want CodeRelayFailed", target, err)
-		}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
 // TestNotifyStopConcurrent asserts the stop function is safe under concurrent
 // invocation: many goroutines calling it at once must not double-close the
-// channel (which would panic) nor race — proving the sync.Once guard. Run under
+// channel (which would panic) nor race — proving the sync.Once guard. Under
 // -race this fails loudly if the guard regresses to an unsynchronised bool.
 func TestNotifyStopConcurrent(t *testing.T) {
 	t.Parallel()
-
-	_, stop := svcsignal.Notify(coreproc.Signal(syscall.SIGUSR2))
-
-	const callers int = 32
-	var wg sync.WaitGroup
-	wg.Add(callers)
-	//: launch many concurrent stop callers racing on the same teardown closure.
-	for range callers {
-		//: each goroutine invokes stop; only one may close the channel.
-		go func() {
-			defer wg.Done()
-			stop()
-		}()
+	type tc struct {
+		name    string
+		callers int
 	}
-	wg.Wait()
+	tests := []tc{
+		{"two callers", 2},
+		{"thirty-two callers", 32},
+		{"a hundred callers", 100},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		ch, stop := svcsignal.Notify(coreproc.Signal(syscall.SIGCONT))
 
-	//: a further call after the storm must still be a safe no-op.
-	stop()
+		done := make(chan struct{}, c.callers)
+		//: launch many concurrent stop callers racing on the same closure.
+		for range c.callers {
+			go func() {
+				stop()
+				done <- struct{}{}
+			}()
+		}
+		for range c.callers {
+			select {
+			case <-done:
+			case <-time.After(deliveryTimeout):
+				t.Fatal("a concurrent stop caller never returned")
+			}
+		}
+
+		//: exactly one close must have happened, and it must have happened —
+		//: the channel is closed, and reading it again does not panic.
+		drainUntilClosed(t, ch)
+
+		//: a further call after the storm must still be a safe no-op.
+		stop()
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
 }
 
-// TestRelayFailsTyped asserts a delivery failure surfaces the typed RELAY_FAILED
-// code rather than a bare stdlib error.
-func TestRelayFailsTyped(t *testing.T) {
-	t.Parallel()
-
-	//: pid 0x7fffffff cannot exist; kill(2) fails with ESRCH, which Relay wraps.
-	src := make(chan coreproc.Signal, 1)
-	src <- coreproc.Signal(syscall.SIGTERM)
-	close(src)
-
-	//: target an impossible pid so the first delivery fails deterministically.
-	err := svcsignal.Relay(src, svcsignal.Target(0x7fffffff))
-	//: the failure must carry the central RELAY_FAILED code.
-	if !errs.HasCode(err, coreproc.CodeRelayFailed) {
-		t.Fatalf("Relay err = %v, want CodeRelayFailed", err)
+// drainUntilClosed reads ch until it is closed, failing if that never happens.
+//
+// Draining rather than asserting on the first read is deliberate: a self-kill is
+// process-wide, so a subscription can hold a signal another test sent. What is
+// being pinned here is that the channel CLOSES — which only happens in the
+// translator's defer, and therefore proves the goroutine returned.
+func drainUntilClosed(t *testing.T, ch <-chan coreproc.Signal) {
+	t.Helper()
+	deadline := time.After(deliveryTimeout)
+	for {
+		select {
+		case _, ok := <-ch:
+			//: a closed channel is the end of the stream and of the goroutine.
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the channel was never closed after stop")
+			return
+		}
 	}
 }

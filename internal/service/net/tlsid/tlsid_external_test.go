@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,129 +74,144 @@ func write(t *testing.T, path string, data []byte) {
 	}
 }
 
-// loadCase describes one Load scenario.
-type loadCase struct {
-	name    string
-	params  func(md materialDir) corenet.IdentityFileParams
-	wantErr bool
-}
-
-// TestLoadRefusesUnusableMaterial pins that every way of getting TLS material
-// wrong on disk is a loud typed failure rather than a silent downgrade. The
-// junk-file case is the one that matters most in practice: an operator points
-// the CA path at the wrong file and, without this check, gets a client that
-// trusts nothing while reporting nothing useful.
-func TestLoadRefusesUnusableMaterial(t *testing.T) {
+// TestLoad pins that every way of getting TLS material wrong on disk is a loud
+// typed failure rather than a silent downgrade.
+//
+// The junk-file case is the one that matters most in practice: an operator
+// points the CA path at the wrong file and, without this check, gets a client
+// that trusts nothing while reporting nothing useful. The empty-file case is
+// the same failure one step earlier — an empty bundle would reach core as "not
+// configured" and silently widen trust to the platform store.
+func TestLoad(t *testing.T) {
 	t.Parallel()
-	cases := []loadCase{
+	md := writeMaterial(t)
+
+	type tc struct {
+		name   string
+		params corenet.IdentityFileParams
+		//: the field the refusal must name, so an operator knows WHICH path to
+		//: fix rather than only that one of four was wrong.
+		wantField string
+		wantErr   bool
+	}
+	tests := []tc{
+		{name: "no material at all is a verify-only identity"},
 		{
-			name:   "no material at all is a verify-only identity",
-			params: func(materialDir) corenet.IdentityFileParams { return corenet.IdentityFileParams{} },
+			name:   "a real CA bundle",
+			params: corenet.IdentityFileParams{RootsFile: md.Cert},
 		},
 		{
-			name: "a real CA bundle loads",
-			params: func(md materialDir) corenet.IdentityFileParams {
-				return corenet.IdentityFileParams{RootsFile: md.Cert}
-			},
+			name:   "a full client keypair",
+			params: corenet.IdentityFileParams{CertFile: md.Cert, KeyFile: md.Key},
 		},
 		{
-			name: "a text file as CA bundle",
-			params: func(md materialDir) corenet.IdentityFileParams {
-				return corenet.IdentityFileParams{RootsFile: md.Junk}
+			name:    "a text file where a CA bundle belongs",
+			params:  corenet.IdentityFileParams{RootsFile: md.Junk},
+			wantErr: true,
+		},
+		{
+			name:      "an empty CA bundle",
+			params:    corenet.IdentityFileParams{RootsFile: md.Empty},
+			wantField: "roots_file",
+			wantErr:   true,
+		},
+		{
+			name:      "a CA path that does not exist",
+			params:    corenet.IdentityFileParams{RootsFile: md.Cert + ".absent"},
+			wantField: "roots_file",
+			wantErr:   true,
+		},
+		{
+			name:      "an empty certificate file",
+			params:    corenet.IdentityFileParams{CertFile: md.Empty, KeyFile: md.Key},
+			wantField: "cert_file",
+			wantErr:   true,
+		},
+		{
+			name:      "a key path that does not exist",
+			params:    corenet.IdentityFileParams{CertFile: md.Cert, KeyFile: md.Key + ".absent"},
+			wantField: "key_file",
+			wantErr:   true,
+		},
+		{
+			name:      "an empty client CA file",
+			params:    corenet.IdentityFileParams{ClientCAFile: md.Empty},
+			wantField: "client_ca_file",
+			wantErr:   true,
+		},
+		{
+			//: a certificate with no key must not degrade to plain TLS; the
+			//: refusal comes from core, so it names no file field.
+			name:    "a certificate with no key",
+			params:  corenet.IdentityFileParams{CertFile: md.Cert},
+			wantErr: true,
+		},
+		{
+			name: "mutual TLS with no client CA bundle",
+			params: corenet.IdentityFileParams{
+				CertFile: md.Cert, KeyFile: md.Key, RequireClientCert: true,
 			},
 			wantErr: true,
 		},
 		{
-			name: "an empty CA bundle must not widen trust silently",
-			params: func(md materialDir) corenet.IdentityFileParams {
-				return corenet.IdentityFileParams{RootsFile: md.Empty}
-			},
-			wantErr: true,
-		},
-		{
-			name: "a missing CA bundle",
-			params: func(md materialDir) corenet.IdentityFileParams {
-				return corenet.IdentityFileParams{RootsFile: md.Cert + ".absent"}
-			},
-			wantErr: true,
-		},
-		{
-			name: "certificate without key must not degrade to plain TLS",
-			params: func(md materialDir) corenet.IdentityFileParams {
-				return corenet.IdentityFileParams{CertFile: md.Cert}
-			},
-			wantErr: true,
-		},
-		{
-			name: "a full client keypair loads",
-			params: func(md materialDir) corenet.IdentityFileParams {
-				return corenet.IdentityFileParams{CertFile: md.Cert, KeyFile: md.Key}
-			},
-		},
-		{
-			name: "mutual TLS without a client CA bundle",
-			params: func(md materialDir) corenet.IdentityFileParams {
-				return corenet.IdentityFileParams{CertFile: md.Cert, KeyFile: md.Key, RequireClientCert: true}
-			},
-			wantErr: true,
+			//: the field a port-forwarded or tunnelled deployment cannot work
+			//: without: the dial address is 127.0.0.1 while the peer
+			//: certificate names the real service.
+			name:   "a bundle with an overridden server name",
+			params: corenet.IdentityFileParams{RootsFile: md.Cert, ServerName: "sdm.core.svc"},
 		},
 	}
-	md := writeMaterial(t)
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		id, err := tlsid.Load(c.params)
+		if c.wantErr {
+			//: every refusal on this path is the same operator mistake, so it
+			//: must arrive under one matchable sentinel.
+			if !errs.HasCode(err, corenet.CodeTLSMaterialInvalid) {
+				t.Fatalf("Load(%s) = %v, want TLS_MATERIAL_INVALID", c.name, err)
+			}
+			if c.wantField != "" && fieldValue(err, "field") != c.wantField {
+				t.Errorf("the field annotation is %q, want %q", fieldValue(err, "field"), c.wantField)
+			}
+			//: the file's CONTENTS must never reach the error, whatever it is.
+			if strings.Contains(errs.PublicOf(err), "PRIVATE KEY") {
+				t.Errorf("the public message quotes file contents: %q", errs.PublicOf(err))
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("Load(%s) = %v, want nil", c.name, err)
+		}
+		if c.params.ServerName != "" {
+			if got := id.ClientConfig().ServerName; got != c.params.ServerName {
+				t.Errorf("ServerName = %q, want %q", got, c.params.ServerName)
+			}
+		}
+		//: going through the filesystem must not create a second, unredacted
+		//: path to the material.
+		if id.String() != "<redacted>" || id.GoString() != "<redacted>" {
+			t.Errorf("the loaded identity is not redacted: %s / %#v", id.String(), id)
+		}
+		//: and the modern floor must survive the disk round trip.
+		if got := id.ClientConfig().MinVersion; got != tls.VersionTLS13 {
+			t.Errorf("MinVersion = %x, want TLS 1.3", got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			runLoadCase(t, tc, md)
+			runCase(t, c)
 		})
 	}
 }
 
-// runLoadCase executes one loadCase against Load.
-func runLoadCase(t *testing.T, tc loadCase, md materialDir) {
-	t.Helper()
-	_, err := tlsid.Load(tc.params(md))
-	if tc.wantErr {
-		if !errs.HasCode(err, corenet.CodeTLSMaterialInvalid) {
-			t.Fatalf("expected TLS_MATERIAL_INVALID, got %v", err)
+// fieldValue returns the StringValue of the first field keyed key, or "".
+func fieldValue(err error, key string) string {
+	for _, f := range errs.FieldsOf(err) {
+		//: the first match wins; fields merge along the wrap chain.
+		if f.Key() == key {
+			return f.StringValue()
 		}
-		return
 	}
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-// TestLoadCarriesServerName pins the field that a port-forwarded or tunnelled
-// deployment cannot work without: the dial address is 127.0.0.1 while the peer
-// certificate names the real service, so the handshake fails until ServerName
-// overrides the verified name.
-func TestLoadCarriesServerName(t *testing.T) {
-	t.Parallel()
-	md := writeMaterial(t)
-	id, err := tlsid.Load(corenet.IdentityFileParams{RootsFile: md.Cert, ServerName: "sdm.core.svc"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := id.ClientConfig().ServerName; got != "sdm.core.svc" {
-		t.Fatalf("ServerName = %q, want \"sdm.core.svc\"", got)
-	}
-}
-
-// TestLoadedIdentityStaysRedacted pins that going through the filesystem does
-// not create a second, unredacted path to the material.
-func TestLoadedIdentityStaysRedacted(t *testing.T) {
-	t.Parallel()
-	md := writeMaterial(t)
-	id, err := tlsid.Load(corenet.IdentityFileParams{CertFile: md.Cert, KeyFile: md.Key})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if id.String() != "<redacted>" || id.GoString() != "<redacted>" {
-		t.Fatalf("identity is not redacted: %s / %#v", id.String(), id)
-	}
-	if id.IsZero() {
-		t.Fatal("a loaded identity must not report IsZero")
-	}
-	if got := id.ClientConfig().MinVersion; got != tls.VersionTLS13 {
-		t.Fatalf("MinVersion = %x, want TLS 1.3", got)
-	}
+	return ""
 }

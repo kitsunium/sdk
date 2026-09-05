@@ -36,26 +36,79 @@ func TestHelpers(t *testing.T) {
 // TestNewDispatch checks New routes by scheme and rejects unknowns.
 func TestNewDispatch(t *testing.T) {
 	t.Parallel()
-	//: a known scheme generates.
-	if s, err := id.New(id.UUIDv7Scheme); err != nil || s == "" {
-		t.Fatalf("New(uuidv7) got=%q err=%v", s, err)
+	type tc struct {
+		name   string
+		scheme id.Scheme
+		wantOK bool
 	}
-	//: an unknown scheme surfaces UnknownScheme — assert the exact sentinel,
-	//: not merely "some error", so a different failure cannot pass silently.
-	_, err := id.New("nope")
-	if !errors.Is(err, id.UnknownScheme) {
-		t.Fatalf("New(nope) err=%v, want UnknownScheme", err)
+	tests := []tc{
+		{"uuidv4", id.UUIDv4Scheme, true},
+		{"uuidv7", id.UUIDv7Scheme, true},
+		{"ulid", id.ULIDScheme, true},
+		{"snowflake", id.SnowflakeScheme, true},
+		{"an unregistered scheme", "nope", false},
+		{"an empty scheme", "", false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got, err := id.New(c.scheme)
+		if !c.wantOK {
+			//: assert the exact sentinel, not merely "some error", so a
+			//: different failure cannot pass silently.
+			if !errors.Is(err, id.UnknownScheme) {
+				t.Fatalf("New(%q) err = %v, want UnknownScheme", c.scheme, err)
+			}
+			if got != "" {
+				t.Errorf("New(%q) returned %q alongside the error", c.scheme, got)
+			}
+			return
+		}
+		if err != nil || got == "" {
+			t.Fatalf("New(%q) got = %q err = %v", c.scheme, got, err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
 // TestNewSnowflakeExplicitNode checks the explicit-node constructor works.
 func TestNewSnowflakeExplicitNode(t *testing.T) {
 	t.Parallel()
-	gen := id.NewSnowflake(42)
-	s, err := gen.New()
-	//: an explicit-node snowflake generates a non-empty decimal id.
-	if err != nil || s == "" {
-		t.Fatalf("NewSnowflake(42).New() got=%q err=%v", s, err)
+	type tc struct {
+		name string
+		node int64
+	}
+	tests := []tc{
+		{"node zero", 0},
+		{"a mid-range node", 42},
+		{"the highest 10-bit node", 1023},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		gen := id.NewSnowflake(c.node)
+		first, err := gen.New()
+		if err != nil || first == "" {
+			t.Fatalf("NewSnowflake(%d).New() got = %q err = %v", c.node, first, err)
+		}
+		//: two ids from one generator must differ, or the node bits would be
+		//: the only thing distinguishing concurrent producers.
+		second, err := gen.New()
+		if err != nil {
+			t.Fatalf("second New(): %v", err)
+		}
+		if first == second {
+			t.Errorf("two ids from node %d are identical: %q", c.node, first)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 

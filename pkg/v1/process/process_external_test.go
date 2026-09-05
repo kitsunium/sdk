@@ -4,35 +4,13 @@
 package process_test
 
 import (
-	"context"
-	"os"
-	"runtime"
 	"syscall"
 	"testing"
-	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/pkg/v1/process"
 )
-
-// shPath is the shell used by the live-spawn facade test.
-const shPath = "/bin/sh"
-
-// requireShell skips the calling test when the host cannot run the fixture.
-func requireShell(t *testing.T) {
-	t.Helper()
-	//: the live spawn is Unix-only behaviour.
-	if runtime.GOOS == "windows" {
-		//: nothing to run where Start returns UnsupportedPlatform.
-		t.Skip("facade spawn test requires a Unix host")
-	}
-	//: a missing shell means the fixture command cannot run.
-	if _, err := os.Stat(shPath); err != nil {
-		//: skip rather than fail when /bin/sh is absent.
-		t.Skipf("%s not present: %v", shPath, err)
-	}
-}
 
 // TestSignalConstantsMatchCore asserts the facade signal constants equal the
 // underlying platform numbers — the alias guarantee.
@@ -75,38 +53,9 @@ func TestSignalConstantsMatchCore(t *testing.T) {
 func TestStartInvalidSpecDelegates(t *testing.T) {
 	t.Parallel()
 
-	_, err := process.Start(context.Background(), process.Spec{})
+	_, err := process.Start(t.Context(), process.Spec{})
 	//: the facade must pass the central INVALID_SPEC code straight through.
 	if !errs.HasCode(err, coreproc.CodeInvalidSpec) {
 		t.Fatalf("Start(empty) err = %v, want CodeInvalidSpec", err)
-	}
-}
-
-// TestStartAndStop exercises the full facade path: spawn, group-stop, and Wait.
-func TestStartAndStop(t *testing.T) {
-	t.Parallel()
-	requireShell(t)
-
-	spec := process.Spec{
-		Path:    shPath,
-		Args:    []string{"sh", "-c", "sleep 30 & wait"},
-		Setpgid: true,
-	}
-	p, err := process.Start(context.Background(), spec)
-	//: a clean spawn through the facade must not error.
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	//: the handle must report a positive leader pid.
-	if p.PID() <= 0 {
-		t.Fatalf("PID() = %d, want > 0", p.PID())
-	}
-	//: a graceful group stop must succeed within the grace window.
-	if sErr := p.Stop(context.Background(), 2*time.Second, process.SIGTERM); sErr != nil {
-		t.Fatalf("Stop: %v", sErr)
-	}
-	//: Wait must reap the stopped group without a host fault.
-	if _, wErr := p.Wait(); wErr != nil {
-		t.Fatalf("Wait: %v", wErr)
 	}
 }

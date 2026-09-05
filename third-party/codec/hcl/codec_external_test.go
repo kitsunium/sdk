@@ -1,7 +1,8 @@
+// Package hcl_test — the codec as a consumer sees it: one registered singleton
+// reachable by name, MIME type and file extension.
 package hcl_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -14,63 +15,79 @@ type cfg struct {
 	Replica int    `hcl:"replica"`
 }
 
-// TestRoundTrip encodes a struct to HCL and decodes it back without loss.
+// TestNew pins that the package registers itself on import and that every
+// documented key resolves to the SAME singleton. Three keys resolving to three
+// codecs would still pass a per-key lookup test while doubling the work a
+// content-negotiating caller does.
+func TestNew(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		lookup func() (codec.Codec, bool)
+	}
+	tests := []tc{
+		{"by format name", func() (codec.Codec, bool) { return codec.Lookup("hcl") }},
+		{"by MIME type", func() (codec.Codec, bool) { return codec.LookupMIME("application/hcl") }},
+		{"by file extension", func() (codec.Codec, bool) { return codec.LookupExt(".hcl") }},
+	}
+	want := hcl.New()
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got, ok := c.lookup()
+		if !ok {
+			t.Fatalf("lookup %s missed — the codec did not self-register", c.name)
+		}
+		//: the same singleton, not merely an equivalent codec.
+		if got != want {
+			t.Errorf("lookup %s resolved a different instance", c.name)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+	//: New is stateless, so repeated calls must not mint new instances.
+	if hcl.New() != want {
+		t.Error("New() returned a different instance on a second call")
+	}
+}
+
+// TestRoundTrip is the consumer-level contract: what this codec writes, it can
+// read back. Marshal and Unmarshal are tested individually inside the package;
+// what only shows up here is that the two agree.
 func TestRoundTrip(t *testing.T) {
 	t.Parallel()
-	c := hcl.New()
-	data, err := c.Marshal(cfg{Name: "kitsunium", Replica: 3})
-	//: encode must succeed for a tagged struct.
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+	type tc struct {
+		name string
+		in   cfg
 	}
-	var got cfg
-	//: decode back into a fresh value.
-	if uerr := c.Unmarshal(data, &got); uerr != nil {
-		t.Fatalf("Unmarshal: %v (data=%q)", uerr, data)
+	tests := []tc{
+		{"an ordinary document", cfg{Name: "kitsunium", Replica: 3}},
+		{"a zero document", cfg{}},
+		{"a name needing quoting", cfg{Name: `a "quoted" name`, Replica: 1}},
+		{"a negative count", cfg{Name: "kitsunium", Replica: -1}},
 	}
-	//: fields must survive the round trip.
-	if got.Name != "kitsunium" || got.Replica != 3 {
-		t.Errorf("round-trip mismatch got=%+v", got)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		codc := hcl.New()
+		data, err := codc.Marshal(c.in)
+		if err != nil {
+			t.Fatalf("Marshal(%+v) = %v, want nil", c.in, err)
+		}
+		var got cfg
+		if uerr := codc.Unmarshal(data, &got); uerr != nil {
+			t.Fatalf("Unmarshal(%q) = %v, want nil", data, uerr)
+		}
+		if got != c.in {
+			t.Errorf("the round trip turned %+v into %+v", c.in, got)
+		}
 	}
-}
-
-// TestRegisteredViaImport verifies the codec self-registers under name/MIME/ext.
-func TestRegisteredViaImport(t *testing.T) {
-	t.Parallel()
-	//: name lookup.
-	if _, ok := codec.Lookup("hcl"); !ok {
-		t.Error("Format \"hcl\" not registered")
-	}
-	//: MIME lookup.
-	if _, ok := codec.LookupMIME("application/hcl"); !ok {
-		t.Error("MIME application/hcl not registered")
-	}
-	//: extension lookup.
-	if _, ok := codec.LookupExt(".hcl"); !ok {
-		t.Error("extension .hcl not registered")
-	}
-}
-
-// TestMarshalRejectsScalar confirms a non-struct surfaces a wrapped error.
-func TestMarshalRejectsScalar(t *testing.T) {
-	t.Parallel()
-	//: HCL marshal is struct-only.
-	_, err := hcl.New().Marshal(42)
-	//: the error must surface and name the marshal reason.
-	if err == nil || !strings.Contains(err.Error(), "HCL_MARSHAL_FAILED") {
-		t.Fatalf("Marshal(scalar) err=%v, want HCL_MARSHAL_FAILED", err)
-	}
-}
-
-// TestUnmarshalSizeCap surfaces HCL_SIZE_EXCEEDED above the 10 MiB cap.
-func TestUnmarshalSizeCap(t *testing.T) {
-	t.Parallel()
-	//: an 11 MiB buffer trips the cap before the parser runs.
-	big := make([]byte, (10<<20)+1)
-	var got cfg
-	err := hcl.New().Unmarshal(big, &got)
-	//: the cap error must surface.
-	if err == nil || !strings.Contains(err.Error(), "HCL_SIZE_EXCEEDED") {
-		t.Fatalf("Unmarshal(oversized) err=%v, want HCL_SIZE_EXCEEDED", err)
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

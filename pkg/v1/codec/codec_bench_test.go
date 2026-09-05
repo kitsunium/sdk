@@ -951,7 +951,11 @@ func TestGenerateBenchMD(t *testing.T) {
 	//: this test explicitly (what `make bench` already does) so both build
 	//: systems honour the same contract instead of only Bazel.
 	if !strings.Contains(benchRunPattern(), "TestGenerateBenchMD") {
-		t.Skip("bench matrix generator — run `make bench` (or pass -run TestGenerateBenchMD) to regenerate BENCH.md")
+		//: a plain return rather than t.Skip: not running the matrix is the
+		//: correct, passing outcome of an unselected orchestrator, and a Skip
+		//: would report it as a test that could not be run.
+		t.Log("bench matrix generator idle — run `make bench` (or pass -run TestGenerateBenchMD) to regenerate BENCH.md")
+		return
 	}
 	//: drive the whole matrix programmatically via testing.Benchmark — this
 	//: direct call is the driver edge KTN-TEST-SUFFIX's IsBenchOrchestrator

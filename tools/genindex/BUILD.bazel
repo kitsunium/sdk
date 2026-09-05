@@ -1,8 +1,16 @@
-load("@rules_go//go:def.bzl", "go_binary", "go_library")
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 
 go_library(
     name = "genindex_lib",
-    srcs = ["main.go"],
+    srcs = [
+        "collect.go",
+        "emit.go",
+        "index.go",
+        "main.go",
+        "options.go",
+        "render.go",
+        "symbol.go",
+    ],
     importpath = "github.com/kitsunium/sdk/tools/genindex",
     visibility = ["//visibility:private"],
 )
@@ -11,4 +19,10 @@ go_binary(
     name = "genindex",
     embed = [":genindex_lib"],
     visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "genindex_test",
+    srcs = ["main_test.go"],
+    embed = [":genindex_lib"],
 )

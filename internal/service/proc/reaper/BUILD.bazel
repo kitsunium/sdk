@@ -94,7 +94,13 @@ alias(
 
 go_test(
     name = "reaper_test",
-    srcs = ["reaper_internal_test.go"],
+    srcs = [
+        "reaper_external_test.go",
+        "reaper_internal_test.go",
+        "reaper_unix_external_test.go",
+        "reaper_unix_internal_test.go",
+        "subreaper_linux_external_test.go",
+    ],
     embed = [":reaper"],
     deps = select({
         "@rules_go//go/platform:aix": [

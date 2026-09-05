@@ -906,14 +906,59 @@ func TestNewRuntime(t *testing.T) {
 // observable through the returned error.
 func TestNewRuntimeFieldsCopied(t *testing.T) {
 	t.Parallel()
-	//: build a one-field slice, hand it to NewRuntime, then mutate it.
-	fields := []errs.FieldValue{errs.String("k", "original")}
-	err := errs.NewRuntime(0x40_01_01_02, "FIELDED", "ok", "detail", fields...)
-	//: mutate the caller-side slice element after construction.
-	fields[0] = errs.String("k", "tampered")
-	//: the error's own field must still read the original value.
-	got := errs.FieldsOf(err)
-	if len(got) != 1 || got[0].StringValue() != "original" {
-		t.Errorf("FieldsOf = %v, want one field valued %q", got, "original")
+	type tc struct {
+		name    string
+		mutate  func(fields []errs.FieldValue) []errs.FieldValue
+		wantVal string
+	}
+	tests := []tc{
+		{
+			//: the constructor must copy, or a caller reusing its slice would
+			//: rewrite an error already handed off.
+			"overwriting the element after construction",
+			func(f []errs.FieldValue) []errs.FieldValue {
+				f[0] = errs.String("k", "tampered")
+				return f
+			},
+			"original",
+		},
+		{
+			//: the slice is handed over with spare capacity on purpose, so the
+			//: append writes into the very backing array the constructor was
+			//: given rather than harmlessly reallocating.
+			"appending into the caller's spare capacity",
+			func(f []errs.FieldValue) []errs.FieldValue {
+				return append(f, errs.String("extra", "x"))
+			},
+			"original",
+		},
+		{
+			"leaving the slice alone",
+			func(f []errs.FieldValue) []errs.FieldValue { return f },
+			"original",
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		fields := make([]errs.FieldValue, 1, 4)
+		fields[0] = errs.String("k", "original")
+		err := errs.NewRuntime(0x40_01_01_02, "FIELDED", "ok", "detail", fields...)
+		fields = c.mutate(fields)
+		//: the mutated slice is kept live past the constructor call so the
+		//: compiler cannot elide the writes we are probing for.
+		if len(fields) == 0 {
+			t.Fatalf("the mutator emptied the caller's slice")
+		}
+
+		got := errs.FieldsOf(err)
+		if len(got) != 1 || got[0].StringValue() != c.wantVal {
+			t.Errorf("FieldsOf = %v, want one field valued %q", got, c.wantVal)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

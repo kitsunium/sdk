@@ -187,6 +187,17 @@ func (c *Client) resolve(path string, query url.Values) (target string, err erro
 		//: the path is already absolute, so use it as given.
 		return ref.String(), nil
 	}
+	//: a reference carrying its own ORIGIN replaces the base's. RFC 3986 reads
+	//: "//other/path" as an authority rather than as a path, so a caller passing
+	//: one would reach a different peer entirely — past a policy that judges only
+	//: the method and the path, and therefore never sees the substitution. The
+	//: argument is documented as a path relative to the configured base, so
+	//: anything that is not one is refused rather than silently retargeted.
+	if ref.Scheme != "" || ref.Host != "" {
+		//: refuse before the request can be built.
+		return "", errs.Wrap(corenet.UnsafePath, errs.WrapParams{},
+			errs.String("why", "the path carries its own origin"))
+	}
 	//: ResolveReference also applies RFC 3986 dot-segment removal, so a literal
 	//: "/a/.." collapses before any policy sees it; the encoded form does not,
 	//: which is why the policy still checks for dot segments itself.

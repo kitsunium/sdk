@@ -24,7 +24,7 @@ go_test(
     srcs = [
         "reaper_external_nonunix_test.go",
         "reaper_external_test.go",
-        "reaper_external_unix_test.go",
+        "reaper_unix_external_test.go",
     ],
     deps = [
         ":reaper",
