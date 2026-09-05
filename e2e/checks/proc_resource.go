@@ -71,17 +71,13 @@ const reapSignalBuffer int = 8
 // subshell — which outlives the shell — then exits 0, orphaning the grandchild.
 const orphanScript string = "( sleep 1 & ) ; exit 0"
 
-// orphanArgs is the full argv for the orphaning shell: argv[0], the -c flag, and
-// the orphan script. Hoisted so the spawn does not allocate a literal per call.
-var orphanArgs = []string{"sh", "-c", orphanScript}
-
 // Cgroup returns the cgroup-domain conformance checks: create a group, set
 // memory/pids limits, read them back from /sys/fs/cgroup to prove the kernel
 // took them, freeze/thaw, and Kill the tree — Linux; UnsupportedPlatform else.
-func Cgroup() harness.Suite {
+func Cgroup() harness.CheckGroup {
 	//: a single end-to-end run holds the group handle across every sub-check, so
 	//: the create/limits/freeze/kill/delete results all observe one real group.
-	return harness.Suite{Domain: cgroupDomain, Checks: []harness.Check{cgroupConformance, cgroupPreExecPlacement}}
+	return harness.CheckGroup{Domain: cgroupDomain, Checks: []harness.Check{cgroupConformance, cgroupPreExecPlacement}}
 }
 
 // cgroupConformance runs the whole cgroup lifecycle against one real control
@@ -146,6 +142,8 @@ func cgroupPreExecPlacement() harness.Result {
 	name := "sdk-e2e-place-" + strconv.Itoa(os.Getpid())
 	//: a freshly created group gives a known path to place the child into.
 	group, err := cgroup.Create(name)
+	//: a create fault has three readings — environmental, off-platform, or a
+	//: real bug — and they are separated below rather than collapsed.
 	if err != nil {
 		//: a missing-delegation create fault is environmental, not a bug.
 		if cgroupEnvironmental(err) {
@@ -173,9 +171,10 @@ func cgroupPlacementExercise(dir string) harness.Result {
 	//: a child that sleeps briefly stays alive long enough to read membership back.
 	proc, serr := process.Start(context.Background(), process.Spec{
 		Path:       "/bin/sh",
-		Args:       []string{"sh", "-c", "sleep 1"},
+		Args:       sleepBrieflyArgs,
 		CgroupPath: dir,
 	})
+	//: a spawn fault has three readings too, separated below for the same reason.
 	if serr != nil {
 		//: off Linux Start rejects CgroupPath with UnsupportedPlatform — expected.
 		if perrs.HasCode(serr, coreproc.CodeUnsupportedPlatform) {
@@ -194,19 +193,22 @@ func cgroupPlacementExercise(dir string) harness.Result {
 	}
 	pid := strconv.Itoa(proc.PID())
 	//: read the kernel's membership list for the group while the child is alive.
-	procs, rerr := os.ReadFile(filepath.Join(dir, "cgroup.procs"))
+	raw, rerr := os.ReadFile(filepath.Join(dir, "cgroup.procs"))
+	members := string(raw)
 	//: stop + reap the child regardless of the read outcome so nothing lingers.
 	swallowStop(proc)
+	//: the child is already gone by here, so an unreadable membership list is
+	//: the read path failing rather than the placement.
 	if rerr != nil {
 		//: an unreadable cgroup.procs is an environmental fault on the read path.
 		return harness.Failed(cgroupDomain, "placement", fmt.Sprintf("read cgroup.procs: %v", rerr))
 	}
 	//: membership is proven only if the child's pid is one of the listed pids.
-	if !containsPID(string(procs), pid) {
+	if !containsPID(members, pid) {
 		//: pid absent ⇒ the child ran OUTSIDE the group — the exact bug #91 closes.
 		return harness.Failed(cgroupDomain, "placement",
 			fmt.Sprintf("pid %s absent from cgroup.procs %q — child was NOT placed at exec time",
-				pid, strings.TrimSpace(string(procs))))
+				pid, strings.TrimSpace(members)))
 	}
 	//: the child was a member from its first instruction — no unconfined window.
 	return harness.Passed(cgroupDomain, "placement", "child pid present in cgroup.procs at exec time (no post-spawn Add)")
@@ -217,19 +219,34 @@ func cgroupPlacementExercise(dir string) harness.Result {
 func swallowStop(proc process.Process) {
 	//: SIGTERM the group with a short grace, then reap; a sleeping shell exits at once.
 	if err := proc.Stop(context.Background(), time.Second, process.SIGTERM); err != nil {
-		//: a stop fault is best-effort cleanup, not the check's verdict.
-		_, _ = proc.Wait()
+		//: a stop fault is best-effort cleanup, not the check's verdict — but the
+		//: child still has to be reaped, or it lingers as a zombie for the run.
+		reapQuietly(proc)
+		//: nothing further to do; the membership read already decided the verdict.
 		return
 	}
 	//: reap the exited child so it does not linger as a zombie.
-	_, _ = proc.Wait()
+	reapQuietly(proc)
+}
+
+// reapQuietly waits for a placement-check child and discards the outcome.
+//
+// The exit status is not the check's verdict — the membership read is — and by
+// the time this runs the verdict is already decided. Reaping still has to
+// happen, or the conformance binary accumulates a zombie per check.
+func reapQuietly(proc process.Process) {
+	//: the status is irrelevant; the call exists to release the process slot.
+	if _, err := proc.Wait(); err != nil {
+		//: a wait fault means the child was already reaped, which is fine.
+		return
+	}
 }
 
 // containsPID reports whether procs (a newline-separated cgroup.procs body)
 // lists want as one of its pids.
 func containsPID(procs, want string) bool {
 	//: each line is one pid; a trimmed exact match is membership.
-	for _, line := range strings.Split(procs, "\n") {
+	for line := range strings.SplitSeq(procs, "\n") {
 		//: compare the trimmed line to the wanted pid.
 		if strings.TrimSpace(line) == want {
 			//: the child's pid is in the group's process list.
@@ -390,9 +407,9 @@ func readCgroupFile(dir, file string) (content string, err error) {
 // Reaper returns the reaper-domain conformance checks: become a child-subreaper
 // and assert an orphaned grandchild reparents to us and is reaped — Linux +
 // FreeBSD/DragonFly (procctl); UnsupportedPlatform / no-op elsewhere.
-func Reaper() harness.Suite {
+func Reaper() harness.CheckGroup {
 	//: four independent checks: subreaper, IsPID1, construct, orphan adoption.
-	return harness.Suite{Domain: reaperDomain, Checks: []harness.Check{
+	return harness.CheckGroup{Domain: reaperDomain, Checks: []harness.Check{
 		reaperSubreaper,
 		reaperIsPID1,
 		reaperConstruct,
@@ -400,15 +417,28 @@ func Reaper() harness.Suite {
 	}}
 }
 
-// nativeReaperGOOS is the set of platforms whose kernels implement a descendant
-// subreaper (Linux prctl(PR_SET_CHILD_SUBREAPER); FreeBSD/DragonFly
-// procctl(PROC_REAP_ACQUIRE)). On these, SetChildSubreaper must succeed —
-// UnsupportedPlatform there is a regression, not the expected degradation.
-var nativeReaperGOOS = map[string]bool{
-	"linux":     true,
-	"freebsd":   true,
-	"dragonfly": true,
-}
+var (
+	// orphanArgs is the full argv for the orphaning shell: argv[0], the -c flag,
+	// and the orphan script. Hoisted so the spawn does not allocate a literal
+	// per call.
+	orphanArgs = []string{"sh", "-c", orphanScript}
+
+	// sleepBrieflyArgs runs a shell that stays alive just long enough for the
+	// placement check to read the kernel's membership list back. It is hoisted
+	// so the argument vector is allocated once rather than per check.
+	sleepBrieflyArgs = []string{"sh", "-c", "sleep 1"}
+
+	// nativeReaperGOOS is the set of platforms whose kernels implement a
+	// descendant subreaper (Linux prctl(PR_SET_CHILD_SUBREAPER);
+	// FreeBSD/DragonFly procctl(PROC_REAP_ACQUIRE)). On these,
+	// SetChildSubreaper must succeed — UnsupportedPlatform there is a
+	// regression, not the expected degradation.
+	nativeReaperGOOS = map[string]bool{
+		"linux":     true,
+		"freebsd":   true,
+		"dragonfly": true,
+	}
+)
 
 // reaperSubreaper exercises SetChildSubreaper and classifies the outcome by GOOS:
 // on Linux/FreeBSD/DragonFly it must arm subreaper mode and return nil (Pass);

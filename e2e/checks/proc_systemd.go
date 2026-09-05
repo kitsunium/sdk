@@ -53,17 +53,18 @@ const (
 // under; also the expected LISTEN_FDNAMES value the child would recover.
 const prepareFdName string = "http"
 
-// foreignPID is a PID guaranteed different from this process's (getpid()+1), used
-// to stage a foreign activation environment so the LISTEN_PID gate (not absence)
-// drives the empty result in the empty-set check — even when the harness itself
-// runs as PID 1 (a container init), where a hardcoded "1" would no longer be
-// foreign and the gate's rejection path would go unexercised.
-var foreignPID = strconv.Itoa(os.Getpid() + 1)
-
-// Package-level state maps. Hoisted out of the check bodies because a map literal
-// inside a function is a KTN-VAR-CONSTMAP violation; grouped in one var block per
-// KTN-VAR-GROUP.
+// The package's fixtures, hoisted out of the check bodies: a map literal inside
+// a function allocates per call and hides the fixture from anyone reading the
+// check.
 var (
+	// foreignPID is a PID guaranteed different from this process's (getpid()+1),
+	// used to stage a foreign activation environment so the LISTEN_PID gate (not
+	// absence) drives the empty result in the empty-set check — even when the
+	// harness itself runs as PID 1 (a container init), where a hardcoded "1"
+	// would no longer be foreign and the gate's rejection path would go
+	// unexercised.
+	foreignPID = strconv.Itoa(os.Getpid() + 1)
+
 	// foreignActivationEnv is the complete-but-foreign sd_listen_fds environment the
 	// empty-set check stages: a non-zero count addressed to foreignPID.
 	foreignActivationEnv = map[string]string{
@@ -81,10 +82,10 @@ var (
 // SDNotify returns the sd_notify conformance checks: a supervisor Listener
 // receives a readiness datagram from a notifier over the NOTIFY_SOCKET — Linux;
 // UnsupportedPlatform off Linux.
-func SDNotify() harness.Suite {
+func SDNotify() harness.CheckGroup {
 	//: three independent checks: the unsupervised no-op, the parse-state value
 	//: semantics, and the full Linux Listen→Ready→Recv readiness round-trip.
-	return harness.Suite{Domain: sdnotifyDomain, Checks: []harness.Check{
+	return harness.CheckGroup{Domain: sdnotifyDomain, Checks: []harness.Check{
 		sdnotifyNoopWhenUnset,
 		sdnotifyNotificationStates,
 		sdnotifyReadinessRoundTrip,
@@ -252,10 +253,10 @@ func recvWithDeadline(ln sdnotify.Listener) (n sdnotify.Notification, timedOut b
 // attaches a bound listener to a child Spec (Prepare populates ExtraFiles +
 // LISTEN_FDS/LISTEN_FDNAMES) and the documented empty-set contract returns no
 // files — Unix; UnsupportedPlatform off Unix.
-func SDListen() harness.Suite {
+func SDListen() harness.CheckGroup {
 	//: two checks: the activator-side Prepare population and the service-side
 	//: empty/foreign activation-set contract.
-	return harness.Suite{Domain: sdlistenDomain, Checks: []harness.Check{
+	return harness.CheckGroup{Domain: sdlistenDomain, Checks: []harness.Check{
 		sdlistenPreparePopulatesSpec,
 		sdlistenEmptySetNotError,
 	}}

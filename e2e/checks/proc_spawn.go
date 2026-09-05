@@ -58,12 +58,6 @@ const stopGrace time.Duration = 2 * time.Second
 // hang the whole conformance run; a pre-closed source channel drains at once.
 const relayDeadline time.Duration = 2 * time.Second
 
-// intPtr returns a pointer to v — for the pointer Spec fields (Umask) without a
-// named local at the call site.
-func intPtr(v int) *int {
-	return &v
-}
-
 // wantNoFile is the open-file ceiling pushed through Spec.Rlimits and read back
 // via `ulimit -n` — proof the re-exec trampoline ran setrlimit on this kernel.
 const wantNoFile uint64 = 64
@@ -137,9 +131,9 @@ func haveShell() bool {
 
 // Process returns the process-spawn conformance checks (Start/Wait exit codes,
 // stdio capture, group-aware Stop) — Unix; UnsupportedPlatform off Unix.
-func Process() harness.Suite {
+func Process() harness.CheckGroup {
 	//: three independent behaviours, each self-reporting off-platform/no-shell.
-	return harness.Suite{
+	return harness.CheckGroup{
 		Domain: processDomain,
 		Checks: []harness.Check{
 			processExitCode,
@@ -278,9 +272,9 @@ func processGroupStop() harness.Result {
 // Rlimit returns the rlimit/umask conformance checks: spawn a shell that prints
 // its effective limit (ulimit -n, umask, ulimit -c) under Spec.Rlimits/Umask and
 // assert the trampoline actually applied it — Unix; UnsupportedPlatform off Unix.
-func Rlimit() harness.Suite {
+func Rlimit() harness.CheckGroup {
 	//: three trampoline-applied attributes, each read back from the live child.
-	return harness.Suite{
+	return harness.CheckGroup{
 		Domain: rlimitDomain,
 		Checks: []harness.Check{
 			rlimitNoFile,
@@ -351,7 +345,7 @@ func rlimitNoFile() harness.Result {
 // rlimitUmask spawns `sh -c 'umask'` under Spec.Umask of 0o077 and asserts the
 // shell reports that octal mask — proof the trampoline ran umask(2).
 func rlimitUmask() harness.Result {
-	got, res, done := captureShell(rlimitDomain, nameUmask, "umask", nil, intPtr(wantUmask))
+	got, res, done := captureShell(rlimitDomain, nameUmask, "umask", nil, new(wantUmask))
 	//: a terminal helper Result short-circuits the assertion.
 	if done {
 		//: forward the NotSupported/Skip/Fail outcome verbatim.
@@ -397,9 +391,9 @@ func rlimitCore() harness.Result {
 // Signal returns the signal-domain conformance checks (Parse/String round-trip,
 // numeric value matches the platform, Relay delivery) — portable Parse/String;
 // Relay is UnsupportedPlatform off Unix.
-func Signal() harness.Suite {
+func Signal() harness.CheckGroup {
 	//: Parse/String are portable value behaviour; Relay self-reports off-platform.
-	return harness.Suite{
+	return harness.CheckGroup{
 		Domain: signalDomain,
 		Checks: []harness.Check{
 			signalParse,
@@ -447,6 +441,11 @@ func signalParse() harness.Result {
 // makes Relay drain immediately with no real delivery, so the check observes the
 // portable nil-on-clean-drain contract without racing a signal into this process
 // — UnsupportedPlatform off Unix.
+//
+// Goroutine lifecycle: one, which runs Relay so the deadline below can bound it.
+// It reports on a buffered channel, so it cannot block on send even when the
+// deadline wins the race, and a Relay that never returns leaks exactly that one
+// goroutine rather than hanging the whole conformance run.
 func signalRelay() harness.Result {
 	//: a pre-closed source channel makes Relay drain at once with no kill(2),
 	//: so the check is deterministic and never signals the test process itself.

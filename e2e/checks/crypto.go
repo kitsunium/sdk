@@ -54,7 +54,7 @@ var cryptoKey32 = []byte("0123456789abcdef0123456789abcdef")
 
 // Crypto returns the crypto-domain conformance checks (AEAD seal/open, hashing,
 // signing, key derivation, password hashing, MAC, key agreement).
-func Crypto() harness.Suite {
+func Crypto() harness.CheckGroup {
 	//: each Check exercises one facade verb-set and asserts its round-trip.
 	checks := []harness.Check{
 		cryptoAEADRoundTrip,
@@ -67,7 +67,7 @@ func Crypto() harness.Suite {
 		cryptoAgreeSharedKey,
 	}
 	//: bundle the eight checks under the crypto domain label.
-	return harness.Suite{Domain: cryptoDomain, Checks: checks}
+	return harness.CheckGroup{Domain: cryptoDomain, Checks: checks}
 }
 
 // cryptoAEADRoundTrip asserts crypto.Seal then crypto.Open recovers the exact

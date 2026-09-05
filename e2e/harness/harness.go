@@ -11,7 +11,8 @@ package harness
 import (
 	"fmt"
 	"io"
-	"sort"
+	"slices"
+	"strings"
 )
 
 // Status is the outcome of a single conformance check.
@@ -32,6 +33,11 @@ const (
 )
 
 // Result is the outcome of one named check within a domain.
+//
+// Every field is filled by the constructors below rather than by the checks
+// themselves, so a Result can never carry a status the runner does not know how
+// to tally — and Detail is always set, because a failure nobody can diagnose
+// from the table is a failure that will be re-investigated from scratch.
 type Result struct {
 	// Domain is the SDK area under test (codec, crypto, process, cgroup, …).
 	Domain string
@@ -44,19 +50,7 @@ type Result struct {
 	Detail string
 }
 
-// Check exercises one public-API behaviour and returns its Result. A Check must
-// not panic; it converts any failure into a Fail/Skip Result with detail.
-type Check func() Result
-
-// Suite is a domain's named group of checks, returned by each checks/<domain>.go.
-type Suite struct {
-	// Domain labels every Result the suite produces.
-	Domain string
-	// Checks are run in order; each is independent.
-	Checks []Check
-}
-
-// Pass builds a passing Result for the given domain/name.
+// Passed builds a passing Result for the given domain/name.
 func Passed(domain, name, detail string) Result {
 	//: a correct, exercised behaviour.
 	return Result{Domain: domain, Name: name, Status: Pass, Detail: detail}
@@ -83,26 +77,27 @@ func Skipped(domain, name, detail string) Result {
 // Run executes every suite, writes a per-check table to out, and returns the
 // number of Fail results (0 means the host conforms). UNSUPPORTED and SKIP never
 // count as failures.
-func Run(out io.Writer, suites []Suite) int {
+func Run(out io.Writer, groups []CheckGroup) int {
 	var results []Result
 	//: collect every check's result across all domains first.
-	for _, suite := range suites {
-		//: run each check in the suite, guarding against a panicking check.
-		for _, check := range suite.Checks {
+	for _, group := range groups {
+		//: run each check in the group, guarding against a panicking check.
+		for _, check := range group.Checks {
 			//: a check that panics is recorded as a Fail, never aborts the run.
-			results = append(results, safeRun(suite.Domain, check))
+			results = append(results, safeRun(group.Domain, check))
 		}
 	}
 	//: stable ordering so diffs across machines line up.
-	sort.SliceStable(results, func(i, j int) bool {
-		//: order by domain then name for a deterministic table.
-		if results[i].Domain != results[j].Domain {
-			//: primary key is the domain.
-			return results[i].Domain < results[j].Domain
+	slices.SortStableFunc(results, func(a, b Result) int {
+		//: primary key is the domain, secondary the check name.
+		if byDomain := strings.Compare(a.Domain, b.Domain); byDomain != 0 {
+			//: different domains order by domain alone.
+			return byDomain
 		}
-		//: secondary key is the check name.
-		return results[i].Name < results[j].Name
+		//: within a domain, order by check name.
+		return strings.Compare(a.Name, b.Name)
 	})
+	//: the table is printed and the Fail count is the process exit code.
 	return report(out, results)
 }
 
@@ -117,7 +112,8 @@ func safeRun(domain string, check Check) (res Result) {
 			res = Failed(domain, "panic", fmt.Sprintf("%v", r))
 		}
 	}()
-	//: run the check; its Result is returned unless it panics.
+	//: run the check; its Result is returned unless it panics, in which case
+	//: the deferred recover above has already replaced it.
 	return check()
 }
 
@@ -149,6 +145,7 @@ func report(out io.Writer, results []Result) int {
 		}
 	}
 	stderrf(out, "\nsummary: %d pass · %d fail · %d unsupported · %d skip\n", passes, fails, unsup, skips)
+	//: only Fail counts against the host; UNSUPPORTED and SKIP make no claim.
 	return fails
 }
 
