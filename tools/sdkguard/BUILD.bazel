@@ -24,9 +24,6 @@ go_binary(
 
 go_test(
     name = "sdkguard_test",
-    srcs = [
-        "sdkguard_test.go",
-        "version_test.go",
-    ],
+    srcs = ["main_test.go"],
     embed = [":sdkguard_lib"],
 )

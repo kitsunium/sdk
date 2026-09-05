@@ -324,9 +324,12 @@ func skipFile(file *ast.File) bool {
 // excludedByBuildTag reports whether a //go:build line puts the file outside
 // every build.
 //
-// The expression is evaluated with every tag satisfied EXCEPT "ignore", so a
-// platform-specific file still gets scanned — its rules apply on the platform
-// it targets — while "//go:build ignore" is recognised as what it is.
+// The question is narrower than "is this constraint satisfiable", which is a
+// SAT problem: it is "does this file build ONLY when the ignore tag is set".
+// So the expression is evaluated twice, and both answers matter — with ignore
+// set it must build, without it it must not. A first attempt asked only the
+// second half and called "//go:build !windows" excluded, which is wrong: that
+// file builds everywhere except one platform.
 func excludedByBuildTag(text string) bool {
 	expr, err := constraint.Parse(text)
 	//: not a build line at all; ordinary comments land here.
@@ -334,9 +337,13 @@ func excludedByBuildTag(text string) bool {
 		//: an ordinary comment excludes nothing.
 		return false
 	}
-	//: satisfy every tag except "ignore", so only a file excluded from EVERY
-	//: build evaluates false — a platform-specific file still gets scanned.
-	return !expr.Eval(func(tag string) bool { return tag != ignoreTag })
+	//: with every tag set, including ignore.
+	withIgnore := expr.Eval(func(string) bool { return true })
+	//: the same, except ignore is not set.
+	withoutIgnore := expr.Eval(func(tag string) bool { return tag != ignoreTag })
+	//: excluded only when ignore is precisely what makes it buildable —
+	//: which is what "//go:build ignore" means and nothing else does.
+	return withIgnore && !withoutIgnore
 }
 
 // importsOf maps each imported path to the local name it is bound to, and

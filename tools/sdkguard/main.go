@@ -36,6 +36,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -72,7 +73,7 @@ func main() {
 
 	//: -list documents the tool itself; nothing else runs alongside it.
 	if *list {
-		printRules()
+		printRules(os.Stdout)
 		//: printing the table IS the whole invocation.
 		return
 	}
@@ -105,7 +106,7 @@ func inspect(roots []string, selected []ruleEntity, withTests bool, mode string)
 	}
 	//: print before the freshness warning, so the actionable part comes first.
 	if len(findings) > 0 {
-		report(findings)
+		report(os.Stderr, findings)
 	}
 
 	stale, err := reportVersions(roots, mode)
@@ -276,22 +277,27 @@ func normalizeRoot(root string) string {
 	return filepath.Clean(trimmed)
 }
 
-// report prints findings in the standard Go diagnostic format so editors and
-// CI annotators parse them without extra configuration.
-func report(findings []findingEntity) {
+// report writes findings to dst in the standard Go diagnostic format so editors
+// and CI annotators parse them without extra configuration.
+//
+// The destination is a parameter rather than os.Stderr directly: it is what
+// makes the format assertable, and it matches how the SDK asks every writer to
+// be named rather than assumed.
+func report(dst io.Writer, findings []findingEntity) {
 	//: one line per finding, in the order scanRoots settled.
 	for _, f := range findings {
-		fmt.Fprintf(os.Stderr, "%s:%d:%d: %s: %s\n", f.File, f.Line, f.Column, f.Rule, f.Message)
+		fmt.Fprintf(dst, "%s:%d:%d: %s: %s\n", f.File, f.Line, f.Column, f.Rule, f.Message)
 	}
-	fmt.Fprintf(os.Stderr, "\nsdkguard: %d finding(s). Each is a rule the SDK states in an ADR;\n"+
+	fmt.Fprintf(dst, "\nsdkguard: %d finding(s). Each is a rule the SDK states in an ADR;\n"+
 		"suppress a justified one with //sdkguard:allow <RULE> <reason>.\n", len(findings))
 }
 
-// printRules writes the rule table, so `sdkguard -list` documents itself.
-func printRules() {
+// printRules writes the rule table to dst, so `sdkguard -list` documents
+// itself. The destination is a parameter for the same reason report's is.
+func printRules(dst io.Writer) {
 	//: table order is declaration order, which groups the invariants first.
 	for _, r := range allRules {
-		fmt.Printf("%-8s %-11s %-46s %s\n", r.ID, r.Level, r.Title, r.Source)
+		fmt.Fprintf(dst, "%-8s %-11s %-46s %s\n", r.ID, r.Level, r.Title, r.Source)
 	}
 }
 
