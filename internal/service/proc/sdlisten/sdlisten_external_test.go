@@ -80,7 +80,6 @@ func runActivatedChild() int {
 // asserts the child accepts a connection on the passed socket — the acceptance
 // "round-trip without systemd" contract.
 func TestRoundTrip(t *testing.T) {
-	t.Parallel()
 	self, err := os.Executable()
 	//: the round-trip re-execs this test binary as the activated child.
 	if err != nil {

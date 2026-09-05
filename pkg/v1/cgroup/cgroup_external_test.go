@@ -14,7 +14,6 @@ import (
 // gracefully: on a non-delegated host Create returns the typed sentinel and no
 // handle, never a panic.
 func TestCreateDelegates(t *testing.T) {
-	t.Parallel()
 	//: the live confinement path needs delegation; assert the contract otherwise.
 	if cgroup.Available() {
 		//: a delegated host is exercised by the service-level test; skip the dup.

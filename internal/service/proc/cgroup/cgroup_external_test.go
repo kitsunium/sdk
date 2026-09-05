@@ -29,7 +29,6 @@ const killPollInterval time.Duration = 50 * time.Millisecond
 // CgroupUnavailable / UnsupportedPlatform error without panicking — the issue's
 // acceptance criterion across privileged and unprivileged hosts.
 func TestCreateConfinement(t *testing.T) {
-	t.Parallel()
 	//: the unavailable path is the only honest assertion when delegation is absent.
 	if !cgroup.Available() {
 		//: still prove the typed-error contract before skipping the live path.
@@ -116,7 +115,6 @@ func assertUnavailable(t *testing.T) {
 // TestAvailableNeverPanics asserts the delegation probe returns a bool on every
 // host without panicking — the no-op robustness contract.
 func TestAvailableNeverPanics(t *testing.T) {
-	t.Parallel()
 	got := cgroup.Available()
 	//: cgroup-equivalent facilities exist on Linux (cgroup v2) and Windows (Job
 	//: Objects); every other target has none, so the probe must report false there.
@@ -130,7 +128,6 @@ func TestAvailableNeverPanics(t *testing.T) {
 // path element is rejected with the typed INVALID_SPEC sentinel before any
 // filesystem write, so a crafted name can never escape the delegated root.
 func TestCreateRejectsEscapingName(t *testing.T) {
-	t.Parallel()
 	//: name validation is a Linux-build concern; the stub rejects all off Linux.
 	if runtime.GOOS != "linux" {
 		//: off Linux Create short-circuits to UnsupportedPlatform before validation.

@@ -37,7 +37,6 @@ func requireShell(t *testing.T) {
 
 // TestWaitNormalExit asserts Wait reports the exact status of a clean exit.
 func TestWaitNormalExit(t *testing.T) {
-	t.Parallel()
 	requireShell(t)
 
 	type exitCase struct {

@@ -69,7 +69,6 @@ func readSoftNoFile(t *testing.T) uint64 {
 // the portable getrlimit(2) readback in rlimit_unix_test.go proves the same
 // native effect on every other Unix target.
 func TestApplyNoFileObservable(t *testing.T) {
-	t.Parallel()
 	//: /proc/self/limits exists only on Linux; other Unix targets prove the
 	//: setrlimit effect via getrlimit(2) in rlimit_unix_test.go.
 	if runtime.GOOS != "linux" {
@@ -124,7 +123,6 @@ func runApplyCase(t *testing.T, tc applyCase) {
 
 // TestApplyTable drives the success and typed-error rows that hold on any host.
 func TestApplyTable(t *testing.T) {
-	t.Parallel()
 	//: choose the expected code for the unknown-resource row by platform.
 	unknownWant := coreproc.CodeUnknownResource
 	//: a non-Unix target degrades to UNSUPPORTED_PLATFORM before the table.
