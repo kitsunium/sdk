@@ -9,7 +9,6 @@ package exec_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -34,7 +33,7 @@ func (errWriter) Write(_ []byte) (int, error) {
 // fault — the common path for the stdio cases below.
 func startAndWait(t *testing.T, spec coreproc.Spec) coreproc.ExitValue {
 	t.Helper()
-	p, err := svcexec.Start(context.Background(), spec)
+	p, err := svcexec.Start(t.Context(), spec)
 	//: a clean spawn of /bin/sh is the precondition for every stdio assertion.
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -185,7 +184,7 @@ func TestStdioCaptureWriterFailureSurfaces(t *testing.T) {
 		Stdio:  coreproc.StdioCapture,
 		Stdout: errWriter{},
 	}
-	p, err := svcexec.Start(context.Background(), spec)
+	p, err := svcexec.Start(t.Context(), spec)
 	//: a clean spawn is the precondition.
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -215,7 +214,7 @@ func TestStdioCaptureWithSetpgid(t *testing.T) {
 		Stdio:   coreproc.StdioCapture,
 		Stdout:  &out,
 	}
-	p, err := svcexec.Start(context.Background(), spec)
+	p, err := svcexec.Start(t.Context(), spec)
 	//: a clean spawn is the precondition.
 	if err != nil {
 		t.Fatalf("Start: %v", err)

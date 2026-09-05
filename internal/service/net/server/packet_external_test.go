@@ -26,7 +26,7 @@ func startUpper(t *testing.T, opts ...server.GroupOption) (srv *server.Server, a
 			_, err := p.Reply(out)
 			return err
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -88,7 +88,7 @@ func TestDatagramBatchServesEveryPacket(t *testing.T) {
 		seen <- string(p.Data())
 		return nil
 	})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -137,7 +137,7 @@ func TestDatagramSenderIsReported(t *testing.T) {
 			addrs <- p.From().String()
 			return nil
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -172,7 +172,7 @@ func TestUnixDatagramUsesTheSameEngine(t *testing.T) {
 			served <- string(p.Data())
 			return nil
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -235,7 +235,7 @@ func TestPacketDeclarationErrorsSurfaceAtStart(t *testing.T) {
 			t.Parallel()
 			srv := server.New()
 			tc.build(srv)
-			if err := srv.Start(context.Background()); !errs.HasCode(err, tc.want) {
+			if err := srv.Start(t.Context()); !errs.HasCode(err, tc.want) {
 				t.Fatalf("expected %v, got %v", tc.want, err)
 			}
 		})
@@ -257,7 +257,7 @@ func TestPanickingPacketHandlerKeepsTheLoopAlive(t *testing.T) {
 			served <- payload
 			return nil
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -357,7 +357,7 @@ func runPacketSizeCase(t *testing.T, tc packetSizeCase, ceiling int) {
 		seen <- len(p.Data())
 		return nil
 	})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })

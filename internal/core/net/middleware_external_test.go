@@ -31,7 +31,7 @@ func TestChainAppliesOutermostFirst(t *testing.T) {
 		return nil
 	})
 	chained := corenet.Chain[corenet.ConnHandler](base, tag(&log, "a"), tag(&log, "b"), tag(&log, "c"))
-	if err := chained.ServeConn(context.Background(), nil); err != nil {
+	if err := chained.ServeConn(t.Context(), nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := log.String(); got != "abch" {
@@ -50,7 +50,7 @@ func TestChainSkipsNilMiddleware(t *testing.T) {
 		return nil
 	})
 	chained := corenet.Chain[corenet.ConnHandler](base, nil, tag(&log, "a"), nil)
-	if err := chained.ServeConn(context.Background(), nil); err != nil {
+	if err := chained.ServeConn(t.Context(), nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := log.String(); got != "ah" {
@@ -66,7 +66,7 @@ func TestChainWithNoMiddlewareReturnsTheHandler(t *testing.T) {
 		log.WriteString("h")
 		return nil
 	})
-	if err := corenet.Chain[corenet.ConnHandler](base).ServeConn(context.Background(), nil); err != nil {
+	if err := corenet.Chain[corenet.ConnHandler](base).ServeConn(t.Context(), nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := log.String(); got != "h" {
@@ -92,7 +92,7 @@ func TestChainWorksForPacketHandlersToo(t *testing.T) {
 		return nil
 	})
 	chained := corenet.Chain[corenet.PacketHandler](base, wrap("a"), wrap("b"))
-	if err := chained.ServePacket(context.Background(), nil); err != nil {
+	if err := chained.ServePacket(t.Context(), nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := log.String(); got != "abh" {

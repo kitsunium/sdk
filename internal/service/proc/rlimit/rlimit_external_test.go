@@ -69,6 +69,7 @@ func readSoftNoFile(t *testing.T) uint64 {
 // the portable getrlimit(2) readback in rlimit_unix_test.go proves the same
 // native effect on every other Unix target.
 func TestApplyNoFileObservable(t *testing.T) {
+	t.Parallel()
 	//: /proc/self/limits exists only on Linux; other Unix targets prove the
 	//: setrlimit effect via getrlimit(2) in rlimit_unix_test.go.
 	if runtime.GOOS != "linux" {
@@ -192,6 +193,7 @@ func fieldValue(err error, key string) (val string) {
 // surfaces RLIMIT_FAILED annotated with syscall=prlimit64, so logs reflect the
 // actual failing operation rather than always reading "setrlimit".
 func TestForeignPidNamesPrlimit64(t *testing.T) {
+	t.Parallel()
 	//: the prlimit64 path and its annotation exist only on Linux.
 	if runtime.GOOS != "linux" {
 		//: nothing to assert about the syscall field off Linux.

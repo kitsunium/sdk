@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/service/net/server"
@@ -18,7 +17,7 @@ func TestShardedListenerReportsItsShardCount(t *testing.T) {
 		server.Listen("tcp", "127.0.0.1:0"),
 		server.Shards(4),
 	).HandleFunc(noopHandler)
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -63,7 +62,7 @@ func TestUnixListenerCannotShardAndSaysSo(t *testing.T) {
 		server.Listen("unix", sock),
 		server.Shards(4),
 	).HandleFunc(noopHandler)
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -103,7 +102,7 @@ func startEchoSharded(t *testing.T, shards int) (srv *server.Server, addr string
 		server.Listen("tcp", "127.0.0.1:0"),
 		server.Shards(shards),
 	).HandleFunc(echoHandler)
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })

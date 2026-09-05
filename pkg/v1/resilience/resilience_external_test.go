@@ -14,7 +14,7 @@ func TestComposition(t *testing.T) {
 	retry := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 2})
 	timeout := resilience.NewTimeout(time.Second)
 	//: a composed Retry(Timeout(op)) runs the op and returns nil.
-	err := retry.Run(context.Background(), func(ctx context.Context) error {
+	err := retry.Run(t.Context(), func(ctx context.Context) error {
 		return timeout.Run(ctx, func(context.Context) error { return nil })
 	})
 	if err != nil {

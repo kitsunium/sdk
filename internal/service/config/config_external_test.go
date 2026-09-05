@@ -98,7 +98,7 @@ func TestPollWatcher(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := cfg.PollWatcher(path, 10*time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	changed := make(chan struct{}, 1)
 	var wg sync.WaitGroup
 	var watchErr error

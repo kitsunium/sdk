@@ -38,7 +38,7 @@ func TestEveryGroupOptionIsWiredThrough(t *testing.T) {
 		_, err = c.Write(buf[:n])
 		return err
 	})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	defer func() { closeOrFail(t, srv) }()
@@ -68,7 +68,7 @@ func TestTLSOptionServesOverTLS(t *testing.T) {
 			_, werr := io.WriteString(c, "secure\n")
 			return werr
 		})
-	if serr := srv.Start(context.Background()); serr != nil {
+	if serr := srv.Start(t.Context()); serr != nil {
 		t.Fatalf("start: %v", serr)
 	}
 	defer func() { closeOrFail(t, srv) }()
@@ -94,7 +94,7 @@ func TestPlainDialAgainstATLSGroupFails(t *testing.T) {
 			_, werr := io.WriteString(c, "secure\n")
 			return werr
 		})
-	if serr := srv.Start(context.Background()); serr != nil {
+	if serr := srv.Start(t.Context()); serr != nil {
 		t.Fatalf("start: %v", serr)
 	}
 	defer func() { closeOrFail(t, srv) }()
@@ -137,7 +137,7 @@ func TestChainIsReachableFromTheFacade(t *testing.T) {
 		return nil
 	})
 	chained := server.Chain(base, tag("a"), tag("b"))
-	if err := chained.ServeConn(context.Background(), nil); err != nil {
+	if err := chained.ServeConn(t.Context(), nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if strings.Join(order, ",") != "a,b,handler" {

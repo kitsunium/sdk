@@ -4,7 +4,6 @@
 package process_test
 
 import (
-	"context"
 	"os"
 	"runtime"
 	"syscall"
@@ -75,7 +74,7 @@ func TestSignalConstantsMatchCore(t *testing.T) {
 func TestStartInvalidSpecDelegates(t *testing.T) {
 	t.Parallel()
 
-	_, err := process.Start(context.Background(), process.Spec{})
+	_, err := process.Start(t.Context(), process.Spec{})
 	//: the facade must pass the central INVALID_SPEC code straight through.
 	if !errs.HasCode(err, coreproc.CodeInvalidSpec) {
 		t.Fatalf("Start(empty) err = %v, want CodeInvalidSpec", err)
@@ -92,7 +91,7 @@ func TestStartAndStop(t *testing.T) {
 		Args:    []string{"sh", "-c", "sleep 30 & wait"},
 		Setpgid: true,
 	}
-	p, err := process.Start(context.Background(), spec)
+	p, err := process.Start(t.Context(), spec)
 	//: a clean spawn through the facade must not error.
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -102,7 +101,7 @@ func TestStartAndStop(t *testing.T) {
 		t.Fatalf("PID() = %d, want > 0", p.PID())
 	}
 	//: a graceful group stop must succeed within the grace window.
-	if sErr := p.Stop(context.Background(), 2*time.Second, process.SIGTERM); sErr != nil {
+	if sErr := p.Stop(t.Context(), 2*time.Second, process.SIGTERM); sErr != nil {
 		t.Fatalf("Stop: %v", sErr)
 	}
 	//: Wait must reap the stopped group without a host fault.

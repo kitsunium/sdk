@@ -56,7 +56,7 @@ func TestWaitNormalExit(t *testing.T) {
 			Path: shPath,
 			Args: []string{"sh", "-c", "exit " + strconv.Itoa(tc.code)},
 		}
-		p, err := svcexec.Start(context.Background(), spec)
+		p, err := svcexec.Start(t.Context(), spec)
 		//: a clean spawn of /bin/sh must not error.
 		if err != nil {
 			t.Fatalf("Start: %v", err)
@@ -100,7 +100,7 @@ func TestWaitSignaledExit(t *testing.T) {
 		Args:    []string{"sh", "-c", "sleep 30"},
 		Setpgid: true,
 	}
-	p, err := svcexec.Start(context.Background(), spec)
+	p, err := svcexec.Start(t.Context(), spec)
 	//: a clean spawn is the precondition for the signal test.
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -141,7 +141,7 @@ func TestStopGroupNoSurvivor(t *testing.T) {
 		Args:    []string{"sh", "-c", "sleep 30 & echo $! ; wait"},
 		Setpgid: true,
 	}
-	p, err := svcexec.Start(context.Background(), spec)
+	p, err := svcexec.Start(t.Context(), spec)
 	//: a clean spawn is the precondition for the group-kill test.
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -152,7 +152,7 @@ func TestStopGroupNoSurvivor(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	//: Stop must terminate the whole group, grandchild included.
-	if sErr := p.Stop(context.Background(), 10*time.Second, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
+	if sErr := p.Stop(t.Context(), 10*time.Second, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
 		t.Fatalf("Stop: %v", sErr)
 	}
 	//: drive the reap of the leader so the group is fully settled.
@@ -191,7 +191,7 @@ func TestStopEscalatesToKill(t *testing.T) {
 		Args:    []string{"sh", "-c", "trap '' TERM; sleep 30"},
 		Setpgid: true,
 	}
-	p, err := svcexec.Start(context.Background(), spec)
+	p, err := svcexec.Start(t.Context(), spec)
 	//: a clean spawn is the precondition for the escalation test.
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -202,7 +202,7 @@ func TestStopEscalatesToKill(t *testing.T) {
 	grace := 300 * time.Millisecond
 	start := time.Now()
 	//: Stop must return only after escalating to SIGKILL past the grace window.
-	if sErr := p.Stop(context.Background(), grace, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
+	if sErr := p.Stop(t.Context(), grace, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
 		t.Fatalf("Stop: %v", sErr)
 	}
 	elapsed := time.Since(start)
@@ -231,7 +231,7 @@ func TestStopEscalatesToKill(t *testing.T) {
 func TestStartInvalidSpec(t *testing.T) {
 	t.Parallel()
 
-	_, err := svcexec.Start(context.Background(), coreproc.Spec{})
+	_, err := svcexec.Start(t.Context(), coreproc.Spec{})
 	//: an empty Path must surface the central INVALID_SPEC code.
 	if !errs.HasCode(err, coreproc.CodeInvalidSpec) {
 		t.Fatalf("Start(empty) err = %v, want CodeInvalidSpec", err)
@@ -248,7 +248,7 @@ func TestStartUnknownUser(t *testing.T) {
 		Args: []string{"sh", "-c", "true"},
 		User: "this-user-does-not-exist-kitsunium",
 	}
-	_, err := svcexec.Start(context.Background(), spec)
+	_, err := svcexec.Start(t.Context(), spec)
 	//: an unresolvable user must surface the central UNKNOWN_USER code.
 	if !errs.HasCode(err, coreproc.CodeUnknownUser) {
 		t.Fatalf("Start(bad user) err = %v, want CodeUnknownUser", err)
@@ -265,7 +265,7 @@ func TestStartUnknownGroup(t *testing.T) {
 		Args:  []string{"sh", "-c", "true"},
 		Group: "this-group-does-not-exist-kitsunium",
 	}
-	_, err := svcexec.Start(context.Background(), spec)
+	_, err := svcexec.Start(t.Context(), spec)
 	//: an unresolvable group must surface the central UNKNOWN_GROUP code.
 	if !errs.HasCode(err, coreproc.CodeUnknownGroup) {
 		t.Fatalf("Start(bad group) err = %v, want CodeUnknownGroup", err)
@@ -284,7 +284,7 @@ func TestStartUnknownResource(t *testing.T) {
 			coreproc.ResourceNProc: {Soft: 64, Hard: 64},
 		},
 	}
-	_, err := svcexec.Start(context.Background(), spec)
+	_, err := svcexec.Start(t.Context(), spec)
 	//: an unmapped resource must surface the central UNKNOWN_RESOURCE code.
 	if !errs.HasCode(err, coreproc.CodeUnknownResource) {
 		t.Fatalf("Start(bad resource) err = %v, want CodeUnknownResource", err)
@@ -298,6 +298,7 @@ func TestStartUnknownResource(t *testing.T) {
 // this very test binary, whose linked exec package applies the limit before
 // exec'ing /bin/sh, so these cases exercise the full pre-exec path.
 func TestStartLimitsHonoured(t *testing.T) {
+	t.Parallel()
 	requireShell(t)
 
 	type limitCase struct {
@@ -537,7 +538,7 @@ func TestStartExtraFilesSurviveTrampoline(t *testing.T) {
 func TestStartContextCancelled(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := svcexec.Start(ctx, coreproc.Spec{Path: shPath})
 	//: a cancelled context must surface context.Canceled, not a spawn.
@@ -559,7 +560,7 @@ func TestStartEmptyEnvNoLeak(t *testing.T) {
 		//: the shell exits 0 only when the canary is absent (empty environment).
 		Args: []string{"sh", "-c", "[ -z \"$PROC_ENV_LEAK_CANARY\" ]"},
 	}
-	p, err := svcexec.Start(context.Background(), spec)
+	p, err := svcexec.Start(t.Context(), spec)
 	//: a clean spawn is the precondition for the leak check.
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -588,13 +589,13 @@ func TestStopWithoutSetpgid(t *testing.T) {
 		//: deliberately NOT a group leader — exercises the degrade-to-leader path.
 		Setpgid: false,
 	}
-	p, err := svcexec.Start(context.Background(), spec)
+	p, err := svcexec.Start(t.Context(), spec)
 	//: a clean spawn is the precondition for the stop check.
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	//: Stop must actually terminate the leader, not silently no-op on -pid ESRCH.
-	if sErr := p.Stop(context.Background(), time.Second, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
+	if sErr := p.Stop(t.Context(), time.Second, coreproc.Signal(syscall.SIGTERM)); sErr != nil {
 		t.Fatalf("Stop: %v", sErr)
 	}
 	//: after Stop the leader must be gone — kill(pid, 0) reports ESRCH.

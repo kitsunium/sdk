@@ -1,7 +1,6 @@
 package client_test
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -42,7 +41,7 @@ func TestFacadeBuildsAWorkingReadOnlyClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	resp, err := c.Get(context.Background(), "/v1/subscribers", nil)
+	resp, err := c.Get(t.Context(), "/v1/subscribers", nil)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -102,7 +101,7 @@ func TestFacadeSentinelsAreMatchable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, gerr := c.Get(context.Background(), tc.path, nil)
+			_, gerr := c.Get(t.Context(), tc.path, nil)
 			if !errors.Is(gerr, tc.want) {
 				t.Fatalf("errors.Is(err, %v) = false, got %v", tc.want, gerr)
 			}
@@ -131,7 +130,7 @@ func TestForgedDotSegmentIsRefused(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	req, err := http.NewRequestWithContext(
-		context.Background(), http.MethodGet, srv.URL+"/v1/supi/..", nil)
+		t.Context(), http.MethodGet, srv.URL+"/v1/supi/..", nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}

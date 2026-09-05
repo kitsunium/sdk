@@ -46,7 +46,7 @@ func Test_Timeout_LateSuccessStillTimesOut(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		err := NewTimeout(10*time.Millisecond).Run(context.Background(), tc.op)
+		err := NewTimeout(10*time.Millisecond).Run(t.Context(), tc.op)
 		//: contract: an expired deadline always reports TimeoutExceeded.
 		if tc.wantErr {
 			if !errors.Is(err, coreres.TimeoutExceeded) {
@@ -69,7 +69,7 @@ func Test_Timeout_LateSuccessStillTimesOut(t *testing.T) {
 // relabelled TimeoutExceeded by the broadened check.
 func Test_Timeout_ParentCancelNotRelabelled(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	err := NewTimeout(time.Hour).Run(ctx, func(c context.Context) error { return c.Err() })
 	//: the parent cancel surfaces context.Canceled, untouched by the policy.

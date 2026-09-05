@@ -14,6 +14,7 @@ import (
 // usable and safe on every platform: ReapOnce never errors on an idle process,
 // and a Start/Stop cycle completes without panic.
 func TestNewLifecycleIsSafe(t *testing.T) {
+	t.Parallel()
 	//: not Parallel — a real Unix reaper reaps ANY child of this process.
 	r := reaper.New()
 	//: Stop before Start must be a harmless no-op.
@@ -38,6 +39,7 @@ func TestNewLifecycleIsSafe(t *testing.T) {
 // post-sweep observer fires on every platform — including the non-Unix no-op,
 // where the documented contract still calls the hook with a zero-child sweep.
 func TestWithOnReapObserves(t *testing.T) {
+	t.Parallel()
 	//: serial — see TestNewLifecycleIsSafe rationale.
 	called := false
 	//: an observer that records it ran; it must never block.

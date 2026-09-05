@@ -15,7 +15,6 @@ func (stubGen) New() (string, error) { return "stub", nil }
 
 // TestRegisterLookupAvailable covers register → lookup → available + Known.
 func TestRegisterLookupAvailable(t *testing.T) {
-	t.Parallel()
 	got := id.Register(stubGen{name: "stub-a"})
 	//: Register hands the generator back for singleton binding.
 	if got.Scheme() != "stub-a" {
@@ -46,7 +45,6 @@ func TestNewUnknownScheme(t *testing.T) {
 
 // TestRegisterDuplicatePanics confirms a distinct generator on a taken scheme panics.
 func TestRegisterDuplicatePanics(t *testing.T) {
-	t.Parallel()
 	id.Register(stubGen{name: "dup-scheme"})
 	defer func() {
 		//: a distinct generator on a taken scheme must panic at boot.
@@ -64,7 +62,6 @@ func TestRegisterDuplicatePanics(t *testing.T) {
 // would otherwise leave Lookup/New resolving a key that Known() reports as
 // absent — two accessors disagreeing about the same scheme.
 func TestRegisterEmptySchemePanics(t *testing.T) {
-	t.Parallel()
 	defer func() {
 		//: Register turns the registry error into a boot-time panic.
 		if recover() == nil {

@@ -56,7 +56,7 @@ func BenchmarkServeConn_SDK(b *testing.B) {
 			echoOnce(c)
 			return nil
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(b.Context()); err != nil {
 		b.Fatalf("start: %v", err)
 	}
 	b.Cleanup(func() { discard(srv.Close()) })
@@ -64,7 +64,7 @@ func BenchmarkServeConn_SDK(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		roundTripOnce(b, addr)
 	}
 }
@@ -99,7 +99,7 @@ func BenchmarkServeConn_BareListener(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		roundTripOnce(b, ln.Addr().String())
 	}
 }
@@ -133,7 +133,7 @@ func httpGet(b *testing.B, client *http.Client, url string) {
 func BenchmarkHTTP_Adapter(b *testing.B) {
 	srv := server.New()
 	srv.Group("http", server.Listen("tcp", "127.0.0.1:0")).HandleHTTP(benchHandler)
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(b.Context()); err != nil {
 		b.Fatalf("start: %v", err)
 	}
 	b.Cleanup(func() { discard(srv.Close()) })
@@ -143,7 +143,7 @@ func BenchmarkHTTP_Adapter(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		httpGet(b, client, url)
 	}
 }
@@ -168,7 +168,7 @@ func BenchmarkHTTP_Native(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		httpGet(b, client, url)
 	}
 }
@@ -198,7 +198,7 @@ func benchSharded(b *testing.B, shards int) {
 		echoOnce(c)
 		return nil
 	})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(b.Context()); err != nil {
 		b.Fatalf("start: %v", err)
 	}
 	b.Cleanup(func() { discard(srv.Close()) })

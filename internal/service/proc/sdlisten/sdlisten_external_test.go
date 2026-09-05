@@ -7,7 +7,6 @@
 package sdlisten_test
 
 import (
-	"context"
 	"io"
 	"net"
 	"os"
@@ -81,6 +80,7 @@ func runActivatedChild() int {
 // asserts the child accepts a connection on the passed socket — the acceptance
 // "round-trip without systemd" contract.
 func TestRoundTrip(t *testing.T) {
+	t.Parallel()
 	self, err := os.Executable()
 	//: the round-trip re-execs this test binary as the activated child.
 	if err != nil {
@@ -103,7 +103,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Logf("parent Listener close: %v", cerr)
 	}
 
-	p, serr := svcexec.Start(context.Background(), spec)
+	p, serr := svcexec.Start(t.Context(), spec)
 	//: release the parent's copies of the passed fds once the child owns its dups.
 	closeExtra(t, spec.ExtraFiles)
 	//: a spawn failure aborts the round-trip.

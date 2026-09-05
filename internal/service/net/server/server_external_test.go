@@ -19,7 +19,7 @@ func startEcho(t *testing.T) (srv *server.Server, addr string) {
 	t.Helper()
 	srv = server.New()
 	srv.Group("echo", server.Listen("tcp", "127.0.0.1:0")).HandleFunc(echoHandler)
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -97,7 +97,7 @@ func TestCountersTrackConnections(t *testing.T) {
 func TestStartRefusesASecondStart(t *testing.T) {
 	t.Parallel()
 	srv, _ := startEcho(t)
-	if err := srv.Start(context.Background()); !errs.HasCode(err, corenet.CodeAlreadyStarted) {
+	if err := srv.Start(t.Context()); !errs.HasCode(err, corenet.CodeAlreadyStarted) {
 		t.Fatalf("expected ALREADY_STARTED, got %v", err)
 	}
 }
@@ -147,7 +147,7 @@ func TestDeclarationErrorsSurfaceAtStart(t *testing.T) {
 			t.Parallel()
 			srv := server.New()
 			tc.build(srv)
-			err := srv.Start(context.Background())
+			err := srv.Start(t.Context())
 			if !errs.HasCode(err, tc.want) {
 				t.Fatalf("expected %v, got %v", tc.want, err)
 			}
@@ -174,7 +174,7 @@ func TestShutdownDrainsInFlightWork(t *testing.T) {
 			close(finished)
 			return err
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	addr := srv.State().Listeners[0].Address
@@ -188,7 +188,7 @@ func TestShutdownDrainsInFlightWork(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 		done <- srv.Shutdown(ctx)
 	}()
@@ -216,7 +216,7 @@ func TestShutdownReportsAnExpiredBudget(t *testing.T) {
 			<-stuck
 			return nil
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	addr := srv.State().Listeners[0].Address
@@ -227,7 +227,7 @@ func TestShutdownReportsAnExpiredBudget(t *testing.T) {
 	defer func() { closeOrFail(t, c) }()
 	waitFor(t, func() bool { return srv.State().ActiveConns == 1 })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 	if serr := srv.Shutdown(ctx); !errs.HasCode(serr, corenet.CodeDrainTimeout) {
 		t.Fatalf("expected DRAIN_TIMEOUT, got %v", serr)
@@ -259,7 +259,7 @@ func TestPanickingHandlerClosesOnlyItsConnection(t *testing.T) {
 			swallowReadErr(c, buf)
 			panic("handler exploded")
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })

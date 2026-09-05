@@ -82,6 +82,7 @@ func runChild(secs string) (code int) {
 // TestDrainResultNoChildren asserts a sweep with no children returns (0, nil):
 // ECHILD is a clean end, never an error.
 func TestDrainResultNoChildren(t *testing.T) {
+	t.Parallel()
 	//: not Parallel — Wait4(-1) reaps ANY child of this process, so reaper
 	//: tests that spawn or count children must not run concurrently.
 	r := &unixReaper{}
@@ -100,6 +101,7 @@ func TestDrainResultNoChildren(t *testing.T) {
 // TestDrainResultCountsChildren spawns N direct children that exit immediately
 // and asserts a single drain sweep collects exactly N.
 func TestDrainResultCountsChildren(t *testing.T) {
+	t.Parallel()
 	//: serial — see TestDrainResultNoChildren rationale.
 	const childCount int = 4
 	//: spawn childCount trivial children that exit at once, becoming zombies.
@@ -145,6 +147,7 @@ func waitForZombies(t *testing.T) {
 // TestStartStopNoGoroutineLeak runs many Start/Stop cycles and asserts the
 // goroutine count does not grow, proving the loop goroutine exits on Stop.
 func TestStartStopNoGoroutineLeak(t *testing.T) {
+	t.Parallel()
 	//: serial — the reaper installs a process-global SIGCHLD handler.
 	r := New().(*unixReaper)
 	//: a warm-up cycle settles any one-time runtime goroutines.
@@ -172,6 +175,7 @@ func TestStartStopNoGoroutineLeak(t *testing.T) {
 // the old running=false-first path) could let a later Start race a still-running
 // loop; here all callers must observe the loop gone before returning.
 func TestConcurrentStopIsFullBarrier(t *testing.T) {
+	t.Parallel()
 	//: serial — process-global SIGCHLD handler and goroutine accounting.
 	r := New().(*unixReaper)
 	//: bring the background loop up so there is a goroutine to join.
@@ -230,6 +234,7 @@ func TestStartIdempotentAndStopWithoutStart(t *testing.T) {
 // the background loop runs, asserting no data race and no panic. Run under -race
 // this is the concurrency-safety acceptance check.
 func TestReapOnceConcurrentWithLoop(t *testing.T) {
+	t.Parallel()
 	//: serial at the package level; internal concurrency is the point.
 	r := New().(*unixReaper)
 	//: start the background loop so ReapOnce races a live sweeper.
@@ -267,6 +272,7 @@ func TestReapOnceConcurrentWithLoop(t *testing.T) {
 // cycle. When PR_SET_CHILD_SUBREAPER is unavailable, it skips but still asserts
 // the typed-error contract was honoured.
 func TestSubreaperReapsOrphanedGrandchild(t *testing.T) {
+	t.Parallel()
 	//: serial — spawns processes and reaps ANY child of this test process.
 	if err := SetChildSubreaper(); err != nil {
 		//: subreaper unavailable — either no facility on this platform

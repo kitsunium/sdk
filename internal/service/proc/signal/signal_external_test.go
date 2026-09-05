@@ -69,6 +69,7 @@ func settledGoroutines() (stable int) {
 // value, then the stop func unregisters the subscription (no further delivery)
 // and leaks no goroutine — the central #62 Notify contract.
 func TestNotifyDeliversThenStops(t *testing.T) {
+	t.Parallel()
 	//: not parallel: it measures the process-wide goroutine count.
 
 	//: warm up os/signal first — its internal signal_recv goroutine starts on

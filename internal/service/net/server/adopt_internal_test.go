@@ -66,6 +66,7 @@ func unadoptableFile(t *testing.T) *os.File {
 // nothing to close, and a supervisor restarting a service into this path leaks
 // a descriptor per attempt.
 func TestPartialStreamAdoptionReleasesEveryDescriptor(t *testing.T) {
+	t.Parallel()
 	//: not parallel — it counts process-wide descriptors.
 	good := adoptableListenerFile(t)
 	bad := unadoptableFile(t)
@@ -91,6 +92,7 @@ func TestPartialStreamAdoptionReleasesEveryDescriptor(t *testing.T) {
 // TestPartialPacketAdoptionReleasesEveryDescriptor is the same property on the
 // datagram half, which had the byte-identical defect.
 func TestPartialPacketAdoptionReleasesEveryDescriptor(t *testing.T) {
+	t.Parallel()
 	//: not parallel — it counts process-wide descriptors.
 	good := adoptablePacketFile(t)
 	bad := unadoptableFile(t)

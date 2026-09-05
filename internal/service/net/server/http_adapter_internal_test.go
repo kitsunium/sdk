@@ -30,7 +30,7 @@ func startHTTPGroup(t *testing.T) (srv *Server, adapter *httpAdapter, addr strin
 			t.Errorf("write response: %v", err)
 		}
 	}))
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	addr = srv.State().Listeners[0].Address
@@ -82,7 +82,7 @@ func TestCloseStopsTheEmbeddedHTTPServer(t *testing.T) {
 func TestShutdownStopsTheEmbeddedHTTPServer(t *testing.T) {
 	t.Parallel()
 	srv, adapter, _ := startHTTPGroup(t)
-	ctx, cancel := context.WithTimeout(context.Background(), httpDaemonSettleTimeout)
+	ctx, cancel := context.WithTimeout(t.Context(), httpDaemonSettleTimeout)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		t.Fatalf("shutdown: %v", err)
@@ -125,7 +125,7 @@ func runLaunchShutdownRace(t *testing.T) {
 	defer closeQuietly(t, local)
 	defer closeQuietly(t, remote)
 
-	ctx, cancel := context.WithTimeout(context.Background(), httpDaemonSettleTimeout)
+	ctx, cancel := context.WithTimeout(t.Context(), httpDaemonSettleTimeout)
 	defer cancel()
 
 	var wg sync.WaitGroup

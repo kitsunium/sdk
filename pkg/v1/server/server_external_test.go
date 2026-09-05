@@ -73,7 +73,7 @@ func echo(t *testing.T, addr, line string) string {
 // and the test always receives from it before returning.
 func TestServeStartsBlocksAndDrains(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	srv := server.New(server.WithDrainTimeout(2 * time.Second))
 	srv.Group("echo", server.Listen("tcp", "127.0.0.1:0")).
 		HandleFunc(func(_ context.Context, c server.Conn) error {
@@ -120,7 +120,7 @@ func TestMiddlewaresWrapOutermostFirst(t *testing.T) {
 			_, err := io.WriteString(c, "ok\n")
 			return err
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	defer func() { closeOrFail(t, srv) }()
@@ -152,7 +152,7 @@ func TestUnixSocketUsesTheSameEngine(t *testing.T) {
 			_, err := io.WriteString(c, "unix\n")
 			return err
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	defer func() { closeOrFail(t, srv) }()
@@ -182,7 +182,7 @@ func TestOneGroupServesTwoFamilies(t *testing.T) {
 			_, err := io.WriteString(c, c.Group()+"\n")
 			return err
 		})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	defer func() { closeOrFail(t, srv) }()
@@ -231,7 +231,7 @@ func TestSentinelsAreMatchableThroughTheFacade(t *testing.T) {
 			t.Parallel()
 			srv := server.New()
 			tc.build(srv)
-			if err := srv.Start(context.Background()); !errors.Is(err, tc.want) {
+			if err := srv.Start(t.Context()); !errors.Is(err, tc.want) {
 				t.Fatalf("errors.Is(err, %v) = false, got %v", tc.want, err)
 			}
 		})

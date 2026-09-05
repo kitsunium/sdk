@@ -27,7 +27,7 @@ func TestRetrySucceedsThenExhausts(t *testing.T) {
 	r := res.NewRetry(res.RetryConfig{MaxAttempts: 3})
 	//: an op that succeeds on the 3rd attempt returns nil.
 	calls := 0
-	err := r.Run(context.Background(), func(context.Context) error {
+	err := r.Run(t.Context(), func(context.Context) error {
 		calls++
 		if calls < 3 {
 			return errBoom
@@ -38,7 +38,7 @@ func TestRetrySucceedsThenExhausts(t *testing.T) {
 		t.Fatalf("retry-success: err=%v calls=%d, want nil/3", err, calls)
 	}
 	//: an always-failing op exhausts and wraps as RetryExhausted.
-	err = r.Run(context.Background(), func(context.Context) error { return errBoom })
+	err = r.Run(t.Context(), func(context.Context) error { return errBoom })
 	if !errs.HasCode(err, coreres.CodeRetryExhausted) {
 		t.Errorf("retry-exhaust: err=%v, want RETRY_EXHAUSTED", err)
 	}
@@ -49,7 +49,7 @@ func TestTimeout(t *testing.T) {
 	t.Parallel()
 	to := res.NewTimeout(10 * time.Millisecond)
 	//: an op that respects ctx and overruns surfaces TIMEOUT_EXCEEDED.
-	err := to.Run(context.Background(), func(ctx context.Context) error {
+	err := to.Run(t.Context(), func(ctx context.Context) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})
@@ -57,7 +57,7 @@ func TestTimeout(t *testing.T) {
 		t.Errorf("timeout: err=%v, want TIMEOUT_EXCEEDED", err)
 	}
 	//: a fast op passes through.
-	if err := to.Run(context.Background(), func(context.Context) error { return nil }); err != nil {
+	if err := to.Run(t.Context(), func(context.Context) error { return nil }); err != nil {
 		t.Errorf("timeout fast-path: err=%v, want nil", err)
 	}
 }
@@ -69,19 +69,19 @@ func TestBreakerTripsAndRecovers(t *testing.T) {
 	b := res.NewCircuitBreaker(res.BreakerConfig{FailureThreshold: 2, OpenDuration: time.Minute, Clock: clk})
 	fail := func(context.Context) error { return errBoom }
 	//: two failures trip the breaker Open.
-	b.Run(context.Background(), fail)
-	b.Run(context.Background(), fail)
+	b.Run(t.Context(), fail)
+	b.Run(t.Context(), fail)
 	//: a call while Open is rejected fast with CIRCUIT_OPEN.
-	if err := b.Run(context.Background(), fail); !errs.HasCode(err, coreres.CodeCircuitOpen) {
+	if err := b.Run(t.Context(), fail); !errs.HasCode(err, coreres.CodeCircuitOpen) {
 		t.Fatalf("breaker open: err=%v, want CIRCUIT_OPEN", err)
 	}
 	//: after the cooldown, a successful trial closes the breaker.
 	clk.advance(2 * time.Minute)
-	if err := b.Run(context.Background(), func(context.Context) error { return nil }); err != nil {
+	if err := b.Run(t.Context(), func(context.Context) error { return nil }); err != nil {
 		t.Fatalf("breaker half-open trial: err=%v, want nil", err)
 	}
 	//: the breaker is Closed again and admits calls.
-	if err := b.Run(context.Background(), func(context.Context) error { return nil }); err != nil {
+	if err := b.Run(t.Context(), func(context.Context) error { return nil }); err != nil {
 		t.Errorf("breaker closed: err=%v, want nil", err)
 	}
 }
@@ -93,19 +93,19 @@ func TestRateLimiterBurst(t *testing.T) {
 	rl := res.NewRateLimiter(res.RateLimiterConfig{Rate: 1, Burst: 2, Clock: clk})
 	noop := func(context.Context) error { return nil }
 	//: the burst of 2 is admitted.
-	if err := rl.Run(context.Background(), noop); err != nil {
+	if err := rl.Run(t.Context(), noop); err != nil {
 		t.Fatalf("token 1: %v", err)
 	}
-	if err := rl.Run(context.Background(), noop); err != nil {
+	if err := rl.Run(t.Context(), noop); err != nil {
 		t.Fatalf("token 2: %v", err)
 	}
 	//: the 3rd immediate call is rate-limited.
-	if err := rl.Run(context.Background(), noop); !errs.HasCode(err, coreres.CodeRateLimited) {
+	if err := rl.Run(t.Context(), noop); !errs.HasCode(err, coreres.CodeRateLimited) {
 		t.Fatalf("token 3: err=%v, want RATE_LIMITED", err)
 	}
 	//: after 1s a refill (rate=1/s) admits one more.
 	clk.advance(time.Second)
-	if err := rl.Run(context.Background(), noop); err != nil {
+	if err := rl.Run(t.Context(), noop); err != nil {
 		t.Errorf("after refill: err=%v, want nil", err)
 	}
 }
@@ -117,7 +117,7 @@ func TestBulkheadRejectsWhenFull(t *testing.T) {
 	bh := res.NewBulkhead(1)
 	var nestedErr error
 	//: the outer Run occupies the single slot for the duration of its op.
-	outerErr := bh.Run(context.Background(), func(ctx context.Context) error {
+	outerErr := bh.Run(t.Context(), func(ctx context.Context) error {
 		//: a nested Run, while the slot is held, must be rejected.
 		nestedErr = bh.Run(ctx, func(context.Context) error { return nil })
 		//: the outer op itself succeeds.

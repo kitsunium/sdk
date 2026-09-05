@@ -1,7 +1,6 @@
 package client_test
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -54,7 +53,7 @@ func TestPolicyIsEnforcedInTheTransport(t *testing.T) {
 
 	//: forge a request through the raw client, deliberately bypassing Do.
 	req, err := http.NewRequestWithContext(
-		context.Background(), http.MethodDelete, srv.URL+"/v1/subscribers", nil)
+		t.Context(), http.MethodDelete, srv.URL+"/v1/subscribers", nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -91,7 +90,7 @@ func TestNoContentIsNotAnError(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	c := newClient(t, srv, corenet.ClientConfig{})
-	resp, err := c.Get(context.Background(), "/v1/subscribers", nil)
+	resp, err := c.Get(t.Context(), "/v1/subscribers", nil)
 	if err != nil {
 		t.Fatalf("204 reported as an error: %v", err)
 	}
@@ -113,7 +112,7 @@ func TestNonSuccessReturnsBodyAndError(t *testing.T) {
 		writeOrFail(t, w, `{"detail":"enable and disable are exclusive"}`)
 	})
 	c := newClient(t, srv, corenet.ClientConfig{})
-	resp, err := c.Get(context.Background(), "/v1/subscribers", url.Values{"enable": {"true"}})
+	resp, err := c.Get(t.Context(), "/v1/subscribers", url.Values{"enable": {"true"}})
 	if err == nil {
 		t.Fatal("a 400 was reported as success")
 	}
@@ -134,7 +133,7 @@ func TestOversizedBodyFailsRatherThanTruncating(t *testing.T) {
 		writeOrFail(t, w, string(make([]byte, 4096)))
 	})
 	c := newClient(t, srv, corenet.ClientConfig{MaxResponseSize: 128})
-	_, err := c.Get(context.Background(), "/v1/subscribers", nil)
+	_, err := c.Get(t.Context(), "/v1/subscribers", nil)
 	if err == nil {
 		t.Fatal("an oversized body was accepted")
 	}
@@ -153,7 +152,7 @@ func TestQueryIsEncodedByTheClient(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 	c := newClient(t, srv, corenet.ClientConfig{})
-	_, err := c.Get(context.Background(), "/v1/subscribers", url.Values{"profileId": {"P tenant/a"}})
+	_, err := c.Get(t.Context(), "/v1/subscribers", url.Values{"profileId": {"P tenant/a"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,7 +174,7 @@ func TestCallHookReportsTheCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	if _, gerr := c.Get(context.Background(), "/v1/subscribers", nil); gerr != nil {
+	if _, gerr := c.Get(t.Context(), "/v1/subscribers", nil); gerr != nil {
 		t.Fatalf("unexpected error: %v", gerr)
 	}
 	close(calls)
@@ -204,7 +203,7 @@ func TestRefusedCallIsObservedWithoutAStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	if _, gerr := c.Get(context.Background(), "/v1/authentication/all", nil); gerr == nil {
+	if _, gerr := c.Get(t.Context(), "/v1/authentication/all", nil); gerr == nil {
 		t.Fatal("a denied path was admitted")
 	}
 	close(calls)
@@ -287,7 +286,7 @@ func runBodySizeCase(t *testing.T, tc bodySizeCase, ceiling int64) {
 		writeOrFail(t, w, strings.Repeat("x", tc.size))
 	})
 	c := newClient(t, srv, corenet.ClientConfig{MaxResponseSize: ceiling})
-	resp, err := c.Get(context.Background(), "/v1/subscribers", nil)
+	resp, err := c.Get(t.Context(), "/v1/subscribers", nil)
 	//: only a body PAST the ceiling may be refused.
 	if tc.wantErr {
 		if !errs.HasCode(err, codeOf(t, corenet.ResponseTooLarge)) {
@@ -321,7 +320,7 @@ func TestBodyReadFailureIsTyped(t *testing.T) {
 		writeOrFail(t, w, "partial")
 	})
 	c := newClient(t, srv, corenet.ClientConfig{})
-	_, err := c.Get(context.Background(), "/v1/subscribers", nil)
+	_, err := c.Get(t.Context(), "/v1/subscribers", nil)
 	if err == nil {
 		t.Fatal("a body cut short was reported as success")
 	}
@@ -350,7 +349,7 @@ func TestCallHookReportsTheBodySize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	if _, gerr := c.Get(context.Background(), "/v1/subscribers", nil); gerr != nil {
+	if _, gerr := c.Get(t.Context(), "/v1/subscribers", nil); gerr != nil {
 		t.Fatalf("unexpected error: %v", gerr)
 	}
 	close(calls)
@@ -389,7 +388,7 @@ func TestCallHookReportsABodyFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	if _, gerr := c.Get(context.Background(), "/v1/subscribers", nil); gerr == nil {
+	if _, gerr := c.Get(t.Context(), "/v1/subscribers", nil); gerr == nil {
 		t.Fatal("an oversized body was accepted")
 	}
 	close(calls)

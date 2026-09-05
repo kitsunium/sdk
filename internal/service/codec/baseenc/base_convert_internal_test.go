@@ -66,7 +66,6 @@ func TestBaseConversion_LeadingZeros(t *testing.T) {
 // TestBaseConversion_Malformed verifies a char outside the alphabet is
 // rejected (Base58 excludes 0, O, I, l by construction).
 func TestBaseConversion_Malformed(t *testing.T) {
-	t.Parallel()
 	//: '0' is not in the Base58 alphabet.
 	if _, ok := decodeBaseN([]byte("0OIl"), &base58Reverse, base58Radix); ok {
 		t.Error("base58 accepted excluded chars 0OIl")

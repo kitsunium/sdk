@@ -17,7 +17,7 @@ func startHTTP(t *testing.T, h http.Handler, opts ...server.GroupOption) (srv *s
 	srv = server.New()
 	all := append([]server.GroupOption{server.Listen("tcp", "127.0.0.1:0")}, opts...)
 	srv.Group("api", all...).HandleHTTP(h)
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -148,7 +148,7 @@ func TestHTTPAdapterDrainsOnShutdown(t *testing.T) {
 	//: the connection is now idle but still open, held by keep-alive.
 	waitFor(t, func() bool { return srv.State().ActiveConns == 1 })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	started := time.Now()
 	if serr := srv.Shutdown(ctx); serr != nil {

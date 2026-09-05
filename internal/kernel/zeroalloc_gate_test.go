@@ -77,6 +77,7 @@ var gatedBenches = []struct {
 // probe in the millisecond range, so the serial gate still finishes well under
 // the 30-second budget.
 func TestZeroAllocInvariant(t *testing.T) {
+	t.Parallel()
 	for _, g := range gatedBenches {
 		t.Run(g.name, func(t *testing.T) {
 			//: programmatic bench — adaptive N amortises GC events to ~0/op.

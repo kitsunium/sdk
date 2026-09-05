@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"context"
 	stdnet "net"
 	"os"
 	"os/exec"
@@ -27,7 +26,7 @@ func TestAdoptWithoutActivationFails(t *testing.T) {
 	t.Setenv("LISTEN_FDS", "")
 	srv := server.New()
 	srv.Group("api", server.Adopt("api")).HandleFunc(noopHandler)
-	err := srv.Start(context.Background())
+	err := srv.Start(t.Context())
 	if !errs.HasCode(err, corenet.CodeSocketAdoptFailed) {
 		t.Fatalf("expected SOCKET_ADOPT_FAILED, got %v", err)
 	}
@@ -41,7 +40,7 @@ func TestAdoptWrongNameFails(t *testing.T) {
 	t.Setenv("LISTEN_FDNAMES", "published")
 	srv := server.New()
 	srv.Group("api", server.Adopt("requested")).HandleFunc(noopHandler)
-	err := srv.Start(context.Background())
+	err := srv.Start(t.Context())
 	if !errs.HasCode(err, corenet.CodeSocketAdoptFailed) {
 		t.Fatalf("expected SOCKET_ADOPT_FAILED, got %v", err)
 	}
@@ -53,7 +52,7 @@ func TestGroupWithNeitherAddressNorAdoptFails(t *testing.T) {
 	t.Parallel()
 	srv := server.New()
 	srv.Group("api").HandleFunc(noopHandler)
-	if err := srv.Start(context.Background()); !errs.HasCode(err, corenet.CodeInvalidAddress) {
+	if err := srv.Start(t.Context()); !errs.HasCode(err, corenet.CodeInvalidAddress) {
 		t.Fatalf("expected INVALID_ADDRESS, got %v", err)
 	}
 }
@@ -67,6 +66,7 @@ func TestGroupWithNeitherAddressNorAdoptFails(t *testing.T) {
 // child wakes up in the state a socket-activated service wakes up in — holding
 // a socket it never bound.
 func TestAdoptServesTheInheritedSocket(t *testing.T) {
+	t.Parallel()
 	//: the child half runs the same binary; do not recurse.
 	if os.Getenv(childAddrEnv) != "" {
 		t.Skip("child half; driven by the parent")
@@ -109,6 +109,7 @@ func runAdoptChild(t *testing.T, socket *os.File, addr string) (output []byte, e
 // TestAdoptChildServesInheritedSocket is the child half: it adopts the socket it
 // was handed and proves it serves traffic on it.
 func TestAdoptChildServesInheritedSocket(t *testing.T) {
+	t.Parallel()
 	addr := os.Getenv(childAddrEnv)
 	//: without the marker this is the parent pass, where there is no fd 3.
 	if addr == "" {
@@ -116,7 +117,7 @@ func TestAdoptChildServesInheritedSocket(t *testing.T) {
 	}
 	srv := server.New()
 	srv.Group("api", server.Adopt("api")).HandleFunc(echoHandler)
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("adopting an inherited socket failed: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })

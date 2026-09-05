@@ -30,7 +30,7 @@ func TestConnLimitRefusesBeyondTheCeiling(t *testing.T) {
 		<-release
 		return nil
 	})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -80,7 +80,7 @@ func TestConnLimitReleasesItsSlot(t *testing.T) {
 		server.Listen("tcp", "127.0.0.1:0"),
 		server.MaxConns(4),
 	).HandleFunc(echoHandler)
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })

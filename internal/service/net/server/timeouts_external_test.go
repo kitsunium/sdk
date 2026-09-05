@@ -65,7 +65,7 @@ func TestReadTimeoutIsPerReadNotPerConnection(t *testing.T) {
 		close(failures)
 		return nil
 	})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -114,7 +114,7 @@ func TestReadTimeoutStillCutsOffASilentPeer(t *testing.T) {
 		failed <- err
 		return err
 	})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })
@@ -159,7 +159,7 @@ func TestStalledHandshakeIsBounded(t *testing.T) {
 		reached <- struct{}{}
 		return nil
 	})
-	if err := srv.Start(context.Background()); err != nil {
+	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { closeOrFail(t, srv) })

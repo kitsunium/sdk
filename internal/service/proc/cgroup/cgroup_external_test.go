@@ -29,6 +29,7 @@ const killPollInterval time.Duration = 50 * time.Millisecond
 // CgroupUnavailable / UnsupportedPlatform error without panicking — the issue's
 // acceptance criterion across privileged and unprivileged hosts.
 func TestCreateConfinement(t *testing.T) {
+	t.Parallel()
 	//: the unavailable path is the only honest assertion when delegation is absent.
 	if !cgroup.Available() {
 		//: still prove the typed-error contract before skipping the live path.
@@ -201,6 +202,7 @@ func deleteGroup(t *testing.T, g coreproc.Group) {
 // (the documented fallback). Acceptance #74: Freeze/Thaw observable + idempotent,
 // typed error when absent, never panics.
 func TestKillFreezeThawContract(t *testing.T) {
+	t.Parallel()
 	//: a real cgroup v2 hierarchy is required to drive the feature files.
 	if !cgroup.Available() {
 		//: the typed-error contract is covered by TestCreateConfinement.
@@ -225,6 +227,7 @@ func TestKillFreezeThawContract(t *testing.T) {
 // setsid's a grandchild leaves the parent's process group, so kill(-pgid) would
 // miss it — but cgroup.kill, tracking membership by control group, takes it down.
 func TestKillTerminatesSetsidDescendant(t *testing.T) {
+	t.Parallel()
 	//: cgroup.kill is a Linux cgroup v2 feature.
 	if runtime.GOOS != "linux" {
 		//: nothing to exercise where cgroup v2 does not exist.
