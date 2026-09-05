@@ -58,8 +58,19 @@ jobs:
         uses: bazel-contrib/setup-bazel@e403ad507104847c3539436f64a9e9eecc73eeec # v0.15.0
 
       - name: Configure git identity
+        # The owning account's GitHub noreply address, not a domain one.
+        # post-commit accepts an author only as
+        # `<id>+<login>@users.noreply.github.com` or an app/bot noreply, so
+        # `ci@kitsunium.com` could never pass whatever the `authors` list said.
+        # Every release commit it produced is tainted for good: the tags
+        # pointing at them are cached by the module proxy and cannot be moved
+        # without breaking `go get` for anyone who already fetched them. This
+        # closes the source rather than chasing the consequence.
+        #
+        # The display name stays kitsunium-bot. Only the address is matched,
+        # and the name is what makes a release commit legible as CI's work.
         run: |
-          git config user.email "ci@kitsunium.com"
+          git config user.email "133899878+kodflow@users.noreply.github.com"
           git config user.name "kitsunium-bot"
 
       - name: Compute majors to bump
