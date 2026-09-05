@@ -44,48 +44,45 @@ var gateSentinel = errs.Define(
 	"zero-alloc gate private detail",
 )
 
-// gatedBenches lists every kernel function whose steady-state MUST allocate
-// zero. A regression to AllocsPerOp > 0 fails the build. Extend this list when
-// a new hot path makes a documented zero-alloc claim.
-var gatedBenches = []struct {
-	name string
-	fn   func(b *testing.B)
-}{
-	{"ring.TryWrite_Happy", benchRingTryWrite},
-	{"ring.TryRead_Happy", benchRingTryRead},
-	{"ring.TryWrite_Full", benchRingTryWriteFull},
-	{"ring.TryRead_Empty", benchRingTryReadEmpty},
-	{"buffer.GetPut_Steadystate", benchBufferGetPut},
-	{"clock.System.Now", benchClockNow},
-	{"clock.System.Since", benchClockSince},
-	{"errs.Code.Pack", benchErrsPack},
-	{"errs.Error.Code", benchErrsErrorCode},
-	{"errs.Error.Reason", benchErrsErrorReason},
-	{"errs.Error.Public", benchErrsErrorPublic},
-	{"errs.Error.Private", benchErrsErrorPrivate},
-	{"errs.HasCode", benchErrsHasCode},
-}
-
 // TestZeroAllocInvariant runs each gated probe programmatically via
 // testing.Benchmark and asserts AllocsPerOp == 0.
 //
-// Subtests run SERIALLY (no t.Parallel) on purpose: testing.Benchmark derives
-// AllocsPerOp from runtime.MemStats, a process-global allocation counter, so
-// two probes measuring concurrently would attribute each other's allocations
-// and could flake the == 0 assertion. This mirrors the codec allocation-budget
-// gate, which omits t.Parallel for the same reason. Go's adaptive N keeps each
-// probe in the millisecond range, so the serial gate still finishes well under
-// the 30-second budget.
+// The table below lists every kernel function whose steady state MUST allocate
+// zero. A regression to AllocsPerOp > 0 fails the build. Extend it when a new
+// hot path makes a documented zero-alloc claim.
 func TestZeroAllocInvariant(t *testing.T) {
 	t.Parallel()
-	for _, g := range gatedBenches {
-		t.Run(g.name, func(t *testing.T) {
+	type tc struct {
+		name string
+		fn   func(b *testing.B)
+	}
+	tests := []tc{
+		{"ring.TryWrite_Happy", benchRingTryWrite},
+		{"ring.TryRead_Happy", benchRingTryRead},
+		{"ring.TryWrite_Full", benchRingTryWriteFull},
+		{"ring.TryRead_Empty", benchRingTryReadEmpty},
+		{"buffer.GetPut_Steadystate", benchBufferGetPut},
+		{"clock.System.Now", benchClockNow},
+		{"clock.System.Since", benchClockSince},
+		{"errs.Code.Pack", benchErrsPack},
+		{"errs.Error.Code", benchErrsErrorCode},
+		{"errs.Error.Reason", benchErrsErrorReason},
+		{"errs.Error.Public", benchErrsErrorPublic},
+		{"errs.Error.Private", benchErrsErrorPrivate},
+		{"errs.HasCode", benchErrsHasCode},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: programmatic bench — adaptive N amortises GC events to ~0/op.
+		result := testing.Benchmark(c.fn)
+		if got := result.AllocsPerOp(); got != 0 {
+			t.Errorf("%s: AllocsPerOp = %d, want 0 (steady-state zero-alloc invariant)", c.name, got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			//: programmatic bench — adaptive N amortises GC events to ~0/op.
-			result := testing.Benchmark(g.fn)
-			if got := result.AllocsPerOp(); got != 0 {
-				t.Errorf("%s: AllocsPerOp = %d, want 0 (steady-state zero-alloc invariant)", g.name, got)
-			}
+			runCase(t, c)
 		})
 	}
 }
