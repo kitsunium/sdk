@@ -1,4 +1,11 @@
+//go:build unix
+
 // Package sdnotify_test — the notifier side as a service uses it.
+//
+// Every test here binds a real AF_UNIX datagram socket and reads what the
+// notifier wrote to it, which is the only way to prove the wire format. Windows
+// has no such socket, so the whole file is Unix-only; the no-op contract off
+// Linux is covered by sdnotify_other_test.go.
 package sdnotify_test
 
 import (
@@ -18,13 +25,44 @@ import (
 // recvTimeout bounds every wait on a datagram that has already been sent.
 const recvTimeout time.Duration = 5 * time.Second
 
+// sunPathMax is the smallest sun_path any platform in the matrix offers — macOS
+// and the BSDs stop there, Linux allows 108 — and it is the WHOLE socket path
+// that has to fit inside it.
+const sunPathMax int = 104
+
+// shortTempDir returns a directory short enough to hold an AF_UNIX socket path.
+//
+// t.TempDir() embeds the test's name in the directory it makes, and on macOS
+// TMPDIR is already /var/folders/<two hashed components>/T — so a table-driven
+// subtest name overruns the limit and bind fails with EINVAL, which reads as
+// "the socket is wrong" rather than "the path is too long".
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	//: /tmp is the shortest base every Unix has; TMPDIR is the one that is long.
+	dir, err := os.MkdirTemp("/tmp", "ktn")
+	if err != nil {
+		t.Fatalf("creating a short temporary directory: %v", err)
+	}
+	t.Cleanup(func() {
+		//: best-effort: the socket is unlinked with the directory.
+		if rerr := os.RemoveAll(dir); rerr != nil {
+			t.Logf("removing %s: %v", dir, rerr)
+		}
+	})
+	return dir
+}
+
 // listenOn binds a datagram socket in a temporary directory and returns its
 // path plus a function that reads the next datagram.
 func listenOn(t *testing.T) (path string, next func() string) {
 	t.Helper()
-	//: a short path: AF_UNIX sun_path is ~108 bytes, and a long TMPDIR plus a
-	//: test name overruns it.
-	path = filepath.Join(t.TempDir(), "n.sock")
+	path = filepath.Join(shortTempDir(t), "n.sock")
+	//: fail with the actual reason rather than letting bind report EINVAL,
+	//: which says nothing about the length.
+	if len(path) >= sunPathMax {
+		t.Fatalf("the socket path is %d bytes, over the %d-byte sun_path limit: %s",
+			len(path), sunPathMax, path)
+	}
 	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"})
 	if err != nil {
 		t.Fatalf("binding %s: %v", path, err)

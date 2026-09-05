@@ -1,4 +1,11 @@
+//go:build linux
+
 // Package cgroup_test — the functional options as a caller uses them.
+//
+// WithRoot names a directory in the cgroup v2 hierarchy, so its effect is only
+// observable on Linux. Windows has a Job Object backend and FreeBSD an rctl one;
+// neither has a root path, so both record the option and ignore it — which is
+// correct, and makes the assertions below meaningless there rather than false.
 package cgroup_test
 
 import (

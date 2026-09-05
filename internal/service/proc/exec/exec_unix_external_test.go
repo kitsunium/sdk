@@ -32,6 +32,9 @@ func TestStart(t *testing.T) {
 		spec      coreproc.Spec
 		cancelled bool
 		wantCode  errs.Code
+		//: the refusal on a platform whose kernel has no equivalent of the
+		//: field under test; zero means the code does not vary.
+		wantCodeOffLinux errs.Code
 	}
 	//: a directory that exists and is definitively not a control group.
 	notACgroup := filepath.Join(t.TempDir(), "not-a-cgroup")
@@ -54,9 +57,15 @@ func TestStart(t *testing.T) {
 			wantCode: coreproc.CodeUnknownResource,
 		},
 		{
-			name:     "a cgroup path that is not a control group",
-			spec:     coreproc.Spec{Path: shellPath, CgroupPath: notACgroup},
-			wantCode: coreproc.CodeCgroupUnavailable,
+			//: on Linux the path exists and is not a control group, so the
+			//: placement fails; elsewhere there are no control groups at all and
+			//: the field itself is refused. Both are correct, and a test that
+			//: demanded one everywhere would be asserting Linux's contract on a
+			//: kernel that never promised it.
+			name:             "a cgroup path that is not a control group",
+			spec:             coreproc.Spec{Path: shellPath, CgroupPath: notACgroup},
+			wantCode:         coreproc.CodeCgroupUnavailable,
+			wantCodeOffLinux: coreproc.CodeUnsupportedPlatform,
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -82,8 +91,14 @@ func TestStart(t *testing.T) {
 			return
 		}
 		if c.wantCode != 0 {
-			if !errs.HasCode(err, c.wantCode) {
-				t.Fatalf("Start(%s) = %v, want code %v", c.name, err, c.wantCode)
+			want := c.wantCode
+			//: a field the kernel has no equivalent for is refused as
+			//: unsupported rather than as a failed operation.
+			if c.wantCodeOffLinux != 0 && runtime.GOOS != "linux" {
+				want = c.wantCodeOffLinux
+			}
+			if !errs.HasCode(err, want) {
+				t.Fatalf("Start(%s) = %v, want code %v", c.name, err, want)
 			}
 			if proc != nil {
 				t.Error("Start returned a process beside the error")
@@ -91,7 +106,7 @@ func TestStart(t *testing.T) {
 			return
 		}
 		if err != nil {
-			t.Fatalf("Start(%s) = %v, want nil", c.name, err)
+			t.Fatalf("Start(%s) = %v, want nil", c.name, spawnDetail(err))
 		}
 		if proc == nil {
 			t.Fatal("Start returned no process and no error")
@@ -106,6 +121,24 @@ func TestStart(t *testing.T) {
 			runCase(t, c)
 		})
 	}
+}
+
+// spawnDetail renders an error with its whole cause chain.
+//
+// A typed refusal prints only its public message, which is the right thing on a
+// caller's screen and the wrong thing in a test failure: "Could not start the
+// process" says nothing about WHY, and the why — ENOENT, EMFILE, EAGAIN — is the
+// only part that tells a reader whether the code or the host is at fault.
+func spawnDetail(err error) string {
+	var sb strings.Builder
+	//: walk the chain outermost first; each layer adds what it knew.
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if sb.Len() > 0 {
+			sb.WriteString(" ← ")
+		}
+		sb.WriteString(e.Error())
+	}
+	return sb.String()
 }
 
 // contextCancelled returns a context that is already cancelled.
@@ -182,7 +215,7 @@ func TestStartLimitsHonoured(t *testing.T) {
 
 		p, err := svcexec.Start(t.Context(), spec)
 		if err != nil {
-			t.Fatalf("Start(%s) = %v, want nil", c.name, err)
+			t.Fatalf("Start(%s) = %v, want nil", c.name, spawnDetail(err))
 		}
 		exit, wErr := p.Wait()
 		if wErr != nil {
@@ -258,7 +291,7 @@ func TestStartTrampolineFailuresAreTyped(t *testing.T) {
 			//: the kernel clamped instead of refusing, so the spawn succeeds —
 			//: which is the platform's behaviour, not a contract violation.
 			if err != nil {
-				t.Fatalf("Start on a clamping platform = %v, want nil", err)
+				t.Fatalf("Start on a clamping platform = %v, want nil", spawnDetail(err))
 			}
 			if _, werr := p.Wait(); werr != nil {
 				t.Errorf("Wait = %v, want nil", werr)
@@ -344,7 +377,7 @@ func TestStartExtraFilesSurviveTrampoline(t *testing.T) {
 			t.Fatalf("closing the parent's read end: %v", rcErr)
 		}
 		if err != nil {
-			t.Fatalf("Start = %v, want nil", err)
+			t.Fatalf("Start = %v, want nil", spawnDetail(err))
 		}
 		//: Wait joins the capture copier, so out holds the child's full stdout.
 		if _, werr := proc.Wait(); werr != nil {
@@ -391,7 +424,7 @@ func TestStartEmptyEnvNoLeak(t *testing.T) {
 
 		p, err := svcexec.Start(t.Context(), spec)
 		if err != nil {
-			t.Fatalf("Start(%s) = %v, want nil", c.name, err)
+			t.Fatalf("Start(%s) = %v, want nil", c.name, spawnDetail(err))
 		}
 		exit, wErr := p.Wait()
 		if wErr != nil {
@@ -490,7 +523,7 @@ func TestStdio(t *testing.T) {
 
 		p, err := svcexec.Start(t.Context(), spec)
 		if err != nil {
-			t.Fatalf("Start(%s) = %v, want nil", c.name, err)
+			t.Fatalf("Start(%s) = %v, want nil", c.name, spawnDetail(err))
 		}
 		exit, wErr := p.Wait()
 		if wErr != nil {
@@ -554,7 +587,7 @@ func TestStdioCaptureWriterFailureSurfaces(t *testing.T) {
 
 		p, err := svcexec.Start(t.Context(), spec)
 		if err != nil {
-			t.Fatalf("Start = %v, want nil", err)
+			t.Fatalf("Start = %v, want nil", spawnDetail(err))
 		}
 		exit, wErr := p.Wait()
 

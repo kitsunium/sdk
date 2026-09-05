@@ -6,6 +6,7 @@ package signal
 
 import (
 	"os"
+	ossignal "os/signal"
 	"syscall"
 	"testing"
 	"time"
@@ -15,6 +16,15 @@ import (
 
 // helperTimeout bounds every wait on something that must already be in flight.
 const helperTimeout time.Duration = 10 * time.Second
+
+// quietSignal is the signal Test_translate registers for: one no test in this
+// binary raises and the Go runtime does not use, so the registration window
+// before the subscription is detached catches nothing at all.
+//
+// It is chosen from the set every GOOS defines — SIGUSR1, SIGURG and SIGXFSZ do
+// not exist on Windows — because the translation loop itself is
+// platform-neutral and deserves coverage everywhere the package builds.
+const quietSignal syscall.Signal = syscall.SIGALRM
 
 // fakeSignal is an os.Signal that is NOT a syscall.Signal, which is the carrier
 // toSignal has to defend against. os/signal never delivers one, but a caller
@@ -40,7 +50,7 @@ func Test_toSignal(t *testing.T) {
 	}
 	tests := []tc{
 		{"SIGTERM", syscall.SIGTERM, coreproc.Signal(syscall.SIGTERM)},
-		{"SIGUSR1", syscall.SIGUSR1, coreproc.Signal(syscall.SIGUSR1)},
+		{"SIGINT", syscall.SIGINT, coreproc.Signal(syscall.SIGINT)},
 		{"SIGHUP", syscall.SIGHUP, coreproc.Signal(syscall.SIGHUP)},
 		{"a carrier that is not a syscall signal", fakeSignal{}, coreproc.Signal(0)},
 		{"a nil carrier", nil, coreproc.Signal(0)},
@@ -152,16 +162,27 @@ func Test_translate(t *testing.T) {
 		done := make(chan struct{})
 		ready := make(chan struct{})
 
-		//: no osSigs: registering for real would make this test depend on
-		//: process-wide signal delivery, which is what the black-box test
-		//: covers. The translation loop is the subject here.
-		go translate(src, dst, done, ready, nil)
+		//: translate registers src with os/signal unconditionally, and an EMPTY
+		//: list means "every signal" — os/signal documents it that way. This
+		//: channel would then receive the SIGURG the Go scheduler raises for
+		//: preemption, many times a second, plus everything the sibling tests
+		//: send themselves. Naming one signal nothing raises keeps the window
+		//: empty; detaching below closes it altogether.
+		go translate(src, dst, done, ready, []os.Signal{quietSignal})
 
 		select {
 		case <-ready:
 		case <-time.After(helperTimeout):
 			t.Fatal("translate never signalled readiness")
 		}
+		//: detach the subscription now that registration is proven live. The
+		//: subject here is the translation LOOP, which this test drives by hand;
+		//: a real delivery landing in src would be forwarded into dst and read
+		//: as one of the values asserted below, and in the closed-source case it
+		//: would panic the runtime with a send on a closed channel. Stop
+		//: guarantees no further send once it returns, which is what makes this
+		//: test independent of whatever signals its siblings raise.
+		ossignal.Stop(src)
 
 		for _, sig := range c.sends {
 			src <- sig
@@ -176,6 +197,10 @@ func Test_translate(t *testing.T) {
 		}
 
 		if c.closeSource {
+			//: safe to close only because the subscription was detached above:
+			//: os/signal sends without knowing whether the channel is still
+			//: open, and a delivery landing here would panic the runtime's own
+			//: goroutine, where nothing recovers it.
 			close(src)
 		} else {
 			close(done)

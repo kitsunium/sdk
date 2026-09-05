@@ -94,20 +94,16 @@ func TestCreate(t *testing.T) {
 		name string
 		//: the group name handed to Create.
 		group string
-		//: true when the name itself must be refused, whatever the platform.
-		wantInvalid bool
 	}
+	//: the name GRAMMAR is a property of the Linux backend, where the name
+	//: becomes a directory in the v2 hierarchy — Test_validateName pins every
+	//: rejected form there. Windows names a Job Object and FreeBSD an rctl
+	//: subject; neither is a path, so neither refuses "a/b". What is portable is
+	//: what this test asserts: a valid name either works or degrades typed, and
+	//: a refusal never hands back a handle.
 	tests := []tc{
-		{"an empty name", "", true},
-		{"the current directory", ".", true},
-		{"the parent directory", "..", true},
-		{"a traversal", "../escape", true},
-		{"a nested path", "a/b", true},
-		{"a traversal past the root", "nested/../..", true},
-		{"an absolute path", "/abs", true},
-		{"a trailing separator", "foo/", true},
-		{"a plain name", "sdk-test-create", false},
-		{"a name with a dash and digits", "sdk-test-create-2", false},
+		{"a plain name", "sdk-test-create"},
+		{"a name with a dash and digits", "sdk-test-create-2"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -117,19 +113,6 @@ func TestCreate(t *testing.T) {
 		//: reason for the refusal.
 		if err != nil && g != nil {
 			t.Fatalf("Create(%q) returned a handle beside %v", c.group, err)
-		}
-
-		if c.wantInvalid {
-			//: name validation runs before the hierarchy check on Linux; off
-			//: Linux the stub refuses everything first.
-			want := coreproc.CodeInvalidSpec
-			if runtime.GOOS != "linux" {
-				want = coreproc.CodeUnsupportedPlatform
-			}
-			if !errs.HasCode(err, want) {
-				t.Fatalf("Create(%q) = %v, want code %v", c.group, err, want)
-			}
-			return
 		}
 
 		//: a valid name on a host with no delegated hierarchy must degrade to
