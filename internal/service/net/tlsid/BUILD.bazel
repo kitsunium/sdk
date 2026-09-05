@@ -27,9 +27,12 @@ alias(
 
 go_test(
     name = "tlsid_test",
-    srcs = ["tlsid_external_test.go"],
+    srcs = [
+        "tlsid_external_test.go",
+        "tlsid_internal_test.go",
+    ],
+    embed = [":tlsid"],
     deps = [
-        ":tlsid",
         "//internal/core/net",
         "//internal/kernel/errs",
     ],

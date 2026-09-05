@@ -21,12 +21,45 @@ alias(
 
 go_test(
     name = "sdlisten_test",
-    srcs = ["sdlisten_other_test.go"],
+    srcs = [
+        "sdlisten_external_test.go",
+        "sdlisten_other_test.go",
+    ],
     deps = select({
+        "@rules_go//go/platform:aix": [
+            ":sdlisten",
+        ],
+        "@rules_go//go/platform:android": [
+            ":sdlisten",
+        ],
+        "@rules_go//go/platform:darwin": [
+            ":sdlisten",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            ":sdlisten",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            ":sdlisten",
+        ],
+        "@rules_go//go/platform:illumos": [
+            ":sdlisten",
+        ],
+        "@rules_go//go/platform:ios": [
+            ":sdlisten",
+        ],
         "@rules_go//go/platform:js": [
             ":sdlisten",
             "//internal/core/proc",
             "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:linux": [
+            ":sdlisten",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            ":sdlisten",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            ":sdlisten",
         ],
         "@rules_go//go/platform:osx": [
             ":sdlisten",
@@ -42,6 +75,9 @@ go_test(
             ":sdlisten",
             "//internal/core/proc",
             "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:solaris": [
+            ":sdlisten",
         ],
         "@rules_go//go/platform:windows": [
             ":sdlisten",

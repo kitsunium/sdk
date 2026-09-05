@@ -28,10 +28,14 @@ alias(
 
 go_test(
     name = "hcl_test",
-    srcs = ["codec_external_test.go"],
+    srcs = [
+        "codec_external_test.go",
+        "codec_internal_test.go",
+    ],
+    embed = [":hcl"],
     deps = [
-        ":hcl",
         "//internal/core/codec",
+        "//internal/kernel/errs",
     ],
 )
 

@@ -35,9 +35,21 @@ alias(
 
 go_test(
     name = "config_test",
-    srcs = ["config_external_test.go"],
+    srcs = [
+        "env_source_external_test.go",
+        "env_source_internal_test.go",
+        "file_source_external_test.go",
+        "file_source_internal_test.go",
+        "load_external_test.go",
+        "load_internal_test.go",
+        "merge_internal_test.go",
+        "poll_watcher_external_test.go",
+        "poll_watcher_internal_test.go",
+        "wrap_internal_test.go",
+    ],
+    embed = [":config"],
     deps = [
-        ":config",
+        "//internal/core/codec",
         "//internal/core/config",
         "//internal/kernel/errs",
         "//internal/service/codec/json",

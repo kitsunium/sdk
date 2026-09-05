@@ -44,6 +44,7 @@ go_test(
         "codec_external_test.go",
         "codec_integration_test.go",
         "codec_internal_test.go",
+        "decode_all_reader_internal_test.go",
         "decoder_internal_test.go",
         "encoder_internal_test.go",
         "helpers_internal_test.go",

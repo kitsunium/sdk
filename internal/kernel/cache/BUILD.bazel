@@ -30,6 +30,9 @@ alias(
 
 go_test(
     name = "cache_test",
-    srcs = ["cache_external_test.go"],
-    deps = [":cache"],
+    srcs = [
+        "cache_external_test.go",
+        "cache_internal_test.go",
+    ],
+    embed = [":cache"],
 )

@@ -21,9 +21,13 @@ alias(
 
 go_test(
     name = "proc_test",
-    srcs = ["capability_external_test.go"],
+    srcs = [
+        "capability_external_test.go",
+        "capability_internal_test.go",
+    ],
+    embed = [":proc"],
     deps = [
-        ":proc",
+        "//internal/core/proc",
         "//pkg/v1/errs",
     ],
 )

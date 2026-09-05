@@ -26,10 +26,14 @@ alias(
 
 go_test(
     name = "protobuf_test",
-    srcs = ["codec_external_test.go"],
+    srcs = [
+        "codec_external_test.go",
+        "codec_internal_test.go",
+    ],
+    embed = [":protobuf"],
     deps = [
-        ":protobuf",
         "//internal/core/codec",
+        "//internal/kernel/errs",
         "@org_golang_google_protobuf//proto",
         "@org_golang_google_protobuf//types/known/structpb",
     ],

@@ -42,10 +42,19 @@ alias(
 go_test(
     name = "resilience_test",
     srcs = [
+        "breaker_external_test.go",
+        "breaker_internal_test.go",
+        "bulkhead_external_test.go",
+        "bulkhead_internal_test.go",
         "misconfigured_internal_test.go",
-        "resilience_external_test.go",
+        "ratelimit_external_test.go",
+        "ratelimit_internal_test.go",
+        "retry_external_test.go",
+        "retry_internal_test.go",
         "retryable_internal_test.go",
+        "timeout_external_test.go",
         "timeout_internal_test.go",
+        "wrap_internal_test.go",
     ],
     embed = [":resilience"],
     deps = [

@@ -37,11 +37,21 @@ alias(
 go_test(
     name = "id_test",
     srcs = [
-        "id_external_test.go",
+        "common_internal_test.go",
+        "snowflake_external_test.go",
         "snowflake_internal_test.go",
+        "ulid_external_test.go",
+        "ulid_internal_test.go",
+        "uuidv4_external_test.go",
+        "uuidv4_internal_test.go",
+        "uuidv7_external_test.go",
+        "uuidv7_internal_test.go",
     ],
     embed = [":id"],
-    deps = ["//internal/core/id"],
+    deps = [
+        "//internal/core/id",
+        "//internal/kernel/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

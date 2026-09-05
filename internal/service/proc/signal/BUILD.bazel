@@ -71,88 +71,61 @@ go_test(
     name = "signal_test",
     srcs = [
         "relay_other_test.go",
+        "relay_unix_external_test.go",
         "relay_windows_test.go",
         "signal_external_test.go",
+        "signal_internal_test.go",
     ],
-    deps = select({
+    embed = [":signal"],
+    deps = [
+        "//internal/core/proc",
+    ] + select({
         "@rules_go//go/platform:aix": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:android": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:darwin": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:dragonfly": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:freebsd": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:illumos": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:ios": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:js": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:linux": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:netbsd": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:openbsd": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:osx": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:plan9": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:qnx": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:solaris": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "@rules_go//go/platform:windows": [
-            ":signal",
-            "//internal/core/proc",
             "//internal/kernel/errs",
         ],
         "//conditions:default": [],

@@ -49,11 +49,14 @@ go_test(
     name = "cgroup_test",
     srcs = [
         "cgroup_external_test.go",
+        "cgroup_linux_internal_test.go",
         "cgroup_other_test.go",
         "cgroup_windows_test.go",
+        "option_external_test.go",
+        "option_internal_test.go",
     ],
+    embed = [":cgroup"],
     deps = [
-        ":cgroup",
         "//internal/core/proc",
         "//internal/kernel/errs",
     ],
