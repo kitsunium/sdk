@@ -1,5 +1,5 @@
-// Command sdkguard enforces the SDK's consumer-facing rules on a codebase that
-// imports the SDK.
+// Package main — sdkguard enforces the SDK's consumer-facing rules on a
+// codebase that imports the SDK.
 //
 // The rules the SDK states in its ADRs — one logging pipeline, typed errors,
 // stdout belongs to the protocol — are only real if something checks them. The
@@ -33,11 +33,12 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -47,6 +48,17 @@ const exitFindings int = 1
 
 // exitToolError is the status returned when sdkguard itself failed.
 const exitToolError int = 2
+
+var (
+	// errUnknownRule reports a -rules entry naming no rule in the table.
+	errUnknownRule = errors.New("unknown rule")
+
+	// errUnknownLevel reports a -level value outside the two the table uses.
+	errUnknownLevel = errors.New("unknown level")
+
+	// errUnknownMode reports a -version-check value the probe cannot honour.
+	errUnknownMode = errors.New("unknown version-check mode")
+)
 
 // main parses flags, scans the requested roots and reports what it found.
 func main() {
@@ -63,65 +75,100 @@ func main() {
 		return
 	}
 
-	selected, err := selectRules(*rules)
-	if err == nil {
-		selected, err = filterLevel(selected, *level)
-	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sdkguard:", err)
-		os.Exit(exitToolError)
-	}
-
+	selected := mustSelect(*rules, *level)
 	roots := flag.Args()
+	//: no argument means "here and below", the spelling every Go tool takes.
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
 
-	findings, err := scanRoots(roots, selected, *tests)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sdkguard:", err)
-		os.Exit(exitToolError)
+	//: scanning and the freshness probe are one step from here: both report,
+	//: and together they decide the exit code.
+	if inspect(roots, selected, *tests, *versionCheck) {
+		os.Exit(exitFindings)
 	}
+}
 
+// inspect runs the rules and the freshness probe over roots, reporting whether
+// the run should fail.
+//
+// Split out of main so the entry point states the flags and this states the
+// work; together they carried more branches than either needs.
+func inspect(roots []string, selected []ruleEntity, withTests bool, mode string) bool {
+	findings, err := scanRoots(roots, selected, withTests)
+	//: an unreadable tree is a tool failure, distinct from a rule violation.
+	if err != nil {
+		//: exit 2 so CI can tell "tool broke" from "rules broken".
+		fail(err)
+	}
+	//: print before the freshness warning, so the actionable part comes first.
 	if len(findings) > 0 {
 		report(findings)
 	}
 
-	stale, err := reportVersions(roots, *versionCheck)
+	stale, err := reportVersions(roots, mode)
+	//: a malformed -version-check is a tool error, not a finding.
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "sdkguard:", err)
-		os.Exit(exitToolError)
+		//: same exit code, same reasoning.
+		fail(err)
 	}
 
-	// Being behind is a warning, so it must not move the exit code — otherwise
-	// it is not a warning, it is a gate wearing a warning's words. Only
-	// -version-check=error promotes it.
-	if len(findings) > 0 || (stale && *versionCheck == versionCheckError) {
-		os.Exit(exitFindings)
+	//: being behind is a warning, so it must not move the exit code —
+	//: otherwise it is not a warning, it is a gate wearing a warning's words.
+	//: Only -version-check=error promotes it.
+	return len(findings) > 0 || (stale && mode == versionCheckError)
+}
+
+// mustSelect resolves the rule set from the two selection flags, exiting when
+// either names something the table does not hold.
+//
+// Split out of main so the entry point states the pipeline and this states the
+// selection; together they carried more branches than either needs.
+func mustSelect(rules, level string) []ruleEntity {
+	selected, err := selectRules(rules)
+	//: only narrow by level once the IDs themselves resolved.
+	if err == nil {
+		selected, err = filterLevel(selected, level)
 	}
+	//: an unknown rule or level is a typo the caller must see, not a silent
+	//: empty run that would report "no issues" and mean nothing.
+	if err != nil {
+		//: exit 2: the tool could not do what was asked.
+		fail(err)
+	}
+	//: the rules this invocation will run.
+	return selected
+}
+
+// fail prints a tool-level error and exits with the tool-error status.
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, "sdkguard:", err)
+	os.Exit(exitToolError)
 }
 
 // reportVersions probes every root, so a stale requirement in the second
 // module of a multi-module invocation is not silently ignored — results must
 // not depend on argument order.
-func reportVersions(roots []string, mode string) (bool, error) {
+func reportVersions(roots []string, mode string) (stale bool, err error) {
 	seen := make(map[string]bool, len(roots))
-	stale := false
 	for _, root := range roots {
-		// One warning per go.mod, not per root: several roots inside one
-		// module would otherwise repeat the same advice.
-		dir := normalizeRoot(root)
-		path, found := findGoMod(dir)
-		if found && seen[path] {
-			continue
-		}
+		//: one warning per go.mod, not per root: several roots inside one
+		//: module would otherwise repeat the same advice.
+		path, found := findGoMod(normalizeRoot(root))
 		if found {
+			//: a module already probed has nothing new to say.
+			if seen[path] {
+				continue
+			}
 			seen[path] = true
 		}
-		got, err := reportVersion(root, mode)
-		if err != nil {
-			return false, err
+		got, probeErr := reportVersion(root, mode)
+		//: a malformed flag is the caller's problem and stops the run.
+		if probeErr != nil {
+			//: surface it rather than reporting a partial answer.
+			return false, probeErr
 		}
+		//: one stale module is enough to make the whole run stale.
 		stale = stale || got
 	}
 	return stale, nil
@@ -129,14 +176,14 @@ func reportVersions(roots []string, mode string) (bool, error) {
 
 // reportVersion runs the freshness probe for one root and prints its warning,
 // reporting whether the SDK was found to be behind.
-func reportVersion(root, mode string) (bool, error) {
+func reportVersion(root, mode string) (stale bool, err error) {
 	switch mode {
 	case versionCheckOff:
 		return false, nil
 	case versionCheckWarn, versionCheckError:
 	default:
-		return false, fmt.Errorf("unknown -version-check %q (want %s, %s or %s)",
-			mode, versionCheckWarn, versionCheckOff, versionCheckError)
+		return false, fmt.Errorf("%w %q (want %s, %s or %s)",
+			errUnknownMode, mode, versionCheckWarn, versionCheckOff, versionCheckError)
 	}
 
 	notice, stale := checkVersion(normalizeRoot(root), probe{})
@@ -148,8 +195,8 @@ func reportVersion(root, mode string) (bool, error) {
 }
 
 // scanRoots walks every root and collects the findings of every selected rule.
-func scanRoots(roots []string, rules []Rule, withTests bool) ([]Finding, error) {
-	var out []Finding
+func scanRoots(roots []string, rules []ruleEntity, withTests bool) (findings []findingEntity, err error) {
+	var out []findingEntity
 	for _, root := range roots {
 		found, err := scanDir(normalizeRoot(root), rules, withTests)
 		if err != nil {
@@ -157,16 +204,35 @@ func scanRoots(roots []string, rules []Rule, withTests bool) ([]Finding, error) 
 		}
 		out = append(out, found...)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Pos.Filename != out[j].Pos.Filename {
-			return out[i].Pos.Filename < out[j].Pos.Filename
-		}
-		if out[i].Pos.Line != out[j].Pos.Line {
-			return out[i].Pos.Line < out[j].Pos.Line
-		}
-		return out[i].Rule < out[j].Rule
-	})
+	//: SortFunc is generic where sort.Slice reflects, and the comparison also
+	//: settles the column so two findings on one line have a stable order.
+	slices.SortFunc(out, compareFindings)
 	return out, nil
+}
+
+// compareFindings orders findings by file, then line, then column, then rule.
+//
+// The column is part of the key on purpose: two findings on one line — a
+// nested call flagged twice, say — would otherwise compare equal and their
+// order would depend on the sort's internals rather than on the source.
+func compareFindings(a, b findingEntity) int {
+	//: file first, so a report reads in the order a developer opens files.
+	if c := strings.Compare(a.File, b.File); c != 0 {
+		//: different files need no further comparison.
+		return c
+	}
+	//: then down the file.
+	if a.Line != b.Line {
+		//: cmp-style result without importing cmp for one call.
+		return a.Line - b.Line
+	}
+	//: then across the line, which is what makes the order total.
+	if a.Column != b.Column {
+		//: same reasoning as the line comparison.
+		return a.Column - b.Column
+	}
+	//: finally by rule, so two rules on one token stay in a fixed order.
+	return strings.Compare(a.Rule, b.Rule)
 }
 
 // normalizeRoot accepts the `./...` spelling Go developers already type, so the
@@ -188,9 +254,9 @@ func normalizeRoot(root string) string {
 
 // report prints findings in the standard Go diagnostic format so editors and
 // CI annotators parse them without extra configuration.
-func report(findings []Finding) {
+func report(findings []findingEntity) {
 	for _, f := range findings {
-		fmt.Fprintf(os.Stderr, "%s: %s: %s\n", f.Pos, f.Rule, f.Message)
+		fmt.Fprintf(os.Stderr, "%s:%d:%d: %s: %s\n", f.File, f.Line, f.Column, f.Rule, f.Message)
 	}
 	fmt.Fprintf(os.Stderr, "\nsdkguard: %d finding(s). Each is a rule the SDK states in an ADR;\n"+
 		"suppress a justified one with //sdkguard:allow <RULE> <reason>.\n", len(findings))
@@ -204,15 +270,15 @@ func printRules() {
 }
 
 // filterLevel narrows a rule set to one level. An empty level keeps them all.
-func filterLevel(rules []Rule, level string) ([]Rule, error) {
+func filterLevel(rules []ruleEntity, level string) (selected []ruleEntity, err error) {
 	level = strings.ToLower(strings.TrimSpace(level))
 	if level == "" {
 		return rules, nil
 	}
 	if level != LevelInvariant && level != LevelConvention {
-		return nil, fmt.Errorf("unknown level %q (want %s or %s)", level, LevelInvariant, LevelConvention)
+		return nil, fmt.Errorf("%w %q (want %s or %s)", errUnknownLevel, level, LevelInvariant, LevelConvention)
 	}
-	var out []Rule
+	var out []ruleEntity
 	for _, r := range rules {
 		if r.Level == level {
 			out = append(out, r)
@@ -222,20 +288,20 @@ func filterLevel(rules []Rule, level string) ([]Rule, error) {
 }
 
 // selectRules resolves the -rules flag to a rule set.
-func selectRules(spec string) ([]Rule, error) {
+func selectRules(spec string) (selected []ruleEntity, err error) {
 	if strings.TrimSpace(spec) == "" {
 		return allRules, nil
 	}
-	byID := make(map[string]Rule, len(allRules))
+	byID := make(map[string]ruleEntity, len(allRules))
 	for _, r := range allRules {
 		byID[r.ID] = r
 	}
-	var out []Rule
-	for _, id := range strings.Split(spec, ",") {
+	var out []ruleEntity
+	for id := range strings.SplitSeq(spec, ",") {
 		id = strings.ToUpper(strings.TrimSpace(id))
 		r, ok := byID[id]
 		if !ok {
-			return nil, fmt.Errorf("unknown rule %q (see -list)", id)
+			return nil, fmt.Errorf("%w %q (see -list)", errUnknownRule, id)
 		}
 		out = append(out, r)
 	}

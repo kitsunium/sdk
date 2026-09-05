@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -18,7 +19,7 @@ func write(t *testing.T, name, src string) string {
 }
 
 // idsOf renders the findings as "RULE" strings for compact assertions.
-func idsOf(findings []Finding) []string {
+func idsOf(findings []findingEntity) []string {
 	out := make([]string, 0, len(findings))
 	for _, f := range findings {
 		out = append(out, f.Rule)
@@ -27,7 +28,7 @@ func idsOf(findings []Finding) []string {
 }
 
 // scan runs every rule over one fixture file.
-func scan(t *testing.T, src string) []Finding {
+func scan(t *testing.T, src string) []findingEntity {
 	t.Helper()
 	dir := write(t, "fixture.go", src)
 	found, err := scanDir(dir, allRules, false)
@@ -101,12 +102,9 @@ func TestRulesFireOnViolations(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := idsOf(scan(t, c.src))
-		for _, id := range got {
-			if id == c.want {
-				return
-			}
+		if !slices.Contains(got, c.want) {
+			t.Errorf("rule %s did not fire; got %v", c.want, got)
 		}
-		t.Errorf("rule %s did not fire; got %v", c.want, got)
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -479,8 +477,8 @@ func TestScanRootsAcceptsEllipsisAndSortsOutput(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("findings = %d, want 2 (%v)", len(got), idsOf(got))
 	}
-	if !strings.HasSuffix(got[0].Pos.Filename, "b.go") {
-		t.Errorf("first finding = %s, want b.go (sorted before sub/a.go)", got[0].Pos.Filename)
+	if !strings.HasSuffix(got[0].File, "b.go") {
+		t.Errorf("first finding = %s, want b.go (sorted before sub/a.go)", got[0].File)
 	}
 	if got[1].Rule != "SDK002" {
 		t.Errorf("second finding = %s, want SDK002", got[1].Rule)

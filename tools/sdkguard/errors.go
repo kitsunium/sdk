@@ -1,4 +1,4 @@
-// Command sdkguard — the tool's own sentinels.
+// Package main — the tool's own sentinels.
 //
 // sdkguard does not import the SDK (it must run in a consumer's tree without
 // pulling the very library it audits), so it cannot use pkg/v1/errs. These are

@@ -17,7 +17,9 @@ func proxyStub(t *testing.T, versions ...string) probe {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_, _ = w.Write([]byte(strings.Join(versions, "\n") + "\n"))
+		if _, err := w.Write([]byte(strings.Join(versions, "\n") + "\n")); err != nil {
+			t.Errorf("stub write: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	return probe{proxy: srv.URL, client: srv.Client()}

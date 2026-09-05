@@ -1,4 +1,4 @@
-// Command sdkguard — source scanning, import resolution and suppressions.
+// Package main — source scanning, import resolution and suppressions.
 package main
 
 import (
@@ -20,109 +20,116 @@ const suppressPrefix string = "//sdkguard:allow"
 // ignoreTag is the conventional build tag for a file that is part of no build.
 const ignoreTag string = "ignore"
 
-// generatedMarker matches the line Go tools write to mark machine-owned
-// source, per the convention in go/generate's documentation.
-var generatedMarker = regexp.MustCompile(`^// Code generated .* DO NOT EDIT\.$`)
+// suppressionFields is the smallest number of fields a directive carries: the
+// rule ID, and at least one word of the mandatory reason.
+const suppressionFields int = 2
 
-// Finding is one rule violation, positioned for the standard diagnostic format.
-type Finding struct {
-	// Pos is the file:line:col the diagnostic points at.
-	Pos token.Position
+// nearbyLines is how far above a finding a directive may sit and still cover
+// it — the finding's own line, or the one before it.
+const nearbyLines int = 1
+
+var (
+	// generatedMarker matches the line Go tools write to mark machine-owned
+	// source, per the convention in go/generate's documentation.
+	generatedMarker = regexp.MustCompile(`^// Code generated .* DO NOT EDIT\.$`)
+
+	// vendoredDirs names the trees whose contents are not the consumer's to fix.
+	vendoredDirs = map[string]bool{
+		"vendor":       true,
+		"testdata":     true,
+		"node_modules": true,
+	}
+)
+
+// findingEntity is one rule violation, positioned for the standard diagnostic format.
+type findingEntity struct {
+	// File is the path the diagnostic points into.
+	//
+	// Kept flat rather than holding a token.Position: that struct carries an
+	// Offset nothing here reads, and the four extra words pushed the finding
+	// past the width at which passing it by value stops being free — which
+	// matters because the sort comparator takes one by value per comparison.
+	File string
 	// Rule is the violated rule's ID (e.g. "SDK001").
 	Rule string
 	// Message states what was found and what to do instead.
 	Message string
-}
-
-// fileCtx carries everything a rule needs about one parsed file: where it came
-// from, which packages it imports under which local names, and which lines
-// carry an exemption.
-type fileCtx struct {
-	// fset resolves ast positions to file:line:col.
-	fset *token.FileSet
-	// byPath maps an import path to the local name it is bound to in this
-	// file. A rule matches selectors against the local name, so an aliased or
-	// renamed import is caught exactly like a plain one.
-	byPath map[string]string
-	// dotImports maps a dot-imported path to the position of its import spec.
-	//
-	// A dot import binds no qualifier, so calls appear unqualified and no
-	// selector match is possible: `. "log/slog"` turns slog.New into New, and
-	// every selector-based rule goes silent on a file that may well be
-	// building a second pipeline. Recording it lets the rules say so instead
-	// of passing quietly, which is the only honest option without type
-	// resolution.
-	dotImports map[string]token.Pos
-	// suppressed records, per line, which rule IDs an inline directive exempts.
-	suppressed map[int]map[string]bool
-	// bridgeBound names the identifiers this file assigns from a slog-bridge
-	// constructor, so a handler bound to a variable is still recognised as
-	// the sanctioned composition when it reaches slog.New.
-	bridgeBound map[string]bool
-	// shadowed names the import local names this file also declares as an
-	// identifier. Without type resolution a selector cannot be told apart
-	// from a field access on a same-named local, so those packages stop
-	// matching here — see shadowedNames for why that direction.
-	shadowed map[string]bool
+	// Line is the 1-based line the diagnostic points at.
+	Line int
+	// Column is the 1-based column the diagnostic points at.
+	Column int
 }
 
 // scanDir walks dir and runs every rule over every Go file it finds.
-func scanDir(dir string, rules []Rule, withTests bool) ([]Finding, error) {
-	var out []Finding
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+func scanDir(dir string, rules []ruleEntity, withTests bool) (findings []findingEntity, err error) {
+	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
+		//: an unreadable root is a tool error the caller must see, not an
+		//: empty result that would read as "no violations".
+		if walkErr != nil {
+			//: surface it rather than continuing on a partial tree.
+			return walkErr
 		}
-		if d.IsDir() {
-			return skipDir(path, d)
+		//: a directory decides only whether the walk descends into it.
+		if entry.IsDir() {
+			//: prune the trees nobody can act on.
+			return skipDir(path, entry)
 		}
+		//: only Go source carries the constructs the rules match.
 		if !strings.HasSuffix(path, ".go") {
+			//: skip the file without complaint.
 			return nil
 		}
-		// Test files are excluded by default: fixtures legitimately mint
-		// throwaway errors, and flagging them trains people to ignore the tool.
+		//: test files are excluded by default: fixtures legitimately mint
+		//: throwaway errors, and flagging them trains people to ignore the tool.
 		if !withTests && strings.HasSuffix(path, "_test.go") {
+			//: opt in with -tests when they should be covered.
 			return nil
 		}
-		found, ferr := scanFile(path, rules)
-		if ferr != nil {
-			return ferr
-		}
-		out = append(out, found...)
+		findings = append(findings, scanFile(path, rules)...)
+		//: keep walking; a file yielding nothing is not a reason to stop.
 		return nil
 	})
-	return out, err
+	//: the named returns carry both halves of the answer.
+	return findings, err
 }
 
 // skipDir reports whether a directory is outside the consumer's own source.
-func skipDir(path string, d fs.DirEntry) error {
-	name := d.Name()
-	// Vendored and generated trees are not the consumer's conventions to keep;
-	// testdata holds deliberately broken fixtures.
-	if name == "vendor" || name == "testdata" || name == "node_modules" {
+func skipDir(path string, dir fs.DirEntry) error {
+	name := dir.Name()
+	//: vendored and generated trees are not the consumer's conventions to
+	//: keep, testdata holds deliberately broken fixtures, and a hidden
+	//: directory (.git, .cache, a bazel symlink) never holds source we own.
+	//: One condition, one effect — they were two guards saying the same thing.
+	hidden := name != "." && path != "." && strings.HasPrefix(name, ".")
+	if hidden || vendoredDirs[name] {
+		//: pruning here keeps the walk off trees nobody can act on.
 		return filepath.SkipDir
 	}
-	// Hidden directories (.git, .cache, bazel symlinks) never hold source we own.
-	if name != "." && strings.HasPrefix(name, ".") && path != "." {
-		return filepath.SkipDir
-	}
+	//: an ordinary directory: keep walking into it.
 	return nil
 }
 
 // scanFile parses one file and runs the rules over it.
-func scanFile(path string, rules []Rule) ([]Finding, error) {
+//
+// It reports no error: the two ways a file yields nothing — it does not parse,
+// or no build includes it — are both silences by design, not failures. Naming
+// an error the caller could never act on would only invite a check that always
+// passes.
+func scanFile(path string, rules []ruleEntity) []findingEntity {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	//: a file that does not parse is the compiler's problem to report, not
+	//: ours; staying silent keeps sdkguard usable mid-refactor.
 	if err != nil {
-		// A file that does not parse is the compiler's problem to report, not
-		// ours; staying silent keeps sdkguard usable mid-refactor.
-		return nil, nil
+		//: no findings, and no complaint the caller would have to swallow.
+		return nil
 	}
 	byPath, dotImports := importsOf(file)
-	// A file no build includes, or one a generator owns, is not the
-	// consumer's to fix — reporting it is noise they cannot action.
+	//: a file no build includes, or one a generator owns, is not the
+	//: consumer's to fix — reporting it is noise they cannot action.
 	if skipFile(file) {
-		return nil, nil
+		//: same silence, different reason.
+		return nil
 	}
 
 	ctx := &fileCtx{
@@ -134,16 +141,20 @@ func scanFile(path string, rules []Rule) ([]Finding, error) {
 	ctx.bridgeBound = ctx.bridgeBoundNames(file)
 	ctx.shadowed = shadowedNames(file, byPath)
 
-	var out []Finding
-	for _, r := range rules {
-		for _, f := range r.Check(ctx, file) {
-			if ctx.isSuppressed(f) {
+	var out []findingEntity
+	//: every selected rule sees the same parsed file and context.
+	for _, rule := range rules {
+		for _, finding := range rule.Check(ctx, file) {
+			//: a justified exemption removes the finding, silently by design.
+			if ctx.isSuppressed(&finding) {
+				//: the directive carried a reason, so honour it.
 				continue
 			}
-			out = append(out, f)
+			out = append(out, finding)
 		}
 	}
-	return out, nil
+	//: everything this file has to report.
+	return out
 }
 
 // bridgeBoundNames collects the identifiers assigned from a slog-bridge
@@ -153,7 +164,8 @@ func scanFile(path string, rules []Rule) ([]Finding, error) {
 // failure mode is a missed finding rather than a false one — the right
 // direction for a rule whose whole value rests on not crying wolf.
 func (fc *fileCtx) bridgeBoundNames(file *ast.File) map[string]bool {
-	out := make(map[string]bool)
+	//: a handful of bindings at most; the hint avoids the first growth.
+	out := make(map[string]bool, len(fc.byPath))
 	ast.Inspect(file, func(n ast.Node) bool {
 		assign, ok := n.(*ast.AssignStmt)
 		if !ok {
@@ -192,43 +204,75 @@ func shadowedNames(file *ast.File, byPath map[string]string) map[string]bool {
 	for _, name := range byPath {
 		locals[name] = true
 	}
-	out := make(map[string]bool)
-	mark := func(e ast.Expr) {
-		if ident, ok := e.(*ast.Ident); ok && locals[ident.Name] {
+	//: at most every imported name can end up shadowed, never more.
+	out := make(map[string]bool, len(locals))
+	mark := func(expr ast.Expr) {
+		//: only an identifier can shadow a package name.
+		if ident, ok := expr.(*ast.Ident); ok && locals[ident.Name] {
+			//: record it so every rule watching that path stops matching.
 			out[ident.Name] = true
 		}
 	}
 	ast.Inspect(file, func(n ast.Node) bool {
-		switch decl := n.(type) {
-		// Short variable declarations: the commonest way a name is bound.
-		case *ast.AssignStmt:
-			if decl.Tok == token.DEFINE {
-				for _, lhs := range decl.Lhs {
-					mark(lhs)
-				}
-			}
-		// var / const / type blocks.
-		case *ast.ValueSpec:
-			for _, name := range decl.Names {
-				mark(name)
-			}
-		case *ast.TypeSpec:
-			mark(decl.Name)
-		// Parameters, named results and struct fields.
-		case *ast.Field:
-			for _, name := range decl.Names {
-				mark(name)
-			}
-		// Range and type-switch bindings.
-		case *ast.RangeStmt:
-			mark(decl.Key)
-			mark(decl.Value)
-		case *ast.FuncDecl:
-			mark(decl.Name)
-		}
+		//: collect from every construct that binds a name.
+		markDeclared(n, mark)
+		//: walk the whole file: a shadow anywhere disables the package here.
 		return true
 	})
+	//: the set of import names this file also declares.
 	return out
+}
+
+// markDeclared calls mark for each identifier n binds.
+//
+// Split out of shadowedNames so the traversal and the grammar stay separate;
+// together they carried a branch count no reader tracks at once.
+func markDeclared(n ast.Node, mark func(ast.Expr)) {
+	//: the two halves are split so neither carries the whole grammar: one
+	//: knows the constructs binding a LIST of names, the other those binding
+	//: a single identifier.
+	markNameLists(n, mark)
+	markSingleNames(n, mark)
+}
+
+// markNameLists handles the constructs binding several names at once.
+func markNameLists(n ast.Node, mark func(ast.Expr)) {
+	switch decl := n.(type) {
+	//: short variable declarations: the commonest way a name is bound.
+	case *ast.AssignStmt:
+		//: only := binds; = assigns to something already named.
+		if decl.Tok == token.DEFINE {
+			for _, lhs := range decl.Lhs {
+				mark(lhs)
+			}
+		}
+	//: var and const blocks.
+	case *ast.ValueSpec:
+		for _, name := range decl.Names {
+			mark(name)
+		}
+	//: parameters, named results and struct fields.
+	case *ast.Field:
+		for _, name := range decl.Names {
+			mark(name)
+		}
+	}
+}
+
+// markSingleNames handles the constructs binding one identifier.
+func markSingleNames(n ast.Node, mark func(ast.Expr)) {
+	switch decl := n.(type) {
+	//: a type declaration binds its name in the file scope.
+	case *ast.TypeSpec:
+		mark(decl.Name)
+	//: range bindings, either of which may be absent.
+	case *ast.RangeStmt:
+		mark(decl.Key)
+		mark(decl.Value)
+	//: a function name shadows a package name just as a variable would.
+	case *ast.FuncDecl:
+		mark(decl.Name)
+	}
 }
 
 // skipFile reports whether a parsed file is outside the consumer's control.
@@ -304,7 +348,8 @@ func importsOf(file *ast.File) (map[string]string, map[string]token.Pos) {
 // to justify is the kind that outlives the reason it was granted for, which is
 // exactly the failure mode the SDK's own .ktn-linter.yaml warns about.
 func suppressionsOf(fset *token.FileSet, file *ast.File) map[int]map[string]bool {
-	out := make(map[int]map[string]bool)
+	//: one entry per commented line at most; comments are sparse.
+	out := make(map[int]map[string]bool, len(file.Comments))
 	for _, group := range file.Comments {
 		for _, c := range group.List {
 			id, ok := parseSuppression(c.Text)
@@ -312,8 +357,9 @@ func suppressionsOf(fset *token.FileSet, file *ast.File) map[int]map[string]bool
 				continue
 			}
 			line := fset.Position(c.Pos()).Line
+			//: a directive names one rule; more on a line is unusual.
 			if out[line] == nil {
-				out[line] = make(map[string]bool)
+				out[line] = make(map[string]bool, 1)
 			}
 			out[line][id] = true
 		}
@@ -329,7 +375,7 @@ func parseSuppression(text string) (string, bool) {
 	}
 	fields := strings.Fields(strings.TrimPrefix(trimmed, suppressPrefix))
 	// fields[0] is the rule ID; anything after it is the mandatory reason.
-	if len(fields) < 2 {
+	if len(fields) < suppressionFields {
 		return "", false
 	}
 	return strings.ToUpper(fields[0]), true
@@ -338,9 +384,11 @@ func parseSuppression(text string) (string, bool) {
 // isSuppressed reports whether an exemption covers this finding. A directive
 // counts on the finding's own line or on the line above it, matching how Go
 // developers already write //nolint and //go:build style directives.
-func (fc *fileCtx) isSuppressed(f Finding) bool {
-	for _, line := range []int{f.Pos.Line, f.Pos.Line - 1} {
-		if fc.suppressed[line][f.Rule] {
+func (fc *fileCtx) isSuppressed(finding *findingEntity) bool {
+	//: a pointer because the struct is wider than the by-value threshold, and
+	//: nothing here mutates it.
+	for _, line := range []int{finding.Line, finding.Line - nearbyLines} {
+		if fc.suppressed[line][finding.Rule] {
 			return true
 		}
 	}
@@ -385,23 +433,27 @@ func (fc *fileCtx) imports(path string) bool {
 	return ok
 }
 
-// at builds a Finding positioned on n.
-func (fc *fileCtx) at(n ast.Node, rule, msg string) Finding {
-	return Finding{Pos: fc.fset.Position(n.Pos()), Rule: rule, Message: msg}
+// at builds a findingEntity positioned on n.
+func (fc *fileCtx) at(n ast.Node, rule, msg string) findingEntity {
+	pos := fc.fset.Position(n.Pos())
+	return findingEntity{File: pos.Filename, Line: pos.Line, Column: pos.Column, Rule: rule, Message: msg}
 }
 
 // blindSpot reports a dot import that makes rule unable to analyse this file.
 //
 // Reporting beats staying silent: a rule that cannot see is not a rule that
 // found nothing, and only the first is worth a clean run.
-func (fc *fileCtx) blindSpot(path, rule string) []Finding {
+func (fc *fileCtx) blindSpot(path, rule string) []findingEntity {
 	pos, dotted := fc.dotImports[path]
 	if !dotted {
 		return nil
 	}
-	return []Finding{{
-		Pos:  fc.fset.Position(pos),
-		Rule: rule,
+	at := fc.fset.Position(pos)
+	return []findingEntity{{
+		File:   at.Filename,
+		Line:   at.Line,
+		Column: at.Column,
+		Rule:   rule,
 		Message: path + " is dot-imported, so its calls carry no qualifier and " +
 			rule + " cannot analyse this file; import it normally so the rule can see it",
 	}}

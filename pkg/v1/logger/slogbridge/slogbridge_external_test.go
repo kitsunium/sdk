@@ -2,7 +2,6 @@ package slogbridge_test
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	"os"
 	"strings"
@@ -44,27 +43,36 @@ func attrsOf(t *testing.T, recs []logger.RecordSnapshot) map[string]logger.Attr 
 	return out
 }
 
-// A nil Logger must be refused, not silently swallowed: the bridge's entire
-// value is the guarantee that one pipeline carries everything, and a handler
-// that discards would break that guarantee exactly where a caller trusted it.
-func TestNilLoggerIsRefused(t *testing.T) {
+// NewHandler refuses a nil Logger rather than swallowing it: the package's
+// entire value is the guarantee that one pipeline carries everything, and a
+// handler that discards would break that guarantee exactly where a caller
+// trusted it.
+func TestNewHandler(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name string
-		call func() error
+		name    string
+		lg      logger.Logger
+		wantErr bool
 	}
 	tests := []tc{
-		{"New", func() error { _, err := slogbridge.New(nil); return err }},
-		{"NewHandler", func() error { _, err := slogbridge.NewHandler(nil); return err }},
+		{"a nil Logger is refused", nil, true},
+		{"a real Logger yields a handler", mustLogger(t), false},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		err := c.call()
-		if err == nil {
-			t.Fatal("nil logger accepted")
+		hdl, err := slogbridge.NewHandler(c.lg)
+		if c.wantErr {
+			assertLoggerRequired(t, err)
+			if hdl != nil {
+				t.Error("a handler came back alongside the error")
+			}
+			return
 		}
-		if !errs.HasCode(err, slogbridge.CodeLoggerRequired) {
-			t.Errorf("code = %v, want CodeLoggerRequired (1.1.1.1)", err)
+		if err != nil {
+			t.Fatalf("NewHandler: %v", err)
+		}
+		if hdl == nil {
+			t.Error("no handler and no error")
 		}
 	}
 	for _, c := range tests {
@@ -72,6 +80,67 @@ func TestNilLoggerIsRefused(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// New is the one-liner a caller hands to a library typed on the concrete
+// *slog.Logger; it carries NewHandler's refusal unchanged.
+func TestNew(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		lg      logger.Logger
+		wantErr bool
+	}
+	tests := []tc{
+		{"a nil Logger is refused", nil, true},
+		{"a real Logger yields an slog.Logger", mustLogger(t), false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		sl, err := slogbridge.New(c.lg)
+		if c.wantErr {
+			assertLoggerRequired(t, err)
+			if sl != nil {
+				t.Error("a logger came back alongside the error")
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if sl == nil {
+			t.Fatal("no logger and no error")
+		}
+		// It must be usable, not merely non-nil.
+		sl.Info("m")
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// mustLogger builds a destination for the cases that need a real one.
+func mustLogger(t *testing.T) logger.Logger {
+	t.Helper()
+	lg, err := logger.NewWithSink(logger.SinkConfig{Sink: logger.NewMemorySink()})
+	if err != nil {
+		t.Fatalf("NewWithSink: %v", err)
+	}
+	return lg
+}
+
+// assertLoggerRequired pins the typed sentinel, not merely "an error".
+func assertLoggerRequired(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("nil logger accepted")
+	}
+	if !errs.HasCode(err, slogbridge.CodeLoggerRequired) {
+		t.Errorf("code = %v, want CodeLoggerRequired (1.1.1.1)", err)
 	}
 }
 
@@ -94,7 +163,7 @@ func TestLevelsMapExactly(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		sl, sink := newRecorder(t, logger.LevelDebug)
-		sl.Log(context.Background(), c.in, "m")
+		sl.Log(t.Context(), c.in, "m")
 		recs := sink.Records()
 		if len(recs) != 1 {
 			t.Fatalf("record count = %d, want 1", len(recs))
@@ -128,7 +197,7 @@ func TestOutOfRangeLevelsSaturate(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		sl, sink := newRecorder(t, logger.Level(-128))
-		sl.Log(context.Background(), c.in, "m")
+		sl.Log(t.Context(), c.in, "m")
 		recs := sink.Records()
 		if len(recs) != 1 {
 			t.Fatalf("record count = %d, want 1", len(recs))
@@ -150,20 +219,42 @@ func TestOutOfRangeLevelsSaturate(t *testing.T) {
 // even though slog itself was given no level of its own.
 func TestSDKThresholdGovernsTheSlogView(t *testing.T) {
 	t.Parallel()
-	sl, sink := newRecorder(t, logger.LevelWarn)
-
-	sl.Info("dropped by the SDK threshold")
-	sl.Debug("dropped by the SDK threshold")
-	if got := len(sink.Records()); got != 0 {
-		t.Fatalf("records below threshold = %d, want 0", got)
+	type tc struct {
+		name      string
+		level     slog.Level
+		wantKept  bool
+		wantAllow bool
 	}
-	if sl.Enabled(context.Background(), slog.LevelInfo) {
-		t.Error("Enabled(info) = true under a warn threshold")
+	tests := []tc{
+		{"debug is below a warn threshold", slog.LevelDebug, false, false},
+		{"info is below a warn threshold", slog.LevelInfo, false, false},
+		{"warn reaches the sink", slog.LevelWarn, true, true},
+		{"error reaches the sink", slog.LevelError, true, true},
 	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		sl, sink := newRecorder(t, logger.LevelWarn)
 
-	sl.Warn("kept")
-	if got := len(sink.Records()); got != 1 {
-		t.Fatalf("records at threshold = %d, want 1", got)
+		// Enabled must agree with what actually lands: the bridge holds no
+		// level, so both answers come from the SDK Logger alone.
+		if got := sl.Enabled(t.Context(), c.level); got != c.wantAllow {
+			t.Errorf("Enabled(%v) = %v, want %v", c.level, got, c.wantAllow)
+		}
+
+		sl.Log(t.Context(), c.level, "m")
+		want := 0
+		if c.wantKept {
+			want = 1
+		}
+		if got := len(sink.Records()); got != want {
+			t.Errorf("records = %d, want %d", got, want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -193,7 +284,7 @@ func TestAttrKindsSurviveConversion(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		sl, sink := newRecorder(t, logger.LevelDebug)
-		sl.LogAttrs(context.Background(), slog.LevelInfo, "m", c.attr)
+		sl.LogAttrs(t.Context(), slog.LevelInfo, "m", c.attr)
 		got, ok := attrsOf(t, sink.Records())["k"]
 		if !ok {
 			t.Fatal(`attr "k" missing`)
@@ -235,7 +326,7 @@ func TestGroupsFlattenToDottedKeys(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		sl, sink := newRecorder(t, logger.LevelDebug)
-		sl.LogAttrs(context.Background(), slog.LevelInfo, "m", c.attr)
+		sl.LogAttrs(t.Context(), slog.LevelInfo, "m", c.attr)
 		if _, ok := attrsOf(t, sink.Records())[c.wantKey]; !ok {
 			t.Errorf("key %q missing; got %v", c.wantKey, sink.Records()[0].Attrs)
 		}
@@ -263,7 +354,7 @@ func TestSlogElisionRulesAreHonoured(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		sl, sink := newRecorder(t, logger.LevelDebug)
-		sl.LogAttrs(context.Background(), slog.LevelInfo, "m", c.attr)
+		sl.LogAttrs(t.Context(), slog.LevelInfo, "m", c.attr)
 		// framework_version is stamped by the SDK Logger on every record, so
 		// it is the expected floor here — anything beyond it means the elided
 		// attribute leaked through.
@@ -289,19 +380,32 @@ func TestSlogElisionRulesAreHonoured(t *testing.T) {
 // through to Logger.WithGroup.
 func TestGroupsAreEndPositionalNotRetroactive(t *testing.T) {
 	t.Parallel()
-	sl, sink := newRecorder(t, logger.LevelDebug)
-
-	sl.With(slog.String("before", "1")).
-		WithGroup("g").
-		With(slog.String("after", "2")).
-		Info("m")
-
-	got := attrsOf(t, sink.Records())
-	if _, ok := got["before"]; !ok {
-		t.Errorf(`"before" was requalified; got %v`, sink.Records()[0].Attrs)
+	type tc struct {
+		name    string
+		wantKey string
 	}
-	if _, ok := got["g.after"]; !ok {
-		t.Errorf(`"g.after" missing; got %v`, sink.Records()[0].Attrs)
+	tests := []tc{
+		{"an attr bound before the group keeps its bare key", "before"},
+		{"an attr bound after the group is qualified", "g.after"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		sl, sink := newRecorder(t, logger.LevelDebug)
+
+		sl.With(slog.String("before", "1")).
+			WithGroup("g").
+			With(slog.String("after", "2")).
+			Info("m")
+
+		if _, ok := attrsOf(t, sink.Records())[c.wantKey]; !ok {
+			t.Errorf("key %q missing; got %v", c.wantKey, sink.Records()[0].Attrs)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -332,7 +436,7 @@ func TestArbitraryValuesSurviveToOutput(t *testing.T) {
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
-		sl.LogAttrs(context.Background(), slog.LevelInfo, "m", c.attr)
+		sl.LogAttrs(t.Context(), slog.LevelInfo, "m", c.attr)
 		line := buf.String()
 		if strings.Contains(line, "=?") {
 			t.Errorf("value erased to \"?\": %q", line)
@@ -354,12 +458,35 @@ func TestArbitraryValuesSurviveToOutput(t *testing.T) {
 // record still shows which group the value came from.
 func TestEmptyKeyUnderAGroupKeepsTheSeparator(t *testing.T) {
 	t.Parallel()
-	sl, sink := newRecorder(t, logger.LevelDebug)
+	type tc struct {
+		name    string
+		group   string
+		wantKey string
+	}
+	tests := []tc{
+		{"under a group the separator survives", "g", "g."},
+		{"nested groups keep the whole chain", "g1", "g1."},
+		{"with no group the key stays empty", "", ""},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		sl, sink := newRecorder(t, logger.LevelDebug)
 
-	sl.WithGroup("g").LogAttrs(context.Background(), slog.LevelInfo, "m", slog.String("", "v"))
+		view := sl
+		if c.group != "" {
+			view = sl.WithGroup(c.group)
+		}
+		view.LogAttrs(t.Context(), slog.LevelInfo, "m", slog.String("", "v"))
 
-	if _, ok := attrsOf(t, sink.Records())["g."]; !ok {
-		t.Errorf(`key "g." missing; got %v`, sink.Records()[0].Attrs)
+		if _, ok := attrsOf(t, sink.Records())[c.wantKey]; !ok {
+			t.Errorf("key %q missing; got %v", c.wantKey, sink.Records()[0].Attrs)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -368,16 +495,43 @@ func TestEmptyKeyUnderAGroupKeepsTheSeparator(t *testing.T) {
 // for — the exact failure the stdlib handlers resolve away.
 func TestLogValuerIsResolved(t *testing.T) {
 	t.Parallel()
-	sl, sink := newRecorder(t, logger.LevelDebug)
-
-	sl.LogAttrs(context.Background(), slog.LevelInfo, "m", slog.Any("k", valuer{}))
-
-	got := attrsOf(t, sink.Records())["k"]
-	if got.Value.Kind() != logger.KindString {
-		t.Fatalf("kind = %v, want KindString (LogValuer unresolved)", got.Value.Kind())
+	type tc struct {
+		name     string
+		attr     slog.Attr
+		wantKind logger.Kind
+		wantText string
 	}
-	if got.Value.String() != "resolved" {
-		t.Errorf("value = %q, want %q", got.Value.String(), "resolved")
+	tests := []tc{
+		{
+			"a string valuer resolves to its string",
+			slog.Any("k", valuer{}), logger.KindString, "resolved",
+		},
+		{
+			// The resolved value keeps ITS kind, not the valuer's: resolution
+			// happens before the Kind switch, not after.
+			"an int valuer resolves to an int",
+			slog.Any("k", intValuer{}), logger.KindInt64, "",
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		sl, sink := newRecorder(t, logger.LevelDebug)
+
+		sl.LogAttrs(t.Context(), slog.LevelInfo, "m", c.attr)
+
+		got := attrsOf(t, sink.Records())["k"]
+		if got.Value.Kind() != c.wantKind {
+			t.Fatalf("kind = %v, want %v (LogValuer unresolved)", got.Value.Kind(), c.wantKind)
+		}
+		if c.wantText != "" && got.Value.String() != c.wantText {
+			t.Errorf("value = %q, want %q", got.Value.String(), c.wantText)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -387,36 +541,67 @@ type valuer struct{}
 // LogValue satisfies slog.LogValuer.
 func (valuer) LogValue() slog.Value { return slog.StringValue("resolved") }
 
+// intValuer resolves to a non-string kind, so the test can tell resolution
+// from a blanket string conversion.
+type intValuer struct{}
+
+// LogValue satisfies slog.LogValuer.
+func (intValuer) LogValue() slog.Value { return slog.IntValue(7) }
+
 // The end-to-end claim of this package: a record emitted through the slog
 // view comes out of the SDK pipeline carrying the SDK's own decorations. If
 // "framework_version" is present, the record went through NewText's
 // decorated Logger and not through a parallel slog handler.
 func TestBridgedRecordsCarrySDKDecorations(t *testing.T) {
 	t.Parallel()
-	var buf bytes.Buffer
+	type tc struct {
+		name string
+		want string
+		why  string
+	}
+	tests := []tc{
+		{
+			"the SDK version stamp",
+			"framework_version=",
+			"proves the record went through NewText's decorated Logger, not a parallel handler",
+		},
+		{
+			"the SDK line shape",
+			"INFO bridged",
+			"proves the SDK text handler rendered it, not slog's",
+		},
+		{
+			// Before the handler's Kind table was completed this printed "?",
+			// which would have made the bridge lossy for the single attribute
+			// type slog callers use most.
+			"a duration rendered as a duration",
+			`took="1.5s"`,
+			"proves Duration survives the bridge and the handler",
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var buf bytes.Buffer
 
-	lg, err := logger.NewText(logger.Config{Writer: &buf, MinLevel: logger.LevelInfo})
-	if err != nil {
-		t.Fatalf("NewText: %v", err)
-	}
-	sl, err := slogbridge.New(lg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+		lg, err := logger.NewText(logger.Config{Writer: &buf, MinLevel: logger.LevelInfo})
+		if err != nil {
+			t.Fatalf("NewText: %v", err)
+		}
+		sl, err := slogbridge.New(lg)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
 
-	sl.Info("bridged", slog.Duration("took", 1500*time.Millisecond))
+		sl.Info("bridged", slog.Duration("took", 1500*time.Millisecond))
 
-	line := buf.String()
-	if !strings.Contains(line, "framework_version=") {
-		t.Errorf("bridged record lacks framework_version: %q", line)
+		if line := buf.String(); !strings.Contains(line, c.want) {
+			t.Errorf("output %q lacks %q — %s", line, c.want, c.why)
+		}
 	}
-	if !strings.Contains(line, "INFO bridged") {
-		t.Errorf("record not rendered by the SDK text handler: %q", line)
-	}
-	// A duration must render as a duration. Before the handler's Kind table
-	// was completed it printed "?", which would have made the bridge lossy
-	// for the single attribute type slog callers use most.
-	if !strings.Contains(line, `took="1.5s"`) {
-		t.Errorf("duration not rendered: %q", line)
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

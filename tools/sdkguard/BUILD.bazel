@@ -5,7 +5,10 @@ go_library(
     srcs = [
         "analyze.go",
         "errors.go",
+        "file_ctx.go",
         "main.go",
+        "pipeline_call.go",
+        "probe.go",
         "rules.go",
         "version.go",
     ],

@@ -1,4 +1,4 @@
-// Command sdkguard — the rule table.
+// Package main — the rule table.
 //
 // Each rule states an SDK decision a consumer can violate silently, and each
 // one is deliberately narrow. A rule that fires on legitimate code teaches
@@ -43,8 +43,103 @@ const LevelInvariant string = "invariant"
 // conventions on when it is ready, instead of switching the whole tool off.
 const LevelConvention string = "convention"
 
-// Rule is one consumer-facing SDK convention and the check that enforces it.
-type Rule struct {
+var (
+	// allRules is the full rule table, ordered by ID.
+	allRules = []ruleEntity{
+		{
+			ID:     "SDK001",
+			Level:  LevelInvariant,
+			Title:  "no second logging pipeline beside the SDK logger",
+			Source: "ADR 0032",
+			Check:  checkSlogPipeline,
+		},
+		{
+			ID:     "SDK002",
+			Level:  LevelConvention,
+			Title:  "errors carry a typed code, not a formatted string",
+			Source: "SDK rule 2 / ADR 0019",
+			Check:  checkUntypedErrors,
+		},
+		{
+			ID:     "SDK003",
+			Level:  LevelInvariant,
+			Title:  "stdout is a protocol channel, never a log destination",
+			Source: "ADR 0030",
+			Check:  checkStdoutDestination,
+		},
+		{
+			ID:     "SDK004",
+			Level:  LevelInvariant,
+			Title:  "logger.Version is stamped at link time, not assigned",
+			Source: "pkg/v1/logger/CLAUDE.md",
+			Check:  checkVersionAssignment,
+		},
+		{
+			ID:     "SDK005",
+			Level:  LevelConvention,
+			Title:  "no second logging pipeline via the legacy log package",
+			Source: "ADR 0032",
+			Check:  checkLegacyLog,
+		},
+	}
+
+	// The distinction is the whole rule. Banning the log/slog import outright would
+	// be simpler and wrong: a consumer of slogbridge imports it to type a
+	// *slog.Logger field or to pass slog.String attrs to a foreign API. Only the
+	// constructors and the process-wide default create a second destination.
+	slogPipelineCalls = []pipelineCall{
+		{"New", "slog.New builds a logger the SDK pipeline does not own"},
+		{"NewTextHandler", "slog.NewTextHandler builds a second encoder and destination"},
+		{"NewJSONHandler", "slog.NewJSONHandler builds a second encoder and destination"},
+		{"SetDefault", "slog.SetDefault redirects the process-wide logger away from the SDK"},
+		{"Default", "slog.Default reaches for a logger the SDK never configured"},
+	}
+
+	// untypedErrorCalls are the stdlib error constructors the SDK replaced.
+	untypedErrorCalls = map[string]string{
+		fmtPath:    "Errorf",
+		errorsPath: "New",
+	}
+
+	// logDestinations are the constructors whose io.Writer argument becomes a log
+	// destination. os.Stdout reaching any of them is the ADR 0030 defect.
+	logDestinations = []struct{ path, name string }{
+		{loggerPath, "NewWriterSink"},
+		{slogPath, "NewTextHandler"},
+		{slogPath, "NewJSONHandler"},
+		{logPath, "New"},
+		{logPath, "SetOutput"},
+	}
+
+	// writerFields are the struct field names that denote a log destination.
+	writerFields = map[string]bool{
+		"Writer": true, "Writers": true, "Out": true, "Output": true,
+	}
+
+	// The field name alone is NOT enough to conclude anything: a plain
+	// `Report{Output: os.Stdout}` is a CLI writing its result, which ADR 0030
+	// explicitly permits. Requiring the literal's TYPE to come from a logging
+	// package is what keeps this rule on the destinations it is about. The cost is
+	// that a consumer's own wrapper struct is missed — the documented price of
+	// working without type resolution.
+	loggingConfigPkgs = []string{loggerPath, slogPath, logPath}
+
+	// legacyLogCalls are the stdlib log entry points that write through a pipeline
+	// the SDK does not own. Fatal and Panic also bypass every deferred cleanup.
+	legacyLogCalls = []string{
+		"Print", "Printf", "Println",
+		"Fatal", "Fatalf", "Fatalln",
+		"Panic", "Panicf", "Panicln",
+		"New", "SetOutput", "Default",
+	}
+)
+
+// ruleEntity is one consumer-facing SDK convention and the check enforcing it.
+//
+// Unexported because a main package cannot be imported: nothing outside this
+// binary can name the type, so exporting it would promise a surface that does
+// not exist.
+type ruleEntity struct {
 	// ID is the stable identifier used in reports and suppressions.
 	ID string
 	// Title is the one-line statement of the rule.
@@ -54,75 +149,25 @@ type Rule struct {
 	// Source names the ADR or SDK rule the decision was recorded in.
 	Source string
 	// Check returns the findings for one parsed file.
-	Check func(fc *fileCtx, file *ast.File) []Finding
-}
-
-// allRules is the full rule table, ordered by ID.
-var allRules = []Rule{
-	{
-		ID:     "SDK001",
-		Level:  LevelInvariant,
-		Title:  "no second logging pipeline beside the SDK logger",
-		Source: "ADR 0032",
-		Check:  checkSlogPipeline,
-	},
-	{
-		ID:     "SDK002",
-		Level:  LevelConvention,
-		Title:  "errors carry a typed code, not a formatted string",
-		Source: "SDK rule 2 / ADR 0019",
-		Check:  checkUntypedErrors,
-	},
-	{
-		ID:     "SDK003",
-		Level:  LevelInvariant,
-		Title:  "stdout is a protocol channel, never a log destination",
-		Source: "ADR 0030",
-		Check:  checkStdoutDestination,
-	},
-	{
-		ID:     "SDK004",
-		Level:  LevelInvariant,
-		Title:  "logger.Version is stamped at link time, not assigned",
-		Source: "pkg/v1/logger/CLAUDE.md",
-		Check:  checkVersionAssignment,
-	},
-	{
-		ID:     "SDK005",
-		Level:  LevelConvention,
-		Title:  "no second logging pipeline via the legacy log package",
-		Source: "ADR 0032",
-		Check:  checkLegacyLog,
-	},
+	Check func(fc *fileCtx, file *ast.File) []findingEntity
 }
 
 // slogPipelineCalls are the log/slog entry points that BUILD a pipeline, as
 // opposed to the vocabulary a bridge consumer legitimately needs.
 //
-// The distinction is the whole rule. Banning the log/slog import outright would
-// be simpler and wrong: a consumer of slogbridge imports it to type a
-// *slog.Logger field or to pass slog.String attrs to a foreign API. Only the
-// constructors and the process-wide default create a second destination.
-var slogPipelineCalls = map[string]string{
-	"New":            "slog.New builds a logger the SDK pipeline does not own",
-	"NewTextHandler": "slog.NewTextHandler builds a second encoder and destination",
-	"NewJSONHandler": "slog.NewJSONHandler builds a second encoder and destination",
-	"SetDefault":     "slog.SetDefault redirects the process-wide logger away from the SDK",
-	"Default":        "slog.Default reaches for a logger the SDK never configured",
-}
 
 // checkSlogPipeline implements SDK001.
-func checkSlogPipeline(fc *fileCtx, file *ast.File) []Finding {
+func checkSlogPipeline(fc *fileCtx, file *ast.File) []findingEntity {
 	if blind := fc.blindSpot(slogPath, "SDK001"); blind != nil {
 		return blind
 	}
 	if !fc.imports(slogPath) {
 		return nil
 	}
-	var out []Finding
+	var out []findingEntity
 	ast.Inspect(file, func(n ast.Node) bool {
-		for name, why := range slogPipelineCalls {
-			if !fc.isCall(n, slogPath, name) {
+		for _, call := range slogPipelineCalls {
+			if !fc.isCall(n, slogPath, call.name) {
 				continue
 			}
 			// slog.New(slogbridge.NewHandler(lg)) composes the sanctioned
@@ -132,7 +177,7 @@ func checkSlogPipeline(fc *fileCtx, file *ast.File) []Finding {
 			if fc.wrapsBridge(n) {
 				continue
 			}
-			out = append(out, fc.at(n, "SDK001", why+
+			out = append(out, fc.at(n, "SDK001", call.why+
 				"; hand the SDK Logger over instead: slogbridge.New(lg) (ADR 0032)"))
 		}
 		return true
@@ -169,15 +214,9 @@ func (fc *fileCtx) wrapsBridge(n ast.Node) bool {
 	return false
 }
 
-// untypedErrorCalls are the stdlib error constructors the SDK replaced.
-var untypedErrorCalls = map[string]string{
-	fmtPath:    "Errorf",
-	errorsPath: "New",
-}
-
 // checkUntypedErrors implements SDK002.
-func checkUntypedErrors(fc *fileCtx, file *ast.File) []Finding {
-	var out []Finding
+func checkUntypedErrors(fc *fileCtx, file *ast.File) []findingEntity {
+	var out []findingEntity
 	for path := range untypedErrorCalls {
 		out = append(out, fc.blindSpot(path, "SDK002")...)
 	}
@@ -195,30 +234,8 @@ func checkUntypedErrors(fc *fileCtx, file *ast.File) []Finding {
 	return out
 }
 
-// logDestinations are the constructors whose io.Writer argument becomes a log
-// destination. os.Stdout reaching any of them is the ADR 0030 defect.
-var logDestinations = []struct{ path, name string }{
-	{loggerPath, "NewWriterSink"},
-	{slogPath, "NewTextHandler"},
-	{slogPath, "NewJSONHandler"},
-	{logPath, "New"},
-	{logPath, "SetOutput"},
-}
-
-// writerFields are the struct field names that denote a log destination.
-var writerFields = map[string]bool{
-	"Writer": true, "Writers": true, "Out": true, "Output": true,
-}
-
 // loggingConfigPkgs are the packages whose struct literals configure logging.
 //
-// The field name alone is NOT enough to conclude anything: a plain
-// `Report{Output: os.Stdout}` is a CLI writing its result, which ADR 0030
-// explicitly permits. Requiring the literal's TYPE to come from a logging
-// package is what keeps this rule on the destinations it is about. The cost is
-// that a consumer's own wrapper struct is missed — the documented price of
-// working without type resolution.
-var loggingConfigPkgs = []string{loggerPath, slogPath, logPath}
 
 // isLoggingConfig reports whether lit constructs a logging package's struct.
 func (fc *fileCtx) isLoggingConfig(lit *ast.CompositeLit) bool {
@@ -240,11 +257,11 @@ func (fc *fileCtx) isLoggingConfig(lit *ast.CompositeLit) bool {
 
 // stdoutInConfig reports os.Stdout bound to a destination field of a logging
 // package's struct literal.
-func (fc *fileCtx) stdoutInConfig(lit *ast.CompositeLit) []Finding {
+func (fc *fileCtx) stdoutInConfig(lit *ast.CompositeLit) []findingEntity {
 	if !fc.isLoggingConfig(lit) {
 		return nil
 	}
-	var out []Finding
+	var out []findingEntity
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
@@ -266,14 +283,14 @@ func (fc *fileCtx) stdoutInConfig(lit *ast.CompositeLit) []Finding {
 // (fmt.Fprintln(os.Stdout, …), json.NewEncoder(os.Stdout)) is untouched,
 // because a CLI printing its results to stdout is doing its job; ADR 0030 is
 // about stdout carrying a protocol, not about stdout being forbidden.
-func checkStdoutDestination(fc *fileCtx, file *ast.File) []Finding {
+func checkStdoutDestination(fc *fileCtx, file *ast.File) []findingEntity {
 	if blind := fc.blindSpot(osPath, "SDK003"); blind != nil {
 		return blind
 	}
 	if !fc.imports(osPath) {
 		return nil
 	}
-	var out []Finding
+	var out []findingEntity
 	ast.Inspect(file, func(n ast.Node) bool {
 		if lit, ok := n.(*ast.CompositeLit); ok {
 			out = append(out, fc.stdoutInConfig(lit)...)
@@ -298,11 +315,13 @@ func checkStdoutDestination(fc *fileCtx, file *ast.File) []Finding {
 
 // stdoutIn reports every os.Stdout reference inside expr, so a fan-out slice
 // literal is caught as surely as a bare reference.
-func (fc *fileCtx) stdoutIn(expr ast.Expr, where string) []Finding {
-	var out []Finding
+func (fc *fileCtx) stdoutIn(expr ast.Expr, where string) []findingEntity {
+	var out []findingEntity
 	ast.Inspect(expr, func(n ast.Node) bool {
-		e, ok := n.(ast.Expr)
-		if !ok || !fc.isSelector(e, osPath, "Stdout") {
+		//: only an expression can be the os.Stdout selector.
+		node, ok := n.(ast.Expr)
+		if !ok || !fc.isSelector(node, osPath, "Stdout") {
+			//: keep walking; a non-match says nothing about the subtree.
 			return true
 		}
 		out = append(out, fc.at(n, "SDK003", "os.Stdout is used as "+where+
@@ -314,14 +333,14 @@ func (fc *fileCtx) stdoutIn(expr ast.Expr, where string) []Finding {
 }
 
 // checkVersionAssignment implements SDK004.
-func checkVersionAssignment(fc *fileCtx, file *ast.File) []Finding {
+func checkVersionAssignment(fc *fileCtx, file *ast.File) []findingEntity {
 	if blind := fc.blindSpot(loggerPath, "SDK004"); blind != nil {
 		return blind
 	}
 	if !fc.imports(loggerPath) {
 		return nil
 	}
-	var out []Finding
+	var out []findingEntity
 	ast.Inspect(file, func(n ast.Node) bool {
 		assign, ok := n.(*ast.AssignStmt)
 		if !ok {
@@ -340,24 +359,15 @@ func checkVersionAssignment(fc *fileCtx, file *ast.File) []Finding {
 	return out
 }
 
-// legacyLogCalls are the stdlib log entry points that write through a pipeline
-// the SDK does not own. Fatal and Panic also bypass every deferred cleanup.
-var legacyLogCalls = []string{
-	"Print", "Printf", "Println",
-	"Fatal", "Fatalf", "Fatalln",
-	"Panic", "Panicf", "Panicln",
-	"New", "SetOutput", "Default",
-}
-
 // checkLegacyLog implements SDK005.
-func checkLegacyLog(fc *fileCtx, file *ast.File) []Finding {
+func checkLegacyLog(fc *fileCtx, file *ast.File) []findingEntity {
 	if blind := fc.blindSpot(logPath, "SDK005"); blind != nil {
 		return blind
 	}
 	if !fc.imports(logPath) {
 		return nil
 	}
-	var out []Finding
+	var out []findingEntity
 	ast.Inspect(file, func(n ast.Node) bool {
 		for _, name := range legacyLogCalls {
 			if !fc.isCall(n, logPath, name) {
