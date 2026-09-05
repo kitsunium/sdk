@@ -2,6 +2,7 @@
 package client_test
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -438,6 +439,11 @@ func TestClient_Get(t *testing.T) {
 			name: "an encoded dot segment", path: "/v1/supi/%2e%2e", wantCode: corenet.CodeUnsafePath,
 		},
 		{name: "an encoded separator", path: "/v1/supi/a%2fb", wantCode: corenet.CodeUnsafePath},
+		{
+			//: an authority, not a path: resolving it would replace the host.
+			name: "a reference carrying its own origin", path: "//evil.example/v1/subscribers",
+			wantCode: corenet.CodeUnsafePath,
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -695,6 +701,67 @@ func TestClient_Do(t *testing.T) {
 		//: a refusal must leave no trace on the network.
 		if *reached {
 			t.Error("the upstream was contacted despite the refusal")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestClient_Get_RefusesAForeignOrigin is the empirical form of the same
+// property: the client must not reach a peer the caller never configured.
+//
+// "//host/path" is an AUTHORITY under RFC 3986, so resolving it against the base
+// replaces the host — and the built-in policies judge only the method and the
+// path, so an allowlist of "/v1/subscribers" happily authorises the request on
+// its way to somewhere else entirely. A caller that passes a caller-supplied
+// identifier into Get without thinking about it is the realistic route in.
+//
+// Two upstreams stand in for the two ends: the configured one, and the one a
+// substitution would reach. The second must never be contacted at all.
+func TestClient_Get_RefusesAForeignOrigin(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// target is what the caller passes to Get, with %s replaced by the
+		// foreign upstream's authority.
+		target string
+	}
+	tests := []tc{
+		{name: "a scheme-relative reference", target: "//%s/v1/subscribers"},
+		{name: "an absolute URL", target: "http://%s/v1/subscribers"},
+		//: the same substitution with a query, which the client would encode
+		//: onto the foreign request just as happily.
+		{name: "a scheme-relative reference with a query", target: "//%s/v1/subscribers?a=b"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		foreign, reached := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeOrFail(t, w, `{"secret":"reached the wrong peer"}`)
+		})
+		configured, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeOrFail(t, w, `{"ok":true}`)
+		})
+		client := newClient(t, configured, corenet.ClientConfig{})
+		authority := strings.TrimPrefix(foreign.URL, "http://")
+
+		_, err := client.Get(t.Context(), fmt.Sprintf(c.target, authority), nil)
+
+		if err == nil {
+			t.Fatal("the client resolved a path that carried its own origin")
+		}
+		if !errs.HasCode(err, corenet.CodeUnsafePath) {
+			t.Fatalf("Get = %v, want UNSAFE_PATH", err)
+		}
+		//: the whole point: the other upstream is never contacted, not even a
+		//: connection — a policy that judges paths cannot catch this one.
+		if *reached {
+			t.Fatal("the client reached an upstream the caller never configured, " +
+				"past a policy that authorised only the path")
 		}
 	}
 	for _, c := range tests {

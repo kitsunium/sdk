@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,20 +72,34 @@ func Test_parseBase(t *testing.T) {
 	}
 }
 
-// Test_Client_resolve pins the query encoding and the base resolution.
+// Test_Client_resolve pins the query encoding, the base resolution, and the
+// refusal of a reference that carries its own ORIGIN.
 //
 // Encoding the query HERE is what stops each call site inventing its own — and
 // a call site that concatenated a raw value would produce a path the policy
 // judges differently from the one that goes on the wire.
+//
+// The origin check is the one that matters most. RFC 3986 reads "//other/path"
+// as an authority rather than as a path, so ResolveReference REPLACES the base's
+// host with it — and the built-in policies judge only the method and the path,
+// so nothing downstream sees the substitution. A caller passing a
+// caller-supplied identifier straight into Get would reach whatever peer that
+// identifier named.
 func Test_Client_resolve(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name    string
-		base    string
-		path    string
-		query   url.Values
-		want    string
-		wantErr bool
+		// name describes the case.
+		name string
+		// base is the client's configured base URL; empty means none.
+		base string
+		// path is what the caller passes to Get.
+		path string
+		// query is encoded onto it.
+		query url.Values
+		// want is the resolved target.
+		want string
+		// wantCode is the refusal, or zero when the path resolves.
+		wantCode errs.Code
 	}
 	tests := []tc{
 		{name: "a path against a base", base: "https://h", path: "/v1/x", want: "https://h/v1/x"},
@@ -120,7 +135,39 @@ func Test_Client_resolve(t *testing.T) {
 			name: "an absolute URL with no base",
 			base: "", path: "https://other/v1/x", want: "https://other/v1/x",
 		},
-		{name: "an unparseable path", base: "https://h", path: "://nope", wantErr: true},
+		{name: "an unparseable path", base: "https://h", path: "://nope", wantCode: corenet.CodeInvalidAddress},
+		{
+			//: "//host/path" is an AUTHORITY, so resolving it against the base
+			//: replaces the host — and the policy, which judges only method and
+			//: path, never sees that it happened.
+			name: "a scheme-relative reference against a base",
+			base: "https://h", path: "//evil.example/v1/x", wantCode: corenet.CodeUnsafePath,
+		},
+		{
+			name: "a scheme-relative reference naming a port",
+			base: "https://h", path: "//127.0.0.1:8080/v1/x", wantCode: corenet.CodeUnsafePath,
+		},
+		{
+			//: an absolute URL is the same substitution spelled out in full.
+			name: "an absolute URL against a base",
+			base: "https://h", path: "https://evil.example/v1/x", wantCode: corenet.CodeUnsafePath,
+		},
+		{
+			name: "a scheme with no authority against a base",
+			base: "https://h", path: "mailto:someone@example", wantCode: corenet.CodeUnsafePath,
+		},
+		{
+			//: a relative path is still resolved against the base, because that
+			//: is what a relative reference means.
+			name: "a relative path against a base",
+			base: "https://h", path: "v1/x", want: "https://h/v1/x",
+		},
+		{
+			//: with no base there is nothing to substitute, so the caller's own
+			//: absolute URL is the request.
+			name: "a scheme-relative reference with no base",
+			base: "", path: "//other/v1/x", want: "//other/v1/x",
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -132,9 +179,19 @@ func Test_Client_resolve(t *testing.T) {
 
 		got, err := client.resolve(c.path, c.query)
 
-		if c.wantErr {
-			if !errs.HasCode(err, corenet.CodeInvalidAddress) {
-				t.Fatalf("resolve(%q) = %v, want INVALID_ADDRESS", c.path, err)
+		if c.wantCode != 0 {
+			if !errs.HasCode(err, c.wantCode) {
+				t.Fatalf("resolve(%q) = %v, want code %v", c.path, err, c.wantCode)
+			}
+			//: a refused reference resolves to nothing, so no caller checking
+			//: only the value can send a request to a peer it never named.
+			if got != "" {
+				t.Errorf("resolve(%q) returned %q beside the error", c.path, got)
+			}
+			//: the refusal never echoes the path, which may carry a secret the
+			//: caller pasted into it.
+			if strings.Contains(err.Error(), c.path) {
+				t.Errorf("the refusal echoes the path: %v", err)
 			}
 			return
 		}

@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-03T00:00:00Z -->
+<!-- updated: 2026-09-05T00:00:00Z -->
 # internal/service/net/client/
 
 ## Purpose
@@ -24,6 +24,7 @@ Public façade: `pkg/v1/client`.
 | `policies.go` | `AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies` |
 | `defaults.go` | the safe defaults filled into `corenet.ClientConfig`, whose type core declares beside the inbound half's `LimitsValue` / `TimeoutsValue` |
 | `path.go` | `checkPath` / `hasDotSegment` / `hasEncodedSeparator` — safety checks run *before* patterns |
+| — | `Client.resolve` (in `client.go`) refuses a reference carrying its own origin, which resolution would otherwise substitute for the base |
 
 ## Why-this-shape
 
@@ -62,6 +63,16 @@ Public façade: `pkg/v1/client`.
   either case). This was found by mutation-testing the dot-segment guard: the
   mutation did *not* fail, which showed the escaped-path decision was unpinned
   and pointed straight at the real gap.
+- **A path that carries its own ORIGIN is refused, not resolved.** RFC 3986
+  reads `//other/path` as an authority rather than as a path, so
+  `url.URL.ResolveReference` replaces the configured host with it — and the
+  built-in policies judge only the method and the path, so nothing downstream
+  sees the substitution. `Get("//peer/v1/x")` therefore reached `peer` past an
+  `AllowPaths("/v1/x")` policy that authorised it. `resolve` refuses any
+  reference with a scheme or a host once a base is configured: the argument is
+  documented as a path relative to that base, and anything else is a different
+  request than the call site reads as. With no base the caller supplies absolute
+  URLs by design, so the check does not apply there.
 - **A refusal never echoes the path in its public message.** The path is the
   shape of the private API surface; a denial must not leak it into a log line or
   a response. The reason goes in a structured field instead.
@@ -93,6 +104,8 @@ this layer.
 - Trust a caller-supplied regexp to be anchored.
 - Compare a decoded path.
 - Put the refused path in a `Public` message.
+- Let a caller-supplied path carry its own scheme or authority into `resolve`.
+  It replaces the base's origin, and no path-and-method policy can see it.
 - Truncate an over-sized response body — fail. A silent truncation surfaces
   three layers away as an incomprehensible decode error.
 
