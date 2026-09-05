@@ -19,40 +19,64 @@ func (f *fakeClock) advance(d time.Duration)         { f.now = f.now.Add(d) }
 // TestLRUEviction evicts the least-recently-used entry past the capacity.
 func TestLRUEviction(t *testing.T) {
 	t.Parallel()
-	c := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: 2})
-	c.Set("a", 1)
-	c.Set("b", 2)
-	//: touching "a" makes "b" the LRU victim.
-	c.Fetch("a")
-	c.Set("c", 3)
-	//: "b" was least-recently-used and must be gone.
-	if _, ok := c.Fetch("b"); ok {
-		t.Error("b should have been evicted as LRU")
+	type tc struct {
+		name    string
+		key     string
+		wantHit bool
 	}
-	//: "a" and "c" must survive.
-	if _, ok := c.Fetch("a"); !ok {
-		t.Error("a should survive")
+	tests := []tc{
+		{"the untouched entry is the victim", "b", false},
+		{"the entry a Fetch refreshed survives", "a", true},
+		{"the newest entry survives", "c", true},
 	}
-	if _, ok := c.Fetch("c"); !ok {
-		t.Error("c should survive")
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		cch := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: 2})
+		cch.Set("a", 1)
+		cch.Set("b", 2)
+		//: touching "a" makes "b" the LRU victim.
+		cch.Fetch("a")
+		cch.Set("c", 3)
+		if _, ok := cch.Fetch(c.key); ok != c.wantHit {
+			t.Errorf("Fetch(%q) hit = %v, want %v", c.key, ok, c.wantHit)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
 // TestTTLExpiry expires an entry once the fake clock passes its deadline.
 func TestTTLExpiry(t *testing.T) {
 	t.Parallel()
-	clk := &fakeClock{now: time.Unix(0, 0)}
-	c := cache.NewCache[string, int](cache.Config[string, int]{Clock: clk})
-	c.SetTTL("k", 7, time.Minute)
-	//: before the deadline the entry is live.
-	if _, ok := c.Fetch("k"); !ok {
-		t.Fatal("k should be live before TTL")
+	type tc struct {
+		name    string
+		advance time.Duration
+		wantHit bool
 	}
-	//: advance past the deadline.
-	clk.advance(2 * time.Minute)
-	//: after the deadline the entry is a miss.
-	if _, ok := c.Fetch("k"); ok {
-		t.Error("k should have expired")
+	tests := []tc{
+		{"before the deadline", 0, true},
+		{"just short of the deadline", 59 * time.Second, true},
+		{"past the deadline", 2 * time.Minute, false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		clk := &fakeClock{now: time.Unix(0, 0)}
+		cch := cache.NewCache[string, int](cache.Config[string, int]{Clock: clk})
+		cch.SetTTL("k", 7, time.Minute)
+		clk.advance(c.advance)
+		if _, ok := cch.Fetch("k"); ok != c.wantHit {
+			t.Errorf("Fetch hit = %v after %v, want %v", ok, c.advance, c.wantHit)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -90,16 +114,34 @@ func TestOnEvictAndStats(t *testing.T) {
 // TestUpdateExisting keeps the length stable and updates the value.
 func TestUpdateExisting(t *testing.T) {
 	t.Parallel()
-	c := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: 4})
-	c.Set("k", 1)
-	c.Set("k", 2)
-	//: an overwrite does not grow the cache.
-	if c.Len() != 1 {
-		t.Errorf("Len=%d after overwrite, want 1", c.Len())
+	type tc struct {
+		name      string
+		wantLen   int
+		wantValue int
 	}
-	//: the value reflects the latest Set.
-	if v, _ := c.Fetch("k"); v != 2 {
-		t.Errorf("Fetch=%d, want 2", v)
+	tests := []tc{
+		{"an overwrite does not grow the cache", 1, 0},
+		{"the value reflects the latest Set", 0, 2},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		cch := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: 4})
+		cch.Set("k", 1)
+		cch.Set("k", 2)
+		if c.wantLen != 0 && cch.Len() != c.wantLen {
+			t.Errorf("Len = %d, want %d", cch.Len(), c.wantLen)
+		}
+		if c.wantValue != 0 {
+			if v, _ := cch.Fetch("k"); v != c.wantValue {
+				t.Errorf("Fetch = %d, want %d", v, c.wantValue)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 // EVERY platform table, so the test compiles and runs on non-Unix targets too
 // (Windows's syscall lacks SIGUSR1/SIGWINCH/etc.). The full Unix table is
 // round-tripped in signal_unix_external_test.go. Central contract of issue #62.
-func TestParseRoundTrip(t *testing.T) {
+func Test_Parse(t *testing.T) {
 	t.Parallel()
 
 	//: only signals in both the unix and non-unix tables round-trip everywhere.
@@ -49,7 +49,7 @@ func TestParseRoundTrip(t *testing.T) {
 
 // TestParseForms asserts the three accepted spellings (SIG-prefixed, bare,
 // numeric) and case-insensitivity all resolve to the same signal.
-func TestParseForms(t *testing.T) {
+func Test_Parse_forms(t *testing.T) {
 	t.Parallel()
 
 	want := proc.Signal(syscall.SIGTERM)
@@ -92,7 +92,7 @@ func TestParseForms(t *testing.T) {
 
 // TestParseUnknown asserts unrecognised names and out-of-range numbers surface
 // the typed UnknownSignal sentinel rather than a guess.
-func TestParseUnknown(t *testing.T) {
+func Test_Parse_unknown(t *testing.T) {
 	t.Parallel()
 
 	//: neither a bogus name nor an impossible number names a real signal.
@@ -109,32 +109,118 @@ func TestParseUnknown(t *testing.T) {
 	}
 }
 
-// TestSignalOS asserts the os.Signal bridge preserves the numeric value.
-func TestSignalOS(t *testing.T) {
+// The bridge to os.Signal must preserve the platform number exactly: the
+// value crosses into os/exec and the kernel, where a remapped number would
+// deliver the wrong signal rather than fail.
+func Test_Signal_OS(t *testing.T) {
 	t.Parallel()
-
-	s := proc.Signal(syscall.SIGTERM)
-	//: the bridge must yield the identical syscall.Signal (os.Signal carrier).
-	if got := s.OS(); got != syscall.SIGTERM {
-		t.Fatalf("OS() = %v, want %v", got, syscall.SIGTERM)
+	type tc struct {
+		name string
+		sig  syscall.Signal
 	}
-	//: Int mirrors the underlying platform number.
-	if s.Int() != int(syscall.SIGTERM) {
-		t.Fatalf("Int() = %d, want %d", s.Int(), int(syscall.SIGTERM))
+	tests := []tc{
+		{"SIGTERM", syscall.SIGTERM},
+		{"SIGINT", syscall.SIGINT},
+		{"SIGKILL", syscall.SIGKILL},
+		{"SIGHUP", syscall.SIGHUP},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := proc.Signal(c.sig).OS(); got != c.sig {
+			t.Errorf("OS() = %v, want %v", got, c.sig)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
-// TestUnknownSignalString asserts an unmapped signal renders legibly.
-func TestUnknownSignalString(t *testing.T) {
+// Int mirrors the underlying platform number, which is what a caller writing
+// an exit status or a wait4 result compares against.
+func Test_Signal_Int(t *testing.T) {
 	t.Parallel()
-
-	s := proc.Signal(0)
-	//: the zero/unknown signal must stay legible rather than print as a name.
-	if got := s.String(); got != "signal 0" {
-		t.Fatalf("String() = %q, want %q", got, "signal 0")
+	type tc struct {
+		name string
+		sig  syscall.Signal
 	}
-	//: and it must report as not-known.
-	if s.Known() {
-		t.Fatal("Signal(0).Known() = true, want false")
+	tests := []tc{
+		{"SIGTERM", syscall.SIGTERM},
+		{"SIGINT", syscall.SIGINT},
+		{"SIGKILL", syscall.SIGKILL},
+		{"the zero signal", 0},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := proc.Signal(c.sig).Int(); got != int(c.sig) {
+			t.Errorf("Int() = %d, want %d", got, int(c.sig))
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// An unmapped signal must stay legible rather than print as a name it does not
+// have: "signal 0" tells an operator what arrived, where an empty string or a
+// wrong name would not.
+func Test_Signal_String(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		sig  proc.Signal
+		want string
+	}
+	tests := []tc{
+		{"the zero signal is not a name", proc.Signal(0), "signal 0"},
+		{"SIGTERM", proc.Signal(syscall.SIGTERM), "SIGTERM"},
+		{"SIGINT", proc.Signal(syscall.SIGINT), "SIGINT"},
+		{"an out-of-range number stays legible", proc.Signal(250), "signal 250"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := c.sig.String(); got != c.want {
+			t.Errorf("String() = %q, want %q", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Known is the guard before trusting a decoded value; the zero signal is the
+// reserved sentinel and must never read as known.
+func Test_Signal_Known(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		sig  proc.Signal
+		want bool
+	}
+	tests := []tc{
+		{"the zero signal is reserved", proc.Signal(0), false},
+		{"SIGTERM", proc.Signal(syscall.SIGTERM), true},
+		{"SIGINT", proc.Signal(syscall.SIGINT), true},
+		{"an out-of-range number", proc.Signal(250), false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := c.sig.Known(); got != c.want {
+			t.Errorf("Known() = %v, want %v", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
