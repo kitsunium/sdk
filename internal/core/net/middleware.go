@@ -1,6 +1,8 @@
 // Package net — the generic handler decorator.
 package net
 
+import "slices"
+
 // Middleware decorates a handler with another of the same type.
 //
 // It is generic over the handler type so stream and datagram handlers share one
@@ -15,10 +17,10 @@ type Middleware[H any] func(next H) H
 // which is the only ordering a reader will guess correctly.
 func Chain[H any](h H, middlewares ...Middleware[H]) H {
 	//: apply in reverse so the first entry ends up outermost.
-	for i := len(middlewares) - 1; i >= 0; i-- {
+	for _, middleware := range slices.Backward(middlewares) {
 		//: a nil entry is skipped rather than panicking at serve time.
-		if middlewares[i] != nil {
-			h = middlewares[i](h)
+		if middleware != nil {
+			h = middleware(h)
 		}
 	}
 	//: the fully decorated handler.
