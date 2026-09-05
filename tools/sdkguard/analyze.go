@@ -101,6 +101,7 @@ func skipDir(path string, dir fs.DirEntry) error {
 	//: directory (.git, .cache, a bazel symlink) never holds source we own.
 	//: One condition, one effect — they were two guards saying the same thing.
 	hidden := name != "." && path != "." && strings.HasPrefix(name, ".")
+	//: either kind of directory holds nothing the consumer wrote.
 	if hidden || vendoredDirs[name] {
 		//: pruning here keeps the walk off trees nobody can act on.
 		return filepath.SkipDir
@@ -138,12 +139,14 @@ func scanFile(path string, rules []ruleEntity) []findingEntity {
 		dotImports: dotImports,
 		suppressed: suppressionsOf(fset, file),
 	}
+	//: both resolve names the rules consult, so they run before any rule does.
 	ctx.bridgeBound = ctx.bridgeBoundNames(file)
 	ctx.shadowed = shadowedNames(file, byPath)
 
 	var out []findingEntity
 	//: every selected rule sees the same parsed file and context.
 	for _, rule := range rules {
+		//: a rule may report several times in one file.
 		for _, finding := range rule.Check(ctx, file) {
 			//: a justified exemption removes the finding, silently by design.
 			if ctx.isSuppressed(&finding) {
@@ -168,24 +171,33 @@ func (fc *fileCtx) bridgeBoundNames(file *ast.File) map[string]bool {
 	out := make(map[string]bool, len(fc.byPath))
 	ast.Inspect(file, func(n ast.Node) bool {
 		assign, ok := n.(*ast.AssignStmt)
+		//: only an assignment can bind a handler to a name.
 		if !ok {
+			//: keep walking; the binding may sit deeper.
 			return true
 		}
+		//: a multi-value assignment puts the handler on one side of the pair.
 		for _, rhs := range assign.Rhs {
+			//: either bridge constructor yields a handler that forwards to the
+			//: SDK Logger, so a name bound from one is sanctioned.
 			if !fc.isCall(rhs, bridgeConstructorPath, "NewHandler") &&
 				!fc.isCall(rhs, bridgeConstructorPath, "New") {
+				//: an ordinary assignment says nothing about the bridge.
 				continue
 			}
-			// Bind every left-hand name; the error half of the pair is
-			// harmless here because no rule matches a bare error identifier.
+			//: bind every left-hand name; the error half of the pair is
+			//: harmless here because no rule matches a bare error identifier.
 			for _, lhs := range assign.Lhs {
+				//: only an identifier can carry the binding forward.
 				if ident, isIdent := lhs.(*ast.Ident); isIdent {
 					out[ident.Name] = true
 				}
 			}
 		}
+		//: walk the whole file: the binding may precede or follow the use.
 		return true
 	})
+	//: the names slog.New may legitimately wrap in this file.
 	return out
 }
 
@@ -201,6 +213,7 @@ func (fc *fileCtx) bridgeBoundNames(file *ast.File) map[string]bool {
 // positive it prevents.
 func shadowedNames(file *ast.File, byPath map[string]string) map[string]bool {
 	locals := make(map[string]bool, len(byPath))
+	//: index the import names so the walk below is a lookup, not a scan.
 	for _, name := range byPath {
 		locals[name] = true
 	}
@@ -237,22 +250,26 @@ func markDeclared(n ast.Node, mark func(ast.Expr)) {
 
 // markNameLists handles the constructs binding several names at once.
 func markNameLists(n ast.Node, mark func(ast.Expr)) {
+	//: three constructs bind a list of names; everything else binds one or none.
 	switch decl := n.(type) {
 	//: short variable declarations: the commonest way a name is bound.
 	case *ast.AssignStmt:
 		//: only := binds; = assigns to something already named.
 		if decl.Tok == token.DEFINE {
+			//: a := may bind several names at once.
 			for _, lhs := range decl.Lhs {
 				mark(lhs)
 			}
 		}
 	//: var and const blocks.
 	case *ast.ValueSpec:
+		//: one spec can declare several names sharing a type.
 		for _, name := range decl.Names {
 			mark(name)
 		}
 	//: parameters, named results and struct fields.
 	case *ast.Field:
+		//: one field can name several identifiers of the same type.
 		for _, name := range decl.Names {
 			mark(name)
 		}
@@ -261,6 +278,7 @@ func markNameLists(n ast.Node, mark func(ast.Expr)) {
 
 // markSingleNames handles the constructs binding one identifier.
 func markSingleNames(n ast.Node, mark func(ast.Expr)) {
+	//: three constructs bind exactly one identifier apiece.
 	switch decl := n.(type) {
 	//: a type declaration binds its name in the file scope.
 	case *ast.TypeSpec:
@@ -277,21 +295,29 @@ func markSingleNames(n ast.Node, mark func(ast.Expr)) {
 
 // skipFile reports whether a parsed file is outside the consumer's control.
 func skipFile(file *ast.File) bool {
+	//: both markers live in the header, so the scan stops at the package clause.
 	for _, group := range file.Comments {
-		// Only the header matters: both markers must precede the package
-		// clause to have any meaning.
+		//: only the header matters: both markers must precede the package
+		//: clause to have any meaning.
 		if group.Pos() > file.Package {
+			//: past the header; nothing below can be either marker.
 			break
 		}
+		//: a group holds one comment per line, and either line may be it.
 		for _, c := range group.List {
+			//: a generator owns this file; the consumer cannot fix it.
 			if generatedMarker.MatchString(strings.TrimSpace(c.Text)) {
+				//: skip it rather than report what nobody can action.
 				return true
 			}
+			//: a file no build includes is not part of the code under review.
 			if excludedByBuildTag(c.Text) {
+				//: same reasoning, different marker.
 				return true
 			}
 		}
 	}
+	//: an ordinary source file the consumer owns.
 	return false
 }
 
@@ -303,10 +329,13 @@ func skipFile(file *ast.File) bool {
 // it targets — while "//go:build ignore" is recognised as what it is.
 func excludedByBuildTag(text string) bool {
 	expr, err := constraint.Parse(text)
+	//: not a build line at all; ordinary comments land here.
 	if err != nil {
-		// Not a build line at all; ordinary comments land here.
+		//: an ordinary comment excludes nothing.
 		return false
 	}
+	//: satisfy every tag except "ignore", so only a file excluded from EVERY
+	//: build evaluates false — a platform-specific file still gets scanned.
 	return !expr.Eval(func(tag string) bool { return tag != ignoreTag })
 }
 
@@ -314,31 +343,41 @@ func excludedByBuildTag(text string) bool {
 // separately records the dot imports no selector can reach.
 func importsOf(file *ast.File) (map[string]string, map[string]token.Pos) {
 	out := make(map[string]string, len(file.Imports))
-	dots := make(map[string]token.Pos)
+	//: dot imports are rare; the map usually stays empty.
+	dots := make(map[string]token.Pos, len(file.Imports))
+	//: one pass over the import block resolves every name a rule may match.
 	for _, spec := range file.Imports {
 		path, err := strconv.Unquote(spec.Path.Value)
+		//: an unquotable path cannot be matched against anything.
 		if err != nil {
+			//: skip it; the compiler will have more to say than we would.
 			continue
 		}
-		// An explicit alias wins; otherwise Go binds the path's last element,
-		// which is right for every package the rules care about.
+		//: an explicit alias wins; otherwise Go binds the path's last element,
+		//: which is right for every package the rules care about.
 		name := path[strings.LastIndex(path, "/")+1:]
+		//: an alias overrides the element Go would have bound.
 		if spec.Name != nil {
+			//: the alias is what selectors in this file will spell.
 			name = spec.Name.Name
 		}
+		//: two bindings are not names a selector can carry.
 		switch name {
-		// A blank import binds nothing callable, so no selector can reference
-		// it and no rule can fire on it.
+		//: a blank import binds nothing callable, so no selector can reference
+		//: it and no rule can fire on it.
 		case "_":
+			//: nothing to record either way.
 			continue
-		// A dot import binds no qualifier at all; the rules cannot see through
-		// it, so record it and let them report the blind spot.
+		//: a dot import binds no qualifier at all; the rules cannot see through
+		//: it, so record it and let them report the blind spot.
 		case ".":
 			dots[path] = spec.Pos()
+			//: recorded as a blind spot, not as a resolvable name.
 			continue
 		}
 		out[path] = name
 	}
+	//: the resolvable names, and separately the ones nothing can resolve.
 	return out, dots
 }
 
@@ -350,10 +389,14 @@ func importsOf(file *ast.File) (map[string]string, map[string]token.Pos) {
 func suppressionsOf(fset *token.FileSet, file *ast.File) map[int]map[string]bool {
 	//: one entry per commented line at most; comments are sparse.
 	out := make(map[int]map[string]bool, len(file.Comments))
+	//: a directive can sit anywhere, so the whole comment set is scanned.
 	for _, group := range file.Comments {
+		//: a group holds one comment per line; each may be a directive.
 		for _, c := range group.List {
 			id, ok := parseSuppression(c.Text)
+			//: an ordinary comment, or a directive with no reason.
 			if !ok {
+				//: only a justified directive earns an exemption.
 				continue
 			}
 			line := fset.Position(c.Pos()).Line
@@ -364,20 +407,27 @@ func suppressionsOf(fset *token.FileSet, file *ast.File) map[int]map[string]bool
 			out[line][id] = true
 		}
 	}
+	//: the exemptions this file grants, by line.
 	return out
 }
 
 // parseSuppression extracts the rule ID from a directive that carries a reason.
 func parseSuppression(text string) (string, bool) {
 	trimmed := strings.TrimSpace(text)
+	//: an ordinary comment is not a directive.
 	if !strings.HasPrefix(trimmed, suppressPrefix) {
+		//: nothing to exempt.
 		return "", false
 	}
 	fields := strings.Fields(strings.TrimPrefix(trimmed, suppressPrefix))
-	// fields[0] is the rule ID; anything after it is the mandatory reason.
+	//: fields[0] is the rule ID; anything after it is the mandatory reason.
+	//: A bare directive does not suppress — an exemption nobody had to justify
+	//: is the kind that outlives the reason it was granted for.
 	if len(fields) < suppressionFields {
+		//: refuse it rather than honour an unexplained exemption.
 		return "", false
 	}
+	//: accept sdk001 as readily as SDK001; the ID is not a password.
 	return strings.ToUpper(fields[0]), true
 }
 
@@ -388,10 +438,13 @@ func (fc *fileCtx) isSuppressed(finding *findingEntity) bool {
 	//: a pointer because the struct is wider than the by-value threshold, and
 	//: nothing here mutates it.
 	for _, line := range []int{finding.Line, finding.Line - nearbyLines} {
+		//: the directive covers its own line or the one below it.
 		if fc.suppressed[line][finding.Rule] {
+			//: a justified exemption; the finding is dropped silently.
 			return true
 		}
 	}
+	//: no directive covers this finding.
 	return false
 }
 
@@ -399,30 +452,39 @@ func (fc *fileCtx) isSuppressed(finding *findingEntity) bool {
 // local name the file bound that import to.
 func (fc *fileCtx) isSelector(n ast.Expr, path, name string) bool {
 	sel, ok := n.(*ast.SelectorExpr)
+	//: only a selector can name a package member, and the member must match.
 	if !ok || sel.Sel.Name != name {
+		//: not the reference this rule watches.
 		return false
 	}
 	ident, ok := sel.X.(*ast.Ident)
+	//: the qualifier must be a plain identifier, not another expression.
 	if !ok {
+		//: a method on a value, not a package member.
 		return false
 	}
-	// The import must be present in THIS file; a selector on a same-named
-	// local variable in a file that does not import the package is not a match.
+	//: the import must be present in THIS file; a selector on a same-named
+	//: local variable in a file that does not import the package is not a match.
 	local, ok := fc.byPath[path]
+	//: the path must be imported here, under exactly this qualifier.
 	if !ok || ident.Name != local {
+		//: the file never bound this path to that name.
 		return false
 	}
-	// ...and the name must not also be bound as an identifier here, or the
-	// selector could just as well be a field access on that local.
+	//: ...and the name must not also be bound as an identifier here, or the
+	//: selector could just as well be a field access on that local.
 	return !fc.shadowed[local]
 }
 
 // isCall reports whether n is a call to <path>.<name>.
 func (fc *fileCtx) isCall(n ast.Node, path, name string) bool {
 	call, ok := n.(*ast.CallExpr)
+	//: a reference that is not called says nothing about a pipeline.
 	if !ok {
+		//: a bare selector is vocabulary, not construction.
 		return false
 	}
+	//: the callee decides; the arguments are the caller's business.
 	return fc.isSelector(call.Fun, path, name)
 }
 
@@ -430,12 +492,14 @@ func (fc *fileCtx) isCall(n ast.Node, path, name string) bool {
 // checks before walking the whole AST.
 func (fc *fileCtx) imports(path string) bool {
 	_, ok := fc.byPath[path]
+	//: presence alone answers it; the local name is the selector's business.
 	return ok
 }
 
 // at builds a findingEntity positioned on n.
 func (fc *fileCtx) at(n ast.Node, rule, msg string) findingEntity {
 	pos := fc.fset.Position(n.Pos())
+	//: flattened here so the finding stays narrow enough to pass by value.
 	return findingEntity{File: pos.Filename, Line: pos.Line, Column: pos.Column, Rule: rule, Message: msg}
 }
 
@@ -445,10 +509,13 @@ func (fc *fileCtx) at(n ast.Node, rule, msg string) findingEntity {
 // found nothing, and only the first is worth a clean run.
 func (fc *fileCtx) blindSpot(path, rule string) []findingEntity {
 	pos, dotted := fc.dotImports[path]
+	//: an ordinary import resolves fine; there is no blind spot to report.
 	if !dotted {
+		//: the rule can see this file, so let it do its own work.
 		return nil
 	}
 	at := fc.fset.Position(pos)
+	//: point at the import itself — that is the line a reader must change.
 	return []findingEntity{{
 		File:   at.Filename,
 		Line:   at.Line,

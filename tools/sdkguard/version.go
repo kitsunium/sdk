@@ -106,23 +106,32 @@ type moduleRef struct {
 // freshness nudge that breaks a build has failed at being a nudge.
 func checkVersion(dir string, p probe) (string, bool) {
 	ref, ok := sdkRequirement(dir)
-	// A workspace root has no go.mod of its own, so the documented
-	// `sdkguard ./...` form from there would scan every module and warn about
-	// none of them.
+	//: a workspace root has no go.mod of its own, so the documented
+	//: `sdkguard ./...` form from there would scan every module and warn about
+	//: none of them.
 	if !ok {
+		//: fall back to the modules go.work lists.
 		ref, ok = workspaceRequirement(dir)
 	}
+	//: no requirement, or one the build replaces locally — say nothing either
+	//: way: a replace means someone is working against a checkout.
 	if !ok || ref.Replaced {
+		//: silence, which is the documented behaviour of every failure path.
 		return "", false
 	}
 	versions, err := p.versions(sdkModule)
+	//: no proxy, no network, a bad response — none of them is worth a warning.
 	if err != nil {
+		//: a nudge that breaks a build has failed at being a nudge.
 		return "", false
 	}
 	newer := newerThan(ref.Version, versions)
+	//: up to date, or ahead of the proxy on an unreleased tag.
 	if len(newer) == 0 {
+		//: nothing to advise.
 		return "", false
 	}
+	//: behind, with the gap counted so the notice can name its size.
 	return versionNotice(ref.Version, newer), true
 }
 
@@ -135,14 +144,19 @@ func checkVersion(dir string, p probe) (string, bool) {
 // line shapes, and a parse that fails simply yields no warning.
 func sdkRequirement(dir string) (moduleRef, bool) {
 	path, ok := findGoMod(dir)
+	//: no go.mod above this directory; the caller may still try go.work.
 	if !ok {
+		//: nothing to read.
 		return moduleRef{}, false
 	}
 	data, err := os.ReadFile(path) //nolint:gosec // path comes from walking the scan root, not from input
+	//: an unreadable go.mod is not this tool's problem to report.
 	if err != nil {
+		//: silence, like every other degraded path.
 		return moduleRef{}, false
 	}
 
+	//: the grammar lives in parseGoMod; this function only located the file.
 	return parseGoMod(string(data))
 }
 
@@ -160,6 +174,7 @@ func parseGoMod(text string) (moduleRef, bool) {
 	for raw := range strings.SplitSeq(text, "\n") {
 		//: a blank or comment-only line carries nothing to read.
 		line := stripComment(raw)
+		//: a blank or comment-only line carries nothing to read.
 		if line == "" {
 			//: nothing on this line survives the comment strip.
 			continue
@@ -181,6 +196,7 @@ func stripComment(raw string) string {
 	//: Cut says "before, and whether there was a marker" in one call, which
 	//: is exactly the question; Index made the caller re-derive it.
 	before, _, found := strings.Cut(line, "//")
+	//: a marker anywhere on the line ends its content there.
 	if found {
 		//: keep only what precedes the marker, re-trimmed.
 		return strings.TrimSpace(before)
@@ -194,24 +210,31 @@ func stripComment(raw string) string {
 // Split out of parseGoMod so each function states one thing: this one knows
 // the grammar, the caller knows the iteration.
 func readGoModLine(ref *moduleRef, section gomodSection, line string) gomodSection {
+	//: block openers first, then the single-line forms, then block content.
 	switch {
 	//: opening a block sets the context for the lines that follow.
 	case strings.HasPrefix(line, "require ("):
+		//: every following line is a requirement until ")".
 		return sectionRequire
+	//: the replace block, read the same way.
 	case strings.HasPrefix(line, "replace ("):
+		//: every following line is a replacement until ")".
 		return sectionReplace
 	//: a lone ")" closes whichever block was open.
 	case line == ")":
+		//: back to the top level, where a keyword is required again.
 		return sectionNone
 	//: the single-line forms carry their own keyword, so they are read
 	//: directly and leave the surrounding context untouched.
 	case strings.HasPrefix(line, "require "):
 		readRequire(ref, strings.TrimPrefix(line, "require "))
+	//: the single-line replace, likewise.
 	case strings.HasPrefix(line, "replace "):
 		readReplace(ref, strings.TrimPrefix(line, "replace "))
 	//: anything else belongs to the open block, if there is one.
 	case section == sectionRequire:
 		readRequire(ref, line)
+	//: inside a replace block, every line is a replacement.
 	case section == sectionReplace:
 		readReplace(ref, line)
 	}
@@ -222,8 +245,6 @@ func readGoModLine(ref *moduleRef, section gomodSection, line string) gomodSecti
 // readRequire records the SDK version from a "<path> <version>" entry.
 func readRequire(ref *moduleRef, entry string) {
 	fields := strings.Fields(entry)
-	//: a require entry spells "<path> <version>"; anything shorter is not one,
-	//: and a path that is not the SDK's is none of this probe's business.
 	//: three conditions, one effect — the entry is not an SDK requirement this
 	//: probe can compare, whether it is too short, names another module, or
 	//: carries something that is not a version. Reading a malformed line as a
@@ -234,6 +255,7 @@ func readRequire(ref *moduleRef, entry string) {
 		//: nothing to record.
 		return
 	}
+	//: the version this build requires, ready to compare against the roster.
 	ref.Version = fields[requireVersion]
 }
 
@@ -246,11 +268,16 @@ func readRequire(ref *moduleRef, entry string) {
 // behind.
 func readReplace(ref *moduleRef, entry string) {
 	lhs, _, found := strings.Cut(entry, "=>")
+	//: an entry with no arrow is not a replacement.
 	if !found {
+		//: nothing to record.
 		return
 	}
 	fields := strings.Fields(lhs)
+	//: only the LEFT side names what is being replaced; the SDK appearing on
+	//: the right means some other module was redirected TO it.
 	if len(fields) > 0 && fields[0] == sdkModule {
+		//: the build uses a local checkout, so freshness advice is noise.
 		ref.Replaced = true
 	}
 }
@@ -262,30 +289,41 @@ func readReplace(ref *moduleRef, entry string) {
 // module hide behind an up-to-date sibling.
 func workspaceRequirement(dir string) (moduleRef, bool) {
 	work, found := findUp(dir, "go.work")
+	//: no workspace either; there is nothing left to resolve through.
 	if !found {
+		//: the caller already tried go.mod.
 		return moduleRef{}, false
 	}
 	data, err := os.ReadFile(work) //nolint:gosec // path comes from walking the scan root, not from input
+	//: an unreadable go.work is not this tool's problem to report.
 	if err != nil {
+		//: silence, like every other degraded path.
 		return moduleRef{}, false
 	}
 
 	root := filepath.Dir(work)
 	var oldest moduleRef
+	//: use paths are relative to the workspace root, not the scan root.
 	for _, rel := range workspaceUses(string(data)) {
 		ref, ok := sdkRequirement(filepath.Join(root, rel))
+		//: a module that does not depend on the SDK has nothing to say.
 		if !ok {
+			//: skip it and keep looking.
 			continue
 		}
-		// A replaced module anywhere means someone is working locally; say
-		// nothing rather than nag about a version the build does not use.
+		//: a replaced module anywhere means someone is working locally; say
+		//: nothing rather than nag about a version the build does not use.
 		if ref.Replaced {
+			//: one local checkout silences the whole workspace.
 			return moduleRef{}, false
 		}
+		//: the OLDEST wins: warning about the newest would let a stale module
+		//: hide behind an up-to-date sibling.
 		if oldest.Version == "" || semverLess(ref.Version, oldest.Version) {
 			oldest = ref
 		}
 	}
+	//: a requirement was found only when some module named one.
 	return oldest, oldest.Version != ""
 }
 
@@ -297,41 +335,55 @@ func workspaceUses(text string) []string {
 	//: SplitSeq walks the lines without materialising the whole slice.
 	for raw := range strings.SplitSeq(text, "\n") {
 		line := stripComment(raw)
+		//: go.work has the same two shapes go.mod does: block, or single line.
 		switch {
+		//: a blank or comment-only line carries nothing.
 		case line == "":
+		//: opening the block; every following line is a directory.
 		case strings.HasPrefix(line, "use ("):
 			inBlock = true
+		//: closing it; a keyword is required again below.
 		case line == ")":
 			inBlock = false
+		//: the single-line form carries its own keyword.
 		case strings.HasPrefix(line, "use "):
 			dirs = append(dirs, strings.Trim(strings.TrimPrefix(line, "use "), `"`))
+		//: anything else inside the block is a directory.
 		case inBlock:
 			dirs = append(dirs, strings.Trim(line, `"`))
 		}
 	}
+	//: the module directories this workspace declares.
 	return dirs
 }
 
 // findGoMod walks up from dir looking for a go.mod, so the tool works from a
 // package subdirectory the way every other Go tool does.
 func findGoMod(dir string) (string, bool) {
+	//: the walk itself is shared with the go.work lookup.
 	return findUp(dir, "go.mod")
 }
 
 // findUp walks up from dir looking for name.
 func findUp(dir, name string) (string, bool) {
 	abs, err := filepath.Abs(dir)
+	//: an unresolvable path cannot be walked up from.
 	if err != nil {
+		//: nothing found, and nothing to complain about.
 		return "", false
 	}
+	//: climb until the file turns up or the filesystem root is reached.
 	for {
 		candidate := filepath.Join(abs, name)
+		//: the first hit wins, which is the nearest enclosing module.
 		if _, statErr := os.Stat(candidate); statErr == nil {
+			//: found it.
 			return candidate, true
 		}
 		parent := filepath.Dir(abs)
-		// filepath.Dir is idempotent at the filesystem root; that is the stop.
+		//: filepath.Dir is idempotent at the filesystem root; that is the stop.
 		if parent == abs {
+			//: walked the whole way up without finding it.
 			return "", false
 		}
 		abs = parent
@@ -347,26 +399,35 @@ func findUp(dir, name string) (string, bool) {
 // reason the list exists.
 func (p probe) versions(module string) (releases []string, err error) {
 	bases := []string{p.proxy}
+	//: an explicit proxy is a test stub; otherwise read the environment.
 	if p.proxy == "" {
 		resolved, enabled := resolveProxies()
+		//: GOPROXY=off, or a list naming nothing callable.
 		if !enabled {
+			//: no request is made at all.
 			return nil, errProxyDisabled
 		}
 		bases = resolved
 	}
 	client := p.client
+	//: a nil client means production; the timeout is what keeps a firewalled
+	//: runner from hanging the whole lint.
 	if client == nil {
 		client = &http.Client{Timeout: probeTimeout}
 	}
 
 	lastErr := errProxyDisabled
+	//: walk the list in order, exactly as the go command would.
 	for _, base := range bases {
-		out, err := fetchVersions(client, base, module)
-		if err == nil {
+		out, fetchErr := fetchVersions(client, base, module)
+		//: the first proxy that answers settles it.
+		if fetchErr == nil {
+			//: no need to try the backups.
 			return out, nil
 		}
-		lastErr = err
+		lastErr = fetchErr
 	}
+	//: every entry failed; report the last cause rather than a bare nil.
 	return nil, lastErr
 }
 
@@ -390,10 +451,12 @@ func fetchVersions(client *http.Client, base, module string) (releases []string,
 		return nil, errProxyDisabled
 	}
 
-	// Bound the read: a proxy is a third party, and an unbounded body from one
-	// would be a denial-of-service on the linter.
+	//: bound the read: a proxy is a third party, and an unbounded body from one
+	//: would be a denial-of-service on the linter.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxListBytes))
+	//: a truncated or failed read leaves nothing worth parsing.
 	if err != nil {
+		//: the deferred close joins its own error onto this one.
 		return nil, err
 	}
 
@@ -414,7 +477,9 @@ func fetchVersions(client *http.Client, base, module string) (releases []string,
 // usable proxy in order, reporting whether any exists at all.
 func resolveProxies() ([]string, bool) {
 	raw := strings.TrimSpace(os.Getenv("GOPROXY"))
+	//: unset means the go command's own default, not "no proxy".
 	if raw == "" {
+		//: the same endpoint a plain `go get` would reach.
 		return []string{defaultProxy}, true
 	}
 	var out []string
@@ -448,6 +513,7 @@ func isProxySeparator(r rune) bool {
 // that URL is usable, and whether it forbids proxying outright.
 func classifyProxy(entry string) (url string, usable, stop bool) {
 	entry = strings.TrimSpace(entry)
+	//: two keywords and a scheme are the only spellings that mean anything.
 	switch {
 	//: "off" forbids any module download.
 	case entry == "off":
@@ -457,6 +523,7 @@ func classifyProxy(entry string) (url string, usable, stop bool) {
 	case entry == "direct" || entry == "":
 		//: nothing callable here, but the list continues.
 		return "", false, false
+	//: an http(s) entry is the only kind this probe can dial.
 	case strings.HasPrefix(entry, "http://") || strings.HasPrefix(entry, "https://"):
 		//: a usable endpoint; the trailing slash would double up on join.
 		return strings.TrimSuffix(entry, "/"), true, false
@@ -473,6 +540,7 @@ func newerThan(cur string, versions []string) []string {
 	var newer []string
 	//: keep only the tags that sort strictly after the requirement.
 	for _, candidate := range versions {
+		//: strictly newer, so an exact match is not "behind".
 		if semverLess(cur, candidate) {
 			newer = append(newer, candidate)
 		}
@@ -485,7 +553,10 @@ func newerThan(cur string, versions []string) []string {
 // sortVersions orders versions ascending by semver. Insertion sort keeps the
 // dependency list empty and the input is a handful of tags.
 func sortVersions(v []string) {
+	//: insertion sort keeps the dependency list empty; the input is a handful
+	//: of tags, so the quadratic worst case never bites.
 	for i := 1; i < len(v); i++ {
+		//: slide the element left until it sits in order.
 		for j := i; j > 0 && semverLess(v[j], v[j-1]); j-- {
 			v[j], v[j-1] = v[j-1], v[j]
 		}
@@ -511,7 +582,9 @@ func parseSemver(v string) (major, minor, patch int, ok bool) {
 	//: parse each component; any non-numeric part disqualifies the whole tag.
 	for i, p := range parts {
 		n, err := strconv.Atoi(p)
+		//: a non-numeric or negative component disqualifies the whole tag.
 		if err != nil || n < 0 {
+			//: not a strict release; the caller must not treat it as one.
 			return 0, 0, 0, false
 		}
 		nums[i] = n
@@ -525,18 +598,29 @@ func parseSemver(v string) (major, minor, patch int, ok bool) {
 func semverLess(a, b string) bool {
 	amaj, amin, apatch, aok := parseSemver(a)
 	bmaj, bmin, bpatch, bok := parseSemver(b)
+	//: nothing sorts before an unparseable target, or every pseudo-version
+	//: would look like an upgrade.
 	if !bok {
+		//: b is not a release, so a cannot precede it.
 		return false
 	}
+	//: an unparseable a sorts first, so a consumer on a pseudo-version is told
+	//: about every real release.
 	if !aok {
+		//: a is not a release, so every real tag is newer.
 		return true
 	}
+	//: major, then minor, then patch — the usual precedence.
 	if amaj != bmaj {
+		//: a differing major settles it.
 		return amaj < bmaj
 	}
+	//: same major, so the minor decides.
 	if amin != bmin {
+		//: a differing minor settles it.
 		return amin < bmin
 	}
+	//: same major and minor; only the patch is left.
 	return apatch < bpatch
 }
 
@@ -544,17 +628,19 @@ func semverLess(a, b string) bool {
 // what tells a reader how urgent this is, and it names the exact go get line
 // because a nudge without a next step is just noise.
 func versionNotice(cur string, newer []string) string {
+	//: newerThan sorted ascending, so the last entry is the newest release.
 	latest := newer[len(newer)-1]
 	var b strings.Builder
 	b.WriteString("warning: the SDK is " + strconv.Itoa(len(newer)) + " " +
 		gapKind(cur, latest) + " behind — go.mod requires " + cur + ", latest is " + latest + ".\n")
-	// The reason a patch matters here is specific to this SDK's release policy,
-	// and it is the part a consumer cannot infer from a changelog of exported
-	// symbols.
+	//: the reason a patch matters here is specific to this SDK's release
+	//: policy, and it is the part a consumer cannot infer from a changelog of
+	//: exported symbols.
 	b.WriteString("  A patch is cut whenever an internal package pkg depends on changes (ADR 0007),\n")
 	b.WriteString("  so releases carry fixes that never alter the public API.\n")
 	b.WriteString("  Update:  go get " + sdkModule + "@" + latest + "\n")
 	b.WriteString("  Silence: -version-check=off")
+	//: one block of text, printed verbatim by the caller.
 	return b.String()
 }
 
@@ -563,15 +649,24 @@ func versionNotice(cur string, newer []string) string {
 func gapKind(cur, latest string) string {
 	cmaj, cmin, _, cok := parseSemver(cur)
 	lmaj, lmin, _, lok := parseSemver(latest)
+	//: without two parseable tags the gap has no nameable kind.
 	if !cok || !lok {
+		//: the neutral word, which still reads correctly in the sentence.
 		return "releases"
 	}
+	//: name the largest component that moved; that is what conveys urgency.
 	switch {
+	//: a major gap is the one a reader must plan for.
 	case lmaj != cmaj:
+		//: say MAJOR loudly; it is the only gap that can break a build.
 		return "releases, crossing a MAJOR version,"
+	//: a minor gap means new API, not just fixes.
 	case lmin != cmin:
+		//: worth naming, but not worth alarming about.
 		return "releases, crossing a minor version,"
+	//: patches only — the case this whole probe exists for.
 	default:
+		//: the wording that makes ADR 0007's policy legible in one line.
 		return "patch releases"
 	}
 }
