@@ -1,3 +1,4 @@
+// Package resilience — the timeout policy's Run.
 package resilience
 
 import (
@@ -9,75 +10,120 @@ import (
 	coreres "github.com/kitsunium/sdk/internal/core/resilience"
 )
 
-// Test_Timeout_LateSuccessStillTimesOut pins the deadline's authority: an
-// Operation that ignores ctx and reports success AFTER the deadline expired
-// must still surface TimeoutExceeded.
+// Test_timeoutRunner_Run pins the deadline's authority AND its boundary.
 //
-// The old guard only consulted dctx.Err() when op returned a non-nil error, so
-// a ctx-ignoring op returning nil made Run report success and silently void the
-// policy. The doc promises degraded precision ("op granularity") for such an
-// op — not an abandoned deadline.
-func Test_Timeout_LateSuccessStillTimesOut(t *testing.T) {
+// The authority half: an operation that IGNORES its context and reports success
+// after the deadline expired must still surface TimeoutExceeded. An earlier
+// version only consulted the derived context when the operation returned an
+// error, so a ctx-deaf operation returning nil made Run report success and
+// silently void the policy. The documented degradation for such an operation is
+// "precision drops to op granularity" — not "the deadline is abandoned".
+//
+// The boundary half: a PARENT cancellation is not a deadline. Relabelling it
+// TimeoutExceeded would tell a caller shutting down that its dependency was
+// slow, which is a different problem with a different fix.
+func Test_timeoutRunner_Run(t *testing.T) {
 	t.Parallel()
+	opErr := errors.New("the operation failed")
+
+	//: outcome names the single verdict the call must reach, which keeps the
+	//: impossible combinations (a timeout that is also a cancellation)
+	//: unrepresentable.
+	type outcome int
+	const (
+		succeeds outcome = iota
+		timesOut
+		propagatesCancellation
+		propagatesOpError
+	)
 	type tc struct {
-		name    string
+		name string
+		//: the policy's deadline.
+		timeout time.Duration
 		op      coreres.Operation
-		wantErr bool
+		//: cancel the parent before running.
+		cancelParent bool
+		want         outcome
+		//: the operation's own error, for the propagate case.
+		opErr error
 	}
 	tests := []tc{
 		{
-			//: the defect case — ignores ctx, overruns, then reports success.
-			"ignores ctx and succeeds late",
-			func(context.Context) error { time.Sleep(40 * time.Millisecond); return nil },
-			true,
+			name:    "an operation that finishes in time",
+			timeout: 5 * time.Second,
+			op:      func(context.Context) error { return nil },
 		},
 		{
-			//: a well-behaved op that finishes in time still succeeds.
-			"finishes in time",
-			func(context.Context) error { return nil },
-			false,
+			name:    "an operation's own error passes through",
+			timeout: 5 * time.Second,
+			op:      func(context.Context) error { return opErr },
+			want:    propagatesOpError,
+			opErr:   opErr,
 		},
 		{
-			//: an op honouring ctx surfaces the deadline itself.
-			"honours ctx",
-			func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() },
-			true,
+			//: the defect case: deaf to the deadline, then reports success.
+			name:    "an operation that ignores the context and succeeds late",
+			timeout: 10 * time.Millisecond,
+			op:      func(context.Context) error { time.Sleep(40 * time.Millisecond); return nil },
+			want:    timesOut,
+		},
+		{
+			name:    "an operation that honours the context",
+			timeout: 10 * time.Millisecond,
+			op:      func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() },
+			want:    timesOut,
+		},
+		{
+			//: a parent cancellation is not a deadline.
+			name:         "a cancelled parent propagates untouched",
+			timeout:      time.Hour,
+			op:           func(ctx context.Context) error { return ctx.Err() },
+			cancelParent: true,
+			want:         propagatesCancellation,
 		},
 	}
-	runCase := func(t *testing.T, tc tc) {
+	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		err := NewTimeout(10*time.Millisecond).Run(t.Context(), tc.op)
-		//: contract: an expired deadline always reports TimeoutExceeded.
-		if tc.wantErr {
-			if !errors.Is(err, coreres.TimeoutExceeded) {
-				t.Errorf("%s: err=%v, want TimeoutExceeded", tc.name, err)
-			}
-			return
+		ctx := t.Context()
+		if c.cancelParent {
+			stopped, cancel := context.WithCancel(t.Context())
+			cancel()
+			defer cancel()
+			ctx = stopped
 		}
-		//: an in-time operation propagates its own (nil) outcome.
-		if err != nil {
-			t.Errorf("%s: err=%v, want nil", tc.name, err)
-		}
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
-	}
-}
 
-// Test_Timeout_ParentCancelNotRelabelled guards the boundary: a parent
-// cancellation is NOT a deadline, so it must propagate as-is rather than being
-// relabelled TimeoutExceeded by the broadened check.
-func Test_Timeout_ParentCancelNotRelabelled(t *testing.T) {
-	t.Parallel()
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	err := NewTimeout(time.Hour).Run(ctx, func(c context.Context) error { return c.Err() })
-	//: the parent cancel surfaces context.Canceled, untouched by the policy.
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("err=%v, want context.Canceled", err)
+		err := NewTimeout(c.timeout).Run(ctx, c.op)
+
+		switch c.want {
+		case timesOut:
+			if !errors.Is(err, coreres.TimeoutExceeded) {
+				t.Fatalf("Run = %v, want TimeoutExceeded", err)
+			}
+		case propagatesCancellation:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("Run = %v, want the cancellation", err)
+			}
+			//: and it must NOT be dressed up as a timeout.
+			if errors.Is(err, coreres.TimeoutExceeded) {
+				t.Error("a parent cancellation was relabelled TimeoutExceeded")
+			}
+		case propagatesOpError:
+			if !errors.Is(err, c.opErr) {
+				t.Fatalf("Run = %v, want %v verbatim", err, c.opErr)
+			}
+			if errors.Is(err, coreres.TimeoutExceeded) {
+				t.Error("an in-time failure was relabelled TimeoutExceeded")
+			}
+		case succeeds:
+			if err != nil {
+				t.Fatalf("Run = %v, want nil", err)
+			}
+		}
 	}
-	//: and it must NOT be mislabelled as a timeout.
-	if errors.Is(err, coreres.TimeoutExceeded) {
-		t.Error("parent cancellation was relabelled TimeoutExceeded")
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
