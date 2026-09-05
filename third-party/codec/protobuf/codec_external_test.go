@@ -1,7 +1,8 @@
+// Package protobuf_test — the codec as a consumer sees it: one registered
+// singleton reachable by name, MIME type and file extension.
 package protobuf_test
 
 import (
-	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -12,74 +13,94 @@ import (
 )
 
 // sample builds a structpb.Struct proto.Message fixture (no codegen needed).
-func sample(t *testing.T) *structpb.Struct {
+func sample(t *testing.T, fields map[string]any) *structpb.Struct {
 	t.Helper()
-	//: a JSON-like document structpb can represent losslessly.
-	s, err := structpb.NewStruct(map[string]any{"id": "kitsunium", "n": float64(42), "ok": true})
-	//: construction must succeed for the round-trip to be meaningful.
+	s, err := structpb.NewStruct(fields)
+	//: construction must succeed for the round trip to be meaningful.
 	if err != nil {
 		t.Fatalf("structpb.NewStruct: %v", err)
 	}
 	return s
 }
 
-// TestRoundTrip encodes a proto.Message and decodes it back without loss.
+// TestNew pins that the package registers itself on import and that every
+// documented key resolves to the SAME singleton. Three keys resolving to three
+// codecs would still pass a per-key lookup test while doubling the work a
+// content-negotiating caller does.
+func TestNew(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		lookup func() (codec.Codec, bool)
+	}
+	tests := []tc{
+		{"by format name", func() (codec.Codec, bool) { return codec.Lookup("protobuf") }},
+		{"by MIME type", func() (codec.Codec, bool) { return codec.LookupMIME("application/protobuf") }},
+		{"by the x- MIME alias", func() (codec.Codec, bool) { return codec.LookupMIME("application/x-protobuf") }},
+		{"by file extension", func() (codec.Codec, bool) { return codec.LookupExt(".pb") }},
+	}
+	want := protobuf.New()
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got, ok := c.lookup()
+		if !ok {
+			t.Fatalf("lookup %s missed — the codec did not self-register", c.name)
+		}
+		//: the same singleton, not merely an equivalent codec.
+		if got != want {
+			t.Errorf("lookup %s resolved a different instance", c.name)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+	//: New is stateless, so repeated calls must not mint new instances.
+	if protobuf.New() != want {
+		t.Error("New() returned a different instance on a second call")
+	}
+}
+
+// TestRoundTrip is the consumer-level contract: what this codec writes, it can
+// read back. Marshal and Unmarshal are tested individually inside the package;
+// what only shows up here is that the two agree.
 func TestRoundTrip(t *testing.T) {
 	t.Parallel()
-	c := protobuf.New()
-	want := sample(t)
-	data, err := c.Marshal(want)
-	//: encode must succeed for a proto.Message.
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+	type tc struct {
+		name   string
+		fields map[string]any
 	}
-	got := &structpb.Struct{}
-	//: decode back into a fresh message.
-	if uerr := c.Unmarshal(data, got); uerr != nil {
-		t.Fatalf("Unmarshal: %v", uerr)
+	tests := []tc{
+		{"a mixed document", map[string]any{"id": "kitsunium", "n": float64(42), "ok": true}},
+		{"an empty document", map[string]any{}},
+		{"a nested document", map[string]any{"outer": map[string]any{"inner": "v"}}},
+		{"a list-valued field", map[string]any{"xs": []any{"a", "b"}}},
 	}
-	//: proto.Equal is the canonical message comparison.
-	if !proto.Equal(want, got) {
-		t.Errorf("round-trip mismatch got=%v want=%v", got, want)
-	}
-}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		codc := protobuf.New()
+		want := sample(t, c.fields)
 
-// TestRegisteredViaImport verifies the codec self-registers under name/MIME/ext.
-func TestRegisteredViaImport(t *testing.T) {
-	t.Parallel()
-	//: name lookup.
-	if _, ok := codec.Lookup("protobuf"); !ok {
-		t.Error("Format \"protobuf\" not registered")
+		data, err := codc.Marshal(want)
+		if err != nil {
+			t.Fatalf("Marshal = %v, want nil", err)
+		}
+		got := &structpb.Struct{}
+		if uerr := codc.Unmarshal(data, got); uerr != nil {
+			t.Fatalf("Unmarshal = %v, want nil", uerr)
+		}
+		//: proto messages carry unexported state, so equality goes through the
+		//: library rather than through ==.
+		if !proto.Equal(want, got) {
+			t.Errorf("the round trip turned %v into %v", want, got)
+		}
 	}
-	//: MIME lookup.
-	if _, ok := codec.LookupMIME("application/protobuf"); !ok {
-		t.Error("MIME application/protobuf not registered")
-	}
-	//: extension lookup.
-	if _, ok := codec.LookupExt(".pb"); !ok {
-		t.Error("extension .pb not registered")
-	}
-}
-
-// TestMarshalRejectsNonMessage confirms a non-proto.Message surfaces the sentinel.
-func TestMarshalRejectsNonMessage(t *testing.T) {
-	t.Parallel()
-	//: Protobuf is schema-bound — a plain map is not a message.
-	_, err := protobuf.New().Marshal(map[string]any{"x": 1})
-	//: the error must surface and name the marshal reason.
-	if err == nil || !strings.Contains(err.Error(), "PROTOBUF_MARSHAL_FAILED") {
-		t.Fatalf("Marshal(non-message) err=%v, want PROTOBUF_MARSHAL_FAILED", err)
-	}
-}
-
-// TestUnmarshalSizeCap surfaces PROTOBUF_SIZE_EXCEEDED above the 10 MiB cap.
-func TestUnmarshalSizeCap(t *testing.T) {
-	t.Parallel()
-	//: an 11 MiB buffer trips the cap before the decoder runs.
-	big := make([]byte, (10<<20)+1)
-	err := protobuf.New().Unmarshal(big, &structpb.Struct{})
-	//: the cap error must surface.
-	if err == nil || !strings.Contains(err.Error(), "PROTOBUF_SIZE_EXCEEDED") {
-		t.Fatalf("Unmarshal(oversized) err=%v, want PROTOBUF_SIZE_EXCEEDED", err)
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
