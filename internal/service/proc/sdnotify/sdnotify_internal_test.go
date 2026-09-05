@@ -2,6 +2,7 @@
 package sdnotify
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -9,35 +10,15 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// resolveCase is one resolveAddr expectation.
-type resolveCase struct {
-	name string
-	raw  string
-	want string
-}
-
-// parseCase is one parsePayload expectation.
-type parseCase struct {
-	name      string
-	body      string
-	wantReady bool
-	wantPID   int
-	wantStat  string
-	wantErr   bool
-}
-
-// watchdogCase is one watchdogInterval expectation.
-type watchdogCase struct {
-	name    string
-	raw     string
-	wantDur time.Duration
-	wantOK  bool
-}
-
-// TestResolveAddr verifies the abstract-namespace marker rewrite.
-func TestResolveAddr(t *testing.T) {
+// Test_resolveAddr verifies the abstract-namespace marker rewrite.
+func Test_resolveAddr(t *testing.T) {
 	t.Parallel()
 	//: each case maps a raw NOTIFY_SOCKET value to its bound address form.
+	type resolveCase struct {
+		name string
+		raw  string
+		want string
+	}
 	cases := []resolveCase{
 		//: a pathname socket passes through unchanged.
 		{name: "pathname", raw: "/run/notify", want: "/run/notify"},
@@ -68,11 +49,19 @@ func TestResolveAddr(t *testing.T) {
 	}
 }
 
-// TestParsePayload verifies datagram-body parsing into a NotificationValue and
+// Test_parsePayload verifies datagram-body parsing into a NotificationValue and
 // the InvalidNotification path.
-func TestParsePayload(t *testing.T) {
+func Test_parsePayload(t *testing.T) {
 	t.Parallel()
 	//: each case maps a datagram body to expected flags/fields or an error.
+	type parseCase struct {
+		name      string
+		body      string
+		wantReady bool
+		wantPID   int
+		wantStat  string
+		wantErr   bool
+	}
 	cases := []parseCase{
 		//: a READY datagram sets the ready flag.
 		{name: "ready", body: "READY=1\n", wantReady: true},
@@ -134,20 +123,18 @@ func TestParsePayload(t *testing.T) {
 	}
 }
 
-// encodeCase is one encodePayload expectation.
-type encodeCase struct {
-	name    string
-	state   map[string]string
-	wantErr bool
-}
-
-// TestEncodePayloadInjection verifies encodePayload rejects names/values that
+// Test_encodePayload verifies encodePayload rejects names/values that
 // would forge extra fields via the '\n' / '=' delimiters, and accepts clean
 // state. A newline in a value previously injected additional NAME=value lines
 // (e.g. a forged READY=1), so such input must surface InvalidNotification.
-func TestEncodePayloadInjection(t *testing.T) {
+func Test_encodePayload(t *testing.T) {
 	t.Parallel()
 	//: each case maps a state map to "encodes cleanly" or "rejected as malformed".
+	type encodeCase struct {
+		name    string
+		state   map[string]string
+		wantErr bool
+	}
 	cases := []encodeCase{
 		//: a clean single-line value encodes without error.
 		{name: "clean", state: map[string]string{"STATUS": "serving"}},
@@ -192,10 +179,16 @@ func TestEncodePayloadInjection(t *testing.T) {
 	}
 }
 
-// TestWatchdogInterval verifies $WATCHDOG_USEC microsecond parsing.
-func TestWatchdogInterval(t *testing.T) {
+// Test_watchdogInterval verifies $WATCHDOG_USEC microsecond parsing.
+func Test_watchdogInterval(t *testing.T) {
 	t.Parallel()
 	//: each case maps a raw WATCHDOG_USEC value to a duration and ok flag.
+	type watchdogCase struct {
+		name    string
+		raw     string
+		wantDur time.Duration
+		wantOK  bool
+	}
 	cases := []watchdogCase{
 		//: a positive integer scales microseconds to a Duration.
 		{name: "valid", raw: "30000000", wantDur: 30 * time.Second, wantOK: true},
@@ -229,6 +222,103 @@ func TestWatchdogInterval(t *testing.T) {
 			t.Parallel()
 			//: delegate to the shared helper.
 			runCase(t, tc)
+		})
+	}
+}
+
+// Test_wrapInvalid pins the malformed-notification wrapper. It carries
+// EX_DATAERR rather than EX_OSERR because nothing went wrong with the socket:
+// the datagram arrived intact and said something the protocol does not allow,
+// and those two failures need different fixes.
+func Test_wrapInvalid(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		cause error
+		field errs.FieldValue
+	}
+	tests := []tc{
+		{"a line with no separator", nil, errs.String("line", "READY")},
+		{"a non-numeric main pid", strconv.ErrSyntax, errs.String("mainpid", "abc")},
+		{"an injecting field name", nil, errs.String("name", "A\nB")},
+		{"a truncated datagram", nil, errs.String("reason", "datagram truncated")},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		err := wrapInvalid(c.cause, c.field)
+
+		if !errs.HasCode(err, coreproc.CodeInvalidNotification) {
+			t.Fatalf("wrapInvalid = %v, want INVALID_NOTIFICATION", err)
+		}
+		//: EX_DATAERR: the data was wrong, not the operating system.
+		if got := errs.ExitCodeOf(err); got != exitDataErr {
+			t.Errorf("exit code = %d, want %d", got, exitDataErr)
+		}
+		//: the offending field rides along, or "malformed datagram" says
+		//: nothing about which part of it was.
+		var named bool
+		for _, f := range errs.FieldsOf(err) {
+			if f.Key() == c.field.Key() {
+				named = true
+			}
+		}
+		if !named {
+			t.Errorf("the error does not carry the %q field: %v", c.field.Key(), errs.FieldsOf(err))
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_mainPIDFromState pins the lift into the typed field. An ABSENT MAINPID is
+// valid and yields zero; a PRESENT but unparseable one makes the whole datagram
+// malformed — because a supervisor acts on that number, and acting on a
+// misparsed one means tracking the wrong process.
+func Test_mainPIDFromState(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		state   map[string]string
+		want    int
+		wantErr bool
+	}
+	tests := []tc{
+		{name: "no main pid at all", state: map[string]string{}},
+		{name: "other fields only", state: map[string]string{"READY": "1"}},
+		{name: "a plausible pid", state: map[string]string{"MAINPID": "4242"}, want: 4242},
+		{name: "pid one", state: map[string]string{"MAINPID": "1"}, want: 1},
+		{name: "a non-numeric pid", state: map[string]string{"MAINPID": "abc"}, wantErr: true},
+		{name: "an empty pid", state: map[string]string{"MAINPID": ""}, wantErr: true},
+		{name: "a float pid", state: map[string]string{"MAINPID": "42.0"}, wantErr: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got, err := mainPIDFromState(c.state)
+		if c.wantErr {
+			if !errs.HasCode(err, coreproc.CodeInvalidNotification) {
+				t.Fatalf("mainPIDFromState(%v) = %v, want INVALID_NOTIFICATION", c.state, err)
+			}
+			//: a refused pid must report zero, not a half-parsed number.
+			if got != 0 {
+				t.Errorf("mainPIDFromState returned %d beside the error", got)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("mainPIDFromState(%v) = %v, want nil", c.state, err)
+		}
+		if got != c.want {
+			t.Errorf("mainPIDFromState(%v) = %d, want %d", c.state, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
 		})
 	}
 }

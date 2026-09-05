@@ -1,0 +1,393 @@
+// Package sdnotify_test — the notifier side as a service uses it.
+package sdnotify_test
+
+import (
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svcsdnotify "github.com/kitsunium/sdk/internal/service/proc/sdnotify"
+)
+
+// recvTimeout bounds every wait on a datagram that has already been sent.
+const recvTimeout time.Duration = 5 * time.Second
+
+// listenOn binds a datagram socket in a temporary directory and returns its
+// path plus a function that reads the next datagram.
+func listenOn(t *testing.T) (path string, next func() string) {
+	t.Helper()
+	//: a short path: AF_UNIX sun_path is ~108 bytes, and a long TMPDIR plus a
+	//: test name overruns it.
+	path = filepath.Join(t.TempDir(), "n.sock")
+	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"})
+	if err != nil {
+		t.Fatalf("binding %s: %v", path, err)
+	}
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Logf("closing the listener: %v", cerr)
+		}
+	})
+	return path, func() string {
+		t.Helper()
+		if derr := conn.SetReadDeadline(time.Now().Add(recvTimeout)); derr != nil {
+			t.Fatalf("setting the read deadline: %v", derr)
+		}
+		buf := make([]byte, 4096)
+		n, rerr := conn.Read(buf)
+		if rerr != nil {
+			t.Fatalf("reading the datagram: %v", rerr)
+		}
+		return string(buf[:n])
+	}
+}
+
+// TestNotify pins the two halves of the libsystemd contract that matter most.
+//
+// An UNSET socket is a silent no-op returning nil, because a service must run
+// identically under systemd and from a shell — reporting an error there would
+// make every unsupervised run fail at startup for a reason that is not a fault.
+// A SET but broken socket is the opposite: the supervisor is expecting to hear
+// from us and did not, so it has to be reported.
+func TestNotify(t *testing.T) {
+	//: not parallel — every case sets $NOTIFY_SOCKET, which is process-wide.
+	type tc struct {
+		name string
+		//: the socket value to export; "bind" means a real listener.
+		socket string
+		state  map[string]string
+		//: the datagram the listener must receive, when one is bound.
+		wantBody string
+		wantErr  bool
+	}
+	tests := []tc{
+		{name: "an unset socket is a no-op", socket: "", state: map[string]string{"READY": "1"}},
+		{name: "an unset socket with a nil state", socket: ""},
+		{
+			name:     "a bound socket receives the datagram",
+			socket:   "bind",
+			state:    map[string]string{"READY": "1"},
+			wantBody: "READY=1\n",
+		},
+		{
+			//: an empty state still opens and closes the connection, matching
+			//: libsystemd's "ping" behaviour.
+			name:     "an empty state still pings",
+			socket:   "bind",
+			state:    map[string]string{},
+			wantBody: "",
+		},
+		{
+			name:    "a socket path nothing is listening on",
+			socket:  "/nonexistent/sdk-sdnotify-test.sock",
+			state:   map[string]string{"READY": "1"},
+			wantErr: true,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var next func() string
+		socket := c.socket
+		if c.socket == "bind" {
+			socket, next = listenOn(t)
+		}
+		t.Setenv("NOTIFY_SOCKET", socket)
+
+		err := svcsdnotify.Notify(c.state)
+
+		if c.wantErr {
+			//: the supervisor was expecting this and did not get it, so the
+			//: failure is real and typed.
+			if !errs.HasCode(err, coreproc.CodeNotifyFailed) {
+				t.Fatalf("Notify = %v, want NOTIFY_FAILED", err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("Notify = %v, want nil", err)
+		}
+		if next == nil {
+			return
+		}
+		if got := next(); got != c.wantBody {
+			t.Errorf("the supervisor received %q, want %q", got, c.wantBody)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			runCase(t, c)
+		})
+	}
+}
+
+// TestNotifyRejectsFieldInjection pins the encoding guard. The datagram body is
+// an environment block: fields are newline-separated and NAME=value within a
+// line. A name or value carrying those delimiters would forge EXTRA fields —
+// a STATUS value ending in "\nMAINPID=1" would tell the supervisor to track
+// init as this service's main process.
+func TestNotifyRejectsFieldInjection(t *testing.T) {
+	//: not parallel — it sets $NOTIFY_SOCKET.
+	type tc struct {
+		name  string
+		state map[string]string
+	}
+	tests := []tc{
+		{"a newline in a value", map[string]string{"STATUS": "ok\nMAINPID=1"}},
+		{"a newline in a name", map[string]string{"STATUS\nMAINPID": "1"}},
+		{"an equals sign in a name", map[string]string{"STATUS=x": "1"}},
+		{"a leading newline in a value", map[string]string{"STATUS": "\nREADY=1"}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		socket, _ := listenOn(t)
+		t.Setenv("NOTIFY_SOCKET", socket)
+
+		err := svcsdnotify.Notify(c.state)
+
+		//: the refusal is a malformed-notification fault, not a send fault:
+		//: nothing was wrong with the socket.
+		if !errs.HasCode(err, coreproc.CodeInvalidNotification) {
+			t.Fatalf("Notify = %v, want INVALID_NOTIFICATION", err)
+		}
+		//: the forged field must not appear anywhere in an encoding of this
+		//: state — the guard runs BEFORE the write, so nothing was sent at all.
+		for name, value := range c.state {
+			if strings.ContainsAny(name, "\n=") || strings.ContainsRune(value, '\n') {
+				continue
+			}
+			t.Errorf("the case %q carries no injecting field, so it proves nothing", c.name)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			runCase(t, c)
+		})
+	}
+}
+
+// TestReady pins the startup-complete signal.
+//
+// systemd keys on the NAME: a Ready() that sent STARTED=1 would leave the unit
+// waiting for a readiness notification that never arrives, and it would time out
+// at startup with the service running perfectly.
+func TestReady(t *testing.T) {
+	//: not parallel — it sets $NOTIFY_SOCKET.
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a bound supervisor socket"}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		socket, next := listenOn(t)
+		t.Setenv("NOTIFY_SOCKET", socket)
+
+		if err := svcsdnotify.Ready(); err != nil {
+			t.Fatalf("Ready = %v, want nil", err)
+		}
+
+		got := next()
+		if got != "READY=1\n" {
+			t.Errorf("Ready sent %q, want %q", got, "READY=1\n")
+		}
+		//: exactly one field — a helper that sent two would tell the supervisor
+		//: something it was never asked to.
+		if strings.Count(got, "\n") != 1 {
+			t.Errorf("Ready sent %d fields, want 1", strings.Count(got, "\n"))
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			runCase(t, c)
+		})
+	}
+}
+
+// TestReloading pins the start of a reload cycle.
+//
+// A supervisor suppresses health checks between RELOADING and the next READY, so
+// a wrong name here means the service is probed mid-reload and restarted for
+// failing a check it was never going to pass.
+func TestReloading(t *testing.T) {
+	//: not parallel — it sets $NOTIFY_SOCKET.
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a bound supervisor socket"}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		socket, next := listenOn(t)
+		t.Setenv("NOTIFY_SOCKET", socket)
+
+		if err := svcsdnotify.Reloading(); err != nil {
+			t.Fatalf("Reloading = %v, want nil", err)
+		}
+
+		got := next()
+		if got != "RELOADING=1\n" {
+			t.Errorf("Reloading sent %q, want %q", got, "RELOADING=1\n")
+		}
+		//: exactly one field — a helper that sent two would tell the supervisor
+		//: something it was never asked to.
+		if strings.Count(got, "\n") != 1 {
+			t.Errorf("Reloading sent %d fields, want 1", strings.Count(got, "\n"))
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			runCase(t, c)
+		})
+	}
+}
+
+// TestStopping pins the start of a graceful shutdown.
+//
+// Without it the supervisor cannot tell a deliberate shutdown from a crash, and
+// a restart policy of on-failure would bring the service straight back up.
+func TestStopping(t *testing.T) {
+	//: not parallel — it sets $NOTIFY_SOCKET.
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a bound supervisor socket"}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		socket, next := listenOn(t)
+		t.Setenv("NOTIFY_SOCKET", socket)
+
+		if err := svcsdnotify.Stopping(); err != nil {
+			t.Fatalf("Stopping = %v, want nil", err)
+		}
+
+		got := next()
+		if got != "STOPPING=1\n" {
+			t.Errorf("Stopping sent %q, want %q", got, "STOPPING=1\n")
+		}
+		//: exactly one field — a helper that sent two would tell the supervisor
+		//: something it was never asked to.
+		if strings.Count(got, "\n") != 1 {
+			t.Errorf("Stopping sent %d fields, want 1", strings.Count(got, "\n"))
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			runCase(t, c)
+		})
+	}
+}
+
+// TestWatchdog pins the watchdog keep-alive.
+//
+// This one is load-bearing in the most literal sense: miss the interval and the
+// supervisor kills the process. A wrong field name means every ping is ignored.
+func TestWatchdog(t *testing.T) {
+	//: not parallel — it sets $NOTIFY_SOCKET.
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a bound supervisor socket"}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		socket, next := listenOn(t)
+		t.Setenv("NOTIFY_SOCKET", socket)
+
+		if err := svcsdnotify.Watchdog(); err != nil {
+			t.Fatalf("Watchdog = %v, want nil", err)
+		}
+
+		got := next()
+		if got != "WATCHDOG=1\n" {
+			t.Errorf("Watchdog sent %q, want %q", got, "WATCHDOG=1\n")
+		}
+		//: exactly one field — a helper that sent two would tell the supervisor
+		//: something it was never asked to.
+		if strings.Count(got, "\n") != 1 {
+			t.Errorf("Watchdog sent %d fields, want 1", strings.Count(got, "\n"))
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			runCase(t, c)
+		})
+	}
+}
+
+// TestStatus pins the free-text progress line, which is what an operator sees in
+// `systemctl status`. The value is sent verbatim — including an empty one, which
+// is how a service clears a stale message rather than leaving the last one up
+// forever.
+func TestStatus(t *testing.T) {
+	//: not parallel — it sets $NOTIFY_SOCKET.
+	type tc struct {
+		name string
+		msg  string
+	}
+	tests := []tc{
+		{"a progress message", "warming up"},
+		{"an empty message clears the line", ""},
+		{"a message with spaces and punctuation", "serving 3 of 5 shards, ok"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		socket, next := listenOn(t)
+		t.Setenv("NOTIFY_SOCKET", socket)
+
+		if err := svcsdnotify.Status(c.msg); err != nil {
+			t.Fatalf("Status = %v, want nil", err)
+		}
+
+		want := "STATUS=" + c.msg + "\n"
+		if got := next(); got != want {
+			t.Errorf("Status sent %q, want %q", got, want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			runCase(t, c)
+		})
+	}
+}
+
+// TestMainPID pins the pid advertisement, which lets a supervisor track a
+// process other than the notifier itself — the shape a service takes when it
+// forks a worker and hands supervision over to it.
+func TestMainPID(t *testing.T) {
+	//: not parallel — it sets $NOTIFY_SOCKET.
+	type tc struct {
+		name string
+		pid  int
+	}
+	tests := []tc{
+		{"a plausible pid", 4242},
+		{"pid 1", 1},
+		{"our own pid", os.Getpid()},
+		//: a zero or negative pid is nonsense the supervisor will refuse, but
+		//: the encoder's job is to send what it was given, not to judge it.
+		{"a zero pid", 0},
+		{"a negative pid", -1},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		socket, next := listenOn(t)
+		t.Setenv("NOTIFY_SOCKET", socket)
+
+		if err := svcsdnotify.MainPID(c.pid); err != nil {
+			t.Fatalf("MainPID = %v, want nil", err)
+		}
+
+		want := "MAINPID=" + strconv.Itoa(c.pid) + "\n"
+		if got := next(); got != want {
+			t.Errorf("MainPID sent %q, want %q", got, want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			runCase(t, c)
+		})
+	}
+}
