@@ -78,15 +78,12 @@ serialization_tags:
 exclude:
   # Vendored third-party code — never our convention to enforce.
   - "vendor/**"
-  # Build-time tools (single-purpose scripts under tools/) — per the
-  # Rule 8 exemption in /workspace/CLAUDE.md, these are tooling, not
-  # library code, and stay out of the per-package doc-style gates.
-  - "tools/**"
-  # The e2e conformance binary (e2e/**) is a runtime test harness, not shipped
-  # library code — same category as tools/. Its job is to exercise the public
-  # API on real kernels, so library-shape rules (role-suffixed structs, one
-  # struct per file, per-package doc gates) do not apply.
-  - "e2e/**"
+  #
+  # tools/** and e2e/** used to sit here, exempted as "tooling, not library
+  # code". Both are now clean at `--phases all` and are gated like everything
+  # else: the rules turned out to apply perfectly well to a build script and to
+  # a conformance harness, and the exemption was mostly hiding missing tests.
+  # Do not re-add them — fix the finding instead.
   # Go module cache occasionally shows up in IDE-driven scans.
   - "**/.cache/**"
   # Protocol Buffers and gRPC generated code.

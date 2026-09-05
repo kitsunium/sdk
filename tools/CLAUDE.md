@@ -49,7 +49,7 @@ Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime det
 - Shell scripts: keep them small enough to read end-to-end. If a tool exceeds ~80 lines, split it into a helper package elsewhere and keep the entry point thin.
 - Go programs (e.g. `genindex/`) live in their own subdirectory with `go.mod` OUTSIDE `go.work` (`GOWORK=off`) so the 5-module workspace invariant is preserved.
 - Stdlib-only for Go tools. Pulling extra deps would pollute the build dependency graph for what is essentially a one-shot script.
-- The `tools/**` tree is excluded from `ktn-linter` via `.ktn-linter.yaml` (Rule 8 tooling exemption in /workspace/CLAUDE.md). Tools are not library code; package-doc gates do not apply.
+- The `tools/**` tree is linted like everything else. It used to be excluded via `.ktn-linter.yaml` on the grounds that tools are not library code, but the rules turned out to apply perfectly well to a build script — and the exemption was mostly hiding missing tests. Fix the finding rather than re-adding the exclusion.
 
 ## Do NOT
 
