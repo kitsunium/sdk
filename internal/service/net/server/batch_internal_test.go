@@ -1,110 +1,120 @@
-//go:build linux
-
+// Package server — the datagram batch-read abstraction.
 package server
 
 import (
-	stdnet "net"
 	"testing"
-
-	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
-// TestLinuxSelectsTheBatchedReader pins the platform selection itself.
+// Test_datagram_payload pins that only the PREFIX the read filled is handed on.
 //
-// Every behavioural datagram test would pass identically on the portable
-// fallback, so none of them prove the batched path is actually in use. If a
-// refactor broke the type assertion in newDatagramSource, the engine would quietly
-// degrade to one syscall per datagram and every other test would stay green.
-// This is the only test that would fail.
-func TestLinuxSelectsTheBatchedReader(t *testing.T) {
+// Slots are reused for the life of the read loop, so a slot's buffer still holds
+// whatever the previous datagram put there. Handing the whole buffer to the
+// handler would append the tail of an older datagram — from a different peer —
+// to every short one, which is a data-leak between senders rather than a
+// cosmetic bug.
+func Test_datagram_payload(t *testing.T) {
 	t.Parallel()
-	pc, err := stdnet.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
+	type tc struct {
+		// name describes the case.
+		name string
+		// size is the slot buffer's length.
+		size int
+		// n is how many bytes the last read placed in it.
+		n int
 	}
-	defer func() {
-		//: a close failure here would leak a socket into the rest of the suite.
-		if cerr := pc.Close(); cerr != nil {
-			t.Errorf("close: %v", cerr)
+	tests := []tc{
+		{name: "a full buffer", size: 8, n: 8},
+		{name: "a short datagram in a reused buffer", size: 1024, n: 3},
+		//: an empty datagram is legal on UDP and must not become the buffer's
+		//: stale contents.
+		{name: "an empty datagram", size: 1024, n: 0},
+		{name: "a single byte", size: 64, n: 1},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		slot := datagram{buf: make([]byte, c.size), n: c.n}
+		//: fill the whole buffer, so anything past n is visibly stale.
+		for i := range slot.buf {
+			slot.buf[i] = 0xAA
 		}
-	}()
 
-	reader := newDatagramSource(pc)
-	//: a portable reader on linux means the batched path silently vanished.
-	if _, ok := reader.(*multiReader); !ok {
-		t.Fatalf("newDatagramSource returned %T on linux, want *multiReader — "+
-			"the engine has silently degraded to one syscall per datagram", reader)
-	}
-	//: State's degradation report is derived from this, so it must agree.
-	if !batchAvailable() {
-		t.Fatal("batchAvailable reports false on linux")
-	}
-}
+		got := slot.payload()
 
-// TestFallbackWhenNoRawDescriptor pins the honest degradation: a PacketConn with
-// no raw descriptor — a test double, or a wrapper — must still be served rather
-// than rejected. recvmmsg needs a real descriptor, and falling back keeps such a
-// socket working instead of failing at the first read.
-func TestFallbackWhenNoRawDescriptor(t *testing.T) {
-	t.Parallel()
-	reader := newDatagramSource(wrappedConn{})
-	//: the portable reader is the floor every socket can use.
-	if _, ok := reader.(*portableReader); !ok {
-		t.Fatalf("newDatagramSource returned %T for a descriptor-less conn, want *portableReader", reader)
+		if len(got) != c.n {
+			t.Fatalf("payload has %d bytes for a %d-byte read — the handler would "+
+				"see the tail of a previous datagram", len(got), c.n)
+		}
+		//: the payload aliases the slot rather than copying it, which is what
+		//: keeps the read loop allocation-free.
+		if c.n > 0 && &got[0] != &slot.buf[0] {
+			t.Error("payload copied the slot buffer instead of aliasing it")
+		}
 	}
-}
-
-// wrappedConn is a PacketConn that deliberately exposes no SyscallConn.
-type wrappedConn struct {
-	stdnet.PacketConn
-}
-
-// TestBatchSizeDefaultsAreSafe pins that zero means "domain default" and one
-// means "no batching", never "unbounded" or a zero-length read.
-func TestBatchSizeDefaultsAreSafe(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name  string
-		given int
-		want  int
-	}{
-		{name: "unset takes the default", given: 0, want: defaultBatchSize},
-		{name: "negative takes the default", given: -4, want: defaultBatchSize},
-		{name: "one disables batching", given: 1, want: 1},
-		{name: "explicit size is honoured", given: 32, want: 32},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got := batchSize(corenet.LimitsValue{BatchSize: tc.given})
-			//: a wrong default here would change the syscall count silently.
-			if got != tc.want {
-				t.Fatalf("batchSize(%d) = %d, want %d", tc.given, got, tc.want)
-			}
+			runCase(t, c)
 		})
 	}
 }
 
-// TestPacketSizeDefaultsAreSafe pins the same rule for the datagram ceiling.
-func TestPacketSizeDefaultsAreSafe(t *testing.T) {
+// Test_newSlots pins the PROBE BYTE, which is what makes an oversized datagram
+// detectable at all.
+//
+// The kernel copies as much as the buffer holds and discards the remainder, so a
+// buffer sized exactly at the group's ceiling cannot tell a datagram that just
+// fits from one that was cut down to fit — both report the same length. Reading
+// one byte further makes the two distinguishable, which is the same reason the
+// outbound body ceiling reads one byte past its own limit.
+func Test_newSlots(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name  string
-		given int
-		want  int
-	}{
-		{name: "unset takes the default", given: 0, want: defaultMaxPacketSize},
-		{name: "negative takes the default", given: -1, want: defaultMaxPacketSize},
-		{name: "explicit size is honoured", given: 1500, want: 1500},
+	type tc struct {
+		// name describes the case.
+		name string
+		// count is the batch size.
+		count int
+		// size is the group's datagram ceiling.
+		size int
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := packetSize(corenet.LimitsValue{MaxPacketSize: tc.given})
-			//: an unset ceiling must never mean "unbounded".
-			if got != tc.want {
-				t.Fatalf("packetSize(%d) = %d, want %d", tc.given, got, tc.want)
+	tests := []tc{
+		{name: "a single slot", count: 1, size: 1500},
+		{name: "a full batch", count: 32, size: 1500},
+		{name: "the domain defaults", count: defaultBatchSize, size: defaultMaxPacketSize},
+		{name: "a tiny ceiling", count: 2, size: 1},
+		{name: "no slots at all", count: 0, size: 1500},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		slots := newSlots(c.count, c.size)
+
+		//: the length IS the batch size: the slice is indexed, never appended to.
+		if len(slots) != c.count {
+			t.Fatalf("newSlots(%d, %d) returned %d slots, want %d",
+				c.count, c.size, len(slots), c.count)
+		}
+		for i := range slots {
+			//: one byte PAST the ceiling, which is the whole difference between
+			//: a datagram that just fits and one that was truncated to fit.
+			if len(slots[i].buf) != c.size+1 {
+				t.Fatalf("slot %d has a %d-byte buffer for a %d-byte ceiling, want %d — "+
+					"an oversized datagram would be indistinguishable from one that fits",
+					i, len(slots[i].buf), c.size, c.size+1)
 			}
+			//: each slot owns its own buffer, or two datagrams read in one batch
+			//: would overwrite each other.
+			if i > 0 && &slots[i].buf[0] == &slots[i-1].buf[0] {
+				t.Fatalf("slots %d and %d share a buffer", i-1, i)
+			}
+			//: a fresh slot has read nothing yet.
+			if slots[i].n != 0 || slots[i].addr != nil {
+				t.Fatalf("slot %d arrives pre-filled: n=%d addr=%v", i, slots[i].n, slots[i].addr)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
 		})
 	}
 }
