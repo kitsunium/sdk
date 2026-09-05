@@ -246,6 +246,22 @@ func Test_checkStdoutDestination(t *testing.T) {
 				"var _ = logger.Config{Writer: os.Stdout}\n", 1,
 		},
 		{
+			//: a dot-imported os hides os.Stdout itself.
+			"a dot-imported os is a blind spot",
+			"package p\nimport . \"os\"\nimport \"log\"\nvar _ = log.New(Stdout, \"\", 0)\n", 1,
+		},
+		{
+			//: and a dot-imported DESTINATION package hides the callee, which is
+			//: the half a rule that only watched os would pass over in silence:
+			//: New(os.Stdout, "", 0) carries no qualifier to match.
+			"a dot-imported log is a blind spot too",
+			"package p\nimport (\"os\"\n. \"log\")\nvar _ = New(os.Stdout, \"\", 0)\n", 1,
+		},
+		{
+			"a dot-imported log/slog is a blind spot too",
+			"package p\nimport (\"os\"\n. \"log/slog\")\nvar _ = NewTextHandler(os.Stdout, nil)\n", 1,
+		},
+		{
 			"a fan-out slice inside a logging config",
 			"package p\nimport (\"io\"\n\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/logger\")\n" +
 				"var _ = logger.Config{Writers: []io.Writer{os.Stderr, os.Stdout}}\n", 1,
@@ -1764,6 +1780,32 @@ func Test_parseGoMod(t *testing.T) {
 			"v0.1.9", false, true,
 		},
 		{
+			//: a version-qualified directive redirects ONLY that version. The
+			//: build here resolves v0.1.24 from the proxy, so the freshness
+			//: nudge still applies — reading it as a local checkout would
+			//: silence the check for a consumer who is genuinely behind.
+			"a replace scoped to a version this module does not require",
+			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.24\n" +
+				"replace github.com/kitsunium/sdk/pkg v0.1.9 => ../sdk/pkg\n",
+			"v0.1.24", false, true,
+		},
+		{
+			//: the same directive, for the version this module actually
+			//: requires: now the build really does use the local checkout.
+			"a replace scoped to the version this module requires",
+			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.9\n" +
+				"replace github.com/kitsunium/sdk/pkg v0.1.9 => ../sdk/pkg\n",
+			"v0.1.9", true, true,
+		},
+		{
+			//: the replace is read before the require, so the comparison cannot
+			//: happen while parsing.
+			"a version-qualified replace declared before the require",
+			"module x\n\nreplace github.com/kitsunium/sdk/pkg v0.1.9 => ../sdk/pkg\n" +
+				"require github.com/kitsunium/sdk/pkg v0.1.9\n",
+			"v0.1.9", true, true,
+		},
+		{
 			"an indirect marker",
 			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk/pkg v0.1.9 // indirect\n)\n",
 			"v0.1.9", false, true,
@@ -1798,8 +1840,8 @@ func Test_parseGoMod(t *testing.T) {
 		if ref.Version != c.wantVersion {
 			t.Errorf("version = %q, want %q", ref.Version, c.wantVersion)
 		}
-		if ref.Replaced != c.wantReplace {
-			t.Errorf("replaced = %v, want %v", ref.Replaced, c.wantReplace)
+		if ref.Replaced() != c.wantReplace {
+			t.Errorf("replaced = %v, want %v", ref.Replaced(), c.wantReplace)
 		}
 	}
 	for _, c := range tests {
@@ -1900,27 +1942,100 @@ func Test_readRequire(t *testing.T) {
 	}
 }
 
-// Direction matters: the SDK on the RIGHT of the arrow is not a replacement
-// of it, and reading it as one would silence a consumer who is genuinely behind.
-func Test_readReplace(t *testing.T) {
+// A directive that names a version redirects ONLY that version, so the verdict
+// cannot be reached while parsing: the require line may come after the replace.
+// Getting this wrong in the permissive direction is the expensive one — it
+// silences the freshness nudge for a consumer who is genuinely behind, which is
+// the single thing this probe exists to say.
+func Test_moduleRef_Replaced(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name  string
-		entry string
-		want  bool
+		name string
+		ref  moduleRef
+		want bool
 	}
 	tests := []tc{
-		{"the SDK on the left", sdkModule + " => ../sdk/pkg", true},
-		{"the SDK on the right", "example.com/fork => " + sdkModule + " v0.1.24", false},
-		{"another module entirely", "example.com/x => ../x", false},
-		{"no arrow at all", sdkModule + " v0.1.0", false},
+		{"no directive at all", moduleRef{Version: "v0.1.24"}, false},
+		{
+			"an unversioned directive redirects every version",
+			moduleRef{Version: "v0.1.24", replaceVersions: []string{""}},
+			true,
+		},
+		{
+			"a directive for the required version",
+			moduleRef{Version: "v0.1.9", replaceVersions: []string{"v0.1.9"}},
+			true,
+		},
+		{
+			//: v0.1.9 is redirected; this build resolves v0.1.24 from the proxy.
+			"a directive for another version",
+			moduleRef{Version: "v0.1.24", replaceVersions: []string{"v0.1.9"}},
+			false,
+		},
+		{
+			//: one matching directive among several is enough.
+			"several directives, one matching",
+			moduleRef{Version: "v0.1.24", replaceVersions: []string{"v0.1.9", "v0.1.24"}},
+			true,
+		},
+		{
+			"several directives, none matching",
+			moduleRef{Version: "v0.1.24", replaceVersions: []string{"v0.1.9", "v0.1.10"}},
+			false,
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		var ref moduleRef
+		if got := c.ref.Replaced(); got != c.want {
+			t.Errorf("Replaced() = %v, want %v", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Direction matters: the SDK on the RIGHT of the arrow is not a replacement
+// of it, and reading it as one would silence a consumer who is genuinely behind.
+//
+// So does the left side's VERSION. A directive that names one redirects only
+// that version; every other version still resolves from the proxy, and a
+// consumer pinned to an old one still wants the nudge.
+func Test_readReplace(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		//: the version the module requires, against which a version-qualified
+		//: directive is judged.
+		version string
+		entry   string
+		want    bool
+	}
+	tests := []tc{
+		{"the SDK on the left", "v0.1.24", sdkModule + " => ../sdk/pkg", true},
+		{"an unversioned directive with no requirement", "", sdkModule + " => ../sdk/pkg", true},
+		{
+			"a directive for the required version",
+			"v0.1.9", sdkModule + " v0.1.9 => ../sdk/pkg", true,
+		},
+		{
+			//: only v0.1.9 is redirected; this build resolves v0.1.24 normally.
+			"a directive for another version",
+			"v0.1.24", sdkModule + " v0.1.9 => ../sdk/pkg", false,
+		},
+		{"the SDK on the right", "v0.1.9", "example.com/fork => " + sdkModule + " v0.1.24", false},
+		{"another module entirely", "v0.1.9", "example.com/x => ../x", false},
+		{"no arrow at all", "v0.1.9", sdkModule + " v0.1.0", false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		ref := moduleRef{Version: c.version}
 		readReplace(&ref, c.entry)
-		if ref.Replaced != c.want {
-			t.Errorf("replaced = %v, want %v", ref.Replaced, c.want)
+		if ref.Replaced() != c.want {
+			t.Errorf("replaced = %v, want %v", ref.Replaced(), c.want)
 		}
 	}
 	for _, c := range tests {

@@ -84,8 +84,12 @@ package needs them (ADR 0033). `slogbridge.New` itself carries a documented
   bundled encoders print `?` for `logger.Any`, so routing `slog.Any("err", err)`
   — the commonest slog idiom after strings — through it would deliver the
   record with its value erased. The bridge converts via `slog.Value.String`,
-  which formats any kind exactly as slog's own handlers do. The payload's Go
-  type is lost; a `?` loses the type *and* the value.
+  which is slog's own TEXT rendering. That is the narrow claim: it matches what
+  `slog.TextHandler` would have printed, not what `slog.JSONHandler` would —
+  a `json.Marshaler`, or an ordinary struct, arrives as its text form rather
+  than as the JSON object slog's own JSON handler would emit. The payload's Go
+  type is lost either way; a `?` loses the type *and* the value, which is the
+  trade this makes deliberately.
 - **An empty key is not an empty group.** slog prints `g.=v` for
   `String("", "v")` bound under `WithGroup("g")`, keeping the separator so the
   record still shows which group the value came from. `qualifyKey` reproduces

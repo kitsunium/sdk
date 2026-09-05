@@ -1,6 +1,7 @@
 package slogbridge
 
 import (
+	"errors"
 	"log/slog"
 	"math"
 	"testing"
@@ -111,22 +112,44 @@ func Test_qualifyKey(t *testing.T) {
 
 // Each slog Kind must land on its SDK peer, and KindAny must NOT — both
 // encoders print "?" for it, so the value would reach the log erased.
+//
+// What KindAny becomes is slog's TEXT rendering, and the cases below say so
+// rather than leaving it implied: a json.Marshaler crosses as the text form its
+// String method produces, NOT as the JSON object slog.JSONHandler would have
+// emitted. That is a deliberate narrowing — the SDK's encoders have no
+// marshaler-aware path — and a reader who assumes otherwise would be surprised
+// by a bridged record on a JSON sink.
 func Test_convert(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
 		in   slog.Value
 		want logger.Kind
+		//: the rendered text, for the cases that pin HOW a value crosses rather
+		//: than merely which Kind it lands on.
+		wantText string
 	}
 	tests := []tc{
-		{"string", slog.StringValue("v"), logger.KindString},
-		{"int64", slog.Int64Value(1), logger.KindInt64},
-		{"uint64", slog.Uint64Value(1), logger.KindUint64},
-		{"float64", slog.Float64Value(1.5), logger.KindFloat64},
-		{"bool", slog.BoolValue(true), logger.KindBool},
-		{"duration", slog.DurationValue(time.Second), logger.KindDuration},
-		{"time", slog.TimeValue(time.Unix(0, 0)), logger.KindTime},
-		{"any becomes text, never KindAny", slog.AnyValue([]int{1}), logger.KindString},
+		{"string", slog.StringValue("v"), logger.KindString, "v"},
+		{"int64", slog.Int64Value(1), logger.KindInt64, ""},
+		{"uint64", slog.Uint64Value(1), logger.KindUint64, ""},
+		{"float64", slog.Float64Value(1.5), logger.KindFloat64, ""},
+		{"bool", slog.BoolValue(true), logger.KindBool, ""},
+		{"duration", slog.DurationValue(time.Second), logger.KindDuration, ""},
+		{"time", slog.TimeValue(time.Unix(0, 0)), logger.KindTime, ""},
+		{"any becomes text, never KindAny", slog.AnyValue([]int{1}), logger.KindString, ""},
+		{"an error becomes its message", slog.AnyValue(errors.New("boom")), logger.KindString, "boom"},
+		{
+			//: the case the claim has to be narrow about: slog's JSON handler
+			//: would call MarshalJSON, the text one calls String, and the bridge
+			//: is the text one.
+			name: "a json.Marshaler crosses as TEXT, not as JSON",
+			in:   slog.AnyValue(marshalable{}), want: logger.KindString, wantText: "text form",
+		},
+		{
+			name: "an ordinary struct crosses as its Go rendering",
+			in:   slog.AnyValue(struct{ A int }{A: 1}), want: logger.KindString, wantText: "{1}",
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -137,6 +160,10 @@ func Test_convert(t *testing.T) {
 		if got.Value.Kind() != c.want {
 			t.Errorf("kind = %v, want %v", got.Value.Kind(), c.want)
 		}
+		//: only the cases that pin the rendering say what it must be.
+		if c.wantText != "" && got.Value.String() != c.wantText {
+			t.Errorf("text = %q, want %q", got.Value.String(), c.wantText)
+		}
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -144,6 +171,22 @@ func Test_convert(t *testing.T) {
 			runCase(t, c)
 		})
 	}
+}
+
+// marshalable is a json.Marshaler whose JSON and text forms differ, so a test
+// can tell which one the bridge used.
+type marshalable struct{}
+
+// MarshalJSON implements json.Marshaler.
+func (marshalable) MarshalJSON() ([]byte, error) {
+	//: what slog.JSONHandler would have emitted, and what the bridge does NOT.
+	return []byte(`{"json":true}`), nil
+}
+
+// String implements fmt.Stringer, which is what slog's text rendering uses.
+func (marshalable) String() string {
+	//: the form the bridge actually carries across.
+	return "text form"
 }
 
 // slog's elision rules live in the bridge, since the SDK handler has no
@@ -225,7 +268,14 @@ func Test_appendGroup(t *testing.T) {
 	}
 }
 
-// assertKeys compares the produced attribute keys against what a case expects.
+// assertKeys compares the produced attribute KEYS, which is where the whole
+// flattening contract lives.
+//
+// slog nests groups; the SDK's encoders have no group payload to render, so the
+// bridge folds a group into dotted keys instead. The values are carried
+// through untouched, so a wrong key is the only way the fold can go wrong — and
+// it goes wrong invisibly, since a record with `a.b` where `a.b.c` was meant
+// still renders as a perfectly ordinary line.
 func assertKeys(t *testing.T, got []logger.Attr, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

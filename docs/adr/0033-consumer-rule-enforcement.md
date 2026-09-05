@@ -170,6 +170,15 @@ outlives its reason.
   selector rule can see through it. The rules report the blind spot rather than
   passing quietly; actually analysing such a file needs scope resolution, which
   is the same dependency as above.
+- **Lexical binding identity instead of identifier text.** Shadowing is tracked
+  per FILE, not per scope: a `logger` bound in one function disables the
+  `logger` package for the whole file, and a bridge-bound `handler` in one
+  function exempts an unrelated `handler` elsewhere. Both directions are
+  conservative — the first drops findings, the second keeps a sanctioned
+  composition from being flagged — and both are deliberate: a rule that fires on
+  correct code is the kind people switch off. Precision here means carrying a
+  scope stack through the walk, which is the same work `go/types` would do for
+  free if it were available.
 - **A ktn-linter rule.** The natural home once that project gains a
   project-rule mechanism; the rules here would move and this binary would
   shrink to the freshness probe.

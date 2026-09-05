@@ -307,6 +307,26 @@ func (fc *fileCtx) stdoutInConfig(lit *ast.CompositeLit) []findingEntity {
 	return out
 }
 
+// stdoutBlindSpot reports the first dot import that would make SDK003 blind.
+//
+// EVERY package the rule reads a selector from counts, not just os. With
+// `. "log"` and an ordinary os import, New(os.Stdout, "", 0) carries no
+// qualified callee, so the destination match never fires and the rule reports a
+// clean file it never actually analysed — which is the one outcome a rule must
+// not produce.
+func stdoutBlindSpot(fc *fileCtx) []findingEntity {
+	//: os hides the destination, the logging packages hide the callee.
+	for _, path := range append([]string{osPath}, loggingConfigPkgs...) {
+		//: the first one found is enough; they all mean the same thing.
+		if blind := fc.blindSpot(path, "SDK003"); blind != nil {
+			//: name the import a reader has to change.
+			return blind
+		}
+	}
+	//: every package this rule needs resolves normally.
+	return nil
+}
+
 // checkStdoutDestination implements SDK003.
 //
 // It fires only where os.Stdout becomes a LOG destination — a Writer-shaped
@@ -316,7 +336,7 @@ func (fc *fileCtx) stdoutInConfig(lit *ast.CompositeLit) []findingEntity {
 // about stdout carrying a protocol, not about stdout being forbidden.
 func checkStdoutDestination(fc *fileCtx, file *ast.File) []findingEntity {
 	//: a dot import hides every selector, so say so instead of passing quietly.
-	if blind := fc.blindSpot(osPath, "SDK003"); blind != nil {
+	if blind := stdoutBlindSpot(fc); blind != nil {
 		//: one honest finding beats a clean run this rule did not earn.
 		return blind
 	}

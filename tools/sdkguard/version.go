@@ -92,10 +92,36 @@ type gomodSection int
 type moduleRef struct {
 	// Version is the required version, e.g. "v0.1.24".
 	Version string
-	// Replaced reports whether a replace directive redirects the module. A
-	// replaced module is someone working against a local checkout; telling them
-	// to upgrade would be noise.
-	Replaced bool
+	// replaceVersions holds the LEFT-SIDE version of every replace directive
+	// naming the SDK, with the empty string standing for an unversioned one.
+	//
+	// The distinction is load-bearing. `replace <mod> => ../mod` redirects every
+	// version; `replace <mod> v0.1.9 => ../mod` redirects only v0.1.9 and leaves
+	// every other version resolving normally. Treating the second as if it were
+	// the first silences the freshness check for a build that is not, in fact,
+	// using a local checkout — and inside a workspace it silences it for every
+	// sibling module too.
+	replaceVersions []string
+}
+
+// Replaced reports whether a replace directive actually redirects the version
+// this module requires.
+//
+// A replaced module is someone working against a local checkout, and telling
+// them to upgrade would be noise. A module pinned by a directive for some OTHER
+// version is not that, and still wants the nudge.
+func (r moduleRef) Replaced() bool {
+	//: the require line may be read after the replace, so the comparison
+	//: happens here rather than while parsing.
+	for _, at := range r.replaceVersions {
+		//: an unversioned directive redirects every version there is.
+		if at == "" || at == r.Version {
+			//: this build genuinely resolves the SDK locally.
+			return true
+		}
+	}
+	//: every directive named a version this module does not require.
+	return false
 }
 
 // checkVersion returns the warning text for an outdated SDK, and whether the
@@ -115,7 +141,7 @@ func checkVersion(dir string, p probe) (string, bool) {
 	}
 	//: no requirement, or one the build replaces locally — say nothing either
 	//: way: a replace means someone is working against a checkout.
-	if !ok || ref.Replaced {
+	if !ok || ref.Replaced() {
 		//: silence, which is the documented behaviour of every failure path.
 		return "", false
 	}
@@ -276,10 +302,19 @@ func readReplace(ref *moduleRef, entry string) {
 	fields := strings.Fields(lhs)
 	//: only the LEFT side names what is being replaced; the SDK appearing on
 	//: the right means some other module was redirected TO it.
-	if len(fields) > 0 && fields[0] == sdkModule {
-		//: the build uses a local checkout, so freshness advice is noise.
-		ref.Replaced = true
+	if len(fields) == 0 || fields[0] != sdkModule {
+		//: this directive names another module.
+		return
 	}
+	var at string
+	//: a second field on the left is the version the directive is scoped to;
+	//: its absence means it applies to every version, which is what the empty
+	//: string records.
+	if len(fields) > 1 {
+		//: scoped to exactly this version.
+		at = fields[1]
+	}
+	ref.replaceVersions = append(ref.replaceVersions, at)
 }
 
 // workspaceRequirement resolves the SDK requirement through a go.work file.
@@ -313,7 +348,9 @@ func workspaceRequirement(dir string) (moduleRef, bool) {
 		}
 		//: a replaced module anywhere means someone is working locally; say
 		//: nothing rather than nag about a version the build does not use.
-		if ref.Replaced {
+		//: Replaced() weighs the directive's own version, so a pin for some
+		//: other version does not silence the sibling that is genuinely behind.
+		if ref.Replaced() {
 			//: one local checkout silences the whole workspace.
 			return moduleRef{}, false
 		}

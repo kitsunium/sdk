@@ -15,6 +15,7 @@
 package kernel_zeroalloc_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,21 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/ring"
 )
+
+// gateMu serialises the probes.
+//
+// Two reasons, and the second is the one that bites. Allocation accounting is
+// PROCESS-wide, so two testing.Benchmark calls running at once each measure the
+// other's allocations and AllocsPerOp stops meaning anything — for a gate whose
+// whole output is that number, an unreliable reading is worse than no gate. And
+// the probes write the shared sinks below with no synchronisation, which is a
+// genuine data race that nothing would ever report: this file carries
+// //go:build !race precisely so it never runs under the detector.
+//
+// Holding it for the measurement keeps t.Parallel() truthful — each subtest
+// still yields to the scheduler, and still runs alongside every test that does
+// not measure allocations.
+var gateMu sync.Mutex
 
 // Sinks defeat dead-store elimination so the probed calls are not optimised away.
 var (
@@ -73,8 +89,12 @@ func TestZeroAllocInvariant(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
+		//: one probe at a time: the counters are process-wide and the sinks are
+		//: shared, so a concurrent probe corrupts both.
+		gateMu.Lock()
 		//: programmatic bench — adaptive N amortises GC events to ~0/op.
 		result := testing.Benchmark(c.fn)
+		gateMu.Unlock()
 		if got := result.AllocsPerOp(); got != 0 {
 			t.Errorf("%s: AllocsPerOp = %d, want 0 (steady-state zero-alloc invariant)", c.name, got)
 		}

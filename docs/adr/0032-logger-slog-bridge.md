@@ -155,6 +155,14 @@ markdown table never was what prevented a collision.
 
 ## Deferred
 
+- **Carrying `slog.Record.PC` across the bridge.** The bridge calls the ordinary
+  `Log`, which captures a program counter at the bridge itself, so a destination
+  built with `logger.WithCaller` reports `slogbridge/handler.go` rather than the
+  foreign library's logging call. Closing it needs an emission path that ACCEPTS
+  a program counter; `Logger.Log` captures its own, and giving it one touches the
+  contract every handler implements. Documented under §Known limits in the
+  package, with the workaround — do not enable `WithCaller` on a destination that
+  receives bridged records, because a wrong source is worse than none.
 - **Carrying `slog.Record.Time` across the bridge.** It needs an emission path
   that accepts a timestamp — `Logger.Log` has none, and adding one touches the
   core contract every handler implements. Out of scope for an adapter; revisit
