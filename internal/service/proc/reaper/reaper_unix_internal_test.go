@@ -6,8 +6,9 @@
 // Wait4(-1) reaps ANY child of this process, and the loop installs a
 // PROCESS-GLOBAL SIGCHLD handler. Two tests doing either at once would steal
 // each other's children and each other's signals, so every test below takes
-// reapMu for its whole body. They are still marked parallel — the mutex is what
-// makes that safe, and it keeps them from blocking the rest of the package.
+// reapMu for its whole body — as does the external test package, through the
+// exported ReapLock. They are still marked parallel — the mutex is what makes
+// that safe, and it keeps them from blocking the rest of the package.
 package reaper
 
 import (
@@ -32,9 +33,15 @@ const helperEnv string = "SDK_REAPER_ROLE_CHILD"
 // sleeps the requested seconds then exits, modelling the orphan to be reaped.
 const grandchildEnv string = "SDK_REAPER_ROLE_GRANDCHILD"
 
-// reapMu serialises every test that spawns a child, sweeps for one, or installs
-// the SIGCHLD handler. All three are process-global.
-var reapMu sync.Mutex
+const (
+	// reapDeadline bounds the wait for spawned children to exit and be reaped.
+	// It is generous on purpose: the assertion is that every child IS reaped,
+	// not that it happens quickly, so the deadline exists to fail instead of
+	// hanging.
+	reapDeadline time.Duration = 30 * time.Second
+	// reapPoll is how long a sweep that found nothing waits before retrying.
+	reapPoll time.Duration = 2 * time.Millisecond
+)
 
 // TestMain intercepts the re-exec child/grandchild roles before the test runner
 // starts, so a child can orphan a sleeping grandchild onto the parent test
@@ -86,6 +93,13 @@ func runChild(secs string) (code int) {
 // idle supervisor sweeps constantly and would otherwise log an error every time.
 // A positive pid means keep going, and pid 0 with no error means "children
 // exist, none have exited" — also a clean end.
+//
+// What one sweep returns is TIMING, not contract: it reaps the children that
+// have already exited, and a child spawned a moment ago may not have. So the
+// test sweeps until the total arrives, which is what the supervisor's own loop
+// does. Asserting an exact count after a fixed sleep pins the scheduler
+// instead — it passed under `go test` and failed under coverage
+// instrumentation, where four children do not all exit inside 50ms.
 func Test_unixReaper_drainResult(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -110,19 +124,28 @@ func Test_unixReaper_drainResult(t *testing.T) {
 				t.Fatalf("spawning child %d: %v", i, err)
 			}
 		}
-		//: give the children a moment to actually exit before sweeping.
-		if c.children > 0 {
-			time.Sleep(50 * time.Millisecond)
-		}
 
 		r := &unixReaper{}
-		got, err := r.drainResult()
-		//: ECHILD must surface as nil, never as REAP_FAILED.
-		if err != nil {
-			t.Fatalf("drainResult = %v, want nil", err)
+		total := 0
+		deadline := time.Now().Add(reapDeadline)
+		//: always sweep at least once, so the no-children case still pins that
+		//: ECHILD comes back as a clean zero rather than as REAP_FAILED.
+		for {
+			got, err := r.drainResult()
+			//: ECHILD must surface as nil, never as REAP_FAILED.
+			if err != nil {
+				t.Fatalf("drainResult = %v, want nil", err)
+			}
+			total += got
+			//: every child accounted for, or out of patience.
+			if total >= c.children || !time.Now().Before(deadline) {
+				break
+			}
+			//: nothing had exited yet; let them.
+			time.Sleep(reapPoll)
 		}
-		if got != c.children {
-			t.Errorf("drainResult = %d, want %d", got, c.children)
+		if total != c.children {
+			t.Errorf("the sweeps reaped %d children, want %d", total, c.children)
 		}
 	}
 	for _, c := range tests {
@@ -596,15 +619,29 @@ func Test_unixReaper_loop(t *testing.T) {
 				t.Fatalf("spawning child %d: %v", i, err)
 			}
 		}
-		//: let the children exit; the loop may already have collected some via
-		//: SIGCHLD, and the final drain takes whatever is left.
-		time.Sleep(100 * time.Millisecond)
+		//: wait for the children to be accounted for rather than for a fixed
+		//: duration: WHEN each one exits is the scheduler's business, and a
+		//: sleep that is long enough on an idle machine is not long enough
+		//: under coverage instrumentation.
+		deadline := time.Now().Add(reapDeadline)
+		for {
+			mu.Lock()
+			got := total
+			mu.Unlock()
+			//: every child collected, or out of patience.
+			if got >= c.children || !time.Now().Before(deadline) {
+				break
+			}
+			//: nothing new yet; give the loop another SIGCHLD to work with.
+			time.Sleep(reapPoll)
+		}
 		r.Stop()
 
 		mu.Lock()
 		defer mu.Unlock()
-		//: every child is accounted for by the time Stop returns — that is the
-		//: whole point of the final drain.
+		//: every child is accounted for by the time Stop returns, whether the
+		//: SIGCHLD path or the final drain collected it — that is the promise
+		//: Stop makes, and the count is how a caller sees it kept.
 		if total != c.children {
 			t.Errorf("the loop reaped %d children, want %d", total, c.children)
 		}

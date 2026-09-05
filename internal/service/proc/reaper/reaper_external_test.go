@@ -28,6 +28,11 @@ func TestWithOnReap(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
+		//: a sweep reaps ANY child of the process, including one another test
+		//: spawned and is counting on.
+		svcreaper.ReapLock()
+		defer svcreaper.ReapUnlock()
+
 		var mu sync.Mutex
 		var calls int
 		r := svcreaper.New(svcreaper.WithOnReap(func(int) {
@@ -57,7 +62,11 @@ func TestWithOnReap(t *testing.T) {
 		})
 	}
 	//: a nil observer must be accepted and simply do nothing, so a caller can
-	//: pass one unconditionally.
+	//: pass one unconditionally. This runs BEFORE the parallel subtests above,
+	//: so it takes the lock on its own account.
+	svcreaper.ReapLock()
+	defer svcreaper.ReapUnlock()
+
 	r := svcreaper.New(svcreaper.WithOnReap(nil))
 	if _, err := r.ReapOnce(); err != nil {
 		t.Errorf("ReapOnce with a nil observer = %v, want nil", err)

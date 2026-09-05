@@ -27,6 +27,11 @@ func TestNew(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
+		//: a sweep reaps ANY child of the process, including one another test
+		//: spawned and is counting on.
+		svcreaper.ReapLock()
+		defer svcreaper.ReapUnlock()
+
 		r := svcreaper.New(c.opts...)
 		if r == nil {
 			t.Fatal("New returned no reaper")

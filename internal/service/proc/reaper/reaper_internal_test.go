@@ -1,7 +1,37 @@
-// Package reaper — the cross-platform option accumulator.
+// Package reaper — the cross-platform option accumulator, and the reap lock the
+// whole test binary shares.
 package reaper
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
+
+// reapMu serialises every test in this BINARY that spawns a child, sweeps for
+// one, or installs the SIGCHLD handler. All three are process-global.
+var reapMu sync.Mutex
+
+// ReapLock takes the binary-wide reap lock, and ReapUnlock releases it.
+//
+// Wait4(-1) reaps ANY child of the process, so two tests sweeping at once steal
+// each other's children: the one that spawned them gets ECHILD and counts zero,
+// while the thief counts children it never spawned. The external test package
+// sweeps too — that is most of what its tests do — and cannot see an unexported
+// mutex, so the lock is exported for it. Both are declared in a _test.go file
+// and therefore exist only in the test build of this package, never in the
+// shipped one.
+//
+// Every test that spawns a child, sweeps for one, or starts the loop must hold
+// it for its whole body.
+func ReapLock() {
+	reapMu.Lock()
+}
+
+// ReapUnlock releases the lock taken by ReapLock. See ReapLock for why the pair
+// is exported.
+func ReapUnlock() {
+	reapMu.Unlock()
+}
 
 // Test_resolve pins the folding and the nil tolerance. Options are commonly
 // built conditionally — append one only when a flag is set — and the idiomatic
