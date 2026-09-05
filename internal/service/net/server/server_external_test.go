@@ -21,9 +21,18 @@ import (
 	"github.com/kitsunium/sdk/internal/service/net/server"
 )
 
-// pollInterval is how often waitFor re-checks its condition. Polling beats a
-// fixed sleep: it is both faster in the common case and far less flaky.
-const pollInterval time.Duration = 2 * time.Millisecond
+const (
+	// pollInterval is how often waitFor re-checks its condition. Polling beats a
+	// fixed sleep: it is both faster in the common case and far less flaky.
+	pollInterval time.Duration = 2 * time.Millisecond
+	// serveDeadline bounds a wait for work that is already in flight — a
+	// connection dialled, a datagram sent. It is deliberately far longer than
+	// the work takes: the assertion is that the engine serves it AT ALL, not
+	// that it serves it quickly, so the deadline exists to fail instead of
+	// hanging. A tight one measures the machine's load instead, which is how a
+	// suite acquires a test that only fails under -race on a busy runner.
+	serveDeadline time.Duration = 30 * time.Second
+)
 
 // startEcho starts an echo server on an ephemeral port and returns it with the
 // address it actually bound.

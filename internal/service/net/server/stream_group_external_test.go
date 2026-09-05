@@ -72,7 +72,7 @@ func TestStreamGroup_Name(t *testing.T) {
 			if got != c.declared {
 				t.Fatalf("the handler saw group %q, want %q", got, c.declared)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(serveDeadline):
 			t.Fatal("the connection was never served")
 		}
 	}
@@ -329,7 +329,7 @@ func TestStreamGroup_Use(t *testing.T) {
 				if got != expected {
 					t.Fatalf("step %d ran %q, want %q", i, got, expected)
 				}
-			case <-time.After(5 * time.Second):
+			case <-time.After(serveDeadline):
 				t.Fatalf("the chain stopped after %d of %d steps", i, len(want))
 			}
 		}

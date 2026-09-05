@@ -55,6 +55,15 @@ func startHTTPGroup(t *testing.T) (srv *Server, adapter *httpAdapter, addr strin
 	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	//: every caller here shuts the server down itself, but only on the path it
+	//: is testing — a failure before that point would otherwise leave the
+	//: listener and the net/http goroutine running for the rest of the binary.
+	//: Close is idempotent, so the deliberate shutdown still stands.
+	t.Cleanup(func() {
+		if cerr := srv.Close(); cerr != nil {
+			t.Errorf("close: %v", cerr)
+		}
+	})
 	addr = srv.State().Listeners[0].Address
 	//: one real request is what makes the adapter build its bridge and start
 	//: the goroutine whose lifetime this file is about.
@@ -62,7 +71,11 @@ func startHTTPGroup(t *testing.T) (srv *Server, adapter *httpAdapter, addr strin
 	if rerr != nil {
 		t.Fatalf("build request: %v", rerr)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	//: a client of its own rather than http.DefaultClient, whose connection pool
+	//: is shared with every other test in the binary and can hand this request a
+	//: keep-alive connection to a server that has since gone away.
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

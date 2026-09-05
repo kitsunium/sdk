@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	stdnet "net"
 	"net/http"
 	"os"
@@ -795,7 +796,7 @@ func Test_Server_acceptLoop(t *testing.T) {
 
 		select {
 		case <-stopped:
-		case <-time.After(5 * time.Second):
+		case <-time.After(serveDeadline):
 			t.Fatal("the accept loop is still running after its listener closed — " +
 				"it would hold the in-flight token the drain waits on forever")
 		}
@@ -988,15 +989,15 @@ func Test_Server_closeListeners(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		srv := newTestServer(t)
-		addrs := make([]string, 0, c.listeners)
-		packetAddrs := make([]string, 0, c.packets)
+		listeners := make([]stdnet.Listener, 0, c.listeners)
+		conns := make([]stdnet.PacketConn, 0, c.packets)
 		for range c.listeners {
 			ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
 				t.Fatalf("listen: %v", err)
 			}
 			srv.listeners = append(srv.listeners, &boundListener{ln: ln})
-			addrs = append(addrs, ln.Addr().String())
+			listeners = append(listeners, ln)
 		}
 		for range c.packets {
 			pc, err := stdnet.ListenPacket("udp", "127.0.0.1:0")
@@ -1004,18 +1005,25 @@ func Test_Server_closeListeners(t *testing.T) {
 				t.Fatalf("listen packet: %v", err)
 			}
 			srv.packetConns = append(srv.packetConns, &boundPacketConn{pc: pc})
-			packetAddrs = append(packetAddrs, pc.LocalAddr().String())
+			conns = append(conns, pc)
 		}
 
 		srv.closeListeners()
 
-		//: the ports are actually released, which is what makes a restart on
-		//: the same address possible.
-		for _, addr := range addrs {
-			assertReleased(t, "tcp", addr)
+		//: every socket is genuinely closed, which is what releases the port and
+		//: makes a restart on the same address possible. The handle itself is
+		//: asked rather than the address: an ephemeral port freed here can be
+		//: handed straight to a sibling test, so a failed re-bind would prove
+		//: nothing about whether OUR socket went back.
+		for i, ln := range listeners {
+			if _, err := ln.Accept(); !errors.Is(err, stdnet.ErrClosed) {
+				t.Errorf("listener %d accepts after closeListeners: %v", i, err)
+			}
 		}
-		for _, addr := range packetAddrs {
-			assertReleased(t, "udp", addr)
+		for i, pc := range conns {
+			if _, _, err := pc.ReadFrom(make([]byte, 1)); !errors.Is(err, stdnet.ErrClosed) {
+				t.Errorf("datagram socket %d reads after closeListeners: %v", i, err)
+			}
 		}
 		//: forgotten as well as closed, so a second call cannot double-close.
 		srv.mu.RLock()

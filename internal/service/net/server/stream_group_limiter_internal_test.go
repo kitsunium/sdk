@@ -127,7 +127,7 @@ func Test_Server_admit(t *testing.T) {
 		for range c.occupy {
 			select {
 			case <-held:
-			case <-time.After(5 * time.Second):
+			case <-time.After(serveDeadline):
 				t.Fatal("a slot-holding handler never started")
 			}
 		}

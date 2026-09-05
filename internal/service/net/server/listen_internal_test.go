@@ -18,6 +18,14 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// serveDeadline bounds a wait for work that is already in flight — a connection
+// accepted, a datagram read. It is deliberately far longer than the work takes:
+// the assertion is that the engine serves it AT ALL, not that it serves it
+// quickly, so the deadline exists to fail instead of hanging. A tight one
+// measures the machine's load instead, which is how a suite acquires a test that
+// only fails under -race on a busy runner.
+const serveDeadline time.Duration = 30 * time.Second
+
 // addrTarget names how a case's address is produced.
 type addrTarget int
 

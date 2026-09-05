@@ -412,7 +412,7 @@ func TestReadTimeout(t *testing.T) {
 				if err == nil {
 					t.Fatal("a peer that sent nothing was never cut off")
 				}
-			case <-time.After(5 * time.Second):
+			case <-time.After(serveDeadline):
 				t.Fatalf("a peer that sent nothing was still connected long after its %v budget",
 					readBudget)
 			}
@@ -722,7 +722,7 @@ func TestReadBufferSize(t *testing.T) {
 			if got != c.size {
 				t.Fatalf("Buffer has length %d, want %d", got, c.size)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(serveDeadline):
 			t.Fatal("the connection was never served")
 		}
 	}
@@ -872,7 +872,7 @@ func TestBatchSize(t *testing.T) {
 			select {
 			case payload := <-seen:
 				got[payload]++
-			case <-time.After(5 * time.Second):
+			case <-time.After(serveDeadline):
 				t.Fatalf("only %d of %d datagrams were served", len(got), c.datagrams)
 			}
 		}
@@ -1030,7 +1030,15 @@ func TestMaxConns(t *testing.T) {
 		//: difference between a working server and a dead one.
 		{name: "no ceiling by default", rounds: 3},
 		{name: "a ceiling that releases its slots", ceiling: 4, rounds: 20},
-		{name: "a ceiling of one, sequentially", ceiling: 1, rounds: 5},
+		//: deliberately NO sequential case at a ceiling of one. The slot is
+		//: released when the handler RETURNS, which is after the peer has
+		//: already read its echo and closed — so a client reconnecting
+		//: immediately can legitimately meet a server that is still occupied,
+		//: and the refusal reaches it as a connection reset mid-read. That is
+		//: correct behaviour, not a leak; a case at ceiling one therefore
+		//: asserts nothing and fails roughly one run in three. The release
+		//: property is pinned at four, where the window is absorbed, and the
+		//: refusal itself by the probe below.
 		{name: "a connection past the ceiling", ceiling: 1, probeBeyond: true},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -1049,10 +1057,9 @@ func TestMaxConns(t *testing.T) {
 					t.Fatalf("connection %d got %q, want %q — a slot leaked", i, got, "ping\n")
 				}
 			}
-			//: sequential traffic under a ceiling must never be refused, but a
-			//: slot is released when the handler returns, which can be just
-			//: after the peer saw its echo — so a ceiling of one may legitimately
-			//: refuse a reconnection that arrives inside that window.
+			//: sequential traffic under a ceiling of more than one must never be
+			//: refused: the release window is absorbed by the spare slots, so a
+			//: rejection here is a leaked slot rather than a race.
 			if c.ceiling > 1 && srv.State().RejectedConns != 0 {
 				t.Fatalf("RejectedConns = %d for sequential traffic under a ceiling of %d, want 0",
 					srv.State().RejectedConns, c.ceiling)

@@ -220,7 +220,7 @@ func TestServer_Serve(t *testing.T) {
 				if !errs.HasCode(err, c.wantCode) {
 					t.Fatalf("Serve = %v, want code %v", err, c.wantCode)
 				}
-			case <-time.After(5 * time.Second):
+			case <-time.After(serveDeadline):
 				t.Fatal("Serve blocked on a server that never started")
 			}
 			return

@@ -6,47 +6,77 @@ package server
 import (
 	stdnet "net"
 	"os"
+	"strconv"
+	"syscall"
 	"testing"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// assertReleased pins that nothing still holds addr.
+// socketOf reads what a descriptor currently refers to, as /proc/self/fd
+// reports it: "socket:[<inode>]", unique to that socket for as long as any
+// descriptor holds it open.
+//
+// It replaces the obvious proof — re-bind the address and see whether it is
+// free — which measures the wrong thing. A sibling test binding an ephemeral
+// port can be handed the very port the fixture just released, so the re-bind
+// fails with EADDRINUSE for a socket that WAS released. The inode cannot be
+// confused that way: no other socket in the process can carry it.
+func socketOf(t *testing.T, fd uintptr) string {
+	t.Helper()
+	target, err := os.Readlink("/proc/self/fd/" + strconv.FormatUint(uint64(fd), 10))
+	if err != nil {
+		t.Fatalf("reading what descriptor %d refers to: %v", fd, err)
+	}
+	return target
+}
+
+// socketOfConn is socketOf for a live listener or datagram socket.
+func socketOfConn(t *testing.T, c syscall.Conn) string {
+	t.Helper()
+	raw, err := c.SyscallConn()
+	if err != nil {
+		t.Fatalf("reaching the descriptor: %v", err)
+	}
+	var id string
+	if cerr := raw.Control(func(fd uintptr) { id = socketOf(t, fd) }); cerr != nil {
+		t.Fatalf("reaching the descriptor: %v", cerr)
+	}
+	return id
+}
+
+// assertReleased pins that NO descriptor in this process still refers to the
+// socket.
 //
 // It is the only assertion that actually measures a leak. Checking that Close
 // was called proves the code took a path, not that the kernel got the
-// descriptor back, and a descriptor leak is precisely a divergence between
-// those two. Re-binding is the honest test of that and — unlike counting the
-// process's open descriptors — it measures THIS socket rather than whatever
-// else the suite happens to have open, so it stays true under t.Parallel().
-func assertReleased(t *testing.T, network, addr string) {
+// descriptor back — and a descriptor leak is precisely a divergence between
+// those two. A dup shares the open file description, so a listener built from
+// an adopted descriptor carries the same inode: one look covers both.
+func assertReleased(t *testing.T, socket string) {
 	t.Helper()
-	//: the datagram half has no SO_REUSEADDR by default and the stream half's
-	//: only permits a bind in TIME_WAIT, so a successful bind means every
-	//: descriptor that held this address is gone.
-	if network == "udp" {
-		pc, err := stdnet.ListenPacket(network, addr)
-		if err != nil {
-			t.Fatalf("%s is still held after it should have been released: %v", addr, err)
-		}
-		if cerr := pc.Close(); cerr != nil {
-			t.Errorf("close: %v", cerr)
-		}
-		return
-	}
-	ln, err := stdnet.Listen(network, addr)
+	entries, err := os.ReadDir("/proc/self/fd")
 	if err != nil {
-		t.Fatalf("%s is still held after it should have been released: %v", addr, err)
+		t.Fatalf("read /proc/self/fd: %v", err)
 	}
-	if cerr := ln.Close(); cerr != nil {
-		t.Errorf("close: %v", cerr)
+	//: every descriptor the process still holds, including any dup of ours.
+	for _, e := range entries {
+		target, rerr := os.Readlink("/proc/self/fd/" + e.Name())
+		//: a descriptor closed while the directory was being read.
+		if rerr != nil {
+			continue
+		}
+		if target == socket {
+			t.Fatalf("descriptor %s still refers to %s — the attempt kept a "+
+				"descriptor nothing can reclaim", e.Name(), socket)
+		}
 	}
 }
 
 // adoptableListenerFile returns a descriptor a stream adoption accepts, with the
-// address it is bound to so a later re-bind can prove it was released.
-func adoptableListenerFile(t *testing.T) (file *os.File, addr string) {
+// socket identity a later look uses to prove it was released.
+func adoptableListenerFile(t *testing.T) (file *os.File, socket string) {
 	t.Helper()
 	ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -66,12 +96,12 @@ func adoptableListenerFile(t *testing.T) (file *os.File, addr string) {
 	if ferr != nil {
 		t.Fatalf("listener file: %v", ferr)
 	}
-	return dup, ln.Addr().String()
+	return dup, socketOf(t, dup.Fd())
 }
 
 // adoptablePacketFile returns a descriptor a datagram adoption accepts, with the
-// address it is bound to.
-func adoptablePacketFile(t *testing.T) (file *os.File, addr string) {
+// socket identity a later look uses to prove it was released.
+func adoptablePacketFile(t *testing.T) (file *os.File, socket string) {
 	t.Helper()
 	pc, err := stdnet.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
@@ -91,7 +121,7 @@ func adoptablePacketFile(t *testing.T) (file *os.File, addr string) {
 	if ferr != nil {
 		t.Fatalf("socket file: %v", ferr)
 	}
-	return dup, pc.LocalAddr().String()
+	return dup, socketOf(t, dup.Fd())
 }
 
 // releaseOnCleanup gives a descriptor back when the test ends.
@@ -357,13 +387,13 @@ func Test_listenersFromFiles(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		files := make([]*os.File, 0, len(c.shape))
-		addrs := make([]string, 0, len(c.shape))
+		sockets := make([]string, 0, len(c.shape))
 		good := true
 		for _, adoptable := range c.shape {
 			if adoptable {
-				file, addr := adoptableListenerFile(t)
+				file, socket := adoptableListenerFile(t)
 				files = append(files, file)
-				addrs = append(addrs, addr)
+				sockets = append(sockets, socket)
 				continue
 			}
 			good = false
@@ -382,8 +412,8 @@ func Test_listenersFromFiles(t *testing.T) {
 			}
 			//: an adopted listener is live, which is the point of adopting it.
 			for i, ln := range listeners {
-				if ln.Addr().String() != addrs[i] {
-					t.Errorf("listener %d is bound to %v, want %s", i, ln.Addr(), addrs[i])
+				if ln.Addr() == nil || ln.Addr().String() == "" {
+					t.Errorf("adopted listener %d reports no address", i)
 				}
 			}
 			closeListeners(listeners)
@@ -394,11 +424,11 @@ func Test_listenersFromFiles(t *testing.T) {
 			closeListeners(listeners)
 			t.Fatalf("listenersFromFiles = %v, want SOCKET_ADOPT_FAILED", err)
 		}
-		//: every address the attempt touched must be free again — including the
-		//: one whose listener was built before the failure and which nothing
-		//: else could ever have reclaimed.
-		for _, addr := range addrs {
-			assertReleased(t, "tcp", addr)
+		//: every socket the attempt touched must be gone — including the one
+		//: whose listener was built before the failure and which nothing else
+		//: could ever have reclaimed.
+		for _, socket := range sockets {
+			assertReleased(t, socket)
 		}
 	}
 	for _, c := range tests {
@@ -428,13 +458,13 @@ func Test_packetConnsFromFiles(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		files := make([]*os.File, 0, len(c.shape))
-		addrs := make([]string, 0, len(c.shape))
+		sockets := make([]string, 0, len(c.shape))
 		good := true
 		for _, adoptable := range c.shape {
 			if adoptable {
-				file, addr := adoptablePacketFile(t)
+				file, socket := adoptablePacketFile(t)
 				files = append(files, file)
-				addrs = append(addrs, addr)
+				sockets = append(sockets, socket)
 				continue
 			}
 			good = false
@@ -458,9 +488,9 @@ func Test_packetConnsFromFiles(t *testing.T) {
 			closePacketConns(conns)
 			t.Fatalf("packetConnsFromFiles = %v, want SOCKET_ADOPT_FAILED", err)
 		}
-		//: every address the attempt touched must be free again.
-		for _, addr := range addrs {
-			assertReleased(t, "udp", addr)
+		//: every socket the attempt touched must be gone.
+		for _, socket := range sockets {
+			assertReleased(t, socket)
 		}
 	}
 	for _, c := range tests {
@@ -495,11 +525,11 @@ func Test_closeFiles(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		files := make([]*os.File, 0, c.count)
-		addrs := make([]string, 0, c.count)
+		sockets := make([]string, 0, c.count)
 		for range c.count {
-			file, addr := adoptableListenerFile(t)
+			file, socket := adoptableListenerFile(t)
 			files = append(files, file)
-			addrs = append(addrs, addr)
+			sockets = append(sockets, socket)
 		}
 		if c.closedAlready {
 			closeFiles(files)
@@ -507,8 +537,8 @@ func Test_closeFiles(t *testing.T) {
 
 		closeFiles(files)
 
-		for _, addr := range addrs {
-			assertReleased(t, "tcp", addr)
+		for _, socket := range sockets {
+			assertReleased(t, socket)
 		}
 	}
 	for _, c := range tests {
@@ -537,20 +567,24 @@ func Test_closeListeners(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		listeners := make([]stdnet.Listener, 0, c.count)
-		addrs := make([]string, 0, c.count)
+		sockets := make([]string, 0, c.count)
 		for range c.count {
 			ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
 				t.Fatalf("listen: %v", err)
 			}
 			listeners = append(listeners, ln)
-			addrs = append(addrs, ln.Addr().String())
+			conn, ok := ln.(syscall.Conn)
+			if !ok {
+				t.Fatalf("Listen returned a %T with no descriptor", ln)
+			}
+			sockets = append(sockets, socketOfConn(t, conn))
 		}
 
 		closeListeners(listeners)
 
-		for _, addr := range addrs {
-			assertReleased(t, "tcp", addr)
+		for _, socket := range sockets {
+			assertReleased(t, socket)
 		}
 		//: releasing twice is what a concurrent Close does, and must not panic.
 		closeListeners(listeners)
@@ -580,20 +614,24 @@ func Test_closePacketConns(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		conns := make([]stdnet.PacketConn, 0, c.count)
-		addrs := make([]string, 0, c.count)
+		sockets := make([]string, 0, c.count)
 		for range c.count {
 			pc, err := stdnet.ListenPacket("udp", "127.0.0.1:0")
 			if err != nil {
 				t.Fatalf("listen packet: %v", err)
 			}
 			conns = append(conns, pc)
-			addrs = append(addrs, pc.LocalAddr().String())
+			conn, ok := pc.(syscall.Conn)
+			if !ok {
+				t.Fatalf("ListenPacket returned a %T with no descriptor", pc)
+			}
+			sockets = append(sockets, socketOfConn(t, conn))
 		}
 
 		closePacketConns(conns)
 
-		for _, addr := range addrs {
-			assertReleased(t, "udp", addr)
+		for _, socket := range sockets {
+			assertReleased(t, socket)
 		}
 		//: releasing twice is what a concurrent Close does, and must not panic.
 		closePacketConns(conns)

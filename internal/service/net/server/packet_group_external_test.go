@@ -74,7 +74,7 @@ func TestPacketGroup_Name(t *testing.T) {
 			if got != c.declared {
 				t.Fatalf("the handler saw group %q, want %q", got, c.declared)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(serveDeadline):
 			t.Fatal("the datagram was never served")
 		}
 	}
@@ -268,7 +268,7 @@ func TestPacketGroup_HandleFunc_SenderIsReported(t *testing.T) {
 			if got != conn.LocalAddr().String() {
 				t.Fatalf("sender = %q, want %q", got, conn.LocalAddr().String())
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(serveDeadline):
 			t.Fatal("the datagram was never served")
 		}
 	}
@@ -333,7 +333,7 @@ func TestPacketGroup_HandleFunc_ContainsAPanic(t *testing.T) {
 			if got != "survivor" {
 				t.Fatalf("served %q, want \"survivor\"", got)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(serveDeadline):
 			t.Fatal("the read loop died with the panicking handler")
 		}
 	}
@@ -410,7 +410,7 @@ func TestPacketGroup_Use(t *testing.T) {
 					if got != expected {
 						t.Fatalf("datagram %d step %d ran %q, want %q", d, i, got, expected)
 					}
-				case <-time.After(5 * time.Second):
+				case <-time.After(serveDeadline):
 					t.Fatalf("datagram %d stopped after %d of %d steps", d, i, len(want))
 				}
 			}

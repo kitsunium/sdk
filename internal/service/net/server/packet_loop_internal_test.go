@@ -241,7 +241,7 @@ func Test_Server_readLoop(t *testing.T) {
 		if len(c.payloads) > 0 {
 			select {
 			case <-handler.served:
-			case <-time.After(5 * time.Second):
+			case <-time.After(serveDeadline):
 				t.Fatalf("the loop served %v, want %v", handler.payloads(), c.payloads)
 			}
 		}
@@ -253,7 +253,7 @@ func Test_Server_readLoop(t *testing.T) {
 
 		select {
 		case <-stopped:
-		case <-time.After(5 * time.Second):
+		case <-time.After(serveDeadline):
 			t.Fatal("the read loop is still running after its socket closed — it " +
 				"would hold the in-flight token the drain waits on forever")
 		}
