@@ -80,6 +80,7 @@ func TestZeroAllocInvariant(t *testing.T) {
 	t.Parallel()
 	for _, g := range gatedBenches {
 		t.Run(g.name, func(t *testing.T) {
+			t.Parallel()
 			//: programmatic bench — adaptive N amortises GC events to ~0/op.
 			result := testing.Benchmark(g.fn)
 			if got := result.AllocsPerOp(); got != 0 {
