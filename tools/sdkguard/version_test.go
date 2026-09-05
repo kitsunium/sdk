@@ -325,12 +325,14 @@ func TestResolveProxiesHonoursGOPROXY(t *testing.T) {
 		{
 			"a comma list keeps every URL in order",
 			"https://a.example,https://b.example,direct",
-			[]string{"https://a.example", "https://b.example"}, true,
+			[]string{"https://a.example", "https://b.example"},
+			true,
 		},
 		{
 			"a pipe list keeps every URL in order",
 			"https://b.example|https://c.example",
-			[]string{"https://b.example", "https://c.example"}, true,
+			[]string{"https://b.example", "https://c.example"},
+			true,
 		},
 		{"trailing slash trimmed", "https://d.example/", []string{"https://d.example"}, true},
 		{"off ahead of a URL still disables", "off,https://e.example", nil, false},

@@ -68,7 +68,8 @@ func Test_handler_Handle(t *testing.T) {
 		{"a record below the threshold", slog.LevelDebug, nil, false, 0},
 		{
 			"a group is flattened before emission", slog.LevelInfo,
-			[]slog.Attr{slog.Group("g", slog.Int("n", 1))}, true, 2,
+			[]slog.Attr{slog.Group("g", slog.Int("n", 1))},
+			true, 2,
 		},
 		{"an elided attr never reaches the sink", slog.LevelInfo, []slog.Attr{{}}, true, 1},
 	}
