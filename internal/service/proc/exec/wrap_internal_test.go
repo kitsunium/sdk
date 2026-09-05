@@ -37,6 +37,7 @@ func wrapCases() []wrapCase {
 		"a foreign public message", "a foreign private message")
 	return []wrapCase{
 		{name: "a plain cause", cause: os.ErrPermission},
+		{name: "an error the OS reported", cause: os.ErrNotExist},
 		{name: "a typed cause", cause: foreign, typedCause: true},
 		{name: "a nil cause"},
 		{
@@ -47,9 +48,18 @@ func wrapCases() []wrapCase {
 	}
 }
 
+// wrapExpect is what one wrapper promises: the sentinel's code, its reason and
+// the exit status a supervisor reads.
+type wrapExpect struct {
+	code   errs.Code
+	reason string
+	exit   int
+}
+
 // assertWrapped checks the three properties every wrapper promises.
-func assertWrapped(t *testing.T, got error, c wrapCase, code errs.Code, reason string, exit int) {
+func assertWrapped(t *testing.T, got error, c wrapCase, want wrapExpect) {
 	t.Helper()
+	code, reason, exit := want.code, want.reason, want.exit
 	if got == nil {
 		t.Fatal("the wrapper returned nil")
 	}
@@ -88,7 +98,8 @@ func Test_wrapSpawn(t *testing.T) {
 	tests := wrapCases()
 	runCase := func(t *testing.T, c wrapCase) {
 		t.Helper()
-		assertWrapped(t, wrapSpawn(c.cause, c.fields...), c, coreproc.CodeSpawnFailed, "SPAWN_FAILED", exitOSErr)
+		assertWrapped(t, wrapSpawn(c.cause, c.fields...), c,
+			wrapExpect{code: coreproc.CodeSpawnFailed, reason: "SPAWN_FAILED", exit: exitOSErr})
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -107,7 +118,8 @@ func Test_wrapWait(t *testing.T) {
 	tests := wrapCases()
 	runCase := func(t *testing.T, c wrapCase) {
 		t.Helper()
-		assertWrapped(t, wrapWait(c.cause, c.fields...), c, coreproc.CodeWaitFailed, "WAIT_FAILED", exitOSErr)
+		assertWrapped(t, wrapWait(c.cause, c.fields...), c,
+			wrapExpect{code: coreproc.CodeWaitFailed, reason: "WAIT_FAILED", exit: exitOSErr})
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -127,7 +139,8 @@ func Test_wrapSignal(t *testing.T) {
 	tests := wrapCases()
 	runCase := func(t *testing.T, c wrapCase) {
 		t.Helper()
-		assertWrapped(t, wrapSignal(c.cause, c.fields...), c, coreproc.CodeSignalFailed, "SIGNAL_FAILED", exitOSErr)
+		assertWrapped(t, wrapSignal(c.cause, c.fields...), c,
+			wrapExpect{code: coreproc.CodeSignalFailed, reason: "SIGNAL_FAILED", exit: exitOSErr})
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -148,7 +161,8 @@ func Test_wrapStop(t *testing.T) {
 	tests := wrapCases()
 	runCase := func(t *testing.T, c wrapCase) {
 		t.Helper()
-		assertWrapped(t, wrapStop(c.cause, c.fields...), c, coreproc.CodeStopFailed, "STOP_FAILED", exitOSErr)
+		assertWrapped(t, wrapStop(c.cause, c.fields...), c,
+			wrapExpect{code: coreproc.CodeStopFailed, reason: "STOP_FAILED", exit: exitOSErr})
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -168,7 +182,8 @@ func Test_wrapRlimit(t *testing.T) {
 	tests := wrapCases()
 	runCase := func(t *testing.T, c wrapCase) {
 		t.Helper()
-		assertWrapped(t, wrapRlimit(c.cause, c.fields...), c, coreproc.CodeRlimitFailed, "RLIMIT_FAILED", exitOSErr)
+		assertWrapped(t, wrapRlimit(c.cause, c.fields...), c,
+			wrapExpect{code: coreproc.CodeRlimitFailed, reason: "RLIMIT_FAILED", exit: exitOSErr})
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -185,10 +200,17 @@ func Test_wrapRlimit(t *testing.T) {
 // 'this program is broken'.
 func Test_wrapCgroupUnavailable(t *testing.T) {
 	t.Parallel()
-	tests := wrapCases()
+	//: the domain-specific row: this wrapper always names WHAT was
+	//: invalid, and that annotation is the whole diagnostic.
+	tests := append(wrapCases(), wrapCase{
+		name:   "an invalid cgroup path",
+		cause:  os.ErrNotExist,
+		fields: []errs.FieldValue{errs.String("cgroup_path", "/not/a/cgroup")},
+	})
 	runCase := func(t *testing.T, c wrapCase) {
 		t.Helper()
-		assertWrapped(t, wrapCgroupUnavailable(c.cause, c.fields...), c, coreproc.CodeCgroupUnavailable, "CGROUP_UNAVAILABLE", exitUnavailable)
+		assertWrapped(t, wrapCgroupUnavailable(c.cause, c.fields...), c,
+			wrapExpect{code: coreproc.CodeCgroupUnavailable, reason: "CGROUP_UNAVAILABLE", exit: exitUnavailable})
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -208,7 +230,8 @@ func Test_wrapStdioCapture(t *testing.T) {
 	tests := wrapCases()
 	runCase := func(t *testing.T, c wrapCase) {
 		t.Helper()
-		assertWrapped(t, wrapStdioCapture(c.cause, c.fields...), c, coreproc.CodeStdioCaptureFailed, "STDIO_CAPTURE_FAILED", exitIOErr)
+		assertWrapped(t, wrapStdioCapture(c.cause, c.fields...), c,
+			wrapExpect{code: coreproc.CodeStdioCaptureFailed, reason: "STDIO_CAPTURE_FAILED", exit: exitIOErr})
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -224,10 +247,17 @@ func Test_wrapStdioCapture(t *testing.T) {
 // not exist on this host — a configuration error it can report without guessing.
 func Test_wrapUnknownUser(t *testing.T) {
 	t.Parallel()
-	tests := wrapCases()
+	//: the domain-specific row: this wrapper always names WHAT was
+	//: invalid, and that annotation is the whole diagnostic.
+	tests := append(wrapCases(), wrapCase{
+		name:   "an invalid user name",
+		cause:  os.ErrNotExist,
+		fields: []errs.FieldValue{errs.String("user", "nobody-at-all")},
+	})
 	runCase := func(t *testing.T, c wrapCase) {
 		t.Helper()
-		assertWrapped(t, wrapUnknownUser(c.cause, c.fields...), c, coreproc.CodeUnknownUser, "UNKNOWN_USER", exitNoUser)
+		assertWrapped(t, wrapUnknownUser(c.cause, c.fields...), c,
+			wrapExpect{code: coreproc.CodeUnknownUser, reason: "UNKNOWN_USER", exit: exitNoUser})
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -243,10 +273,17 @@ func Test_wrapUnknownUser(t *testing.T) {
 // user and a missing group should not be reported as a missing user.
 func Test_wrapUnknownGroup(t *testing.T) {
 	t.Parallel()
-	tests := wrapCases()
+	//: the domain-specific row: this wrapper always names WHAT was
+	//: invalid, and that annotation is the whole diagnostic.
+	tests := append(wrapCases(), wrapCase{
+		name:   "an invalid group name",
+		cause:  os.ErrNotExist,
+		fields: []errs.FieldValue{errs.String("group", "nogroup-at-all")},
+	})
 	runCase := func(t *testing.T, c wrapCase) {
 		t.Helper()
-		assertWrapped(t, wrapUnknownGroup(c.cause, c.fields...), c, coreproc.CodeUnknownGroup, "UNKNOWN_GROUP", exitNoUser)
+		assertWrapped(t, wrapUnknownGroup(c.cause, c.fields...), c,
+			wrapExpect{code: coreproc.CodeUnknownGroup, reason: "UNKNOWN_GROUP", exit: exitNoUser})
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {

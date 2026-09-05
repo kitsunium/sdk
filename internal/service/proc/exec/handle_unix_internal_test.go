@@ -36,9 +36,15 @@ func startChild(t *testing.T, setpgid bool, program string) *handle {
 	}
 	h := newHandle(started, setpgid, sio)
 	t.Cleanup(func() {
-		//: whatever the test did, leave nothing running or unreaped.
-		_ = h.SignalGroup(coreproc.Signal(syscall.SIGKILL))
-		_, _ = h.Wait()
+		//: whatever the test did, leave nothing running or unreaped. Both
+		//: calls routinely fail on an already-reaped child, which is the
+		//: outcome we wanted, so they are logged rather than asserted.
+		if kerr := h.SignalGroup(coreproc.Signal(syscall.SIGKILL)); kerr != nil {
+			t.Logf("cleanup SignalGroup: %v", kerr)
+		}
+		if _, werr := h.Wait(); werr != nil {
+			t.Logf("cleanup Wait: %v", werr)
+		}
 		sio.closeAll()
 	})
 	return h
@@ -387,50 +393,48 @@ func Test_handle_Stop(t *testing.T) {
 // is "not settled", and that distinction is what tells Stop to escalate.
 func Test_handle_awaitExit(t *testing.T) {
 	t.Parallel()
+	//: outcome names the terminal state the wait must reach, which reads
+	//: better than three booleans and keeps the impossible combinations
+	//: (cancelled but not settled) unrepresentable.
+	type outcome int
+	const (
+		exited outcome = iota
+		graceElapsed
+		cancelled
+	)
 	type tc struct {
-		name        string
-		program     string
-		grace       time.Duration
-		cancel      bool
-		wantSettled bool
-		wantErr     bool
+		name    string
+		program string
+		grace   time.Duration
+		want    outcome
 	}
 	tests := []tc{
-		{name: "the process exits within the window", program: "exit 0", grace: 5 * time.Second, wantSettled: true},
-		{name: "the process exits with no deadline", program: "exit 0", grace: 0, wantSettled: true},
-		{
-			name:        "the grace window closes first",
-			program:     "sleep 30",
-			grace:       100 * time.Millisecond,
-			wantSettled: false,
-		},
-		{
-			name:        "the caller cancels",
-			program:     "sleep 30",
-			grace:       5 * time.Second,
-			cancel:      true,
-			wantSettled: true,
-			wantErr:     true,
-		},
+		{name: "the process exits within the window", program: "exit 0", grace: 5 * time.Second, want: exited},
+		{name: "the process exits with no deadline", program: "exit 0", grace: 0, want: exited},
+		{name: "the grace window closes first", program: "sleep 30", grace: 100 * time.Millisecond, want: graceElapsed},
+		{name: "the caller cancels", program: "sleep 30", grace: 5 * time.Second, want: cancelled},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		h := startChild(t, true, c.program)
 
 		ctx := t.Context()
-		if c.cancel {
-			cancelled, cancel := context.WithCancel(t.Context())
+		if c.want == cancelled {
+			stopped, cancel := context.WithCancel(t.Context())
 			cancel()
 			defer cancel()
-			ctx = cancelled
+			ctx = stopped
 		}
 
 		settled, err := h.awaitExit(ctx, c.grace)
 
-		if settled != c.wantSettled {
-			t.Fatalf("awaitExit settled = %v, want %v (err %v)", settled, c.wantSettled, err)
+		//: only an elapsed grace window is "not settled", and that is exactly
+		//: what tells Stop to escalate.
+		wantSettled := c.want != graceElapsed
+		if settled != wantSettled {
+			t.Fatalf("awaitExit settled = %v, want %v (err %v)", settled, wantSettled, err)
 		}
-		if c.wantErr {
+		if c.want == cancelled {
 			//: a cancellation is surfaced verbatim so a caller shutting down
 			//: recognises its own context error.
 			if !errors.Is(err, context.Canceled) {

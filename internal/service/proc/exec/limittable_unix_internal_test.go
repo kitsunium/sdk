@@ -57,18 +57,31 @@ func Test_buildResourceLimits(t *testing.T) {
 	if _, ok := table[coreproc.ResourceUnknown]; ok {
 		t.Error("the zero-value Resource resolves to a real RLIMIT constant")
 	}
-	//: distinct constants, checked on a clone so the walk cannot observe a
-	//: concurrent edit.
-	seen := make(map[int]coreproc.Resource, len(table))
-	for res, rl := range maps.Clone(table) {
+	//: distinct constants, checked on a private clone.
+	cloned := maps.Clone(table)
+	seen := make(map[int]coreproc.Resource, len(cloned))
+	for res, rl := range cloned {
 		if prior, clash := seen[rl]; clash {
 			t.Errorf("%v and %v both map to RLIMIT constant %d", prior, res, rl)
 		}
 		seen[rl] = res
 	}
-	//: the package-level table must be the one this function builds.
-	if len(resourceLimits) != len(table) {
-		t.Errorf("the package table has %d entries, the freshly built one %d",
-			len(resourceLimits), len(table))
+	//: the package-level table must be the one this function builds — walked
+	//: entry by entry rather than compared by size, so a swapped pair cannot
+	//: hide behind a matching count.
+	for res, rl := range maps.Clone(resourceLimits) {
+		got, ok := cloned[res]
+		if !ok {
+			t.Errorf("the package table maps %v, the freshly built one does not", res)
+			continue
+		}
+		if got != rl {
+			t.Errorf("%v maps to %d in the package table and %d in a fresh one", res, rl, got)
+		}
+	}
+	for res := range cloned {
+		if _, ok := resourceLimits[res]; !ok {
+			t.Errorf("a fresh table maps %v, the package one does not", res)
+		}
 	}
 }

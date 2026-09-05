@@ -274,12 +274,10 @@ func Test_handshakeError(t *testing.T) {
 		}
 		seen[b] = struct{}{}
 	}
-	//: the fallback descriptor sits after the three std streams.
-	if defaultHandshakeFD != 3 {
-		t.Errorf("defaultHandshakeFD = %d, want 3", defaultHandshakeFD)
-	}
-	//: os.Stderr is fd 2, so fd 3 is genuinely the first free slot.
-	if os.Stderr.Fd() != 2 {
-		t.Errorf("os.Stderr is fd %d, so fd 3 is not the first free slot", os.Stderr.Fd())
+	//: the fallback descriptor must sit past the three std streams, or the
+	//: trampoline would report its status into stdout or stderr.
+	if uintptr(defaultHandshakeFD) <= os.Stderr.Fd() {
+		t.Errorf("defaultHandshakeFD = %d, which is not past stderr (fd %d)",
+			defaultHandshakeFD, os.Stderr.Fd())
 	}
 }

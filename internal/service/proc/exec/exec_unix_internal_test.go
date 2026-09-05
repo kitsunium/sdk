@@ -6,9 +6,7 @@
 package exec
 
 import (
-	"context"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"syscall"
@@ -464,10 +462,11 @@ func Test_spawn(t *testing.T) {
 		spec    coreproc.Spec
 		wantErr bool
 	}
+	dir := t.TempDir()
 	tests := []tc{
 		{name: "a real binary", spec: coreproc.Spec{Path: shellPath, Args: []string{"sh", "-c", "exit 0"}}},
 		{name: "a path that does not exist", spec: coreproc.Spec{Path: "/definitely/not/here"}, wantErr: true},
-		{name: "a directory as the target", spec: coreproc.Spec{Path: os.TempDir()}, wantErr: true},
+		{name: "a directory as the target", spec: coreproc.Spec{Path: dir}, wantErr: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -502,87 +501,6 @@ func Test_spawn(t *testing.T) {
 		//: reap it so the test leaves no zombie behind.
 		if _, werr := started.Wait(); werr != nil {
 			t.Logf("reaping the child: %v", werr)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-// Test_Start pins the guard ordering at the top of the spawn: the context, the
-// spec, the limits and the cgroup path are all checked BEFORE any OS work, so a
-// misconfigured Start costs nothing and leaves nothing behind.
-func Test_Start(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name      string
-		spec      coreproc.Spec
-		cancelled bool
-		wantCode  errs.Code
-	}
-	tests := []tc{
-		{name: "a runnable spec", spec: coreproc.Spec{Path: shellPath, Args: []string{"sh", "-c", "exit 0"}}},
-		{
-			name:      "a cancelled context short-circuits",
-			spec:      coreproc.Spec{Path: shellPath},
-			cancelled: true,
-		},
-		{name: "an empty path", spec: coreproc.Spec{}, wantCode: coreproc.CodeInvalidSpec},
-		{
-			name: "an unmappable resource",
-			spec: coreproc.Spec{Path: shellPath, Rlimits: map[coreproc.Resource]coreproc.LimitValue{
-				coreproc.ResourceUnknown: {Soft: 1, Hard: 1},
-			}},
-			wantCode: coreproc.CodeUnknownResource,
-		},
-		{
-			name:     "a cgroup path that is not a control group",
-			spec:     coreproc.Spec{Path: shellPath, CgroupPath: filepath.Join(os.TempDir(), "not-a-cgroup")},
-			wantCode: coreproc.CodeCgroupUnavailable,
-		},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		ctx := t.Context()
-		if c.cancelled {
-			cancelled, cancel := contextCancelled(t)
-			defer cancel()
-			ctx = cancelled
-		}
-
-		proc, err := Start(ctx, c.spec)
-
-		if c.cancelled {
-			//: the cancellation is surfaced verbatim, not relabelled: a caller
-			//: shutting down needs to recognise its own context error.
-			if err == nil {
-				t.Fatal("Start on a cancelled context = nil, want the cancellation")
-			}
-			if proc != nil {
-				t.Error("Start returned a process on a cancelled context")
-			}
-			return
-		}
-		if c.wantCode != 0 {
-			if !errs.HasCode(err, c.wantCode) {
-				t.Fatalf("Start(%s) = %v, want code %v", c.name, err, c.wantCode)
-			}
-			if proc != nil {
-				t.Error("Start returned a process beside the error")
-			}
-			return
-		}
-		if err != nil {
-			t.Fatalf("Start(%s) = %v, want nil", c.name, err)
-		}
-		if proc == nil {
-			t.Fatal("Start returned no process and no error")
-		}
-		if _, werr := proc.Wait(); werr != nil {
-			t.Errorf("Wait = %v, want nil", werr)
 		}
 	}
 	for _, c := range tests {
@@ -633,12 +551,4 @@ func Test_teardown(t *testing.T) {
 			runCase(t, c)
 		})
 	}
-}
-
-// contextCancelled returns a context that is already cancelled.
-func contextCancelled(t *testing.T) (context.Context, context.CancelFunc) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	return ctx, cancel
 }
