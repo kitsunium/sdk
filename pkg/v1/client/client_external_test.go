@@ -30,26 +30,45 @@ func readOnly(t *testing.T) client.Policy {
 // from this surface is unusable in practice.
 func TestFacadeBuildsAWorkingReadOnlyClient(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if _, werr := io.WriteString(w, `{"subscribers":[]}`); werr != nil {
-			t.Errorf("write response: %v", werr)
-		}
-	}))
-	t.Cleanup(srv.Close)
+	type tc struct {
+		name string
+		path string
+		body string
+	}
+	tests := []tc{
+		{"a listed collection", "/v1/subscribers", `{"subscribers":[]}`},
+		{"a listed collection with a query string", "/v1/subscribers?limit=1", `{"subscribers":[]}`},
+		{"an empty body", "/v1/subscribers", ""},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if _, werr := io.WriteString(w, c.body); werr != nil {
+				t.Errorf("write response: %v", werr)
+			}
+		}))
+		t.Cleanup(srv.Close)
 
-	c, err := client.New(client.Config{BaseURL: srv.URL}, tlsid.Identity{}, readOnly(t), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
+		cl, err := client.New(client.Config{BaseURL: srv.URL}, tlsid.Identity{}, readOnly(t), nil)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		resp, err := cl.Get(t.Context(), c.path, nil)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", c.path, err)
+		}
+		if resp.Status != http.StatusOK {
+			t.Fatalf("Status = %d, want 200", resp.Status)
+		}
+		if string(resp.Body) != c.body {
+			t.Fatalf("Body = %q, want %q", resp.Body, c.body)
+		}
 	}
-	resp, err := c.Get(t.Context(), "/v1/subscribers", nil)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if resp.Status != http.StatusOK {
-		t.Fatalf("Status = %d, want 200", resp.Status)
-	}
-	if string(resp.Body) != `{"subscribers":[]}` {
-		t.Fatalf("Body = %q", resp.Body)
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -118,37 +137,59 @@ func TestFacadeSentinelsAreMatchable(t *testing.T) {
 // different resource. The guard refuses it before any pattern is tried.
 func TestForgedDotSegmentIsRefused(t *testing.T) {
 	t.Parallel()
-	reached := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
+	type tc struct {
+		name string
+		path string
+	}
+	tests := []tc{
+		{"a bare dot segment", "/v1/supi/.."},
+		{"a dot segment in the middle", "/v1/supi/../authentication/all"},
+		{"a percent-encoded dot segment", "/v1/supi/%2e%2e"},
+		{"an uppercase percent-encoded dot segment", "/v1/supi/%2E%2E"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		reached := false
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			reached = true
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(srv.Close)
 
-	c, err := client.New(client.Config{BaseURL: srv.URL}, tlsid.Identity{}, readOnly(t), nil)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	req, err := http.NewRequestWithContext(
-		t.Context(), http.MethodGet, srv.URL+"/v1/supi/..", nil)
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	if got := req.URL.EscapedPath(); got != "/v1/supi/.." {
-		t.Fatalf("url.Parse normalised the path to %q — the premise of this test changed", got)
-	}
-	resp, err := c.HTTP().Do(req)
-	if err == nil {
-		if cerr := resp.Body.Close(); cerr != nil {
-			t.Errorf("close: %v", cerr)
+		cl, err := client.New(client.Config{BaseURL: srv.URL}, tlsid.Identity{}, readOnly(t), nil)
+		if err != nil {
+			t.Fatalf("New: %v", err)
 		}
-		t.Fatal("a forged dot-segment path was admitted")
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+c.path, nil)
+		if err != nil {
+			t.Fatalf("build request: %v", err)
+		}
+		//: the premise: url.Parse leaves the forged segment intact. If a future
+		//: Go normalised it here, this test would silently stop testing.
+		if got := req.URL.EscapedPath(); got != c.path {
+			t.Fatalf("url.Parse normalised %q to %q — the premise of this test changed", c.path, got)
+		}
+
+		resp, err := cl.HTTP().Do(req)
+		if err == nil {
+			if cerr := resp.Body.Close(); cerr != nil {
+				t.Errorf("close: %v", cerr)
+			}
+			t.Fatalf("the forged path %q was admitted", c.path)
+		}
+		if !errors.Is(err, client.UnsafePath) {
+			t.Fatalf("Do(%s) = %v, want UnsafePath", c.path, err)
+		}
+		//: a refusal that still reached the upstream would not be a refusal.
+		if reached {
+			t.Fatal("the upstream was contacted despite the refusal")
+		}
 	}
-	if !errors.Is(err, client.UnsafePath) {
-		t.Fatalf("expected UnsafePath, got %v", err)
-	}
-	if reached {
-		t.Fatal("the upstream was contacted despite the refusal")
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 

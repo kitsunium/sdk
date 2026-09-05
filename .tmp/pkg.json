@@ -1,0 +1,17 @@
+{
+  "$schema": "https://ktn-linter.dev/schema/v1/report.json",
+  "version": "1.0.0",
+  "tool": {
+    "name": "ktn-linter",
+    "version": "1.0.0"
+  },
+  "summary": {
+    "totalIssues": 0,
+    "byLevel": {
+      "error": 0,
+      "info": 0,
+      "warning": 0
+    }
+  },
+  "results": []
+}

@@ -9,29 +9,54 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/rlimit"
 )
 
-// TestApplyDelegates asserts the facade forwards to the service: an unmapped
-// resource yields UnknownResource wherever rlimits are native, and
-// UnsupportedPlatform where they are not.
+// TestApplyDelegates asserts the facade forwards to the service rather than
+// re-implementing any part of it: the typed code that comes back is the
+// service's own. A facade that swallowed or re-wrapped it would leave callers
+// unable to tell a bad resource from an unsupported platform.
 func TestApplyDelegates(t *testing.T) {
 	t.Parallel()
-	err := rlimit.Apply(0, map[rlimit.Resource]rlimit.Limit{
-		//: the zero-value resource has no RLIMIT_* mapping.
-		coreproc.ResourceUnknown: {Soft: 1, Hard: 1},
-	})
-	//: select the platform-correct expectation.
-	want := coreproc.CodeUnknownResource
-	//: only off Unix does the stub short-circuit before mapping. Keyed on the
-	//: build-tagged nativeRlimit rather than a runtime.GOOS == "linux" guess,
-	//: which wrongly claimed darwin and the BSDs unsupported when the service
-	//: implements them through setrlimit(2).
-	if !nativeRlimit {
-		//: the non-Unix stub returns UNSUPPORTED_PLATFORM.
-		want = coreproc.CodeUnsupportedPlatform
+	type tc struct {
+		name    string
+		pid     int
+		limits  map[rlimit.Resource]rlimit.Limit
+		native  errs.Code
+		foreign errs.Code
 	}
-	//: the facade must surface the same typed code the service returns.
-	if !errs.HasCode(err, want) {
-		//: a mismatch means the facade is not delegating faithfully.
-		t.Fatalf("Apply = %v, want code %v", err, want)
+	tests := []tc{
+		{
+			//: the zero-value resource has no RLIMIT_* mapping, so a native
+			//: platform gets as far as the mapping table and refuses there.
+			name:    "an unmapped resource",
+			limits:  map[rlimit.Resource]rlimit.Limit{coreproc.ResourceUnknown: {Soft: 1, Hard: 1}},
+			native:  coreproc.CodeUnknownResource,
+			foreign: coreproc.CodeUnsupportedPlatform,
+		},
+		{
+			name:    "an out-of-range resource",
+			limits:  map[rlimit.Resource]rlimit.Limit{coreproc.Resource(200): {Soft: 1, Hard: 1}},
+			native:  coreproc.CodeUnknownResource,
+			foreign: coreproc.CodeUnsupportedPlatform,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		err := rlimit.Apply(c.pid, c.limits)
+		//: keyed on the build-tagged nativeRlimit rather than a
+		//: runtime.GOOS == "linux" guess, which wrongly called darwin and the
+		//: BSDs unsupported when the service implements them via setrlimit(2).
+		want := c.native
+		if !nativeRlimit {
+			want = c.foreign
+		}
+		if !errs.HasCode(err, want) {
+			t.Fatalf("Apply with %s = %v, want code %v", c.name, err, want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 
@@ -43,21 +68,38 @@ func wantCore(v coreproc.LimitValue) coreproc.LimitValue {
 	return v
 }
 
-// TestAliasesIdentical asserts the public aliases are the very same types as the
-// core proc value types, so values cross the facade boundary without conversion.
+// TestAliasesIdentical asserts the public names are the very same types and
+// constants as the core proc ones, so values cross the facade boundary without
+// conversion. A distinct named type here would compile but force every consumer
+// into casts the facade exists to spare them.
 func TestAliasesIdentical(t *testing.T) {
 	t.Parallel()
-	lim := rlimit.Limit{Soft: 1, Hard: 2}
-	//: passing the facade alias where the core type is required proves identity.
-	core := wantCore(lim)
-	//: the round-trip must preserve the value (proves a type alias, not a copy type).
-	if core.Soft != 1 || core.Hard != 2 {
-		//: a divergence would mean the alias is a distinct named type.
-		t.Fatalf("alias round-trip lost data: %+v", core)
+	type tc struct {
+		name string
+		lim  rlimit.Limit
 	}
-	//: LimitInfinity must re-export the core constant unchanged.
+	tests := []tc{
+		{"a bounded limit", rlimit.Limit{Soft: 1, Hard: 2}},
+		{"the zero limit", rlimit.Limit{}},
+		{"an infinite limit", rlimit.Limit{Soft: rlimit.LimitInfinity, Hard: rlimit.LimitInfinity}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: passing the facade alias where the core type is required is the
+		//: proof; the value check only guards against a silent conversion.
+		core := wantCore(c.lim)
+		if core.Soft != c.lim.Soft || core.Hard != c.lim.Hard {
+			t.Fatalf("alias round-trip of %s lost data: %+v", c.name, core)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+	//: the re-exported constant is a package-level fact, not a per-case one.
 	if rlimit.LimitInfinity != coreproc.LimitInfinity {
-		//: a divergent constant breaks consumer expectations.
-		t.Fatalf("LimitInfinity mismatch")
+		t.Fatalf("LimitInfinity = %v, want %v", rlimit.LimitInfinity, coreproc.LimitInfinity)
 	}
 }
