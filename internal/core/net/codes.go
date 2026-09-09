@@ -110,3 +110,47 @@ const CodeSSEStreamClosed errs.Code = 0x00_02_0B_19 // 0.2.11.25
 // interpret rather than guess at: a negative keep-alive interval or a negative
 // per-write budget (ADR 0031).
 const CodeSSEStreamMisconfigured errs.Code = 0x00_02_0B_1A // 0.2.11.26
+
+// CodeWSHandshakeFailed identifies an HTTP request that is not a valid RFC 6455
+// opening handshake: wrong method, absent or non-"websocket" Upgrade token, a
+// Connection header without "Upgrade", a Sec-WebSocket-Key that does not decode
+// to sixteen bytes, a Sec-WebSocket-Version other than 13, or an Origin the
+// server's policy refuses. The response is written before this is returned, so
+// the handler has nothing left to answer.
+const CodeWSHandshakeFailed errs.Code = 0x00_02_0B_1B // 0.2.11.27
+
+// CodeWSUpgradeUnsupported identifies a ResponseWriter whose connection cannot
+// be taken over — an HTTP/2 request, or a middleware wrapper that hides
+// http.Hijacker. WebSocket is not a response format: it replaces HTTP on the
+// socket, so without the hijack there is nothing to upgrade.
+const CodeWSUpgradeUnsupported errs.Code = 0x00_02_0B_1C // 0.2.11.28
+
+// CodeWSProtocolViolation identifies a frame RFC 6455 forbids: an unmasked
+// client frame (§5.1), a set reserved bit or reserved opcode (§5.2), a
+// fragmented or oversized control frame (§5.5), a non-minimal length encoding
+// (§5.2), a continuation with no message in progress or a new data frame
+// interrupting one (§5.4), or a malformed close payload (§5.5.1). Each fails
+// the connection.
+const CodeWSProtocolViolation errs.Code = 0x00_02_0B_1D // 0.2.11.29
+
+// CodeWSMessageTooLarge identifies a frame or an accumulated message beyond the
+// connection's configured ceiling. The frame's announced length is checked
+// BEFORE any buffer is sized from it, because a 64-bit length field a peer
+// chooses is an out-of-memory condition one allocation away.
+const CodeWSMessageTooLarge errs.Code = 0x00_02_0B_1E // 0.2.11.30
+
+// CodeWSInvalidPayload identifies a payload the protocol cannot carry: a text
+// message or close reason that is not valid UTF-8 (§8.1), a close code that
+// must never appear on the wire (1004, 1005, 1006, 1015 and the unallocated
+// ranges — §7.4.2), or a close reason past the control-frame ceiling.
+const CodeWSInvalidPayload errs.Code = 0x00_02_0B_1F // 0.2.11.31
+
+// CodeWSConnClosed identifies an operation on a connection that has ended — the
+// peer sent Close, the server began draining, the handler closed it, or the
+// socket died. It is the terminal outcome a receive loop runs until.
+const CodeWSConnClosed errs.Code = 0x00_02_0B_20 // 0.2.11.32
+
+// CodeWSConnMisconfigured identifies a connection option the domain refuses to
+// interpret rather than guess at: a negative ping interval or write budget, or
+// a non-positive size ceiling (ADR 0031).
+const CodeWSConnMisconfigured errs.Code = 0x00_02_0B_21 // 0.2.11.33
