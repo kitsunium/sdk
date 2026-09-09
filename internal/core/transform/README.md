@@ -9,7 +9,7 @@ contract and the process-wide registry mapping an `Algorithm` to a registered
 ## Port
 
 ```go
-type Algorithm string // "gzip", "flate" — frozen per scheme, like codec.Format
+type Algorithm string // "gzip", "flate", "zlib" — frozen per scheme, like codec.Format
 
 type Compressor interface {
     Algorithm() Algorithm
@@ -22,8 +22,10 @@ func Lookup(a Algorithm) (Compressor, bool)
 func Available() []Algorithm
 ```
 
-Concrete schemes live under `internal/service/transform/` (stdlib gzip/flate)
-and self-register via a package-level `var` at import — no `init()`.
+Concrete schemes live under `internal/service/transform/` (stdlib
+gzip/flate/zlib) and self-register via a package-level `var` at import — no
+`init()`. `flate` is the raw DEFLATE stream (RFC 1951); `zlib` is the RFC 1950
+envelope that HTTP misnames `deflate`. They are distinct schemes, not aliases.
 
 ## Why a parallel registry, not a codec Format
 

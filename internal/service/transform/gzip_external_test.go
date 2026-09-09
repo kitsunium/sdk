@@ -24,7 +24,7 @@ func resolve(t *testing.T, algo coretransform.Algorithm) coretransform.Compresso
 }
 
 // roundTrip drives Compress then Decompress through the registry-resolved scheme
-// and asserts the payload survives intact (shared by the gzip + flate suites).
+// and asserts the payload survives intact (shared by every scheme's suite).
 func roundTrip(t *testing.T, algo coretransform.Algorithm, payload []byte, wantShrink bool) {
 	t.Helper()
 	comp := resolve(t, algo)

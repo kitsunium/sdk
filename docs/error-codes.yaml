@@ -706,6 +706,10 @@ codes:
     const: CodeFlateFailed
     hex: "0x00_03_1A_02"
     package: internal/service/transform
+  - code: "0.3.26.3"
+    const: CodeZlibFailed
+    hex: "0x00_03_1A_03"
+    package: internal/service/transform
   - code: "0.3.27.1"
     const: CodeRotFileOpenFailed
     hex: "0x00_03_1B_01"
