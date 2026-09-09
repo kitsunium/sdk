@@ -2,11 +2,12 @@
 
 // Package codec is the universal encoder/decoder dispatch facade.
 //
-// One verb, twenty-two formats. [Marshal] and [Unmarshal] reach every
+// One verb, twenty-three formats. [Marshal] and [Unmarshal] reach every
 // encoding the SDK ships — JSON, YAML, CBOR, MessagePack, BSON, NDJSON,
-// XML, TOML, CSV, ASN.1 DER, PEM, TLV, FlatBuffers, plus the nine base-N
-// variants (base64, base64url, base32, base16, base45, base58, base62,
-// hex, ascii85). Format-swap at runtime is a single string change.
+// XML, TOML, CSV, ASN.1 DER, PEM, TLV, FlatBuffers, multipart/form-data,
+// plus the nine base-N variants (base64, base64url, base32, base16,
+// base45, base58, base62, hex, ascii85). Format-swap at runtime is a
+// single string change.
 //
 // # Goals
 //
@@ -19,7 +20,7 @@
 //   - Streaming when it pays. Codecs that implement StreamingCodec
 //     get NewEncoder / NewDecoder automatically — no need to buffer
 //     megabytes.
-//   - Zero registration code. Blank-import the package; the 14
+//   - Zero registration code. Blank-import the package; the 15
 //     service codecs self-register via init(). No Register() calls
 //     in consumer code.
 //   - Append for hot paths. Codecs implementing Appender let you
@@ -28,7 +29,7 @@
 //     same value to N formats at once — content negotiation, replication,
 //     multi-protocol message buses.
 //
-// # What's shipped — all 22 formats
+// # What's shipped — all 23 formats
 //
 // Single blank import (`import _ "github.com/kitsunium/sdk/pkg/v1/codec"`)
 // activates the entire list. The Streaming column marks codecs that
@@ -48,6 +49,7 @@
 //	| cbor         | codec.CBOR        | application/cbor           | .cbor               | yes       | IoT / mobile (RFC 8949) |
 //	| msgpack      | codec.MsgPack     | application/msgpack        | .msgpack / .mpk     | yes       | RPC payloads |
 //	| bson         | codec.BSON        | application/bson           | .bson               | —         | MongoDB documents (top level must be a document) |
+//	| multipart    | codec.Multipart   | multipart/form-data        | —                   | yes       | uploads / form posts (native shape multipart.FormValue) |
 //	| tlv          | codec.TLV         | application/x-tlv          | .tlv                | yes       | custom binary streams, self-describing |
 //	| flatbuffers  | codec.FlatBuffers | application/x-flatbuffers  | .fbs / .bin         | —         | zero-copy passthrough |
 //	| base64       | codec.Base64      | application/base64         | .b64 / .base64      | yes       | text-safe wrap (JSON → base-N) |
@@ -151,6 +153,7 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/codec/flatbuffers"
 	_ "github.com/kitsunium/sdk/internal/service/codec/json"
 	_ "github.com/kitsunium/sdk/internal/service/codec/msgpack"
+	_ "github.com/kitsunium/sdk/internal/service/codec/multipart"
 	_ "github.com/kitsunium/sdk/internal/service/codec/ndjson"
 	_ "github.com/kitsunium/sdk/internal/service/codec/pem"
 	_ "github.com/kitsunium/sdk/internal/service/codec/tlv"
@@ -229,6 +232,13 @@ const (
 	// BSON denotes the MongoDB binary document format (top-level must be a
 	// document — struct or map — not a scalar). ADR 0021.
 	BSON Format = "bson"
+	// Multipart denotes RFC 7578 multipart/form-data. Its native Go shape is
+	// a multipart.FormValue; any other value travels as a single
+	// JSON-mediated part. The RFC 2046 boundary lives in the Content-Type
+	// header, which the Codec contract cannot carry — the codec re-emits it
+	// in the body, and multipart.ContentType recovers the header value from
+	// the bytes Marshal returned.
+	Multipart Format = "multipart"
 )
 
 // Marshal serialises v using the codec registered under f. The codec's

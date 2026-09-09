@@ -49,8 +49,8 @@ are unchanged.
 
 ## Consumers
 
-`BufferPool`: `service/codec/{cbor,csv,json,msgpack,ndjson,pem,toml,xml,yaml}`
-plus the `baseenc` JSON-mediation buffer — ten consumers. `ReaderPool`:
+`BufferPool`: `service/codec/{cbor,csv,json,msgpack,multipart,ndjson,pem,toml,xml,yaml}`
+plus the `baseenc` JSON-mediation buffer — eleven consumers. `ReaderPool`:
 `service/codec/{csv,msgpack}` (their `Unmarshal` wraps the input `[]byte` in
 a recyclable `*bytes.Reader`). The `≥2-consumer` rule for a shared primitive
 is satisfied many times over.

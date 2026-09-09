@@ -3,14 +3,14 @@
 
 ## Purpose
 
-Public facade for the universal codec dispatch. Consumers address a codec by `Format` (string alias) and call `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` — the package looks the format up in the `internal/core/codec` registry, type-asserts the streaming extension when needed, and forwards. Blank-imports the 14 service codec packages (covering 22 Format names — `baseenc` alone registers 9) so a single `import _ ".../pkg/v1/codec"` activates the full registry.
+Public facade for the universal codec dispatch. Consumers address a codec by `Format` (string alias) and call `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` — the package looks the format up in the `internal/core/codec` registry, type-asserts the streaming extension when needed, and forwards. Blank-imports the 15 service codec packages (covering 23 Format names — `baseenc` alone registers 9) so a single `import _ ".../pkg/v1/codec"` activates the full registry.
 
 ## Contents
 
 ```
-codec.go      — Format alias, 22 Format constants, Marshal/Unmarshal/NewEncoder/NewDecoder,
+codec.go      — Format alias, 23 Format constants, Marshal/Unmarshal/NewEncoder/NewDecoder,
                 Available/FromMIME/FromExtension, resolveStreaming + unknownFormat helpers,
-                blank imports for asn1|baseenc|bson|cbor|csv|flatbuffers|json|msgpack|ndjson|pem|tlv|toml|xml|yaml
+                blank imports for asn1|baseenc|bson|cbor|csv|flatbuffers|json|msgpack|multipart|ndjson|pem|tlv|toml|xml|yaml
 compressed.go — MarshalCompressed / UnmarshalCompressed verbs + CompressAlgorithm alias
                 (Gzip/Flate constants) + the self-describing compressed-frame codec
                 (ADR 0014 D1); blank-imports internal/service/transform (gzip+flate)
@@ -45,7 +45,7 @@ is a type alias so consumers name a compressor without importing `internal/*`.
 ## Conventions
 
 - **`Format` is the public dispatch key.** It's `type Format = corecodec.Format` — a string alias, but the 22 named constants (`JSON`, `NDJSON`, `XML`, `CSV`, `ASN1DER`, `PEM`, `YAML`, `TOML`, `CBOR`, `MsgPack`, `TLV`, `FlatBuffers`, `Base64`, `Base64URL`, `Base32`, `Base16`, `Hex`, `ASCII85`, `Base45`, `Base58`, `Base62`, `BSON`) are the contract. Their string values are frozen post-v1.0.0.
-- **Lookup is `// IFACE-PLUGIN`.** `corecodec.Lookup`, `LookupMIME`, `LookupExt`, and `Available` (the implementations behind the four facade entry points) are the canonical plugin discovery surface. The 14 service codec packages register themselves via package-level `var` side-effects driven by the blank imports in `codec.go`.
+- **Lookup is `// IFACE-PLUGIN`.** `corecodec.Lookup`, `LookupMIME`, `LookupExt`, and `Available` (the implementations behind the four facade entry points) are the canonical plugin discovery surface. The 15 service codec packages register themselves via package-level `var` side-effects driven by the blank imports in `codec.go`.
 - **Origin wins.** When the underlying codec returns an `*errs.Error`, this package forwards it untouched. Only dispatch-level failures (unknown format, non-streaming codec) get a new sentinel built in this package.
 - **Error codes use range 1.2.0.*** per ADR 0005:
   - `1.2.0.1` `CodeUnknownFormat` — `corecodec.Lookup` returned `false`.

@@ -8,18 +8,18 @@ import "github.com/kitsunium/sdk/pkg/v1/codec"
 
 Package codec is the universal encoder/decoder dispatch facade.
 
-One verb, twenty\-two formats. [Marshal](<#Marshal>) and [Unmarshal](<#Unmarshal>) reach every encoding the SDK ships — JSON, YAML, CBOR, MessagePack, BSON, NDJSON, XML, TOML, CSV, ASN.1 DER, PEM, TLV, FlatBuffers, plus the nine base\-N variants \(base64, base64url, base32, base16, base45, base58, base62, hex, ascii85\). Format\-swap at runtime is a single string change.
+One verb, twenty\-three formats. [Marshal](<#Marshal>) and [Unmarshal](<#Unmarshal>) reach every encoding the SDK ships — JSON, YAML, CBOR, MessagePack, BSON, NDJSON, XML, TOML, CSV, ASN.1 DER, PEM, TLV, FlatBuffers, multipart/form\-data, plus the nine base\-N variants \(base64, base64url, base32, base16, base45, base58, base62, hex, ascii85\). Format\-swap at runtime is a single string change.
 
 ### Goals
 
 - One verb, many formats. codec.Marshal\(f, v\) reaches every registered wire format — your call site doesn't change when you swap JSON for CBOR.
 - Stable Format strings. Once registered, a Format string is frozen across minor versions. Code that compiles today keeps compiling.
 - Streaming when it pays. Codecs that implement StreamingCodec get NewEncoder / NewDecoder automatically — no need to buffer megabytes.
-- Zero registration code. Blank\-import the package; the 14 service codecs self\-register via init\(\). No Register\(\) calls in consumer code.
+- Zero registration code. Blank\-import the package; the 15 service codecs self\-register via init\(\). No Register\(\) calls in consumer code.
 - Append for hot paths. Codecs implementing Appender let you reuse a \[\]byte buffer across calls — handy in tight loops.
 - Broadcast marshal. MarshalMany\(v, formats...\) serialises the same value to N formats at once — content negotiation, replication, multi\-protocol message buses.
 
-### What's shipped — all 22 formats
+### What's shipped — all 23 formats
 
 Single blank import \(\`import \_ "github.com/kitsunium/sdk/pkg/v1/codec"\`\) activates the entire list. The Streaming column marks codecs that implement core/codec.StreamingCodec and unlock NewEncoder / NewDecoder. Every codec implements core/codec.Appender.
 
@@ -37,6 +37,7 @@ Single blank import \(\`import \_ "github.com/kitsunium/sdk/pkg/v1/codec"\`\) ac
 | cbor         | codec.CBOR        | application/cbor           | .cbor               | yes       | IoT / mobile (RFC 8949) |
 | msgpack      | codec.MsgPack     | application/msgpack        | .msgpack / .mpk     | yes       | RPC payloads |
 | bson         | codec.BSON        | application/bson           | .bson               | —         | MongoDB documents (top level must be a document) |
+| multipart    | codec.Multipart   | multipart/form-data        | —                   | yes       | uploads / form posts (native shape multipart.FormValue) |
 | tlv          | codec.TLV         | application/x-tlv          | .tlv                | yes       | custom binary streams, self-describing |
 | flatbuffers  | codec.FlatBuffers | application/x-flatbuffers  | .fbs / .bin         | —         | zero-copy passthrough |
 | base64       | codec.Base64      | application/base64         | .b64 / .base64      | yes       | text-safe wrap (JSON → base-N) |
@@ -215,7 +216,7 @@ var (
 ```
 
 <a name="Marshal"></a>
-## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L241>)
+## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L251>)
 
 ```go
 func Marshal(f Format, v any) (encoded []byte, err error)
@@ -233,7 +234,7 @@ func MarshalCompressed(f Format, algo CompressAlgorithm, v any) (box []byte, err
 MarshalCompressed serialises v with the codec registered under f, compresses the result with the transform registered under algo, and wraps both in a self\-describing frame so UnmarshalCompressed needs no Format or Algorithm argument. It returns UnknownCompressor when algo has no frame id or no registered body, CompressedFrameInvalid when f exceeds the addressable length, and forwards any codec / compressor error untouched \(origin wins\).
 
 <a name="MarshalMany"></a>
-## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L307>)
+## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L317>)
 
 ```go
 func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, err error)
@@ -252,7 +253,7 @@ out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
 ```
 
 <a name="Unmarshal"></a>
-## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L266>)
+## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L276>)
 
 ```go
 func Unmarshal(f Format, data []byte, v any) error
@@ -270,7 +271,7 @@ func UnmarshalCompressed(box []byte, v any) error
 UnmarshalCompressed parses a frame produced by MarshalCompressed, decompresses the payload under a bomb guard, and decodes it into v using the inner Format the frame records. A malformed frame, an unknown algorithm id, or a payload that decompresses past the bomb guard returns CompressedFrameInvalid; codec and compressor faults are forwarded untouched.
 
 <a name="Codec"></a>
-## type [Codec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L166>)
+## type [Codec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L169>)
 
 Codec re\-exports core/codec.Codec for consumers who want direct access.
 
@@ -299,7 +300,7 @@ const (
 ```
 
 <a name="Decoder"></a>
-## type [Decoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L172>)
+## type [Decoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L175>)
 
 Decoder re\-exports core/codec.Decoder for streaming callers.
 
@@ -308,7 +309,7 @@ type Decoder = corecodec.Decoder
 ```
 
 <a name="NewDecoder"></a>
-### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L380>)
+### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L390>)
 
 ```go
 func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
@@ -317,7 +318,7 @@ func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
 NewDecoder returns a streaming decoder for the codec registered under f.
 
 <a name="Encoder"></a>
-## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L169>)
+## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L172>)
 
 Encoder re\-exports core/codec.Encoder for streaming callers.
 
@@ -326,7 +327,7 @@ type Encoder = corecodec.Encoder
 ```
 
 <a name="NewEncoder"></a>
-### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L367>)
+### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L377>)
 
 ```go
 func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
@@ -335,7 +336,7 @@ func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
 NewEncoder returns a streaming encoder for the codec registered under f.
 
 <a name="Format"></a>
-## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L163>)
+## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L166>)
 
 Format re\-exports core/codec.Format so consumers only depend on pkg/v1.
 
@@ -399,11 +400,18 @@ const (
     // BSON denotes the MongoDB binary document format (top-level must be a
     // document — struct or map — not a scalar). ADR 0021.
     BSON Format = "bson"
+    // Multipart denotes RFC 7578 multipart/form-data. Its native Go shape is
+    // a multipart.FormValue; any other value travels as a single
+    // JSON-mediated part. The RFC 2046 boundary lives in the Content-Type
+    // header, which the Codec contract cannot carry — the codec re-emits it
+    // in the body, and multipart.ContentType recovers the header value from
+    // the bytes Marshal returned.
+    Multipart Format = "multipart"
 )
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L393>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L403>)
 
 ```go
 func Available() []Format
@@ -412,7 +420,7 @@ func Available() []Format
 Available returns the sorted list of registered formats.
 
 <a name="FromExtension"></a>
-### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L412>)
+### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L422>)
 
 ```go
 func FromExtension(ext string) (f Format, ok bool)
@@ -421,7 +429,7 @@ func FromExtension(ext string) (f Format, ok bool)
 FromExtension resolves a file extension to its registered Format.
 
 <a name="FromMIME"></a>
-### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L399>)
+### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L409>)
 
 ```go
 func FromMIME(mime string) (f Format, ok bool)

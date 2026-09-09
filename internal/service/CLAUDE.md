@@ -10,7 +10,7 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 | Sub-tree | Purpose | Code prefix |
 |---|---|---|
 | `logger/` | v2 one-alloc-per-emit multi-sink architecture (`builder`, `encoder`, `sink/{console,file,syslog,memory}`, `middleware/{multi,async,route,failover,sample,recover,encwrite,tee}`) realising `core/logger.Handler` + `Logger` | `0.3.1.*` (and per-component slots, see logger CLAUDE.md) |
-| `codec/` | 14 wire-format codecs over 22 Format names (asn1, baseenc[9], bson, cbor, csv, flatbuffers, json, msgpack, ndjson, pem, tlv, toml, xml, yaml), each implementing `core/codec.Codec`; all satisfy `Appender`, most also `StreamingCodec` | `0.3.2.*` … `0.3.24.*` (one PP slot per codec) |
+| `codec/` | 15 wire-format codecs over 23 Format names (asn1, baseenc[9], bson, cbor, csv, flatbuffers, json, msgpack, multipart, ndjson, pem, tlv, toml, xml, yaml), each implementing `core/codec.Codec`; all satisfy `Appender`, most also `StreamingCodec` | `0.3.2.*` … `0.3.41.*` (one PP slot per codec) |
 | `id/` | identifier generators (UUIDv4/v7, ULID, snowflake) implementing `core/id.Generator`; stdlib-only, cross-OS, self-registered (ADR 0024) | `0.3.39.*` |
 | `resilience/` | concrete reliability policies (retry/circuit-breaker/rate-limit/bulkhead/timeout) implementing `core/resilience.Runner`; stdlib + kernel clock, cross-OS (ADR 0026) | (emits core sentinels `0.2.8.*`) |
 | `metrics/` | in-memory Meter + lock-free instruments + stdlib text exporter, implementing `core/metrics`; stdlib-only, cross-OS (ADR 0027) | (emits core sentinels `0.2.9.*`) |
@@ -39,7 +39,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 ## Subtree
 
 - `logger/` — see `internal/service/logger/README.md` (full contract, error catalogue, output format)
-- `codec/` — see `internal/service/codec/CLAUDE.md` (14 codec packages + per-codec error ranges)
+- `codec/` — see `internal/service/codec/CLAUDE.md` (15 codec packages + per-codec error ranges)
 - `id/` — see `internal/service/id/CLAUDE.md` (UUIDv4/v7, ULID, snowflake — ADR 0024)
 - `resilience/` — see `internal/service/resilience/CLAUDE.md` (retry/breaker/ratelimit/bulkhead/timeout — ADR 0026)
 - `metrics/` — see `internal/service/metrics/CLAUDE.md` (in-memory meter + text exporter — ADR 0027)

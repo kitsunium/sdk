@@ -1,0 +1,56 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "multipart",
+    srcs = [
+        "boundary.go",
+        "codec.go",
+        "codes.go",
+        "counter.go",
+        "decoder.go",
+        "encoder.go",
+        "errors.go",
+        "form.go",
+        "limits.go",
+        "multipart_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/codec/multipart",
+    visibility = ["//internal/service:service_consumers"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/core/codec/scratch",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":multipart",
+    visibility = ["//internal/service:service_consumers"],
+)
+
+go_test(
+    name = "multipart_test",
+    size = "small",
+    srcs = [
+        "boundary_internal_test.go",
+        "codec_external_test.go",
+        "decoder_internal_test.go",
+        "encoder_internal_test.go",
+        "limits_internal_test.go",
+    ],
+    embed = [":multipart"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/core/codec/scratch",
+        "//internal/kernel/errs",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

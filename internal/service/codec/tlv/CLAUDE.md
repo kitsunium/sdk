@@ -16,7 +16,7 @@ arbitrary Go values; decoder reconstructs them as Go-native types
 | `Extensions()`   | `.tlv` |
 | Constructor      | `New() codec.Codec` |
 | Streaming        | yes (`NewEncoder`, `NewDecoder` — one record per Encode/Decode) |
-| Appender         | yes (`Append(dst, v) ([]byte, error)`) — drops Marshal's fresh-slice alloc; benches at 1 alloc/op, the best of the 22 formats (see `pkg/v1/codec/BENCH.md`) |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — drops Marshal's fresh-slice alloc; benches at 1 alloc/op, the best of the 22 formats benchmarked in `pkg/v1/codec/BENCH.md` |
 
 ## Error codes (range `0.3.22.*`)
 

@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Fourteen wire-format codecs covering 22 registered Format names, one Go package each, all implementing `internal/core/codec.Codec`. Blank-importing a package registers its singleton(s) with the core registry so it becomes resolvable by Name / MIME type / file extension. `pkg/v1/codec` blank-imports all fourteen in one shot; downstream applications can import only the formats they need. The `baseenc` package registers 9 distinct Format names (base64, base64url, base32, base16, hex, ascii85, base45, base58, base62) under a single Go package so swapping base-N variants is a Format-string change, identical to swapping json↔cbor.
+Fifteen wire-format codecs covering 23 registered Format names, one Go package each, all implementing `internal/core/codec.Codec`. Blank-importing a package registers its singleton(s) with the core registry so it becomes resolvable by Name / MIME type / file extension. `pkg/v1/codec` blank-imports all fifteen in one shot; downstream applications can import only the formats they need. The `baseenc` package registers 9 distinct Format names (base64, base64url, base32, base16, hex, ascii85, base45, base58, base62) under a single Go package so swapping base-N variants is a Format-string change, identical to swapping json↔cbor.
 
 ## Contents
 
@@ -17,6 +17,7 @@ Fourteen wire-format codecs covering 22 registered Format names, one Go package 
 | `flatbuffers/` | FlatBuffers passthrough (already-encoded `[]byte`) | `0.3.23.*` | no  | yes |
 | `json/`        | JSON (RFC 8259) — encoding/json               | `0.3.2.*`  | yes | yes |
 | `msgpack/`     | MessagePack — vmihailenco/msgpack/v5          | `0.3.7.*`  | yes | yes |
+| `multipart/`   | multipart/form-data (RFC 7578) — mime/multipart | `0.3.41.*` | yes | yes |
 | `ndjson/`      | Newline-delimited JSON                        | `0.3.11.*` | no  | yes |
 | `pem/`         | PEM block (RFC 7468) — encoding/pem           | `0.3.10.*` | no  | yes |
 | `tlv/`         | Self-describing TLV (reflection-driven binary)| `0.3.22.*` | yes | yes |
@@ -68,6 +69,7 @@ The `PP` slots above are authoritative — verified against each `codes.go`. New
 - `flatbuffers/` — see `flatbuffers/CLAUDE.md`
 - `json/`        — see `json/CLAUDE.md`
 - `msgpack/`     — see `msgpack/CLAUDE.md`
+- `multipart/`   — see `multipart/CLAUDE.md`
 - `ndjson/`      — see `ndjson/CLAUDE.md`
 - `pem/`         — see `pem/CLAUDE.md`
 - `tlv/`         — see `tlv/CLAUDE.md`
