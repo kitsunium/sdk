@@ -184,6 +184,17 @@ rules:
 
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
+      # The token domain is the same class, three times over. Its parameters
+      # are core/token.ClaimsValue (the redacting claim set), jwk.KeyValue,
+      # core/crypto.Key and core/token.Algorithm — every one of them fixed by a
+      # contract the function implements or by the value type the domain is
+      # ABOUT. The suggestion for Algorithm is the clearest tell: a uint8 enum
+      # would become `interface{ String() string }`, which is every type in Go
+      # that can print itself, and the comparison it feeds exists precisely to
+      # be against a closed set (ADR 0042 §Algorithm confusion).
+      - "**/internal/core/token/**"
+      - "**/internal/service/token/**"
+      - "**/pkg/v1/token/**"
 
   # KTN-VAR-NILSLICE (info) — "prefer a nil slice to an empty one".
   #
@@ -319,6 +330,24 @@ rules:
       # metadata plus three octet slices; shrinking it under the 64 B threshold
       # would mean dropping members the format defines.
       - "**/internal/service/crypto/jwk/**"
+      # The token domain, for the same two reasons as jwk and core/net above.
+      #
+      # ClaimsValue (152 B) is immutable by construction: the With* setters
+      # copy, the accessors clone out, and String/GoString redact. All three
+      # properties need a VALUE receiver — redaction that only fires on a
+      # pointer is redaction that does not fire, and a *ClaimsValue would let a
+      # holder mutate a claim set after a verifier had judged it. 152 B is what
+      # seven registered claims honestly cost (four strings, three time.Time, a
+      # slice and a map); nothing can be dropped to get under 64.
+      #
+      # IssuerConfig / VerifierConfig / Paseto*Config (80-160 B) are copied
+      # exactly once, at construction, immediately before key parsing and
+      # policy validation that dwarf the copy — and by value so that filling in
+      # the defaults cannot mutate the config the caller still holds. Same
+      # argument as net/client.Config above.
+      - "**/internal/core/token/**"
+      - "**/internal/service/token/**"
+      - "**/pkg/v1/token/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue.
