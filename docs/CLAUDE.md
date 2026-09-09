@@ -45,6 +45,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0037-sdk-codec-multipart.md` | multipart/form-data: the boundary is not in the body, so the codec grows extension interfaces (`BoundaryCodec`, `BoundaryProvider`) instead of widening the universal contract | Accepted (extends ADR 0003) |
 | `adr/0038-id-schemes-and-the-unregistered-typeid.md` | NanoID, KSUID, TypeID — and a `Scheme` deliberately absent from the registry, which makes the registry non-exhaustive by design | Accepted (extends ADR 0024) |
 | `adr/0039-extending-a-published-port-without-breaking-it.md` | Extend a published port with a sibling interface, never by widening it: a `pkg/v1` type alias publishes the *shape*, and Go interfaces are structural | Accepted (reverses the `clock` Do NOT) |
+| `adr/0040-changing-a-published-shape-while-v0.md` | A published concrete shape may still change — v0 is the only reason, it must be said out loud, and the licence expires at v1 | Accepted (completes ADR 0039) |
 
 ## ADR conventions
 
