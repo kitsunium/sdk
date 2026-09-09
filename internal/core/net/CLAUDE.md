@@ -1,13 +1,14 @@
-<!-- updated: 2026-09-02T00:00:00Z -->
+<!-- updated: 2026-09-09T00:00:00Z -->
 # internal/core/net/
 
 ## Purpose
 
 The network domain's contract layer (ADR 0029): the ports, immutable value types
 and **every** `0.2.11.*` sentinel for both faces of the domain — inbound
-(listeners, connection and datagram handlers) and outbound (the guarded HTTP
-transport). Concrete behaviour lives in `internal/service/net/{tlsid,client,server}`;
-the public façades are `pkg/v1/{tlsid,client,server}`.
+(listeners, connection and datagram handlers, the Server-Sent Events frame) and
+outbound (the guarded HTTP transport). Concrete behaviour lives in
+`internal/service/net/{tlsid,client,server,sse}`; the public façades are
+`pkg/v1/{tlsid,client,server}` and `pkg/v1/server/sse`.
 
 This package follows the **`proc` shape** (ADR 0016): one core sibling owns one
 code block and declares every sentinel; service implementations and façades
@@ -23,7 +24,7 @@ name.
 
 | File | Surface |
 |---|---|
-| `codes.go` | the 22 `Code` constants, `0.2.11.1` – `0.2.11.22` |
+| `codes.go` | the 26 `Code` constants, `0.2.11.1` – `0.2.11.26` |
 | `errors.go` | the matching `*errs.Error` sentinels + the local sysexits constants |
 | `wrap.go` | `wrapAs(sentinel, cause, fields...)` — origin-wins sentinel wrapping |
 | `identity.go` | `IdentityValue` — the opaque, redacting TLS identity + `NewIdentity` |
@@ -37,6 +38,8 @@ name.
 | `request.go` | `RequestValue` — what a `Policy` is shown |
 | `call.go` | `CallValue` — one completed outbound call |
 | `hook.go` | `CallHook` — the observation function port |
+| `sse.go` | `SSEEventValue` — the Server-Sent Events frame, its validation and its wire form, plus `AppendSSEComment` |
+| `drain.go` | `WithDrainSignal` / `DrainSignal` — the shutdown signal a long-lived handler observes |
 
 ## Why-this-shape
 
@@ -86,6 +89,28 @@ name.
   cannot leak the private API surface through a log line.
 - **`CallHook` is a func, not an interface**, so the domain needs no dependency
   on `logger` or `metrics`; the consumer wires it to whichever it uses.
+- **An SSE newline SPLITS rather than escapes.** The format has no escape
+  mechanism, so a terminator inside `Data` becomes another `data:` line and the
+  client rejoins them with `"\n"` — that is what makes a multi-line payload
+  expressible, and it is exactly why a terminator inside `ID` or `Name` is
+  refused instead of truncated. A silently shortened id is a resume token that
+  points at the wrong place. CRLF, CR and LF are all recognised, and all three
+  normalise to LF on reassembly: the VALUE round-trips, its byte spelling does
+  not, and the type comment says so.
+- **An SSE `event:` with no `data:` is refused.** Every client discards a frame
+  whose data buffer is empty and discards the event type with it, so a caller
+  who names an event would watch it silently not arrive. A retry-only or id-only
+  frame is *not* refused — both are meaningful, and an id-only frame is how a
+  cursor is advanced without dispatching anything.
+- **The drain signal is a context VALUE, never a cancellation.** Cancelling the
+  request context would tell every in-flight handler to abandon the response it
+  is halfway through, which is the opposite of what a graceful drain exists for.
+  A value is additive: a handler that ignores it behaves exactly as before, and
+  a handler that holds a connection open indefinitely gets the one piece of
+  information it cannot otherwise have. An absent signal is a NIL channel rather
+  than an error or a second return value, because receiving from nil blocks
+  forever — so a `select` that watches it needs no nil check and simply never
+  fires that case.
 - **`DurationValue` is a PROMOTION CANDIDATE.** It is domain-neutral and
   stdlib-only, so it belongs in `kernel` or `core/config` the moment a second
   domain needs it. It is declared here because the repo's bar for a shared
@@ -120,8 +145,12 @@ name.
 | 0.2.11.20 | `TooManyRedirects` | 69 |
 | 0.2.11.21 | `InvalidDuration` | 78 |
 | 0.2.11.22 | `UnsafePath` | 77 |
+| 0.2.11.23 | `SSEFieldInvalid` | 64 |
+| 0.2.11.24 | `SSEFlushUnsupported` | 70 |
+| 0.2.11.25 | `SSEStreamClosed` | 69 |
+| 0.2.11.26 | `SSEStreamMisconfigured` | 78 |
 
-`0.2.11.23` – `0.2.11.255` reserved.
+`0.2.11.27` – `0.2.11.255` reserved.
 
 ## Imports allowed
 
@@ -145,7 +174,11 @@ ABI constants instead of `x/net/ipv4`.
 - Add a plug-in registry. One canonical implementation per primitive (the
   `proc` / `resilience` precedent).
 - Put `context` in a struct field or package-level state. It appears only in
-  interface signatures and single-method function ports (`internal/core/CLAUDE.md`).
+  interface signatures, single-method function ports
+  (`internal/core/CLAUDE.md`), and the `drain.go` accessors — which take and
+  return one, and store nothing.
+- Escape a newline in an SSE value, or truncate a field that cannot carry one.
+- Signal a drain by cancelling the request context. See §Why-this-shape.
 
 ## Verification
 

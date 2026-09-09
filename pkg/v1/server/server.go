@@ -57,9 +57,36 @@
 // any listener fell back from a requested optimisation. A silent degradation is
 // indistinguishable from a working server, so it is surfaced rather than logged
 // once at startup.
+//
+// # Connections that never end
+//
+// A drain waits for in-flight work to finish, which assumes it eventually does.
+// An event stream, a long poll, or anything built on a protocol upgrade breaks
+// that assumption: the request is in flight forever by design, so the drain
+// waits out its whole budget and then severs the socket under the handler.
+//
+// [DrainSignal] is the way out. A handler holding a connection open selects on
+// it alongside its own work and returns when it closes, which turns a
+// budget-length DRAIN_TIMEOUT into a clean drain:
+//
+//	select {
+//	case <-server.DrainSignal(r.Context()):
+//		return
+//	case ev := <-events:
+//		// …
+//	}
+//
+// The request context is deliberately NOT cancelled to say this. Cancelling it
+// would tell every handler to abandon the response it is halfway through, which
+// is the opposite of what a graceful drain is for. The signal is additive: a
+// handler that ignores it behaves exactly as it did before.
+//
+// [github.com/kitsunium/sdk/pkg/v1/server/sse] is the Server-Sent Events
+// implementation built on it, and watches the signal for you.
 package server
 
 import (
+	"context"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -146,6 +173,21 @@ var (
 func New(opts ...Option) *Server {
 	//: the service layer owns the wiring; this facade only forwards.
 	return svcserver.New(opts...)
+}
+
+// DrainSignal returns the channel closed when the server serving this request
+// begins draining, or nil when none is published.
+//
+// It is how a handler that holds a connection open indefinitely — an event
+// stream, a long poll — learns that finishing now is the cooperative thing to
+// do. Without it such a handler holds the drain open until the budget expires
+// and its socket is severed under it, on every shutdown.
+//
+// A nil channel blocks forever, so a select that watches it needs no nil check
+// and behaves correctly on a server that publishes nothing.
+func DrainSignal(ctx context.Context) <-chan struct{} {
+	//: the core contract; this facade only forwards.
+	return corenet.DrainSignal(ctx)
 }
 
 // Chain applies middlewares to a handler, outermost first.
