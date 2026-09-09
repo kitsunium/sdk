@@ -594,6 +594,22 @@ codes:
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"
     package: internal/core/logger/level
+  - code: "0.2.18.1"
+    const: CodeCacheMisconfigured
+    hex: "0x00_02_12_01"
+    package: internal/core/cache
+  - code: "0.2.18.2"
+    const: CodeCacheBackendFailed
+    hex: "0x00_02_12_02"
+    package: internal/core/cache
+  - code: "0.2.18.3"
+    const: CodeCacheFillFailed
+    hex: "0x00_02_12_03"
+    package: internal/core/cache
+  - code: "0.2.18.4"
+    const: CodeCacheEntryRejected
+    hex: "0x00_02_12_04"
+    package: internal/core/cache
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -1226,6 +1242,14 @@ codes:
     const: CodeUnsupportedTarget
     hex: "0x00_03_2F_07"
     package: internal/service/validation
+  - code: "0.3.48.1"
+    const: CodeCacheChainMisconfigured
+    hex: "0x00_03_30_01"
+    package: internal/service/cache
+  - code: "0.3.48.2"
+    const: CodeCacheTierFailed
+    hex: "0x00_03_30_02"
+    package: internal/service/cache
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

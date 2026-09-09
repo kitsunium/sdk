@@ -1,9 +1,19 @@
 # ADR 0025 — Generic LRU+TTL cache as a kernel primitive (`cache`)
 
-- **Status**: Accepted
+- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0010 (recycler), ADR 0011 (snapshot), ADR 0006 (ring) — the kernel-primitive precedents; ADR 0024 (Phase-B wave)
+
+> **Amendment (2026-09-09, [ADR 0049](0049-cache-becomes-a-domain.md)).** The
+> placement decided below stands: `Cache[K,V]` remains a kernel primitive and
+> nothing about it moved. ADR 0049 adds a DOMAIN *above* it —
+> `internal/core/cache` (`Store[V]` + siblings, block `0.2.18.*`) and
+> `internal/service/cache` (tagged memory store + L1/L2 chain, block
+> `0.3.48.*`) — carrying the three things a primitive deliberately does not
+> have: invalidation by tag, stampede protection, and tier chaining. It also
+> notes, as a fact checked rather than assumed, that this package had **zero**
+> in-tree consumers besides `pkg/v1/cache` between the two ADRs.
 
 ## Context
 
