@@ -122,10 +122,10 @@
 //
 // A [Snapshot] maps each instrument name to its metric, and each metric to its
 // series — the shape every per-series wire format wants, and the shape an
-// OTLP encoder can walk without a regrouping pass. Two stdlib exporters are
-// registered on import and [Export] dispatches by name. Both write to stderr so
-// that importing this package never arms a writer on stdout, which a process
-// may be using as a protocol channel (ADR 0030).
+// OTLP encoder can walk without a regrouping pass. Three stdlib exporters are
+// registered on import and [Export] dispatches by name. All three write to
+// stderr so that importing this package never arms a writer on stdout, which a
+// process may be using as a protocol channel (ADR 0030).
 //
 // "text" is a diagnostic that prints the whole model — resource, scope, window,
 // temporality, monotonicity, and each attribute with its type visible.
@@ -164,12 +164,70 @@
 // A non-monotonic sum is typed `gauge` there, not `counter`, because `rate()`
 // on a counter re-extrapolates from zero every time the value falls.
 //
-// An OTLP exporter is not in this package; the snapshot shape exists so that
-// one can be written without reconstructing anything.
+// # OTLP
+//
+// "otlpjson" is the native wire: the OpenTelemetry Protocol, JSON encoding,
+// implemented from the specification with encoding/json and net/http and
+// nothing else. Nothing here imports go.opentelemetry.io, for the reason
+// nothing else in this package does — OTel is a document, and the whole point
+// of shaping [Snapshot] on its data model was that a payload carrying
+// temporality, resource, scope and typed attributes is OTLP-encodable by
+// construction. Unlike the Prometheus connector, this one loses NOTHING.
+//
+// It comes in two halves, deliberately, so an encoding bug and a network bug
+// are never the same investigation:
+//
+// [EncodeOTLPJSON] is the ENCODER. It takes a [Snapshot] and returns the exact
+// bytes of one ExportMetricsServiceRequest — the body of a POST to
+// /v1/metrics — and does no I/O at all. Hand it to a queue, a file, a
+// compressor, or a test that compares it to the schema:
+//
+//	body, err := metrics.EncodeOTLPJSON(m.Collect())
+//
+// [NewOTLPJSONExporter] binds that encoder to an io.Writer, emitting one
+// newline-terminated document per export so a stream is NDJSON. The registered
+// "otlpjson" exporter is that, on stderr (ADR 0030).
+//
+// [NewOTLPHTTPExporter] is the EMITTER: it encodes and POSTs to a collector
+// under Content-Type: application/json. It is NOT registered — the registry is
+// reached by importing a package, there is no endpoint that could be a correct
+// default, and arming a network client from an import is worse than arming a
+// writer. The endpoint is a full URL used as-is, so spell the signal path:
+//
+//	exporter, err := metrics.NewOTLPHTTPExporter("otlp",
+//	    metrics.OTLPHTTPConfig{Endpoint: "http://collector:4318" + metrics.OTLPMetricsPath})
+//
+// It does not retry, and that is a decision. The specification asks a client to
+// back off on a retryable status; this SDK already ships that policy, and a
+// backoff hidden inside Export would be a second one you cannot see, tune or
+// cancel. What you get instead is the classification a retry policy needs —
+// [OTLPRetryable] has exactly the signature resilience.RetryConfig.Retryable
+// wants:
+//
+//	runner := resilience.NewRetry(resilience.RetryConfig{
+//	    MaxAttempts: 3,
+//	    BaseDelay:   time.Second,
+//	    Retryable:   metrics.OTLPRetryable,
+//	})
+//
+// [OTLPExportUnavailable] is transient (a transport fault, or HTTP 429 / 502 /
+// 503 / 504 — the four the specification lists, and no other 5xx).
+// [OTLPExportRejected] is permanent. [OTLPPartialSuccess] means the collector
+// accepted the request and dropped some of its points, which the specification
+// forbids retrying, so it is reported rather than replayed.
+//
+// Two things the encoder REFUSES rather than mis-encodes, both structural and
+// therefore wrong on the first export or never:
+// [OTLPUnresolvedTemporality], because the schema says its UNSPECIFIED value
+// "MUST not be used"; and [OTLPInvalidBucketLayout], because OTLP requires
+// bucket counts one longer than strictly-increasing finite bounds — the bucket
+// above the last declared bound is already the +Inf overflow, so an infinite
+// bound would declare it twice.
 package metrics
 
 import (
 	"io"
+	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
@@ -192,7 +250,22 @@ const (
 	// DefaultScopeName names this SDK as the instrumenting library when a
 	// caller declares no scope of their own.
 	DefaultScopeName string = coremetrics.DefaultScopeName
+	// OTLPMetricsPath is the URL path OTLP/HTTP reserves for the metrics
+	// signal. An OTLP endpoint is a full URL used as-is, so append this to a
+	// collector's base address rather than hoping the SDK guesses it.
+	OTLPMetricsPath string = svcmetrics.OTLPMetricsPath
+	// DefaultOTLPTimeout bounds one OTLP/HTTP export round trip when
+	// OTLPHTTPConfig leaves Timeout unset. It is the OpenTelemetry protocol
+	// exporter specification's own default, not a figure this SDK invented.
+	DefaultOTLPTimeout time.Duration = svcmetrics.DefaultOTLPTimeout
+	// DefaultOTLPMaxResponseBytes caps how much of a collector's response is
+	// read. The body is the one length a remote party controls in this
+	// exchange, and a conforming response is a few hundred bytes.
+	DefaultOTLPMaxResponseBytes int64 = svcmetrics.DefaultOTLPMaxResponseBytes
 )
+
+// OTLPHTTPConfig is the public alias for an OTLP/HTTP exporter's configuration.
+type OTLPHTTPConfig = svcmetrics.OTLPHTTPConfig
 
 // Meter is the public alias for the frozen instrument factory: Counter, Gauge,
 // Histogram and Collect.
@@ -336,6 +409,27 @@ var (
 	// UnsupportedTemporality is returned by the Prometheus connector when the
 	// snapshot is a delta one, which the exposition format cannot express.
 	UnsupportedTemporality = svcmetrics.UnsupportedTemporality
+	// OTLPUnresolvedTemporality is returned by the OTLP/JSON encoder when a
+	// metric's temporality is neither delta nor cumulative. The schema's
+	// UNSPECIFIED value is documented as one that MUST NOT be used.
+	OTLPUnresolvedTemporality = svcmetrics.OTLPUnresolvedTemporality
+	// OTLPInvalidBucketLayout is returned by the OTLP/JSON encoder when a
+	// histogram's buckets are not one count more than strictly-increasing
+	// finite bounds.
+	OTLPInvalidBucketLayout = svcmetrics.OTLPInvalidBucketLayout
+	// OTLPEndpointInvalid is returned by NewOTLPHTTPExporter when the endpoint
+	// is not an absolute http(s) URL carrying the signal path.
+	OTLPEndpointInvalid = svcmetrics.OTLPEndpointInvalid
+	// OTLPExportRejected is returned when a collector refuses the payload with
+	// a status the specification marks non-retryable.
+	OTLPExportRejected = svcmetrics.OTLPExportRejected
+	// OTLPExportUnavailable is returned when an OTLP/HTTP export fails
+	// transiently — a transport fault, or HTTP 429/502/503/504. It is the one
+	// OTLPRetryable reports true for.
+	OTLPExportUnavailable = svcmetrics.OTLPExportUnavailable
+	// OTLPPartialSuccess is returned when a collector accepts the request but
+	// rejects some of its data points. The specification forbids retrying it.
+	OTLPPartialSuccess = svcmetrics.OTLPPartialSuccess
 )
 
 // String returns a string-valued attribute. It is the shortest of the four
@@ -393,6 +487,46 @@ func NewTextExporter(name ExporterName, dst io.Writer) Exporter {
 func NewPrometheusExporter(name ExporterName, dst io.Writer) Exporter {
 	//: delegate to the service constructor.
 	return svcmetrics.NewPrometheusExporter(name, dst)
+}
+
+// EncodeOTLPJSON renders snap as ONE OTLP/JSON ExportMetricsServiceRequest:
+// exactly the bytes that go in the body of a POST to /v1/metrics under
+// Content-Type: application/json.
+//
+// It does no I/O, so it is the half of OTLP support that is testable on its
+// own — and the half NewOTLPHTTPExporter calls before it touches a socket.
+func EncodeOTLPJSON(snap Snapshot) (doc []byte, err error) {
+	//: delegate to the service encoder.
+	return svcmetrics.EncodeOTLPJSON(snap)
+}
+
+// NewOTLPJSONExporter returns an Exporter writing each snapshot to dst as one
+// newline-terminated OTLP/JSON document, so a stream of exports is NDJSON. It
+// is not auto-registered; the registered "otlpjson" exporter is this, on
+// stderr.
+func NewOTLPJSONExporter(name ExporterName, dst io.Writer) Exporter {
+	//: delegate to the service constructor.
+	return svcmetrics.NewOTLPJSONExporter(name, dst)
+}
+
+// NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as
+// OTLP/JSON and POSTs it to cfg.Endpoint, which is a full URL used as-is.
+//
+// It is never registered, and it never retries — compose resilience.NewRetry
+// with OTLPRetryable instead. A refused endpoint fails here, at wiring, rather
+// than at the first scrape.
+func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter Exporter, err error) {
+	//: delegate to the service constructor.
+	return svcmetrics.NewOTLPHTTPExporter(name, cfg)
+}
+
+// OTLPRetryable reports whether err is an OTLP/HTTP failure the specification
+// says may be replayed: a transport fault, or HTTP 429 / 502 / 503 / 504.
+// Its signature is resilience.RetryConfig.Retryable's, so it drops in without
+// an adapter.
+func OTLPRetryable(err error) bool {
+	//: delegate to the service classifier.
+	return svcmetrics.OTLPRetryable(err)
 }
 
 // RegisterExporter adds e to the process-wide exporter registry.

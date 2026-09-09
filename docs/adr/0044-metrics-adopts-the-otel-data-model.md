@@ -1,6 +1,6 @@
 # ADR 0044 — `metrics` adopts the OpenTelemetry DATA MODEL, and none of its code
 
-- **Status**: Accepted
+- **Status**: Accepted. **§Deferred “The OTLP exporter itself” is CLOSED by [ADR 0048](0048-sdk-metrics-otlp-json.md)** — the OTLP/JSON encoder and the OTLP/HTTP emitter ship on top of the snapshot shape §Decision 9 designed for them, with the same zero-dependency posture.
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0027](0027-sdk-metrics-domain.md) (the metrics domain this reshapes), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (sibling interfaces), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (a published shape may change while v0), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0041](0041-sdk-scheduler-domain.md) (func ports), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (exporter destinations)
