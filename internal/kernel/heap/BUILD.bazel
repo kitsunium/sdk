@@ -1,0 +1,33 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "heap",
+    srcs = ["heap.go"],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/heap",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":heap",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "heap_test",
+    size = "small",
+    srcs = [
+        "heap_bench_test.go",
+        "heap_external_test.go",
+        "heap_internal_test.go",
+    ],
+    embed = [":heap"],
+)

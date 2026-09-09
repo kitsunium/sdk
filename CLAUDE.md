@@ -12,8 +12,8 @@ Go SDK providing a normed, performant toolbox for downstream applications. Sixte
 ```
 internal/
 ├── kernel/        stdlib-only AND generic primitives
-│                  batcher, buffer, cache, clock, errs, recycler,
-│                  ring, singleflight, snapshot, worker
+│                  batcher, buffer, cache, clock, errs, group, heap,
+│                  recycler, ring, singleflight, snapshot, topic, worker
 ├── core/          domain interfaces + domain values
 │                  cache, codec (+ scratch), config, crypto, id, logger,
 │                  logger/level, metrics, net, proc, resilience, scheduler,
