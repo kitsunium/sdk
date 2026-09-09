@@ -762,6 +762,64 @@ func TestHTTPAdapterDrainsOnShutdown(t *testing.T) {
 	}
 }
 
+// TestDrainSignalReachesAPlainHTTPHandler pins the mechanism underneath the
+// event stream, without an event stream in sight.
+//
+// Any handler that holds a connection open indefinitely — a long poll, a hand
+// rolled chunked feed — has the same problem and gets the same answer: a
+// channel on the request context, closed when the server starts draining. The
+// two assertions that matter are that it is NOT nil inside a handler on this
+// engine (a nil would make every select silently never fire) and that the
+// request context is NOT cancelled to deliver it, because cancelling would tell
+// every handler to abandon the response the drain exists to let it finish.
+func TestDrainSignalReachesAPlainHTTPHandler(t *testing.T) {
+	t.Parallel()
+	live := make(chan struct{})
+	//: what the handler observed, read only after the drain has completed.
+	var ctxCancelledBeforeSignal bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/hold", func(w http.ResponseWriter, r *http.Request) {
+		draining := server.DrainSignal(r.Context())
+		if draining == nil {
+			t.Errorf("DrainSignal() = nil inside a handler on this engine")
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Errorf("the adapter's ResponseWriter is not an http.Flusher")
+			return
+		}
+		//: headers out now, so the client knows the handler is running.
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+		close(live)
+		<-draining
+		//: the drain must not have been delivered by cancelling the request.
+		ctxCancelledBeforeSignal = r.Context().Err() != nil
+	})
+	srv, base := startHTTP(t, mux)
+
+	resp, err := (&http.Client{Transport: &http.Transport{}}).Get(base + "/hold")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer closeOrFail(t, resp.Body)
+	<-live
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	started := time.Now()
+	if serr := srv.Shutdown(ctx); serr != nil {
+		t.Fatalf("shutdown reported %v, want a clean drain", serr)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("drain took %v — the handler never saw the signal", elapsed)
+	}
+	if ctxCancelledBeforeSignal {
+		t.Errorf("the request context was already cancelled when the signal arrived")
+	}
+}
+
 // TestHTTPStreamsReachTheClientBeforeTheHandlerReturns pins the property every
 // streaming format on this engine depends on: the response is FLUSHED per
 // event.
