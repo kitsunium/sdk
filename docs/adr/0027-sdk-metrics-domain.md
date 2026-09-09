@@ -1,6 +1,6 @@
 # ADR 0027 — Observability domain (`metrics`)
 
-- **Status**: Accepted. **Exporter destination amended by ADR 0030** — the registered `text` exporter writes to stderr, not stdout.
+- **Status**: Accepted. **Exporter destination amended by ADR 0030** — the registered `text` exporter writes to stderr, not stdout. **Labels are no longer deferred**: instruments are keyed by name + label set, with a per-name cardinality bound and an aggregated overflow series (see §Deferred). Prometheus/OTLP exporters and the push loop remain deferred.
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0024 (Phase-B wave), ADR 0012 (writer registry — the exporter-registry model), ADR 0011 (snapshot), ADR 0005/0006 (codes)
@@ -42,8 +42,17 @@ the `metrics` domain.
 - **OpenTelemetry SDK wrapper** — rejected for v1: heavy dep; the in-house
   instruments + exporter registry keep the core dep-light, and an OTLP exporter
   can land later as a **third-party** quarantined package (deferred).
-- **Labels in v1** — deferred: a labelled instrument needs a label-set map key +
-  cardinality control; v1 is name-keyed to ship the core value first.
+- **Labels in v1** — deferred at the time, and **since shipped in place**: a
+  labelled instrument needs a label-set map key + cardinality control, and both
+  now exist. One instrument name plus one label set is one series; the key is
+  the sorted, length-prefixed encoding of both; a per-NAME bound
+  (`MaxSeriesPerInstrument`, default 2000) folds the excess into one aggregated
+  series carrying `sdk_metric_overflow="true"`. A non-positive bound clamps to
+  the default and never means unbounded (ADR 0031). `SnapshotValue` changed
+  shape from `map[name]value` to `map[name][]seriesValue` to carry the
+  dimensions — a minor bump under ADR 0007 §Bump semantics, with no prior
+  published surface to break. Impl + rationale:
+  `internal/service/metrics/CLAUDE.md` §Cardinality policy.
 - **Separate `Collector` interface** — rejected: putting `Collect` on `Meter`
   avoids a single-method interface and a second type.
 
@@ -63,7 +72,8 @@ the formatting work.
 
 ## Deferred
 
-- Labelled dimensions (label sets + cardinality limits).
+- ~~Labelled dimensions (label sets + cardinality limits)~~ — shipped, see
+  §Why not above.
 - Prometheus + OTLP exporters as **third-party** quarantined packages (heavy
   deps), self-registering via the exporter registry.
 - Active push/scrape loop (`worker.Every`) — v1 is pull-on-demand (`Collect`+`Export`).

@@ -1,4 +1,4 @@
-// Package metrics — the instrument-kind guard.
+// Package metrics — the per-name kind binding.
 package metrics
 
 import (
@@ -7,7 +7,7 @@ import (
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 )
 
-// Test_memMeter_assertKind pins the name-reuse guard, and why it panics rather
+// Test_memMeter_bindName pins the name-reuse guard, and why it panics rather
 // than returning an error.
 //
 // Fetching an instrument is not a fallible operation in the port's shape —
@@ -17,33 +17,34 @@ import (
 // value it records is landing in the wrong instrument. A panic in development is
 // the cheapest possible way to find that; silently returning the existing
 // instrument of the wrong kind would be the most expensive.
-func Test_memMeter_assertKind(t *testing.T) {
+//
+// The kind is tracked per NAME, not per series: labels vary within one metric,
+// its kind does not.
+func Test_memMeter_bindName(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
 		//: the kind the name is already bound to, if any.
-		bind func(m *memMeter, metric string)
+		bind *instrumentKind
 		//: the kind being requested now.
 		want      instrumentKind
 		wantPanic bool
 	}
-	bindCounter := func(m *memMeter, metric string) { m.counters[metric] = &memCounter{} }
-	bindGauge := func(m *memMeter, metric string) { m.gauges[metric] = &memGauge{} }
-	bindHistogram := func(m *memMeter, metric string) { m.histograms[metric] = newHistogram(nil) }
+	counter, gauge, histogram := kindCounter, kindGauge, kindHistogram
 
 	tests := []tc{
 		{name: "an unbound name as a counter", want: kindCounter},
 		{name: "an unbound name as a gauge", want: kindGauge},
 		{name: "an unbound name as a histogram", want: kindHistogram},
-		{name: "a counter fetched again", bind: bindCounter, want: kindCounter},
-		{name: "a gauge fetched again", bind: bindGauge, want: kindGauge},
-		{name: "a histogram fetched again", bind: bindHistogram, want: kindHistogram},
-		{name: "a counter fetched as a gauge", bind: bindCounter, want: kindGauge, wantPanic: true},
-		{name: "a counter fetched as a histogram", bind: bindCounter, want: kindHistogram, wantPanic: true},
-		{name: "a gauge fetched as a counter", bind: bindGauge, want: kindCounter, wantPanic: true},
-		{name: "a gauge fetched as a histogram", bind: bindGauge, want: kindHistogram, wantPanic: true},
-		{name: "a histogram fetched as a counter", bind: bindHistogram, want: kindCounter, wantPanic: true},
-		{name: "a histogram fetched as a gauge", bind: bindHistogram, want: kindGauge, wantPanic: true},
+		{name: "a counter fetched again", bind: &counter, want: kindCounter},
+		{name: "a gauge fetched again", bind: &gauge, want: kindGauge},
+		{name: "a histogram fetched again", bind: &histogram, want: kindHistogram},
+		{name: "a counter fetched as a gauge", bind: &counter, want: kindGauge, wantPanic: true},
+		{name: "a counter fetched as a histogram", bind: &counter, want: kindHistogram, wantPanic: true},
+		{name: "a gauge fetched as a counter", bind: &gauge, want: kindCounter, wantPanic: true},
+		{name: "a gauge fetched as a histogram", bind: &gauge, want: kindHistogram, wantPanic: true},
+		{name: "a histogram fetched as a counter", bind: &histogram, want: kindCounter, wantPanic: true},
+		{name: "a histogram fetched as a gauge", bind: &histogram, want: kindGauge, wantPanic: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -53,14 +54,14 @@ func Test_memMeter_assertKind(t *testing.T) {
 		}
 		const metric string = "requests"
 		if c.bind != nil {
-			c.bind(meter, metric)
+			meter.names[metric] = &nameState{kind: *c.bind}
 		}
 
 		defer func() {
 			r := recover()
 			if !c.wantPanic {
 				if r != nil {
-					t.Errorf("assertKind panicked: %v", r)
+					t.Errorf("bindName panicked: %v", r)
 				}
 				return
 			}
@@ -75,7 +76,16 @@ func Test_memMeter_assertKind(t *testing.T) {
 			}
 		}()
 
-		meter.assertKind(metric, c.want)
+		state := meter.bindName(metric, c.want)
+		//: a successful bind always hands back live bookkeeping — admit
+		//: increments through it, so a nil here would be a nil dereference
+		//: on the very next line of the create path.
+		if state == nil {
+			t.Fatal("bindName returned no state")
+		}
+		if state.kind != c.want {
+			t.Errorf("the name is bound to kind %d, want %d", state.kind, c.want)
+		}
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
