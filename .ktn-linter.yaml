@@ -45,6 +45,17 @@ vocabulary:
     # impose here ("ServeConner", "ServePacketter") are not words.
     - github.com/kitsunium/sdk/internal/core/net.ConnHandler
     - github.com/kitsunium/sdk/internal/core/net.PacketHandler
+    # EntryFetcher and Tagger are ADR 0039 siblings of the frozen core/cache.Store
+    # port, and the -er forms the rule would impose — "FetchEntrier" and
+    # "InvalidateTagger" — are not words. Both name the ROLE a store plays rather
+    # than its method: a tier that can hand back its whole entry, and a store that
+    # indexes by tag. The family (Store / EntryFetcher / Tagger / Loader) says at a
+    # glance which capability a type assertion is asking for, which is the entire
+    # ergonomics of a port that grows by siblings. Same argument as UpDownMeter
+    # below. Loader is NOT listed: its method is Load, so it satisfies the rule
+    # natively — the exemption is only for the two the rule cannot spell.
+    - github.com/kitsunium/sdk/internal/core/cache.EntryFetcher
+    - github.com/kitsunium/sdk/internal/core/cache.Tagger
     # UpDownMeter is the ADR 0039 sibling of the frozen core/metrics.Meter port,
     # and "Meter" is the OpenTelemetry vocabulary for an instrument factory —
     # the word the whole domain is discussed in. The -er form the rule would
@@ -149,6 +160,14 @@ rules:
       - "**/internal/core/logger/**"
       - "**/internal/service/logger/**"
       - "**/pkg/v1/logger/**"
+      # kernel/singleflight carries a recovered PANIC value across a goroutine
+      # boundary. recover() is defined by the language to return `any`, and the
+      # payload really can be anything a panic() call was given — so `any` is not
+      # a missing abstraction here, it is the only type the value HAS. Narrowing
+      # it would either drop payloads (the rule's suggestion, an interface with
+      # String()) or silently change what a caller recovers, which is exactly
+      # what PanicValue.Raised exists to preserve verbatim.
+      - "**/internal/kernel/singleflight/**"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #
@@ -304,6 +323,38 @@ rules:
       # "constructor NewNewAttrValue()", which is not a name anything could
       # satisfy — the same broken suggestion the jwk entry above records.)
       - "**/internal/core/metrics/**"
+      # kernel/singleflight.Group has NO constructor on purpose: its zero value
+      # is usable, exactly as sync.Mutex, sync.WaitGroup and sync.Map are, and
+      # the map it lazily builds is the only state it owns. A NewGroup() would
+      # be a second way in that adds nothing and makes `var g Group[K,V]` look
+      # wrong when it is the intended spelling. (The rule's own message here
+      # reads "constructor NewNewGroup()", which is not a name anything could
+      # satisfy — the same broken suggestion the jwk and metrics entries record.)
+      - "**/internal/kernel/singleflight/**"
+
+  # KTN-GOROUTINE-SYNCMAP / KTN-GOROUTINE-ATOMICVAL (phase 4) — the suggested
+  # replacements cannot express what this map is for.
+  #
+  # kernel/singleflight.Group holds `map[K]*call[V]` under an RWMutex, and the
+  # RWMutex exists for exactly one read-only method (InFlight); every other path
+  # mutates. Neither suggestion works here:
+  #   - sync.Map is for read-heavy, insert-once maps. Join must, ATOMICALLY,
+  #     look the key up, increment a refcount, insert on absence and spawn the
+  #     goroutine — a read-modify-write across two objects that sync.Map's
+  #     LoadOrStore cannot serialise. Racing it would either duplicate the very
+  #     execution the package exists to deduplicate, or cancel a call whose
+  #     refcount was read stale.
+  #   - atomic.Value replaces a field a writer REPLACES wholesale. This map is
+  #     mutated in place under the same lock that guards the refcounts, and
+  #     copy-on-write per call would make every Do allocate the whole map.
+  # The rules fire on the SHAPE (RWMutex + one map field), which this genuinely
+  # is; they cannot see that the workload is write-heavy by construction.
+  KTN-GOROUTINE-SYNCMAP:
+    exclude:
+      - "**/internal/kernel/singleflight/**"
+  KTN-GOROUTINE-ATOMICVAL:
+    exclude:
+      - "**/internal/kernel/singleflight/**"
 
   KTN-VAR-NILSLICE:
     exclude:
@@ -525,9 +576,22 @@ rules:
   # trade this for an unused-parameter complaint.
   #
   # Scoped to that one stub. RETIRE alongside the block above.
+  #
+  # The second entry is the same class on a different seam. service/cache's
+  # memory store implements core/cache.Store, whose methods take a context
+  # because a REMOTE tier can block. This one cannot: every operation is an
+  # in-process map access under a mutex, so there is no point at which a
+  # cancellation could be honoured, and a ctx.Err() check would be a branch that
+  # can only ever pass. Writing `_` says that IN THE SIGNATURE; naming the
+  # parameter and ignoring it would say nothing at all. The rule's own message
+  # is again the giveaway — the implementing type is unexported and NewMemory
+  # returns the port, so the only satisfaction evidence is the `var _ Store[…] =
+  # (*memoryStore[…])(nil)` block in cache_compliance.go, which the rule does
+  # not read.
   KTN-FUNC-BLANKPARAM:
     exclude:
       - "**/internal/service/proc/cgroup/cgroup_other.go"
+      - "**/internal/service/cache/**"
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on

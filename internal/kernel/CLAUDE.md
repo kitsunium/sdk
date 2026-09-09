@@ -18,6 +18,7 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 | `batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014) | `0.1.5.*` (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
 | `worker/` | generic goroutine-lifecycle daemon (`LoopDaemon`, `Start`/`Every`/`Stop`) | (none — emits no codes) |
 | `cache/` | generic `Cache[K,V]` LRU + TTL cache (ADR 0025); reuses `clock` for testable expiry | (none — `Fetch` returns `(V, bool)`) |
+| `singleflight/` | generic `Group[K,V]` call deduplication (ADR 0049); one execution per key however many callers arrive | (none — transparent to `fn`'s error; a panic is re-raised, not coded) |
 
 Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
 
@@ -41,6 +42,7 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 - `buffer` stays — the `[]byte` pool is generic even though `service/logger` is the heaviest consumer today. Since ADR 0010 it is a thin specialisation over `recycler.CappedPool[*[]byte]` (the generic `Pool[T]` moved to `recycler`).
 - `ring` admitted by ADR 0006 — SPSC bounded queue is a textbook generic primitive. Logger's async middleware is the only consumer today; metrics batchers and codec stream pipelines are obvious future users.
 - `snapshot` admitted by ADR 0011 — `Value[T]` is a textbook generic copy-on-write container (lock-free `Load` + mutex-serialised writers). The codec registry consolidated its three hand-rolled `atomic.Pointer[map]` + CAS loops onto it; routing tables, feature-flag maps, and hot-reloaded config are obvious future consumers.
+- `singleflight` admitted by ADR 0049 — `Group[K,V]` is textbook generic call deduplication (`Do`/`Forget`/`InFlight`; no domain word in any signature). It ships with **one** in-tree consumer, `internal/service/cache`, and that is recorded rather than dressed up: the second consumer claimed during planning (`config`) was checked and does not exist — `config.Load` is stateless and `pollWatcher.Watch` delegates the reload to a caller callback, so there is nothing to deduplicate. Two real candidates exist and were left alone (`service/validation.planFor`, `service/codec/tlv.typeInfoFor`, both `LoadOrStore` on a compile-once cache that accepts the duplicate in writing). The admission rests on the rule that governs — stdlib-only AND generic — and on the precedent in the row above it: **ADR 0025 admitted `cache` with ZERO domain consumers**, and it still has none besides `pkg/v1/cache`. A consumer count was never the bar; ADR 0010's "three copies already existed" was a *consolidation* argument, not a gate.
 
 ## Conventions unique to kernel
 
@@ -78,3 +80,4 @@ GOWORK=off go test -race -cover ./...
 - `batcher/` — see `internal/kernel/batcher/CLAUDE.md`
 - `worker/` — see `internal/kernel/worker/CLAUDE.md`
 - `cache/` — see `internal/kernel/cache/CLAUDE.md`
+- `singleflight/` — see `internal/kernel/singleflight/CLAUDE.md` (call deduplication, ADR 0049 — and the ~2 µs threshold below which it costs more than it saves)
