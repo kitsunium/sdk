@@ -71,7 +71,15 @@ and what would have to change in `internal/core/net/response.go` for one.
 bazel test --config=race //pkg/v1/server:server_test
 # Fallback:
 cd pkg && GOWORK=off go test -race -cover ./v1/server/...
-# expected: coverage 100%
+# expected: ~59% for the facade itself, ~83% for sse/.
+#
+# The facade's figure is not a gap. Seven forwarders here (HandshakeTimeout,
+# MaxPacketSize, BatchSize, ChainPacket, MaxConns, Shards, Adopt) are one-line
+# passthroughs whose behaviour is pinned in
+# //internal/service/net/server:server_test, where the option can actually be
+# observed; exercising them again through this package would assert that Go
+# calls the function it was told to. Everything with behaviour of its own —
+# New, Chain, DrainSignal, the sentinels — is covered here.
 ```
 
 ## Reference
