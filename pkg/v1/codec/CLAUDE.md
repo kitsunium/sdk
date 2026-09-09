@@ -13,7 +13,8 @@ codec.go      — Format alias, 22 Format constants, Marshal/Unmarshal/NewEncode
                 blank imports for asn1|baseenc|bson|cbor|csv|flatbuffers|json|msgpack|ndjson|pem|tlv|toml|xml|yaml
 compressed.go — MarshalCompressed / UnmarshalCompressed verbs + CompressAlgorithm alias
                 (Gzip/Flate constants) + the self-describing compressed-frame codec
-                (ADR 0014 D1); blank-imports internal/service/transform (gzip+flate)
+                (ADR 0014 D1); blank-imports internal/service/transform, which
+                self-registers gzip+flate+zlib — only gzip and flate are framed
 codes.go      — CodeUnknownFormat / CodeCodecUnavailable / CodeStreamingUnsupported (range 1.2.0.*)
 errors.go     — UnknownFormat / CodecUnavailable / StreamingUnsupported sentinels (errs.Define)
 ```
@@ -28,7 +29,12 @@ self-describing frame**:
 [1B magic=0xC7][1B frame-ver=0x01][1B algID][2B innerFormatLen BE][innerFormat][payload]
 ```
 
-`algID` is frozen per scheme (`gzip=0x01`, `flate=0x02`); `innerFormat` is the
+`algID` is frozen per scheme (`gzip=0x01`, `flate=0x02`). The service layer also
+registers a third stdlib scheme, `zlib` (the RFC 1950 envelope HTTP misnames
+`deflate`), which has **no** frame algID: `MarshalCompressed(f, "zlib", v)`
+returns `UnknownCompressor`, the documented behaviour for an unframed algorithm.
+Allocating `0x03` is an additive change to a wire format frozen post-v1.0.0 and
+is a `pkg/v1` decision not yet taken. `innerFormat` is the
 codec Format string, so `UnmarshalCompressed(box, &v)` needs **no** Format or
 Algorithm argument. A **decompression-bomb guard** (absolute 64 MiB frame
 ceiling + an expansion-ratio bound above a 4 KiB small-payload floor) returns
@@ -36,9 +42,9 @@ ceiling + an expansion-ratio bound above a 4 KiB small-payload floor) returns
 the frame **bytes** are frozen post-v1.0.0. Compression is a parallel transform
 registry, **never** a codec `Format` (ADR 0014 §Why-not).
 
-**Dep-light:** the first wave ships **stdlib gzip/flate only** (`compress/gzip`
-+ `compress/flate`), so the compression verbs add **zero** new vendor modules
-beyond what the codec facade already carries. zstd/snappy/s2 are deferred opt-in
+**Dep-light:** the transform schemes are **stdlib only** (`compress/gzip`,
+`compress/flate`, `compress/zlib`), so the compression verbs add **zero** new
+vendor modules beyond what the codec facade already carries. zstd/snappy/s2 are deferred opt-in
 follow-ups behind their own imports. `CompressAlgorithm = transform.Algorithm`
 is a type alias so consumers name a compressor without importing `internal/*`.
 

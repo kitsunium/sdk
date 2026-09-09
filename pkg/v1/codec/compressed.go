@@ -10,7 +10,7 @@ import (
 	"encoding/binary"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/transform"
-	_ "github.com/kitsunium/sdk/internal/service/transform" // self-registers gzip + flate
+	_ "github.com/kitsunium/sdk/internal/service/transform" // self-registers gzip + flate + zlib
 )
 
 const (

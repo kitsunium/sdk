@@ -18,8 +18,10 @@ compressed-frame format land at `pkg/v1/codec` in a later commit; this package
 declares only the port + registry.
 
 No algorithm bodies and no vendor types live here. Concrete schemes live under
-`internal/service/transform/` (stdlib gzip/flate today), self-registering via a
-package-level `var` at import — no `init()`.
+`internal/service/transform/` (stdlib gzip/flate/zlib today), self-registering
+via a package-level `var` at import — no `init()`. `flate` (raw DEFLATE, RFC
+1951) and `zlib` (the RFC 1950 envelope HTTP misnames `deflate`) are distinct
+`Algorithm`s, not aliases — see that package's `CLAUDE.md`.
 
 Code range: `0.2.5.*` (ADR 0014).
 
