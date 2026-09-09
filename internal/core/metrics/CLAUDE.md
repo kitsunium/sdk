@@ -10,8 +10,9 @@ aggregation `Temporality`, the producing `ResourceValue` and the
 `ScopeValue` that instrumented it, plus the `Exporter` contract + process-wide
 registry that ships a `SnapshotValue` out. A core sibling admitted by
 **ADR 0027** and re-shaped by **ADR 0044**. The in-memory meter and the stdlib
-`text` / `prometheus` exporters live in `internal/service/metrics`; exporters
-self-register via the registry (writer-registry model, ADR 0012).
+`text` / `prometheus` / `otlpjson` exporters live in
+`internal/service/metrics`; exporters self-register via the registry
+(writer-registry model, ADR 0012).
 
 Code range: `0.2.9.*` (ADR 0027, extended by ADR 0044).
 
@@ -19,7 +20,9 @@ Code range: `0.2.9.*` (ADR 0027, extended by ADR 0044).
 imports `go.opentelemetry.io/*`, and nothing ever should: the model is a shape,
 the OTel Go SDK would drag in the SDK-wide-banned `x/sys`, and what
 interoperability actually needs is a payload an OTLP encoder can walk — which is
-exactly what `SnapshotValue` is. Same posture as the Prometheus exposition
+exactly what `SnapshotValue` is. That encoder now exists and imports nothing
+either (`internal/service/metrics`, ADR 0048): the OTLP/JSON wire is
+`encoding/json` over these values, which is the claim this posture was making. Same posture as the Prometheus exposition
 format, RFC 7517 and the JWS Compact Serialization: implemented from the
 document, with the standard library.
 
@@ -108,7 +111,11 @@ Properties an exporter may rely on:
   that wants a cumulative ladder builds it as it walks.
 - **One `StartTime`/`Time` pair per snapshot.** OTLP puts them on every point;
   an encoder copies this pair down, because every point of one `Collect` covers
-  the same window. That is a field assignment, not a reconstruction.
+  the same window. That is a field assignment, not a reconstruction. It is also
+  the one place a hand-built snapshot bites: `time.Time.UnixNano` is documented
+  as undefined for the zero `Time`, so an encoder must map an unset instant onto
+  the schema's own 0 rather than the year-2339 value the cast produces — see
+  `internal/service/metrics/CLAUDE.md` §The OTLP/JSON encoder.
 
 `Attrs` **aliases the meter's own copy** and must not be mutated. Cloning per
 `Collect` would cost one allocation per series per scrape — i.e. it would scale
