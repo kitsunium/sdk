@@ -52,4 +52,13 @@ var (
 		"The operation exceeded its timeout",
 		"service/resilience: operation did not complete before the deadline",
 		errs.WithExitCode(exitUnavailable))
+
+	// FallbackFailed is returned when the primary operation AND the fallback
+	// both failed. It is the policy's own outcome rather than either half's
+	// error, so that neither can be dropped and neither can hijack the code:
+	// both messages travel as the "primary" and "fallback" fields.
+	FallbackFailed = errs.Define(CodeFallbackFailed, "FALLBACK_FAILED",
+		"The operation and its fallback both failed",
+		"service/resilience: primary and fallback both failed; the fields carry both messages",
+		errs.WithExitCode(exitUnavailable))
 )
