@@ -542,6 +542,42 @@ codes:
     const: CodeLifetimeTooLong
     hex: "0x00_02_0D_10"
     package: internal/core/token
+  - code: "0.2.14.1"
+    const: CodeNotFound
+    hex: "0x00_02_0E_01"
+    package: internal/core/session
+  - code: "0.2.14.2"
+    const: CodeExpired
+    hex: "0x00_02_0E_02"
+    package: internal/core/session
+  - code: "0.2.14.3"
+    const: CodeInvalidID
+    hex: "0x00_02_0E_03"
+    package: internal/core/session
+  - code: "0.2.14.4"
+    const: CodeInvalidConfig
+    hex: "0x00_02_0E_04"
+    package: internal/core/session
+  - code: "0.2.14.5"
+    const: CodeIdentifierCollision
+    hex: "0x00_02_0E_05"
+    package: internal/core/session
+  - code: "0.2.14.6"
+    const: CodeEntropyFailed
+    hex: "0x00_02_0E_06"
+    package: internal/core/session
+  - code: "0.2.14.7"
+    const: CodeStoreUnavailable
+    hex: "0x00_02_0E_07"
+    package: internal/core/session
+  - code: "0.2.14.8"
+    const: CodeSealInvalid
+    hex: "0x00_02_0E_08"
+    package: internal/core/session
+  - code: "0.2.14.9"
+    const: CodeFixationRefused
+    hex: "0x00_02_0E_09"
+    package: internal/core/session
   - code: "0.2.15.1"
     const: CodeValidationFailed
     hex: "0x00_02_0F_01"
@@ -1134,6 +1170,26 @@ codes:
     const: CodeReservedLabelName
     hex: "0x00_03_2D_03"
     package: internal/service/metrics
+  - code: "0.3.46.1"
+    const: CodeRecordCorrupt
+    hex: "0x00_03_2E_01"
+    package: internal/service/session
+  - code: "0.3.46.2"
+    const: CodeDirectoryUnsafe
+    hex: "0x00_03_2E_02"
+    package: internal/service/session
+  - code: "0.3.46.3"
+    const: CodeLockFailed
+    hex: "0x00_03_2E_03"
+    package: internal/service/session
+  - code: "0.3.46.4"
+    const: CodePayloadTooLarge
+    hex: "0x00_03_2E_04"
+    package: internal/service/session
+  - code: "0.3.46.5"
+    const: CodeInvalidPurpose
+    hex: "0x00_03_2E_05"
+    package: internal/service/session
   - code: "0.3.47.1"
     const: CodeRequired
     hex: "0x00_03_2F_01"

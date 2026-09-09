@@ -1,0 +1,77 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "session",
+    srcs = [
+        "codes.go",
+        "compare.go",
+        "config.go",
+        "encode.go",
+        "errors.go",
+        "file_config.go",
+        "file_ops.go",
+        "file_publish.go",
+        "file_store.go",
+        "file_write.go",
+        "fsguard_other.go",
+        "fsguard_unix.go",
+        "memory_store.go",
+        "memory_write.go",
+        "mint.go",
+        "record.go",
+        "sealer.go",
+        "session.go",
+        "window.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/session",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/proc",
+        "//internal/core/session",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/crypto/aesgcm",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":session",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "session_test",
+    size = "small",
+    srcs = [
+        "encode_internal_test.go",
+        "entropy_internal_test.go",
+        "file_store_external_test.go",
+        "fixation_external_test.go",
+        "sealer_external_test.go",
+        "store_external_test.go",
+    ],
+    embed = [":session"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/session",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
