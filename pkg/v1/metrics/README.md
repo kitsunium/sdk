@@ -6,7 +6,9 @@
 import "github.com/kitsunium/sdk/pkg/v1/metrics"
 ```
 
-Package metrics is the public facade for the SDK's observability domain — the natural twin of the logger. A [Meter](<#Meter>) \(from [NewMeter](<#NewMeter>)\) mints lock\-free [Counter](<#Counter>)/[Gauge](<#Gauge>)/[Histogram](<#Histogram>) instruments; \[Meter.Collect\] takes a [Snapshot](<#Snapshot>) that an [Exporter](<#Exporter>) ships out. Two stdlib exporters are registered on import — "text" \(a one\-line\-per\-series diagnostic\) and "prometheus" \(the Prometheus text exposition format\) — and [Export](<#Export>) dispatches by name. Both write to stderr so that importing this package never arms a writer on stdout, which a process may be using as a protocol channel \(ADR 0030\); pass os.Stdout to [NewTextExporter](<#NewTextExporter>) to opt in explicitly.
+Package metrics is the public facade for the SDK's observability domain — the natural twin of the logger, shaped on the OpenTelemetry metrics DATA MODEL.
+
+The model is OpenTelemetry's; the code is not. Nothing here imports go.opentelemetry.io: OTel is a published specification, and this SDK implements it the way it implements the Prometheus exposition format or RFC 7517 — from the document, with the standard library. What you get is the model's vocabulary \(typed attributes, aggregation temporality, Resource, InstrumentationScope, monotonic and non\-monotonic sums, observable instruments\) with this SDK's dependency budget, which is zero.
 
 ```
 m := metrics.NewMeter()
@@ -14,9 +16,82 @@ m.Counter("requests").Add(1)
 _ = metrics.Export("text", m.Collect())
 ```
 
-### Scraping
+### Instruments
 
-The registered "prometheus" exporter is a diagnostic; a scrape endpoint binds its own with [NewPrometheusExporter](<#NewPrometheusExporter>) and hands it the response writer:
+A [Meter](<#Meter>) mints four synchronous instruments and registers three asynchronous ones:
+
+- [Counter](<#Counter>) — a MONOTONIC sum. Requests served, bytes written. A non\-positive Add is ignored, because a backend reading a monotonic sum is entitled to treat a decrease as a process restart.
+- [UpDownCounter](<#UpDownCounter>) — a NON\-MONOTONIC sum. In\-flight requests, queue depth. Additive like a counter, but Add may be negative and Dec exists.
+- [Gauge](<#Gauge>) — a sampled reading with no arithmetic behind it. Temperature, a configured limit.
+- [Histogram](<#Histogram>) — a bucketed distribution. Latency, payload size.
+- \[FullMeter.ObservableCounter\], \[FullMeter.ObservableUpDownCounter\] and \[FullMeter.ObservableGauge\] — a callback read once per \[Meter.Collect\], for a value that already exists somewhere and only needs reading \(runtime.NumGoroutine\(\), a cache size\). The callback reports the ABSOLUTE value; the SDK differences it when the meter is a delta reader.
+
+A Counter and an UpDownCounter both produce a [SumMetric](<#SumMetric>) in the snapshot, told apart by \[SumMetric.Monotonic\]. That is the OTel data model's own economy: monotonicity is a FIELD of a sum, not a second point type.
+
+[Meter](<#Meter>) itself carries only the three instruments and Collect it shipped with; UpDownCounter and the observables live on the sibling interfaces [UpDownMeter](<#UpDownMeter>) and [AsyncMeter](<#AsyncMeter>), because a published Go interface cannot grow a method without breaking every downstream implementer \(ADR 0039\). [FullMeter](<#FullMeter>) is the union, and it is what [NewMeter](<#NewMeter>) returns.
+
+### Attributes
+
+An instrument is identified by its name AND its attributes. One name plus one attribute set is one SERIES, and every fetch of that pair returns the same instrument, so observations accumulate in one place wherever they are made. An attribute's value is TYPED — string, bool, int64 or float64 — and built by one of four constructors:
+
+```
+m.Counter("requests",
+    metrics.String("http.request.method", "GET"),
+    metrics.Int64("http.response.status_code", 503),
+    metrics.Bool("cache.hit", false),
+).Inc()
+```
+
+The type is part of the identity: String\("v", "1"\) and Int64\("v", 1\) are two different series, not one. Attribute ORDER is not — a set is a set. Passing no attributes names the dimensionless series.
+
+An attribute KEY is structure: it is written at the call site and constant for the process, so an empty key, a repeated key, or a value built by a struct literal instead of a constructor is a programmer error and panics with [InvalidAttribute](<#UnknownExporter>). An attribute VALUE is data and may be anything.
+
+Homogeneous ARRAY attributes, which the OTel model also allows, are not implemented — see the package's CLAUDE.md for what they would cost on the observation path.
+
+### Temporality
+
+[Temporality](<#Temporality>) says which window a reported number covers, and it is the one fact a metric value cannot carry by itself:
+
+- [TemporalityCumulative](<#TemporalityCumulative>) — the point covers everything since the meter started. Successive collections repeat the start timestamp. This is what an unconfigured [Meter](<#Meter>) does, because an in\-memory meter accumulates into atomics and never resets them.
+- [TemporalityDelta](<#TemporalityDelta>) — the point covers only the window since the previous collection. \[Meter.Collect\] then CONSUMES what it reports, so a delta meter has exactly one reader.
+
+[TemporalityUnspecified](<#TemporalityUnspecified>) is the zero value and resolves to cumulative; there is no setting that leaves it undecided \(ADR 0031\).
+
+### Resource and scope
+
+A [Snapshot](<#Snapshot>) carries two identities once for the whole payload rather than on every point: the [Resource](<#Resource>) \(who produced this — service.name, and anything else the caller adds\) and the [Scope](<#Scope>) \(what instrumented it — a library name and version\). An absent service.name resolves to [UnknownService](<#DefaultMaxSeriesPerInstrument>), which is what the specification mandates rather than a value this SDK invented.
+
+```
+m := metrics.NewMeterWithConfig(metrics.MeterConfig{
+    Resource: metrics.Resource{Attrs: []metrics.Attr{
+        metrics.String(metrics.ServiceNameKey, "orders"),
+    }},
+    Scope: metrics.Scope{Name: "github.com/acme/orders", Version: "1.4.0"},
+})
+```
+
+### Cardinality
+
+Distinct attribute values create distinct series, and an unbounded stream of them is a memory incident rather than a reporting inconvenience. Every Meter therefore bounds how many series ONE instrument name may hold — [DefaultMaxSeriesPerInstrument](<#DefaultMaxSeriesPerInstrument>) unless [NewMeterWithConfig](<#NewMeterWithConfig>) says otherwise. Past the bound, further attribute sets are folded into a single aggregated series carrying \[OverflowAttrKey\]=true: memory stays bounded, no observation is dropped, and the condition is visible in every snapshot from then on. What is lost is the breakdown — once folded, an observation's own attributes are gone.
+
+A non\-positive MaxSeriesPerInstrument clamps to the default. There is no setting that means "unbounded" \(ADR 0031\); a caller who wants a very large bound writes a very large number, where a reviewer can see it.
+
+### Exporting
+
+A [Snapshot](<#Snapshot>) maps each instrument name to its metric, and each metric to its series — the shape every per\-series wire format wants, and the shape an OTLP encoder can walk without a regrouping pass. Two stdlib exporters are registered on import and [Export](<#Export>) dispatches by name. Both write to stderr so that importing this package never arms a writer on stdout, which a process may be using as a protocol channel \(ADR 0030\).
+
+"text" is a diagnostic that prints the whole model — resource, scope, window, temporality, monotonicity, and each attribute with its type visible.
+
+"prometheus" is a deliberately LOSSY connector to the Prometheus text exposition format, kept because a Prometheus deployment is a real destination and not because the format can carry this model. What it loses:
+
+- Temporality. The format has none, and a server reads every counter as cumulative. A delta snapshot is REFUSED \([UnsupportedTemporality](<#UnknownExporter>)\) rather than mis\-labelled.
+- The attribute's TYPE. A Prometheus label value is a string, so Int64\("v", 1\) and String\("v", "1"\) — two series here — become one there.
+- The Resource and the Scope, which have nowhere to go. In particular service.name cannot even be spelled: a Prometheus label name is \[a\-zA\-Z\_\]\[a\-zA\-Z0\-9\_\]\* and the dot is outside it.
+- Exemplars, which this SDK does not produce at all.
+
+It REFUSES, rather than rewrites, a name the format cannot spell: an instrument name must match \[a\-zA\-Z\_:\]\[a\-zA\-Z0\-9\_:\]\* and an attribute key \[a\-zA\-Z\_\]\[a\-zA\-Z0\-9\_\]\*, which means an OTel\-conventional dotted key is refused too. Mapping the offending characters to "\_" would silently merge two distinct instruments into one family, and a metrics pipeline cannot detect that afterwards. The refusal is typed \([InvalidMetricName](<#UnknownExporter>), [InvalidLabelName](<#UnknownExporter>), [ReservedLabelName](<#UnknownExporter>)\) and leaves the writer untouched, because a truncated exposition parses as a complete one.
+
+A scrape endpoint binds its own exporter with [NewPrometheusExporter](<#NewPrometheusExporter>) and hands it the response writer:
 
 ```
 http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
@@ -25,51 +100,52 @@ http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 })
 ```
 
-It writes one "\# TYPE" header per instrument name followed by that name's series, renders a histogram as the cumulative \_bucket ladder \(including the mandatory le="\+Inf" line\) plus \_sum and \_count, and escapes every label value so a value carrying a quote or a newline cannot forge a line a reader parses as another series.
+A non\-monotonic sum is typed \`gauge\` there, not \`counter\`, because \`rate\(\)\` on a counter re\-extrapolates from zero every time the value falls.
 
-It REFUSES, rather than rewrites, a name the format cannot spell: a metric name must match \[a\-zA\-Z\_:\]\[a\-zA\-Z0\-9\_:\]\* and a label name \[a\-zA\-Z\_\]\[a\-zA\-Z0\-9\_\]\*. An instrument name is written at the call site and constant for the process, so a rejected one is rejected on the first scrape or never — whereas mapping the offending characters to "\_" would silently merge two distinct instruments into one metric family. The refusal is typed \([InvalidMetricName](<#UnknownExporter>), [InvalidLabelName](<#UnknownExporter>), [ReservedLabelName](<#UnknownExporter>)\) and leaves the writer untouched, because a truncated exposition parses as a complete one.
-
-### Labels and series
-
-An instrument is identified by its name AND its labels. One name plus one label set is one SERIES, and every fetch of that pair returns the same instrument, so observations accumulate in one place wherever they are made:
-
-```
-m.Counter("requests", metrics.Label{Key: "method", Value: "GET"}).Inc()
-```
-
-Label order does not matter — a label set is a set. Passing no labels names the dimensionless series, which is exactly what a call without labels always meant. A label KEY is structure: it is written at the call site and constant for the process, so an empty or repeated key is a programmer error and panics with [InvalidLabel](<#UnknownExporter>). A label VALUE is data and may be anything.
-
-### Cardinality
-
-Distinct label values create distinct series, and an unbounded stream of them is a memory incident rather than a reporting inconvenience. Every Meter therefore bounds how many series ONE instrument name may hold — [DefaultMaxSeriesPerInstrument](<#DefaultMaxSeriesPerInstrument>) unless [NewMeterWithConfig](<#NewMeterWithConfig>) says otherwise. Past the bound, further label sets are folded into a single aggregated series carrying the label \[OverflowLabelKey\]="true": memory stays bounded, no observation is dropped, and the condition is visible in every snapshot from then on. What is lost is the breakdown — once folded, an observation's own labels are gone.
-
-A non\-positive MaxSeriesPerInstrument clamps to the default. There is no setting that means "unbounded" \(ADR 0031\); a caller who wants a very large bound writes a very large number, where a reviewer can see it.
-
-A [Snapshot](<#Snapshot>) maps each instrument name to its series, which is the shape every per\-series wire format wants — and the shape the Prometheus exporter above consumes without a regrouping pass. The OTLP exporter remains deferred to a third\-party package \(ADR 0027\); the Prometheus protobuf format does too.
+An OTLP exporter is not in this package; the snapshot shape exists so that one can be written without reconstructing anything.
 
 ## Index
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Export\(name ExporterName, snap Snapshot\) error](<#Export>)
+- [type AsyncMeter](<#AsyncMeter>)
+- [type Attr](<#Attr>)
+  - [func Bool\(key string, value bool\) Attr](<#Bool>)
+  - [func Float64\(key string, value float64\) Attr](<#Float64>)
+  - [func Int64\(key string, value int64\) Attr](<#Int64>)
+  - [func String\(key, value string\) Attr](<#String>)
+- [type AttrKind](<#AttrKind>)
 - [type Counter](<#Counter>)
-- [type CounterValue](<#CounterValue>)
 - [type Exporter](<#Exporter>)
   - [func NewPrometheusExporter\(name ExporterName, dst io.Writer\) Exporter](<#NewPrometheusExporter>)
   - [func NewTextExporter\(name ExporterName, dst io.Writer\) Exporter](<#NewTextExporter>)
   - [func RegisterExporter\(e Exporter\) Exporter](<#RegisterExporter>)
 - [type ExporterName](<#ExporterName>)
   - [func AvailableExporters\(\) \[\]ExporterName](<#AvailableExporters>)
+- [type Float64Callback](<#Float64Callback>)
+- [type FullMeter](<#FullMeter>)
+  - [func NewMeter\(\) FullMeter](<#NewMeter>)
+  - [func NewMeterWithConfig\(cfg MeterConfig\) FullMeter](<#NewMeterWithConfig>)
 - [type Gauge](<#Gauge>)
-- [type GaugeValue](<#GaugeValue>)
+- [type GaugeMetric](<#GaugeMetric>)
+- [type GaugePoint](<#GaugePoint>)
 - [type Histogram](<#Histogram>)
-- [type HistogramValue](<#HistogramValue>)
-- [type Label](<#Label>)
+- [type HistogramMetric](<#HistogramMetric>)
+- [type HistogramPoint](<#HistogramPoint>)
+- [type Int64Callback](<#Int64Callback>)
 - [type Meter](<#Meter>)
-  - [func NewMeter\(\) Meter](<#NewMeter>)
-  - [func NewMeterWithConfig\(cfg MeterConfig\) Meter](<#NewMeterWithConfig>)
 - [type MeterConfig](<#MeterConfig>)
+- [type ObserveFloat64](<#ObserveFloat64>)
+- [type ObserveInt64](<#ObserveInt64>)
+- [type Resource](<#Resource>)
+- [type Scope](<#Scope>)
 - [type Snapshot](<#Snapshot>)
+- [type SumMetric](<#SumMetric>)
+- [type SumPoint](<#SumPoint>)
+- [type Temporality](<#Temporality>)
+- [type UpDownCounter](<#UpDownCounter>)
+- [type UpDownMeter](<#UpDownMeter>)
 
 
 ## Constants
@@ -81,12 +157,19 @@ const (
     // DefaultMaxSeriesPerInstrument is the cardinality bound NewMeter applies,
     // and the value a non-positive MeterConfig knob clamps to.
     DefaultMaxSeriesPerInstrument int = svcmetrics.DefaultMaxSeriesPerInstrument
-    // OverflowLabelKey is the reserved label naming a meter's aggregated
+    // OverflowAttrKey is the reserved attribute naming a meter's aggregated
     // overflow series. It appears in a snapshot only once an instrument has
-    // exceeded its cardinality bound.
-    OverflowLabelKey string = coremetrics.OverflowLabelKey
-    // OverflowLabelValue is the only value ever stored under OverflowLabelKey.
-    OverflowLabelValue string = coremetrics.OverflowLabelValue
+    // exceeded its cardinality bound, and its value is the boolean true.
+    OverflowAttrKey string = coremetrics.OverflowAttrKey
+    // ServiceNameKey is the attribute key the OTel resource semantic
+    // conventions reserve for the logical name of the service.
+    ServiceNameKey string = coremetrics.ServiceNameKey
+    // UnknownService is the service.name the specification mandates when a
+    // producer supplies none.
+    UnknownService string = coremetrics.UnknownService
+    // DefaultScopeName names this SDK as the instrumenting library when a
+    // caller declares no scope of their own.
+    DefaultScopeName string = coremetrics.DefaultScopeName
 )
 ```
 
@@ -102,22 +185,30 @@ var (
     ExportFailed = coremetrics.ExportFailed
     // InstrumentKindConflict is raised when a name is reused across kinds.
     InstrumentKindConflict = coremetrics.InstrumentKindConflict
-    // InvalidLabel is raised when a label set has an empty or repeated key.
-    InvalidLabel = coremetrics.InvalidLabel
-    // InvalidMetricName is returned by the Prometheus exporter when an
+    // InvalidAttribute is raised when an attribute set has an empty or
+    // repeated key, or a value no constructor ever set.
+    InvalidAttribute = coremetrics.InvalidAttribute
+    // InvalidTemporality is raised when a MeterConfig carries a Temporality
+    // that is none of the three constants.
+    InvalidTemporality = coremetrics.InvalidTemporality
+    // InvalidMetricName is returned by the Prometheus connector when an
     // instrument name is not a valid Prometheus metric name.
     InvalidMetricName = svcmetrics.InvalidMetricName
-    // InvalidLabelName is returned by the Prometheus exporter when a label key
-    // is not a valid Prometheus label name.
+    // InvalidLabelName is returned by the Prometheus connector when an
+    // attribute key is not a valid Prometheus label name.
     InvalidLabelName = svcmetrics.InvalidLabelName
-    // ReservedLabelName is returned by the Prometheus exporter when a label key
-    // is legal but reserved — a "__" prefix, or "le" on a histogram.
+    // ReservedLabelName is returned by the Prometheus connector when an
+    // attribute key is legal but reserved — a "__" prefix, or "le" on a
+    // histogram.
     ReservedLabelName = svcmetrics.ReservedLabelName
+    // UnsupportedTemporality is returned by the Prometheus connector when the
+    // snapshot is a delta one, which the exposition format cannot express.
+    UnsupportedTemporality = svcmetrics.UnsupportedTemporality
 )
 ```
 
 <a name="Export"></a>
-## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L191>)
+## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L405>)
 
 ```go
 func Export(name ExporterName, snap Snapshot) error
@@ -125,26 +216,110 @@ func Export(name ExporterName, snap Snapshot) error
 
 Export ships snap through the exporter registered as name.
 
-<a name="Counter"></a>
-## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L101>)
+<a name="AsyncMeter"></a>
+## type [AsyncMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L207>)
 
-Counter is the public alias for a monotonic cumulative instrument.
+AsyncMeter is the public alias for the sibling port that registers observable \(asynchronous\) instruments.
+
+```go
+type AsyncMeter = coremetrics.AsyncMeter
+```
+
+<a name="Attr"></a>
+## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L226>)
+
+Attr is the public alias for one typed dimension of a series.
+
+```go
+type Attr = coremetrics.AttrValue
+```
+
+<a name="Bool"></a>
+### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L349>)
+
+```go
+func Bool(key string, value bool) Attr
+```
+
+Bool returns a bool\-valued attribute.
+
+<a name="Float64"></a>
+### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L362>)
+
+```go
+func Float64(key string, value float64) Attr
+```
+
+Float64 returns a double attribute. A float is a measurement rather than a dimension, and it is keyed on its bit pattern — see the core documentation.
+
+<a name="Int64"></a>
+### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L355>)
+
+```go
+func Int64(key string, value int64) Attr
+```
+
+Int64 returns a signed\-integer attribute.
+
+<a name="String"></a>
+### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L343>)
+
+```go
+func String(key, value string) Attr
+```
+
+String returns a string\-valued attribute. It is the shortest of the four constructors to write because a string dimension is the common one.
+
+<a name="AttrKind"></a>
+## type [AttrKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L229>)
+
+AttrKind is the public alias for an attribute value's type tag.
+
+```go
+type AttrKind = coremetrics.AttrKind
+```
+
+<a name="AttrKindBool"></a>AttrKindBool marks a bool\-valued attribute.
+
+```go
+const AttrKindBool AttrKind = coremetrics.AttrKindBool
+```
+
+<a name="AttrKindFloat64"></a>AttrKindFloat64 marks an IEEE\-754 double attribute.
+
+```go
+const AttrKindFloat64 AttrKind = coremetrics.AttrKindFloat64
+```
+
+<a name="AttrKindInt64"></a>AttrKindInt64 marks a signed 64\-bit integer attribute.
+
+```go
+const AttrKindInt64 AttrKind = coremetrics.AttrKindInt64
+```
+
+<a name="AttrKindInvalid"></a>AttrKindInvalid marks an attribute whose value no constructor ever set.
+
+```go
+const AttrKindInvalid AttrKind = coremetrics.AttrKindInvalid
+```
+
+<a name="AttrKindString"></a>AttrKindString marks a string\-valued attribute.
+
+```go
+const AttrKindString AttrKind = coremetrics.AttrKindString
+```
+
+<a name="Counter"></a>
+## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L214>)
+
+Counter is the public alias for a monotonic sum instrument.
 
 ```go
 type Counter = coremetrics.Counter
 ```
 
-<a name="CounterValue"></a>
-## type [CounterValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L116>)
-
-CounterValue is the public alias for a per\-series counter snapshot value.
-
-```go
-type CounterValue = coremetrics.CounterValue
-```
-
 <a name="Exporter"></a>
-## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L128>)
+## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L308>)
 
 Exporter is the public alias for a snapshot shipper.
 
@@ -153,7 +328,7 @@ type Exporter = coremetrics.Exporter
 ```
 
 <a name="NewPrometheusExporter"></a>
-### func [NewPrometheusExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L179>)
+### func [NewPrometheusExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L393>)
 
 ```go
 func NewPrometheusExporter(name ExporterName, dst io.Writer) Exporter
@@ -162,7 +337,7 @@ func NewPrometheusExporter(name ExporterName, dst io.Writer) Exporter
 NewPrometheusExporter returns an Exporter rendering the Prometheus text exposition format to dst under name \(not auto\-registered\). Hand it the http.ResponseWriter of a /metrics handler; the registered "prometheus" exporter targets stderr and is a diagnostic, not a scrape endpoint.
 
 <a name="NewTextExporter"></a>
-### func [NewTextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L170>)
+### func [NewTextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L384>)
 
 ```go
 func NewTextExporter(name ExporterName, dst io.Writer) Exporter
@@ -171,7 +346,7 @@ func NewTextExporter(name ExporterName, dst io.Writer) Exporter
 NewTextExporter returns a text Exporter writing to dst under name \(not auto\-registered\).
 
 <a name="RegisterExporter"></a>
-### func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L185>)
+### func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L399>)
 
 ```go
 func RegisterExporter(e Exporter) Exporter
@@ -180,7 +355,7 @@ func RegisterExporter(e Exporter) Exporter
 RegisterExporter adds e to the process\-wide exporter registry.
 
 <a name="ExporterName"></a>
-## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L131>)
+## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L311>)
 
 ExporterName is the public alias for an exporter's registry key.
 
@@ -189,7 +364,7 @@ type ExporterName = coremetrics.ExporterName
 ```
 
 <a name="AvailableExporters"></a>
-### func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L197>)
+### func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L411>)
 
 ```go
 func AvailableExporters() []ExporterName
@@ -197,26 +372,71 @@ func AvailableExporters() []ExporterName
 
 AvailableExporters returns the sorted list of registered exporter names.
 
-<a name="Gauge"></a>
-## type [Gauge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L104>)
+<a name="Float64Callback"></a>
+## type [Float64Callback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L302>)
 
-Gauge is the public alias for an instantaneous up/down instrument.
+Float64Callback is the public alias for a double observable's callback.
+
+```go
+type Float64Callback = coremetrics.Float64Callback
+```
+
+<a name="FullMeter"></a>
+## type [FullMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L211>)
+
+FullMeter is the public alias for the union of all three — what NewMeter returns.
+
+```go
+type FullMeter = coremetrics.FullMeter
+```
+
+<a name="NewMeter"></a>
+### func [NewMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L370>)
+
+```go
+func NewMeter() FullMeter
+```
+
+NewMeter returns a fresh in\-memory Meter with every MeterConfig knob at its resolved default: bounded at DefaultMaxSeriesPerInstrument, cumulative, service.name=unknown\_service, this SDK as the scope, and the system clock.
+
+<a name="NewMeterWithConfig"></a>
+### func [NewMeterWithConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L377>)
+
+```go
+func NewMeterWithConfig(cfg MeterConfig) FullMeter
+```
+
+NewMeterWithConfig returns a fresh in\-memory Meter honouring cfg. Every unset field resolves to a working value and none of them to an inert one.
+
+<a name="Gauge"></a>
+## type [Gauge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L220>)
+
+Gauge is the public alias for a sampled\-reading instrument.
 
 ```go
 type Gauge = coremetrics.Gauge
 ```
 
-<a name="GaugeValue"></a>
-## type [GaugeValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L119>)
+<a name="GaugeMetric"></a>
+## type [GaugeMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L278>)
 
-GaugeValue is the public alias for a per\-series gauge snapshot value.
+GaugeMetric is the public alias for every series of one gauge instrument name.
 
 ```go
-type GaugeValue = coremetrics.GaugeValue
+type GaugeMetric = coremetrics.GaugeMetricValue
+```
+
+<a name="GaugePoint"></a>
+## type [GaugePoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L281>)
+
+GaugePoint is the public alias for one gauge series.
+
+```go
+type GaugePoint = coremetrics.GaugeValue
 ```
 
 <a name="Histogram"></a>
-## type [Histogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L107>)
+## type [Histogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L223>)
 
 Histogram is the public alias for a bucketed distribution instrument.
 
@@ -224,67 +444,157 @@ Histogram is the public alias for a bucketed distribution instrument.
 type Histogram = coremetrics.Histogram
 ```
 
-<a name="HistogramValue"></a>
-## type [HistogramValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L122>)
+<a name="HistogramMetric"></a>
+## type [HistogramMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L285>)
 
-HistogramValue is the public alias for a per\-series histogram snapshot value.
+HistogramMetric is the public alias for every series of one histogram instrument name, plus its temporality.
 
 ```go
-type HistogramValue = coremetrics.HistogramValue
+type HistogramMetric = coremetrics.HistogramMetricValue
 ```
 
-<a name="Label"></a>
-## type [Label](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L113>)
+<a name="HistogramPoint"></a>
+## type [HistogramPoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L288>)
 
-Label is the public alias for one dimension of a series.
+HistogramPoint is the public alias for one histogram series.
 
 ```go
-type Label = coremetrics.LabelValue
+type HistogramPoint = coremetrics.HistogramValue
+```
+
+<a name="Int64Callback"></a>
+## type [Int64Callback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L299>)
+
+Int64Callback is the public alias for an integer observable's callback.
+
+```go
+type Int64Callback = coremetrics.Int64Callback
 ```
 
 <a name="Meter"></a>
-## type [Meter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L98>)
+## type [Meter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L199>)
 
-Meter is the public alias for the instrument factory.
+Meter is the public alias for the frozen instrument factory: Counter, Gauge, Histogram and Collect.
 
 ```go
 type Meter = coremetrics.Meter
 ```
 
-<a name="NewMeter"></a>
-### func [NewMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L155>)
-
-```go
-func NewMeter() Meter
-```
-
-NewMeter returns a fresh in\-memory Meter \(Counter/Gauge/Histogram \+ Collect\) bounded at DefaultMaxSeriesPerInstrument series per instrument name.
-
-<a name="NewMeterWithConfig"></a>
-### func [NewMeterWithConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L163>)
-
-```go
-func NewMeterWithConfig(cfg MeterConfig) Meter
-```
-
-NewMeterWithConfig returns a fresh in\-memory Meter honouring cfg. A non\-positive MaxSeriesPerInstrument clamps to DefaultMaxSeriesPerInstrument — it never means unbounded.
-
 <a name="MeterConfig"></a>
-## type [MeterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L125>)
+## type [MeterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L305>)
 
-MeterConfig is the public alias for a Meter's cardinality configuration.
+MeterConfig is the public alias for a Meter's configuration.
 
 ```go
 type MeterConfig = svcmetrics.MeterConfig
 ```
 
+<a name="ObserveFloat64"></a>
+## type [ObserveFloat64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L296>)
+
+ObserveFloat64 is the public alias for the reporting function a double observable callback is handed.
+
+```go
+type ObserveFloat64 = coremetrics.ObserveFloat64
+```
+
+<a name="ObserveInt64"></a>
+## type [ObserveInt64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L292>)
+
+ObserveInt64 is the public alias for the reporting function an integer observable callback is handed.
+
+```go
+type ObserveInt64 = coremetrics.ObserveInt64
+```
+
+<a name="Resource"></a>
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L261>)
+
+Resource is the public alias for the producer's identity, carried once per snapshot.
+
+```go
+type Resource = coremetrics.ResourceValue
+```
+
+<a name="Scope"></a>
+## type [Scope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L265>)
+
+Scope is the public alias for the instrumentation's identity, carried once per snapshot.
+
+```go
+type Scope = coremetrics.ScopeValue
+```
+
 <a name="Snapshot"></a>
-## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L110>)
+## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L268>)
 
 Snapshot is the public alias for a whole\-meter point\-in\-time copy.
 
 ```go
 type Snapshot = coremetrics.SnapshotValue
+```
+
+<a name="SumMetric"></a>
+## type [SumMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L272>)
+
+SumMetric is the public alias for every series of one sum instrument name, plus its temporality and monotonicity.
+
+```go
+type SumMetric = coremetrics.SumMetricValue
+```
+
+<a name="SumPoint"></a>
+## type [SumPoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L275>)
+
+SumPoint is the public alias for one sum series.
+
+```go
+type SumPoint = coremetrics.SumValue
+```
+
+<a name="Temporality"></a>
+## type [Temporality](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L247>)
+
+Temporality is the public alias for a metric's aggregation temporality.
+
+```go
+type Temporality = coremetrics.Temporality
+```
+
+<a name="TemporalityCumulative"></a>TemporalityCumulative reports the window since the series started.
+
+```go
+const TemporalityCumulative Temporality = coremetrics.TemporalityCumulative
+```
+
+<a name="TemporalityDelta"></a>TemporalityDelta reports the window since the previous collection.
+
+```go
+const TemporalityDelta Temporality = coremetrics.TemporalityDelta
+```
+
+<a name="TemporalityUnspecified"></a>TemporalityUnspecified is the unset zero value; it resolves to TemporalityCumulative and never reaches a Snapshot.
+
+```go
+const TemporalityUnspecified Temporality = coremetrics.TemporalityUnspecified
+```
+
+<a name="UpDownCounter"></a>
+## type [UpDownCounter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L217>)
+
+UpDownCounter is the public alias for a non\-monotonic sum instrument.
+
+```go
+type UpDownCounter = coremetrics.UpDownCounter
+```
+
+<a name="UpDownMeter"></a>
+## type [UpDownMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L203>)
+
+UpDownMeter is the public alias for the sibling port that mints the non\-monotonic sum Meter cannot.
+
+```go
+type UpDownMeter = coremetrics.UpDownMeter
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

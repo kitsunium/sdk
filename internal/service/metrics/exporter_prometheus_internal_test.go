@@ -204,13 +204,13 @@ func TestAppendEscapedValueCoversTheFormat(t *testing.T) {
 // perfectly representable.
 func TestCheckLabelNamesReservesLeOnlyForHistograms(t *testing.T) {
 	t.Parallel()
-	labels := []coremetrics.LabelValue{label(boundLabelKey, "1")}
+	labels := []coremetrics.AttrValue{attr(boundLabelKey, "1")}
 
-	if err := checkLabelNames(labels, false); err != nil {
-		t.Errorf("checkLabelNames(le, non-histogram) = %v, want nil", err)
+	if err := checkAttrNames(labels, false); err != nil {
+		t.Errorf("checkAttrNames(le, non-histogram) = %v, want nil", err)
 	}
-	if err := checkLabelNames(labels, true); err == nil {
-		t.Error("checkLabelNames(le, histogram) = nil, want RESERVED_LABEL_NAME")
+	if err := checkAttrNames(labels, true); err == nil {
+		t.Error("checkAttrNames(le, histogram) = nil, want RESERVED_LABEL_NAME")
 	}
 }
 

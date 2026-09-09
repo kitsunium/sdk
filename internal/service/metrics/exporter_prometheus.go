@@ -1,4 +1,4 @@
-// Package metrics — Prometheus text exposition Exporter (format 0.0.4).
+// Package metrics — Prometheus text exposition connector (format 0.0.4).
 package metrics
 
 import (
@@ -43,7 +43,7 @@ const (
 	reservedLabelPrefix string = "__"
 )
 
-// Prometheus is the default Prometheus exporter, registered to write snapshots
+// Prometheus is the default Prometheus connector, registered to write snapshots
 // to stderr. Use NewPrometheusExporter for the writer a scrape actually needs.
 //
 // stderr, not stdout, for the reason ADR 0030 gives in full on Text: importing
@@ -55,6 +55,15 @@ var Prometheus = coremetrics.RegisterExporter(newPrometheusExporter(prometheusEx
 
 // prometheusExporter renders a Snapshot as a Prometheus text exposition
 // document: one "# TYPE" header per instrument name, then that name's series.
+//
+// It is a DELIBERATELY LOSSY CONNECTOR, not a rendering of this SDK's data
+// model. The model is OpenTelemetry's; the Prometheus text exposition format
+// predates most of it and has no field for the parts it lacks. What is lost,
+// and why each loss is a loss rather than a bug, is enumerated in
+// internal/service/metrics/CLAUDE.md §What the Prometheus connector loses. The
+// short list: temporality (delta is REFUSED rather than mis-labelled), the
+// attribute's TYPE, the Resource, the Scope, and exemplars the SDK does not
+// produce at all.
 //
 // mu serialises the single dst.Write for the same reason textExporter's does —
 // core/metrics.Exporter requires concurrency safety and dst is caller-supplied.
@@ -88,14 +97,14 @@ func (e *prometheusExporter) Name() coremetrics.ExporterName {
 
 // Export renders the whole snapshot into one buffer, then writes it once.
 //
-// A name the format cannot carry aborts the WHOLE document before the write, so
-// a scraper never receives a partial exposition — a truncated document parses
-// as a complete one, and the series it is missing look like series that stopped
-// existing.
+// A name the format cannot carry, or a temporality it cannot express, aborts
+// the WHOLE document before the write, so a scraper never receives a partial
+// exposition — a truncated document parses as a complete one, and the series it
+// is missing look like series that stopped existing.
 func (e *prometheusExporter) Export(snap coremetrics.SnapshotValue) error {
 	//: render + validate first; nothing is written if either fails.
 	buf, err := renderExposition(snap)
-	//: an unrepresentable name is reported typed, with dst untouched.
+	//: an unrepresentable name or temporality is reported typed, dst untouched.
 	if err != nil {
 		//: the sentinel already carries the code, reason and public message.
 		return err
@@ -122,11 +131,14 @@ func (e *prometheusExporter) Export(snap coremetrics.SnapshotValue) error {
 
 // renderExposition builds the whole document, one block per kind, each in
 // sorted-name order so two exports of one snapshot are byte-identical.
+//
+// The Resource and the Scope are read and DROPPED — see checkTemporality's
+// neighbours in CLAUDE.md for why they are not emitted as a target_info metric.
 func renderExposition(snap coremetrics.SnapshotValue) (doc []byte, err error) {
 	//: doc starts nil and every line appends onto it (append never errors);
-	//: counters first.
-	doc, err = appendPromCounters(doc, snap.Counters)
-	//: abort the whole document on an unrepresentable name.
+	//: sums first — counters and up-down counters share one map.
+	doc, err = appendPromSums(doc, snap.Sums)
+	//: abort the whole document on an unrepresentable name or temporality.
 	if err != nil {
 		//: surface the typed refusal.
 		return nil, err
@@ -149,29 +161,48 @@ func renderExposition(snap coremetrics.SnapshotValue) (doc []byte, err error) {
 	return doc, nil
 }
 
-// appendPromCounters renders each counter name as a "counter" family.
-func appendPromCounters(buf []byte, groups map[string][]coremetrics.CounterValue) (doc []byte, err error) {
+// appendPromSums renders each sum name as a "counter" or a "gauge" family.
+//
+// A NON-MONOTONIC sum is typed `gauge`, not `counter`, and that is the
+// OpenTelemetry-to-Prometheus mapping rather than a convenience: `rate()` on a
+// counter treats every decrease as a process restart and re-extrapolates from
+// zero, so an up-down counter exposed as a counter reports a fabricated spike
+// each time its value falls.
+func appendPromSums(buf []byte, metrics map[string]coremetrics.SumMetricValue) (doc []byte, err error) {
 	//: names first, so the document is stable across runs.
-	for _, name := range sortedKeys(groups) {
+	for _, name := range sortedKeys(metrics) {
+		metric := metrics[name]
+		//: a delta metric has no honest spelling here.
+		if err := checkTemporality(name, metric.Temporality); err != nil {
+			//: surface the typed refusal.
+			return nil, err
+		}
 		//: a name that cannot be spelled refuses the export.
 		if err := checkMetricName(name); err != nil {
 			//: surface the typed refusal.
 			return nil, err
 		}
+		//: monotonicity decides the TYPE, and nothing else does.
+		promType := promTypeGauge
+		//: a monotonic sum is what Prometheus calls a counter.
+		if metric.Monotonic {
+			//: the counter case.
+			promType = promTypeCounter
+		}
 		//: the header is written ONCE per name — the property the
 		//: name-keyed snapshot shape exists to make free.
-		buf = appendTypeLine(buf, name, promTypeCounter)
-		//: then each series, already ordered by label set by Collect.
-		for _, series := range groups[name] {
-			//: a label key that cannot be spelled refuses the export.
-			if err := checkLabelNames(series.Labels, false); err != nil {
+		buf = appendTypeLine(buf, name, promType)
+		//: then each series, already ordered by attribute set by Collect.
+		for _, point := range metric.Points {
+			//: an attribute key that cannot be spelled refuses the export.
+			if err := checkAttrNames(point.Attrs, false); err != nil {
 				//: surface the typed refusal.
 				return nil, err
 			}
-			//: the cumulative total is an int64; a decimal integer is a
-			//: valid float to the format's parser.
-			buf = appendSample(buf, name, "", series.Labels,
-				strconv.FormatInt(series.Value, decimalBase))
+			//: the total is an int64; a decimal integer is a valid float to
+			//: the format's parser.
+			buf = appendSample(buf, name, "", point.Attrs,
+				strconv.FormatInt(point.Value, decimalBase))
 		}
 	}
 	//: hand back the extended buffer.
@@ -179,9 +210,10 @@ func appendPromCounters(buf []byte, groups map[string][]coremetrics.CounterValue
 }
 
 // appendPromGauges renders each gauge name as a "gauge" family.
-func appendPromGauges(buf []byte, groups map[string][]coremetrics.GaugeValue) (doc []byte, err error) {
-	//: same two-level walk as counters.
-	for _, name := range sortedKeys(groups) {
+func appendPromGauges(buf []byte, metrics map[string]coremetrics.GaugeMetricValue) (doc []byte, err error) {
+	//: same two-level walk as sums, minus the temporality question a gauge
+	//: does not have.
+	for _, name := range sortedKeys(metrics) {
 		//: a name that cannot be spelled refuses the export.
 		if err := checkMetricName(name); err != nil {
 			//: surface the typed refusal.
@@ -190,14 +222,14 @@ func appendPromGauges(buf []byte, groups map[string][]coremetrics.GaugeValue) (d
 		//: one header per name.
 		buf = appendTypeLine(buf, name, promTypeGauge)
 		//: one line per series.
-		for _, series := range groups[name] {
-			//: a label key that cannot be spelled refuses the export.
-			if err := checkLabelNames(series.Labels, false); err != nil {
+		for _, point := range metrics[name].Points {
+			//: an attribute key that cannot be spelled refuses the export.
+			if err := checkAttrNames(point.Attrs, false); err != nil {
 				//: surface the typed refusal.
 				return nil, err
 			}
 			//: the reading is a float64 — see promFloat on the spelling.
-			buf = appendSample(buf, name, "", series.Labels, promFloat(series.Value))
+			buf = appendSample(buf, name, "", point.Attrs, promFloat(point.Value))
 		}
 	}
 	//: hand back the extended buffer.
@@ -206,9 +238,17 @@ func appendPromGauges(buf []byte, groups map[string][]coremetrics.GaugeValue) (d
 
 // appendPromHistograms renders each histogram name as a "histogram" family:
 // the cumulative _bucket ladder, then _sum and _count.
-func appendPromHistograms(buf []byte, groups map[string][]coremetrics.HistogramValue) (doc []byte, err error) {
-	//: same two-level walk as counters.
-	for _, name := range sortedKeys(groups) {
+func appendPromHistograms(
+	buf []byte, metrics map[string]coremetrics.HistogramMetricValue,
+) (doc []byte, err error) {
+	//: same two-level walk as sums.
+	for _, name := range sortedKeys(metrics) {
+		metric := metrics[name]
+		//: a delta histogram has no honest spelling here either.
+		if err := checkTemporality(name, metric.Temporality); err != nil {
+			//: surface the typed refusal.
+			return nil, err
+		}
 		//: a name that cannot be spelled refuses the export.
 		if err := checkMetricName(name); err != nil {
 			//: surface the typed refusal.
@@ -218,14 +258,14 @@ func appendPromHistograms(buf []byte, groups map[string][]coremetrics.HistogramV
 		//: _bucket / _sum / _count suffixes.
 		buf = appendTypeLine(buf, name, promTypeHistogram)
 		//: one family per series.
-		for _, series := range groups[name] {
+		for _, point := range metric.Points {
 			//: "le" is reserved here, so a histogram gets the stricter check.
-			if err := checkLabelNames(series.Labels, true); err != nil {
+			if err := checkAttrNames(point.Attrs, true); err != nil {
 				//: surface the typed refusal.
 				return nil, err
 			}
 			//: the ladder plus its two totals.
-			buf = appendHistogramSeries(buf, name, series)
+			buf = appendHistogramSeries(buf, name, point)
 		}
 	}
 	//: hand back the extended buffer.
@@ -240,7 +280,7 @@ func appendPromHistograms(buf []byte, groups map[string][]coremetrics.HistogramV
 // The running total below is that conversion, and it is also what makes the
 // ladder monotonic by construction.
 //
-// le="+Inf" carries the ladder's own total rather than series.Count. The two
+// le="+Inf" carries the ladder's own total rather than point.Count. The two
 // are equal at rest, and under a concurrent Record they can differ by the
 // observations in flight, because Record bumps its bucket and the total count
 // as two separate atomics and snapshot reads them at two instants. Deriving
@@ -248,16 +288,16 @@ func appendPromHistograms(buf []byte, groups map[string][]coremetrics.HistogramV
 // bucket beneath it — a non-monotonic ladder, which is the worse violation of
 // the two. No single number restores atomicity here; only a lock would, and the
 // instruments are lock-free on purpose.
-func appendHistogramSeries(buf []byte, name string, series coremetrics.HistogramValue) []byte {
+func appendHistogramSeries(buf []byte, name string, point coremetrics.HistogramValue) []byte {
 	//: bucket i reports every observation up to and including its bound.
 	var cumulative uint64
 	//: the declared bounds, ascending — newHistogram sorts them.
-	for i, bound := range series.Buckets {
+	for i, bound := range point.Bounds {
 		//: a hand-built value may carry fewer counts than bounds; a missing
 		//: slot contributes zero rather than panicking on the scrape path.
-		if i < len(series.Counts) {
+		if i < len(point.Counts) {
 			//: fold this bucket into the running total.
-			cumulative += series.Counts[i]
+			cumulative += point.Counts[i]
 		}
 		//: a non-finite bound has no legal `le` spelling of its own — +Inf is
 		//: already the mandatory last line, and emitting it twice would forge
@@ -268,22 +308,22 @@ func appendHistogramSeries(buf []byte, name string, series coremetrics.Histogram
 			continue
 		}
 		//: one cumulative bucket line.
-		buf = appendBucket(buf, name, series.Labels, promFloat(bound),
+		buf = appendBucket(buf, name, point.Attrs, promFloat(bound),
 			strconv.FormatUint(cumulative, decimalBase))
 	}
 	//: every slot past the declared bounds is the meter's +Inf overflow.
-	for i := len(series.Buckets); i < len(series.Counts); i++ {
+	for i := len(point.Bounds); i < len(point.Counts); i++ {
 		//: fold the overflow into the running total.
-		cumulative += series.Counts[i]
+		cumulative += point.Counts[i]
 	}
 	//: the +Inf bucket is MANDATORY and closes the ladder.
-	buf = appendBucket(buf, name, series.Labels, positiveInfBound,
+	buf = appendBucket(buf, name, point.Attrs, positiveInfBound,
 		strconv.FormatUint(cumulative, decimalBase))
 	//: _sum is a float and may legitimately be NaN or ±Inf.
-	buf = appendSample(buf, name, sumSuffix, series.Labels, promFloat(series.Sum))
+	buf = appendSample(buf, name, sumSuffix, point.Attrs, promFloat(point.Sum))
 	//: _count closes the family.
-	return appendSample(buf, name, countSuffix, series.Labels,
-		strconv.FormatUint(series.Count, decimalBase))
+	return appendSample(buf, name, countSuffix, point.Attrs,
+		strconv.FormatUint(point.Count, decimalBase))
 }
 
 // appendTypeLine appends "# TYPE <name> <kind>\n".
@@ -309,12 +349,12 @@ func appendTypeLine(buf []byte, name, kind string) []byte {
 
 // appendSample appends one sample line: "<name><suffix>{<labels>} <value>\n".
 // It is the shape every family member but a bucket takes.
-func appendSample(buf []byte, name, suffix string, labels []coremetrics.LabelValue, value string) []byte {
+func appendSample(buf []byte, name, suffix string, attrs []coremetrics.AttrValue, value string) []byte {
 	//: the metric name, plus a family suffix for histogram members.
 	buf = append(buf, name...)
 	buf = append(buf, suffix...)
-	//: the label set, or nothing at all when the series has none.
-	buf = appendPromLabels(buf, labels, noBound)
+	//: the attribute set, or nothing at all when the series has none.
+	buf = appendPromLabels(buf, attrs, noBound)
 	//: value, then terminate the line.
 	buf = append(buf, ' ')
 	buf = append(buf, value...)
@@ -329,12 +369,12 @@ func appendSample(buf []byte, name, suffix string, labels []coremetrics.LabelVal
 // a bucket line IS a different shape: it is the only one carrying the reserved
 // `le` dimension, and the only one whose value is a running total rather than
 // the series' own reading.
-func appendBucket(buf []byte, name string, labels []coremetrics.LabelValue, bound, count string) []byte {
+func appendBucket(buf []byte, name string, attrs []coremetrics.AttrValue, bound, count string) []byte {
 	//: the base name plus the family suffix the format reserves.
 	buf = append(buf, name...)
 	buf = append(buf, bucketSuffix...)
 	//: the series' own labels, then le last.
-	buf = appendPromLabels(buf, labels, bound)
+	buf = appendPromLabels(buf, attrs, bound)
 	//: the cumulative count, then terminate the line.
 	buf = append(buf, ' ')
 	buf = append(buf, count...)
@@ -344,16 +384,22 @@ func appendBucket(buf []byte, name string, labels []coremetrics.LabelValue, boun
 
 // appendPromLabels renders {k="v",…[,le="<bound>"]}. A dimensionless series
 // with no bound renders as a bare name, which the format's own examples do.
-func appendPromLabels(buf []byte, labels []coremetrics.LabelValue, bound string) []byte {
+//
+// EVERY value is quoted, whatever the attribute's type: a Prometheus label
+// value is a string and there is no second option. That is the type loss this
+// connector is named for — Int64("v", 1) and String("v", "1") are two series in
+// the snapshot and one series on this wire, and no encoding of a typed value
+// into a string avoids it, because the target has one value type.
+func appendPromLabels(buf []byte, attrs []coremetrics.AttrValue, bound string) []byte {
 	//: no braces at all when there is nothing inside them.
-	if len(labels) == 0 && bound == noBound {
+	if len(attrs) == 0 && bound == noBound {
 		//: nothing to render.
 		return buf
 	}
 	//: open the set.
 	buf = append(buf, '{')
 	//: comma-separated pairs, in the snapshot's canonical order.
-	for i, label := range labels {
+	for i, attr := range attrs {
 		//: separator between pairs only.
 		if i > 0 {
 			//: continue the set.
@@ -361,16 +407,23 @@ func appendPromLabels(buf []byte, labels []coremetrics.LabelValue, bound string)
 		}
 		//: the key is validated against the label-name grammar, so it holds
 		//: no byte the format would need an escape for.
-		buf = append(buf, label.Key...)
+		buf = append(buf, attr.Key...)
 		buf = append(buf, '=', '"')
-		//: the value is data — it must not be able to close the quote.
-		buf = appendEscapedValue(buf, label.Value)
+		//: only a string value can carry a byte that would close the quote;
+		//: a bool, an integer and a double render from [0-9a-zA-Z+-.] alone.
+		if attr.Kind() == coremetrics.AttrKindString {
+			//: the value is data — it must not be able to close the quote.
+			buf = appendEscapedValue(buf, attr.Str())
+		} else {
+			//: the canonical text of a typed value, verbatim.
+			buf = attr.AppendText(buf)
+		}
 		buf = append(buf, '"')
 	}
 	//: the reserved bucket bound goes last, after the series' own labels.
 	if bound != noBound {
 		//: separate it from the pairs that precede it.
-		if len(labels) > 0 {
+		if len(attrs) > 0 {
 			//: continue the set.
 			buf = append(buf, ',')
 		}
@@ -397,6 +450,29 @@ func promFloat(value float64) string {
 	return strconv.FormatFloat(value, 'g', -1, floatBitSize)
 }
 
+// checkTemporality refuses a delta metric.
+//
+// The exposition format has no temporality field, and a Prometheus server reads
+// every counter as cumulative: `rate()` differences successive scrapes itself.
+// Handing it delta values means it differences numbers that are ALREADY
+// differences — the reported rate becomes the second derivative, and a value
+// smaller than the previous one is read as a counter reset and re-extrapolated
+// from zero. Nothing in the document would say so, and no dashboard would look
+// broken; it would just be wrong.
+//
+// Refusing is safe for the same reason refusing a name is: a meter's
+// temporality is chosen at construction and constant for the process, so this
+// fails on the first scrape or never. It cannot start failing under traffic.
+func checkTemporality(name string, temporality coremetrics.Temporality) error {
+	//: cumulative is the only temporality this wire can carry.
+	if temporality != coremetrics.TemporalityDelta {
+		//: representable.
+		return nil
+	}
+	//: origin wins on wrap — the sentinel keeps its code/reason/public.
+	return errs.Wrap(UnsupportedTemporality, errs.WrapParams{}, errs.String("metric", name))
+}
+
 // checkMetricName refuses an instrument name the format cannot carry.
 //
 // The offending name rides in a FIELD, not in the public message: Public is a
@@ -412,26 +488,34 @@ func checkMetricName(name string) error {
 	return errs.Wrap(InvalidMetricName, errs.WrapParams{}, errs.String("metric", name))
 }
 
-// checkLabelNames refuses a label set the format cannot carry. bucketBound
+// checkAttrNames refuses an attribute set the format cannot carry. bucketBound
 // additionally reserves "le", which a histogram spends on its bucket bound.
-func checkLabelNames(labels []coremetrics.LabelValue, bucketBound bool) error {
+//
+// This is where an OTel-conventional key meets the wall: "http.request.method"
+// is the spelling the semantic conventions specify and the dot is outside the
+// label-name grammar. The interoperability specification says to replace the
+// offending byte with "_"; this connector refuses instead, because that mapping
+// is not injective — "a.b", "a-b" and "a b" all become "a_b" — and merging two
+// distinct dimensions is the one failure a metrics pipeline cannot detect
+// afterwards. See CLAUDE.md §What the Prometheus connector loses.
+func checkAttrNames(attrs []coremetrics.AttrValue, bucketBound bool) error {
 	//: every key in the set must survive the wire.
-	for _, label := range labels {
+	for _, attr := range attrs {
 		//: the format's label-name grammar — no colon, unlike a metric name.
-		if !validLabelName(label.Key) {
+		if !validLabelName(attr.Key) {
 			//: origin wins on wrap; the key rides in a field.
-			return errs.Wrap(InvalidLabelName, errs.WrapParams{}, errs.String("label", label.Key))
+			return errs.Wrap(InvalidLabelName, errs.WrapParams{}, errs.String("label", attr.Key))
 		}
 		//: "__foo" is syntactically fine and silently dropped by the server.
-		if strings.HasPrefix(label.Key, reservedLabelPrefix) {
+		if strings.HasPrefix(attr.Key, reservedLabelPrefix) {
 			//: origin wins on wrap; the key rides in a field.
-			return errs.Wrap(ReservedLabelName, errs.WrapParams{}, errs.String("label", label.Key))
+			return errs.Wrap(ReservedLabelName, errs.WrapParams{}, errs.String("label", attr.Key))
 		}
 		//: a second "le" on a bucket line is a duplicate label name, which
 		//: the format rejects outright.
-		if bucketBound && label.Key == boundLabelKey {
+		if bucketBound && attr.Key == boundLabelKey {
 			//: origin wins on wrap; the key rides in a field.
-			return errs.Wrap(ReservedLabelName, errs.WrapParams{}, errs.String("label", label.Key))
+			return errs.Wrap(ReservedLabelName, errs.WrapParams{}, errs.String("label", attr.Key))
 		}
 	}
 	//: the whole set is representable.
@@ -514,7 +598,8 @@ func labelNameByte(c byte, first bool) bool {
 		return !first
 	//: everything outside the grammar.
 	default:
-		//: anything else, including the colon a metric name may hold.
+		//: anything else, including the colon a metric name may hold and the
+		//: dot every OTel-conventional attribute key carries.
 		return false
 	}
 }

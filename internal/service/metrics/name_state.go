@@ -4,30 +4,83 @@ package metrics
 
 import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 
-// instrumentKind discriminates a name's bound instrument type.
-type instrumentKind int
+// instrumentKind discriminates a name's bound instrument type. There are seven
+// because the OTel instrument set has seven: four synchronous and three
+// observable, minus the synchronous Gauge this SDK spells as the plain Gauge.
+type instrumentKind uint8
 
 const (
-	// kindCounter marks a name bound to a Counter.
+	// kindCounter marks a name bound to a synchronous monotonic Counter.
 	kindCounter instrumentKind = iota
+	// kindUpDownCounter marks a name bound to a synchronous non-monotonic
+	// UpDownCounter.
+	kindUpDownCounter
 	// kindGauge marks a name bound to a Gauge.
 	kindGauge
 	// kindHistogram marks a name bound to a Histogram.
 	kindHistogram
+	// kindObservableCounter marks a name bound to an asynchronous monotonic sum.
+	kindObservableCounter
+	// kindObservableUpDownCounter marks a name bound to an asynchronous
+	// non-monotonic sum.
+	kindObservableUpDownCounter
+	// kindObservableGauge marks a name bound to an asynchronous gauge.
+	kindObservableGauge
 )
+
+// outputGroup is the snapshot map a kind's series land in. Four instrument
+// kinds share one Sum map because the OTel data model has ONE sum point shape
+// and puts monotonicity and synchronicity elsewhere — on the metric, and on
+// nothing the wire can see at all.
+type outputGroup uint8
+
+const (
+	// groupSum is SnapshotValue.Sums.
+	groupSum outputGroup = iota
+	// groupGauge is SnapshotValue.Gauges.
+	groupGauge
+	// groupHistogram is SnapshotValue.Histograms.
+	groupHistogram
+)
+
+// group reports which snapshot map this kind's series are collected into.
+func (k instrumentKind) group() outputGroup {
+	//: the four sums, then the two gauges, then the histogram.
+	switch k {
+	//: every additive instrument, synchronous or not, is a Sum.
+	case kindCounter, kindUpDownCounter, kindObservableCounter, kindObservableUpDownCounter:
+		//: SnapshotValue.Sums.
+		return groupSum
+	//: a sampled reading, synchronous or not.
+	case kindGauge, kindObservableGauge:
+		//: SnapshotValue.Gauges.
+		return groupGauge
+	//: the only remaining kind.
+	default:
+		//: SnapshotValue.Histograms.
+		return groupHistogram
+	}
+}
+
+// monotonic reports whether this kind's Sum carries Monotonic = true. It is
+// meaningless for a gauge or a histogram, which never read it.
+func (k instrumentKind) monotonic() bool {
+	//: only the two counter kinds promise never to decrease.
+	return k == kindCounter || k == kindObservableCounter
+}
 
 // nameState is what a Meter knows about one instrument NAME, as opposed to one
 // series: the kind it is bound to, how many series it has admitted, and the key
 // of its overflow series once one exists. Guarded by memMeter.mu.
 //
-// Kind and bound both belong to the name rather than the series because labels
-// vary within one metric and neither of these does: every series under
-// http_requests_total is a counter, and they share one quota.
+// Kind and bound both belong to the name rather than the series because
+// attributes vary within one metric and neither of these does: every series
+// under http_requests_total is a counter, and they share one quota.
 type nameState struct {
 	kind instrumentKind
-	// series counts ADMITTED label sets, excluding the overflow series. The
-	// overflow series is deliberately outside the bound: it is the one extra
-	// slot that makes the bound observable instead of silent.
+	// series counts ADMITTED attribute sets, excluding the overflow series.
+	// The overflow series is deliberately outside the bound: it is the one
+	// extra slot that makes the bound observable instead of silent.
 	series int
 	// overflowKey is the encoded series key of this name's overflow series,
 	// computed on first overflow and cached. Empty until then.
@@ -48,16 +101,17 @@ func (s *nameState) seriesCap() int {
 	return s.series + 1
 }
 
-// overflowSeries returns the key and label set of name's overflow series,
+// overflowSeries returns the key and attribute set of name's overflow series,
 // computing the key once.
-func (s *nameState) overflowSeries(name string) (key string, labels []coremetrics.LabelValue) {
+func (s *nameState) overflowSeries(name string) (key string, attrs []coremetrics.AttrValue) {
 	//: compute once per name, on the create path only.
 	if s.overflowKey == "" {
-		//: same encoding as any other series — the overflow label is a label.
-		s.overflowKey = string(appendSeriesKey(nil, name, overflowLabels))
+		//: same encoding as any other series — the overflow marker is an
+		//: attribute like any other.
+		s.overflowKey = string(appendSeriesKey(nil, s.kind, name, overflowAttrs))
 	}
-	//: the label set is shared; the caller clones it before storing.
-	return s.overflowKey, overflowLabels
+	//: the attribute set is shared; the caller clones it before storing.
+	return s.overflowKey, overflowAttrs
 }
 
 // bindName returns the per-name state, binding the name to want on first use
@@ -68,7 +122,9 @@ func (s *nameState) overflowSeries(name string) (key string, labels []coremetric
 // Counter(name) returns a Counter, full stop — so there is nowhere to put an
 // error. And the mistake is always a programming one: the same metric name
 // bound to two kinds means one of the two call sites is wrong, and every value
-// it records lands in an instrument nothing will ever read.
+// it records lands in an instrument nothing will ever read. A Counter name
+// fetched as an UpDownCounter is the same defect wearing a subtler coat — it
+// would flip Monotonic on a metric a backend has already learned to trust.
 func (m *memMeter) bindName(name string, want instrumentKind) *nameState {
 	state, ok := m.names[name]
 	//: first sighting of the name claims the kind.

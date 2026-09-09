@@ -307,12 +307,16 @@ codes:
     hex: "0x00_02_09_03"
     package: internal/core/metrics
   - code: "0.2.9.4"
-    const: CodeInvalidLabel
+    const: CodeInvalidAttribute
     hex: "0x00_02_09_04"
     package: internal/core/metrics
   - code: "0.2.9.5"
     const: CodeDuplicateRegistration
     hex: "0x00_02_09_05"
+    package: internal/core/metrics
+  - code: "0.2.9.6"
+    const: CodeInvalidTemporality
+    hex: "0x00_02_09_06"
     package: internal/core/metrics
   - code: "0.2.10.1"
     const: CodeConfigSourceFailed
@@ -1097,6 +1101,10 @@ codes:
   - code: "0.3.45.3"
     const: CodeReservedLabelName
     hex: "0x00_03_2D_03"
+    package: internal/service/metrics
+  - code: "0.3.45.4"
+    const: CodeUnsupportedTemporality
+    hex: "0x00_03_2D_04"
     package: internal/service/metrics
   - code: "1.1.0.1"
     const: CodeWriterRequired
