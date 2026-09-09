@@ -47,9 +47,29 @@ One option covers both. A [github.com/kitsunium/sdk/pkg/v1/tlsid.Identity](<http
 
 \[Server.State\] reports the phase, the addresses actually bound, and whether any listener fell back from a requested optimisation. A silent degradation is indistinguishable from a working server, so it is surfaced rather than logged once at startup.
 
+### Connections that never end
+
+A drain waits for in\-flight work to finish, which assumes it eventually does. An event stream, a long poll, or anything built on a protocol upgrade breaks that assumption: the request is in flight forever by design, so the drain waits out its whole budget and then severs the socket under the handler.
+
+[DrainSignal](<#DrainSignal>) is the way out. A handler holding a connection open selects on it alongside its own work and returns when it closes, which turns a budget\-length DRAIN\_TIMEOUT into a clean drain:
+
+```
+select {
+case <-server.DrainSignal(r.Context()):
+	return
+case ev := <-events:
+	// …
+}
+```
+
+The request context is deliberately NOT cancelled to say this. Cancelling it would tell every handler to abandon the response it is halfway through, which is the opposite of what a graceful drain is for. The signal is additive: a handler that ignores it behaves exactly as it did before.
+
+[github.com/kitsunium/sdk/pkg/v1/server/sse](<https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/server/sse/>) is the Server\-Sent Events implementation built on it, and watches the signal for you.
+
 ## Index
 
 - [Variables](<#variables>)
+- [func DrainSignal\(ctx context.Context\) \<\-chan struct\{\}](<#DrainSignal>)
 - [type Conn](<#Conn>)
 - [type Group](<#Group>)
 - [type GroupOption](<#GroupOption>)
@@ -109,8 +129,21 @@ var (
 )
 ```
 
+<a name="DrainSignal"></a>
+## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L188>)
+
+```go
+func DrainSignal(ctx context.Context) <-chan struct{}
+```
+
+DrainSignal returns the channel closed when the server serving this request begins draining, or nil when none is published.
+
+It is how a handler that holds a connection open indefinitely — an event stream, a long poll — learns that finishing now is the cooperative thing to do. Without it such a handler holds the drain open until the budget expires and its socket is severed under it, on every shutdown.
+
+A nil channel blocks forever, so a select that watches it needs no nil check and behaves correctly on a server that publishes nothing.
+
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L81>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L108>)
 
 Conn is one accepted stream connection. It embeds net.Conn.
 
@@ -119,7 +152,7 @@ type Conn = corenet.Conn
 ```
 
 <a name="Group"></a>
-## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L78>)
+## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L105>)
 
 Group is a set of listeners sharing one handler, middleware chain and policy.
 
@@ -130,7 +163,7 @@ type Group = svcserver.StreamGroup
 ```
 
 <a name="GroupOption"></a>
-## type [GroupOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L123>)
+## type [GroupOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L150>)
 
 GroupOption configures a Group.
 
@@ -139,7 +172,7 @@ type GroupOption = svcserver.GroupOption
 ```
 
 <a name="Adopt"></a>
-### func [Adopt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L304>)
+### func [Adopt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L346>)
 
 ```go
 func Adopt(names ...string) GroupOption
@@ -152,7 +185,7 @@ Socket activation is what makes a zero\-downtime restart possible: the superviso
 A named socket the supervisor did not pass is SocketAdoptFailed, never a silent fallback to binding: a service that quietly binds its own port has lost exactly the property activation exists to provide.
 
 <a name="BatchSize"></a>
-### func [BatchSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L261>)
+### func [BatchSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L303>)
 
 ```go
 func BatchSize(n int) GroupOption
@@ -161,7 +194,7 @@ func BatchSize(n int) GroupOption
 BatchSize sets how many datagrams one read attempts to collect. One disables batching; zero selects the platform default. Where the platform cannot batch, State reports the degradation rather than hiding it.
 
 <a name="HandshakeTimeout"></a>
-### func [HandshakeTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L212>)
+### func [HandshakeTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L254>)
 
 ```go
 func HandshakeTimeout(d time.Duration) GroupOption
@@ -172,7 +205,7 @@ HandshakeTimeout bounds the TLS negotiation on the group's listeners.
 Unset does not mean unbounded, unlike the other three. The handshake runs on the connection's own goroutine — the listener does not negotiate in Accept, which is what keeps one slow peer from stalling the accept path for everyone — so it is the one phase that can be stalled before any handler exists to notice, and a peer that connects and says nothing would otherwise hold a goroutine and a slot under MaxConns indefinitely. It falls back to a domain default instead.
 
 <a name="IdleTimeout"></a>
-### func [IdleTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L198>)
+### func [IdleTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L240>)
 
 ```go
 func IdleTimeout(d time.Duration) GroupOption
@@ -183,7 +216,7 @@ IdleTimeout bounds how long a connection may sit with no traffic at all.
 It is enforced on the read side, where silence is observable: a read is bounded by whichever of ReadTimeout and IdleTimeout is tighter. Setting both therefore narrows the bound rather than replacing it, which is what the two options together are asking for.
 
 <a name="Listen"></a>
-### func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L162>)
+### func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L204>)
 
 ```go
 func Listen(network, addr string) GroupOption
@@ -192,7 +225,7 @@ func Listen(network, addr string) GroupOption
 Listen adds an address to a group. Repeat it to bind several addresses to one handler — a TCP port and a Unix socket, for instance.
 
 <a name="MaxConns"></a>
-### func [MaxConns](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L280>)
+### func [MaxConns](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L322>)
 
 ```go
 func MaxConns(n int) GroupOption
@@ -203,7 +236,7 @@ MaxConns caps how many connections a group serves at once.
 The budget is per group, not per socket: a group listening on a TCP port and a Unix socket, or sharded across several listeners, shares one ceiling — which is what an operator sizing a server actually means. Beyond it a connection is accepted and closed immediately with ConnLimitReached, because a refusal the peer can observe beats a timeout it cannot tell from a hang. Zero means no ceiling.
 
 <a name="MaxPacketSize"></a>
-### func [MaxPacketSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L253>)
+### func [MaxPacketSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L295>)
 
 ```go
 func MaxPacketSize(n int) GroupOption
@@ -214,7 +247,7 @@ MaxPacketSize caps the datagram size a group accepts.
 A larger datagram is dropped and counted in \[State.OversizedPackets\], never delivered. Truncating would hand the handler a prefix indistinguishable from a complete message, which is a correctness problem rather than a capacity one; a drop it can observe in State is the honest answer.
 
 <a name="ReadBufferSize"></a>
-### func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L220>)
+### func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L262>)
 
 ```go
 func ReadBufferSize(n int) GroupOption
@@ -223,7 +256,7 @@ func ReadBufferSize(n int) GroupOption
 ReadBufferSize sizes the per\-connection scratch buffer handed to the handler by Conn.Buffer. It is recycled with the connection, which is what lets a handler read without allocating per connection.
 
 <a name="ReadTimeout"></a>
-### func [ReadTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L181>)
+### func [ReadTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L223>)
 
 ```go
 func ReadTimeout(d time.Duration) GroupOption
@@ -234,7 +267,7 @@ ReadTimeout bounds one read from the peer.
 It is refreshed per read, not installed once when the connection is accepted: a deadline set at accept time would be a budget for the connection's whole life, which a peer trickling one byte at a time stays comfortably inside. On a group serving an http.Handler the same value becomes net/http's own ReadTimeout and ReadHeaderTimeout, so it is refreshed per request there.
 
 <a name="Shards"></a>
-### func [Shards](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L289>)
+### func [Shards](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L331>)
 
 ```go
 func Shards(n int) GroupOption
@@ -245,7 +278,7 @@ Shards sets how many listeners to open on each of the group's addresses.
 Zero selects one per core; one disables sharding. Where the platform or the socket family cannot shard, the count collapses to one and State reports why.
 
 <a name="TLS"></a>
-### func [TLS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L169>)
+### func [TLS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L211>)
 
 ```go
 func TLS(id tlsid.Identity) GroupOption
@@ -254,7 +287,7 @@ func TLS(id tlsid.Identity) GroupOption
 TLS turns the group's listeners into TLS listeners, or mutual\-TLS ones when the identity requires a client certificate.
 
 <a name="WriteTimeout"></a>
-### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L187>)
+### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L229>)
 
 ```go
 func WriteTimeout(d time.Duration) GroupOption
@@ -263,7 +296,7 @@ func WriteTimeout(d time.Duration) GroupOption
 WriteTimeout bounds one write to the peer, refreshed per write.
 
 <a name="Handler"></a>
-## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L84>)
+## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L111>)
 
 Handler serves one accepted stream connection.
 
@@ -272,7 +305,7 @@ type Handler = corenet.ConnHandler
 ```
 
 <a name="Chain"></a>
-### func [Chain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L155>)
+### func [Chain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L197>)
 
 ```go
 func Chain(h Handler, middlewares ...Middleware) Handler
@@ -283,7 +316,7 @@ Chain applies middlewares to a handler, outermost first.
 Chain\(h, a, b, c\) yields a\(b\(c\(h\)\)\): the first middleware listed is the first to see a connection, matching how the list reads at the call site.
 
 <a name="HandlerFunc"></a>
-## type [HandlerFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L87>)
+## type [HandlerFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L114>)
 
 HandlerFunc adapts a plain function to Handler.
 
@@ -292,7 +325,7 @@ type HandlerFunc = corenet.ConnHandlerFunc
 ```
 
 <a name="ListenerState"></a>
-## type [ListenerState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L96>)
+## type [ListenerState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L123>)
 
 ListenerState reports one bound listener, including any fallback.
 
@@ -301,7 +334,7 @@ type ListenerState = corenet.ListenerStateValue
 ```
 
 <a name="Middleware"></a>
-## type [Middleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L90>)
+## type [Middleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L117>)
 
 Middleware decorates a handler with another of the same type.
 
@@ -310,7 +343,7 @@ type Middleware = corenet.Middleware[corenet.ConnHandler]
 ```
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L120>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L147>)
 
 Option configures a Server.
 
@@ -319,7 +352,7 @@ type Option = svcserver.Option
 ```
 
 <a name="WithDrainTimeout"></a>
-### func [WithDrainTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L227>)
+### func [WithDrainTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L269>)
 
 ```go
 func WithDrainTimeout(d time.Duration) Option
@@ -328,7 +361,7 @@ func WithDrainTimeout(d time.Duration) Option
 WithDrainTimeout bounds how long Shutdown waits for in\-flight connections before severing them.
 
 <a name="Packet"></a>
-## type [Packet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L236>)
+## type [Packet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L278>)
 
 Packet is one received datagram.
 
@@ -337,7 +370,7 @@ type Packet = corenet.Packet
 ```
 
 <a name="PacketGroup"></a>
-## type [PacketGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L233>)
+## type [PacketGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L275>)
 
 PacketGroup is a set of datagram sockets sharing one handler and chain.
 
@@ -346,7 +379,7 @@ type PacketGroup = svcserver.PacketGroup
 ```
 
 <a name="PacketHandler"></a>
-## type [PacketHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L239>)
+## type [PacketHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L281>)
 
 PacketHandler serves one received datagram.
 
@@ -355,7 +388,7 @@ type PacketHandler = corenet.PacketHandler
 ```
 
 <a name="ChainPacket"></a>
-### func [ChainPacket](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L267>)
+### func [ChainPacket](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L309>)
 
 ```go
 func ChainPacket(h PacketHandler, middlewares ...PacketMiddleware) PacketHandler
@@ -364,7 +397,7 @@ func ChainPacket(h PacketHandler, middlewares ...PacketMiddleware) PacketHandler
 ChainPacket applies middlewares to a datagram handler, outermost first.
 
 <a name="PacketHandlerFunc"></a>
-## type [PacketHandlerFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L242>)
+## type [PacketHandlerFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L284>)
 
 PacketHandlerFunc adapts a plain function to PacketHandler.
 
@@ -373,7 +406,7 @@ type PacketHandlerFunc = corenet.PacketHandlerFunc
 ```
 
 <a name="PacketMiddleware"></a>
-## type [PacketMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L245>)
+## type [PacketMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L287>)
 
 PacketMiddleware decorates a datagram handler.
 
@@ -382,7 +415,7 @@ type PacketMiddleware = corenet.Middleware[corenet.PacketHandler]
 ```
 
 <a name="Phase"></a>
-## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L99>)
+## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L126>)
 
 Phase is where a server sits in its lifecycle.
 
@@ -421,7 +454,7 @@ const PhaseStopped Phase = corenet.PhaseStopped
 ```
 
 <a name="Server"></a>
-## type [Server](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L71>)
+## type [Server](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L98>)
 
 Server owns a set of listener groups and their lifecycle.
 
@@ -430,7 +463,7 @@ type Server = svcserver.Server
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L146>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L173>)
 
 ```go
 func New(opts ...Option) *Server
@@ -439,7 +472,7 @@ func New(opts ...Option) *Server
 New builds a server.
 
 <a name="State"></a>
-## type [State](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L93>)
+## type [State](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L120>)
 
 State is a snapshot of the server's lifecycle and listeners.
 

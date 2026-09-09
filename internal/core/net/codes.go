@@ -86,3 +86,27 @@ const CodeInvalidDuration errs.Code = 0x00_02_0B_15 // 0.2.11.21
 // because an anchored pattern like ^/v1/supi/[^/]+$ happily matches "/v1/supi/.."
 // which the upstream then normalises to a different resource.
 const CodeUnsafePath errs.Code = 0x00_02_0B_16 // 0.2.11.22
+
+// CodeSSEFieldInvalid identifies a Server-Sent Events frame the wire format
+// cannot carry: a line terminator inside an id, an event name or a comment
+// (the format has no escape — a newline SPLITS a value, so an id carrying one
+// would silently become a different id plus a stray field), a negative retry,
+// a retry under one millisecond (the wire field is an integer millisecond
+// count, and truncating to zero would say "reconnect immediately"), or a frame
+// with no field set at all.
+const CodeSSEFieldInvalid errs.Code = 0x00_02_0B_17 // 0.2.11.23
+
+// CodeSSEFlushUnsupported identifies a ResponseWriter that cannot be flushed.
+// Server-Sent Events is a streaming format: without a flush every event sits in
+// the transport buffer until the handler returns, which for an endless stream
+// means the client receives nothing, ever.
+const CodeSSEFlushUnsupported errs.Code = 0x00_02_0B_18 // 0.2.11.24
+
+// CodeSSEStreamClosed identifies a send on a stream that has already ended —
+// the client disconnected, the server began draining, or the handler closed it.
+const CodeSSEStreamClosed errs.Code = 0x00_02_0B_19 // 0.2.11.25
+
+// CodeSSEStreamMisconfigured identifies a stream option the domain refuses to
+// interpret rather than guess at: a negative keep-alive interval or a negative
+// per-write budget (ADR 0031).
+const CodeSSEStreamMisconfigured errs.Code = 0x00_02_0B_1A // 0.2.11.26

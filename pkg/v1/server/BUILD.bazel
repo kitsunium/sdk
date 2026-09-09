@@ -25,6 +25,7 @@ go_test(
     srcs = ["server_external_test.go"],
     deps = [
         ":server",
+        "//pkg/v1/server/sse",
         "//pkg/v1/tlsid",
     ],
 )
