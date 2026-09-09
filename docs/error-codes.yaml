@@ -418,6 +418,70 @@ codes:
     const: CodeUnsafePath
     hex: "0x00_02_0B_16"
     package: internal/core/net
+  - code: "0.2.13.1"
+    const: CodeMalformed
+    hex: "0x00_02_0D_01"
+    package: internal/core/token
+  - code: "0.2.13.2"
+    const: CodeAlgorithmNone
+    hex: "0x00_02_0D_02"
+    package: internal/core/token
+  - code: "0.2.13.3"
+    const: CodeAlgorithmMismatch
+    hex: "0x00_02_0D_03"
+    package: internal/core/token
+  - code: "0.2.13.4"
+    const: CodeSignatureInvalid
+    hex: "0x00_02_0D_04"
+    package: internal/core/token
+  - code: "0.2.13.5"
+    const: CodeExpired
+    hex: "0x00_02_0D_05"
+    package: internal/core/token
+  - code: "0.2.13.6"
+    const: CodeNotYetValid
+    hex: "0x00_02_0D_06"
+    package: internal/core/token
+  - code: "0.2.13.7"
+    const: CodeExpiryRequired
+    hex: "0x00_02_0D_07"
+    package: internal/core/token
+  - code: "0.2.13.8"
+    const: CodeAudienceMismatch
+    hex: "0x00_02_0D_08"
+    package: internal/core/token
+  - code: "0.2.13.9"
+    const: CodeIssuerMismatch
+    hex: "0x00_02_0D_09"
+    package: internal/core/token
+  - code: "0.2.13.10"
+    const: CodeTooLarge
+    hex: "0x00_02_0D_0A"
+    package: internal/core/token
+  - code: "0.2.13.11"
+    const: CodeTooDeep
+    hex: "0x00_02_0D_0B"
+    package: internal/core/token
+  - code: "0.2.13.12"
+    const: CodeKeyUnsuitable
+    hex: "0x00_02_0D_0C"
+    package: internal/core/token
+  - code: "0.2.13.13"
+    const: CodePolicyMisconfigured
+    hex: "0x00_02_0D_0D"
+    package: internal/core/token
+  - code: "0.2.13.14"
+    const: CodeIssueFailed
+    hex: "0x00_02_0D_0E"
+    package: internal/core/token
+  - code: "0.2.13.15"
+    const: CodeClaimNameInvalid
+    hex: "0x00_02_0D_0F"
+    package: internal/core/token
+  - code: "0.2.13.16"
+    const: CodeLifetimeTooLong
+    hex: "0x00_02_0D_10"
+    package: internal/core/token
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"
@@ -942,6 +1006,34 @@ codes:
     const: CodeJWKAmbiguousKid
     hex: "0x00_03_2A_0B"
     package: internal/service/crypto/jwk
+  - code: "0.3.44.1"
+    const: CodeHeaderUnsupported
+    hex: "0x00_03_2C_01"
+    package: internal/service/token
+  - code: "0.3.44.2"
+    const: CodeKeyNotFound
+    hex: "0x00_03_2C_02"
+    package: internal/service/token
+  - code: "0.3.44.3"
+    const: CodeKeyIDMissing
+    hex: "0x00_03_2C_03"
+    package: internal/service/token
+  - code: "0.3.44.4"
+    const: CodeKeyIDAmbiguous
+    hex: "0x00_03_2C_04"
+    package: internal/service/token
+  - code: "0.3.44.5"
+    const: CodeFooterMismatch
+    hex: "0x00_03_2C_05"
+    package: internal/service/token
+  - code: "0.3.44.6"
+    const: CodeSchemeUnsupported
+    hex: "0x00_03_2C_06"
+    package: internal/service/token
+  - code: "0.3.44.7"
+    const: CodeDuplicateMember
+    hex: "0x00_03_2C_07"
+    package: internal/service/token
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

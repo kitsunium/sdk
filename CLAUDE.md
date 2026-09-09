@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Ten domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (24 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing, and JWK/JWKS key representation — RFC 7517 for EC/OKP/oct, with private export opt-in and never the default), **transform** (compression — stdlib gzip/flate/zlib; `flate` is raw DEFLATE, `zlib` is the RFC 1950 envelope HTTP misnames `deflate`), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging — ADR 0026; hedging duplicates the operation, so it demands an in-code idempotence assertion and a load cap — ADR 0031), **metrics** (counter/gauge/histogram + exporter registry + labelled series with a bounded, visibly-overflowing cardinality — ADR 0027), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
+Go SDK providing a normed, performant toolbox for downstream applications. Eleven domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (24 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing, and JWK/JWKS key representation — RFC 7517 for EC/OKP/oct, with private export opt-in and never the default), **transform** (compression — stdlib gzip/flate/zlib; `flate` is raw DEFLATE, `zlib` is the RFC 1950 envelope HTTP misnames `deflate`), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging — ADR 0026; hedging duplicates the operation, so it demands an in-code idempotence assertion and a load cap — ADR 0031), **metrics** (counter/gauge/histogram + exporter registry + labelled series with a bounded, visibly-overflowing cardinality — ADR 0027), **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028), and **token** (JWT over JWS Compact + PASETO v4.public — ADR 0042; the algorithm is bound by the constructor, never read from the token, so algorithm confusion is a call that does not compile, and `alg:none` has no representation in the type). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.27.0 (pinned in `MODULE.bazel`)
 
@@ -16,7 +16,7 @@ internal/
 │                  ring, snapshot, worker
 ├── core/          domain interfaces + domain values
 │                  codec (+ scratch), crypto, id, logger, logger/level,
-│                  proc, transform, writer
+│                  proc, token, transform, writer
 └── service/       concrete implementations
                    logger (+ encoder, sink/{console,file,memory,syslog},
                              middleware/{async,encwrite,failover,multi,
@@ -33,6 +33,7 @@ internal/
                            sdnotify, signal)
                    id     (uuidv4, uuidv7, ulid, snowflake, nanoid,
                            ksuid, typeid)
+                   token  (JWS compact + PASETO v4.public)
                    transform
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
@@ -41,8 +42,9 @@ pkg/
     ├── codec/     (blank-imports all 16 service codecs + transform)
     ├── crypto/    (+ agree, hash, kdf, mac, password, sign)
     ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024)
-    └── proc/      (+ cgroup, process, reaper, rlimit, sdlisten,
-                      sdnotify, signal)
+    ├── proc/      (+ cgroup, process, reaper, rlimit, sdlisten,
+    │                 sdnotify, signal)
+    └── token/     (JWT over JWS compact + PASETO v4.public — ADR 0042)
 third-party/       opt-in vendor integrations (root module only)
                    aws/writer/{cloudwatch,s3}, codec/{hcl,protobuf},
                    db/writer/{clickhouse,mysql,redis},
@@ -179,5 +181,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0038 — `id` gains NanoID, KSUID and TypeID, and the `Scheme` registry stops being exhaustive: TypeID is **not** registered because a prefix names the caller's entity, so a singleton would either invent that vocabulary or mint a prefixless identifier — `docs/adr/0038-id-schemes-and-the-unregistered-typeid.md`
 - ADR 0039 — a published port is extended by a **sibling interface**, never by widening: `pkg/v1/cache.Config` is a type alias that carries `clock.Clock` into the released module, and Go interfaces are structural, so adding a method breaks every downstream two-method double at compile time with no deprecation window. `Clock` stays frozen, `Waiter` is new, `Timed` is the union, and `System` widens as a *value* — which is safe. Applies to every port an alias publishes — `docs/adr/0039-extending-a-published-port-without-breaking-it.md`
 - ADR 0040 — the concrete-type half of ADR 0039: a published **shape** has no sibling trick, so `SnapshotValue` changing form reached every consumer through the `pkg/v1/metrics.Snapshot` alias. Permitted **only because the module is v0** — stated out loud in the commit, and gone at v1. One rule for both halves: an interface gets a sibling at any version; a concrete shape may change while v0, loudly, and not after — `docs/adr/0040-changing-a-published-shape-while-v0.md`
+- ADR 0042 — security-token domain (`token`): 13th core sibling, `Issuer`/`Verifier` ports, JWT over JWS Compact Serialization + PASETO v4.public; **no registry** because its key would be the attacker-written `alg` header. Algorithm confusion is made *unwritable* — one constructor per algorithm, each taking only the key type it can use, so handing an EC public key to the HMAC path does not compile — and the header is then still compared against the binding before any key reaches a primitive. `alg:none` has no representation in the `Algorithm` enum. Bounds are checked before the work they fund (the CVE-2025-30204 class). `exp` is required by default on both sides. Error blocks `0.2.13.*`/`0.3.44.*`; `v4.local` refused by name because XChaCha20+BLAKE2b live in `third-party/` — `docs/adr/0042-sdk-token-domain.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

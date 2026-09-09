@@ -1,0 +1,90 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "token",
+    srcs = [
+        "bounds_value.go",
+        "claims_codec.go",
+        "codes.go",
+        "depth_scan.go",
+        "ed25519_signing.go",
+        "ed25519_verifying.go",
+        "encoding.go",
+        "errors.go",
+        "es256_signing.go",
+        "es256_verifying.go",
+        "hs256_binding.go",
+        "issuer_config.go",
+        "jose_shape.go",
+        "jsonstring.go",
+        "jwkbridge.go",
+        "jws.go",
+        "jws_issuer.go",
+        "jws_parts.go",
+        "jws_verifier.go",
+        "jwt.go",
+        "keys.go",
+        "paseto.go",
+        "paseto_issuer.go",
+        "paseto_issuer_config.go",
+        "paseto_shape.go",
+        "paseto_verifier.go",
+        "paseto_verifier_config.go",
+        "policy.go",
+        "token.go",
+        "token_compliance.go",
+        "validate.go",
+        "verifier_config.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/token",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/token",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/crypto/ed25519sig",
+        "//internal/service/crypto/hmacsha2",
+        "//internal/service/crypto/jwk",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":token",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "token_test",
+    srcs = [
+        "encoding_internal_test.go",
+        "jwkbridge_external_test.go",
+        "jwt_external_test.go",
+        "paseto_external_test.go",
+        "security_external_test.go",
+    ],
+    embed = [":token"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/token",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/crypto/jwk",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

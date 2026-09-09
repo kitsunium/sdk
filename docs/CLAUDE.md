@@ -46,6 +46,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0038-id-schemes-and-the-unregistered-typeid.md` | NanoID, KSUID, TypeID — and a `Scheme` deliberately absent from the registry, which makes the registry non-exhaustive by design | Accepted (extends ADR 0024) |
 | `adr/0039-extending-a-published-port-without-breaking-it.md` | Extend a published port with a sibling interface, never by widening it: a `pkg/v1` type alias publishes the *shape*, and Go interfaces are structural | Accepted (reverses the `clock` Do NOT) |
 | `adr/0040-changing-a-published-shape-while-v0.md` | A published concrete shape may still change — v0 is the only reason, it must be said out loud, and the licence expires at v1 | Accepted (completes ADR 0039) |
+| `adr/0042-sdk-token-domain.md` | Security-token domain (`token`): 13th core sibling, `Issuer`/`Verifier` ports, JWT over JWS compact + PASETO v4.public. **No registry, on purpose** — its key would be the attacker-written `alg` header. The algorithm is bound by a constructor that accepts only the one key type it can use, so the confusion bug does not compile; `none` has no representation in the `Algorithm` enum; bounds are checked before the work they fund (CVE-2025-30204); blocks `0.2.13.*`/`0.3.44.*`. v4.local deferred — it needs primitives the SDK keeps in `third-party/` | Accepted |
 
 ## ADR conventions
 
