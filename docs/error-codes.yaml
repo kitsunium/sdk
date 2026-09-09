@@ -610,6 +610,22 @@ codes:
     const: CodeCacheEntryRejected
     hex: "0x00_02_12_04"
     package: internal/core/cache
+  - code: "0.2.19.1"
+    const: CodeInvalidComponent
+    hex: "0x00_02_13_01"
+    package: internal/core/lifecycle
+  - code: "0.2.19.2"
+    const: CodeDuplicateComponent
+    hex: "0x00_02_13_02"
+    package: internal/core/lifecycle
+  - code: "0.2.19.3"
+    const: CodeLifecycleRunning
+    hex: "0x00_02_13_03"
+    package: internal/core/lifecycle
+  - code: "0.2.19.4"
+    const: CodeComponentPanicked
+    hex: "0x00_02_13_04"
+    package: internal/core/lifecycle
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -1274,6 +1290,26 @@ codes:
     const: CodeCacheTierFailed
     hex: "0x00_03_30_02"
     package: internal/service/cache
+  - code: "0.3.49.1"
+    const: CodeStartFailed
+    hex: "0x00_03_31_01"
+    package: internal/service/lifecycle
+  - code: "0.3.49.2"
+    const: CodeStopFailed
+    hex: "0x00_03_31_02"
+    package: internal/service/lifecycle
+  - code: "0.3.49.3"
+    const: CodeStopTimeout
+    hex: "0x00_03_31_03"
+    package: internal/service/lifecycle
+  - code: "0.3.49.4"
+    const: CodeUnwindFailed
+    hex: "0x00_03_31_04"
+    package: internal/service/lifecycle
+  - code: "0.3.49.5"
+    const: CodeReadinessFailed
+    hex: "0x00_03_31_05"
+    package: internal/service/lifecycle
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
