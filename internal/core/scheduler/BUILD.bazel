@@ -1,0 +1,46 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "scheduler",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "scheduler.go",
+        "scheduler_entry.go",
+        "scheduler_result.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/scheduler",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":scheduler",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "scheduler_test",
+    size = "small",
+    srcs = ["scheduler_external_test.go"],
+    deps = [
+        ":scheduler",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -21,6 +21,7 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `metrics/` | instrument interfaces (Counter/Gauge/Histogram, variadic in `LabelValue`) + `Meter` + `Exporter` registry + per-series `SnapshotValue`; one name + one label set = one series, bounded per name; in-mem meter in service (ADR 0027) | `0.2.9.*` |
 | `config/` | `Source` / `Validator` / `Watcher` ports; env+file loader + cross-OS poll watcher in service (ADR 0028) | `0.2.10.*` |
 | `net/` | network domain contract: TLS identity (opaque, redacting), listener/handler ports, outbound `Policy`, the Server-Sent Events frame (`SSEEventValue`) and the drain signal a long-lived handler observes; **no registry** (ADR 0029) | `0.2.11.*` |
+| `scheduler/` | time-driven execution contract: `Job` + `Schedule` (both FUNC ports) + `Scheduler`, `EntryValue` / `ResultValue`; **no registry** (ADR 0041) | `0.2.12.*` |
 
 `Major=0` (internal), `Layer=2` (core). The codec registry ships codes today (`CodeDuplicateRegistration` 0.2.2.1, plus 0.2.2.2-4 reserved for future Marshal/Unmarshal sentinels); the writer registry ships `0.2.3.*` (ADR 0012). Logger codes will land alongside service-layer wiring.
 
@@ -40,7 +41,7 @@ Single Go module `github.com/kitsunium/sdk/internal/core` — one `go.mod`, one 
 - Add concrete runtime types with stateful methods here. The `codec` / `writer` / `crypto` / `transform` / `id` registries' `snapshot.Value`-backed lookups are the deliberate exceptions — they carry no domain logic, only routing.
 - Import `context` outside of interface signatures — **except for a single-method function port**, i.e. a named `func(ctx context.Context) …` type that IS the contract (`resilience.Operation`, ADR 0026). Such a type is a declaration, not plumbing: it is the function-shaped equivalent of a one-method interface, and the Go stdlib uses the same shape (`http.HandlerFunc`). Forcing it into an interface would make every call site write an adapter for no gain. This exception does NOT admit `context` in struct fields, value types, or package-level state.
 - Reach upward into `internal/service/*` or `pkg/*`.
-- Grow a **new** sibling without first widening the layer's purpose statement (the `writer` sibling was admitted by ADR 0012; `crypto` by ADR 0013; `transform` by ADR 0014; `proc` by ADR 0016; `id` by ADR 0024, which opens the Phase-B new-domain wave — observability/reliability/configuration land in ADR 0025–0028).
+- Grow a **new** sibling without first widening the layer's purpose statement (the `writer` sibling was admitted by ADR 0012; `crypto` by ADR 0013; `transform` by ADR 0014; `proc` by ADR 0016; `id` by ADR 0024, which opens the Phase-B new-domain wave — observability/reliability/configuration land in ADR 0025–0028; `net` by ADR 0029; `scheduler` by ADR 0041).
 
 ## Verification
 
@@ -66,5 +67,6 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `metrics/` — see `internal/core/metrics/CLAUDE.md` (observability, ADR 0027)
 - `config/` — see `internal/core/config/CLAUDE.md` (configuration, ADR 0028)
 - `net/` — see `internal/core/net/CLAUDE.md` (network domain, ADR 0029)
+- `scheduler/` — see `internal/core/scheduler/CLAUDE.md` (time-driven execution, ADR 0041)
 - `logger/` — see `internal/core/logger/CLAUDE.md` (README is the human-readable surface doc)
 - `logger/level/` — see `internal/core/logger/level/CLAUDE.md`
