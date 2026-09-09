@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Domain **interfaces** and immutable domain **value types** for the SDK's domains — **codecs, the logger, log-transport writers, cryptographic schemes, byte transforms, OS process supervision, and identifier generation** (ADR 0012, ADR 0013, ADR 0014, ADR 0016, ADR 0024). Core describes "what the SDK's domains are" without prescribing how they are realised — every method body belongs in `internal/service/*`, every public alias belongs in `pkg/v1/*`. Plug-in registries (codec, writer, crypto, transform, id) are the deliberate exception: they carry routing state, no domain logic. `proc` is the deliberate counter-example — no registry: each primitive has a single canonical OS implementation chosen at build time by platform tag. ADR 0024 opens the **Phase-B new-domain wave** (identity now; observability/reliability/configuration to follow in ADR 0025–0028).
+Domain **interfaces** and immutable domain **value types** for the SDK's domains — **codecs, the logger, log-transport writers, cryptographic schemes, byte transforms, OS process supervision, and identifier generation** (ADR 0012, ADR 0013, ADR 0014, ADR 0016, ADR 0024). Core describes "what the SDK's domains are" without prescribing how they are realised — every method body belongs in `internal/service/*`, every public alias belongs in `pkg/v1/*`. Plug-in registries (codec, writer, crypto, transform, id) are the deliberate exception: they carry routing state, no domain logic. `proc` is the deliberate counter-example — no registry: each primitive has a single canonical OS implementation chosen at build time by platform tag. `token` is the second counter-example, and its reason is stronger: a token registry's key would be the `alg` header, which the attacker writes (ADR 0042). ADR 0024 opens the **Phase-B new-domain wave** (identity now; observability/reliability/configuration to follow in ADR 0025–0028). Security tokens land later, as the 13th sibling (ADR 0042).
 
 ## Contents
 
@@ -22,6 +22,8 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `config/` | `Source` / `Validator` / `Watcher` ports; env+file loader + cross-OS poll watcher in service (ADR 0028) | `0.2.10.*` |
 | `net/` | network domain contract: TLS identity (opaque, redacting), listener/handler ports, outbound `Policy`, the Server-Sent Events frame (`SSEEventValue`) and the drain signal a long-lived handler observes; **no registry** (ADR 0029) | `0.2.11.*` |
 | `scheduler/` | time-driven execution contract: `Job` + `Schedule` (both FUNC ports) + `Scheduler`, `EntryValue` / `ResultValue`; **no registry** (ADR 0041) | `0.2.12.*` |
+| `net/` | network domain contract: TLS identity (opaque, redacting), listener/handler ports, outbound `Policy`; **no registry** (ADR 0029) | `0.2.11.*` |
+| `token/` | security-token contract: one-method `Issuer` / `Verifier` ports, the redacting immutable `ClaimsValue`, and a closed `Algorithm` enum in which `none` has no representation; **no registry**, because its key would be the attacker-written `alg` header (ADR 0042) | `0.2.13.*` |
 
 `Major=0` (internal), `Layer=2` (core). The codec registry ships codes today (`CodeDuplicateRegistration` 0.2.2.1, plus 0.2.2.2-4 reserved for future Marshal/Unmarshal sentinels); the writer registry ships `0.2.3.*` (ADR 0012). Logger codes will land alongside service-layer wiring.
 
@@ -68,5 +70,6 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `config/` — see `internal/core/config/CLAUDE.md` (configuration, ADR 0028)
 - `net/` — see `internal/core/net/CLAUDE.md` (network domain, ADR 0029)
 - `scheduler/` — see `internal/core/scheduler/CLAUDE.md` (time-driven execution, ADR 0041)
+- `token/` — see `internal/core/token/CLAUDE.md` (security tokens, ADR 0042)
 - `logger/` — see `internal/core/logger/CLAUDE.md` (README is the human-readable surface doc)
 - `logger/level/` — see `internal/core/logger/level/CLAUDE.md`

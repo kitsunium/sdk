@@ -1,0 +1,286 @@
+// Package token — verification against a JWK or a JWK Set.
+//
+// This file holds the ONLY run-time algorithm selection in the package, and the
+// selector is the KEY, never the token. A relying party fetched the key set
+// from a publisher it trusts; the "kty"/"crv" members are that publisher's
+// statement about their own key, and deriving the algorithm from them is
+// exactly as trustworthy as the key itself. Deriving it from the token's "alg"
+// header would be trusting the attacker's statement about the relying party's
+// key — which is algorithm confusion, spelled out.
+package token
+
+import (
+	"crypto/ecdsa"
+	"crypto/x509"
+	"slices"
+
+	coretoken "github.com/kitsunium/sdk/internal/core/token"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
+)
+
+// NewVerifierFromJWK returns a JWT verifier bound to the algorithm key's own
+// type and curve imply:
+//
+//	kty=oct                -> HS256
+//	kty=EC,  crv=P-256     -> ES256
+//	kty=OKP, crv=Ed25519   -> EdDSA
+//
+// Every other key — RSA, P-384, P-521 — is refused with KeyUnsuitable. The SDK
+// signs with none of them, and a verifier that pretends otherwise would promise
+// an interop the crypto domain cannot honour.
+//
+// The key's own advisory members are enforced, not ignored: a "use" other than
+// "sig", a "key_ops" that excludes "verify", or an "alg" that disagrees with
+// what the key type implies, all refuse the key. A publisher who says "this key
+// is for encryption" has said something, and honouring it costs nothing.
+func NewVerifierFromJWK(key jwk.KeyValue, cfg VerifierConfig) (verifier coretoken.Verifier, err error) {
+	binding, berr := bindJWK(key)
+	//: the key decides the algorithm; the token never gets a vote.
+	if berr != nil {
+		//: propagate KeyUnsuitable.
+		return nil, berr
+	}
+	//: from here the verifier is bound exactly as a hand-built one would be.
+	return newJWSVerifier(binding, cfg)
+}
+
+// NewSetVerifier returns a JWT verifier that selects a key from set by the
+// token's "kid" header.
+//
+// # The kid is a selector, not a credential
+//
+// The kid chooses which key to TRY. It never decides whether the token is
+// valid: the signature does. So a kid naming an EC key does not let a token
+// claiming HS256 through — the binding built from that key reports ES256, the
+// header comparison refuses, and no key material reaches a MAC.
+//
+// # Duplicate kids
+//
+// jwk.Set.ByKid refuses to choose between keys sharing a kid, because nothing
+// in the document distinguishes them and picking the first would make the
+// answer depend on member order. This verifier CAN choose, because it has
+// something the key set does not: a signature. It tries the candidates in
+// document order and accepts the first that verifies, which is the rotation
+// path RFC 7517 §4.5 leaves open.
+//
+// It tries a BOUNDED number of them. The candidate count is chosen by whoever
+// published the JWK Set, and each attempt is a signature verification, so an
+// unbounded loop would let a publisher — or anybody who can influence the
+// document — price every request. Past MaxKeyCandidates the token is refused
+// with KeyIDAmbiguous rather than verified slowly.
+func NewSetVerifier(set jwk.Set, cfg VerifierConfig) (verifier coretoken.Verifier, err error) {
+	policy, perr := newPolicy(cfg)
+	//: every bound and knob is validated once, here.
+	if perr != nil {
+		//: propagate PolicyMisconfigured.
+		return nil, perr
+	}
+	//: an empty set can never verify anything; say so at construction.
+	if set.Len() == 0 {
+		//: refuse rather than build a verifier that always fails.
+		return nil, errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+			errs.String("knob", "empty JWK Set"))
+	}
+	//: bound to the set, not to one key.
+	return &setVerifier{set: set, policy: policy}, nil
+}
+
+// setVerifier authenticates JWS compact tokens against a JWK Set.
+type setVerifier struct {
+	// set is the trusted key material.
+	set jwk.Set
+	// policy is the validated verification policy.
+	policy policyValue
+}
+
+// Verify selects candidate keys by kid and authenticates against them.
+func (v *setVerifier) Verify(token string) (claims coretoken.ClaimsValue, err error) {
+	parts, perr := v.policy.parseJWS(token)
+	//: bounded parse, no key involved yet.
+	if perr != nil {
+		//: propagate TooLarge / Malformed / TooDeep / DuplicateMember.
+		return coretoken.ClaimsValue{}, perr
+	}
+	candidates, cerr := v.candidates(parts.header.kid)
+	//: selection failures are named separately from verification failures.
+	if cerr != nil {
+		//: propagate KeyIDMissing / KeyNotFound / KeyIDAmbiguous.
+		return coretoken.ClaimsValue{}, cerr
+	}
+	//: try each candidate; the first whose signature verifies wins.
+	for _, candidate := range candidates {
+		binding, berr := bindJWK(candidate)
+		//: a candidate the SDK cannot verify with is skipped, not fatal — a
+		//: published set legitimately holds keys for algorithms we do not do.
+		if berr != nil {
+			continue
+		}
+		//: the algorithm gate, per candidate, before any primitive runs.
+		if herr := v.policy.checkHeader(parts.header, binding.algorithm()); herr != nil {
+			continue
+		}
+		//: authenticate.
+		if binding.verify(parts.input, parts.signature) {
+			//: authenticated: now the claims may be decoded and judged.
+			return v.policy.decodeAndValidate(parts.payload, joseShape{})
+		}
+	}
+	//: no candidate authenticated the token. The verdict is deliberately the
+	//: same as a single-key failure: which of several keys did not match is
+	//: not information a bearer is owed.
+	return coretoken.ClaimsValue{}, coretoken.SignatureInvalid
+}
+
+// candidates resolves the keys to try for kid, refusing both ends.
+func (v *setVerifier) candidates(kid string) (keys []jwk.KeyValue, err error) {
+	//: a set verifier selects by id; it does not try everything it holds.
+	if kid == "" {
+		//: refuse, and name the missing header.
+		return nil, KeyIDMissing
+	}
+	matches := v.set.AllByKid(kid)
+	//: no key under that id.
+	if len(matches) == 0 {
+		//: refuse without saying which ids the set does hold.
+		return nil, KeyNotFound
+	}
+	//: more candidates than the bound: refuse rather than verify slowly.
+	if len(matches) > v.policy.maxKeyCandidates {
+		//: name the limit, never the kid.
+		return nil, errs.Wrap(KeyIDAmbiguous, errs.WrapParams{},
+			errs.Int("limit", v.policy.maxKeyCandidates))
+	}
+	//: one, or a bounded rotation window.
+	return matches, nil
+}
+
+// bindJWK maps a JWK onto the verifying binding its own type and curve imply.
+func bindJWK(key jwk.KeyValue) (binding verifyingKey, err error) {
+	//: the publisher's advisory members are honoured before the material is.
+	if uerr := checkJWKUsage(key); uerr != nil {
+		//: propagate KeyUnsuitable.
+		return nil, uerr
+	}
+	//: the mapping. It reads kty and crv — the KEY's members — and nothing
+	//: from any token.
+	switch {
+	//: a symmetric JWK is an HS256 secret; core/crypto.Key enforces 256 bits.
+	case key.Kty() == jwk.TypeOct:
+		//: bound to HMAC-SHA-256.
+		return bindOctJWK(key)
+	//: the only EC curve the SDK signs on.
+	case key.Kty() == jwk.TypeEC && key.Crv() == jwk.CurveP256:
+		//: bound to ES256.
+		return bindECJWK(key)
+	//: the Edwards curve behind JOSE EdDSA.
+	case key.Kty() == jwk.TypeOKP && key.Crv() == jwk.CurveEd25519:
+		//: bound to EdDSA.
+		return bindOKPJWK(key)
+	//: RSA, P-384, P-521 and anything else: representable, not verifiable.
+	default:
+		//: refuse rather than promise an interop the SDK cannot honour.
+		return nil, keyUnsuitable("no token algorithm for this kty/crv")
+	}
+}
+
+// bindOctJWK binds a symmetric JWK to HS256.
+func bindOctJWK(key jwk.KeyValue) (binding verifyingKey, err error) {
+	secret, serr := key.Secret()
+	//: jwk.Secret enforces the 256-bit core/crypto.Key length.
+	if serr != nil {
+		//: a symmetric JWK that is not a usable secret.
+		return nil, keyUnsuitable("oct JWK is not a 256-bit symmetric key")
+	}
+	//: bound to HS256 and nothing else.
+	return bindSecret(secret)
+}
+
+// bindECJWK binds a P-256 JWK to ES256.
+func bindECJWK(key jwk.KeyValue) (binding verifyingKey, err error) {
+	der, derr := key.ECDSAPublic()
+	//: jwk validates the point on the curve before it renders it.
+	if derr != nil {
+		//: propagate as a key verdict.
+		return nil, keyUnsuitable("EC JWK does not render a PKIX public key")
+	}
+	parsed, perr := x509.ParsePKIXPublicKey(der)
+	//: the DER came from jwk one line ago, so a failure here is a bug, not input.
+	if perr != nil {
+		//: still typed, never a panic.
+		return nil, keyUnsuitable("PKIX round-trip of an EC JWK failed")
+	}
+	public, isECDSA := parsed.(*ecdsa.PublicKey)
+	//: the type assertion cannot fail for a kty=EC key, but an assertion that
+	//: cannot fail is still an assertion someone will make fail later.
+	if !isECDSA {
+		//: refuse.
+		return nil, keyUnsuitable("EC JWK did not decode to an ECDSA public key")
+	}
+	//: bound to ES256, with the curve and point re-checked.
+	return bindP256Public(public)
+}
+
+// bindOKPJWK binds an Ed25519 JWK to EdDSA.
+func bindOKPJWK(key jwk.KeyValue) (binding verifyingKey, err error) {
+	public, perr := key.Ed25519Public()
+	//: jwk validates the length and the seed/public consistency.
+	if perr != nil {
+		//: propagate as a key verdict.
+		return nil, keyUnsuitable("OKP JWK does not render an Ed25519 public key")
+	}
+	//: bound to JOSE EdDSA — not to PASETO v4.public, which uses the same
+	//: primitive over different bytes and carries its own Algorithm.
+	return bindEd25519Public(public, coretoken.AlgorithmEdDSA)
+}
+
+// checkJWKUsage honours the key's own advisory members: "use", "key_ops" and
+// "alg". They are the publisher's statement about their key, and a relying
+// party that ignores them is choosing to know less than it was told.
+func checkJWKUsage(key jwk.KeyValue) error {
+	//: "use" is optional; when present it must permit signatures.
+	if use := key.Use(); use != "" && use != "sig" {
+		//: a key published for encryption is not a key for verifying tokens.
+		return keyUnsuitable("JWK use is not sig")
+	}
+	//: "key_ops" is optional; when present it must include "verify".
+	if ops := key.KeyOps(); len(ops) != 0 && !slices.Contains(ops, "verify") {
+		//: the publisher excluded the operation we were about to perform.
+		return keyUnsuitable("JWK key_ops does not include verify")
+	}
+	implied, known := impliedAlg(key)
+	//: "alg" is optional; when present it must be the algorithm the key type
+	//: implies, or the publisher and the key disagree about the key.
+	if alg := key.Alg(); alg != "" && (!known || alg != implied) {
+		//: refuse the contradiction rather than pick a side.
+		return keyUnsuitable("JWK alg contradicts its kty/crv")
+	}
+	//: the publisher's statements are consistent with what we intend to do.
+	return nil
+}
+
+// impliedAlg reports the JOSE algorithm name a key's type and curve imply.
+// The second result is false when this package implements none for it, which
+// is a different statement from "the empty algorithm" and keeps the caller
+// from comparing a publisher's "alg" against nothing at all.
+func impliedAlg(key jwk.KeyValue) (alg string, known bool) {
+	//: the same mapping bindJWK uses, rendered as a JOSE name.
+	switch {
+	//: symmetric keys carry HMAC-SHA-256 here.
+	case key.Kty() == jwk.TypeOct:
+		//: JOSE HS256.
+		return coretoken.AlgorithmHS256.String(), true
+	//: the only EC curve the SDK signs on.
+	case key.Kty() == jwk.TypeEC && key.Crv() == jwk.CurveP256:
+		//: JOSE ES256.
+		return coretoken.AlgorithmES256.String(), true
+	//: the Edwards curve behind JOSE EdDSA.
+	case key.Kty() == jwk.TypeOKP && key.Crv() == jwk.CurveEd25519:
+		//: JOSE EdDSA.
+		return coretoken.AlgorithmEdDSA.String(), true
+	//: no algorithm implied; bindJWK refuses this key anyway.
+	default:
+		//: nothing to compare a publisher's alg against.
+		return "", false
+	}
+}

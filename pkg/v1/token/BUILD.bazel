@@ -1,0 +1,50 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "token",
+    srcs = [
+        "codes.go",
+        "constants.go",
+        "constructors.go",
+        "sentinels.go",
+        "token.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/token",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/token",
+        "//internal/service/crypto/jwk",
+        "//internal/service/token",
+        "//pkg/v1/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":token",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "token_test",
+    srcs = [
+        "token_external_test.go",
+        "wiring_external_test.go",
+    ],
+    deps = [
+        ":token",
+        "//internal/service/crypto/jwk",
+        "//pkg/v1/crypto",
+        "//pkg/v1/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
