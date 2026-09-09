@@ -55,6 +55,7 @@ filegroup(
         "//internal/service/codec/xml:audit_srcs",
         "//internal/service/codec/yaml:audit_srcs",
         "//internal/service/config:audit_srcs",
+        "//internal/service/crypto/jwk:audit_srcs",
         "//internal/service/id:audit_srcs",
         "//internal/service/logger:audit_srcs",
         "//internal/service/logger/middleware/async:audit_srcs",
