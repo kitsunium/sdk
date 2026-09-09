@@ -12,6 +12,7 @@ go_library(
         "gauge.go",
         "histogram.go",
         "histogram_value.go",
+        "label.go",
         "meter.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/metrics",

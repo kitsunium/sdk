@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/pkg/v1/metrics"
 ```
 
-Package metrics is the public facade for the SDK's observability domain — the natural twin of the logger. A \[Collector\] \(from [NewMeter](<#NewMeter>)\) mints lock\-free [Counter](<#Counter>)/[Gauge](<#Gauge>)/[Histogram](<#Histogram>) instruments by name; \[Collector.Collect\] takes a [Snapshot](<#Snapshot>) that an [Exporter](<#Exporter>) ships out. The stdlib text exporter \(name "text", stderr\) is registered on import; [Export](<#Export>) dispatches by name. It writes to stderr so that importing this package never arms a writer on stdout, which a process may be using as a protocol channel \(ADR 0030\); pass os.Stdout to [NewTextExporter](<#NewTextExporter>) to opt in explicitly.
+Package metrics is the public facade for the SDK's observability domain — the natural twin of the logger. A [Meter](<#Meter>) \(from [NewMeter](<#NewMeter>)\) mints lock\-free [Counter](<#Counter>)/[Gauge](<#Gauge>)/[Histogram](<#Histogram>) instruments; \[Meter.Collect\] takes a [Snapshot](<#Snapshot>) that an [Exporter](<#Exporter>) ships out. The stdlib text exporter \(name "text", stderr\) is registered on import; [Export](<#Export>) dispatches by name. It writes to stderr so that importing this package never arms a writer on stdout, which a process may be using as a protocol channel \(ADR 0030\); pass os.Stdout to [NewTextExporter](<#NewTextExporter>) to opt in explicitly.
 
 ```
 m := metrics.NewMeter()
@@ -14,25 +14,65 @@ m.Counter("requests").Add(1)
 _ = metrics.Export("text", m.Collect())
 ```
 
-v1 is label\-free \(instruments are name\-keyed\); labelled dimensions and the Prometheus/OTLP exporters are deferred \(ADR 0027\).
+### Labels and series
+
+An instrument is identified by its name AND its labels. One name plus one label set is one SERIES, and every fetch of that pair returns the same instrument, so observations accumulate in one place wherever they are made:
+
+```
+m.Counter("requests", metrics.Label{Key: "method", Value: "GET"}).Inc()
+```
+
+Label order does not matter — a label set is a set. Passing no labels names the dimensionless series, which is exactly what a call without labels always meant. A label KEY is structure: it is written at the call site and constant for the process, so an empty or repeated key is a programmer error and panics with [InvalidLabel](<#UnknownExporter>). A label VALUE is data and may be anything.
+
+### Cardinality
+
+Distinct label values create distinct series, and an unbounded stream of them is a memory incident rather than a reporting inconvenience. Every Meter therefore bounds how many series ONE instrument name may hold — [DefaultMaxSeriesPerInstrument](<#DefaultMaxSeriesPerInstrument>) unless [NewMeterWithConfig](<#NewMeterWithConfig>) says otherwise. Past the bound, further label sets are folded into a single aggregated series carrying the label \[OverflowLabelKey\]="true": memory stays bounded, no observation is dropped, and the condition is visible in every snapshot from then on. What is lost is the breakdown — once folded, an observation's own labels are gone.
+
+A non\-positive MaxSeriesPerInstrument clamps to the default. There is no setting that means "unbounded" \(ADR 0031\); a caller who wants a very large bound writes a very large number, where a reviewer can see it.
+
+A [Snapshot](<#Snapshot>) maps each instrument name to its series, which is the shape every per\-series wire format wants. The Prometheus and OTLP exporters remain deferred \(ADR 0027\).
 
 ## Index
 
+- [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Export\(name ExporterName, snap Snapshot\) error](<#Export>)
 - [type Counter](<#Counter>)
+- [type CounterValue](<#CounterValue>)
 - [type Exporter](<#Exporter>)
   - [func NewTextExporter\(name ExporterName, dst io.Writer\) Exporter](<#NewTextExporter>)
   - [func RegisterExporter\(e Exporter\) Exporter](<#RegisterExporter>)
 - [type ExporterName](<#ExporterName>)
   - [func AvailableExporters\(\) \[\]ExporterName](<#AvailableExporters>)
 - [type Gauge](<#Gauge>)
+- [type GaugeValue](<#GaugeValue>)
 - [type Histogram](<#Histogram>)
 - [type HistogramValue](<#HistogramValue>)
+- [type Label](<#Label>)
 - [type Meter](<#Meter>)
   - [func NewMeter\(\) Meter](<#NewMeter>)
+  - [func NewMeterWithConfig\(cfg MeterConfig\) Meter](<#NewMeterWithConfig>)
+- [type MeterConfig](<#MeterConfig>)
 - [type Snapshot](<#Snapshot>)
 
+
+## Constants
+
+<a name="DefaultMaxSeriesPerInstrument"></a>
+
+```go
+const (
+    // DefaultMaxSeriesPerInstrument is the cardinality bound NewMeter applies,
+    // and the value a non-positive MeterConfig knob clamps to.
+    DefaultMaxSeriesPerInstrument int = svcmetrics.DefaultMaxSeriesPerInstrument
+    // OverflowLabelKey is the reserved label naming a meter's aggregated
+    // overflow series. It appears in a snapshot only once an instrument has
+    // exceeded its cardinality bound.
+    OverflowLabelKey string = coremetrics.OverflowLabelKey
+    // OverflowLabelValue is the only value ever stored under OverflowLabelKey.
+    OverflowLabelValue string = coremetrics.OverflowLabelValue
+)
+```
 
 ## Variables
 
@@ -46,11 +86,13 @@ var (
     ExportFailed = coremetrics.ExportFailed
     // InstrumentKindConflict is raised when a name is reused across kinds.
     InstrumentKindConflict = coremetrics.InstrumentKindConflict
+    // InvalidLabel is raised when a label set has an empty or repeated key.
+    InvalidLabel = coremetrics.InvalidLabel
 )
 ```
 
 <a name="Export"></a>
-## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L80>)
+## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L146>)
 
 ```go
 func Export(name ExporterName, snap Snapshot) error
@@ -59,7 +101,7 @@ func Export(name ExporterName, snap Snapshot) error
 Export ships snap through the exporter registered as name.
 
 <a name="Counter"></a>
-## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L31>)
+## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L74>)
 
 Counter is the public alias for a monotonic cumulative instrument.
 
@@ -67,8 +109,17 @@ Counter is the public alias for a monotonic cumulative instrument.
 type Counter = coremetrics.Counter
 ```
 
+<a name="CounterValue"></a>
+## type [CounterValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L89>)
+
+CounterValue is the public alias for a per\-series counter snapshot value.
+
+```go
+type CounterValue = coremetrics.CounterValue
+```
+
 <a name="Exporter"></a>
-## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L46>)
+## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L101>)
 
 Exporter is the public alias for a snapshot shipper.
 
@@ -77,7 +128,7 @@ type Exporter = coremetrics.Exporter
 ```
 
 <a name="NewTextExporter"></a>
-### func [NewTextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L68>)
+### func [NewTextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L134>)
 
 ```go
 func NewTextExporter(name ExporterName, dst io.Writer) Exporter
@@ -86,7 +137,7 @@ func NewTextExporter(name ExporterName, dst io.Writer) Exporter
 NewTextExporter returns a text Exporter writing to dst under name \(not auto\-registered\).
 
 <a name="RegisterExporter"></a>
-### func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L74>)
+### func [RegisterExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L140>)
 
 ```go
 func RegisterExporter(e Exporter) Exporter
@@ -95,7 +146,7 @@ func RegisterExporter(e Exporter) Exporter
 RegisterExporter adds e to the process\-wide exporter registry.
 
 <a name="ExporterName"></a>
-## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L49>)
+## type [ExporterName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L104>)
 
 ExporterName is the public alias for an exporter's registry key.
 
@@ -104,7 +155,7 @@ type ExporterName = coremetrics.ExporterName
 ```
 
 <a name="AvailableExporters"></a>
-### func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L86>)
+### func [AvailableExporters](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L152>)
 
 ```go
 func AvailableExporters() []ExporterName
@@ -113,7 +164,7 @@ func AvailableExporters() []ExporterName
 AvailableExporters returns the sorted list of registered exporter names.
 
 <a name="Gauge"></a>
-## type [Gauge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L34>)
+## type [Gauge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L77>)
 
 Gauge is the public alias for an instantaneous up/down instrument.
 
@@ -121,8 +172,17 @@ Gauge is the public alias for an instantaneous up/down instrument.
 type Gauge = coremetrics.Gauge
 ```
 
+<a name="GaugeValue"></a>
+## type [GaugeValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L92>)
+
+GaugeValue is the public alias for a per\-series gauge snapshot value.
+
+```go
+type GaugeValue = coremetrics.GaugeValue
+```
+
 <a name="Histogram"></a>
-## type [Histogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L37>)
+## type [Histogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L80>)
 
 Histogram is the public alias for a bucketed distribution instrument.
 
@@ -131,16 +191,25 @@ type Histogram = coremetrics.Histogram
 ```
 
 <a name="HistogramValue"></a>
-## type [HistogramValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L43>)
+## type [HistogramValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L95>)
 
-HistogramValue is the public alias for a per\-histogram snapshot value.
+HistogramValue is the public alias for a per\-series histogram snapshot value.
 
 ```go
 type HistogramValue = coremetrics.HistogramValue
 ```
 
+<a name="Label"></a>
+## type [Label](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L86>)
+
+Label is the public alias for one dimension of a series.
+
+```go
+type Label = coremetrics.LabelValue
+```
+
 <a name="Meter"></a>
-## type [Meter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L28>)
+## type [Meter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L71>)
 
 Meter is the public alias for the instrument factory.
 
@@ -149,16 +218,34 @@ type Meter = coremetrics.Meter
 ```
 
 <a name="NewMeter"></a>
-### func [NewMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L61>)
+### func [NewMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L119>)
 
 ```go
 func NewMeter() Meter
 ```
 
-NewMeter returns a fresh in\-memory Meter \(Counter/Gauge/Histogram \+ Collect\).
+NewMeter returns a fresh in\-memory Meter \(Counter/Gauge/Histogram \+ Collect\) bounded at DefaultMaxSeriesPerInstrument series per instrument name.
+
+<a name="NewMeterWithConfig"></a>
+### func [NewMeterWithConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L127>)
+
+```go
+func NewMeterWithConfig(cfg MeterConfig) Meter
+```
+
+NewMeterWithConfig returns a fresh in\-memory Meter honouring cfg. A non\-positive MaxSeriesPerInstrument clamps to DefaultMaxSeriesPerInstrument — it never means unbounded.
+
+<a name="MeterConfig"></a>
+## type [MeterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L98>)
+
+MeterConfig is the public alias for a Meter's cardinality configuration.
+
+```go
+type MeterConfig = svcmetrics.MeterConfig
+```
 
 <a name="Snapshot"></a>
-## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L40>)
+## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/metrics/metrics.go#L83>)
 
 Snapshot is the public alias for a whole\-meter point\-in\-time copy.
 

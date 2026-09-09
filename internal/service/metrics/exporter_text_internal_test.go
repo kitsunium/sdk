@@ -77,39 +77,116 @@ func Test_textExporter_Name(t *testing.T) {
 	}
 }
 
-// Test_appendLine pins the one-metric-per-line format. Every consumer of this
-// output splits on newlines and then on spaces, so a missing separator merges
-// two metrics into one unparseable line.
-func Test_appendLine(t *testing.T) {
+// Test_appendSeriesLine pins the one-series-per-line format. Every consumer of
+// this output splits on newlines and then on spaces, so a missing separator
+// merges two series into one unparseable line.
+func Test_appendSeriesLine(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name   string
 		buf    []byte
 		prefix string
 		metric string
+		labels []coremetrics.LabelValue
 		value  string
 		want   string
 	}
 	tests := []tc{
-		{"onto an empty buffer", nil, "counter ", "requests", "7", "counter requests 7\n"},
 		{
-			"onto an existing line",
-			[]byte("counter a 1\n"), "gauge ", "b", "2",
-			"counter a 1\ngauge b 2\n",
+			name: "onto an empty buffer", prefix: "counter ", metric: "requests",
+			value: "7", want: "counter requests 7\n",
 		},
-		{"an empty value still terminates the line", nil, "counter ", "x", "", "counter x \n"},
-		{"an empty name", nil, "counter ", "", "1", "counter  1\n"},
+		{
+			name: "onto an existing line", buf: []byte("counter a 1\n"),
+			prefix: "gauge ", metric: "b", value: "2",
+			want: "counter a 1\ngauge b 2\n",
+		},
+		{
+			//: the pre-label rendering is unchanged, byte for byte — a
+			//: dimensionless series must not sprout empty braces.
+			name: "an empty value still terminates the line", prefix: "counter ",
+			metric: "x", value: "", want: "counter x \n",
+		},
+		{name: "an empty name", prefix: "counter ", metric: "", value: "1", want: "counter  1\n"},
+		{
+			name: "one label", prefix: "counter ", metric: "requests",
+			labels: []coremetrics.LabelValue{{Key: "method", Value: "GET"}},
+			value:  "7", want: "counter requests{method=\"GET\"} 7\n",
+		},
+		{
+			name: "several labels keep the snapshot's order", prefix: "counter ",
+			metric: "requests",
+			labels: []coremetrics.LabelValue{
+				{Key: "method", Value: "GET"},
+				{Key: "status", Value: "200"},
+			},
+			value: "7", want: "counter requests{method=\"GET\",status=\"200\"} 7\n",
+		},
+		{
+			//: an empty VALUE is legitimate data and renders as empty quotes.
+			name: "an empty label value", prefix: "gauge ", metric: "g",
+			labels: []coremetrics.LabelValue{{Key: "tenant", Value: ""}},
+			value:  "1", want: "gauge g{tenant=\"\"} 1\n",
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		line := string(appendLine(c.buf, c.prefix, c.metric, c.value))
+		line := string(appendSeriesLine(c.buf, c.prefix, c.metric, c.labels, c.value))
 		if line != c.want {
-			t.Errorf("appendLine = %q, want %q", line, c.want)
+			t.Errorf("appendSeriesLine = %q, want %q", line, c.want)
 		}
-		//: every line ends with a newline, or the next metric would be glued
+		//: every line ends with a newline, or the next series would be glued
 		//: to this one.
 		if !strings.HasSuffix(line, "\n") {
-			t.Errorf("appendLine did not terminate the line: %q", line)
+			t.Errorf("appendSeriesLine did not terminate the line: %q", line)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_appendEscapedValue pins the escaping of a label VALUE, which is data.
+//
+// A value carries whatever the process is measuring — a URL, a header, a
+// user-supplied tenant id. Unescaped, a value holding a quote or a newline
+// forges a line that a reader of this output parses as another series: a
+// metrics dump becomes an injection surface, and the forged series is
+// indistinguishable from a real one.
+func Test_appendEscapedValue(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		in   string
+		want string
+	}
+	tests := []tc{
+		{"plain text passes through", "GET", "GET"},
+		{"the empty value", "", ""},
+		{"a quote cannot close the value", `a"b`, `a\"b`},
+		{"a backslash doubles", `a\b`, `a\\b`},
+		{"a newline cannot forge a line", "a\nb", `a\nb`},
+		{
+			//: the whole point, spelled out: a value that tries to close its
+			//: own quote and open a fresh line stays one value.
+			"a forged line stays one value",
+			"x\" 1\ncounter forged 99",
+			`x\" 1\ncounter forged 99`,
+		},
+		{"utf-8 is copied verbatim", "héllo", "héllo"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := string(appendEscapedValue(nil, c.in))
+		if got != c.want {
+			t.Errorf("appendEscapedValue(%q) = %q, want %q", c.in, got, c.want)
+		}
+		//: no escape may leave a raw newline behind, whatever the input.
+		if strings.Contains(got, "\n") {
+			t.Errorf("appendEscapedValue(%q) leaked a raw newline: %q", c.in, got)
 		}
 	}
 	for _, c := range tests {
@@ -127,16 +204,24 @@ func Test_sortedKeys(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
-		in   map[string]int64
+		in   map[string][]coremetrics.CounterValue
 		want []string
 	}
+	//: the values are irrelevant here — only the key order is under test.
+	group := func(names ...string) map[string][]coremetrics.CounterValue {
+		out := make(map[string][]coremetrics.CounterValue, len(names))
+		for _, n := range names {
+			out[n] = []coremetrics.CounterValue{{Value: 1}}
+		}
+		return out
+	}
 	tests := []tc{
-		{"an empty map", map[string]int64{}, []string{}},
+		{"an empty map", group(), []string{}},
 		{"a nil map", nil, []string{}},
-		{"a single key", map[string]int64{"a": 1}, []string{"a"}},
-		{"keys are sorted", map[string]int64{"z": 1, "a": 2, "m": 3}, []string{"a", "m", "z"}},
-		{"digits sort before letters", map[string]int64{"a": 1, "1": 2}, []string{"1", "a"}},
-		{"case is significant", map[string]int64{"b": 1, "A": 2}, []string{"A", "b"}},
+		{"a single key", group("a"), []string{"a"}},
+		{"keys are sorted", group("z", "a", "m"), []string{"a", "m", "z"}},
+		{"digits sort before letters", group("a", "1"), []string{"1", "a"}},
+		{"case is significant", group("b", "A"), []string{"A", "b"}},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -186,7 +271,9 @@ func Test_textExporter_Export(t *testing.T) {
 		t.Helper()
 		var buf bytes.Buffer
 		e := newTextExporter("test", &buf)
-		snap := coremetrics.SnapshotValue{Counters: map[string]int64{"requests": 7}}
+		snap := coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
+			"requests": {{Value: 7}},
+		}}
 
 		//: Goroutine lifecycle: c.writers goroutines, each exporting once and
 		//: returning; the WaitGroup joins them all before the assertion.

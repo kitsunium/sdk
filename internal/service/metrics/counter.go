@@ -1,7 +1,10 @@
 // Package metrics provides the in-memory Meter + instruments (Counter, Gauge,
-// Histogram) implementing core/metrics, plus a stdlib text Exporter. Instruments
-// are atomic and lock-free on the hot path; the Meter serialises only
-// instrument creation. v1 is label-free. ADR 0027. Cross-OS: 100% portable.
+// Histogram) implementing core/metrics, plus a stdlib text Exporter.
+// Instruments are atomic and lock-free on the hot path; the Meter takes only a
+// read lock to resolve an existing series and serialises creation alone.
+// Instruments are keyed by name AND label set, with a per-name cardinality
+// bound that folds the excess into one aggregated overflow series. ADR 0027.
+// Cross-OS: 100% portable.
 package metrics
 
 import "sync/atomic"
@@ -31,4 +34,11 @@ func (c *memCounter) load() int64 {
 func (c *memCounter) Inc() {
 	//: one is always a valid monotonic step.
 	c.v.Add(1)
+}
+
+// newMemCounter builds a zeroed counter. A package-level function value so the
+// Meter's create path passes it without allocating a closure.
+func newMemCounter() *memCounter {
+	//: a counter starts at zero and needs no configuration.
+	return &memCounter{}
 }

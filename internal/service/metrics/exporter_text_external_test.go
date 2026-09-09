@@ -31,28 +31,58 @@ func TestNewTextExporter(t *testing.T) {
 		snap coremetrics.SnapshotValue
 		want string
 	}
+	label := func(key, value string) []coremetrics.LabelValue {
+		return []coremetrics.LabelValue{{Key: key, Value: value}}
+	}
 	tests := []tc{
 		{name: "an empty snapshot", want: ""},
 		{
 			name: "one counter",
-			snap: coremetrics.SnapshotValue{Counters: map[string]int64{"requests": 7}},
+			snap: coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
+				"requests": {{Value: 7}},
+			}},
 			want: "counter requests 7\n",
 		},
 		{
 			//: declared out of order; the output must be sorted.
 			name: "counters are sorted by name",
-			snap: coremetrics.SnapshotValue{Counters: map[string]int64{"z": 1, "a": 2, "m": 3}},
+			snap: coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
+				"z": {{Value: 1}}, "a": {{Value: 2}}, "m": {{Value: 3}},
+			}},
 			want: "counter a 2\ncounter m 3\ncounter z 1\n",
 		},
 		{
+			//: several series under ONE name: the name is written once per
+			//: series, which is the shape every per-series wire format wants.
+			name: "one name, several series",
+			snap: coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
+				"requests": {
+					{Labels: label("method", "GET"), Value: 7},
+					{Labels: label("method", "POST"), Value: 2},
+				},
+			}},
+			want: "counter requests{method=\"GET\"} 7\ncounter requests{method=\"POST\"} 2\n",
+		},
+		{
+			//: the dimensionless series renders exactly as it did before
+			//: labels existed — no empty braces.
+			name: "a dimensionless series next to a labelled one",
+			snap: coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
+				"requests": {{Value: 9}, {Labels: label("method", "GET"), Value: 7}},
+			}},
+			want: "counter requests 9\ncounter requests{method=\"GET\"} 7\n",
+		},
+		{
 			name: "a gauge renders its float",
-			snap: coremetrics.SnapshotValue{Gauges: map[string]float64{"in_flight": 2.5}},
+			snap: coremetrics.SnapshotValue{Gauges: map[string][]coremetrics.GaugeValue{
+				"in_flight": {{Value: 2.5}},
+			}},
 			want: "gauge in_flight 2.5\n",
 		},
 		{
 			name: "a histogram renders its observation count",
 			snap: coremetrics.SnapshotValue{
-				Histograms: map[string]coremetrics.HistogramValue{"latency": {Count: 42}},
+				Histograms: map[string][]coremetrics.HistogramValue{"latency": {{Count: 42}}},
 			},
 			want: "histogram_count latency 42\n",
 		},
@@ -62,9 +92,9 @@ func TestNewTextExporter(t *testing.T) {
 			//: section.
 			name: "every kind, in a fixed order",
 			snap: coremetrics.SnapshotValue{
-				Counters:   map[string]int64{"c": 1},
-				Gauges:     map[string]float64{"g": 2},
-				Histograms: map[string]coremetrics.HistogramValue{"h": {Count: 3}},
+				Counters:   map[string][]coremetrics.CounterValue{"c": {{Value: 1}}},
+				Gauges:     map[string][]coremetrics.GaugeValue{"g": {{Value: 2}}},
+				Histograms: map[string][]coremetrics.HistogramValue{"h": {{Count: 3}}},
 			},
 			want: "counter c 1\ngauge g 2\nhistogram_count h 3\n",
 		},
@@ -116,7 +146,9 @@ func TestTextExporterWriterFailure(t *testing.T) {
 	}
 	tests := []tc{
 		{"an empty snapshot", coremetrics.SnapshotValue{}},
-		{"a populated snapshot", coremetrics.SnapshotValue{Counters: map[string]int64{"c": 1}}},
+		{"a populated snapshot", coremetrics.SnapshotValue{
+			Counters: map[string][]coremetrics.CounterValue{"c": {{Value: 1}}},
+		}},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

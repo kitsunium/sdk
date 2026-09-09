@@ -9,6 +9,16 @@ import (
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
 )
 
+// firstOr returns the first series of a group, or fallback when the group is
+// absent. A snapshot now maps a name to its SERIES, and these cases record a
+// single dimensionless one — so "the value under that name" is series zero.
+func firstOr[V any](series []V, fallback V) V {
+	if len(series) == 0 {
+		return fallback
+	}
+	return series[0]
+}
+
 // TestNewMeter pins that a fresh meter is immediately usable and that Collect
 // hands back empty maps rather than nils — a caller ranges over all three
 // without a guard, so a nil would be a panic in the reporting path, which is
@@ -130,14 +140,14 @@ func TestInstruments(t *testing.T) {
 		c.record(m)
 		snap := m.Collect()
 
-		if got := snap.Counters["c"]; got != c.wantCount {
+		if got := firstOr(snap.Counters["c"], coremetrics.CounterValue{}).Value; got != c.wantCount {
 			t.Errorf("the counter reads %d, want %d", got, c.wantCount)
 		}
-		if got := snap.Gauges["g"]; math.Abs(got-c.wantGauge) > 1e-9 {
+		if got := firstOr(snap.Gauges["g"], coremetrics.GaugeValue{}).Value; math.Abs(got-c.wantGauge) > 1e-9 {
 			t.Errorf("the gauge reads %v, want %v", got, c.wantGauge)
 		}
 		if c.wantBucket > 0 {
-			hist := snap.Histograms["h"]
+			hist := firstOr(snap.Histograms["h"], coremetrics.HistogramValue{})
 			if len(hist.Counts) == 0 || hist.Counts[0] != c.wantBucket {
 				t.Errorf("the histogram's first bucket holds %v, want %d", hist.Counts, c.wantBucket)
 			}

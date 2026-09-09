@@ -5,12 +5,16 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "metrics",
     srcs = [
+        "cardinality.go",
         "counter.go",
         "exporter_text.go",
         "gauge.go",
         "histogram.go",
-        "kind.go",
         "meter.go",
+        "name_state.go",
+        "series.go",
+        "series_entry.go",
+        "series_store.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/metrics",
     visibility = [
@@ -35,14 +39,18 @@ alias(
 go_test(
     name = "metrics_test",
     srcs = [
+        "cardinality_external_test.go",
         "counter_internal_test.go",
         "exporter_text_external_test.go",
         "exporter_text_internal_test.go",
         "gauge_internal_test.go",
         "histogram_internal_test.go",
-        "kind_internal_test.go",
+        "meter_alloc_test.go",
+        "meter_bench_test.go",
         "meter_external_test.go",
         "meter_internal_test.go",
+        "name_state_internal_test.go",
+        "series_internal_test.go",
     ],
     embed = [":metrics"],
     deps = [

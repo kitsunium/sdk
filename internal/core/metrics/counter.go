@@ -4,8 +4,8 @@
 // admitted by ADR 0027 (Phase-B wave), the natural twin of the logger. The
 // in-memory meter + a stdlib text exporter live in internal/service/metrics;
 // exporters self-register via the registry (writer-registry model, ADR 0012).
-// v1 is label-free: instruments are keyed by name (labels are a deferred
-// extension).
+// Instruments are keyed by name AND label set: one name plus one label set is
+// one series, and a Meter bounds how many series a name may hold.
 package metrics
 
 // Counter is a monotonically-increasing cumulative instrument.
