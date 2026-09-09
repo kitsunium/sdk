@@ -56,8 +56,8 @@ func Test_ulidGen_New(t *testing.T) {
 				t.Fatalf("New = %v, want nil", err)
 			}
 			//: exactly 26 Crockford characters, or no parser will accept it.
-			if len(got) != ulidChars {
-				t.Fatalf("New() = %q (%d chars), want %d", got, len(got), ulidChars)
+			if len(got) != crockfordChars {
+				t.Fatalf("New() = %q (%d chars), want %d", got, len(got), crockfordChars)
 			}
 			for _, r := range got {
 				if !strings.ContainsRune(ulidAlphabet, r) {
@@ -108,11 +108,11 @@ func Test_crockford32(t *testing.T) {
 	var one [uuidRawLen]byte
 	one[uuidRawLen-1] = 1
 	tests := []tc{
-		{"all zeros", zeros, strings.Repeat("0", ulidChars)},
+		{"all zeros", zeros, strings.Repeat("0", crockfordChars)},
 		//: 128 one-bits under a 2-bit zero pad: the first character carries
 		//: only 3 real bits (value 7 → 'the eighth symbol'), the rest are full.
-		{"all ones", ones, "7" + strings.Repeat("Z", ulidChars-1)},
-		{"the lowest bit", one, strings.Repeat("0", ulidChars-1) + "1"},
+		{"all ones", ones, "7" + strings.Repeat("Z", crockfordChars-1)},
+		{"the lowest bit", one, strings.Repeat("0", crockfordChars-1) + "1"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -120,8 +120,8 @@ func Test_crockford32(t *testing.T) {
 		if got != c.want {
 			t.Errorf("crockford32(%x) = %q, want %q", c.in, got, c.want)
 		}
-		if len(got) != ulidChars {
-			t.Errorf("crockford32 produced %d characters, want %d", len(got), ulidChars)
+		if len(got) != crockfordChars {
+			t.Errorf("crockford32 produced %d characters, want %d", len(got), crockfordChars)
 		}
 	}
 	for _, c := range tests {

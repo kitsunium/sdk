@@ -838,6 +838,22 @@ codes:
     const: CodeIDClockStalled
     hex: "0x00_03_27_03"
     package: internal/service/id
+  - code: "0.3.39.4"
+    const: CodeIDInvalidSize
+    hex: "0x00_03_27_04"
+    package: internal/service/id
+  - code: "0.3.39.5"
+    const: CodeIDInvalidPrefix
+    hex: "0x00_03_27_05"
+    package: internal/service/id
+  - code: "0.3.39.6"
+    const: CodeIDMalformed
+    hex: "0x00_03_27_06"
+    package: internal/service/id
+  - code: "0.3.39.7"
+    const: CodeIDTimestampRange
+    hex: "0x00_03_27_07"
+    package: internal/service/id
   - code: "0.3.40.1"
     const: CodeFormValueInvalid
     hex: "0x00_03_28_01"
