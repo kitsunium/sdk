@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Ten domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (24 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression — stdlib gzip/flate/zlib; `flate` is raw DEFLATE, `zlib` is the RFC 1950 envelope HTTP misnames `deflate`), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging — ADR 0026; hedging duplicates the operation, so it demands an in-code idempotence assertion and a load cap — ADR 0031), **metrics** (counter/gauge/histogram + exporter registry + labelled series with a bounded, visibly-overflowing cardinality — ADR 0027), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
+Go SDK providing a normed, performant toolbox for downstream applications. Ten domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (24 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing, and JWK/JWKS key representation — RFC 7517 for EC/OKP/oct, with private export opt-in and never the default), **transform** (compression — stdlib gzip/flate/zlib; `flate` is raw DEFLATE, `zlib` is the RFC 1950 envelope HTTP misnames `deflate`), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging — ADR 0026; hedging duplicates the operation, so it demands an in-code idempotence assertion and a load cap — ADR 0031), **metrics** (counter/gauge/histogram + exporter registry + labelled series with a bounded, visibly-overflowing cardinality — ADR 0027), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.27.0 (pinned in `MODULE.bazel`)
 
@@ -24,7 +24,7 @@ internal/
                    writer (console, dbsink, file, journald, levelgate,
                            nettransport, rotfile)
                    crypto (aesgcm, ecdsasig, ed25519sig, hkdfsha256,
-                           hmacsha2, keyenvelope, keytree, pbkdf2pw,
+                           hmacsha2, jwk, keyenvelope, keytree, pbkdf2pw,
                            stdhash, streamaead, x25519)
                    codec  (asn1, baseenc, bson, cbor, csv, flatbuffers,
                            form, json, msgpack, multipart, ndjson, pem, tlv, toml,

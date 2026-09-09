@@ -1,0 +1,61 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "jwk",
+    srcs = [
+        "bridge.go",
+        "codes.go",
+        "curve.go",
+        "errors.go",
+        "jwk.go",
+        "marshal.go",
+        "parse.go",
+        "set.go",
+        "wire.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/crypto/jwk",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":jwk",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "jwk_test",
+    srcs = [
+        "bridge_external_test.go",
+        "jwk_internal_test.go",
+        "marshal_external_test.go",
+        "parse_external_test.go",
+        "set_external_test.go",
+    ],
+    embed = [":jwk"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/kernel/errs",
+        "//internal/service/crypto/ecdsasig",
+        "//internal/service/crypto/ed25519sig",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

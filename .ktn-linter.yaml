@@ -239,6 +239,15 @@ rules:
       # and StreamGroup is not constructed directly at all — Server.Group mints
       # it, so a public constructor would be a second, worse way in.
       - "**/internal/service/net/server/**"
+      # crypto/jwk.KeyValue has no from-parts constructor ON PURPOSE. Every
+      # KeyValue comes out of Parse or a From* bridge, and each of those
+      # validates the material — coordinates at the curve's fixed length, the
+      # point actually on the curve, "d" actually deriving the declared "x"/"y".
+      # A NewKeyValue(kty, crv, x, y, d) would be a second way in that skips all
+      # of it, i.e. exactly the "poorly initialized struct" the rule exists to
+      # prevent. (The rule's own message here reads "constructor
+      # NewNewKeyValue()", which is not a name anything could satisfy.)
+      - "**/internal/service/crypto/jwk/**"
 
   KTN-VAR-NILSLICE:
     exclude:
@@ -292,6 +301,24 @@ rules:
       # compare a snapshot without racing the server that produced it. A
       # pointer would hand out a view that mutates underneath the reader.
       - "**/pkg/v1/server/**"
+      # crypto/jwk.KeyValue (176 B) — the value receiver is the security
+      # mechanism, not a style choice, and it is the SAME precedent as
+      # core/net.IdentityValue and core/crypto.Key above.
+      #
+      # MarshalJSON MUST be on a value receiver: it is what makes plain
+      # json.Marshal (and a struct field, and a []KeyValue) render the PUBLIC
+      # JWK. Move the method set to pointers and a non-pointer KeyValue silently
+      # stops going through it — the safe default the package exists to provide
+      # would be reachable only by callers who already knew to take an address.
+      # The same argument covers String/GoString: redaction that only fires on a
+      # pointer is redaction that does not fire. And immutability is the second
+      # half — a *KeyValue would let a holder mutate a key AFTER its coordinates
+      # were validated against the curve.
+      #
+      # The type is 176 B because a JWK genuinely carries three strings of
+      # metadata plus three octet slices; shrinking it under the 64 B threshold
+      # would mean dropping members the format defines.
+      - "**/internal/service/crypto/jwk/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue.
