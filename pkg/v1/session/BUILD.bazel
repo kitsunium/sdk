@@ -1,0 +1,40 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "session",
+    srcs = ["session.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/session",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/proc",
+        "//internal/core/session",
+        "//internal/service/session",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":session",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "session_test",
+    size = "small",
+    srcs = ["session_external_test.go"],
+    deps = [
+        ":session",
+        "//pkg/v1/crypto",
+        "//pkg/v1/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -203,6 +203,20 @@ rules:
       - "**/internal/core/token/**"
       - "**/internal/service/token/**"
       - "**/pkg/v1/token/**"
+      # The session stores' lookup helpers take a core/session.ID and the rule
+      # suggests `interface{ Digest() string }`. That is the contract-required
+      # class in its most dangerous form: ID is an OPAQUE BEARER SECRET whose
+      # whole value is that no other type can stand in for it. The suggested
+      # interface would be satisfied by any type carrying a Digest method — a
+      # caller's own string wrapper included — which is exactly the substitution
+      # the opaque type exists to make impossible; and it would discard Equal
+      # (the crypto/subtle comparison every lookup path ends in) and IsZero (the
+      # guard that keeps an unnamed session off the filesystem). Same reasoning
+      # as the AEAD Key above: the parameter's type IS the security boundary
+      # (ADR 0045 §D3).
+      - "**/internal/core/session/**"
+      - "**/internal/service/session/**"
+      - "**/pkg/v1/session/**"
 
   # KTN-VAR-NILSLICE (info) — "prefer a nil slice to an empty one".
   #
@@ -362,6 +376,39 @@ rules:
       - "**/internal/core/token/**"
       - "**/internal/service/token/**"
       - "**/pkg/v1/token/**"
+      # The session domain, for the same two reasons as token and jwk above.
+      #
+      # SessionValue (144 B) is immutable by construction: Set/Delete copy,
+      # Data clones out, and String/GoString render the SHAPE and never the
+      # subject, the identifier or the payload. All three properties need a
+      # VALUE receiver — redaction that only fires on a pointer is redaction
+      # that does not fire, and a *SessionValue would let a holder mutate a
+      # session after a store had validated it, which is precisely the mutation
+      # the fixation guard exists to refuse (ADR 0045 §D2). 144 B is what an
+      # identifier, a subject, three instants and a payload honestly cost;
+      # nothing can be dropped to get under 64.
+      #
+      # StateValue (144 B) is the exported description a third-party Store
+      # builds a SessionValue from — a pointer would let the store mutate the
+      # description its caller still holds.
+      #
+      # The service layer's internal `record` (112 B) and `window` (32 B + the
+      # record params it takes) are pure functions over a value: slide, rotate,
+      # deadline and build take a record and return a modified COPY, which is
+      # what makes "a store never mutates a record another goroutine holds"
+      # true by construction rather than by discipline. The copy happens a few
+      # times per request, immediately beside an AEAD seal and an fsync that
+      # dwarf it — the same argument ADR 0016's process.Spec makes above.
+      #
+      # Config / FileConfig (72-144 B) are copied exactly once, at
+      # construction, and by value so that filling in the defaults cannot
+      # mutate the config the caller still holds. Same argument as
+      # net/client.Config above; taking a pointer here would also diverge from
+      # every other SDK constructor (`logger.NewText(Config)`,
+      # `scheduler.New(Config)`).
+      - "**/internal/core/session/**"
+      - "**/internal/service/session/**"
+      - "**/pkg/v1/session/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue.
