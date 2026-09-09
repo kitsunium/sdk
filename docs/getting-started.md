@@ -48,7 +48,7 @@ func main() {
 }
 ```
 
-Twenty-two Format names are registered out of the box (`asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `json`, `msgpack`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml`, and the nine base-N variants `base16`/`base32`/`base45`/`base58`/`base62`/`base64`/`base64url`/`hex`/`ascii85`). `codec.Available()` returns the live list if you would rather ask the registry than trust this page. See the [codec page](../codec/) for the full surface.
+Twenty-three Format names are registered out of the box (`asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml`, and the nine base-N variants `base16`/`base32`/`base45`/`base58`/`base62`/`base64`/`base64url`/`hex`/`ascii85`). `codec.Available()` returns the live list if you would rather ask the registry than trust this page. See the [codec page](../codec/) for the full surface.
 
 ## Hello, logger
 

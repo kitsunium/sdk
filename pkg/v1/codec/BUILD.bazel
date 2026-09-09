@@ -33,6 +33,7 @@ go_library(
         "//internal/service/codec/form",
         "//internal/service/codec/json",
         "//internal/service/codec/msgpack",
+        "//internal/service/codec/multipart",
         "//internal/service/codec/ndjson",
         "//internal/service/codec/pem",
         "//internal/service/codec/tlv",

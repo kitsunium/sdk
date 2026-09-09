@@ -18,6 +18,7 @@ Fifteen wire-format codecs covering 23 registered Format names, one Go package e
 | `form/`        | `application/x-www-form-urlencoded` — `url.Values` | `0.3.40.*` | no  | yes |
 | `json/`        | JSON (RFC 8259) — encoding/json               | `0.3.2.*`  | yes | yes |
 | `msgpack/`     | MessagePack — vmihailenco/msgpack/v5          | `0.3.7.*`  | yes | yes |
+| `multipart/`   | multipart/form-data (RFC 7578) — mime/multipart | `0.3.41.*` | yes | yes |
 | `ndjson/`      | Newline-delimited JSON                        | `0.3.11.*` | no  | yes |
 | `pem/`         | PEM block (RFC 7468) — encoding/pem           | `0.3.10.*` | no  | yes |
 | `tlv/`         | Self-describing TLV (reflection-driven binary)| `0.3.22.*` | yes | yes |
@@ -70,6 +71,7 @@ The `PP` slots above are authoritative — verified against each `codes.go`. New
 - `form/`        — see `form/CLAUDE.md`
 - `json/`        — see `json/CLAUDE.md`
 - `msgpack/`     — see `msgpack/CLAUDE.md`
+- `multipart/`   — see `multipart/CLAUDE.md`
 - `ndjson/`      — see `ndjson/CLAUDE.md`
 - `pem/`         — see `pem/CLAUDE.md`
 - `tlv/`         — see `tlv/CLAUDE.md`

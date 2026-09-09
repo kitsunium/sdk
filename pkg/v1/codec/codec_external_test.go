@@ -65,6 +65,7 @@ var expectedAppenders = []string{
 	"base58",
 	"base62",
 	"bson",
+	"multipart",
 }
 
 // registeredAppenders is the package-level Appender registry snapshot
@@ -778,6 +779,10 @@ func codecAdapters() map[codec.Format]codecAdapter {
 		//: BSON needs a top-level document and has no uint64/sub-ms-time
 		//: support, so it uses a dedicated document fixture (not complexRT).
 		codec.Format("bson"): bsonAdapter(),
+		//: multipart is JSON-mediated for any non-FormValue value, so the
+		//: universal complexRT shape round-trips through its single
+		//: JSON-envelope part exactly as it does through json itself.
+		codec.Multipart: universalAdapter("multipart"),
 	}
 }
 
@@ -1588,9 +1593,10 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 				},
 			})
 		//: Universal-any group: json + yaml + toml + cbor + msgpack +
-		//: every baseenc variant (baseenc is JSON-mediated). All accept
-		//: complexRT natively without going through the promotion path.
-		case "json", "yaml", "toml", "cbor", "msgpack", "base64", "base64url", "base32", "base16", "hex", "ascii85", "base45":
+		//: multipart + every baseenc variant (baseenc and multipart are
+		//: JSON-mediated). All accept complexRT natively without going
+		//: through the promotion path.
+		case "json", "yaml", "toml", "cbor", "msgpack", "multipart", "base64", "base64url", "base32", "base16", "hex", "ascii85", "base45":
 			//: capture the codec + fixture + decode hook.
 			val := tweakForCodec(string(f), sampleComplex())
 			tests = append(tests, tc{

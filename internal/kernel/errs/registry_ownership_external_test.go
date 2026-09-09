@@ -80,6 +80,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_26_00: "third-party/codec/protobuf",
 	0x00_03_27_00: "internal/service/id",
 	0x00_03_28_00: "internal/service/codec/form",
+	0x00_03_29_00: "internal/service/codec/multipart",
 	0x01_01_00_00: "pkg/v1/logger",
 	0x01_01_01_00: "pkg/v1/logger/slogbridge",
 	0x01_02_00_00: "pkg/v1/codec",
