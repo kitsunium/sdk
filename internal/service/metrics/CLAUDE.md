@@ -4,11 +4,14 @@
 
 In-memory `Meter` + lock-free instruments
 (`Counter`/`UpDownCounter`/`Gauge`/`Histogram` and the three observable
-families) implementing `core/metrics`, plus two stdlib Exporters — a **text**
-diagnostic that renders the whole OTel model, and a **Prometheus** text-exposition
-**connector** that deliberately does not. Both are registered to **stderr** on
-import (ADR 0030). Stdlib-only, cross-OS. ADR 0027 / ADR 0044. Emits core
-sentinels `0.2.9.*` and owns block `0.3.45.*` for what the wire format refuses.
+families) implementing `core/metrics`, plus three stdlib Exporters — a **text**
+diagnostic that renders the whole OTel model, a **Prometheus** text-exposition
+**connector** that deliberately does not, and **OTLP/JSON**, the native wire the
+model was adopted for, which loses nothing. All three are registered to
+**stderr** on import (ADR 0030); the OTLP/**HTTP** emitter is constructed
+explicitly and never registered. Stdlib-only, cross-OS. ADR 0027 / ADR 0044 /
+ADR 0048. Emits core sentinels `0.2.9.*` and owns block `0.3.45.*` for what a
+wire format refuses.
 
 Instruments are keyed by name **and typed attribute set** — one name plus one
 attribute set is one **series** — with a per-name cardinality bound that folds
@@ -30,8 +33,13 @@ the excess into a single aggregated overflow series.
 | `gauge.go` | `memGauge` (atomic float64 bits, CAS) |
 | `histogram.go` | `memHistogram` (sorted bounds + atomic counts/sum, delta-consuming snapshot) |
 | `exporter_text.go` | `textExporter` + default **stderr** `Text` + `NewTextExporter` |
+| `exporter_otlpjson.go` | `EncodeOTLPJSON` (the ENCODER — snapshot to bytes, no I/O) + the proto3-JSON scalar types (`otlpInt64`/`otlpUint64`/`otlpDouble`) + the two refusals + `otlpJSONExporter` + default **stderr** `OTLPJSON` + `NewOTLPJSONExporter` |
+| `otlp_request.go` | the OTLP payload TREE — a Go mirror of the four `.proto` files, in schema field-number order, restricted to the fields this SDK produces |
+| `exporter_otlphttp.go` | the EMITTER, and the only `net/http` in this package: `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPMetricsPath` + `DefaultOTLPTimeout`/`DefaultOTLPMaxResponseBytes` + endpoint refusal + response classification |
+| `otlphttp_config.go` | `OTLPHTTPConfig` (endpoint, client, headers, timeout, response cap) |
+| `otlp_export_response.go` | `ExportMetricsServiceResponse` + `ExportMetricsPartialSuccess` + `otlpLenientInt64`, the number-OR-string 64-bit decoder the specification requires |
 | `exporter_prometheus.go` | `prometheusExporter` + default **stderr** `Prometheus` + `NewPrometheusExporter` + the two name grammars |
-| `codes.go` / `errors.go` | `0.3.45.*` (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY) |
+| `codes.go` / `errors.go` | `0.3.45.*` (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY, OTLP_UNRESOLVED_TEMPORALITY, OTLP_INVALID_BUCKET_LAYOUT, OTLP_ENDPOINT_INVALID, OTLP_EXPORT_REJECTED, OTLP_EXPORT_UNAVAILABLE, OTLP_PARTIAL_SUCCESS) |
 
 ## Series identity
 
@@ -315,6 +323,202 @@ Each row below has an executable test.
 | **OTel-conventional attribute KEYS** | `http.request.method` is **REFUSED** by name (`INVALID_LABEL_NAME`) | the sharpest consequence of adopting the model: the dotted spelling is what the semantic conventions specify, and this wire cannot carry it. The refusal is loud and deterministic — a key is a literal at the call site — which is the whole reason refusing beats mangling |
 | **Exemplars** | none | the SDK produces none at all (ADR 0044 §Deferred): no tracing domain, so no span id to attach |
 
+## The OTLP/JSON encoder
+
+Reference: the OTLP specification (<https://opentelemetry.io/docs/specs/otlp/>),
+§JSON Protobuf Encoding for the encoding rules and §OTLP/HTTP Request for the
+path and content type; `opentelemetry/proto/{metrics,common,resource}/v1/*.proto`
+and `collector/metrics/v1/metrics_service.proto` for the shapes and field
+numbers. Everything below is those documents. ADR 0048.
+
+This is the wire the data model was adopted for, and unlike the Prometheus
+connector it is **lossless**: temporality, the attribute's type, the `Resource`
+and the `Scope` all travel.
+
+`EncodeOTLPJSON(SnapshotValue) ([]byte, error)` is the encoder and does no I/O
+at all — it returns exactly the body of a POST to `/v1/metrics`. That is the
+whole boundary between the two surfaces: an encoding defect and a network defect
+are never the same investigation, and the conformance test needs no server.
+
+**The mapping is a walk, not a reconstruction**, which is what ADR 0044
+§Decision 9 shaped `SnapshotValue` for. Sums, then gauges, then histograms, each
+in ascending name order — the same walk the text exporter takes, so the document
+renders byte-identically twice in a row. The two single-element levels
+(`resourceMetrics[0]`, `scopeMetrics[0]`) are single because one Meter has one
+Resource and one Scope. `Counts` rides through unchanged: the snapshot is
+already **per bucket**, which is what `bucketCounts` wants — the conversion the
+Prometheus connector has to do does not exist here.
+
+**Four protobuf-JSON rules, each of which is invisible until a receiver drops
+the payload.** OTLP/JSON is protobuf-JSON, not "the obvious JSON for this
+struct":
+
+| Rule | Consequence of getting it wrong |
+|---|---|
+| Field names are **lowerCamelCase** (`dataPoints`, `startTimeUnixNano`) | a receiver MUST ignore unknown fields, so a snake_case payload arrives as an empty request and is **accepted** |
+| 64-bit integers are **decimal strings** — `"4200"`, not `4200` — and either form is accepted on decode | a JSON number is a double in most parsers: a counter past 2⁵³ silently loses its low bits |
+| Enums are **integers**. This is OTLP *overriding* generic proto3 JSON, which uses names | `"AGGREGATION_TEMPORALITY_DELTA"` is an unknown value and reads as UNSPECIFIED |
+| A receiver MUST ignore unknown fields | applies to us as a receiver too — the collector's response is parsed leniently |
+
+`AGGREGATION_TEMPORALITY_UNSPECIFIED = 0`, `DELTA = 1`, `CUMULATIVE = 2`, from
+`metrics.proto`.
+
+**Field order inside each message is the schema's FIELD-NUMBER order.**
+protobuf-JSON imposes none, so any order is valid; field-number order is used
+because it is *derivable from the document*, which is what makes the expected
+bytes in the tests checkable against the `.proto` field by field rather than
+against taste. The visible evidence that the order came from the schema:
+`NumberDataPoint` puts `attributes` **after** the value, because it is field 7 —
+it replaced a `labels` field that used to sit at 1.
+
+**Three fields are emitted at their zero, because presence is the meaning.**
+proto3-JSON says a serializer *should* omit a default-valued field; these three
+are exceptions and each has a reason:
+
+- **`asInt` / `asDouble`** are `oneof` members, which have explicit presence.
+  Omitted, the data point selects no case at all — a counter sitting at 0 would
+  encode as a point with no value.
+- **`sum` on a histogram point** is declared `optional double`. Present-and-zero
+  means the observations summed to zero; absent means no sum was recorded. This
+  SDK always has one, so it is a pointer in the Go shape and always emitted.
+- **`isMonotonic`** would legitimately be omitted when false, and is emitted
+  anyway. It is the one field that tells a Counter from an UpDownCounter, and a
+  field that vanishes exactly when it carries the surprising answer is one a
+  reader cannot trust.
+
+Everything the SDK does not produce is **absent**, not blank: `description`,
+`unit`, `schemaUrl`, `flags`, `exemplars`, `droppedAttributesCount`, histogram
+`min`/`max`, an empty `attributes` array, an absent scope `version` (rule 5).
+
+**Two refusals, both structural.** Each aborts the whole document before a byte
+is produced, for the reason the Prometheus connector aborts on a bad name: a
+truncated payload is not a payload, and a receiver would reject the request
+rather than the series that could not be spelled.
+
+| Refusal | Why the wire cannot carry it |
+|---|---|
+| `OTLP_UNRESOLVED_TEMPORALITY` (`0.3.45.5`) — a temporality that is neither delta nor cumulative | the schema's own comment reads "UNSPECIFIED is the default AggregationTemporality, it MUST not be used". A receiver handed 0 drops the metric or guesses which window the number covers, and guessing is the failure ADR 0044 exists to prevent. A Meter resolves the knob at construction, so this is reachable only from a hand-built or cast snapshot — it fails on the first export or never |
+| `OTLP_INVALID_BUCKET_LAYOUT` (`0.3.45.6`) — counts not one longer than the bounds, or bounds that are non-finite or not strictly increasing | both invariants are stated in `metrics.proto`. A non-finite bound breaks the second by construction: the bucket above the last declared bound is *already* `(bound, +infinity)`, so declaring `+Inf` forges a second, permanently empty bucket over the same range, and `NaN` is not an ordering. `Meter.Histogram` takes bounds from the caller and does not dedupe them, so all three are reachable |
+
+**The Prometheus connector SKIPS a non-finite bound; this one refuses.** That is
+not an inconsistency: there, `le="+Inf"` is already a mandatory separate line, so
+skipping costs nothing. Here, skipping would break
+`len(bucketCounts) == len(explicitBounds) + 1`, i.e. it would produce a malformed
+payload rather than a merely lossy one.
+
+**Non-finite doubles are named, not fatal.** `encoding/json` refuses `NaN` and
+`±Inf` outright; proto3-JSON spells them `"NaN"`, `"Infinity"`, `"-Infinity"`. A
+gauge is whatever was sampled, so a NaN reading must not fail an entire export.
+Finite values render shortest-round-trip (`'g'`, `-1`), every form of which is a
+valid JSON number — including the exponent notation `1e+21`.
+
+**HTML escaping is OFF.** `encoding/json` escapes `<`, `>` and `&` into their
+`\u00xx` forms by default, a defence for JSON embedded in a `<script>` element.
+An OTLP body never is, and OTel-conventional attributes carry URLs (`url.full`,
+`http.route`) whose query separator is exactly `&`. `json.Encoder` is the only
+way to turn it off, and it appends a newline a single-document body must not
+carry — hence `marshalOTLPJSON`.
+
+**An unset `time.Time` encodes as 0**, and the guard is load-bearing rather than
+defensive noise: `UnixNano`'s result is documented as *undefined* out of range,
+and the zero `Time` returns `-6795364578871345152`, which cast to a `uint64`
+nanosecond timestamp reads as the year 2339. Zero is what the schema means by an
+unknown timestamp; a plausible wrong date is what no dashboard can detect. A
+test asserts the garbage value never appears.
+
+**The writer-bound exporter terminates each document with a newline**, so a
+stream of exports is NDJSON. `EncodeOTLPJSON` does not — an HTTP body is one
+document.
+
+## The OTLP/HTTP emitter
+
+`exporter_otlphttp.go` is the only file in this package that imports `net/http`.
+It calls `EncodeOTLPJSON` and adds transport, nothing else.
+
+It is **never registered**. The registry is reached by importing a package, and
+arming a *network client* from an import is a step past the hazard ADR 0030
+already refuses: there is no endpoint that could be a correct default, and a
+wrong one turns every `Export` into a POST at whatever answers on that address.
+A test asserts no OTLP/HTTP exporter appears in `AvailableExporters()`.
+
+**The endpoint is a full URL used as-is** — no path is appended, no scheme
+guessed — which mirrors the specification's own per-signal endpoint variable.
+It is refused at construction (`OTLP_ENDPOINT_INVALID`, `0.3.45.7`) when it is
+not absolute `http(s)` with a host and a non-root path. The path check earns its
+keep: a bare `http://collector:4318` **connects**, answers 404, and looks
+exactly like a collector that is up. Refusing at wiring is strictly earlier than
+refusing at the first scrape, and — unlike the `resilience` constructors — no
+published signature forces the refusal to be deferred into an always-failing
+value, so the constructor returns `(Exporter, error)`.
+
+**Bounds, in both directions that matter.**
+
+| | |
+|---|---|
+| Round trip | `DefaultOTLPTimeout` = 10 s, the value the OpenTelemetry protocol exporter specification defaults `OTEL_EXPORTER_OTLP_TIMEOUT` to. Non-positive **clamps**; there is no "no timeout" setting, because a stalled collector must never wedge the scraping goroutine (ADR 0031) |
+| Response body | read through `io.LimitReader` (`DefaultOTLPMaxResponseBytes`, 1 MiB). It is the one length a REMOTE party controls in this exchange |
+| Request body | deliberately **not** capped: its size is a property of the caller's own cardinality, any SDK-chosen ceiling would be arbitrary, and the collector answers 413 for one it will not take |
+| Redirects | refused with `http.ErrUseLastResponse` (CWE-918). A 30x would otherwise bounce the POST — `Authorization` header included — at whatever host the response names, past an allowlist that only saw the configured endpoint. The unfollowed 30x is classified as a permanent rejection, which is what a misconfigured endpoint is |
+| A caller-supplied `http.Client` | used **as-is**, deadline and redirect policy included. It is the seam for a proxy, an mTLS identity or an SSRF allowlist, and second-guessing it would defeat the seam |
+
+**It does not retry, and that is a decision.** The specification asks a client to
+honour `Retry-After` and otherwise back off exponentially;
+`internal/service/resilience` already ships that policy, and a backoff hidden
+inside `Export` would be a second one a caller cannot see, tune or cancel — with
+no `context` to cancel it with. What this exporter supplies instead is the
+**classification** a retry policy needs, in exactly the shape
+`resilience.RetryConfig.Retryable` wants:
+
+```go
+resilience.NewRetry(resilience.RetryConfig{
+    MaxAttempts: 3,
+    BaseDelay:   time.Second,
+    Retryable:   metrics.OTLPRetryable,
+})
+```
+
+**Three verdicts, from the specification's own sections.**
+
+| Response | Verdict | Retryable | Section |
+|---|---|---|---|
+| 2xx, `partialSuccess` unset or zero | `nil` | — | Full Success |
+| 2xx, `rejectedDataPoints != 0` | `OTLP_PARTIAL_SUCCESS` (`0.3.45.10`) | **no** | Partial Success — "the client MUST NOT retry" |
+| 429 / 502 / 503 / 504 | `OTLP_EXPORT_UNAVAILABLE` (`0.3.45.9`) | yes | Retryable Response Codes |
+| any other 4xx/5xx, and an unfollowed 3xx | `OTLP_EXPORT_REJECTED` (`0.3.45.8`) | no | Failures — "all other 4xx or 5xx … MUST NOT be retried" |
+| transport fault, no response | `OTLP_EXPORT_UNAVAILABLE` | yes | All Other Responses — "the client SHOULD retry" |
+
+The retryable set is spelled out rather than derived from the status class,
+because **5xx is not retryable as a class**: a 500 or a 501 means the same
+request will fail the same way. Both halves have a test.
+
+- **A partial success is an ERROR.** The status was 200 and data was lost.
+  Returning `nil` would report a success that did not fully happen, on every
+  scrape.
+- **An unparseable 2xx body is a SUCCESS.** The 200 already said the request was
+  accepted; turning a malformed or proxied response into a lost-data verdict
+  would invent a failure forever. It is also the posture the specification asks
+  a receiver to take in the other direction.
+- **`rejectedDataPoints` decodes from a number OR a string** (`otlpLenientInt64`),
+  because the specification says either is accepted on decode and collectors
+  differ. A decoder that read one form would silently read every partial success
+  as a full one against the other kind.
+
+**Nothing untrusted is echoed.** The collector's `errorMessage` is decoded into
+the response shape and deliberately **not** attached to the error: it is
+unbounded remote-controlled text and an `errs` Field goes straight into
+structured logs. The rejected COUNT is what an operator alerts on. `Retry-After`
+is surfaced only in its **delta-seconds** form — converting an HTTP-date means
+comparing the collector's clock to ours, which is the sort of quiet assumption
+that surfaces months later as a retry storm. The endpoint never reaches a
+rendered message: a transport cause is wrapped (so it stays reachable through
+`errors.Unwrap`), and `errs` renders the Public string only, so the `*url.Error`
+does not leak into a log line.
+
+**Headers are set before `Content-Type`**, so the specification's
+`application/json` always wins and a caller cannot mislabel the body by
+accident. Header values are secrets: written, never read back, never echoed. The
+map is cloned at construction so a later caller mutation cannot change the wire.
+
 ## Conventions
 
 - **Lock-free instruments.** The meter takes only the READ lock to resolve an
@@ -354,19 +558,31 @@ Each row below has an executable test.
   under delta temporality and a mutation under any temporality once an
   observable is registered.
 - **Registration via `var Text = metrics.RegisterExporter(...)`** (and
-  `var Prometheus = …`) — no `init()`.
-- **Both registered defaults write to `os.Stderr`** (ADR 0030). Importing a
+  `var Prometheus = …`, `var OTLPJSON = …`) — no `init()`.
+- **An OTLP surface never touches the observation path.** `EncodeOTLPJSON`
+  builds a message tree and hands it to `encoding/json`; that is fine because an
+  export is a SCRAPE-rate operation, while the allocation budget this package
+  defends is per OBSERVATION. Do not "optimise" the encoder by hand-appending
+  bytes — the escaping `encoding/json` gets right for free is a correctness
+  property (an attribute value is data), and there is no measurement asking for
+  the trade.
+- **All three registered defaults write to `os.Stderr`** (ADR 0030). Importing a
   package must not arm a writer on a stream the process may be using as a
   protocol channel; stdout is reachable only by asking for it explicitly with
   `NewTextExporter(name, os.Stdout)`. The temptation is stronger for the
   Prometheus exporter — an exposition document *looks* like something a caller
   wants on stdout — but a scrape endpoint hands the exporter its
   `http.ResponseWriter` and never touches the registered default, so nothing is
-  gained by making the import dangerous. One regression test per surface.
-- **Both exporters escape STRING attribute values** (`\\`, `\"`, `\n`) through
-  the shared `appendEscapedValue`. A value is data; unescaped, one containing a
+  gained by making the import dangerous. One regression test per surface. The
+  OTLP/HTTP emitter goes one step further and is **not registered at all**: an
+  import that arms a network client is worse than one that arms a writer,
+  because there is no endpoint that could be a correct default.
+- **The two TEXT exporters escape STRING attribute values** (`\\`, `\"`, `\n`)
+  through the shared `appendEscapedValue`; the OTLP encoder does not need it,
+  because `encoding/json` owns JSON string escaping and doing it twice would
+  double every backslash on the wire. A value is data; unescaped, one containing a
   quote or a newline forges a line a reader parses as another series.
-- Cross-OS: 100 % portable (sync/atomic/math/strconv/time).
+- Cross-OS: 100 % portable (sync/atomic/math/strconv/time/encoding-json/net-http).
 
 ## Do NOT
 
@@ -394,10 +610,30 @@ Each row below has an executable test.
 - Grow `NewMeter` / `NewMeterWithConfig` past the inlining budget. See
   §Conventions.
 - Add an "unbounded" cardinality setting.
+- Register the OTLP/**HTTP** emitter, or give it a default endpoint. See
+  §The OTLP/HTTP emitter.
+- Retry inside `Export`. `resilience` owns backoff; this package classifies
+  (`OTLPRetryable`). A hidden loop cannot be tuned or cancelled by the caller
+  who owns the scrape, and `Export` has no `context` to cancel it with.
+- Emit `AGGREGATION_TEMPORALITY_UNSPECIFIED` (0). The schema says it MUST NOT be
+  used; the encoder refuses instead.
+- Emit an enum by NAME, or a 64-bit integer as a JSON number. OTLP/JSON forbids
+  the first outright, and the second loses the low bits of anything past 2⁵³.
+- Omit `asInt`/`asDouble`, the histogram `sum`, or `isMonotonic` when they hold
+  their zero. Presence is the meaning — see §The OTLP/JSON encoder.
+- Skip a non-finite histogram bound the way the Prometheus connector does. It
+  breaks `len(bucketCounts) == len(explicitBounds) + 1`.
+- Turn HTML escaping back on in the OTLP encoder, or reach for `json.Marshal`
+  instead of the configured `json.Encoder`.
+- Attach a collector's `errorMessage`, a `Retry-After` HTTP-date, or the
+  endpoint to an error. All three are remote-controlled or secret; a Field goes
+  into structured logs.
 
 ## Verification
 
 ```
 bazel test --config=race //internal/service/metrics:metrics_test
 bazel test --config=alloc //internal/service/metrics:metrics_test   # the !race alloc gates
+# Fallback (no Bazel):
+cd internal/service && GOWORK=off go test -race ./metrics/...
 ```

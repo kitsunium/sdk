@@ -27,4 +27,40 @@ var (
 	UnsupportedTemporality = errs.Define(CodeUnsupportedTemporality, "UNSUPPORTED_TEMPORALITY",
 		"The Prometheus exposition format carries cumulative metrics only",
 		"service/metrics: the text exposition format has no temporality field and the server reads every counter as cumulative; build the meter with TemporalityCumulative for this exporter")
+
+	// OTLPUnresolvedTemporality is returned when a snapshot's temporality has
+	// no OTLP enum value.
+	OTLPUnresolvedTemporality = errs.Define(CodeOTLPUnresolvedTemporality, "OTLP_UNRESOLVED_TEMPORALITY",
+		"That aggregation temporality has no OTLP representation",
+		"service/metrics: the OTLP AggregationTemporality enum spells only delta (1) and cumulative (2); UNSPECIFIED is documented as MUST NOT be used, so a Meter resolves the knob at construction and a hand-built snapshot must too")
+
+	// OTLPInvalidBucketLayout is returned when a histogram point's buckets
+	// cannot be spelled as explicit_bounds plus bucket_counts.
+	OTLPInvalidBucketLayout = errs.Define(CodeOTLPInvalidBucketLayout, "OTLP_INVALID_BUCKET_LAYOUT",
+		"That histogram's buckets have no OTLP representation",
+		"service/metrics: OTLP requires bucket_counts to be one longer than explicit_bounds and explicit_bounds to be strictly increasing and finite; the bucket above the last declared bound is already the +Inf overflow")
+
+	// OTLPEndpointInvalid is returned by NewOTLPHTTPExporter when the
+	// configured endpoint cannot be a metrics collector URL.
+	OTLPEndpointInvalid = errs.Define(CodeOTLPEndpointInvalid, "OTLP_ENDPOINT_INVALID",
+		"The OTLP endpoint is not an absolute http or https URL with a path",
+		"service/metrics: OTLP/HTTP takes a full URL used as-is, so it must carry the signal path (metrics.OTLPMetricsPath); a bare host would POST to the root and collect 404s")
+
+	// OTLPExportRejected is returned when a collector refuses the payload with
+	// a status the specification marks non-retryable.
+	OTLPExportRejected = errs.Define(CodeOTLPExportRejected, "OTLP_EXPORT_REJECTED",
+		"The OTLP collector rejected the metrics payload",
+		"service/metrics: the collector answered a 4xx/5xx outside the retryable set, so the same bytes will fail again; check the payload, the headers and the collector's own logs")
+
+	// OTLPExportUnavailable is returned when an OTLP/HTTP export fails in a way
+	// the specification says may be retried.
+	OTLPExportUnavailable = errs.Define(CodeOTLPExportUnavailable, "OTLP_EXPORT_UNAVAILABLE",
+		"The OTLP collector is unreachable or overloaded",
+		"service/metrics: a transport fault or one of HTTP 429/502/503/504; compose resilience.NewRetry with Retryable: metrics.OTLPRetryable rather than looping here")
+
+	// OTLPPartialSuccess is returned when a collector accepts the request but
+	// rejects some of its data points.
+	OTLPPartialSuccess = errs.Define(CodeOTLPPartialSuccess, "OTLP_PARTIAL_SUCCESS",
+		"The OTLP collector accepted the request but rejected some data points",
+		"service/metrics: the response carried partialSuccess.rejectedDataPoints; the specification forbids retrying it, so the rejected points are lost and the cause is at the collector")
 )
