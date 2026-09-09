@@ -20,6 +20,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `config/` | Configuration (ADR 0028): generic `Load[T]` merging `EnvSource`/`FileSource` (later wins) + decode + `Validator`; `PollWatcher` cross-OS hot-reload; stdlib-only | `pkg/v1/config/README.md` |
 | `scheduler/` | Time-driven execution (ADR 0041): `Parse`/`ParseInLocation` (five-field POSIX cron, UTC by default) + `Every` + `New` → a `Scheduler` you `Add` to and `Run`; `Job`/`Schedule`/`Entry`/`Result`/`Config` aliases; every construct outside the subset refused BY NAME at construction; DST, missed deadlines and overlap documented rather than emergent; stdlib-only, cross-OS | `pkg/v1/scheduler/README.md` |
 | `token/` | Security tokens (ADR 0042): JWT over JWS Compact Serialization + PASETO v4.public. One constructor per algorithm — `NewHS256Verifier` takes a `crypto.Key`, `NewES256Verifier` an `*ecdsa.PublicKey` — so algorithm confusion is a call that does not compile; `alg:none` has no representation in `Algorithm`; `exp` is required unless opted out by name; `NewSetVerifier` selects by `kid` from a JWK Set and resolves a duplicated one by signature. `Claims` prints its shape, never its values. stdlib-only | `pkg/v1/token/README.md` |
+| `validation/` | Value validation (ADR 0046): `Constraint`/`Violation`/`Report` aliases + `All`/`First`/`Field`/`Each`/`Check`/`Must`, the built-ins (`Required`/`AtLeast`/`AtMost`/`Between`/`Length`/`Count`/`OneOf`/`Matches`) and `Struct[T]` — the struct-tag front end whose plan is cached per type. A violation says WHERE in one path grammar (`JoinField`/`JoinIndex`, json-tag member names); every violation is collected by default; neither `Violation` nor `Report` is an `error` (`Report.Err()` converts and returns a genuine nil); a message never echoes the value. Feeds `config.Validator` without replacing it. stdlib-only | `pkg/v1/validation/README.md` |
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -80,3 +81,5 @@ GOWORK=off go test -race -cover ./v1/...
 - `metrics/` — see `pkg/v1/metrics/CLAUDE.md`
 - `config/` — see `pkg/v1/config/CLAUDE.md`
 - `scheduler/` — see `pkg/v1/scheduler/CLAUDE.md`
+- `token/` — see `pkg/v1/token/CLAUDE.md`
+- `validation/` — see `pkg/v1/validation/CLAUDE.md`
