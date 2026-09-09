@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-03T00:00:00Z -->
+<!-- updated: 2026-09-09T00:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -138,6 +138,23 @@ Two things about it were got wrong first and are worth keeping wrong-proof:
 - **`Shutdown` stops the embedded `http.Server` before draining.** Without it an
   idle keep-alive connection holds `ServeConn` open for the whole drain budget;
   `TestHTTPAdapterDrainsOnShutdown` fails if the drain takes more than 3s.
+- **The adapter publishes a drain signal, because stopping `http.Server` is not
+  enough for a request that never ends.** `http.Server.Shutdown` waits for
+  in-flight requests, and an event stream or a long poll never becomes idle, so
+  it held the drain for the caller's ENTIRE budget and was then killed by having
+  its socket severed — `DRAIN_TIMEOUT` on every deploy, for every connected
+  client, with no chance for the handler to stop cleanly. Measured before the
+  fix: a five-second budget cost five seconds and returned an error; after: 40 ms
+  and a clean drain. `stop()` closes `a.draining` FIRST — before the bridge
+  closes and before `http.Server.Shutdown` starts waiting — and `BaseContext`
+  puts that channel on every request context, where `corenet.DrainSignal` reads
+  it. The open-stream cases of `TestHTTPAdapterDrainsOnShutdown` are the
+  regression guard, and they have been mutation-checked: suppressing the close
+  restores the budget-length `DRAIN_TIMEOUT`.
+- **The request context is deliberately NOT cancelled to say it.** Cancelling it
+  would tell every handler to abandon the response it is halfway through, which
+  is precisely what the drain exists to let them finish. The signal is a context
+  VALUE, so it is additive: a handler that ignores it behaves exactly as before.
 
 ## Sharded accept
 

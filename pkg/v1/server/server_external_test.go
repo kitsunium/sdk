@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/pkg/v1/server"
+	"github.com/kitsunium/sdk/pkg/v1/server/sse"
 	"github.com/kitsunium/sdk/pkg/v1/tlsid"
 )
 
@@ -684,30 +685,38 @@ func TestHTTPAdapterOverTLS(t *testing.T) {
 	}
 }
 
-// TestHTTPAdapterDrainsOnShutdown pins that an idle keep-alive connection does
-// not hold the drain open for its whole budget. Without the adapter shutting
-// its http.Server down, ServeConn would sit waiting on a connection that may
-// never see another request.
+// TestHTTPAdapterDrainsOnShutdown pins that a connection nobody is going to
+// finish does not hold the drain open for its whole budget.
+//
+// Two shapes cause that, and they need different mechanisms. An IDLE KEEP-ALIVE
+// is one net/http can release itself, which is why the adapter shuts its
+// http.Server down before draining. An OPEN EVENT STREAM is one nothing can
+// release from outside: http.Server.Shutdown waits for in-flight requests, and
+// a request that never ends never becomes idle. Measured before the drain
+// signal existed, an open stream held Shutdown for the caller's entire budget
+// and was then killed by having its socket severed — DRAIN_TIMEOUT on every
+// deploy, for every connected client, with no chance for the handler to stop
+// cleanly. The signal (server.DrainSignal, watched by sse.Stream) is what turns
+// that into the sub-second clean drain asserted here.
 func TestHTTPAdapterDrainsOnShutdown(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
 		//: how many idle keep-alive connections are left open at shutdown.
 		idleConns int64
+		//: how many endless event streams are still being written at shutdown.
+		openStreams int64
 	}
 	tests := []tc{
-		{"one idle keep-alive", 1},
-		{"three idle keep-alives", 3},
+		{name: "one idle keep-alive", idleConns: 1},
+		{name: "three idle keep-alives", idleConns: 3},
+		{name: "one open event stream", openStreams: 1},
+		{name: "three open event streams", openStreams: 3},
+		{name: "idle keep-alives beside open streams", idleConns: 2, openStreams: 2},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		mux := http.NewServeMux()
-		mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-			if _, err := io.WriteString(w, "ok"); err != nil {
-				t.Errorf("write: %v", err)
-			}
-		})
-		srv, base := startHTTP(t, mux)
+		srv, base := startHTTP(t, streamingMux(t))
 
 		//: a client per connection: one transport pools, and would give us one
 		//: idle connection however many requests we made.
@@ -722,8 +731,13 @@ func TestHTTPAdapterDrainsOnShutdown(t *testing.T) {
 			}
 			closeOrFail(t, resp.Body)
 		}
-		//: the connections are now idle but still open, held by keep-alive.
-		waitFor(t, func() bool { return srv.State().ActiveConns == c.idleConns })
+		//: each stream stays open, with its handler still running, until the
+		//: shutdown below tells it to stop.
+		for range c.openStreams {
+			openStream(t, base)
+		}
+		//: idle keep-alives and live streams both count as active connections.
+		waitFor(t, func() bool { return srv.State().ActiveConns == c.idleConns+c.openStreams })
 
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
@@ -731,10 +745,10 @@ func TestHTTPAdapterDrainsOnShutdown(t *testing.T) {
 		if serr := srv.Shutdown(ctx); serr != nil {
 			t.Fatalf("shutdown reported %v, want a clean drain", serr)
 		}
-		//: a drain that took the whole budget means the keep-alive was never
-		//: released, which is the bug this test exists to catch.
+		//: a drain that took the whole budget means nothing released the
+		//: connection, which is the bug this test exists to catch.
 		if elapsed := time.Since(started); elapsed > 3*time.Second {
-			t.Fatalf("drain took %v — the idle keep-alive was not released", elapsed)
+			t.Fatalf("drain took %v — the connection was never released", elapsed)
 		}
 		if phase := srv.State().Phase; phase != server.PhaseStopped {
 			t.Errorf("phase = %v, want stopped", phase)
@@ -745,6 +759,239 @@ func TestHTTPAdapterDrainsOnShutdown(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// TestDrainSignalReachesAPlainHTTPHandler pins the mechanism underneath the
+// event stream, without an event stream in sight.
+//
+// Any handler that holds a connection open indefinitely — a long poll, a hand
+// rolled chunked feed — has the same problem and gets the same answer: a
+// channel on the request context, closed when the server starts draining. The
+// two assertions that matter are that it is NOT nil inside a handler on this
+// engine (a nil would make every select silently never fire) and that the
+// request context is NOT cancelled to deliver it, because cancelling would tell
+// every handler to abandon the response the drain exists to let it finish.
+func TestDrainSignalReachesAPlainHTTPHandler(t *testing.T) {
+	t.Parallel()
+	live := make(chan struct{})
+	//: what the handler observed, read only after the drain has completed.
+	var ctxCancelledBeforeSignal bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/hold", func(w http.ResponseWriter, r *http.Request) {
+		draining := server.DrainSignal(r.Context())
+		if draining == nil {
+			t.Errorf("DrainSignal() = nil inside a handler on this engine")
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Errorf("the adapter's ResponseWriter is not an http.Flusher")
+			return
+		}
+		//: headers out now, so the client knows the handler is running.
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+		close(live)
+		<-draining
+		//: the drain must not have been delivered by cancelling the request.
+		ctxCancelledBeforeSignal = r.Context().Err() != nil
+	})
+	srv, base := startHTTP(t, mux)
+
+	resp, err := (&http.Client{Transport: &http.Transport{}}).Get(base + "/hold")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer closeOrFail(t, resp.Body)
+	<-live
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	started := time.Now()
+	if serr := srv.Shutdown(ctx); serr != nil {
+		t.Fatalf("shutdown reported %v, want a clean drain", serr)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("drain took %v — the handler never saw the signal", elapsed)
+	}
+	if ctxCancelledBeforeSignal {
+		t.Errorf("the request context was already cancelled when the signal arrived")
+	}
+}
+
+// TestHTTPStreamsReachTheClientBeforeTheHandlerReturns pins the property every
+// streaming format on this engine depends on: the response is FLUSHED per
+// event.
+//
+// Without a flush the frames accumulate in the transport buffer and arrive when
+// the handler returns — which for an event stream is never, so the client sits
+// on an open connection receiving nothing while the server believes it is
+// working. The test proves it by making the handler's progress depend on the
+// client having already received the first event: the handler cannot send the
+// second until the test, having read the first, unblocks it. Buffered, this
+// deadlocks; flushed, it passes in milliseconds.
+func TestHTTPStreamsReachTheClientBeforeTheHandlerReturns(t *testing.T) {
+	t.Parallel()
+	received := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
+		stream, err := sse.New(w, r, sse.WithoutKeepAlive())
+		if err != nil {
+			t.Errorf("sse.New: %v", err)
+			return
+		}
+		defer closeOrFail(t, stream)
+		if serr := stream.Send(sse.Event{ID: "1", Name: "tick", Data: "first"}); serr != nil {
+			t.Errorf("send first: %v", serr)
+			return
+		}
+		select {
+		//: the client has the first event, so the flush reached the wire.
+		case <-received:
+		case <-time.After(5 * time.Second):
+			t.Errorf("the client never received the first event — it was buffered, not flushed")
+			return
+		}
+		if serr := stream.Send(sse.Event{ID: "2", Name: "tick", Data: "second"}); serr != nil {
+			t.Errorf("send second: %v", serr)
+		}
+	})
+	_, base := startHTTP(t, mux)
+
+	client := &http.Client{Transport: &http.Transport{}}
+	resp, err := client.Get(base + "/stream")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer closeOrFail(t, resp.Body)
+	if got := resp.Header.Get("Content-Type"); got != sse.ContentType {
+		t.Fatalf("Content-Type = %q, want %q", got, sse.ContentType)
+	}
+	reader := bufio.NewReader(resp.Body)
+	if got := readFrame(t, reader); got != "id: 1\nevent: tick\ndata: first\n\n" {
+		t.Fatalf("first frame = %q", got)
+	}
+	close(received)
+	if got := readFrame(t, reader); got != "id: 2\nevent: tick\ndata: second\n\n" {
+		t.Fatalf("second frame = %q", got)
+	}
+}
+
+// TestSSEStreamResumesFromTheClientCursor pins the reconnection contract: the
+// SDK reads Last-Event-ID and hands it to the handler, and replays nothing
+// itself. Resuming is the application's decision because only it knows what an
+// id means and whether replaying an event is safe.
+func TestSSEStreamResumesFromTheClientCursor(t *testing.T) {
+	t.Parallel()
+	seen := make(chan string, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
+		stream, err := sse.New(w, r, sse.WithoutKeepAlive())
+		if err != nil {
+			t.Errorf("sse.New: %v", err)
+			return
+		}
+		defer closeOrFail(t, stream)
+		seen <- stream.LastEventID()
+		//: echo the cursor back so the handler's own resume is observable.
+		if serr := stream.Send(sse.Event{ID: "next", Data: "resumed from " + stream.LastEventID()}); serr != nil {
+			t.Errorf("send: %v", serr)
+		}
+	})
+	_, base := startHTTP(t, mux)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/stream", nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set(sse.LastEventIDHeader, "cursor-42")
+	resp, gerr := (&http.Client{Transport: &http.Transport{}}).Do(req)
+	if gerr != nil {
+		t.Fatalf("do: %v", gerr)
+	}
+	defer closeOrFail(t, resp.Body)
+	if got := <-seen; got != "cursor-42" {
+		t.Fatalf("LastEventID() = %q, want cursor-42", got)
+	}
+	if got := readFrame(t, bufio.NewReader(resp.Body)); got != "id: next\ndata: resumed from cursor-42\n\n" {
+		t.Fatalf("frame = %q", got)
+	}
+}
+
+// streamingMux serves a plain response on "/" and an endless event stream on
+// "/stream". The stream ends only when the stream itself says so — the client
+// went away, or the server began draining — which is what makes it a fair test
+// of a connection nothing can finish from outside.
+func streamingMux(t *testing.T) *http.ServeMux {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		if _, err := io.WriteString(w, "ok"); err != nil {
+			t.Errorf("write: %v", err)
+		}
+	})
+	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
+		stream, err := sse.New(w, r, sse.KeepAlive(20*time.Millisecond))
+		if err != nil {
+			t.Errorf("sse.New: %v", err)
+			return
+		}
+		defer closeOrFail(t, stream)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			//: the peer is gone or the server is draining; either way, stop.
+			case <-stream.Done():
+				return
+			case <-ticker.C:
+				//: a failed send means the stream is over.
+				if serr := stream.Send(sse.Event{Data: "tick"}); serr != nil {
+					return
+				}
+			}
+		}
+	})
+	return mux
+}
+
+// openStream opens an event stream and reads its first frame, so the caller
+// knows the handler is running and the connection is live. The body is closed
+// when the test ends, not before.
+func openStream(t *testing.T, base string) {
+	t.Helper()
+	//: no client timeout: a timeout would cancel the request, which is exactly
+	//: the thing the drain is supposed to be the one to do.
+	resp, err := (&http.Client{Transport: &http.Transport{}}).Get(base + "/stream")
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	t.Cleanup(func() { closeOrFail(t, resp.Body) })
+	readFrame(t, bufio.NewReader(resp.Body))
+}
+
+// lineSource is the narrow half of *bufio.Reader that reading a frame needs.
+type lineSource interface {
+	// ReadString reads up to and including the first delim.
+	ReadString(delim byte) (string, error)
+}
+
+// readFrame reads one whole event-stream frame — everything up to and including
+// the blank line that terminates it.
+func readFrame(t *testing.T, reader lineSource) string {
+	t.Helper()
+	var frame strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read frame: %v", err)
+		}
+		frame.WriteString(line)
+		//: the blank line is the frame terminator.
+		if line == "\n" {
+			return frame.String()
+		}
 	}
 }
 
