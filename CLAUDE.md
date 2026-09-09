@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Ten domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (22 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout — ADR 0026), **metrics** (counter/gauge/histogram + exporter registry — ADR 0027), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
+Go SDK providing a normed, performant toolbox for downstream applications. Ten domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (22 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout — ADR 0026), **metrics** (counter/gauge/histogram + exporter registry — ADR 0027), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.27.0 (pinned in `MODULE.bazel`)
 
@@ -31,7 +31,8 @@ internal/
                            yaml)
                    proc   (cgroup, exec, reaper, rlimit, sdlisten,
                            sdnotify, signal)
-                   id     (uuidv4, uuidv7, ulid, snowflake)
+                   id     (uuidv4, uuidv7, ulid, snowflake, nanoid,
+                           ksuid, typeid)
                    transform
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
@@ -39,7 +40,7 @@ pkg/
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
     ├── codec/     (blank-imports all 14 service codecs + transform)
     ├── crypto/    (+ agree, hash, kdf, mac, password, sign)
-    ├── id/        (UUIDv4/v7, ULID, snowflake — ADR 0024)
+    ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024)
     └── proc/      (+ cgroup, process, reaper, rlimit, sdlisten,
                       sdnotify, signal)
 third-party/       opt-in vendor integrations (root module only)
@@ -161,7 +162,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0021 — BSON codec (M5) over `go.mongodb.org/mongo-driver/bson` in `internal/service/codec/bson` (library-backed codec precedent, not third-party quarantine); non-streaming + Appender; error block `0.3.36.*` — `docs/adr/0021-sdk-codec-bson.md`
 - ADR 0022 — HCL codec (M5) quarantined in `third-party/codec/hcl` (root module) because `hcl/v2` (via `x/tools`) would **introduce** `x/sys` — banned SDK-wide — into `internal/service`; the ADR's original "downgrades `x/sys`" wording is corrected by ADR 0034; opt-in, not in `pkg/v1/codec`; first `third-party/codec/` subtree; error block `0.3.37.*` — `docs/adr/0022-sdk-codec-hcl.md`
 - ADR 0023 — schema codecs (M6): opt-in under `third-party/codec/` (schema-bound, can't honour the universal round-trip contract); Protobuf concrete (`0.3.38.*`), Avro/Cap'n Proto deferred — `docs/adr/0023-sdk-schema-codecs.md`
-- ADR 0024 — identifier-generation domain (`id`): 7th core sibling, `Generator`/`Scheme` registry (UUIDv4/v7, ULID, snowflake), canonical-string output, stdlib-only/cross-OS; opens the Phase-B new-domain wave; error block `0.2.7.*`/`0.3.39.*` — `docs/adr/0024-sdk-id-domain.md`
+- ADR 0024 — identifier-generation domain (`id`): 7th core sibling, `Generator`/`Scheme` registry (UUIDv4/v7, ULID, snowflake), canonical-string output, stdlib-only/cross-OS; opens the Phase-B new-domain wave; error block `0.2.7.*`/`0.3.39.*`. Extended in place — NanoID, KSUID and TypeID ship in the same shape and the same `0.3.39.*` block; TypeID is constructor-only (no registered default prefix, ADR 0031) — `docs/adr/0024-sdk-id-domain.md`
 - ADR 0025 — generic LRU+TTL `Cache[K,V]` as a **kernel** primitive (`internal/kernel/cache`): domain-neutral, stdlib-only, reuses `clock` for testable TTL; `Fetch` (not `Get`) since a hit mutates LRU; no error codes; `pkg/v1/cache` aliases — `docs/adr/0025-sdk-cache-kernel.md`
 - ADR 0026 — reliability domain (`resilience`): 8th core sibling, **no registry** (concrete composable `Runner` policies — retry/circuit-breaker/rate-limit/bulkhead/timeout); error block `0.2.8.*` — `docs/adr/0026-sdk-resilience-domain.md`
 - ADR 0027 — observability domain (`metrics`): 9th core sibling, Counter/Gauge/Histogram + `Meter` + `Exporter` registry (writer-registry model); in-memory meter + stdlib text exporter; error block `0.2.9.*`; labels/Prometheus/OTLP deferred — `docs/adr/0027-sdk-metrics-domain.md`

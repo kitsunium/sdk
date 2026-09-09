@@ -6,16 +6,11 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
-const (
-	// ulidChars is the canonical ULID rendering length.
-	ulidChars int = 26
-	// bitsPerChar is the base32 group width (5 bits per Crockford char).
-	bitsPerChar int = 5
-	// ulidPadBits is the zero pad at the MSB: 26*5 - 16*8 = 130-128 = 2.
-	ulidPadBits int = ulidChars*bitsPerChar - uuidRawLen*bitsPerByte
-	// ulidAlphabet is Crockford base32 (excludes I, L, O, U).
-	ulidAlphabet string = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-)
+// ulidAlphabet is Crockford base32 (excludes I, L, O, U) in the UPPER case ULID
+// renders with — TypeID uses the same 32 symbols in lower case. The rendering
+// length is crockfordChars: a ULID is exactly the 128-bit Crockford packing
+// TypeID also uses, which is why both go through crockford32Encode.
+const ulidAlphabet string = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 // ULID is the registered ULID generator: a 48-bit ms timestamp + 80 random bits
 // rendered as 26 Crockford-base32 chars, lexically sortable by time.
@@ -45,31 +40,10 @@ func (ulidGen) New() (newID string, err error) {
 	return crockford32(b[:]), nil
 }
 
-// crockford32 renders the 16-byte big-endian value b as ulidChars Crockford
-// base32 characters, MSB-first with ulidPadBits zero pad bits at the top.
+// crockford32 renders the 16-byte big-endian value b as crockfordChars uppercase
+// Crockford base32 characters. The bit packing lives in crockford32Encode,
+// shared with TypeID.
 func crockford32(b []byte) string {
-	//: one output byte per base32 character.
-	var out [ulidChars]byte
-	//: walk each output character, most-significant group first.
-	for i := range ulidChars {
-		//: accumulate bitsPerChar bits into v, MSB-first.
-		v := 0
-		//: pull each of the 5 bits for this character.
-		for j := range bitsPerChar {
-			//: position within the zero-padded 130-bit space, then de-pad.
-			realIdx := i*bitsPerChar + j - ulidPadBits
-			//: pad bits (realIdx < 0) contribute a zero high bit.
-			bit := 0
-			//: real bits read MSB-first from the byte array.
-			if realIdx >= 0 {
-				bit = int((b[realIdx/bitsPerByte] >> (bitsPerByte - 1 - realIdx%bitsPerByte)) & 1)
-			}
-			//: shift the accumulator and OR in this bit.
-			v = v<<1 | bit
-		}
-		//: map the 5-bit group to its Crockford character.
-		out[i] = ulidAlphabet[v]
-	}
-	//: the assembled 26-char rendering.
-	return string(out[:])
+	//: ULID is the uppercase rendering of the shared 128-bit packing.
+	return crockford32Encode(b, ulidAlphabet)
 }
