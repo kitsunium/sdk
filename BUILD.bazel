@@ -19,6 +19,7 @@ filegroup(
     name = "audit_sources",
     srcs = [
         "go.work",
+        "//internal/core/cache:audit_srcs",
         "//internal/core/codec:audit_srcs",
         "//internal/core/config:audit_srcs",
         "//internal/core/crypto:audit_srcs",
@@ -42,6 +43,7 @@ filegroup(
         "//internal/kernel/recycler:audit_srcs",
         "//internal/kernel/ring:audit_srcs",
         "//internal/kernel/snapshot:audit_srcs",
+        "//internal/service/cache:audit_srcs",
         "//internal/service/codec/asn1:audit_srcs",
         "//internal/service/codec/baseenc:audit_srcs",
         "//internal/service/codec/bson:audit_srcs",
@@ -83,6 +85,7 @@ filegroup(
         "//internal/service/writer/journald:audit_srcs",
         "//internal/service/writer/nettransport:audit_srcs",
         "//internal/service/writer/rotfile:audit_srcs",
+        "//pkg/v1/cache:audit_srcs",
         "//pkg/v1/codec:audit_srcs",
         "//pkg/v1/config:audit_srcs",
         "//pkg/v1/errs:audit_srcs",
