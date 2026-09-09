@@ -1,7 +1,13 @@
 // Package resilience provides the concrete reliability policies (retry,
-// circuit-breaker, rate-limit, bulkhead, timeout) implementing
-// core/resilience.Runner. Each constructor returns a Runner; policies compose by
-// nesting. ADR 0026. Cross-OS: 100% portable (context, time, sync, atomic).
+// circuit-breaker, rate-limit, bulkhead, timeout, fallback, hedging)
+// implementing core/resilience.Runner. Each constructor returns a Runner;
+// policies compose by nesting. ADR 0026. Cross-OS: 100% portable (context,
+// time, sync, atomic).
+//
+// Hedging is the one policy that runs the Operation CONCURRENTLY with itself,
+// so it is correct only on an idempotent Operation; HedgeConfig.Idempotent
+// makes the caller say so in code (ADR 0031's rule applied to a precondition
+// the SDK cannot check).
 package resilience
 
 import (

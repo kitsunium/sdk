@@ -84,6 +84,41 @@ Two contracts were tightened during review, both before any release:
   two existing policies, not a new policy.)
 - Wait-mode (blocking) bulkhead/rate-limiter (v1 is reject-mode).
 - Half-open concurrency control (v1 admits HalfOpen trials without a probe cap).
+- **Adaptive concurrency (AIMD) and deadline propagation.** Both were examined
+  when `fallback`/`hedging` landed (below) and left out on purpose: each changes
+  what a policy may decide on the caller's behalf, and each needs measurement
+  rather than a plausible implementation. `MaxInFlight` is a *static* cap
+  deliberately — an adaptive one that shrinks under load is the AIMD design, and
+  choosing its constants without data is how a load-shedding mechanism becomes a
+  second outage.
+
+## Extension — `fallback` and `hedging` (Decision 2 now names seven policies)
+
+Two compositions landed after the original five, in the same shape (concrete
+`Runner`, no registry, same `0.2.8.*` block, no new range owner):
+
+- **`NewFallback`** runs a secondary `Operation` when the primary fails. A
+  successful fallback returns `nil` — that masking is the policy. When both
+  halves fail the result is the new `FallbackFailed` sentinel (`0.2.8.7`,
+  `EX_TEMPFAIL`) carrying BOTH messages as the `primary` and `fallback` fields:
+  returning either error alone makes the outcome undiagnosable, and promoting
+  either to the wrap origin would let an `*errs.Error` half hijack the policy
+  code (the rule `wrapAs` exists to enforce). A nil `Fallback` is refused
+  (ADR 0031).
+- **`NewHedge`** duplicates an `Operation` still outstanding after `Delay` and
+  takes the first success. It is the only policy that runs the operation
+  concurrently with itself, so it carries two obligations the others do not, and
+  ADR 0031's rule is applied to both: `Idempotent` is a **mandatory in-code
+  assertion** (the SDK cannot detect idempotence, and the symptom of getting it
+  wrong is a silent double effect, so a doc comment is the wrong instrument),
+  and `Delay` + `MaxInFlight` are **refused** rather than defaulted — a zero
+  delay duplicates every call, and both directions of a guessed cap are harmful
+  (too low is inert, too high is an amplifier). `MaxHedges` clamps to 1, which
+  is the contrast that locates the clamp/refuse line. Hedging fires on latency
+  only; reacting to a failure is `NewRetry`'s job, and reaching `MaxInFlight`
+  degrades the policy to no-hedging rather than to a rejection.
+
+Rationale in full: `internal/service/resilience/CLAUDE.md` §Fallback / §Hedging.
 
 ## References
 
