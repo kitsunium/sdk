@@ -279,12 +279,12 @@ func Test_httpAdapter_register(t *testing.T) {
 		t.Helper()
 		adapter := newHTTPAdapter(http.NotFoundHandler())
 		sockets := make([]stdnet.Conn, 0, c.count)
-		channels := make([]chan struct{}, 0, c.count)
+		waiters := make([]*connWaiter, 0, c.count)
 
 		for range c.count {
 			socket := &fakeSocket{}
 			sockets = append(sockets, socket)
-			channels = append(channels, adapter.register(socket))
+			waiters = append(waiters, adapter.register(socket))
 		}
 
 		adapter.mu.RLock()
@@ -293,11 +293,11 @@ func Test_httpAdapter_register(t *testing.T) {
 		if waiting != c.count {
 			t.Fatalf("%d connections registered, want %d", waiting, c.count)
 		}
-		for i, done := range channels {
+		for i, waiter := range waiters {
 			//: open, or the engine goroutine would return before net/http had
 			//: finished with the connection.
 			select {
-			case <-done:
+			case <-waiter.done:
 				t.Fatalf("the channel for connection %d is already closed", i)
 			default:
 			}
@@ -306,7 +306,7 @@ func Test_httpAdapter_register(t *testing.T) {
 			adapter.mu.RLock()
 			registered := adapter.waiters[sockets[i]]
 			adapter.mu.RUnlock()
-			if registered != done {
+			if registered != waiter {
 				t.Fatalf("connection %d is registered against a different channel", i)
 			}
 		}
@@ -421,9 +421,9 @@ func Test_httpAdapter_onConnState(t *testing.T) {
 		t.Helper()
 		adapter := newHTTPAdapter(http.NotFoundHandler())
 		socket := &fakeSocket{}
-		var done chan struct{}
+		var waiter *connWaiter
 		if c.registered {
-			done = adapter.register(socket)
+			waiter = adapter.register(socket)
 		}
 
 		for _, state := range c.states {
@@ -436,7 +436,7 @@ func Test_httpAdapter_onConnState(t *testing.T) {
 			return
 		}
 		select {
-		case <-done:
+		case <-waiter.done:
 			if !c.wantReleased {
 				t.Fatal("a keep-alive transition released the engine goroutine — " +
 					"the pool would reclaim a connection net/http is still serving")
