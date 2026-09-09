@@ -18,6 +18,7 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 | `config/` | env+file sources, merge+decode+validate `Load[T]`, cross-OS poll watcher, implementing `core/config`; codec-dispatched file parse (ADR 0028) | (emits core sentinels `0.2.10.*`) |
 | `scheduler/` | five-field POSIX cron parser + fixed-interval `Every` + the firing engine, implementing `core/scheduler`; waits through `kernel/clock.Timed`, never package `time` (ADR 0041) | parser owns `0.3.43.*`; the engine emits core sentinels `0.2.12.*` |
 | `token/` | JWT over JWS Compact Serialization + PASETO v4.public, implementing `core/token`; composes `crypto/{hmacsha2,ed25519sig,jwk}`, plus `crypto/ecdsa` directly for the JOSE fixed-width R\|\|S encoding `ecdsasig`'s DER cannot supply; the algorithm is bound by the constructor and never read from the token (ADR 0042) | `0.3.44.*` (plus core sentinels `0.2.13.*`) |
+| `session/` | memory store + file store + AEAD cookie sealer, implementing `core/session`; composes `crypto/aesgcm` and `kernel/clock` (the narrow `Clock` half — a store reads time, it never waits). The file store seals every record, binds it to its own filename through the AAD, narrows **and then stats** its permissions, publishes by `rename(2)`, and serialises under one store-wide `flock`; where those mechanics do not exist it refuses at construction with `proc.UnsupportedPlatform` rather than pretending (ADR 0045/0018) | `0.3.46.*` (plus core sentinels `0.2.14.*`) |
 
 ## Module
 
@@ -50,6 +51,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 - `config/` — see `internal/service/config/CLAUDE.md` (env+file loader + poll watcher — ADR 0028)
 - `scheduler/` — see `internal/service/scheduler/CLAUDE.md` (cron parser + engine — ADR 0041)
 - `token/` — see `internal/service/token/CLAUDE.md` (JWT + PASETO v4.public, and the RFC 8725 coverage table — ADR 0042)
+- `session/` — see `internal/service/session/CLAUDE.md` (memory + file stores, the sealer, and the platform matrix — ADR 0045)
 
 ## Verification
 
