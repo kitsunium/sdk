@@ -53,6 +53,21 @@ type httpAdapter struct {
 	// reaches launch afterwards must not start a server: the engine does not
 	// track this goroutine in its WaitGroup, so nothing else would ever end it.
 	stopped bool
+	// draining is closed the moment shutdown begins, and reaches every handler
+	// through the request context (corenet.DrainSignal).
+	//
+	// It exists because http.Server.Shutdown waits for in-flight requests and a
+	// request that never ends never becomes idle: an event stream or a long
+	// poll held the drain open for its entire budget, every time, and was then
+	// killed by having its socket severed — the least graceful ending available.
+	// Cancelling the request context instead would tell EVERY handler to
+	// abandon its half-written response, which is the opposite of draining;
+	// this signal is additive, and a handler that ignores it behaves as before.
+	draining chan struct{}
+	// drainOnce guards close(draining). The stopped flag above already makes
+	// the close single, but the guard is explicit so the invariant is local to
+	// the close rather than inferred from a flag three lines away.
+	drainOnce sync.Once
 }
 
 // newHTTPAdapter wraps an http.Handler as a ConnHandler.
@@ -60,8 +75,9 @@ func newHTTPAdapter(h http.Handler) *httpAdapter {
 	//: the bridge is built on first use, when a real connection reveals which
 	//: listener accepted it.
 	return &httpAdapter{
-		handler: h,
-		waiters: make(map[stdnet.Conn]chan struct{}, expectedLiveConns),
+		handler:  h,
+		waiters:  make(map[stdnet.Conn]chan struct{}, expectedLiveConns),
+		draining: make(chan struct{}),
 	}
 }
 
@@ -172,6 +188,16 @@ func (a *httpAdapter) launch(raw stdnet.Conn) {
 		//: bounds it separately; falling back to the read budget means a group
 		//: that set one is defended without having to know that.
 		ReadHeaderTimeout: a.timeouts.Read.Duration(),
+		//: every request on this listener derives from a context carrying the
+		//: drain signal, which is the only way a handler holding a connection
+		//: open indefinitely can learn that the server is shutting down. A
+		//: request context would have to be CANCELLED to say it, and cancelling
+		//: one asks a handler to abandon a response the drain exists to let it
+		//: finish.
+		BaseContext: func(stdnet.Listener) context.Context {
+			//: the same channel for every request the group serves.
+			return corenet.WithDrainSignal(context.Background(), a.draining)
+		},
 	}
 	a.bridge = bridge
 	a.server = srv
@@ -239,7 +265,16 @@ func (a *httpAdapter) closeNow() {
 func (a *httpAdapter) stop() (bridge *chanListener, srv *http.Server, daemon *worker.LoopDaemon) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	//: the drain signal goes out FIRST, before the bridge closes and before
+	//: http.Server.Shutdown starts waiting. A stream that learns it is over
+	//: only once Shutdown has already begun waiting on it has learnt it too
+	//: late — the budget is already running.
 	a.stopped = true
+	//: closed exactly once, however many times shutdown and closeNow race.
+	a.drainOnce.Do(func() {
+		//: every in-flight handler watching the signal sees this.
+		close(a.draining)
+	})
 	//: whatever was launched before this point, if anything.
 	return a.bridge, a.server, a.daemon
 }

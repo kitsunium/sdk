@@ -20,7 +20,7 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `resilience/` | `Runner` port + 7 concrete policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging); **no registry** (ADR 0026) | `0.2.8.*` |
 | `metrics/` | instrument interfaces (Counter/Gauge/Histogram, variadic in `LabelValue`) + `Meter` + `Exporter` registry + per-series `SnapshotValue`; one name + one label set = one series, bounded per name; in-mem meter in service (ADR 0027) | `0.2.9.*` |
 | `config/` | `Source` / `Validator` / `Watcher` ports; env+file loader + cross-OS poll watcher in service (ADR 0028) | `0.2.10.*` |
-| `net/` | network domain contract: TLS identity (opaque, redacting), listener/handler ports, outbound `Policy`; **no registry** (ADR 0029) | `0.2.11.*` |
+| `net/` | network domain contract: TLS identity (opaque, redacting), listener/handler ports, outbound `Policy`, the Server-Sent Events frame (`SSEEventValue`) and the drain signal a long-lived handler observes; **no registry** (ADR 0029) | `0.2.11.*` |
 
 `Major=0` (internal), `Layer=2` (core). The codec registry ships codes today (`CodeDuplicateRegistration` 0.2.2.1, plus 0.2.2.2-4 reserved for future Marshal/Unmarshal sentinels); the writer registry ships `0.2.3.*` (ADR 0012). Logger codes will land alongside service-layer wiring.
 
