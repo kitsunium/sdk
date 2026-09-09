@@ -610,6 +610,22 @@ codes:
     const: CodeCacheEntryRejected
     hex: "0x00_02_12_04"
     package: internal/core/cache
+  - code: "0.2.21.1"
+    const: CodeLockMisconfigured
+    hex: "0x00_02_15_01"
+    package: internal/core/lock
+  - code: "0.2.21.2"
+    const: CodeLockNotHeld
+    hex: "0x00_02_15_02"
+    package: internal/core/lock
+  - code: "0.2.21.3"
+    const: CodeLockBackendFailed
+    hex: "0x00_02_15_03"
+    package: internal/core/lock
+  - code: "0.2.21.4"
+    const: CodeLockNameRejected
+    hex: "0x00_02_15_04"
+    package: internal/core/lock
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -1274,6 +1290,18 @@ codes:
     const: CodeCacheTierFailed
     hex: "0x00_03_30_02"
     package: internal/service/cache
+  - code: "0.3.51.1"
+    const: CodeLockFenceCorrupt
+    hex: "0x00_03_33_01"
+    package: internal/service/lock
+  - code: "0.3.51.2"
+    const: CodeLockDirectoryUnsafe
+    hex: "0x00_03_33_02"
+    package: internal/service/lock
+  - code: "0.3.51.3"
+    const: CodeLockKeepaliveLost
+    hex: "0x00_03_33_03"
+    package: internal/service/lock
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
