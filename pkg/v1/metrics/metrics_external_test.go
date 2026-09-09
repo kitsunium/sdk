@@ -30,7 +30,7 @@ func TestFacade(t *testing.T) {
 		m := metrics.NewMeter()
 		c.record(m)
 		snapshot := m.Collect()
-		total := len(snapshot.Counters) + len(snapshot.Gauges) + len(snapshot.Histograms)
+		total := len(snapshot.Sums) + len(snapshot.Gauges) + len(snapshot.Histograms)
 		if got := total > 0; got != c.wantAny {
 			t.Errorf("collected %d instruments, want any = %v", total, c.wantAny)
 		}
@@ -90,7 +90,7 @@ func TestFacadeExporterRegistry(t *testing.T) {
 func TestFacadePrometheusExporter(t *testing.T) {
 	t.Parallel()
 	meter := metrics.NewMeter()
-	meter.Counter("requests_total", metrics.Label{Key: "method", Value: "GET"}).Inc()
+	meter.Counter("requests_total", metrics.String("method", "GET")).Inc()
 
 	var buf bytes.Buffer
 	if err := metrics.NewPrometheusExporter("scrape", &buf).Export(meter.Collect()); err != nil {

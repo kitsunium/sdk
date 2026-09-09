@@ -11,14 +11,20 @@ var (
 		"An instrument name is not a valid Prometheus metric name",
 		"service/metrics: the Prometheus exposition format requires [a-zA-Z_:][a-zA-Z0-9_:]*; rename the instrument at its call site")
 
-	// InvalidLabelName is returned when a label key cannot be spelled as a
-	// Prometheus label name.
+	// InvalidLabelName is returned when an attribute key cannot be spelled as
+	// a Prometheus label name.
 	InvalidLabelName = errs.Define(CodeInvalidLabelName, "INVALID_LABEL_NAME",
-		"A label key is not a valid Prometheus label name",
-		"service/metrics: the Prometheus exposition format requires [a-zA-Z_][a-zA-Z0-9_]* for a label name — no colon, unlike a metric name")
+		"An attribute key is not a valid Prometheus label name",
+		"service/metrics: the Prometheus exposition format requires [a-zA-Z_][a-zA-Z0-9_]* for a label name — no colon, and no dot, so an OTel-conventional dotted key cannot be carried")
 
-	// ReservedLabelName is returned when a label key is legal but reserved.
+	// ReservedLabelName is returned when an attribute key is legal but reserved.
 	ReservedLabelName = errs.Define(CodeReservedLabelName, "RESERVED_LABEL_NAME",
-		"A label key is reserved by the Prometheus exposition format",
+		"An attribute key is reserved by the Prometheus exposition format",
 		"service/metrics: a \"__\" prefix is reserved for the server's internal labels, and \"le\" is reserved for a histogram's bucket bound")
+
+	// UnsupportedTemporality is returned when a delta snapshot is handed to
+	// the Prometheus exporter.
+	UnsupportedTemporality = errs.Define(CodeUnsupportedTemporality, "UNSUPPORTED_TEMPORALITY",
+		"The Prometheus exposition format carries cumulative metrics only",
+		"service/metrics: the text exposition format has no temporality field and the server reads every counter as cumulative; build the meter with TemporalityCumulative for this exporter")
 )

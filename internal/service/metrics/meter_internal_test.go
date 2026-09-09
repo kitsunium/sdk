@@ -12,16 +12,12 @@ import (
 // when the snapshot holds a different number. Every test in this file works on
 // dimensionless instruments, where "one name, one series" is the invariant a
 // wrong answer would quietly break.
-func sole[V any](t *testing.T, groups map[string][]V, name string) V {
+func sole[V any](t *testing.T, points []V, name string) V {
 	t.Helper()
-	series, ok := groups[name]
-	if !ok {
-		t.Fatalf("the snapshot has no series under %q", name)
+	if len(points) != 1 {
+		t.Fatalf("%q holds %d series, want exactly 1", name, len(points))
 	}
-	if len(series) != 1 {
-		t.Fatalf("%q holds %d series, want exactly 1", name, len(series))
-	}
-	return series[0]
+	return points[0]
 }
 
 // Test_memMeter_Counter pins the idempotent fetch. A metric name is looked up
@@ -56,7 +52,7 @@ func Test_memMeter_Counter(t *testing.T) {
 		for range c.fetches {
 			m.Counter("requests").Inc()
 		}
-		if got := sole(t, m.Collect().Counters, "requests").Value; got != int64(c.fetches) {
+		if got := sole(t, m.Collect().Sums["requests"].Points, "requests").Value; got != int64(c.fetches) {
 			t.Errorf("the counter reads %d, want %d", got, c.fetches)
 		}
 		//: a different name is a different instrument.
@@ -102,7 +98,7 @@ func Test_memMeter_Gauge(t *testing.T) {
 		for range c.fetches {
 			m.Gauge("in_flight").Add(1)
 		}
-		if got := sole(t, m.Collect().Gauges, "in_flight").Value; math.Abs(got-float64(c.fetches)) > 1e-9 {
+		if got := sole(t, m.Collect().Gauges["in_flight"].Points, "in_flight").Value; math.Abs(got-float64(c.fetches)) > 1e-9 {
 			t.Errorf("the gauge reads %v, want %v", got, float64(c.fetches))
 		}
 	}
@@ -150,9 +146,9 @@ func Test_memMeter_Histogram(t *testing.T) {
 			t.Fatal("a repeated fetch returned a different histogram")
 		}
 
-		snap := sole(t, m.Collect().Histograms, "latency")
-		if !slices.Equal(snap.Buckets, c.wantBuckets) {
-			t.Errorf("buckets = %v, want the creation-time %v", snap.Buckets, c.wantBuckets)
+		snap := sole(t, m.Collect().Histograms["latency"].Points, "latency")
+		if !slices.Equal(snap.Bounds, c.wantBuckets) {
+			t.Errorf("bounds = %v, want the creation-time %v", snap.Bounds, c.wantBuckets)
 		}
 		if snap.Count != 1 {
 			t.Errorf("Count = %d, want 1", snap.Count)
@@ -191,8 +187,8 @@ func Test_memMeter_Collect(t *testing.T) {
 		}
 
 		snap := m.Collect()
-		if len(snap.Counters) != c.instruments {
-			t.Errorf("%d counters, want %d", len(snap.Counters), c.instruments)
+		if len(snap.Sums) != c.instruments {
+			t.Errorf("%d sums, want %d", len(snap.Sums), c.instruments)
 		}
 		if len(snap.Gauges) != c.instruments {
 			t.Errorf("%d gauges, want %d", len(snap.Gauges), c.instruments)
@@ -206,9 +202,9 @@ func Test_memMeter_Collect(t *testing.T) {
 			name := string(rune('a' + i))
 			m.Counter(name + "_count").Inc()
 		}
-		for name, series := range snap.Counters {
-			if series[0].Value != 1 {
-				t.Errorf("the snapshot's %q counter changed to %d", name, series[0].Value)
+		for name, metric := range snap.Sums {
+			if metric.Points[0].Value != 1 {
+				t.Errorf("the snapshot's %q counter changed to %d", name, metric.Points[0].Value)
 			}
 		}
 	}
@@ -253,8 +249,8 @@ func Test_memMeter_CollectConcurrent(t *testing.T) {
 				for range 50 {
 					//: the snapshot's content is irrelevant here; the race
 					//: detector is the assertion.
-					if snap := m.Collect(); snap.Counters == nil {
-						t.Error("Collect returned a nil counter map")
+					if snap := m.Collect(); snap.Sums == nil {
+						t.Error("Collect returned a nil sum map")
 						return
 					}
 				}
@@ -264,7 +260,7 @@ func Test_memMeter_CollectConcurrent(t *testing.T) {
 
 		//: after the storm every counter created is present exactly once.
 		snap := m.Collect()
-		if len(snap.Counters) == 0 {
+		if len(snap.Sums) == 0 {
 			t.Error("no counters survived the concurrent creation")
 		}
 	}

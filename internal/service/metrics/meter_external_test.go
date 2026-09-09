@@ -69,11 +69,11 @@ func TestNewMeter(t *testing.T) {
 
 		snap := m.Collect()
 		//: empty, not nil.
-		if snap.Counters == nil || snap.Gauges == nil || snap.Histograms == nil {
+		if snap.Sums == nil || snap.Gauges == nil || snap.Histograms == nil {
 			t.Fatalf("Collect returned nil maps: %+v", snap)
 		}
-		if len(snap.Counters) != c.counters {
-			t.Errorf("%d counters, want %d", len(snap.Counters), c.counters)
+		if len(snap.Sums) != c.counters {
+			t.Errorf("%d sums, want %d", len(snap.Sums), c.counters)
 		}
 		if len(snap.Gauges) != c.gauges {
 			t.Errorf("%d gauges, want %d", len(snap.Gauges), c.gauges)
@@ -116,6 +116,21 @@ func TestInstruments(t *testing.T) {
 			wantCount: 5,
 		},
 		{
+			//: an up-down counter is additive like a counter and signed like
+			//: a gauge — the instrument the frozen Meter port could not mint.
+			name: "an up-down counter goes both ways",
+			record: func(m coremetrics.Meter) {
+				full, ok := m.(coremetrics.FullMeter)
+				if !ok {
+					return
+				}
+				full.UpDownCounter("c").Add(5)
+				full.UpDownCounter("c").Add(-2)
+				full.UpDownCounter("c").Dec()
+			},
+			wantCount: 2,
+		},
+		{
 			name:      "a gauge replaces",
 			record:    func(m coremetrics.Meter) { m.Gauge("g").Set(3); m.Gauge("g").Set(7) },
 			wantGauge: 7,
@@ -140,14 +155,14 @@ func TestInstruments(t *testing.T) {
 		c.record(m)
 		snap := m.Collect()
 
-		if got := firstOr(snap.Counters["c"], coremetrics.CounterValue{}).Value; got != c.wantCount {
+		if got := firstOr(snap.Sums["c"].Points, coremetrics.SumValue{}).Value; got != c.wantCount {
 			t.Errorf("the counter reads %d, want %d", got, c.wantCount)
 		}
-		if got := firstOr(snap.Gauges["g"], coremetrics.GaugeValue{}).Value; math.Abs(got-c.wantGauge) > 1e-9 {
+		if got := firstOr(snap.Gauges["g"].Points, coremetrics.GaugeValue{}).Value; math.Abs(got-c.wantGauge) > 1e-9 {
 			t.Errorf("the gauge reads %v, want %v", got, c.wantGauge)
 		}
 		if c.wantBucket > 0 {
-			hist := firstOr(snap.Histograms["h"], coremetrics.HistogramValue{})
+			hist := firstOr(snap.Histograms["h"].Points, coremetrics.HistogramValue{})
 			if len(hist.Counts) == 0 || hist.Counts[0] != c.wantBucket {
 				t.Errorf("the histogram's first bucket holds %v, want %d", hist.Counts, c.wantBucket)
 			}
@@ -188,6 +203,24 @@ func TestKindConflictPanics(t *testing.T) {
 			func(m coremetrics.Meter) { m.Histogram("x", nil) },
 			func(m coremetrics.Meter) { m.Counter("x") },
 		},
+		{
+			//: same point shape, opposite Monotonic — the subtle conflict
+			//: the OTel sum model makes possible.
+			"a counter fetched as an up-down counter",
+			func(m coremetrics.Meter) { m.Counter("x") },
+			func(m coremetrics.Meter) { asFull(m).UpDownCounter("x") },
+		},
+		{
+			//: synchronous versus observable decides how a delta window is
+			//: computed, so the two cannot share a name either.
+			"a counter registered as an observable counter",
+			func(m coremetrics.Meter) { m.Counter("x") },
+			func(m coremetrics.Meter) {
+				asFull(m).ObservableCounter("x", func(observe coremetrics.ObserveInt64) {
+					observe(1)
+				})
+			},
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -207,4 +240,19 @@ func TestKindConflictPanics(t *testing.T) {
 			runCase(t, c)
 		})
 	}
+}
+
+// asFull reaches the sibling ports through the frozen Meter the tables above
+// are written against. The assertion always holds for this SDK's meters — it is
+// here so the table can stay typed on the narrow port that consumers see.
+func asFull(m coremetrics.Meter) coremetrics.FullMeter {
+	//: every in-tree Meter is a FullMeter; the widening is safe by ADR 0039.
+	full, ok := m.(coremetrics.FullMeter)
+	//: a Meter that is not one would be a foreign implementation.
+	if !ok {
+		//: nothing to assert against.
+		panic("the meter under test is not a FullMeter")
+	}
+	//: hand back the wide view.
+	return full
 }

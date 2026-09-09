@@ -18,8 +18,10 @@ import (
 // the cheapest possible way to find that; silently returning the existing
 // instrument of the wrong kind would be the most expensive.
 //
-// The kind is tracked per NAME, not per series: labels vary within one metric,
-// its kind does not.
+// The kind is tracked per NAME, not per series: attributes vary within one
+// metric, its kind does not. A Counter name fetched as an UpDownCounter is the
+// same defect wearing a subtler coat — same point shape, opposite Monotonic,
+// and a backend that has learned to read the metric as never decreasing.
 func Test_memMeter_bindName(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -30,15 +32,26 @@ func Test_memMeter_bindName(t *testing.T) {
 		want      instrumentKind
 		wantPanic bool
 	}
-	counter, gauge, histogram := kindCounter, kindGauge, kindHistogram
+	counter, updown, gauge := kindCounter, kindUpDownCounter, kindGauge
+	histogram, observable := kindHistogram, kindObservableCounter
 
 	tests := []tc{
 		{name: "an unbound name as a counter", want: kindCounter},
+		{name: "an unbound name as an up-down counter", want: kindUpDownCounter},
 		{name: "an unbound name as a gauge", want: kindGauge},
 		{name: "an unbound name as a histogram", want: kindHistogram},
+		{name: "an unbound name as an observable counter", want: kindObservableCounter},
 		{name: "a counter fetched again", bind: &counter, want: kindCounter},
+		{name: "an up-down counter fetched again", bind: &updown, want: kindUpDownCounter},
 		{name: "a gauge fetched again", bind: &gauge, want: kindGauge},
 		{name: "a histogram fetched again", bind: &histogram, want: kindHistogram},
+		{name: "an observable counter registered again", bind: &observable, want: kindObservableCounter},
+		//: the subtle one: same point shape, opposite monotonicity.
+		{name: "a counter fetched as an up-down counter", bind: &counter, want: kindUpDownCounter, wantPanic: true},
+		{name: "an up-down counter fetched as a counter", bind: &updown, want: kindCounter, wantPanic: true},
+		//: and the synchronous/asynchronous split, which decides whether a
+		//: delta window is swapped to zero or differenced.
+		{name: "a counter registered as an observable counter", bind: &counter, want: kindObservableCounter, wantPanic: true},
 		{name: "a counter fetched as a gauge", bind: &counter, want: kindGauge, wantPanic: true},
 		{name: "a counter fetched as a histogram", bind: &counter, want: kindHistogram, wantPanic: true},
 		{name: "a gauge fetched as a counter", bind: &gauge, want: kindCounter, wantPanic: true},

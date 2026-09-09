@@ -228,8 +228,12 @@ func TestExport(t *testing.T) {
 		{
 			name: "a registered exporter carrying data",
 			key:  "export-ok",
-			snap: metrics.SnapshotValue{Counters: map[string][]metrics.CounterValue{
-				"requests": {{Value: 3}},
+			snap: metrics.SnapshotValue{Sums: map[string]metrics.SumMetricValue{
+				"requests": {
+					Temporality: metrics.TemporalityCumulative,
+					Monotonic:   true,
+					Points:      []metrics.SumValue{{Value: 3}},
+				},
 			}},
 		},
 		{
