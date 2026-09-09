@@ -168,6 +168,11 @@ rules:
       # String()) or silently change what a caller recovers, which is exactly
       # what PanicValue.Raised exists to preserve verbatim.
       - "**/internal/kernel/singleflight/**"
+      # kernel/group carries a recovered panic out of a TASK goroutine for the
+      # identical reason, and the two PanicValue types are deliberately
+      # separate so the message a crash prints names the primitive that was
+      # running the code which failed. Same rule limitation, same justification.
+      - "**/internal/kernel/group/**"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #
@@ -331,6 +336,31 @@ rules:
       # reads "constructor NewNewGroup()", which is not a name anything could
       # satisfy — the same broken suggestion the jwk and metrics entries record.)
       - "**/internal/kernel/singleflight/**"
+      # The three primitives added alongside it hit the SAME broken suggestion,
+      # for two different reasons, both recorded rather than waved through:
+      #
+      #   - kernel/topic.Topic and kernel/topic.Subscriber. Topic has no
+      #     constructor for singleflight's reason exactly — its zero value is
+      #     usable and the membership snapshot it lazily publishes is the only
+      #     state it owns. Subscriber has none ON PURPOSE in the opposite
+      #     direction: every one comes out of Topic.Subscribe, which is what
+      #     binds the handle to its topic and refuses an unset delivery policy
+      #     (ADR 0031). A NewSubscriber() would be a second way in that skips
+      #     both, i.e. exactly the "poorly initialized struct" the rule exists
+      #     to prevent — the same shape as the jwk.KeyValue entry above.
+      #   - kernel/group.Group and kernel/heap.Heap DO have constructors, named
+      #     New, because each package produces one main type and Go's
+      #     convention for that case is group.New() / heap.New(). NewGroup() and
+      #     NewHeap() would stutter, which the same linter's naming rules
+      #     discourage elsewhere — the net/client entry above records the very
+      #     same trade.
+      #
+      # (The rule's own messages here read "constructor NewNewTopic()",
+      # "NewNewSubscriber()", "NewNewGroup()" and "NewNewHeap()", none of which
+      # is a name anything could satisfy.)
+      - "**/internal/kernel/topic/**"
+      - "**/internal/kernel/group/**"
+      - "**/internal/kernel/heap/**"
 
   # KTN-GOROUTINE-SYNCMAP / KTN-GOROUTINE-ATOMICVAL (phase 4) — the suggested
   # replacements cannot express what this map is for.
