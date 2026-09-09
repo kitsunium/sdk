@@ -11,7 +11,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 |---|---|---|
 | `logger/slogbridge/` | `NewHandler` / `New` — adapt an SDK `Logger` to `log/slog` for APIs typed on the concrete `*slog.Logger` (ADR 0032). The one package allowed to import `log/slog` | `pkg/v1/logger/slogbridge/README.md` |
 | `logger/` | Logger facade: `Config` / `NewText` / `Default` / `NewWithSink`, `Info|Warn|Error|Debug`, `Build` builder, `String|Int|…` attr ctors, `Version` (ldflags injection point) | `pkg/v1/logger/README.md` |
-| `codec/` | Universal codec dispatch: `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` over a `Format` registry; blank-imports 14 service codecs covering 22 Format names — text/binary/base-N reached identically (asn1-der, baseenc family [base64/base64url/base32/base16/hex/ascii85/base45/base58/base62], bson, cbor, csv, flatbuffers, json, msgpack, ndjson, pem, tlv, toml, xml, yaml) | _(no README)_ |
+| `codec/` | Universal codec dispatch: `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` over a `Format` registry; blank-imports 15 service codecs covering 23 Format names — text/binary/base-N reached identically (asn1-der, baseenc family [base64/base64url/base32/base16/hex/ascii85/base45/base58/base62], bson, cbor, csv, flatbuffers, form, json, msgpack, ndjson, pem, tlv, toml, xml, yaml) | _(no README)_ |
 | `errs/` | Error introspection **and construction** (ADR 0019): read — `CodeOf` / `ReasonOf` / `PublicOf` / `PrivateOf` / `HTTPStatusOf` / `ExitCodeOf` / `HasCode` / `HasReason` / `NewPrefixMatcher`; build — `New` / `Wrap` (+ `WrapParams`) / `Field` helpers (`String` / `Int` / `Int64` / `Bool` / `Float` / `NewFieldValue`); codes — `Pack` / `ParseCode` / `MinAppMajor` / `MaxMajor` + `Code` / `Major` / `Layer` / `PkgCode` / `Serial` / `Field` / `PrefixMatcher` type aliases + `MaskBy*` constants. Octets are composable on the typed `Code` (e.g. `code.Layer()`). | `pkg/v1/errs/README.md` |
 | `id/` | Identifier generation (ADR 0024): `New(scheme)` dispatch + helpers `UUIDv4` / `UUIDv7` / `ULID` / `Snowflake` / `NewSnowflake(node)` / `Available`; `Scheme` constants; stdlib-only, cross-OS | `pkg/v1/id/README.md` |
 | `cache/` | Generic LRU + TTL `Cache[K,V]` (ADR 0025): `New` + `Fetch` / `Set` / `SetTTL` / `Delete` / `Len` / `Purge` / `Stats`; type aliases onto `kernel/cache`; stdlib-only, cross-OS | `pkg/v1/cache/README.md` |
@@ -44,7 +44,7 @@ Single Go module `github.com/kitsunium/sdk/pkg` — one `go.mod` (at `pkg/go.mod
 ## Conventions
 
 - Import aliases at call sites: `logger "…/pkg/v1/logger"`, `errs "…/pkg/v1/errs"`, `codec "…/pkg/v1/codec"`.
-- `import _ "github.com/kitsunium/sdk/pkg/v1/codec"` is enough to activate all 14 service codecs (22 Format names incl. base-N family) — registry side-effects driven by blank imports.
+- `import _ "github.com/kitsunium/sdk/pkg/v1/codec"` is enough to activate all 15 service codecs (23 Format names incl. base-N family) — registry side-effects driven by blank imports.
 - Every emitted log record carries `framework_version` via the ldflags-injected `logger.Version`. Injection recipe is in `pkg/v1/logger/README.md`; under Bazel `--stamp` + `x_defs` + `tools/workspace_status.sh` (`STABLE_VERSION`) supply the same value.
 - `logger.NewText(Config{Writer: nil})` returns `(nil, WriterRequired)`. `logger.NewWithSink(SinkConfig{Sink: nil})` returns `(nil, SinkConfigRequired)`. Use `logger.Default()` for the stderr one-liner.
 

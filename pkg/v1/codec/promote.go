@@ -1,16 +1,17 @@
 // Package codec — JSON-bridge promotion path for codecs whose runtime
 // preconditions reject the public Marshal(F, any) / Unmarshal(F, *,
-// any) contract. Five of the twenty-two registered codecs constrain
+// any) contract. Six of the twenty-three registered codecs constrain
 // their input shape: csv expects [][]string, ndjson expects []T, pem
 // expects *pem.Block, flatbuffers expects []byte or BytesProvider,
-// tlv's decoder cannot project composites into typed targets. Without
-// promotion the facade's "format-swap is a single string change"
-// promise is a lie for 5/22. Promotion intercepts the VALUE_INVALID
-// / FLATBUFFERS_BAD_* / UNMARSHAL_FAILED responses, encodes the value
-// to JSON, wraps the bytes in a codec-specific container the codec
-// will accept, and reverses the pipeline on Unmarshal. The fast
-// (native-shape) path is untouched so existing callers see zero
-// overhead. See TestUniversalRoundtripAllCodecs for the contract pin.
+// form expects url.Values, tlv's decoder cannot project composites
+// into typed targets. Without promotion the facade's "format-swap is
+// a single string change" promise is a lie for 6/23. Promotion
+// intercepts the VALUE_INVALID / FLATBUFFERS_BAD_* / UNMARSHAL_FAILED
+// responses, encodes the value to JSON, wraps the bytes in a
+// codec-specific container the codec will accept, and reverses the
+// pipeline on Unmarshal. The fast (native-shape) path is untouched so
+// existing callers see zero overhead. See
+// TestUniversalRoundtripAllCodecs for the contract pin.
 package codec
 
 import (
@@ -18,6 +19,7 @@ import (
 	"encoding/binary"
 	stdjson "encoding/json"
 	stdpem "encoding/pem"
+	"net/url"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	fbcodec "github.com/kitsunium/sdk/internal/service/codec/flatbuffers"
@@ -38,6 +40,14 @@ const csvPromotionRowCount int = 2
 // csvPromotionHeader is the single-column header label written by
 // promoteMarshal's csv branch and read back by promoteUnmarshal.
 const csvPromotionHeader string = "_json"
+
+// formPromotionKey is the single url.Values key the form promotion
+// container binds the inner JSON to. A urlencoded body has no place to
+// put a typed payload, so the wrapper is one ordinary pair — which is
+// why a promoted form body reads `_json=%7B…%7D` rather than one pair
+// per struct field: mapping a Go struct onto form fields would require
+// inventing a nesting dialect the format does not define.
+const formPromotionKey string = "_json"
 
 // pemPromotionBlockType is the Type label written into the pem.Block
 // produced by promoteMarshal's pem branch. PEM accepts any Type label;
@@ -117,6 +127,10 @@ func wrapForFormat(f Format, inner []byte) (container any, err error) {
 	case CSV:
 		//: 2-row table; body's first column carries the json string.
 		return [][]string{{csvPromotionHeader}, {innerStr}}, nil
+	//: form requires url.Values; a single pair carries the json string.
+	case Form:
+		//: one-key, one-value body — percent-escaping is transparent.
+		return url.Values{formPromotionKey: []string{innerStr}}, nil
 	//: pem requires *pem.Block; mint a "JSON"-typed block.
 	case PEM:
 		//: pem.Encode base64-encodes Bytes; Type travels with it.
@@ -168,6 +182,12 @@ func containerForFormat(f Format) (containerPtr any, extract func() ([]byte, err
 		table := new([][]string)
 		//: pointer for codec; closure for inner extraction.
 		return table, extractCSV(table), nil
+	//: form decodes back into the single-pair body laid down at wrap time.
+	case Form:
+		//: heap container for the populated values.
+		values := new(url.Values)
+		//: pointer for codec; closure for inner extraction.
+		return values, extractForm(values), nil
 	//: pem decodes into a *pem.Block; block.Bytes holds the payload.
 	case PEM:
 		//: heap container for the parsed block.
@@ -219,6 +239,23 @@ func extractCSV(table *[][]string) func() ([]byte, error) {
 		}
 		//: cast back to bytes for json.Unmarshal.
 		return []byte((*table)[1][0]), nil
+	}
+}
+
+// extractForm returns the inner-bytes closure for a form container.
+func extractForm(values *url.Values) func() ([]byte, error) {
+	//: closure captures the container.
+	return func() ([]byte, error) {
+		//: the wrap stage writes exactly one value under formPromotionKey;
+		//: anything else means these bytes were not produced by promotion.
+		payload := (*values)[formPromotionKey]
+		//: refuse a body that does not carry the promotion pair.
+		if len(payload) != 1 {
+			//: typed sentinel.
+			return nil, promoteContainerFailed("malformed form promotion container")
+		}
+		//: cast back to bytes for json.Unmarshal.
+		return []byte(payload[0]), nil
 	}
 }
 
@@ -285,19 +322,19 @@ func promoteContainerFailed(detail string) error {
 }
 
 // hasPromotionStrategy reports whether f names a codec the JSON-bridge
-// can actually promote. Only the five constrained codecs (ndjson, csv,
-// pem, flatbuffers, tlv) have a wrap/container pair; the value-rich
-// codecs (json, cbor, msgpack, asn1, xml, toml, yaml) accept any Go
-// value natively, so a decode failure on them is a genuine wire fault —
-// retrying would hit promote.go's default branch and replace the
-// original UNMARSHAL_FAILED with a PROMOTE_FAILED that discards the
-// cause (finding V75). Gating the retry on this predicate keeps the
-// origin reason/code routable for every corrupt-bytes input.
+// can actually promote. Only the six constrained codecs (ndjson, csv,
+// form, pem, flatbuffers, tlv) have a wrap/container pair; the
+// value-rich codecs (json, cbor, msgpack, asn1, xml, toml, yaml)
+// accept any Go value natively, so a decode failure on them is a
+// genuine wire fault — retrying would hit promote.go's default branch
+// and replace the original UNMARSHAL_FAILED with a PROMOTE_FAILED that
+// discards the cause (finding V75). Gating the retry on this predicate
+// keeps the origin reason/code routable for every corrupt-bytes input.
 func hasPromotionStrategy(f Format) bool {
 	//: only the constrained codecs carry a wrap/container promotion pair.
 	switch f {
-	//: the five formats handled by wrapForFormat / containerForFormat.
-	case NDJSON, CSV, PEM, "flatbuffers", "tlv":
+	//: the six formats handled by wrapForFormat / containerForFormat.
+	case NDJSON, CSV, Form, PEM, "flatbuffers", "tlv":
 		//: a JSON-bridge strategy exists — promotion retry is valid.
 		return true
 	//: every other Format decodes any value natively; no retry.

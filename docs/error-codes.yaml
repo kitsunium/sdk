@@ -838,6 +838,18 @@ codes:
     const: CodeIDClockStalled
     hex: "0x00_03_27_03"
     package: internal/service/id
+  - code: "0.3.40.1"
+    const: CodeFormValueInvalid
+    hex: "0x00_03_28_01"
+    package: internal/service/codec/form
+  - code: "0.3.40.2"
+    const: CodeFormUnmarshalFailed
+    hex: "0x00_03_28_02"
+    package: internal/service/codec/form
+  - code: "0.3.40.3"
+    const: CodeFormMultiValue
+    hex: "0x00_03_28_03"
+    package: internal/service/codec/form
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
