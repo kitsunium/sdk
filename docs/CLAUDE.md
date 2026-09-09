@@ -41,6 +41,9 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0031-policy-zero-values-are-never-inert.md` | A policy constructor never returns an inert policy: **clamp** where a working default needs no explanation (`BreakerConfig.OpenDuration` → 30s), **refuse** where any SDK-chosen value would be arbitrary (`RateLimiterConfig.Rate`, `NewTimeout`) via the `PolicyMisconfigured` sentinel `0.2.8.6` | Accepted (amends ADR 0026 §Decision 2) |
 | `adr/0034-hcl-quarantine-rationale-corrected.md` | The HCL quarantine stands; its stated mechanism does not. Under MVS a dependency requiring a lower version cannot downgrade a higher requirement; measured, adding `hcl/v2` to `internal/service` **introduces** `x/sys` (via `x/tools`) into a module that bans it | Accepted (amends ADR 0022 §Context.1 — mechanism only) |
 | `adr/0035-pp-range-ownership-enforcement.md` | `PP`-range ownership enforced by exclusivity + a hand-maintained `codeRangeOwners` table, keyed on Code declarations rather than `Define` calls; the table is never generated from the constants it audits | Accepted (supplies enforcement for ADR 0005 §Registry) |
+| `adr/0036-sdk-codec-form-urlencoded.md` | form-urlencoded: repetition is the only array syntax; framework dialects and last-wins refused; non-bijectivity stated rather than faked | Accepted (extends ADR 0003) |
+| `adr/0037-sdk-codec-multipart.md` | multipart/form-data: the boundary is not in the body, so the codec grows extension interfaces (`BoundaryCodec`, `BoundaryProvider`) instead of widening the universal contract | Accepted (extends ADR 0003) |
+| `adr/0038-id-schemes-and-the-unregistered-typeid.md` | NanoID, KSUID, TypeID — and a `Scheme` deliberately absent from the registry, which makes the registry non-exhaustive by design | Accepted (extends ADR 0024) |
 
 ## ADR conventions
 
