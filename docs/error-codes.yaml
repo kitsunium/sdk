@@ -290,6 +290,10 @@ codes:
     const: CodePolicyMisconfigured
     hex: "0x00_02_08_06"
     package: internal/core/resilience
+  - code: "0.2.8.7"
+    const: CodeFallbackFailed
+    hex: "0x00_02_08_07"
+    package: internal/core/resilience
   - code: "0.2.9.1"
     const: CodeUnknownExporter
     hex: "0x00_02_09_01"

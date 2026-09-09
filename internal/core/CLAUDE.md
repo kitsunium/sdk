@@ -17,7 +17,7 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `logger/level/` | `Level int8` + `Debug`/`Info`/`Warn`/`Error` constants + `String()` | `0.2.17.*` (reserved) |
 | `proc/` | OS process-supervision foundation: `Process` / `Reaper` / `Group` / `Listener` ports + `Spec` / `ExitValue` / `LimitValue` / `NotificationValue` / `Signal` / `Resource` value types; no registry (build-tag selection) (ADR 0016) | `0.2.6.*` |
 | `id/` | `Generator` port + `Scheme` registry (UUIDv4/v7, ULID, snowflake, NanoID, KSUID; TypeID is constructor-only — it needs a prefix, so nothing is registered under it); canonical-string output (ADR 0024) | `0.2.7.*` |
-| `resilience/` | `Runner` port + 5 concrete policies (retry/circuit-breaker/rate-limit/bulkhead/timeout); **no registry** (ADR 0026) | `0.2.8.*` |
+| `resilience/` | `Runner` port + 7 concrete policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging); **no registry** (ADR 0026) | `0.2.8.*` |
 | `metrics/` | instrument interfaces (Counter/Gauge/Histogram) + `Meter` + `Exporter` registry; in-mem meter in service (ADR 0027) | `0.2.9.*` |
 | `config/` | `Source` / `Validator` / `Watcher` ports; env+file loader + cross-OS poll watcher in service (ADR 0028) | `0.2.10.*` |
 | `net/` | network domain contract: TLS identity (opaque, redacting), listener/handler ports, outbound `Policy`; **no registry** (ADR 0029) | `0.2.11.*` |
