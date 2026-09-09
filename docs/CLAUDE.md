@@ -46,6 +46,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0038-id-schemes-and-the-unregistered-typeid.md` | NanoID, KSUID, TypeID — and a `Scheme` deliberately absent from the registry, which makes the registry non-exhaustive by design | Accepted (extends ADR 0024) |
 | `adr/0039-extending-a-published-port-without-breaking-it.md` | Extend a published port with a sibling interface, never by widening it: a `pkg/v1` type alias publishes the *shape*, and Go interfaces are structural | Accepted (reverses the `clock` Do NOT) |
 | `adr/0040-changing-a-published-shape-while-v0.md` | A published concrete shape may still change — v0 is the only reason, it must be said out loud, and the licence expires at v1 | Accepted (completes ADR 0039) |
+| `adr/0041-sdk-scheduler-domain.md` | Time-driven execution domain (`scheduler`): 12th core sibling, no registry; FUNC ports; five-field POSIX cron, everything else refused by name; DST / missed deadlines / overlap decided and documented; `clock.Timed` throughout, enforced by an AST test; blocks `0.2.12.*` / `0.3.43.*` | Accepted |
 
 ## ADR conventions
 
