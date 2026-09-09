@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Ten domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (24 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing, and JWK/JWKS key representation — RFC 7517 for EC/OKP/oct, with private export opt-in and never the default), **transform** (compression — stdlib gzip/flate/zlib; `flate` is raw DEFLATE, `zlib` is the RFC 1950 envelope HTTP misnames `deflate`), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging — ADR 0026; hedging duplicates the operation, so it demands an in-code idempotence assertion and a load cap — ADR 0031), **metrics** (counter/gauge/histogram + exporter registry + labelled series with a bounded, visibly-overflowing cardinality — ADR 0027; the stdlib `prometheus` exporter renders the text exposition format and REFUSES a name that format cannot spell rather than transliterating it into a collision), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
+Go SDK providing a normed, performant toolbox for downstream applications. Twelve domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (24 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing, and JWK/JWKS key representation — RFC 7517 for EC/OKP/oct, with private export opt-in and never the default), **transform** (compression — stdlib gzip/flate/zlib; `flate` is raw DEFLATE, `zlib` is the RFC 1950 envelope HTTP misnames `deflate`), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging — ADR 0026; hedging duplicates the operation, so it demands an in-code idempotence assertion and a load cap — ADR 0031), **metrics** (counter/gauge/histogram + exporter registry + labelled series with a bounded, visibly-overflowing cardinality — ADR 0027; the stdlib `prometheus` exporter renders the text exposition format and REFUSES a name that format cannot spell rather than transliterating it into a collision), **net** (inbound and outbound over one substrate: TLS/mTLS identity, per-phase deadlines, policy, and Server-Sent Events — ADR 0029/0043), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001), and **scheduler** (five-field POSIX cron + fixed intervals — ADR 0041; DST, missed deadlines and overlap are decided and documented rather than emergent: a non-existent wall-clock time does not fire, a repeated one fires once, a missed deadline is skipped **and counted**, and an overlapping fire is skipped by default). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.27.0 (pinned in `MODULE.bazel`)
 
@@ -16,7 +16,7 @@ internal/
 │                  ring, snapshot, worker
 ├── core/          domain interfaces + domain values
 │                  codec (+ scratch), crypto, id, logger, logger/level,
-│                  proc, transform, writer
+│                  proc, scheduler, transform, writer
 └── service/       concrete implementations
                    logger (+ encoder, sink/{console,file,memory,syslog},
                              middleware/{async,encwrite,failover,multi,
@@ -33,6 +33,7 @@ internal/
                            sdnotify, signal)
                    id     (uuidv4, uuidv7, ulid, snowflake, nanoid,
                            ksuid, typeid)
+                   scheduler (cron parser + fixed interval + engine)
                    transform
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
@@ -41,8 +42,9 @@ pkg/
     ├── codec/     (blank-imports all 16 service codecs + transform)
     ├── crypto/    (+ agree, hash, kdf, mac, password, sign)
     ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024)
-    └── proc/      (+ cgroup, process, reaper, rlimit, sdlisten,
-                      sdnotify, signal)
+    ├── proc/      (+ cgroup, process, reaper, rlimit, sdlisten,
+    │                 sdnotify, signal)
+    └── scheduler/ (Parse/ParseInLocation/Every + the engine — ADR 0041)
 third-party/       opt-in vendor integrations (root module only)
                    aws/writer/{cloudwatch,s3}, codec/{hcl,protobuf},
                    db/writer/{clickhouse,mysql,redis},
@@ -179,6 +181,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0038 — `id` gains NanoID, KSUID and TypeID, and the `Scheme` registry stops being exhaustive: TypeID is **not** registered because a prefix names the caller's entity, so a singleton would either invent that vocabulary or mint a prefixless identifier — `docs/adr/0038-id-schemes-and-the-unregistered-typeid.md`
 - ADR 0039 — a published port is extended by a **sibling interface**, never by widening: `pkg/v1/cache.Config` is a type alias that carries `clock.Clock` into the released module, and Go interfaces are structural, so adding a method breaks every downstream two-method double at compile time with no deprecation window. `Clock` stays frozen, `Waiter` is new, `Timed` is the union, and `System` widens as a *value* — which is safe. Applies to every port an alias publishes — `docs/adr/0039-extending-a-published-port-without-breaking-it.md`
 - ADR 0040 — the concrete-type half of ADR 0039: a published **shape** has no sibling trick, so `SnapshotValue` changing form reached every consumer through the `pkg/v1/metrics.Snapshot` alias. Permitted **only because the module is v0** — stated out loud in the commit, and gone at v1. One rule for both halves: an interface gets a sibling at any version; a concrete shape may change while v0, loudly, and not after — `docs/adr/0040-changing-a-published-shape-while-v0.md`
+- ADR 0041 — time-driven execution domain (`scheduler`): 12th core sibling, **no registry**; `Job`/`Schedule` are FUNC ports so a published port cannot grow a method at all (ADR 0039 applied structurally); five-field POSIX cron with the day-field OR rule, everything outside the subset refused BY NAME (six/seven fields, `@reboot`, `@every`, Quartz `L`/`W`/`#`/`?`, 7-for-Sunday, and an expression matching no date); DST decided — spring-forward skips, fall-back fires once; missed deadlines skipped **and counted**, never replayed; overlap skipped by default with the assertion `AllowOverlap` opting in; the engine waits through `clock.Timed` and a named AST test fails the build on any wall-clock wait, in production code and in the suite; error blocks `0.2.12.*` (port) / `0.3.43.*` (parser) — `docs/adr/0041-sdk-scheduler-domain.md`
 - ADR 0043 — draining is **announced** to the handler, not imposed. Adding SSE exposed a defect that predated it: an open stream held `Shutdown` for the caller's entire budget and returned `DRAIN_TIMEOUT`, because `http.Server.Shutdown` waits for in-flight requests and one that never ends never becomes idle — the normal outcome of every deployment, covered by no test. The adapter now closes a **signal channel** carried on the request context; deliberately **not** a cancellation, which would tell every well-behaved handler to abandon the response the drain exists to let it finish — `docs/adr/0043-drain-is-a-signal-not-a-cancellation.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`
