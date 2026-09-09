@@ -1,6 +1,6 @@
 # ADR 0027 — Observability domain (`metrics`)
 
-- **Status**: Accepted. **Exporter destination amended by ADR 0030** — the registered `text` exporter writes to stderr, not stdout. **Labels are no longer deferred**: instruments are keyed by name + label set, with a per-name cardinality bound and an aggregated overflow series (see §Deferred). Prometheus/OTLP exporters and the push loop remain deferred.
+- **Status**: Accepted. **Exporter destination amended by ADR 0030** — the registered `text` exporter writes to stderr, not stdout. **Labels are no longer deferred**: instruments are keyed by name + label set, with a per-name cardinality bound and an aggregated overflow series (see §Deferred). **The Prometheus text-exposition exporter is no longer deferred either** — it landed in-tree and stdlib-only rather than as a third-party package, because the text format needs no client library (see §Deferred). OTLP, the Prometheus protobuf format and the push loop remain deferred.
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0024 (Phase-B wave), ADR 0012 (writer registry — the exporter-registry model), ADR 0011 (snapshot), ADR 0005/0006 (codes)
@@ -74,8 +74,20 @@ the formatting work.
 
 - ~~Labelled dimensions (label sets + cardinality limits)~~ — shipped, see
   §Why not above.
-- Prometheus + OTLP exporters as **third-party** quarantined packages (heavy
-  deps), self-registering via the exporter registry.
+- ~~Prometheus + OTLP exporters as **third-party** quarantined packages (heavy
+  deps), self-registering via the exporter registry.~~ — **split, and the
+  Prometheus half shipped in-tree**. The premise "heavy deps" holds for OTLP and
+  for the Prometheus *protobuf* format; it does not hold for the Prometheus
+  **text exposition format**, which is a line-oriented format an exporter writes
+  with `strconv` alone. Quarantining it would have bought a dependency on
+  `client_golang` in exchange for nothing, against the SDK's dep-light rule, so
+  `internal/service/metrics` renders it directly and self-registers as
+  `prometheus` (stderr, ADR 0030) beside `text`. It needed a per-package error
+  block — `0.3.45.*` — because it REFUSES an instrument or label name the
+  exposition grammar cannot spell instead of transliterating it, which would not
+  be injective and would merge distinct instruments into one family. Rationale +
+  format citations: `internal/service/metrics/CLAUDE.md` §The Prometheus text
+  exposition format. OTLP and the protobuf format remain deferred as written.
 - Active push/scrape loop (`worker.Every`) — v1 is pull-on-demand (`Collect`+`Export`).
 
 ## References

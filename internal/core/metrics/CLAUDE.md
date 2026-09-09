@@ -6,15 +6,18 @@ Declares the **observability port** — the natural twin of the logger: instrume
 (`Counter`/`Gauge`/`Histogram`), the `Meter` that mints + `Collect`s them, and
 the `Exporter` contract + process-wide registry that ships a `SnapshotValue`
 out. A core sibling admitted by **ADR 0027** (Phase-B wave). The in-memory meter
-+ a stdlib text exporter live in `internal/service/metrics`; exporters
-self-register via the registry (writer-registry model, ADR 0012).
++ the stdlib `text` and `prometheus` exporters live in
+`internal/service/metrics`; exporters self-register via the registry
+(writer-registry model, ADR 0012).
 
 Code range: `0.2.9.*` (ADR 0027).
 
 Instruments are keyed by name **and label set**: one name plus one label set is
 one **series**, and a `Meter` is required to bound how many series a name may
 hold. Labels were the deferred half of ADR 0027 §Deferred and are no longer
-deferred; the Prometheus/OTLP exporters still are.
+deferred; neither is the Prometheus text exposition exporter, which is
+stdlib-only and lives beside the text one in `service/metrics`. OTLP and the
+Prometheus **protobuf** format stay deferred to `third-party/` (heavy deps).
 
 ## Contents
 
