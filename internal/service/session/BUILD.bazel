@@ -59,6 +59,7 @@ go_test(
         "fixation_external_test.go",
         "sealer_external_test.go",
         "store_external_test.go",
+        "withlock_internal_test.go",
     ],
     embed = [":session"],
     deps = [

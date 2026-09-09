@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,14 +64,15 @@ func TestWithLockExcludesGoroutines(t *testing.T) {
 				finished sync.WaitGroup
 			)
 			start.Add(1)
+			var failures atomic.Int64
 			for range tc.callers {
-				finished.Add(1)
-				go func() {
-					defer finished.Done()
+				finished.Go(func() {
 					//: every caller is released at once, so the sections
 					//: genuinely compete instead of running one after another.
 					start.Wait()
-					_ = concrete.withLock(context.Background(), func() error {
+					//: a store fault would make the occupancy assertion vacuous,
+					//: so it is counted rather than discarded.
+					if lockErr := concrete.withLock(context.Background(), func() error {
 						mu.Lock()
 						inside++
 						if inside > maxSeen {
@@ -85,12 +87,17 @@ func TestWithLockExcludesGoroutines(t *testing.T) {
 						inside--
 						mu.Unlock()
 						return nil
-					})
-				}()
+					}); lockErr != nil {
+						failures.Add(1)
+					}
+				})
 			}
 			start.Done()
 			finished.Wait()
 
+			if n := failures.Load(); n != 0 {
+				t.Fatalf("withLock failed %d times; the occupancy assertion would be vacuous", n)
+			}
 			mu.Lock()
 			got := maxSeen
 			mu.Unlock()

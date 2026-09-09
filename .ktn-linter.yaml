@@ -279,6 +279,18 @@ rules:
     exclude:
       - "**/internal/service/net/server/**"
 
+  # KTN-GOROUTINE-RWOVERMU — following this rule here would REOPEN a defect that
+  # was measured, fixed and mutation-tested. fileStore.withLock guards a
+  # read-modify-write cycle whose write happens inside the fn it calls, so the
+  # rule's heuristic sees no field assignment in the method body and concludes
+  # the access is read-only. It is not: Load slides the idle window and
+  # therefore writes. An RLock would admit concurrent holders into exactly the
+  # cycle the mutex exists to serialise — which is the bug
+  # TestWithLockExcludesGoroutines pins, and which the rule would restore.
+  KTN-GOROUTINE-RWOVERMU:
+    exclude:
+      - "**/internal/service/session/**"
+
   # KTN-FUNC-EMPTYSENTINEL (phase 5) — "" is a domain value here, not a sentinel.
   #
   # zoneOf returns the IPv6 zone, where "" is the correct net.UDPAddr.Zone for a
