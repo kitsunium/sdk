@@ -18,6 +18,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `resilience/` | Reliability policies (ADR 0026): `NewRetry` / `NewCircuitBreaker` / `NewRateLimiter` / `NewBulkhead` / `NewTimeout` / `NewFallback` / `NewHedge` returning composable `Runner`s; `Operation`/`Runner` + `*Config` aliases; outcome sentinels; stdlib-only, cross-OS | `pkg/v1/resilience/README.md` |
 | `metrics/` | Observability (ADR 0027): `NewMeter` → lock-free Counter/Gauge/Histogram; `Collect` → `Snapshot`; `Export`/`RegisterExporter`/`NewTextExporter`/`AvailableExporters`; default text exporter registered on **stderr** (ADR 0030 — stdout may be the process's protocol channel), stdout reachable via `NewTextExporter(name, os.Stdout)`; stdlib-only, cross-OS | `pkg/v1/metrics/README.md` |
 | `config/` | Configuration (ADR 0028): generic `Load[T]` merging `EnvSource`/`FileSource` (later wins) + decode + `Validator`; `PollWatcher` cross-OS hot-reload; stdlib-only | `pkg/v1/config/README.md` |
+| `scheduler/` | Time-driven execution (ADR 0041): `Parse`/`ParseInLocation` (five-field POSIX cron, UTC by default) + `Every` + `New` → a `Scheduler` you `Add` to and `Run`; `Job`/`Schedule`/`Entry`/`Result`/`Config` aliases; every construct outside the subset refused BY NAME at construction; DST, missed deadlines and overlap documented rather than emergent; stdlib-only, cross-OS | `pkg/v1/scheduler/README.md` |
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -77,3 +78,4 @@ GOWORK=off go test -race -cover ./v1/...
 - `resilience/` — see `pkg/v1/resilience/CLAUDE.md`
 - `metrics/` — see `pkg/v1/metrics/CLAUDE.md`
 - `config/` — see `pkg/v1/config/CLAUDE.md`
+- `scheduler/` — see `pkg/v1/scheduler/CLAUDE.md`

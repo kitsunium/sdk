@@ -418,6 +418,22 @@ codes:
     const: CodeUnsafePath
     hex: "0x00_02_0B_16"
     package: internal/core/net
+  - code: "0.2.12.1"
+    const: CodeInvalidEntry
+    hex: "0x00_02_0C_01"
+    package: internal/core/scheduler
+  - code: "0.2.12.2"
+    const: CodeDuplicateJob
+    hex: "0x00_02_0C_02"
+    package: internal/core/scheduler
+  - code: "0.2.12.3"
+    const: CodeSchedulerRunning
+    hex: "0x00_02_0C_03"
+    package: internal/core/scheduler
+  - code: "0.2.12.4"
+    const: CodeJobPanicked
+    hex: "0x00_02_0C_04"
+    package: internal/core/scheduler
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"
@@ -942,6 +958,26 @@ codes:
     const: CodeJWKAmbiguousKid
     hex: "0x00_03_2A_0B"
     package: internal/service/crypto/jwk
+  - code: "0.3.43.1"
+    const: CodeInvalidExpression
+    hex: "0x00_03_2B_01"
+    package: internal/service/scheduler
+  - code: "0.3.43.2"
+    const: CodeUnsupportedSyntax
+    hex: "0x00_03_2B_02"
+    package: internal/service/scheduler
+  - code: "0.3.43.3"
+    const: CodeUnreachableSchedule
+    hex: "0x00_03_2B_03"
+    package: internal/service/scheduler
+  - code: "0.3.43.4"
+    const: CodeInvalidLocation
+    hex: "0x00_03_2B_04"
+    package: internal/service/scheduler
+  - code: "0.3.43.5"
+    const: CodeInvalidInterval
+    hex: "0x00_03_2B_05"
+    package: internal/service/scheduler
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
