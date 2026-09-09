@@ -39,3 +39,10 @@ func (g *memGauge) load() float64 {
 	//: decode the atomic bit pattern.
 	return math.Float64frombits(g.bits.Load())
 }
+
+// newMemGauge builds a zeroed gauge. A package-level function value so the
+// Meter's create path passes it without allocating a closure.
+func newMemGauge() *memGauge {
+	//: a gauge starts at zero and needs no configuration.
+	return &memGauge{}
+}

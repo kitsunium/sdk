@@ -13,7 +13,7 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 | `codec/` | 16 wire-format codecs over 24 Format names (asn1, baseenc[9], bson, cbor, csv, flatbuffers, form, json, msgpack, multipart, ndjson, pem, tlv, toml, xml, yaml), each implementing `core/codec.Codec`; all satisfy `Appender`, most also `StreamingCodec` | `0.3.2.*` … `0.3.40.*` (one PP slot per codec) |
 | `id/` | identifier generators (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID) implementing `core/id.Generator`; stdlib-only, cross-OS, self-registered except TypeID (ADR 0024) | `0.3.39.*` |
 | `resilience/` | concrete reliability policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging) implementing `core/resilience.Runner`; stdlib + kernel clock, cross-OS (ADR 0026) | (emits core sentinels `0.2.8.*`) |
-| `metrics/` | in-memory Meter + lock-free instruments + stdlib text exporter, implementing `core/metrics`; stdlib-only, cross-OS (ADR 0027) | (emits core sentinels `0.2.9.*`) |
+| `metrics/` | in-memory Meter + lock-free instruments + stdlib text exporter, implementing `core/metrics`; labelled series with a per-name cardinality bound and an aggregated overflow series; allocation-free lookup (see its `BENCH.md`); stdlib-only, cross-OS (ADR 0027) | (emits core sentinels `0.2.9.*`) |
 | `config/` | env+file sources, merge+decode+validate `Load[T]`, cross-OS poll watcher, implementing `core/config`; codec-dispatched file parse (ADR 0028) | (emits core sentinels `0.2.10.*`) |
 
 ## Module

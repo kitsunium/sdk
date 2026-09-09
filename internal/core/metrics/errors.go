@@ -20,6 +20,11 @@ var (
 		"That instrument name is already registered with a different kind",
 		"service/metrics: a name bound to one instrument kind was fetched as another")
 
+	// InvalidLabel is the panic sentinel for an unusable label set.
+	InvalidLabel = errs.Define(CodeInvalidLabel, "INVALID_LABEL",
+		"A label key is empty or repeated in that instrument's label set",
+		"service/metrics: a label set must name each dimension exactly once with a non-empty key")
+
 	// DuplicateRegistration is the boot-time Exporter-registry panic sentinel.
 	DuplicateRegistration = errs.Define(CodeDuplicateRegistration, "DUPLICATE_REGISTRATION",
 		"An exporter is already registered under that name",
