@@ -6,7 +6,10 @@ go_library(
     name = "metrics",
     srcs = [
         "cardinality.go",
+        "codes.go",
         "counter.go",
+        "errors.go",
+        "exporter_prometheus.go",
         "exporter_text.go",
         "gauge.go",
         "histogram.go",
@@ -41,6 +44,8 @@ go_test(
     srcs = [
         "cardinality_external_test.go",
         "counter_internal_test.go",
+        "exporter_prometheus_external_test.go",
+        "exporter_prometheus_internal_test.go",
         "exporter_text_external_test.go",
         "exporter_text_internal_test.go",
         "gauge_internal_test.go",

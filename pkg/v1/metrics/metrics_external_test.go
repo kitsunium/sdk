@@ -1,6 +1,8 @@
 package metrics_test
 
 import (
+	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/metrics"
@@ -58,6 +60,7 @@ func TestFacadeExporterRegistry(t *testing.T) {
 	}
 	tests := []tc{
 		{"the default text exporter is registered", "text", false},
+		{"the prometheus exporter is registered", "prometheus", false},
 		{"an unregistered name is refused", "nonesuch", true},
 		{"an empty name is refused", "", true},
 	}
@@ -76,5 +79,47 @@ func TestFacadeExporterRegistry(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// The Prometheus exporter reaches consumers through two doors, and both need
+// pinning: the registry (which a bare import arms, on stderr) and the explicit
+// constructor (which a /metrics handler binds to its response writer). Only the
+// second is usable for a scrape, so a facade exporting the registry name but
+// not the constructor would look complete and serve nothing.
+func TestFacadePrometheusExporter(t *testing.T) {
+	t.Parallel()
+	meter := metrics.NewMeter()
+	meter.Counter("requests_total", metrics.Label{Key: "method", Value: "GET"}).Inc()
+
+	var buf bytes.Buffer
+	if err := metrics.NewPrometheusExporter("scrape", &buf).Export(meter.Collect()); err != nil {
+		t.Fatalf("Export = %v, want nil", err)
+	}
+
+	want := "# TYPE requests_total counter\nrequests_total{method=\"GET\"} 1\n"
+	if buf.String() != want {
+		t.Errorf("Export wrote %q, want %q", buf.String(), want)
+	}
+}
+
+// A name the exposition format cannot spell is REFUSED, not rewritten, and the
+// refusal is typed so a consumer acts on it rather than parsing a string. The
+// sentinel has to be reachable from the facade for that to be possible at all.
+func TestFacadePrometheusRefusesUnrepresentableNames(t *testing.T) {
+	t.Parallel()
+	meter := metrics.NewMeter()
+	meter.Counter("http.requests").Inc()
+
+	var buf bytes.Buffer
+	err := metrics.NewPrometheusExporter("scrape", &buf).Export(meter.Collect())
+
+	if !errors.Is(err, metrics.InvalidMetricName) {
+		t.Fatalf("Export = %v, want InvalidMetricName", err)
+	}
+	//: nothing is written, because a truncated exposition parses as a
+	//: complete one and its missing series look like series that stopped.
+	if buf.Len() != 0 {
+		t.Errorf("Export wrote %q on a refusal, want nothing", buf.String())
 	}
 }
