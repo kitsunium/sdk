@@ -45,6 +45,14 @@ vocabulary:
     # impose here ("ServeConner", "ServePacketter") are not words.
     - github.com/kitsunium/sdk/internal/core/net.ConnHandler
     - github.com/kitsunium/sdk/internal/core/net.PacketHandler
+    # UpDownMeter is the ADR 0039 sibling of the frozen core/metrics.Meter port,
+    # and "Meter" is the OpenTelemetry vocabulary for an instrument factory —
+    # the word the whole domain is discussed in. The -er form the rule would
+    # impose, "UpDownCounterrer", is not a word; and naming the sibling after
+    # its method rather than its role would break the Meter / UpDownMeter /
+    # AsyncMeter / FullMeter family that says, at a glance, which capabilities a
+    # parameter requires. Same argument as ConnHandler above.
+    - github.com/kitsunium/sdk/internal/core/metrics.UpDownMeter
 
 # ── Global options ────────────────────────────────────────────────────────────
 
@@ -287,6 +295,15 @@ rules:
       # prevent. (The rule's own message here reads "constructor
       # NewNewKeyValue()", which is not a name anything could satisfy.)
       - "**/internal/service/crypto/jwk/**"
+      # core/metrics.AttrValue is built by FOUR kind-specific constructors —
+      # String / Bool / Int64 / Float64 — and by nothing else: the value payload
+      # is unexported precisely so a struct literal cannot produce an attribute
+      # whose kind and payload disagree. A NewAttrValue(key, kind, num, str)
+      # would be exactly the "poorly initialized struct" the rule exists to
+      # prevent, reachable in one call. (The rule's own message here reads
+      # "constructor NewNewAttrValue()", which is not a name anything could
+      # satisfy — the same broken suggestion the jwk entry above records.)
+      - "**/internal/core/metrics/**"
 
   KTN-VAR-NILSLICE:
     exclude:
@@ -409,6 +426,26 @@ rules:
       - "**/internal/core/session/**"
       - "**/internal/service/session/**"
       - "**/pkg/v1/session/**"
+      # The metrics domain, for the two reasons already established above.
+      # SnapshotValue (128 B) is the payload an Exporter receives, and
+      # `Exporter.Export(snap SnapshotValue) error` is a PUBLISHED port —
+      # pkg/v1/metrics.Exporter is a type alias to it, so changing the parameter
+      # to a pointer breaks every downstream implementer at compile time with no
+      # deprecation window (ADR 0039). By value is also the safer half: the
+      # Attrs slices inside a snapshot ALIAS the meter's own copies, so handing
+      # an exporter a pointer would invite it to rewrite the identity of series
+      # the meter is still serving. It grew past 64 B when it took on the OTel
+      # payload hierarchy — Resource, Scope and the collection window, each
+      # carried once per payload rather than once per point, which is the whole
+      # reason those concepts exist. The copy happens once per export,
+      # immediately before formatting work that dwarfs it.
+      # MeterConfig (88 B) is taken and returned BY VALUE by resolve precisely
+      # so filling in the defaults cannot mutate the config its caller still
+      # holds, and newMemMeter copies it exactly once, at construction. Same
+      # argument as net/client.Config above.
+      - "**/internal/core/metrics/**"
+      - "**/internal/service/metrics/**"
+      - "**/pkg/v1/metrics/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue.

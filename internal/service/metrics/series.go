@@ -1,5 +1,5 @@
 // Package metrics — series identity: the canonical key binding an instrument
-// name and a label set to exactly one series.
+// name and an attribute set to exactly one series.
 package metrics
 
 import (
@@ -10,106 +10,89 @@ import (
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 )
 
-// maxStackLabels is how many labels the lookup path sorts without touching the
-// heap. Eight is already an unusual number of dimensions on one metric; beyond
-// it the sort falls back to a heap clone, which is correct and merely slower —
-// the pathological case pays, the normal one does not.
-const maxStackLabels int = 8
+// maxStackAttrs is how many attributes the lookup path sorts without touching
+// the heap. Eight is already an unusual number of dimensions on one metric;
+// beyond it the sort falls back to a heap clone, which is correct and merely
+// slower — the pathological case pays, the normal one does not.
+const maxStackAttrs int = 8
 
 // seriesKeyCap is the stack scratch the encoded series key is built in. A key
-// is the instrument name plus every key and value, each length-prefixed, so
-// 192 bytes covers a long name with a handful of labels. Overflowing it costs
-// one heap slice on that call, nothing more.
+// is the instrument name plus every key and typed value, each tagged and
+// length-prefixed or fixed-width, so 192 bytes covers a long name with a
+// handful of attributes. Overflowing it costs one heap slice on that call,
+// nothing more.
 const seriesKeyCap int = 192
 
-// overflowLabels is the label set of the single aggregated series a name folds
-// into once its cardinality bound is reached. Package-level and never mutated.
-var overflowLabels = []coremetrics.LabelValue{{
-	Key:   coremetrics.OverflowLabelKey,
-	Value: coremetrics.OverflowLabelValue,
-}}
-
-// sortLabels returns labels ordered by Key, writing into buf when it fits so
-// the common case never allocates.
+// overflowAttrs is the attribute set of the single aggregated series a name
+// folds into once its cardinality bound is reached. Package-level and never
+// mutated.
 //
-// Sorting is what makes a label SET a set: without it {a,b} and {b,a} encode to
-// two different keys and silently become two series, which both doubles
-// cardinality and splits one metric's total across two rows that no exporter
-// can recombine.
+// The value is a BOOL, not the string "true". Before typed attributes it had to
+// be a string because a value was a string everywhere the snapshot was going;
+// that reason expired with the OTel attribute model. The Prometheus rendering
+// is byte-identical either way, and an OTLP payload now carries a real boolean.
+var overflowAttrs = []coremetrics.AttrValue{coremetrics.Bool(coremetrics.OverflowAttrKey, true)}
+
+// sortAttrs returns attrs ordered by Key, writing into buf when it fits so the
+// common case never allocates.
+//
+// Sorting is what makes an attribute SET a set: without it {a,b} and {b,a}
+// encode to two different keys and silently become two series, which both
+// doubles cardinality and splits one metric's total across two rows that no
+// exporter can recombine.
 //
 // The result aliases either buf or a fresh heap slice; callers must copy it
 // before storing it.
-func sortLabels(buf, labels []coremetrics.LabelValue) []coremetrics.LabelValue {
+func sortAttrs(buf, attrs []coremetrics.AttrValue) []coremetrics.AttrValue {
 	//: the dimensionless series is the common case and needs no work.
-	if len(labels) == 0 {
+	if len(attrs) == 0 {
 		//: nil, not an empty slice — it is what gets stored on the entry.
 		return nil
 	}
 	//: sorted borrows the caller's stack scratch whenever the set fits.
 	sorted := buf
 	//: an oversized set falls back to the heap rather than truncating.
-	if len(labels) > cap(buf) {
+	if len(attrs) > cap(buf) {
 		//: fresh backing array; correctness before speed.
-		sorted = make([]coremetrics.LabelValue, 0, len(labels))
+		sorted = make([]coremetrics.AttrValue, 0, len(attrs))
 	}
 	//: copy in, then order by Key.
-	sorted = append(sorted, labels...)
-	slices.SortFunc(sorted, compareByKey)
+	sorted = append(sorted, attrs...)
+	slices.SortFunc(sorted, coremetrics.CompareAttrKey)
 	//: hand back the ordered view.
 	return sorted
 }
 
-// compareByKey orders two labels by Key. A package-level function value, not a
-// closure, so passing it to SortFunc allocates nothing.
-func compareByKey(a, b coremetrics.LabelValue) int {
-	//: Key alone decides the order; duplicates are rejected, not tie-broken.
-	return strings.Compare(a.Key, b.Key)
-}
-
-// validateLabels panics when sorted cannot name a series — an empty Key, or the
-// same Key twice. It runs on the ALREADY SORTED set so duplicates are adjacent
-// and the check is one comparison per label.
+// appendSeriesKey appends the canonical encoding of (kind, name, sorted) to dst
+// and returns the grown slice.
 //
-// Panicking is the same call the meter already makes for a cross-kind name
-// reuse, and it is safe for the same reason: a label key is structure written
-// at the call site, never data. It is wrong on the first call or never, so the
-// panic fires in development, deterministically, at the line that caused it.
-// The alternative is a series that no exporter can emit (Prometheus and OTLP
-// both reject an empty label name) failing far away, inside the component the
-// SDK told the caller to stop thinking about.
-func validateLabels(sorted []coremetrics.LabelValue) {
-	//: walk once; the set is sorted, so a duplicate sits next to its twin.
-	for i, label := range sorted {
-		//: an empty key names no dimension.
-		if label.Key == "" {
-			//: fail at the call site that wrote it.
-			panic(coremetrics.InvalidLabel.Error())
-		}
-		//: the same key twice means the set is not a set.
-		if i > 0 && sorted[i-1].Key == label.Key {
-			//: same refusal — the label set is unusable either way.
-			panic(coremetrics.InvalidLabel.Error())
-		}
-	}
-}
-
-// appendSeriesKey appends the canonical encoding of (name, sorted) to dst and
-// returns the grown slice.
+// Every string is LENGTH-PREFIXED rather than separator-delimited, and every
+// value carries its KIND TAG. An attribute value is data — a route, a tenant
+// id, a status code — so with a delimiter a caller who can influence one value
+// can forge another series' key and have two unrelated series silently
+// accumulate into one. Length prefixes make the encoding injective over
+// strings; the attribute kind tag extends that injectivity across TYPES, so
+// String("v", "1") and Int64("v", 1) stay two series rather than merging into
+// one on the strength of spelling the same in decimal.
 //
-// Every string is LENGTH-PREFIXED rather than separator-delimited. A label
-// value is data — a route, a tenant id, a status line — so with a delimiter a
-// caller who can influence one value can forge another series' key and have
-// two unrelated series silently accumulate into one. Length prefixes make the
-// encoding injective: there is exactly one (name, labels) that produces a
-// given key.
-func appendSeriesKey(dst []byte, name string, sorted []coremetrics.LabelValue) []byte {
-	//: the name opens the key.
+// The INSTRUMENT kind opens the key for a different reason: four instrument
+// kinds now share one store, because a Counter and an UpDownCounter produce the
+// same point shape. Without it, `Counter("x")` and `UpDownCounter("x")` would
+// resolve to the same key, the second call would HIT the read lock, and the
+// cross-kind conflict would never reach bindName — one name would silently
+// carry both monotonicities. One byte on a stack buffer buys that check back
+// without a second map read per observation.
+func appendSeriesKey(dst []byte, kind instrumentKind, name string, sorted []coremetrics.AttrValue) []byte {
+	//: the instrument kind opens the key, before anything a caller controls.
+	dst = append(dst, byte(kind))
+	//: then the name.
 	dst = appendSized(dst, name)
-	//: then every label, in the order that made the set canonical.
-	for _, label := range sorted {
-		//: key then value, both sized.
-		dst = appendSized(dst, label.Key)
-		dst = appendSized(dst, label.Value)
+	//: then every attribute, in the order that made the set canonical.
+	for _, attr := range sorted {
+		//: the key is a string and is sized like the name.
+		dst = appendSized(dst, attr.Key)
+		//: the value carries its own tag and its own framing.
+		dst = attr.AppendIdentity(dst)
 	}
 	//: caller owns the grown slice.
 	return dst
@@ -123,23 +106,23 @@ func appendSized(dst []byte, s string) []byte {
 	return append(dst, s...)
 }
 
-// cloneLabels returns an owned copy of src, or nil for the dimensionless set.
-// The copy is what lets the meter share its label slice with every snapshot
+// cloneAttrs returns an owned copy of src, or nil for the dimensionless set.
+// The copy is what lets the meter share its attribute slice with every snapshot
 // while the caller's stack scratch stays on the stack.
-func cloneLabels(src []coremetrics.LabelValue) []coremetrics.LabelValue {
-	//: nil in, nil out — the dimensionless series stores no label slice.
+func cloneAttrs(src []coremetrics.AttrValue) []coremetrics.AttrValue {
+	//: nil in, nil out — the dimensionless series stores no attribute slice.
 	if len(src) == 0 {
 		//: nothing to own.
 		return nil
 	}
-	//: exact-size backing array; the label set never grows after creation.
+	//: exact-size backing array; the attribute set never grows after creation.
 	return slices.Clone(src)
 }
 
-// compareLabels orders two sorted label sets lexicographically — key, then
-// value, then the shorter set first on a common prefix. Used at Collect time
-// to make a snapshot's series order deterministic.
-func compareLabels(a, b []coremetrics.LabelValue) int {
+// compareAttrs orders two sorted attribute sets lexicographically — key, then
+// the value's canonical identity, then the shorter set first on a common
+// prefix. Used at Collect time to make a snapshot's series order deterministic.
+func compareAttrs(a, b []coremetrics.AttrValue) int {
 	//: compare pairwise over the common prefix.
 	for i := range min(len(a), len(b)) {
 		//: keys decide first.
@@ -147,8 +130,11 @@ func compareLabels(a, b []coremetrics.LabelValue) int {
 			//: ordered.
 			return c
 		}
-		//: equal keys fall through to the values.
-		if c := strings.Compare(a[i].Value, b[i].Value); c != 0 {
+		//: equal keys fall through to the values. The ordering is total
+		//: across kinds and distinguishes every pair the series key keeps
+		//: apart, so two distinct series never sort equal and the snapshot
+		//: stays byte-deterministic.
+		if c := coremetrics.CompareAttrValue(a[i], b[i]); c != 0 {
 			//: ordered.
 			return c
 		}

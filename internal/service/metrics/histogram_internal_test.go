@@ -38,8 +38,8 @@ func Test_newHistogram(t *testing.T) {
 
 		h := newHistogram(in)
 
-		if !slices.Equal(h.buckets, c.want) {
-			t.Errorf("buckets = %v, want %v", h.buckets, c.want)
+		if !slices.Equal(h.bounds, c.want) {
+			t.Errorf("buckets = %v, want %v", h.bounds, c.want)
 		}
 		//: the counts slice carries one extra slot for the +Inf overflow, or a
 		//: value above every boundary would have nowhere to go.
@@ -53,7 +53,7 @@ func Test_newHistogram(t *testing.T) {
 			t.Errorf("newHistogram mutated the caller's slice into %v", in)
 		}
 		//: and it is a copy, not the same backing array.
-		if len(in) > 0 && &h.buckets[0] == &in[0] {
+		if len(in) > 0 && &h.bounds[0] == &in[0] {
 			t.Error("newHistogram retained the caller's backing array")
 		}
 	}
@@ -103,7 +103,7 @@ func Test_memHistogram_Record(t *testing.T) {
 			sum += v
 		}
 
-		snap := h.snapshot()
+		snap := h.snapshot(false)
 		if !slices.Equal(snap.Counts, c.want) {
 			t.Fatalf("counts = %v, want %v", snap.Counts, c.want)
 		}
@@ -151,7 +151,7 @@ func Test_memHistogram_RecordDuration(t *testing.T) {
 
 		h.RecordDuration(c.d)
 
-		snap := h.snapshot()
+		snap := h.snapshot(false)
 		if math.Abs(snap.Sum-c.want) > 1e-9 {
 			t.Errorf("Sum = %v seconds, want %v", snap.Sum, c.want)
 		}
@@ -191,9 +191,9 @@ func Test_memHistogram_snapshot(t *testing.T) {
 			h.Record(v)
 		}
 
-		snap := h.snapshot()
+		snap := h.snapshot(false)
 		countsBefore := slices.Clone(snap.Counts)
-		bucketsBefore := slices.Clone(snap.Buckets)
+		bucketsBefore := slices.Clone(snap.Bounds)
 
 		for _, v := range c.after {
 			h.Record(v)
@@ -207,12 +207,12 @@ func Test_memHistogram_snapshot(t *testing.T) {
 			t.Errorf("the snapshot's Count is %d, want %d", snap.Count, len(c.before))
 		}
 		//: and mutating the snapshot must not reach the histogram.
-		if len(snap.Buckets) > 0 {
-			snap.Buckets[0] = math.MaxFloat64
-			if h.buckets[0] == math.MaxFloat64 {
+		if len(snap.Bounds) > 0 {
+			snap.Bounds[0] = math.MaxFloat64
+			if h.bounds[0] == math.MaxFloat64 {
 				t.Error("the snapshot shares its buckets with the histogram")
 			}
-			copy(snap.Buckets, bucketsBefore)
+			copy(snap.Bounds, bucketsBefore)
 		}
 	}
 	for _, c := range tests {
@@ -253,7 +253,7 @@ func Test_memHistogram_RecordConcurrent(t *testing.T) {
 		}
 		wg.Wait()
 
-		snap := h.snapshot()
+		snap := h.snapshot(false)
 		want := uint64(c.goroutines * c.each)
 		if snap.Count != want {
 			t.Errorf("Count = %d, want %d", snap.Count, want)

@@ -20,13 +20,19 @@ var (
 		"That instrument name is already registered with a different kind",
 		"service/metrics: a name bound to one instrument kind was fetched as another")
 
-	// InvalidLabel is the panic sentinel for an unusable label set.
-	InvalidLabel = errs.Define(CodeInvalidLabel, "INVALID_LABEL",
-		"A label key is empty or repeated in that instrument's label set",
-		"service/metrics: a label set must name each dimension exactly once with a non-empty key")
+	// InvalidAttribute is the panic sentinel for an unusable attribute set.
+	InvalidAttribute = errs.Define(CodeInvalidAttribute, "INVALID_ATTRIBUTE",
+		"An attribute key is empty or repeated, or its value was never set",
+		"service/metrics: an attribute set must name each dimension once, with a non-empty key and a value from String/Bool/Int64/Float64")
 
 	// DuplicateRegistration is the boot-time Exporter-registry panic sentinel.
 	DuplicateRegistration = errs.Define(CodeDuplicateRegistration, "DUPLICATE_REGISTRATION",
 		"An exporter is already registered under that name",
 		"core/metrics.RegisterExporter: a distinct exporter already claims this name, or a nil exporter was supplied")
+
+	// InvalidTemporality is the panic sentinel for a Temporality that is none
+	// of the three declared constants.
+	InvalidTemporality = errs.Define(CodeInvalidTemporality, "INVALID_TEMPORALITY",
+		"That aggregation temporality is not one this SDK declares",
+		"core/metrics: Temporality must be Unspecified, Delta or Cumulative; any other value came from a cast")
 )

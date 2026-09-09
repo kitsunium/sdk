@@ -14,13 +14,19 @@ const CodeUnknownExporter errs.Code = 0x00_02_09_01 // 0.2.9.1
 const CodeExportFailed errs.Code = 0x00_02_09_02 // 0.2.9.2
 
 // CodeInstrumentKindConflict identifies a Meter call reusing a name already
-// bound to a DIFFERENT instrument kind (e.g. a Counter name fetched as a Gauge).
+// bound to a DIFFERENT instrument kind (e.g. a Counter name fetched as a Gauge,
+// or as an UpDownCounter, which is a different monotonicity on one metric).
 const CodeInstrumentKindConflict errs.Code = 0x00_02_09_03 // 0.2.9.3
 
-// CodeInvalidLabel identifies an instrument fetched with a label set that
-// cannot name a series: a label with an empty Key, or the same Key twice.
-const CodeInvalidLabel errs.Code = 0x00_02_09_04 // 0.2.9.4
+// CodeInvalidAttribute identifies an instrument fetched with an attribute set
+// that cannot name a series: an attribute with an empty Key, the same Key
+// twice, or a value no constructor ever set (AttrKindInvalid).
+const CodeInvalidAttribute errs.Code = 0x00_02_09_04 // 0.2.9.4
 
 // CodeDuplicateRegistration identifies a boot-time Exporter registry collision:
 // a nil exporter, or a distinct exporter claiming an already-registered Name.
 const CodeDuplicateRegistration errs.Code = 0x00_02_09_05 // 0.2.9.5
+
+// CodeInvalidTemporality identifies a MeterConfig carrying a Temporality that
+// is none of the three declared constants — reachable only by a deliberate cast.
+const CodeInvalidTemporality errs.Code = 0x00_02_09_06 // 0.2.9.6

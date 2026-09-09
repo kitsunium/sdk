@@ -13,13 +13,49 @@ import (
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
 )
 
-// labelsOf is the one-label shorthand the tables below share.
-func labelsOf(pairs ...string) []coremetrics.LabelValue {
-	out := make([]coremetrics.LabelValue, 0, len(pairs)/2)
+// labelsOf is the string-attribute shorthand the tables below share. Every
+// case here is a STRING attribute, because that is the only kind the Prometheus
+// wire can carry without losing its type — the typed kinds get their own test.
+func labelsOf(pairs ...string) []coremetrics.AttrValue {
+	out := make([]coremetrics.AttrValue, 0, len(pairs)/2)
 	for i := 0; i+1 < len(pairs); i += 2 {
-		out = append(out, coremetrics.LabelValue{Key: pairs[i], Value: pairs[i+1]})
+		out = append(out, coremetrics.String(pairs[i], pairs[i+1]))
 	}
 	return out
+}
+
+// promCounter wraps points as the CUMULATIVE, MONOTONIC sum metric a snapshot
+// carries for a Counter. Temporality is spelled out in every case because it is
+// the one field the Prometheus wire has no room for, and a delta metric is
+// refused rather than mis-labelled.
+func promCounter(points ...coremetrics.SumValue) coremetrics.SumMetricValue {
+	return coremetrics.SumMetricValue{
+		Temporality: coremetrics.TemporalityCumulative,
+		Monotonic:   true,
+		Points:      points,
+	}
+}
+
+// promUpDown wraps points as the cumulative NON-MONOTONIC sum an
+// UpDownCounter produces — the metric Prometheus must type `gauge`.
+func promUpDown(points ...coremetrics.SumValue) coremetrics.SumMetricValue {
+	return coremetrics.SumMetricValue{
+		Temporality: coremetrics.TemporalityCumulative,
+		Points:      points,
+	}
+}
+
+// promGauge wraps points as a gauge metric, which carries no temporality at all.
+func promGauge(points ...coremetrics.GaugeValue) coremetrics.GaugeMetricValue {
+	return coremetrics.GaugeMetricValue{Points: points}
+}
+
+// promHistogram wraps points as a cumulative histogram metric.
+func promHistogram(points ...coremetrics.HistogramValue) coremetrics.HistogramMetricValue {
+	return coremetrics.HistogramMetricValue{
+		Temporality: coremetrics.TemporalityCumulative,
+		Points:      points,
+	}
 }
 
 // exportPrometheus renders snap through a fresh exporter over a buffer.
@@ -52,8 +88,8 @@ func TestPrometheusExporterFormat(t *testing.T) {
 		{name: "an empty snapshot renders nothing at all", want: ""},
 		{
 			name: "a dimensionless counter renders as a bare name",
-			snap: coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
-				"requests_total": {{Value: 7}},
+			snap: coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
+				"requests_total": promCounter(coremetrics.SumValue{Value: 7}),
 			}},
 			want: "# TYPE requests_total counter\nrequests_total 7\n",
 		},
@@ -61,11 +97,8 @@ func TestPrometheusExporterFormat(t *testing.T) {
 			//: the header is written ONCE, then every series under it — the
 			//: property the name-keyed snapshot shape exists to make free.
 			name: "one header, several series",
-			snap: coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
-				"requests_total": {
-					{Labels: labelsOf("method", "GET"), Value: 7},
-					{Labels: labelsOf("method", "POST"), Value: 2},
-				},
+			snap: coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
+				"requests_total": promCounter(coremetrics.SumValue{Attrs: labelsOf("method", "GET"), Value: 7}, coremetrics.SumValue{Attrs: labelsOf("method", "POST"), Value: 2}),
 			}},
 			want: "# TYPE requests_total counter\n" +
 				"requests_total{method=\"GET\"} 7\n" +
@@ -73,8 +106,8 @@ func TestPrometheusExporterFormat(t *testing.T) {
 		},
 		{
 			name: "several labels stay in the snapshot's canonical order",
-			snap: coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
-				"requests_total": {{Labels: labelsOf("code", "200", "method", "post"), Value: 1027}},
+			snap: coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
+				"requests_total": promCounter(coremetrics.SumValue{Attrs: labelsOf("code", "200", "method", "post"), Value: 1027}),
 			}},
 			want: "# TYPE requests_total counter\n" +
 				"requests_total{code=\"200\",method=\"post\"} 1027\n",
@@ -82,8 +115,8 @@ func TestPrometheusExporterFormat(t *testing.T) {
 		{
 			//: declared out of order; the document must be sorted by name.
 			name: "families are sorted by name",
-			snap: coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
-				"z": {{Value: 1}}, "a": {{Value: 2}},
+			snap: coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
+				"z": promCounter(coremetrics.SumValue{Value: 1}), "a": promCounter(coremetrics.SumValue{Value: 2}),
 			}},
 			want: "# TYPE a counter\na 2\n# TYPE z counter\nz 1\n",
 		},
@@ -91,8 +124,8 @@ func TestPrometheusExporterFormat(t *testing.T) {
 			//: a colon is legal in a metric name — it is what recording rules
 			//: use — and illegal in a label name, which the refusal table pins.
 			name: "a colon is legal in a metric name",
-			snap: coremetrics.SnapshotValue{Gauges: map[string][]coremetrics.GaugeValue{
-				"job:rate:5m": {{Value: 2.5}},
+			snap: coremetrics.SnapshotValue{Gauges: map[string]coremetrics.GaugeMetricValue{
+				"job:rate:5m": promGauge(coremetrics.GaugeValue{Value: 2.5}),
 			}},
 			want: "# TYPE job:rate:5m gauge\njob:rate:5m 2.5\n",
 		},
@@ -100,10 +133,10 @@ func TestPrometheusExporterFormat(t *testing.T) {
 			//: the format names NaN / +Inf / -Inf as valid values, and Go's
 			//: own FormatFloat spells all three exactly that way.
 			name: "a gauge spells the non-finite values the format names",
-			snap: coremetrics.SnapshotValue{Gauges: map[string][]coremetrics.GaugeValue{
-				"a_nan": {{Value: math.NaN()}},
-				"b_pos": {{Value: math.Inf(1)}},
-				"c_neg": {{Value: math.Inf(-1)}},
+			snap: coremetrics.SnapshotValue{Gauges: map[string]coremetrics.GaugeMetricValue{
+				"a_nan": promGauge(coremetrics.GaugeValue{Value: math.NaN()}),
+				"b_pos": promGauge(coremetrics.GaugeValue{Value: math.Inf(1)}),
+				"c_neg": promGauge(coremetrics.GaugeValue{Value: math.Inf(-1)}),
 			}},
 			want: "# TYPE a_nan gauge\na_nan NaN\n" +
 				"# TYPE b_pos gauge\nb_pos +Inf\n" +
@@ -113,13 +146,13 @@ func TestPrometheusExporterFormat(t *testing.T) {
 			//: the published example from the exposition-format documentation,
 			//: with the per-bucket counts the meter stores.
 			name: "the documentation's own histogram family",
-			snap: coremetrics.SnapshotValue{Histograms: map[string][]coremetrics.HistogramValue{
-				"http_request_duration_seconds": {{
-					Buckets: []float64{0.05, 0.1, 0.2, 0.5, 1},
-					Counts:  []uint64{24054, 9390, 66948, 28997, 4599, 10332},
-					Sum:     53423,
-					Count:   144320,
-				}},
+			snap: coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
+				"http_request_duration_seconds": promHistogram(coremetrics.HistogramValue{
+					Bounds: []float64{0.05, 0.1, 0.2, 0.5, 1},
+					Counts: []uint64{24054, 9390, 66948, 28997, 4599, 10332},
+					Sum:    53423,
+					Count:  144320,
+				}),
 			}},
 			want: "# TYPE http_request_duration_seconds histogram\n" +
 				"http_request_duration_seconds_bucket{le=\"0.05\"} 24054\n" +
@@ -135,14 +168,14 @@ func TestPrometheusExporterFormat(t *testing.T) {
 			//: le goes LAST, after the series' own labels, and every member of
 			//: the family repeats those labels.
 			name: "a labelled histogram carries le last",
-			snap: coremetrics.SnapshotValue{Histograms: map[string][]coremetrics.HistogramValue{
-				"latency": {{
-					Labels:  labelsOf("route", "/v1"),
-					Buckets: []float64{1},
-					Counts:  []uint64{3, 1},
-					Sum:     4.5,
-					Count:   4,
-				}},
+			snap: coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
+				"latency": promHistogram(coremetrics.HistogramValue{
+					Attrs:  labelsOf("route", "/v1"),
+					Bounds: []float64{1},
+					Counts: []uint64{3, 1},
+					Sum:    4.5,
+					Count:  4,
+				}),
 			}},
 			want: "# TYPE latency histogram\n" +
 				"latency_bucket{route=\"/v1\",le=\"1\"} 3\n" +
@@ -154,8 +187,8 @@ func TestPrometheusExporterFormat(t *testing.T) {
 			//: a histogram with no declared bounds still owes the mandatory
 			//: +Inf line — a family without it is not a histogram.
 			name: "a bucketless histogram still emits +Inf",
-			snap: coremetrics.SnapshotValue{Histograms: map[string][]coremetrics.HistogramValue{
-				"latency": {{Counts: []uint64{5}, Sum: 10, Count: 5}},
+			snap: coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
+				"latency": promHistogram(coremetrics.HistogramValue{Counts: []uint64{5}, Sum: 10, Count: 5}),
 			}},
 			want: "# TYPE latency histogram\n" +
 				"latency_bucket{le=\"+Inf\"} 5\n" +
@@ -167,13 +200,13 @@ func TestPrometheusExporterFormat(t *testing.T) {
 			//: duplicate series; it is skipped and its count still lands in
 			//: the mandatory one.
 			name: "a non-finite declared bound folds into +Inf instead of duplicating it",
-			snap: coremetrics.SnapshotValue{Histograms: map[string][]coremetrics.HistogramValue{
-				"latency": {{
-					Buckets: []float64{math.NaN(), 1, math.Inf(1)},
-					Counts:  []uint64{2, 3, 4, 5},
-					Sum:     1,
-					Count:   14,
-				}},
+			snap: coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
+				"latency": promHistogram(coremetrics.HistogramValue{
+					Bounds: []float64{math.NaN(), 1, math.Inf(1)},
+					Counts: []uint64{2, 3, 4, 5},
+					Sum:    1,
+					Count:  14,
+				}),
 			}},
 			want: "# TYPE latency histogram\n" +
 				"latency_bucket{le=\"1\"} 5\n" +
@@ -186,9 +219,9 @@ func TestPrometheusExporterFormat(t *testing.T) {
 			//: is stable and not merely each section.
 			name: "every kind, in a fixed order",
 			snap: coremetrics.SnapshotValue{
-				Counters:   map[string][]coremetrics.CounterValue{"c": {{Value: 1}}},
-				Gauges:     map[string][]coremetrics.GaugeValue{"g": {{Value: 2}}},
-				Histograms: map[string][]coremetrics.HistogramValue{"h": {{Count: 3}}},
+				Sums:       map[string]coremetrics.SumMetricValue{"c": promCounter(coremetrics.SumValue{Value: 1})},
+				Gauges:     map[string]coremetrics.GaugeMetricValue{"g": promGauge(coremetrics.GaugeValue{Value: 2})},
+				Histograms: map[string]coremetrics.HistogramMetricValue{"h": promHistogram(coremetrics.HistogramValue{Count: 3})},
 			},
 			want: "# TYPE c counter\nc 1\n" +
 				"# TYPE g gauge\ng 2\n" +
@@ -221,15 +254,15 @@ func TestPrometheusExporterFormat(t *testing.T) {
 // the natural bug.
 func TestPrometheusExporterHeaderAppearsOncePerName(t *testing.T) {
 	t.Parallel()
-	series := make([]coremetrics.CounterValue, 0, 64)
+	series := make([]coremetrics.SumValue, 0, 64)
 	for i := range 64 {
-		series = append(series, coremetrics.CounterValue{
-			Labels: labelsOf("shard", string(rune('a'+i%26))),
-			Value:  int64(i),
+		series = append(series, coremetrics.SumValue{
+			Attrs: labelsOf("shard", string(rune('a'+i%26))),
+			Value: int64(i),
 		})
 	}
 	got := exportPrometheus(t, coremetrics.SnapshotValue{
-		Counters: map[string][]coremetrics.CounterValue{"requests_total": series},
+		Sums: map[string]coremetrics.SumMetricValue{"requests_total": promCounter(series...)},
 	})
 
 	if n := strings.Count(got, "# TYPE requests_total counter\n"); n != 1 {
@@ -300,8 +333,8 @@ func TestPrometheusExporterEscapesAdversarialLabelValues(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := exportPrometheus(t, coremetrics.SnapshotValue{
-			Counters: map[string][]coremetrics.CounterValue{
-				"requests_total": {{Labels: labelsOf("route", c.value), Value: 1}},
+			Sums: map[string]coremetrics.SumMetricValue{
+				"requests_total": promCounter(coremetrics.SumValue{Attrs: labelsOf("route", c.value), Value: 1}),
 			},
 		})
 		want := "# TYPE requests_total counter\n" + c.want + "\n"
@@ -380,10 +413,14 @@ func TestPrometheusExporterRefusesUnrepresentableNames(t *testing.T) {
 		want kerrs.Code
 	}
 	counter := func(name string, labels ...string) coremetrics.SnapshotValue {
-		return coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
-			name: {{Labels: labelsOf(labels...), Value: 1}},
+		return coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
+			name: promCounter(coremetrics.SumValue{Attrs: labelsOf(labels...), Value: 1}),
 		}}
 	}
+	//: the attribute keys the OTel semantic conventions actually specify are
+	//: DOTTED, so adopting the OTel model means the idiomatic key is the one
+	//: this wire refuses. Naming it here keeps the loss executable.
+	otelKey := counter("ok", "http.request.method", "GET")
 	tests := []tc{
 		{"a dotted metric name", counter("http.requests"), svcmetrics.CodeInvalidMetricName},
 		{"a dashed metric name", counter("http-requests"), svcmetrics.CodeInvalidMetricName},
@@ -393,28 +430,29 @@ func TestPrometheusExporterRefusesUnrepresentableNames(t *testing.T) {
 		{"a metric name holding a newline", counter("a\nb 9"), svcmetrics.CodeInvalidMetricName},
 		{"a UTF-8 metric name", counter("µs_total"), svcmetrics.CodeInvalidMetricName},
 		{"a dotted label name", counter("ok", "http.method", "GET"), svcmetrics.CodeInvalidLabelName},
+		{"an OTel-conventional attribute key", otelKey, svcmetrics.CodeInvalidLabelName},
 		{"a colon in a label name", counter("ok", "a:b", "GET"), svcmetrics.CodeInvalidLabelName},
 		{"a label name opening on a digit", counter("ok", "5xx", "GET"), svcmetrics.CodeInvalidLabelName},
 		{"a label name holding a quote", counter("ok", `a"b`, "GET"), svcmetrics.CodeInvalidLabelName},
 		{"a server-reserved label prefix", counter("ok", "__name__", "x"), svcmetrics.CodeReservedLabelName},
 		{
 			"le on a histogram, which owns it",
-			coremetrics.SnapshotValue{Histograms: map[string][]coremetrics.HistogramValue{
-				"latency": {{Labels: labelsOf("le", "1"), Count: 1}},
+			coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
+				"latency": promHistogram(coremetrics.HistogramValue{Attrs: labelsOf("le", "1"), Count: 1}),
 			}},
 			svcmetrics.CodeReservedLabelName,
 		},
 		{
 			"a gauge name the format cannot spell",
-			coremetrics.SnapshotValue{Gauges: map[string][]coremetrics.GaugeValue{
-				"in flight": {{Value: 1}},
+			coremetrics.SnapshotValue{Gauges: map[string]coremetrics.GaugeMetricValue{
+				"in flight": promGauge(coremetrics.GaugeValue{Value: 1}),
 			}},
 			svcmetrics.CodeInvalidMetricName,
 		},
 		{
 			"a histogram name the format cannot spell",
-			coremetrics.SnapshotValue{Histograms: map[string][]coremetrics.HistogramValue{
-				"latency/ms": {{Count: 1}},
+			coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
+				"latency/ms": promHistogram(coremetrics.HistogramValue{Count: 1}),
 			}},
 			svcmetrics.CodeInvalidMetricName,
 		},
@@ -447,8 +485,8 @@ func TestPrometheusExporterRefusalIsAtomicAcrossFamilies(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
 	err := svcmetrics.NewPrometheusExporter("test", &buf).Export(coremetrics.SnapshotValue{
-		Counters:   map[string][]coremetrics.CounterValue{"good_total": {{Value: 1}}},
-		Histograms: map[string][]coremetrics.HistogramValue{"bad.name": {{Count: 1}}},
+		Sums:       map[string]coremetrics.SumMetricValue{"good_total": promCounter(coremetrics.SumValue{Value: 1})},
+		Histograms: map[string]coremetrics.HistogramMetricValue{"bad.name": promHistogram(coremetrics.HistogramValue{Count: 1})},
 	})
 
 	if !kerrs.HasCode(err, svcmetrics.CodeInvalidMetricName) {
@@ -470,18 +508,21 @@ func TestPrometheusExporterRefusalIsAtomicAcrossFamilies(t *testing.T) {
 func TestPrometheusExporterEmitsTheOverflowSeries(t *testing.T) {
 	t.Parallel()
 	meter := svcmetrics.NewMeterWithConfig(svcmetrics.MeterConfig{MaxSeriesPerInstrument: 1})
-	meter.Counter("requests_total", coremetrics.LabelValue{Key: "route", Value: "/a"}).Inc()
+	meter.Counter("requests_total", coremetrics.String("route", "/a")).Inc()
 	//: past the bound of one, every further label set folds into overflow.
-	meter.Counter("requests_total", coremetrics.LabelValue{Key: "route", Value: "/b"}).Inc()
-	meter.Counter("requests_total", coremetrics.LabelValue{Key: "route", Value: "/c"}).Inc()
+	meter.Counter("requests_total", coremetrics.String("route", "/b")).Inc()
+	meter.Counter("requests_total", coremetrics.String("route", "/c")).Inc()
 
 	got := exportPrometheus(t, meter.Collect())
 
 	//: the reserved key is spelled with underscores precisely so it needs no
 	//: mangling to be a legal Prometheus label name.
+	//: the marker is a BOOL attribute now, and it still reaches the wire as
+	//: the same "true" — a Prometheus label value is a string, so the type is
+	//: exactly what this connector loses.
 	want := "# TYPE requests_total counter\n" +
 		"requests_total{route=\"/a\"} 1\n" +
-		"requests_total{" + coremetrics.OverflowLabelKey + "=\"" + coremetrics.OverflowLabelValue + "\"} 2\n"
+		"requests_total{" + coremetrics.OverflowAttrKey + "=\"true\"} 2\n"
 	if got != want {
 		t.Errorf("Export wrote\n%q\nwant\n%q", got, want)
 	}
@@ -492,7 +533,7 @@ func TestPrometheusExporterEmitsTheOverflowSeries(t *testing.T) {
 func TestPrometheusExporterFromARealMeter(t *testing.T) {
 	t.Parallel()
 	meter := svcmetrics.NewMeter()
-	meter.Counter("requests_total", coremetrics.LabelValue{Key: "method", Value: "GET"}).Add(3)
+	meter.Counter("requests_total", coremetrics.String("method", "GET")).Add(3)
 	meter.Gauge("in_flight").Set(2.5)
 	hist := meter.Histogram("latency_seconds", []float64{0.5, 1})
 	hist.Record(0.25)
@@ -523,7 +564,7 @@ func TestPrometheusExporterWriterFailure(t *testing.T) {
 
 	err := svcmetrics.NewPrometheusExporter("test", failingWriter{err: sinkErr}).
 		Export(coremetrics.SnapshotValue{
-			Counters: map[string][]coremetrics.CounterValue{"c": {{Value: 1}}},
+			Sums: map[string]coremetrics.SumMetricValue{"c": promCounter(coremetrics.SumValue{Value: 1})},
 		})
 
 	if !kerrs.HasCode(err, coremetrics.CodeExportFailed) {
@@ -560,5 +601,164 @@ func TestPrometheusExporterRegistry(t *testing.T) {
 	//: exporting through the registry reaches the same implementation.
 	if err := coremetrics.Export("prometheus", coremetrics.SnapshotValue{}); err != nil {
 		t.Errorf("Export through the registry = %v, want nil", err)
+	}
+}
+
+// TestPrometheusTypesANonMonotonicSumAsAGauge pins the mapping that keeps
+// `rate()` honest.
+//
+// A Counter and an UpDownCounter produce the SAME point shape in the OTel data
+// model and differ only by SumMetricValue.Monotonic. Prometheus has no such field —
+// it has two TYPE words — so the mapping has to happen here. Typing a
+// non-monotonic sum as `counter` would make the server treat every decrease as
+// a process restart and re-extrapolate from zero, inventing a spike on a
+// metric that merely went down.
+func TestPrometheusTypesANonMonotonicSumAsAGauge(t *testing.T) {
+	t.Parallel()
+	got := exportPrometheus(t, coremetrics.SnapshotValue{
+		Sums: map[string]coremetrics.SumMetricValue{
+			"in_flight":      promUpDown(coremetrics.SumValue{Value: 2}),
+			"requests_total": promCounter(coremetrics.SumValue{Value: 7}),
+		},
+	})
+	want := "# TYPE in_flight gauge\nin_flight 2\n" +
+		"# TYPE requests_total counter\nrequests_total 7\n"
+	if got != want {
+		t.Errorf("Export wrote\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestPrometheusRefusesADeltaSnapshot pins the loudest of this connector's
+// losses.
+//
+// The exposition format has no temporality field and a Prometheus server reads
+// every counter as cumulative: `rate()` differences successive scrapes itself.
+// Handing it delta values means it differences numbers that are already
+// differences, and a window smaller than the last one reads as a counter reset.
+// Nothing in the document would say so and no dashboard would look broken.
+//
+// Refusing is safe for the same reason refusing a name is: a meter's
+// temporality is fixed at construction, so this fails on the first scrape or
+// never — it cannot start failing under traffic.
+func TestPrometheusRefusesADeltaSnapshot(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		snap coremetrics.SnapshotValue
+	}
+	delta := func(m coremetrics.SumMetricValue) coremetrics.SumMetricValue {
+		m.Temporality = coremetrics.TemporalityDelta
+		return m
+	}
+	tests := []tc{
+		{
+			name: "a delta counter",
+			snap: coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
+				"requests_total": delta(promCounter(coremetrics.SumValue{Value: 7})),
+			}},
+		},
+		{
+			name: "a delta up-down counter",
+			snap: coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
+				"in_flight": delta(promUpDown(coremetrics.SumValue{Value: 2})),
+			}},
+		},
+		{
+			name: "a delta histogram",
+			snap: coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
+				"latency": {Temporality: coremetrics.TemporalityDelta, Points: []coremetrics.HistogramValue{{Count: 1}}},
+			}},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var buf bytes.Buffer
+		err := svcmetrics.NewPrometheusExporter("test", &buf).Export(c.snap)
+		if !kerrs.HasCode(err, svcmetrics.CodeUnsupportedTemporality) {
+			t.Fatalf("Export = %v, want UNSUPPORTED_TEMPORALITY", err)
+		}
+		//: nothing is written, exactly as for a refused name.
+		if buf.Len() != 0 {
+			t.Errorf("Export wrote %q on a refusal, want nothing", buf.String())
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestPrometheusFlattensEveryAttributeKindToAString is the type loss, made
+// executable.
+//
+// A Prometheus label value IS a string; there is no second option and no
+// encoding avoids it. So Int64("v", 1) and String("v", "1") — two distinct
+// series in the snapshot, kept apart by the kind tag in the series key —
+// become ONE series on this wire. That is not a bug to fix here, it is the
+// property that makes this exporter a connector rather than a rendering, and
+// the assertion below is what stops it from being discovered by surprise.
+func TestPrometheusFlattensEveryAttributeKindToAString(t *testing.T) {
+	t.Parallel()
+	got := exportPrometheus(t, coremetrics.SnapshotValue{
+		Sums: map[string]coremetrics.SumMetricValue{
+			"requests_total": promCounter(
+				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.Bool("cached", true)}, Value: 1},
+				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.Float64("ratio", 0.5)}, Value: 2},
+				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.Int64("status", 503)}, Value: 3},
+			),
+		},
+	})
+	want := "# TYPE requests_total counter\n" +
+		"requests_total{cached=\"true\"} 1\n" +
+		"requests_total{ratio=\"0.5\"} 2\n" +
+		"requests_total{status=\"503\"} 3\n"
+	if got != want {
+		t.Errorf("Export wrote\n%q\nwant\n%q", got, want)
+	}
+
+	//: and the collapse itself: two series the snapshot keeps apart render as
+	//: two IDENTICAL label sets, which a Prometheus server merges.
+	collapsed := exportPrometheus(t, coremetrics.SnapshotValue{
+		Sums: map[string]coremetrics.SumMetricValue{
+			"requests_total": promCounter(
+				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.Int64("v", 1)}, Value: 1},
+				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.String("v", "1")}, Value: 2},
+			),
+		},
+	})
+	if strings.Count(collapsed, "requests_total{v=\"1\"}") != 2 {
+		t.Errorf("the two kinds did not both render as v=\"1\":\n%q", collapsed)
+	}
+}
+
+// TestPrometheusDropsResourceAndScope pins the second loss: neither identity
+// reaches the wire, and in particular service.name CANNOT — a Prometheus label
+// name is [a-zA-Z_][a-zA-Z0-9_]* and the dot is outside it.
+//
+// The OTel-to-Prometheus interoperability specification answers this by
+// mangling the key into a `target_info` metric. This SDK does not, because the
+// mangling is not injective and this repo refuses non-injective name rewriting
+// everywhere else in the same file.
+func TestPrometheusDropsResourceAndScope(t *testing.T) {
+	t.Parallel()
+	meter := svcmetrics.NewMeterWithConfig(svcmetrics.MeterConfig{
+		Resource: coremetrics.ResourceValue{Attrs: []coremetrics.AttrValue{
+			coremetrics.String(coremetrics.ServiceNameKey, "orders"),
+		}},
+		Scope: coremetrics.ScopeValue{Name: "github.com/acme/orders", Version: "1.4.0"},
+	})
+	meter.Counter("requests_total").Inc()
+
+	got := exportPrometheus(t, meter.Collect())
+
+	if got != "# TYPE requests_total counter\nrequests_total 1\n" {
+		t.Errorf("Export wrote\n%q\nwant only the counter family", got)
+	}
+	for _, dropped := range []string{"orders", "service", "target_info", "1.4.0"} {
+		if strings.Contains(got, dropped) {
+			t.Errorf("the document leaked %q, which this connector does not carry:\n%q", dropped, got)
+		}
 	}
 }

@@ -1,4 +1,5 @@
-// Package metrics — stdlib text Exporter (one series per line).
+// Package metrics — stdlib text Exporter (one series per line, under a header
+// per instrument name).
 package metrics
 
 import (
@@ -8,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -23,6 +25,15 @@ const (
 	floatBitSize int = 64
 )
 
+// The three kind words and the two monotonicity words the header line uses.
+const (
+	textKindSum       string = "sum"
+	textKindGauge     string = "gauge"
+	textKindHistogram string = "histogram"
+	textMonotonic     string = "monotonic"
+	textNonMonotonic  string = "non_monotonic"
+)
+
 // Text is the default text exporter, registered to write snapshots to stderr.
 // Use NewTextExporter for a custom writer/name (not added to the registry).
 //
@@ -36,8 +47,24 @@ const (
 // with NewTextExporter(name, os.Stdout). ADR 0030.
 var Text = coremetrics.RegisterExporter(newTextExporter(textExporterName, os.Stderr))
 
-// textExporter renders a Snapshot as newline-delimited
-// "kind name{labels} value" lines.
+// textExporter renders a Snapshot as a newline-delimited diagnostic document.
+//
+// Unlike the Prometheus exporter it is LOSSLESS about the model: it prints the
+// Resource, the Scope, the collection window and each metric's temporality and
+// monotonicity, because those are exactly the facts a caller cannot otherwise
+// see and the reason this file exists at all. The grammar is
+//
+//	# resource <k>=<v> …
+//	# scope name="…" [version="…"]
+//	# window start="…" end="…"
+//	# metric <name> <sum|gauge|histogram> [<temporality>] [monotonic|non_monotonic]
+//	<name>{<k>=<v>,…} <value>
+//
+// with one "# metric" header per instrument name followed by that name's
+// series — one pass over the snapshot, because the snapshot is keyed by name.
+// A string attribute value is quoted and escaped; a bool, integer or double is
+// printed bare, so the ATTRIBUTE'S TYPE is visible in the output rather than
+// flattened into a string the way a wire format would flatten it.
 //
 // mu serialises the single dst.Write. core/metrics.Exporter documents that
 // implementations MUST be safe for concurrent use, and dst is caller-supplied:
@@ -75,8 +102,12 @@ func (e *textExporter) Name() coremetrics.ExporterName {
 func (e *textExporter) Export(snap coremetrics.SnapshotValue) error {
 	//: accumulate every line into a single byte buffer (append never errors).
 	var buf []byte
-	//: one block per kind, each in sorted-name order for deterministic output.
-	buf = appendCounters(buf, snap.Counters)
+	//: the payload-level facts first — they qualify every line beneath them.
+	buf = appendResourceLine(buf, snap.Resource)
+	buf = appendScopeLine(buf, snap.Scope)
+	buf = appendWindowLine(buf, snap.StartTime, snap.Time)
+	//: then one block per kind, each in sorted-name order for stable output.
+	buf = appendSums(buf, snap.Sums)
 	buf = appendGauges(buf, snap.Gauges)
 	buf = appendHistograms(buf, snap.Histograms)
 	//: single write — the only error surface — serialised so concurrent
@@ -98,30 +129,89 @@ func (e *textExporter) Export(snap coremetrics.SnapshotValue) error {
 	})
 }
 
-// appendCounters renders every counter series as "counter <name>{…} <total>".
-func appendCounters(buf []byte, groups map[string][]coremetrics.CounterValue) []byte {
+// appendResourceLine renders the producer's attributes, carried once.
+func appendResourceLine(buf []byte, resource coremetrics.ResourceValue) []byte {
+	//: the header word.
+	buf = append(buf, "# resource"...)
+	//: then every attribute, space-separated, in the Resource's own order.
+	for _, attr := range resource.Attrs {
+		//: one space per pair keeps the line shell-greppable.
+		buf = append(buf, ' ')
+		buf = appendAttrPair(buf, attr)
+	}
+	//: terminate the line.
+	return append(buf, '\n')
+}
+
+// appendScopeLine renders the instrumentation scope. Version is omitted when
+// empty rather than printed as an empty string, because the specification makes
+// it optional and an empty one says nothing.
+func appendScopeLine(buf []byte, scope coremetrics.ScopeValue) []byte {
+	//: name is always present — a Meter normalises it.
+	buf = append(buf, "# scope name="...)
+	buf = appendQuoted(buf, scope.Name)
+	//: an absent version is absent, not blank.
+	if scope.Version != "" {
+		//: append the optional field.
+		buf = append(buf, " version="...)
+		buf = appendQuoted(buf, scope.Version)
+	}
+	//: terminate the line.
+	return append(buf, '\n')
+}
+
+// appendWindowLine renders the interval every point below covers. Under
+// cumulative temporality start repeats across collections; under delta it
+// advances, which is the difference the two words on the metric lines name.
+func appendWindowLine(buf []byte, start, end time.Time) []byte {
+	//: RFC3339 with nanoseconds — sortable, unambiguous, and what OTLP's
+	//: unix-nano fields render back to.
+	buf = append(buf, "# window start=\""...)
+	buf = start.AppendFormat(buf, time.RFC3339Nano)
+	buf = append(buf, "\" end=\""...)
+	buf = end.AppendFormat(buf, time.RFC3339Nano)
+	//: terminate the line.
+	return append(buf, "\"\n"...)
+}
+
+// appendSums renders each sum name as a header plus one line per series.
+func appendSums(buf []byte, metrics map[string]coremetrics.SumMetricValue) []byte {
 	//: names first, so the block is stable across runs.
-	for _, name := range sortedKeys(groups) {
-		//: then each series, already ordered by label set by Collect.
-		for _, series := range groups[name] {
-			//: the cumulative total is an int64.
-			buf = appendSeriesLine(buf, "counter ", name, series.Labels,
-				strconv.FormatInt(series.Value, decimalBase))
+	for _, name := range sortedKeys(metrics) {
+		metric := metrics[name]
+		//: monotonicity is the field that tells a Counter from an
+		//: UpDownCounter, and it is the whole reason both are one kind here.
+		monotonicity := textNonMonotonic
+		//: a monotonic sum never decreases.
+		if metric.Monotonic {
+			//: the counter case.
+			monotonicity = textMonotonic
+		}
+		//: one header per name.
+		buf = appendMetricHeader(buf, name, textKindSum, metric.Temporality.String(), monotonicity)
+		//: then each series, already ordered by attribute set by Collect.
+		for _, point := range metric.Points {
+			//: the total is an int64.
+			buf = appendSeriesLine(buf, name, point.Attrs,
+				strconv.FormatInt(point.Value, decimalBase))
 		}
 	}
 	//: hand back the extended buffer.
 	return buf
 }
 
-// appendGauges renders every gauge series as "gauge <name>{…} <reading>".
-func appendGauges(buf []byte, groups map[string][]coremetrics.GaugeValue) []byte {
-	//: same two-level walk as counters.
-	for _, name := range sortedKeys(groups) {
+// appendGauges renders each gauge name as a header plus one line per series. A
+// gauge has neither temporality nor monotonicity, so its header carries neither.
+func appendGauges(buf []byte, metrics map[string]coremetrics.GaugeMetricValue) []byte {
+	//: same two-level walk as sums.
+	for _, name := range sortedKeys(metrics) {
+		//: one header per name, kind word only.
+		buf = appendMetricHeader(buf, name, textKindGauge, "", "")
 		//: one line per series.
-		for _, series := range groups[name] {
+		for _, point := range metrics[name].Points {
 			//: the reading is a float64.
-			buf = appendSeriesLine(buf, "gauge ", name, series.Labels,
-				strconv.FormatFloat(series.Value, 'g', -1, floatBitSize))
+			buf = appendSeriesLine(buf, name, point.Attrs,
+				strconv.FormatFloat(point.Value, 'g', -1, floatBitSize))
 		}
 	}
 	//: hand back the extended buffer.
@@ -131,27 +221,54 @@ func appendGauges(buf []byte, groups map[string][]coremetrics.GaugeValue) []byte
 // appendHistograms renders each histogram series' observation count. The full
 // bucket layout is reachable through the Snapshot API — this exporter is a
 // diagnostic, not a wire format.
-func appendHistograms(buf []byte, groups map[string][]coremetrics.HistogramValue) []byte {
-	//: same two-level walk as counters.
-	for _, name := range sortedKeys(groups) {
+func appendHistograms(buf []byte, metrics map[string]coremetrics.HistogramMetricValue) []byte {
+	//: same two-level walk as sums.
+	for _, name := range sortedKeys(metrics) {
+		metric := metrics[name]
+		//: one header per name; a histogram has a temporality, no monotonicity.
+		buf = appendMetricHeader(buf, name, textKindHistogram, metric.Temporality.String(), "")
 		//: one line per series.
-		for _, series := range groups[name] {
+		for _, point := range metric.Points {
 			//: observation count only.
-			buf = appendSeriesLine(buf, "histogram_count ", name, series.Labels,
-				strconv.FormatUint(series.Count, decimalBase))
+			buf = appendSeriesLine(buf, name, point.Attrs,
+				strconv.FormatUint(point.Count, decimalBase))
 		}
 	}
 	//: hand back the extended buffer.
 	return buf
 }
 
-// appendSeriesLine appends "prefix name{k=\"v\",…} value\n" to buf.
-func appendSeriesLine(buf []byte, prefix, name string, labels []coremetrics.LabelValue, value string) []byte {
-	//: kind marker then the instrument name.
-	buf = append(buf, prefix...)
+// appendMetricHeader appends "# metric <name> <kind>[ <temporality>][ <mono>]".
+// An empty qualifier is omitted rather than printed blank, which is what makes
+// the gauge header shorter than the sum header instead of ragged.
+func appendMetricHeader(buf []byte, name, kind, temporality, monotonicity string) []byte {
+	//: the header word plus the instrument it qualifies.
+	buf = append(buf, "# metric "...)
 	buf = append(buf, name...)
-	//: the label set, or nothing at all when the series has none.
-	buf = appendLabels(buf, labels)
+	buf = append(buf, ' ')
+	buf = append(buf, kind...)
+	//: a gauge has no window to name.
+	if temporality != "" {
+		//: delta or cumulative.
+		buf = append(buf, ' ')
+		buf = append(buf, temporality...)
+	}
+	//: only a sum has a monotonicity.
+	if monotonicity != "" {
+		//: monotonic or non_monotonic.
+		buf = append(buf, ' ')
+		buf = append(buf, monotonicity...)
+	}
+	//: terminate the line.
+	return append(buf, '\n')
+}
+
+// appendSeriesLine appends "name{k=v,…} value\n" to buf.
+func appendSeriesLine(buf []byte, name string, attrs []coremetrics.AttrValue, value string) []byte {
+	//: the instrument name opens the line.
+	buf = append(buf, name...)
+	//: the attribute set, or nothing at all when the series has none.
+	buf = appendAttrs(buf, attrs)
 	//: value, then terminate the line.
 	buf = append(buf, ' ')
 	buf = append(buf, value...)
@@ -159,41 +276,65 @@ func appendSeriesLine(buf []byte, prefix, name string, labels []coremetrics.Labe
 	return append(buf, '\n')
 }
 
-// appendLabels renders {k="v",…}. A dimensionless series renders as a bare
-// name, so every pre-label line is byte-identical to what it always was.
-func appendLabels(buf []byte, labels []coremetrics.LabelValue) []byte {
+// appendAttrs renders {k=v,…}. A dimensionless series renders as a bare name.
+func appendAttrs(buf []byte, attrs []coremetrics.AttrValue) []byte {
 	//: no braces at all for the dimensionless series.
-	if len(labels) == 0 {
+	if len(attrs) == 0 {
 		//: nothing to render.
 		return buf
 	}
 	//: open the set.
 	buf = append(buf, '{')
 	//: comma-separated pairs, in the snapshot's canonical order.
-	for i, label := range labels {
+	for i, attr := range attrs {
 		//: separator between pairs only.
 		if i > 0 {
 			//: continue the set.
 			buf = append(buf, ',')
 		}
-		//: key is structure — no escaping needed, it is validated non-empty.
-		buf = append(buf, label.Key...)
-		buf = append(buf, '=', '"')
-		//: value is data — it must not be able to close the quote.
-		buf = appendEscapedValue(buf, label.Value)
-		buf = append(buf, '"')
+		//: key, then the typed value.
+		buf = appendAttrPair(buf, attr)
 	}
 	//: close the set.
 	return append(buf, '}')
 }
 
-// appendEscapedValue writes a label value with backslash, quote and newline
+// appendAttrPair renders one k=v pair with the value's TYPE visible: a string
+// is quoted and escaped, a bool / integer / double is printed bare.
+//
+// That asymmetry is the point of this exporter. Every wire format the SDK
+// targets flattens a bool into the two letters "true"; a diagnostic that did
+// the same would hide the one thing the typed attribute model added.
+func appendAttrPair(buf []byte, attr coremetrics.AttrValue) []byte {
+	//: the key is structure — validated non-empty, so it needs no escaping.
+	buf = append(buf, attr.Key...)
+	buf = append(buf, '=')
+	//: only a string can carry a byte that would break the line.
+	if attr.Kind() == coremetrics.AttrKindString {
+		//: quoted and escaped.
+		return appendQuoted(buf, attr.Str())
+	}
+	//: a bool / integer / double renders from [0-9a-zA-Z+-.] alone.
+	return attr.AppendText(buf)
+}
+
+// appendQuoted renders "…" with backslash, quote and newline escaped inside.
+func appendQuoted(buf []byte, value string) []byte {
+	//: open the quote.
+	buf = append(buf, '"')
+	//: the value is data — it must not be able to close it.
+	buf = appendEscapedValue(buf, value)
+	//: close the quote.
+	return append(buf, '"')
+}
+
+// appendEscapedValue writes a string value with backslash, quote and newline
 // escaped.
 //
-// A label value is data — a URL, a header, a user-supplied tenant id. Without
-// escaping, a value containing a quote or a newline forges a line that a
-// reader of this output parses as another series, which turns a metrics dump
-// into an injection surface. The three escapes are the Prometheus text
+// A string attribute value is data — a URL, a header, a user-supplied tenant
+// id. Without escaping, a value containing a quote or a newline forges a line
+// that a reader of this output parses as another series, which turns a metrics
+// dump into an injection surface. The three escapes are the Prometheus text
 // convention, so the output stays readable by the same eyes and tools.
 func appendEscapedValue(buf []byte, value string) []byte {
 	//: byte-wise: the escapes are all ASCII and UTF-8 is pass-through.

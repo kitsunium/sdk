@@ -8,6 +8,11 @@ import (
 
 // memGauge is an instantaneous float64 value stored as IEEE-754 bits in an
 // atomic.Uint64 (lock-free Set/Add via compare-and-swap).
+//
+// It carries no temporality flag and no delta bookkeeping, and that is the OTel
+// data model rather than an omission: a gauge is a SAMPLED READING, so there is
+// no window for it to cover and OTLP's Gauge message has no temporality field.
+// An observable gauge writes through the same Set a synchronous one does.
 type memGauge struct {
 	bits atomic.Uint64
 }
