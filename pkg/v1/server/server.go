@@ -83,6 +83,18 @@
 //
 // [github.com/kitsunium/sdk/pkg/v1/server/sse] is the Server-Sent Events
 // implementation built on it, and watches the signal for you.
+//
+// # Protocol upgrades
+//
+// [github.com/kitsunium/sdk/pkg/v1/server/websocket] is WebSocket (RFC 6455),
+// server side. It hijacks the response, which means the socket stops being the
+// engine's: it is neither closed nor waited for by a drain — the same carve-out
+// http.Server.Shutdown documents for hijacked connections. The connection
+// watches [DrainSignal] and closes itself with a 1001 "going away" instead, so
+// a deployment ends it deliberately rather than by severing it.
+//
+// The same is true of anything else a handler hijacks: once the socket is taken
+// over it is the handler's to close.
 package server
 
 import (
