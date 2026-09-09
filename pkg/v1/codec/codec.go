@@ -2,11 +2,12 @@
 
 // Package codec is the universal encoder/decoder dispatch facade.
 //
-// One verb, twenty-two formats. [Marshal] and [Unmarshal] reach every
+// One verb, twenty-three formats. [Marshal] and [Unmarshal] reach every
 // encoding the SDK ships — JSON, YAML, CBOR, MessagePack, BSON, NDJSON,
-// XML, TOML, CSV, ASN.1 DER, PEM, TLV, FlatBuffers, plus the nine base-N
-// variants (base64, base64url, base32, base16, base45, base58, base62,
-// hex, ascii85). Format-swap at runtime is a single string change.
+// XML, TOML, CSV, urlencoded forms, ASN.1 DER, PEM, TLV, FlatBuffers,
+// plus the nine base-N variants (base64, base64url, base32, base16,
+// base45, base58, base62, hex, ascii85). Format-swap at runtime is a
+// single string change.
 //
 // # Goals
 //
@@ -19,7 +20,7 @@
 //   - Streaming when it pays. Codecs that implement StreamingCodec
 //     get NewEncoder / NewDecoder automatically — no need to buffer
 //     megabytes.
-//   - Zero registration code. Blank-import the package; the 14
+//   - Zero registration code. Blank-import the package; the 15
 //     service codecs self-register via init(). No Register() calls
 //     in consumer code.
 //   - Append for hot paths. Codecs implementing Appender let you
@@ -28,7 +29,7 @@
 //     same value to N formats at once — content negotiation, replication,
 //     multi-protocol message buses.
 //
-// # What's shipped — all 22 formats
+// # What's shipped — all 23 formats
 //
 // Single blank import (`import _ "github.com/kitsunium/sdk/pkg/v1/codec"`)
 // activates the entire list. The Streaming column marks codecs that
@@ -41,6 +42,7 @@
 //	| ndjson       | codec.NDJSON      | application/x-ndjson       | .ndjson / .jsonl    | —         | streaming logs, line-oriented batches |
 //	| xml          | codec.XML         | application/xml            | .xml                | yes       | legacy integrations |
 //	| csv          | codec.CSV         | text/csv                   | .csv                | —         | tabular exports |
+//	| form         | codec.Form        | application/x-www-form-urlencoded | .form / .urlencoded | —  | HTML form bodies, query strings |
 //	| asn1-der     | codec.ASN1DER     | application/pkix-cert      | .der / .cer         | —         | crypto / X.509 artefacts |
 //	| pem          | codec.PEM         | application/x-pem-file     | .pem / .crt / .key  | —         | block-wrapped DER (certs, keys) |
 //	| yaml         | codec.YAML        | application/yaml           | .yaml / .yml        | yes       | human-edited configs |
@@ -149,6 +151,7 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/codec/cbor"
 	_ "github.com/kitsunium/sdk/internal/service/codec/csv"
 	_ "github.com/kitsunium/sdk/internal/service/codec/flatbuffers"
+	_ "github.com/kitsunium/sdk/internal/service/codec/form"
 	_ "github.com/kitsunium/sdk/internal/service/codec/json"
 	_ "github.com/kitsunium/sdk/internal/service/codec/msgpack"
 	_ "github.com/kitsunium/sdk/internal/service/codec/ndjson"
@@ -185,6 +188,11 @@ const (
 	XML Format = "xml"
 	// CSV denotes the stdlib encoding/csv wire format.
 	CSV Format = "csv"
+	// Form denotes application/x-www-form-urlencoded, the encoding every
+	// HTML form POSTs. Its native Go shape is url.Values: a repeated key
+	// carries multiple values, which is the only array syntax the format
+	// has.
+	Form Format = "form"
 	// ASN1DER denotes the stdlib encoding/asn1 DER wire format.
 	ASN1DER Format = "asn1-der"
 	// PEM denotes the stdlib encoding/pem block format.

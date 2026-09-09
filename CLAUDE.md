@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Ten domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (22 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout — ADR 0026), **metrics** (counter/gauge/histogram + exporter registry — ADR 0027), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
+Go SDK providing a normed, performant toolbox for downstream applications. Ten domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`), a universal **codec** (23 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing), **transform** (compression), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout — ADR 0026), **metrics** (counter/gauge/histogram + exporter registry — ADR 0027), and **config** (env+file layering, typed decode, cross-OS poll-watch — ADR 0028). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001).
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.27.0 (pinned in `MODULE.bazel`)
 
@@ -27,8 +27,8 @@ internal/
                            hmacsha2, keyenvelope, keytree, pbkdf2pw,
                            stdhash, streamaead, x25519)
                    codec  (asn1, baseenc, bson, cbor, csv, flatbuffers,
-                           json, msgpack, ndjson, pem, tlv, toml, xml,
-                           yaml)
+                           form, json, msgpack, ndjson, pem, tlv, toml,
+                           xml, yaml)
                    proc   (cgroup, exec, reaper, rlimit, sdlisten,
                            sdnotify, signal)
                    id     (uuidv4, uuidv7, ulid, snowflake)
@@ -37,7 +37,7 @@ pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── logger/    (+ ldflags-injected Version, + writer/, + slogbridge/)
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
-    ├── codec/     (blank-imports all 14 service codecs + transform)
+    ├── codec/     (blank-imports all 15 service codecs + transform)
     ├── crypto/    (+ agree, hash, kdf, mac, password, sign)
     ├── id/        (UUIDv4/v7, ULID, snowflake — ADR 0024)
     └── proc/      (+ cgroup, process, reaper, rlimit, sdlisten,
