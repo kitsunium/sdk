@@ -17,7 +17,7 @@ Public façade: `pkg/v1/server`.
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop, the drain |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `Use` |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
-| `conn.go` | the pooled `corenet.Conn` implementation |
+| `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |
 | `options.go` | `Option` / `GroupOption` |
 | `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
@@ -30,6 +30,7 @@ Public façade: `pkg/v1/server`.
 | `multireader_mmsghdr_linux.go` | the cited `struct mmsghdr` layout |
 | `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
 | `http_adapter.go` | the `net/http` adapter (ADR 0029 D3) |
+| `conn_waiter.go` | `connWaiter` — the completion channel and the hijack flag one `ServeConn` blocks on |
 | `http_listener.go` | the channel-fed bridge listener |
 | `reuseport_{linux,bsd,other}.go` | the cited `SO_REUSEPORT` constant per family |
 | `stream_group_limiter.go` | the per-group connection ceiling |
@@ -131,6 +132,23 @@ Two things about it were got wrong first and are worth keeping wrong-proof:
 - **`conn.Close` is nil-safe** because `net/http` can close a connection after
   the engine has reclaimed the wrapper — on a drain, where the adapter releases
   its waiter without waiting for `net/http` to finish.
+- **A HIJACKED connection is no longer the engine's to close** (ADR 0047 §D9).
+  This was a defect that predated WebSocket and was reachable with nothing but
+  `net/http`: the adapter released its waiter on `StateHijacked` — correctly,
+  since `net/http` is finished with the connection at that point — and `release`
+  then ran its deferred `Close`, severing a socket the handler had just been
+  handed. The flag rides on the `connWaiter` and is transferred to the pooled
+  wrapper by `markHijacked`; `release` skips the close when it is set. It is
+  read on **both** arms of the `select` in `ServeConn`, not only under `<-done`:
+  a hijack landing while the drain cancels the context leaves both cases ready,
+  and `select` chooses between ready cases at random. Two consequences are
+  deliberate and match `net/http`'s own carve-out ("Shutdown does not attempt to
+  close nor wait for hijacked connections such as WebSockets"): such a
+  connection is **not waited for** by the drain, and it stops counting toward
+  `State().Active`. The drain SIGNAL is what reaches it instead.
+  `TestAHijackedConnectionSurvivesTheEngine` provokes the defect with a plain
+  `http.Handler` and is mutation-checked — forcing the close back on fails it
+  and nothing else.
 - **The serving goroutine is a `kernel/worker.LoopDaemon`**, so its owner and
   termination are explicit and `shutdown` has a `Done()` channel to bound its
   wait on. `http.Server` is interrupted by closing its listener, not by a stop
@@ -262,4 +280,7 @@ cd internal/service && GOWORK=off go test -race -cover ./net/server/...
 ## Reference
 
 - ADR 0029 — `docs/adr/0029-sdk-net-domain.md`
+- ADR 0043 — the drain signal — `docs/adr/0043-drain-is-a-signal-not-a-cancellation.md`
+- ADR 0047 §D9 — the hijacked-connection hand-over — `docs/adr/0047-sdk-net-websocket.md`
 - Contract layer — `internal/core/net/CLAUDE.md`
+- The two protocols that depend on both — `internal/service/net/{sse,websocket}/CLAUDE.md`

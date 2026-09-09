@@ -40,7 +40,8 @@ func (s *Server) acquire(raw stdnet.Conn, group *StreamGroup) *conn {
 	return c
 }
 
-// release closes the socket and returns the wrapper to the pool.
+// release returns the wrapper to the pool, closing the socket unless a handler
+// has taken it over.
 //
 // The close error is not surfaced: this runs on a deferred path with no caller
 // to report to, and by this point the handler has already finished, so a
@@ -51,10 +52,18 @@ func (s *Server) release(c *conn) {
 	s.liveMu.Lock()
 	delete(s.live, c.id)
 	s.liveMu.Unlock()
-	//: closing here rather than in the handler means a handler that forgets —
-	//: or panics — still cannot leak a descriptor. Close is nil-safe, so a
-	//: connection net/http already closed costs nothing here.
-	swallowErr(c.Close())
+	//: a hijacked socket is no longer ours. The handler that took the response
+	//: over owns it and will close it when its own protocol says so; closing it
+	//: here severed it the instant net/http reported the hijack, which made
+	//: every upgrade-based protocol unusable on this engine. This mirrors
+	//: net/http's own rule that Shutdown neither closes nor waits for hijacked
+	//: connections.
+	if !c.hijacked {
+		//: closing here rather than in the handler means a handler that forgets
+		//: — or panics — still cannot leak a descriptor. Close is nil-safe, so a
+		//: connection net/http already closed costs nothing here.
+		swallowErr(c.Close())
+	}
 	//: hand the scratch buffer back before dropping the reference to it.
 	if c.scratch != nil {
 		buffer.Put(c.scratch)

@@ -1,0 +1,29 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "websocket",
+    srcs = ["websocket.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/server/websocket",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/net",
+        "//internal/service/net/websocket",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":websocket",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "websocket_test",
+    srcs = ["websocket_external_test.go"],
+    deps = [
+        ":websocket",
+        "//pkg/v1/server",
+    ],
+)

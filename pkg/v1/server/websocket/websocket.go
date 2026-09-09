@@ -1,0 +1,342 @@
+//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/server/websocket .
+
+// Package websocket is the server side of RFC 6455: an HTTP request upgraded
+// into a bidirectional, message-oriented connection over the same socket.
+//
+// # The whole thing
+//
+//	func handler(w http.ResponseWriter, r *http.Request) {
+//		conn, err := websocket.Upgrade(w, r)
+//		if err != nil {
+//			return // Upgrade has already written the HTTP refusal
+//		}
+//		defer conn.Close()
+//
+//		for {
+//			msg, rerr := conn.Receive()
+//			if rerr != nil {
+//				return
+//			}
+//			if serr := conn.Send(msg); serr != nil {
+//				return
+//			}
+//		}
+//	}
+//
+// It is written against net/http's own interfaces, so it works in any
+// http.Handler. Mounted on this SDK's engine — Group.HandleHTTP — it
+// additionally observes the server's drain signal, which is what stops a
+// connection that by design never ends from being severed under its handler on
+// every deployment.
+//
+// # Messages, not frames
+//
+// [Conn.Receive] returns whole messages. Fragmentation is the sender's private
+// choice of chunk size, not a semantic boundary, so surfacing it would put an
+// implementation detail of the peer's writer into every consumer. Control
+// frames — Ping, Pong, Close — are answered underneath and never surface as
+// messages: they are transport, not payload.
+//
+// The returned [Message].Data aliases the connection's reassembly buffer and is
+// valid until the next [Conn.Receive]. Keep it longer and you must copy it.
+// That is what makes a steady-state read allocate nothing.
+//
+// # What is refused, and why refusing is the specification
+//
+// RFC 6455 is unusual in how much of it is stated as MUST-fail rather than
+// should-tolerate, because a frame stream that keeps going after a
+// disagreement is two endpoints reading different messages from the same bytes.
+// This implementation refuses:
+//
+//   - an unmasked client frame (§5.1) — masking is what stops a hostile script
+//     from steering a browser into emitting bytes a transparent proxy would
+//     read as a second, attacker-chosen HTTP request;
+//   - a set reserved bit or a reserved opcode (§5.2);
+//   - a fragmented or over-125-byte control frame (§5.5);
+//   - a length not in its minimal encoding (§5.2);
+//   - a continuation with no message in progress, or a new data frame
+//     interrupting one (§5.4);
+//   - a text message that is not valid UTF-8 (§8.1), judged on the reassembled
+//     message so a sequence straddling a fragment boundary stays valid;
+//   - a close code that must never travel — 1004, 1005, 1006, 1015 and the
+//     unallocated ranges (§7.4.2) — in either direction.
+//
+// # Bounds
+//
+// A frame announces its length in a 64-bit field the PEER writes.
+// [MaxFrameSize] is checked against that announcement before a single byte is
+// read or allocated, and [MaxMessageSize] against the accumulated total, since
+// fragmentation lets a peer exceed any per-frame bound a thousand small frames
+// at a time. Neither has an "unbounded" setting on purpose.
+//
+// # Extensions
+//
+// None are negotiated, permessage-deflate included. The server sends no
+// Sec-WebSocket-Extensions header — which RFC 6455 §4.2.2 defines as the way to
+// say "no extension is in use" — and the frame reader enforces the same answer
+// by refusing any reserved bit an extension would have set. Compression is
+// therefore a refusal the wire can verify, not a promise in a document.
+//
+// # Origin
+//
+// The browser's same-origin policy does not apply to WebSocket: any page can
+// open a connection to this server, and the browser attaches the user's cookies
+// to the handshake. By default an Origin header, when present, must match the
+// request's own host; a request with no Origin (a CLI, a service, a Go client)
+// is allowed, because there is no ambient credential to abuse. [AllowOrigins]
+// replaces the rule with an allowlist and [AllowAnyOrigin] removes it, by name.
+//
+// # Liveness and shutdown
+//
+// A peer that vanishes without closing leaves a socket that is perfectly
+// readable and will simply never produce another byte. [PingInterval] is the
+// only thing that turns that silence into an ending; zero is clamped to
+// [DefaultPingInterval] rather than meaning "never", and "never" is spelled
+// [WithoutPing].
+//
+// [Conn.Done] closes when the peer sends Close, when the socket dies, when the
+// handler closes it, or when the server begins draining — in which case the
+// connection sends a 1001 "going away" of its own accord. [Conn.Receive] and
+// [Conn.Send] refuse from the same instant, so a handler that only loops on
+// them terminates too.
+//
+// # Clients
+//
+// This package is the server half only. The SDK's outbound client returns a
+// fully-read body by design and cannot dial an upgrade; see the package
+// CLAUDE.md for why that is a separate decision rather than an omission.
+package websocket
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	corenet "github.com/kitsunium/sdk/internal/core/net"
+	svcws "github.com/kitsunium/sdk/internal/service/net/websocket"
+)
+
+// GUID is the fixed string RFC 6455 §1.3 concatenates to the client's key
+// before hashing. It is a constant of the protocol, not a secret.
+const GUID string = corenet.WSGUID
+
+// Version is the only protocol version this server speaks. A request naming
+// another is refused WITH this value advertised back, so a client can
+// renegotiate instead of guessing.
+const Version string = corenet.WSVersion
+
+// MaxControlPayload is the ceiling RFC 6455 §5.5 puts on a control frame's
+// payload, and therefore on a [Conn.Ping] payload or a close reason.
+const MaxControlPayload int = corenet.WSMaxControlPayload
+
+// DefaultPingInterval is the heartbeat cadence a connection uses when the
+// caller sets none. It sits under the idle timeout of every proxy worth naming.
+const DefaultPingInterval time.Duration = svcws.DefaultPingInterval
+
+// DefaultWriteTimeout bounds ONE frame's write. A connection has no total write
+// budget by nature; this is what stops a peer that has stopped reading from
+// pinning a goroutine forever.
+const DefaultWriteTimeout time.Duration = svcws.DefaultWriteTimeout
+
+// DefaultMaxMessageSize is the ceiling on one reassembled message.
+const DefaultMaxMessageSize int64 = svcws.DefaultMaxMessageSize
+
+// DefaultMaxFrameSize is the ceiling on a single frame's announced payload.
+const DefaultMaxFrameSize int64 = svcws.DefaultMaxFrameSize
+
+// The close codes RFC 6455 §7.4.1 defines. [CloseNoStatus], [CloseAbnormal] and
+// [CloseTLSHandshake] describe the ABSENCE of a close frame: they may be
+// observed through [Conn.PeerCloseCode] and must never be sent, which
+// [Conn.CloseWith] enforces.
+const (
+	// CloseNormal is a completed purpose, on either side.
+	CloseNormal CloseCode = corenet.WSCloseNormal
+	// CloseGoingAway is a server shutting down; it is what a drain sends.
+	CloseGoingAway CloseCode = corenet.WSCloseGoingAway
+	// CloseProtocolError is a frame the RFC forbids.
+	CloseProtocolError CloseCode = corenet.WSCloseProtocolError
+	// CloseUnsupportedData is a well-formed frame carrying data this endpoint
+	// cannot accept.
+	CloseUnsupportedData CloseCode = corenet.WSCloseUnsupportedData
+	// CloseNoStatus means the peer's Close frame carried no code.
+	CloseNoStatus CloseCode = corenet.WSCloseNoStatus
+	// CloseAbnormal means the connection died without a Close frame.
+	CloseAbnormal CloseCode = corenet.WSCloseAbnormal
+	// CloseInvalidPayload is text that is not valid UTF-8.
+	CloseInvalidPayload CloseCode = corenet.WSCloseInvalidPayload
+	// ClosePolicyViolation is the generic refusal when no other code fits.
+	ClosePolicyViolation CloseCode = corenet.WSClosePolicyViolation
+	// CloseTooLarge is a message beyond what this endpoint accepts.
+	CloseTooLarge CloseCode = corenet.WSCloseTooLarge
+	// CloseExtensionRequired is a client giving up for want of an extension.
+	CloseExtensionRequired CloseCode = corenet.WSCloseExtensionRequired
+	// CloseInternalError is an unexpected condition on this side.
+	CloseInternalError CloseCode = corenet.WSCloseInternalError
+	// CloseTLSHandshake means the TLS handshake failed.
+	CloseTLSHandshake CloseCode = corenet.WSCloseTLSHandshake
+)
+
+// Sentinels returned by this package. Match with errors.Is or errs.HasCode.
+var (
+	// HandshakeFailed reports a request that is not a valid RFC 6455 opening
+	// handshake, or one whose origin the policy refused. [Upgrade] has already
+	// written the HTTP response when it returns this.
+	HandshakeFailed = corenet.WSHandshakeFailed
+	// UpgradeUnsupported reports a response whose connection cannot be taken
+	// over — HTTP/2, or a middleware that wraps the ResponseWriter without
+	// forwarding Unwrap. The request was fine; this stack cannot serve it.
+	UpgradeUnsupported = corenet.WSUpgradeUnsupported
+	// ProtocolViolation reports a frame RFC 6455 forbids. The connection has
+	// already been failed when it surfaces.
+	ProtocolViolation = corenet.WSProtocolViolation
+	// MessageTooLarge reports a frame or a reassembled message beyond the
+	// configured ceiling, refused before any buffer was sized from it.
+	MessageTooLarge = corenet.WSMessageTooLarge
+	// InvalidPayload reports text that is not UTF-8, a close code that must
+	// never travel, or a close reason past the control-frame ceiling.
+	InvalidPayload = corenet.WSInvalidPayload
+	// ConnClosed reports an operation on a connection that has ended. It is the
+	// terminal outcome a receive loop runs until, and it carries the peer's
+	// close code when there was one.
+	ConnClosed = corenet.WSConnClosed
+	// ConnMisconfigured reports an option the domain refuses to interpret
+	// rather than guess at, such as a negative ping interval.
+	ConnMisconfigured = corenet.WSConnMisconfigured
+)
+
+// Conn is one upgraded WebSocket connection.
+//
+// Writes are safe for concurrent use; reads are not. The protocol is a single
+// ordered frame stream, so two concurrent readers would each take half of a
+// message — exactly one goroutine calls [Conn.Receive].
+type Conn = svcws.Conn
+
+// Message is one complete WebSocket application message.
+type Message = corenet.WSMessageValue
+
+// CloseCode is the status code a Close frame carries (RFC 6455 §7.4).
+type CloseCode = corenet.WSCloseCode
+
+// Option configures a Conn.
+type Option = svcws.Option
+
+// Upgrade completes the RFC 6455 opening handshake and returns the connection.
+//
+// On failure it has ALREADY written the HTTP response — a 426 carrying the
+// version this server speaks, a 400, a 403 or a 405 as the fault requires — so
+// the handler should simply return.
+//
+// The socket is taken over from net/http. It is no longer the HTTP server's to
+// close, nor this SDK's listener engine's: it is the handler's until
+// [Conn.Close].
+func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (conn *Conn, err error) {
+	//: the service layer owns the wiring; this facade only forwards.
+	return svcws.Upgrade(w, r, opts...)
+}
+
+// Subprotocols declares the subprotocols this server speaks, most preferred
+// first.
+//
+// The SERVER's order decides. A client advertises what it can speak; choosing
+// among those is the server's call, or a client that listed a deprecated
+// dialect first could pin the server to it forever. No overlap is not a failure
+// — the upgrade succeeds with no subprotocol, which RFC 6455 §4.2.2 names as
+// the way to say "none agreed".
+func Subprotocols(names ...string) Option {
+	//: forwarded unchanged.
+	return svcws.Subprotocols(names...)
+}
+
+// MaxMessageSize bounds one reassembled message.
+//
+// Zero is clamped to [DefaultMaxMessageSize], negative is refused. There is
+// deliberately no "unbounded" setting: the length is announced by the peer in a
+// 64-bit field, and fragmentation lets it keep announcing more, so an unbounded
+// ceiling is not a configuration choice — it is a remote memory allocator.
+func MaxMessageSize(n int64) Option {
+	//: forwarded unchanged.
+	return svcws.MaxMessageSize(n)
+}
+
+// MaxFrameSize bounds one frame's ANNOUNCED payload length.
+//
+// It is separate from [MaxMessageSize] because it is enforced at a different
+// moment: against the header, before a byte is read or allocated. A ceiling
+// above the message ceiling can never be reached and is refused as a mistake.
+func MaxFrameSize(n int64) Option {
+	//: forwarded unchanged.
+	return svcws.MaxFrameSize(n)
+}
+
+// PingInterval sets how often the connection pings an otherwise silent peer.
+//
+// Zero does not mean "never": it is clamped to [DefaultPingInterval], because a
+// connection with the heartbeat silently disabled works perfectly on loopback
+// and then stops noticing peers that vanish — which is how a mobile client
+// normally leaves. A negative interval is refused; "never" is [WithoutPing].
+func PingInterval(d time.Duration) Option {
+	//: forwarded unchanged.
+	return svcws.PingInterval(d)
+}
+
+// WithoutPing disables the heartbeat, and with it the connection's only
+// liveness check. Use it where the transport provides its own.
+func WithoutPing() Option {
+	//: forwarded unchanged.
+	return svcws.WithoutPing()
+}
+
+// WriteTimeout bounds how long one frame's write may take.
+//
+// It is per-frame on purpose: a group's WriteTimeout is an absolute deadline
+// for one HTTP response, and this connection outlives the response entirely.
+// Zero is clamped to [DefaultWriteTimeout], negative is refused.
+func WriteTimeout(d time.Duration) Option {
+	//: forwarded unchanged.
+	return svcws.WriteTimeout(d)
+}
+
+// AllowOrigins replaces the default same-origin rule with an exact allowlist.
+//
+// The comparison is on the whole Origin header — scheme, host and port —
+// case-insensitively. Matching the host alone would accept http:// for an https
+// server, which is the downgrade the check exists to notice.
+func AllowOrigins(origins ...string) Option {
+	//: forwarded unchanged.
+	return svcws.AllowOrigins(origins...)
+}
+
+// AllowAnyOrigin disables the origin check.
+//
+// It has to be written out because the browser's same-origin policy does not
+// apply to WebSocket: any page may open a connection to this server and the
+// browser will attach the user's cookies to the handshake. Reach for it when
+// authentication does not ride on ambient credentials — a bearer token, a
+// signed ticket — which is exactly when the origin proves nothing anyway.
+func AllowAnyOrigin() Option {
+	//: forwarded unchanged.
+	return svcws.AllowAnyOrigin()
+}
+
+// AcceptKey computes the Sec-WebSocket-Accept value for a client's
+// Sec-WebSocket-Key (RFC 6455 §4.2.2).
+//
+// It is exported for tests and for anyone writing a client handshake by hand.
+// The digest is SHA-1 by the RFC's own instruction and is not a security
+// primitive: its job is to prove the server parsed the handshake rather than
+// replaying it, so a cached 101 cannot pass for a live upgrade.
+func AcceptKey(key string) string {
+	//: the core contract; this facade only forwards.
+	return corenet.WSAcceptKey(key)
+}
+
+// DrainSignal returns the channel closed when the server serving this request
+// begins draining, or nil when it publishes none.
+//
+// [Conn] watches it for you. It is re-exported here because a handler often
+// wants to stop its own work at the same moment, and a nil channel blocks
+// forever, so a select that watches it needs no nil check.
+func DrainSignal(ctx context.Context) <-chan struct{} {
+	//: the core contract; this facade only forwards.
+	return corenet.DrainSignal(ctx)
+}
