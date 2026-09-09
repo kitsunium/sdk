@@ -1,0 +1,73 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "validation",
+    srcs = [
+        "bounds.go",
+        "codes.go",
+        "compile.go",
+        "descend.go",
+        "dive.go",
+        "element_plan.go",
+        "errors.go",
+        "pattern.go",
+        "plan.go",
+        "plan_key.go",
+        "presence.go",
+        "reject.go",
+        "rule_names.go",
+        "rules.go",
+        "rules_kind.go",
+        "rules_oneof.go",
+        "set.go",
+        "size.go",
+        "struct.go",
+        "validation.go",
+        "violate.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/validation",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/validation",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":validation",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "validation_test",
+    size = "small",
+    srcs = [
+        "compose_external_test.go",
+        "constraints_external_test.go",
+        "equivalence_external_test.go",
+        "refusals_external_test.go",
+        "struct_external_test.go",
+        "validation_bench_test.go",
+    ],
+    embed = [":validation"],
+    deps = [
+        "//internal/core/validation",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
