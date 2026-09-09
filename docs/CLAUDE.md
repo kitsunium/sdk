@@ -44,6 +44,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0036-sdk-codec-form-urlencoded.md` | form-urlencoded: repetition is the only array syntax; framework dialects and last-wins refused; non-bijectivity stated rather than faked | Accepted (extends ADR 0003) |
 | `adr/0037-sdk-codec-multipart.md` | multipart/form-data: the boundary is not in the body, so the codec grows extension interfaces (`BoundaryCodec`, `BoundaryProvider`) instead of widening the universal contract | Accepted (extends ADR 0003) |
 | `adr/0038-id-schemes-and-the-unregistered-typeid.md` | NanoID, KSUID, TypeID — and a `Scheme` deliberately absent from the registry, which makes the registry non-exhaustive by design | Accepted (extends ADR 0024) |
+| `adr/0039-extending-a-published-port-without-breaking-it.md` | Extend a published port with a sibling interface, never by widening it: a `pkg/v1` type alias publishes the *shape*, and Go interfaces are structural | Accepted (reverses the `clock` Do NOT) |
 
 ## ADR conventions
 
