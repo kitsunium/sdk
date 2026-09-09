@@ -30,6 +30,7 @@ go_library(
         "//internal/service/codec/cbor",
         "//internal/service/codec/csv",
         "//internal/service/codec/flatbuffers",
+        "//internal/service/codec/form",
         "//internal/service/codec/json",
         "//internal/service/codec/msgpack",
         "//internal/service/codec/ndjson",
