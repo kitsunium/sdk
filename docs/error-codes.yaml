@@ -942,6 +942,18 @@ codes:
     const: CodeJWKAmbiguousKid
     hex: "0x00_03_2A_0B"
     package: internal/service/crypto/jwk
+  - code: "0.3.45.1"
+    const: CodeInvalidMetricName
+    hex: "0x00_03_2D_01"
+    package: internal/service/metrics
+  - code: "0.3.45.2"
+    const: CodeInvalidLabelName
+    hex: "0x00_03_2D_02"
+    package: internal/service/metrics
+  - code: "0.3.45.3"
+    const: CodeReservedLabelName
+    hex: "0x00_03_2D_03"
+    package: internal/service/metrics
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
