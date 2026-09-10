@@ -23,7 +23,10 @@ alias(
 go_test(
     name = "config_test",
     srcs = ["config_external_test.go"],
-    deps = [":config"],
+    deps = [
+        ":config",
+        "//pkg/v1/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

@@ -19,10 +19,59 @@ err := config.Load(&c,
 
 File parsing dispatches through the codec registry — blank\-import the format's codec \(e.g. pkg/v1/codec\) so it is registered. Failures surface typed sentinels \(SourceFailed / DecodeFailed / ValidationFailed / WatchFailed\).
 
+### The schema: required keys, defaults, and a closed vocabulary
+
+[NewSchema](<#NewSchema>) compiles a [SchemaSpec](<#SchemaSpec>) into a [Schema](<#Schema>): which keys the application cannot start without, the typed [Default](<#Default>) each key takes when nobody supplies it, and the constraints the decoded result must satisfy — the \`validate\` struct tags of the type, composed with any cross\-field rule the caller adds. [LoadSchema](<#LoadSchema>) is [Load](<#Load>) with one.
+
+```
+type Conf struct {
+    Port     int    `json:"port"      validate:"min=1,max=65535"`
+    Database struct {
+        DSN      string `json:"dsn"       validate:"required"`
+        MaxConns int    `json:"max_conns" validate:"min=1,max=512"`
+    } `json:"database" validate:"dive"`
+}
+
+schema, err := config.NewSchema[Conf](config.SchemaSpec[Conf]{
+    Required: []string{"database.dsn"},
+    Defaults: []config.Default{
+        {Key: "port", Value: 8080},
+        {Key: "database.max_conns", Value: 16},
+    },
+})
+// …
+var c Conf
+err = config.LoadSchema(&c, schema,
+    config.FileSource("json", "/etc/app.json"),
+    config.EnvSource("APP"),
+)
+```
+
+Five properties are the reason it exists.
+
+A required key that no source supplied fails the LOAD — at start\-up, before anything reads the value, which is the entire point of declaring one. Every missing key is named in ONE error rather than the first one found, so an operator does not restart the service once per typo. It is a key\-level check, decided on the merged map while the key is still a key; \`validate:"required"\` is the value\-level one, decided after the decode. \`port = 0\` satisfies the first and fails the second. Declare both when both are meant.
+
+A key no field of the type addresses is REFUSED by default. Ignoring it is the classic production incident: APP\_PORTT=9090 decodes into nothing, the process starts on the old port, and the only evidence is the absence of an effect. Set [SchemaSpec](<#SchemaSpec>).AllowUnknownKeys where the source genuinely carries more than this type reads — a file shared by two services, or an unprefixed EnvSource, which hands over every variable in the environment.
+
+A default is a LAYER, not a post\-decode fallback. It is merged under every source before the decode, so presence is decided while the operator's key is still a key: an omitted "port" takes 8080, and \`port = 0\` written in a file stays 0. The layer order is default \< file \< env \< any later source, and the default layer is placed first structurally — there is no way to spell a load in which it wins, because a default that could win is not a default. A key may not be both required and defaulted: the schema would fill it itself, so the requirement could never fire.
+
+A violation names the OPERATOR's key \("database.max\_conns"\), never the Go field, because every format is decoded through a json round trip and the json tag is literally the key they typed.
+
+A message never contains the value that was refused. A configuration value is routinely a password, a token or a connection string, and a validation message is the one error message designed to reach a human. The error carries the violation count, the first rule and the offending keys; \[Schema.Check\] returns the full report when per\-key messages are wanted.
+
+A schema that contradicts itself — a default outside the bounds it also declares, a key naming no field of the type, the same key twice, a key both required and defaulted — is refused by [NewSchema](<#NewSchema>) with SchemaInvalid, before any source is read. A schema that declares nothing is legitimate and accepts \(and still refuses an unknown key\).
+
+[SchemaSpec](<#SchemaSpec>).Rule and \[Schema.Check\] speak in the vocabulary of pkg/v1/validation: a rule is a validation.Constraint and a report is a validation.Report. They are the same types, not converted ones — this domain composes that engine rather than reimplementing it, and a rule written for an HTTP body is the same value here. The schema describes the SHAPE \(which keys, required or not, and what they default to\); the constraints on a VALUE stay where they already are.
+
 ## Index
 
 - [Variables](<#variables>)
 - [func Load\[T any\]\(target \*T, sources ...Source\) error](<#Load>)
+- [func LoadSchema\[T any\]\(target \*T, schema \*Schema\[T\], sources ...Source\) error](<#LoadSchema>)
+- [type Default](<#Default>)
+- [type Schema](<#Schema>)
+  - [func NewSchema\[T any\]\(spec SchemaSpec\[T\]\) \(schema \*Schema\[T\], err error\)](<#NewSchema>)
+- [type SchemaSpec](<#SchemaSpec>)
 - [type Source](<#Source>)
   - [func EnvSource\(prefix string\) Source](<#EnvSource>)
   - [func FileSource\(format, path string\) Source](<#FileSource>)
@@ -45,11 +94,20 @@ var (
     ValidationFailed = coreconfig.ConfigValidationFailed
     // WatchFailed is returned when the watcher cannot observe its source.
     WatchFailed = coreconfig.ConfigWatchFailed
+    // SchemaInvalid is returned by NewSchema when the schema contradicts the
+    // type it describes, or itself. It is never a load outcome.
+    SchemaInvalid = coreconfig.ConfigSchemaInvalid
+    // KeyMissing is returned by LoadSchema when the schema requires keys no
+    // source supplied. Its fields name every one of them.
+    KeyMissing = coreconfig.ConfigKeyMissing
+    // UnknownKey is returned by LoadSchema when a source supplied keys the
+    // target type cannot address and the schema did not opt out.
+    UnknownKey = coreconfig.ConfigUnknownKey
 )
 ```
 
 <a name="Load"></a>
-## func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L50>)
+## func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L157>)
 
 ```go
 func Load[T any](target *T, sources ...Source) error
@@ -57,8 +115,57 @@ func Load[T any](target *T, sources ...Source) error
 
 Load merges sources into target \(later overrides earlier\), decodes, and validates \(when target implements Validator\).
 
+It declares no schema: nothing is required, nothing is defaulted, and a key the target cannot address is dropped exactly as encoding/json drops it. Use [LoadSchema](<#LoadSchema>) to have those caught.
+
+<a name="LoadSchema"></a>
+## func [LoadSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L184>)
+
+```go
+func LoadSchema[T any](target *T, schema *Schema[T], sources ...Source) error
+```
+
+LoadSchema is [Load](<#Load>) with a compiled [Schema](<#Schema>): the schema's typed defaults are merged UNDER every source, its required keys and its vocabulary are checked against the merged map before anything is decoded, and its constraints run over the decoded result before the target's own Validate — which is still called, never replaced.
+
+The layer order is default \< file \< env \< any later source. A missing required key and an unaddressable key are reported together, each naming all of its keys, so one restart tells the whole truth. A nil schema is refused by name rather than silently loading nothing.
+
+<a name="Default"></a>
+## type [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L119>)
+
+Default is the public alias for one declared key and the typed value it takes when NO source supplied it. A defaulted key is never also required.
+
+```go
+type Default = coreconfig.DeclaredValue
+```
+
+<a name="Schema"></a>
+## type [Schema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L124>)
+
+Schema is the public alias for a compiled configuration shape: the default layer it contributes, the keys it requires, the vocabulary it accepts, and the constraints it enforces. Build one with [NewSchema](<#NewSchema>).
+
+```go
+type Schema[T any] = svcconfig.SchemaValue[T]
+```
+
+<a name="NewSchema"></a>
+### func [NewSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L169>)
+
+```go
+func NewSchema[T any](spec SchemaSpec[T]) (schema *Schema[T], err error)
+```
+
+NewSchema compiles spec into a [Schema](<#Schema>), refusing at construction every declaration that could not work: a malformed key, a key naming no field of T, a duplicate, a key declared both required and with a default, a default the decode cannot carry, and — the one that matters — a default that violates the constraint the schema itself declares for that key. A tag the validation engine refuses surfaces THAT engine's error, whose fields already name the field, the rule and the clause.
+
+<a name="SchemaSpec"></a>
+## type [SchemaSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L129>)
+
+SchemaSpec is the public alias for a schema declaration. Its zero value is a legitimate schema: nothing required, nothing defaulted, no extra rule — but the \`validate\` tags of T still apply and an unknown key is still refused.
+
+```go
+type SchemaSpec[T any] = svcconfig.SchemaSpec[T]
+```
+
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L29>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L109>)
 
 Source is the public alias for a configuration layer producer.
 
@@ -67,7 +174,7 @@ type Source = coreconfig.Source
 ```
 
 <a name="EnvSource"></a>
-### func [EnvSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L67>)
+### func [EnvSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L206>)
 
 ```go
 func EnvSource(prefix string) Source
@@ -79,8 +186,10 @@ The key a field must match is the variable name with the prefix removed and lowe
 
 A value is coerced to a typed Go value only when the WHOLE value is one complete JSON document — "8080" becomes an int64, "true" a bool. Anything else keeps its exact string, so identifiers that merely start like numbers \("0A0A01", "1500ms", "10.45.0.0/16", "2026\-09\-03"\) arrive intact.
 
+An EMPTY prefix reads the whole process environment, so pairing it with a schema that refuses unknown keys refuses PATH, HOME and everything else the shell exported. That is a fact about the source, not about the schema: give the source a prefix, or set [SchemaSpec](<#SchemaSpec>).AllowUnknownKeys.
+
 <a name="FileSource"></a>
-### func [FileSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L74>)
+### func [FileSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L213>)
 
 ```go
 func FileSource(format, path string) Source
@@ -89,7 +198,7 @@ func FileSource(format, path string) Source
 FileSource returns a Source reading path and parsing it as format \(the codec must be registered — blank\-import its package, e.g. pkg/v1/codec\).
 
 <a name="Validator"></a>
-## type [Validator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L32>)
+## type [Validator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L112>)
 
 Validator is the public alias for a decoded config's self\-check.
 
@@ -98,7 +207,7 @@ type Validator = coreconfig.Validator
 ```
 
 <a name="Watcher"></a>
-## type [Watcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L35>)
+## type [Watcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L115>)
 
 Watcher is the public alias for a change observer.
 
@@ -107,7 +216,7 @@ type Watcher = coreconfig.Watcher
 ```
 
 <a name="PollWatcher"></a>
-### func [PollWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L80>)
+### func [PollWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L219>)
 
 ```go
 func PollWatcher(path string, interval time.Duration) Watcher

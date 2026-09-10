@@ -334,6 +334,18 @@ codes:
     const: CodeConfigWatchFailed
     hex: "0x00_02_0A_04"
     package: internal/core/config
+  - code: "0.2.10.5"
+    const: CodeConfigSchemaInvalid
+    hex: "0x00_02_0A_05"
+    package: internal/core/config
+  - code: "0.2.10.6"
+    const: CodeConfigKeyMissing
+    hex: "0x00_02_0A_06"
+    package: internal/core/config
+  - code: "0.2.10.7"
+    const: CodeConfigUnknownKey
+    hex: "0x00_02_0A_07"
+    package: internal/core/config
   - code: "0.2.11.1"
     const: CodeListenFailed
     hex: "0x00_02_0B_01"
