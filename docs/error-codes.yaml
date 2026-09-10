@@ -702,6 +702,26 @@ codes:
     const: CodeHalt
     hex: "0x00_02_16_06"
     package: internal/core/events
+  - code: "0.2.23.1"
+    const: CodeQueueMisconfigured
+    hex: "0x00_02_17_01"
+    package: internal/core/queue
+  - code: "0.2.23.2"
+    const: CodeMessageTooLarge
+    hex: "0x00_02_17_02"
+    package: internal/core/queue
+  - code: "0.2.23.3"
+    const: CodeUnknownReceipt
+    hex: "0x00_02_17_03"
+    package: internal/core/queue
+  - code: "0.2.23.4"
+    const: CodeLeaseExpired
+    hex: "0x00_02_17_04"
+    package: internal/core/queue
+  - code: "0.2.23.5"
+    const: CodeInvalidBatchSize
+    hex: "0x00_02_17_05"
+    package: internal/core/queue
   - code: "0.2.24.1"
     const: CodeUnknownDialect
     hex: "0x00_02_18_01"
@@ -1554,6 +1574,22 @@ codes:
     const: CodeHaltNotPermitted
     hex: "0x00_03_34_02"
     package: internal/service/events
+  - code: "0.3.53.1"
+    const: CodeQueueBackendFailed
+    hex: "0x00_03_35_01"
+    package: internal/service/queue
+  - code: "0.3.53.2"
+    const: CodeQueueDirectoryUnusable
+    hex: "0x00_03_35_02"
+    package: internal/service/queue
+  - code: "0.3.53.3"
+    const: CodeConsumerMisconfigured
+    hex: "0x00_03_35_03"
+    package: internal/service/queue
+  - code: "0.3.53.4"
+    const: CodeHandlerPanicked
+    hex: "0x00_03_35_04"
+    package: internal/service/queue
   - code: "0.3.54.1"
     const: CodeConfigInvalid
     hex: "0x00_03_36_01"
