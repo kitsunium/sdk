@@ -19,6 +19,7 @@
 package tlv
 
 import (
+	"bytes"
 	"reflect"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -871,8 +872,9 @@ func decodeStructInto(length uint64, rest []byte, target reflect.Value, depth in
 	nameIndex := buildNameIndex(info)
 	//: walk every field record advertised on the wire.
 	for range length {
-		//: read the field name.
-		name, next, nerr := decodeFieldName(rest, depth+1)
+		//: read the field name WITHOUT materialising a Go string — it is
+		//: only compared against the cached names, never retained.
+		name, next, nerr := parseFieldName(rest, depth+1)
 		//: surface name failure verbatim.
 		if nerr != nil {
 			//: already wrapped.
@@ -920,11 +922,16 @@ func buildNameIndex(info *structTypeInfo) map[string]int {
 // resolveFieldIndex returns the struct-field index for the wire name.
 // Uses the optional nameIndex map for large structs, otherwise scans
 // the cached field list linearly.
-func resolveFieldIndex(info *structTypeInfo, nameIndex map[string]int, name string) (idx int, found bool) {
-	//: large-struct path — single map lookup.
+//
+// name is a []byte rather than a string on purpose: both a map index
+// expression `m[string(b)]` and a comparison `s == string(b)` are compiled
+// without allocating the string, so the wire name never reaches the heap.
+// The bytes alias the decoder's input and are not retained past this call.
+func resolveFieldIndex(info *structTypeInfo, nameIndex map[string]int, name []byte) (idx int, found bool) {
+	//: large-struct path — single map lookup, no string allocated.
 	if nameIndex != nil {
 		//: comma-ok mirrors the linear scan's return.
-		i, ok := nameIndex[name]
+		i, ok := nameIndex[string(name)]
 		//: miss returns -1 to match the linear-scan path bit-for-bit
 		//: (Go's zero-value for int would otherwise be 0, which is a
 		//: valid field index — confusing for callers and tests).
@@ -937,8 +944,9 @@ func resolveFieldIndex(info *structTypeInfo, nameIndex map[string]int, name stri
 	}
 	//: small-struct linear scan — cache hit on the common case.
 	for i := range info.fields {
-		//: exported field names are unique per struct (Go spec).
-		if info.fields[i].name == name {
+		//: exported field names are unique per struct (Go spec); both sides
+		//: are already bytes, so the compare is one runtime.memequal.
+		if bytes.Equal(info.fields[i].nameBytes, name) {
 			//: name matched — caller assigns into target.Field(i).
 			return i, true
 		}

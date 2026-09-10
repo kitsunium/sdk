@@ -45,6 +45,7 @@ go_test(
         "decoder_typed_internal_test.go",
         "encoder_internal_test.go",
         "helpers_internal_test.go",
+        "tlv_bench_test.go",
         "typeinfo_internal_test.go",
         "types_internal_test.go",
     ],

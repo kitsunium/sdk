@@ -41,6 +41,19 @@ initialisers, no `init()` function.
   excluded from the bulk streaming round-trip test for that reason. Decode
   errors reuse `BaseEncDecodeFailed`. Leading zero bytes map to leading
   `alphabet[0]` chars.
+  **What the cap actually admits is now measured** (`BENCH.md` §2): 1 KiB
+  encodes in 4.3 ms and 4 KiB — the cap itself — in **69 ms**, decoding in
+  22 ms. An earlier revision of this file said "a few KiB bounds the work to
+  the low-millisecond range"; that was wrong by more than an order of
+  magnitude, and since the cap is a CWE-400 defence, anyone considering
+  raising it needs the real exponent rather than that estimate. For contrast,
+  base64 encodes the same 4 KiB in 6.5 µs — a factor of 10 594.
+  The base-conversion **decode** allocates twice per call regardless of size:
+  `decodeBaseN` sizes the magnitude buffer once (`len(s)` bytes always hold an
+  `len(s)`-digit base-radix number for any radix under 256) and `mulAddWindow`
+  grows the live window leftwards into that reserve. It must stay that way —
+  the previous shape prepended a fresh slice per new high byte and cost 2 049
+  allocations for a 1 KiB decode, 97.85 % of the package's allocated objects.
 
 ## Marshal/Unmarshal pipeline
 
@@ -67,6 +80,13 @@ the outer base-N step wraps the JSON.
   Ascii85 has no `AppendEncode`, so the buffer is encoded into a sized
   scratch slice then `append`ed onto `dst`. The JSON pre-step always
   allocates; base-N Append is "encoding-step zero-alloc" only.
+- **Base16 emits its own alphabet; it does not post-process `hex`.**
+  `encodeHexUpperInto` indexes `hexUpperAlphabet` directly, and
+  `appendEncodeBase16Upper` reserves the width with `slices.Grow` and writes
+  into it. Both stdlib-based shapes that preceded it walked the output a
+  second time to fix case, which cost 3.13× the stdlib lowercase encoder;
+  base16 now costs what `hex` costs (`BENCH.md` §4). Do not "simplify" either
+  back to `hex.Encode` + a case pass.
 - **Streaming** wraps the stdlib base-N reader/writer in a json.Encoder /
   json.Decoder. Base16 (uppercase) has no streaming form in stdlib so
   the encoder buffers all writes and runs `encodeBytes` at Close.
@@ -87,6 +107,16 @@ the outer base-N step wraps the JSON.
   `encoding/base32`, `encoding/hex`, or `encoding/ascii85` directly; the
   SDK does not ship a parallel byte-level surface (the former
   `pkg/v1/codec/baseenc` was removed for uniformity).
+
+## Performance
+
+`BENCH.md` is the **choice table** for the nine variants: cost AND expansion,
+side by side, at the same 1 KiB payload. Regenerate with
+`cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem ./codec/baseenc/`.
+The one-line summary a caller needs: base58/base62 cost ~2 770× base64 for
+0.03 expansion points, so they are chosen for what the alphabet LOOKS like,
+never for size; among the block encodings ascii85 is the most compact (1.250×)
+at 2× base64's cost, and base32's decode is 3.8× its own encode.
 
 ## Verification
 
