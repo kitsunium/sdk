@@ -34,6 +34,8 @@ go_test(
     name = "websocket_test",
     srcs = [
         "options_internal_test.go",
+        "websocket_alloc_internal_test.go",
+        "websocket_bench_test.go",
         "websocket_external_test.go",
     ],
     embed = [":websocket"],

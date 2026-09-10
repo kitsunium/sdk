@@ -68,8 +68,14 @@ func (i IdentityValue) IsZero() bool {
 // own would leave cfg.Certificates[0] = other and cfg.RootCAs.AddCert(evil)
 // reaching every other configuration the identity has ever minted, including
 // ones already in use — which is the opposite of what an opaque, immutable
-// identity is for. The cost is paid once per config, at construction or at
-// listener setup, never per request.
+// identity is for. Who pays that cost, and how often, is the CALLER's choice
+// and not a property of this method: net/client calls it once inside New and
+// net/server once per listener, but service/mail calls it per connection —
+// which for SMTP is per message — deliberately, because StartTLS takes the
+// config and a transport that reused one would hand every send a *tls.Config
+// another send could still be mutating. Three slice clones are nothing beside
+// an SMTP round trip; the sentence that used to sit here said "never per
+// request", which was true of the two net callers and false of the third.
 func (i IdentityValue) ClientConfig() *tls.Config {
 	//: a zero identity still yields a usable, safe-by-default client config.
 	return &tls.Config{

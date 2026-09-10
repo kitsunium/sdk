@@ -44,3 +44,10 @@
 # "zero-allocation logger" claim in README.md / CLAUDE.md. Also pins fan-out
 # WIDTH, which that per-emit claim never covered.
 //pkg/v1/logger:logger_test
+# The two steady-state allocation claims RFC 6455's frame reader is sold on:
+# the reassembly buffer is reused across messages and the write buffer across
+# frames, so neither Receive nor Send allocates once a connection is warm. Both
+# are stated in Receive's doc comment, in initialWriteCapacity's and in the
+# package CLAUDE.md, and both were unguarded until 2026-09. Each is
+# mutation-checked in its own doc comment.
+//internal/service/net/websocket:websocket_test

@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09T00:00:00Z -->
+<!-- updated: 2026-09-10T00:00:00Z -->
 # internal/service/net/websocket/
 
 ## Purpose
@@ -200,6 +200,73 @@ None of its own. Every failure is an `internal/core/net` sentinel
 (`0.2.11.27` – `0.2.11.33`), wrapped with the offending frame, option or header.
 Per ADR 0029 the service layer declares **no** codes.
 
+## Cost
+
+Measured in `BENCH.md` — median of five runs (nine for the fragmentation
+family) on an 8-core AMD EPYC 7351P VM, `go1.27.1`. The numbers below are the
+ones a reader needs before touching this package; the report has the rest,
+including every run behind every median.
+
+| | |
+|---|---|
+| One 4 KiB binary message received | **3 274 ns**, 0 B, **0 allocs** |
+| The same message sent | 232 ns, 0 B, 0 allocs |
+| Text instead of binary | **+0.037 ns/byte**, identically on both sides — 4.6 % of a 4 KiB message |
+| One additional frame in a fragmented message | ≈115 ns |
+| A `Ping` answered between two fragments | +210 ns, of which 140 ns is the Pong §5.5.2 obliges |
+| A whole connection: `NewConn`, its watcher goroutine, terminate, join | 2 307 ns, 9 allocs |
+
+**Steady-state `Receive` and `Send` allocate nothing**, and since 2026-09 that
+is a test rather than a claim — `websocket_alloc_internal_test.go`, `!race`,
+gated by `//internal/service/net/websocket:websocket_test` in
+`tools/alloc-lane-targets.txt` (rule 12). Both guards are mutation-checked and
+carry the observed failure in their doc comments. The first message on a
+connection legitimately costs 4 885 ns and 4 672 B — that is the reassembly
+buffer being allocated once, which is exactly what makes every later message
+free and why a `Receive` result is valid only until the next call.
+
+### Refusing is cheaper than complying
+
+The question the refusal rows exist to answer: **no MUST-fail in this package is
+a denial-of-service lever.**
+
+- Every framing refusal lands in an **880–959 ns** band. Nine of them, detected
+  at nine different depths, spanning 8.9 % end to end — so *where* the check
+  sits is not what the cost is made of. What it is made of is the typed `errs`
+  error (one allocation more than an acceptance) and the §7.1.7 courtesy Close.
+- A refusal is **1.6–1.7×** the cost of accepting a 64-byte message and
+  **16–18 %** of accepting a 4 KiB one.
+- The frame ceiling is the case that matters: refusing a header that announces
+  2 MiB and carries nothing costs 959 ns against roughly 1.6 ms to accept what
+  it claimed — **0.06 % of the work refused.** That ratio is a direct
+  consequence of checking the bound against the ANNOUNCED length before any
+  read, and the benchmark enforces it: those scripts carry a header and no
+  payload over a socket that reports `io.EOF`, so a check moved after the read
+  reports `WSConnClosed` and fails the row instead of publishing a number for
+  the wrong path.
+- Reaching a refusal at all costs the peer a TCP connect plus the §4.2
+  handshake: **262 653 ns** on loopback. A refusal is 0.37 % of that.
+
+### Where the time actually goes — and it is not here
+
+Between **62 % and 89 %** of a received message is `corenet.ApplyWSMask`, the
+per-byte XOR §5.1 makes mandatory on every inbound byte. This package's own flat
+time is ~13 % of the worst case (256 fragments) and ~2 % of the ordinary one.
+
+`ApplyWSMask` is byte-at-a-time and runs at 1.36 GB/s; the same transform eight
+bytes at a time measures 7.4 GB/s — **5.5×**, which would take a 4 KiB receive
+from 3 274 ns to roughly 810 ns. It lives in `internal/core/net`, so it is
+**recorded and not taken here**; see `BENCH.md` §"The cost that dominates is in
+another package".
+
+Two optimisations inside this package were tested and **refused with numbers**:
+`bufio.Peek`/`Discard` in `nextHeader` (+1.1 % on realistic shapes, −2.4 % only
+at 256 fragments, and it would make header reading depend on `bufio`'s minimum
+buffer size), and skipping the per-frame `rx.Add(1)` when the heartbeat is off
+(unmeasurable — two of three rows got *slower* with the work removed). Neither
+was refused on security grounds, because no candidate that weakened a refusal
+was entertained.
+
 ## Do NOT
 
 - Read from the raw socket instead of the `bufio.Reader` the hijack returned.
@@ -218,6 +285,13 @@ Per ADR 0029 the service layer declares **no** codes.
 - Call `Receive` from two goroutines.
 - Add permessage-deflate without the ADR that decides it. See above.
 - Write anything to stdout (ADR 0030). The only output is the connection.
+- Make a refusal cheaper by making it conditional, by moving a check off the
+  read path, or by checking a bound after the allocation it guards. §Cost
+  measures the price of every MUST-fail and it is 0.37 % of what it costs a peer
+  to reach one; there is nothing here to reclaim.
+- Optimise this package for throughput before reading §Cost. The dominant term
+  is `corenet.ApplyWSMask`, in another package, and it is 62–89 % of a received
+  message.
 
 ## Verification
 
@@ -228,6 +302,15 @@ bazel test --config=race //internal/service/net/websocket:websocket_test
 # Fallback (go test — quick local iteration)
 cd internal/service && GOWORK=off go test -race -cover ./net/websocket/...
 # expected: coverage ~93%
+
+# The allocation guards. They carry //go:build !race, so the race suite above
+# does NOT compile them and this is their only lane (rule 12):
+bazel test --config=alloc //internal/service/net/websocket:websocket_test
+cd internal/service && GOWORK=off go test -run=TestSteadyState ./net/websocket/
+
+# The numbers in §Cost:
+cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem \
+    -benchtime=1s -count=5 ./net/websocket/
 ```
 
 The adversarial table (`TestAdversarialFramesFailTheConnection`) is the point of
@@ -239,6 +322,9 @@ reader agree.
 ## Reference
 
 - ADR 0047 — `docs/adr/0047-sdk-net-websocket.md`
+- `BENCH.md` — the full report behind §Cost: the profiles quoted verbatim, the
+  two refused optimisations, and the two row-sets that were re-measured rather
+  than published
 - ADR 0029 (the net domain), ADR 0043 (drain is a signal)
 - ADR 0030 (stdout is a protocol channel), ADR 0031 (zero values are never inert)
 - Contract layer — `internal/core/net/CLAUDE.md`
