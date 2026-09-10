@@ -76,13 +76,16 @@ func (c zlibCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
 	//: encode into a buffer pre-seeded with dst so the result is caller-owned.
 	buf := bytes.NewBuffer(dst)
 	//: NewZlibCompressor already clamped level, so this call cannot reject it; an
-	//: in-package struct literal can still reach the fault path (tested).
-	w, nerr := zlib.NewWriterLevel(buf, c.level)
+	//: in-package struct literal can still reach the fault path (tested), and it
+	//: reaches it through the unpooled branch takeZlibWriter keeps for it.
+	w, nerr := takeZlibWriter(buf, c.level)
 	//: NewWriterLevel only errors on an out-of-range level — guarded, but surfaced.
 	if nerr != nil {
 		//: wrap the construction error under the zlib sentinel.
 		return dst, errs.Wrap(nerr, zlibWrap)
 	}
+	//: return the encoder to its level's pool on every exit.
+	defer releaseZlibWriter(w, c.level)
 	//: a Write fault is rare (buffer-backed) but must still be surfaced.
 	if _, werr := w.Write(src); werr != nil {
 		//: wrap the stdlib error under the zlib sentinel.
@@ -113,17 +116,20 @@ func (zlibCompressor) Decompress(dst, src []byte) (decoded []byte, err error) {
 // failed Adler-32 check returns a wrapped zlib error. max is an explicit
 // parameter so the overflow backstop is testable without mutating shared state.
 func zlibDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
-	//: a zlib reader validates the 2-byte header up-front; a bad header fails here.
-	r, rerr := zlib.NewReader(bytes.NewReader(src))
+	//: a recycled zlib reader validates the 2-byte header up-front, exactly as a
+	//: fresh one does; a bad header fails here either way.
+	box, rerr := takeZlibReader(bytes.NewReader(src))
 	//: malformed header — surface the failure via the zlib sentinel.
 	if rerr != nil {
 		//: wrap the header error under the zlib sentinel.
 		return dst, errs.Wrap(rerr, zlibWrap)
 	}
+	//: return the decoder on every exit below.
+	defer releaseZlibReader(box)
 	//: drain the reader through the shared bounded helper at the given cap.
-	plain, overflow, derr := readAllBounded(r, max)
+	plain, overflow, derr := readAllBounded(box.rc, max)
 	//: fold a Close fault into the result so the reader error is never dropped.
-	if cerr := r.Close(); cerr != nil && derr == nil {
+	if cerr := box.rc.Close(); cerr != nil && derr == nil {
 		//: a clean drain followed by a Close fault still fails decompression.
 		derr = cerr
 	}

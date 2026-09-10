@@ -4,7 +4,6 @@ package transform
 
 import (
 	"bytes"
-	"compress/flate"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -29,13 +28,16 @@ func (flateCompressor) Algorithm() coretransform.Algorithm {
 func (flateCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
 	//: encode into a buffer pre-seeded with dst so the result is caller-owned.
 	buf := bytes.NewBuffer(dst)
-	//: DefaultCompression matches the stdlib default the gzip writer uses too.
-	w, nerr := flate.NewWriter(buf, flate.DefaultCompression)
+	//: a recycled writer at DefaultCompression, the level the gzip scheme uses
+	//: too; see pool.go for why constructing one per call dominated this path.
+	w, nerr := takeFlateWriter(buf)
 	//: NewWriter only errors on an out-of-range level — guarded, but surfaced.
 	if nerr != nil {
 		//: wrap the construction error under the flate sentinel.
 		return dst, errs.Wrap(nerr, flateWrap)
 	}
+	//: return the encoder on every exit, including the two failure paths.
+	defer releaseFlateWriter(w)
 	//: a Write fault is rare (buffer-backed) but must still be surfaced.
 	if _, werr := w.Write(src); werr != nil {
 		//: wrap the stdlib error under the flate sentinel.
@@ -65,12 +67,21 @@ func (flateCompressor) Decompress(dst, src []byte) (decoded []byte, err error) {
 // flate error. max is an explicit parameter so the overflow backstop is testable
 // without mutating shared state.
 func flateDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
-	//: raw DEFLATE has no header to pre-validate; the reader fails on read.
-	r := flate.NewReader(bytes.NewReader(src))
+	//: raw DEFLATE has no header to pre-validate; the reader fails on read. The
+	//: error branch exists because the Resetter interface may fail, not because
+	//: this stream can be rejected here.
+	box, rerr := takeFlateReader(bytes.NewReader(src))
+	//: a decoder that could not be prepared is a flate-direction failure.
+	if rerr != nil {
+		//: wrap the reset error under the flate sentinel.
+		return dst, errs.Wrap(rerr, flateWrap)
+	}
+	//: return the decoder on every exit below.
+	defer releaseFlateReader(box)
 	//: drain the reader through the shared bounded helper at the given cap.
-	plain, overflow, derr := readAllBounded(r, max)
+	plain, overflow, derr := readAllBounded(box.rc, max)
 	//: fold a Close fault into the result so the reader error is never dropped.
-	if cerr := r.Close(); cerr != nil && derr == nil {
+	if cerr := box.rc.Close(); cerr != nil && derr == nil {
 		//: a clean drain followed by a Close fault still fails decompression.
 		derr = cerr
 	}

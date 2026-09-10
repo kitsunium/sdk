@@ -49,6 +49,7 @@ refactor that quietly turned one into the other would fail rather than ship.
 | `gzip.go`    | `GzipCompressor` singleton + `gzipCompressor` (Algorithm "gzip") |
 | `flate.go`   | `FlateCompressor` singleton + `flateCompressor` (Algorithm "flate") |
 | `zlib.go`    | `ZlibCompressor` singleton + `NewZlibCompressor(level)` + `zlibCompressor` (Algorithm "zlib") |
+| `pool.go`    | the recycled stdlib codecs — `take*`/`release*` per scheme, the per-level zlib pools, and `readerBox` |
 | `bounded.go` | `readAllBounded` — the shared layer-local decompression bound |
 | `codes.go`   | `CodeGzipFailed` (0.3.26.1), `CodeFlateFailed` (0.3.26.2), `CodeZlibFailed` (0.3.26.3) |
 | `errors.go`  | `GzipFailed` / `FlateFailed` / `ZlibFailed` sentinels + `gzipWrap` / `flateWrap` / `zlibWrap` WrapParams |
@@ -92,6 +93,58 @@ clamp makes unreachable through the constructor. The branch is kept — and driv
 by `Test_zlibCompressor_CompressBadLevel` through an in-package struct literal —
 so a future scheme that bypasses the constructor fails typed rather than
 silently.
+
+## Cost
+
+**Constructing a stdlib codec dominated every small call, and it is now pooled.**
+A CPU profile of a 256-byte gzip put `runtime.memclrNoHeapPointers` at 18.83 % —
+zeroing tables the call was about to overwrite — and an allocation profile put
+**99.94 %** of the bytes in `compress/flate` construction. `pool.go` recycles both
+directions through `kernel/recycler`. Medians of three runs, in `BENCH.md`:
+
+| verb | payload | before | after |
+|---|---:|---:|---:|
+| gzip Compress | 256 B | 493 060 ns / 1 076 250 B | **10 175 ns / 258 B** |
+| gzip Compress | 1 MiB | 2 934 639 ns / 1 084 052 B | 2 667 901 ns / 10 425 B |
+| gzip Decompress | 256 B | 19 935 ns / 42 024 B | **6 581 ns / 840 B** |
+
+**The gain is a function of payload size, not of scheme**: an encoder costs ~1.076 MB
+to build whatever it then compresses, so pooling is 48× at 256 B and 1.10× at 1 MiB.
+Output was verified byte-identical before and after across all 30 scheme × corpus ×
+size combinations by SHA-256 — the pool changes cost, never bytes.
+
+It is also a function of the caller's **GC rate**, which is why the round-trip row did
+not add up at first: the runtime empties every `sync.Pool` at each collection, so a
+fraction of iterations rebuild the encoder. With `GOGC=off` the arithmetic closes to
+8 bytes out of 19 735.
+
+Two measurements that change how the package should be read:
+
+- **Do not compress below ~128 bytes.** `compress/flate` stores ≤32 B verbatim, emits a
+  Huffman-only block for 33–127 B, and only above 128 B looks for matches — measured at
+  127 B random = 12 224 ns against 128 B random = **1 129 ns, 10.8× on one byte**. Below
+  128 B the output is larger than the input on every corpus.
+- **The old zlib level sweep was measuring the constructor.** Before pooling
+  `HuffmanOnly` looked like the fastest level, because its writer is the cheapest to
+  build; with construction off the hot path `BestSpeed` is fastest and `HuffmanOnly` is
+  3.98× slower with a 107× worse ratio. `NoCompression` measures identically to
+  `DefaultCompression` on time *and* ratio — the §zlib-level clamp, confirmed rather
+  than asserted.
+
+The bound in `bounded.go` costs a flat **+24 B and +1 alloc at every size** (the
+`io.LimitReader` struct), 0.58 % of a 256-byte gzip decompress.
+
+### Measured and NOT taken
+
+A `if cap(dst) == 0 { return plain, nil }` fast path in all three `Decompress`
+functions bought −32 % B/op at 1 MiB and −28 % at 4 KiB. It was **removed**: it
+abandons the append-to-dst convention the port documents in three places, and no test
+in the repository was sensitive because every call site passes `dst = nil` — so the
+`append` branch it claimed to preserve had become dead code. Measuring it directly
+also found what `-benchmem` cannot show: `io.ReadAll`'s 512-byte floor means a 64-byte
+result is handed back pinning a 512-byte array, **8× retention** for as long as the
+caller holds it. The optimisation is real above ~256 B and belongs in its own change,
+with the three docs updated and a test that fails when the convention moves.
 
 ## Conventions
 
