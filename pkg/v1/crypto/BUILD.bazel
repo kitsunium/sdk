@@ -23,6 +23,9 @@ alias(
 
 go_test(
     name = "crypto_test",
-    srcs = ["crypto_external_test.go"],
+    srcs = [
+        "crypto_bench_test.go",
+        "crypto_external_test.go",
+    ],
     deps = [":crypto"],
 )

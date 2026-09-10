@@ -22,6 +22,9 @@ alias(
 
 go_test(
     name = "sign_test",
-    srcs = ["sign_external_test.go"],
+    srcs = [
+        "sign_bench_test.go",
+        "sign_external_test.go",
+    ],
     deps = [":sign"],
 )

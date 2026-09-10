@@ -22,7 +22,10 @@ alias(
 
 go_test(
     name = "agree_test",
-    srcs = ["agree_external_test.go"],
+    srcs = [
+        "agree_bench_test.go",
+        "agree_external_test.go",
+    ],
     deps = [
         ":agree",
         "//pkg/v1/crypto",
