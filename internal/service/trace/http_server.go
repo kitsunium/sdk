@@ -24,7 +24,15 @@ const (
 	URLPathKey string = "url.path"
 	// URLSchemeKey is "http" or "https".
 	URLSchemeKey string = "url.scheme"
-	// URLFullKey is the whole outbound URL, recorded on CLIENT spans only.
+	// URLFullKey is the outbound URL, recorded on CLIENT spans only and with
+	// its userinfo REDACTED — the client middleware renders it through
+	// url.URL.Redacted(), not String(), so a password in the URL becomes
+	// "xxxxx" instead of travelling to a telemetry backend. The query string
+	// is NOT redacted: a secret passed as ?api_key= is still recorded, because
+	// deciding which parameters are sensitive would mean guessing, and a
+	// wrong guess is both a silent leak and a silently mangled attribute.
+	// A caller who puts secrets in a query string must keep them out of the
+	// URL the SDK is handed.
 	URLFullKey string = "url.full"
 	// ServerAddressKey is the host a client called, or a server was called on.
 	ServerAddressKey string = "server.address"

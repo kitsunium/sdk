@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
@@ -389,4 +390,69 @@ func hasIntAttr(attrs []coremetrics.AttrValue, key string, value int64) bool {
 		}
 	}
 	return false
+}
+
+// TestClientMiddlewareRedactsCredentialsInTheURL pins a leak the middleware had:
+// url.full was rendered with url.URL.String(), which emits userinfo verbatim, so
+// a caller dialling https://user:secret@host put that password into a span
+// attribute — and a span attribute is exported, by design, to a telemetry
+// backend that is very often a different trust domain from the credential. It is
+// url.URL.Redacted() now, which replaces the password with "xxxxx".
+//
+// The test asserts three separate things because two of them are the ways a
+// careless fix goes wrong: the secret must be ABSENT, the redaction marker must
+// be PRESENT (a fix that dropped the attribute entirely would pass an
+// absence-only check while losing the observability the span exists for), and
+// the path and host must survive intact.
+//
+// It also pins what is deliberately NOT fixed. The query string is recorded as
+// written, so `?api_key=` still travels; the SDK cannot redact it without
+// guessing which parameters are sensitive, and a wrong guess is both a silent
+// leak and a silently mangled attribute. That is asserted here so the limit is
+// a decision on record rather than an oversight someone discovers.
+//
+// MUTATION: restoring `request.URL.String()` fails with
+// `url.full = "https://svc:s3cr3t@api.example/v1/charge?api_key=AKIA" — it
+// carries the credential verbatim`.
+func TestClientMiddlewareRedactsCredentialsInTheURL(t *testing.T) {
+	const secret string = "s3cr3t"
+	recorder := svctrace.NewRecorder(svctrace.RecorderConfig{})
+	tracer := svctrace.NewTracer(svctrace.TracerConfig{Sink: recorder.Sink()})
+	transport := svctrace.ClientMiddleware(tracer)(roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+	}))
+
+	request := httptest.NewRequest(http.MethodPost, "https://svc:"+secret+"@api.example/v1/charge?api_key=AKIA", nil)
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	closeBody(t, response)
+
+	var full string
+	//: find the attribute the middleware records the outbound URL under.
+	for _, attr := range recorder.Collect().Spans[0].Attrs {
+		if attr.Key == svctrace.URLFullKey {
+			full = attr.Str()
+		}
+	}
+	if full == "" {
+		t.Fatalf("no %s attribute was recorded on the client span", svctrace.URLFullKey)
+	}
+	if strings.Contains(full, secret) {
+		t.Errorf("url.full = %q — it carries the credential verbatim", full)
+	}
+	//: absence alone would also pass if the attribute lost its userinfo entirely.
+	if !strings.Contains(full, "svc:xxxxx@") {
+		t.Errorf("url.full = %q, want the redaction marker svc:xxxxx@", full)
+	}
+	//: the rest of the URL is what the span is for; it must survive.
+	if !strings.Contains(full, "api.example/v1/charge") {
+		t.Errorf("url.full = %q lost the host or path", full)
+	}
+	//: recorded on purpose: Redacted() does not touch the query string, and the
+	//: SDK will not guess which parameters are secret. See URLFullKey's doc.
+	if !strings.Contains(full, "api_key=AKIA") {
+		t.Errorf("url.full = %q — the query string is documented as NOT redacted", full)
+	}
 }
