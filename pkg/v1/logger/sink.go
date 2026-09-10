@@ -68,8 +68,9 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 		//: service-layer rejection already carries the right code/reason.
 		return nil, hErr
 	}
-	//: wrap the handler into a Logger via svclogger.
-	base, lErr := svclogger.New(handler)
+	//: wrap the handler into a Logger via svclogger, bound to the trace domain
+	//: so every record emitted inside a span carries its ids (ADR 0062).
+	base, lErr := svclogger.NewWithTraceContext(handler, TraceContextFromContext)
 	//: forward any svclogger-level error unchanged (origin wins).
 	if lErr != nil {
 		//: service-layer rejection already carries the right code/reason.

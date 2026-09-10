@@ -22,17 +22,48 @@ const callerSkipDepth int = 2
 type loggerImpl struct {
 	// h is the underlying Handler that receives every emitted RecordEvent.
 	h corelogger.Handler
+	// trace reads the span identity off the caller's context so every record
+	// can carry it. Nil means "this Logger does no trace correlation" — the
+	// state a Logger built by New is in, since this layer deliberately does
+	// not know which propagation the application uses (ADR 0062).
+	trace corelogger.TraceContextSource
 }
 
-// New wraps a core.Handler inside a core.Logger.
+// New wraps a core.Handler inside a core.Logger with no trace correlation.
 func New(h corelogger.Handler) (lg corelogger.Logger, err error) {
+	//: one construction path — the correlated one, with no source bound.
+	return NewWithTraceContext(h, nil)
+}
+
+// NewWithTraceContext wraps a core.Handler inside a core.Logger that stamps
+// every emitted record with the trace context src reads off the caller's
+// context.
+//
+// src is a port, not an import: this package never learns which propagation
+// carries the span, so internal/service/logger keeps zero edges to any other
+// service-layer domain. pkg/v1/logger binds it to the trace domain. A nil src
+// is the documented "no correlation" wiring and costs nothing per emit.
+func NewWithTraceContext(h corelogger.Handler, src corelogger.TraceContextSource) (lg corelogger.Logger, err error) {
 	//: reject nil handlers so callers cannot accidentally construct a dead Logger.
 	if h == nil {
 		//: caller supplied no handler — return the documented sentinel.
 		return nil, HandlerNil
 	}
 	//: wrap the handler in the concrete loggerImpl.
-	return &loggerImpl{h: h}, nil
+	return &loggerImpl{h: h, trace: src}, nil
+}
+
+// traceContext reads the span identity for ctx, or the invalid zero value when
+// this Logger carries no source. Kept as a method so the three emission paths
+// share one nil check and one call site.
+func (l *loggerImpl) traceContext(ctx context.Context) corelogger.TraceContextValue {
+	//: an uncorrelated Logger pays nothing — not even the context walk.
+	if l.trace == nil {
+		//: the invalid zero value renders nothing.
+		return corelogger.TraceContextValue{}
+	}
+	//: the bound port answers; it never allocates and never fails.
+	return l.trace(ctx)
 }
 
 // Enabled delegates to the underlying Handler using a zero RecordEvent whose
@@ -55,6 +86,8 @@ func (l *loggerImpl) Log(ctx context.Context, lv level.Level, msg string, attrs 
 		//: nothing to emit at this level.
 		return
 	}
+	//: read the span AFTER the level gate so a dropped record pays no context walk.
+	r.TraceContext = l.traceContext(ctx)
 	//: route any handler error through the documented swallow helper.
 	swallowHandlerError(l.h.Handle(ctx, r))
 }
@@ -62,7 +95,7 @@ func (l *loggerImpl) Log(ctx context.Context, lv level.Level, msg string, attrs 
 // With returns a derived Logger whose emitted records carry the given attrs.
 func (l *loggerImpl) With(attrs ...corelogger.AttrValue) corelogger.Logger {
 	//: delegate attr accumulation to the Handler's WithAttrs contract.
-	return &loggerImpl{h: l.h.WithAttrs(attrs)}
+	return &loggerImpl{h: l.h.WithAttrs(attrs), trace: l.trace}
 }
 
 // Build is the package-level entry point that returns a chainable Builder
@@ -143,6 +176,8 @@ func (l *loggerImpl) LogAttrs(ctx context.Context, lv level.Level, msg string, a
 		//: nothing to emit at this level.
 		return
 	}
+	//: read the span AFTER the level gate so a dropped record pays no context walk.
+	r.TraceContext = l.traceContext(ctx)
 	//: route any handler error through the documented swallow helper.
 	swallowHandlerError(l.h.Handle(ctx, r))
 }
@@ -156,5 +191,5 @@ func (l *loggerImpl) WithGroup(name string) corelogger.Logger {
 		return l
 	}
 	//: delegate group accumulation to the Handler's WithGroup contract.
-	return &loggerImpl{h: l.h.WithGroup(name)}
+	return &loggerImpl{h: l.h.WithGroup(name), trace: l.trace}
 }

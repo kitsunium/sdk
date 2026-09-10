@@ -12,6 +12,7 @@ go_library(
         "logger.go",
         "record.go",
         "sink.go",
+        "trace_context.go",
         "value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/logger",
@@ -36,6 +37,7 @@ go_test(
     srcs = [
         "kind_external_test.go",
         "kind_internal_test.go",
+        "trace_context_external_test.go",
         "value_external_test.go",
         "value_internal_test.go",
     ],

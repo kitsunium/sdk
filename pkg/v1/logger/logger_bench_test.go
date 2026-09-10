@@ -16,6 +16,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/trace"
 )
 
 // discardSink implements logger.Sink (= corelogger.Sink) by dropping
@@ -78,5 +79,78 @@ func BenchmarkLogger10Fields(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		logger.Info(ctx, lg, "event", benchAttrs10...)
+	}
+}
+
+// benchTraceID and benchSpanID are a syntactically valid W3C identifier pair
+// (the traceparent example from the specification) so the "with span"
+// benchmarks measure the emitting path an instrumented service actually runs.
+var (
+	benchTraceID = trace.TraceID{
+		0x4b, 0xf9, 0x2f, 0x35, 0x77, 0xb3, 0x4d, 0xa6,
+		0xa3, 0xce, 0x92, 0x9d, 0x0e, 0x0e, 0x47, 0x36,
+	}
+	benchSpanID = trace.SpanID{0x00, 0xf0, 0x67, 0xaa, 0x0b, 0xa9, 0x02, 0xb7}
+)
+
+// benchTraceContext defeats dead-code elimination in the extraction benches.
+var benchTraceContext logger.TraceContext
+
+// benchSpanContext returns a context carrying a valid span, i.e. what an
+// inbound HTTP request looks like once the trace middleware has extracted the
+// traceparent header.
+func benchSpanContext(ctx context.Context) context.Context {
+	return trace.ContextWithSpanContext(ctx, trace.SpanContext{
+		TraceID: benchTraceID,
+		SpanID:  benchSpanID,
+		Flags:   trace.FlagSampled,
+	})
+}
+
+// BenchmarkLoggerStaticStringWithSpan — the cheapest path, emitted from inside
+// a span. The delta against BenchmarkLoggerStaticString is the whole cost of
+// trace correlation: one context walk plus 32 + 16 hex digits appended into
+// the encoder's borrowed buffer. It MUST NOT change the allocation count.
+func BenchmarkLoggerStaticStringWithSpan(b *testing.B) {
+	ctx := benchSpanContext(b.Context())
+	lg := newKitsuniumLogger(b)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		logger.Info(ctx, lg, "static")
+	}
+}
+
+// BenchmarkLogger10FieldsWithSpan — the structured scenario, emitted from
+// inside a span.
+func BenchmarkLogger10FieldsWithSpan(b *testing.B) {
+	ctx := benchSpanContext(b.Context())
+	lg := newKitsuniumLogger(b)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		logger.Info(ctx, lg, "event", benchAttrs10...)
+	}
+}
+
+// BenchmarkTraceContextFromContextHit isolates the extraction: the context
+// walk plus the two array copies, with no logging around it.
+func BenchmarkTraceContextFromContextHit(b *testing.B) {
+	ctx := benchSpanContext(b.Context())
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		benchTraceContext = logger.TraceContextFromContext(ctx)
+	}
+}
+
+// BenchmarkTraceContextFromContextMiss isolates the extraction when no span is
+// in scope — the path most log lines in a service take.
+func BenchmarkTraceContextFromContextMiss(b *testing.B) {
+	ctx := b.Context()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		benchTraceContext = logger.TraceContextFromContext(ctx)
 	}
 }

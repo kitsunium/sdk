@@ -44,7 +44,7 @@ Logger ── Handler (genericHandler / TextHandler)
 
 | File              | Role |
 |---|---|
-| `logger.go`       | `loggerImpl` + `New` + `Build`/`LogAttrs` package entries |
+| `logger.go`       | `loggerImpl` + `New` / `NewWithTraceContext` + `Build`/`LogAttrs` package entries |
 | `builder.go`      | `Builder` interface + `chainBuilder` impl (recycled via `recordPool`) |
 | `handler.go`      | `genericHandler` (Encoder × Sink composition) + `NewHandler` |
 | `text_handler.go` | `TextHandler` legacy fused handler (`NewTextHandler`) |
@@ -67,6 +67,23 @@ Logger ── Handler (genericHandler / TextHandler)
 - **Swallow on emit.** `Logger.Log` MUST NOT propagate handler errors —
   see `swallowHandlerError` in `logger.go`. A future commit may swap this
   for a configurable `OnError` hook.
+- **Trace correlation is injected, never imported** (ADR 0062).
+  `NewWithTraceContext(h, src)` binds a `core/logger.TraceContextSource`; the
+  three emission paths (`Log`, `LogAttrs`, `Builder.Send`) call it and stamp
+  `RecordEvent.TraceContext`. This package therefore keeps **zero edges to any
+  other service-layer domain** — it never learns that `trace` exists, which is
+  the point, since `internal/service/trace` is a sibling it may not import.
+  `pkg/v1/logger` supplies the binding; `New(h)` leaves it nil and a nil source
+  costs nothing per emit.
+- **The source is read AFTER the `Enabled` gate**, in all three paths, so a
+  record dropped by the level threshold pays no `context` walk. It is read
+  before `Handle`, so every Handler, Sink and middleware sees the identity on
+  the record.
+- **A `!race` alloc guard covers this.** `TestT34TraceCorrelationAddsNoAllocation`
+  in `pkg/v1/logger` asserts **exactly 1** alloc/op on all three emission paths,
+  in and out of a span — stricter than `TestV116BuildSendAllocatesOnePerEmit`,
+  which only asserts `>= 1`. Same race-off alloc lane; profiled in
+  `pkg/v1/logger/BENCH.md`.
 
 ## Error catalogue — range 0.3.1.\*
 

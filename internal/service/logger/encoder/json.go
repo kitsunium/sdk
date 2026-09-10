@@ -96,6 +96,10 @@ func (e *jsonEncoder) Append(dst []byte, groups []string, r corelogger.RecordEve
 	}
 	dst = append(dst, '{')
 	dst = appendJSONHeader(dst, r)
+	//: trace context is emitted as TOP-LEVEL keys of the object, right after
+	//: the header and before the attributes — the shape the OpenTelemetry
+	//: compatibility spec shows for non-OTLP JSON logs.
+	dst = appendJSONTraceContext(dst, r)
 	//: append every record-bound attribute prefixed by the group stack.
 	for _, a := range r.Attrs {
 		//: each attr becomes a comma-prefixed "key":value member.
@@ -123,6 +127,43 @@ func appendJSONHeader(dst []byte, r corelogger.RecordEvent) []byte {
 	//: Message is escaped as a JSON string — no separate framing sanitiser is
 	//: needed because JSON escaping already neutralises CR/LF/NUL.
 	return appendJSONString(dst, r.Message)
+}
+
+// appendJSONTraceContext writes the two correlation members
+// ,"trace_id":"<32 hex>","span_id":"<16 hex>" into dst, and writes NOTHING
+// when tc is the invalid zero value.
+//
+// They are TOP-LEVEL keys of the log object rather than attributes, which is
+// what "includes trace context fields as top-level keys within the JSON log
+// object" prescribes (specification/compatibility/logging_trace_context.md).
+// An attribute could not have satisfied it: WithGroup would render the key as
+// "g1.trace_id" and no ingestion pipeline would recognise it.
+//
+// The absent case emits nothing at all — not "" and not the all-zero id, both
+// of which are invalid under W3C Trace Context §3.2.2.3/§3.2.2.4 and would
+// otherwise appear on every line a service logs outside a request.
+func appendJSONTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
+	//: the identity travels on the record because Encoder.Append receives no
+	//: context.Context — that is the whole reason it is a field (ADR 0062).
+	tc := r.TraceContext
+	//: no span in scope — the object carries no correlation members at all.
+	if !tc.IsValid() {
+		//: the buffer is handed back untouched.
+		return dst
+	}
+	//: ,"trace_id":"<32 hex>" — the hex alphabet needs no JSON escaping.
+	dst = append(dst, ',')
+	dst = appendJSONString(dst, corelogger.TraceIDKey)
+	dst = append(dst, ':', '"')
+	dst = tc.AppendTraceIDHex(dst)
+	dst = append(dst, '"')
+	//: ,"span_id":"<16 hex>".
+	dst = append(dst, ',')
+	dst = appendJSONString(dst, corelogger.SpanIDKey)
+	dst = append(dst, ':', '"')
+	dst = tc.AppendSpanIDHex(dst)
+	//: hand back the buffer carrying both correlation members.
+	return append(dst, '"')
 }
 
 // appendJSONAttr writes one attribute as a "g1.g2.key":value JSON member.
