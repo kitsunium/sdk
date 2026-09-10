@@ -125,6 +125,13 @@ jobs:
       - name: audit-coverage invariant — every code-declaring package is audited
         run: bash scripts/pre-commit/check-audit-coverage.sh
 
+      # Guards the root CLAUDE.md against the drift parallel union merges
+      # produce: a core/ tree that no longer matches internal/core, a domain
+      # described twice, or two whole Purpose paragraphs coexisting. Both
+      # checks key on the directories on disk rather than on a count.
+      - name: domain-doc invariant — the root CLAUDE.md still describes the tree
+        run: bash scripts/pre-commit/check-domain-docs.sh
+
       - name: coverage
         run: |
           bazel coverage --combined_report=lcov //...
