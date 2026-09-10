@@ -1,0 +1,50 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "vfs",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "path.go",
+        "perm.go",
+        "vfs.go",
+        "vfs_interface.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/vfs",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":vfs",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "vfs_test",
+    size = "small",
+    srcs = [
+        "path_bench_test.go",
+        "vfs_external_test.go",
+    ],
+    deps = [
+        ":vfs",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
