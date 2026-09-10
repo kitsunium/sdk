@@ -27,6 +27,7 @@ import (
 	"context"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
@@ -42,6 +43,31 @@ import (
 // every call — has happened several times by the end.
 const allocRuns int = 500
 
+// allocRuntimeWarmup is how many Flush calls warmRuntimeCaches spends on a
+// THROWAWAY sink before any window is measured. It is not about this package.
+//
+// Flush reaches the file through a type switch over non-empty interfaces, and
+// the runtime serves those from a per-call-site cache it builds LAZILY on
+// purpose: runtime/iface.go gates the build behind `cheaprand()&1023 != 0`, so
+// about one miss in 1024 pays for it and buildInterfaceSwitchCache allocates.
+// The result is a handful of allocations landing at an unpredictable point
+// roughly a thousand calls into the process, attributable to no line here.
+//
+// It is invisible to testing.AllocsPerRun — 6 over 500 is 0 after the integer
+// division — and it is precisely what a total-counting window sees. Measured:
+// this guard failed 2 runs in 5 under Bazel's sandbox at "500 flushes performed
+// 6 allocations", while passing 12 of 12 locally on both tmpfs and ext4, and
+// holding the collector off did NOT fix it. Thirty thousand calls put the
+// probability the cache is still unbuilt at (1023/1024)^30000, about 2e-13.
+//
+// The THROWAWAY sink is load-bearing rather than tidy. The cache is the
+// runtime's — per call site, process-global — so any sink can pay for it, while
+// what this file polices is per sink. Warming through the sink under test would
+// leave an accumulating regression far past its own growth steps, which is the
+// same blindness the integer division produces and the reason this file counts
+// totals at all.
+const allocRuntimeWarmup int = 30000
+
 // mallocsOver reports the TOTAL number of heap allocations f performs across
 // runs calls, rather than the per-call average.
 //
@@ -52,6 +78,21 @@ const allocRuns int = 500
 // measured passing against it. A total is not subject to that rounding.
 func mallocsOver(runs int, f func()) uint64 {
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	//: collection is held off for the window: a collection is not free of
+	//: allocations from the measured goroutine's point of view, since it drains
+	//: pools and forces the next calls to miss.
+	//:
+	//: It is NOT what fixed this guard's flake, and the record is kept because
+	//: the wrong hypothesis is worth as much as the right one. This test failed
+	//: 2 runs in 5 under Bazel's sandbox at "500 flushes performed 6
+	//: allocations" while passing 12 of 12 locally on tmpfs AND ext4; a
+	//: collection was the obvious suspect, holding it off changed nothing, and
+	//: the cause was the runtime's lazily-built interface-switch cache — see
+	//: allocRuntimeWarmup. The parade below is kept on its own merits.
+	//: The argument is evaluated now and the previous rate restored on return.
+	//: NOT runtime.GC(), which returns before its sweep finishes and therefore
+	//: allocates INSIDE the window it was meant to clear.
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	//: warm up so first-call initialisation is not counted as steady state.
 	f()
 	var before, after runtime.MemStats
@@ -84,6 +125,21 @@ func (allocNoopSink) Close() error                  { return nil }
 // allocSink is the sink writer.Open("file", cfg) hands back over a fresh file
 // in the test's own directory — the shipped composition, not a reassembly of
 // it, and carrying a genuine write(2).
+// warmRuntimeCaches builds the runtime's lazy interface-switch caches on a sink
+// nothing else will touch, so no measured window pays for them.
+func warmRuntimeCaches(t *testing.T) {
+	t.Helper()
+	throwaway := allocSink(t, "runtime-warmup.log")
+	ctx := context.Background()
+	//: only Flush is warmed: it is the arm that failed, and warming a path this
+	//: file does not measure would spend thirty thousand syscalls for nothing.
+	for range allocRuntimeWarmup {
+		if err := throwaway.Flush(ctx); err != nil {
+			t.Fatalf("warming the runtime caches: %v", err)
+		}
+	}
+}
+
 func allocSink(t *testing.T, name string) corelogger.Sink {
 	t.Helper()
 	s, err := writer.Open("file", writer.FileConfig{Path: filepath.Join(t.TempDir(), name)})
@@ -121,6 +177,8 @@ func allocSink(t *testing.T, name string) corelogger.Sink {
 // actually notice, a doubling of the logger's advertised allocation budget.
 func TestFileWriterAddsNoAllocationToAnEmit(t *testing.T) {
 	ctx := context.Background()
+	//: before anything is measured, and never on the sink under test.
+	warmRuntimeCaches(t)
 	sink := allocSink(t, "alloc.log")
 	rec := corelogger.RecordEvent{Level: level.Info}
 	line := []byte("2026-09-10T20:15:11.482Z INFO msg=\"request served\" status=200\n")

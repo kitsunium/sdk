@@ -24,7 +24,7 @@ published**, measured in `BENCH.md` and gated by
 |---|---|
 | `sse.go` | `Stream` — `New`, `Send`, `Comment`, `Done`, `LastEventID`, `Close`; the keep-alive and watcher goroutines; the flush probe; `retain` and the two constants that bound the encode buffer |
 | `options.go` | `Option` — `KeepAlive`, `WithoutKeepAlive`, `WriteTimeout`, `Retry`; `resolve` and the ADR 0031 clamp/refuse split |
-| `sse_alloc_internal_test.go` | the `AllocsPerRun` gates under the "a steady-state send allocates nothing" claim — `//go:build !race`, so the race-off alloc lane is its ONLY lane (see §Verification) |
+| `sse_alloc_internal_test.go` | the malloc-total gates under the "a steady-state send allocates nothing" claim (deliberately NOT `testing.AllocsPerRun` — its integer division reports 0.0 for anything allocating less than once per call) — `//go:build !race`, so the race-off alloc lane is its ONLY lane (see §Verification) |
 | `BENCH.md` | what a stream costs open, per frame, and to drain — see §Cost |
 
 The frame itself — `corenet.SSEEventValue`, its validation and its wire form —
@@ -235,7 +235,7 @@ bazel test --config=race //internal/service/net/sse:sse_test
 
 # The allocation gates, which the race suite CANNOT run: sse_alloc_internal_test.go
 # is //go:build !race, because the race detector allocates shadow state on every
-# memory access and AllocsPerRun would be measuring the detector. Its only lane is
+# memory access and the allocation total would be measuring the detector. Its only lane is
 # the race-off one, and //internal/service/net/sse:sse_test is listed in
 # tools/alloc-lane-targets.txt for exactly that reason (SDK-wide rule 12).
 make test-alloc

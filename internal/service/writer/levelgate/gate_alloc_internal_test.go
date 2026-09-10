@@ -24,6 +24,7 @@ package levelgate
 import (
 	"context"
 	"runtime"
+	"runtime/debug"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
@@ -61,6 +62,15 @@ var allocPayload = []byte(
 // read the counter either side.
 func mallocsOver(runs int, f func()) uint64 {
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	//: collection is held off for the window — taken for consistency with the two sibling writer guards: this
+	//: window is the cheapest of the three and the least exposed, which is
+	//: exactly why a divergence here would be found last.
+	//: A collection is not free of allocations from the measured goroutine's
+	//: point of view; it drains pools and forces the next calls to miss.
+	//: The argument is evaluated now and the previous rate restored on return.
+	//: NOT runtime.GC(), which returns before its sweep finishes and therefore
+	//: allocates INSIDE the window it was meant to clear.
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	//: warm up so first-call initialisation is not counted as steady state.
 	f()
 	var before, after runtime.MemStats

@@ -217,7 +217,9 @@ And the three benchmarks the change added:
 `TestLookupIsAllocationFree`, `TestEveryInstrumentLookupIsAllocationFree`,
 `TestOverflowLookupIsAllocationFree` and `TestDescribedMeterLookupIsAllocationFree`
 (in `meter_alloc_test.go`) assert the zero-allocation claims above with
-`testing.AllocsPerRun`, across every attribute KIND, every synchronous
+a malloc TOTAL rather than `testing.AllocsPerRun` — whose integer division
+reports 0.0 for any regression allocating less than once per call — across every
+attribute KIND, every synchronous
 instrument, the overflow path and a meter carrying a description. The file carries `//go:build !race`, so
 it is invisible to the race suite and runs in exactly one lane — the race-off
 allocation lane. `//internal/service/metrics:metrics_test` is listed in
