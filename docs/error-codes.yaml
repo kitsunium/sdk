@@ -318,6 +318,14 @@ codes:
     const: CodeInvalidTemporality
     hex: "0x00_02_09_06"
     package: internal/core/metrics
+  - code: "0.2.9.7"
+    const: CodeInvalidDescription
+    hex: "0x00_02_09_07"
+    package: internal/core/metrics
+  - code: "0.2.9.8"
+    const: CodeDescriptionConflict
+    hex: "0x00_02_09_08"
+    package: internal/core/metrics
   - code: "0.2.10.1"
     const: CodeConfigSourceFailed
     hex: "0x00_02_0A_01"

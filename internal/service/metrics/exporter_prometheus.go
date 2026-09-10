@@ -190,7 +190,9 @@ func appendPromSums(buf []byte, metrics map[string]coremetrics.SumMetricValue) (
 			promType = promTypeCounter
 		}
 		//: the header is written ONCE per name — the property the
-		//: name-keyed snapshot shape exists to make free.
+		//: name-keyed snapshot shape exists to make free. HELP first, then
+		//: TYPE, which is the order the format's own examples use.
+		buf = appendHelpLine(buf, name, metric.Description)
 		buf = appendTypeLine(buf, name, promType)
 		//: then each series, already ordered by attribute set by Collect.
 		for _, point := range metric.Points {
@@ -219,7 +221,8 @@ func appendPromGauges(buf []byte, metrics map[string]coremetrics.GaugeMetricValu
 			//: surface the typed refusal.
 			return nil, err
 		}
-		//: one header per name.
+		//: one header per name, docstring first when there is one.
+		buf = appendHelpLine(buf, name, metrics[name].Description)
 		buf = appendTypeLine(buf, name, promTypeGauge)
 		//: one line per series.
 		for _, point := range metrics[name].Points {
@@ -254,8 +257,9 @@ func appendPromHistograms(
 			//: surface the typed refusal.
 			return nil, err
 		}
-		//: the TYPE header names the BASE metric; the samples carry the
-		//: _bucket / _sum / _count suffixes.
+		//: the HELP and TYPE headers name the BASE metric; the samples carry
+		//: the _bucket / _sum / _count suffixes.
+		buf = appendHelpLine(buf, name, metric.Description)
 		buf = appendTypeLine(buf, name, promTypeHistogram)
 		//: one family per series.
 		for _, point := range metric.Points {
@@ -326,15 +330,78 @@ func appendHistogramSeries(buf []byte, name string, point coremetrics.HistogramV
 		strconv.FormatUint(point.Count, decimalBase))
 }
 
-// appendTypeLine appends "# TYPE <name> <kind>\n".
+// appendHelpLine appends "# HELP <name> <docstring>\n" — and nothing at all
+// when the metric has no description.
 //
-// No "# HELP" line accompanies it. HELP is optional in the exposition format
-// and carries a DOCSTRING; the SDK's Meter records no description for an
-// instrument, so the only HELP this exporter could emit is the metric name
-// repeated back or a fixed sentence restating the TYPE line. Both are
-// placeholders, and a placeholder on every scrape teaches an operator nothing.
-// The day Meter grows a description, HELP lands on the line above this one and
-// nothing else about the document changes.
+// That day arrived: ADR 0044 adopted the OTel data model, ADR 0067 gave the
+// Meter a Describer sibling, and the OTel-to-Prometheus interoperability
+// specification says outright that "OTLP metric point descriptions become HELP
+// metadata". An ABSENT description still emits nothing: HELP is optional in the
+// exposition format, and a blank docstring on every scrape is the placeholder
+// this exporter refused to invent before there was anything real to print.
+//
+// The format permits exactly one HELP and one TYPE line per metric name, which
+// is why this call sits inside the same header-per-name step as
+// appendTypeLine rather than anywhere near the per-series loop. HELP goes ABOVE
+// TYPE, which is the order the format's own published examples use.
+func appendHelpLine(buf []byte, name, description string) []byte {
+	//: an undescribed metric gets no line rather than an empty one.
+	if description == "" {
+		//: nothing to say.
+		return buf
+	}
+	//: the comment prefix the format reserves for metadata.
+	buf = append(buf, "# HELP "...)
+	//: the base metric name — validated, so it needs no escaping.
+	buf = append(buf, name...)
+	buf = append(buf, ' ')
+	//: the docstring is DATA and must not be able to forge a line.
+	buf = appendEscapedHelp(buf, description)
+	//: hand back the extended buffer.
+	return append(buf, '\n')
+}
+
+// appendEscapedHelp writes a HELP docstring with the format's OWN two escapes:
+// a backslash doubles and a line feed becomes "\n".
+//
+// It is deliberately NOT appendEscapedValue, which escapes a third character.
+// A label value is a QUOTED token, so a double quote inside it would close the
+// value early and has to be escaped; a HELP docstring is the unquoted rest of
+// the line, so the format says only "the backslash and the line feed characters
+// have to be escaped" and a quote is an ordinary character. Escaping it anyway
+// would put a literal backslash into the help text an operator reads —
+// corrupting the prose to defend against a delimiter that is not there.
+//
+// The line feed is the one that matters. A description is prose the caller
+// wrote, and it may legitimately contain anything; unescaped, a newline inside
+// it ends the HELP comment and the remainder of the description is parsed as a
+// sample line — the same forged-line hazard TestPrometheusExporterEscapes-
+// AdversarialLabelValues pins for label values, one line higher up.
+func appendEscapedHelp(buf []byte, description string) []byte {
+	//: byte-wise: both escapes are ASCII and UTF-8 is pass-through, which is
+	//: what lets a docstring carry any rune the format admits.
+	for i := range len(description) {
+		//: escape the two characters the format names, and only those.
+		switch char := description[i]; char {
+		//: a literal backslash doubles, or it would eat the next character.
+		case '\\':
+			//: emit the escaped form.
+			buf = append(buf, '\\', '\\')
+		//: a newline would end the comment and forge a sample line.
+		case '\n':
+			//: emit the escaped form.
+			buf = append(buf, '\\', 'n')
+		//: every other byte, quote included, is ordinary here.
+		default:
+			//: copy verbatim.
+			buf = append(buf, char)
+		}
+	}
+	//: hand back the extended buffer.
+	return buf
+}
+
+// appendTypeLine appends "# TYPE <name> <kind>\n".
 func appendTypeLine(buf []byte, name, kind string) []byte {
 	//: the comment prefix the format reserves for metadata.
 	buf = append(buf, "# TYPE "...)

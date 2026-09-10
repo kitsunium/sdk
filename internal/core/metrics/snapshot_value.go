@@ -16,6 +16,11 @@ type SumMetricValue struct {
 	// Monotonic is true for a Counter and false for an UpDownCounter. A
 	// backend uses it to decide whether a decrease is a reset or a reading.
 	Monotonic bool
+	// Description is the instrument's human-readable docstring, or "" when
+	// nobody described it. It is NON-IDENTIFYING — the OTel data model says so
+	// outright — so it never joins the series identity and an exporter that
+	// cannot carry it loses nothing but the prose. See Describer.
+	Description string
 	// Points holds the name's series, sorted by attribute set.
 	Points []SumValue
 }
@@ -28,6 +33,9 @@ type SumMetricValue struct {
 // that all three kinds present the same walk to an exporter — an exporter that
 // had to special-case gauges would special-case them in every format.
 type GaugeMetricValue struct {
+	// Description is the instrument's human-readable docstring, or "" when
+	// nobody described it. See SumMetricValue.Description.
+	Description string
 	// Points holds the name's series, sorted by attribute set.
 	Points []GaugeValue
 }
@@ -43,6 +51,9 @@ type HistogramMetricValue struct {
 	// Temporality says which window Points cover. Never
 	// TemporalityUnspecified.
 	Temporality Temporality
+	// Description is the instrument's human-readable docstring, or "" when
+	// nobody described it. See SumMetricValue.Description.
+	Description string
 	// Points holds the name's series, sorted by attribute set.
 	Points []HistogramValue
 }

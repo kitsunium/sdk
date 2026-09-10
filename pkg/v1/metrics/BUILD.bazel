@@ -23,6 +23,7 @@ go_test(
     name = "metrics_test",
     srcs = [
         "attrs_external_test.go",
+        "describer_external_test.go",
         "metrics_external_test.go",
     ],
     deps = [":metrics"],

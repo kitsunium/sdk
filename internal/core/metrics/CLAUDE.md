@@ -7,14 +7,15 @@ the **OpenTelemetry metrics DATA MODEL**. Instruments
 (`Counter`/`UpDownCounter`/`Gauge`/`Histogram` and their observable
 counterparts), the `Meter` that mints + `Collect`s them, typed `AttrValue`s,
 aggregation `Temporality`, the producing `ResourceValue` and the
-`ScopeValue` that instrumented it, plus the `Exporter` contract + process-wide
-registry that ships a `SnapshotValue` out. A core sibling admitted by
-**ADR 0027** and re-shaped by **ADR 0044**. The in-memory meter and the stdlib
+`ScopeValue` that instrumented it, the `Describer` sibling that documents an
+instrument name, plus the `Exporter` contract + process-wide registry that ships
+a `SnapshotValue` out. A core sibling admitted by **ADR 0027**, re-shaped by
+**ADR 0044** and given a description by **ADR 0067**. The in-memory meter and the stdlib
 `text` / `prometheus` / `otlpjson` exporters live in
 `internal/service/metrics`; exporters self-register via the registry
 (writer-registry model, ADR 0012).
 
-Code range: `0.2.9.*` (ADR 0027, extended by ADR 0044).
+Code range: `0.2.9.*` (ADR 0027, extended by ADR 0044 and ADR 0067).
 
 **OTel is a specification here, not a dependency.** Nothing in this package
 imports `go.opentelemetry.io/*`, and nothing ever should: the model is a shape,
@@ -41,11 +42,12 @@ may hold.
 | `counter.go` / `updowncounter.go` / `gauge.go` / `histogram.go` | the four synchronous instrument interfaces (+ the package doc) |
 | `observable.go` | `ObserveInt64`/`ObserveFloat64` + `Int64Callback`/`Float64Callback` — FUNC ports |
 | `meter.go` | `Meter` — **frozen**: Counter/Gauge/Histogram + `Collect() SnapshotValue` |
-| `updown_meter.go` / `async_meter.go` / `full_meter.go` | the two sibling ports and their union |
+| `updown_meter.go` / `async_meter.go` / `full_meter.go` | the two INSTRUMENT sibling ports and their union |
+| `describer.go` | `Describer` — the third sibling: `Describe(name, description string)`, deliberately NOT in `FullMeter` |
 | `sum_value.go` / `gauge_value.go` / `histogram_value.go` | the three per-series point types |
 | `snapshot_value.go` | `SumMetricValue`/`GaugeMetricValue`/`HistogramMetricValue` + `SnapshotValue` |
 | `exporter.go` | `Exporter` + `ExporterName` + registry (`RegisterExporter`/`LookupExporter`/`AvailableExporters`/`Export`) |
-| `codes.go` / `errors.go` | `0.2.9.*` (UNKNOWN_EXPORTER, EXPORT_FAILED, INSTRUMENT_KIND_CONFLICT, INVALID_ATTRIBUTE, DUPLICATE_REGISTRATION, INVALID_TEMPORALITY) |
+| `codes.go` / `errors.go` | `0.2.9.*` (UNKNOWN_EXPORTER, EXPORT_FAILED, INSTRUMENT_KIND_CONFLICT, INVALID_ATTRIBUTE, DUPLICATE_REGISTRATION, INVALID_TEMPORALITY, INVALID_DESCRIPTION, DESCRIPTION_CONFLICT) |
 
 `pkg/v1/metrics` publishes these under shorter names — `Attr`, `Resource`,
 `Scope`, `Snapshot`, `SumPoint`/`SumMetric`, … — the same way `Snapshot` has
@@ -65,6 +67,8 @@ convention, not part of the public vocabulary.
 | Gauge (last value) | yes | `GaugeMetricValue` — and NO temporality, deliberately |
 | Explicit-bucket Histogram | yes | `HistogramMetricValue` |
 | Observable (asynchronous) instruments | yes | `AsyncMeter` + the two func callbacks |
+| `Metric.description` | yes | `Describer` port; `Description` on the three metric envelopes (ADR 0067) |
+| `Metric.unit` | **deferred** | a unit changes the metric NAME on some wires (Prometheus suffixes it) and is a second decision |
 | Exemplars | **deferred** | no tracing domain, so no span id to carry |
 | Exponential histograms | **deferred** | a second point type, not a field |
 | Summary (legacy) | **never** | the OTel spec itself says "not recommended for new applications" |
@@ -77,9 +81,9 @@ type SnapshotValue struct {
     Scope      ScopeValue
     StartTime  time.Time
     Time       time.Time
-    Sums       map[string]SumMetricValue        // name -> {Temporality, Monotonic, Points}
-    Gauges     map[string]GaugeMetricValue      // name -> {Points}
-    Histograms map[string]HistogramMetricValue  // name -> {Temporality, Points}
+    Sums       map[string]SumMetricValue        // name -> {Temporality, Monotonic, Description, Points}
+    Gauges     map[string]GaugeMetricValue      // name -> {Description, Points}
+    Histograms map[string]HistogramMetricValue  // name -> {Temporality, Description, Points}
 }
 ```
 
@@ -95,8 +99,21 @@ exporter walking these maps writes its header once per key and its points from
 the slice — no regrouping pass, no composite key to parse, no second index.
 
 The per-name **envelope** is what the earlier `map[name][]seriesValue` shape
-could not carry: temporality and monotonicity belong to the METRIC in the OTel
-model, not to a point, and they are the same for every series under one name.
+could not carry: temporality, monotonicity and the description belong to the
+METRIC in the OTel model, not to a point, and they are the same for every series
+under one name. The description landed there (ADR 0067) rather than in a fourth
+`Descriptions map[string]string` on the snapshot for exactly that reason — a
+separate map would let a hand-built snapshot describe a metric that does not
+exist, and would make every exporter do a second lookup keyed on a name it is
+already holding.
+
+Adding `Description` to all three envelopes **changed three published shapes**:
+`pkg/v1/metrics.SumMetric`, `GaugeMetric` and `HistogramMetric` are type
+aliases. That is permitted **only because the module is v0** and is said out
+loud here and in ADR 0067 §Decision 4, as ADR 0040 requires. Nothing in this
+repository broke, because every composite literal of the three — production and
+test — is written with FIELD NAMES; an unkeyed one anywhere would have stopped
+compiling.
 
 Properties an exporter may rely on:
 
@@ -152,7 +169,14 @@ a reader is safe; a writer would corrupt every future snapshot.
   series; `CompareAttrValue` breaks the same ties, or a sort would call two
   distinct series equal and the snapshot would stop being deterministic.
 - **`Temporality` is on the metric, never on the point** — the OTel split — and
-  a gauge has none at all.
+  a gauge has none at all. **So is `Description`**, for the same reason: the OTel
+  data model puts it on the Metric, and the specification calls it explicitly
+  NON-IDENTIFYING, so it never joins a series key.
+- **A description belongs to the NAME, not to a call site.** `Describe(name, …)`
+  rather than a parameter on `Counter`, which also keeps the docstring off the
+  observation path entirely. An empty description and a second, differing one
+  are both programmer errors the implementation panics on
+  (`InvalidDescription` / `DescriptionConflict`); identical text is idempotent.
 - **Exporter registry** mirrors the writer registry (`snapshot.Value`, idempotent
   Register, panic on conflict).
 - A name reused across instrument kinds is a programmer error
@@ -165,7 +189,13 @@ a reader is safe; a writer would corrupt every future snapshot.
   ours. See §Purpose and ADR 0044 §Decision 1.
 - Put meter/instrument bodies here — they live in `service/metrics`.
 - Mutate an `Attrs` slice reached through a `SnapshotValue`. It is the meter's.
-- Add a method to `Meter`. Add a sibling interface (ADR 0039).
+- Add a method to `Meter` — **or to `FullMeter`**. Add a sibling interface
+  (ADR 0039). A union is still an interface: folding `Describer` into `FullMeter`
+  would break every downstream double, which is what
+  `TestPreDescriberDoubleStillSatisfiesFullMeter` fails on.
+- Refuse a description for the BYTES it carries. A name and an attribute key are
+  structure and are validated; a description is prose, and escaping it is the
+  exporter's job.
 - Give `GaugeMetricValue` a `Temporality`. A sampled reading covers no window,
   and OTLP's `Gauge` message has no such field.
 - Add an "unbounded cardinality" mode to the port. ADR 0031: a bound of zero is

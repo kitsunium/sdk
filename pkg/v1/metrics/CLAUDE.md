@@ -3,9 +3,10 @@
 ## Purpose
 
 Public facade for the SDK observability domain (ADR 0027, re-shaped on the
-OpenTelemetry data model by ADR 0044), the logger's twin. Aliases the
-`Meter`/instrument/`Exporter` types, the typed `Attr`, `Temporality`,
-`Resource`, `Scope`, the point/metric snapshot values and `MeterConfig`; exposes
+OpenTelemetry data model by ADR 0044, given a `Describer` by ADR 0067), the
+logger's twin. Aliases the `Meter`/instrument/`Describer`/`Exporter` types, the
+typed `Attr`, `Temporality`, `Resource`, `Scope`, the point/metric snapshot
+values and `MeterConfig`; exposes
 `String`/`Bool`/`Int64`/`Float64`, `NewMeter`, `NewMeterWithConfig`, `Export`,
 `RegisterExporter`, `NewTextExporter`, `NewPrometheusExporter`,
 `EncodeOTLPJSON`, `NewOTLPJSONExporter`, `NewOTLPHTTPExporter`, `OTLPRetryable`,
@@ -28,14 +29,15 @@ visible aggregated overflow series.
 | Symbol | Notes |
 |---|---|
 | `Meter` | the FROZEN port: Counter/Gauge/Histogram + Collect (ADR 0039) |
-| `UpDownMeter` / `AsyncMeter` / `FullMeter` | the two sibling ports and their union — what `NewMeter` returns |
+| `UpDownMeter` / `AsyncMeter` / `FullMeter` | the two INSTRUMENT sibling ports and their union — what `NewMeter` returns |
+| `Describer` | the third sibling: `Describe(name, description string)`. Deliberately NOT in `FullMeter` — reach it by type assertion, and read the false case as "this meter records no description" |
 | `Counter` / `UpDownCounter` / `Gauge` / `Histogram` | instrument aliases; every accessor is variadic in `Attr` |
 | `Attr` (= `AttrValue`) / `AttrKind` + `AttrKind*` | one TYPED dimension of a series |
 | `String` / `Bool` / `Int64` / `Float64` | the only ways to build a usable `Attr` |
 | `Temporality` + `Temporality*` | delta or cumulative, carried by the metric |
 | `Resource` / `Scope` + `ServiceNameKey` / `UnknownService` / `DefaultScopeName` | who produced the payload, and what instrumented it |
 | `Snapshot` (= `SnapshotValue`) | `{Resource, Scope, StartTime, Time, Sums/Gauges/Histograms map[name]…Metric}` — see below |
-| `SumMetric` / `GaugeMetric` / `HistogramMetric` | the per-name envelopes |
+| `SumMetric` / `GaugeMetric` / `HistogramMetric` | the per-name envelopes — each carries `Description`, `""` when nobody wrote one |
 | `SumPoint` / `GaugePoint` / `HistogramPoint` | the per-series points |
 | `ObserveInt64` / `ObserveFloat64` / `Int64Callback` / `Float64Callback` | the observable func ports |
 | `MeterConfig` / `DefaultMaxSeriesPerInstrument` | bound, temporality, resource, scope, clock |
@@ -47,6 +49,7 @@ visible aggregated overflow series.
 | `NewOTLPHTTPExporter` / `OTLPHTTPConfig` / `OTLPMetricsPath` / `DefaultOTLPTimeout` / `DefaultOTLPMaxResponseBytes` | the EMITTER and its knobs; never registered, and the endpoint is a full URL used as-is |
 | `OTLPRetryable` | classifies an export failure; its signature IS `resilience.RetryConfig.Retryable`'s |
 | `UnknownExporter` / `ExportFailed` / `InstrumentKindConflict` / `InvalidAttribute` / `InvalidTemporality` | sentinels |
+| `InvalidDescription` / `DescriptionConflict` | the two `Describe` refusals — an empty description, and a second differing one for one name |
 | `InvalidMetricName` / `InvalidLabelName` / `ReservedLabelName` / `UnsupportedTemporality` | how a consumer RECOGNISES what the Prometheus connector cannot carry |
 | `OTLPUnresolvedTemporality` / `OTLPInvalidBucketLayout` | what the OTLP encoder refuses to spell — both structural, so they fail on the first export or never |
 | `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` | the OTLP/HTTP verdicts; only `OTLPExportUnavailable` is retryable |
@@ -60,6 +63,15 @@ visible aggregated overflow series.
 - **`NewMeter` returns `FullMeter`, and a `Meter` parameter still accepts it.**
   Widening a returned VALUE is safe; widening the interface is what ADR 0039
   forbids. `UpDownCounter` and the observables live on siblings for that reason.
+- **A description is NOT part of the series identity** — the OTel data model
+  calls it non-identifying — so it lives on the metric envelope and `Describe`
+  takes a NAME. `Describer` is a fourth sibling and stays OUT of `FullMeter`,
+  because a union is still an interface and widening one breaks a downstream
+  double at any version. Describing is a wiring-time call and costs the
+  observation path nothing (`internal/service/metrics/BENCH.md` §ADR 0067). Both
+  refusals panic: an empty description would document nothing, and two differing
+  descriptions for one name mean one wiring site is wrong. Identical text is
+  idempotent.
 - **An attribute's KIND is part of the series identity.** `String("v", "1")` and
   `Int64("v", 1)` are two series. The four constructors are the only way to
   build one; a struct literal leaves `AttrKindInvalid`, which is refused.
@@ -109,7 +121,11 @@ visible aggregated overflow series.
 
 - Reimplement instruments here — the facade is aliases + wrappers.
 - Import `go.opentelemetry.io/*`. Anywhere.
-- Add a method to the `Meter` alias's underlying interface. Add a sibling.
+- Add a method to the `Meter` alias's underlying interface — or to `FullMeter`'s.
+  Add a sibling.
+- Fold `Describer` into `FullMeter` for convenience. The type assertion is the
+  API: its false branch is how a caller learns a foreign `Meter` will drop their
+  documentation.
 - Register the OTLP/HTTP emitter, or hand it a default endpoint. An import
   must not arm a network client (ADR 0048).
 - Wrap `NewOTLPHTTPExporter` in a private retry loop. `resilience` owns

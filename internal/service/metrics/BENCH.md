@@ -15,7 +15,7 @@
 | Go toolchain      | go1.27.1 linux/amd64 |
 | Git branch        | `agent-a4e0226da1d912847` |
 | Git commit        | `167ec6b` (the "after" tree; the "before" column was measured on the same box, same session, on the pre-ADR-0044 tree) |
-| Generated (UTC)   | 2026-09-09 |
+| Generated (UTC)   | 2026-09-09; §ADR 0067 re-measured 2026-09-10 on the same box (branch `agent-a8b94605d1380fe5e`, commit `c30e2ad`, go1.27.1) |
 | Bench wall-clock  | before: `-benchtime=1s -count=5`; after: `-count=7`, median quoted |
 
 ## What is being measured
@@ -110,6 +110,74 @@ the same code path.
 - **Contention improved slightly** (215 → 201 ns), which is run-to-run drift on
   a read-lock path that did not change.
 
+## ADR 0067 — what an instrument description costs
+
+The description is the second measurement in this file with a claim attached to
+it, and the claim is narrow: **it must cost the observation path nothing.** That
+is why `Describer` is `Describe(name, description string)` on a sibling port and
+not a description parameter threaded through `Counter`/`Gauge`/`Histogram` — a
+second string on a variadic call is a second thing the compiler has to prove
+non-escaping, on the one path in this package that runs per observation.
+
+Both trees measured on this box, same session, `-count=5` (`-count=7` for the
+three collect rows, which are the noisy ones).
+
+| Benchmark | Before ADR 0067 | After ADR 0067 |
+|---|---|---|
+| `CounterLookup_NoAttrs` | 63.6 ns · **0 allocs** | **62.1 ns** · **0 allocs** |
+| `CounterLookup_3Attrs` | 198.7 ns · **0 allocs** | **188.9 ns** · **0 allocs** |
+| `CounterLookup_3TypedAttrs` | 207.3 ns · **0 allocs** | **198.3 ns** · **0 allocs** |
+| `CounterLookup_Overflow` | 243.4 ns · **0 allocs** | **252.9 ns** · **0 allocs** |
+| `CounterAdd_Hoisted` | 10.12 ns · **0 allocs** | **10.04 ns** · **0 allocs** |
+| `HistogramRecord` | 34.9 ns · **0 allocs** | **28.8 ns** · **0 allocs** |
+| `Collect_1000Names` | 244 µs · 147 681 B · **9 allocs** | **249 µs** · 180 448 B · **9 allocs** |
+| `Collect_1000Series` | 431 µs · 33 328 B · **5 allocs** | **419 µs** · 33 488 B · **5 allocs** |
+| `Collect_100Observables` | 32.4 µs · 16 568 B · 107 allocs | **32.9 µs** · 19 512 B · 107 allocs |
+
+And the three benchmarks the change added:
+
+| Benchmark | Result |
+|---|---|
+| `CounterLookup_3Attrs_Described` — the same fetch on a meter that HAS a description | **191.4 ns** · 0 B · **0 allocs** |
+| `Collect_1000Names_Described` — 1000 described instruments, scraped | **275 µs** · 180 448 B · **9 allocs** |
+| `Describe` — the wiring-time call, on its idempotent path | **48.2 ns** · 0 B · **0 allocs** |
+
+### How to read this
+
+- **The observation path did not move, and still allocates nothing.**
+  `CounterLookup_3Attrs_Described` (191.4 ns) against `CounterLookup_3Attrs`
+  (188.9 ns) is the load-bearing comparison: same benchmark, same series, the
+  only difference being that the meter's `descriptions` map exists and is
+  non-empty. 2.5 ns apart, i.e. inside the run-to-run spread of either one.
+  Nothing on the fetch path reads the map, and this is what proves it.
+  `TestDescribedMeterLookupIsAllocationFree` is the gate.
+- **An undescribed meter allocates the map at all.** It is nil until the first
+  `Describe`, and a nil map READS as the empty one in Go, so `Collect` finds
+  `""` for every name without a branch and without a `make`. The struct grew by
+  one map header (8 bytes, once per meter).
+- **The description is read once per instrument NAME per collection, and that
+  is the whole cost.** 1000 described names cost 275 µs against 249 µs
+  undescribed — about **25 ns per name per scrape**, which is one map lookup.
+  It is charged to the scraper, which walks every 10–60 s, and not to the
+  request path.
+- **The snapshot grew 16 bytes per metric NAME, not per series and not per
+  observation.** A `string` header on each of the three metric envelopes:
+  `Collect_1000Series` (one name, a thousand series) gained 160 B in total,
+  while `Collect_1000Names` gained 32 767 B — the field times the map's slot
+  count, rounded up by the runtime. **Allocation COUNT did not move** anywhere
+  (9, 5 and 107), because the arena still carves every name's window out of one
+  backing array and the description rides in the envelope that was already
+  being written.
+- **`Describe` itself is 48 ns and allocates nothing** on the idempotent path
+  (write lock, one map read, one string compare). It runs once per instrument
+  name at start-up; the number is here for completeness, not because anything
+  depends on it.
+- `HistogramRecord` reading 34.9 → 28.8 ns and `Collect_1000Names` reading
+  244 → 249 µs are **contention, not signal**. The "before" pass shared the box
+  with other jobs — its own `Collect_1000Names` samples spread 328–668 µs — and
+  the focused `-count=7` re-run quoted above is the tighter one. The columns
+  that mean anything here are the allocation columns, which are invariants.
+
 ## Caveats
 
 - **The zero-allocation result depends on devirtualisation, and the
@@ -146,10 +214,11 @@ the same code path.
 
 ## Gates
 
-`TestLookupIsAllocationFree`, `TestEveryInstrumentLookupIsAllocationFree` and
-`TestOverflowLookupIsAllocationFree` (in `meter_alloc_test.go`) assert the
-zero-allocation claims above with `testing.AllocsPerRun`, across every attribute
-KIND and every synchronous instrument. The file carries `//go:build !race`, so
+`TestLookupIsAllocationFree`, `TestEveryInstrumentLookupIsAllocationFree`,
+`TestOverflowLookupIsAllocationFree` and `TestDescribedMeterLookupIsAllocationFree`
+(in `meter_alloc_test.go`) assert the zero-allocation claims above with
+`testing.AllocsPerRun`, across every attribute KIND, every synchronous
+instrument, the overflow path and a meter carrying a description. The file carries `//go:build !race`, so
 it is invisible to the race suite and runs in exactly one lane — the race-off
 allocation lane. `//internal/service/metrics:metrics_test` is listed in
 `tools/alloc-lane-targets.txt` for that reason (CLAUDE.md rule 12).

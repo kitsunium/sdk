@@ -30,3 +30,12 @@ const CodeDuplicateRegistration errs.Code = 0x00_02_09_05 // 0.2.9.5
 // CodeInvalidTemporality identifies a MeterConfig carrying a Temporality that
 // is none of the three declared constants — reachable only by a deliberate cast.
 const CodeInvalidTemporality errs.Code = 0x00_02_09_06 // 0.2.9.6
+
+// CodeInvalidDescription identifies a Describe call carrying an empty
+// description — a call that would document nothing (ADR 0067).
+const CodeInvalidDescription errs.Code = 0x00_02_09_07 // 0.2.9.7
+
+// CodeDescriptionConflict identifies a second, DIFFERENT description bound to
+// an instrument name that already has one. A description belongs to the name,
+// so two of them means one of the two wiring sites is wrong (ADR 0067).
+const CodeDescriptionConflict errs.Code = 0x00_02_09_08 // 0.2.9.8
