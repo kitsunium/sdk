@@ -74,6 +74,7 @@ go_test(
         "policy_external_test.go",
         "sse_external_test.go",
         "state_external_test.go",
+        "websocket_bench_test.go",
         "websocket_external_test.go",
         "wrap_internal_test.go",
     ],
