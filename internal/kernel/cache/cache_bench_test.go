@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// : keys are built once, outside every timed loop. Building them inside would
-// : measure strconv.Itoa — which allocates — and bury the map+LRU cost this
-// : file exists to expose.
+// keys are built once, outside every timed loop. Building them inside would
+// measure strconv.Itoa — which allocates — and bury the map+LRU cost this
+// file exists to expose.
 func benchKeys(n int) []string {
 	out := make([]string, n)
 	for i := range out {
@@ -110,8 +110,8 @@ func BenchmarkSet_NewKey(b *testing.B) {
 	}
 }
 
-// : package-level so the compiler cannot prove the cache dead and elide the
-// : Set calls above.
+// package-level so the compiler cannot prove the cache dead and elide the
+// Set calls above.
 var (
 	benchCache   *Cache[string, int]
 	benchInt     int

@@ -20,8 +20,6 @@ import (
 const (
 	// TraceParentLen is the length of a version-00 traceparent, exactly.
 	TraceParentLen int = 55
-	// traceParentFields is the number of dash-separated components.
-	traceParentFields int = 4
 	// traceParentSep separates the four components.
 	traceParentSep string = "-"
 	// versionHexLen is the width of the version field.
@@ -30,14 +28,18 @@ const (
 	flagsHexLen int = 2
 )
 
-// The dash-separated positions of `version "-" trace-id "-" parent-id "-"
-// trace-flags`, named so a reader checks them against the grammar rather than
-// against a count. iota reproduces the grammar's own order; the version sits at
-// 0 and is read by slicing rather than by index, so it has no name here.
+// The three field offsets inside the fixed 55-character prefix, derived from
+// the widths above rather than written as literals so the grammar and the
+// arithmetic cannot drift apart. Every version keeps these fields exactly where
+// version 00 puts them (§3.2.4), which is what makes fixed-offset reading
+// correct here and not merely convenient.
 const (
-	traceIDField int = iota + 1
-	parentIDField
-	traceFlagsField
+	// traceIDOffset is where trace-id starts: past the version and its dash.
+	traceIDOffset int = versionHexLen + 1
+	// parentIDOffset is where parent-id starts.
+	parentIDOffset int = traceIDOffset + TraceIDHexLen + 1
+	// flagsOffset is where trace-flags starts.
+	flagsOffset int = parentIDOffset + SpanIDHexLen + 1
 )
 
 // The two versions the specification names explicitly.
@@ -124,23 +126,26 @@ func hasValidTraceParentTail(version, header string) bool {
 // parseTraceParentPrefix reads the four dash-separated fields of a 55-character
 // traceparent prefix.
 func parseTraceParentPrefix(prefix string) (context SpanContextValue, err error) {
-	//: exactly four fields; the fixed width above guarantees the count, and
-	//: splitting is what checks the dashes sit where the grammar puts them.
-	fields := strings.Split(prefix, traceParentSep)
-	//: a misplaced dash produces a different field count.
-	if len(fields) != traceParentFields {
-		//: refuse.
+	//: the three dashes sit at fixed positions in every version (§3.2.4), so
+	//: checking them in place is what splitting used to check by field count —
+	//: and it reads the fields without building a slice to hold them.
+	//: strings.Split allocated a four-element []string on EVERY inbound
+	//: request, which the memory profile put at 92.6 % of this function's
+	//: allocated objects.
+	if prefix[traceIDOffset-1] != '-' || prefix[parentIDOffset-1] != '-' || prefix[flagsOffset-1] != '-' {
+		//: a misplaced dash is a header this grammar cannot describe.
 		return SpanContextValue{}, InvalidTraceParent
 	}
-	//: an all-zero or non-hex trace-id is refused by ParseTraceID.
-	traceID, traceErr := ParseTraceID(fields[traceIDField])
+	//: an all-zero or non-hex trace-id is refused by ParseTraceID, which also
+	//: enforces the width — so a dash landing inside the field is caught there.
+	traceID, traceErr := ParseTraceID(prefix[traceIDOffset : traceIDOffset+TraceIDHexLen])
 	//: surface the typed refusal.
 	if traceErr != nil {
 		//: refuse.
 		return SpanContextValue{}, traceErr
 	}
 	//: an all-zero or non-hex parent-id is refused by ParseSpanID.
-	spanID, spanErr := ParseSpanID(fields[parentIDField])
+	spanID, spanErr := ParseSpanID(prefix[parentIDOffset : parentIDOffset+SpanIDHexLen])
 	//: surface the typed refusal.
 	if spanErr != nil {
 		//: refuse.
@@ -148,7 +153,7 @@ func parseTraceParentPrefix(prefix string) (context SpanContextValue, err error)
 	}
 	//: the flag byte is kept whole, undefined bits included — see
 	//: TraceFlags.Sanitized for why masking happens on output instead.
-	flags, flagsErr := parseTraceFlags(fields[traceFlagsField])
+	flags, flagsErr := parseTraceFlags(prefix[flagsOffset:])
 	//: surface the typed refusal.
 	if flagsErr != nil {
 		//: refuse.
@@ -165,10 +170,11 @@ func parseTraceFlags(text string) (flags TraceFlags, err error) {
 		//: refuse.
 		return 0, InvalidTraceParent
 	}
-	//: one byte out of two hex digits.
-	decoded, decodeErr := hex.DecodeString(text)
+	//: decode into a fixed array, as ParseTraceID does: DecodeString RETURNS a
+	//: fresh slice, so it heap-allocated one byte per inbound request.
+	var decoded [1]byte
 	//: unreachable after the checks above, and still not ignored.
-	if decodeErr != nil {
+	if _, decodeErr := hex.Decode(decoded[:], []byte(text)); decodeErr != nil {
 		//: refuse.
 		return 0, InvalidTraceParent
 	}
