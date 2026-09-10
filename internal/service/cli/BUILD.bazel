@@ -1,0 +1,66 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "cli",
+    srcs = [
+        "cli.go",
+        "codes.go",
+        "config.go",
+        "errors.go",
+        "execute.go",
+        "flagsource.go",
+        "help.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/cli",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/cli",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":cli",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "cli_test",
+    size = "small",
+    srcs = [
+        "cli_bench_test.go",
+        "execute_external_test.go",
+        "flagsource_external_test.go",
+        "harness_external_test.go",
+        "help_external_test.go",
+        "new_external_test.go",
+        "noexit_external_test.go",
+    ],
+    # keep: TestPackageNeverEndsTheProcess parses the .go files of all three
+    # cli packages at runtime. Bazel's sandbox strips the source-tree
+    # relationship, so the sources have to reach the test as runfiles — the
+    # same mechanism //internal/kernel/errs uses for its AST audits.
+    data = ["//:audit_sources"],
+    deps = [
+        ":cli",
+        "//internal/core/cli",
+        "//internal/core/config",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

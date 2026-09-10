@@ -906,6 +906,22 @@ codes:
     const: CodeUnsupportedAddress
     hex: "0x00_02_1F_09"
     package: internal/core/mail
+  - code: "0.2.32.1"
+    const: CodeInvalidCommand
+    hex: "0x00_02_20_01"
+    package: internal/core/cli
+  - code: "0.2.32.2"
+    const: CodeAmbiguousCommand
+    hex: "0x00_02_20_02"
+    package: internal/core/cli
+  - code: "0.2.32.3"
+    const: CodeDuplicateCommand
+    hex: "0x00_02_20_03"
+    package: internal/core/cli
+  - code: "0.2.32.4"
+    const: CodeReservedFlag
+    hex: "0x00_02_20_04"
+    package: internal/core/cli
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -1834,6 +1850,22 @@ codes:
     const: CodeSendRefused
     hex: "0x00_03_3D_09"
     package: internal/service/mail
+  - code: "0.3.62.1"
+    const: CodeUnknownCommand
+    hex: "0x00_03_3E_01"
+    package: internal/service/cli
+  - code: "0.3.62.2"
+    const: CodeMissingCommand
+    hex: "0x00_03_3E_02"
+    package: internal/service/cli
+  - code: "0.3.62.3"
+    const: CodeInvalidFlags
+    hex: "0x00_03_3E_03"
+    package: internal/service/cli
+  - code: "0.3.62.4"
+    const: CodeCommandPanicked
+    hex: "0x00_03_3E_04"
+    package: internal/service/cli
   - code: "0.3.63.1"
     const: CodeZstdFailed
     hex: "0x00_03_3F_01"

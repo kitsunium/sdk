@@ -126,6 +126,16 @@ vocabulary:
     # glance which capability a type assertion is asking for. Fallbacker is NOT
     # listed: its method is Fallback, so it satisfies the rule natively.
     - github.com/kitsunium/sdk/internal/core/i18n.KeyLister
+    # core/cli.Executor (ADR 0065). The -er form the rule would impose,
+    # "Executer", is not a word: the English agent noun for something that
+    # executes is "executor", which is why the SDK already spells
+    # internal/core/sql.Executor that way. The rule does not fire there only
+    # because that interface carries three methods; this one is FROZEN at one
+    # by ADR 0039, so the same word trips a rule the same word survived
+    # elsewhere. Renaming for the rule would give the SDK two spellings of one
+    # concept — the exact confusion the naming rule exists to prevent. Same
+    # class as Transactor and Tracer above: the name is the domain's own word.
+    - github.com/kitsunium/sdk/internal/core/cli.Executor
 
 # ── Global options ────────────────────────────────────────────────────────────
 
@@ -309,6 +319,18 @@ rules:
       # could not hold both shapes in one field. Same argument as codec's
       # Marshal and view's Render above (ADR 0063 §D5).
       - "**/internal/service/i18n/**"
+      # service/cli.flagValue extracts a parsed flag's value for the
+      # configuration layer FlagSource yields (ADR 0065 §D6). Its return type is
+      # fixed at BOTH ends and by neither of this domain's choices:
+      # flag.Getter.Get() is declared `Get() any` in the standard library, and
+      # core/config.Source.Load returns map[string]any. The whole function is
+      # the bridge between those two `any`s. A "specific interface" here could
+      # only be one every int, bool, string, time.Duration and caller-defined
+      # flag.Value already satisfies — which is `any` with extra steps — and it
+      # would have to be widened again one line later to enter the map. Same
+      # class as the recovered-panic entries above: `any` is the type the value
+      # HAS, not a missing abstraction.
+      - "**/internal/service/cli/**"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #
@@ -329,6 +351,26 @@ rules:
   # because one rule limitation causes them all.
   KTN-API-MINIF:
     exclude:
+      # internal/service/cli and internal/core/cli — this is the sql entry's
+      # argument, and here it is the domain's DEFINING decision rather than an
+      # incidental one. ADR 0065 §D1: a cli.Binder receives the standard
+      # library's own *flag.FlagSet, unwrapped, exactly as core/vfs takes
+      # io/fs unchanged (ADR 0056). The rule suggests replacing it with
+      # `interface{ VisitAll(func(*flag.Flag)) }` and `interface{ Int(string,
+      # int, string) *int }` — two synthetic types that mention flag.Flag in
+      # their own signatures, that no caller's existing flag.Value could reach,
+      # and that would have to grow a method every time somebody used a
+      # different FooVar helper. The concrete type is the whole point: it is
+      # what lets every stdlib flag helper and every flag.Value a consumer
+      # already owns work here with no adapter.
+      #
+      # help.go's writeUsage takes a corecli.CommandValue for the second
+      # reason the sql entry gives: it is the domain's published declaration
+      # value (pkg/v1/cli.Command aliases it), the help renderer reads its
+      # Name, Summary, Description AND Commands, and the suggested
+      # `interface{ IsGroup() bool }` would keep exactly one of the four.
+      - "**/internal/core/cli/**"
+      - "**/internal/service/cli/**"
       # internal/service/sql — the SAME class, and here it is the domain's
       # central decision rather than an incidental one. ADR 0055 D1: the sql
       # ports speak *sql.DB, *sql.Conn, *sql.Rows and sql.Result — the standard
@@ -587,6 +629,24 @@ rules:
   KTN-ERROR-DISCARD:
     exclude:
       - "**/internal/service/health/handler.go"
+      # service/cli's writeHelp ends in `_, _ = e.errOut.Write(...)`, and it is
+      # the health/handler.go case with one extra reason.
+      #
+      # It cannot PROPAGATE usefully: writeHelp is called from the two paths
+      # that are ALREADY returning a verdict — UNKNOWN_COMMAND and
+      # INVALID_FLAGS — and from the -h path, which returns nil because asking
+      # for help is not a failure (ADR 0065 §D4). Replacing "that sub-command
+      # does not exist" with "the diagnostic stream is broken" would report the
+      # less actionable of the two facts and change the exit status the caller
+      # routes on. It cannot LOG: ADR 0030 forbids the SDK writing to stdout,
+      # this domain writes only to the two writers its Config was given, and
+      # the one that just failed IS the diagnostic writer.
+      #
+      # The only failure a Write can report here is a caller-supplied io.Writer
+      # that broke, which is the caller's news about the caller's own object.
+      # Writing `_, _ =` says that out loud instead of leaving a bare call for
+      # a reader to wonder about. Scoped to the one file.
+      - "**/internal/service/cli/help.go"
 
   # KTN-FUNC-EMPTYSENTINEL (phase 5) — "" is a domain value here, not a sentinel.
   #
@@ -606,6 +666,26 @@ rules:
   # would stutter, which the same linter's own naming rules discourage elsewhere.
   KTN-STRUCT-CTOR:
     exclude:
+      # The cli domain hits the same broken suggestion the jwk / metrics /
+      # singleflight entries below record — "constructor NewNewInvocationValue()"
+      # and "NewNewFlagSourceValue()", neither of which is a name anything could
+      # satisfy — and it hits it for the two opposite reasons already on file.
+      #
+      # core/cli.InvocationValue is MINTED BY THE ENGINE and by nothing else:
+      # every field is filled by service/cli.dispatch from a resolution that has
+      # already happened, so a from-parts constructor would be a second way in
+      # that produces an invocation no command line ever produced. It stays an
+      # exported struct because an Action receives one and a test double
+      # legitimately writes one — the adapter is written to tolerate exactly
+      # that (a nil FlagSet is skipped rather than dereferenced).
+      #
+      # service/cli.FlagSourceValue DOES have a constructor: FlagSource. The
+      # rule wants it spelled NewFlagSourceValue, which would stutter at the
+      # call site the domain is designed around — `cli.FlagSource(invocation)`
+      # as the last argument of a config.Load — and would read as a second
+      # constructor beside the one pkg/v1/cli publishes under its own name.
+      - "**/internal/core/cli/**"
+      - "**/internal/service/cli/**"
       - "**/internal/service/net/client/**"
       # Same rule, same reason: these packages each produce one main type, and
       # Go's convention for that case is a constructor called New, used
@@ -791,6 +871,28 @@ rules:
   # too but is not flagged (it is not a pure forwarder).
   KTN-VAR-BIGSTRUCT:
     exclude:
+      # core/cli.CommandValue is 88 bytes — Name + Summary + Description (16
+      # each) + Flags + Run (8 each) + Commands (24) — and none of the six is
+      # removable: they are the whole declaration. Value semantics are the
+      # contract, exactly as for pkg/v1/process.Spec below: a command tree is
+      # written as a nested composite LITERAL at a call site, so
+      # `cli.New(cfg, cli.Command{…})` is the spelling the domain is designed
+      # around, and taking *Command would force every child in every
+      # []cli.Command to be addressable — turning a declaration into a variable
+      # graph. It would also let a caller mutate a tree AFTER New validated it,
+      # defeating the whole-tree validation that is ADR 0065 §D5's point.
+      #
+      # The copy happens once per command per PROCESS, during a construction
+      # measured at 52 µs for a 27-command tree — 2.6 % of the 1.99 ms it takes
+      # to start a Go binary that does nothing (internal/service/cli/BENCH.md).
+      # The performance concern the rule guards is not merely moot here, it is
+      # below the noise floor of process startup.
+      #
+      # pkg/v1/cli is included because its three functions are pure forwarders
+      # of the same alias; excluding only the core layer would leave findings on
+      # bodies whose entire content is `return svccli.New(cfg, root)`.
+      - "**/internal/core/cli/**"
+      - "**/pkg/v1/cli/**"
       - "**/pkg/v1/process/**"
       # service/sql.Config is 72 bytes — eight over the threshold — and the
       # eight are not removable: *sql.DB (8) + Dialect (1, padded to 8) +
