@@ -22,7 +22,10 @@ alias(
 
 go_test(
     name = "kdf_test",
-    srcs = ["kdf_external_test.go"],
+    srcs = [
+        "kdf_bench_test.go",
+        "kdf_external_test.go",
+    ],
     deps = [
         ":kdf",
         "//pkg/v1/errs",
