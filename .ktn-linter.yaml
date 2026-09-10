@@ -92,6 +92,19 @@ vocabulary:
     # FullFS) is what tells a reader at a glance which capability a type
     # assertion is asking for.
     - github.com/kitsunium/sdk/internal/core/vfs.AtomicWriter
+    # DeadLetterReader and LeaseExtender are the ADR 0039 capability siblings of
+    # the frozen core/queue.Broker port, and they are the EntryFetcher/Tagger
+    # case again. The -er forms the rule would impose are "DeadLetterser",
+    # which is not a word, and "Extender", which drops the noun that says WHAT
+    # is being extended — a lease, not a deadline, not a batch, not a queue.
+    # Both name the ROLE a broker plays rather than its method: one can hand
+    # back the messages it gave up on, the other can renew a claim a handler is
+    # still working under. The family (Broker / DeadLetterReader /
+    # LeaseExtender) is what tells a reader at a glance which capability a type
+    # assertion is asking for, which is the whole ergonomics of a port that
+    # grows by siblings.
+    - github.com/kitsunium/sdk/internal/core/queue.DeadLetterReader
+    - github.com/kitsunium/sdk/internal/core/queue.LeaseExtender
 
 # ── Global options ────────────────────────────────────────────────────────────
 
