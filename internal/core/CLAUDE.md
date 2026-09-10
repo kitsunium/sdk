@@ -19,7 +19,7 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `id/` | `Generator` port + `Scheme` registry (UUIDv4/v7, ULID, snowflake, NanoID, KSUID; TypeID is constructor-only — it needs a prefix, so nothing is registered under it); canonical-string output (ADR 0024) | `0.2.7.*` |
 | `resilience/` | `Runner` port + 7 concrete policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging); **no registry** (ADR 0026) | `0.2.8.*` |
 | `metrics/` | the OpenTelemetry metrics DATA MODEL, implemented from the spec and importing none of its code: instrument interfaces (Counter/UpDownCounter/Gauge/Histogram + the three observable families, variadic in the typed `AttrValue`), the frozen `Meter` + the `UpDownMeter`/`AsyncMeter` siblings (ADR 0039), aggregation `Temporality`, `ResourceValue`/`ScopeValue`, `Exporter` registry, and a `SnapshotValue` keyed name → metric → series; one name + one attribute set = one series, bounded per name; in-mem meter in service (ADR 0027, ADR 0044) | `0.2.9.*` |
-| `config/` | `Source` / `Validator` / `Watcher` ports; env+file loader + cross-OS poll watcher in service (ADR 0028) | `0.2.10.*` |
+| `config/` | `Source` / `Validator` / `Watcher` ports; env+file loader + cross-OS poll watcher in service (ADR 0028 + ADR 0061) | `0.2.10.*` |
 | `net/` | network domain contract: TLS identity (opaque, redacting), listener/handler ports, outbound `Policy`, the Server-Sent Events frame (`SSEEventValue`), the WebSocket wire format (`WSFrameHeaderValue` / `WSCloseCode` / `WSMessageValue` — RFC 6455, ADR 0047) and the drain signal a long-lived handler observes; **no registry** (ADR 0029) | `0.2.11.*` |
 | `scheduler/` | time-driven execution contract: `Job` + `Schedule` (both FUNC ports) + `Scheduler`, `EntryValue` / `ResultValue`; **no registry** (ADR 0041) | `0.2.12.*` |
 | `lifecycle/` | ordered start/stop contract: `Start` + `Stop` (both FUNC ports) + the three-method `Lifecycle`, `ComponentValue` / `TransitionValue` / the two-valued `Phase`; the Add order IS the dependency order and shutdown is its exact reverse, with **no graph** — a linear sequence already is a topological order (ADR 0050 §D1); a `Stop` is called only for a component whose `Start` returned nil, which is what lets a teardown assume its own construction succeeded; **no registry** (ADR 0050) | `0.2.19.*` |
@@ -82,7 +82,7 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `id/` — see `internal/core/id/CLAUDE.md` (identifier generation, ADR 0024)
 - `resilience/` — see `internal/core/resilience/CLAUDE.md` (reliability policies, ADR 0026)
 - `metrics/` — see `internal/core/metrics/CLAUDE.md` (observability, ADR 0027 / ADR 0044)
-- `config/` — see `internal/core/config/CLAUDE.md` (configuration, ADR 0028)
+- `config/` — see `internal/core/config/CLAUDE.md` (configuration + schema, ADR 0028 + ADR 0061)
 - `net/` — see `internal/core/net/CLAUDE.md` (network domain, ADR 0029)
 - `scheduler/` — see `internal/core/scheduler/CLAUDE.md` (time-driven execution, ADR 0041)
 - `lifecycle/` — see `internal/core/lifecycle/CLAUDE.md` (ordered start/stop, ADR 0050 — and why there is deliberately no dependency graph and no autowiring)
