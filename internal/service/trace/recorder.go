@@ -40,9 +40,34 @@ type Recorder struct {
 	// maxSpans is the resolved bound.
 	maxSpans int
 
-	// mu guards spans and dropped. It is an RWMutex because Len and Dropped
-	// are pure reads an operator may poll while spans are still arriving.
-	mu sync.RWMutex
+	// mu guards spans and dropped. It is a sync.Mutex, and the choice was
+	// MEASURED rather than reasoned — see BENCH.md §2.
+	//
+	// This field held a sync.RWMutex, justified by "Len and Dropped are pure
+	// reads an operator may poll while spans are still arriving". Every part of
+	// that sentence is true and the conclusion is still backwards: `record`
+	// takes the EXCLUSIVE side and runs once per span from every request
+	// goroutine, while the shared side runs once per collection interval — and
+	// `Collect`, which is what an export actually calls, takes the exclusive
+	// side too, so it never benefited at all. A read-write lock was optimising
+	// the rarest path and taxing the busiest one.
+	//
+	// The measurement is not close. Writing alone, the RWMutex costs 1.27x to
+	// 1.65x more from one to eight goroutines. In the mixed shape its own
+	// comment named — spans arriving while an operator polls Len — it costs
+	// 2.7x at one writer and 8.0x to 9.0x from two, because a writer's Lock
+	// must drain the in-flight reader and pays a park/unpark round trip on
+	// every acquisition.
+	//
+	// What it gives up is stated too: with FOUR OR MORE goroutines doing
+	// nothing but polling Len, the RWMutex was 1.20x to 1.23x faster. That is a
+	// real regression on a scenario this type's own contract excludes — Collect
+	// DRAINS, so a Recorder has exactly one reader — and at that one reader the
+	// Mutex is marginally faster anyway (23.00 ns against 23.89).
+	//
+	// TestRecorderTakesAnExclusiveLockOnEveryPath fails the build on a change
+	// back.
+	mu sync.Mutex
 	// spans holds the finished spans awaiting collection, in end order.
 	spans []coretrace.SpanValue
 	// dropped counts spans refused since construction. It is CUMULATIVE and
@@ -133,10 +158,11 @@ func (r *Recorder) Collect() coretrace.SpansValue {
 
 // Len reports how many spans are waiting to be collected.
 func (r *Recorder) Len() int {
-	//: a plain read still takes a lock — the slice header is not atomic — but a
-	//: shared one, so polling never blocks the spans that are ending.
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	//: a plain read still takes a lock — the slice header is not atomic — and
+	//: an exclusive one, because a shared one made the spans that are ending
+	//: 9x more expensive. See the mu field comment.
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	//: the pending count.
 	return len(r.spans)
 }
@@ -144,9 +170,9 @@ func (r *Recorder) Len() int {
 // Dropped reports how many spans have been refused since construction, across
 // every collection interval. It is cumulative — see the field comment.
 func (r *Recorder) Dropped() uint64 {
-	//: a shared read, for the reason Len takes one.
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	//: an exclusive read, for the reason Len takes one.
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	//: the cumulative overflow count.
 	return r.dropped
 }

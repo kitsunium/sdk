@@ -54,14 +54,22 @@ cost even at a 0 % ratio; instrumenting a 5 ms database call is 0.008 %.
 | | ns/op | B/op | allocs |
 |---|---:|---:|---:|
 | `Start`+`End`, sampled, no attributes | 728.4 | 432 | 3 |
-| `Start`+`End`, sampled, three attributes | 1 069.0 | 720 | 5 |
+| `Start`+`End`, sampled, three attributes | 953.3 | 576 | 4 |
 | `SetAttrs`, three attributes, mid-span | 320.6 | 144 | 1 |
 | `AddEvent`, name + three attributes | 531.0 | 518 | 1 |
 | `SpanContext()` | **5.7** | 0 | **0** |
 
-Three attributes at `Start` cost **341 ns and two allocations** — the slice and
-its copy. Adding them later with `SetAttrs` costs 320.6 ns and one allocation,
-so where they go is a readability choice rather than a performance one.
+Three attributes at `Start` cost **225 ns and one allocation** — the slice.
+Adding them later with `SetAttrs` costs 320.6 ns and one allocation, so where
+they go is a readability choice rather than a performance one.
+
+That row used to read 1 069.0 ns / 720 B / 5 allocs, and the second allocation
+was a defensive COPY that `span.finish` made of the attribute array on its way to
+the sink. It was justified by a tear a late write could cause — and an ignored
+write cannot reallocate anything, because every write site returns on the same
+`ended` flag, under the same mutex `finish` sets it with. The comment refuted
+itself in its own sentence and the copy cost 240 B on every sampled span. See
+`internal/service/trace/BENCH.md` §3.
 
 `AddEvent` at 531 ns is the most expensive per-call operation here; it records a
 timestamped point, so an event per loop iteration is not free.
@@ -109,7 +117,7 @@ tracing, which against any real HTTP handler is noise.
 ```
 BenchmarkStartEnd_Sampled-8                     728.4 ns/op      432 B/op     3 allocs/op
 BenchmarkStartEnd_NotSampled-8                  403.5 ns/op      176 B/op     3 allocs/op
-BenchmarkStartEnd_SampledWithAttrs-8           1069.0 ns/op      720 B/op     5 allocs/op
+BenchmarkStartEnd_SampledWithAttrs-8            953.3 ns/op      576 B/op     4 allocs/op
 BenchmarkStartEnd_Nested-8                     2707.0 ns/op     1296 B/op     9 allocs/op
 BenchmarkSpan_SetAttrs-8                        320.6 ns/op      144 B/op     1 allocs/op
 BenchmarkSpan_AddEvent-8                        531.0 ns/op      518 B/op     1 allocs/op
