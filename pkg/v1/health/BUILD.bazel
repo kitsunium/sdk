@@ -22,7 +22,10 @@ alias(
 
 go_test(
     name = "health_test",
-    srcs = ["health_external_test.go"],
+    srcs = [
+        "health_bench_test.go",
+        "health_external_test.go",
+    ],
     deps = [
         ":health",
         "//pkg/v1/errs",
