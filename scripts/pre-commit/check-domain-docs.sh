@@ -15,7 +15,12 @@
 #   1. the `core/` list in the architecture tree names EXACTLY the directories
 #      under internal/core, no more and no fewer;
 #   2. no domain is bolded twice in the Purpose paragraph — a duplicate there is
-#      the union-merge signature.
+#      the union-merge signature;
+#   3. the two ADR indexes (docs/adr/CLAUDE.md and this file's Reference list)
+#      name exactly the ADRs on disk, once each. A duplicated index row is what
+#      a re-run of a half-failed insertion script leaves behind, and it happened
+#      here: the queue row was written twice and neither copy was wrong, so
+#      nothing looked broken.
 #
 # It deliberately does NOT require every core package to appear in the Purpose
 # prose: `writer` and `logger/level` are parts of a domain rather than domains,
@@ -99,3 +104,35 @@ if [ -n "$dupes" ]; then
 	echo "  both, because they will disagree." >&2
 	exit 1
 fi
+
+# --- 3. the ADR indexes against the ADRs on disk ----------------------------
+
+adr_disk="$(ls docs/adr/[0-9][0-9][0-9][0-9]-*.md 2>/dev/null | grep -oE '/[0-9]{4}-' | tr -d '/-' | sort)"
+[ -n "$adr_disk" ] || { echo "✗ docs/adr: no numbered ADR found — has the layout changed?" >&2; exit 1; }
+
+check_adr_index() {
+	file="$1"
+	pattern="$2"
+	label="$3"
+	listed="$(grep -oE "$pattern" "$file" | grep -oE '[0-9]{4}' | sort)"
+
+	dupes="$(printf '%s\n' "$listed" | uniq -d)"
+	if [ -n "$dupes" ]; then
+		echo "✗ $file: these ADRs are listed more than once in $label:" >&2
+		printf '%s\n' "$dupes" | sed 's/^/    /' >&2
+		echo "  A re-run of a partially-failed insertion leaves exactly this." >&2
+		exit 1
+	fi
+
+	missing="$(comm -23 <(printf '%s\n' "$adr_disk") <(printf '%s\n' "$listed" | uniq) || true)"
+	extra="$(comm -13 <(printf '%s\n' "$adr_disk") <(printf '%s\n' "$listed" | uniq) || true)"
+	if [ -n "$missing" ] || [ -n "$extra" ]; then
+		echo "✗ $file: $label disagrees with docs/adr/." >&2
+		[ -n "$missing" ] && { echo "  on disk but NOT listed:" >&2; printf '%s\n' "$missing" | sed 's/^/    /' >&2; }
+		[ -n "$extra" ]   && { echo "  listed but NOT on disk:" >&2; printf '%s\n' "$extra"   | sed 's/^/    /' >&2; }
+		exit 1
+	fi
+}
+
+check_adr_index "docs/adr/CLAUDE.md" '^\| `[0-9]{4}' "the Contents table"
+check_adr_index "$doc"               '^- ADR [0-9]{4}' "the Reference list"
