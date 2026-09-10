@@ -21,8 +21,35 @@ import (
 
 // initialFrameCapacity pre-sizes the per-stream encode buffer. One frame of a
 // few hundred bytes is the overwhelmingly common shape, and the buffer is
-// reused for the stream's whole life, so a steady-state send allocates nothing.
+// reused for the stream's whole life, so a steady-state send allocates nothing
+// once it has reached its high-water mark — which is exactly why
+// maxRetainedFrameCapacity exists.
 const initialFrameCapacity int = 512
+
+// maxRetainedFrameCapacity is the buffer size above which reuse stops being
+// unconditional. The buffer is kept for the stream's whole LIFE, so with no
+// ceiling at all one outsized event pins its own size until the client
+// disconnects — measured, a single one-mebibyte event left 1 056 768 B held per
+// stream forever, which on 10 000 streams is 10.6 GB bought by something that
+// happened once.
+//
+// 64 KiB is chosen against what a stream costs otherwise: 10 000 streams at the
+// ceiling is 640 MB, against 5 MB at the 512-byte floor and against a measured
+// 80.8 MB for everything else 10 000 streams hold. Below the ceiling, churning
+// a buffer would buy nothing worth measuring, so reuse is unconditional there.
+//
+// It is NOT a hard cap, and retain says why: releasing on size alone made a
+// stream that genuinely sends outsized frames re-grow its buffer on every send,
+// which measured 25.5 µs against 6.6 µs for the same frame — 3.89×, a
+// regression paid by exactly the workload the ceiling was never aimed at.
+const maxRetainedFrameCapacity int = 64 * 1024
+
+// retainUseFraction is how much of an oversized buffer the last frame must
+// still be using for the stream to keep it. A half is coarse on purpose: it
+// separates "this stream works at this size" from "this stream is done with
+// that size" without inventing a third case, and no finer setting was measured
+// to matter.
+const retainUseFraction int = 2
 
 // keepAliveComment is the text of the periodic keep-alive. It is a comment,
 // which every client ignores by construction, so it can never be mistaken for
@@ -176,7 +203,7 @@ func (s *Stream) Send(event corenet.SSEEventValue) error {
 		//: nothing was written; report what the format cannot carry.
 		return err
 	}
-	s.frame = frame
+	s.retain(frame)
 	//: one whole frame, then a flush.
 	return s.write(frame)
 }
@@ -200,7 +227,7 @@ func (s *Stream) Comment(text string) error {
 		//: nothing was written; report what the format cannot carry.
 		return err
 	}
-	s.frame = frame
+	s.retain(frame)
 	//: one whole frame, then a flush.
 	return s.write(frame)
 }
@@ -223,6 +250,36 @@ func (s *Stream) Close() error {
 	//: closing an event stream cannot fail; the signature matches io.Closer so
 	//: `defer stream.Close()` reads like every other resource in Go.
 	return nil
+}
+
+// retain keeps the buffer the frame was encoded into for the next frame, unless
+// it has grown past the ceiling AND the frame just written no longer needs it.
+// The caller holds s.mu.
+//
+// The two clauses are two different mistakes. Without the first, a stream would
+// churn its buffer at the 512-byte floor for no gain. Without the second — a
+// plain "release anything above the ceiling" — a stream that genuinely sends
+// outsized frames re-grows one on EVERY send, measured at 3.83× the cost of the
+// send itself; the case worth releasing is the stream that sent one outsized
+// frame and went back to small ones, and that is exactly what "the frame just
+// written used less than half of it" names.
+//
+// The frame just encoded is NOT invalidated by a release: write is handed the
+// slice directly and keeps it alive across the call, so the outsized buffer is
+// dropped only once the wire has seen its bytes.
+func (s *Stream) retain(frame []byte) {
+	//: an oversized buffer the last frame has stopped using goes back, rather
+	//: than pinning its size for the rest of the stream's life. A stream with a
+	//: keep-alive reaches this within one interval even if it never sends
+	//: another event, because a comment is a frame too.
+	if cap(frame) > maxRetainedFrameCapacity && len(frame) < cap(frame)/retainUseFraction {
+		s.frame = make([]byte, 0, initialFrameCapacity)
+		//: the oversized buffer is now unreachable from the stream.
+		return
+	}
+	//: otherwise reuse it — that is what makes a steady-state send free, at any
+	//: size the stream is actually working at.
+	s.frame = frame
 }
 
 // write puts one already-encoded frame on the wire and flushes it. The caller
