@@ -42,17 +42,30 @@ does a severity floor cost the records it discards".
 | `New(inner, Info)` — the "inherit" sentinel | 3.07 | 0 |
 | `New(inner, Error)` — a real floor | 29.99 | 1 (24 B) |
 
-- **A drop costs 0.89 ns over an ungated sink and removes a 302 ns write** — the
-  cheapest destination this SDK has, and 1 868 ns if the destination is a
-  container's stderr (`../console/BENCH.md` §1). The gate repays itself 340× on
-  its first discarded record.
+- **A drop costs about 1 ns over an ungated sink and removes a 302 ns write** —
+  the cheapest destination this SDK has, and 1 868 ns if the destination is a
+  container's stderr (`../console/BENCH.md` §1). The gate repays itself **over
+  300×** on its first discarded record.
+
+  The precision is deliberately coarse, and that is the honest reading. Under a
+  median of nine samples across three separate processes the drop cost is
+  0.95 ns (6.862 against 5.911) — but the ungated arm's own spread over those
+  nine is 5.867 to 6.398, i.e. 0.53 ns, more than half the quantity being
+  measured. A first pass reported 0.89 ns from three samples in one process;
+  two digits there implied a precision this machine does not have. The
+  conclusion is unaffected, because it never depended on the second digit: one
+  nanosecond against three hundred is the same decision whatever the first is.
 - **Neither direction allocates.** An allocation profile at `-memprofilerate=1`
   over 529 020 912 dropped records does not contain `gateSink.Write` at all.
   `TestGateAllocatesNothingInEitherDirection` pins it, mutation-checked in its
   own doc comment, and is covered by the race-off alloc lane
   (`tools/alloc-lane-targets.txt`, SDK-wide rule 12).
-- **The comparison itself is not measurable** (0.05 ns against the same
-  delegation with the branch deleted). What a passing record pays is a second
+- **The comparison itself is not measurable, and its SIGN is not stable.**
+  Against the same delegation with the branch deleted it read +0.05 ns over
+  three samples in one process and −0.04 ns over nine across three — the gated
+  path measuring marginally *faster* than the ungated one, which is only
+  possible if the difference is noise. Reported as unmeasurable rather than as a
+  number with a direction. What a passing record pays is a second
   interface hop carrying the 104-byte `RecordEvent` by value — 2.65 ns of which
   is the copy, 39 % of a whole drop. The port is frozen (ADR 0039) and the copy
   is also what stops a sink mutating a record its `multi` siblings will see;

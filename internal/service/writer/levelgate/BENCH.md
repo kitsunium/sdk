@@ -17,24 +17,42 @@ either of them.
 
 | one `Write`, 83-byte payload | ns/op | B/op | allocs |
 |---|---:|---:|---:|
-| **no gate at all** — what `New(inner, Info)` returns | 5.95 | 0 | 0 |
-| **dropped** — `min=Error`, record at `Info` | **6.84** | **0** | **0** |
-| passed — `min=Warn`, record at `Error` | 13.58 | 0 | 0 |
-| the same delegation with the comparison REMOVED | 13.53 | 0 | 0 |
+| **no gate at all** — what `New(inner, Info)` returns | 5.911 | 0 | 0 |
+| **dropped** — `min=Error`, record at `Info` | **6.862** | **0** | **0** |
+| passed — `min=Warn`, record at `Error` | 13.54 | 0 | 0 |
+| the same delegation with the comparison REMOVED | 13.58 | 0 | 0 |
+
+Medians of **nine samples across three separate processes**. An earlier pass
+took three samples in one process and published 5.95 / 6.84 / 13.58 / 13.53;
+those are within the spread of these and are superseded rather than
+contradicted, but see the two paragraphs below for what the tighter protocol
+changed about how they may be READ.
 
 Three things follow, and the third is the one that was worth measuring.
 
-**The drop costs 0.89 ns over a sink with no gate in front of it** — and in
-exchange it removes the entire downstream write, which is 302 ns even when the
-destination is `/dev/null` and 1 868 ns when it is a container's stderr
-(`../console/BENCH.md` §1). A gate installed to suppress debug logging returns
-its own cost **340 times over** on the first record it discards, at the cheapest
-destination this SDK has.
+**The drop costs about a nanosecond over a sink with no gate in front of it**
+— 0.95 ns by these medians — and in exchange it removes the entire downstream
+write, which is 302 ns even when the destination is `/dev/null` and 1 868 ns
+when it is a container's stderr (`../console/BENCH.md` §1). A gate installed to
+suppress debug logging returns its own cost **more than three hundred times
+over** on the first record it discards, at the cheapest destination this SDK
+has.
 
-**The comparison itself is not measurable.** `passed` (13.58 ns) and the same
-sink with `if r.Level < s.min` deleted (13.53 ns) differ by 0.05 ns. The 7.63 ns
-a passing record pays over an ungated one is one extra interface hop carrying a
-104-byte record by value — not the branch.
+The second digit is deliberately not quoted. The ungated arm's own spread across
+these nine samples is 5.867 to 6.398 — **0.53 ns, more than half the quantity
+being measured** — so "0.89" and "0.95" are the same reading taken twice, and
+neither supports two significant figures. The conclusion never rested on them:
+one nanosecond against three hundred is the same decision at either value.
+
+**The comparison itself is not measurable, and its sign is not stable.**
+Three samples in one process put `passed` 0.05 ns ABOVE the same sink with
+`if r.Level < s.min` deleted; nine samples across three processes put it
+0.04 ns BELOW — the gated path measuring marginally faster than the ungated
+one, which cannot be a real effect and is therefore proof the difference is
+noise. It is reported here as unmeasurable rather than as a small number with a
+direction, because a signed figure invites a reader to trust the sign. The
+7.6 ns a passing record pays over an ungated one is one extra interface hop
+carrying a 104-byte record by value — not the branch.
 
 **Nothing on either path reaches the heap.** An allocation profile taken at
 `-memprofilerate=1` over **529 020 912** dropped records — every allocation
