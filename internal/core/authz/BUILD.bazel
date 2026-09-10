@@ -1,0 +1,47 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "authz",
+    srcs = [
+        "attr_value.go",
+        "authz.go",
+        "codes.go",
+        "decision.go",
+        "errors.go",
+        "request_value.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/authz",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":authz",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "authz_test",
+    size = "small",
+    srcs = ["authz_external_test.go"],
+    deps = [
+        ":authz",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
