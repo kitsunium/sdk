@@ -112,3 +112,10 @@ go_test(
         "//internal/kernel/worker",
     ],
 )
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
