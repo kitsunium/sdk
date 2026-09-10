@@ -4,6 +4,14 @@
 // on Get/Put. Stdlib-only and domain-neutral: any byte buffer, codec stream,
 // HTTP body encoder, or metrics line writer can reuse it.
 //
+// "Pointer-sized" is load-bearing, not decoration. sync.Pool stores any, and
+// only a value that fits in an interface word is boxed for free — so a
+// *[]byte costs nothing to Put while a bare []byte, being a three-word
+// header, heap-allocates 24 B on every single Put. Measured in BENCH.md at
+// 25.58 ns and 0 allocs against 82.95 ns and 1 alloc for the same workload,
+// and 2.975 ns against 27.17 ns under b.RunParallel. Pool a pointer. Every
+// consumer in this repository already does.
+//
 // The byte-slice pool (internal/kernel/buffer) and the codec scratch buffer
 // pool (internal/core/codec/scratch) are built ON this primitive; Pool[T]
 // is the shared mechanism, the capacity thresholds stay with the consumers.
