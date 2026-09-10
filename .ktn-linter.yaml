@@ -39,6 +39,17 @@ vocabulary:
   # describes the method rather than the role the type plays.
   adapter_role_interfaces:
     - github.com/kitsunium/sdk/internal/core/net.Policy
+    # core/mail.Transport and core/mail.BatchSender (ADR 0064). "Transport" is a
+    # NOMINAL role, the word this domain is discussed in — "the SMTP transport",
+    # "the in-memory transport" — and the -er form the rule would impose,
+    # "Sender", names the verb the port happens to expose today instead of the
+    # thing the type IS. It is also the word a provider connector under
+    # third-party/ would have to reuse. Same argument as core/net.Policy above.
+    # BatchSender's -er form would be "SendBatcher", which is not a word; the
+    # type already ends in -er and names its role, exactly as EntryFetcher does
+    # below. Outbox is not listed: it has two methods, so the rule does not fire.
+    - github.com/kitsunium/sdk/internal/core/mail.Transport
+    - github.com/kitsunium/sdk/internal/core/mail.BatchSender
     # ConnHandler / PacketHandler follow the stdlib's own precedent: http.Handler
     # is a single-method interface named <Noun>Handler, and "Handler" names the
     # role the type plays rather than its method. The -er forms the rule would
@@ -105,6 +116,16 @@ vocabulary:
     # grows by siblings.
     - github.com/kitsunium/sdk/internal/core/queue.DeadLetterReader
     - github.com/kitsunium/sdk/internal/core/queue.LeaseExtender
+    # KeyLister is the ADR 0063 sibling of the frozen core/i18n.Catalog port,
+    # and the -er form the rule would impose — "Keyser" — is not a word. The
+    # name already ENDS in -er and names the ROLE a catalogue plays: one that
+    # can enumerate what it holds, so a consumer's own test can compare a
+    # language's key set against the fallback's and fail the build on a missing
+    # translation. Same argument as EntryFetcher and AtomicWriter above; the
+    # family (Catalog / KeyLister / Fallbacker) is what tells a reader at a
+    # glance which capability a type assertion is asking for. Fallbacker is NOT
+    # listed: its method is Fallback, so it satisfies the rule natively.
+    - github.com/kitsunium/sdk/internal/core/i18n.KeyLister
 
 # ── Global options ────────────────────────────────────────────────────────────
 
@@ -207,6 +228,22 @@ rules:
   KTN-VAR-STRMAP:
     exclude:
       - "**/internal/core/sql/sql_dialect.go"
+      # The i18n domain (ADR 0063) is the same direction as sql_dialect.go, in
+      # two places and for two reasons.
+      #
+      # service/i18n's rulesByTag turns a BCP 47 tag a REQUEST or a FILENAME
+      # carried ("pl", "pt-PT", "fr-CA") into that language's CLDR plural rule
+      # or into a refusal naming the supported set. The string is what is being
+      # looked up; there is no integer to key on until after the lookup has
+      # succeeded, and the constants are the accepted VOCABULARY.
+      #
+      # The catalogue maps are stronger still: `map[string]string` from a CLDR
+      # category NAME ("zero", "one", "few", "many") to a pattern is the shape
+      # a catalogue FILE has, decoded through the codec domain. The names are
+      # Unicode's, not the SDK's enum, and an int-keyed map cannot be decoded
+      # from a JSON object.
+      - "**/internal/core/i18n/**"
+      - "**/internal/service/i18n/**"
 
   KTN-INTERFACE-ANYUSE:
     exclude:
@@ -263,6 +300,15 @@ rules:
       - "**/internal/core/view/**"
       - "**/internal/service/view/**"
       - "**/pkg/v1/view/**"
+      # service/i18n decodes a catalogue FILE through the codec domain, and a
+      # catalogue entry is legitimately one of two shapes — a pattern string or
+      # a map of CLDR forms. `map[string]any` is what every codec produces for
+      # a nested object and is the only shape both entry forms can land on;
+      # entryFrom then type-switches on it, which is the rule's own documented
+      # auto-exemption. A typed struct would need per-format tags and still
+      # could not hold both shapes in one field. Same argument as codec's
+      # Marshal and view's Render above (ADR 0063 §D5).
+      - "**/internal/service/i18n/**"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #
@@ -294,6 +340,17 @@ rules:
       # the stdlib type a consumer already knows with a synthetic one that
       # exists only to satisfy a linter.
       #
+      # internal/core/i18n and internal/service/i18n — the same #385 limitation
+      # on a domain built out of VALUES. TagValue, CountValue and MessageValue
+      # are comparable domain values published through pkg/v1/i18n, and the
+      # rule's suggestions ("interface tagValue with IsZero() bool", "interface
+      # countValue with IntegerPart() uint64") would replace a map key with an
+      # interface — TagValue is used as a map key in three places, which an
+      # interface cannot be safely, and CountValue is the parameter of the
+      # frozen core/i18n.PluralRule func port, so narrowing it breaks every
+      # rule's signature at once.
+      - "**/internal/core/i18n/**"
+      - "**/internal/service/i18n/**"
       # sql.TxOptionsValue is the same contract-required-value case as
       # tlsid.Identity below: it is core/sql's single per-transaction option
       # type, published as pkg/v1/sql.TxOptions and frozen by ADR 0039.
@@ -580,6 +637,28 @@ rules:
       # "constructor NewNewAttrValue()", which is not a name anything could
       # satisfy — the same broken suggestion the jwk entry above records.)
       - "**/internal/core/metrics/**"
+      # The i18n values (ADR 0063) are the jwk and metrics case again: every
+      # one comes out of a constructor that VALIDATES, and each is named for
+      # what it does rather than for the type it returns. TagValue comes from
+      # ParseTag, which refuses everything outside the BCP 47 subset BY NAME;
+      # CountValue comes from Int or Decimal, which are the two ways CLDR's
+      # operands can be derived and which say at the call site which one the
+      # caller means; MessageValue comes from NewMessage or NewPluralMessage,
+      # which parse the placeholders once so no render ever parses. A
+      # NewTagValue / NewCountValue / NewMessageValue would each be a second
+      # way in that skips the validation — exactly the "poorly initialized
+      # struct" the rule exists to prevent. (Same broken "NewNewTagValue()"
+      # suggestion the entries above record.)
+      #
+      # service/i18n.PluralValue is stronger still: a caller never constructs
+      # one. Its only instances are the thirteen entries of the hand-written
+      # CLDR rule table, and a public constructor would let a consumer mint a
+      # language whose declared categories and whose rule disagree — which is
+      # the one inconsistency the load-time completeness check assumes away,
+      # and which TestEveryRuleOnlyEverReturnsACategoryItDeclares pins for the
+      # entries that do exist.
+      - "**/internal/core/i18n/**"
+      - "**/internal/service/i18n/**"
       # kernel/singleflight.Group has NO constructor on purpose: its zero value
       # is usable, exactly as sync.Mutex, sync.WaitGroup and sync.Map are, and
       # the map it lazily builds is the only state it owns. A NewGroup() would
@@ -763,6 +842,28 @@ rules:
       # it exactly once per client, at construction.
       - "**/internal/service/net/client/**"
       - "**/pkg/v1/client/**"
+      # The mail domain — value semantics ARE the contract (ADR 0064).
+      # MessageValue is 264 B because a mail HAS eleven fields: four address
+      # lists, two bodies, an attachment slice, a header slice, a subject, a
+      # date and a message id. There is no field ordering that lands under 64
+      # and nothing to box that would not add a nil check to every guard.
+      #
+      # The port takes it by value on purpose. Transport.Send(ctx, msg) must not
+      # be able to observe a caller mutating the message after the call — a
+      # transport that composed a *different* subject from the one the caller
+      # validated is the exact class of defect this domain exists to prevent —
+      # and AttachmentValue (72 B) is copied for the same reason one level down.
+      # The single copy happens once per SEND, immediately before a MIME
+      # composition measured at 12 microseconds and a network round trip
+      # measured in milliseconds (internal/service/mail/BENCH.md), so the
+      # performance concern the rule guards is unmeasurable here.
+      #
+      # pkg/v1/mail is included because its Compose/Validate helpers are pure
+      # forwarders of the same alias; excluding only core would leave findings
+      # on functions whose entire body is `return coremail.Validate(msg)`.
+      - "**/internal/core/mail/**"
+      - "**/internal/service/mail/**"
+      - "**/pkg/v1/mail/**"
       # The trace domain — value semantics ARE the contract, for four types
       # (ADR 0051). SpanValue (296 B) is a FINISHED span handed to a SpanSink,
       # and SpansValue (80 B) is a batch handed to a SpanExporter: both are

@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "i18n",
+    srcs = ["i18n.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/i18n",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/codec",
+        "//internal/core/i18n",
+        "//internal/service/i18n",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":i18n",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "i18n_test",
+    size = "small",
+    srcs = ["i18n_external_test.go"],
+    deps = [
+        ":i18n",
+        "//pkg/v1/codec",
+        "//pkg/v1/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

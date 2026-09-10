@@ -1,0 +1,70 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "mail",
+    srcs = [
+        "codes.go",
+        "compose.go",
+        "composer.go",
+        "composer_config.go",
+        "composition.go",
+        "entity.go",
+        "errors.go",
+        "headerwrite.go",
+        "line_wrapper.go",
+        "memory.go",
+        "session.go",
+        "smtp.go",
+        "smtp_compliance.go",
+        "smtpconfig.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/mail",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/mail",
+        "//internal/core/net",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":mail",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "mail_test",
+    size = "small",
+    srcs = [
+        "compose_bench_test.go",
+        "compose_external_test.go",
+        "fakesmtp_external_test.go",
+        "header_external_test.go",
+        "memory_external_test.go",
+        "smtp_external_test.go",
+    ],
+    deps = [
+        ":mail",
+        "//internal/core/mail",
+        "//internal/core/net",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -838,6 +838,74 @@ codes:
     const: CodeCheckPanicked
     hex: "0x00_02_1D_04"
     package: internal/core/health
+  - code: "0.2.30.1"
+    const: CodeInvalidTag
+    hex: "0x00_02_1E_01"
+    package: internal/core/i18n
+  - code: "0.2.30.2"
+    const: CodeInvalidKey
+    hex: "0x00_02_1E_02"
+    package: internal/core/i18n
+  - code: "0.2.30.3"
+    const: CodeInvalidPattern
+    hex: "0x00_02_1E_03"
+    package: internal/core/i18n
+  - code: "0.2.30.4"
+    const: CodeArgumentMissing
+    hex: "0x00_02_1E_04"
+    package: internal/core/i18n
+  - code: "0.2.30.5"
+    const: CodeMessageNotFound
+    hex: "0x00_02_1E_05"
+    package: internal/core/i18n
+  - code: "0.2.30.6"
+    const: CodePluralFormMissing
+    hex: "0x00_02_1E_06"
+    package: internal/core/i18n
+  - code: "0.2.30.7"
+    const: CodeInvalidCount
+    hex: "0x00_02_1E_07"
+    package: internal/core/i18n
+  - code: "0.2.30.8"
+    const: CodeInvalidForm
+    hex: "0x00_02_1E_08"
+    package: internal/core/i18n
+  - code: "0.2.31.1"
+    const: CodeHeaderInjection
+    hex: "0x00_02_1F_01"
+    package: internal/core/mail
+  - code: "0.2.31.2"
+    const: CodeInvalidAddress
+    hex: "0x00_02_1F_02"
+    package: internal/core/mail
+  - code: "0.2.31.3"
+    const: CodeMissingSender
+    hex: "0x00_02_1F_03"
+    package: internal/core/mail
+  - code: "0.2.31.4"
+    const: CodeNoRecipients
+    hex: "0x00_02_1F_04"
+    package: internal/core/mail
+  - code: "0.2.31.5"
+    const: CodeEmptyBody
+    hex: "0x00_02_1F_05"
+    package: internal/core/mail
+  - code: "0.2.31.6"
+    const: CodeReservedHeader
+    hex: "0x00_02_1F_06"
+    package: internal/core/mail
+  - code: "0.2.31.7"
+    const: CodeInvalidAttachment
+    hex: "0x00_02_1F_07"
+    package: internal/core/mail
+  - code: "0.2.31.8"
+    const: CodeHeaderTooLong
+    hex: "0x00_02_1F_08"
+    package: internal/core/mail
+  - code: "0.2.31.9"
+    const: CodeUnsupportedAddress
+    hex: "0x00_02_1F_09"
+    package: internal/core/mail
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -1710,6 +1778,62 @@ codes:
     const: CodeNotifyFailed
     hex: "0x00_03_3B_06"
     package: internal/service/health
+  - code: "0.3.60.1"
+    const: CodeUnsupportedLanguage
+    hex: "0x00_03_3C_01"
+    package: internal/service/i18n
+  - code: "0.3.60.2"
+    const: CodeCatalogInvalid
+    hex: "0x00_03_3C_02"
+    package: internal/service/i18n
+  - code: "0.3.60.3"
+    const: CodeCatalogLoadFailed
+    hex: "0x00_03_3C_03"
+    package: internal/service/i18n
+  - code: "0.3.60.4"
+    const: CodeTranslationIncomplete
+    hex: "0x00_03_3C_04"
+    package: internal/service/i18n
+  - code: "0.3.60.5"
+    const: CodeNegotiationEmpty
+    hex: "0x00_03_3C_05"
+    package: internal/service/i18n
+  - code: "0.3.61.1"
+    const: CodeComposeFailed
+    hex: "0x00_03_3D_01"
+    package: internal/service/mail
+  - code: "0.3.61.2"
+    const: CodeInvalidConfig
+    hex: "0x00_03_3D_02"
+    package: internal/service/mail
+  - code: "0.3.61.3"
+    const: CodeDialFailed
+    hex: "0x00_03_3D_03"
+    package: internal/service/mail
+  - code: "0.3.61.4"
+    const: CodeGreetingFailed
+    hex: "0x00_03_3D_04"
+    package: internal/service/mail
+  - code: "0.3.61.5"
+    const: CodeTLSRequired
+    hex: "0x00_03_3D_05"
+    package: internal/service/mail
+  - code: "0.3.61.6"
+    const: CodeTLSFailed
+    hex: "0x00_03_3D_06"
+    package: internal/service/mail
+  - code: "0.3.61.7"
+    const: CodeAuthInsecure
+    hex: "0x00_03_3D_07"
+    package: internal/service/mail
+  - code: "0.3.61.8"
+    const: CodeAuthFailed
+    hex: "0x00_03_3D_08"
+    package: internal/service/mail
+  - code: "0.3.61.9"
+    const: CodeSendRefused
+    hex: "0x00_03_3D_09"
+    package: internal/service/mail
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
