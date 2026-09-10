@@ -100,3 +100,21 @@
 # all, while a separator-free token of the same size does. Each is
 # mutation-checked in its own doc comment.
 //internal/service/token:token_test
+# The two claims that decide whether tracing belongs in a DEFAULT middleware
+# stack, neither of which had a gate — or a number — until 2026-09. A traced
+# request's latency surcharge is ~1.3 % of a full SDK HTTP request, which nobody
+# would reject a middleware over; its ALLOCATION surcharge is +19 % against a
+# 63-allocation baseline, which at high RPS is a GC-pressure story. So the
+# budget is expressed in allocations, per request, sampled AND unsampled, and a
+# regression in it is a regression in the argument.
+#
+# The second is the overflow path: past MaxSpans a span is REFUSED, and refusing
+# it must cost less than keeping it — otherwise a recorder nobody is draining,
+# the exact situation the bound exists to survive, becomes the most expensive
+# state the type has. Its mutation is the one that vindicates counting totals:
+# appending the dropped span's name allocated 9 times over 500 calls, which
+# testing.AllocsPerRun divides as integers and reports as 0.0.
+#
+# Each is mutation-checked in its own doc comment, and the first records a
+# mutation that was DISCARDED for not modelling a defect.
+//internal/service/trace:trace_test

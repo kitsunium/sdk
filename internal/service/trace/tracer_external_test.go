@@ -316,3 +316,63 @@ func TestConcurrentAnnotationIsSafe(t *testing.T) {
 		t.Errorf("attrs = %d, want 1 — every worker wrote the same key", len(recorded.Attrs))
 	}
 }
+
+// TestTheValueASinkReceivesIsFinal is the safety net under the ownership
+// TRANSFER in finish().
+//
+// The exported SpanValue no longer CLONES the span's attribute and event
+// arrays; the span hands them over and nils its own references, which is the
+// same "exactly one holder" guarantee for one allocation and 240 B less per
+// sampled span (BENCH.md §1.4). What makes that safe is a conjunction, and the
+// conjunction is what this test pins: every write site returns on `s.ended`
+// under the same mutex finish sets it with, AND finish drops the references. A
+// reader who later allows a post-End write has to defeat BOTH.
+//
+// The status attribute is set through a SEPARATE SetAttrs call on purpose, so
+// the span's array carries the spare capacity slices.Insert leaves behind. A
+// late in-place replacement writes into that spare array — which is exactly the
+// tear this test would have to observe, and it cannot be provoked at all on a
+// span whose attributes all arrived at Start.
+//
+// MUTATION, and it has to be a compound one: removing the `if s.ended { return }`
+// guard from SetAttrs ALONE leaves the test passing, because the nil makes the
+// binary search miss and slices.Insert builds a fresh array the exported value
+// never sees. Removing the nil alone leaves it passing too, because the guard
+// still turns the write away. Both must go. With both removed, observed:
+// "the exported value's attrs changed after the span ended: got MUTATED at
+// http.request.method, want GET". Restored; span.go is byte-identical to its
+// intended form and the test passes again.
+func TestTheValueASinkReceivesIsFinal(t *testing.T) {
+	var captured coretrace.SpanValue
+	tracer := svctrace.NewTracer(svctrace.TracerConfig{
+		Sampler: svctrace.AlwaysSample,
+		Sink:    func(value coretrace.SpanValue) { captured = value },
+	})
+	_, span := tracer.Start(context.Background(), "GET", coretrace.SpanParams{
+		Kind: coretrace.SpanKindServer,
+		Attrs: []coremetrics.AttrValue{
+			coremetrics.String("http.request.method", "GET"),
+			coremetrics.String("url.path", "/v1/orders/42"),
+			coremetrics.String("url.scheme", "https"),
+			coremetrics.String("server.address", "api.example.com"),
+		},
+	})
+	//: a separate call, so the array grows and keeps spare capacity.
+	span.SetAttrs(coremetrics.Int64("http.response.status_code", 200))
+	span.End()
+	if len(captured.Attrs) != 5 {
+		t.Fatalf("the sink received %d attributes, want 5", len(captured.Attrs))
+	}
+	//: everything below happens to a span that has already been exported.
+	span.SetAttrs(coremetrics.String("http.request.method", "MUTATED"))
+	span.AddEvent("late")
+	span.SetStatus(coretrace.StatusError, "late")
+	for _, attr := range captured.Attrs {
+		if attr.Key == "http.request.method" && attr.Str() != "GET" {
+			t.Errorf("the exported value attrs changed after the span ended: got %s at %s, want GET", attr.Str(), attr.Key)
+		}
+	}
+	if len(captured.Events) != 0 {
+		t.Errorf("the exported value gained %d events after the span ended", len(captured.Events))
+	}
+}

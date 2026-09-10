@@ -100,7 +100,7 @@ func (s *span) SetAttrs(attrs ...coremetrics.AttrValue) {
 	//: validate + sort the incoming set before taking the lock — SortAttrs
 	//: panics on an unusable set, and panicking under a held mutex would
 	//: leave the span locked for every other goroutine annotating it.
-	incoming := coremetrics.SortAttrs(attrs)
+	incoming := sortedIncoming(attrs)
 	//: merge under the lock.
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -125,6 +125,32 @@ func (s *span) SetAttrs(attrs ...coremetrics.AttrValue) {
 		//: a new Key is inserted where the ordering puts it.
 		s.attrs = slices.Insert(s.attrs, at, attr)
 	}
+}
+
+// sortedIncoming returns attrs in the canonical order, VALIDATED, cloning only
+// when a clone buys something.
+//
+// SortAttrs always clones, and its reason is ownership: it SORTS in place, so it
+// must not sort the caller's array. A single attribute is already sorted, so
+// there is nothing to sort and nothing to protect — and the merge below only
+// ever COPIES elements out of this slice, never keeps it. The validation still
+// runs, still on this goroutine, still outside the lock.
+//
+// One attribute is not a corner case: it is what ServerMiddleware does with the
+// response status on every request, and what almost every hand-written
+// `span.SetAttrs(...)` at an instrumentation site does.
+func sortedIncoming(attrs []coremetrics.AttrValue) []coremetrics.AttrValue {
+	//: more than one attribute has an order to establish, and establishing it
+	//: means owning the array first.
+	if len(attrs) > 1 {
+		//: clone + sort + validate.
+		return coremetrics.SortAttrs(attrs)
+	}
+	//: exactly one — SetAttrs already returned on zero. Validate it with the
+	//: same call SortAttrs would have made, on a set that is trivially sorted.
+	coremetrics.ValidateAttrs(attrs)
+	//: the caller's array, read and never retained.
+	return attrs
 }
 
 // AddEvent implements core/trace.Span, stamping the event with the tracer's
@@ -200,9 +226,28 @@ func (s *span) finish() (value coretrace.SpanValue, first bool) {
 	//: the transition itself.
 	s.ended = true
 	s.end = s.tracer.cfg.Clock.Now()
-	//: the exported value OWNS its slices: the span's own backing arrays keep
-	//: being reachable from this struct, and a sink that held the value while
-	//: a late (ignored) write reallocated would otherwise observe a tear.
+	//: the exported value OWNS its slices, and it owns them by TRANSFER rather
+	//: than by copy: the span hands the arrays over and drops its own
+	//: references, so there is exactly one holder afterwards — the same
+	//: guarantee a clone gives, for no allocation.
+	//:
+	//: This was `slices.Clone` on both, and the reason given was "a sink that
+	//: held the value while a late (ignored) write reallocated would otherwise
+	//: observe a tear". That event cannot happen: every write site above
+	//: returns on `s.ended` under this same mutex, which the line above just
+	//: set, so an ignored write reallocates nothing. The clone was defending
+	//: against its own description of an impossibility, and it cost one
+	//: allocation and 240 B on every sampled span — 7.9 % of a traced HTTP
+	//: request (BENCH.md §1.4).
+	//:
+	//: Nilling is what makes the transfer real rather than a rename. It is
+	//: also what a reader should check first if a post-End write is ever
+	//: allowed: this line is the one that would have to go back to a clone.
+	attrs, events := s.attrs, s.events
+	//: the span is ended and reads neither again; giving them up is what makes
+	//: the value the sole owner.
+	s.attrs, s.events = nil, nil
+	//: links were never cloned and never mutated after construction.
 	return coretrace.SpanValue{
 		Context:   s.context,
 		Parent:    s.parent,
@@ -210,8 +255,8 @@ func (s *span) finish() (value coretrace.SpanValue, first bool) {
 		Kind:      s.kind,
 		StartTime: s.start,
 		EndTime:   s.end,
-		Attrs:     slices.Clone(s.attrs),
-		Events:    slices.Clone(s.events),
+		Attrs:     attrs,
+		Events:    events,
 		Links:     s.links,
 		Status:    s.status.Resolved(),
 	}, true

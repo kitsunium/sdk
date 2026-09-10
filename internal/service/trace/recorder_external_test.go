@@ -2,6 +2,7 @@ package trace_test
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -154,5 +155,36 @@ func TestATracerWithNoSinkRecordsNothing(t *testing.T) {
 	span.End()
 	if !span.SpanContext().IsValid() {
 		t.Error("a sink-less tracer must still mint a propagatable context")
+	}
+}
+
+// TestRecorderTakesAnExclusiveLockOnEveryPath pins the lock choice BENCH.md §2
+// measured, because nothing else in this package can.
+//
+// A lock type is invisible to every functional test — the RWMutex this field
+// held was correct, it was just the wrong instrument — so the only thing that
+// stops the next reader from "restoring" it on the reasoning its own comment
+// carried is a test that names the measurement. The reasoning is genuinely
+// appealing: Len and Dropped ARE pure reads. What it misses is that record takes
+// the exclusive side once per span from every request goroutine, that the shared
+// side runs once per collection interval, and that Collect — the call an export
+// actually makes — takes the exclusive side too and never benefited at all.
+//
+// It reads the field through reflect rather than parsing the source, because
+// reflect reports the type the COMPILER saw, and a type alias or an embedded
+// wrapper would defeat a grep.
+//
+// MUTATION: `mu sync.Mutex` back to `mu sync.RWMutex`, with Len and Dropped
+// back to RLock/RUnlock — i.e. the code this package shipped until BENCH.md §2.
+// Observed: "Recorder.mu is a sync.RWMutex; BENCH.md §2 measured that lock 8.0x
+// to 9.0x slower on the path this type spends its life on". Restored; recorder.go
+// is byte-identical to its intended form and the test passes again.
+func TestRecorderTakesAnExclusiveLockOnEveryPath(t *testing.T) {
+	field, ok := reflect.TypeFor[svctrace.Recorder]().FieldByName("mu")
+	if !ok {
+		t.Fatal("Recorder has no field named mu — this test guards a lock that has been renamed or removed")
+	}
+	if field.Type != reflect.TypeFor[sync.Mutex]() {
+		t.Errorf("Recorder.mu is a %s; BENCH.md §2 measured that lock 8.0x to 9.0x slower on the path this type spends its life on", field.Type)
 	}
 }
