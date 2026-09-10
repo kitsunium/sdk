@@ -8,6 +8,16 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
+// benchMaskWordWidth mirrors the width ApplyWSMask moves at a time. The
+// production constant is unexported, so the benchmark restates it — and the
+// crossover row in BENCH.md is what would notice if the two ever disagreed.
+const benchMaskWordWidth int = 2 * corenet.WSMaskLen
+
+// benchHijackBuffer is the size of the bufio.Reader net/http hands to a
+// hijacking handler, which is the largest frame that can arrive in one buffered
+// read.
+const benchHijackBuffer int = 4096
+
 // sinks so no frame, mask or validation can be proven unused and elided.
 var (
 	bytesSink  []byte
@@ -75,6 +85,103 @@ func benchMask(b *testing.B, n int) {
 		corenet.ApplyWSMask(payload, benchMaskKey)
 	}
 	bytesSink = payload
+}
+
+// maskBenchLengths are the lengths that expose how the transform handles what
+// its wide loops cannot take.
+//
+// They are not round numbers for tidiness. ApplyWSMask moves a thirty-two-byte
+// block, then a word, then a byte, so seven, fifteen and thirty-one are the
+// worst case of each tier — a full seven bytes left to the slowest loop — while
+// eight, thirty-two and sixty-four are the best. WSMaxControlPayload is RFC
+// 6455 §5.5's ceiling on a control frame, so it is the largest payload a Ping
+// can carry and the common case for a heartbeat. Four thousand and ninety-six
+// is net/http's hijacked bufio.Reader, and one past it is the first size whose
+// frame cannot arrive in a single buffered read.
+var maskBenchLengths = []int{
+	0, 1, 3, 4, 7, benchMaskWordWidth, 15, 64,
+	corenet.WSMaxControlPayload, benchHijackBuffer, benchHijackBuffer + 1, 64 << 10, 1 << 20,
+}
+
+// BenchmarkApplyWSMask measures the shipped implementation against the
+// byte-at-a-time form it replaced — IN THE SAME BINARY, on the same lengths and
+// the same payloads.
+//
+// Publishing a before number from one run and an after number from another
+// invites a machine-state difference to be read as a speed-up. Here the two
+// rows are minutes apart at most, on the same CPU with the same buffer, so the
+// ratio between them is measured rather than inferred. `byte_at_a_time` calls
+// applyWSMaskReference, which is the previous production body verbatim and is
+// also the correctness oracle in websocket_frame_external_test.go — so the
+// thing being timed is exactly the thing being proved equivalent.
+func BenchmarkApplyWSMask(b *testing.B) {
+	//: the shipped word-at-a-time transform.
+	for _, n := range maskBenchLengths {
+		b.Run("wide/"+benchLengthName(n), func(b *testing.B) {
+			benchMaskWith(b, n, corenet.ApplyWSMask)
+		})
+	}
+	//: the form it replaced, for the ratio.
+	for _, n := range maskBenchLengths {
+		b.Run("byte_at_a_time/"+benchLengthName(n), func(b *testing.B) {
+			benchMaskWith(b, n, applyWSMaskReference)
+		})
+	}
+	//: the rejected alternative — see benchMaskShortGuarded.
+	for _, n := range maskBenchLengths {
+		b.Run("short_guarded/"+benchLengthName(n), func(b *testing.B) {
+			benchMaskWith(b, n, benchMaskShortGuarded)
+		})
+	}
+}
+
+// benchMaskShortGuarded is NOT the shipped implementation and must never
+// become it. It is the short-payload branch the wide transform invites — below
+// one word, skip the set-up and go straight to the byte loop — kept here so the
+// decision NOT to ship it stays measurable instead of becoming folklore.
+//
+// The wide form is slower than the byte-at-a-time one below eight bytes, which
+// is a real cost on a path that carries empty Pings. This variant recovers it.
+// What the rows show is that it does not pay: the extra branch is paid on every
+// call, including the payloads between one word and one cache line where the
+// wide form's whole win begins, and the amount recovered below one word is
+// smaller than the amount lost above it. A control frame is capped at
+// WSMaxControlPayload by §5.5, so the sizes this would help are precisely the
+// sizes that are already too cheap to matter.
+func benchMaskShortGuarded(payload []byte, key [corenet.WSMaskLen]byte) {
+	//: below one word there is nothing for the wide loops to take, so the key
+	//: word would be built and thrown away.
+	if len(payload) < benchMaskWordWidth {
+		for i := range payload {
+			payload[i] ^= key[i&(corenet.WSMaskLen-1)]
+		}
+		//: handled.
+		return
+	}
+	corenet.ApplyWSMask(payload, key)
+}
+
+func benchMaskWith(b *testing.B, n int, apply func([]byte, [corenet.WSMaskLen]byte)) {
+	b.Helper()
+	payload := benchPayload(n)
+	b.SetBytes(int64(n))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		apply(payload, benchMaskKey)
+	}
+	bytesSink = payload
+}
+
+// benchLengthName renders a length as a fixed-width decimal so the sub-benchmark
+// names sort in the order the lengths do, which is what makes the generated
+// table readable without re-sorting it by hand.
+func benchLengthName(n int) string {
+	name := itoaMask(n)
+	for len(name) < 7 {
+		name = "0" + name
+	}
+	return name
 }
 
 // BenchmarkValidateWSText_* is the other per-byte pass. ADR 0047 judges UTF-8

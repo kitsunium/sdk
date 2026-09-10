@@ -123,6 +123,22 @@ name.
   checked once, in `ParseWSFrameHeader`. Masking is a security requirement and
   not ceremony: it stops a hostile script steering a browser into emitting bytes
   a transparent intermediary would read as a second HTTP request.
+- **The masking transform moves a WORD at a time, and the byte order cancels.**
+  It runs over every inbound byte with no fast path and no way to opt out, so a
+  CPU profile put **88.99 %** of a 4 KiB receive in `ApplyWSMask` alone. It now
+  takes 32 bytes per iteration, then 8, then 1 — **16.1×** the byte-at-a-time
+  throughput, **6.17×** on the whole in-situ receive path — with no assembly, no
+  build-tagged per-architecture file and no `unsafe`, which is the only reason
+  it can be one implementation across all eight GOOS the SDK targets (ADR 0018).
+  The compiler renders each word as a single memory-destination XOR; there is no
+  vector instruction involved and none is wanted. Endianness safety is not a
+  property of choosing little-endian — it is a property of using **one** order
+  for the payload word AND the key word, under which a fixed-order decode is a
+  bijection and XOR stays bytewise. Mixing two, or reinterpreting the slice as
+  words with `unsafe`, is what breaks it, and the second is why `unsafe` is
+  absent: a native-order reinterpretation would agree with a little-endian key
+  on this VM and disagree on a big-endian host, which is a defect no test here
+  can see. Every claim above is measured in `BENCH.md`.
 - **`WSCloseCode.Sendable` answers for both directions.** A peer that sends 1006
   is committing exactly the protocol error this endpoint must not commit, so one
   predicate governs both and the two cannot drift. `Echoable` exists because
@@ -148,6 +164,35 @@ name.
   domain needs it. It is declared here because the repo's bar for a shared
   primitive is two real consumers arising from an actual duplication, and today
   there is one. The doc comment on the type says so.
+
+## Cost
+
+Full numbers, methodology and the rejected alternatives are in `BENCH.md`. The
+three facts that decide how this package is used:
+
+| | |
+|---|---|
+| `ApplyWSMask`, 4 KiB | **186.8 ns** — 21.9 GB/s, 0 allocs |
+| `ValidateWSText`, 4 KiB ASCII | 140.7 ns — 29.1 GB/s, 0 allocs |
+| `ParseWSFrameHeader` | 29.5 ns, 0 allocs |
+
+- **Masking is no longer what caps an inbound connection.** It was 96 % of the
+  per-byte work on an ASCII text message and is now 57 %, within 1.3× of UTF-8
+  validation. `BENCH.md` still opens with that inversion because the previous
+  version of this file asserted the opposite and was right at the time.
+- **The slowest per-byte thing here is now `ValidateWSText` on multibyte text**,
+  at 1.05 GB/s against 21.9 for the mask. Counting only this package's two
+  per-byte passes, 4 KiB of three-byte runes costs 12.5× what the same byte
+  count costs in ASCII; before the widening it was 2.2×, because the mask was
+  expensive on both sides of the comparison. That is where the next per-byte win
+  is, if one is ever wanted.
+- **Per-FRAME cost is what a fragmented message pays.** With the mask 16×
+  cheaper, 256 frames carrying 64 KiB improved only 2.53× against 9.06× for the
+  same bytes in one frame. A peer chooses its own chunk size and a server cannot
+  refuse it, so this is the axis a peer can turn against the reader for free.
+
+The whole file is allocation-free except `ParseWSClosePayload`, which returns
+the close reason as a string once per connection.
 
 ## Error range
 
@@ -225,6 +270,19 @@ ABI constants instead of `x/net/ipv4`.
   is how permessage-deflate is refused where the wire can verify it.
 - Treat `crypto/sha1` here as a security primitive, or "upgrade" it. RFC 6455
   §1.3 fixes the algorithm; changing it produces a server that talks to nothing.
+- Reach for `unsafe`, assembly or a build-tagged per-architecture file to make
+  `ApplyWSMask` faster. It is already 16× the byte-at-a-time form in pure
+  stdlib, the remaining bottleneck at realistic sizes is the memory hierarchy
+  rather than the CPU, and every one of those three costs the single-implementation
+  property ADR 0018 requires.
+- Read the payload with one `binary` byte order and build the key word with
+  another, or with hand-written shifts that assume a memory layout. One order,
+  used for both, is the entire endianness argument — and a mismatch is wrong on
+  every host, not only on the big-endian ones nobody here can test.
+- Delete `applyWSMaskReference` from `websocket_frame_external_test.go`, or
+  "simplify" it to call `ApplyWSMask`. It is the RFC §5.3 transform transcribed
+  and the oracle every masking test is judged against; an oracle that calls the
+  implementation proves the implementation equals itself.
 
 ## Verification
 
