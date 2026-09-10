@@ -241,6 +241,15 @@ rules:
       - "**/internal/core/events/**"
       - "**/internal/service/events/**"
       - "**/pkg/v1/events/**"
+      # The view domain renders an arbitrary caller MODEL. core/view.Renderer's
+      # Render(ctx, name string, data any) fixes the parameter — the whole point
+      # of a template engine is that the user's struct type is not known to it,
+      # exactly as for codec's Marshal. The concrete engine and its internal
+      # helpers implement that contract, so narrowing the parameter breaks
+      # interface satisfaction (ADR 0058 §D3).
+      - "**/internal/core/view/**"
+      - "**/internal/service/view/**"
+      - "**/pkg/v1/view/**"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #
@@ -278,6 +287,14 @@ rules:
       # Narrowing it to `interface{ IsZero() bool }` would hide that the
       # isolation level and the read-only flag travel with it.
       - "**/internal/service/sql/**"
+      # The view engine's helpers take *html/template.Template, and here the
+      # suggestion is not merely unactionable but actively dangerous: the rule
+      # proposes `interface{ Execute(wr io.Writer, data any) error }`, which
+      # text/template.Template satisfies exactly. That substitution compiles,
+      # passes every test that does not assert on escaped output, and ships
+      # stored XSS — it is the one thing ADR 0058 §D2 and the domain's AST audit
+      # exist to make impossible. The concrete type IS the guarantee.
+      - "**/internal/service/view/**"
       # The tlsid handshake test takes two Identity values and uses BOTH halves
       # of the type (ServerConfig on one, ClientConfig on the other). Narrowing
       # each parameter to a one-method interface would replace the single domain

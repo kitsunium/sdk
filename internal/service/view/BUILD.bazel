@@ -1,0 +1,66 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "view",
+    srcs = [
+        "codes.go",
+        "cycles.go",
+        "errors.go",
+        "html.go",
+        "limit.go",
+        "parse.go",
+        "render.go",
+        "scan.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/view",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/view",
+        "//internal/kernel/errs",
+        "//internal/kernel/recycler",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":view",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "view_test",
+    size = "small",
+    srcs = [
+        "disclosure_external_test.go",
+        "escape_external_test.go",
+        "html_external_test.go",
+        "render_external_test.go",
+        "texttemplate_external_test.go",
+        "view_bench_test.go",
+    ],
+    # keep: TestTheDomainNeverReachesTextTemplate parses every .go file in the
+    # three view packages at runtime. Bazel's sandbox strips the source-tree
+    # relationship, so the sources have to reach the test as runfiles — the
+    # same mechanism //internal/kernel/errs uses for its AST audits.
+    data = ["//:audit_sources"],
+    deps = [
+        ":view",
+        "//internal/core/view",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
