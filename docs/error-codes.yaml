@@ -690,6 +690,26 @@ codes:
     const: CodeHalt
     hex: "0x00_02_16_06"
     package: internal/core/events
+  - code: "0.2.24.1"
+    const: CodeUnknownDialect
+    hex: "0x00_02_18_01"
+    package: internal/core/sql
+  - code: "0.2.24.2"
+    const: CodeDialectRefused
+    hex: "0x00_02_18_02"
+    package: internal/core/sql
+  - code: "0.2.24.3"
+    const: CodeNestedIsolation
+    hex: "0x00_02_18_03"
+    package: internal/core/sql
+  - code: "0.2.24.4"
+    const: CodeInvalidMigration
+    hex: "0x00_02_18_04"
+    package: internal/core/sql
+  - code: "0.2.24.5"
+    const: CodeMigrationIrreversible
+    hex: "0x00_02_18_05"
+    package: internal/core/sql
   - code: "0.2.25.1"
     const: CodeInvalidPath
     hex: "0x00_02_19_01"
@@ -1474,6 +1494,74 @@ codes:
     const: CodeHaltNotPermitted
     hex: "0x00_03_34_02"
     package: internal/service/events
+  - code: "0.3.54.1"
+    const: CodeConfigInvalid
+    hex: "0x00_03_36_01"
+    package: internal/service/sql
+  - code: "0.3.54.2"
+    const: CodePoolMisconfigured
+    hex: "0x00_03_36_02"
+    package: internal/service/sql
+  - code: "0.3.54.3"
+    const: CodeBeginFailed
+    hex: "0x00_03_36_03"
+    package: internal/service/sql
+  - code: "0.3.54.4"
+    const: CodeCommitFailed
+    hex: "0x00_03_36_04"
+    package: internal/service/sql
+  - code: "0.3.54.5"
+    const: CodeRollbackFailed
+    hex: "0x00_03_36_05"
+    package: internal/service/sql
+  - code: "0.3.54.6"
+    const: CodeSavepointFailed
+    hex: "0x00_03_36_06"
+    package: internal/service/sql
+  - code: "0.3.54.7"
+    const: CodeTxPoisoned
+    hex: "0x00_03_36_07"
+    package: internal/service/sql
+  - code: "0.3.54.8"
+    const: CodeTxClosed
+    hex: "0x00_03_36_08"
+    package: internal/service/sql
+  - code: "0.3.54.9"
+    const: CodeHealthCheckFailed
+    hex: "0x00_03_36_09"
+    package: internal/service/sql
+  - code: "0.3.54.10"
+    const: CodeHealthCheckTimeout
+    hex: "0x00_03_36_0A"
+    package: internal/service/sql
+  - code: "0.3.54.11"
+    const: CodeMigrationFailed
+    hex: "0x00_03_36_0B"
+    package: internal/service/sql
+  - code: "0.3.54.12"
+    const: CodeMigrationOutOfOrder
+    hex: "0x00_03_36_0C"
+    package: internal/service/sql
+  - code: "0.3.54.13"
+    const: CodeMigrationLockUnsupported
+    hex: "0x00_03_36_0D"
+    package: internal/service/sql
+  - code: "0.3.54.14"
+    const: CodeMigrationLockTimeout
+    hex: "0x00_03_36_0E"
+    package: internal/service/sql
+  - code: "0.3.54.15"
+    const: CodeMigrationUnknownVersion
+    hex: "0x00_03_36_0F"
+    package: internal/service/sql
+  - code: "0.3.54.16"
+    const: CodeVersionTableInvalid
+    hex: "0x00_03_36_10"
+    package: internal/service/sql
+  - code: "0.3.54.17"
+    const: CodeDuplicateMigration
+    hex: "0x00_03_36_11"
+    package: internal/service/sql
   - code: "0.3.55.1"
     const: CodeRootUnavailable
     hex: "0x00_03_37_01"

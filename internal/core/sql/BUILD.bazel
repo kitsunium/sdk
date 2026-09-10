@@ -1,0 +1,48 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "sql",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "sql.go",
+        "sql_dialect.go",
+        "sql_interface.go",
+        "sql_migration.go",
+        "sql_txoptions.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/sql",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":sql",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "sql_test",
+    size = "small",
+    srcs = ["sql_external_test.go"],
+    deps = [
+        ":sql",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

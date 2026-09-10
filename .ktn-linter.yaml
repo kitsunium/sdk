@@ -56,6 +56,17 @@ vocabulary:
     # natively — the exemption is only for the two the rule cannot spell.
     - github.com/kitsunium/sdk/internal/core/cache.EntryFetcher
     - github.com/kitsunium/sdk/internal/core/cache.Tagger
+    # core/sql.Transactor and core/sql.Preparer (ADR 0055). The -er forms the rule
+    # would impose are "Transacter" and "PrepareContexter", neither of which is a
+    # word. Both name the ROLE the type plays, which is how the domain is
+    # discussed end to end — "the transactor owns the transaction", "assert for
+    # Preparer" — and Transactor is additionally the industry's own term for the
+    # role (Spring's PlatformTransactionManager, the Go ecosystem's Transactor).
+    # Preparer is an ADR 0039 sibling of the frozen Executor port, exactly the
+    # EntryFetcher/Tagger case above: the family name says at a glance which
+    # capability a type assertion is asking for.
+    - github.com/kitsunium/sdk/internal/core/sql.Transactor
+    - github.com/kitsunium/sdk/internal/core/sql.Preparer
     # UpDownMeter is the ADR 0039 sibling of the frozen core/metrics.Meter port,
     # and "Meter" is the OpenTelemetry vocabulary for an instrument factory —
     # the word the whole domain is discussed in. The -er form the rule would
@@ -169,8 +180,34 @@ rules:
   # other Go package in the SDK must still avoid `any` except where the
   # Codec contract requires it (codec) or the slog-style discriminated
   # Value union demands it for Time / Group / Any payloads (logger).
+  # KTN-VAR-STRMAP (phase 4) — the keys are the INPUT, not an enum.
+  #
+  # core/sql's dialectByName and refusedDialects are the two halves of
+  # ParseDialect: they turn a configuration STRING a human wrote ("postgres",
+  # "mariadb", "sqlserver") into a Dialect or into a refusal that says why. An
+  # int-keyed map cannot do that — the string is what is being looked up, and
+  # there is no integer to key on until after the lookup has succeeded. The
+  # rule reads "constant string keys" and infers an enum; here the constants
+  # are the accepted VOCABULARY, which is the opposite direction.
+  #
+  # Scoped to the one file that owns both tables.
+  KTN-VAR-STRMAP:
+    exclude:
+      - "**/internal/core/sql/sql_dialect.go"
+
   KTN-INTERFACE-ANYUSE:
     exclude:
+      # internal/service/sql — `arg any` is database/sql's OWN bind-parameter
+      # type. (*sql.Tx).ExecContext, QueryContext and QueryRowContext are all
+      # `args ...any` in the standard library, and driver.Value is defined as a
+      # closed set the DRIVER narrows, not the caller. The three flagged sites
+      # (tryLockSQL / unlockSQL / tryOnce) each carry exactly one advisory-lock
+      # key — an int64 on PostgreSQL, a string on MySQL — straight to that
+      # stdlib signature. Any interface narrower than `any` would have to be
+      # widened again at the call, and inventing one here is the first step of
+      # the ORM ADR 0055 D1 refuses to become: once the bind type is ours,
+      # conversion is ours.
+      - "**/internal/service/sql/**"
       - "**/internal/core/codec/**"
       - "**/internal/service/codec/**"
       - "**/pkg/v1/codec/**"
@@ -224,6 +261,23 @@ rules:
   # because one rule limitation causes them all.
   KTN-API-MINIF:
     exclude:
+      # internal/service/sql — the SAME class, and here it is the domain's
+      # central decision rather than an incidental one. ADR 0055 D1: the sql
+      # ports speak *sql.DB, *sql.Conn, *sql.Rows and sql.Result — the standard
+      # library's own types, deliberately NOT re-declared equivalents — because
+      # re-declaring them is the first step of the ORM this domain exists to
+      # refuse. Once Rows is ours, scanning is ours; once scanning is ours,
+      # mapping is one refactor away. The rule's suggestions here ("interface
+      # dB with SetConnMaxIdleTime", "interface rows with Scan") would replace
+      # the stdlib type a consumer already knows with a synthetic one that
+      # exists only to satisfy a linter.
+      #
+      # sql.TxOptionsValue is the same contract-required-value case as
+      # tlsid.Identity below: it is core/sql's single per-transaction option
+      # type, published as pkg/v1/sql.TxOptions and frozen by ADR 0039.
+      # Narrowing it to `interface{ IsZero() bool }` would hide that the
+      # isolation level and the read-only flag travel with it.
+      - "**/internal/service/sql/**"
       # The tlsid handshake test takes two Identity values and uses BOTH halves
       # of the type (ServerConfig on one, ClientConfig on the other). Narrowing
       # each parameter to a one-method interface would replace the single domain
@@ -606,6 +660,28 @@ rules:
   KTN-VAR-BIGSTRUCT:
     exclude:
       - "**/pkg/v1/process/**"
+      # service/sql.Config is 72 bytes — eight over the threshold — and the
+      # eight are not removable: *sql.DB (8) + Dialect (1, padded to 8) +
+      # PoolConfig (32) + clock.Timed (16) + CheckTimeout (8). Every field is
+      # 8-aligned, so there is no padding hole for the Dialect byte and no
+      # field ordering that lands under 64. Shrinking would mean deleting a
+      # field or boxing PoolConfig behind a pointer, which trades eight bytes
+      # once per PORT for a nil check on every read.
+      #
+      # Value semantics are the contract, exactly as for pkg/v1/process.Spec
+      # above: a constructor must not be able to observe a later mutation of
+      # the caller's struct, and taking *Config would let a caller change the
+      # dialect or the pool ceiling after NewTransactor returned. The copy
+      # happens ONCE per port — three times in the life of a process, next to
+      # a BeginTx that costs a network round trip — so the performance concern
+      # the rule guards is not merely moot here, it is unmeasurable
+      # (internal/service/sql/BENCH.md).
+      #
+      # pkg/v1/sql is included because its constructors are pure forwarders of
+      # the same alias; excluding only the service layer would leave three
+      # findings on functions whose entire body is `return svcsql.New…(cfg)`.
+      - "**/internal/service/sql/**"
+      - "**/pkg/v1/sql/**"
       # core/net — value semantics ARE the contract, for three types:
       #
       #   IdentityValue (96 B) is the opaque, redacting TLS identity. It copies
@@ -864,6 +940,17 @@ rules:
       - "**/internal/service/proc/cgroup/cgroup_other.go"
       - "**/internal/service/cache/**"
       - "**/internal/service/trace/**"
+      # savepointSQL(_ coresql.Dialect, name string) discards its dialect BY
+      # DESIGN, and the discard is the documentation. All three supported
+      # engines spell SAVEPOINT / ROLLBACK TO SAVEPOINT / RELEASE SAVEPOINT
+      # identically, and that uniformity is the SELECTION CRITERION for the
+      # supported set rather than a coincidence (ADR 0055 D4) — the engines
+      # that spell nesting differently are refused BY NAME at ParseDialect.
+      # The parameter is kept so that adding a fourth engine cannot be done by
+      # forgetting this file; naming it would only trade this finding for an
+      # unused-parameter one, and using it would mean writing an unreachable
+      # branch that returns empty SQL. Scoped to the one file.
+      - "**/internal/service/sql/dialect_sql.go"
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on
