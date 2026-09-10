@@ -745,9 +745,13 @@ func TestHTTPAdapterDrainsOnShutdown(t *testing.T) {
 		if serr := srv.Shutdown(ctx); serr != nil {
 			t.Fatalf("shutdown reported %v, want a clean drain", serr)
 		}
-		//: a drain that took the whole budget means nothing released the
-		//: connection, which is the bug this test exists to catch.
-		if elapsed := time.Since(started); elapsed > 3*time.Second {
+		//: 500 ms against a drain measured at 1.808 ms with 64 open streams
+		//: (internal/service/net/sse/BENCH.md) — 277x headroom, and still the
+		//: sub-second this test's own doc comment claims. The bound used to be
+		//: 3s against a 5s budget, which left a regression from 1.8 ms to 2.9 s
+		//: passing every test in the repository: ADR 0043's whole point,
+		//: guarded by nothing that could see it fail.
+		if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 			t.Fatalf("drain took %v — the connection was never released", elapsed)
 		}
 		if phase := srv.State().Phase; phase != server.PhaseStopped {
@@ -812,7 +816,8 @@ func TestDrainSignalReachesAPlainHTTPHandler(t *testing.T) {
 	if serr := srv.Shutdown(ctx); serr != nil {
 		t.Fatalf("shutdown reported %v, want a clean drain", serr)
 	}
-	if elapsed := time.Since(started); elapsed > 3*time.Second {
+	//: 500 ms, for the reason TestHTTPAdapterDrainsOnShutdown states.
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("drain took %v — the handler never saw the signal", elapsed)
 	}
 	if ctxCancelledBeforeSignal {

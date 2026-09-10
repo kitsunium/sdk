@@ -103,6 +103,24 @@ name.
   points at the wrong place. CRLF, CR and LF are all recognised, and all three
   normalise to LF on reassembly: the VALUE round-trips, its byte spelling does
   not, and the type comment says so.
+- **The SSE terminator scan keeps a cursor per byte and never rescans.** The
+  format has no escape, so finding the terminators in `Data` is the only
+  per-byte work an event stream does — and `strings.IndexAny`, the obvious call,
+  has no `bytealg` path: above eight bytes it builds a 32-byte ASCII set per
+  call and walks the string byte by byte, below eight it decodes a rune per
+  byte. A profile put it at **91 %** of encoding a 4 KiB single-line frame,
+  against 7 % for the `memmove` that is the actual work. `strings.IndexByte` is
+  the assembly-backed primitive, but it finds ONE byte, and the two obvious ways
+  to call it twice are each quadratic on half the possible payloads — unbounded,
+  a payload of LF-terminated lines rescans its whole tail for a CR that is not
+  there; with the CR scan bounded by the LF, the exact mirror (CR-terminated,
+  no LF) does the same. Both were measured at **16× SLOWER** than the code they
+  replaced before either was believed. What ships finds both terminators once
+  over the whole payload and moves each cursor only FORWARD, so each byte is
+  examined at most once per terminator whatever the payload's shape:
+  **2.1×–6.4×**, and the same substitution in `validateSSELine` is worth 1.7×
+  more. `BENCH.md` prints the profile, all four strategies and the corpus that
+  exposes each blow-up.
 - **An SSE `event:` with no `data:` is refused.** Every client discards a frame
   whose data buffer is empty and discards the event type with it, so a caller
   who names an event would watch it silently not arrive. A retry-only or id-only
@@ -168,13 +186,21 @@ name.
 ## Cost
 
 Full numbers, methodology and the rejected alternatives are in `BENCH.md`. The
-three facts that decide how this package is used:
+facts that decide how this package is used:
 
-| | |
+| WebSocket | |
 |---|---|
 | `ApplyWSMask`, 4 KiB | **186.8 ns** — 21.9 GB/s, 0 allocs |
 | `ValidateWSText`, 4 KiB ASCII | 140.7 ns — 29.1 GB/s, 0 allocs |
 | `ParseWSFrameHeader` | 29.5 ns, 0 allocs |
+
+| Server-Sent Events | |
+|---|---|
+| `AppendTo`, single-line 256 B | **57.85 ns** — 4.4 GB/s, 0 allocs |
+| `AppendTo`, single-line 4 KiB | **430.8 ns** — 9.5 GB/s, 0 allocs |
+| `AppendTo`, id + event + 256 B | 98.32 ns, 0 allocs |
+| `AppendSSEComment` (keep-alive) | 19.99 ns, 0 allocs |
+| `Validate` | 12.2 ns data-only, 36.3 ns with id + event |
 
 - **Masking is no longer what caps an inbound connection.** It was 96 % of the
   per-byte work on an ASCII text message and is now 57 %, within 1.3× of UTF-8
@@ -190,6 +216,17 @@ three facts that decide how this package is used:
   cheaper, 256 frames carrying 64 KiB improved only 2.53× against 9.06× for the
   same bytes in one frame. A peer chooses its own chunk size and a server cannot
   refuse it, so this is the axis a peer can turn against the reader for free.
+- **An SSE frame is now bounded by the memory hierarchy, not by a scan.**
+  Encoding got **2.56×–4.62×** faster, `Validate` 1.73× and the keep-alive
+  comment 1.59×, by replacing `strings.IndexAny` — which had no `bytealg` path
+  and was 91 % of a 4 KiB frame — with two forward cursors over `IndexByte`.
+  The scan is still the largest profile entry at 65 %, and now it should be:
+  two assembly passes is the floor for proving two bytes are absent.
+- **A multi-line SSE payload costs 2.4× a single-line one of the same size**
+  (33 653 ns against 6 582 for 64 KiB with CRLF every 64 bytes), because every
+  line is a separate `data:` field and a CRLF cut refreshes BOTH cursors. That
+  is per-FIELD cost, not per-byte cost, and it is the axis a payload's shape
+  turns rather than its size.
 
 The whole file is allocation-free except `ParseWSClosePayload`, which returns
 the close reason as a string once per connection.
@@ -283,6 +320,18 @@ ABI constants instead of `x/net/ipv4`.
   "simplify" it to call `ApplyWSMask`. It is the RFC §5.3 transform transcribed
   and the oracle every masking test is judged against; an oracle that calls the
   implementation proves the implementation equals itself.
+- Delete `splitIndexAny` from `sse_bench_test.go`, or "simplify" it to call
+  `appendSSEData`. It is the terminator scan this package shipped before the
+  campaign, transcribed, and it is the oracle both SSE equivalence tests are
+  judged against — over every string of length 0 to 9 in `{'a', '\n', '\r'}`.
+  The bound is 9 rather than 8 because `strings.IndexAny` itself changes
+  strategy at `len(s) > 8`, so a corpus stopping at eight would exercise only
+  one of the oracle's own two code paths.
+- Rewrite `appendSSEData`'s two cursors as an `IndexByte` pair per line. It
+  reads as the same thing and is quadratic — in one of two mirror-image halves
+  depending on which scan is left unbounded, both measured at 16× slower than
+  the `IndexAny` form they would replace. The forward-only refresh IS the
+  algorithm, not an optimisation layered on it.
 
 ## Verification
 

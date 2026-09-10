@@ -4,7 +4,9 @@ package sse_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	stdnet "net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +18,26 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/net/sse"
 )
+
+// drainStreamCount is how many streams are held open across a drain. It is
+// large enough that a per-stream cost would show and small enough to stay
+// inside the default file-descriptor limit with a client connection each.
+const drainStreamCount int = 64
+
+// drainBudget is the shutdown budget the control case is allowed to burn. It is
+// deliberately short: the control exists to prove the budget is what gets spent
+// when nothing observes the drain, and proving it should not cost seconds.
+const drainBudget time.Duration = 300 * time.Millisecond
+
+// deadlineFrames is how many events the write-deadline tests send. Three is the
+// smallest count that distinguishes "set once" from "refreshed per frame" and
+// still leaves a frame after the injected failure.
+const deadlineFrames int = 3
+
+// errDeadlineRefused is what deadlineWriter reports once it is refusing. It is
+// a test double's own error, not an SDK sentinel: the point of the branch under
+// test is that the stream does not care WHICH error a deadline refusal is.
+var errDeadlineRefused = errors.New("sse_test: the response cannot carry a write deadline")
 
 // TestNewRefusesAResponseThatCannotFlush is the streaming contract itself.
 //
@@ -541,4 +563,348 @@ type wrapper struct {
 func (w *wrapper) Unwrap() http.ResponseWriter {
 	//: the controller — and our own probe — follow this to find the flusher.
 	return w.ResponseWriter
+}
+
+// TestDrainWithOpenStreamsFinishesInMilliseconds is the executable form of a
+// claim this package's CLAUDE.md has made in prose since it was written —
+// "finishes in milliseconds instead of burning its whole budget" — and of
+// ADR 0043's "40 ms, clean".
+//
+// The only guard that existed anywhere was pkg/v1/server's
+// TestHTTPAdapterDrainsOnShutdown, which fails at three SECONDS with three
+// streams open. A regression from 40 ms to 2.9 s would have passed it, and
+// passed everything else in the repository. This measures the real number, over
+// sixty-four streams, and asserts a bound an order of magnitude under that one.
+//
+// It also runs the CONTROL — the same server publishing no drain signal at all,
+// which is the ADR 0043 defect itself — so the two numbers sit beside each
+// other rather than the fast one standing alone.
+//
+// MUTATION-CHECKED. Replacing `draining := corenet.DrainSignal(ctx)` in
+// Stream.watch with a nil channel — i.e. never observing the signal — turns the
+// signalled case into the control and fails it at `shutdown = context deadline
+// exceeded, want a clean drain` after `drain of 64 open streams: 300.2ms`. The
+// budget, in full, which is exactly the behaviour ADR 0043 exists to prevent.
+//
+// A second mutation is worth recording because of HOW it failed rather than
+// that it did: deleting the `s.end()` inside the `case <-draining:` arm — so the
+// watcher observes the drain, returns, and tells nobody — does not fail this
+// test, it HANGS it, and hangs the teardown too. Nothing is left to translate
+// the request context's end into the stream's, so every handler blocks forever
+// and httptest's own Close never returns. That is the shape a drain regression
+// takes when the watcher is half-removed, and it is why the arm's two lines are
+// not one.
+func TestDrainWithOpenStreamsFinishesInMilliseconds(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		//: whether the server publishes a drain signal at all. False is the
+		//: pre-ADR-0043 shape and must spend the whole budget.
+		signalled bool
+		//: whether Shutdown is expected to come back clean.
+		wantClean bool
+	}
+	tests := []tc{
+		{name: "the drain signal is published", signalled: true, wantClean: true},
+		{name: "no drain signal — the ADR 0043 defect", signalled: false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		harness := newDrainHarness(t, c.signalled)
+		defer harness.stop(t)
+		harness.openStreams(t, drainStreamCount)
+
+		//: the signal is closed exactly as the engine's adapter closes it, then
+		//: the shutdown is timed from that instant.
+		harness.beginDraining()
+		ctx, cancel := context.WithTimeout(t.Context(), drainBudget)
+		defer cancel()
+		started := time.Now()
+		err := harness.server.Config.Shutdown(ctx)
+		elapsed := time.Since(started)
+		t.Logf("drain of %d open streams: %v (signalled=%v, err=%v)", drainStreamCount, elapsed, c.signalled, err)
+
+		//: the unsignalled control must burn the budget; that IS the defect.
+		if !c.wantClean {
+			//: anything faster would mean something else released the
+			//: connections, and the comparison below would be meaningless.
+			if err == nil {
+				t.Fatalf("shutdown with no drain signal returned clean in %v; the control is not controlling anything", elapsed)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("shutdown = %v, want a clean drain", err)
+		}
+		//: a third of the budget, against pkg/v1/server's three seconds. The
+		//: measured value on this machine is two orders of magnitude under it.
+		if elapsed > drainBudget/3 {
+			t.Fatalf("drain of %d open streams took %v, want under %v", drainStreamCount, elapsed, drainBudget/3)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// drainHarness is a real http.Server serving real event streams over real
+// connections. httptest is used rather than the SDK's own engine because the
+// mechanism under test is the stream's reaction to the signal, and the engine
+// lives in a package this one must not depend on.
+type drainHarness struct {
+	server   *httptest.Server
+	draining chan struct{}
+	clients  []*http.Client
+	bodies   []io.Closer
+	opened   chan struct{}
+}
+
+// newDrainHarness starts a server whose handler holds an event stream open
+// until the stream itself says it is over.
+func newDrainHarness(t *testing.T, signalled bool) *drainHarness {
+	t.Helper()
+	h := &drainHarness{
+		draining: make(chan struct{}),
+		opened:   make(chan struct{}, drainStreamCount),
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stream, err := sse.New(w, r, sse.WithoutKeepAlive())
+		//: a stream that cannot open would leave the count short and hang the
+		//: harness on its own wait, which is a clearer failure than a nil deref.
+		if err != nil {
+			return
+		}
+		defer closeStream(t, stream)
+		//: one frame proves to the client that the stream is live before the
+		//: drain begins; without it the client could still be in the headers.
+		if serr := stream.Send(corenet.SSEEventValue{Data: "open"}); serr != nil {
+			return
+		}
+		h.opened <- struct{}{}
+		//: the handler holds the response open exactly as a real one does, and
+		//: returns only when the stream ends. Before ADR 0043 nothing could end
+		//: it, which is why Shutdown burned its budget.
+		<-stream.Done()
+	}))
+	//: the engine publishes the signal on the LISTENER's base context, so every
+	//: request derives from it; this mirrors http_adapter.go exactly.
+	if signalled {
+		srv.Config.BaseContext = func(stdnet.Listener) context.Context {
+			//: one channel for every request this server serves.
+			return corenet.WithDrainSignal(context.Background(), h.draining)
+		}
+	}
+	srv.Start()
+	h.server = srv
+	return h
+}
+
+// openStreams opens n client connections and waits until every handler has
+// written its first frame.
+func (h *drainHarness) openStreams(t *testing.T, n int) {
+	t.Helper()
+	for range n {
+		//: one client per connection: a shared transport would pool them and
+		//: give us one connection however many requests we made.
+		client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{}}
+		h.clients = append(h.clients, client)
+		resp, err := client.Get(h.server.URL + "/events")
+		if err != nil {
+			t.Fatalf("open stream: %v", err)
+		}
+		h.bodies = append(h.bodies, resp.Body)
+	}
+	//: every handler is now inside its wait, which is the state a drain has to
+	//: get out of.
+	for range n {
+		<-h.opened
+	}
+}
+
+// beginDraining closes the signal the server published, exactly as the engine's
+// adapter does at the top of its shutdown.
+func (h *drainHarness) beginDraining() {
+	//: closed, never sent on, so every stream sees it and a late one sees it
+	//: immediately.
+	close(h.draining)
+}
+
+// stop releases the client connections and the server, in that order, so a
+// control case whose handlers are still blocked can still be torn down.
+func (h *drainHarness) stop(t *testing.T) {
+	t.Helper()
+	//: closing the bodies severs the connections, which ends the request
+	//: contexts, which ends the streams the control case left blocked.
+	for _, body := range h.bodies {
+		//: a body already closed by the server is not a test failure, but a
+		//: body that refuses to close is worth seeing in the log.
+		if err := body.Close(); err != nil {
+			t.Logf("closing a stream body: %v", err)
+		}
+	}
+	//: idle connections are the transports', not the server's.
+	for _, client := range h.clients {
+		client.CloseIdleConnections()
+	}
+	h.server.Close()
+}
+
+// TestWriteDeadlineIsRefreshedOnEveryFrame covers a branch that, until this
+// test, NOTHING in the repository executed.
+//
+// `httptest.ResponseRecorder` implements Flush but not SetWriteDeadline, and so
+// does this package's own `capture` double — so every existing test built a
+// stream with `deadlines` false and skipped the per-frame refresh entirely. The
+// path is not incidental: it is the whole reason the stream replaces
+// http.Server's response-wide WriteTimeout, which would otherwise cut every
+// stream at a fixed instant. A benchmark measuring only the recorder harness
+// understates a small send by 2.11× for the same reason (see BENCH.md).
+//
+// MUTATION-CHECKED. Hoisting the refresh out of write into New — "set it once",
+// the change this design exists to refuse — fails it at `SetWriteDeadline was
+// called 1 time(s), want 4 (one probe + one per frame)`.
+func TestWriteDeadlineIsRefreshedOnEveryFrame(t *testing.T) {
+	t.Parallel()
+	w := &deadlineWriter{header: make(http.Header)}
+	stream, err := sse.New(w, httptest.NewRequest(http.MethodGet, "/events", nil), sse.WithoutKeepAlive())
+	if err != nil {
+		t.Fatalf("New() = %v, want a stream", err)
+	}
+	defer closeStream(t, stream)
+	//: the keep-alive is off, so every deadline after the probe is a frame's.
+	for i := range deadlineFrames {
+		if serr := stream.Send(corenet.SSEEventValue{Data: "tick"}); serr != nil {
+			t.Fatalf("Send(%d) = %v, want nil", i, serr)
+		}
+	}
+	//: one probe at construction plus one per frame.
+	if got, want := len(w.deadlines), deadlineFrames+1; got != want {
+		t.Fatalf("SetWriteDeadline was called %d time(s), want %d (one probe + one per frame)", got, want)
+	}
+	//: the probe is the ZERO time — that is how ResponseController is asked
+	//: whether deadlines are supported without imposing one.
+	if !w.deadlines[0].IsZero() {
+		t.Errorf("the construction probe set %v, want the zero time", w.deadlines[0])
+	}
+	//: every later deadline is a real, strictly future bound, and each is later
+	//: than the one before it — which is what "refreshed" means and what a
+	//: single response-wide deadline could not do.
+	for i, deadline := range w.deadlines[1:] {
+		if deadline.IsZero() {
+			t.Fatalf("frame %d set the zero deadline, want a bound", i)
+		}
+		//: a later frame must not inherit an earlier frame's expiry.
+		if i > 0 && !deadline.After(w.deadlines[i]) {
+			t.Errorf("frame %d's deadline %v is not after frame %d's %v", i, deadline, i-1, w.deadlines[i])
+		}
+	}
+}
+
+// TestAFailingWriteDeadlineDegradesRatherThanFailingTheFrame covers the other
+// half of the same untested branch: `if derr := ...; derr != nil`.
+//
+// A deadline that cannot be set is not worth failing a frame over — the write
+// below it reports any real problem — so the stream records that it cannot bound
+// its writes and carries on. The alternative, failing the send, would kill a
+// working stream over a bound it was applying as a courtesy.
+//
+// MUTATION-CHECKED, both halves. Returning the SetWriteDeadline error from write
+// instead of clearing s.deadlines fails it at `Send after a refused deadline =
+// [0.2.11.25 SSE_STREAM_CLOSED] The event stream is closed, want nil`. Dropping
+// the `s.deadlines = false` assignment while still swallowing the error fails it
+// at `the stream kept asking after a refusal: 4 call(s), want 2` — the branch
+// still degrades, but it pays for a call it already knows will fail on every
+// frame for the rest of the stream's life.
+func TestAFailingWriteDeadlineDegradesRatherThanFailingTheFrame(t *testing.T) {
+	t.Parallel()
+	w := &deadlineWriter{header: make(http.Header)}
+	stream, err := sse.New(w, httptest.NewRequest(http.MethodGet, "/events", nil), sse.WithoutKeepAlive())
+	if err != nil {
+		t.Fatalf("New() = %v, want a stream", err)
+	}
+	defer closeStream(t, stream)
+	//: the first frame's deadline is refused, from here on.
+	w.refuse()
+	for range deadlineFrames {
+		//: the frame must still go out; a refused deadline is not a refused
+		//: write.
+		if serr := stream.Send(corenet.SSEEventValue{Data: "tick"}); serr != nil {
+			t.Fatalf("Send after a refused deadline = %v, want nil", serr)
+		}
+	}
+	//: the probe, then exactly ONE refused attempt — after which the stream
+	//: stops asking rather than paying for a call it knows will fail.
+	if got := len(w.deadlines); got != 2 {
+		t.Fatalf("the stream kept asking after a refusal: %d call(s), want 2", got)
+	}
+	//: and every frame is on the wire, which is the point.
+	if got, want := strings.Count(w.body(), "data: tick"), deadlineFrames; got != want {
+		t.Errorf("%d frame(s) reached the wire, want %d", got, want)
+	}
+}
+
+// deadlineWriter is the response shape a real socket has: it flushes AND it
+// accepts a write deadline. It exists because neither httptest.ResponseRecorder
+// nor this file's `capture` does the second, so without it the per-frame
+// deadline path has no test and no benchmark.
+type deadlineWriter struct {
+	mu        sync.Mutex
+	header    http.Header
+	buf       bytes.Buffer
+	deadlines []time.Time
+	refusing  bool
+}
+
+// Header implements http.ResponseWriter.
+func (w *deadlineWriter) Header() http.Header {
+	//: the map itself, so a caller's Set is visible here.
+	return w.header
+}
+
+// Write implements http.ResponseWriter.
+func (w *deadlineWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	//: bytes.Buffer never fails a write, so a failure here would be the SDK's.
+	return w.buf.Write(p)
+}
+
+// WriteHeader implements http.ResponseWriter.
+func (w *deadlineWriter) WriteHeader(int) {}
+
+// Flush implements http.Flusher, which is the streaming contract.
+func (w *deadlineWriter) Flush() {}
+
+// SetWriteDeadline implements the interface http.ResponseController looks for,
+// recording every deadline it is handed so the test can assert on the sequence.
+func (w *deadlineWriter) SetWriteDeadline(deadline time.Time) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.deadlines = append(w.deadlines, deadline)
+	//: once refusing, every later call fails — which is what a socket whose
+	//: connection has gone does.
+	if w.refusing {
+		//: the refusal a real ResponseWriter reports when it cannot bound.
+		return errDeadlineRefused
+	}
+	//: accepted.
+	return nil
+}
+
+// refuse makes every later SetWriteDeadline fail.
+func (w *deadlineWriter) refuse() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.refusing = true
+}
+
+// body returns what has reached the wire.
+func (w *deadlineWriter) body() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	//: a copy, so the caller cannot race the stream's own writes.
+	return w.buf.String()
 }

@@ -51,3 +51,10 @@
 # package CLAUDE.md, and both were unguarded until 2026-09. Each is
 # mutation-checked in its own doc comment.
 //internal/service/net/websocket:websocket_test
+# The two allocation claims an event stream is sold on, neither of which had a
+# gate: initialFrameCapacity's "a steady-state send allocates nothing" (true,
+# but only above the buffer's high-water mark) and the price of the retention
+# ceiling that now bounds that mark — an outsized frame must allocate, because
+# the alternative is pinning its size for the stream's whole life. Each is
+# mutation-checked in its own doc comment.
+//internal/service/net/sse:sse_test
