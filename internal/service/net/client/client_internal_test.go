@@ -2,7 +2,9 @@
 package client
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -478,6 +480,197 @@ func Test_Client_applyHeaders(t *testing.T) {
 		for k, want := range c.want {
 			if got := req.Header.Get(k); got != want {
 				t.Errorf("%s = %q, want %q", k, got, want)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// hintedReader hands back a fixed payload while ANNOUNCING whatever length the
+// test wants, which is the only way to model a peer whose Content-Length and
+// body disagree.
+type hintedReader struct {
+	// payload is what the peer actually sends.
+	payload []byte
+	// off is the read cursor.
+	off int
+}
+
+// Read implements io.Reader over the remaining payload.
+func (r *hintedReader) Read(p []byte) (n int, err error) {
+	//: the payload is exhausted.
+	if r.off >= len(r.payload) {
+		//: report the end exactly as a transport body would.
+		return 0, io.EOF
+	}
+	n = copy(p, r.payload[r.off:])
+	r.off += n
+	//: hand back what fitted in the caller's buffer.
+	return n, nil
+}
+
+// Test_readBody pins that the peer's Content-Length is a HINT and never a
+// promise, in both directions.
+//
+// The pre-sizing exists because io.ReadAll starts at bytes.MinRead and grows by
+// append, so it allocates roughly twice a large body and copies it a dozen
+// times. Taking the hint at face value would trade that for something worse: a
+// peer answering ten bytes with a Content-Length of defaultMaxResponseSize
+// would make this client reserve the whole ceiling per request for ten bytes of
+// work, which is a memory-amplification introduced by a performance fix.
+//
+// So the hint is bounded by maxPresizedRead and ignored above it, and the
+// reserved capacity is asserted here rather than left to the benchmark — a
+// benchmark is not run in CI and this is the bound that keeps a lying peer
+// cheap.
+//
+// MUTATION: removing the `hint > maxPresizedRead` clause so the claim is
+// believed all the way to the ceiling fails the "lying at the ceiling" case
+// with `got ... bytes of capacity, want at most ...` — the reservation reported
+// there is defaultMaxResponseSize plus bytes.MinRead, bought with a ten-byte
+// reply, which is exactly the amplification the bound refuses.
+func Test_readBody(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the peer's behaviour.
+		name string
+		// sent is how many bytes the peer actually sends.
+		sent int
+		// hint is the Content-Length it announces; negative means unknown.
+		hint int64
+		// wantMaxCap bounds the capacity the read may reserve.
+		wantMaxCap int
+	}
+	tests := []tc{
+		{name: "an honest small body", sent: 1024, hint: 1024, wantMaxCap: 1024 + bytes.MinRead},
+		{name: "an honest body at the bound", sent: 4096, hint: 4096, wantMaxCap: 4096 + bytes.MinRead},
+		{
+			//: -1 is what net/http reports for a chunked or HTTP/2 body.
+			name: "an unknown length", sent: 4096, hint: -1, wantMaxCap: 3 * 4096,
+		},
+		{name: "no length at all", sent: 512, hint: 0, wantMaxCap: 3 * 512},
+		{
+			//: past the bound nothing is reserved on the peer's word at all.
+			name: "a body larger than the bound", sent: 3 * int(maxPresizedRead), hint: 3 * maxPresizedRead,
+			wantMaxCap: 3 * 3 * int(maxPresizedRead),
+		},
+		{
+			//: the lie the bound exists for.
+			name: "a peer lying at the ceiling", sent: 10, hint: defaultMaxResponseSize,
+			wantMaxCap: int(maxPresizedRead) + bytes.MinRead,
+		},
+		{
+			//: the most a lying peer can ever extract.
+			name: "a peer lying at the bound", sent: 10, hint: maxPresizedRead,
+			wantMaxCap: int(maxPresizedRead) + bytes.MinRead,
+		},
+		{
+			//: a peer that undersells itself must not be truncated.
+			name: "a peer that sends more than it claimed", sent: 8192, hint: 16,
+			wantMaxCap: 3 * 8192,
+		},
+		{name: "an empty body with a length", sent: 0, hint: 0, wantMaxCap: bytes.MinRead},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		payload := make([]byte, c.sent)
+		for i := range payload {
+			payload[i] = byte(i)
+		}
+
+		got, err := readBody(&hintedReader{payload: payload}, c.hint)
+		if err != nil {
+			t.Fatalf("readBody = %v, want nil", err)
+		}
+		//: every byte the peer sent must arrive, whatever it announced.
+		if !bytes.Equal(got, payload) {
+			t.Fatalf("read %d bytes, want the %d the peer sent", len(got), c.sent)
+		}
+		//: and the reservation must never scale with the peer's claim.
+		if cap(got) > c.wantMaxCap {
+			t.Errorf("a peer claiming %d bytes for %d got %d bytes of capacity, want at most %d",
+				c.hint, c.sent, cap(got), c.wantMaxCap)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_canonicalHeaders pins that the configured default names are normalised
+// ONCE, at construction.
+//
+// http.Header.Get and http.Header.Set both canonicalise their argument, and
+// that conversion allocates for a name that is neither already canonical nor
+// one of net/http's interned common names. A caller who writes
+// "x-request-source" — and nothing tells them not to — therefore paid two
+// allocations per header per request for a configuration that was never wrong.
+//
+// MUTATION: returning `configured` unchanged fails every mis-spelled case at
+// once — `"User-Agent" = "", want "sdk/1"` beside
+// `key "USER-AGENT" survived canonicalisation`, and the same pair for "accept"
+// and "x-request-source". The map handed to applyHeaders would still carry the
+// caller's spelling, so every request would re-derive the canonical form.
+func Test_canonicalHeaders(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the configured spelling.
+		name string
+		// configured is what the caller wrote.
+		configured map[string]string
+		// want is the map applyHeaders must be given.
+		want map[string]string
+	}
+	tests := []tc{
+		{name: "no defaults at all", configured: nil, want: nil},
+		{name: "an empty map", configured: map[string]string{}, want: nil},
+		{
+			name:       "an already canonical name is untouched",
+			configured: map[string]string{"X-Request-Source": "sdk"},
+			want:       map[string]string{"X-Request-Source": "sdk"},
+		},
+		{
+			name:       "a lowercase custom name is canonicalised",
+			configured: map[string]string{"x-request-source": "sdk"},
+			want:       map[string]string{"X-Request-Source": "sdk"},
+		},
+		{
+			name:       "a lowercase common name is canonicalised too",
+			configured: map[string]string{"accept": "application/json"},
+			want:       map[string]string{"Accept": "application/json"},
+		},
+		{
+			name:       "a shouted name is canonicalised",
+			configured: map[string]string{"USER-AGENT": "sdk/1"},
+			want:       map[string]string{"User-Agent": "sdk/1"},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+
+		got := canonicalHeaders(c.configured)
+
+		if len(got) != len(c.want) {
+			t.Fatalf("canonicalHeaders produced %d entries, want %d", len(got), len(c.want))
+		}
+		for name, value := range c.want {
+			//: the canonical spelling must be the KEY, not merely reachable.
+			if got[name] != value {
+				t.Errorf("%q = %q, want %q", name, got[name], value)
+			}
+		}
+		for name := range c.configured {
+			//: a name the caller mis-spelled must not survive as a second key.
+			if _, ok := got[name]; ok && http.CanonicalHeaderKey(name) != name {
+				t.Errorf("key %q survived canonicalisation", name)
 			}
 		}
 	}

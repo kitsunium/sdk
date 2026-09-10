@@ -286,7 +286,7 @@ func Test_requestOf(t *testing.T) {
 			t.Fatalf("parsing %q: %v", c.target, perr)
 		}
 
-		got := requestOf(req)
+		got := requestOf(req, req.URL.EscapedPath())
 
 		if got.Method != http.MethodGet {
 			t.Errorf("Method = %q, want GET", got.Method)
@@ -307,5 +307,61 @@ func Test_requestOf(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// Test_guard_handsThePolicyTheEscapedPath pins the ONE thing that could go
+// wrong in reading url.URL.EscapedPath once instead of twice.
+//
+// RoundTrip used to call it separately for the observation record and for the
+// value the policy judges. It now reads it once and passes it to both, which
+// costs one scan and one allocation less on a percent-encoded path — and puts a
+// plain string parameter where a method call used to be. A later contributor
+// passing req.URL.Path instead compiles, reads fine, and silently hands every
+// policy the DECODED path: `%2e%2e` becomes `..`, and an allowlist written
+// against the wire form stops matching what is on the wire.
+//
+// The record the hook receives is checked with it, because it is the same
+// string and a regression would take both.
+//
+// MUTATION: passing req.URL.Path to requestOf in RoundTrip fails with
+// `the policy judged "/v1/../a%2fb", want "/v1/%2e%2e/a%2Fb"` — the decoded
+// form, in which the dot segment is a literal ".." no encoded-form rule fires
+// on and the encoded separator has become a real one.
+func Test_guard_handsThePolicyTheEscapedPath(t *testing.T) {
+	t.Parallel()
+	const target string = "https://sdm:8443/v1/%2e%2e/a%2Fb"
+	const want string = "/v1/%2e%2e/a%2Fb"
+	var judged string
+	var observed []corenet.CallValue
+	g := &guard{
+		next:   &stubTransport{status: http.StatusOK, body: "ok", calls: new(0)},
+		policy: corenet.PolicyFunc(func(req corenet.RequestValue) error { judged = req.EscapedPath; return nil }),
+		hook:   func(call corenet.CallValue) { observed = append(observed, call) },
+	}
+	req := newGuardRequest(t, http.MethodGet, target)
+	//: the fixture is only meaningful if url.URL kept a distinct raw form.
+	if req.URL.RawPath == "" || req.URL.RawPath == req.URL.Path {
+		t.Fatalf("the fixture needs a URL whose escaped and decoded paths differ; RawPath = %q, Path = %q",
+			req.URL.RawPath, req.URL.Path)
+	}
+
+	resp, err := g.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip = %v, want nil", err)
+	}
+	//: the policy must judge the form that goes on the wire.
+	if judged != want {
+		t.Errorf("the policy judged %q, want %q", judged, want)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Fatalf("closing the body: %v", cerr)
+	}
+	if len(observed) != 1 {
+		t.Fatalf("the hook fired %d times, want 1", len(observed))
+	}
+	//: and the record must carry the same string, not the decoded one.
+	if observed[0].Path != want {
+		t.Errorf("the record carries path %q, want %q", observed[0].Path, want)
 	}
 }

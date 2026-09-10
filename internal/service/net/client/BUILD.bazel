@@ -40,6 +40,8 @@ go_test(
     name = "client_test",
     srcs = [
         "capped_body_internal_test.go",
+        "client_alloc_internal_test.go",
+        "client_bench_test.go",
         "client_external_test.go",
         "client_internal_test.go",
         "conjunction_internal_test.go",
@@ -47,6 +49,7 @@ go_test(
         "deny_policy_internal_test.go",
         "guard_internal_test.go",
         "method_policy_internal_test.go",
+        "path_equivalence_internal_test.go",
         "path_internal_test.go",
         "path_policy_internal_test.go",
         "policies_external_test.go",
