@@ -29,6 +29,7 @@ alias(
 go_test(
     name = "hcl_test",
     srcs = [
+        "codec_bench_test.go",
         "codec_external_test.go",
         "codec_internal_test.go",
     ],
@@ -36,6 +37,8 @@ go_test(
     deps = [
         "//internal/core/codec",
         "//internal/kernel/errs",
+        "//internal/service/codec/cbor",
+        "//internal/service/codec/json",
     ],
 )
 

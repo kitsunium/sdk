@@ -23,6 +23,7 @@ alias(
 go_test(
     name = "xchacha_test",
     srcs = [
+        "xchacha_bench_test.go",
         "xchacha_external_test.go",
         "xchacha_internal_test.go",
     ],
@@ -30,5 +31,7 @@ go_test(
     deps = [
         "//internal/core/crypto",
         "//internal/kernel/errs",
+        "//internal/service/crypto/aesgcm",
+        "@org_golang_x_crypto//chacha20poly1305",
     ],
 )

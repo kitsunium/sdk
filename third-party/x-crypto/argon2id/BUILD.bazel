@@ -23,6 +23,7 @@ alias(
 go_test(
     name = "argon2id_test",
     srcs = [
+        "argon2id_bench_test.go",
         "argon2id_external_test.go",
         "argon2id_internal_test.go",
     ],
@@ -30,5 +31,7 @@ go_test(
     deps = [
         "//internal/core/crypto",
         "//internal/kernel/errs",
+        "//internal/service/crypto/pbkdf2pw",
+        "@org_golang_x_crypto//argon2",
     ],
 )
