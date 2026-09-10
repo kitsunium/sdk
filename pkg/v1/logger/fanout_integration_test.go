@@ -3,6 +3,7 @@
 package logger_test
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/logger"
@@ -38,6 +39,39 @@ import (
 // sibling would corrupt the measurement). Run via
 // `bazel test --config=pure //pkg/v1/logger:logger_test`, covered by the
 // race-off alloc lane in tools/alloc-lane-targets.txt (rule 12).
+// fanoutRuns is the iteration count both arms share. It is large enough that a
+// per-record regression is unmistakable and small enough to stay fast.
+const fanoutRuns int = 2000
+
+// mallocsOver totals the allocations f performs across runs, and exists because
+// testing.AllocsPerRun cannot see an amortised one. Its last line is
+// `float64(mallocs / uint64(runs))` — an INTEGER division, documented in the
+// stdlib as being there so a caller can write `== 1` instead of `< 2`. Any
+// defect allocating less than once per call therefore reports exactly 0.0: six
+// allocations across five hundred calls is "0". A slice that doubles is exactly
+// such a defect, and the sibling guard in
+// internal/service/writer/levelgate found one that way, with a mutation that
+// PASSED against AllocsPerRun.
+//
+// A total is not subject to that rounding. The bookkeeping mirrors
+// AllocsPerRun's otherwise — pin GOMAXPROCS so no other P allocates into the
+// count, warm up so lazily-initialised state is not attributed to the loop, and
+// read the counter either side. No runtime.GC(): an explicit collection returns
+// before its sweep finishes, so the residual work allocates INSIDE the window.
+func mallocsOver(runs int, f func()) uint64 {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	//: warm up so first-call initialisation is not counted as steady state.
+	f()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range runs {
+		f()
+	}
+	runtime.ReadMemStats(&after)
+	//: Mallocs is cumulative and monotonic, so the difference is the total.
+	return after.Mallocs - before.Mallocs
+}
+
 func TestFanoutWidthAddsNoAllocation(t *testing.T) {
 	ctx := t.Context()
 	type tc struct {
@@ -52,7 +86,7 @@ func TestFanoutWidthAddsNoAllocation(t *testing.T) {
 	}
 	//: emitAllocs wires a Logger fanning out to width discard sinks and reports
 	//: what one Send costs on it.
-	emitAllocs := func(t *testing.T, width int) float64 {
+	emitAllocs := func(t *testing.T, width int) uint64 {
 		t.Helper()
 		//: appended rather than indexed into a sized slice: branches is a slice
 		//: of INTERFACES, so the zero value a fill would write is nil — and
@@ -73,7 +107,7 @@ func TestFanoutWidthAddsNoAllocation(t *testing.T) {
 		}
 		//: warm the pool so the measured runs hit the recycled-builder path.
 		logger.Build(lg, logger.LevelInfo).Str("warm", "up").Send(ctx, "warm")
-		return testing.AllocsPerRun(2000, func() {
+		return mallocsOver(fanoutRuns, func() {
 			b := logger.Build(lg, logger.LevelInfo).Str("k1", "v1").Int("n1", 1)
 			allocSink = b
 			b.Send(ctx, "msg")
@@ -86,7 +120,7 @@ func TestFanoutWidthAddsNoAllocation(t *testing.T) {
 		//: strictly equal, never "at most base+k": widening a fan-out must not
 		//: show up in the allocation profile at all.
 		if got != base {
-			t.Errorf("%s: allocs/op at width %d = %v, want %v (the width-1 baseline) — fan-out width must cost nothing", tc.name, tc.width, got, base)
+			t.Errorf("%s: %d emits at width %d performed %d allocations, want %d (the width-1 baseline) — fan-out width must cost nothing", tc.name, fanoutRuns, tc.width, got, base)
 		}
 	}
 	for _, tc := range tests {
