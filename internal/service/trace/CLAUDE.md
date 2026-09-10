@@ -205,8 +205,33 @@ Four decisions:
 
 ## Benchmarks
 
-There are none, and therefore no `BENCH.md` (rule 9). The allocation claim this
-SDK defends is on `metrics`' observation path; a span is a per-operation object
-that allocates by construction, and a benchmark here would pin a number nothing
-depends on. Batching (ADR 0051 §Deferred) brings a measurable hot path and a
-`BENCH.md` with it.
+There are none in THIS package, and therefore no `BENCH.md` here (rule 9 gates on
+a bench file having a sibling report, not on a package having one). The numbers
+live one layer up, in `pkg/v1/trace/BENCH.md`: the façade is a set of type
+aliases and delegating constructors, so a benchmark there exercises this code.
+
+**The paragraph that used to sit here said a benchmark "would pin a number
+nothing depends on", and that was already false when it was written.** The commit
+`perf(trace): a span you do not record still costs 403 ns, and that is
+propagation` is justified by exactly such a number — an unsampled span is not
+free, because it still carries a context, and 403 ns against 728 ns sampled is
+the number a caller decides a sampling rate with. The old wording reasoned about
+spans only and never mentioned the two other per-operation units this package
+owns.
+
+Those two are still unmeasured, and naming them is more useful than the sentence
+they replace:
+
+- **`serveTraced`** runs per HTTP REQUEST, not per span, and adds its own heap
+  escapes on top of `Start`'s — the four-attribute literal, the status wrapper,
+  the `r.WithContext` request copy, the `SetAttrs` variadic. Against the
+  61-allocation baseline a full SDK HTTP request already measures at
+  (`internal/service/net/server/BENCH.md`), the question is the allocation RATE
+  it adds, not the latency, and that is what decides whether tracing belongs in a
+  default middleware stack.
+- **`Recorder.record`** takes an exclusive `Lock` on every span end, from every
+  request goroutine, on an `RWMutex` whose read side runs once per export. That
+  is a write-mostly path on a read-optimised lock, and nothing in this repository
+  measures it under concurrency.
+
+Batching (ADR 0051 §Deferred) brings a third.
