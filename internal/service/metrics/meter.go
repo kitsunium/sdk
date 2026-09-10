@@ -46,6 +46,17 @@ type memMeter struct {
 	// observers holds every registered asynchronous instrument, read once per
 	// Collect. Guarded by mu.
 	observers []observer
+	// descriptions maps an instrument NAME to its docstring. Guarded by mu,
+	// and deliberately NIL until the first Describe: a nil map reads as the
+	// empty one, so a meter nobody documents allocates nothing here and
+	// Collect still finds "" for every name. See meter_describe.go.
+	//
+	// It is a map of its own rather than a field on nameState because a
+	// description is NON-IDENTIFYING (the OTel data model says so) and carries
+	// no instrument kind, while every nameState does. Storing it there would
+	// force Describe to invent a kind for a name that may never mint an
+	// instrument.
+	descriptions map[string]string
 }
 
 // NewMeter returns a fresh in-memory Meter with every MeterConfig knob at its
@@ -207,9 +218,9 @@ func (m *memMeter) Collect() coremetrics.SnapshotValue {
 		Scope:      m.scope,
 		StartTime:  m.startTime,
 		Time:       now,
-		Sums:       collectSums(m.sums.byKey, m.names, m.temporality, delta),
-		Gauges:     collectGauges(m.gauges.byKey, m.names),
-		Histograms: collectHistograms(m.histograms.byKey, m.names, m.temporality, delta),
+		Sums:       collectSums(m.sums.byKey, m.names, m.descriptions, m.temporality, delta),
+		Gauges:     collectGauges(m.gauges.byKey, m.names, m.descriptions),
+		Histograms: collectHistograms(m.histograms.byKey, m.names, m.descriptions, m.temporality, delta),
 	}
 	m.mu.RUnlock()
 
@@ -228,17 +239,19 @@ func (m *memMeter) Collect() coremetrics.SnapshotValue {
 // meter's temporality and each name's monotonicity onto the metric.
 func collectSums(
 	store map[string]*seriesEntry[*memSum], names map[string]*nameState,
-	temporality coremetrics.Temporality, delta bool,
+	descriptions map[string]string, temporality coremetrics.Temporality, delta bool,
 ) map[string]coremetrics.SumMetricValue {
 	//: one arena for every sum series, carved per name.
 	out := make(map[string]coremetrics.SumMetricValue, sizeGroups(names, len(store)))
 	//: the two facts OTel puts on the METRIC rather than on the point.
 	for name, slot := range carve[coremetrics.SumValue](len(store), names, groupSum) {
 		//: monotonicity belongs to the name — every series under
-		//: http_requests_total is a counter.
+		//: http_requests_total is a counter. So does the description, which is
+		//: "" for an undescribed name and for every name when the map is nil.
 		out[name] = coremetrics.SumMetricValue{
 			Temporality: temporality,
 			Monotonic:   slot.kind.monotonic(),
+			Description: descriptions[name],
 			Points:      slot.window,
 		}
 	}
@@ -265,14 +278,18 @@ func collectSums(
 // carries no temporality, so neither does this walk.
 func collectGauges(
 	store map[string]*seriesEntry[*memGauge], names map[string]*nameState,
+	descriptions map[string]string,
 ) map[string]coremetrics.GaugeMetricValue {
 	//: same grouping as sums.
 	out := make(map[string]coremetrics.GaugeMetricValue, sizeGroups(names, len(store)))
-	//: points and nothing else, exactly like OTLP's Gauge message — a sampled
+	//: points and a docstring, exactly like OTLP's Gauge message — a sampled
 	//: reading covers no window, so there is no temporality to carry.
 	for name, slot := range carve[coremetrics.GaugeValue](len(store), names, groupGauge) {
 		//: the envelope is the window.
-		out[name] = coremetrics.GaugeMetricValue{Points: slot.window}
+		out[name] = coremetrics.GaugeMetricValue{
+			Description: descriptions[name],
+			Points:      slot.window,
+		}
 	}
 	//: snapshot each series' instantaneous reading.
 	for _, entry := range store {
@@ -296,14 +313,18 @@ func collectGauges(
 // collectHistograms groups every histogram series under its instrument name.
 func collectHistograms(
 	store map[string]*seriesEntry[*memHistogram], names map[string]*nameState,
-	temporality coremetrics.Temporality, delta bool,
+	descriptions map[string]string, temporality coremetrics.Temporality, delta bool,
 ) map[string]coremetrics.HistogramMetricValue {
 	//: same grouping as sums.
 	out := make(map[string]coremetrics.HistogramMetricValue, sizeGroups(names, len(store)))
 	//: a histogram has a temporality but no monotonicity.
 	for name, slot := range carve[coremetrics.HistogramValue](len(store), names, groupHistogram) {
 		//: the envelope carries the window it covers.
-		out[name] = coremetrics.HistogramMetricValue{Temporality: temporality, Points: slot.window}
+		out[name] = coremetrics.HistogramMetricValue{
+			Temporality: temporality,
+			Description: descriptions[name],
+			Points:      slot.window,
+		}
 	}
 	//: snapshot each series' bucketed distribution.
 	for _, entry := range store {

@@ -11,8 +11,9 @@
 // long-removed labels field at 1.
 //
 // Every field this SDK does not produce is ABSENT rather than always-empty
-// (rule 5): schemaUrl, description, unit, flags, exemplars,
-// droppedAttributesCount, and a histogram point's min/max.
+// (rule 5): schemaUrl, unit, flags, exemplars, droppedAttributesCount, and a
+// histogram point's min/max. `description` joined the produced set in ADR 0067
+// and is omitted only when the metric carries none — see otlpMetric.
 package metrics
 
 // otlpRequest is ExportMetricsServiceRequest — the body of a POST to
@@ -53,17 +54,28 @@ type otlpScope struct {
 	Version string `json:"version,omitempty"`
 }
 
-// otlpMetric is Metric: name (1) plus the data oneof — gauge (5), sum (7),
-// histogram (9). Exactly one of the three pointers is non-nil, which is how a
-// oneof is spelled in Go.
+// otlpMetric is Metric: name (1) + description (2), plus the data oneof —
+// gauge (5), sum (7), histogram (9). Exactly one of the three pointers is
+// non-nil, which is how a oneof is spelled in Go.
 //
-// description (2) and unit (3) are absent: a Meter records neither, and an
-// empty string for each would be a placeholder.
+// description is `string description = 2;` in the schema — a PLAIN proto3
+// string, with no `optional` and therefore NO explicit presence. "" and absent
+// are the same value to a receiver, so this is the opposite case from the three
+// fields ADR 0048 emits at their zero: `asInt`/`asDouble` are oneof members and
+// a histogram point's `sum` is `optional double`, both of which HAVE presence,
+// and `isMonotonic` is emitted because false is its surprising answer. An empty
+// description has no surprising answer — it means nobody wrote one — so it is
+// omitted, which is also what the proto3-JSON default mapping does with a
+// default-valued field.
+//
+// unit (3) is still absent: a Meter records none, and an empty string for it
+// would be a placeholder (rule 5).
 type otlpMetric struct {
-	Name      string         `json:"name"`
-	Gauge     *otlpGauge     `json:"gauge,omitempty"`
-	Sum       *otlpSum       `json:"sum,omitempty"`
-	Histogram *otlpHistogram `json:"histogram,omitempty"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Gauge       *otlpGauge     `json:"gauge,omitempty"`
+	Sum         *otlpSum       `json:"sum,omitempty"`
+	Histogram   *otlpHistogram `json:"histogram,omitempty"`
 }
 
 // otlpGauge is Gauge: dataPoints (1) and nothing else. There is no

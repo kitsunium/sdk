@@ -9,6 +9,7 @@ go_library(
         "attr_value.go",
         "codes.go",
         "counter.go",
+        "describer.go",
         "errors.go",
         "exporter.go",
         "full_meter.go",
@@ -57,6 +58,7 @@ go_test(
     name = "metrics_test",
     srcs = [
         "attr_bench_test.go",
+        "describer_external_test.go",
         "exporter_external_test.go",
         "exporter_internal_test.go",
         "model_external_test.go",

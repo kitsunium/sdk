@@ -190,6 +190,41 @@ func TestOverflowLookupIsAllocationFree(t *testing.T) {
 	}
 }
 
+// TestDescribedMeterLookupIsAllocationFree pins that ADR 0067 cost the
+// observation path nothing.
+//
+// A description is wiring-time state, and the whole shape of the feature —
+// Describe(name, …) on a sibling instead of a description parameter threaded
+// through Counter — was chosen so that the fetch path never reads it. This is
+// the executable version of that claim: the same fetch, on a meter that HAS a
+// description map, still allocates zero. Threading the docstring through the
+// instrument constructors would have put a second string on a variadic call the
+// compiler has to prove non-escaping, which is exactly the proof this whole file
+// exists to protect.
+func TestDescribedMeterLookupIsAllocationFree(t *testing.T) {
+	labels := []coremetrics.AttrValue{
+		coremetrics.String("status", "200"),
+		coremetrics.String("method", "GET"),
+	}
+	m := NewMeter()
+	//: the map exists and is non-empty for the whole measurement.
+	m.(coremetrics.Describer).Describe("http_requests_total", "Requests served")
+	//: create the series first — this gate is about RESOLVING one.
+	m.Counter("http_requests_total", labels...).Inc()
+
+	got := testing.AllocsPerRun(allocRuns, func() {
+		m.Counter("http_requests_total", labels...).Inc()
+	})
+	if got != 0 {
+		t.Errorf("a fetch on a described meter allocates %v times per call, want 0", got)
+	}
+	//: and the description really is on the snapshot, so the gate is not
+	//: passing by measuring a meter that quietly dropped it.
+	if help := m.Collect().Sums["http_requests_total"].Description; help != "Requests served" {
+		t.Fatalf("description = %q, want %q", help, "Requests served")
+	}
+}
+
 // manyAttrs builds n distinct attributes with keys in descending order, so the
 // sort has real work to do.
 func manyAttrs(n int) []coremetrics.AttrValue {

@@ -108,6 +108,50 @@ func BenchmarkCollect_1000Series(b *testing.B) {
 	}
 }
 
+// BenchmarkCounterLookup_3Attrs_Described is BenchmarkCounterLookup_3Attrs on a
+// meter that HAS a description map. It exists to make the ADR 0067 claim
+// falsifiable: a description is wiring-time state that the fetch path never
+// reads, so these two numbers must be the same line.
+func BenchmarkCounterLookup_3Attrs_Described(b *testing.B) {
+	m := NewMeter()
+	m.(coremetrics.Describer).Describe("http_requests_total", "Requests served, by route and status")
+	m.Counter("http_requests_total", benchAttrs...).Inc()
+	b.ReportAllocs()
+	for b.Loop() {
+		m.Counter("http_requests_total", benchAttrs...).Inc()
+	}
+}
+
+// BenchmarkCollect_1000Names_Described is where the description IS read: once
+// per instrument name, on the scrape path, out of a map with a thousand entries
+// in it. Against BenchmarkCollect_1000Names it prices the whole feature.
+func BenchmarkCollect_1000Names_Described(b *testing.B) {
+	m := NewMeter()
+	describer := m.(coremetrics.Describer)
+	for i := range 1000 {
+		name := "http_requests_total_" + strconv.Itoa(i)
+		describer.Describe(name, "Requests served by handler "+strconv.Itoa(i))
+		m.Counter(name).Inc()
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		m.Collect()
+	}
+}
+
+// BenchmarkDescribe is the wiring-time call itself, on its idempotent path — the
+// shape a caller who describes from two packages actually takes. It is here for
+// completeness rather than because it is on any hot path: it runs once per
+// instrument name at start-up.
+func BenchmarkDescribe(b *testing.B) {
+	describer := NewMeter().(coremetrics.Describer)
+	describer.Describe("http_requests_total", "Requests served")
+	b.ReportAllocs()
+	for b.Loop() {
+		describer.Describe("http_requests_total", "Requests served")
+	}
+}
+
 // BenchmarkHistogramRecord is the instrument arithmetic, unchanged by attributes.
 func BenchmarkHistogramRecord(b *testing.B) {
 	m := NewMeter()

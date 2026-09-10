@@ -134,6 +134,7 @@ type otlpDouble float64
 //	  .Sums[name]        ->   .scopeMetrics[0].metrics[] {name, sum{…}}
 //	  .Gauges[name]      ->   metrics[] {name, gauge{…}}
 //	  .Histograms[name]  ->   metrics[] {name, histogram{…}}
+//	  .*[name].Description ->  metrics[].description, omitted when empty
 //	  .StartTime/.Time   ->   copied DOWN onto every data point
 //
 // The two single-element levels are single because one Meter has exactly one
@@ -252,7 +253,7 @@ func appendOTLPSums(list []otlpMetric, sums map[string]coremetrics.SumMetricValu
 		}
 		//: one Metric per name, with the Sum envelope carrying the two facts
 		//: the OTel model attaches to the metric rather than to a point.
-		list = append(list, otlpMetric{Name: name, Sum: &otlpSum{
+		list = append(list, otlpMetric{Name: name, Description: metric.Description, Sum: &otlpSum{
 			DataPoints:             otlpSumPoints(metric.Points, start, end),
 			AggregationTemporality: temporality,
 			IsMonotonic:            metric.Monotonic,
@@ -288,7 +289,7 @@ func appendOTLPGauges(list []otlpMetric, gauges map[string]coremetrics.GaugeMetr
 	//: same name-ordered walk as sums.
 	for _, name := range sortedKeys(gauges) {
 		//: one Metric per name; the Gauge envelope has a single field.
-		list = append(list, otlpMetric{Name: name, Gauge: &otlpGauge{
+		list = append(list, otlpMetric{Name: name, Description: gauges[name].Description, Gauge: &otlpGauge{
 			DataPoints: otlpGaugePoints(gauges[name].Points, start, end),
 		}})
 	}
@@ -337,7 +338,7 @@ func appendOTLPHistograms(list []otlpMetric, histograms map[string]coremetrics.H
 		}
 		//: one Metric per name; a Histogram carries a temporality, no
 		//: monotonicity — a distribution is not a total.
-		list = append(list, otlpMetric{Name: name, Histogram: &otlpHistogram{
+		list = append(list, otlpMetric{Name: name, Description: metric.Description, Histogram: &otlpHistogram{
 			DataPoints:             points,
 			AggregationTemporality: temporality,
 		}})

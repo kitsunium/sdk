@@ -75,6 +75,41 @@ under the inline budget silently cost 48 bytes per attributed observation — is
 exactly why the inlining check was worth running even though it came back
 negative.
 
+## ADR 0067 re-measurement — nothing here moved
+
+ADR 0067 added a `Description` field to the three metric envelopes and a
+`Describer` sibling port. **Neither is on any path this file measures**: the
+functions below are the attribute constructors, the identity encoding, the
+comparison and the validation, and a description is non-identifying — it never
+reaches `AppendIdentity`, never joins a series key and never participates in a
+comparison.
+
+Re-run after the change on the same box (2026-09-10, go1.27.1, branch
+`agent-a8b94605d1380fe5e`, commit `c30e2ad`), every figure inside the noise of
+the reference table below and **every allocation column unchanged at zero**:
+
+```
+BenchmarkString-8                             10.14 ns/op   0 B/op   0 allocs/op
+BenchmarkBool-8                               10.17 ns/op   0 B/op   0 allocs/op
+BenchmarkInt64-8                               3.267 ns/op  0 B/op   0 allocs/op
+BenchmarkFloat64-8                             2.812 ns/op  0 B/op   0 allocs/op
+BenchmarkAppendIdentity_String-8              10.13 ns/op   0 B/op   0 allocs/op
+BenchmarkAppendIdentity_Int64-8                5.615 ns/op  0 B/op   0 allocs/op
+BenchmarkAppendIdentity_Set4-8                31.38 ns/op   0 B/op   0 allocs/op
+BenchmarkAppendText-8                          6.158 ns/op  0 B/op   0 allocs/op
+BenchmarkCompareAttrValue_SameKind-8           7.052 ns/op  0 B/op   0 allocs/op
+BenchmarkCompareAttrValue_DifferentKind-8      5.136 ns/op  0 B/op   0 allocs/op
+BenchmarkValidateAttrs_Set4-8                  9.265 ns/op  0 B/op   0 allocs/op
+BenchmarkSortAttrs_Set4-8                    371.3 ns/op  192 B/op   1 allocs/op
+```
+
+`SortAttrs` reading 371 ns against the table's 247 ns is the box, not the
+change: it is the only allocating function here, so it is the only one a
+contended machine's GC can move, and the run above shared the host with several
+other jobs. The cost of a description is measured where it is actually paid —
+one map read per instrument NAME per collection, in
+`internal/service/metrics/BENCH.md` §ADR 0067.
+
 ## Reproducibility envelope
 
 > **Numbers vary across machines.** This run shared the box with four other
