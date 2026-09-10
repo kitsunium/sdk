@@ -4,6 +4,7 @@ package logger_test
 
 import (
 	"runtime"
+	"runtime/debug"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/logger"
@@ -60,6 +61,17 @@ const fanoutRuns int = 2000
 // before its sweep finishes, so the residual work allocates INSIDE the window.
 func mallocsOver(runs int, f func()) uint64 {
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	//: collection is held off for the window, because this assertion is
+	//: DIFFERENTIAL and a collection is not. Every emit here draws its builder
+	//: from a sync.Pool, and a collection DRAINS that pool, so the next few
+	//: Build calls miss and cost about seven extra allocations — measured, in
+	//: roughly one window in ten. Landing in the width-N arm and not in the
+	//: width-1 baseline, that is a seven-allocation difference and a false
+	//: failure; landing in both, it cancels. Neither is a measurement.
+	//: The argument is evaluated now and the previous rate restored on return.
+	//: NOT runtime.GC(), which returns before its sweep finishes and so
+	//: allocates INSIDE the window it was meant to clear.
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	//: warm up so first-call initialisation is not counted as steady state.
 	f()
 	var before, after runtime.MemStats

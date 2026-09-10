@@ -5,6 +5,7 @@ package failover_test
 import (
 	"context"
 	"runtime"
+	"runtime/debug"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
@@ -56,6 +57,13 @@ var allocSink int
 // work allocates INSIDE the window.
 func mallocsOver(runs int, f func()) uint64 {
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	//: collection held off for the window, for the reason the sibling guard in
+	//: pkg/v1/logger states at length: this assertion is DIFFERENTIAL, and a
+	//: collection landing in one arm and not the other is a difference that is
+	//: not a measurement. Nothing on this path is pooled, so the exposure is
+	//: smaller here than there — it is taken anyway, so the two guards behind
+	//: the same claim cannot drift into being measured differently.
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	//: warm up so first-call initialisation is not counted as steady state.
 	f()
 	var before, after runtime.MemStats

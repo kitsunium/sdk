@@ -23,6 +23,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
@@ -48,6 +49,15 @@ const allocRuns int = 500
 // measured passing against it. A total is not subject to that rounding.
 func mallocsOver(runs int, f func()) uint64 {
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	//: collection is held off for the window — the sibling file guard failed exactly this way under Bazel while
+	//: passing locally, so the parade is taken here too rather than waiting for
+	//: the same afternoon to be spent twice.
+	//: A collection is not free of allocations from the measured goroutine's
+	//: point of view; it drains pools and forces the next calls to miss.
+	//: The argument is evaluated now and the previous rate restored on return.
+	//: NOT runtime.GC(), which returns before its sweep finishes and therefore
+	//: allocates INSIDE the window it was meant to clear.
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	//: warm up so first-call initialisation is not counted as steady state.
 	f()
 	var before, after runtime.MemStats
