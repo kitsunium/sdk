@@ -181,6 +181,20 @@ rules:
       # separate so the message a crash prints names the primitive that was
       # running the code which failed. Same rule limitation, same justification.
       - "**/internal/kernel/group/**"
+      # The events domain (ADR 0053) is an in-process bus carrying MANY event
+      # types on one Bus. Go methods cannot take type parameters, so a
+      # `Subscribe[E]` method cannot be written and a `Bus[E]` would carry
+      # exactly one event type — a typed channel, not a bus. The port is
+      # therefore erased (`Listener func(ctx, any) error`) and the typing is
+      # restored by the package-level generic `On[E]`, which asserts on
+      # delivery at a measured 2.4 ns (internal/service/events/BENCH.md). The
+      # rule's suggestion — a specific interface — would mean every event type
+      # in every downstream application had to implement an SDK interface, which
+      # is the framework this SDK is not. `any` here is the language's answer,
+      # not a missing abstraction, exactly as it is for a recovered panic above.
+      - "**/internal/core/events/**"
+      - "**/internal/service/events/**"
+      - "**/pkg/v1/events/**"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #
