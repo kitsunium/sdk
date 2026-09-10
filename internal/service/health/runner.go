@@ -1,0 +1,179 @@
+// Package health — hosts the execution of one check: its budget, its panic
+// recovery, and the wrapping that decides what a stranger reading the probe
+// body is allowed to learn.
+package health
+
+import (
+	"context"
+	"fmt"
+
+	corehealth "github.com/kitsunium/sdk/internal/core/health"
+	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// evaluate answers one check: from the cache if it holds a current success,
+// otherwise by waiting out one run under this check's own budget.
+//
+// # Goroutine lifetime
+//
+// A cache hit launches nothing. On a miss, [entry.claim] hands exactly one
+// caller `mine`, and that caller spawns ONE goroutine running [health.perform]
+// — every other probe joins the same run. Its lifetime is the check body's,
+// which the SDK does not bound: it ends when the body returns, and nothing
+// here ends it earlier, because Go cannot kill a goroutine.
+//
+// What CAN be stopped is the waiting. When the budget fires, [health.abandoned]
+// cancels the run's context — an announcement the body may honour — and this
+// function returns without the goroutine. The run stays registered on the
+// entry, so the next probe joins it rather than spawning a second: a wedged
+// dependency costs one goroutine for the whole outage, not one per poll.
+//
+// The goroutine's only shared state is the run it was given: it writes
+// `result` before closing `done`, and every waiter reads `result` only after
+// `done` closes.
+func (h *health) evaluate(ctx context.Context, e *entry) corehealth.ResultValue {
+	//: a replayable success costs nothing and starts nothing.
+	if replay, ok := e.fresh(h.clk.Now()); ok {
+		//: dated, and marked as dated.
+		return replay
+	}
+	run, mine := e.claim(ctx)
+	//: exactly one caller starts the body; the rest wait on the same run.
+	if mine {
+		go h.perform(e, run)
+	}
+	//: the budget is armed on the INJECTED clock, so a test moves it without
+	//: sleeping and production waits on the real one.
+	timer := h.clk.NewTimer(e.budget)
+	//: release it on every exit path.
+	defer timer.Stop()
+	select {
+	//: the check answered within its budget.
+	case <-run.done:
+		//: whatever it said, verbatim.
+		return run.result
+	//: the budget expired.
+	case <-timer.C():
+		//: announce, stop waiting, and report.
+		return h.abandoned(e, run)
+	}
+}
+
+// perform runs one check body and publishes its result to everyone waiting.
+func (h *health) perform(e *entry, run *inflight) {
+	begun := h.clk.Now()
+	err := h.invoke(e, run)
+	result := corehealth.ResultValue{
+		Name: e.name, Status: e.verdict(err), At: h.clk.Now(),
+		Took: h.clk.Since(begun), Err: err,
+	}
+	//: published BEFORE the entry is released, so a probe arriving in between
+	//: joins a finished run and gets its answer at once.
+	run.result = result
+	close(run.done)
+	//: a startup check that just passed shrinks the set the phase reads.
+	if e.finish(result) {
+		h.startupPassed()
+	}
+}
+
+// invoke calls the check body with its panic recovered, and wraps a failure so
+// that what reaches a probe body is decided here and nowhere else.
+//
+// A panic escaping a check would take the whole process down over a health
+// question — the endpoint becoming the outage it was watching for.
+func (h *health) invoke(e *entry, run *inflight) (err error) {
+	defer func() {
+		value := recover()
+		//: the ordinary path.
+		if value == nil {
+			//: leave err as the check returned it.
+			return
+		}
+		//: the recovered value travels as a FIELD, never as the wrap origin.
+		//: A panic string routinely carries an address or a query, and as a
+		//: cause it would become the Public a stranger reads.
+		err = kerrs.Wrap(corehealth.CheckPanicked, kerrs.WrapParams{},
+			kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()),
+			kerrs.String("panic", fmt.Sprint(value)))
+	}()
+	//: wrap after the body returns, so the recover above sees the raw panic.
+	return h.wrapFailure(e, e.call(run))
+}
+
+// call dispatches to whichever of the two bodies this entry carries.
+func (e *entry) call(run *inflight) error {
+	//: a liveness body takes no context — that is the domain's central rule
+	//: made structural, not a special case (core/health.SelfCheck).
+	if e.runSelf != nil {
+		//: process-local evidence, nothing to cancel.
+		return e.runSelf()
+	}
+	//: startup and readiness get the run's detached, cancellable context.
+	return e.run(run.ctx)
+}
+
+// verdict turns an error into this check's status, applying criticality.
+func (e *entry) verdict(err error) corehealth.Status {
+	//: the ordinary path.
+	if err == nil {
+		//: passed.
+		return corehealth.StatusHealthy
+	}
+	//: a non-critical failure still serves; that is the whole meaning of the
+	//: flag, and the reason Degraded is a serving state.
+	if e.nonCritical {
+		//: serving, with a caveat.
+		return corehealth.StatusDegraded
+	}
+	//: not serving.
+	return corehealth.StatusUnhealthy
+}
+
+// wrapFailure gives a check's error an SDK identity WITHOUT overwriting one it
+// already has.
+//
+// This is the whole public/private mechanism doing the work. Origin-wins means
+// a caller's own *errs.Error keeps its Code, Reason, Public and Private, so a
+// wire-safe message they wrote is what a stranger reads; a plain error — the
+// driver's `dial tcp 10.0.3.14:5432: connect: connection refused` — becomes
+// [CheckFailed] instead, and its text survives only in the Err a handler never
+// renders and Config.OnReport does.
+func (h *health) wrapFailure(e *entry, err error) error {
+	//: the ordinary path.
+	if err == nil {
+		//: nothing to label.
+		return nil
+	}
+	//: read from the sentinel rather than repeating its literals, so the
+	//: fallback identity cannot drift from the sentinel it names.
+	return kerrs.Wrap(err, kerrs.WrapParams{
+		Code:    CheckFailed.Code(),
+		Reason:  CheckFailed.Reason(),
+		Public:  CheckFailed.Public(),
+		Private: CheckFailed.Private(),
+	}, kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()))
+}
+
+// abandoned reports a check whose answer did not arrive within its budget.
+//
+// The registry cancels the run's context — an ANNOUNCEMENT, the one piece of
+// information the check cannot otherwise have — and stops waiting. It does not
+// kill the goroutine, which Go cannot do, and it closes nothing the check
+// holds. The run stays outstanding, so the NEXT probe joins it rather than
+// starting a second one: a wedged dependency costs one goroutine for the
+// duration of the outage, not one per poll.
+func (h *health) abandoned(e *entry, run *inflight) corehealth.ResultValue {
+	//: tell the body its time is up; it decides what that means. A liveness
+	//: body has no context and hears nothing, which its own doc comment says.
+	run.cancel()
+	err := kerrs.Wrap(CheckTimeout, kerrs.WrapParams{},
+		kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()),
+		kerrs.String("budget", e.budget.String()))
+	//: a timeout is a FAILURE, not an unknown — see the CheckTimeout sentinel
+	//: — so it goes through the same criticality rule every other failure does.
+	return corehealth.ResultValue{
+		Name: e.name, Status: e.verdict(err), TimedOut: true,
+		At: h.clk.Now(), Took: e.budget, Err: err,
+	}
+}

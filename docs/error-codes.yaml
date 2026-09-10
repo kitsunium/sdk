@@ -690,6 +690,22 @@ codes:
     const: CodeHalt
     hex: "0x00_02_16_06"
     package: internal/core/events
+  - code: "0.2.29.1"
+    const: CodeInvalidCheck
+    hex: "0x00_02_1D_01"
+    package: internal/core/health
+  - code: "0.2.29.2"
+    const: CodeDuplicateCheck
+    hex: "0x00_02_1D_02"
+    package: internal/core/health
+  - code: "0.2.29.3"
+    const: CodeUnknownProbe
+    hex: "0x00_02_1D_03"
+    package: internal/core/health
+  - code: "0.2.29.4"
+    const: CodeCheckPanicked
+    hex: "0x00_02_1D_04"
+    package: internal/core/health
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -1426,6 +1442,30 @@ codes:
     const: CodeHaltNotPermitted
     hex: "0x00_03_34_02"
     package: internal/service/events
+  - code: "0.3.59.1"
+    const: CodeCheckFailed
+    hex: "0x00_03_3B_01"
+    package: internal/service/health
+  - code: "0.3.59.2"
+    const: CodeCheckTimeout
+    hex: "0x00_03_3B_02"
+    package: internal/service/health
+  - code: "0.3.59.3"
+    const: CodeStaleCacheWindow
+    hex: "0x00_03_3B_03"
+    package: internal/service/health
+  - code: "0.3.59.4"
+    const: CodeStartupPending
+    hex: "0x00_03_3B_04"
+    package: internal/service/health
+  - code: "0.3.59.5"
+    const: CodeDraining
+    hex: "0x00_03_3B_05"
+    package: internal/service/health
+  - code: "0.3.59.6"
+    const: CodeNotifyFailed
+    hex: "0x00_03_3B_06"
+    package: internal/service/health
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
