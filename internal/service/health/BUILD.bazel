@@ -1,0 +1,83 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "health",
+    srcs = [
+        "body.go",
+        "codes.go",
+        "component.go",
+        "config.go",
+        "entry.go",
+        "errors.go",
+        "handler.go",
+        "handler_config.go",
+        "health.go",
+        "inflight.go",
+        "notify.go",
+        "probe.go",
+        "runner.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/health",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/health",
+        "//internal/core/lifecycle",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/proc/sdnotify",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":health",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "health_test",
+    srcs = [
+        "component_external_test.go",
+        "handler_external_test.go",
+        "harness_external_test.go",
+        "nosleep_external_test.go",
+        "notify_external_test.go",
+        "notify_linux_external_test.go",
+        "probe_external_test.go",
+        "runner_external_test.go",
+    ],
+    data = ["//:audit_sources"],
+    deps = [
+        ":health",
+        "//internal/core/health",
+        "//internal/core/lifecycle",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/lifecycle",
+    ] + select({
+        "@rules_go//go/platform:android": [
+            "//internal/core/proc",
+            "//internal/service/proc/sdnotify",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//internal/core/proc",
+            "//internal/service/proc/sdnotify",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

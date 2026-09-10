@@ -280,6 +280,33 @@ rules:
       - "**/internal/core/trace/**"
       - "**/internal/service/trace/**"
       - "**/pkg/v1/trace/**"
+      # The health domain is the token/Algorithm case above, four times over —
+      # and here the suggestion does not even compile. shortCircuit and unknown
+      # take a core/health.Probe and STORE it in ReportValue.Probe, a field
+      # typed Probe; statusCode and notifyState take a core/health.Status, and
+      # notifyState assigns it to health.lastNotified, a field typed Status.
+      # Replacing either parameter with the proposed one-method interface
+      # (`interface{ String() string }` / `interface{ Serving() bool }`) means
+      # the value can no longer reach the field it exists to reach without a
+      # type assertion back to the type that was just removed.
+      #
+      # Both are closed enums whose ZERO VALUE is load-bearing: Status's zero is
+      # Unhealthy so that a forgotten assignment reads as "not serving", and
+      # Probe's zero is deliberately unclaimed so that an unset probe is refused
+      # rather than answered. An interface parameter trades both for a nil no
+      # caller can be stopped from passing.
+      - "**/internal/service/health/handler.go"
+      - "**/internal/service/health/notify.go"
+      - "**/internal/service/health/probe.go"
+      # The health suite's probeUnderClock takes the SDK's own
+      # *clock.ManualClock and uses BOTH halves of it: BlockUntil to prove the
+      # budget timer exists BEFORE the clock is moved, then Advance to move it.
+      # The rule's suggested interface carries only Advance, so adopting it
+      # would drop the very call that makes every timeout assertion in this
+      # suite deterministic instead of a race between the test and the engine.
+      # Same both-halves-of-the-type case as the pkg/v1/tlsid handshake test
+      # above.
+      - "**/internal/service/health/harness_external_test.go"
 
   # KTN-VAR-NILSLICE (info) — "prefer a nil slice to an empty one".
   #
@@ -321,6 +348,70 @@ rules:
   KTN-GOROUTINE-RWOVERMU:
     exclude:
       - "**/internal/service/session/**"
+
+  # KTN-GOROUTINE-DOUBLECLOSE (error) — the guard the rule asks for would
+  # SILENCE the defect it exists to catch.
+  #
+  # service/health.perform closes inflight.done, and exactly one goroutine per
+  # inflight ever reaches that line: entry.claim publishes the run and returns
+  # `mine` to a single caller under the entry's own lock, and perform is called
+  # only for that caller. A second inflight is a different channel. The rule
+  # sees `close(<field>)` and cannot see the claim protocol one file over — the
+  # same blind spot the session RWOVERMU entry above records, in the other
+  # direction.
+  #
+  # A sync.Once here would not make the code safer. It would make a BROKEN
+  # claim protocol silent: "two goroutines were handed the same run" would stop
+  # being an immediate panic naming the line and become a second measurement
+  # quietly dropped, with every waiter served the first one. The panic IS the
+  # detector for that invariant; TestConcurrentProbesShareOneMeasurement and
+  # TestAWedgedCheckCostsOneGoroutineNotOnePerPoll pin the invariant itself.
+  # Scoped to the one file that closes it.
+  KTN-GOROUTINE-DOUBLECLOSE:
+    exclude:
+      - "**/internal/service/health/runner.go"
+
+  # KTN-STRUCT-FLAGS (info) — the suggested bitfield would create a data race
+  # in one case and delete a test's own vocabulary in the other.
+  #
+  # service/health.entry carries nonCritical, latching and passed, and they are
+  # NOT three flags of one kind. nonCritical and latching are written once at
+  # registration and read afterwards WITHOUT the entry's mutex — entry.verdict
+  # runs on the measuring goroutine, outside every critical section, which is
+  # what keeps the lock off the path a check body blocks on. passed is written
+  # under that mutex by entry.finish. Packing them into one integer would make
+  # setting passed a read-modify-write of the whole word, racing the lock-free
+  # reads of nonCritical: a genuine, race-detector-visible data race introduced
+  # by adopting a readability suggestion.
+  #
+  # The second entry is a table-driven test whose case struct carries
+  # nonCritical, alsoFail and wantServing. A mask would replace three named
+  # columns with a number, which is precisely the readability a table test
+  # exists for — and wantServing cannot be folded into want, because deriving
+  # it would assert Status.Serving() against itself instead of pinning that
+  # Degraded serves.
+  KTN-STRUCT-FLAGS:
+    exclude:
+      - "**/internal/service/health/entry.go"
+      - "**/internal/service/health/probe_external_test.go"
+
+  # KTN-ERROR-DISCARD (error) — the one seam where "log or propagate" is not
+  # available at all.
+  #
+  # service/health's ServeHTTP ends in `_, _ = w.Write(body)`. It cannot
+  # PROPAGATE: http.Handler.ServeHTTP returns nothing, and the status line and
+  # Content-Length are already on the wire by the time Write can fail. It
+  # cannot LOG: ADR 0030 forbids the SDK writing to stdout, this domain extends
+  # that to stderr, and the handler deliberately holds a core/health.Health and
+  # not the Config that carries the caller's hooks — a route must not be able
+  # to reach the registry's internals. The only failure Write can report here
+  # is a client that hung up mid-response, which is the client's news and not
+  # the server's; net/http discards the body of a HEAD on this same path for
+  # the same reason. Writing `_, _ =` says that out loud instead of leaving a
+  # bare call for a reader to wonder about. Scoped to the one file.
+  KTN-ERROR-DISCARD:
+    exclude:
+      - "**/internal/service/health/handler.go"
 
   # KTN-FUNC-EMPTYSENTINEL (phase 5) — "" is a domain value here, not a sentinel.
   #
@@ -612,6 +703,22 @@ rules:
       - "**/internal/core/metrics/**"
       - "**/internal/service/metrics/**"
       - "**/pkg/v1/metrics/**"
+      # core/health.ResultValue (72 B) is one check's ANSWER, and value
+      # semantics are the contract for the same two reasons core/net and
+      # core/session give above. It is PUBLISHED — pkg/v1/health.Result is a
+      # type alias to it — it is handed to Config.OnReport, which is a caller's
+      # own hook, and it is carried in ReportValue.Results, which the handler
+      # renders while that hook still holds it. Age is a pure accessor on that
+      # answer; a pointer receiver would make the SDK's one immutable
+      # measurement type the only core value in the tree with a mutable method
+      # set, in a domain whose entire discipline is that a recorded verdict is
+      # not edited after the fact.
+      #
+      # 72 B is what a name, a verdict, three flags, an instant, a duration and
+      # an error honestly cost; nothing can be dropped to get under 64. The one
+      # copy per rendered check happens immediately beside the json.Marshal
+      # that dwarfs it.
+      - "**/internal/core/health/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue.
