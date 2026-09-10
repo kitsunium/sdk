@@ -9,7 +9,7 @@ Two facts here are worth more than the rest of the table.
 
 ## 1. A TTL more than doubles the cost of a hit — and the cache is not the cause
 
-`Fetch_Hit` is 58.65 ns; `Fetch_HitWithTTL` is 128.6 ns. The 70 ns difference is
+`Fetch_Hit` is 59.89 ns; `Fetch_HitWithTTL` is 130.1 ns. The 70 ns difference is
 one `Clock.Now()` call, because `expired()` short-circuits on a zero `expireAt`
 and never touches the clock for an entry without an expiry.
 
@@ -41,7 +41,7 @@ that is what the interface is for.
 
 ## 2. One mutex, taken exclusively, even on a read
 
-`Fetch_Parallel` is 355.3 ns against 58.65 ns single-threaded — roughly 6× worse
+`Fetch_Parallel` is 375.5 ns against 59.89 ns single-threaded — roughly 6× worse
 under 8 goroutines rather than better. That is not a defect, it is the design
 stated in numbers: a hit MUTATES the LRU list, so `Fetch` takes the write lock,
 which is precisely why ADR 0025 named the method `Fetch` and not `Get`. There is
@@ -54,27 +54,27 @@ distribution.
 
 ## The rest of the table
 
-- **`NewCache`** — 13.95 µs and 54.6 kB for a `MaxEntries: 1024` cache. That is
+- **`NewCache`** — 13.46 µs and 54.8 kB for a `MaxEntries: 1024` cache. That is
   the map's initial bucket array, allocated once. Build caches at startup, never
   per request.
-- **`Fetch_Miss`** (46.09 ns) is cheaper than `Fetch_Hit` (58.65 ns): a miss
+- **`Fetch_Miss`** (45.17 ns) is cheaper than `Fetch_Hit` (59.89 ns): a miss
   returns after the map lookup, while a hit also relinks the entry to the front.
-- **`Set_NewKey`** — 241.1 ns, **1 alloc/op, 170 B**. The allocation is the
+- **`Set_NewKey`** — 239.0 ns, **1 alloc/op, 170 B**. The allocation is the
   `entry` node and is structural: an intrusive doubly-linked LRU needs one node
   per live key. It cannot be pooled without handing evicted nodes back to a
   recycler, which would trade a clear ownership story for one allocation.
-- **`Set_Overwrite`** — 54.30 ns, **0 allocs**: replacing a live key reuses its
-  node. The ~187 ns delta against `Set_NewKey` is the allocation plus the map
+- **`Set_Overwrite`** — 54.43 ns, **0 allocs**: replacing a live key reuses its
+  node. The ~185 ns delta against `Set_NewKey` is the allocation plus the map
   insert.
-- **`Set_AtCapacity`** — 223.3 ns, and note **0 allocs/op** with 63 B/op
+- **`Set_AtCapacity`** — 218.6 ns, and note **0 allocs/op** with 63 B/op
   reported. Above `MaxEntries` every insert also evicts, so the node freed by the
   eviction is immediately reused by the insert; the residual bytes are the map's
   own amortised growth, not a per-op allocation.
-- **`Set_AtCapacityOnEvict`** — 331.7 ns and 1 alloc: the callback runs on the
-  SETTER's goroutine, outside the lock. The ~108 ns premium is what a trivial
+- **`Set_AtCapacityOnEvict`** — 287.4 ns and 1 alloc: the callback runs on the
+  SETTER's goroutine, outside the lock. The ~69 ns premium is what a trivial
   `OnEvict` costs; a callback doing real work bills all of it to whoever called
   `Set`, and blocks nothing else. Size the callback accordingly.
-- **`Len` / `Stats`** — 23.7 / 23.9 ns, 0 allocs. A read lock and a small copy.
+- **`Len` / `Stats`** — 22.2 / 24.3 ns, 0 allocs. A read lock and a small copy.
 
 ## Reproducibility envelope
 
@@ -101,17 +101,15 @@ goos: linux
 goarch: amd64
 pkg: github.com/kitsunium/sdk/internal/kernel/cache
 cpu: AMD EPYC 7351P 16-Core Processor
-BenchmarkNewCache-8                	   85754	     13952 ns/op	   54608 B/op	       5 allocs/op
-BenchmarkFetch_Hit-8               	20485714	        58.65 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFetch_HitWithTTL-8        	 9307658	       128.6 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFetch_Miss-8              	26181844	        46.09 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSet_NewKey-8              	 4752457	       241.1 ns/op	     170 B/op	       1 allocs/op
-BenchmarkSet_Overwrite-8           	21786427	        54.30 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSet_AtCapacity-8          	 5363378	       223.3 ns/op	      63 B/op	       0 allocs/op
-BenchmarkSet_AtCapacityOnEvict-8   	 3593678	       331.7 ns/op	      87 B/op	       1 allocs/op
-BenchmarkFetch_Parallel-8          	 3165457	       355.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLen-8                     	51124513	        23.68 ns/op	       0 B/op	       0 allocs/op
-BenchmarkStats-8                   	50214440	        23.93 ns/op	       0 B/op	       0 allocs/op
-PASS
-ok  	github.com/kitsunium/sdk/internal/kernel/cache	13.557s
+BenchmarkNewCache-8                	   89852	     13462 ns/op	   54768 B/op	       7 allocs/op
+BenchmarkFetch_Hit-8               	20066893	        59.89 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFetch_HitWithTTL-8        	 9400237	       130.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFetch_Miss-8              	26481696	        45.17 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet_NewKey-8              	 4784624	       239.0 ns/op	     170 B/op	       1 allocs/op
+BenchmarkSet_Overwrite-8           	22074398	        54.43 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet_AtCapacity-8          	 5467629	       218.6 ns/op	      63 B/op	       0 allocs/op
+BenchmarkSet_AtCapacityOnEvict-8   	 4168083	       287.4 ns/op	      87 B/op	       1 allocs/op
+BenchmarkFetch_Parallel-8          	 3537349	       375.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLen-8                     	56052486	        22.17 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStats-8                   	49495653	        24.31 ns/op	       0 B/op	       0 allocs/op
 ```
