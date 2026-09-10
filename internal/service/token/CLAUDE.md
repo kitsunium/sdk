@@ -113,6 +113,77 @@ chooses.
 - `MaxPrivateClaims` (in `core/token`) caps the member count.
 - `NewSetVerifier` caps how many candidate keys one `kid` may cost.
 
+## Cost
+
+Measured in `BENCH.md` — **median of nine samples across three separate
+processes** on an 8-core AMD EPYC 7351P VM, `go1.27.1`. `realistic` is nine
+claim members (iss/sub/aud/exp/iat/jti plus three private); `minimal` is the
+three an issuer stamps on its own.
+
+| Verify (per authenticated request) | minimal | realistic |
+|---|---:|---:|
+| **HS256** | **14 353 ns** | **28 905 ns** · 7 122 B · 121 allocs |
+| PASETO v4.public | 97 873 ns | 112 154 ns · 5 834 B · 93 allocs |
+| EdDSA | 104 459 ns | 119 406 ns · 6 610 B · 114 allocs |
+| ES256 | 126 140 ns | 142 029 ns · 7 796 B · 134 allocs |
+
+Issuing costs **2.1–2.4× less** than verifying, on all four. `Verify`
+allocates on every call; there is no zero-allocation claim here to hold.
+
+**"Is verification mostly crypto?" has two opposite answers.** HS256 is
+**4.5 % signature, 95.5 % this package**; every asymmetric option is
+**74–79 % signature** (up to 90.5 % on a small claim set). An optimisation to
+the JSON path moves HS256 by roughly twenty times what it moves ES256 — which
+is why the split is published per algorithm and never averaged.
+
+Six extra claim members cost **+14.3–15.9 µs and exactly +4 038 B / +57
+allocations**, identically through all three JWS algorithms. Decoding private
+claims is **O(n²)** in their count, because `attachPrivate` adds them one at a
+time through `core/token`'s copy-on-write `WithPrivateRaw`: 64 of them cost
+205 µs and 191 KB. `MaxPrivateClaims` is what bounds that at 7× a realistic
+payload; the fix needs a batch setter in `core/token`.
+
+### Refusing is cheaper than accepting — all thirteen ways
+
+| | ns | % of an accepted HS256 token |
+|---|---:|---:|
+| wrong segment count | **99.3** | 0.34 % |
+| oversized (8 KiB+1, 1 MiB, 8 MiB — identical) | 258 | 0.89 % |
+| not strict base64url | 335 | 1.16 % |
+| header too deep | 528 | 1.83 % |
+| duplicate header member | 1 396 | 4.83 % |
+| `alg:none` / `alg` ≠ binding | 4 674 / 4 977 | 16.2 % / 17.2 % |
+| bad signature | 6 239 | 21.6 % |
+| claims too deep / duplicate claim | 7 170 / 7 361 | 24.8 % / 25.5 % |
+| expired | 27 830 | 96.3 % |
+
+**No refusal costs more than the acceptance it replaces**, so none is a
+denial-of-service lever. The expired row is 96 % because an expired token is
+parsed, verified and decoded in full first — §Ordering being visible in the
+numbers — and reaching it costs an attacker a valid signature.
+
+**The cost ordering IS the check ordering**, which is ADR 0042 §D4 verified by
+measurement rather than by reading: every check costs strictly more than the
+one before it and sits strictly after it. And the oversized refusal is **flat
+at 168.5–170.2 ns across a 8 192× size range**, which is the CVE-2025-30204
+bound doing its job.
+
+### What the security properties cost
+
+`checkHeader` — the algorithm-confusion gate this whole package is built
+around — costs **15.6 ns, 0.05 %** of a verification. There has never been a
+performance argument for reading the algorithm from the token, and now there is
+a number saying so.
+
+The expensive one is RFC 8725 §2.6: the duplicate-member refusal costs
+**24.8 %** across its two calls, **5.5× the signature**, 26.9 % of the CPU
+profile and 31.7 % of the allocated bytes. Three optimisations that would
+reduce it are **refused by name in BENCH.md §13**, each with the property it
+would weaken — merging the three JSON passes, pooling the `json.Decoder`, and
+hand-decoding the registered string claims. All three replace a delegated
+parser with a hand-rolled one on the path whose job is that two readers cannot
+disagree about a token.
+
 ## Ordering — signature first, always
 
 `Verify` is: parse → compare the algorithm → verify the signature → decode and
@@ -197,6 +268,22 @@ cd internal/service && GOWORK=off go test -race -cover ./token/...
 examples in the PASETO specification rather than against this implementation —
 an off-by-one in a length prefix produces signatures that verify perfectly
 against themselves and against nobody else's.
+
+Two allocation guards live in `split_alloc_internal_test.go` under
+`//go:build !race`, so the race suite does not compile them and
+`//internal/service/token:token_test` in `tools/alloc-lane-targets.txt` is
+their ONLY lane (rule 12). They pin the two claims §Bounds makes and nothing
+enforced before 2026-09: `TestSplitCompactAllocatesNothing` (a well-formed
+split allocates zero — a regression to `strings.Split` returns identical parts
+and is invisible to every functional test here) and
+`TestOversizedRefusalDoesNotScanTheToken` (the length bound is checked before
+the scan). Each carries its mutation and the observed failure in its doc
+comment. The second is a WALL-TIME assertion, deliberately: the first version
+counted allocations and the bound-ordering mutation passed against it, because
+the walk is `strings.IndexByte` into a fixed array and scanning eight megabytes
+allocates nothing. Its input is separator-FREE for a related reason — a token
+of megabytes of `.` is short-circuited three bytes in by the segment-count
+check, so it never exercises the length bound at all.
 
 ## Linter exemptions
 

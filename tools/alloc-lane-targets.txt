@@ -88,3 +88,15 @@
 //internal/service/writer/levelgate:levelgate_test
 //internal/service/writer/console:console_test
 //internal/service/writer/file:file_test
+# The two claims the CVE-2025-30204 defence rests on, both stated in three
+# places (splitCompact's doc comment, segmentsValue's, and the package
+# CLAUDE.md §Bounds) and both unguarded until 2026-09: splitting a well-formed
+# token allocates NOTHING, because the parts are views held in a fixed
+# [4]string array rather than a slice a separator count can grow; and refusing
+# an oversized token does not scan it, because the length bound is checked
+# first. A regression to strings.Split is invisible to every functional test in
+# the package — it returns exactly the same parts — and the second test found
+# that the obvious hostile input (megabytes of ".") does not force the scan at
+# all, while a separator-free token of the same size does. Each is
+# mutation-checked in its own doc comment.
+//internal/service/token:token_test
