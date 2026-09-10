@@ -17,6 +17,7 @@ require (
 	github.com/kitsunium/sdk/internal/core v0.1.16
 	github.com/kitsunium/sdk/internal/kernel v0.1.16
 	github.com/kitsunium/sdk/internal/service v0.1.16
+	github.com/klauspost/compress v1.19.2
 	github.com/moby/moby/api v1.55.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/testcontainers/testcontainers-go v0.44.0
@@ -65,7 +66,6 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mdelapenya/tlscert v0.2.0 // indirect

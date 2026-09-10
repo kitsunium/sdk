@@ -8,9 +8,15 @@ library: **gzip** (`compress/gzip`), **flate** (raw DEFLATE, `compress/flate`)
 and **zlib** (the RFC 1950 envelope, `compress/zlib`). One Go package implements
 all three schemes. Blank-importing the package self-registers all three
 singletons with the core registry so they become resolvable by `Algorithm`
-(ADR 0014 D1). The wave ships **stdlib only** — zstd / snappy / s2 are deferred
-opt-in follow-ups behind their own vendor imports, so the `pkg/v1/codec` module
-graph stays vendor-free.
+(ADR 0014 D1). This package ships **stdlib only**, so the `pkg/v1/codec` module
+graph stays vendor-free. The vendor compressors ADR 0014 deferred have since
+landed **outside** this module, in `third-party/transform` — **zstd** and **s2**
+over `github.com/klauspost/compress` (ADR 0066). They register into the same
+`core/transform` registry, so `transform.Lookup("zstd")` resolves once a
+consumer blank-imports that package and never before. `snappy` was closed by
+substitution: s2 reads Snappy streams, and ADR 0066 §Why-not refuses to register
+under the `"snappy"` NAME because the block encoder emits extensions a Snappy
+decoder does not read.
 
 Code range: `0.3.26.*` (`0x1a`, ADR 0014).
 
@@ -118,8 +124,11 @@ not to this package. Consumers reach the scheme through
 
 ## Do NOT
 
-- Add a vendor compressor (zstd / snappy / s2) here — those land as opt-in
-  follow-ups behind their own imports (ADR 0014 §Deferred).
+- Add a vendor compressor here. This package is the stdlib half of the domain
+  and stays that way; `internal/service` is required by `pkg`, so a vendor
+  import here lands in the graph of every consumer who only wanted a logger.
+  zstd and s2 live in `third-party/transform` (ADR 0066), brotli and lz4 were
+  measured and refused there.
 - Move the bounded-read cap into `core/transform` — the port stays body-free.
 - Add an `init()` — use the package-level `var = transform.Register(...)` form.
 - Treat `flate` as the HTTP `deflate` encoding, or register `zlib` under the
