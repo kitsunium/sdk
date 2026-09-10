@@ -75,6 +75,9 @@ func (e *textEncoder) Append(dst []byte, groups []string, r corelogger.RecordEve
 	}
 	//: render the header in the documented "TIME LEVEL msg" order.
 	dst = appendHeader(dst, r)
+	//: the trace context is a TOP-LEVEL field, so it lands between the header
+	//: and the attributes and is never touched by the group prefix stack.
+	dst = appendTraceContext(dst, r)
 	//: append every record-bound attribute prefixed by the group stack.
 	for _, a := range r.Attrs {
 		//: render each record-local attr using the same encoding rules.
@@ -96,6 +99,41 @@ func appendHeader(dst []byte, r corelogger.RecordEvent) []byte {
 	//: not see attacker-influenced CR/LF/NUL produce spoofed frames. This
 	//: is defence-in-depth: sinks that need richer escaping still can.
 	return appendSanitizedMessage(dst, r.Message)
+}
+
+// appendTraceContext writes the two top-level correlation fields
+// "trace_id=<32 hex> span_id=<16 hex>" into dst, and writes NOTHING when tc is
+// the invalid zero value.
+//
+// Emitting nothing is the whole point: an all-zero identifier is invalid under
+// W3C Trace Context §3.2.2.3/§3.2.2.4, so rendering trace_id= or
+// trace_id=000…0 would put a field no query can join on onto every line a
+// service logs outside a request — which is most of them.
+//
+// The values are NOT quoted, unlike string attribute values. They are record
+// fields rather than attributes, they are fixed-length lowercase hex and can
+// therefore contain nothing that needs quoting, and an operator pasting an id
+// from a tracing backend greps for `trace_id=<id>` exactly as it appears there.
+func appendTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
+	//: the identity travels on the record because Encoder.Append receives no
+	//: context.Context — that is the whole reason it is a field (ADR 0062).
+	tc := r.TraceContext
+	//: no span in scope — emit nothing rather than an unjoinable zero id.
+	if !tc.IsValid() {
+		//: the buffer is handed back untouched.
+		return dst
+	}
+	//: " trace_id=" then the 32 hex digits, straight into the buffer.
+	dst = append(dst, ' ')
+	dst = append(dst, corelogger.TraceIDKey...)
+	dst = append(dst, '=')
+	dst = tc.AppendTraceIDHex(dst)
+	//: " span_id=" then the 16 hex digits.
+	dst = append(dst, ' ')
+	dst = append(dst, corelogger.SpanIDKey...)
+	dst = append(dst, '=')
+	//: hand back the buffer carrying both correlation fields.
+	return tc.AppendSpanIDHex(dst)
 }
 
 // appendSanitizedMessage copies msg onto dst replacing '\n', '\r', and NUL

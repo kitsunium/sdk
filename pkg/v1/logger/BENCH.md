@@ -44,3 +44,108 @@ BenchmarkLogger10Fields-8       	13,755,102	  857.2 ns/op	 768 B/op	1 allocs/op
 
 - `cd pkg/v1 && go test -run '^$' -bench=. -benchmem -benchtime=10s ./logger`
 - Logger initialised once outside the bench loop; the loop is `b.Loop()` calls to `logger.Info(...)`.
+
+---
+
+# Trace correlation — ADR 0062
+
+The `trace_id` / `span_id` correlation fields added by ADR 0062 are stamped on
+**every** record a `pkg/v1/logger` Logger emits. The claim they had to survive
+is the one this file exists for: **one heap allocation per emit**. The section
+below is a separate measurement run — different box, different date, so the
+numbers above are NOT comparable to these, only the numbers within this section
+are comparable to each other.
+
+## Reproducibility envelope
+
+| Dimension | Value |
+|---|---|
+| CPU                | AMD EPYC 7351P 16-Core (8 vCPU visible) |
+| RAM                | 15 GiB, balloon 8192 (shared VM) |
+| OS / kernel        | Linux 6.12.101+deb13-amd64 |
+| Architecture       | amd64 |
+| Go toolchain       | go1.27 linux/amd64 |
+| Git branch         | `jaimerias-que-tu-te-connect` |
+| Generated (UTC)    | 2026-09-10 |
+| Bench wall-clock   | `-benchtime=3s -count=4` (medians reported) |
+
+## Results
+
+```
+BenchmarkLoggerStaticString-8              3041551    1186 ns/op     64 B/op    1 allocs/op
+BenchmarkLoggerStaticStringWithSpan-8      2820920    1278 ns/op     64 B/op    1 allocs/op
+BenchmarkLogger10Fields-8                  1943826    1847 ns/op    768 B/op    1 allocs/op
+BenchmarkLogger10FieldsWithSpan-8          1864524    1914 ns/op    768 B/op    1 allocs/op
+BenchmarkTraceContextFromContextHit-8    100000000   31.9  ns/op      0 B/op    0 allocs/op
+BenchmarkTraceContextFromContextMiss-8   100000000   35.5  ns/op      0 B/op    0 allocs/op
+```
+
+Baseline for the delta, measured in the same session on the same box by binding
+the Logger to a **nil** `TraceContextSource` (i.e. the pre-ADR-0062 wiring):
+
+```
+BenchmarkLoggerStaticString-8 (uncorrelated)   2147702   1114 ns/op   64 B/op   1 allocs/op
+BenchmarkLogger10Fields-8     (uncorrelated)   1380577   1736 ns/op  768 B/op   1 allocs/op
+```
+
+## How to read this
+
+- **The allocation budget is unchanged: 1 alloc/op, with a span and without
+  one.** So are the bytes — 64 B and 768 B, identical in all four rows. The
+  identifiers never become a Go string: they are `hex.Encode`d into a stack
+  array and appended into the buffer the handler already borrowed from the
+  pool. Pinned by `TestT34TraceCorrelationAddsNoAllocation`, which asserts
+  **exactly 1** on all three emission paths for both cases — stricter than
+  `TestV116BuildSendAllocatesOnePerEmit`, which asserts only `>= 1`.
+- **Cost of being correlated at all** (uncorrelated → correlated, no span in
+  scope): +72 ns on the static line, +111 ns on the 10-field line. That is one
+  `context.Value` walk, and a record that then renders nothing.
+- **Cost of actually having a span** (correlated, no span → correlated, in a
+  span): +92 ns and +67 ns respectively — 48 hex digits plus two keys appended
+  into the buffer. The two deltas straddle each other, which is the honest
+  reading of a ±5 % box: on this hardware the hex rendering and the context
+  walk are the same order of magnitude and neither dominates.
+- **Extraction is 0 allocs whether it hits or misses** (~32 / ~36 ns). The miss
+  costs slightly more than the hit here because the miss walks the whole
+  `context` chain before concluding there is nothing; a deeper chain in a real
+  request costs more, and it is still one walk per emitted record.
+
+## Where the one allocation comes from — profiled, not asserted
+
+`go tool pprof -top -sample_index=alloc_objects` over
+`BenchmarkLoggerStaticStringWithSpan` (i.e. the in-span path):
+
+```
+      flat  flat%   sum%        cum   cum%
+   1720425 96.90% 96.90%    1720425 96.90%  slices.Grow[…logger.AttrValue…] (inline)
+         0     0%   100%    1720425 96.90%  internal/service/logger.mergeAttrs
+         0     0%   100%    1720425 96.90%  internal/service/logger.(*genericHandler).Handle
+```
+
+96.9 % of allocated objects are the handler's pre-existing attrs clone. Nothing
+on the trace path appears in the allocation profile **at all** — no
+`hex.Encode`, no `TraceContextFromContext`, no `context.valueCtx`.
+
+The same run's CPU profile places the hex rendering in context:
+
+```
+     250ms 10.92%  time.Time.appendFormat        (the timestamp)
+     170ms  7.42%  time.nextStdChunk             (the timestamp layout)
+     110ms  4.80%  encoding/hex.Encode           ← the trace + span ids
+      70ms  3.06%  encoder.appendSanitizedMessage
+      ...  20.09%  runtime.tracebackPCs (cum)    (the caller PC capture)
+```
+
+Rendering both identifiers is **4.8 %** of an in-span emit — less than a fifth
+of what formatting the timestamp costs, and a quarter of what capturing the
+caller PC costs. No optimisation was applied because none was warranted: the
+path was allocation-free by construction and the profile says the cost is not
+where a reader would guess.
+
+## Methodology (this section)
+
+- `cd pkg/v1 && GOWORK=off go test -run '^$' -bench='BenchmarkLogger|BenchmarkTraceContext' -benchmem -benchtime=3s -count=4 ./v1/logger/`
+- Profiles: same command with `-bench=BenchmarkLoggerStaticStringWithSpan -benchtime=2s -memprofile=… -cpuprofile=… -o …`, read with `go tool pprof -top`.
+- The span fixture is the W3C Trace Context specification's own traceparent
+  example, installed with `trace.ContextWithSpanContext` — the same call the
+  inbound HTTP middleware makes after reading the header.

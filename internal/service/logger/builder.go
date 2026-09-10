@@ -161,6 +161,8 @@ func (b *chainBuilder) Send(ctx context.Context, msg string) {
 	r := corelogger.RecordEvent{Level: b.lv, Message: msg, PC: pcs[0], Attrs: b.attrs}
 	//: short-circuit when the handler reports disabled — avoids formatting work.
 	if b.owner.h.Enabled(ctx, r) {
+		//: read the span AFTER the level gate so a dropped record pays no context walk.
+		r.TraceContext = b.owner.traceContext(ctx)
 		//: route any handler error through the documented swallow helper.
 		swallowHandlerError(b.owner.h.Handle(ctx, r))
 	}

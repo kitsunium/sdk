@@ -36,6 +36,7 @@ go_test(
         "json_internal_test.go",
         "text_external_test.go",
         "text_internal_test.go",
+        "trace_context_external_test.go",
     ],
     embed = [":encoder"],
     deps = [

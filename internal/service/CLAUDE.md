@@ -9,7 +9,7 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 
 | Sub-tree | Purpose | Code prefix |
 |---|---|---|
-| `logger/` | v2 one-alloc-per-emit multi-sink architecture (`builder`, `encoder`, `sink/{console,file,syslog,memory}`, `middleware/{multi,async,route,failover,sample,recover,encwrite,tee}`) realising `core/logger.Handler` + `Logger` | `0.3.1.*` (and per-component slots, see logger CLAUDE.md) |
+| `logger/` | v2 one-alloc-per-emit multi-sink architecture (`builder`, `encoder`, `sink/{console,file,syslog,memory}`, `middleware/{multi,async,route,failover,sample,recover,encwrite,tee}`) realising `core/logger.Handler` + `Logger`. Trace correlation is INJECTED via `NewWithTraceContext` (a `core/logger.TraceContextSource`), never imported — this package keeps zero edges to `internal/service/trace` or any other sibling domain (ADR 0062) | `0.3.1.*` (and per-component slots, see logger CLAUDE.md) |
 | `codec/` | 16 wire-format codecs over 24 Format names (asn1, baseenc[9], bson, cbor, csv, flatbuffers, form, json, msgpack, multipart, ndjson, pem, tlv, toml, xml, yaml), each implementing `core/codec.Codec`; all satisfy `Appender`, most also `StreamingCodec` | `0.3.2.*` … `0.3.40.*` (one PP slot per codec) |
 | `crypto/` | stdlib-only schemes behind the eight `core/crypto` ports (aesgcm, streamaead, stdhash, hmacsha2, ecdsasig, ed25519sig, hkdfsha256, pbkdf2pw, x25519), the keyenvelope/keytree compositions, and the `jwk` key format (RFC 7517 JWK + JWK Set) | schemes emit core sentinels `0.2.4.*`; `jwk` owns `0.3.42.*` |
 | `id/` | identifier generators (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID) implementing `core/id.Generator`; stdlib-only, cross-OS, self-registered except TypeID (ADR 0024) | `0.3.39.*` |

@@ -34,6 +34,7 @@ Consumers import this package; internal/\* paths are compile\-blocked outside th
 - Composable transport. A Logger is wired from a Sink \(where bytes go\) \+ an Encoder \(how bytes are formatted\). Fan\-out, async, route, failover, sample, recover middleware compose around a Sink — bring your own topology.
 - Typed Attrs at the call site. 9 typed constructors \(String, Int, Bool, Float64, Int64, Uint64, Duration, Time, Any\) — no any\-untyped key/value pairs that error at runtime.
 - Build\-time version stamping. Version is the single ldflags injection point. FrameworkVersion\(\) is added as "framework\_version" to every emitted record — set under go build \-ldflags "\-X .../logger.Version=…" or Bazel \-\-stamp.
+- Trace correlation, on by default and free. A record emitted inside a span carries that span's trace\_id and span\_id as top\-level fields; a record emitted outside one carries neither key. No call site changes — Logger.Log has always taken a context.Context. Costs no extra allocation. See ADR 0062 and the "Trace correlation" section below.
 - Two failure modes only. Construction returns WriterRequired \(1.1.0.1\) on a nil writer or SinkConfigRequired \(1.1.0.2\) on a nil sink — both introspectable via errs.HasCode.
 
 ### What's shipped
@@ -96,6 +97,23 @@ logger.Build(lg, logger.LevelInfo).
 
 [LogAttrs](<#LogAttrs>) is the slice overload that avoids the variadic\-slice allocation in \[Logger.Log\].
 
+### Trace correlation
+
+Every Logger this package builds stamps the span in scope onto every record it emits, as the two TOP\-LEVEL fields OpenTelemetry prescribes for non\-OTLP log formats: \[TraceIDKey\] \("trace\_id", 32 lowercase hex digits\) and \[SpanIDKey\] \("span\_id", 16\). Populating the context is the trace domain's job — the inbound HTTP middleware in github.com/kitsunium/sdk/pkg/v1/trace, or an explicit trace.ContextWithSpanContext:
+
+```
+ctx = trace.ContextWithSpanContext(ctx, spanContext)
+logger.Info(ctx, lg, "served") // → … trace_id=4bf9… span_id=00f0…
+```
+
+Three properties are worth knowing:
+
+- They are record FIELDS \([Record](<#Record>).TraceContext\), not attributes, so \[Logger.WithGroup\] never renames them to "http.trace\_id" and a Sink can read the identity off the record instead of parsing it back out of a formatted line.
+- When no span is in scope NOTHING is emitted — not an empty value and not the all\-zero identifier, both of which W3C Trace Context declares invalid. Most lines a service logs are outside a request, and an unjoinable trace\_id on all of them would make the field useless as a filter.
+- It costs no extra allocation: the hot path stays at exactly one heap allocation per emit, with a span and without. The identifiers are hex\-encoded straight into the encoder's buffer and never become a Go string. Measured in BENCH.md.
+
+[TraceContextFromContext](<#TraceContextFromContext>) is the adapter, exported so a caller wiring a Logger by hand can reuse it.
+
 ### Version stamping
 
 [Version](<#Version>) is the single ldflags injection point for the SDK. Recipes:
@@ -119,6 +137,10 @@ Package logger — exposes the in\-memory test sink \(NewMemorySink\) and its Re
 Package logger — exposes the Sink port and the multi\-sink helper alongside the encoder\-aware constructor NewWithSink. Together they let consumers replace the default text\-on\-stderr wiring \(NewText / Default\) with arbitrary fan\-out / async / file / syslog topologies — without reaching into internal/\* packages.
 
 Package logger — declares the TopologyConfig DTO consumed by FromConfig. A TopologyConfig is the decoded shape of a logger config file: a global level plus an ordered list of named writer entries. It is a plain data carrier with no behaviour — the construction logic lives in FromConfig.
+
+Package logger — bridges the trace domain to the logging domain, so a log line emitted inside a span carries that span's identity and an operator holding a trace\_id can find the logs that belong to it.
+
+This file is the ONLY place in the SDK where logging and tracing meet, and that placement is the design \(ADR 0062\). internal/service/logger and internal/service/trace are siblings — one may not import the other — and internal/core/logger is kept stdlib\-only so a consumer who only wants a line on stderr does not compile the trace model. pkg/v1 is the layer that is allowed to know both domains, so the binding lives here and nowhere else.
 
 Package logger — exposes the SDK version to the rest of the logger package. The ldflags pipeline injects the real value at build time; local development runs fall back to the "dev" sentinel.
 
@@ -191,6 +213,9 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
   - [func NewWriterSink\(w io.Writer\) \(sink Sink, err error\)](<#NewWriterSink>)
 - [type SinkConfig](<#SinkConfig>)
 - [type TopologyConfig](<#TopologyConfig>)
+- [type TraceContext](<#TraceContext>)
+  - [func TraceContextFromContext\(ctx context.Context\) TraceContext](<#TraceContextFromContext>)
+- [type TraceContextSource](<#TraceContextSource>)
 - [type WriterEntryConfig](<#WriterEntryConfig>)
 - [type WriterName](<#WriterName>)
 - [type WriterSpec](<#WriterSpec>)
@@ -286,7 +311,7 @@ var Version string
 ```
 
 <a name="Debug"></a>
-## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L288>)
+## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L327>)
 
 ```go
 func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -295,7 +320,7 @@ func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Debug emits a RecordEvent at LevelDebug through lg.
 
 <a name="Error"></a>
-## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L306>)
+## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L345>)
 
 ```go
 func Error(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -313,7 +338,7 @@ func FrameworkVersion() string
 FrameworkVersion returns the linked\-in SDK version, or "dev" if unset.
 
 <a name="Info"></a>
-## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L294>)
+## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L333>)
 
 ```go
 func Info(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -331,7 +356,7 @@ func LogAttrs(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr
 LogAttrs is the slice\-overload of Logger.Log that avoids the variadic slice allocation imposed by Logger.Log\(... Attr\). Pre\-built attribute slices flow through this entry point without per\-call boxing.
 
 <a name="Warn"></a>
-## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L300>)
+## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L339>)
 
 ```go
 func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -340,7 +365,7 @@ func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Warn emits a RecordEvent at LevelWarn through lg.
 
 <a name="Attr"></a>
-## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L144>)
+## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L182>)
 
 Attr is the stable alias for the internal AttrValue key/value pair.
 
@@ -349,7 +374,7 @@ type Attr = corelogger.AttrValue
 ```
 
 <a name="Any"></a>
-### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L361>)
+### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L400>)
 
 ```go
 func Any(key string, val any) Attr
@@ -358,7 +383,7 @@ func Any(key string, val any) Attr
 Any builds an Attr carrying an opaque payload. Use the typed helpers when possible — Any disables type\-aware rendering.
 
 <a name="Bool"></a>
-### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L324>)
+### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L363>)
 
 ```go
 func Bool(key string, val bool) Attr
@@ -367,7 +392,7 @@ func Bool(key string, val bool) Attr
 Bool builds an Attr carrying a boolean value.
 
 <a name="Duration"></a>
-### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L348>)
+### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L387>)
 
 ```go
 func Duration(key string, val time.Duration) Attr
@@ -376,7 +401,7 @@ func Duration(key string, val time.Duration) Attr
 Duration builds an Attr carrying a time.Duration value.
 
 <a name="Float64"></a>
-### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L330>)
+### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L369>)
 
 ```go
 func Float64(key string, val float64) Attr
@@ -385,7 +410,7 @@ func Float64(key string, val float64) Attr
 Float64 builds an Attr carrying a float64 value.
 
 <a name="Int"></a>
-### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L318>)
+### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L357>)
 
 ```go
 func Int(key string, val int) Attr
@@ -394,7 +419,7 @@ func Int(key string, val int) Attr
 Int builds an Attr carrying an int value.
 
 <a name="Int64"></a>
-### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L336>)
+### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L375>)
 
 ```go
 func Int64(key string, val int64) Attr
@@ -403,7 +428,7 @@ func Int64(key string, val int64) Attr
 Int64 builds an Attr carrying an int64 value.
 
 <a name="String"></a>
-### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L312>)
+### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L351>)
 
 ```go
 func String(key, val string) Attr
@@ -412,7 +437,7 @@ func String(key, val string) Attr
 String builds an Attr carrying a string value.
 
 <a name="Time"></a>
-### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L354>)
+### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L393>)
 
 ```go
 func Time(key string, val time.Time) Attr
@@ -421,7 +446,7 @@ func Time(key string, val time.Time) Attr
 Time builds an Attr carrying a time.Time value.
 
 <a name="Uint64"></a>
-### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L342>)
+### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L381>)
 
 ```go
 func Uint64(key string, val uint64) Attr
@@ -470,7 +495,7 @@ type CloudWatchConfig = corewriter.CloudWatchConfig
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L173-L183>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L211-L221>)
 
 Config carries the construction parameters accepted by NewText. Two destination forms are supported — pick the one that fits:
 
@@ -566,7 +591,7 @@ func NewTextEncoder() Encoder
 NewTextEncoder returns the default human\-readable encoder, rendering each record as "TIME LEVEL msg key=val …\\n" with RFC3339\-millisecond timestamps. It is a named peer of TextEncoder bound to the real system clock.
 
 <a name="TextEncoder"></a>
-### func [TextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L140>)
+### func [TextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L141>)
 
 ```go
 func TextEncoder() Encoder
@@ -656,7 +681,7 @@ const KindUint64 Kind = corelogger.KindUint64
 ```
 
 <a name="Level"></a>
-## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L147>)
+## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L185>)
 
 Level is the stable alias for the internal severity type.
 
@@ -727,7 +752,7 @@ type Leveler = level.Leveler
 ```
 
 <a name="Logger"></a>
-## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L141>)
+## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L179>)
 
 Logger is the stable alias for the internal core.Logger interface.
 
@@ -736,7 +761,7 @@ type Logger = corelogger.Logger
 ```
 
 <a name="Default"></a>
-### func [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L251>)
+### func [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L290>)
 
 ```go
 func Default() (lg Logger, err error)
@@ -745,7 +770,7 @@ func Default() (lg Logger, err error)
 Default returns a Logger writing INFO\-and\-above records to os.Stderr. The stderr Writer is supplied explicitly here; NewText itself no longer silently defaults a nil Writer.
 
 <a name="DefaultMulti"></a>
-### func [DefaultMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L277>)
+### func [DefaultMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L316>)
 
 ```go
 func DefaultMulti(path string) (lg Logger, err error)
@@ -801,7 +826,7 @@ lg, err := logger.NewMulti(logger.LevelInfo,
 ```
 
 <a name="NewText"></a>
-### func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L199>)
+### func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L237>)
 
 ```go
 func NewText(cfg Config) (lg Logger, err error)
@@ -907,7 +932,7 @@ type Sink = corelogger.Sink
 ```
 
 <a name="ConsoleStderr"></a>
-### func [ConsoleStderr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L125>)
+### func [ConsoleStderr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L126>)
 
 ```go
 func ConsoleStderr() Sink
@@ -916,7 +941,7 @@ func ConsoleStderr() Sink
 ConsoleStderr returns the stderr console Sink used by Default. Exposed so callers building a Multi\(\) topology can wire stderr alongside richer transports without re\-implementing the convenience constructor.
 
 <a name="ConsoleStdout"></a>
-### func [ConsoleStdout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L132>)
+### func [ConsoleStdout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L133>)
 
 ```go
 func ConsoleStdout() Sink
@@ -925,7 +950,7 @@ func ConsoleStdout() Sink
 ConsoleStdout returns the stdout console Sink. Same rationale as ConsoleStderr — exposed for Multi\(\) compositions.
 
 <a name="Multi"></a>
-### func [Multi](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L85>)
+### func [Multi](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L86>)
 
 ```go
 func Multi(branches ...Sink) Sink
@@ -934,7 +959,7 @@ func Multi(branches ...Sink) Sink
 Multi is a thin wrapper around the internal multi \(fan\-out\) sink. It broadcasts every record to each branch in order and aggregates per\-sink failures via errors.Join under the FANOUT\_WRITE\_FAILED sentinel.
 
 <a name="NewWriterSink"></a>
-### func [NewWriterSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L102>)
+### func [NewWriterSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L103>)
 
 ```go
 func NewWriterSink(w io.Writer) (sink Sink, err error)
@@ -980,6 +1005,39 @@ type TopologyConfig struct {
     // Writers is the ordered set of named writer entries to fan records out to.
     Writers []WriterEntryConfig `json:"writers" yaml:"writers" toml:"writers"`
 }
+```
+
+<a name="TraceContext"></a>
+## type [TraceContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/tracecontext.go#L23>)
+
+TraceContext is the stable alias for the trace correlation a Record carries: the trace and span identifiers of the span the record was emitted inside. The zero value means "no trace here" and renders nothing.
+
+```go
+type TraceContext = corelogger.TraceContextValue
+```
+
+<a name="TraceContextFromContext"></a>
+### func [TraceContextFromContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/tracecontext.go#L45>)
+
+```go
+func TraceContextFromContext(ctx context.Context) TraceContext
+```
+
+TraceContextFromContext reads the span identity carried by ctx and returns it in the shape a log record carries.
+
+It is the adapter between [github.com/kitsunium/sdk/pkg/v1/trace](<https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/trace/>)'s SpanContext and the logger's TraceContext: the two identifiers, without the flags and the tracestate, because a log line answers "which span produced this?" and nothing else.
+
+An absent, unsampled\-and\-absent or malformed span context yields the zero value, and the encoders then emit no trace\_id and no span\_id at all — never an empty string and never the all\-zero identifier, both of which W3C Trace Context §3.2.2.3/§3.2.2.4 declare invalid.
+
+It allocates nothing: the context walk returns a value type, and the two identifiers are fixed\-size arrays copied by assignment.
+
+<a name="TraceContextSource"></a>
+## type [TraceContextSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/tracecontext.go#L28>)
+
+TraceContextSource is the stable alias for the port that reads a TraceContext off a context.Context. Every Logger built by this package is wired to TraceContextFromContext.
+
+```go
+type TraceContextSource = corelogger.TraceContextSource
 ```
 
 <a name="WriterEntryConfig"></a>
