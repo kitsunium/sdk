@@ -690,6 +690,38 @@ codes:
     const: CodeHalt
     hex: "0x00_02_16_06"
     package: internal/core/events
+  - code: "0.2.25.1"
+    const: CodeInvalidPath
+    hex: "0x00_02_19_01"
+    package: internal/core/vfs
+  - code: "0.2.25.2"
+    const: CodeInvalidPermission
+    hex: "0x00_02_19_02"
+    package: internal/core/vfs
+  - code: "0.2.25.3"
+    const: CodePathEscaped
+    hex: "0x00_02_19_03"
+    package: internal/core/vfs
+  - code: "0.2.25.4"
+    const: CodeReadFailed
+    hex: "0x00_02_19_04"
+    package: internal/core/vfs
+  - code: "0.2.25.5"
+    const: CodeWriteFailed
+    hex: "0x00_02_19_05"
+    package: internal/core/vfs
+  - code: "0.2.25.6"
+    const: CodePublishFailed
+    hex: "0x00_02_19_06"
+    package: internal/core/vfs
+  - code: "0.2.25.7"
+    const: CodeNotRegularFile
+    hex: "0x00_02_19_07"
+    package: internal/core/vfs
+  - code: "0.2.25.8"
+    const: CodeDirectoryNotEmpty
+    hex: "0x00_02_19_08"
+    package: internal/core/vfs
   - code: "0.2.29.1"
     const: CodeInvalidCheck
     hex: "0x00_02_1D_01"
@@ -1442,6 +1474,14 @@ codes:
     const: CodeHaltNotPermitted
     hex: "0x00_03_34_02"
     package: internal/service/events
+  - code: "0.3.55.1"
+    const: CodeRootUnavailable
+    hex: "0x00_03_37_01"
+    package: internal/service/vfs
+  - code: "0.3.55.2"
+    const: CodeDirectorySyncFailed
+    hex: "0x00_03_37_02"
+    package: internal/service/vfs
   - code: "0.3.59.1"
     const: CodeCheckFailed
     hex: "0x00_03_3B_01"

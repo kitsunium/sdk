@@ -72,6 +72,15 @@ vocabulary:
     # meaning of the word in a domain full of things that start. Same argument
     # as UpDownMeter above and ConnHandler further up.
     - github.com/kitsunium/sdk/internal/core/trace.Tracer
+    # AtomicWriter is the ADR 0039 capability sibling of the frozen core/vfs
+    # WritableFS port, and the -er form the rule would impose —
+    # "WriteAtomiccer" — is not a word. The name already ENDS in -er: it names
+    # the role a filesystem plays (one that can publish a whole file
+    # indivisibly) rather than restating its method, exactly as EntryFetcher
+    # and UpDownMeter do above. The family (FS / WritableFS / AtomicWriter /
+    # FullFS) is what tells a reader at a glance which capability a type
+    # assertion is asking for.
+    - github.com/kitsunium/sdk/internal/core/vfs.AtomicWriter
 
 # ── Global options ────────────────────────────────────────────────────────────
 
@@ -243,6 +252,20 @@ rules:
       # preserve the payload's type across the bridge, so narrowing to Any()
       # would erase exactly what the package exists to keep (ADR 0032).
       - "**/pkg/v1/logger/slogbridge/**"
+      # The vfs domain is the same contract-required class, and its two cases
+      # are the clearest examples in this file of a suggestion that does not
+      # compile. ValidatePerm takes an fs.FileMode and the rule suggests
+      # `interface{ String() string }` — but the function's entire body is
+      # `perm == 0 || perm&^fs.ModePerm != 0`, two operations no interface has;
+      # the parameter is a BIT SET, and the suggested interface is every type in
+      # Go that can print itself. syncDirHandle takes the *os.File that
+      # os.Root.Open returned, and it means one specific thing: fsync(2) on a
+      # DIRECTORY descriptor. Narrowing it to `interface{ Sync() error }` would
+      # advertise that any Syncer will do, which is false — and the testing seam
+      # the suggestion is reaching for already exists one level up, as the
+      # injectable atomicOps.syncDir that publish() drives.
+      - "**/internal/core/vfs/**"
+      - "**/internal/service/vfs/**"
 
       - "**/internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
@@ -526,9 +549,26 @@ rules:
   KTN-GOROUTINE-SYNCMAP:
     exclude:
       - "**/internal/kernel/singleflight/**"
+      # service/vfs.memFS is the same shape and the same answer. Its RWMutex
+      # guards `map[string]*memNode`, and the map is a FILESYSTEM TREE: MkdirAll
+      # inserts a whole chain of parents, RemoveAll deletes a node and every
+      # descendant, and WriteFile must observe "is there a non-directory in the
+      # way" and insert under one lock. Those are multi-key transactions, and
+      # sync.Map has no way to serialise them — a concurrent RemoveAll and
+      # MkdirAll racing through LoadOrStore would leave a child whose parent no
+      # longer exists, which is a tree state the type exists to make
+      # unreachable. The workload is write-heavy by construction too: the
+      # RWMutex earns its keep on the read side, and the read side is the half
+      # sync.Map would not be helping.
+      - "**/internal/service/vfs/**"
   KTN-GOROUTINE-ATOMICVAL:
     exclude:
       - "**/internal/kernel/singleflight/**"
+      # Same struct, same reason, plus one of its own: atomic.Value replaces a
+      # field a writer swaps WHOLESALE, and memFS mutates its map in place under
+      # the lock that also orders the compound operations above. Copy-on-write
+      # would make every WriteFile clone the entire tree.
+      - "**/internal/service/vfs/**"
 
   # KTN-STRUCT-ROLE-STUTTER (phase 4) — the package name IS the signal's name.
   #
