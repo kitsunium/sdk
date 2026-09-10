@@ -7,7 +7,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/worker"
 )
 
-// : sinks so the compiler cannot prove a daemon or a channel unused.
+// sinks so the compiler cannot prove a daemon or a channel unused.
 var (
 	daemonSink *worker.LoopDaemon
 	doneSink   <-chan struct{}

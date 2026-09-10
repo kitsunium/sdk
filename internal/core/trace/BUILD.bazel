@@ -60,6 +60,7 @@ go_test(
     srcs = [
         "carrier_external_test.go",
         "model_external_test.go",
+        "trace_bench_test.go",
         "trace_state_external_test.go",
         "traceparent_external_test.go",
     ],

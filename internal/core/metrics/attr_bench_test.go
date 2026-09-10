@@ -6,8 +6,8 @@ import (
 	"github.com/kitsunium/sdk/internal/core/metrics"
 )
 
-// : sinks so the compiler cannot prove the constructed values dead. Every
-// : benchmark here measures a function whose result is otherwise discardable.
+// sinks so the compiler cannot prove the constructed values dead. Every
+// benchmark here measures a function whose result is otherwise discardable.
 var (
 	attrSink  metrics.AttrValue
 	bytesSink []byte
@@ -15,8 +15,8 @@ var (
 	sliceSink []metrics.AttrValue
 )
 
-// : one shared identity buffer, reset per iteration. A fresh make() inside the
-// : loop would measure the allocator rather than AppendIdentity.
+// one shared identity buffer, reset per iteration. A fresh make() inside the
+// loop would measure the allocator rather than AppendIdentity.
 var identityBuf = make([]byte, 0, 256)
 
 // BenchmarkString / Bool / Int64 / Float64 pin the four constructors at zero
