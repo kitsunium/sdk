@@ -264,9 +264,12 @@ func Test_resolveFieldIndex(t *testing.T) {
 		t.Helper()
 		info := &structTypeInfo{fields: make([]structFieldInfo, len(tc.fields))}
 		for i, name := range tc.fields {
-			info.fields[i] = structFieldInfo{name: name, index: i}
+			info.fields[i] = structFieldInfo{name: name, nameBytes: []byte(name), index: i}
 		}
-		idx, ok := resolveFieldIndex(info, nil, tc.lookup)
+		//: the wire name arrives as bytes aliasing the decode buffer.
+		lookup := []byte(tc.lookup)
+
+		idx, ok := resolveFieldIndex(info, nil, lookup)
 		//: linear-scan path contract.
 		if idx != tc.wantIdx || ok != tc.wantOK {
 			t.Errorf("%s: linear: got (%d,%v) want (%d,%v)", tc.name, idx, ok, tc.wantIdx, tc.wantOK)
@@ -276,7 +279,7 @@ func Test_resolveFieldIndex(t *testing.T) {
 		for i, f := range info.fields {
 			nameIndex[f.name] = i
 		}
-		idx2, ok2 := resolveFieldIndex(info, nameIndex, tc.lookup)
+		idx2, ok2 := resolveFieldIndex(info, nameIndex, lookup)
 		//: map path must agree with the linear path bit-for-bit.
 		if idx2 != tc.wantIdx || ok2 != tc.wantOK {
 			t.Errorf("%s: map: got (%d,%v) want (%d,%v)", tc.name, idx2, ok2, tc.wantIdx, tc.wantOK)

@@ -16,7 +16,7 @@ arbitrary Go values; decoder reconstructs them as Go-native types
 | `Extensions()`   | `.tlv` |
 | Constructor      | `New() codec.Codec` |
 | Streaming        | yes (`NewEncoder`, `NewDecoder` — one record per Encode/Decode) |
-| Appender         | yes (`Append(dst, v) ([]byte, error)`) — drops Marshal's fresh-slice alloc; benches at 1 alloc/op, the best of the formats measured in `pkg/v1/codec/BENCH.md` (the 22 present at the last `make bench` run — `form` was registered after it and is not in those numbers) |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — drops Marshal's fresh-slice alloc. Against a genuinely pre-sized `dst` it is **0 allocs/op** (`BENCH.md` §2); the "1 alloc/op" quoted in `pkg/v1/codec/BENCH.md` is that harness's recycled buffer occasionally growing, and it is still the best of the 22 formats measured there (`form` was registered after that run and is not in those numbers) |
 
 ## Error codes (range `0.3.22.*`)
 
@@ -53,6 +53,29 @@ arbitrary Go values; decoder reconstructs them as Go-native types
   buffer.
 
 ## Performance (own-traversal; audit levers verified)
+
+`BENCH.md` holds the package's own numbers — regenerate with
+`cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem ./codec/tlv/`.
+Four facts a caller acts on: a scalar field costs **18.3 ns** to encode and a
+**nesting level costs about seven fields** (~129 ns, of which ~92 ns is the
+recursion itself), so flatten a payload rather than nest it; `Append` into a
+sized buffer is **0 allocations** while `Marshal` pays 2-6 for the growth
+cascade; and a **wire field name never becomes a Go string** on the typed
+decode path — `parseFieldName` returns bytes aliasing the input and
+`resolveFieldIndex` compares them against the per-type `nameBytes`. That last
+one is load-bearing, not cosmetic: the string it replaced was 61.80 % of the
+package's allocated objects and removing it took a 5-field struct decode from
+15 allocations to 5. Do not "simplify" `parseFieldName` back into
+`decodeFieldName` — and do not retain the bytes it returns, which alias the
+caller's own input buffer.
+
+**`cachedStructTypeInfo` is NOT a `singleflight` candidate — measured, `BENCH.md`
+§4.** A cache miss (`buildStructTypeInfo`) costs 234.7 ns at one field, 896.1 ns
+at five and 2 356 ns at sixteen, against a **2 007 ns** leading `singleflight.Do`
+(`internal/kernel/singleflight/BENCH.md`); it happens once per Go type per
+process; and the hit path is 26.23 ns serial, 3.71 ns aggregate across 8 P, so
+there is no contention to relieve either. Wrapping it would make the worst case
+slower in wall time to save ~16 µs of CPU, once, for the life of the process.
 
 The encode path writes into a pre-sized pooled scratch buffer, so the
 `-gcflags=-m=2` "escapes to heap" annotations on `encodeInt`/`encodeUint`'s

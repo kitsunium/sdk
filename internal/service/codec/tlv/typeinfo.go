@@ -57,6 +57,10 @@ func buildNamePrefix(name string) []byte {
 type structFieldInfo struct {
 	//: name is the exported field name as encoded on the TLV wire.
 	name string
+	//: nameBytes is name as bytes, so the decoder can compare a wire name
+	//: against it with bytes.Equal instead of converting one of the two.
+	//: Built once per type; the decode path then never converts at all.
+	nameBytes []byte
 	//: index is the field position passed to reflect.Value.Field(i).
 	index int
 	//: typ is the field's declared type, cached for the decoder's
@@ -140,6 +144,7 @@ func buildStructTypeInfo(t reflect.Type) *structTypeInfo {
 		//: the prefix (the cap check fires first).
 		fields = append(fields, structFieldInfo{
 			name:       sf.Name,
+			nameBytes:  []byte(sf.Name),
 			index:      i,
 			typ:        sf.Type,
 			kind:       sf.Type.Kind(),

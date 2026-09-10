@@ -40,6 +40,7 @@ go_test(
     srcs = [
         "base45_internal_test.go",
         "base_convert_internal_test.go",
+        "baseenc_bench_test.go",
         "buffering_writer_internal_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",

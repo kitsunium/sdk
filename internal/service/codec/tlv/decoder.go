@@ -743,51 +743,65 @@ func decodeStruct(length uint64, rest []byte, depth int) (value any, residual []
 // len(rest)" guard would also catch the make([]byte, length) attempt,
 // but the explicit cap gives callers a precise diagnostic.
 func decodeFieldName(data []byte, depth int) (name string, rest []byte, err error) {
+	//: parse the header, then pay for the string the untyped map needs.
+	nameBytes, residual, perr := parseFieldName(data, depth)
+	//: surface parse failure verbatim.
+	if perr != nil {
+		//: already wrapped.
+		return "", data, perr
+	}
+	//: the untyped path stores this as a map key, so it must not alias data.
+	return string(nameBytes), residual, nil
+}
+
+// parseFieldName reads the name-TLV at the head of data and returns the name
+// bytes ALIASING data — no copy and no allocation. It carries every check
+// decodeFieldName documents; the two differ only in what they hand back.
+//
+// The caller must COMPARE the bytes and never retain them: they point into
+// the caller's own input buffer, which is exactly the aliasing decodeString
+// copies to avoid. decodeStructInto is the intended caller — it resolves the
+// name to a field index and drops it. A memory profile attributed 61.80 % of
+// this package's allocated objects to the string this avoids, because a
+// decoded name was paying twice: once for the bytes, once to box the string
+// into the `any` decodeString returns. See BENCH.md §"What a field name cost".
+func parseFieldName(data []byte, depth int) (name, rest []byte, err error) {
 	//: nesting guard — names live one level below the struct.
 	if depth > maxTLVDepth {
 		//: surface the documented depth sentinel.
-		return "", data, depthExceededError(depth)
+		return nil, data, depthExceededError(depth)
 	}
 	//: every record needs at least 2 bytes (tag + 1-byte length).
 	if len(data) < minRecordBytes {
 		//: surface the truncated sentinel.
-		return "", data, truncatedError()
+		return nil, data, truncatedError()
 	}
 	//: the only legal tag here is tagString.
 	tag := Tag(data[0])
 	//: malformed when the name is not a string TLV.
 	if tag != tagString {
 		//: surface as decode failure with the offending tag.
-		return "", data, nonStringFieldNameError()
+		return nil, data, nonStringFieldNameError()
 	}
 	//: read the LEB128 length.
 	length, after, lerr := readVarintFromBytes(data[1:])
 	//: surface varint failure.
 	if lerr != nil {
 		//: already wrapped.
-		return "", data, lerr
+		return nil, data, lerr
 	}
-	//: enforce the encoder-side cap before allocating the name buffer.
+	//: enforce the encoder-side cap before trusting the declared length.
 	if length > uint64(maxFieldNameBytes) {
 		//: surface as decode failure with a precise diagnostic.
-		return "", data, fieldNameTooLongDecodeError(length)
+		return nil, data, fieldNameTooLongDecodeError(length)
 	}
-	//: decode the string body via the shared helper.
-	val, residual, derr := decodeString(length, after)
-	//: surface decode failure.
-	if derr != nil {
-		//: already wrapped.
-		return "", data, derr
+	//: the buffer must actually carry the bytes the header declares.
+	if uint64(len(after)) < length {
+		//: short read.
+		return nil, data, truncatedError()
 	}
-	//: decodeString returns a string in the any.
-	nameStr, ok := val.(string)
-	//: malformed when decodeString returned a non-string (defensive).
-	if !ok {
-		//: surface as decode failure.
-		return "", data, nonStringFieldNameError()
-	}
-	//: success.
-	return nameStr, residual, nil
+	//: success — name aliases data, residual continues after it.
+	return after[:length], after[length:], nil
 }
 
 // intWidth returns the byte width of a signed-integer tag.
