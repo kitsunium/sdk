@@ -21,7 +21,10 @@ alias(
 
 go_test(
     name = "id_test",
-    srcs = ["id_external_test.go"],
+    srcs = [
+        "id_bench_test.go",
+        "id_external_test.go",
+    ],
     deps = [":id"],
 )
 
