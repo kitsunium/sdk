@@ -93,6 +93,11 @@ lint:
 	# Exemption invariant: a `//go:build !race` test is invisible to the race
 	# suite, so the alloc lane is its only gate. Fail if one runs in no lane.
 	bash scripts/pre-commit/check-alloc-lane-coverage.sh
+	# The errs AST audits can only judge files that reach them as runfiles of
+	# //:audit_sources. A package declaring codes but missing from that list is
+	# audited by nothing AND passes — ADR 0020 records this gap having already
+	# hidden ~10 emitters once. Mechanical, so it cannot reopen by forgetting.
+	bash scripts/pre-commit/check-audit-coverage.sh
 	# The SDK is bound by the invariants it imposes on consumers. Running the
 	# guard here is what keeps ADR 0033 from being a tool nobody executes.
 	$(MAKE) --no-print-directory guard
