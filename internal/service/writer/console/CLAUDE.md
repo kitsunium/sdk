@@ -75,7 +75,9 @@ terminal emulator's and is not reproducible.
 - **74 % of the package floor is one mutex**: an uncontended `sync.Mutex`
   Lock/Unlock pair costs 19.63 ns of the `io.Discard` row's 26.63 ns on this Zen
   1 part, and work placed inside that pair is nearly free (an interface write
-  that costs 2.84 ns alone adds 0.34 ns there). That is also why `BENCH.md` §2
+  that costs 2.86 ns alone adds about 0.3 ns there — the gap from the predicted
+  total is 2.57 ns, nine times this table's widest spread, while the residual
+  itself sits at the noise floor). That is also why `BENCH.md` §2
   **refuses to rank the four `context` shapes** it measured: the guard being
   timed costs less than 0.4 ns and the rows span 2.9 ns.
 - **`/dev/null` does not scale with the payload** (1.7 % across 96 B → 8 KiB); a

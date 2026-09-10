@@ -60,13 +60,23 @@ The `io.Discard` row is 26.63 ns for a call that does nothing. Where it goes:
 
 | | ns/op |
 |---|---:|
-| `sync.Mutex` Lock+Unlock, uncontended, one integer increment between | **19.63** |
-| one interface call to `io.Discard.Write` | 2.84 |
-| both — the write INSIDE the pair | **19.97** |
+| `sync.Mutex` Lock+Unlock, uncontended, one integer increment between | **19.62** |
+| one interface call to `io.Discard.Write` | 2.864 |
+| both — the write INSIDE the pair | **19.91** |
 
-`19.63 + 2.84 = 22.47` predicted; **19.97 measured**. The interface write costs
-0.34 ns when it sits inside the critical section instead of 2.84 ns on its own —
-88 % of it disappears. This is a Zen 1 part, where a LOCK-prefixed instruction is
+Medians of nine samples across three separate processes.
+
+`19.62 + 2.864 = 22.48` predicted; **19.91 measured**. The interface write
+nearly vanishes inside the critical section: about 0.3 ns there against 2.86 ns
+on its own, roughly 90 % of it gone.
+
+The direction is solid and the residual is not, and the two are worth
+separating. The **gap from the prediction is 2.57 ns, nine times the widest
+spread in this table** (the combined arm ranges 19.73 to 20.02, i.e. 0.29 ns) —
+so "the write disappears inside the lock" is not a rounding artefact. But the
+leftover itself, 0.29 ns here against 0.34 ns from an earlier three-sample pass,
+is exactly the size of that spread, so it is quoted as "about 0.3 ns" and no
+conclusion rests on the second digit. This is a Zen 1 part, where a LOCK-prefixed instruction is
 expensive and a tight loop of them stalls; unrelated work between two of them
 lets the first retire.
 
