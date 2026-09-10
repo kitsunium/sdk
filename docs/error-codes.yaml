@@ -666,6 +666,30 @@ codes:
     const: CodeLockNameRejected
     hex: "0x00_02_15_04"
     package: internal/core/lock
+  - code: "0.2.22.1"
+    const: CodeInvalidSubscription
+    hex: "0x00_02_16_01"
+    package: internal/core/events
+  - code: "0.2.22.2"
+    const: CodeDuplicateListener
+    hex: "0x00_02_16_02"
+    package: internal/core/events
+  - code: "0.2.22.3"
+    const: CodeUnknownListener
+    hex: "0x00_02_16_03"
+    package: internal/core/events
+  - code: "0.2.22.4"
+    const: CodeInvalidEventType
+    hex: "0x00_02_16_04"
+    package: internal/core/events
+  - code: "0.2.22.5"
+    const: CodeListenerPanicked
+    hex: "0x00_02_16_05"
+    package: internal/core/events
+  - code: "0.2.22.6"
+    const: CodeHalt
+    hex: "0x00_02_16_06"
+    package: internal/core/events
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -1394,6 +1418,14 @@ codes:
     const: CodeLockKeepaliveLost
     hex: "0x00_03_33_03"
     package: internal/service/lock
+  - code: "0.3.52.1"
+    const: CodeListenerFailed
+    hex: "0x00_03_34_01"
+    package: internal/service/events
+  - code: "0.3.52.2"
+    const: CodeHaltNotPermitted
+    hex: "0x00_03_34_02"
+    package: internal/service/events
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
