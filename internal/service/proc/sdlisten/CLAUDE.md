@@ -38,6 +38,22 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
 Fd inheritance is a Unix mechanism, so this is `//go:build unix` (Linux, darwin,
 the BSDs). Off Unix the stub returns `UnsupportedPlatform`; every GOOS compiles.
 
+## Performance — see `BENCH.md`
+
+A binary that links this package and is **not** socket-activated pays **52 ns and
+zero allocations**, once: every entry point starts with `fdCount`, which stops at
+an unset `LISTEN_FDS`. There is no reason to guard the call.
+
+`Prepare` is linear and syscall-bound: **4.5 µs for one socket, 14.0 µs for four**,
+of which **63 % is the `dup(2)`** the protocol requires (`net.TCPListener.File()`,
+2 855 ns) and 309 ns per listener is this package's bookkeeping. `Prepare` with no
+listeners is 3.9 ns. Against the ~626 µs `exec.Start` that always follows it, a
+four-socket `Prepare` is 2.2 % of the launch it prepares.
+
+The `LISTEN_PID`-absent shortcut saves the 139 ns of `Atoi` + `getpid(2)`, but it
+exists for correctness (a pre-fork activator cannot know the child pid), not
+speed.
+
 ## Do NOT
 
 - Call `errs.Define` — all codes live in `core/proc`. Restate the sentinel fields

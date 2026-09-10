@@ -59,6 +59,7 @@ go_test(
         "creds_unix_internal_test.go",
         "exec_internal_test.go",
         "exec_other_test.go",
+        "exec_unix_bench_test.go",
         "exec_unix_external_test.go",
         "exec_unix_internal_test.go",
         "exec_windows_test.go",

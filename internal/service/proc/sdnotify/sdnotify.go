@@ -88,13 +88,21 @@ func resolveAddr(raw string) string {
 // name/value delimiter) would forge extra fields in the datagram, so such a
 // state is rejected with InvalidNotification rather than encoded.
 func encodePayload(state map[string]string) (body string, err error) {
-	//: pre-size the builder roughly to avoid repeated growth on small maps.
+	//: deliberately NOT pre-sized. Computing the exact size needs a second range
+	//: over the map, and a map range costs ~60 ns of iterator setup — more than
+	//: the single growth it would save on the one-field payload every shorthand
+	//: (Ready/Watchdog/Status/MainPID) builds. Measured both ways in BENCH.md:
+	//: pre-sizing made Ready() 29 % SLOWER.
 	var b strings.Builder
 	//: emit one "NAME=value" line per entry; the trailing newline per line is
 	//: harmless and matches systemd's own framing.
 	for name, value := range state {
-		//: a name containing '\n' or '=' would split into forged extra fields.
-		if strings.ContainsAny(name, "\n=") {
+		//: a name containing '\n' or '=' would split into forged extra fields. Two
+		//: byte searches, not ContainsAny: both delimiters are ASCII, so the results
+		//: are identical for every input (a UTF-8 continuation byte is never 0x0A or
+		//: 0x3D), and ContainsAny decodes a rune per byte for a short name — 24 % of
+		//: this function, named by the profile in BENCH.md.
+		if strings.Contains(name, "\n") || strings.Contains(name, "=") {
 			//: reject the field-injecting name as a malformed notification.
 			return "", wrapInvalid(nil, errs.String("name", name))
 		}

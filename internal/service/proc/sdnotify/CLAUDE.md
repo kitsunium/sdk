@@ -33,6 +33,30 @@ and `NotificationValue` value type declared in `internal/core/proc`. Backs the
   `time.Duration`; unset/garbage/zero ⇒ `ok=false`, mirroring
   `sd_watchdog_enabled`.
 
+## Performance — see `BENCH.md`
+
+A `Ready()` / `Watchdog()` call is **0.7 % formatting and 99.3 % socket**
+(168.8 ns to build `READY=1\n` and validate it, inside a 23.7 µs
+dial/write/close). An UNSUPERVISED binary — `$NOTIFY_SOCKET` unset — pays
+**83.7 ns and zero allocations** per call, so the shorthands can be shipped
+unconditionally. There is no watchdog interval a supervisor would plausibly
+configure at which this package becomes a cost.
+
+Two consequences are pinned in the code:
+
+- The field-injection check uses `strings.Contains(name, "\n") ||
+  strings.Contains(name, "=")` rather than `strings.ContainsAny(name, "\n=")`.
+  Both delimiters are ASCII and a UTF-8 continuation byte is never `0x0A` or
+  `0x3D`, so the results are identical for every input; `ContainsAny` decodes a
+  rune per byte for a name of ≤8 bytes (every sd_notify field name), which a
+  profile named at 34 % of `encodePayload`. Worth **−24 %** on the function and
+  −0.2 % on the call — kept because it is free, not because it matters.
+- The `strings.Builder` is deliberately **not** pre-sized. Computing the exact
+  size needs a second `range` over the map, and a map range costs ~60 ns of
+  iterator setup — measured at **+29 % on `Ready()`**, which is a one-entry map
+  like every other shorthand. The comment that used to claim pre-sizing now
+  states the measurement instead.
+
 ## Credential verification (SO_PASSCRED)
 
 `Listen` binds a `unixgram` socket under a private `0700` temp dir and sets
