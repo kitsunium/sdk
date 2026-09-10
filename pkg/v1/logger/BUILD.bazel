@@ -59,6 +59,7 @@ go_test(
         "builder_integration_test.go",
         "caller_external_test.go",
         "encoder_external_test.go",
+        "fanout_integration_test.go",
         "fromconfig_external_test.go",
         "fromconfig_internal_test.go",
         "levelvar_external_test.go",

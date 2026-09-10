@@ -12,9 +12,10 @@ the `text` encoder; `ndjson` / `json` land in follow-up commits.
 
 | File      | Role |
 |---|---|
-| `encoder.go` | `Encoder = corelogger.Encoder` type alias |
-| `text.go`    | `textEncoder` — renders `RecordEvent` → bytes, sanitises framing bytes, renders the top-level trace context |
-| `json.go`    | `jsonEncoder` — renders `RecordEvent` → one JSON object per line, flat attrs, top-level trace context |
+| `encoder.go`  | `Encoder = corelogger.Encoder` type alias |
+| `text.go`     | `textEncoder` — renders `RecordEvent` → bytes, sanitises framing bytes, renders the top-level trace context; `appendQuotedString`/`quoteSafe` are its escaping fast path |
+| `json.go`     | `jsonEncoder` — renders `RecordEvent` → one JSON object per line, flat attrs, top-level trace context |
+| `timestamp.go`| `appendTimestamp` — the shared RFC3339-milli renderer BOTH encoders use in place of `time.Time.AppendFormat` |
 
 ## Output shape
 
@@ -53,6 +54,28 @@ the `text` encoder; `ndjson` / `json` land in follow-up commits.
   hot path beyond `strconv.Append*` growth. The trace identifiers hold to it:
   `TraceContextValue.Append*Hex` `hex.Encode`s into a stack array and appends,
   so no Go string is ever materialised — profiled in `pkg/v1/logger/BENCH.md`.
+  Now measured for the whole package: **every benchmark in `BENCH.md` reports
+  0 B/op and 0 allocs/op**, at 0/4/16 attributes, every `Kind`, with and
+  without groups and trace context.
+- **Two hot paths exist because two profiles ordered them**, and both are
+  pinned by differential tests rather than by review. `appendQuotedString`
+  (text.go) replaces `strconv.AppendQuote` when every byte is printable ASCII
+  other than `"` and `\` — the set AppendQuote copies verbatim — which was
+  **70 % of a text encode**, half of it `utf8.DecodeRuneInString` + IsPrint.
+  `appendTimestamp` (timestamp.go) replaces `time.Time.AppendFormat` for the
+  one layout both encoders declare, which was **34.6 % of a whole emit**
+  because the generic formatter re-parses the layout per record; it is 5-6×
+  faster and falls back to the stdlib for any year outside `[0, 9999]`.
+  **Neither is allowed to differ by one byte**: `TestAppendQuotedStringMatchesStrconv`
+  sweeps all 256 byte values in three positions, and
+  `TestAppendTimestampMatchesAppendFormat` sweeps four zones × 100 000 instants.
+  Change either fast path and those tests are the contract — widen an accepted
+  set and they fail before a malformed log line ever reaches a parser.
+- **One timestamp renderer, two encoders.** `timestampLayout` and
+  `jsonTimestampLayout` are the same string, and `appendTimestamp` renders that
+  one layout. `TestJSONTimestampLayoutMatchesTextLayout` asserts the equality,
+  so giving JSON its own shape fails loudly instead of silently emitting the
+  text encoder's format.
 
 ## Error catalogue — range 0.3.2.\*
 
@@ -71,9 +94,22 @@ A future structured encoder may populate the range.
   It is a top-level field: a group prefix on it produces `http.trace_id`, which
   no ingestion pipeline recognises. There is a named test for that.
 - Render an absent trace context as an empty or all-zero id — see ADR 0062 §3.
+- Call `strconv.AppendQuote` or `time.Time.AppendFormat` directly on the hot
+  path again. Both are still reachable — as the documented FALLBACK inside
+  `appendQuotedString` and `appendTimestamp` — but a new call site bypasses the
+  measured fast paths and the differential tests that guard them.
+- Widen `quoteSafe`'s accepted byte set or `appendTimestamp`'s year window
+  without re-running the differential tests. They are not style checks; they
+  are the only thing keeping a fast path honest.
 
 ## Verification
 
 ```
 bazel test --config=race //internal/service/logger/encoder:encoder_test
+```
+
+Benchmarks and their reasoning live in `BENCH.md`; refresh with
+
+```
+cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s -count=3 ./logger/encoder/
 ```

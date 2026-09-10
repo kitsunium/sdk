@@ -179,7 +179,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 | `bazel query 'kind("go_library", deps(//internal/kernel/...)) except //internal/kernel/...'` | empty — kernel has zero outgoing go_library edges |
 | `make build` | `bazel mod tidy` + `bazel run //:gazelle` + `gofumpt -l -w` + `bazel build //...` |
 | `make test` | every `*_test` target green incl. `//internal/kernel/errs:errs_test` (AST audit) |
-| `make test-alloc` | race-off allocation gates green (20 targets) — the only lane running `//go:build !race` tests |
+| `make test-alloc` | race-off allocation gates green — every target in `tools/alloc-lane-targets.txt`, the only lane running `//go:build !race` tests |
 | `bash scripts/pre-commit/check-alloc-lane-coverage.sh` | exit 0 — no `!race` test sits outside `tools/alloc-lane-targets.txt` (rule 12) |
 | `bash scripts/pre-commit/check-domain-docs.sh` | exit 0 — the architecture tree still names exactly the `internal/core` directories, no domain is described twice, and both ADR indexes name exactly the ADRs on disk, once each (rule 11) |
 | `bash scripts/pre-commit/check-audit-coverage.sh` | exit 0 — no package declaring an `errs.Define`/`errs.Code` sits outside `//:audit_sources` (rule 3) |

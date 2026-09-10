@@ -36,6 +36,11 @@
 # Labelled-series lookup allocation gate — the claim that resolving an existing
 # series (including one already folded into overflow) costs zero allocations.
 //internal/service/metrics:metrics_test
+# An unexercised failover branch must cost nothing: the healthy write returns
+# on the first sink and its error slate stays empty, so chain DEPTH must not
+# appear in the allocation profile.
+//internal/service/logger/middleware/failover:failover_test
 # Build().Send() one-alloc-per-emit contract — the guard behind the
-# "zero-allocation logger" claim in README.md / CLAUDE.md.
+# "zero-allocation logger" claim in README.md / CLAUDE.md. Also pins fan-out
+# WIDTH, which that per-emit claim never covered.
 //pkg/v1/logger:logger_test

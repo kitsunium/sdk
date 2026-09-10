@@ -47,7 +47,15 @@ func New(branches ...corelogger.Sink) (sink corelogger.Sink, err error) {
 // branch fails, Write returns Exhausted wrapping the joined failure chain.
 func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: collect per-branch errors so the Exhausted error carries the full picture.
-	collected := make([]error, 0, len(s.chain))
+	//: DECLARED NIL, never pre-sized: Write runs once per log record, and the
+	//: happy path returns on the FIRST branch without ever appending — yet a
+	//: make([]error, 0, len(s.chain)) whose capacity is not a constant escapes
+	//: the compiler's implicit stack budget at three branches and heap-
+	//: allocates on every write, so a longer fallback chain taxed the healthy
+	//: path for failures that never happened. Measured at
+	//: internal/service/logger/BENCH.md §0. Flush/Close keep their pre-sized
+	//: slates because they run once per sink lifetime, not once per record.
+	var collected []error
 	//: walk the chain in order; first success short-circuits the loop.
 	for _, branch := range s.chain {
 		//: try the branch and capture either success or failure.

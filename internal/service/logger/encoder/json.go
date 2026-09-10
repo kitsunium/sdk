@@ -14,9 +14,10 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
-// jsonTimestampLayout is the RFC3339-with-milliseconds format used to render
-// the RecordEvent.Time field into the JSON "ts" string member.
-const jsonTimestampLayout string = "2006-01-02T15:04:05.000Z07:00"
+// The "ts" member's format is timestampLayout, declared in timestamp.go and
+// shared with the text encoder. It used to be duplicated here as
+// jsonTimestampLayout; the two strings were identical, and one constant cannot
+// drift from itself.
 
 // jsonEncoderName is the canonical identifier returned by jsonEncoder.Name.
 const jsonEncoderName string = "json"
@@ -116,7 +117,10 @@ func appendJSONHeader(dst []byte, r corelogger.RecordEvent) []byte {
 	dst = appendJSONString(dst, "ts")
 	dst = append(dst, ':')
 	dst = append(dst, '"')
-	dst = r.Time.AppendFormat(dst, jsonTimestampLayout)
+	//: appendTimestamp renders timestampLayout — the one layout both encoders
+	//: share — byte for byte, at 5-6× AppendFormat's speed. See timestamp.go
+	//: and BENCH.md §5.2.
+	dst = appendTimestamp(dst, r.Time)
 	dst = append(dst, '"', ',')
 	dst = appendJSONString(dst, "level")
 	dst = append(dst, ':')
@@ -212,9 +216,9 @@ func appendJSONValue(dst []byte, a corelogger.AttrValue) []byte {
 		return appendJSONString(dst, a.Value.Duration().String())
 	//: timestamps render as a quoted RFC3339-with-millis string.
 	case corelogger.KindTime:
-		//: reuse the header layout so all timestamps share one shape.
+		//: reuse the header renderer so all timestamps share one shape.
 		dst = append(dst, '"')
-		dst = a.Value.Time().AppendFormat(dst, jsonTimestampLayout)
+		dst = appendTimestamp(dst, a.Value.Time())
 		//: close the quoted timestamp token before handing the buffer back.
 		return append(dst, '"')
 	//: every other Kind degrades to a quoted "?" placeholder, kept valid JSON.
