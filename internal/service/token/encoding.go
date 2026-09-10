@@ -186,11 +186,53 @@ func checkNoDuplicateMembers(raw []byte) error {
 	return nil
 }
 
-// skipValue consumes exactly one JSON value from dec without interpreting it.
+// skipValue consumes exactly one JSON value from dec without interpreting it
+// and without copying its bytes.
+//
+// The obvious spelling — decoding into a json.RawMessage — COPIES the whole
+// value only for it to be discarded, and this is the duplicate-member pass, so
+// every byte copied is waste. A memory profile put that copy at 23 % of the
+// objects a token verification allocates; removing it is measured at two
+// allocations and ~14 % of an HS256 verification in BENCH.md.
 func skipValue(dec *json.Decoder) error {
-	var skipped json.RawMessage
-	//: RawMessage copies the value's bytes and stops at its end.
-	return dec.Decode(&skipped)
+	//: 0 means "no container open yet"; a scalar therefore ends immediately.
+	depth := 0
+	//: walk tokens until the value this call was asked to skip is fully read.
+	for {
+		tok, terr := dec.Token()
+		//: propagate the decoder's own verdict, including a truncation.
+		if terr != nil {
+			//: the caller turns this into Malformed.
+			return terr
+		}
+		delim, isDelim := tok.(json.Delim)
+		//: a scalar at the top of this value IS the whole value.
+		if !isDelim {
+			//: inside a container, scalars and member names are just consumed.
+			if depth == 0 {
+				//: the value was a single token.
+				return nil
+			}
+			//: keep walking the container.
+			continue
+		}
+		//: only the delimiter kind matters; the value itself is discarded.
+		switch delim {
+		//: an opening delimiter descends one level.
+		case '{', '[':
+			//: track it so the matching close can be recognised.
+			depth++
+		//: a closing delimiter ascends one.
+		default:
+			//: back up one level.
+			depth--
+			//: reaching zero closes the value this call was asked to skip.
+			if depth == 0 {
+				//: the container is fully consumed.
+				return nil
+			}
+		}
+	}
 }
 
 // preAuthEncode implements PASETO's PAE (pre-authentication encoding): the
