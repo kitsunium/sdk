@@ -23,7 +23,10 @@ alias(
 
 go_test(
     name = "trace_test",
-    srcs = ["trace_external_test.go"],
+    srcs = [
+        "trace_bench_test.go",
+        "trace_external_test.go",
+    ],
     deps = [
         ":trace",
         "//pkg/v1/metrics",
