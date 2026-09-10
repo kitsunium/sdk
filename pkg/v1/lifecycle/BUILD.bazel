@@ -23,7 +23,10 @@ alias(
 go_test(
     name = "lifecycle_test",
     size = "small",
-    srcs = ["lifecycle_external_test.go"],
+    srcs = [
+        "lifecycle_bench_test.go",
+        "lifecycle_external_test.go",
+    ],
     deps = [
         ":lifecycle",
         "//pkg/v1/errs",
