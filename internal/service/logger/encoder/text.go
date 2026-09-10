@@ -11,9 +11,8 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
-// timestampLayout is the RFC3339-with-milliseconds format used to render the
-// RecordEvent.Time field into the textual output.
-const timestampLayout string = "2006-01-02T15:04:05.000Z07:00"
+// The record timestamp's format is timestampLayout, declared in timestamp.go
+// beside the renderer that produces it and shared with the JSON encoder.
 
 // decimalBase is the radix passed to strconv.Append* for human-readable ints.
 const decimalBase int = 10
@@ -35,6 +34,18 @@ const groupSeparator byte = '.'
 
 // textEncoderName is the canonical identifier returned by TextEncoder.Name.
 const textEncoderName string = "text"
+
+// quoteSafeFloor and quoteSafeCeiling bound the byte range strconv.AppendQuote
+// copies into its output verbatim: an ASCII byte for which strconv.IsPrint
+// reports true is exactly one in [0x20, 0x7E]. Outside that range AppendQuote
+// either escapes the byte or decodes a multi-byte rune, so appendQuotedString
+// hands the whole string back to it.
+const (
+	// quoteSafeFloor is the lowest byte AppendQuote emits unescaped (space).
+	quoteSafeFloor byte = 0x20
+	// quoteSafeCeiling is the highest such byte (tilde).
+	quoteSafeCeiling byte = 0x7e
+)
 
 // textEncoder renders records as a single plain-text line. Unexported so the
 // public surface is the Encoder interface returned by NewText.
@@ -89,8 +100,11 @@ func (e *textEncoder) Append(dst []byte, groups []string, r corelogger.RecordEve
 
 // appendHeader writes the leading "TIME LEVEL msg" prefix into dst.
 func appendHeader(dst []byte, r corelogger.RecordEvent) []byte {
-	//: render the header in the documented "TIME LEVEL msg" order.
-	dst = r.Time.AppendFormat(dst, timestampLayout)
+	//: render the header in the documented "TIME LEVEL msg" order. The
+	//: timestamp goes through appendTimestamp rather than AppendFormat: same
+	//: bytes, 5-6× the speed, and it was 34.6 % of a whole emit — see
+	//: timestamp.go and BENCH.md §5.2.
+	dst = appendTimestamp(dst, r.Time)
 	dst = append(dst, ' ')
 	dst = append(dst, r.Level.String()...)
 	dst = append(dst, ' ')
@@ -182,14 +196,70 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) [
 	return appendValueOnly(dst, a)
 }
 
+// appendQuotedString appends s as a double-quoted token, producing byte-for-
+// byte what strconv.AppendQuote produces — but skipping it when it has nothing
+// to do.
+//
+// AppendQuote is the single most expensive call in this encoder: a CPU profile
+// of a four-string-attribute record attributed 70 % of the whole encode to it,
+// and half of THAT to utf8.DecodeRuneInString plus strconv.IsPrint — a full
+// Unicode printability analysis of every rune, run on every value, to discover
+// that a log message made of ASCII needs no escaping at all. The scan below
+// answers the same question with a byte-range comparison and then copies the
+// string with one memmove. Measured in internal/service/logger/encoder/BENCH.md.
+//
+// Correctness is not a judgement call: AppendQuote emits a byte verbatim
+// exactly when the rune is ASCII, strconv.IsPrint reports true (which for
+// ASCII is precisely [0x20, 0x7E]), and it is neither the delimiter '"' nor
+// the escape '\\'. quoteSafe accepts that set and nothing else, so the fast
+// path is a strict subset of the slow path's identity cases — pinned by
+// TestAppendQuotedStringMatchesStrconv, which sweeps every byte value.
+func appendQuotedString(dst []byte, s string) []byte {
+	//: anything AppendQuote might transform goes to AppendQuote.
+	if !quoteSafe(s) {
+		//: the general path owns every escaping and multi-byte-rune case.
+		return strconv.AppendQuote(dst, s)
+	}
+	//: verbatim copy between the two delimiters AppendQuote would have added.
+	dst = append(dst, '"')
+	dst = append(dst, s...)
+	//: close the quoted token before handing the buffer back.
+	return append(dst, '"')
+}
+
+// quoteSafe reports whether every byte of s is one strconv.AppendQuote would
+// copy into its output unchanged. A byte outside the printable-ASCII range is
+// rejected without inspecting it further, which also rejects every byte of
+// every multi-byte UTF-8 rune (all of them are >= 0x80).
+func quoteSafe(s string) bool {
+	//: byte-wise rather than rune-wise: the accepted set is single-byte only,
+	//: so a byte scan cannot mis-classify a multi-byte rune — it rejects it.
+	for i := range len(s) {
+		c := s[i]
+		//: reject control bytes, DEL and anything non-ASCII.
+		if c < quoteSafeFloor || c > quoteSafeCeiling {
+			//: hand the string to strconv.AppendQuote.
+			return false
+		}
+		//: reject the two bytes AppendQuote escapes inside the printable range.
+		if c == '"' || c == '\\' {
+			//: hand the string to strconv.AppendQuote.
+			return false
+		}
+	}
+	//: every byte survives AppendQuote unchanged.
+	return true
+}
+
 // appendValueOnly renders only the value part of an AttrValue.
 func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 	//: dispatch on the typed Kind discriminant — no boxing on the hot path.
 	switch a.Value.Kind() {
 	//: strings are quoted so whitespace in values remains visible.
 	case corelogger.KindString:
-		//: strconv.AppendQuote handles escaping consistently across encoders.
-		return strconv.AppendQuote(dst, a.Value.String())
+		//: same output as strconv.AppendQuote, without the Unicode analysis
+		//: when the value is plain ASCII — see appendQuotedString.
+		return appendQuotedString(dst, a.Value.String())
 	//: int64 (also covers int / int32 widened by IntValue) renders base-10.
 	case corelogger.KindInt64:
 		//: strconv.AppendInt is the canonical alloc-free integer renderer.
@@ -208,13 +278,15 @@ func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 		return strconv.AppendFloat(dst, a.Value.Float64(), floatFormat, floatPrec, floatBitSize)
 	//: durations render via the standard time.Duration String() form.
 	case corelogger.KindDuration:
-		//: AppendQuote keeps the textual form readable next to other quoted attrs.
-		return strconv.AppendQuote(dst, a.Value.Duration().String())
+		//: quoted like a string so the textual form stays readable next to the
+		//: other quoted attrs; a Duration's rendering is always plain ASCII, so
+		//: this always takes appendQuotedString's fast path.
+		return appendQuotedString(dst, a.Value.Duration().String())
 	//: timestamps render as RFC3339-with-millis to match the header format.
 	case corelogger.KindTime:
-		//: AppendFormat reuses timestampLayout — the SAME layout as the line
-		//: header — so a Time attr and the record timestamp share one shape.
-		return a.Value.Time().AppendFormat(dst, timestampLayout)
+		//: the SAME renderer as the line header, so a Time attr and the record
+		//: timestamp cannot drift apart in shape.
+		return appendTimestamp(dst, a.Value.Time())
 	//: every other Kind degrades to '?' until structured encoders ship.
 	default:
 		//: '?' is the documented placeholder for unsupported variants.

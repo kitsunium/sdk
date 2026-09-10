@@ -113,11 +113,40 @@ Logger ── Handler (genericHandler / TextHandler)
 - Re-export anything from this package at `pkg/v1/*` directly. The public
   facade owns its own constructors.
 
+## The one-allocation claim, measured through a real sink chain
+
+`BENCH.md` in this directory carries the cross-cutting report for the whole
+subtree — this package, every `middleware/*` and every `sink/*` — benchmarked
+against one shared discard control in one run, because a control measured in a
+different run is not a control. The encoder half is `encoder/BENCH.md`.
+
+Its headline: **the claim held at any middleware DEPTH and broke at fan-out
+WIDTH.** `multi.Write` and `failover.Write` each pre-sized a per-record error
+slate whose capacity was not a compile-time constant, so from three branches up
+they heap-allocated on every record on the completely healthy path — a
+`recover`→`failover(4)`→`multi(4)` emit measured 3 allocs/op. Both now declare
+the slate nil, and every stack in the report is back to **1 alloc/op** at every
+depth and width. `TestV116BuildSendAllocatesOnePerEmit` and
+`TestT34TraceCorrelationAddsNoAllocation` were not touched and still pass.
+
+The report also splits where an emit's time actually goes: the encoder was
+46 %, `runtime.Callers` (the caller-PC capture in `Send`) is 22.5 %,
+`mergeAttrs` — the one allocation — is 6.2 %, and the sink chain is under 1 %.
+The middleware costs matter for their allocation behaviour far more than for
+their nanoseconds.
+
 ## Verification
 
 ```
 bazel test --config=race //internal/service/logger:logger_test
 bazel test --config=race //internal/service/logger/...
+```
+
+Benchmarks (never under `-race`; `async` is concurrent and its timings are
+meaningless with the detector on):
+
+```
+cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s -count=3 ./logger/
 ```
 
 ## Subtree

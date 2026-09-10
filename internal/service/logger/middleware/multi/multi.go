@@ -46,7 +46,15 @@ func New(branches ...corelogger.Sink) corelogger.Sink {
 // sentinel.
 func (s *fanoutSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte) (n int, err error) {
 	//: collect per-branch errors so callers see every failure, not just the first.
-	errs2 := make([]error, 0, len(s.branches))
+	//: DECLARED NIL, never pre-sized: Write runs once per log record, and a
+	//: make([]error, 0, len(s.branches)) whose capacity is not a constant
+	//: escapes the compiler's implicit stack budget at three branches and
+	//: heap-allocates on EVERY write — including the healthy one where no
+	//: branch ever fails and the slice stays empty. Measured at
+	//: internal/service/logger/BENCH.md §0; the sibling tee middleware has
+	//: always used this shape. Flush/Close keep their pre-sized slates
+	//: because they run once per sink lifetime, not once per record.
+	var errs2 []error
 	//: walk every branch in order; failures are captured but never short-circuit.
 	for _, b := range s.branches {
 		//: every branch sees the payload regardless of upstream failures.

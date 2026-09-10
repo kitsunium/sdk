@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -167,5 +168,59 @@ func Test_groupSeparator(t *testing.T) {
 				t.Errorf("groupSeparator = %q, want %q", groupSeparator, tc.want)
 			}
 		})
+	}
+}
+
+// TestAppendQuotedStringMatchesStrconv is the differential test that licenses
+// appendQuotedString's fast path. That fast path exists because a CPU profile
+// put 70 % of a text encode inside strconv.AppendQuote (see BENCH.md §5.1), and
+// it is legitimate only while its output is byte-for-byte AppendQuote's. This
+// sweeps every byte value in three positions, plus the multi-byte and escaping
+// cases, and compares the two renderings directly — so a future widening of
+// quoteSafe that admits one byte AppendQuote would have escaped fails here
+// rather than in a log line somebody downstream has to parse.
+func TestAppendQuotedStringMatchesStrconv(t *testing.T) {
+	t.Parallel()
+	cases := make([]string, 0, 3*256+8)
+	//: every byte value alone, leading and trailing — the three positions a
+	//: scan-then-copy implementation could get wrong independently.
+	for b := range 256 {
+		c := string([]byte{byte(b)})
+		cases = append(cases, c, "lead"+c, c+"trail")
+	}
+	cases = append(cases,
+		"",
+		"plain ascii value",
+		`has "quotes" inside`,
+		`has \backslash inside`,
+		"has\nnewline\tand\ttabs",
+		"héllo wörld",
+		"日本語のログ",
+		"\x00\x1f\x7f",
+	)
+	for _, s := range cases {
+		want := strconv.AppendQuote(nil, s)
+		got := appendQuotedString(nil, s)
+		//: byte equality is the whole contract — a "close enough" rendering
+		//: would silently change every text line the SDK has ever emitted.
+		if string(got) != string(want) {
+			t.Fatalf("appendQuotedString(%q) = %q, want %q", s, got, want)
+		}
+	}
+}
+
+// TestQuoteSafeRejectsEverythingStrconvTransforms pins the accepted set itself,
+// so the boundary is asserted as an intention rather than only as a consequence
+// of the differential sweep above.
+func TestQuoteSafeRejectsEverythingStrconvTransforms(t *testing.T) {
+	t.Parallel()
+	for b := range 256 {
+		s := string([]byte{byte(b)})
+		//: printable ASCII minus the delimiter and the escape — exactly the
+		//: bytes strconv.AppendQuote copies through untouched.
+		wantSafe := b >= int(quoteSafeFloor) && b <= int(quoteSafeCeiling) && b != '"' && b != '\\'
+		if got := quoteSafe(s); got != wantSafe {
+			t.Errorf("quoteSafe(%q) = %v, want %v", s, got, wantSafe)
+		}
 	}
 }
