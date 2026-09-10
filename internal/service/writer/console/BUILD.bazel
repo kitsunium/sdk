@@ -32,6 +32,8 @@ alias(
 go_test(
     name = "console_test",
     srcs = [
+        "console_alloc_external_test.go",
+        "console_bench_test.go",
         "console_external_test.go",
         "console_internal_test.go",
     ],
@@ -40,6 +42,10 @@ go_test(
         "//internal/core/logger",
         "//internal/core/logger/level",
         "//internal/core/writer",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/logger",
+        "//internal/service/logger/encoder",
+        "//internal/service/logger/sink/console",
     ],
 )
