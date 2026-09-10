@@ -191,9 +191,21 @@ func checkNoDuplicateMembers(raw []byte) error {
 //
 // The obvious spelling — decoding into a json.RawMessage — COPIES the whole
 // value only for it to be discarded, and this is the duplicate-member pass, so
-// every byte copied is waste. A memory profile put that copy at 23 % of the
-// objects a token verification allocates; removing it is measured at two
-// allocations and ~14 % of an HS256 verification in BENCH.md.
+// every byte copied is waste.
+//
+// Both implementations are benchmarked side by side over the exact two
+// payloads one verification scans (BenchmarkDuplicateScanRealistic); the
+// copying one lives in the benchmark file and nothing in production calls it.
+// The saving is 919 ns on the header and 3 909 ns on the claims — together
+// 16.8 % of one HS256 verification — plus 832 B on a single 4 KiB claim value,
+// a gap that grows with the value. See BENCH.md §12.
+//
+// The OBJECT count is not the reason and must not be quoted as one: on Go
+// 1.27, whose encoding/json is backed by json/v2, the copying implementation
+// allocates two FEWER objects on a claim set containing an array, because
+// json.Decoder.Token boxes every scalar it walks past while Decode takes the
+// value in one grab. pkg/v1/token/BENCH.md's "two allocations" predates that
+// toolchain; the time saving it also reports does reproduce.
 func skipValue(dec *json.Decoder) error {
 	//: 0 means "no container open yet"; a scalar therefore ends immediately.
 	depth := 0
