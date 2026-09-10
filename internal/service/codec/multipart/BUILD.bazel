@@ -40,6 +40,7 @@ go_test(
         "decoder_internal_test.go",
         "encoder_internal_test.go",
         "limits_internal_test.go",
+        "multipart_bench_test.go",
     ],
     embed = [":multipart"],
     deps = [
