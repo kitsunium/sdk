@@ -9,17 +9,17 @@ below change how the package should be used.
 
 | workload | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| `Pool_GetPut_Buffer4K` — pool holds `[]byte` | 82.95 | 24 | 1 |
-| `Pool_GetPut_BufferPtr4K` — pool holds `*[]byte` | **25.58** | **0** | **0** |
-| `Pool_Parallel` — `[]byte` | 27.17 | 24 | 1 |
-| `Pool_ParallelPtr` — `*[]byte` | **2.975** | **0** | **0** |
+| `Pool_GetPut_Buffer4K` — pool holds `[]byte` | 51.36 | 24 | 1 |
+| `Pool_GetPut_BufferPtr4K` — pool holds `*[]byte` | **25.70** | **0** | **0** |
+| `Pool_Parallel` — `[]byte` | 19.82 | 24 | 1 |
+| `Pool_ParallelPtr` — `*[]byte` | **3.496** | **0** | **0** |
 
 `sync.Pool` stores `any`. A pointer fits in an interface word and is boxed for
 free; a slice header is three words and cannot be, so `Put([]byte)`
 heap-allocates 24 B to carry it — **every call**. Pooling a `*[]byte` instead
-is 3.2× faster serially and **9× faster in parallel**, at zero allocations.
+is 2× faster serially and **5.7× faster in parallel**, at zero allocations.
 
-Note that `Pool_ParallelPtr` at 2.975 ns is faster than the same operation on a
+Note that `Pool_ParallelPtr` at 3.496 ns is faster than the same operation on a
 single goroutine. That is `sync.Pool`'s per-P shards working exactly as
 designed: with no boxing allocation to serialise on the allocator, each P
 services its own free list and the cores stop talking to each other.
@@ -36,26 +36,26 @@ benchmark pair exists to keep the next consumer honest.
 
 | payload | pooled Get+Put | `make` | ratio |
 |---|---:|---:|---:|
-| 4 KiB | 82.95 ns | 3 227 ns | **39×** |
-| 64 KiB | 83.52 ns | 23 974 ns | **287×** |
+| 4 KiB | 51.36 ns | 1 554 ns | **30×** |
+| 64 KiB | 54.04 ns | 14 845 ns | **275×** |
 
-A 16× larger buffer costs the pool **0.7 % more** and costs the allocator 7.4×
+A 16× larger buffer costs the pool **5 % more** and costs the allocator 9.6×
 more. The pool's price is a per-P lookup and does not depend on what it
 recycles, which is the whole argument for the primitive — and the reason its
 benefit grows with the size of what you hand it.
 
 ## 3. For a small object, pooling wins — but barely, and it is not free
 
-`Pool_GetPut_Small` is 20.61 ns / 0 allocs against `New_Small` at 26.95 ns /
+`Pool_GetPut_Small` is 20.29 ns / 0 allocs against `New_Small` at 24.64 ns /
 1 alloc / 32 B. A four-word struct behind a pointer is already cheap to
-allocate, so the pool buys ~6 ns and one GC-pressure unit. Worth it on a path
+allocate, so the pool buys ~4 ns and one GC-pressure unit. Worth it on a path
 that runs millions of times; noise anywhere else. **Do not pool something small
 because pooling is available** — pool it because you measured the allocation.
 
 ## 4. `CappedPool` misconfigured is an allocator wearing a pool's name
 
-`CappedPool_GetPut_UnderCap` is 65.45 ns; `CappedPool_GetPut_OverCap` is
-**2 025 ns with 2 allocs**, a 31× regression. The over-cap benchmark sets
+`CappedPool_GetPut_UnderCap` is 64.46 ns; `CappedPool_GetPut_OverCap` is
+**1 783 ns with 2 allocs**, a 28× regression. The over-cap benchmark sets
 `maxCap` *below* the factory's own capacity, so every `Put` orphans the value
 and every `Get` misses and rebuilds it. Nothing fails, nothing warns, and the
 type still says `CappedPool`.
@@ -73,7 +73,7 @@ happy path.
 
 > **Numbers vary across machines** — and this run was taken on a shared box with
 > four other jobs active, so absolute `ns/op` carry real run-to-run variance
-> (`Buffer4K` measured 52 ns on a quieter pass and 83 ns here). **The ratios are
+> (`Buffer4K` measured 51 ns here and 83 ns on a busier pass). **The ratios are
 > what this report asserts**: pointer-vs-slice, pooled-vs-`make`, flat-vs-linear.
 > Those held across every run.
 
@@ -96,17 +96,15 @@ goos: linux
 goarch: amd64
 pkg: github.com/kitsunium/sdk/internal/kernel/recycler
 cpu: AMD EPYC 7351P 16-Core Processor
-BenchmarkPool_GetPut_Small-8            	50273792	        20.61 ns/op	       0 B/op	       0 allocs/op
-BenchmarkNew_Small-8                    	44342377	        26.95 ns/op	      32 B/op	       1 allocs/op
-BenchmarkPool_GetPut_Buffer4K-8         	21454522	        82.95 ns/op	      24 B/op	       1 allocs/op
-BenchmarkNew_Buffer4K-8                 	  752248	      3227 ns/op	    4096 B/op	       1 allocs/op
-BenchmarkPool_GetPut_Buffer64K-8        	16288644	        83.52 ns/op	      24 B/op	       1 allocs/op
-BenchmarkNew_Buffer64K-8                	   65796	     23974 ns/op	   65536 B/op	       1 allocs/op
-BenchmarkPool_Parallel-8                	48483122	        27.17 ns/op	      24 B/op	       1 allocs/op
-BenchmarkPool_GetPut_BufferPtr4K-8      	47622847	        25.58 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPool_ParallelPtr-8             	377658792	         2.975 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCappedPool_GetPut_UnderCap-8   	18123566	        65.45 ns/op	      24 B/op	       1 allocs/op
-BenchmarkCappedPool_GetPut_OverCap-8    	  635425	      2025 ns/op	    4121 B/op	       2 allocs/op
-PASS
-ok  	github.com/kitsunium/sdk/internal/kernel/recycler	18.505s
+BenchmarkPool_GetPut_Small-8            	59718727	        20.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNew_Small-8                    	44788792	        24.64 ns/op	      32 B/op	       1 allocs/op
+BenchmarkPool_GetPut_Buffer4K-8         	24304731	        51.36 ns/op	      24 B/op	       1 allocs/op
+BenchmarkNew_Buffer4K-8                 	  824965	      1554 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkPool_GetPut_Buffer64K-8        	19177189	        54.04 ns/op	      24 B/op	       1 allocs/op
+BenchmarkNew_Buffer64K-8                	   87289	     14845 ns/op	   65536 B/op	       1 allocs/op
+BenchmarkPool_Parallel-8                	80598091	        19.82 ns/op	      24 B/op	       1 allocs/op
+BenchmarkPool_GetPut_BufferPtr4K-8      	45264038	        25.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPool_ParallelPtr-8             	390679272	         3.496 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCappedPool_GetPut_UnderCap-8   	17068155	        64.46 ns/op	      24 B/op	       1 allocs/op
+BenchmarkCappedPool_GetPut_OverCap-8    	  724784	      1783 ns/op	    4121 B/op	       2 allocs/op
 ```

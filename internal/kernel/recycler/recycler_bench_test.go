@@ -124,10 +124,7 @@ func BenchmarkPool_Parallel(b *testing.B) {
 // *bytes.Reader, service/logger pools *chainBuilder, async pools *recordEntry,
 // net/server pools *pooledConn — so this exists to keep the next one honest.
 func BenchmarkPool_GetPut_BufferPtr4K(b *testing.B) {
-	p := recycler.NewPool(func() *[]byte {
-		buf := make([]byte, 0, 4096)
-		return &buf
-	})
+	p := recycler.NewPool(func() *[]byte { return new(make([]byte, 0, 4096)) })
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
@@ -141,10 +138,7 @@ func BenchmarkPool_GetPut_BufferPtr4K(b *testing.B) {
 // BenchmarkPool_ParallelPtr is Pool_Parallel with the same correction, so the
 // contention number is read without the boxing allocation on top of it.
 func BenchmarkPool_ParallelPtr(b *testing.B) {
-	p := recycler.NewPool(func() *[]byte {
-		buf := make([]byte, 0, 4096)
-		return &buf
-	})
+	p := recycler.NewPool(func() *[]byte { return new(make([]byte, 0, 4096)) })
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {

@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"maps"
 	"sync"
 	"testing"
 
@@ -145,9 +146,7 @@ func BenchmarkUpdate_WithClone(b *testing.B) {
 	for b.Loop() {
 		v.Update(func(cur *table) *table {
 			next := &table{m: make(map[string]int, len(cur.m)+1)}
-			for k, val := range cur.m {
-				next.m[k] = val
-			}
+			maps.Copy(next.m, cur.m)
 			next.m["zz"] = i
 			return next
 		})

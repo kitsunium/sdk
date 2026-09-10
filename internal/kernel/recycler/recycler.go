@@ -8,8 +8,8 @@
 // only a value that fits in an interface word is boxed for free — so a
 // *[]byte costs nothing to Put while a bare []byte, being a three-word
 // header, heap-allocates 24 B on every single Put. Measured in BENCH.md at
-// 25.58 ns and 0 allocs against 82.95 ns and 1 alloc for the same workload,
-// and 2.975 ns against 27.17 ns under b.RunParallel. Pool a pointer. Every
+// 25.70 ns and 0 allocs against 51.36 ns and 1 alloc for the same workload,
+// and 3.496 ns against 19.82 ns under b.RunParallel. Pool a pointer. Every
 // consumer in this repository already does.
 //
 // The byte-slice pool (internal/kernel/buffer) and the codec scratch buffer

@@ -24,8 +24,7 @@ func benchKeys(n int) []string {
 func BenchmarkNewCache(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		c := NewCache[string, int](Config[string, int]{MaxEntries: 1024})
-		_ = c
+		benchCache = NewCache[string, int](Config[string, int]{MaxEntries: 1024})
 	}
 }
 
@@ -50,7 +49,7 @@ func BenchmarkFetch_Hit(b *testing.B) {
 		if !ok {
 			b.Fatalf("miss on seeded key %q", keys[i&1023])
 		}
-		_ = v
+		benchInt = v
 		i++
 	}
 }
@@ -72,7 +71,7 @@ func BenchmarkFetch_HitWithTTL(b *testing.B) {
 		if !ok {
 			b.Fatalf("miss on seeded key %q", keys[i&1023])
 		}
-		_ = v
+		benchInt = v
 		i++
 	}
 }
@@ -113,7 +112,12 @@ func BenchmarkSet_NewKey(b *testing.B) {
 
 // : package-level so the compiler cannot prove the cache dead and elide the
 // : Set calls above.
-var benchCache *Cache[string, int]
+var (
+	benchCache   *Cache[string, int]
+	benchInt     int
+	benchStats   StatsValue
+	benchEvicted int
+)
 
 // BenchmarkSet_Overwrite measures replacing a live key. No entry is allocated
 // and no eviction runs — the delta against Set_NewKey is the node allocation.
@@ -151,10 +155,9 @@ func BenchmarkSet_AtCapacity(b *testing.B) {
 // property a caller must know before putting real work in OnEvict.
 func BenchmarkSet_AtCapacityOnEvict(b *testing.B) {
 	keys := benchKeys(4096)
-	var evicted int
 	c := NewCache[string, int](Config[string, int]{
 		MaxEntries: 512,
-		OnEvict:    func(string, int) { evicted++ },
+		OnEvict:    func(string, int) { benchEvicted++ },
 	})
 	for i, k := range keys[:512] {
 		c.Set(k, i)
@@ -166,7 +169,6 @@ func BenchmarkSet_AtCapacityOnEvict(b *testing.B) {
 		c.Set(keys[i&4095], i)
 		i++
 	}
-	_ = evicted
 }
 
 // BenchmarkFetch_Parallel is the contention number. One mutex covers the map
@@ -201,7 +203,7 @@ func BenchmarkLen(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = c.Len()
+		benchInt = c.Len()
 	}
 }
 
@@ -212,6 +214,6 @@ func BenchmarkStats(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = c.Stats()
+		benchStats = c.Stats()
 	}
 }
