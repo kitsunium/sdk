@@ -30,6 +30,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `token/` | Security tokens (ADR 0042): JWT over JWS Compact Serialization + PASETO v4.public. One constructor per algorithm — `NewHS256Verifier` takes a `crypto.Key`, `NewES256Verifier` an `*ecdsa.PublicKey` — so algorithm confusion is a call that does not compile; `alg:none` has no representation in `Algorithm`; `exp` is required unless opted out by name; `NewSetVerifier` selects by `kid` from a JWK Set and resolves a duplicated one by signature. `Claims` prints its shape, never its values. stdlib-only | `pkg/v1/token/README.md` |
 | `validation/` | Value validation (ADR 0046): `Constraint`/`Violation`/`Report` aliases + `All`/`First`/`Field`/`Each`/`Check`/`Must`, the built-ins (`Required`/`AtLeast`/`AtMost`/`Between`/`Length`/`Count`/`OneOf`/`Matches`) and `Struct[T]` — the struct-tag front end whose plan is cached per type. A violation says WHERE in one path grammar (`JoinField`/`JoinIndex`, json-tag member names); every violation is collected by default; neither `Violation` nor `Report` is an `error` (`Report.Err()` converts and returns a genuine nil); a message never echoes the value. Feeds `config.Validator` without replacing it. stdlib-only | `pkg/v1/validation/README.md` |
 | `vfs/` | Filesystem (ADR 0056): `NewOS` → a tree-confined filesystem, `NewMem` → a double that needs no temporary directory. `FS`/`WritableFS`/`AtomicWriter`/`FullFS` aliases plus the ten sentinels. Reading is `io/fs` unchanged, so `fs.WalkDir`, `fs.Glob` and `fs.ReadFile` work with no adapter. `WriteAtomic` publishes via a temporary + `rename(2)` + two flushes: on failure the previous bytes are byte-for-byte intact and no temporary survives. A refusal carries BOTH identities — `errors.Is(err, vfs.ReadFailed)` and `errors.Is(err, fs.ErrNotExist)` both answer — so the package can be adopted one call at a time. A zero mode is refused, never defaulted. stdlib-only; `NewOS` refuses at construction off its native platforms | `pkg/v1/vfs/README.md` |
+| `view/` | Server-side rendering (ADR 0058): `New(Config{FS: …})` → a `Renderer` you `Render(ctx, name, data)`, returning the complete document or nothing — it never takes an `io.Writer`, because a mid-execution failure would already have flushed the status line and half the page. The engine is the stdlib `html/template`, USED and not reimplemented: it is the only Go engine that escapes according to CONTEXT, and a hand-written escaper would be the security regression this domain exists to prevent. `text/template` has no representation at all and an AST audit fails the build on the import. **`TrustHTML` is the one bypass and the only spelling the SDK offers**; the other six html/template trust types are REFUSED in render data with the path named. **What it does NOT prevent is stated out loud: `TrustedHTML` is a type alias, so a `Trusted` the caller built wrongly is an XSS the SDK cannot see** — the domain prevents an accidental bypass and gives the deliberate one one greppable word. **Parse once**: reparsing per request costs 34× on a realistic tree. Stdlib-only, cross-OS | `pkg/v1/view/README.md` |
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -97,5 +98,24 @@ GOWORK=off go test -race -cover ./v1/...
 - `token/` — see `pkg/v1/token/CLAUDE.md`
 - `validation/` — see `pkg/v1/validation/CLAUDE.md`
 - `vfs/` — see `pkg/v1/vfs/CLAUDE.md`
+- `view/` — see `pkg/v1/view/CLAUDE.md`
 - `session/` — see `pkg/v1/session/CLAUDE.md`
 - `sql/` — see `pkg/v1/sql/CLAUDE.md`
+
+## Before v1 — the shapes this layer publishes
+
+Every `type X = internal…Y` in this tree publishes `Y`'s **shape**, not just its
+name. ADR 0039 covers the interface half (extend by a sibling, never by
+widening); ADR 0040 covers this half, and gives it an expiry date — a concrete
+shape may change while the module is v0, said out loud, and **not after**.
+
+`.claude/contexts/pre-v1-published-shape-audit.md` is the inventory that licence
+applies to: **124 concrete structs**, split by what a change to each actually
+costs. 43 are construction shapes a caller fills in by field name, where adding
+a field is free. The expensive group is the `*Value` shapes the SDK **returns** —
+a caller destructures those, so even an added field breaks a composite literal
+written without field names.
+
+Review that list before tagging v1, not after. Regenerate it rather than trust
+it: the count in it was wrong by a factor of 25 on the first pass, and looked
+entirely plausible.
