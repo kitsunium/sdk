@@ -73,6 +73,7 @@ go_test(
         "relay_other_test.go",
         "relay_unix_external_test.go",
         "relay_windows_test.go",
+        "signal_bench_test.go",
         "signal_external_test.go",
         "signal_internal_test.go",
     ],

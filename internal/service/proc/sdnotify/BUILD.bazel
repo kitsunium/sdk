@@ -37,6 +37,7 @@ go_test(
         "listen_linux_internal_test.go",
         "notify_external_test.go",
         "notify_internal_test.go",
+        "sdnotify_bench_test.go",
         "sdnotify_external_test.go",
         "sdnotify_internal_test.go",
         "sdnotify_other_test.go",

@@ -57,6 +57,23 @@ Only the kill(2) path is split:
 - `relay_other.go` (`//go:build !unix`) — returns `coreproc.UnsupportedPlatform`,
   so every GOOS compiles and merely degrades.
 
+## Performance — see `BENCH.md`
+
+**`Notify` is a wiring-time call, not a per-request one.** Registration costs
+**≈7 300 ns**; the per-delivery translation it buys costs **2.98 ns** — a ratio of
+**≈2 460×**. Subscribing to four signals in ONE call (13.4 µs) is 2.2× cheaper
+than four separate calls (29.3 µs) and spawns one goroutine instead of four, at
+the same allocation count.
+
+`Relay` costs **≈346 ns per delivered signal**, which is a bare `kill(2)` on this
+kernel — the loop adds nothing measurable per signal, and ~196 ns once per `Relay`
+call. `stop()` after the first is 3.1 ns (the `sync.Once` fast path), so a
+defensive teardown path pays nothing.
+
+One caveat on reading the registration figure: `stop()` closes `done` and returns;
+the goroutine's own `signal.Stop` and `close(dst)` run just afterwards on that
+goroutine, so **deregistration is not inside the ≈7 300 ns**.
+
 ## Errors
 
 No codes are defined here. All sentinels are central in `internal/core/proc`;

@@ -97,6 +97,7 @@ go_test(
     srcs = [
         "reaper_external_test.go",
         "reaper_internal_test.go",
+        "reaper_unix_bench_test.go",
         "reaper_unix_external_test.go",
         "reaper_unix_internal_test.go",
         "subreaper_linux_external_test.go",

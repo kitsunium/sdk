@@ -90,6 +90,7 @@ go_test(
     name = "sdlisten_test",
     srcs = [
         "sdlisten_other_test.go",
+        "sdlisten_unix_bench_test.go",
         "sdlisten_unix_external_test.go",
         "sdlisten_unix_internal_test.go",
     ],
