@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "transform",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "s2.go",
+        "transform.go",
+        "zstd.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/transform",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/transform",
+        "//internal/kernel/errs",
+        "@com_github_klauspost_compress//s2",
+        "@com_github_klauspost_compress//zstd",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":transform",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "transform_test",
+    srcs = [
+        "bomb_external_test.go",
+        "transform_bench_test.go",
+        "transform_external_test.go",
+        "transform_internal_test.go",
+    ],
+    embed = [":transform"],
+    deps = [
+        "//internal/core/transform",
+        "//internal/kernel/errs",
+        "//internal/service/transform",
+        "@com_github_klauspost_compress//s2",
+        "@com_github_klauspost_compress//zstd",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (errs.Define emitters must be in //:audit_sources).
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

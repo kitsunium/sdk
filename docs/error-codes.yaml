@@ -1834,6 +1834,22 @@ codes:
     const: CodeSendRefused
     hex: "0x00_03_3D_09"
     package: internal/service/mail
+  - code: "0.3.63.1"
+    const: CodeZstdFailed
+    hex: "0x00_03_3F_01"
+    package: third-party/transform
+  - code: "0.3.63.2"
+    const: CodeS2Failed
+    hex: "0x00_03_3F_02"
+    package: third-party/transform
+  - code: "0.3.63.3"
+    const: CodeDecompressionLimitExceeded
+    hex: "0x00_03_3F_03"
+    package: third-party/transform
+  - code: "0.3.63.4"
+    const: CodeLimitMisconfigured
+    hex: "0x00_03_3F_04"
+    package: third-party/transform
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

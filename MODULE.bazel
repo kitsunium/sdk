@@ -47,6 +47,7 @@ use_repo(
     "com_github_kitsunium_sdk_internal_core",
     "com_github_kitsunium_sdk_internal_kernel",
     "com_github_kitsunium_sdk_internal_service",
+    "com_github_klauspost_compress",
     "com_github_moby_moby_api",
     "com_github_pelletier_go_toml_v2",
     "com_github_redis_go_redis_v9",
