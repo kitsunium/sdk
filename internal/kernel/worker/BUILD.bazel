@@ -29,6 +29,7 @@ go_test(
     size = "small",
     srcs = [
         "every_external_test.go",
+        "worker_bench_test.go",
         "worker_external_test.go",
     ],
     deps = [":worker"],
