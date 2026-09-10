@@ -742,6 +742,22 @@ codes:
     const: CodeDirectoryNotEmpty
     hex: "0x00_02_19_08"
     package: internal/core/vfs
+  - code: "0.2.26.1"
+    const: CodePermissionDenied
+    hex: "0x00_02_1A_01"
+    package: internal/core/authz
+  - code: "0.2.26.2"
+    const: CodeAttributeMissing
+    hex: "0x00_02_1A_02"
+    package: internal/core/authz
+  - code: "0.2.26.3"
+    const: CodeAttributeKindMismatch
+    hex: "0x00_02_1A_03"
+    package: internal/core/authz
+  - code: "0.2.26.4"
+    const: CodePolicyMisconfigured
+    hex: "0x00_02_1A_04"
+    package: internal/core/authz
   - code: "0.2.29.1"
     const: CodeInvalidCheck
     hex: "0x00_02_1D_01"
@@ -1570,6 +1586,18 @@ codes:
     const: CodeDirectorySyncFailed
     hex: "0x00_03_37_02"
     package: internal/service/vfs
+  - code: "0.3.56.1"
+    const: CodeGrantInvalid
+    hex: "0x00_03_38_01"
+    package: internal/service/authz
+  - code: "0.3.56.2"
+    const: CodeRuleInvalid
+    hex: "0x00_03_38_02"
+    package: internal/service/authz
+  - code: "0.3.56.3"
+    const: CodeConditionInvalid
+    hex: "0x00_03_38_03"
+    package: internal/service/authz
   - code: "0.3.59.1"
     const: CodeCheckFailed
     hex: "0x00_03_3B_01"
