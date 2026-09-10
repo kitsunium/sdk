@@ -69,3 +69,22 @@
 # which a canonical UUID carries on a path that is not adversarial at all. Both
 # are gated at zero/one now, and each is mutation-checked in its doc comment.
 //internal/service/net/client:client_test
+# The two default writers (ADR 0015) and the severity floor in front of them,
+# against the SDK's flagship claim: "one alloc per emit". pkg/v1/logger's
+# TestV116BuildSendAllocatesOnePerEmit ends at the handler, and nothing had ever
+# measured what a WRITER adds underneath it. The answer is nothing — the
+# allocation profile of a full emit puts 99.53 % (console) / 95.92 % (file) of
+# its objects on the handler's attrs clone and 0 on the transport — and the
+# three tests here make that a property rather than an observation. The gate is
+# the writer's DELTA against a transport-free emit, not a constant, so it does
+# not couple to the clone it does not own.
+#
+# levelgate's is the one with teeth of its own: a dropped record must cost
+# nothing at all, since its whole cost is paid by the caller who configured the
+# floor so that work would not happen. Each is mutation-checked in its doc
+# comment, and all three count a TOTAL malloc delta rather than calling
+# testing.AllocsPerRun — whose integer division reported 0.0 for a mutation that
+# really did allocate.
+//internal/service/writer/levelgate:levelgate_test
+//internal/service/writer/console:console_test
+//internal/service/writer/file:file_test
