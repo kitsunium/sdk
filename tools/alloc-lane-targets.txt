@@ -58,3 +58,14 @@
 # the alternative is pinning its size for the stream's whole life. Each is
 # mutation-checked in its own doc comment.
 //internal/service/net/sse:sse_test
+# The two allocation claims the outbound client's own comments made and its code
+# contradicted. guard.go said "a nil hook costs one comparison per call" while
+# installing the observation record AND the closure that fills it on every
+# response — two heap allocations per request for the DEFAULT configuration,
+# 65 % of the objects the profile attributed to guard.RoundTrip. And path.go
+# lowercased the whole path and every segment to compare them against six ASCII
+# constants, so the safety checks allocated on any path carrying an uppercase
+# byte — which url.URL.EscapedPath emits by construction (%2F, never %2f), and
+# which a canonical UUID carries on a path that is not adversarial at all. Both
+# are gated at zero/one now, and each is mutation-checked in its doc comment.
+//internal/service/net/client:client_test

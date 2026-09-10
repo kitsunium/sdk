@@ -18,12 +18,12 @@ Public façade: `pkg/v1/client`.
 | `path_policy.go` | `pathPolicy` — anchored allow patterns |
 | `deny_policy.go` | `denyPolicy` — anchored deny patterns, final |
 | `conjunction.go` | `conjunction` — every member must allow |
-| `client.go` | `Client`, `New`, `Get`, `Do`, `HTTP` — per-phase timeouts, redirect cap |
+| `client.go` | `Client`, `New`, `Get`, `Do`, `HTTP` — per-phase timeouts, redirect cap, `readBody`'s bounded use of the peer's `Content-Length`, `canonicalHeaders` |
 | `guard.go` | the policy-enforcing `http.RoundTripper` |
 | `capped_body.go` | the response ceiling; fails rather than truncating |
 | `policies.go` | `AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies` |
 | `defaults.go` | the safe defaults filled into `corenet.ClientConfig`, whose type core declares beside the inbound half's `LimitsValue` / `TimeoutsValue` |
-| `path.go` | `checkPath` / `hasDotSegment` / `hasEncodedSeparator` — safety checks run *before* patterns |
+| `path.go` | `checkPath` / `hasDotSegment` / `hasEncodedSeparator` — safety checks run *before* patterns; `foldsASCII` / `lowerASCII` fold in place so they allocate nothing |
 | — | `Client.resolve` (in `client.go`) refuses a reference carrying its own origin, which resolution would otherwise substitute for the base |
 
 ## Why-this-shape
@@ -79,6 +79,46 @@ Public façade: `pkg/v1/client`.
 - **`RequestValue` is passed by value** so a policy cannot mutate the request it
   is authorising. The consumer's hand-rolled version took a `*url.URL` and they
   flagged it themselves as a mistake.
+- **`EscapedPath` is read ONCE in `RoundTrip` and passed down.** It is not a
+  field read: where `u.RawPath` is set — exactly the percent-encoded paths the
+  safety checks exist to catch — `url.URL` re-validates and unescapes, and that
+  allocates. Reading it twice made the adversarial input cost twice. The
+  consequence is that `requestOf` now takes a `string`, so handing it
+  `req.URL.Path` compiles and reads fine while silently showing every policy the
+  DECODED path; `Test_guard_handsThePolicyTheEscapedPath` is there for that one
+  mistake and nothing else.
+- **The safety checks fold ASCII in place, never `strings.ToLower`.** The
+  lowercase-and-compare spelling allocated a copy of the whole path and of every
+  segment for any input carrying an uppercase byte — which `EscapedPath`
+  guarantees, since it emits `%2F` and never `%2f`, and which a canonical UUID
+  carries on a path that is not adversarial at all. Equivalence with the old
+  spelling is not argued in a comment: `path_equivalence_internal_test.go`
+  sweeps the whole Unicode code space for the lemma it rests on, then runs both
+  implementations side by side over the adversarial corpus and 200 000 seeded
+  random paths.
+- **The observation record and its closure are built only when a hook exists.**
+  A closure assigning into the record forces the record onto the heap, so
+  installing both unconditionally charged the DEFAULT configuration — a nil hook
+  — two heap allocations per request for an observer that does not exist, while
+  a comment two lines away claimed a nil hook cost one comparison. The ceiling
+  (`cappedBody`) is still installed unconditionally and must be.
+- **The peer's `Content-Length` is a hint, bounded at `maxPresizedRead`.**
+  `io.ReadAll` starts at 512 bytes and grows by append, so it allocates roughly
+  twice a large body. The obvious repair is worse than the defect: sizing from
+  the header up to `MaxResponseSize` lets a ten-byte reply claiming
+  `Content-Length: 8388608` reserve 8 MiB per request, for free, times every
+  call in flight. So the hint is clamped, ignored when negative, and — the part
+  that is not obvious — **ignored entirely above the bound** rather than clamped
+  to it, because reserving 64 KiB on the word of a peer claiming 8 MiB still
+  hands a liar 64 KiB. The ceiling is untouched: `cappedBody` refuses an
+  over-sized body whatever buffer it is handed.
+- **Default header names are canonicalised once, in `New`.** `http.Header.Get`
+  and `Set` both canonicalise their argument and both allocate for a name that
+  is neither already canonical nor one of `net/http`'s interned common names —
+  so a `DefaultHeaders` map written `"x-request-source"` cost two allocations per
+  request, forever, for a configuration that was never wrong. Nothing documented
+  the requirement, which is why the fix is in the constructor rather than in a
+  sentence.
 
 ## Error range
 
@@ -88,7 +128,7 @@ service layer declares **no** codes.
 
 ## Imports allowed
 
-stdlib (`net/http`, `net/url`, `regexp`, `strings`, `io`, `time`) +
+stdlib (`bytes`, `net/http`, `net/url`, `regexp`, `strings`, `io`, `time`) +
 `internal/kernel/*` + `internal/core/net`. Never `pkg/*`.
 
 **Never the codec.** The client must not decode response bodies: depending on
@@ -108,11 +148,71 @@ this layer.
   It replaces the base's origin, and no path-and-method policy can see it.
 - Truncate an over-sized response body — fail. A silent truncation surfaces
   three layers away as an incomprehensible decode error.
+- Size a read buffer from `Content-Length` without a bound, or bound it by
+  `MaxResponseSize`. Both let a peer reserve memory it never has to send.
+- Memoise `checkPath` across policies by caching on `RequestValue`. It is passed
+  by value precisely so a policy cannot mutate what it is authorising; a cache
+  field trades a documented security property for an allocation that no longer
+  exists.
+- Hoist `checkPath` out of the policies into `guard.RoundTrip`. It halves the
+  work and looks safer, and it is a behaviour change: a caller composing only
+  `AllowMethods(...)` gets no path check today, and hoisting starts refusing
+  dot segments for policy sets that previously passed. That is an ADR.
+- Replace the `strings.ToLower` spelling in `path.go` without re-running
+  `path_equivalence_internal_test.go` against the implementation you removed.
+  The reference implementations live in that file for exactly this reason.
+
+## Cost
+
+Measured in `BENCH.md` against a **stub transport**, so these are this package's
+own numbers and not the network's. `pkg/v1/client/BENCH.md` prices the
+end-to-end call and is the one to read for "what does a request cost"; this is
+what is inside the 5.53 % it attributes to `guard.RoundTrip`.
+
+| | ns/op | B/op | allocs |
+|---|---:|---:|---:|
+| `guard.RoundTrip` + `Close`, no hook | 195.8 | 64 | **1** |
+| `guard.RoundTrip` + `Close`, with a hook | 350.1 | 184 | 3 |
+| `guard.RoundTrip` on a `%2F` path | 532.7 | 96 | 2 |
+| `checkPath`, plain path | 88.5 | 0 | **0** |
+| `checkPath`, uppercase UUID path | 125.7 | 0 | **0** |
+| `Policies(AllowMethods, DenyPaths, AllowPaths)`, UUID path | 1 361 | 0 | **0** |
+
+The single allocation left in `RoundTrip` is the `cappedBody`. It is the
+response ceiling and it is not optional.
+
+**A pattern list is a linear scan, at two very different slopes.** Per pattern
+tried and rejected: **64.2 ns** when it shares a prefix with the request path,
+**about 5 ns** when it does not. So it is not the pattern COUNT that decides the
+bill, it is prefix similarity × count. Fifty patterns cost 3 436 ns to admit the
+last-listed endpoint and 557 ns to refuse a path none of them match.
+
+Two consequences a consumer should know, both in `BENCH.md` §4:
+
+- **Order an allow list hot-first.** It short-circuits on a match, so an
+  admitted request costs its POSITION, not the list's length.
+- **A deny list is paid in full on every admitted request.** `denyPolicy` can
+  only return nil after trying every pattern, so it has no best case. Prefer a
+  precise allow list to a broad one plus a long deny list.
+
+`pkg/v1/client/BENCH.md` recommends denying by default and enumerating what you
+allow. At fifty patterns that recommendation costs 1.8 % of its own loopback
+`Get`, so it **survives** — with those two qualifications, and with the note
+that ~500 patterns is where the linear scan stops being noise.
+
+The allocation claims above are gated by `client_alloc_internal_test.go`, which
+carries `//go:build !race` — `AllocsPerRun` under the race detector measures the
+detector — and therefore runs in exactly one place: the race-off alloc lane.
+`//internal/service/net/client:client_test` is listed in
+`tools/alloc-lane-targets.txt` for that reason (SDK-wide rule 12). Each gate is
+mutation-checked in its own doc comment.
 
 ## Verification
 
 ```
 bazel test --config=race //internal/service/net/client:client_test
+# The allocation gates run ONLY in the race-off lane:
+bazel test --config=alloc //internal/service/net/client:client_test
 # Fallback:
 cd internal/service && GOWORK=off go test -race -cover ./net/client/...
 ```
