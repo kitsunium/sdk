@@ -239,7 +239,10 @@ double quote too — the two exporters follow the two grammars they are writing,
 which is not an inconsistency. A
 string attribute value is quoted and escaped; a bool, integer or double is
 printed **bare**, so the attribute's TYPE is visible rather than flattened the
-way a wire format flattens it. A histogram renders its observation count only —
+way a wire format flattens it. Attribute keys and instrument names go through
+the same escape, unquoted: they are normally literals, but one line per series
+is the format's only framing, and a newline in a key or a name forged exactly
+the line the value escaping exists to prevent. A histogram renders its observation count only —
 the bucket layout is reachable through the Snapshot API, and this is a
 diagnostic, not a wire format.
 
