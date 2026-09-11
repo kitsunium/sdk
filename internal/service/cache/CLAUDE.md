@@ -173,6 +173,11 @@ discovers until an incident.
   confident wrong answers, and `TestAFailedFillStoresNothing` pins it.
 - Relabel a typed fill error. ADR 0005 §origin wins: an error already carrying
   a dotted quad keeps it, and `TestATypedFillErrorKeepsItsOwnCode` pins that.
+- Reduce an UNTYPED fill error to a string. It is labelled `CACHE_FILL_FAILED`
+  with `errs.Wrap(cause, WrapParams{…})`, so the caller's
+  `errors.Is(err, sql.ErrNoRows)` still answers beside `errs.HasCode`;
+  `TestAnUntypedFillErrorKeepsItsIdentity` pins both, through the memory store
+  and the chain.
 - Add a Redis or memcached tier here. Distributed backends are exception 4 of
   the third-party doctrine and belong under `third-party/` — a separate change
   with its own dependency budget.
