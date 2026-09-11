@@ -115,8 +115,9 @@ func checkQueueDir(dir string, info fs.FileInfo) error {
 }
 
 // unusableBecause reports whether a directory is unusable for this queue, and
-// names why. It is [checkQueueDir]'s rule, shared with the state directories
-// so the two levels cannot drift apart.
+// names why. It is [checkQueueDir]'s rule, and the base of the stricter one the
+// state directories get ([stateUnusableBecause]), so the two levels cannot
+// drift apart.
 //
 // A symlink is only ever seen here through os.Lstat, which is what the state
 // check uses; the queue directory itself is read through os.Stat, so a link
@@ -145,6 +146,32 @@ func unusableBecause(info fs.FileInfo) (why string, unusable bool) {
 	return "world-writable", true
 }
 
+// stateUnusableBecause is [unusableBecause] with one refusal added, for a
+// directory that holds messages.
+//
+// The sticky bit is enough at the root, where nothing lives but the three
+// states: it stops another account unlinking or replacing them. It does not
+// stop one CREATING an entry, and in a state directory an entry IS a message —
+// a sticky world-writable `ready/` is an open injection point, delivered like
+// any other message. So a state is refused as soon as an account outside the
+// owner and group can write to it, sticky or not. That also closes the owner
+// gap the root keeps: a state another account made world-writable no longer
+// passes, and one it made private is one this broker cannot use at all.
+func stateUnusableBecause(info fs.FileInfo) (why string, unusable bool) {
+	//: a link, a non-directory, or world-writable without the sticky bit.
+	if why, unusable = unusableBecause(info); unusable {
+		//: the root's verdict stands.
+		return why, true
+	}
+	//: what the root accepts and a state must not: world-writable, sticky.
+	if info.Mode()&worldWritable != 0 {
+		//: any account can plant a message here.
+		return "sticky-world-writable", true
+	}
+	//: owner and group only.
+	return "", false
+}
+
 // makeStates creates the three state directories, or checks them when they
 // already exist.
 func makeStates(dir string) error {
@@ -164,12 +191,13 @@ func makeStates(dir string) error {
 // prepareState creates one state directory owner-only when it is absent, and
 // then checks what is there — whether or not this call is what put it there.
 //
-// The check is the root's, one level down, because the state directories are
-// where the messages live. Under a queue directory the root rule accepts — a
-// group share, or a sticky directory like /tmp — another account can create
-// `ready/` or `inflight/` before this broker does; trusting whatever it finds
-// would let that account plant messages or unlink them, which is the silent
-// injection and the silent drain [checkQueueDir] refuses at the root.
+// The check is the root's, one level down and one notch stricter, because the
+// state directories are where the messages live. Under a queue directory the
+// root rule accepts — a group share, or a sticky directory like /tmp — another
+// account can create `ready/` or `inflight/` before this broker does; trusting
+// whatever it finds would let that account plant messages or unlink them,
+// which is the silent injection and the silent drain [checkQueueDir] refuses at
+// the root. See [stateUnusableBecause] for the notch.
 //
 // It is os.Mkdir and os.Lstat, never os.MkdirAll or os.Stat, because both of
 // those FOLLOW a symlink: MkdirAll reports success for a link to any
@@ -191,9 +219,9 @@ func prepareState(dir, state string) error {
 		//: the medium could not answer.
 		return backendFailed("lstat", state, statErr)
 	}
-	why, unusable := unusableBecause(info)
+	why, unusable := stateUnusableBecause(info)
 	//: a real directory, and one no account outside the owner and group can
-	//: replace an entry in — or one whose sticky bit says only its owner may.
+	//: write an entry into at all.
 	if !unusable {
 		//: nothing to refuse.
 		return nil

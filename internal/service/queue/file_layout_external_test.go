@@ -139,6 +139,12 @@ func TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust(t *testing.T) {
 			t.Helper()
 			mkdirMode(t, statePath, 0o777)
 		}},
+		// the root accepts this mode, and a state must not: the sticky bit stops
+		// an unlink, not a planted message.
+		{"a sticky world-writable ready/", "ready", "sticky-world-writable", func(t *testing.T, statePath string) {
+			t.Helper()
+			mkdirMode(t, statePath, 0o777|os.ModeSticky)
+		}},
 		{
 			"an inflight/ that is a symlink to a private directory", "inflight", "symlink",
 			func(t *testing.T, statePath string) {
