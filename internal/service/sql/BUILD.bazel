@@ -1,0 +1,80 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "sql",
+    srcs = [
+        "codes.go",
+        "config.go",
+        "dialect_sql.go",
+        "errors.go",
+        "executor.go",
+        "health.go",
+        "migrate.go",
+        "migrate_config.go",
+        "migrate_lock.go",
+        "migrate_plan.go",
+        "migrate_table.go",
+        "resolved.go",
+        "savepoint_stmts.go",
+        "scope_key_type.go",
+        "sql.go",
+        "statements.go",
+        "tx.go",
+        "txscope.go",
+        "txstate.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/sql",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/sql",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":sql",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "sql_test",
+    size = "small",
+    srcs = [
+        "config_external_test.go",
+        "harness_external_test.go",
+        "health_external_test.go",
+        "migrate_external_test.go",
+        "nosleep_external_test.go",
+        "sql_bench_test.go",
+        "tx_external_test.go",
+        "txcancel_external_test.go",
+    ],
+    # keep: TestPackageNeverWaitsOnTheWallClock parses this package's own .go
+    # files at runtime. Bazel's sandbox strips the source-tree relationship, so
+    # the sources have to reach the test as runfiles — the same mechanism
+    # //internal/kernel/errs uses for its AST audits.
+    data = ["//:audit_sources"],
+    deps = [
+        ":sql",
+        "//internal/core/sql",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
