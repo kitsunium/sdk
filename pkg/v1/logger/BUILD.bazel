@@ -17,6 +17,7 @@ go_library(
         "memory.go",
         "sink.go",
         "topology.go",
+        "tracecontext.go",
         "version.go",
         "witherror.go",
         "writer.go",
@@ -32,6 +33,7 @@ go_library(
         "//internal/core/codec",
         "//internal/core/logger",
         "//internal/core/logger/level",
+        "//internal/core/trace",
         "//internal/core/writer",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
@@ -64,6 +66,8 @@ go_test(
         "logger_external_test.go",
         "memory_external_test.go",
         "sink_external_test.go",
+        "tracecontext_external_test.go",
+        "tracecontext_integration_test.go",
         "version_external_test.go",
         "witherror_external_test.go",
         "witherror_internal_test.go",
@@ -79,6 +83,7 @@ go_test(
         "//internal/service/codec/json",
         "//pkg/v1/errs",
         "//pkg/v1/logger/writer",
+        "//pkg/v1/trace",
     ],
 )
 

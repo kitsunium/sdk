@@ -6,8 +6,8 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
-// : sinks defeat dead-code elimination. A pooled value that is never observed
-// : can be proven unused, and the compiler would then measure nothing.
+// sinks defeat dead-code elimination. A pooled value that is never observed
+// can be proven unused, and the compiler would then measure nothing.
 var (
 	byteSink  []byte
 	ptrSink   *[]byte

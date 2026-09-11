@@ -8,7 +8,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
-// : the table this container is built for: a read-mostly map published whole.
+// the table this container is built for: a read-mostly map published whole.
 type table struct {
 	m map[string]int
 }
@@ -21,7 +21,7 @@ func newTable(n int) *table {
 	return t
 }
 
-// : package-level sinks so the compiler cannot prove the loads dead.
+// package-level sinks so the compiler cannot prove the loads dead.
 var (
 	tableSink *table
 	intSink   int

@@ -29,6 +29,12 @@
 //     injection point. FrameworkVersion() is added as
 //     "framework_version" to every emitted record — set under
 //     go build -ldflags "-X .../logger.Version=…" or Bazel --stamp.
+//   - Trace correlation, on by default and free. A record emitted
+//     inside a span carries that span's trace_id and span_id as
+//     top-level fields; a record emitted outside one carries neither
+//     key. No call site changes — Logger.Log has always taken a
+//     context.Context. Costs no extra allocation. See ADR 0062 and
+//     the "Trace correlation" section below.
 //   - Two failure modes only. Construction returns WriterRequired
 //     (1.1.0.1) on a nil writer or SinkConfigRequired (1.1.0.2) on a
 //     nil sink — both introspectable via errs.HasCode.
@@ -102,6 +108,38 @@
 //
 // [LogAttrs] is the slice overload that avoids the variadic-slice
 // allocation in [Logger.Log].
+//
+// # Trace correlation
+//
+// Every Logger this package builds stamps the span in scope onto
+// every record it emits, as the two TOP-LEVEL fields OpenTelemetry
+// prescribes for non-OTLP log formats: [TraceIDKey] ("trace_id", 32
+// lowercase hex digits) and [SpanIDKey] ("span_id", 16). Populating
+// the context is the trace domain's job — the inbound HTTP middleware
+// in github.com/kitsunium/sdk/pkg/v1/trace, or an explicit
+// trace.ContextWithSpanContext:
+//
+//	ctx = trace.ContextWithSpanContext(ctx, spanContext)
+//	logger.Info(ctx, lg, "served") // → … trace_id=4bf9… span_id=00f0…
+//
+// Three properties are worth knowing:
+//
+//   - They are record FIELDS ([Record].TraceContext), not attributes,
+//     so [Logger.WithGroup] never renames them to "http.trace_id" and
+//     a Sink can read the identity off the record instead of parsing
+//     it back out of a formatted line.
+//   - When no span is in scope NOTHING is emitted — not an empty
+//     value and not the all-zero identifier, both of which W3C Trace
+//     Context declares invalid. Most lines a service logs are outside
+//     a request, and an unjoinable trace_id on all of them would make
+//     the field useless as a filter.
+//   - It costs no extra allocation: the hot path stays at exactly one
+//     heap allocation per emit, with a span and without. The
+//     identifiers are hex-encoded straight into the encoder's buffer
+//     and never become a Go string. Measured in BENCH.md.
+//
+// [TraceContextFromContext] is the adapter, exported so a caller
+// wiring a Logger by hand can reuse it.
 //
 // # Version stamping
 //
@@ -234,8 +272,9 @@ func NewText(cfg Config) (lg Logger, err error) {
 		//: service-layer rejection already carries the right code/reason.
 		return nil, hErr
 	}
-	//: wrap the handler into a Logger via svclogger.
-	base, lErr := svclogger.New(handler)
+	//: wrap the handler into a Logger via svclogger, bound to the trace domain
+	//: so every record emitted inside a span carries its ids (ADR 0062).
+	base, lErr := svclogger.NewWithTraceContext(handler, TraceContextFromContext)
 	//: forward any svclogger-level error unchanged (origin wins).
 	if lErr != nil {
 		//: service-layer rejection already carries the right code/reason.

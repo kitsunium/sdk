@@ -25,4 +25,12 @@ type RecordEvent struct {
 	PC uintptr
 	// Attrs carries the structured key/value pairs attached to this event.
 	Attrs []AttrValue
+	// TraceContext is the identity of the span this event was emitted
+	// inside; the zero value means "no trace here" and MUST render nothing.
+	// It is a FIELD rather than two entries in Attrs because the Encoder
+	// port receives no context.Context — the identity has to travel on the
+	// record to reach the formatter at all — and because OpenTelemetry
+	// prescribes trace_id / span_id as TOP-LEVEL keys of the log object,
+	// which an attribute cannot be: WithGroup would prefix it. See ADR 0062.
+	TraceContext TraceContextValue
 }

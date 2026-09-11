@@ -145,6 +145,10 @@ func (h *TextHandler) renderLine(b []byte, r corelogger.RecordEvent) []byte {
 	b = append(b, r.Level.String()...)
 	b = append(b, ' ')
 	b = append(b, r.Message...)
+	//: the trace context is a TOP-LEVEL field: it lands between the header and
+	//: the attributes and is never touched by the group prefix stack. Nothing
+	//: is written when no span is in scope (ADR 0062).
+	b = appendTraceContext(b, r)
 	//: handler-bound attrs precede record-bound attrs for consistent output.
 	for _, a := range h.attrs {
 		//: render each handler attr next to the previous byte contents.
@@ -177,6 +181,32 @@ func (h *TextHandler) writeLine(line []byte) error {
 	}
 	//: happy path — nothing to report.
 	return nil
+}
+
+// appendTraceContext writes the two top-level correlation fields
+// "trace_id=<32 hex> span_id=<16 hex>" into dst, and writes NOTHING when tc is
+// the invalid zero value. It mirrors the identically-named helper in
+// service/logger/encoder byte for byte so the legacy TextHandler and the
+// composed text encoder produce the same line (ADR 0062).
+func appendTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
+	//: the identity travels on the record, exactly as in the composed encoder.
+	tc := r.TraceContext
+	//: no span in scope — emit nothing rather than an unjoinable zero id.
+	if !tc.IsValid() {
+		//: the buffer is handed back untouched.
+		return dst
+	}
+	//: " trace_id=" then the 32 hex digits, straight into the buffer.
+	dst = append(dst, ' ')
+	dst = append(dst, corelogger.TraceIDKey...)
+	dst = append(dst, '=')
+	dst = tc.AppendTraceIDHex(dst)
+	//: " span_id=" then the 16 hex digits.
+	dst = append(dst, ' ')
+	dst = append(dst, corelogger.SpanIDKey...)
+	dst = append(dst, '=')
+	//: hand back the buffer carrying both correlation fields.
+	return tc.AppendSpanIDHex(dst)
 }
 
 // appendAttrWithGroups prepends the active group prefix stack ("g1.g2.…")

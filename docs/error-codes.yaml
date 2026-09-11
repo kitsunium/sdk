@@ -770,6 +770,38 @@ codes:
     const: CodePolicyMisconfigured
     hex: "0x00_02_1A_04"
     package: internal/core/authz
+  - code: "0.2.27.1"
+    const: CodeViewMisconfigured
+    hex: "0x00_02_1B_01"
+    package: internal/core/view
+  - code: "0.2.27.2"
+    const: CodeTemplateNotFound
+    hex: "0x00_02_1B_02"
+    package: internal/core/view
+  - code: "0.2.27.3"
+    const: CodeRenderFailed
+    hex: "0x00_02_1B_03"
+    package: internal/core/view
+  - code: "0.2.27.4"
+    const: CodeRenderTooLarge
+    hex: "0x00_02_1B_04"
+    package: internal/core/view
+  - code: "0.2.27.5"
+    const: CodeUnsafeValue
+    hex: "0x00_02_1B_05"
+    package: internal/core/view
+  - code: "0.2.27.6"
+    const: CodeEngineUnknown
+    hex: "0x00_02_1B_06"
+    package: internal/core/view
+  - code: "0.2.27.7"
+    const: CodeEngineInvalid
+    hex: "0x00_02_1B_07"
+    package: internal/core/view
+  - code: "0.2.27.8"
+    const: CodeDuplicateEngine
+    hex: "0x00_02_1B_08"
+    package: internal/core/view
   - code: "0.2.29.1"
     const: CodeInvalidCheck
     hex: "0x00_02_1D_01"
@@ -1610,6 +1642,14 @@ codes:
     const: CodeConditionInvalid
     hex: "0x00_03_38_03"
     package: internal/service/authz
+  - code: "0.3.57.1"
+    const: CodeTemplateSourceFailed
+    hex: "0x00_03_39_01"
+    package: internal/service/view
+  - code: "0.3.57.2"
+    const: CodeTemplateParseFailed
+    hex: "0x00_03_39_02"
+    package: internal/service/view
   - code: "0.3.59.1"
     const: CodeCheckFailed
     hex: "0x00_03_3B_01"
