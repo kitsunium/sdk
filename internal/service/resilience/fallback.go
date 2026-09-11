@@ -20,6 +20,12 @@ type fallbackRunner struct {
 // the policy. When both fail the result is FallbackFailed, carrying both
 // messages as fields so neither failure is lost.
 //
+// A cancelled context is reported as itself, never as FallbackFailed: when it
+// is already dead after the primary the fallback does not run at all, and when
+// it dies WHILE the fallback runs, a failed fallback returns ctx.Err(). A
+// fallback that succeeds despite a late cancellation still returns nil — the
+// work was done.
+//
 // A nil cfg.Fallback is refused: every call returns PolicyMisconfigured without
 // running the operation (ADR 0031). A fallback policy with no fallback would
 // run the primary and pass its error through unchanged — indistinguishable
@@ -65,9 +71,22 @@ func (f fallbackRunner) Run(ctx context.Context, op coreres.Operation) error {
 	//: plan B, under the caller's own context.
 	fallbackErr := f.secondary(ctx)
 	//: a successful fallback is the whole point — the primary error is absorbed.
+	//: That holds even when the caller went away while plan B was running: the
+	//: work completed, and reporting a cancellation for it would tell the
+	//: caller something did not happen when it did.
 	if fallbackErr == nil {
 		//: masked by design.
 		return nil
+	}
+	//: the check above the fallback cannot see a cancellation that lands WHILE
+	//: plan B runs — and plan B starts on whatever budget the primary left, so
+	//: it is the likelier place for a deadline to expire. Plan B then fails
+	//: because the context died, not because it is broken, and FALLBACK_FAILED
+	//: would send an operator looking for a fault in two dependencies that did
+	//: nothing wrong. Same rule as the check above, applied after the fact.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		//: the caller went away mid-fallback — report that, not a double fault.
+		return ctxErr
 	}
 	//: both halves failed. Reporting only one of them makes the outcome
 	//: undiagnosable — "the fallback failed" without saying what it was

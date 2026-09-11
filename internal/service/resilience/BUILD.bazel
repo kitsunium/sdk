@@ -13,6 +13,7 @@ go_library(
         "fallback_config.go",
         "hedge.go",
         "hedge_config.go",
+        "hedge_outcome.go",
         "hedge_race.go",
         "misconfigured.go",
         "ratelimit.go",

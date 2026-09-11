@@ -47,6 +47,11 @@ type HedgeConfig struct {
 	// provide — and "issue at least one duplicate" is exactly the kind of
 	// obvious floor that ADR 0031 clamps rather than refuses (cf. Burst,
 	// NewBulkhead's limit).
+	//
+	// There is no ceiling, because none is needed: the budget bounds how many
+	// duplicates a call may issue and nothing else — no per-call allocation
+	// grows with it. math.MaxInt therefore means "as many as the Delay and
+	// MaxInFlight allow".
 	MaxHedges int
 	// MaxInFlight bounds how many duplicate attempts this Runner may have
 	// running at once, across all concurrent calls. It has no default: a
