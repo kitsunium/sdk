@@ -40,10 +40,15 @@ const (
 	maxFormBytes int = 8 * 1024 * 1024
 
 	// maxFormPairs caps the number of key=value pairs a single payload may
-	// declare. net/url.ParseQuery has no such limit: "a=1&a=1&…" repeated
-	// far enough is a memory-amplification lever, since every pair appends
-	// to the same slice. The ceiling is checked from the '&' count BEFORE
-	// parsing, so an over-long body is refused without allocating a map.
+	// declare: "a=1&a=1&…" repeated far enough is a memory-amplification
+	// lever, since every pair appends to the same slice. The ceiling is
+	// checked from the '&' count BEFORE parsing, so an over-long body is
+	// refused without allocating a map. Count and value are net/url's own:
+	// since Go 1.24 ParseQuery applies the same '&' count + 1 against the
+	// same 10 000 (GODEBUG urlmaxqueryparams), so this codec and
+	// r.ParseForm() in the same process refuse the same bodies — an empty
+	// segment counted as a pair by both. The check is kept because the
+	// stdlib's can be lifted at run time and a const cannot.
 	maxFormPairs int = 10_000
 
 	// upperhex is the digit table for percent-escapes. Uppercase matches
@@ -153,8 +158,10 @@ func (*formCodec) Unmarshal(data []byte, v any) error {
 			Private: "service/codec/form.Unmarshal: payload length exceeds maxFormBytes",
 		}, errs.Int("len", len(data)), errs.Int("cap", maxFormBytes))
 	}
-	//: '&' count + 1 is an exact upper bound on the pair count, so the
-	//: ceiling is enforced without parsing (bytes.Count is SIMD-fast).
+	//: '&' count + 1 bounds the pair count from above (an empty segment
+	//: counts) and is the bound url.ParseQuery applies itself, so the
+	//: ceiling is enforced without parsing (bytes.Count is SIMD-fast) and
+	//: refuses exactly what the stdlib would.
 	if pairs := bytes.Count(data, []byte{'&'}) + 1; pairs > maxFormPairs {
 		//: surface the documented sentinel with the offending counts.
 		return errs.Wrap(nil, errs.WrapParams{

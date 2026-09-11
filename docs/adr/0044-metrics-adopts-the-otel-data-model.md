@@ -51,8 +51,8 @@ the standard library and nothing else. The metrics data model is implemented the
 same way, for the same reasons:
 
 - The dependency budget is the product. `go.opentelemetry.io/otel` plus
-  `otel/sdk` plus `otel/metric` drags in `x/sys` — banned SDK-wide (ADR 0022 /
-  ADR 0034) — and a release cadence this repo does not control, for a model
+  `otel/sdk` plus `otel/metric` drags in `x/sys` — banned SDK-wide ([ADR 0022](0022-sdk-codec-hcl.md) /
+  [ADR 0034](0034-hcl-quarantine-rationale-corrected.md)) — and a release cadence this repo does not control, for a model
   whose whole content is a shape.
 - The model is small enough to own. Everything below is under 400 lines of
   declarations.

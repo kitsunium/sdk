@@ -164,6 +164,92 @@ func TestUnmarshalMultiValueTarget(t *testing.T) {
 	}
 }
 
+// TestPairCeilingMatchesParseQuery pins that the codec's pair ceiling refuses
+// exactly the bodies url.ParseQuery refuses, and where the stdlib's own bound
+// sits. Since Go 1.24 the stdlib applies the same '&' count + 1 against the
+// same 10 000 (GODEBUG urlmaxqueryparams), so a body at the ceiling with a
+// trailing '&' is refused by both and the same body without it by neither.
+// The codec half cannot fail on its own — Unmarshal hands the body to
+// ParseQuery, which refuses whatever the codec's check lets through — so the
+// url.ParseQuery half is the tripwire: a toolchain that moves its default
+// fails here, naming the documentation that would have gone stale.
+func TestPairCeilingMatchesParseQuery(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name        string
+		data        string
+		wantRefused bool
+	}
+	tests := []tc{
+		{"exactly the ceiling", strings.Repeat("a=1&", 9_999) + "a=1", false},
+		{"the ceiling plus a trailing separator", strings.Repeat("a=1&", 10_000), true},
+		{"one pair over the ceiling", strings.Repeat("a=1&", 10_000) + "a=1", true},
+		{"empty segments past the ceiling", strings.Repeat("&", 10_000) + "a=1", true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		var got url.Values
+		codecErr := form.New().Unmarshal([]byte(tc.data), &got)
+		_, stdlibErr := url.ParseQuery(tc.data)
+		if refused := codecErr != nil; refused != tc.wantRefused {
+			t.Errorf("%s: codec refused=%v, want %v (err=%v)", tc.name, refused, tc.wantRefused, codecErr)
+		}
+		if refused := stdlibErr != nil; refused != tc.wantRefused {
+			t.Errorf("%s: url.ParseQuery refused=%v, want %v — the stdlib bound moved (err=%v)", tc.name, refused, tc.wantRefused, stdlibErr)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestPairCeilingHoldsWhenTheStdlibOneIsLifted pins why the codec keeps its own
+// ceiling although url.ParseQuery applies the same one: the stdlib's is a
+// GODEBUG setting a process can lift, and maxFormPairs is a const. With
+// urlmaxqueryparams=0 ParseQuery accepts every body below, so the codec's check
+// is the only guard left, and it must still count a trailing separator exactly
+// as the stdlib does by default — lifting the knob changes nothing the codec
+// returns. Seen failing: with the ceiling check disabled, both cases over it
+// reported "codec refused=false, want true"; with pairs counted exactly
+// instead, "the ceiling plus a trailing separator" alone did.
+//
+// Serial by construction: t.Setenv rewrites GODEBUG for the whole process, and
+// it refuses to run under t.Parallel().
+func TestPairCeilingHoldsWhenTheStdlibOneIsLifted(t *testing.T) {
+	t.Setenv("GODEBUG", "urlmaxqueryparams=0")
+	type tc struct {
+		name        string
+		data        string
+		wantRefused bool
+	}
+	tests := []tc{
+		{"exactly the ceiling", strings.Repeat("a=1&", 9_999) + "a=1", false},
+		{"the ceiling plus a trailing separator", strings.Repeat("a=1&", 10_000), true},
+		{"one pair over the ceiling", strings.Repeat("a=1&", 10_000) + "a=1", true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		//: without the knob taking effect ParseQuery would refuse too, and the
+		//: codec's refusal would prove nothing about the codec.
+		if _, err := url.ParseQuery(tc.data); err != nil {
+			t.Fatalf("%s: url.ParseQuery err=%v with urlmaxqueryparams=0 — the stdlib bound was not lifted", tc.name, err)
+		}
+		var got url.Values
+		err := form.New().Unmarshal([]byte(tc.data), &got)
+		if refused := err != nil; refused != tc.wantRefused {
+			t.Errorf("%s: codec refused=%v, want %v (err=%v)", tc.name, refused, tc.wantRefused, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runCase(t, tc)
+		})
+	}
+}
+
 // TestUnmarshalTargetShapes covers the three accepted pointer targets, the
 // MULTI_VALUE refusal that keeps the single-valued target honest, and the
 // VALUE_INVALID rejections.

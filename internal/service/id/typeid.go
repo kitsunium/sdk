@@ -191,7 +191,10 @@ func validateTypePrefix(prefix string) error {
 }
 
 // legalPrefixByte reports whether c is legal at offset i of a prefix of length
-// total: lowercase ASCII anywhere, and '_' only strictly between two letters.
+// total: lowercase ASCII anywhere, and '_' anywhere but the first or the last
+// byte. That is the specification's ^([a-z]([a-z_]{0,61}[a-z])?)?$ exactly, so
+// consecutive interior underscores ("user__account") are legal and a check
+// that also required letters on both sides would refuse spec-valid prefixes.
 func legalPrefixByte(c byte, i, total int) bool {
 	//: lowercase ASCII is legal at every position.
 	if c >= 'a' && c <= 'z' {

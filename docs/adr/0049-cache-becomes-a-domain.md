@@ -286,8 +286,9 @@ stops being true the day the default changes.
 - **A 16th core sibling.** `internal/core/CLAUDE.md`, the root `CLAUDE.md`
   domain list, `internal/service/CLAUDE.md` and `pkg/v1/CLAUDE.md` all gain a
   row (rule 11). `internal/kernel/CLAUDE.md` gains a tenth kernel package.
-- Two new blocks in `codeRangeOwners`: `0x00_02_12_00` → `internal/core/cache`,
-  `0x00_03_30_00` → `internal/service/cache`, plus their `audit_srcs`.
+- Two new blocks in `codeRangeOwners`: `0.2.18.*` → `internal/core/cache` and
+  `0.3.48.*` → `internal/service/cache` (table keys `0x00_02_12_00` and
+  `0x00_03_30_00`), plus their `audit_srcs`.
   `docs/error-codes.yaml` regenerated.
 - `pkg/v1/cache` now depends on `internal/core/cache` and
   `internal/service/cache` as well as the kernel primitive. All three are

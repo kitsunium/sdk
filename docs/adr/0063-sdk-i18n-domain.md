@@ -83,7 +83,7 @@ Everything below follows from refusing that outcome.
 
 ## Decision
 
-A 26th core sibling, `internal/core/i18n` (block `0.2.30.*`), its
+A 27th core sibling, `internal/core/i18n` (block `0.2.30.*`), its
 implementation in `internal/service/i18n` (block `0.3.60.*`), and the façade in
 `pkg/v1/i18n`. **No registry** — the precedent of `proc` (ADR 0016),
 `resilience` (0026), `net` (0029), `scheduler` (0041), `token` (0042),

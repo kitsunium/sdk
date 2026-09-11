@@ -43,7 +43,7 @@ get subtly wrong in ways nobody notices for months.
 
 ## Decision
 
-### 1. `trace` is the 17th core sibling, in the ordinary four-layer shape.
+### 1. `trace` is the 18th core sibling, in the ordinary four-layer shape.
 
 `internal/core/trace` declares the port and the data model, `internal/service/trace`
 implements it, `pkg/v1/trace` publishes it. Error blocks `0.2.20.*` and `0.3.50.*`,

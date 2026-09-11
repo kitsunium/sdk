@@ -74,6 +74,17 @@ SDK speak a dialect its callers did not choose.
   claims a round-trip it does not have is worse than one that documents the
   gap — the caller stops checking.
 
+## Breaking changes
+
+None. `form` is a new Format name; every existing Format, code and signature is
+unchanged.
+
+## Deferred
+
+None. The `a[]=`, `a[0]=` and comma dialects are refused (§Why not), not
+deferred: supporting one of them would turn one Format name into several
+incompatible formats.
+
 ## References
 
 - `internal/service/codec/form/CLAUDE.md` §The decision that matters

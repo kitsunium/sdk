@@ -5,7 +5,7 @@
 Declares the **authorization port**: `Policy` (may this subject do this to
 that), the three-valued `Decision` it answers with, the immutable
 `RequestValue` that asks, the typed `AttrValue` facts attached to it, and the
-`Condition` an attribute rule is written as. The 18th core sibling, admitted by
+`Condition` an attribute rule is written as. The 24th core sibling, admitted by
 **ADR 0057**. The RBAC and ABAC evaluators, the deny-overrides combiner, the
 closure and the built-in conditions live in `internal/service/authz`.
 

@@ -105,6 +105,16 @@ while the conclusion was right, for a reason the ADR never stated.
   derived from a mechanism that cannot occur will eventually refuse a
   dependency for a reason that does not exist.
 
+## Breaking changes
+
+None. No code, public symbol, error code or build target moves: the quarantine
+decision stands, and only the rationale ADR 0022 gave for it is corrected.
+
+## Deferred
+
+None. The correction is complete in this change, including the four
+`CLAUDE.md` files that had promoted the old mechanism into a rule.
+
 ## References
 
 - ADR 0022 §Context.1, §Why not · ADR 0012 (quarantine policy) · ADR 0016

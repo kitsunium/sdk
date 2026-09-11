@@ -5,7 +5,7 @@
 Declares the **message-translation port**: `Catalog` (frozen at two methods),
 the `TagValue` that names a language, the `MessageValue` a translator wrote,
 the CLDR plural `Form` a quantity falls in, the `CountValue` that decides
-which, and the `Args` that fill a message's holes. The 26th core sibling,
+which, and the `Args` that fill a message's holes. The 27th core sibling,
 admitted by **ADR 0063**. The CLDR rule table, the concrete catalogue, the
 Accept-Language negotiation and the renderer live in `internal/service/i18n`.
 

@@ -249,7 +249,8 @@ clipped message still says how much was clipped.
 
 **Codes.** Three serials in the block `core/config` already owns; no new `PP`
 range, and `registry_ownership_external_test.go` is unchanged because
-`0x00_02_0A_00` is already mapped to `internal/core/config`.
+the `0.2.10.*` range (its table key is `0x00_02_0A_00`) is already mapped to
+`internal/core/config`.
 
 | Code | Name | When |
 |---|---|---|
