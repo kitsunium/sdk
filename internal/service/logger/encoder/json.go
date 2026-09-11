@@ -182,7 +182,8 @@ func appendJSONAttr(dst []byte, groups []string, a corelogger.AttrValue) []byte 
 	//: a top-level attribute may not spell one of the SDK's own fields; inside
 	//: a group the prefix above already keeps it apart.
 	if len(groups) == 0 && ReservesKey(a.Key) {
-		//: "attr." needs no escaping.
+		//: appended raw: no byte in "attr." needs JSON escaping, unlike the
+		//: key itself just below.
 		dst = append(dst, ReservedPrefix...)
 	}
 	dst = appendJSONEscaped(dst, a.Key)
