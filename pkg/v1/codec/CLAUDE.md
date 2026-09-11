@@ -18,8 +18,14 @@ compressed.go — MarshalCompressed / UnmarshalCompressed verbs + CompressAlgori
 multipart.go  — MultipartForm / MultipartPart aliases + MultipartContentType: exactly what a
                 consumer needs to build a file upload, send it, and read it back (see
                 §Multipart below)
-codes.go      — CodeUnknownFormat / CodeCodecUnavailable / CodeStreamingUnsupported (range 1.2.0.*)
-errors.go     — UnknownFormat / CodecUnavailable / StreamingUnsupported sentinels (errs.Define)
+promote.go    — the JSON-bridge promotion path for codecs whose native shape cannot hold an
+                arbitrary Go value (csv, form, pem, flatbuffers, tlv, ndjson): wrapForFormat
+                builds the container, containerForFormat + the extract* closures read it
+                back, and refuse any container not EXACTLY the shape the wrap stage wrote
+codes.go      — CodeUnknownFormat / CodeCodecUnavailable / CodeStreamingUnsupported /
+                CodePromoteFailed (range 1.2.0.*)
+errors.go     — UnknownFormat / CodecUnavailable / StreamingUnsupported / PromoteFailed
+                sentinels (errs.Define)
 ```
 
 ## Compressed frame (ADR 0014 D1)
@@ -91,6 +97,7 @@ proof that the three names suffice.
   - `1.2.0.1` `CodeUnknownFormat` — `corecodec.Lookup` returned `false`.
   - `1.2.0.2` `CodeCodecUnavailable` — registry entry exists but codec is unusable (reserved for future build-tag gating).
   - `1.2.0.3` `CodeStreamingUnsupported` — `NewEncoder` / `NewDecoder` called on a codec that doesn't implement `corecodec.StreamingCodec`.
+  - `1.2.0.4` `CodePromoteFailed` — the promotion path cannot serve the request: no strategy for the Format, or a container whose shape is not exactly the one the wrap stage writes (a form body with a second key beside `_json`, a csv table with an extra row or column) — refused rather than decoded past, because the extra data would be dropped without a word.
 - **The sentinel vars (`UnknownFormat`, `CodecUnavailable`, `StreamingUnsupported`) exist** for `errs.HasReason` matching, but the dispatch functions construct fresh wrapped errors with `errs.Wrap(nil, ...)` so the `Private` field can name the offending Format / codec.
 
 ## Do NOT

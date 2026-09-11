@@ -5,6 +5,7 @@ import (
 	stdjson "encoding/json"
 	stdpem "encoding/pem"
 	"errors"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -445,6 +446,7 @@ func TestExtractNDJSON(t *testing.T) {
 func TestExtractCSV(t *testing.T) {
 	t.Parallel()
 	inner := canaryJSONBytes(t)
+	innerStr := string(inner)
 	type tc struct {
 		name       string
 		table      [][]string
@@ -453,9 +455,14 @@ func TestExtractCSV(t *testing.T) {
 		wantInPriv string
 	}
 	tests := []tc{
-		{name: "well-formed", table: [][]string{{csvPromotionHeader}, {string(inner)}}, want: inner, wantErr: false},
+		{name: "well-formed", table: [][]string{{csvPromotionHeader}, {innerStr}}, want: inner, wantErr: false},
 		{name: "missing-body", table: [][]string{{csvPromotionHeader}}, wantErr: true, wantInPriv: "malformed csv"},
 		{name: "empty-body-row", table: [][]string{{csvPromotionHeader}, {}}, wantErr: true, wantInPriv: "malformed csv"},
+		//: the wrap stage writes exactly two single-column rows under its own
+		//: header; each of these used to decode, dropping what was extra.
+		{name: "an extra row", table: [][]string{{csvPromotionHeader}, {innerStr}, {"x"}}, wantErr: true, wantInPriv: "malformed csv"},
+		{name: "an extra column", table: [][]string{{csvPromotionHeader}, {innerStr, "x"}}, wantErr: true, wantInPriv: "malformed csv"},
+		{name: "another header", table: [][]string{{"role"}, {innerStr}}, wantErr: true, wantInPriv: "malformed csv"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -475,6 +482,48 @@ func TestExtractCSV(t *testing.T) {
 		}
 		if string(got) != string(tc.want) {
 			t.Errorf("%s: got=%q want=%q", tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestExtractForm asserts the form extract closure returns the promotion
+// pair's value on a well-formed body and the typed sentinel otherwise. A second
+// key used to pass: _json=…&role=user decoded the JSON and dropped role without
+// a word — seen failing so, with the key count check removed.
+func TestExtractForm(t *testing.T) {
+	t.Parallel()
+	inner := canaryJSONBytes(t)
+	innerStr := string(inner)
+	type tc struct {
+		name    string
+		values  url.Values
+		want    []byte
+		wantErr bool
+	}
+	tests := []tc{
+		{name: "well-formed", values: url.Values{formPromotionKey: {innerStr}}, want: inner},
+		{name: "no promotion pair", values: url.Values{"role": {"user"}}, wantErr: true},
+		{name: "a repeated promotion pair", values: url.Values{formPromotionKey: {innerStr, innerStr}}, wantErr: true},
+		{name: "a second key beside the pair", values: url.Values{formPromotionKey: {innerStr}, "role": {"user"}}, wantErr: true},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		values := tc.values
+		got, err := extractForm(&values)()
+		if tc.wantErr {
+			if priv := kerrs.PrivateOf(err); err == nil || !strings.Contains(priv, "malformed form") {
+				t.Fatalf("%s: err=%v, want the malformed-form refusal", tc.name, err)
+			}
+			return
+		}
+		if err != nil || string(got) != string(tc.want) {
+			t.Fatalf("%s: got=%q err=%v, want %q", tc.name, got, err, tc.want)
 		}
 	}
 	for _, tc := range tests {
