@@ -29,7 +29,9 @@ type netSink struct {
 	network string
 	// send ships one record over the transport; captured at construction.
 	send sendFunc
-	// closer releases the transport (net.Conn.Close, or a no-op for http).
+	// closer releases the transport: net.Conn.Close for tcp/udp; for http, the
+	// idle connections of the pool the sink owns — the default client's — and
+	// nothing of a caller-supplied client's.
 	closer func() error
 	// mu serialises send against Close so the transport is never used after or
 	// during its own close.
@@ -41,7 +43,7 @@ type netSink struct {
 func newNetSink(network string, send sendFunc, closer func() error) *netSink {
 	//: degrade a nil closer to a no-op so Close never dereferences nil.
 	if closer == nil {
-		//: http has no persistent connection to close — a no-op is correct.
+		//: a seam with nothing of its own to release — a no-op is correct.
 		closer = func() error { return nil }
 	}
 	//: hand back the constructed sink owning the seams.

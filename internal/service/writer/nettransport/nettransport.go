@@ -70,9 +70,10 @@ func (f *netFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error) {
 // build wires the protocol seam (http client or a dialed conn) and composes the
 // levelgate(async(netSink)) chain around it.
 func (f *netFactory) build(c NetConfig) (sink corelogger.Sink, err error) {
-	//: http uses a stateless client seam — no dial, no persistent connection.
+	//: http uses a client seam — no dial here, keep-alive connections pooled.
 	if f.proto == protoHTTP {
-		//: the http seam allocates per send; its closer drops idle conns.
+		//: the http seam allocates per send; its closer drops the idle
+		//: connections of the pool it owns (never a supplied client's).
 		send, closer := newHTTPSeam(c.Address, c.HTTPClient)
 		//: compose the non-blocking + level-gated chain over the http seam.
 		return compose(f.proto, send, closer, c), nil
