@@ -51,32 +51,61 @@ fi
 	exit 1
 }
 
-# What declaring a code looks like. The typed constant is the house form —
-# `const CodeX errs.Code = 0x…`, or `CodeX errs.Code = 0x…` inside a block —
-# and it is the ONLY form in internal/core/codec, which formats its codes into
-# its registry errors and never calls Define. The conversion
-# `CodeX = errs.Code(0x…)` is the other spelling. Before this pattern, the
-# conversion was the only code-declaration alternative, it matched nothing in
-# the tree, and core/codec could have left //:audit_sources unnoticed. A hex
-# literal is required on the right so a re-export, whose right side is a
-# selector, stays exempt.
-declares='errs\.Define|errs\.Code[[:space:]]*=[[:space:]]*0[xX]|errs\.Code\([[:space:]]*0[xX]'
+# What declaring a code looks like — the same spellings the ownership audit
+# (registry_ownership_external_test.go, classifyCodeSpec) counts as an
+# allocation, so no package can be judged there and missed here:
+#
+#   - an errs.Define call;
+#   - a Code-named constant typed as the Code type, whatever its right side —
+#     `CodeX errs.Code = 0x…`, `= iota + 0x…`, a decimal, another constant —
+#     spelled `errs.Code`, through any import name, or `Code` inside kernel/errs;
+#   - a Code-named constant converted to it, `CodeX = errs.Code(…)`.
+#
+# The one exemption is the audit's: a right side that is a bare selector is a
+# RE-EXPORT (`CodeX errs.Code = core.CodeX`, pkg/v1's form) and allocates
+# nothing. This used to require a hex literal on the right, which left an iota
+# group, a decimal and a constant expression invisible to the guard while the
+# audit, once reached, would have judged them — so a package declaring its codes
+# only that way stayed out of //:audit_sources and out of both audits.
+define='errs\.Define'
+typed='(^|[[:space:](])Code[[:alnum:]_]*[[:space:]]+([[:alpha:]_][[:alnum:]_]*\.)?Code[[:space:]]*='
+converted='(^|[[:space:](])Code[[:alnum:]_]*[[:space:]]*=[[:space:]]*([[:alpha:]_][[:alnum:]_]*\.)?Code\('
+reexport='=[[:space:]]*[[:alpha:]_][[:alnum:]_]*\.[[:alpha:]_][[:alnum:]_]*[[:space:]]*(//.*)?$'
+
+# declaringFiles prints the production files of one package that declare a
+# code, and fails only when grep could not read one of them.
+declaringFiles() {
+	local file status
+	for file in "$1"/*.go; do
+		case "$file" in *_test.go) continue ;; esac
+		status=0
+		grep -qE "$define" "$file" || status=$?
+		[ "$status" -gt 1 ] && return 2
+		if [ "$status" -eq 0 ]; then
+			echo "$file"
+			continue
+		fi
+		status=0
+		grep -E "$typed|$converted" "$file" | grep -qvE "$reexport" || status=$?
+		# The pipeline's status is the last grep's; a read failure in the
+		# first shows up as a missing match, so the file is re-checked for
+		# readability before "no codes here" is believed.
+		[ -r "$file" ] || return 2
+		[ "$status" -eq 0 ] && echo "$file"
+	done
+	return 0
+}
 
 missing=""
 while IFS= read -r dir; do
-	status=0
-	declaring="$(grep -lE "$declares" "$dir"/*.go)" || status=$?
-	# grep says 0 for a match, 1 for none, and anything else when it could
-	# not read — which must not be mistaken for "no codes here".
-	if [ "$status" -gt 1 ]; then
+	# Test files are skipped inside: an audit fixture deliberately declares
+	# colliding codes to prove the audit bites.
+	if ! declaring="$(declaringFiles "$dir")"; then
 		echo "✗ could not scan $dir for code declarations — refusing to guess." >&2
 		exit 1
 	fi
 	# Nothing in this package declares a code.
-	[ "$status" -eq 0 ] || continue
-	# Test files are excluded: an audit fixture deliberately declares
-	# colliding codes to prove the audit bites.
-	grep -qv '_test\.go$' <<<"$declaring" || continue
+	[ -n "$declaring" ] || continue
 	grep -qxF "$dir" <<<"$audited" || missing="${missing}${dir}"$'\n'
 done <<<"$packages"
 
