@@ -36,7 +36,7 @@ the excess into a single aggregated overflow series.
 | `exporter_text.go` | `textExporter` + default **stderr** `Text` + `NewTextExporter` |
 | `exporter_otlpjson.go` | `EncodeOTLPJSON` (the ENCODER — snapshot to bytes, no I/O) + the proto3-JSON scalar types (`otlpInt64`/`otlpUint64`/`otlpDouble`) + the two refusals + `otlpJSONExporter` + default **stderr** `OTLPJSON` + `NewOTLPJSONExporter` |
 | `otlp_request.go` | the OTLP payload TREE — a Go mirror of the four `.proto` files, in schema field-number order, restricted to the fields this SDK produces |
-| `exporter_otlphttp.go` | the EMITTER, and the only `net/http` in this package: `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPMetricsPath` + `DefaultOTLPTimeout`/`DefaultOTLPMaxResponseBytes` + endpoint refusal + response classification |
+| `exporter_otlphttp.go` | the EMITTER, and the only `net/http` in this package: `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPMetricsPath` + `DefaultOTLPTimeout`/`DefaultOTLPMaxResponseBytes` + endpoint refusal + response classification + the default client's own connection pool (`newOTLPTransport`) |
 | `otlphttp_config.go` | `OTLPHTTPConfig` (endpoint, client, headers, timeout, response cap) |
 | `otlp_export_response.go` | `ExportMetricsServiceResponse` + `ExportMetricsPartialSuccess` + `otlpLenientInt64`, the number-OR-string 64-bit decoder the specification requires |
 | `exporter_prometheus.go` | `prometheusExporter` + default **stderr** `Prometheus` + `NewPrometheusExporter` + the two name grammars |
@@ -497,10 +497,44 @@ value, so the constructor returns `(Exporter, error)`.
 | | |
 |---|---|
 | Round trip | `DefaultOTLPTimeout` = 10 s, the value the OpenTelemetry protocol exporter specification defaults `OTEL_EXPORTER_OTLP_TIMEOUT` to. Non-positive **clamps**; there is no "no timeout" setting, because a stalled collector must never wedge the scraping goroutine (ADR 0031) |
-| Response body | read through `io.LimitReader` (`DefaultOTLPMaxResponseBytes`, 1 MiB). It is the one length a REMOTE party controls in this exchange |
+| Response body | read through `io.LimitReader` (`DefaultOTLPMaxResponseBytes`, 1 MiB). It is the one length a REMOTE party controls in this exchange — so the drain that recycles the connection after the verdict is bounded by the same default. It was not, and a collector streaming an endless body held `Export` forever whenever the client had no deadline |
 | Request body | deliberately **not** capped: its size is a property of the caller's own cardinality, any SDK-chosen ceiling would be arbitrary, and the collector answers 413 for one it will not take |
 | Redirects | refused with `http.ErrUseLastResponse` (CWE-918). A 30x would otherwise bounce the POST — `Authorization` header included — at whatever host the response names, past an allowlist that only saw the configured endpoint. The unfollowed 30x is classified as a permanent rejection, which is what a misconfigured endpoint is |
-| A caller-supplied `http.Client` | used **as-is**, deadline and redirect policy included. It is the seam for a proxy, an mTLS identity or an SSRF allowlist, and second-guessing it would defeat the seam |
+| A caller-supplied `http.Client` | used **as-is**, deadline, redirect policy and `Transport` included. It is the seam for a proxy, an mTLS identity or an SSRF allowlist, and second-guessing it would defeat the seam — so one riding `http.DefaultTransport` keeps the exposure below, and giving it a `Transport` of its own is how the caller removes it |
+| The default client's pool | its OWN: a clone of `http.DefaultTransport`, proxy environment included, sharing none of its connections — see below |
+
+**The default client owns its connection pool, because a shared one gave wrong
+verdicts.** It used to ride `http.DefaultTransport`, and net/http puts a
+BODILESS response's connection back in the idle pool *before* handing the
+response to the waiting round trip; a `CloseIdleConnections` on that pool
+landing in between closes the connection under it, and the round trip reports
+`HTTP/1.x transport connection broken: http: CloseIdleConnections called` for an
+answer that had already arrived. Every `httptest.Server.Close` and every
+`http.DefaultClient.CloseIdleConnections` in the process is such a call. The
+verdict was then `OTLP_EXPORT_UNAVAILABLE` whatever the collector said: a 200
+became retryable — the caller's retry replays accepted data, which double-counts
+a delta point — a 429 lost its `Retry-After`, and a 413 became retryable. CI saw
+it as a `TestOTLPHTTPSurfacesRetryAfter` flake; with the OS threads
+oversubscribed it failed 4 times in 800 runs of this file, and 0 in 600 since.
+`TestOTLPHTTPDefaultClientOwnsItsConnectionPool` proves the isolation
+deterministically — the emptying call between exports, and the connection must
+survive it.
+
+The clone is a snapshot taken at construction. Where `http.DefaultTransport` has
+been replaced by something other than an `*http.Transport`, a fresh transport
+with `Proxy: http.ProxyFromEnvironment` and net/http's 90 s idle timeout stands
+in. `TestOTLPHTTPDefaultClientHonoursTheProxyEnvironment` drives both branches
+through a real `HTTP_PROXY` — in a CHILD process, because net/http reads the
+proxy environment once per process and never proxies loopback.
+`TestOTLPHTTPProxyChild` is that child: it self-skips unless its parent set
+`KTN_OTLP_METRICS_PROXY_CHILD`, so it is discovered and run like any test and
+needs no tag, no `manual` target and no compensating lane (CLAUDE.md rule 12).
+
+**Each exporter therefore owns a pool, and nothing closes it.** The `Exporter`
+port has no lifecycle method and none was invented for this; idle connections
+are reaped by the transport's idle timeout. One exporter per collector, built
+once, is the intended shape — building one per export holds a pool per call
+until that timeout.
 
 **It does not retry, and that is a decision.** The specification asks a client to
 honour `Retry-After` and otherwise back off exponentially;
@@ -672,6 +706,13 @@ map is cloned at construction so a later caller mutation cannot change the wire.
 - Add an "unbounded" cardinality setting.
 - Register the OTLP/**HTTP** emitter, or give it a default endpoint. See
   §The OTLP/HTTP emitter.
+- Build the default client without its own `Transport`. A nil one is
+  `http.DefaultTransport`, which any code in the process can empty — see
+  §The OTLP/HTTP emitter. And do not replace, wrap or clone the `Transport` of
+  a caller-SUPPLIED client: that choice is the caller's.
+- Drain a response without a bound, or bound the drain by the configured
+  `MaxResponseBytes`: that knob caps what is read into memory, and a caller
+  who lowered it must not lose connection reuse on a conforming response.
 - Retry inside `Export`. `resilience` owns backoff; this package classifies
   (`OTLPRetryable`). A hidden loop cannot be tuned or cancelled by the caller
   who owns the scrape, and `Export` has no `context` to cancel it with.

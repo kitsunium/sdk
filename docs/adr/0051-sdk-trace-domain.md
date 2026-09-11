@@ -306,7 +306,11 @@ Two refusals, both of STRUCTURE and therefore failing on the first export or nev
   Unix epoch, which renders as a span 56 years long.
 
 The emitter is a **connector**, written like `nettransport` and like the metrics
-one: bounded response read (1 MiB), no redirects (CWE-918 — an unfollowed `30x` is
+one: bounded response read (1 MiB) and a bounded drain after it, a default client
+that owns its own connection pool rather than riding `http.DefaultTransport`
+*(amended 2026-09-11 — see ADR 0048 §7 for the `net/http` race that made a
+received answer read as a transport fault, and why that double-counts on a
+retry)*, no redirects (CWE-918 — an unfollowed `30x` is
 classified as the permanent rejection a misconfigured endpoint is), an endpoint
 refused at construction unless it is an absolute `http(s)` URL with a non-root path
 (a bare `http://collector:4318` connects, answers 404, and looks exactly like a
