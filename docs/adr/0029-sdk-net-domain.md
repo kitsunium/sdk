@@ -148,7 +148,7 @@ group.HandleHTTP(mux)   // http.Handler served over our listener, limits, TLS, d
 | read/write scratch buffers | `internal/kernel/buffer` (`*[]byte`, 64 KiB discard cap) |
 | accept/poll goroutine lifecycle | `internal/kernel/worker` (`Start`, `Every`, `Stop`) |
 | hot-swappable limits | `internal/kernel/snapshot.Value[T]` |
-| connection ceiling | `pkg/v1/resilience.NewBulkhead` (channel semaphore, reject mode) |
+| connection ceiling | a reject-mode channel semaphore — the bulkhead's shape, held explicitly (amended 2026-09-11: it WAS `pkg/v1/resilience.NewBulkhead`, but a Runner holds its slot for exactly one call, and a hijacked connection outlives the call that admitted it; the slot is now handed to the socket and returned by its Close) |
 | per-connection / per-request deadline | `pkg/v1/resilience.NewTimeout` |
 | inbound admission rate | `pkg/v1/resilience.NewRateLimiter` |
 | counters / histograms | `pkg/v1/metrics` |
