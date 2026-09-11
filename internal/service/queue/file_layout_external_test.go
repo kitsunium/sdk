@@ -21,6 +21,10 @@ import (
 // consumer is scanning it. Delivering it would hand a consumer a truncated
 // payload under a receipt naming a file about to be renamed away — the exact
 // failure atomic publication exists to prevent, re-introduced one layer up.
+//
+// The last three strays have exactly the right shape and wrong contents. Seen
+// failing: with the entropy width unchecked, "Receive(10) returned 2
+// deliveries, want 0"; with the count's spelling unchecked, 1 delivery.
 func TestAStrayFileInTheQueueDirectoryIsNeverDelivered(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -32,6 +36,12 @@ func TestAStrayFileInTheQueueDirectoryIsNeverDelivered(t *testing.T) {
 		"1.2.3.4.msg",             // four fields, none of them a padded instant
 		"..msg",                   // pathological
 		"0000000000000000001.msg", // one field where four belong
+		// The right four fields, each wrong in a way the parser used to let
+		// through: the hex check accepted any width, and Atoi any spelling of
+		// the count — each of these was DELIVERED as a message nobody sent.
+		"0000000000000000001.0000000000000000001.ab.000.msg",               // a 1-byte entropy field
+		"0000000000000000001.0000000000000000001..000.msg",                 // no entropy at all
+		"0000000000000000001.0000000000000000001.0123456789abcdef.+01.msg", // a count padCount never writes
 	}
 	for _, stray := range strays {
 		writeStray(t, filepath.Join(dir, "ready"), stray)
