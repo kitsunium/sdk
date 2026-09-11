@@ -511,6 +511,111 @@ func TestSourceYieldsAFreshCopy(t *testing.T) {
 	}
 }
 
+// routeSchemaConf is one element of an array of tables.
+type routeSchemaConf struct {
+	Path string   `json:"path"`
+	Tags []string `json:"tags"`
+}
+
+// arraySchemaConf is a target whose defaults are arrays — of scalars, and of
+// tables holding arrays — the shapes a decoded layer holds by reference.
+type arraySchemaConf struct {
+	Hosts  []string          `json:"hosts"`
+	Routes []routeSchemaConf `json:"routes"`
+}
+
+// arraySchema builds a schema that defaults both array shapes.
+func arraySchema(t *testing.T) *cfg.SchemaValue[arraySchemaConf] {
+	t.Helper()
+	schema, err := cfg.NewSchemaValue[arraySchemaConf](cfg.SchemaSpec[arraySchemaConf]{
+		Defaults: []coreconfig.DeclaredValue{
+			{Key: "hosts", Value: []string{"a", "b"}},
+			{Key: "routes", Value: []routeSchemaConf{{Path: "/", Tags: []string{"public"}}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSchemaValue: %v", err)
+	}
+	return schema
+}
+
+// TestSourceYieldsAFreshCopyOfEveryArray is TestSourceYieldsAFreshCopy for the
+// shapes it did not reach: an array, a table inside an array, and an array
+// inside that table. ADR 0061 promises a fresh copy on every Load; arrays used
+// to be handed back by reference, so a caller that edited one — printing the
+// effective defaults and "fixing" an entry, say — rewrote the compiled schema,
+// and every later load decoded the edit as if the author had written it.
+//
+// MUTATION (2026-09-11): cloneNested put back to copying maps only (HEAD's
+// merge.go). Observed: `the next Source().Load sees the caller's edit: hosts =
+// []interface {}{"rewritten", "b"}` and `LoadSchema decoded the caller's edit:
+// Hosts=[rewritten b] Routes=[{Path:/rewritten Tags:[rewritten]}]` — all three
+// depths of the edit reached the schema. Restored; SHA-256 of merge.go
+// identical to the pre-mutation file.
+func TestSourceYieldsAFreshCopyOfEveryArray(t *testing.T) {
+	t.Parallel()
+	schema := arraySchema(t)
+	layer, err := schema.Source().Load()
+	if err != nil {
+		t.Fatalf("Source().Load(): %v", err)
+	}
+	hosts, isArray := layer["hosts"].([]any)
+	routes, isRoutes := layer["routes"].([]any)
+	if !isArray || !isRoutes || len(hosts) != 2 || len(routes) != 1 {
+		t.Fatalf("layer = %#v, want two arrays", layer)
+	}
+	route, isTable := routes[0].(map[string]any)
+	tags, hasTags := route["tags"].([]any)
+	if !isTable || !hasTags {
+		t.Fatalf("routes[0] = %#v, want a table carrying an array", routes[0])
+	}
+	//: edit all three depths of what the caller was handed.
+	hosts[0], route["path"], tags[0] = "rewritten", "/rewritten", "rewritten"
+
+	again, err := schema.Source().Load()
+	if err != nil {
+		t.Fatalf("Source().Load(): %v", err)
+	}
+	if next, _ := again["hosts"].([]any); len(next) == 0 || next[0] != "a" {
+		t.Errorf("the next Source().Load sees the caller's edit: hosts = %#v", next)
+	}
+	var conf arraySchemaConf
+	if err := cfg.LoadSchema(&conf, schema); err != nil {
+		t.Fatalf("LoadSchema: %v", err)
+	}
+	pristine := len(conf.Hosts) == 2 && conf.Hosts[0] == "a" && len(conf.Routes) == 1 &&
+		conf.Routes[0].Path == "/" && len(conf.Routes[0].Tags) == 1 && conf.Routes[0].Tags[0] == "public"
+	if !pristine {
+		t.Errorf("LoadSchema decoded the caller's edit: Hosts=%v Routes=%+v", conf.Hosts, conf.Routes)
+	}
+}
+
+// TestAnArrayReplacesItsDefault pins what copying arrays must not turn into:
+// a source that supplies an array REPLACES the default one, whole. Merging the
+// two element by element would decode a list no layer wrote.
+//
+// MUTATION (2026-09-11): deepMerge made to append a source array to the one
+// already under the key. Observed: `Hosts = [a b c], want [c] — an array
+// replaces its default, it is not merged into it`, and in Test_deepMerge's `an
+// array replaces an array, whole`: `key "xs" = []interface {}{1, 2, 3}, want
+// []interface {}{3}` and the same for the nested `ys`. Restored; SHA-256 of
+// merge.go identical to the pre-mutation file.
+func TestAnArrayReplacesItsDefault(t *testing.T) {
+	t.Parallel()
+	var conf arraySchemaConf
+	override := mapSource{values: map[string]any{"hosts": []any{"c"}}}
+	if err := cfg.LoadSchema(&conf, arraySchema(t), override); err != nil {
+		t.Fatalf("LoadSchema: %v", err)
+	}
+	if len(conf.Hosts) != 1 || conf.Hosts[0] != "c" {
+		t.Errorf("Hosts = %v, want [c] — an array replaces its default, it is not merged into it", conf.Hosts)
+	}
+	//: a key the source did not name keeps its default untouched.
+	if len(conf.Routes) != 1 || conf.Routes[0].Path != "/" {
+		t.Errorf("Routes = %+v, want the default", conf.Routes)
+	}
+}
+
 // TestCheckCarriesTheMessagesTheErrorCannot pins the division of labour: the
 // error is the interop shape (count, first rule, keys) and the report is the
 // report. A caller who wants to render a per-key message asks Check.

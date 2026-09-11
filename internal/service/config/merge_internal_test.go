@@ -5,7 +5,10 @@
 // outlives the call.
 package config
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // Test_deepMerge pins the override rules and the non-aliasing guarantee.
 func Test_deepMerge(t *testing.T) {
@@ -67,6 +70,14 @@ func Test_deepMerge(t *testing.T) {
 			src:  map[string]any{"a": nil},
 			want: map[string]any{"a": nil},
 		},
+		{
+			//: an array REPLACES: merging element by element would produce a
+			//: list no layer wrote. Copying arrays must never turn into this.
+			name: "an array replaces an array, whole",
+			dst:  map[string]any{"xs": []any{1, 2}, "n": map[string]any{"ys": []any{"a", "b"}}},
+			src:  map[string]any{"xs": []any{3}, "n": map[string]any{"ys": []any{"c"}}},
+			want: map[string]any{"xs": []any{3}, "n": map[string]any{"ys": []any{"c"}}},
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -126,8 +137,27 @@ func Test_deepMerge_DoesNotAlias(t *testing.T) {
 	}
 }
 
-// Test_cloneNested pins that the copy shares no map with its source at any
-// depth, and that leaves are carried across unchanged.
+// Test_cloneNested pins that the copy shares no map and no array with its
+// source at any depth, and that leaves are carried across unchanged.
+//
+// Arrays are copied because a clone is not only read by the merge, which never
+// mutates one: Source().Load hands a clone to a CALLER, who may. The array
+// checks below read the SOURCE directly rather than through a second clone —
+// a snapshot taken with the function under test would alias exactly as the
+// clone does, and see nothing.
+//
+// MUTATION (2026-09-11): cloneNested put back to copying maps only, arrays
+// stored by reference (HEAD's merge.go). Observed: `writing to an array in the
+// clone reached the source` on `a slice`; on `an array of tables`, that and
+// `writing to a table inside an array in the clone reached the source`. The
+// nil-array case stayed green — sharing a nil array keeps it nil. Restored;
+// SHA-256 of merge.go identical to the pre-mutation file.
+//
+// MUTATION (2026-09-11): cloneArray's slices.Clone replaced by `append([]any{},
+// src...)`, which turns a nil array into an empty one. Observed on `a nil
+// array`, from both checks: `key "xs" = []interface {}{}, want []interface
+// {}(nil)` and `a nil array: the clone is []interface {}{}, want the nil array
+// kept nil — null would decode as []`. Restored; SHA-256 identical.
 func Test_cloneNested(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -139,9 +169,9 @@ func Test_cloneNested(t *testing.T) {
 		{"a flat map", map[string]any{"a": 1, "b": "two"}},
 		{"a nested map", map[string]any{"n": map[string]any{"a": 1}}},
 		{"a doubly nested map", map[string]any{"n": map[string]any{"in": map[string]any{"a": 1}}}},
-		//: slices are opaque leaves — the merge never descends into one, so it
-		//: cannot mutate one either.
-		{"a slice leaf", map[string]any{"xs": []any{1, 2}}},
+		{"a slice", map[string]any{"xs": []any{1, 2}}},
+		{"an array of tables", map[string]any{"xs": []any{map[string]any{"a": 1}, []any{"deep"}}}},
+		{"a nil array", map[string]any{"xs": []any(nil)}},
 		{"a nil leaf", map[string]any{"a": nil}},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -161,6 +191,7 @@ func Test_cloneNested(t *testing.T) {
 				t.Error("writing to a nested clone reached the source")
 			}
 		}
+		assertArrayDetached(t, got, c.src)
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -170,8 +201,42 @@ func Test_cloneNested(t *testing.T) {
 	}
 }
 
+// assertArrayDetached checks the array under "xs", when there is one: a null
+// stays null, a table inside it is its own, and so is the array itself.
+func assertArrayDetached(t *testing.T, got, src map[string]any) {
+	t.Helper()
+	srcXs, isArray := src["xs"].([]any)
+	//: nothing to check without an array.
+	if !isArray {
+		return
+	}
+	gotXs, _ := got["xs"].([]any)
+	//: null must stay null — [] is a different document.
+	if srcXs == nil {
+		if gotXs != nil {
+			t.Errorf("a nil array: the clone is %#v, want the nil array kept nil — null would decode as []", gotXs)
+		}
+		return
+	}
+	//: a table inside the array, written through the clone.
+	if inner, isTable := gotXs[0].(map[string]any); isTable {
+		inner["injected"] = true
+		if srcInner, _ := srcXs[0].(map[string]any); srcInner["injected"] != nil {
+			t.Error("writing to a table inside an array in the clone reached the source")
+		}
+	}
+	//: the array's own element, written through the clone.
+	gotXs[0] = "injected"
+	if written, isString := srcXs[0].(string); isString && written == "injected" {
+		t.Error("writing to an array in the clone reached the source")
+	}
+}
+
 // assertNested compares two config maps structurally, recursing into nested
-// maps and comparing everything else with ==.
+// maps and comparing everything else — arrays included — with
+// reflect.DeepEqual, which also tells a nil array from an empty one. Arrays
+// used to be skipped outright, which made "an array replaces, it is not
+// merged" a claim nothing here could check.
 func assertNested(t *testing.T, got, want map[string]any) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -193,12 +258,7 @@ func assertNested(t *testing.T, got, want map[string]any) {
 			assertNested(t, gotSub, wantSub)
 			continue
 		}
-		//: slices are opaque leaves; comparing them by identity is enough,
-		//: since nothing in the merge rewrites one.
-		if _, isSlice := wantVal.([]any); isSlice {
-			continue
-		}
-		if gotVal != wantVal {
+		if !reflect.DeepEqual(gotVal, wantVal) {
 			t.Errorf("key %q = %#v, want %#v", key, gotVal, wantVal)
 		}
 	}

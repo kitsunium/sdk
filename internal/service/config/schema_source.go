@@ -7,9 +7,11 @@ type schemaSource struct {
 	defaults map[string]any
 }
 
-// Load returns a private copy of the default layer. Defaults never fail to
-// read: they were resolved at construction, and there is no backing store.
+// Load returns a private copy of the default layer — every table and every
+// array in it, not only the top-level map. Defaults never fail to read: they
+// were resolved at construction, and there is no backing store.
 func (s schemaSource) Load() (values map[string]any, err error) {
-	//: hand back a detached copy so a caller's mutation cannot reach the schema.
+	//: hand back a detached copy so a caller's mutation, of a table or of an
+	//: array, cannot reach the schema.
 	return cloneNested(s.defaults), nil
 }
