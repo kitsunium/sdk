@@ -2,63 +2,118 @@
 
 ## Purpose
 
-Public facade for the SDK observability domain (ADR 0027), the logger's twin.
-Aliases the `Meter`/instrument/`Exporter` types, the per-series snapshot values
-and `MeterConfig`, exposes `NewMeter`, `NewMeterWithConfig`, `Export`,
-`RegisterExporter`, `NewTextExporter`, `AvailableExporters`, the overflow-label
-constants and the sentinels. The default `text` exporter registers on import and
-writes to **stderr** (ADR 0030) — importing a package must not arm a writer on
-stdout, which the process may be using as a protocol channel. Stdlib-only →
+Public facade for the SDK observability domain (ADR 0027, re-shaped on the
+OpenTelemetry data model by ADR 0044), the logger's twin. Aliases the
+`Meter`/instrument/`Exporter` types, the typed `Attr`, `Temporality`,
+`Resource`, `Scope`, the point/metric snapshot values and `MeterConfig`; exposes
+`String`/`Bool`/`Int64`/`Float64`, `NewMeter`, `NewMeterWithConfig`, `Export`,
+`RegisterExporter`, `NewTextExporter`, `NewPrometheusExporter`,
+`EncodeOTLPJSON`, `NewOTLPJSONExporter`, `NewOTLPHTTPExporter`, `OTLPRetryable`,
+`AvailableExporters`, the overflow key and the sentinels. All three default
+exporters register on import and write to **stderr** (ADR 0030) — importing a
+package must not arm a writer on stdout, which the process may be using as a
+protocol channel — and the OTLP/HTTP emitter is not registered at all, because
+an import must not arm a network client either (ADR 0048). Stdlib-only →
 dep-light; cross-OS.
 
-Instruments are identified by name **and label set** (one pair = one series),
-with a per-instrument cardinality bound whose excess folds into a visible
-aggregated overflow series.
+**Zero OTel imports.** The model is a published specification; the code is this
+SDK's. See `internal/core/metrics/CLAUDE.md` §Purpose and ADR 0044 §Decision 1.
+
+Instruments are identified by name **and typed attribute set** (one pair = one
+series), with a per-instrument cardinality bound whose excess folds into a
+visible aggregated overflow series.
 
 ## Surface
 
 | Symbol | Notes |
 |---|---|
-| `Meter` / `Counter` / `Gauge` / `Histogram` | instrument aliases; every accessor is variadic in `Label` |
-| `Label` (= `LabelValue`) | one dimension of a series |
-| `Snapshot` (= `SnapshotValue`) | `map[name][]…Value` per kind — see below |
-| `CounterValue` / `GaugeValue` / `HistogramValue` | per-series snapshot values |
-| `MeterConfig` / `DefaultMaxSeriesPerInstrument` | the cardinality bound |
-| `OverflowLabelKey` / `OverflowLabelValue` | how a consumer RECOGNISES the folded series |
+| `Meter` | the FROZEN port: Counter/Gauge/Histogram + Collect (ADR 0039) |
+| `UpDownMeter` / `AsyncMeter` / `FullMeter` | the two sibling ports and their union — what `NewMeter` returns |
+| `Counter` / `UpDownCounter` / `Gauge` / `Histogram` | instrument aliases; every accessor is variadic in `Attr` |
+| `Attr` (= `AttrValue`) / `AttrKind` + `AttrKind*` | one TYPED dimension of a series |
+| `String` / `Bool` / `Int64` / `Float64` | the only ways to build a usable `Attr` |
+| `Temporality` + `Temporality*` | delta or cumulative, carried by the metric |
+| `Resource` / `Scope` + `ServiceNameKey` / `UnknownService` / `DefaultScopeName` | who produced the payload, and what instrumented it |
+| `Snapshot` (= `SnapshotValue`) | `{Resource, Scope, StartTime, Time, Sums/Gauges/Histograms map[name]…Metric}` — see below |
+| `SumMetric` / `GaugeMetric` / `HistogramMetric` | the per-name envelopes |
+| `SumPoint` / `GaugePoint` / `HistogramPoint` | the per-series points |
+| `ObserveInt64` / `ObserveFloat64` / `Int64Callback` / `Float64Callback` | the observable func ports |
+| `MeterConfig` / `DefaultMaxSeriesPerInstrument` | bound, temporality, resource, scope, clock |
+| `OverflowAttrKey` | how a consumer RECOGNISES the folded series (its value is the bool `true`) |
 | `Exporter` / `ExporterName` | exporter aliases |
-| `NewMeter()` / `NewMeterWithConfig(cfg)` | in-memory Meter (Counter/Gauge/Histogram + Collect) |
-| `Export` / `RegisterExporter` / `NewTextExporter` / `NewPrometheusExporter` / `AvailableExporters` | registry verbs |
-| `UnknownExporter` / `ExportFailed` / `InstrumentKindConflict` / `InvalidLabel` | sentinels |
-| `InvalidMetricName` / `InvalidLabelName` / `ReservedLabelName` | how a consumer RECOGNISES a name the Prometheus format cannot spell |
+| `NewMeter()` / `NewMeterWithConfig(cfg)` | in-memory `FullMeter` |
+| `Export` / `RegisterExporter` / `NewTextExporter` / `NewPrometheusExporter` / `NewOTLPJSONExporter` / `AvailableExporters` | registry verbs |
+| `EncodeOTLPJSON` | the OTLP/JSON ENCODER — snapshot to the exact bytes of one `ExportMetricsServiceRequest`, no I/O (ADR 0048) |
+| `NewOTLPHTTPExporter` / `OTLPHTTPConfig` / `OTLPMetricsPath` / `DefaultOTLPTimeout` / `DefaultOTLPMaxResponseBytes` | the EMITTER and its knobs; never registered, and the endpoint is a full URL used as-is |
+| `OTLPRetryable` | classifies an export failure; its signature IS `resilience.RetryConfig.Retryable`'s |
+| `UnknownExporter` / `ExportFailed` / `InstrumentKindConflict` / `InvalidAttribute` / `InvalidTemporality` | sentinels |
+| `InvalidMetricName` / `InvalidLabelName` / `ReservedLabelName` / `UnsupportedTemporality` | how a consumer RECOGNISES what the Prometheus connector cannot carry |
+| `OTLPUnresolvedTemporality` / `OTLPInvalidBucketLayout` | what the OTLP encoder refuses to spell — both structural, so they fail on the first export or never |
+| `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` | the OTLP/HTTP verdicts; only `OTLPExportUnavailable` is retryable |
 
 ## Conventions
 
-- **Type aliases, not new types**; constructors are thin delegations.
+- **Type aliases, not new types**; constructors are thin delegations. The core
+  layer spells the shapes `…Value` (its role-suffix convention); this package
+  publishes the short names, exactly as `Snapshot` has always aliased
+  `SnapshotValue`.
+- **`NewMeter` returns `FullMeter`, and a `Meter` parameter still accepts it.**
+  Widening a returned VALUE is safe; widening the interface is what ADR 0039
+  forbids. `UpDownCounter` and the observables live on siblings for that reason.
+- **An attribute's KIND is part of the series identity.** `String("v", "1")` and
+  `Int64("v", 1)` are two series. The four constructors are the only way to
+  build one; a struct literal leaves `AttrKindInvalid`, which is refused.
 - **stdout is opt-in**: `NewTextExporter(name, os.Stdout)` binds it explicitly;
-  the registered `text` exporter never does (ADR 0030).
-- **`Snapshot` groups by instrument name**, each name holding its series sorted
-  by label set — the shape a per-series exporter consumes without regrouping.
-  The `Labels` slices alias the meter's own and must not be mutated.
+  neither registered exporter ever does (ADR 0030).
+- **`Snapshot` groups by instrument name**, each name holding one metric
+  envelope whose `Points` are sorted by attribute set — the shape a per-series
+  exporter consumes without regrouping, and the shape an OTLP encoder walks
+  without reconstruction. The `Attrs` slices alias the meter's own and must not
+  be mutated.
+- **Temporality is on the metric, and a gauge has none.** Unset resolves to
+  cumulative; a cast value refuses (ADR 0031). Under `TemporalityDelta`,
+  `Collect` CONSUMES the window it reports, so a delta meter has one reader.
 - **A cardinality bound of zero clamps to the default** and never means
   unbounded (ADR 0031); there is no unbounded setting at all.
-- **The overflow constants are re-exported on purpose.** Detecting the fold is
-  the whole reason it is visible rather than silent, so a consumer must be able
-  to test for it without importing anything internal.
-- **The Prometheus exporter REFUSES a name it cannot spell**, and the sentinels
-  that say so are re-exported for the same reason the overflow constants are: a
-  consumer must be able to test for the condition without importing anything
-  internal. Transliterating instead would merge distinct instruments silently —
-  rationale in `internal/service/metrics/CLAUDE.md`.
+- **The overflow key is re-exported on purpose.** Detecting the fold is the
+  whole reason it is visible rather than silent, so a consumer must be able to
+  test for it without importing anything internal.
+- **The Prometheus exporter is a deliberately LOSSY connector**, and the
+  sentinels that say so are re-exported for the same reason the overflow key is.
+  It refuses a delta snapshot (`UnsupportedTemporality`) and a name the format
+  cannot spell (`InvalidMetricName`/`InvalidLabelName`/`ReservedLabelName`) —
+  including an OTel-conventional DOTTED attribute key — rather than
+  transliterating, which would merge distinct instruments silently. Full list of
+  losses: `internal/service/metrics/CLAUDE.md` §What the Prometheus connector
+  loses.
 - **`NewPrometheusExporter` is the scrape path**; the registered `prometheus`
   name is a stderr diagnostic, like `text` (ADR 0030).
-- OTLP and the Prometheus **protobuf** format remain deferred to `third-party/`
-  (ADR 0027); the text exposition format and labels are not.
+- **OTLP/JSON is the native wire and loses nothing** (ADR 0048) — temporality
+  travels, an attribute keeps its type, Resource and Scope reach the payload.
+  It ships as TWO surfaces on purpose: `EncodeOTLPJSON` is a pure
+  snapshot-to-bytes function that touches no socket, and `NewOTLPHTTPExporter`
+  adds only the POST — so an encoding defect and a network defect are never the
+  same investigation. `NewOTLPJSONExporter(name, w)` sits between them and
+  writes NDJSON.
+- **The OTLP/HTTP emitter does not retry, and that is the point.** It classifies
+  (`OTLPRetryable`, exactly `resilience.RetryConfig.Retryable`'s shape) so the
+  caller who owns the scrape loop owns the backoff, visibly, with a policy they
+  can tune and cancel. A hidden loop inside `Export` could be neither.
+- The OTLP **protobuf** encoding and the Prometheus **protobuf** format remain
+  deferred (ADR 0048 §Deferred, ADR 0027); the JSON encoding is a first-class
+  OTLP encoding, so binary would buy throughput rather than reach.
 - README generated by gomarkdoc; edit the `metrics.go` doc comment and
   regenerate with `cd pkg/v1 && GOWORK=off go generate ./metrics/...`.
 
 ## Do NOT
 
 - Reimplement instruments here — the facade is aliases + wrappers.
+- Import `go.opentelemetry.io/*`. Anywhere.
+- Add a method to the `Meter` alias's underlying interface. Add a sibling.
+- Register the OTLP/HTTP emitter, or hand it a default endpoint. An import
+  must not arm a network client (ADR 0048).
+- Wrap `NewOTLPHTTPExporter` in a private retry loop. `resilience` owns
+  backoff; `OTLPRetryable` is the seam.
 
 ## Verification
 

@@ -1,23 +1,37 @@
-// Package metrics — one instrument kind's series map.
+// Package metrics — one snapshot group's series map.
 package metrics
 
 import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 
-// seriesStore holds every live series of ONE instrument kind, keyed by the
-// canonical series key (name + sorted label set, see series.go).
+// seriesStore holds every live series of ONE snapshot group (sums, gauges or
+// histograms), keyed by the canonical series key (name + sorted attribute set,
+// see series.go).
 //
-// Flat, not nested by name: one map read resolves a labelled fetch, where a
-// name→labels nesting would cost two on the path every observation walks. The
-// kind travels with the store rather than being passed to each call.
+// Flat, not nested by name: one map read resolves an attributed fetch, where a
+// name→attrs nesting would cost two on the path every observation walks.
+//
+// The store is keyed on the GROUP rather than on the instrument kind because a
+// Counter and an UpDownCounter produce the same point shape and land in the
+// same snapshot map; which of the two a name is bound to lives on its
+// nameState, where it is decided once instead of per series.
+//
+// meter is a back-pointer to the meter that owns the store. It is a FIELD
+// rather than a sixth parameter on admit for a measured reason: Go's escape
+// analysis is field-INSENSITIVE on a struct parameter, so grouping the series'
+// identity (name, kind, key, attrs) into one value to shorten the signature
+// makes the whole group escape the moment the name is stored on an entry —
+// which drags the caller's stack scratch onto the heap and costs two
+// allocations per observation. Moving the meter out of the signature keeps the
+// four identity arguments separate and the fetch path allocation-free.
 type seriesStore[T any] struct {
-	kind  instrumentKind
+	meter *memMeter
 	byKey map[string]*seriesEntry[T]
 }
 
-// newSeriesStore returns an empty store for kind.
-func newSeriesStore[T any](kind instrumentKind) seriesStore[T] {
+// newSeriesStore returns an empty store bound to the meter that owns it.
+func newSeriesStore[T any](meter *memMeter) seriesStore[T] {
 	//: no capacity hint — an instrument count is not knowable at construction.
-	return seriesStore[T]{kind: kind, byKey: make(map[string]*seriesEntry[T], 0)}
+	return seriesStore[T]{meter: meter, byKey: make(map[string]*seriesEntry[T], 0)}
 }
 
 // lookup resolves an EXISTING series under the meter's read lock.
@@ -25,10 +39,10 @@ func newSeriesStore[T any](kind instrumentKind) seriesStore[T] {
 // key is []byte rather than a string on purpose: `m[string(b)]` compiles to a
 // lookup that does not allocate, while converting first costs one allocation on
 // a path that runs once per observation.
-func (s *seriesStore[T]) lookup(meter *memMeter, key []byte) (inst T, ok bool) {
-	meter.mu.RLock()
+func (s *seriesStore[T]) lookup(key []byte) (inst T, ok bool) {
+	s.meter.mu.RLock()
 	entry, found := s.byKey[string(key)]
-	meter.mu.RUnlock()
+	s.meter.mu.RUnlock()
 	//: absence is the caller's cue to take the write lock.
 	if !found {
 		//: zero value; the caller ignores it.
@@ -38,30 +52,30 @@ func (s *seriesStore[T]) lookup(meter *memMeter, key []byte) (inst T, ok bool) {
 	return entry.inst, true
 }
 
-// admit resolves — or creates — the series for (name, key, sorted) under the
-// meter's WRITE lock.
+// admit resolves — or creates — the series for (name, kind, key, sorted) under
+// the meter's WRITE lock.
 //
-// Once the name has reached its cardinality bound, a NEW label set is not
+// Once the name has reached its cardinality bound, a NEW attribute set is not
 // rejected and not dropped: it is folded into the name's single overflow
 // series. That choice and its cost:
 //
-//   - Memory is bounded. This is the whole point: an unbounded label set is a
-//     process-killing leak, not a reporting inconvenience.
+//   - Memory is bounded. This is the whole point: an unbounded attribute set is
+//     a process-killing leak, not a reporting inconvenience.
 //   - Nothing is silently lost. A counter's grand total across all its series
 //     stays correct, because every increment still lands somewhere.
 //   - The breakdown IS lost, irrecoverably. Once folded, an observation's
-//     labels are gone; no downstream aggregation can recover which label set
-//     it came from.
+//     attributes are gone; no downstream aggregation can recover which set it
+//     came from.
 //   - Which series keep their identity is ARRIVAL-ORDER dependent. The first
-//     MaxSeriesPerInstrument label sets seen win, so two replicas of the same
-//     service can fold different label sets into overflow and disagree about
+//     MaxSeriesPerInstrument attribute sets seen win, so two replicas of the
+//     same service can fold different sets into overflow and disagree about
 //     what is visible. That is the real cost of not evicting.
-//   - The condition is VISIBLE. A series carrying sdk_metric_overflow="true"
+//   - The condition is VISIBLE. A series carrying sdk_metric_overflow=true
 //     appears in every snapshot from then on, so an operator reading a
-//     dashboard learns their labels blew up. A typed error cannot be returned
-//     from an accessor whose signature hands back a Counter without changing
-//     every call site, and dropping the observation would be exactly the inert
-//     behaviour ADR 0031 exists to ban.
+//     dashboard learns their attributes blew up. A typed error cannot be
+//     returned from an accessor whose signature hands back a Counter without
+//     changing every call site, and dropping the observation would be exactly
+//     the inert behaviour ADR 0031 exists to ban.
 //
 // key stays []byte here too: an instrument already in overflow misses the read
 // lock on EVERY observation and lands in this function every time, so a string
@@ -69,26 +83,26 @@ func (s *seriesStore[T]) lookup(meter *memMeter, key []byte) (inst T, ok bool) {
 // pressure with the same cause. The conversion happens only on insertion,
 // where the key is actually retained.
 func (s *seriesStore[T]) admit(
-	meter *memMeter, name string, key []byte, sorted []coremetrics.LabelValue, build func() T,
+	name string, kind instrumentKind, key []byte, sorted []coremetrics.AttrValue, build func() T,
 ) T {
-	meter.mu.Lock()
-	defer meter.mu.Unlock()
+	s.meter.mu.Lock()
+	defer s.meter.mu.Unlock()
 	//: another goroutine may have created it between the read unlock and here.
 	if entry, ok := s.byKey[string(key)]; ok {
 		//: the raced creation wins; both callers get the one instrument.
 		return entry.inst
 	}
 	//: bind (or verify) the name's kind before spending a series slot on it.
-	state := meter.bindName(name, s.kind)
-	//: at the bound, the new label set folds into the overflow series.
-	if state.series >= meter.maxSeries {
+	state := s.meter.bindName(name, kind)
+	//: at the bound, the new attribute set folds into the overflow series.
+	if state.series >= s.meter.maxSeries {
 		//: retarget this creation at the overflow identity.
 		return s.overflow(state, name, build)
 	}
-	//: an admitted label set spends one slot of the bound.
+	//: an admitted attribute set spends one slot of the bound.
 	state.series++
-	//: create, own the labels, publish under the retained key.
-	entry := &seriesEntry[T]{name: name, labels: cloneLabels(sorted), inst: build()}
+	//: create, own the attributes, publish under the retained key.
+	entry := &seriesEntry[T]{name: name, attrs: cloneAttrs(sorted), inst: build()}
 	s.byKey[retain(key)] = entry
 	//: hand back the fresh instrument.
 	return entry.inst
@@ -109,14 +123,14 @@ func retain(key []byte) string {
 // reached.
 func (s *seriesStore[T]) overflow(state *nameState, name string, build func() T) T {
 	//: the key is computed once per name and cached on the state.
-	key, labels := state.overflowSeries(name)
-	//: after the first fold every further label set lands in this series.
+	key, attrs := state.overflowSeries(name)
+	//: after the first fold every further attribute set lands in this series.
 	if entry, ok := s.byKey[key]; ok {
 		//: one instrument absorbs the whole tail.
 		return entry.inst
 	}
 	//: first fold — create the aggregated series.
-	entry := &seriesEntry[T]{name: name, labels: cloneLabels(labels), inst: build()}
+	entry := &seriesEntry[T]{name: name, attrs: cloneAttrs(attrs), inst: build()}
 	s.byKey[key] = entry
 	//: hand back the series every later overflow will reuse.
 	return entry.inst

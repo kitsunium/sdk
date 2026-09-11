@@ -80,58 +80,88 @@ func Test_textExporter_Name(t *testing.T) {
 // Test_appendSeriesLine pins the one-series-per-line format. Every consumer of
 // this output splits on newlines and then on spaces, so a missing separator
 // merges two series into one unparseable line.
+//
+// The typed cases are the OTel attribute model made visible: a string is quoted
+// and escaped, and a bool / integer / double is printed BARE, so a reader can
+// see which kind a dimension carries. Every wire format flattens that away;
+// this one is a diagnostic and does not have to.
 func Test_appendSeriesLine(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name   string
 		buf    []byte
-		prefix string
 		metric string
-		labels []coremetrics.LabelValue
+		attrs  []coremetrics.AttrValue
 		value  string
 		want   string
 	}
 	tests := []tc{
 		{
-			name: "onto an empty buffer", prefix: "counter ", metric: "requests",
-			value: "7", want: "counter requests 7\n",
+			name: "onto an empty buffer", metric: "requests",
+			value: "7", want: "requests 7\n",
 		},
 		{
-			name: "onto an existing line", buf: []byte("counter a 1\n"),
-			prefix: "gauge ", metric: "b", value: "2",
-			want: "counter a 1\ngauge b 2\n",
+			name: "onto an existing line", buf: []byte("a 1\n"),
+			metric: "b", value: "2",
+			want: "a 1\nb 2\n",
 		},
 		{
-			//: the pre-label rendering is unchanged, byte for byte — a
-			//: dimensionless series must not sprout empty braces.
-			name: "an empty value still terminates the line", prefix: "counter ",
-			metric: "x", value: "", want: "counter x \n",
+			//: a dimensionless series must not sprout empty braces.
+			name:   "an empty value still terminates the line",
+			metric: "x", value: "", want: "x \n",
 		},
-		{name: "an empty name", prefix: "counter ", metric: "", value: "1", want: "counter  1\n"},
+		{name: "an empty name", metric: "", value: "1", want: " 1\n"},
 		{
-			name: "one label", prefix: "counter ", metric: "requests",
-			labels: []coremetrics.LabelValue{{Key: "method", Value: "GET"}},
-			value:  "7", want: "counter requests{method=\"GET\"} 7\n",
+			name: "one attribute", metric: "requests",
+			attrs: []coremetrics.AttrValue{coremetrics.String("method", "GET")},
+			value: "7", want: "requests{method=\"GET\"} 7\n",
 		},
 		{
-			name: "several labels keep the snapshot's order", prefix: "counter ",
+			name:   "several attributes keep the snapshot's order",
 			metric: "requests",
-			labels: []coremetrics.LabelValue{
-				{Key: "method", Value: "GET"},
-				{Key: "status", Value: "200"},
+			attrs: []coremetrics.AttrValue{
+				coremetrics.String("method", "GET"),
+				coremetrics.String("status", "200"),
 			},
-			value: "7", want: "counter requests{method=\"GET\",status=\"200\"} 7\n",
+			value: "7", want: "requests{method=\"GET\",status=\"200\"} 7\n",
 		},
 		{
 			//: an empty VALUE is legitimate data and renders as empty quotes.
-			name: "an empty label value", prefix: "gauge ", metric: "g",
-			labels: []coremetrics.LabelValue{{Key: "tenant", Value: ""}},
-			value:  "1", want: "gauge g{tenant=\"\"} 1\n",
+			name: "an empty string value", metric: "g",
+			attrs: []coremetrics.AttrValue{coremetrics.String("tenant", "")},
+			value: "1", want: "g{tenant=\"\"} 1\n",
+		},
+		{
+			//: the three non-string kinds render unquoted, which is how the
+			//: diagnostic keeps the type visible.
+			name: "an integer attribute is bare", metric: "requests",
+			attrs: []coremetrics.AttrValue{coremetrics.Int64("status", 503)},
+			value: "1", want: "requests{status=503} 1\n",
+		},
+		{
+			name: "a boolean attribute is bare", metric: "requests",
+			attrs: []coremetrics.AttrValue{coremetrics.Bool("cached", true)},
+			value: "1", want: "requests{cached=true} 1\n",
+		},
+		{
+			name: "a double attribute is bare", metric: "requests",
+			attrs: []coremetrics.AttrValue{coremetrics.Float64("ratio", 0.5)},
+			value: "1", want: "requests{ratio=0.5} 1\n",
+		},
+		{
+			//: the pair the wire would merge stays two distinguishable
+			//: renderings here — quoted "1" against bare 1.
+			name: "a string and an integer that spell the same", metric: "requests",
+			attrs: []coremetrics.AttrValue{
+				coremetrics.Int64("n", 1),
+				coremetrics.String("s", "1"),
+			},
+			value: "1", want: "requests{n=1,s=\"1\"} 1\n",
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		line := string(appendSeriesLine(c.buf, c.prefix, c.metric, c.labels, c.value))
+		line := string(appendSeriesLine(c.buf, c.metric, c.attrs, c.value))
 		if line != c.want {
 			t.Errorf("appendSeriesLine = %q, want %q", line, c.want)
 		}
@@ -204,14 +234,14 @@ func Test_sortedKeys(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
-		in   map[string][]coremetrics.CounterValue
+		in   map[string][]coremetrics.SumValue
 		want []string
 	}
 	//: the values are irrelevant here — only the key order is under test.
-	group := func(names ...string) map[string][]coremetrics.CounterValue {
-		out := make(map[string][]coremetrics.CounterValue, len(names))
+	group := func(names ...string) map[string][]coremetrics.SumValue {
+		out := make(map[string][]coremetrics.SumValue, len(names))
 		for _, n := range names {
-			out[n] = []coremetrics.CounterValue{{Value: 1}}
+			out[n] = []coremetrics.SumValue{{Value: 1}}
 		}
 		return out
 	}
@@ -271,8 +301,12 @@ func Test_textExporter_Export(t *testing.T) {
 		t.Helper()
 		var buf bytes.Buffer
 		e := newTextExporter("test", &buf)
-		snap := coremetrics.SnapshotValue{Counters: map[string][]coremetrics.CounterValue{
-			"requests": {{Value: 7}},
+		snap := coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
+			"requests": {
+				Temporality: coremetrics.TemporalityCumulative,
+				Monotonic:   true,
+				Points:      []coremetrics.SumValue{{Value: 7}},
+			},
 		}}
 
 		//: Goroutine lifecycle: c.writers goroutines, each exporting once and
@@ -289,7 +323,7 @@ func Test_textExporter_Export(t *testing.T) {
 
 		//: every Export emitted exactly one INTACT line; a torn write would
 		//: leave a partial line that matches nothing.
-		got := strings.Count(buf.String(), "counter requests 7\n")
+		got := strings.Count(buf.String(), "requests 7\n")
 		if got != c.writers {
 			t.Errorf("%d intact lines, want %d — writes interleaved or were lost", got, c.writers)
 		}

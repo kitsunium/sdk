@@ -5,19 +5,26 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "metrics",
     srcs = [
-        "cardinality.go",
+        "carved.go",
         "codes.go",
-        "counter.go",
+        "config.go",
         "errors.go",
+        "exporter_otlphttp.go",
+        "exporter_otlpjson.go",
         "exporter_prometheus.go",
         "exporter_text.go",
         "gauge.go",
         "histogram.go",
         "meter.go",
+        "meter_observable.go",
         "name_state.go",
+        "otlp_export_response.go",
+        "otlp_request.go",
+        "otlphttp_config.go",
         "series.go",
         "series_entry.go",
         "series_store.go",
+        "sum.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/metrics",
     visibility = [
@@ -26,6 +33,7 @@ go_library(
     ],
     deps = [
         "//internal/core/metrics",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
 )
@@ -43,7 +51,8 @@ go_test(
     name = "metrics_test",
     srcs = [
         "cardinality_external_test.go",
-        "counter_internal_test.go",
+        "exporter_otlphttp_external_test.go",
+        "exporter_otlpjson_external_test.go",
         "exporter_prometheus_external_test.go",
         "exporter_prometheus_internal_test.go",
         "exporter_text_external_test.go",
@@ -55,7 +64,9 @@ go_test(
         "meter_external_test.go",
         "meter_internal_test.go",
         "name_state_internal_test.go",
+        "observable_external_test.go",
         "series_internal_test.go",
+        "sum_internal_test.go",
     ],
     embed = [":metrics"],
     deps = [

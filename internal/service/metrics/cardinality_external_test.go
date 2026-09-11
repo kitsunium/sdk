@@ -1,5 +1,5 @@
-// Package metrics_test — labels, series identity and the cardinality bound as
-// a consumer meets them.
+// Package metrics_test — typed attributes, series identity and the cardinality
+// bound as a consumer meets them.
 package metrics_test
 
 import (
@@ -20,50 +20,50 @@ func TestSeriesIdentity(t *testing.T) {
 	type tc struct {
 		name string
 		//: the two label sets being compared.
-		first, second []coremetrics.LabelValue
+		first, second []coremetrics.AttrValue
 		wantSame      bool
 	}
 	tests := []tc{
 		{name: "no labels twice", wantSame: true},
 		{
 			name:     "the same label twice",
-			first:    []coremetrics.LabelValue{{Key: "a", Value: "1"}},
-			second:   []coremetrics.LabelValue{{Key: "a", Value: "1"}},
+			first:    []coremetrics.AttrValue{coremetrics.String("a", "1")},
+			second:   []coremetrics.AttrValue{coremetrics.String("a", "1")},
 			wantSame: true,
 		},
 		{
 			//: a label set is a SET — declaration order is not identity.
 			name:     "the same labels in a different order",
-			first:    []coremetrics.LabelValue{{Key: "a", Value: "1"}, {Key: "b", Value: "2"}},
-			second:   []coremetrics.LabelValue{{Key: "b", Value: "2"}, {Key: "a", Value: "1"}},
+			first:    []coremetrics.AttrValue{coremetrics.String("a", "1"), coremetrics.String("b", "2")},
+			second:   []coremetrics.AttrValue{coremetrics.String("b", "2"), coremetrics.String("a", "1")},
 			wantSame: true,
 		},
 		{
 			name:   "a different value",
-			first:  []coremetrics.LabelValue{{Key: "a", Value: "1"}},
-			second: []coremetrics.LabelValue{{Key: "a", Value: "2"}},
+			first:  []coremetrics.AttrValue{coremetrics.String("a", "1")},
+			second: []coremetrics.AttrValue{coremetrics.String("a", "2")},
 		},
 		{
 			name:   "a different key",
-			first:  []coremetrics.LabelValue{{Key: "a", Value: "1"}},
-			second: []coremetrics.LabelValue{{Key: "b", Value: "1"}},
+			first:  []coremetrics.AttrValue{coremetrics.String("a", "1")},
+			second: []coremetrics.AttrValue{coremetrics.String("b", "1")},
 		},
 		{
 			//: the dimensionless series is its own series, not a wildcard.
 			name:   "labelled versus dimensionless",
-			second: []coremetrics.LabelValue{{Key: "a", Value: "1"}},
+			second: []coremetrics.AttrValue{coremetrics.String("a", "1")},
 		},
 		{
 			name:   "an extra label",
-			first:  []coremetrics.LabelValue{{Key: "a", Value: "1"}},
-			second: []coremetrics.LabelValue{{Key: "a", Value: "1"}, {Key: "b", Value: "2"}},
+			first:  []coremetrics.AttrValue{coremetrics.String("a", "1")},
+			second: []coremetrics.AttrValue{coremetrics.String("a", "1"), coremetrics.String("b", "2")},
 		},
 		{
 			//: the adversarial pair: one value carrying what a delimiter
 			//: encoding would read as the boundary between two labels.
 			name:   "a value that tries to forge another label",
-			first:  []coremetrics.LabelValue{{Key: "a", Value: "x\x00b\x00y"}},
-			second: []coremetrics.LabelValue{{Key: "a", Value: "x"}, {Key: "b", Value: "y"}},
+			first:  []coremetrics.AttrValue{coremetrics.String("a", "x\x00b\x00y")},
+			second: []coremetrics.AttrValue{coremetrics.String("a", "x"), coremetrics.String("b", "y")},
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -79,7 +79,7 @@ func TestSeriesIdentity(t *testing.T) {
 		//: and the snapshot agrees about how many series exist.
 		first.Add(3)
 		second.Add(4)
-		series := m.Collect().Counters["requests"]
+		series := m.Collect().Sums["requests"].Points
 		wantSeries, wantFirst := 2, int64(3)
 		if c.wantSame {
 			wantSeries, wantFirst = 1, 7
@@ -99,9 +99,9 @@ func TestSeriesIdentity(t *testing.T) {
 	}
 }
 
-// TestInvalidLabelPanics pins the refusal of a label set that cannot name a
-// series, from the outside.
-func TestInvalidLabelPanics(t *testing.T) {
+// TestInvalidAttributePanics pins the refusal of an attribute set that cannot
+// name a series, from the outside.
+func TestInvalidAttributePanics(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name  string
@@ -110,20 +110,34 @@ func TestInvalidLabelPanics(t *testing.T) {
 	tests := []tc{
 		{
 			"a counter with an empty key",
-			func(m coremetrics.Meter) { m.Counter("x", coremetrics.LabelValue{Value: "1"}) },
+			func(m coremetrics.Meter) { m.Counter("x", coremetrics.String("", "1")) },
+		},
+		{
+			//: a struct literal sets no value at all — the kind is
+			//: AttrKindInvalid, which is not "the empty string".
+			"a counter with a value no constructor set",
+			func(m coremetrics.Meter) { m.Counter("x", coremetrics.AttrValue{Key: "a"}) },
 		},
 		{
 			"a gauge with a repeated key",
 			func(m coremetrics.Meter) {
 				m.Gauge("x",
-					coremetrics.LabelValue{Key: "a", Value: "1"},
-					coremetrics.LabelValue{Key: "a", Value: "2"})
+					coremetrics.String("a", "1"),
+					coremetrics.String("a", "2"))
 			},
 		},
 		{
 			"a histogram with an empty key",
 			func(m coremetrics.Meter) {
-				m.Histogram("x", nil, coremetrics.LabelValue{Value: "1"})
+				m.Histogram("x", nil, coremetrics.String("", "1"))
+			},
+		},
+		{
+			//: only the KIND differs, which is exactly the pair the identity
+			//: encoding keeps apart — so it is still a repeated key.
+			"a counter with one key under two kinds",
+			func(m coremetrics.Meter) {
+				m.Counter("x", coremetrics.String("a", "1"), coremetrics.Int64("a", 1))
 			},
 		},
 	}
@@ -132,7 +146,7 @@ func TestInvalidLabelPanics(t *testing.T) {
 		m := svcmetrics.NewMeter()
 		defer func() {
 			if recover() == nil {
-				t.Error("an unusable label set did not panic")
+				t.Error("an unusable attribute set did not panic")
 			}
 		}()
 		c.fetch(m)
@@ -192,12 +206,10 @@ func TestCardinalityBound(t *testing.T) {
 			MaxSeriesPerInstrument: c.configured,
 		})
 		for i := range c.pushed {
-			m.Counter("requests", coremetrics.LabelValue{
-				Key: "id", Value: strconv.Itoa(i),
-			}).Inc()
+			m.Counter("requests", coremetrics.String("id", strconv.Itoa(i))).Inc()
 		}
 
-		series := m.Collect().Counters["requests"]
+		series := m.Collect().Sums["requests"].Points
 		if len(series) != c.wantSeries {
 			t.Fatalf("%d series survived, want %d", len(series), c.wantSeries)
 		}
@@ -206,12 +218,14 @@ func TestCardinalityBound(t *testing.T) {
 		var sawOverflow bool
 		for _, s := range series {
 			total += s.Value
-			for _, l := range s.Labels {
-				if l.Key == coremetrics.OverflowLabelKey {
+			for _, a := range s.Attrs {
+				if a.Key == coremetrics.OverflowAttrKey {
 					sawOverflow = true
-					if l.Value != coremetrics.OverflowLabelValue {
-						t.Errorf("the overflow label reads %q, want %q",
-							l.Value, coremetrics.OverflowLabelValue)
+					//: the marker is a BOOL, not the string "true" — typed
+					//: attributes let it be the thing it always meant.
+					if a.Kind() != coremetrics.AttrKindBool || !a.Bool() {
+						t.Errorf("the overflow attribute is kind %d value %v, want a true bool",
+							a.Kind(), a.Bool())
 					}
 				}
 			}
@@ -257,12 +271,10 @@ func TestZeroBoundIsNotUnbounded(t *testing.T) {
 		})
 		//: push one label set past the default bound.
 		for i := range svcmetrics.DefaultMaxSeriesPerInstrument + 1 {
-			m.Counter("requests", coremetrics.LabelValue{
-				Key: "id", Value: strconv.Itoa(i),
-			}).Inc()
+			m.Counter("requests", coremetrics.String("id", strconv.Itoa(i))).Inc()
 		}
 
-		series := m.Collect().Counters["requests"]
+		series := m.Collect().Sums["requests"].Points
 		//: the default admitted its quota, then the one extra folded — so the
 		//: count is the bound plus the single aggregated series, never the
 		//: bound plus one more real series.
@@ -288,23 +300,23 @@ func TestBoundIsPerInstrumentName(t *testing.T) {
 	m := svcmetrics.NewMeterWithConfig(svcmetrics.MeterConfig{MaxSeriesPerInstrument: 2})
 	//: blow up one name.
 	for i := range 50 {
-		m.Counter("exploding", coremetrics.LabelValue{Key: "id", Value: strconv.Itoa(i)}).Inc()
+		m.Counter("exploding", coremetrics.String("id", strconv.Itoa(i))).Inc()
 	}
 	//: the other name still gets its own quota.
 	for i := range 2 {
-		m.Counter("healthy", coremetrics.LabelValue{Key: "id", Value: strconv.Itoa(i)}).Inc()
+		m.Counter("healthy", coremetrics.String("id", strconv.Itoa(i))).Inc()
 	}
 
-	snap := m.Collect().Counters
-	if got := len(snap["exploding"]); got != 3 {
+	snap := m.Collect().Sums
+	if got := len(snap["exploding"].Points); got != 3 {
 		t.Errorf("the exploding name holds %d series, want 3 (2 admitted + overflow)", got)
 	}
-	if got := len(snap["healthy"]); got != 2 {
+	if got := len(snap["healthy"].Points); got != 2 {
 		t.Errorf("the healthy name holds %d series, want 2 — its quota was spent elsewhere", got)
 	}
-	for _, s := range snap["healthy"] {
-		for _, l := range s.Labels {
-			if l.Key == coremetrics.OverflowLabelKey {
+	for _, s := range snap["healthy"].Points {
+		for _, l := range s.Attrs {
+			if l.Key == coremetrics.OverflowAttrKey {
 				t.Error("the healthy name overflowed because another name did")
 			}
 		}
@@ -323,34 +335,34 @@ func TestSnapshotSeriesAreDeterministic(t *testing.T) {
 	for _, method := range []string{"PUT", "GET", "POST", "DELETE"} {
 		for _, status := range []string{"500", "200"} {
 			m.Counter("requests",
-				coremetrics.LabelValue{Key: "status", Value: status},
-				coremetrics.LabelValue{Key: "method", Value: method}).Inc()
+				coremetrics.String("status", status),
+				coremetrics.String("method", method)).Inc()
 		}
 	}
 
-	first := m.Collect().Counters["requests"]
+	first := m.Collect().Sums["requests"].Points
 	if len(first) != 8 {
 		t.Fatalf("%d series, want 8", len(first))
 	}
 	//: sorted by label set: method ascending, then status.
 	wantMethods := []string{"DELETE", "DELETE", "GET", "GET", "POST", "POST", "PUT", "PUT"}
 	for i, s := range first {
-		if len(s.Labels) != 2 {
-			t.Fatalf("series %d carries %d labels, want 2", i, len(s.Labels))
+		if len(s.Attrs) != 2 {
+			t.Fatalf("series %d carries %d attributes, want 2", i, len(s.Attrs))
 		}
-		//: the label set itself is ordered by key, so method precedes status.
-		if s.Labels[0].Key != "method" || s.Labels[1].Key != "status" {
-			t.Fatalf("series %d labels are %v, want method then status", i, s.Labels)
+		//: the set itself is ordered by key, so method precedes status.
+		if s.Attrs[0].Key != "method" || s.Attrs[1].Key != "status" {
+			t.Fatalf("series %d attributes are %v, want method then status", i, s.Attrs)
 		}
-		if s.Labels[0].Value != wantMethods[i] {
-			t.Errorf("series %d is method %q, want %q", i, s.Labels[0].Value, wantMethods[i])
+		if s.Attrs[0].Str() != wantMethods[i] {
+			t.Errorf("series %d is method %q, want %q", i, s.Attrs[0].Str(), wantMethods[i])
 		}
 	}
 
 	//: and a second collection agrees, which map iteration alone would not.
-	for i, s := range m.Collect().Counters["requests"] {
-		if s.Labels[0].Value != first[i].Labels[0].Value ||
-			s.Labels[1].Value != first[i].Labels[1].Value {
+	for i, s := range m.Collect().Sums["requests"].Points {
+		if s.Attrs[0].Str() != first[i].Attrs[0].Str() ||
+			s.Attrs[1].Str() != first[i].Attrs[1].Str() {
 			t.Fatalf("a second Collect ordered series %d differently", i)
 		}
 	}
