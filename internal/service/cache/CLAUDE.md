@@ -181,9 +181,12 @@ discovers until an incident.
 - Reduce an UNTYPED tier error to a string either. `tierFailure` labels it
   `CACHE_TIER_FAILED` with the cause IN the chain, so a backend's own sentinel
   still answers `errors.Is` (`TestAnUntypedTierErrorKeepsItsIdentity`). A TYPED
-  tier error keeps `CACHE_TIER_FAILED` as the code and travels as fields,
-  because wrapping it would hand the code to the tier under origin-wins and
-  lose the position, which is the one thing the caller cannot reconstruct.
+  tier error keeps `CACHE_TIER_FAILED` as the code and travels as fields
+  (`cause`, `cause_code`), because wrapping it would hand the code to the tier
+  under origin-wins and lose the position, which is the one thing the caller
+  cannot reconstruct. "Typed" means `errors.AsType` finds an `*errs.Error`,
+  the test `Wrap` itself makes — a direct assertion missed one behind
+  `fmt.Errorf`'s `%w` (`TestATypedTierErrorBehindAWrapperKeepsTheTierVerdict`).
 - Add a Redis or memcached tier here. Distributed backends are exception 4 of
   the third-party doctrine and belong under `third-party/` — a separate change
   with its own dependency budget.

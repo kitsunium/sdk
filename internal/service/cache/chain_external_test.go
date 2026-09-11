@@ -3,6 +3,7 @@ package cache_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -298,6 +299,28 @@ func TestAnUntypedTierErrorKeepsItsIdentity(t *testing.T) {
 	}
 	if !errors.Is(fetchErr, reset) {
 		t.Fatalf("errors.Is(err, the tier's own error) = false; err = %v", fetchErr)
+	}
+}
+
+// TestATypedTierErrorBehindAWrapperKeepsTheTierVerdict pins the typed branch
+// against a cause that is typed one layer down. errs.Wrap looks through a
+// stdlib wrapper for an *errs.Error, while the branch used a direct type
+// assertion, so a tier returning fmt.Errorf("backend: %w", sentinel) was
+// wrapped as untyped and origin-wins gave the verdict to the sentinel.
+// Seen failing with the direct assertion restored: CodeOf read the backend's
+// CACHE_BACKEND_FAILED.
+func TestATypedTierErrorBehindAWrapperKeepsTheTierVerdict(t *testing.T) {
+	t.Parallel()
+	near := newFlaky(t)
+	near.fails, near.cause = failGet, fmt.Errorf("backend: %w", corecache.CacheBackendFailed)
+	far := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
+	chain, err := svccache.NewChain(svccache.ChainConfig{}, near, far)
+	if err != nil {
+		t.Fatalf("NewChain: %v", err)
+	}
+	_, _, fetchErr := chain.Fetch(t.Context(), "k")
+	if code, _ := errs.CodeOf(fetchErr); code != svccache.CodeCacheTierFailed {
+		t.Fatalf("chain Fetch returned %v (code %v), want CACHE_TIER_FAILED as the verdict", fetchErr, code)
 	}
 }
 

@@ -286,7 +286,10 @@ func (c *chainStore[V]) fillOnce(ctx context.Context, key string, fill corecache
 // sentinel came back as an error for which errors.Is on that sentinel was
 // false. A typed cause still yields CACHE_TIER_FAILED as the code — the
 // position is the information the caller cannot reconstruct — which wrapping
-// it would lose to origin-wins, so it keeps travelling as fields.
+// it would lose to origin-wins, so it keeps travelling as fields. "Typed" is
+// decided by errors.AsType, the test Wrap itself makes: a direct assertion
+// missed an *errs.Error behind fmt.Errorf's %w, and Wrap then found it and
+// handed it the verdict.
 func tierFailure(position int, operation, key string, cause error) error {
 	fields := []kerrs.FieldValue{
 		kerrs.Int("position", position),
@@ -295,9 +298,10 @@ func tierFailure(position int, operation, key string, cause error) error {
 		kerrs.String("cause", cause.Error()),
 	}
 	//: a typed cause would take over the code if wrapped; label it instead.
-	if _, typed := cause.(*kerrs.Error); typed {
-		//: CACHE_TIER_FAILED, the cause's text in a field.
-		return kerrs.Wrap(CacheTierFailed, kerrs.WrapParams{}, fields...)
+	if typedErr, typed := errors.AsType[*kerrs.Error](cause); typed {
+		//: CACHE_TIER_FAILED, the cause's text and its own code in fields.
+		return kerrs.Wrap(CacheTierFailed, kerrs.WrapParams{},
+			append(fields, kerrs.String("cause_code", typedErr.Code().String()))...)
 	}
 	//: an untyped cause, IN the chain: HasCode sees CACHE_TIER_FAILED and
 	//: errors.Is sees the cause. The identity is read from the sentinel so it
