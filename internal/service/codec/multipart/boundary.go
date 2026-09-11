@@ -52,6 +52,17 @@ func Boundary(data []byte) (boundary string, err error) {
 		//: typed refusal; nothing about the payload is echoed.
 		return "", boundaryInvalid("no delimiter line found within the sniff window")
 	}
+	trimmed, closing := strings.CutSuffix(candidate, delimiterPrefix)
+	//: only a first line ending in "--" is ambiguous — a zero-part body's
+	//: close delimiter, or a boundary that itself ends in "--". Any other
+	//: valid candidate is the answer whether or not the close delimiter is
+	//: found (a truncated body keeps it below), so searching the whole body
+	//: for it could change nothing: it only cost a full scan before any size
+	//: limit applied, 132 ms per 63 MiB for a body of hyphens.
+	if !closing {
+		//: the candidate, or the refusal, with no scan.
+		return candidateOrRefusal(candidate)
+	}
 	//: a well-formed body carries the closing delimiter "--<boundary>--";
 	//: finding it confirms the candidate rather than assuming it.
 	if validateBoundary(candidate) == nil && closesWith(data, candidate) {
@@ -60,13 +71,19 @@ func Boundary(data []byte) (boundary string, err error) {
 	}
 	//: a body with ZERO parts is nothing but its closing delimiter, so the
 	//: first line already carries the trailing "--" — strip it and re-confirm.
-	if trimmed, ok := strings.CutSuffix(candidate, delimiterPrefix); ok &&
-		validateBoundary(trimmed) == nil && closesWith(data, trimmed) {
+	if validateBoundary(trimmed) == nil && closesWith(data, trimmed) {
 		//: confirmed after removing the closing marker.
 		return trimmed, nil
 	}
-	//: no closing delimiter anywhere — the body is truncated. Hand the
-	//: candidate over anyway when it is structurally valid so mime/multipart
+	//: neither reading was confirmed.
+	return candidateOrRefusal(candidate)
+}
+
+// candidateOrRefusal hands over a structurally valid candidate whose closing
+// delimiter was not confirmed, or refuses one that is not a boundary at all.
+func candidateOrRefusal(candidate string) (boundary string, err error) {
+	//: a structurally valid candidate is handed over whether or not its
+	//: close delimiter was seen — a truncated body included, so mime/multipart
 	//: reports the truncation, which is the more precise diagnosis.
 	if verr := validateBoundary(candidate); verr == nil {
 		//: best-effort; the reader will fail with the real reason.

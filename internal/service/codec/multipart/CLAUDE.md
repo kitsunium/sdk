@@ -61,9 +61,14 @@ validated by `mime/multipart.Writer.SetBoundary` and used verbatim.
 
 **2. Decoding from `[]byte` — solved for every real body, NOT solved in
 general.** `Unmarshal` recovers the delimiter with `Boundary(data)`: it scans a
-bounded window for the first `--`-prefixed line, then *confirms* the candidate
-by looking for the matching closing delimiter `--<boundary>--` (a zero-part
-body is nothing but that line, so the trailing `--` is stripped and re-checked).
+bounded window for the first `--`-prefixed line and takes what follows as the
+candidate. Only a line that itself ends in `--` is ambiguous — a zero-part
+body is nothing but its close delimiter, while a boundary may also end in
+`--` — and only then is the body searched for `--<boundary>--` to decide
+between the two readings. Any other valid candidate is the answer whether its
+close delimiter is found or not, so the body is not searched at all: the
+search used to run on every body, before any size limit, and cost 132 ms per
+63 MiB of hyphens against 3 µs now.
 This is exact for every body this package produced and for every RFC 7578
 producer in the wild, because form-data producers emit no preamble.
 
