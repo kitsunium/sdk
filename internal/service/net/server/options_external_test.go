@@ -26,21 +26,45 @@ const (
 	// childAddrEnv marks the re-executed half of the adoption test and carries
 	// the address the inherited socket is bound to.
 	childAddrEnv string = "KITSUNIUM_ADOPT_CHILD_ADDR"
+	// refuseChildEnv marks the re-executed half of TestAdopt and carries the
+	// socket name the child's group asks for.
+	refuseChildEnv string = "KITSUNIUM_ADOPT_REFUSE_CHILD"
 )
 
-// TestMain runs the ADOPTING half of the socket-activation test when the parent
-// marks it, and the ordinary suite otherwise.
+// TestMain runs the child half of an adoption test when the parent marks it,
+// and the ordinary suite otherwise.
 //
 // Adoption cannot be staged in-process: sd_listen_fds(3) reads from descriptor
 // 3, and a Go test binary already holds that descriptor. The child therefore has
 // to be a real exec — and doing it here rather than as a test function is what
 // keeps the suite free of a test that skips itself on every ordinary run.
 func TestMain(m *testing.M) {
-	//: the marker is only ever set by runAdoptChild below.
+	//: the markers are only ever set by the two adoption tests below.
 	if addr := os.Getenv(childAddrEnv); addr != "" {
 		os.Exit(serveInheritedSocket(addr))
 	}
+	if requested, marked := os.LookupEnv(refuseChildEnv); marked {
+		os.Exit(refuseInheritedSocket(requested))
+	}
 	os.Exit(m.Run())
+}
+
+// refuseInheritedSocket is the child half of TestAdopt: a group asking for a
+// socket the supervisor did not publish under that name must fail to start
+// rather than bind its own. It returns the process exit code.
+func refuseInheritedSocket(requested string) int {
+	srv := server.New()
+	defer func() {
+		//: the verdict is already decided; a close failure is only printed.
+		if cerr := srv.Close(); cerr != nil {
+			reportChild("close: %v", cerr)
+		}
+	}()
+	srv.Group("api", server.Adopt(requested)).HandleFunc(noopHandler)
+	if err := srv.Start(context.Background()); !errs.HasCode(err, corenet.CodeSocketAdoptFailed) {
+		return reportChild("Start = %v, want SOCKET_ADOPT_FAILED", err)
+	}
+	return 0
 }
 
 // serveInheritedSocket is the child half: it adopts the socket it was handed at
@@ -1126,8 +1150,17 @@ func TestMaxConns(t *testing.T) {
 // A silent fallback would lose the socket continuity that makes a zero-downtime
 // restart possible, and would lose it invisibly — the process would look healthy
 // while dropping every connection the outgoing one still held.
+//
+// Every case runs in a child, for the reason TestMain gives. Two of them used
+// to run here with LISTEN_FDS=1, so adoption wrapped the test binary's own
+// descriptor 3 in an *os.File that nothing owned — and os.NewFile arms a
+// finaliser that closes it: after one collection, descriptor 3 read EBADF.
+// Whatever held the number by then was closed under its owner, the likely
+// cause of the "connect: bad file descriptor" TestStreamGroup_HandleHTTP met on
+// CI. A case that publishes a descriptor now hands the child a real socket at
+// fd 3.
 func TestAdopt(t *testing.T) {
-	//: not parallel — it mutates the process environment.
+	t.Parallel()
 	type tc struct {
 		// name describes the case.
 		name string
@@ -1144,21 +1177,34 @@ func TestAdopt(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		t.Setenv("LISTEN_FDS", c.listenFDs)
-		t.Setenv("LISTEN_FDNAMES", c.fdNames)
-		srv := server.New()
-		t.Cleanup(func() { closeOrFail(t, srv) })
-		srv.Group("api", server.Adopt(c.requested)).HandleFunc(noopHandler)
+		cmd := exec.CommandContext(t.Context(), os.Args[0]) //nolint:gosec
+		//: appended last, so each replaces anything inherited under its name.
+		cmd.Env = append(os.Environ(),
+			"LISTEN_FDS="+c.listenFDs,
+			"LISTEN_FDNAMES="+c.fdNames,
+			refuseChildEnv+"="+c.requested,
+		)
+		if c.listenFDs != "" {
+			ln := listenTCP(t)
+			file, err := ln.File()
+			if err != nil {
+				t.Fatalf("listener file: %v", err)
+			}
+			defer closeOrFail(t, file)
+			closeOrFail(t, ln)
+			//: ExtraFiles[0] lands on fd 3 — a socket the child really holds.
+			cmd.ExtraFiles = []*os.File{file}
+		}
 
-		err := srv.Start(t.Context())
+		out, runErr := cmd.CombinedOutput()
 
-		if !errs.HasCode(err, corenet.CodeSocketAdoptFailed) {
-			t.Fatalf("Start = %v, want SOCKET_ADOPT_FAILED", err)
+		if runErr != nil {
+			t.Fatalf("the refusing child failed: %v\n%s", runErr, out)
 		}
 	}
 	for _, c := range tests {
-		//: serial, because each case rewrites the process environment.
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			runCase(t, c)
 		})
 	}
