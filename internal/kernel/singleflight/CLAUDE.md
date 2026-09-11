@@ -86,6 +86,10 @@ system and not a kernel primitive.
 - **`Forget(key)`** drops the dedup entry so the NEXT caller starts fresh; it
   does not abandon the call in flight, and existing waiters still get its
   result.
+- **`InFlight()` counts dedup entries, not running calls** — the keys a `Do`
+  arriving now would join. A forgotten or fully abandoned call keeps running
+  uncounted, so after `Forget` plus a re-issuing `Do` it reads 1 while two
+  calls for that key run. Read it as a gauge, never as "how much work is live".
 - Cross-OS: 100 % portable (`sync`, `context`, `runtime/debug`).
 
 ## Do NOT
