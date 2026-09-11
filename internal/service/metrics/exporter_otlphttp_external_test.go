@@ -171,6 +171,9 @@ func TestOTLPHTTPPartialSuccess(t *testing.T) {
 	bodies := map[string]string{
 		"string count": `{"partialSuccess":{"rejectedDataPoints":"7","errorMessage":"cardinality"}}`,
 		"number count": `{"partialSuccess":{"rejectedDataPoints":7,"errorMessage":"cardinality"}}`,
+		//: a JSON string may escape any character, digits included; trimming
+		//: the quotes instead of decoding read this one as a full success.
+		"escaped string count": `{"partialSuccess":{"rejectedDataPoints":"\u0037","errorMessage":"cardinality"}}`,
 		"unknown field": `{"partialSuccess":{"rejectedDataPoints":"7"},` +
 			`"somethingTheSpecAddedLater":{"nested":true}}`,
 	}
