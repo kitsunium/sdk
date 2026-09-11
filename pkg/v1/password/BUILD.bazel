@@ -21,6 +21,9 @@ alias(
 
 go_test(
     name = "password_test",
-    srcs = ["password_external_test.go"],
+    srcs = [
+        "password_bench_test.go",
+        "password_external_test.go",
+    ],
     deps = [":password"],
 )

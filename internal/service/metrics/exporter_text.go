@@ -57,7 +57,7 @@ var Text = coremetrics.RegisterExporter(newTextExporter(textExporterName, os.Std
 //	# resource <k>=<v> …
 //	# scope name="…" [version="…"]
 //	# window start="…" end="…"
-//	# metric <name> <sum|gauge|histogram> [<temporality>] [monotonic|non_monotonic]
+//	# metric <name> <sum|gauge|histogram> [<temporality>] [monotonic|non_monotonic] [description="…"]
 //	<name>{<k>=<v>,…} <value>
 //
 // with one "# metric" header per instrument name followed by that name's
@@ -188,7 +188,13 @@ func appendSums(buf []byte, metrics map[string]coremetrics.SumMetricValue) []byt
 			monotonicity = textMonotonic
 		}
 		//: one header per name.
-		buf = appendMetricHeader(buf, name, textKindSum, metric.Temporality.String(), monotonicity)
+		buf = appendMetricHeader(buf, metricHeader{
+			name:         name,
+			kind:         textKindSum,
+			temporality:  metric.Temporality.String(),
+			monotonicity: monotonicity,
+			description:  metric.Description,
+		})
 		//: then each series, already ordered by attribute set by Collect.
 		for _, point := range metric.Points {
 			//: the total is an int64.
@@ -206,7 +212,11 @@ func appendGauges(buf []byte, metrics map[string]coremetrics.GaugeMetricValue) [
 	//: same two-level walk as sums.
 	for _, name := range sortedKeys(metrics) {
 		//: one header per name, kind word only.
-		buf = appendMetricHeader(buf, name, textKindGauge, "", "")
+		buf = appendMetricHeader(buf, metricHeader{
+			name:        name,
+			kind:        textKindGauge,
+			description: metrics[name].Description,
+		})
 		//: one line per series.
 		for _, point := range metrics[name].Points {
 			//: the reading is a float64.
@@ -226,7 +236,12 @@ func appendHistograms(buf []byte, metrics map[string]coremetrics.HistogramMetric
 	for _, name := range sortedKeys(metrics) {
 		metric := metrics[name]
 		//: one header per name; a histogram has a temporality, no monotonicity.
-		buf = appendMetricHeader(buf, name, textKindHistogram, metric.Temporality.String(), "")
+		buf = appendMetricHeader(buf, metricHeader{
+			name:        name,
+			kind:        textKindHistogram,
+			temporality: metric.Temporality.String(),
+			description: metric.Description,
+		})
 		//: one line per series.
 		for _, point := range metric.Points {
 			//: observation count only.
@@ -238,26 +253,41 @@ func appendHistograms(buf []byte, metrics map[string]coremetrics.HistogramMetric
 	return buf
 }
 
-// appendMetricHeader appends "# metric <name> <kind>[ <temporality>][ <mono>]".
+// appendMetricHeader appends
+// "# metric <name> <kind>[ <temporality>][ <mono>][ description=\"…\"]".
 // An empty qualifier is omitted rather than printed blank, which is what makes
 // the gauge header shorter than the sum header instead of ragged.
-func appendMetricHeader(buf []byte, name, kind, temporality, monotonicity string) []byte {
+//
+// This exporter RENDERS the description, where a wire format may or may not.
+// It is the diagnostic that prints the whole model — resource, scope, window,
+// temporality, monotonicity, each attribute with its type visible — precisely
+// because those are the facts a caller cannot otherwise see. A description is
+// now one of them, and an exporter that dropped it would be answering "did my
+// Describe call reach the snapshot?" with silence. It goes LAST so that the
+// qualifier positions every existing grep depends on do not move.
+func appendMetricHeader(buf []byte, header metricHeader) []byte {
 	//: the header word plus the instrument it qualifies.
 	buf = append(buf, "# metric "...)
-	buf = append(buf, name...)
+	buf = append(buf, header.name...)
 	buf = append(buf, ' ')
-	buf = append(buf, kind...)
+	buf = append(buf, header.kind...)
 	//: a gauge has no window to name.
-	if temporality != "" {
+	if header.temporality != "" {
 		//: delta or cumulative.
 		buf = append(buf, ' ')
-		buf = append(buf, temporality...)
+		buf = append(buf, header.temporality...)
 	}
 	//: only a sum has a monotonicity.
-	if monotonicity != "" {
+	if header.monotonicity != "" {
 		//: monotonic or non_monotonic.
 		buf = append(buf, ' ')
-		buf = append(buf, monotonicity...)
+		buf = append(buf, header.monotonicity...)
+	}
+	//: an undescribed metric gets no key at all, like an absent scope version.
+	if header.description != "" {
+		//: quoted and escaped — a docstring is prose, and prose is data.
+		buf = append(buf, " description="...)
+		buf = appendQuoted(buf, header.description)
 	}
 	//: terminate the line.
 	return append(buf, '\n')

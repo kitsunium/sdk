@@ -21,7 +21,10 @@ alias(
 
 go_test(
     name = "hash_test",
-    srcs = ["hash_external_test.go"],
+    srcs = [
+        "hash_bench_test.go",
+        "hash_external_test.go",
+    ],
     deps = [
         ":hash",
         "//pkg/v1/errs",

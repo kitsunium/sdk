@@ -35,4 +35,15 @@ var (
 	InvalidTemporality = errs.Define(CodeInvalidTemporality, "INVALID_TEMPORALITY",
 		"That aggregation temporality is not one this SDK declares",
 		"core/metrics: Temporality must be Unspecified, Delta or Cumulative; any other value came from a cast")
+
+	// InvalidDescription is the panic sentinel for an empty Describe.
+	InvalidDescription = errs.Define(CodeInvalidDescription, "INVALID_DESCRIPTION",
+		"An instrument description must not be empty",
+		"service/metrics: Describer.Describe was handed \"\"; a description that documents nothing is the inert call ADR 0031 bans")
+
+	// DescriptionConflict is the panic sentinel for two different descriptions
+	// bound to one instrument name.
+	DescriptionConflict = errs.Define(CodeDescriptionConflict, "DESCRIPTION_CONFLICT",
+		"That instrument name already carries a different description",
+		"service/metrics: a description belongs to the name; re-describing with identical text is idempotent, differing text is a wiring defect")
 )

@@ -144,72 +144,45 @@ func Test_trimLeadingZeros(t *testing.T) {
 	}
 }
 
-// Test_prependByte pins that growing the accumulator does not alias. A shift
-// in place would be faster and wrong: the caller still holds the old slice.
-func Test_prependByte(t *testing.T) {
+// Test_mulAddWindow pins the multiply-add that grows the decode accumulator.
+// The carry loop is the part worth pinning: a carry has to land at the new
+// high end of the window, or the magnitude silently comes out byte-reversed
+// at the top. The reserve check is the second half — the window grows into
+// bytes the caller allocated but never wrote, so anything left of start must
+// still be zero for mag[start:] to be the whole magnitude and nothing else.
+func Test_mulAddWindow(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name string
-		in   []byte
-		v    byte
-		want []byte
+		name    string
+		reserve int
+		window  []byte
+		radix   int
+		add     int
+		want    []byte
 	}
 	tests := []tc{
-		{"onto an empty magnitude", []byte{}, 0x01, []byte{0x01}},
-		{"onto a one-byte magnitude", []byte{0x02}, 0x01, []byte{0x01, 0x02}},
-		{"a zero byte", []byte{0x02}, 0x00, []byte{0x00, 0x02}},
+		{"an empty accumulator takes the addend", 1, []byte{}, 58, 7, []byte{0x07}},
+		{"an empty accumulator with a zero addend stays empty", 1, []byte{}, 58, 0, []byte{}},
+		{"no carry", 1, []byte{0x01}, 58, 0, []byte{58}},
+		{"a carry grows the window", 1, []byte{0xFF}, 58, 0, []byte{0x39, 0xC6}},
+		{"a full-width multiply grows the window", 2, []byte{0xFF, 0xFF}, 256, 0, []byte{0xFF, 0xFF, 0x00}},
+		{"the addend lands in the low byte", 1, []byte{0x01}, 62, 5, []byte{67}},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		in := slices.Clone(c.in)
+		mag := make([]byte, c.reserve+len(c.window))
+		copy(mag[c.reserve:], c.window)
 
-		got := prependByte(in, c.v)
+		start := mulAddWindow(mag, c.reserve, c.radix, c.add)
 
-		if !bytes.Equal(got, c.want) {
-			t.Errorf("prependByte(%x, %#x) = %x, want %x", c.in, c.v, got, c.want)
+		if got := mag[start:]; !bytes.Equal(got, c.want) {
+			t.Errorf("mulAddWindow(%x, radix=%d, add=%d) window = %x, want %x",
+				c.window, c.radix, c.add, got, c.want)
 		}
-		//: the caller's slice must be untouched.
-		if !bytes.Equal(in, c.in) {
-			t.Errorf("prependByte mutated the input to %x, want %x", in, c.in)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-// Test_mulAddInPlace pins the multiply-add that grows the decode accumulator.
-// The carry loop is the part worth pinning: a carry that spans more than one
-// new byte has to emit them most-significant-first, or the magnitude silently
-// comes out byte-reversed at the top end.
-func Test_mulAddInPlace(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name  string
-		buf   []byte
-		radix int
-		add   int
-		want  []byte
-	}
-	tests := []tc{
-		{"an empty accumulator takes the addend", []byte{}, 58, 7, []byte{0x07}},
-		{"an empty accumulator with a zero addend stays empty", []byte{}, 58, 0, []byte{}},
-		{"no carry", []byte{0x01}, 58, 0, []byte{58}},
-		{"a carry grows the buffer", []byte{0xFF}, 58, 0, []byte{0x39, 0xC6}},
-		{"a carry spanning two new bytes", []byte{0xFF, 0xFF}, 256, 0, []byte{0xFF, 0xFF, 0x00}},
-		{"the addend lands in the low byte", []byte{0x01}, 62, 5, []byte{67}},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		buf := slices.Clone(c.buf)
-
-		got := mulAddInPlace(buf, c.radix, c.add)
-
-		if !bytes.Equal(got, c.want) {
-			t.Errorf("mulAddInPlace(%x, %d, %d) = %x, want %x", c.buf, c.radix, c.add, got, c.want)
+		//: the unconsumed reserve must stay zero — a stale byte there would
+		//: silently widen the magnitude on the next growth.
+		if !bytes.Equal(mag[:start], make([]byte, start)) {
+			t.Errorf("mulAddWindow left %x in the reserve, want all zero", mag[:start])
 		}
 	}
 	for _, c := range tests {

@@ -22,7 +22,10 @@ alias(
 
 go_test(
     name = "client_test",
-    srcs = ["client_external_test.go"],
+    srcs = [
+        "client_bench_test.go",
+        "client_external_test.go",
+    ],
     deps = [
         ":client",
         "//pkg/v1/tlsid",

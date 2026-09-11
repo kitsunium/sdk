@@ -10,7 +10,7 @@ diagnostic that renders the whole OTel model, a **Prometheus** text-exposition
 model was adopted for, which loses nothing. All three are registered to
 **stderr** on import (ADR 0030); the OTLP/**HTTP** emitter is constructed
 explicitly and never registered. Stdlib-only, cross-OS. ADR 0027 / ADR 0044 /
-ADR 0048. Emits core sentinels `0.2.9.*` and owns block `0.3.45.*` for what a
+ADR 0048 / ADR 0067. Emits core sentinels `0.2.9.*` and owns block `0.3.45.*` for what a
 wire format refuses.
 
 Instruments are keyed by name **and typed attribute set** — one name plus one
@@ -23,6 +23,7 @@ the excess into a single aggregated overflow series.
 |---|---|
 | `meter.go` | `memMeter` + `NewMeter` / `NewMeterWithConfig` / `newMemMeter` + `Collect` (observables, delta consumption, arena layout, per-name sort) |
 | `meter_observable.go` | `observer` + the three `Observable*` registrations + `runObservers` + `observeSum`/`observeGauge` |
+| `meter_describe.go` | `Describe` — the `core/metrics.Describer` half: the lazily-created `descriptions` map, the idempotent path, and the two panics |
 | `carved.go` | `carved[V]` — one instrument name's slot in a collection arena |
 | `series.go` | series identity: `sortAttrs`, `appendSeriesKey`, `cloneAttrs`, `compareAttrs` |
 | `series_store.go` | `seriesStore[T]` — one snapshot group's series map, `lookup` (read lock) + `admit`/`overflow` (write lock) |
@@ -199,7 +200,7 @@ A **lossless** diagnostic: it is the one place a caller can see the whole model.
 # resource service.name="orders"
 # scope name="github.com/acme/orders" version="1.4.0"
 # window start="2026-01-02T03:04:05Z" end="2026-01-02T03:04:15Z"
-# metric http_requests_total sum cumulative monotonic
+# metric http_requests_total sum cumulative monotonic description="Requests served"
 http_requests_total{cached=true,method="GET",status=503} 3
 # metric in_flight gauge
 in_flight 2.5
@@ -209,7 +210,17 @@ latency 42
 
 One `# metric` header per instrument name, then that name's series — one pass
 over the snapshot, because the snapshot is keyed by name. A gauge's header
-carries neither temporality nor monotonicity, because a gauge has neither. A
+carries neither temporality nor monotonicity, because a gauge has neither.
+
+`description="…"` goes **last** so that the qualifier positions every existing
+grep depends on do not move, and is omitted entirely when there is none — the
+same call `# scope`'s optional `version` already makes. This exporter RENDERS it
+because rendering the whole model is what the file is for: an exporter that
+dropped the description would answer "did my `Describe` call reach the
+snapshot?" with silence, which is the one question a diagnostic exists to
+settle. It is QUOTED here, so unlike the Prometheus docstring it escapes the
+double quote too — the two exporters follow the two grammars they are writing,
+which is not an inconsistency. A
 string attribute value is quoted and escaped; a bool, integer or double is
 printed **bare**, so the attribute's TYPE is visible rather than flattened the
 way a wire format flattens it. A histogram renders its observation count only —
@@ -238,12 +249,29 @@ counter treats every decrease as a process restart and re-extrapolates from
 zero, so an UpDownCounter exposed as a counter would report a fabricated spike
 each time its value fell.
 
-**No `# HELP`.** HELP is optional in the format and carries a *docstring*; the
-`Meter` records no description for an instrument, so the only HELP this exporter
-could write is the metric name repeated back or a fixed sentence restating the
-TYPE line. Both are placeholders, and this repo does not ship placeholders
-(rule 5). The day `Meter` grows a description, HELP lands on the line above
-`# TYPE` and nothing else about the document changes.
+**`# HELP`, since ADR 0067.** That day arrived: the `Meter` grew a `Describer`
+sibling, and the OTel-to-Prometheus interoperability specification says outright
+that "OTLP metric point descriptions become HELP metadata". The line lands
+exactly where the old comment promised — above `# TYPE`, inside the same
+header-per-name step, so the format's own rule ("only one HELP line may exist
+for any given metric name") holds for free.
+
+An **absent** description still emits nothing at all. HELP is optional in the
+format, and `# HELP name ` with nothing after it is the placeholder this
+exporter refused to invent for as long as there was nothing real to print
+(rule 5). The undescribed document is byte-for-byte what it was before ADR 0067,
+which is pinned.
+
+**The docstring is escaped with the format's OWN two escapes** — a backslash
+doubles, a line feed becomes `\n` — and a double quote is deliberately left
+alone. A label value is a QUOTED token, so a quote inside it would close the
+value early and `appendEscapedValue` escapes it; a HELP docstring is the
+unquoted remainder of the line, the format names only those two characters, and
+escaping the quote anyway would put a literal backslash into the help text an
+operator reads. `appendEscapedHelp` is a separate function for that one
+difference. The line feed is the dangerous one: unescaped, it ends the comment
+and the rest of the description parses as a **sample line** — the same forged-
+line hazard the adversarial label-value test pins, one line higher up.
 
 **Histograms.** A histogram family is `_bucket{le="…"}` + `_sum` + `_count`,
 and `le="+Inf"` is mandatory. The meter stores a **per-bucket** count (`Record`
@@ -323,6 +351,10 @@ Each row below has an executable test.
 | **OTel-conventional attribute KEYS** | `http.request.method` is **REFUSED** by name (`INVALID_LABEL_NAME`) | the sharpest consequence of adopting the model: the dotted spelling is what the semantic conventions specify, and this wire cannot carry it. The refusal is loud and deterministic — a key is a literal at the call site — which is the whole reason refusing beats mangling |
 | **Exemplars** | none | the SDK produces none at all (ADR 0044 §Deferred): no tracing domain, so no span id to attach |
 
+The description is the one thing on that list's opposite side: it is the only
+part of the OTel Metric this connector gained rather than lost, because the
+exposition format has had a place for it since before OTel existed.
+
 ## The OTLP/JSON encoder
 
 Reference: the OTLP specification (<https://opentelemetry.io/docs/specs/otlp/>),
@@ -386,9 +418,18 @@ are exceptions and each has a reason:
   field that vanishes exactly when it carries the surprising answer is one a
   reader cannot trust.
 
-Everything the SDK does not produce is **absent**, not blank: `description`,
-`unit`, `schemaUrl`, `flags`, `exemplars`, `droppedAttributesCount`, histogram
+Everything the SDK does not produce is **absent**, not blank: `unit`,
+`schemaUrl`, `flags`, `exemplars`, `droppedAttributesCount`, histogram
 `min`/`max`, an empty `attributes` array, an absent scope `version` (rule 5).
+
+- **`description`** (ADR 0067) is produced now, and it is omitted when empty —
+  the OPPOSITE call from the three fields above, for a reason in the schema
+  rather than in taste. It is `string description = 2;`: a plain proto3 string
+  with no `optional`, so it has **no explicit presence**, and `""` is
+  indistinguishable from absent to a receiver. The three always-emitted fields
+  each have the property this one lacks — `asInt`/`asDouble` are oneof members,
+  `sum` is `optional double`, and `isMonotonic`'s surprising answer is `false`.
+  An empty description has no surprising answer: it means nobody wrote one.
 
 **Two refusals, both structural.** Each aborts the whole document before a byte
 is produced, for the reason the Prometheus connector aborts on a bad name: a
@@ -544,6 +585,15 @@ map is cloned at construction so a later caller mutation cannot change the wire.
   an entry — two allocations per observation. Measured.
 - **The stores are keyed flat** by the whole series key, not nested by name: one
   map read resolves an attributed fetch where a nesting would cost two.
+- **A description belongs to the NAME too, but NOT to `nameState`** — it lives
+  in its own `descriptions map[string]string`, nil until the first `Describe`.
+  A `nameState` carries an instrument KIND and a description is non-identifying
+  and implies none, so storing it there would force a caller to mint the
+  instrument before documenting it. The nil map READS as the empty one, so an
+  undescribed meter allocates nothing and `Collect` still finds `""` without a
+  branch. Nothing on the fetch path reads it; gated by
+  `TestDescribedMeterLookupIsAllocationFree` and priced in BENCH.md §ADR 0067
+  (~25 ns per described NAME per scrape, zero per observation).
 - **Kind and bound belong to the NAME**, not the series (`nameState`) —
   attributes vary within one metric, its kind and its quota do not. Four
   instrument kinds map to one output GROUP, because a Counter and an
@@ -599,8 +649,18 @@ map is cloned at construction so a later caller mutation cannot change the wire.
 - Let a delta snapshot reach the Prometheus wire. It is refused, on purpose.
 - Invent a fourth escape sequence. The 0.0.4 parser rejects anything but
   `\\`, `\"` and `\n`, so a `\r` would cost the whole scrape.
-- Emit a placeholder `# HELP`. The format makes it optional precisely because
-  there is not always a docstring to write.
+- Emit a placeholder `# HELP`, or one for an empty description. The format makes
+  it optional precisely because there is not always a docstring to write.
+- Escape a double quote inside a Prometheus `# HELP` docstring. It is not a
+  quoted token; the format names `\\` and `\n` and nothing else, and a third
+  escape would put a literal backslash into the help text.
+- Put a description on a data POINT, or in the series key. It is non-identifying
+  in the OTel data model — two streams differing only by their description are
+  one stream.
+- Thread a description through `Counter`/`Gauge`/`Histogram`. It would put a
+  second string on the one variadic call the compiler has to prove
+  non-escaping, and it would let two call sites disagree about the
+  documentation of one metric while both look correct.
 - Convert a series key to a `string` before a map read. `m[string(b)]` does not
   allocate; `k := string(b); m[k]` does, once per observation.
 - Clone a series' attribute set inside `Collect`. It is shared with the snapshot

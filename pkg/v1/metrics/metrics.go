@@ -44,6 +44,39 @@
 // a method without breaking every downstream implementer (ADR 0039).
 // [FullMeter] is the union, and it is what [NewMeter] returns.
 //
+// # Describing an instrument
+//
+// The OTel data model gives a metric a human-readable description, and the SDK
+// records it against the instrument NAME rather than against a call site,
+// because that is where the model puts it and because it is explicitly
+// NON-IDENTIFYING: describing a metric never creates a series. [Describer] is a
+// fourth sibling and, unlike the other two, it is NOT folded into [FullMeter] —
+// a union is still an interface, and widening one breaks downstream doubles at
+// any version. Reach it by type assertion:
+//
+//	meter := metrics.NewMeter()
+//	if d, ok := meter.(metrics.Describer); ok {
+//		d.Describe("http_server_requests", "Requests served, by route and status")
+//	}
+//
+// The false branch is information, not boilerplate: a Meter that records no
+// description does not implement [Describer], and that is how a caller learns
+// their documentation will not reach the wire.
+//
+// Describing is a WIRING-TIME call and costs the observation path nothing. Two
+// mistakes panic, both of them structural and therefore caught on the first
+// boot or never: an EMPTY description ([InvalidDescription]), which would
+// document nothing; and a SECOND, DIFFERENT description for one name
+// ([DescriptionConflict]), because a description belongs to the name and two of
+// them means one wiring site is wrong. Re-describing with identical text is
+// idempotent.
+//
+// What each exporter does with it: "prometheus" emits `# HELP <name> <text>`
+// above `# TYPE` and nothing at all when there is no description, "otlpjson"
+// fills `Metric.description` and omits the field when it is empty, and "text"
+// prints it on the `# metric` header because that exporter exists to show the
+// whole model.
+//
 // # Attributes
 //
 // An instrument is identified by its name AND its attributes. One name plus one
@@ -279,6 +312,11 @@ type UpDownMeter = coremetrics.UpDownMeter
 // observable (asynchronous) instruments.
 type AsyncMeter = coremetrics.AsyncMeter
 
+// Describer is the public alias for the sibling port that documents an
+// instrument NAME. It is deliberately NOT part of FullMeter — reach it by type
+// assertion, and read the false case as "this meter records no description".
+type Describer = coremetrics.Describer
+
 // FullMeter is the public alias for the union of all three — what NewMeter
 // returns.
 type FullMeter = coremetrics.FullMeter
@@ -396,6 +434,12 @@ var (
 	// InvalidTemporality is raised when a MeterConfig carries a Temporality
 	// that is none of the three constants.
 	InvalidTemporality = coremetrics.InvalidTemporality
+	// InvalidDescription is raised when Describe is handed an empty
+	// description, which would document nothing.
+	InvalidDescription = coremetrics.InvalidDescription
+	// DescriptionConflict is raised when a second, DIFFERENT description is
+	// bound to an instrument name that already has one.
+	DescriptionConflict = coremetrics.DescriptionConflict
 	// InvalidMetricName is returned by the Prometheus connector when an
 	// instrument name is not a valid Prometheus metric name.
 	InvalidMetricName = svcmetrics.InvalidMetricName
