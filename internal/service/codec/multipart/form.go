@@ -32,7 +32,8 @@ type FormValue struct {
 // field: a line break there would end the header line and let the rest of the
 // value write headers of its own. Nothing is escaped or repaired on the way.
 type PartValue struct {
-	// Name is the form field name (Content-Disposition name=). Required.
+	// Name is the form field name (Content-Disposition name=). Required: Encode
+	// refuses a part without one, and decoding refuses a body carrying one.
 	Name string
 	// FileName is the optional filename= parameter; empty for a plain field.
 	// UTF-8 is written as-is (RFC 7578 §4.2); only CR, LF and NUL are refused.

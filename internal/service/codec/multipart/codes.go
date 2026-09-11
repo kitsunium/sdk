@@ -11,8 +11,9 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 const CodeMultipartMarshalFailed errs.Code = 0x00_03_29_01 // 0.3.41.1
 
 // CodeMultipartUnmarshalFailed identifies a failure while parsing a
-// multipart/form-data body: a malformed part header, a missing closing
-// delimiter, or a JSON-mediated part whose payload is not valid JSON.
+// multipart/form-data body: a malformed part header, a part with no form-data
+// name, a missing closing delimiter, or a JSON-mediated part whose payload is
+// not valid JSON.
 const CodeMultipartUnmarshalFailed errs.Code = 0x00_03_29_02 // 0.3.41.2
 
 // CodeMultipartValueInvalid identifies a Marshal / Unmarshal / Encode call

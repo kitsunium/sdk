@@ -122,6 +122,17 @@ func (d *multipartDecoder) fetch() {
 // readInto drains one *mime/multipart.Part into the look-ahead slot, refusing
 // an over-budget body rather than materialising it.
 func (d *multipartDecoder) readInto(src *stdmp.Part) {
+	//: RFC 7578 §4.2: every part MUST carry a form-data name, and PartValue
+	//: declares Name required — the encoder refuses to write a part without
+	//: one, so a decode that produced one would hand back a value this codec
+	//: cannot re-encode. Refused before the body is read, since it is not
+	//: going to be kept.
+	if src.FormName() == "" {
+		//: a malformed body, not a caller mistake.
+		d.pendErr = unmarshalFailed(nil, "Decoder: a part carries no form-data name (RFC 7578 §4.2)")
+		//: nothing buffered.
+		return
+	}
 	//: materialise the body under the byte budget and charge it.
 	body, berr := d.readBody(src)
 	//: a read fault or a crossed bound, already typed.

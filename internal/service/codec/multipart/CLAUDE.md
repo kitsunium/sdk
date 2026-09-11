@@ -160,7 +160,7 @@ which requires the stdlib reader to read back exactly the header block asked for
 | Code | Var | Trigger |
 |---|---|---|
 | `0.3.41.1` | `MarshalFailed`    | `mime/multipart` failed writing a part header/body/closing delimiter, or `encoding/json` rejected the value on the JSON-mediated path |
-| `0.3.41.2` | `UnmarshalFailed`  | malformed part header, truncated body, non-JSON `_json` part, or a body with no `_json` part when the target is not a `*FormValue` |
+| `0.3.41.2` | `UnmarshalFailed`  | malformed part header, truncated body, a part with no form-data name (RFC 7578 §4.2 — the encoder refuses to write one, so it is refused on the way in too), non-JSON `_json` part, or a body with no `_json` part when the target is not a `*FormValue` |
 | `0.3.41.3` | `ValueInvalid`     | `PartValue` with no `Name`; a CR, LF or NUL in `Name` / `FileName` / `ContentType` (field `field` names which, never the value); nil `*FormValue` / `*PartValue`; decode target that is not a non-nil pointer |
 | `0.3.41.4` | `BoundaryInvalid`  | delimiter not recoverable from the body, or a caller-supplied boundary outside RFC 2046 (1–70 bchars, no trailing space) |
 | `0.3.41.5` | `LimitExceeded`    | `MaxPartBytes` / `MaxParts` / `MaxTotalBytes` crossed — fields carry `knob`, `bound`, `got` |

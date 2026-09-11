@@ -230,6 +230,19 @@ func TestUnmarshalFailures(t *testing.T) {
 		{"truncated part header", []byte("--b\r\nContent"), &multipart.FormValue{}, "UNMARSHAL_FAILED"},
 		{"no json part for a value target", body, &payload{}, "UNMARSHAL_FAILED"},
 		{"non-pointer target", jsonBody(t), payload{}, "VALUE_INVALID"},
+		//: RFC 7578 §4.2 requires a name on every part, and the encoder
+		//: refuses to write one without — decoding it used to yield a
+		//: PartValue this codec could not re-encode.
+		{
+			"a part with no form-data name",
+			[]byte("--b\r\nContent-Disposition: form-data\r\n\r\nx\r\n--b--\r\n"),
+			&multipart.FormValue{}, "UNMARSHAL_FAILED",
+		},
+		{
+			"a part that is not form-data at all",
+			[]byte("--b\r\nContent-Disposition: attachment; filename=\"a.txt\"\r\n\r\nx\r\n--b--\r\n"),
+			&multipart.FormValue{}, "UNMARSHAL_FAILED",
+		},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
