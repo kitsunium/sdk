@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-11T00:00:00Z -->
 # internal/service/logger/
 
 ## Purpose
@@ -31,6 +31,17 @@ Logger ── Handler (genericHandler / TextHandler)
   `KindAny` still degrades to `?` — that is the documented contract, pinned by
   `text_handler_internal_test.go`; `KindGroup` degrades too, since producers
   flatten groups into dotted keys rather than emitting a group payload.
+  The same drift had left the **framing scrub** behind: `encoder/text` has
+  replaced CR, LF and NUL with a space in the message, the attribute keys and
+  the group names since V110, and this handler appended all three verbatim — so
+  a `\n` in any of them forged a log line (CWE-117), and since ADR 0062 the real
+  `trace_id`/`span_id` landed on the forged one. All four write sites (message,
+  group name, key with and without a group) now call `encoder.AppendSanitized`,
+  the encoder's own scrub, exported for this caller rather than copied — one
+  function cannot drift from itself — and it costs nothing: `Default()`'s path
+  stays at **0 mallocs per emit**. `TestTextHandler_FramesEveryByteAsTheEncoderDoes`
+  sweeps all 256 byte values through each of the four positions and requires the
+  handler's line to be byte-identical to the encoder's.
 - The `Builder` (builder.go) is the chainable, recycler-backed fluent API
   returned by `Build(lg, lv)`. Per-call cost in steady state: **one** heap
   allocation per emit once `recordPool` is warm — the pool recycles the
@@ -110,6 +121,9 @@ Logger ── Handler (genericHandler / TextHandler)
   zero `Time` only as a backward-compatible fallback; it MUST NOT overwrite a
   non-zero one.
 - Use a `Builder` after `Send` — it has been returned to the recycler.
+- Write a message, attribute key or group name into a `TextHandler` line
+  without `encoder.AppendSanitized`, or give the handler its own scrub. The
+  defect this rule records was a missing call, not a wrong scrubber.
 - Re-export anything from this package at `pkg/v1/*` directly. The public
   facade owns its own constructors.
 

@@ -112,7 +112,7 @@ func appendHeader(dst []byte, r corelogger.RecordEvent) []byte {
 	//: that use line-oriented framing (syslog RFC5424, plain file tail) do
 	//: not see attacker-influenced CR/LF/NUL produce spoofed frames. This
 	//: is defence-in-depth: sinks that need richer escaping still can.
-	return appendSanitizedMessage(dst, r.Message)
+	return AppendSanitized(dst, r.Message)
 }
 
 // appendTraceContext writes the two top-level correlation fields
@@ -150,17 +150,23 @@ func appendTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
 	return tc.AppendSpanIDHex(dst)
 }
 
-// appendSanitizedMessage copies msg onto dst replacing '\n', '\r', and NUL
+// AppendSanitized copies text onto dst replacing '\n', '\r', and NUL
 // with a single space so the content can never inject a new frame in a
 // line-framed downstream sink. Other control characters are preserved to
 // keep the rendering faithful; only framing-sensitive bytes are stripped.
 // It scrubs every attacker-influenceable textual field — the Message, group
 // names, and attribute keys — not just the Message (V110).
-func appendSanitizedMessage(dst []byte, msg string) []byte {
-	//: walk msg byte-by-byte; ASCII control-char check is cheap and the
+//
+// It is exported for one caller outside this package: the legacy
+// service/logger.TextHandler, which renders the same line shape without going
+// through an Encoder. That handler once appended all three fields verbatim —
+// the scrub existed, but only here — so a line break in any of them forged a
+// log line. One function shared by both renderers cannot drift from itself.
+func AppendSanitized(dst []byte, text string) []byte {
+	//: walk text byte-by-byte; ASCII control-char check is cheap and the
 	//: allocation cost matches the existing append pattern in this file.
-	for i := range len(msg) {
-		b := msg[i]
+	for i := range len(text) {
+		b := text[i]
 		//: framing-sensitive bytes collapse to a single space per occurrence.
 		if b == '\n' || b == '\r' || b == 0 {
 			dst = append(dst, ' ')
@@ -184,13 +190,13 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) [
 		//: scrub framing bytes from the group name — an attacker-influenced
 		//: group segment must not inject a second line into a syslog/file frame
 		//: any more than the Message can (V110).
-		dst = appendSanitizedMessage(dst, g)
+		dst = AppendSanitized(dst, g)
 		dst = append(dst, groupSeparator)
 	}
 	//: render the attribute key followed by '=' and the typed value; the key
 	//: runs through the same framing-byte scrub as Message and group names so
 	//: no attacker-influenceable field can forge a frame boundary (V110).
-	dst = appendSanitizedMessage(dst, a.Key)
+	dst = AppendSanitized(dst, a.Key)
 	dst = append(dst, '=')
 	//: hand back the buffer with the encoded attribute appended.
 	return appendValueOnly(dst, a)

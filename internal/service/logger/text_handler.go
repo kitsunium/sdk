@@ -16,6 +16,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/buffer"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/logger/encoder"
 )
 
 // timestampLayout is the RFC3339-with-milliseconds format used to render the
@@ -144,7 +145,10 @@ func (h *TextHandler) renderLine(b []byte, r corelogger.RecordEvent) []byte {
 	b = append(b, ' ')
 	b = append(b, r.Level.String()...)
 	b = append(b, ' ')
-	b = append(b, r.Message...)
+	//: the message goes through the encoder's own framing scrub: a CR, LF or
+	//: NUL here would start a line the caller never wrote, and the trace ids
+	//: rendered next would land on that forged line (CWE-117, V110).
+	b = encoder.AppendSanitized(b, r.Message)
 	//: the trace context is a TOP-LEVEL field: it lands between the header and
 	//: the attributes and is never touched by the group prefix stack. Nothing
 	//: is written when no span is in scope (ADR 0062).
@@ -221,12 +225,14 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) [
 	dst = append(dst, ' ')
 	//: walk the group stack to emit "g1.g2.…" before the attribute key.
 	for _, g := range groups {
-		//: append each group name followed by the canonical separator.
-		dst = append(dst, g...)
+		//: each group name is scrubbed like the message — WithGroup documents
+		//: user input as acceptable — then the canonical separator follows.
+		dst = encoder.AppendSanitized(dst, g)
 		dst = append(dst, groupSeparator)
 	}
-	//: now append the bare key=value (without the leading space appendAttr writes).
-	dst = append(dst, a.Key...)
+	//: now append the bare key=value (without the leading space appendAttr
+	//: writes); the key is scrubbed exactly as the encoder scrubs it.
+	dst = encoder.AppendSanitized(dst, a.Key)
 	dst = append(dst, '=')
 	dst = appendValueOnly(dst, a)
 	//: hand the (possibly re-allocated) buffer back to the caller.
@@ -277,9 +283,10 @@ func appendValueOnly(dst []byte, a corelogger.AttrValue) []byte {
 
 // appendAttr serialises a single AttrValue onto dst in "key=value" form.
 func appendAttr(dst []byte, a corelogger.AttrValue) []byte {
-	//: separator between message and first attr, and between consecutive attrs.
+	//: separator between message and first attr, and between consecutive attrs;
+	//: the key is scrubbed exactly as the grouped path and the encoder scrub it.
 	dst = append(dst, ' ')
-	dst = append(dst, a.Key...)
+	dst = encoder.AppendSanitized(dst, a.Key)
 	dst = append(dst, '=')
 	//: delegate the value to appendValueOnly so the grouped and ungrouped
 	//: paths cannot drift apart — they used to carry two copies of this table,

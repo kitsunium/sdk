@@ -13,7 +13,7 @@ the `text` encoder; `ndjson` / `json` land in follow-up commits.
 | File      | Role |
 |---|---|
 | `encoder.go`  | `Encoder = corelogger.Encoder` type alias |
-| `text.go`     | `textEncoder` — renders `RecordEvent` → bytes, sanitises framing bytes, renders the top-level trace context; `appendQuotedString`/`quoteSafe` are its escaping fast path |
+| `text.go`     | `textEncoder` — renders `RecordEvent` → bytes, sanitises framing bytes through the exported `AppendSanitized` (the one scrub the legacy `service/logger.TextHandler` calls too), renders the top-level trace context; `appendQuotedString`/`quoteSafe` are its escaping fast path |
 | `json.go`     | `jsonEncoder` — renders `RecordEvent` → one JSON object per line, flat attrs, top-level trace context |
 | `timestamp.go`| `appendTimestamp` — the shared RFC3339-milli renderer BOTH encoders use in place of `time.Time.AppendFormat` |
 
