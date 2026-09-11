@@ -155,7 +155,7 @@ left silent, and this paragraph is that statement. `Release-bump: minor` is the
 correct trailer (ADR 0040 §Decision 2): v0 minors carry no compatibility
 promise. Past `pkg/v1.0.0` this same edit would require a new named type, a
 `pkg/v2` path, or not happening. The three types are in the "expensive" group B
-of `.claude/contexts/pre-v1-published-shape-audit.md`, where an ADDED field
+of `docs/pre-v1-published-shape-audit.md`, where an ADDED field
 breaks a caller who wrote an unkeyed composite literal.
 
 **What actually breaks in this repository: nothing** — and that was checked
@@ -313,7 +313,7 @@ mint the instrument before documenting it.
 - `internal/service/metrics/otlp_request.go` — `otlpMetric.Description`
 - `internal/service/metrics/exporter_text.go` — `appendMetricHeader`
 - `internal/service/metrics/BENCH.md` §ADR 0067 — the cost
-- `.claude/contexts/pre-v1-published-shape-audit.md` §B — the three shapes and their price
+- `docs/pre-v1-published-shape-audit.md` §B — the three shapes and their price
 - OpenTelemetry metrics data model — <https://opentelemetry.io/docs/specs/otel/metrics/data-model> (description is non-identifying)
 - OpenTelemetry Prometheus/OpenMetrics compatibility — <https://opentelemetry.io/docs/specs/otel/compatibility/prometheus_and_openmetrics> ("descriptions become HELP metadata"; one HELP per name)
 - Prometheus text exposition format 0.0.4 — <https://prometheus.io/docs/instrumenting/exposition_formats> (HELP escaping: backslash and line feed only)

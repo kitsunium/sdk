@@ -117,7 +117,7 @@ name. ADR 0039 covers the interface half (extend by a sibling, never by
 widening); ADR 0040 covers this half, and gives it an expiry date — a concrete
 shape may change while the module is v0, said out loud, and **not after**.
 
-`.claude/contexts/pre-v1-published-shape-audit.md` is the inventory that licence
+`docs/pre-v1-published-shape-audit.md` is the inventory that licence
 applies to: **124 concrete structs**, split by what a change to each actually
 costs. 43 are construction shapes a caller fills in by field name, where adding
 a field is free. The expensive group is the `*Value` shapes the SDK **returns** —
