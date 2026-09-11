@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-11T00:00:00Z -->
 # pkg/v1/codec/
 
 ## Purpose
@@ -8,13 +8,16 @@ Public facade for the universal codec dispatch. Consumers address a codec by `Fo
 ## Contents
 
 ```
-codec.go      — Format alias, 23 Format constants, Marshal/Unmarshal/NewEncoder/NewDecoder,
+codec.go      — Format alias, 24 Format constants, Marshal/Unmarshal/NewEncoder/NewDecoder,
                 Available/FromMIME/FromExtension, resolveStreaming + unknownFormat helpers,
                 blank imports for asn1|baseenc|bson|cbor|csv|flatbuffers|form|json|msgpack|multipart|ndjson|pem|tlv|toml|xml|yaml
 compressed.go — MarshalCompressed / UnmarshalCompressed verbs + CompressAlgorithm alias
                 (Gzip/Flate constants) + the self-describing compressed-frame codec
                 (ADR 0014 D1); blank-imports internal/service/transform, which
                 self-registers gzip+flate+zlib — only gzip and flate are framed
+multipart.go  — MultipartForm / MultipartPart aliases + MultipartContentType: exactly what a
+                consumer needs to build a file upload, send it, and read it back (see
+                §Multipart below)
 codes.go      — CodeUnknownFormat / CodeCodecUnavailable / CodeStreamingUnsupported (range 1.2.0.*)
 errors.go     — UnknownFormat / CodecUnavailable / StreamingUnsupported sentinels (errs.Define)
 ```
@@ -52,9 +55,36 @@ registered-but-not-framed position `zlib` has held since ADR 0014.
 `CompressAlgorithm = transform.Algorithm`
 is a type alias so consumers name a compressor without importing `internal/*`.
 
+## Multipart
+
+This facade documented the `Multipart` format's native shape as
+`multipart.FormValue` and its header helper as `multipart.ContentType` while
+both lived only under `internal/`, which a consumer cannot import — the
+advertised uploads were reachable only as the JSON-mediated `_json` part.
+`multipart.go` publishes exactly what building, sending and reading back an
+upload needs, as type aliases (the `CompressAlgorithm` precedent), so there is
+no conversion at the edge and the `Codec` interface is not widened (ADR 0037):
+
+| Facade | Delegates to | Needed for |
+|---|---|---|
+| `MultipartForm` | `service/codec/multipart.FormValue` | the native shape to `Marshal`, and the `Unmarshal` target that yields every part |
+| `MultipartPart` | `service/codec/multipart.PartValue` | a file part: `Name`, `FileName`, `ContentType`, `Data` |
+| `MultipartContentType(body)` | `service/codec/multipart.ContentType` | the header the bytes must travel with |
+
+A streaming client needs no further name: the `Encoder` from
+`NewEncoder(Multipart, w)` has a `Boundary() string` method a structural
+assertion reaches, and `mime.FormatMediaType` builds the header from it.
+Deliberately **not** surfaced: `LimitsConfig` / `NewWithLimits` and the
+`BoundaryCodec` / `BoundaryProvider` interfaces. None is needed to build or
+send an upload, the registered codec already carries the ADR 0031 defaults,
+and raising a decode-side ceiling is a public-API decision of its own; the
+facade never documented them, so there was no claim to correct.
+`multipart_external_test.go` imports nothing under `internal/` — it is the
+proof that the three names suffice.
+
 ## Conventions
 
-- **`Format` is the public dispatch key.** It's `type Format = corecodec.Format` — a string alias, but the 24 named constants (`JSON`, `NDJSON`, `XML`, `CSV`, `Form`, `ASN1DER`, `PEM`, `YAML`, `TOML`, `CBOR`, `MsgPack`, `TLV`, `FlatBuffers`, `Base64`, `Base64URL`, `Base32`, `Base16`, `Hex`, `ASCII85`, `Base45`, `Base58`, `Base62`, `BSON`) are the contract. Their string values are frozen post-v1.0.0.
+- **`Format` is the public dispatch key.** It's `type Format = corecodec.Format` — a string alias, but the 24 named constants (`JSON`, `NDJSON`, `XML`, `CSV`, `Form`, `ASN1DER`, `PEM`, `YAML`, `TOML`, `CBOR`, `MsgPack`, `TLV`, `FlatBuffers`, `Base64`, `Base64URL`, `Base32`, `Base16`, `Hex`, `ASCII85`, `Base45`, `Base58`, `Base62`, `BSON`, `Multipart`) are the contract. Their string values are frozen post-v1.0.0.
 - **Lookup is `// IFACE-PLUGIN`.** `corecodec.Lookup`, `LookupMIME`, `LookupExt`, and `Available` (the implementations behind the four facade entry points) are the canonical plugin discovery surface. The 16 service codec packages register themselves via package-level `var` side-effects driven by the blank imports in `codec.go`.
 - **Origin wins.** When the underlying codec returns an `*errs.Error`, this package forwards it untouched. Only dispatch-level failures (unknown format, non-streaming codec) get a new sentinel built in this package.
 - **Error codes use range 1.2.0.*** per ADR 0005:

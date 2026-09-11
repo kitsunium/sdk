@@ -51,7 +51,7 @@
 //	| cbor         | codec.CBOR        | application/cbor           | .cbor               | yes       | IoT / mobile (RFC 8949) |
 //	| msgpack      | codec.MsgPack     | application/msgpack        | .msgpack / .mpk     | yes       | RPC payloads |
 //	| bson         | codec.BSON        | application/bson           | .bson               | —         | MongoDB documents (top level must be a document) |
-//	| multipart    | codec.Multipart   | multipart/form-data        | —                   | yes       | uploads / form posts (native shape multipart.FormValue) |
+//	| multipart    | codec.Multipart   | multipart/form-data        | —                   | yes       | uploads / form posts (native shape codec.MultipartForm) |
 //	| tlv          | codec.TLV         | application/x-tlv          | .tlv                | yes       | custom binary streams, self-describing |
 //	| flatbuffers  | codec.FlatBuffers | application/x-flatbuffers  | .fbs / .bin         | —         | zero-copy passthrough |
 //	| base64       | codec.Base64      | application/base64         | .b64 / .base64      | yes       | text-safe wrap (JSON → base-N) |
@@ -241,11 +241,11 @@ const (
 	// document — struct or map — not a scalar). ADR 0021.
 	BSON Format = "bson"
 	// Multipart denotes RFC 7578 multipart/form-data. Its native Go shape is
-	// a multipart.FormValue; any other value travels as a single
-	// JSON-mediated part. The RFC 2046 boundary lives in the Content-Type
-	// header, which the Codec contract cannot carry — the codec re-emits it
-	// in the body, and multipart.ContentType recovers the header value from
-	// the bytes Marshal returned.
+	// a [MultipartForm] of [MultipartPart] sections; any other value travels
+	// as a single JSON-mediated part. The RFC 2046 boundary lives in the
+	// Content-Type header, which the Codec contract cannot carry — the codec
+	// re-emits it in the body, and [MultipartContentType] recovers the header
+	// value from the bytes Marshal returned.
 	Multipart Format = "multipart"
 )
 
