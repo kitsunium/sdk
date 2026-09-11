@@ -14,8 +14,8 @@
 | Architecture      | amd64 |
 | Go toolchain      | go1.27.1 linux/amd64 |
 | Git branch        | `agent-a4e0226da1d912847` |
-| Git commit        | `167ec6b` (the "after" tree; the "before" column was measured on the same box, same session, on the pre-ADR-0044 tree) |
-| Generated (UTC)   | 2026-09-09; §ADR 0067 re-measured 2026-09-10 on the same box (branch `agent-a8b94605d1380fe5e`, commit `c30e2ad`, go1.27.1) |
+| Git commit        | `26ca30e` (the "after" tree; the "before" column was measured on the same box, same session, on the pre-ADR-0044 tree) |
+| Generated (UTC)   | 2026-09-09; §ADR 0067 re-measured 2026-09-10 on the same box (branch `agent-a8b94605d1380fe5e`, commit `94dd6e7`, go1.27.1) |
 | Bench wall-clock  | before: `-benchtime=1s -count=5`; after: `-count=7`, median quoted |
 
 ## What is being measured

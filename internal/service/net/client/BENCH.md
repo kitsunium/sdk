@@ -420,7 +420,7 @@ they are gated.
 | Architecture | amd64 |
 | Go toolchain | go1.27.1 linux/amd64 |
 | Git branch | jaimerias-que-tu-te-connect |
-| Git commit | c2cb1d3 |
+| Git commit | 512eacb |
 | Generated (UTC) | 2026-09-10 |
 | Bench wall-clock | `-test.benchtime=200ms -count=5`, medians |
 | Load average (baseline sweep, at start) | 0.54 |
@@ -474,7 +474,7 @@ BenchmarkEscapedPath/Encoded-8                                  320.4 ns/op     
 BenchmarkDotSegmentDepth-8                                      172.1 ns/op         0 B/op     0 allocs/op
 ```
 
-## Baseline (medians of five, at commit c2cb1d3 before this change)
+## Baseline (medians of five, at commit 512eacb before this change)
 
 Kept so the deltas above can be re-derived rather than trusted.
 

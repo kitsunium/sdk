@@ -31,7 +31,7 @@ number, not with an argument:
 | Architecture | amd64 |
 | Go toolchain | go1.27.1 linux/amd64 |
 | Git branch | `jaimerias-que-tu-te-connect` |
-| Git commit | `9d9c09f` |
+| Git commit | `b2683aa` |
 | Generated (UTC) | 2026-09-10 |
 | Load average | 0.42 / 0.57 / 0.86 at start, 1.35 / 1.04 / 0.99 at end |
 | Bench wall-clock | `-benchtime=1s`, `-count=5`, 251 s for the main suite |

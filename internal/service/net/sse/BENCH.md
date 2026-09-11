@@ -316,7 +316,7 @@ concurrently, and only the joins serialise.
 | Clock source       | kvm-clock |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | a486bb3 |
+| Git commit         | f2d263d |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, `-test.count=3`, medians |
 

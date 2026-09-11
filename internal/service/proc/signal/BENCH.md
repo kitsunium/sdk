@@ -148,7 +148,7 @@ the benchmark's own process without perturbing it.
 | Architecture | amd64 |
 | Go toolchain | go1.27.1 linux/amd64 |
 | Git branch | jaimerias-que-tu-te-connect |
-| Git commit | 532a984 |
+| Git commit | 1da8e4c |
 | Generated (UTC) | 2026-09-10 |
 | Bench wall-clock | `-benchtime=1s`, median of 5 runs |
 

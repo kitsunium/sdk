@@ -21,7 +21,7 @@ Bazel target: `pkg/v1/codec:codec_bench_test` (tag `manual,benchmark` — exclud
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Bazel              | 9.0.2 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | df35880 |
+| Git commit         | f604c9c |
 | Generated (UTC)    | 2026-09-10T09:47:40Z |
 | Bench wall-clock   | `-test.benchtime=1s` |
 

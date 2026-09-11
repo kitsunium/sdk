@@ -31,7 +31,7 @@ they gave up.
 | Architecture | amd64 |
 | Go toolchain | go1.27.1 linux/amd64 |
 | Git branch | `jaimerias-que-tu-te-connect` |
-| Git commit | `bee0751` (+ the changes in §1.4 and §2.6) |
+| Git commit | `8860191` (+ the changes in §1.4 and §2.6) |
 | Generated (UTC) | 2026-09-10 |
 | Machine load (`uptime`) | 1-minute average between **0.05 and 1.68** across the campaign, sampled before and after every table |
 

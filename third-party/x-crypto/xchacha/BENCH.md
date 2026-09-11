@@ -294,7 +294,7 @@ Nothing in this package was changed to produce this report.
 | Library            | `golang.org/x/crypto` v0.55.0 |
 | Reference arm      | `internal/service/crypto/aesgcm` (same repo, same run) |
 | Git branch         | `jaimerias-que-tu-te-connect` |
-| Git commit         | `f6082f7` (pre-commit) |
+| Git commit         | `c411206` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s -test.count=3`, × 3 processes |
 

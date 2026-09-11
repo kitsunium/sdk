@@ -193,7 +193,7 @@ isolated A/B above is the load-bearing measurement.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | `agent-ae8135b496985ac91` (off `jaimerias-que-tu-te-connect`) |
-| Git commit         | `c30e2ad` (pre-commit) |
+| Git commit         | `94dd6e7` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, `-count=3`, medians, machine under load |
 

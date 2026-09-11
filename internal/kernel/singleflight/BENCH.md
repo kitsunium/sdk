@@ -19,7 +19,7 @@ only meaningful comparison is against calling `fn` directly.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | `jaimerias-que-tu-te-connect` |
-| Git commit         | `8b576c6` (pre-commit) |
+| Git commit         | `c76ec45` (pre-commit) |
 | Generated (UTC)    | 2026-09-09 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run |
 

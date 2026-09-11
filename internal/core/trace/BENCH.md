@@ -108,7 +108,7 @@ Recorded rather than done.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | 9b3c610 |
+| Git commit         | 33c0c3e |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run, machine under load |
 

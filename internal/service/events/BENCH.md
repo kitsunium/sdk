@@ -28,7 +28,7 @@ routinely wrong:
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | `jaimerias-que-tu-te-connect` |
-| Git commit         | `fdf7bdc` (pre-commit) |
+| Git commit         | `e01714c` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run |
 

@@ -52,7 +52,7 @@ is what keeps the case checkable.
 | Architecture | amd64 |
 | Go toolchain | go1.27.1 linux/amd64 |
 | Git branch | `jaimerias-que-tu-te-connect` |
-| Git commit | `91063bf` (pre-commit; `jwk_bench_test.go` and the token-side files in the working tree) |
+| Git commit | `f02e743` (pre-commit; `jwk_bench_test.go` and the token-side files in the working tree) |
 | Generated (UTC) | 2026-09-11 |
 | Machine load | `01:51:01 up 18 days, 13:34, load average: 0.43, 0.38, 0.63` at start; `02:14:04 … 1.10, 0.64, 0.73` at end (the tail is this run's own three processes). No other job on the box. |
 | Bench wall-clock | `-benchtime=1s -count=3`, three processes; 27 jwk rows + 24 token rows × 2 arms × 9 samples ≈ 15 min, plus the GC experiment in §7 |

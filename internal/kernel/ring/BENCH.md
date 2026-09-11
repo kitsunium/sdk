@@ -32,7 +32,7 @@ producers + N consumers and violate the SPSC invariant) across ring sizes 4, 64,
 | Architecture       | arm64 |
 | Go toolchain       | go1.26.4 linux/arm64 |
 | Git branch         | feat/issue-20-kernel-ring-bench |
-| Git commit         | f3b1610 |
+| Git commit         | 9c61f89 |
 | Generated (UTC)    | 2026-06-19 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run |
 

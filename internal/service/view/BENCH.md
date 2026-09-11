@@ -14,7 +14,7 @@
 | Architecture      | amd64 |
 | Go toolchain      | go1.27.1 linux/amd64 |
 | Git branch        | `agent-aa1fdf87a92fea84a` |
-| Git commit        | `0b9dee0` (the tree this domain was added to) |
+| Git commit        | `ea4888b` (the tree this domain was added to) |
 | Generated (UTC)   | 2026-09-10 |
 | Bench wall-clock  | `-benchtime=1s -count=5`, **median quoted** |
 

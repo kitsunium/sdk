@@ -46,7 +46,7 @@ The short answers, before the evidence:
 | Architecture | amd64 |
 | Go toolchain | go1.27.1 linux/amd64 |
 | Git branch | `jaimerias-que-tu-te-connect` |
-| Git commit | `7b6073d` (pre-commit; the four `*_bench_test.go` files in the working tree) |
+| Git commit | `de9f773` (pre-commit; the four `*_bench_test.go` files in the working tree) |
 | Generated (UTC) | 2026-09-11 |
 | Machine load | `23:51:24 up 18 days, 11:34, load average: 2.58, 1.98, 1.89` at start; `1.04, 1.20, 1.44` at end. No other job on the box; a sibling agent was reading source and ran nothing. |
 | Bench wall-clock | `-benchtime=1s -count=3`, three processes, 73 rows × 9 samples ≈ 15 min |
@@ -971,7 +971,7 @@ code. It was the box, not the benchmark.
 ### 16.8 Full results — the JWKS rows
 
 Median of nine (three processes × `-count=3`), `-benchtime=1s`. The *before*
-column is the same binary with `jwkbridge.go` at commit `91063bf`.
+column is the same binary with `jwkbridge.go` at commit `f02e743`.
 
 | benchmark | before ns | after ns | spread (after) | after B/op | after allocs |
 |---|---:|---:|---:|---:|---:|

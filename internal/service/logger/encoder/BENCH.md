@@ -233,7 +233,7 @@ own golden tests; left alone deliberately rather than missed.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | 532a984 |
+| Git commit         | 1da8e4c |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-benchtime=1s -count=3`; median published, spread below |
 | 1-min load average | 0.47 (before-run), 1.32 (after-run) — both well under the 8-core box's noise floor |
