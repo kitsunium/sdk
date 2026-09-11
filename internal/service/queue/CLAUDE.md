@@ -15,8 +15,8 @@ pull loop that runs handlers on goroutines it owns).
 | `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion |
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |
-| `file_config.go` | `FileConfig`, the directory preparation and the world-writable refusal |
-| `file_name.go` | the NAME grammar — the durable broker's entire state machine |
+| `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory |
+| `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
 | `file_dead.go` | `Nack`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
 | `consume.go` | `Consume`, the pull loop, the panic guard |
@@ -43,6 +43,31 @@ rename. So:
   sweeper would be a fourth thing that can die, and it would need electing.
 - **A lexicographic sort is a chronological sort.** Every name opens with a
   19-digit zero-padded instant, so `fs.ReadDir`'s ordering is FIFO for free.
+
+Two consequences of "the state is a name" are enforced rather than assumed:
+
+- **The states are checked like the root.** `prepareState` runs the same rule
+  `checkQueueDir` runs on `Dir` (`unusableBecause`) on each of `ready/`,
+  `inflight/` and `dead/`, through `os.Mkdir` + `os.Lstat` — never `MkdirAll`
+  or `Stat`, which both follow a symlink. Only the root used to be checked, so
+  under a root the rule accepts (a group share, a sticky `/tmp`-like
+  directory) another account could pre-create a world-writable `ready/` and
+  plant or unlink messages. A state that is a symlink is refused whatever it
+  points at. `TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust`.
+  What the rule still does NOT see is an owner: a sticky world-writable state
+  owned by another account passes it, as the root does. Closing that needs a
+  uid comparison, which is platform code.
+- **An instant a name cannot carry is never written.** A name's instants are
+  19 digits of a non-negative int64, so the grammar ends on 2262-04-11; past
+  it `pad` wrote a sign, `parseNano` refused the name, and the message was
+  stranded. `core/queue.MaxDeadlineOffset` bounds the policy's durations for
+  both brokers; `Extend`'s `by` never passes through `Validate`, so the file
+  broker checks the deadline itself (`nameable`) and refuses before anything
+  is renamed. The memory broker keeps `time.Time`, which saturates instead of
+  wrapping, and does NOT refuse such a `by` — the one place the double is more
+  permissive than the durable broker, which is why
+  `TestTheDurableBrokerRefusesAnExtensionItsNamesCannotCarry` runs on the file
+  broker only.
 
 ## Where `internal/service/vfs` is used, and where it stops
 

@@ -90,6 +90,146 @@ func TestTheDurableBrokerRefusesADirectoryAnyAccountCouldDrain(t *testing.T) {
 	}
 }
 
+// TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust applies the root's
+// refusal one level down, where the messages actually live. Only the queue
+// directory used to be checked, so under a root the rule accepts — a group
+// share, or a sticky /tmp-like directory — an `inflight/` or a `ready/` that
+// somebody else had already put there was trusted whatever it was: another
+// account could pre-create a world-writable `ready/` and plant or unlink
+// messages in it, which is the silent injection and the silent drain the root
+// check exists to refuse.
+//
+// The symlink case is the one no mode check can see. It points at a private,
+// perfectly acceptable directory, so the only thing wrong with it is that it
+// is a link — and a state that is a link keeps the queue's messages wherever
+// the link's author chose, or, pointed at a sibling state, makes two states
+// one directory.
+//
+// Seen failing: with makeStates restored to MkdirAll-and-trust, the
+// world-writable and the symlink cases printed
+//
+//	NewFile() = <nil>, want CodeQueueDirectoryUnusable
+//
+// and the regular-file case, which MkdirAll reports as ENOTDIR, printed
+//
+//	NewFile() = [0.3.53.1 QUEUE_BACKEND_FAILED] The queue's storage refused an
+//	operation, want CodeQueueDirectoryUnusable
+func TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		state string
+		why   string
+		plant func(t *testing.T, statePath string)
+	}{
+		{"a world-writable ready/", "ready", "world-writable", func(t *testing.T, statePath string) {
+			t.Helper()
+			mkdirMode(t, statePath, 0o777)
+		}},
+		{
+			"an inflight/ that is a symlink to a private directory", "inflight", "symlink",
+			func(t *testing.T, statePath string) {
+				t.Helper()
+				elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+				mkdirMode(t, elsewhere, 0o700)
+				if err := os.Symlink(elsewhere, statePath); err != nil {
+					t.Fatalf("Symlink() = %v, want nil", err)
+				}
+			},
+		},
+		{"a dead/ that is a regular file", "dead", "not-a-directory", func(t *testing.T, statePath string) {
+			t.Helper()
+			if err := os.WriteFile(statePath, nil, 0o600); err != nil {
+				t.Fatalf("WriteFile() = %v, want nil", err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := filepath.Join(t.TempDir(), "queue")
+			mkdirMode(t, root, 0o700)
+			tc.plant(t, filepath.Join(root, tc.state))
+			_, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()})
+			if !errs.HasCode(err, svcqueue.CodeQueueDirectoryUnusable) {
+				t.Fatalf("NewFile() = %v, want CodeQueueDirectoryUnusable", err)
+			}
+			//: the refusal names the state and the reason, so an operator can
+			//: find the directory without reading this package.
+			if got := fieldValue(err, "state"); got != tc.state {
+				t.Errorf("state field = %q, want %q", got, tc.state)
+			}
+			if got := fieldValue(err, "why"); got != tc.why {
+				t.Errorf("why field = %q, want %q", got, tc.why)
+			}
+		})
+	}
+}
+
+// TestTheDurableBrokerCreatesItsStatesOwnerOnlyAndReopensThem is the other
+// side of the refusal above: what the broker makes itself is exactly what the
+// check accepts, including on the second construction over the same
+// directory — the path every restart and every second process takes.
+func TestTheDurableBrokerCreatesItsStatesOwnerOnlyAndReopensThem(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "queue")
+	for attempt := range 2 {
+		if _, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()}); err != nil {
+			t.Fatalf("NewFile() on construction %d = %v, want nil", attempt+1, err)
+		}
+	}
+	for _, state := range []string{"ready", "inflight", "dead"} {
+		info, err := os.Lstat(filepath.Join(root, state))
+		if err != nil {
+			t.Fatalf("Lstat(%s) = %v, want nil", state, err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("%s is %v, want a real directory", state, info.Mode())
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Errorf("%s created with %v, want -rwx------", state, got)
+		}
+	}
+}
+
+// TestTheDurableBrokerAcceptsStatesSharedThroughAGroup keeps the deliberate
+// arrangement checkQueueDir names — two service accounts sharing a queue
+// through a common group — working once the states are checked too.
+func TestTheDurableBrokerAcceptsStatesSharedThroughAGroup(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "queue")
+	mkdirMode(t, root, 0o770)
+	for _, state := range []string{"ready", "inflight", "dead"} {
+		mkdirMode(t, filepath.Join(root, state), 0o770)
+	}
+	if _, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()}); err != nil {
+		t.Fatalf("NewFile(group-writable root and states) = %v, want nil", err)
+	}
+}
+
+// mkdirMode creates dir with exactly mode: Mkdir applies the process umask, so
+// the bits are set explicitly afterwards.
+func mkdirMode(t *testing.T, dir string, mode os.FileMode) {
+	t.Helper()
+	if err := os.Mkdir(dir, mode); err != nil {
+		t.Fatalf("Mkdir(%s) = %v, want nil", dir, err)
+	}
+	if err := os.Chmod(dir, mode); err != nil {
+		t.Fatalf("Chmod(%s) = %v, want nil", dir, err)
+	}
+}
+
+// fieldValue returns the value of the named field on err, or "" when it
+// carries none.
+func fieldValue(err error, key string) string {
+	for _, field := range errs.FieldsOf(err) {
+		if field.Key() == key {
+			return field.StringValue()
+		}
+	}
+	return ""
+}
+
 // TestTheDurableBrokerRefusesAnEmptyDirectory keeps an unset Dir from
 // resolving to the process's working directory, which is never what anybody
 // meant.

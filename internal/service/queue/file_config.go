@@ -48,7 +48,9 @@ type FileConfig struct {
 	Clock clock.Clock
 	// Dir is the queue directory. It is created owner-only when absent, and
 	// refused when it exists and any account outside the owner and group
-	// could replace its entries.
+	// could replace its entries. Its three state directories are held to the
+	// same rule — created owner-only, checked when somebody else made them —
+	// and refused besides when one is a symlink or not a directory at all.
 	//
 	// Two brokers over one Dir — in one process or in two — are ONE queue.
 	// That is the domain's inter-process claim, and it is the whole reason
@@ -101,37 +103,103 @@ func prepareQueueDir(dir string) error {
 // could then unlink a queued message, which is a silent, undetectable drain,
 // or plant one, which is a silent, undetectable injection.
 func checkQueueDir(dir string, info fs.FileInfo) error {
+	why, unusable := unusableBecause(info)
+	//: acceptable.
+	if !unusable {
+		//: nothing to refuse.
+		return nil
+	}
+	//: QueueDirectoryUnusable, naming the value.
+	return kerrs.Wrap(QueueDirectoryUnusable, kerrs.WrapParams{},
+		kerrs.String("field", "Dir"), kerrs.String("value", dir), kerrs.String("why", why))
+}
+
+// unusableBecause reports whether a directory is unusable for this queue, and
+// names why. It is [checkQueueDir]'s rule, shared with the state directories
+// so the two levels cannot drift apart.
+//
+// A symlink is only ever seen here through os.Lstat, which is what the state
+// check uses; the queue directory itself is read through os.Stat, so a link
+// the caller configured as Dir is followed exactly as before.
+func unusableBecause(info fs.FileInfo) (why string, unusable bool) {
+	mode := info.Mode()
+	//: a link keeps the messages wherever its author chose, whatever it
+	//: points at — and its own permission bits mean nothing.
+	if mode&fs.ModeSymlink != 0 {
+		//: refused before any mode is read.
+		return "symlink", true
+	}
 	//: a regular file where a directory belongs is a configuration fault.
 	if !info.IsDir() {
-		//: QueueDirectoryUnusable, naming the value.
-		return kerrs.Wrap(QueueDirectoryUnusable, kerrs.WrapParams{},
-			kerrs.String("field", "Dir"), kerrs.String("value", dir),
-			kerrs.String("why", "not-a-directory"))
+		//: nothing could be renamed into it.
+		return "not-a-directory", true
 	}
-	mode := info.Mode()
 	//: two ways to be safe, and they carry the same verdict: either no
 	//: account outside the owner and group can replace an entry at all, or
 	//: the sticky bit says only an entry's owner may unlink it.
 	if mode&worldWritable == 0 || mode&os.ModeSticky != 0 {
 		//: acceptable.
-		return nil
+		return "", false
 	}
 	//: world-writable without the sticky bit.
-	return kerrs.Wrap(QueueDirectoryUnusable, kerrs.WrapParams{},
-		kerrs.String("field", "Dir"), kerrs.String("value", dir),
-		kerrs.String("why", "world-writable"))
+	return "world-writable", true
 }
 
-// makeStates creates the three state directories.
+// makeStates creates the three state directories, or checks them when they
+// already exist.
 func makeStates(dir string) error {
 	//: ready, inflight, dead — the three the state machine renames between.
 	for _, state := range stateDirs {
-		//: owner-only, and MkdirAll so an existing one is success.
-		if mkErr := os.MkdirAll(path.Join(dir, state), queueDirMode); mkErr != nil {
-			//: the medium refused.
-			return backendFailed("mkdir", state, mkErr)
+		//: each is checked even when this call just created it, because
+		//: creating is not the same as being the only one to have.
+		if stateErr := prepareState(dir, state); stateErr != nil {
+			//: QueueDirectoryUnusable or QueueBackendFailed, naming the state.
+			return stateErr
 		}
 	}
 	//: ready.
 	return nil
+}
+
+// prepareState creates one state directory owner-only when it is absent, and
+// then checks what is there — whether or not this call is what put it there.
+//
+// The check is the root's, one level down, because the state directories are
+// where the messages live. Under a queue directory the root rule accepts — a
+// group share, or a sticky directory like /tmp — another account can create
+// `ready/` or `inflight/` before this broker does; trusting whatever it finds
+// would let that account plant messages or unlink them, which is the silent
+// injection and the silent drain [checkQueueDir] refuses at the root.
+//
+// It is os.Mkdir and os.Lstat, never os.MkdirAll or os.Stat, because both of
+// those FOLLOW a symlink: MkdirAll reports success for a link to any
+// directory, and Stat describes the target. A state that is a link is refused
+// whatever it points at — elsewhere, the queue's messages would live wherever
+// the link's author chose; at a sibling state, two states would be one
+// directory and the state machine would stop being one.
+func prepareState(dir, state string) error {
+	statePath := path.Join(dir, state)
+	//: owner-only when absent; an existing entry, of whatever type, is left
+	//: for the check below to judge rather than reported as a medium fault.
+	if mkErr := os.Mkdir(statePath, queueDirMode); mkErr != nil && !os.IsExist(mkErr) {
+		//: the medium refused.
+		return backendFailed("mkdir", state, mkErr)
+	}
+	info, statErr := os.Lstat(statePath)
+	//: a state that cannot be described cannot be checked.
+	if statErr != nil {
+		//: the medium could not answer.
+		return backendFailed("lstat", state, statErr)
+	}
+	why, unusable := unusableBecause(info)
+	//: a real directory, and one no account outside the owner and group can
+	//: replace an entry in — or one whose sticky bit says only its owner may.
+	if !unusable {
+		//: nothing to refuse.
+		return nil
+	}
+	//: QueueDirectoryUnusable, naming the state as well as its path.
+	return kerrs.Wrap(QueueDirectoryUnusable, kerrs.WrapParams{},
+		kerrs.String("field", "Dir"), kerrs.String("state", state),
+		kerrs.String("value", statePath), kerrs.String("why", why))
 }

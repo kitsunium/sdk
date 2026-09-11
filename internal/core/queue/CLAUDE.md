@@ -27,7 +27,7 @@ construction; a change to `events` that moves it right is wrong the same way.
 | `queue.go` | package doc (the frontier, the guarantee, the three non-guarantees), `Broker` (FROZEN at four methods), `Handler` (FUNC port), `NackValue` |
 | `message.go` | `MessageValue`, `ReceiptValue`, `LeaseValue`, `DeliveryValue` |
 | `capability.go` | the ADR 0039 siblings — `DeadLetterReader`, `LeaseExtender` — and `DeadLetterValue` |
-| `policy.go` | `PolicyValue`, `Validate`, `Normalized`, `DefaultMaxMessageBytes` |
+| `policy.go` | `PolicyValue`, `Validate`, `Normalized`, `DefaultMaxMessageBytes`, `MaxDeadlineOffset` |
 | `codes.go` | the five `0.2.23.*` codes |
 | `errors.go` | the five sentinels |
 
@@ -56,7 +56,17 @@ construction; a change to `events` that moves it right is wrong the same way.
    `VisibilityTimeout` and `MaxDeliveries` are REFUSED at zero (two opposite
    readings each, one of which silently destroys the guarantee — `core/lock`'s
    TTL argument); `RetryDelay` and `MaxMessageBytes` are CLAMPED (one reading
-   each, harmless).
+   each, harmless). The two durations are also bounded from ABOVE, and that
+   refusal is arithmetic, not a reading: above `MaxDeadlineOffset` (a century)
+   they are REFUSED. A deadline is now plus one of them, the durable broker
+   writes it into a filename as int64 Unix nanoseconds, and that range ends on
+   2262-04-11 — `math.MaxInt64`, "never", wrapped the deadline negative, the
+   name could not be read back, and the message was stranded in `inflight/`
+   with a receipt reading `UNKNOWN_RECEIPT`. `Validate` has no clock, so the
+   ceiling is fixed; it keeps every deadline representable for any clock
+   before 2162, and a negative `RetryDelay` is still "no delay". Pinned by
+   `TestPolicyRefusesADeadlineOffsetPastTheCeiling` here and, on both brokers,
+   by `service/queue`'s `TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry`.
 
 ## Conventions
 
