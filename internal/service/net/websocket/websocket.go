@@ -33,11 +33,28 @@ const initialWriteCapacity int = 512
 
 // Conn is one upgraded WebSocket connection.
 //
+// Every connection needs exactly ONE goroutine looping on [Conn.Receive] for
+// its whole life — not two, and not zero — and that includes a connection the
+// handler only ever writes to.
+//
+// Not two, because the protocol is a single ordered frame stream: two
+// concurrent readers would each take half of a message.
+//
+// Not zero, because that loop is more than the way messages arrive. It is
+// where the peer's Ping is answered (RFC 6455 §5.5.2), where its Close is
+// replied to (§5.5.1), and the only place the heartbeat can see that the peer
+// is alive: the heartbeat counts frames the handler has READ, so a Pong the
+// peer sent on time but nobody read is, to it, silence. A handler that only
+// pushes therefore runs the loop in a goroutine of its own and discards what
+// it reads. Without one, the heartbeat ends the connection within two ping
+// intervals — about a minute at [DefaultPingInterval] — however healthy the
+// peer is. Nothing here starts that reader for you: it would have to own the
+// buffer Receive hands out, and owning it is what makes a steady-state read
+// free.
+//
 // Writes are safe for concurrent use — the heartbeat writes from its own
 // goroutine while the handler writes from another, and a handler fanning
-// messages in from several producers is the normal shape. Reads are NOT: the
-// protocol is a single ordered frame stream, so two concurrent readers would
-// each take half of a message. Exactly one goroutine calls Receive.
+// messages in from several producers is the normal shape.
 type Conn struct {
 	// raw is the socket taken over from net/http at the upgrade. It is ours
 	// from that moment: the engine no longer closes it, and neither does
@@ -77,8 +94,10 @@ type Conn struct {
 	// fragments, so answering it must not disturb the message being assembled.
 	ctl [corenet.WSMaxControlPayload]byte
 
-	// rx counts frames received. The heartbeat reads it to tell a silent peer
-	// from a dead one; the value is meaningless, only its movement matters.
+	// rx counts frames Receive has READ, which is not the same as frames that
+	// have arrived: one still waiting in the socket buffer has not moved it.
+	// The heartbeat reads it to tell a live peer from a silent one; the value
+	// is meaningless, only its movement matters.
 	rx atomic.Uint64
 	// peerCode is the close code the peer sent, or zero when it sent none.
 	peerCode atomic.Uint32
@@ -133,12 +152,18 @@ func (c *Conn) Subprotocol() string {
 }
 
 // Done returns the channel closed when the connection has ended: the peer sent
-// Close, the socket died, the server began draining, or the handler closed it.
+// Close, the socket died, the heartbeat found the peer silent, the server began
+// draining, or the handler closed it.
 //
-// A handler that has its own work to select on watches it. A handler that only
-// loops on Receive does not need it — Receive returns a terminal error at the
-// same moment — but a handler waiting on an application event would otherwise
-// never learn that there is nobody left to send it to.
+// Done is for the goroutines that are NOT reading. The one goroutine every
+// connection needs looping on Receive (see [Conn]) learns of the end from
+// Receive's terminal error at the same moment. A handler that pushes
+// application events selects on Done beside its event source, so it stops
+// between events rather than on the next failed Send.
+//
+// Watching Done does not replace the reader. A connection nobody reads answers
+// no Ping, replies to no Close, and is ended by the heartbeat within two ping
+// intervals, however healthy the peer is.
 func (c *Conn) Done() <-chan struct{} {
 	//: read-only, so nobody but the connection can end it.
 	return c.done
@@ -156,6 +181,12 @@ func (c *Conn) PeerCloseCode() corenet.WSCloseCode {
 }
 
 // Receive reads the next complete message, answering control frames on the way.
+//
+// It is called in a loop, by one goroutine, for the connection's whole life —
+// on a connection with nothing to read as much as on any other. Control
+// frames are served INSIDE this call: the Pong a Ping is owed, the Close a
+// Close is owed, and the count the heartbeat reads to decide the peer is
+// alive. Stop calling it and all three stop with it; see [Conn].
 //
 // It returns a message only when one is whole: fragmentation is the sender's
 // private choice of chunk size, not a semantic boundary, so surfacing it would
@@ -686,6 +717,12 @@ func (c *Conn) watch(draining <-chan struct{}) {
 // that is perfectly readable and will simply never produce another byte; no
 // read error, no close frame, nothing. The heartbeat is what turns that silence
 // into an ending.
+//
+// "Silence" means no frame READ since the last probe: the heartbeat watches
+// rx, and only Receive moves it. It therefore cannot tell a vanished peer from
+// a live one whose Pong is waiting, unread, behind a handler that stopped
+// calling Receive — which is why a reading goroutine is part of Conn's
+// contract rather than a style (ADR 0047 §D8, amended 2026-09-11).
 func (c *Conn) startHeartbeat() {
 	//: an explicitly disabled heartbeat starts no goroutine at all, so it costs
 	//: nothing rather than costing a parked ticker.

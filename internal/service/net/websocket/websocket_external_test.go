@@ -12,12 +12,17 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"io"
+	"math"
 	stdnet "net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -32,6 +37,13 @@ import (
 // answers fails the test instead of hanging the suite.
 const peerDeadline time.Duration = 5 * time.Second
 
+// keepAliveProbes is how many Pings TestHeartbeatKeepsAPushConnectionWhileItsReaderRuns
+// answers before it closes. The heartbeat sends its n-th Ping only once its
+// (n-1)-th liveness check has passed, so six answered Pings are five passed
+// checks: five whole intervals in which the connection could have been ended
+// and was not.
+const keepAliveProbes int = 6
+
 // wsPeer is a WebSocket client with no manners: it will send an unmasked frame,
 // a fragmented Close, a length that lies, and anything else the RFC forbids.
 type wsPeer struct {
@@ -45,7 +57,31 @@ type wsPeer struct {
 func echoServer(t *testing.T, opts ...websocket.Option) (srv *httptest.Server, ended chan error) {
 	t.Helper()
 	ended = make(chan error, 1)
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv = httptest.NewServer(echoHandler(ended, opts...))
+	t.Cleanup(srv.Close)
+	//: the handler may never run at all (a refused handshake), so the channel
+	//: is buffered and nothing here waits on it.
+	return srv, ended
+}
+
+// echoTLSServer is echoServer with TLS terminated by the test server itself —
+// the one deployment in which net/http populates Request.TLS, and therefore
+// the one in which the default origin rule can see which scheme the browser
+// used.
+func echoTLSServer(t *testing.T, opts ...websocket.Option) (srv *httptest.Server, ended chan error) {
+	t.Helper()
+	ended = make(chan error, 1)
+	srv = httptest.NewTLSServer(echoHandler(ended, opts...))
+	t.Cleanup(srv.Close)
+	//: buffered for the same reason as echoServer's.
+	return srv, ended
+}
+
+// echoHandler upgrades and echoes every message back, reporting its exit on
+// ended.
+func echoHandler(ended chan<- error, opts ...websocket.Option) http.Handler {
+	//: the smallest handler that exercises both directions.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Upgrade(w, r, opts...)
 		//: Upgrade has already written the refusal; the handler owes nothing.
 		if err != nil {
@@ -66,11 +102,7 @@ func echoServer(t *testing.T, opts ...websocket.Option) (srv *httptest.Server, e
 				return
 			}
 		}
-	}))
-	t.Cleanup(srv.Close)
-	//: the handler may never run at all (a refused handshake), so the channel
-	//: is buffered and nothing here waits on it.
-	return srv, ended
+	})
 }
 
 // dial performs a conforming opening handshake and returns the peer.
@@ -101,6 +133,29 @@ func rawDial(t *testing.T, srv *httptest.Server) *wsPeer {
 	return &wsPeer{t: t, conn: conn, br: bufio.NewReader(conn)}
 }
 
+// rawDialTLS is rawDial against an echoTLSServer: the TLS handshake is
+// completed, trusting only the certificate that server generated, and nothing
+// is said on the connection yet.
+func rawDialTLS(t *testing.T, srv *httptest.Server) *wsPeer {
+	t.Helper()
+	roots := x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
+	dialer := &tls.Dialer{Config: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13}}
+	ctx, cancel := context.WithTimeout(t.Context(), peerDeadline)
+	defer cancel()
+	conn, err := dialer.DialContext(ctx, "tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial tls: %v", err)
+	}
+	t.Cleanup(func() { closeQuietly(conn) })
+	//: every read is bounded so a silent server fails rather than hangs.
+	if derr := conn.SetDeadline(time.Now().Add(peerDeadline)); derr != nil {
+		t.Fatalf("deadline: %v", derr)
+	}
+	//: the same peer as rawDial's, over the encrypted stream.
+	return &wsPeer{t: t, conn: conn, br: bufio.NewReader(conn)}
+}
+
 // handshake writes an opening handshake and reads the response.
 func (p *wsPeer) handshake(t *testing.T, srv *httptest.Server, extra ...string) *http.Response {
 	t.Helper()
@@ -108,8 +163,10 @@ func (p *wsPeer) handshake(t *testing.T, srv *httptest.Server, extra ...string) 
 	if _, err := rand.Read(nonce[:]); err != nil {
 		t.Fatalf("nonce: %v", err)
 	}
+	//: the listener's address rather than the URL, so the same line serves a
+	//: plaintext and a TLS server.
 	request := "GET / HTTP/1.1\r\n" +
-		"Host: " + strings.TrimPrefix(srv.URL, "http://") + "\r\n" +
+		"Host: " + srv.Listener.Addr().String() + "\r\n" +
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Version: 13\r\n" +
@@ -284,6 +341,29 @@ func (p *wsPeer) expectClose(code uint16) {
 	}
 }
 
+// expectCloseAfterTraffic is expectClose for a connection that was busy when
+// the peer closed it: whatever the server had already put on the wire — a
+// pushed message, a heartbeat Ping — arrives first and is skipped.
+func (p *wsPeer) expectCloseAfterTraffic(code uint16) {
+	p.t.Helper()
+	//: frames already in flight precede the reply.
+	for {
+		_, op, payload, err := p.readFrame()
+		if err != nil {
+			p.t.Fatalf("expected a close frame with code %d, got %v", code, err)
+		}
+		//: anything but the Close is traffic that was already on its way.
+		if op != 0x8 {
+			continue
+		}
+		if len(payload) < 2 || binary.BigEndian.Uint16(payload) != code {
+			p.t.Fatalf("close payload = % x, want code %d", payload, code)
+		}
+		//: the closing handshake was answered.
+		return
+	}
+}
+
 // expectMessage reads one whole message back and asserts its opcode and body.
 func (p *wsPeer) expectMessage(op byte, want []byte) {
 	p.t.Helper()
@@ -300,6 +380,34 @@ func (p *wsPeer) expectMessage(op byte, want []byte) {
 	if !bytes.Equal(payload, want) {
 		p.t.Fatalf("payload = %q, want %q", payload, want)
 	}
+}
+
+// answerPings behaves like a browser that has nothing to say: it reads the
+// server's frames and answers every Ping at once with the Pong RFC 6455 §5.5.2
+// requires, until it has answered want of them or the connection ends.
+//
+// A Pong is the ONLY thing it ever sends, so the server's heartbeat can learn
+// this peer is alive through nothing but Pongs — which is what makes it the
+// right peer for asking whether those Pongs are actually read.
+func (p *wsPeer) answerPings(want int) (answered int, err error) {
+	for answered < want {
+		_, op, payload, rerr := p.readFrame()
+		//: the server ended the connection, or the peer's deadline fired.
+		if rerr != nil {
+			return answered, rerr
+		}
+		//: a pushed message, or anything else that asks for no answer.
+		if op != 0x9 {
+			continue
+		}
+		//: the same application data back, as §5.5.2 requires.
+		if _, werr := p.conn.Write(frame(true, 0, 0xA, true, payload)); werr != nil {
+			return answered, werr
+		}
+		answered++
+	}
+	//: every Ping asked for was answered and the connection is still open.
+	return answered, nil
 }
 
 // TestHandshakeAnswersTheRFCsOwnProof pins §4.2.2: the 101, both upgrade
@@ -525,6 +633,103 @@ func TestOriginIsCheckedByDefault(t *testing.T) {
 			t.Fatalf("status = %d, want 101", resp.StatusCode)
 		}
 	})
+}
+
+// TestDefaultOriginRuleComparesTheSchemeWhereTLSEndsHere pins ADR 0047 §D7's
+// scheme clause, and exactly where the default rule stops being able to apply
+// it.
+//
+// When this server terminates TLS itself it KNOWS the browser used https, so a
+// page served over plain http for the same host is the downgrade the origin
+// check exists to notice: whoever can inject into that page gets an encrypted
+// socket carrying the user's cookies. The default used to compare the host
+// alone and let it through, while the ADR promised otherwise.
+//
+// The plaintext rows are the other half, and they are load-bearing: behind a
+// TLS-terminating proxy the request arrives in plaintext whatever the browser
+// used, so the default cannot see the scheme. An https page must still connect
+// there — a rule demanding that the Origin's scheme equal the request's would
+// answer 403 to every browser behind every proxy — and an http page connects
+// too, which is the gap the documentation states and AllowOrigins closes.
+//
+// MUTATION-CHECKED. Making schemeConsistent answer true on every connection —
+// the host-only rule it replaced — fails exactly one row, "TLS ends here: an
+// http page for the same host is the downgrade", and nothing else in the
+// package notices:
+//
+//	status = 101, want 403 (TLS: true, Origin: "http://127.0.0.1:35201")
+func TestDefaultOriginRuleComparesTheSchemeWhereTLSEndsHere(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// tls reports whether the server terminates TLS itself, which is
+		// what populates Request.TLS.
+		tls bool
+		// origin is the Origin header, "" for none; "{host}" stands for the
+		// address the request is sent to, known only once the server runs.
+		origin string
+		status int
+	}
+	tests := []tc{
+		{
+			name: "TLS ends here: an http page for the same host is the downgrade",
+			tls:  true, origin: "http://{host}", status: http.StatusForbidden,
+		},
+		{
+			name: "TLS ends here: an https page for the same host",
+			tls:  true, origin: "https://{host}", status: http.StatusSwitchingProtocols,
+		},
+		{
+			name: "TLS ends here: the right scheme does not rescue another host",
+			tls:  true, origin: "https://evil.example", status: http.StatusForbidden,
+		},
+		{
+			name: "TLS ends here: no Origin at all is still a non-browser client",
+			tls:  true, origin: "", status: http.StatusSwitchingProtocols,
+		},
+		{
+			name: "TLS ends here: the opaque null origin is still refused",
+			tls:  true, origin: "null", status: http.StatusForbidden,
+		},
+		{
+			name: "plaintext here: an https page must connect, the TLS-terminating proxy case",
+			tls:  false, origin: "https://{host}", status: http.StatusSwitchingProtocols,
+		},
+		{
+			name: "plaintext here: the scheme is invisible, so http connects too",
+			tls:  false, origin: "http://{host}", status: http.StatusSwitchingProtocols,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var srv *httptest.Server
+		var peer *wsPeer
+		//: TLS terminated by the server itself, or the plaintext hop a
+		//: TLS-terminating proxy hands its backend.
+		if c.tls {
+			srv, _ = echoTLSServer(t)
+			peer = rawDialTLS(t, srv)
+		} else {
+			srv, _ = echoServer(t)
+			peer = rawDial(t, srv)
+		}
+		origin := strings.ReplaceAll(c.origin, "{host}", srv.Listener.Addr().String())
+		var extra []string
+		//: an absent header is a different case from an empty one.
+		if origin != "" {
+			extra = append(extra, "Origin: "+origin)
+		}
+		resp := peer.handshake(t, srv, extra...)
+		if resp.StatusCode != c.status {
+			t.Fatalf("status = %d, want %d (TLS: %t, Origin: %q)", resp.StatusCode, c.status, c.tls, origin)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
 }
 
 // TestSubprotocolNegotiationFollowsServerPreference pins §4.2.2's rule that the
@@ -982,11 +1187,13 @@ func TestDrainSendsGoingAwayAndEndsTheHandler(t *testing.T) {
 	}
 }
 
-// TestSendRefusesAfterTheConnectionEnds pins the floor under a handler that
-// only ever calls Send.
+// TestSendRefusesAfterTheConnectionEnds pins the floor under a goroutine that
+// only ever calls Send — a push handler's own loop, running beside the one
+// goroutine the contract requires to loop on Receive.
 //
-// Done() alone is not enough: a handler that never selects on it would still
-// hold a drain open. Both halves are load-bearing, exactly as they are for SSE.
+// Done() alone is not enough: a pushing loop that never selects on it would
+// still hold a drain open. Both halves are load-bearing, exactly as they are
+// for SSE.
 func TestSendRefusesAfterTheConnectionEnds(t *testing.T) {
 	t.Parallel()
 	refused := make(chan error, 1)
@@ -1264,5 +1471,191 @@ func TestHeartbeatEndsAConnectionToAPeerThatVanished(t *testing.T) {
 		}
 	case <-time.After(peerDeadline):
 		t.Fatalf("a silent peer never ended the connection; the heartbeat is inert")
+	}
+}
+
+// TestHeartbeatKeepsAPushConnectionWhileItsReaderRuns pins the contract's
+// positive half: a handler that only ever pushes stays connected for as long as
+// its peer is alive, PROVIDED one goroutine loops on Receive for the
+// connection's whole life.
+//
+// The peer answers Pings and sends nothing else, so the heartbeat can learn it
+// is alive through nothing but Pongs that Receive has read. Six answered Pings
+// are five passed liveness checks — at least five intervals — and the closing
+// handshake after them proves the reading goroutine was still serving control
+// frames at the end.
+//
+// This is the one heartbeat test that must NOT see the connection end, so its
+// interval is chosen against a measurement rather than for speed. Each check
+// gives the peer one interval to get a Pong through Receive, and under -race,
+// with this package's TLS and adversarial tests running beside it, that round
+// trip — Ping written to Pong counted — was measured at up to 24 ms on one P
+// and 20 ms on two: half of a 50 ms window, before CI adds other race-enabled
+// test binaries on the same cores. At 200 ms the margin is eightfold, for
+// 1.2 s of wall time.
+//
+// MUTATION-CHECKED, from both sides. Deleting the reading goroutine from the
+// handler — the shape the contract forbids — fails it two intervals in with:
+//
+//	the connection ended after 1 Ping(s) answered (read tcp 127.0.0.1:44456->127.0.0.1:34671: read: connection reset by peer); a handler whose reader runs must outlive every probe its peer answers
+//
+// The reset is the kernel's, and it is the defect in one word: the server
+// closed a socket whose receive buffer still held the Pong nobody read. Moving
+// Receive's rx.Add(1) below the control-frame branch instead — so a Pong the
+// handler HAS read stops counting — fails this test and nothing else in the
+// package, this time with a clean EOF because the Pong was consumed:
+//
+//	the connection ended after 1 Ping(s) answered (EOF); a handler whose reader runs must outlive every probe its peer answers
+func TestHeartbeatKeepsAPushConnectionWhileItsReaderRuns(t *testing.T) {
+	t.Parallel()
+	const interval time.Duration = 200 * time.Millisecond
+	ctx := t.Context()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Upgrade(w, r, websocket.PingInterval(interval))
+		//: Upgrade has already written the refusal; the peer reports it.
+		if err != nil {
+			return
+		}
+		defer func() { closeQuietly(conn) }()
+		//: THE CONTRACT: one goroutine loops on Receive for the connection's
+		//: whole life and discards what it reads. It returns on the terminal
+		//: error, which the deferred Close guarantees, so it cannot leak.
+		go func() {
+			//: the loop is the whole body; nothing it reads is kept.
+			for {
+				if _, rerr := conn.Receive(); rerr != nil {
+					return
+				}
+			}
+		}()
+		//: the handler's own goroutine only pushes, and never reads.
+		pushUntilEnded(ctx, conn, conn.Done(), interval/5)
+	}))
+	t.Cleanup(srv.Close)
+	peer := dial(t, srv)
+	answered, err := peer.answerPings(keepAliveProbes)
+	//: the peer's own deadline firing means the probes stopped coming, which
+	//: is an inert heartbeat — not the ending this test is about.
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("only %d Ping(s) arrived in %v; the heartbeat stopped probing, so nothing was measured",
+			answered, peerDeadline)
+	}
+	if err != nil {
+		t.Fatalf("the connection ended after %d Ping(s) answered (%v); "+
+			"a handler whose reader runs must outlive every probe its peer answers", answered, err)
+	}
+	//: §5.5.1 — the Close reply is the reading goroutine's job too, so an
+	//: echoed 1000 proves the loop was still running after every probe.
+	peer.send(0x8, true, []byte{0x03, 0xE8})
+	peer.expectCloseAfterTraffic(1000)
+}
+
+// TestHeartbeatEndsAConnectionNobodyReads pins a LIMIT, not a feature.
+//
+// The heartbeat counts frames the handler has READ (ADR 0047 §D8, amended
+// 2026-09-11). A handler that never calls Receive therefore looks exactly like
+// a vanished peer: the peer below answers every Ping on time, its Pongs sit
+// unread in the server's socket buffer, and the connection is ended two
+// intervals after it opened — about a minute at the default. That is why
+// Conn's doc comment makes a reading goroutine a requirement rather than a
+// style, and this test exists so that moving the limit — to three intervals,
+// to the first probe, or to never — is a decision somebody takes, not a side
+// effect nobody sees.
+//
+// The window asserted is [2, 3) intervals, and neither edge is a guess. The
+// clock starts before the upgrade and a ticker never fires early, so a correct
+// heartbeat cannot end the connection before its second tick, and a rule that
+// waited for one more silent check could not end it before its third: both
+// edges reject their mutation with certainty, and a correct heartbeat is given
+// a whole interval to be late in. The worst lateness measured across 340 runs
+// under -race on one, two and four Ps — 26.6 ms, on one P with this package's
+// TLS handshakes running alongside — is why the interval is 200 ms and not the
+// 50 the vanished-peer test can afford: that one only has to end eventually.
+//
+// MUTATION-CHECKED, once per direction the limit could move. Making the
+// heartbeat never fire — startHeartbeat returning before it starts the
+// pinger — fails it with:
+//
+//	a connection nobody reads was still open after 5s; the documented limit has moved
+//
+// Ending the connection only after a SECOND silent check fails the upper edge:
+//
+//	a connection nobody reads ended after 601.442269ms, want about two intervals: within [400ms, 600ms)
+//
+// and dropping the probed guard, so the first tick ends a connection it never
+// probed, is caught before the clock is even read:
+//
+//	the connection ended after 0 Pings (EOF); it was never probed, so this measured nothing
+func TestHeartbeatEndsAConnectionNobodyReads(t *testing.T) {
+	t.Parallel()
+	const interval time.Duration = 200 * time.Millisecond
+	ctx := t.Context()
+	endedAfter := make(chan time.Duration, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//: before the upgrade, so the ticker the upgrade starts cannot predate
+		//: it — which is what lets each bound below exclude its mutation with
+		//: certainty rather than on the odds.
+		start := time.Now()
+		conn, err := websocket.Upgrade(w, r, websocket.PingInterval(interval))
+		//: Upgrade has already written the refusal; the peer reports it.
+		if err != nil {
+			return
+		}
+		defer func() { closeQuietly(conn) }()
+		//: THE SHAPE UNDER TEST: a push handler with no reading goroutine.
+		pushUntilEnded(ctx, conn, conn.Done(), interval/5)
+		//: only an ending the connection reached on its own is a measurement;
+		//: the test giving up is not one.
+		select {
+		case <-conn.Done():
+			endedAfter <- time.Since(start)
+		default:
+		}
+	}))
+	t.Cleanup(srv.Close)
+	peer := dial(t, srv)
+	//: until the connection ends, however many Pings that takes.
+	answered, err := peer.answerPings(math.MaxInt)
+	//: the peer's own deadline firing means nothing ended the connection.
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("a connection nobody reads was still open after %v; the documented limit has moved", peerDeadline)
+	}
+	//: the peer was alive: it answered a probe, and the answer went unread.
+	if answered < 1 {
+		t.Fatalf("the connection ended after %d Pings (%v); it was never probed, so this measured nothing", answered, err)
+	}
+	//: the second tick is the earliest a correct heartbeat can act, the third
+	//: the earliest a rule tolerating one more silent check could.
+	lower, upper := 2*interval, 3*interval
+	select {
+	case elapsed := <-endedAfter:
+		if elapsed < lower || elapsed >= upper {
+			t.Fatalf("a connection nobody reads ended after %v, want about two intervals: within [%v, %v)",
+				elapsed, lower, upper)
+		}
+	case <-time.After(peerDeadline):
+		t.Fatalf("the peer saw the socket end (%v) but the handler never saw Done close", err)
+	}
+}
+
+// pushUntilEnded is a push handler's own loop: one text message every period
+// until the connection ends — ended is its Done channel — or the test does,
+// and never a read.
+func pushUntilEnded(ctx context.Context, conn Sender, ended <-chan struct{}, period time.Duration) {
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+	//: until one of the two endings below.
+	for {
+		select {
+		//: the connection ended; nobody is left to push to.
+		case <-ended:
+			return
+		//: the test is over, whatever the connection is doing.
+		case <-ctx.Done():
+			return
+		//: an application event to push.
+		case <-ticker.C:
+			sendQuietly(conn, corenet.WSMessageValue{Data: []byte("event")})
+		}
 	}
 }

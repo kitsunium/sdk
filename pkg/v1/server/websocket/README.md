@@ -60,13 +60,50 @@ None are negotiated, permessage\-deflate included. The server sends no Sec\-WebS
 
 ### Origin
 
-The browser's same\-origin policy does not apply to WebSocket: any page can open a connection to this server, and the browser attaches the user's cookies to the handshake. By default an Origin header, when present, must match the request's own host; a request with no Origin \(a CLI, a service, a Go client\) is allowed, because there is no ambient credential to abuse. [AllowOrigins](<#AllowOrigins>) replaces the rule with an allowlist and [AllowAnyOrigin](<#AllowAnyOrigin>) removes it, by name.
+The browser's same\-origin policy does not apply to WebSocket: any page can open a connection to this server, and the browser attaches the user's cookies to the handshake. By default an Origin header, when present, must name the request's own host and port — and, when this server terminates TLS itself, the https scheme as well, because an http:// page for the same host is exactly the downgrade the check exists to notice. A request with no Origin \(a CLI, a service, a Go client\) is allowed, because there is no ambient credential to abuse; the opaque "null" origin is refused.
+
+Behind a proxy that terminates TLS, the request reaches this server in plaintext whatever the browser used, so the default rule cannot see the scheme and does not compare it: there, an http:// page for the same host is accepted. X\-Forwarded\-Proto is not consulted, because where no proxy overwrites it the client wrote it. [AllowOrigins](<#AllowOrigins>) closes that gap — it names the scheme outright — and replaces the default rule entirely; [AllowAnyOrigin](<#AllowAnyOrigin>) removes the check, by name.
+
+### One goroutine always reads
+
+Every connection needs exactly one goroutine looping on \[Conn.Receive\] for its whole life — including a connection the handler only ever writes to. That loop is where the peer's Ping is answered \(RFC 6455 §5.5.2\), where its Close is replied to \(§5.5.1\), and the only place the heartbeat can see that the peer is alive. A handler that pushes runs it in a goroutine of its own and discards what it reads:
+
+```
+func push(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Upgrade(w, r)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	go func() { // the reader: required even with nothing to read
+		for {
+			if _, rerr := conn.Receive(); rerr != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-conn.Done():
+			return
+		case event := <-events: // the application's own feed
+			if serr := conn.SendText(event); serr != nil {
+				return
+			}
+		}
+	}
+}
+```
+
+The reading goroutine needs no joining: the deferred Close ends the connection, and its Receive returns the terminal error.
 
 ### Liveness and shutdown
 
-A peer that vanishes without closing leaves a socket that is perfectly readable and will simply never produce another byte. [PingInterval](<#PingInterval>) is the only thing that turns that silence into an ending; zero is clamped to [DefaultPingInterval](<#DefaultPingInterval>) rather than meaning "never", and "never" is spelled [WithoutPing](<#WithoutPing>).
+A peer that vanishes without closing leaves a socket that is perfectly readable and will simply never produce another byte. The heartbeat is the only thing that turns that silence into an ending: every [PingInterval](<#PingInterval>) it sends a Ping, and one interval later it ends the connection if the handler has READ no frame since. It counts frames the handler has read, not frames that arrived — a Pong the peer sent on time is silence to it until \[Conn.Receive\] reads it — so a connection nobody reads is ended within two intervals, about a minute at [DefaultPingInterval](<#DefaultPingInterval>), however healthy the peer is. Zero is clamped to [DefaultPingInterval](<#DefaultPingInterval>) rather than meaning "never", and "never" is spelled [WithoutPing](<#WithoutPing>).
 
-\[Conn.Done\] closes when the peer sends Close, when the socket dies, when the handler closes it, or when the server begins draining — in which case the connection sends a 1001 "going away" of its own accord. \[Conn.Receive\] and \[Conn.Send\] refuse from the same instant, so a handler that only loops on them terminates too.
+\[Conn.Done\] closes when the peer sends Close, when the socket dies, when the heartbeat gives up, when the handler closes it, or when the server begins draining — in which case the connection sends a 1001 "going away" of its own accord. \[Conn.Receive\] and \[Conn.Send\] refuse from the same instant, so the reading loop and a pushing loop both terminate too.
 
 ### Clients
 
@@ -171,7 +208,7 @@ var (
 ```
 
 <a name="AcceptKey"></a>
-## func [AcceptKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L328>)
+## func [AcceptKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L393>)
 
 ```go
 func AcceptKey(key string) string
@@ -182,7 +219,7 @@ AcceptKey computes the Sec\-WebSocket\-Accept value for a client's Sec\-WebSocke
 It is exported for tests and for anyone writing a client handshake by hand. The digest is SHA\-1 by the RFC's own instruction and is not a security primitive: its job is to prove the server parsed the handshake rather than replaying it, so a cached 101 cannot pass for a live upgrade.
 
 <a name="DrainSignal"></a>
-## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L339>)
+## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L404>)
 
 ```go
 func DrainSignal(ctx context.Context) <-chan struct{}
@@ -193,7 +230,7 @@ DrainSignal returns the channel closed when the server serving this request begi
 [Conn](<#Conn>) watches it for you. It is re\-exported here because a handler often wants to stop its own work at the same moment, and a nil channel blocks forever, so a select that watches it needs no nil check.
 
 <a name="CloseCode"></a>
-## type [CloseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L218>)
+## type [CloseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L276>)
 
 CloseCode is the status code a Close frame carries \(RFC 6455 §7.4\).
 
@@ -234,18 +271,18 @@ const (
 ```
 
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L212>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L270>)
 
 Conn is one upgraded WebSocket connection.
 
-Writes are safe for concurrent use; reads are not. The protocol is a single ordered frame stream, so two concurrent readers would each take half of a message — exactly one goroutine calls \[Conn.Receive\].
+Exactly one goroutine loops on \[Conn.Receive\] for the connection's whole life. Never two: the protocol is a single ordered frame stream, so two readers would each take half of a message. Never zero: that loop is also where Pings are answered, where the peer's Close is replied to and where the heartbeat sees the peer alive, so a connection nobody reads is ended within two ping intervals — see the package documentation for the push\-handler shape. Writes are safe for concurrent use.
 
 ```go
 type Conn = svcws.Conn
 ```
 
 <a name="Upgrade"></a>
-### func [Upgrade](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L232>)
+### func [Upgrade](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L290>)
 
 ```go
 func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (conn *Conn, err error)
@@ -258,7 +295,7 @@ On failure it has ALREADY written the HTTP response — a 426 carrying the versi
 The socket is taken over from net/http. It is no longer the HTTP server's to close, nor this SDK's listener engine's: it is the handler's until \[Conn.Close\].
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L215>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L273>)
 
 Message is one complete WebSocket application message.
 
@@ -267,7 +304,7 @@ type Message = corenet.WSMessageValue
 ```
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L221>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L279>)
 
 Option configures a Conn.
 
@@ -276,7 +313,7 @@ type Option = svcws.Option
 ```
 
 <a name="AllowAnyOrigin"></a>
-### func [AllowAnyOrigin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L316>)
+### func [AllowAnyOrigin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L381>)
 
 ```go
 func AllowAnyOrigin() Option
@@ -287,7 +324,7 @@ AllowAnyOrigin disables the origin check.
 It has to be written out because the browser's same\-origin policy does not apply to WebSocket: any page may open a connection to this server and the browser will attach the user's cookies to the handshake. Reach for it when authentication does not ride on ambient credentials — a bearer token, a signed ticket — which is exactly when the origin proves nothing anyway.
 
 <a name="AllowOrigins"></a>
-### func [AllowOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L304>)
+### func [AllowOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L369>)
 
 ```go
 func AllowOrigins(origins ...string) Option
@@ -295,10 +332,10 @@ func AllowOrigins(origins ...string) Option
 
 AllowOrigins replaces the default same\-origin rule with an exact allowlist.
 
-The comparison is on the whole Origin header — scheme, host and port — case\-insensitively. Matching the host alone would accept http:// for an https server, which is the downgrade the check exists to notice.
+The comparison is on the whole Origin header — scheme, host and port — case\-insensitively. Matching the host alone would accept http:// for an https server, which is the downgrade the check exists to notice. Behind a proxy that terminates TLS this is the only way to have the scheme checked at all: the request arrives in plaintext there, so the default rule cannot see which scheme the browser used.
 
 <a name="MaxFrameSize"></a>
-### func [MaxFrameSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L266>)
+### func [MaxFrameSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L324>)
 
 ```go
 func MaxFrameSize(n int64) Option
@@ -309,7 +346,7 @@ MaxFrameSize bounds one frame's ANNOUNCED payload length.
 It is separate from [MaxMessageSize](<#MaxMessageSize>) because it is enforced at a different moment: against the header, before a byte is read or allocated. A ceiling above the message ceiling can never be reached and is refused as a mistake.
 
 <a name="MaxMessageSize"></a>
-### func [MaxMessageSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L256>)
+### func [MaxMessageSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L314>)
 
 ```go
 func MaxMessageSize(n int64) Option
@@ -320,7 +357,7 @@ MaxMessageSize bounds one reassembled message.
 Zero is clamped to [DefaultMaxMessageSize](<#DefaultMaxMessageSize>), negative is refused. There is deliberately no "unbounded" setting: the length is announced by the peer in a 64\-bit field, and fragmentation lets it keep announcing more, so an unbounded ceiling is not a configuration choice — it is a remote memory allocator.
 
 <a name="PingInterval"></a>
-### func [PingInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L277>)
+### func [PingInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L339>)
 
 ```go
 func PingInterval(d time.Duration) Option
@@ -330,8 +367,10 @@ PingInterval sets how often the connection pings an otherwise silent peer.
 
 Zero does not mean "never": it is clamped to [DefaultPingInterval](<#DefaultPingInterval>), because a connection with the heartbeat silently disabled works perfectly on loopback and then stops noticing peers that vanish — which is how a mobile client normally leaves. A negative interval is refused; "never" is [WithoutPing](<#WithoutPing>).
 
+The heartbeat counts frames the handler has READ, so it keeps a connection open only while one goroutine loops on \[Conn.Receive\]; a connection nobody reads is ended within two intervals, however healthy the peer.
+
 <a name="Subprotocols"></a>
-### func [Subprotocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L245>)
+### func [Subprotocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L303>)
 
 ```go
 func Subprotocols(names ...string) Option
@@ -342,7 +381,7 @@ Subprotocols declares the subprotocols this server speaks, most preferred first.
 The SERVER's order decides. A client advertises what it can speak; choosing among those is the server's call, or a client that listed a deprecated dialect first could pin the server to it forever. No overlap is not a failure — the upgrade succeeds with no subprotocol, which RFC 6455 §4.2.2 names as the way to say "none agreed".
 
 <a name="WithoutPing"></a>
-### func [WithoutPing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L284>)
+### func [WithoutPing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L346>)
 
 ```go
 func WithoutPing() Option
@@ -351,7 +390,7 @@ func WithoutPing() Option
 WithoutPing disables the heartbeat, and with it the connection's only liveness check. Use it where the transport provides its own.
 
 <a name="WriteTimeout"></a>
-### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L294>)
+### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L356>)
 
 ```go
 func WriteTimeout(d time.Duration) Option

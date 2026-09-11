@@ -116,6 +116,11 @@ func MaxFrameSize(n int64) Option {
 // vanished without closing, which is the normal way a mobile client leaves.
 // Zero is clamped to [DefaultPingInterval]; a negative interval is refused; to
 // disable it, say so with [WithoutPing].
+//
+// Every interval the heartbeat sends a Ping, and one interval later it ends
+// the connection if the handler has READ no frame since. It counts frames
+// Receive has read, never frames that merely arrived, so it keeps a
+// connection open only while one goroutine loops on Receive — see [Conn].
 func PingInterval(d time.Duration) Option {
 	//: applied in order by Upgrade, so a later option deliberately wins.
 	return func(c *config) {
@@ -157,7 +162,10 @@ func WriteTimeout(d time.Duration) Option {
 // The comparison is on the whole Origin header, case-insensitively — scheme,
 // host and port together. Comparing only the host would accept
 // http://app.example.com for an https server, which is precisely the downgrade
-// an origin check exists to notice.
+// an origin check exists to notice. Behind a proxy that terminates TLS this is
+// the only way to have the scheme checked at all: the request arrives in
+// plaintext there, so the default rule cannot see which scheme the browser
+// used (see sameOrigin).
 func AllowOrigins(origins ...string) Option {
 	//: applied in order by Upgrade, so a later option deliberately wins.
 	return func(c *config) {
