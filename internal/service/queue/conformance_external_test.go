@@ -266,6 +266,59 @@ func TestReadingTheDeadLetterStoreDoesNotConsumeIt(t *testing.T) {
 	}
 }
 
+// TestAReaderThatEditsADeadLetterPayloadDoesNotRewriteTheStore holds the dead-letter
+// read to the port's ownership rule: MessageValue.Payload "belongs to the
+// receiver", and a dead letter is evidence, so an investigator that scribbles
+// over the bytes it was handed must not change what the next one reads. Two
+// records, so the copy is shown to be per entry and the order to survive it.
+//
+// Seen failing: with the memory broker's DeadLetters copying only the OUTER
+// slice, the memory case printed
+//
+//	dead letter 0 after the first reader edited its copy = "XXXXX", want "first" — the
+//	read handed out the bytes the store keeps
+//
+// while the file case, which re-reads every record from disk, passed.
+func TestAReaderThatEditsADeadLetterPayloadDoesNotRewriteTheStore(t *testing.T) {
+	t.Parallel()
+	want := []string{"first", "second"}
+	for _, factory := range bothBrokers() {
+		t.Run(factory.name, func(t *testing.T) {
+			t.Parallel()
+			clk := clock.NewManualClock(epoch)
+			broker := factory.make(t, clk, corequeue.PolicyValue{
+				VisibilityTimeout: testVisibility, MaxDeliveries: 1,
+			})
+			for _, payload := range want {
+				publish(t, broker, payload)
+				//: distinct enqueue instants, so the file broker's name order
+				//: — instant, then entropy — is the publication order.
+				clk.Advance(time.Second)
+			}
+			for range want {
+				nack(t, broker, receiveOne(t, broker).Lease.Receipt, nil)
+			}
+
+			for _, record := range deadLetters(t, broker, 10) {
+				//: every byte the first reader was handed.
+				for index := range record.Message.Payload {
+					record.Message.Payload[index] = 'X'
+				}
+			}
+			again := deadLetters(t, broker, 10)
+			if len(again) != len(want) {
+				t.Fatalf("DeadLetters() returned %d records, want %d", len(again), len(want))
+			}
+			for index, record := range again {
+				if got := string(record.Message.Payload); got != want[index] {
+					t.Fatalf("dead letter %d after the first reader edited its copy = %q, want %q — the "+
+						"read handed out the bytes the store keeps", index, got, want[index])
+				}
+			}
+		})
+	}
+}
+
 // TestANackWithNoCauseIsRecordedAsUnreported keeps "it did not work and I
 // cannot say why" a real answer rather than an empty string a reader would
 // take for a bug in the SDK.

@@ -328,8 +328,21 @@ func (b *memoryBroker) DeadLetters(
 	//: not serialise against the consumers it is investigating.
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	//: a dead letter is evidence; reading it must not consume it.
-	return slices.Clone(b.dead[:min(max, len(b.dead))]), nil
+	//: a dead letter is evidence; reading it must not consume it. The outer
+	//: copy keeps the order and the nil an empty store has always returned.
+	dead = slices.Clone(b.dead[:min(max, len(b.dead))])
+	//: and it must not let the reader REWRITE it either: a DeadLetterValue
+	//: holds a slice, so the outer copy alone hands every caller the very
+	//: bytes this store keeps, and one that edits the payload it was given
+	//: changes what the next investigator reads. The port says the payload
+	//: belongs to the receiver; Receive copies for the same reason, and the
+	//: file broker re-reads the record from disk. Only the copy is written,
+	//: so the read lock is still the right one.
+	for index := range dead {
+		dead[index].Message.Payload = slices.Clone(dead[index].Message.Payload)
+	}
+	//: the caller's own, in the order the store holds them.
+	return dead, nil
 }
 
 // resolve returns the record a receipt names, or the reason it names none.
