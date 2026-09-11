@@ -3,30 +3,28 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 package(default_visibility = ["//visibility:public"])
 
 go_library(
-    name = "resilience",
-    srcs = ["resilience.go"],
-    importpath = "github.com/kitsunium/sdk/pkg/v1/resilience",
+    name = "queue",
+    srcs = ["queue.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/queue",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/resilience",
-        "//internal/service/resilience",
+        "//internal/core/queue",
+        "//internal/service/queue",
     ],
 )
 
 alias(
     name = "go_default_library",
-    actual = ":resilience",
+    actual = ":queue",
     visibility = ["//visibility:public"],
 )
 
 go_test(
-    name = "resilience_test",
-    srcs = [
-        "resilience_bench_test.go",
-        "resilience_external_test.go",
-    ],
+    name = "queue_test",
+    size = "small",
+    srcs = ["queue_external_test.go"],
     deps = [
-        ":resilience",
+        ":queue",
         "//pkg/v1/errs",
     ],
 )

@@ -98,6 +98,10 @@ lint:
 	# audited by nothing AND passes — ADR 0020 records this gap having already
 	# hidden ~10 emitters once. Mechanical, so it cannot reopen by forgetting.
 	bash scripts/pre-commit/check-audit-coverage.sh
+	# The root CLAUDE.md is the first thing anybody reads, and parallel union
+	# merges silently left it describing a tree that no longer existed. Both
+	# invariants key on what is ON DISK, never on a maintained number.
+	bash scripts/pre-commit/check-domain-docs.sh
 	# The SDK is bound by the invariants it imposes on consumers. Running the
 	# guard here is what keeps ADR 0033 from being a tool nobody executes.
 	$(MAKE) --no-print-directory guard
