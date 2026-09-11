@@ -33,6 +33,14 @@ and `NotificationValue` value type declared in `internal/core/proc`. Backs the
   bounds the WRITE and not the dial, since a unixgram dial takes no round trip.
   Only the two helpers with a caller that has a deadline to inherit have a
   sibling; the others gain one when something needs it.
+
+  Its tests are **Linux-only** (`notify_bounded_linux_external_test.go`), and
+  that is a property of the HARNESS, not of the bound: making a send block means
+  filling the supervisor's receive queue, which is Linux's mechanism. CI showed
+  the alternatives on the first run — FreeBSD accepted all 8192 fillers without
+  ever blocking a sender, and macOS refused the send outright instead of parking
+  it, so no deadline had anything to interrupt. Weakening the assertions to
+  something all three satisfy would have kept them green while testing nothing.
 - **Abstract namespace.** A `$NOTIFY_SOCKET` value beginning with `@` selects the
   Linux abstract namespace; the `@` is replaced by a NUL byte in `sun_path[0]`
   before binding/connecting (`resolveAddr`).
