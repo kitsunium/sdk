@@ -12,6 +12,7 @@ and `NotificationValue` value type declared in `internal/core/proc`. Backs the
 | Symbol | Side | Platform |
 |---|---|---|
 | `Notify(state)` / `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` | notifier | all (no-op when unset) |
+| `NotifyContext(ctx, state)` / `ReadyContext` / `StatusContext` | notifier, bounded | all (no-op when unset) |
 | `WatchdogInterval()` | env query | all |
 | `Listen() (Listener, path, err)` | supervisor | linux only |
 
@@ -22,6 +23,16 @@ and `NotificationValue` value type declared in `internal/core/proc`. Backs the
   sd_notify behaviour so an unsupervised binary stays silent rather than erroring.
 - **Set-but-unreachable ⇒ `NotifyFailed`.** A dial/write failure against a
   configured socket is a real error (`coreproc.CodeNotifyFailed`).
+- **The write is the only unbounded step, and the context siblings bound it**
+  (ADR 0072). A unixgram write blocks once the RECEIVER's queue is full, and
+  the receiver is the supervisor: measured on Linux, a brand new sender — which
+  is what every send here is — parks at the 514th small datagram. `Notify` has
+  no deadline and says so; `NotifyContext` hands ctx's deadline to the kernel as
+  the socket's write deadline and reaches a write already parked through
+  `context.AfterFunc`, which is the only way to interrupt a `net.Conn`. It
+  bounds the WRITE and not the dial, since a unixgram dial takes no round trip.
+  Only the two helpers with a caller that has a deadline to inherit have a
+  sibling; the others gain one when something needs it.
 - **Abstract namespace.** A `$NOTIFY_SOCKET` value beginning with `@` selects the
   Linux abstract namespace; the `@` is replaced by a NUL byte in `sun_path[0]`
   before binding/connecting (`resolveAddr`).

@@ -74,7 +74,11 @@ func (h *health) evaluate(ctx context.Context, e *entry) corehealth.ResultValue 
 // perform runs one check body and publishes its result to everyone waiting.
 func (h *health) perform(e *entry, run *inflight) {
 	begun := h.clk.Now()
+	//: the run's budget is its own, and expires whether or not anyone is left
+	//: waiting for it.
+	release := h.boundRun(e, run)
 	err := h.invoke(e, run)
+	release()
 	result := corehealth.ResultValue{
 		Name: e.name, Status: e.verdict(err), At: h.clk.Now(),
 		Took: h.clk.Since(begun), Err: err,
@@ -87,6 +91,48 @@ func (h *health) perform(e *entry, run *inflight) {
 	if e.finish(result) {
 		h.startupPassed()
 	}
+}
+
+// boundRun arms the budget the RUN owns, and returns the release its caller
+// runs when the body returns.
+//
+// The budget used to live only on the waiting side, so the run's context was
+// cancelled by whichever probe sat out the whole budget — and a run every
+// caller had left was cancelled by nobody. That is the ordinary shape of a
+// polled endpoint behind a proxy with its own, shorter timeout: each probe
+// departs early (health.departed, which deliberately cancels nothing, since
+// one caller's context is not the shared run's), the run keeps the next probe
+// from starting a second body, and the body itself is never told its time is
+// up. A check that honours its context then holds its dependency's connection
+// for the entire outage while every probe reports a timeout.
+//
+// The announcement is the same one [health.abandoned] makes and means the same
+// thing: the SDK cannot kill a goroutine, so cancelling the context is the
+// only thing it can do, and the body decides what that means.
+//
+// # Goroutine lifetime
+//
+// One goroutine per run, and it does NOT last the outage: it ends at the
+// budget — having cancelled — or at the release, whichever comes first. So a
+// wedged dependency still costs one goroutine for the whole outage (the body),
+// plus this one for the length of one budget.
+func (h *health) boundRun(e *entry, run *inflight) (release func()) {
+	//: armed on the INJECTED clock, like every other budget here.
+	timer := h.clk.NewTimer(e.budget)
+	released := make(chan struct{})
+	go func() {
+		defer timer.Stop()
+		select {
+		//: the body had its budget and did not answer.
+		case <-timer.C():
+			//: tell it so; a liveness body has no context and hears nothing.
+			run.cancel()
+		//: the body answered first.
+		case <-released:
+			//: nothing to announce.
+		}
+	}()
+	return func() { close(released) }
 }
 
 // invoke calls the check body with its panic recovered, and wraps a failure so

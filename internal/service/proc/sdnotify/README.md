@@ -36,3 +36,9 @@ package.
 - `internal/service/proc/sdnotify/CLAUDE.md` — maintainer notes
 - `internal/core/proc/` — the port + value type + error sentinels
 - ADR 0016 — `docs/adr/0016-sdk-process-supervision-domain.md`
+
+`Notify` waits as long as the supervisor makes it: a unixgram write blocks once
+the receiving queue is full, and it carries no deadline. `NotifyContext` (with
+`ReadyContext` / `StatusContext`) is the same send bounded by a context — the
+deadline becomes the socket's write deadline, and a cancellation reaches a write
+already parked. ADR 0072.
