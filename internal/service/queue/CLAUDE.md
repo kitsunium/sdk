@@ -154,9 +154,16 @@ the code.
 
 ## Do NOT
 
-- Add a `Close`. The durable broker holds one `os.Root` (the `service/vfs`
-  precedent) and no per-message handle, and nothing about the queue's contents
-  lives in this process — which is what makes it genuinely inter-process.
+- Give `Close` any duty beyond releasing descriptors. The durable broker holds
+  TWO directory descriptors — its own `os.Root` and the one inside its
+  `service/vfs` publisher (this rule used to say one, and to refuse a `Close`
+  on that basis) — and nothing about the queue's contents lives in this
+  process, which is what makes it genuinely inter-process. So `Close` is an
+  `io.Closer` reached by type assertion, as the session file store's is: it
+  releases both descriptors, flushes nothing and owns nothing, and every call
+  after it fails. `os.Root` would release them at the next collection anyway;
+  `TestClosingTheDurableBrokerReleasesBothDescriptors` holds the collector off
+  to prove `Close` does it without one.
 - Flush on `Ack`, `Nack` or `Receive`. See above; it buys nothing.
 - Add a sweeper goroutine, a timer, or a background reclaim. Expiry is noticed
   by whoever looks next, in both brokers, deliberately.

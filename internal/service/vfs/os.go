@@ -55,6 +55,23 @@ func NewOS(root string) (filesystem corevfs.FullFS, err error) {
 	return disk, nil
 }
 
+// Close releases the directory descriptor the filesystem was opened on.
+//
+// It satisfies io.Closer, a capability reached by type assertion (ADR 0039)
+// rather than a fifth verb on the frozen WritableFS — the session file store's
+// shape. os.Root also closes itself once it is garbage collected, but a caller
+// opening filesystems in a loop should get its descriptors back when it says
+// so, not at the next collection. Every call after Close fails.
+func (o *osFS) Close() error {
+	//: the one handle this filesystem owns.
+	if closeErr := o.root.Close(); closeErr != nil {
+		//: RootUnavailable, with the operating system's cause in the chain.
+		return failRoot(closeErr, kerrs.String("op", "close"))
+	}
+	//: released.
+	return nil
+}
+
 // failRoot wraps a constructor cause onto [RootUnavailable] by restating it,
 // so the operating-system error survives in the chain.
 func failRoot(cause error, fields ...kerrs.FieldValue) error {

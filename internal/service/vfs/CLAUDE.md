@@ -15,7 +15,7 @@ the port's verdicts stay in `internal/core/vfs`.
 | File | What lives there |
 |---|---|
 | `vfs.go` | package doc, `verdict`, and the `failRead` / `failWrite` / `failPublish` wrap helpers |
-| `os.go` | `NewOS`, the read half (delegating to `os.Root`), and the write guards |
+| `os.go` | `NewOS`, the read half (delegating to `os.Root`), the write guards, and `Close` — `io.Closer` by type assertion (ADR 0039), releasing the root's descriptor rather than waiting for `os.Root`'s finalizer |
 | `os_write.go` | `WriteFile`, `MkdirAll`, `Remove`, `RemoveAll` — the non-atomic verbs |
 | `os_publish.go` | **the domain's reason to exist**: `publish`, `atomicOps`, `tempPath` |
 | `osguard_unix.go` / `osguard_other.go` | `platformNative` + `syncDirHandle`, and the honest refusal where the mechanics do not exist |

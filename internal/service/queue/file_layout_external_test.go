@@ -1,8 +1,11 @@
 package queue_test
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
@@ -311,4 +314,57 @@ func newFileBrokerWithClock(t *testing.T, dir string, clk clock.Clock) corequeue
 		t.Fatalf("NewFile() = %v, want nil", err)
 	}
 	return broker
+}
+
+// TestClosingTheDurableBrokerReleasesBothDescriptors pins that Close gives back
+// the broker's own root AND the one its atomic publisher holds. os.Root closes
+// itself when collected, so the collector is held off here — otherwise a
+// finalizer could return the descriptors and hide a Close that forgot one.
+// Seen failing with the publisher's root left open: "20 brokers opened and
+// closed left 20 more descriptors open". Serial: SetGCPercent is process-wide.
+func TestClosingTheDurableBrokerReleasesBothDescriptors(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("counts /proc/self/fd, which only Linux has")
+	}
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	dir := t.TempDir()
+	before := openDescriptors(t)
+	const brokers int = 20
+	for range brokers {
+		broker := newFileBroker(t, dir, defaultPolicy())
+		closer, ok := broker.(io.Closer)
+		if !ok {
+			t.Fatal("the durable broker does not implement io.Closer")
+		}
+		if err := closer.Close(); err != nil {
+			t.Fatalf("Close() = %v, want nil", err)
+		}
+	}
+	if after := openDescriptors(t); after != before {
+		t.Fatalf("%d brokers opened and closed left %d more descriptors open", brokers, after-before)
+	}
+}
+
+// TestADurableBrokerRefusesWorkAfterClose pins that Close really ended the
+// broker's use of its directory: the next call fails typed instead of reaching
+// a descriptor that is gone.
+func TestADurableBrokerRefusesWorkAfterClose(t *testing.T) {
+	t.Parallel()
+	broker := newFileBroker(t, t.TempDir(), defaultPolicy())
+	if err := broker.(io.Closer).Close(); err != nil {
+		t.Fatalf("Close() = %v, want nil", err)
+	}
+	if _, err := broker.Publish(t.Context(), []byte("late")); !errs.HasCode(err, svcqueue.CodeQueueBackendFailed) {
+		t.Fatalf("Publish after Close = %v, want QUEUE_BACKEND_FAILED", err)
+	}
+}
+
+// openDescriptors counts this process's open file descriptors.
+func openDescriptors(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatalf("ReadDir(/proc/self/fd): %v", err)
+	}
+	return len(entries)
 }
