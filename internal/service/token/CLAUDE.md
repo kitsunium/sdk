@@ -52,7 +52,7 @@ exactly as trustworthy as the key itself.
 | `validate.go` | the shared post-authentication claim checks + `stampIssuedClaims` |
 | `encoding.go` / `depth_scan.go` | bounded segment split, strict base64url, JSON depth + duplicate-member checks, PASETO `PAE` |
 | `jsonstring.go` | `quoteJSONString` / `quoteJSONStrings` — JSON string rendering with no error channel |
-| `claims_codec.go` | the shared claims traversal + the `claimShape` contract + the issue-side UTF-8 refusal (`checkClaimText`, `putPrivate`) |
+| `claims_codec.go` | the shared claims traversal + the `claimShape` contract + the issue-side UTF-8 refusal (`checkClaimText`, `putPrivate`) + the verify-side refusals of text that is not UTF-8 and of a registered claim sent as JSON null (`nullRegisteredClaim` — `encoding/json` would decode `"aud": null` as an audience of `[""]` and `"nbf": null` as 1970; a private claim may still be null) |
 | `jose_shape.go` / `paseto_shape.go` | the two claim-value encodings (NumericDate vs RFC 3339) |
 | `jws.go` / `jws_parts.go` | `headerValue`, the JOSE header parse, `checkHeader` (the algorithm gate), `jwsPartsValue` |
 | `jws_issuer.go` / `jws_verifier.go` | the JWS issuer and single-key verifier |

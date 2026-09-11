@@ -9,6 +9,7 @@
 package token
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 	"unicode/utf8"
@@ -85,6 +86,14 @@ func decodeClaims(raw []byte, maxDepth int, shape claimShape) (claims coretoken.
 
 // decodeRegistered reads the seven registered claims out of members.
 func decodeRegistered(members map[string]json.RawMessage, shape claimShape) (claims coretoken.ClaimsValue, err error) {
+	//: a registered claim present as JSON null is no value of its type, and
+	//: encoding/json would decode it as one anyway — "" for iss, sub and jti,
+	//: an audience of [""] for aud, the Unix epoch for exp, nbf and iat — so a
+	//: signed token could say "null" and be read as absent, empty or 1970.
+	if name, found := nullRegisteredClaim(members); found {
+		//: name the claim, which is the domain's vocabulary, never its value.
+		return coretoken.ClaimsValue{}, malformed("registered claim " + name + " is null")
+	}
 	iss, ierr := decodeStringClaim(members, coretoken.ClaimIssuer)
 	//: a non-string "iss" is malformed, not ignorable.
 	if ierr != nil {
@@ -112,6 +121,26 @@ func decodeRegistered(members map[string]json.RawMessage, shape claimShape) (cla
 	base := coretoken.NewClaimsValue().WithIssuer(iss).WithSubject(sub).WithID(jti)
 	//: the audience setter clones, so passing nil clears the claim.
 	return decodeTimeClaims(base.WithAudience(audience...), members, shape)
+}
+
+// nullRegisteredClaim reports the first registered claim members carries as
+// JSON null, in RFC 7519 §4.1 order so the refusal is deterministic.
+func nullRegisteredClaim(members map[string]json.RawMessage) (name string, found bool) {
+	//: the seven names this domain decodes into typed fields.
+	for _, claim := range [...]string{
+		coretoken.ClaimIssuer, coretoken.ClaimSubject, coretoken.ClaimAudience,
+		coretoken.ClaimExpiry, coretoken.ClaimNotBefore, coretoken.ClaimIssuedAt,
+		coretoken.ClaimID,
+	} {
+		//: RawMessage keeps the member's bytes as sent; the decoder already
+		//: trimmed the whitespace around them.
+		if raw, present := members[claim]; present && bytes.Equal(raw, []byte("null")) {
+			//: the first null registered claim.
+			return claim, true
+		}
+	}
+	//: none is null.
+	return "", false
 }
 
 // decodeTimeClaims reads exp / nbf / iat under shape onto base.
