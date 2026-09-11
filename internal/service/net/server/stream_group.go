@@ -69,6 +69,14 @@ func (g *StreamGroup) HandleHTTP(h http.Handler) *StreamGroup {
 	return g.Handle(adapter)
 }
 
+// tracksCloses reports whether the group's sockets must report their own
+// Close: a handler can take one over — the group serves HTTP — while a ceiling
+// still has to count it. It is read at bind time, after the limiter is built.
+func (g *StreamGroup) tracksCloses() bool {
+	//: every other group either cannot hijack or has no slot to hold.
+	return g.httpAdapter != nil && g.limiter != nil
+}
+
 // Use appends middlewares, outermost first.
 func (g *StreamGroup) Use(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup {
 	g.middlewares = append(g.middlewares, middlewares...)

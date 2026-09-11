@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1252,29 +1253,38 @@ func TestReceiveRefusesAnInvalidOutboundTextMessage(t *testing.T) {
 }
 
 // TestCloseWithRefusesACodeThatMustNotTravel pins that the caller cannot commit
-// the error this package refuses to accept from a peer.
+// the error this package refuses to accept from a peer — nor send the one code
+// only a client may send. 1006 describes a connection that died without a
+// close frame, so sending it in one contradicts its own delivery; 1010 is a
+// client giving up on an extension the server did not negotiate (§7.4.1), so a
+// server initiating a close with it states something that cannot be true.
+// Seen failing with the 1010 check removed: "CloseWith(1010) = <nil>, want
+// WS_INVALID_PAYLOAD".
 func TestCloseWithRefusesACodeThatMustNotTravel(t *testing.T) {
 	t.Parallel()
-	result := make(chan error, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Upgrade(w, r)
-		if err != nil {
-			result <- err
-			return
-		}
-		//: §7.4.1 — 1006 describes a connection that died without a close
-		//: frame, so sending it in one contradicts its own delivery.
-		result <- conn.CloseWith(corenet.WSCloseAbnormal, "")
-	}))
-	t.Cleanup(srv.Close)
-	dial(t, srv)
-	select {
-	case err := <-result:
-		if !errs.HasCode(err, corenet.CodeWSInvalidPayload) {
-			t.Fatalf("CloseWith(1006) = %v, want WS_INVALID_PAYLOAD", err)
-		}
-	case <-time.After(peerDeadline):
-		t.Fatalf("the handler never reported")
+	for _, code := range []corenet.WSCloseCode{corenet.WSCloseAbnormal, corenet.WSCloseExtensionRequired} {
+		t.Run(strconv.Itoa(int(code)), func(t *testing.T) {
+			t.Parallel()
+			result := make(chan error, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := websocket.Upgrade(w, r)
+				if err != nil {
+					result <- err
+					return
+				}
+				result <- conn.CloseWith(code, "")
+			}))
+			t.Cleanup(srv.Close)
+			dial(t, srv)
+			select {
+			case err := <-result:
+				if !errs.HasCode(err, corenet.CodeWSInvalidPayload) {
+					t.Fatalf("CloseWith(%d) = %v, want WS_INVALID_PAYLOAD", code, err)
+				}
+			case <-time.After(peerDeadline):
+				t.Fatalf("the handler never reported")
+			}
+		})
 	}
 }
 

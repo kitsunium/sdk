@@ -98,6 +98,22 @@ func TestEveryMalformedFrameIsOneVerdict(t *testing.T) {
 		}
 	}
 	binary.BigEndian.PutUint32(hostileCount[countAt:countAt+lenPrefix], ^uint32(0))
+	//: the same four 0xFF bytes read as a STRING length, and as an entry count
+	//: on a frame that ends right after it. Both are merely over the cap on a
+	//: 64-bit int, but where int is 32 bits int(0xffffffff) is -1, and -1
+	//: passed every "> cap" check: the string length reached a slice
+	//: expression and panicked, and the count reached make() and a loop that
+	//: ran zero times, so a frame claiming four billion entries decoded as an
+	//: empty payload. Only a 32-bit run can see it: GOARCH=386 go test.
+	//:
+	//: Mutation, under GOARCH=386: converting the prefixes to int before the
+	//: comparison (the code before the fix) failed with "decodeRecord
+	//: panicked: runtime error: slice bounds out of range [5:4]" and with
+	//: "decodeRecord = ({... data:map[]}, <nil>), want CodeRecordCorrupt".
+	hostileLength := bytes.Clone(valid)
+	binary.BigEndian.PutUint32(hostileLength[versionLen:versionLen+lenPrefix], ^uint32(0))
+	bareCount := encodeRecord(record{digest: sampleRecord().digest, subject: sampleRecord().subject})
+	binary.BigEndian.PutUint32(bareCount[len(bareCount)-lenPrefix:], ^uint32(0))
 	tests := []struct {
 		name  string
 		frame []byte
@@ -108,11 +124,20 @@ func TestEveryMalformedFrameIsOneVerdict(t *testing.T) {
 		{"a truncated payload", valid[:len(valid)-3]},
 		{"trailing bytes", append(bytes.Clone(valid), 0x00)},
 		{"an enormous entry count", hostileCount},
+		{"a string length of 0xffffffff", hostileLength},
+		{"an entry count of 0xffffffff with nothing after it", bareCount},
 		{"noise", bytes.Repeat([]byte{0x7F}, len(valid))},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: "no input panics" is part of the verdict, so a panic is reported
+			//: against its case instead of killing the binary.
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("decodeRecord panicked: %v", recovered)
+				}
+			}()
 			decoded, err := decodeRecord(tc.frame)
 			if !errs.HasCode(err, CodeRecordCorrupt) {
 				t.Fatalf("decodeRecord = (%+v, %v), want CodeRecordCorrupt", decoded, err)

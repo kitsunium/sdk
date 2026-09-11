@@ -6,6 +6,8 @@ import (
 	"maps"
 	"slices"
 	"time"
+
+	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // recordVersion is the first byte of every encoded record. A future framing
@@ -181,11 +183,14 @@ func decodeData(raw []byte, off int) (payload map[string]string, ok bool) {
 		//: short frame.
 		return nil, false
 	}
-	count := int(binary.BigEndian.Uint32(raw[off : off+lenPrefix]))
+	count := binary.BigEndian.Uint32(raw[off : off+lenPrefix])
 	off += lenPrefix
 	//: the bound is checked BEFORE the allocation it would fund — a count
-	//: field claiming four billion entries must not reserve four billion slots.
-	if count > maxDataEntries {
+	//: field claiming four billion entries must not reserve four billion slots
+	//: — and on the uint32 the frame carries: where int is 32 bits,
+	//: int(0xffffffff) is -1, which passed this check and made a frame
+	//: claiming four billion entries decode as an empty payload.
+	if count > uint32(maxDataEntries) {
 		//: refused without allocating.
 		return nil, false
 	}
@@ -194,7 +199,8 @@ func decodeData(raw []byte, off int) (payload map[string]string, ok bool) {
 		//: nothing to read.
 		return nil, true
 	}
-	payload = make(map[string]string, count)
+	//: at most maxDataEntries, so the conversion is exact on every platform.
+	payload = make(map[string]string, int(count))
 	//: exactly count pairs, or the frame is corrupt — the loop cannot read
 	//: past the end because takeString bounds every read.
 	for range count {
@@ -236,16 +242,25 @@ func takeString(raw []byte, off int) (value string, next int, ok bool) {
 		//: refused.
 		return "", 0, false
 	}
-	size := int(binary.BigEndian.Uint32(raw[off : off+lenPrefix]))
+	size := binary.BigEndian.Uint32(raw[off : off+lenPrefix])
 	off += lenPrefix
 	//: bound first, then read — the length field is attacker-shaped input on
-	//: any store whose key ever leaks, and this check costs nothing.
-	if size > maxStringLen || off+size > len(raw) {
+	//: any store whose key ever leaks — and bound the uint32 itself: where int
+	//: is 32 bits, int(0xffffffff) is -1, which passed a signed check and
+	//: panicked in the slice expression below.
+	if size > uint32(maxStringLen) {
+		//: refused without converting.
+		return "", 0, false
+	}
+	//: at most maxStringLen, so the conversion is exact on every platform.
+	end := off + int(size)
+	//: the bytes it announces must actually be there.
+	if end > len(raw) {
 		//: refused without slicing.
 		return "", 0, false
 	}
 	//: the conversion copies, so the frame can be reused or zeroed after.
-	return string(raw[off : off+size]), off + size, true
+	return string(raw[off:end]), end, true
 }
 
 // takeTime reads one int64 of Unix nanoseconds.
@@ -258,6 +273,25 @@ func takeTime(raw []byte, off int) (value time.Time, next int, ok bool) {
 	nanos := int64(binary.BigEndian.Uint64(raw[off : off+timeLen])) //nolint:gosec // reverses appendTime's two's-complement round trip
 	//: UTC so a decoded record never carries the reader's local zone.
 	return time.Unix(0, nanos).UTC(), off + timeLen, true
+}
+
+// boundSubject refuses a subject longer than the frame can carry back, before
+// anything is minted, written or retired.
+//
+// takeString caps every decoded string at maxStringLen, the subject included,
+// so a longer subject used to be WRITTEN — and then every load of the session
+// failed as RecordCorrupt, after Regenerate had already retired the record
+// that worked. The memory store has no frame and so no such limit, which is
+// exactly why both stores call this: a subject one store keeps and the other
+// cannot read back would make the port two contracts.
+func boundSubject(subject string) error {
+	//: the same cap as a payload string, since it is the same frame field shape.
+	if len(subject) > maxStringLen {
+		//: the subject is personal data and is never named, only its role.
+		return wrapAs(PayloadTooLarge, nil, kerrs.String("field", "subject"))
+	}
+	//: within bounds.
+	return nil
 }
 
 // boundPayload refuses a session payload above the caps, before it is written.

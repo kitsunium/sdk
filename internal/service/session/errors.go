@@ -64,14 +64,17 @@ var (
 		"service/session: flock on the store-wide lock descriptor failed; the operation was refused rather than run without serialisation",
 		errs.WithExitCode(exitTempFail))
 
-	// PayloadTooLarge is returned by Save for a payload above the store's caps.
-	// A session store holds per-user state on the request path; an unbounded
-	// payload there is a memory-exhaustion vector with a very cheap trigger,
-	// so the bound is a refusal rather than a truncation — silently dropping
-	// keys would report success for a write that did not happen.
+	// PayloadTooLarge is returned by Save for a payload above the store's caps,
+	// and by Regenerate — in both stores, before anything is minted — for a
+	// subject longer than the per-string cap, which the file store's frame
+	// could not read back. A session store holds per-user state on the request
+	// path; an unbounded payload there is a memory-exhaustion vector with a
+	// very cheap trigger, so the bound is a refusal rather than a truncation —
+	// silently dropping keys would report success for a write that did not
+	// happen, and a truncated subject would name a different principal.
 	PayloadTooLarge = errs.Define(CodePayloadTooLarge, "PAYLOAD_TOO_LARGE",
 		"That session holds more data than the store accepts",
-		"service/session: payload exceeds the key-count or per-string cap; the offending key is NOT named because it is caller data",
+		"service/session: payload or subject exceeds the key-count or per-string cap; the offending key or subject is NOT named because it is caller data",
 		errs.WithHTTPStatus(httpPayloadTooLarge))
 
 	// InvalidPurpose is returned by NewSealer for an empty purpose. The purpose

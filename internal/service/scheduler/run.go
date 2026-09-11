@@ -4,6 +4,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -171,6 +172,12 @@ func (s *scheduler) run(ctx context.Context, wg *sync.WaitGroup, e *entry, sched
 }
 
 // invoke runs the job, converting a panic into a typed error.
+//
+// The stack is captured inside the deferred recover, while the job's frames
+// are still on it, and travels as a field. Without it the report names only
+// the recover site — this engine, which did nothing wrong — and the frame
+// that actually panicked is gone for good; service/events, service/queue and
+// service/cli capture it on the same path for the same reason.
 func invoke(ctx context.Context, e *entry) (err error) {
 	//: a panicking job must not reach the runtime: one job's bug would take
 	//: down the process and every other entry with it.
@@ -184,7 +191,8 @@ func invoke(ctx context.Context, e *entry) (err error) {
 		//: the recovered value travels as a FIELD, never as the wrap origin,
 		//: so a panic carrying an *errs.Error cannot hijack JOB_PANICKED.
 		err = kerrs.Wrap(coresched.JobPanicked, kerrs.WrapParams{},
-			kerrs.String("job", e.name), kerrs.String("panic", fmt.Sprint(value)))
+			kerrs.String("job", e.name), kerrs.String("panic", fmt.Sprint(value)),
+			kerrs.String("stack", string(debug.Stack())))
 	}()
 	//: the job gets Run's own context, so cancelling it reaches in here.
 	return e.job(ctx)

@@ -97,8 +97,16 @@ materialises a candidate with `time.Date` in the target location, **accepting it
 only if the fields come back unchanged**. `time.Date` normalises a non-existent
 local time into the neighbouring offset, so the field comparison is what turns a
 silent one-hour shift into an honest "this minute does not exist". For an
-ambiguous time `time.Date` returns the first occurrence, the fields match, and
-the strictly-increasing contract does the rest.
+ambiguous time the fields match, and the first occurrence has to be ASKED for:
+`time.Date` documents that it guarantees neither, and in every zone east of UTC
+its lookup returns the LATER one — 02:30 on 2026-10-25 in Europe/Berlin comes
+back as 01:30Z, not 00:30Z. The engine therefore tries the same fields under
+the offset in force before the transition (read from the zone table, since
+Australia/Lord_Howe moves by thirty minutes) and keeps the earlier instant when
+it reads back unchanged; the strictly-increasing contract does the rest.
+(Amended 2026-09-11: the first version relied on `time.Date` returning the
+first occurrence, which holds only west of UTC, so a fall-back job fired once
+but an hour late in Europe and Australia.)
 
 Resolving a named location needs the host's tz database or a blank import of
 `time/tzdata` in the consumer's binary. **The SDK does not import `time/tzdata`

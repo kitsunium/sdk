@@ -103,9 +103,18 @@ func (fs *fieldSpec) parse(field string) (set []bool, err error) {
 			//: the item's own refusal already names the field and the text.
 			return nil, boundsErr
 		}
-		//: mark every value the item selects.
-		for value := lo; value <= hi; value += step {
+		//: mark every value the item selects. The loop ends on the DISTANCE
+		//: left to hi, never on value+step: a step is parsed from text and may
+		//: be as large as MaxInt, and on a field whose floor is 1 — day-of-month,
+		//: month — that sum wrapped negative and indexed the set below zero,
+		//: panicking where "*/40" already means "the floor and nothing else".
+		for value := lo; ; value += step {
 			set[value] = true
+			//: the next value would pass hi, so the sum is never formed.
+			if step > hi-value {
+				//: this item is fully marked.
+				break
+			}
 		}
 	}
 	//: the field is a usable membership set.

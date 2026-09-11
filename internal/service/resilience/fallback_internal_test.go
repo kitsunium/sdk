@@ -186,3 +186,76 @@ func Test_fallbackRunner_RunCancelled(t *testing.T) {
 		t.Error("a cancellation was reported as FALLBACK_FAILED")
 	}
 }
+
+// Test_fallbackRunner_RunCancelledDuringFallback pins the half of the
+// cancellation rule that the check before the fallback cannot see: a context
+// that dies WHILE plan B is running.
+//
+// Plan B starts on whatever budget the primary left, so it is the likelier
+// place for a deadline to expire — and a fallback that fails because its
+// context died is not broken. Reporting FALLBACK_FAILED for it would send an
+// operator looking for a fault in two dependencies that did nothing wrong,
+// which is the misreport Test_fallbackRunner_RunCancelled already rules out
+// one step earlier.
+//
+// The second case is the other side of the same line: a fallback that finishes
+// its work despite the late cancellation has done the work, and a policy that
+// answered "cancelled" would tell the caller something did not happen when it
+// did.
+//
+// MUTATION-CHECKED. Deleting the ctx.Err() check after the fallback — the
+// pre-fix code — fails the first case with:
+//
+//	Run = [0.2.8.7 FALLBACK_FAILED] The operation and its fallback both failed, want context.Canceled
+//
+// and moving that check ABOVE the fallback's success test, so that any
+// cancellation wins, fails the second with:
+//
+//	Run = context canceled, want nil — the fallback completed its work
+func Test_fallbackRunner_RunCancelledDuringFallback(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		//: what plan B returns after the caller has gone away.
+		fallbackErr error
+		//: whether the call must be reported as the cancellation.
+		wantCanceled bool
+	}
+	tests := []tc{
+		{name: "a failing fallback reports the cancellation", fallbackErr: errSecondary, wantCanceled: true},
+		{name: "a fallback that completes is still a success"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := NewFallback(FallbackConfig{
+			Fallback: func(context.Context) error {
+				//: the caller goes away while plan B is running.
+				cancel()
+				return c.fallbackErr
+			},
+		})
+
+		err := r.Run(ctx, func(context.Context) error { return errPrimary })
+
+		if !c.wantCanceled {
+			if err != nil {
+				t.Fatalf("Run = %v, want nil — the fallback completed its work", err)
+			}
+			return
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run = %v, want context.Canceled", err)
+		}
+		if errs.HasCode(err, coreres.CodeFallbackFailed) {
+			t.Error("a cancellation during the fallback was reported as FALLBACK_FAILED")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

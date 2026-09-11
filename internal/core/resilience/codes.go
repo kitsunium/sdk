@@ -30,5 +30,6 @@ const CodeTimeoutExceeded errs.Code = 0x00_02_08_05 // 0.2.8.5
 const CodePolicyMisconfigured errs.Code = 0x00_02_08_06 // 0.2.8.6
 
 // CodeFallbackFailed identifies a fallback policy whose primary AND secondary
-// operations both failed (both errors travel as fields — neither is dropped).
+// operations both failed on a live context (both errors travel as fields —
+// neither is dropped). A cancellation is reported as ctx.Err() instead.
 const CodeFallbackFailed errs.Code = 0x00_02_08_07 // 0.2.8.7

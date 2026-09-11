@@ -161,6 +161,100 @@ func TestFallBackDayIsOtherwiseNormal(t *testing.T) {
 	}
 }
 
+// loadZone resolves a tz database name. Like newYork it fails rather than
+// skips: the embedded tzdata makes a missing zone a real defect.
+func loadZone(t *testing.T, name string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		t.Fatalf("LoadLocation(%s) failed even with time/tzdata embedded: %v", name, err)
+	}
+	return loc
+}
+
+// TestFallBackEastOfUTCFiresAtTheFirstOccurrence pins "fires ONCE, at the
+// FIRST occurrence" in the zones where it used to be false.
+//
+// time.Date does not promise which occurrence of a repeated reading it
+// returns, and its lookup — the zone in force at the wall-clock reading taken
+// as a UTC instant — lands on the LATER one east of UTC. New York, the only
+// zone TestFallBackFiresOnceAtTheFirstOccurrence uses, is west of UTC and
+// comes back first, which is how the defect stayed invisible: in Berlin a job
+// at 02:30 fired once, but an hour late. Berlin repeats 02:00-03:00 on
+// 2026-10-25, so 02:30 exists at 00:30Z (CEST) and 01:30Z (CET). Lord Howe
+// repeats 01:30-02:00 on 2026-04-05 — a thirty-minute shift, so the rule
+// cannot be "subtract an hour" — and 01:45 exists at 14:45Z and 15:15Z the
+// day before in UTC. Every expectation is in UTC, so "first" is checkable.
+//
+// The third check asks from INSIDE the second pass, before the reading comes
+// round again: the repeat is still not offered, because the reading has
+// already fired once that day.
+//
+// Mutation: making materialise return time.Date's answer as-is (the code
+// before the fix) failed with "first fire = 2026-10-25T01:30:00Z, want
+// 2026-10-25T00:30:00Z" for Berlin and "first fire = 2026-04-04T15:15:00Z,
+// want 2026-04-04T14:45:00Z" for Lord Howe.
+func TestFallBackEastOfUTCFiresAtTheFirstOccurrence(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		zone   string
+		expr   string
+		after  time.Time
+		first  time.Time
+		repeat time.Time
+		inside time.Time
+		next   time.Time
+	}{
+		{
+			name:   "Europe/Berlin repeats a whole hour",
+			zone:   "Europe/Berlin",
+			expr:   "30 2 * * *",
+			after:  time.Date(2026, time.October, 24, 10, 0, 0, 0, time.UTC),
+			first:  time.Date(2026, time.October, 25, 0, 30, 0, 0, time.UTC),
+			repeat: time.Date(2026, time.October, 25, 1, 30, 0, 0, time.UTC),
+			inside: time.Date(2026, time.October, 25, 1, 10, 0, 0, time.UTC),
+			next:   time.Date(2026, time.October, 26, 1, 30, 0, 0, time.UTC),
+		},
+		{
+			name:   "Australia/Lord_Howe repeats thirty minutes",
+			zone:   "Australia/Lord_Howe",
+			expr:   "45 1 * * *",
+			after:  time.Date(2026, time.April, 4, 1, 0, 0, 0, time.UTC),
+			first:  time.Date(2026, time.April, 4, 14, 45, 0, 0, time.UTC),
+			repeat: time.Date(2026, time.April, 4, 15, 15, 0, 0, time.UTC),
+			inside: time.Date(2026, time.April, 4, 15, 5, 0, 0, time.UTC),
+			next:   time.Date(2026, time.April, 5, 15, 15, 0, 0, time.UTC),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			schedule, err := svcsched.ParseInLocation(tc.expr, loadZone(t, tc.zone))
+			if err != nil {
+				t.Fatalf("ParseInLocation failed: %v", err)
+			}
+			first, ok := schedule(tc.after)
+			if !ok || !first.Equal(tc.first) {
+				t.Fatalf("first fire = %s, want %s", first.UTC().Format(time.RFC3339), tc.first.Format(time.RFC3339))
+			}
+			//: once is once: from the first occurrence, the next answer is the
+			//: following day, never the repeat an hour (or half an hour) later.
+			second, ok := schedule(first)
+			if !ok || second.Equal(tc.repeat) || !second.Equal(tc.next) {
+				t.Errorf("after the first fire, next = %s, want %s (the repeat is %s)",
+					second.UTC().Format(time.RFC3339), tc.next.Format(time.RFC3339), tc.repeat.Format(time.RFC3339))
+			}
+			//: asked from inside the second pass, the repeat is still not due.
+			fromInside, ok := schedule(tc.inside)
+			if !ok || !fromInside.Equal(tc.next) {
+				t.Errorf("from inside the repeat, next = %s, want %s (the repeat is %s)",
+					fromInside.UTC().Format(time.RFC3339), tc.next.Format(time.RFC3339), tc.repeat.Format(time.RFC3339))
+			}
+		})
+	}
+}
+
 // TestUTCHasNoTransitions is the control. The same two expressions in UTC fire
 // on every single day, which is what makes UTC the default: there is no
 // arbitrage to make.

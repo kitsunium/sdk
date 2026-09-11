@@ -33,7 +33,9 @@ Public façade: `pkg/v1/server`.
 | `conn_waiter.go` | `connWaiter` — the completion channel and the hijack flag one `ServeConn` blocks on |
 | `http_listener.go` | the channel-fed bridge listener |
 | `reuseport_{linux,bsd,other}.go` | the cited `SO_REUSEPORT` constant per family |
-| `stream_group_limiter.go` | the per-group connection ceiling |
+| `stream_group_limiter.go` | the per-group connection ceiling — a reject-mode semaphore whose slot a hijacked connection keeps until it closes |
+| `conn_tracked.go` | `trackedConn` — the socket that reports its own `Close`, so a hijacked connection's slot comes back when it ends |
+| `listen_tracked.go` | `trackedListener` — hands out `trackedConn`s beneath TLS, for a group that serves HTTP under a ceiling |
 | `adopt.go` | adoption of listeners inherited from a supervisor |
 
 ## Why-this-shape
@@ -149,6 +151,15 @@ Two things about it were got wrong first and are worth keeping wrong-proof:
   `TestAHijackedConnectionSurvivesTheEngine` provokes the defect with a plain
   `http.Handler` and is mutation-checked — forcing the close back on fails it
   and nothing else.
+- **A hijacked connection still holds its `MaxConns` slot until it closes** —
+  the consequence ADR 0047 §D9 did not list. The slot used to be held only
+  while `ServeConn` ran, and `ServeConn` returns at the hijack, so every
+  upgraded WebSocket gave its slot back while it stayed open and `MaxConns`
+  bounded nothing an upgrade reached. Now the slot is handed to the socket, and
+  the socket's `Close` returns it; see "Connection ceiling" below. Neither
+  consequence above changed — the drain still does not wait on the connection,
+  the engine still never closes it — which
+  `TestAHijackedConnectionStillCountsAgainstTheCeiling` pins in the same run.
 - **The serving goroutine is a `kernel/worker.LoopDaemon`**, so its owner and
   termination are explicit and `shutdown` has a `Done()` channel to bound its
   wait on. `http.Server` is interrupted by closing its listener, not by a stop
@@ -199,24 +210,59 @@ contending on one accept queue. Zero means one per core; one disables it.
 
 ## Connection ceiling
 
-`MaxConns(n)` reuses `resilience.NewBulkhead` rather than reimplementing a
-semaphore — a reject-mode channel semaphore *is* a connection ceiling, and
-reusing it means the rejection semantics are the ones the SDK already documents.
+`MaxConns(n)` is a reject-mode channel semaphore (`connLimiter`): a free slot
+admits, a full one refuses at once, nothing queues. It used to be
+`resilience.NewBulkhead`, which has exactly those semantics — but a bulkhead is
+a `Runner`, and a `Runner` holds its slot for exactly one call. A hijacked
+connection outlives the call that admitted it, so the ceiling holds its slot
+explicitly: `tryAcquire` on admission, and `releaseFor` when the handler
+returns — which returns the slot, or hands it to the socket when a handler took
+the socket over. Explicit acquire/release on a channel is the shape `hedge`'s
+in-flight cap already uses in the resilience domain.
 
 - **The budget is per group, not per socket.** A group on a TCP port and a Unix
   socket, or sharded across listeners, shares one ceiling; that is what an
   operator sizing a server means.
-- **A rejection is translated to `ConnLimitReached`**, never surfaced as the
-  resilience domain's `BulkheadFull` — a `net` consumer has no reason to meet a
-  sentinel from a domain it did not import.
+- **A rejection is `ConnLimitReached`**, carrying the ceiling it hit, and is
+  counted in `RejectedConns` — a `net` consumer never meets a resilience
+  sentinel.
 - **No ceiling means no closure on the hot path.** `admit` calls the handler
-  directly when `limiter == nil`, so the policy costs nothing when unused.
+  directly when `limiter == nil`, so the policy costs nothing when unused; with a
+  ceiling the settlement is one deferred call, so a handler that panics still
+  gives its slot back.
 - **A slot is released when the handler returns**, which is *after* the client
   has seen its response and closed. A client reconnecting immediately against a
   ceiling of one can therefore meet a still-occupied server, and that rejection
-  is correct. `TestConnLimitReleasesItsSlot` uses a ceiling of four for exactly
-  this reason — an earlier version asserted zero rejections at a ceiling of one
-  and failed about one run in three.
+  is correct. `TestMaxConns` ("a ceiling that releases its slots") uses a
+  ceiling of four for exactly this reason — an earlier version asserted zero
+  rejections at a ceiling of one and failed about one run in three.
+- **A HIJACKED connection's slot is released when its socket closes**, not when
+  its handler returns. `ServeConn` returns at the hijack, and from then on the
+  engine neither closes the socket nor waits for it (ADR 0047 §D9), so the only
+  event left that says the connection is over is somebody closing it. Hearing it
+  takes a `trackedConn` — an accepted socket that reports its own `Close` —
+  handed out by a `trackedListener` for every group that serves HTTP **under a
+  ceiling** (`StreamGroup.tracksCloses`); no other group can hijack or has a slot
+  to hold, and their sockets are not wrapped. The tracker sits **beneath TLS**,
+  so `net/http` still receives the concrete `*tls.Conn` and `Request.TLS` is
+  populated; on a plaintext listener `net/http` receives the tracker itself,
+  which is why it forwards `CloseWrite` (the graceful half-close) and `ReadFrom`
+  (sendfile/splice) rather than hiding them. `Close` closes the socket FIRST and
+  returns the slot second, so the ceiling never admits a new connection while
+  the old one is still open; a socket closed before the engine hands the slot
+  over returns it at the hand-over; a second `Close` returns nothing.
+  `Test_Server_admit_HijackedConnectionKeepsItsSlot` pins the whole life of the
+  slot over plaintext AND TLS, and is mutation-checked four ways.
+- **What that costs and what it changes, stated rather than discovered.** A
+  ceilinged HTTP group allocates one `trackedConn` per connection (it cannot be
+  pooled: a hijacked one outlives the engine's hold on it); `BENCH.md` measures
+  no ceilinged group, so its numbers are unchanged. A hijacking handler on a
+  ceilinged plaintext group is handed the tracker, never the `*net.TCPConn`
+  beneath it. A group at its ceiling can report fewer `ActiveConns` than
+  `MaxConns`: the difference is hijacked connections, which hold a slot but are
+  no longer the engine's. And a handler that never closes a socket it hijacked
+  now keeps a slot as well as a descriptor — that is the ceiling counting a
+  connection that is, in fact, still open.
 
 ## Socket adoption
 
@@ -265,6 +311,9 @@ declares **no** codes.
 - Return a `Conn` (or its `Buffer()`) to a caller that outlives `ServeConn` —
   both are recycled the moment it returns.
 - Let a handler's error or panic reach the accept loop.
+- Release a hijacked connection's ceiling slot when `ServeConn` returns, or put
+  the close tracker above TLS: the first lets every WebSocket escape
+  `MaxConns`, the second serves every HTTPS request as plaintext.
 - Add a registry of listener types; one canonical engine per family
   (the `proc`/`resilience` no-registry precedent).
 

@@ -129,6 +129,13 @@ func Test_resolveRefusesWhereAnySDKChoiceWouldBeArbitrary(t *testing.T) {
 			[]Option{MaxMessageSize(100), MaxFrameSize(200)},
 			"MaxFrameSize",
 		},
+		//: a subprotocol is echoed verbatim into the response, so each of
+		//: these would have put a malformed handshake on the wire — they
+		//: were accepted before the token check.
+		{"an empty subprotocol", []Option{Subprotocols("chat", "")}, "Subprotocols"},
+		{"a subprotocol with a space", []Option{Subprotocols("chat v2")}, "Subprotocols"},
+		{"a subprotocol with a comma", []Option{Subprotocols("a,b")}, "Subprotocols"},
+		{"a subprotocol with a line break", []Option{Subprotocols("chat\r\nX-Injected: 1")}, "Subprotocols"},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -185,5 +192,60 @@ func Test_resolveBoundsACeilingByWhatASliceCanIndex(t *testing.T) {
 	//: a 32-bit build cannot, and truncating would be the silent narrowing.
 	if !errs.HasCode(err, corenet.CodeWSConnMisconfigured) {
 		t.Fatalf("resolve = %v, want WS_CONN_MISCONFIGURED", err)
+	}
+}
+
+// Test_optionsSnapshotTheirSlices pins that Subprotocols and AllowOrigins copy
+// the slice they are handed. Captured by reference, a caller reusing its slice
+// changed every later handshake and raced with the ones in flight — seen
+// failing so, with the copies removed: "subprotocols = [edited], want [chat]".
+func Test_optionsSnapshotTheirSlices(t *testing.T) {
+	t.Parallel()
+	protocols := []string{"chat"}
+	origins := []string{"https://app.example.com"}
+	opts := []Option{Subprotocols(protocols...), AllowOrigins(origins...)}
+	protocols[0], origins[0] = "edited", "https://evil.example.com"
+	got, err := resolve(opts)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(got.subprotocols) != 1 || got.subprotocols[0] != "chat" {
+		t.Errorf("subprotocols = %v, want [chat]", got.subprotocols)
+	}
+	if len(got.allowedOrigins) != 1 || got.allowedOrigins[0] != "https://app.example.com" {
+		t.Errorf("allowedOrigins = %v, want [https://app.example.com]", got.allowedOrigins)
+	}
+}
+
+// Test_isToken pins the RFC 7230 §3.2.6 grammar the subprotocol check applies.
+func Test_isToken(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		in   string
+		want bool
+	}
+	tests := []tc{
+		{"chat", true},
+		{"v2.json-rpc_1~x", true},
+		{"!#$%&'*+-.^_`|~", true},
+		{"", false},
+		{"a b", false},
+		{"a,b", false},
+		{`"quoted"`, false},
+		{"a/b", false},
+		{"é", false},
+		{"a\tb", false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := isToken(c.in); got != c.want {
+			t.Errorf("isToken(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.in, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

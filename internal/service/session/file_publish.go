@@ -93,6 +93,28 @@ func writeAndSync(file tempRecord, payload []byte) error {
 	return nil
 }
 
+// flushDirectory fsyncs a directory, so the renames and unlinks inside it
+// survive a power loss. It is the production value of fileStore.syncDir.
+//
+// It flushes the directory's ENTRIES, not the files they name: a record's
+// bytes were synced before its rename, and this is the step that makes the
+// rename — or the unlink — itself durable.
+func flushDirectory(dir string) (err error) {
+	handle, openErr := os.Open(dir)
+	//: a directory that cannot be opened cannot be flushed.
+	if openErr != nil {
+		//: the caller reports StoreUnavailable.
+		return openErr
+	}
+	//: released on every path. The flush failure wins; a close failure is the
+	//: answer only when there was nothing better to report.
+	defer func() {
+		err = cmp.Or(err, handle.Close())
+	}()
+	//: fsync(2) on the directory descriptor: its entries, not its files.
+	return handle.Sync()
+}
+
 // removeTemp deletes an abandoned temporary record and returns the failure that
 // caused it to be abandoned. The previous record — if there is one — is
 // untouched, which is the whole point: a failed write must never replace a good

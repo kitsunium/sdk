@@ -150,7 +150,14 @@ Two consequences are deliberate and documented:
   can speak; choosing among those is the server's call, or a client that listed
   a deprecated dialect first could pin the server to it forever. No overlap is
   not a failure — §4.2.2 makes an omitted `Sec-WebSocket-Protocol` the way to
-  say "none agreed".
+  say "none agreed". Each configured name must be an RFC 7230 token, because
+  the chosen one is echoed verbatim into the response; anything else is
+  refused at `Upgrade` (`WS_CONN_MISCONFIGURED`, option `Subprotocols`). Both
+  `Subprotocols` and `AllowOrigins` copy the slice they are handed.
+- **1010 is a client's code.** `CloseWith(1010)` is refused: it says the
+  server did not negotiate an extension the client needs (§7.4.1), which a
+  server cannot say about itself. `Sendable` still accepts it, because a
+  client may send it and echoing it back is §5.5.1's own advice.
 - **The SDK never fragments what it sends.** Fragmentation exists so a sender
   can begin a message whose length it does not yet know; every message this API
   can express is already in memory. Splitting it would add a failure mode — half
@@ -159,6 +166,18 @@ Two consequences are deliberate and documented:
 - **One Close frame, ever.** §5.5.1 allows exactly one per endpoint, and
   `closeSent` is set before the write so a failed attempt cannot leave the door
   open for a second on a socket that is already gone.
+- **Nothing follows the Close.** §5.5.1 forbids a data frame after it, and
+  `sendFrame` refuses EVERY frame once `closeSent` is set — data, Ping and the
+  Pong the reader owes alike, because every path that sends a Close ends the
+  connection at once. The `done` check alone did not cover it: `terminate`
+  closes `done` only after `sendClose` has released the write lock, so a Send or
+  a Ping queued on the lock behind the Close found `done` still open and
+  followed the Close onto the wire. `closeSent` is guarded by that same lock,
+  which is what makes the check exact. `Test_Conn_sendFrame` holds the window
+  open deterministically and is mutation-checked;
+  `Test_Conn_sendFrameUnderARacingClose` races real senders against
+  `CloseWith` and samples it, reliably only under `-race` — the numbers are in
+  its doc comment.
 
 ## permessage-deflate is NOT negotiated, and the refusal is enforced twice
 

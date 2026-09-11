@@ -20,7 +20,8 @@ const CodeDirectoryUnsafe errs.Code = 0x00_03_2E_02 // 0.3.46.2
 const CodeLockFailed errs.Code = 0x00_03_2E_03 // 0.3.46.3
 
 // CodePayloadTooLarge identifies a session payload above the store's key-count
-// or per-string caps. The bound is checked before the write it would fund.
+// or per-string caps, or a subject above the per-string cap. The bound is
+// checked before the write it would fund.
 const CodePayloadTooLarge errs.Code = 0x00_03_2E_04 // 0.3.46.4
 
 // CodeInvalidPurpose identifies a sealer built without a purpose string, which

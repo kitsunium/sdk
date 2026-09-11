@@ -15,6 +15,14 @@ import (
 // above it only lengthens the cookie.
 const IDLen int = 32
 
+// canonicalEncoding is the one spelling an identifier has: unpadded base64url,
+// decoded STRICTLY. 32 bytes are 256 bits and 43 characters carry 258, so the
+// last character holds two bits no byte uses; a lenient decoder ignores them,
+// and four different strings would then name one session. Strict refuses any
+// of those bits set. It is built once because Strict returns a new copy of the
+// encoding on every call.
+var canonicalEncoding = base64.RawURLEncoding.Strict()
+
 // ID is an opaque session identifier. It IS a bearer secret — whoever holds it
 // is the session — so this type is built to make leaking it hard:
 //
@@ -61,8 +69,9 @@ func NewID(raw []byte) (id ID, err error) {
 // before it can be used as a lookup key.
 func ParseID(encoded string) (id ID, err error) {
 	//: raw (unpadded) URL alphabet — the form Reveal emits and the only form
-	//: accepted, so two spellings of one identifier cannot exist.
-	raw, decodeErr := base64.RawURLEncoding.DecodeString(encoded)
+	//: accepted — decoded strictly, so the unused trailing bits must be zero
+	//: and two spellings of one identifier cannot exist.
+	raw, decodeErr := canonicalEncoding.DecodeString(encoded)
 	//: a malformed identifier is refused, never coerced.
 	if decodeErr != nil {
 		//: the decoder's own message is dropped: it can echo attacker input.
@@ -81,7 +90,9 @@ func ParseID(encoded string) (id ID, err error) {
 // error's Public string. A zero-value ID reveals "".
 func (i ID) Reveal() string {
 	//: nil raw renders empty rather than panicking; a zero ID names nothing.
-	return base64.RawURLEncoding.EncodeToString(i.raw)
+	//: The encoder always leaves the unused bits clear, which is exactly the
+	//: spelling ParseID's strict decoder accepts.
+	return canonicalEncoding.EncodeToString(i.raw)
 }
 
 // Digest returns the lowercase hex SHA-256 of the identifier: 64 characters,

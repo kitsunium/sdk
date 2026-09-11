@@ -18,7 +18,7 @@ ADR 0026.
 | `bulkhead.go` | bulkhead | buffered-channel semaphore (reject mode), `BulkheadFull` |
 | `timeout.go` | timeout | `context.WithTimeout`, `TimeoutExceeded`; non-positive `d` refused (ADR 0031) |
 | `fallback.go` / `fallback_config.go` | fallback | secondary `Operation` on primary failure; `FallbackFailed` carries BOTH errors; nil `Fallback` refused (ADR 0031) |
-| `hedge.go` / `hedge_config.go` / `hedge_race.go` | hedging | duplicate copies raced after `Delay`, first success wins; `Idempotent`/`Delay`/`MaxInFlight` refused, `MaxHedges`→1 (ADR 0031) |
+| `hedge.go` / `hedge_config.go` / `hedge_race.go` / `hedge_outcome.go` | hedging | duplicate copies raced after `Delay`, first success wins; a copy's panic re-raised on the caller's goroutine with its original value; `Idempotent`/`Delay`/`MaxInFlight` refused, `MaxHedges`→1 (ADR 0031) |
 | `wrap.go` | — | `wrapAs(sentinel, cause)` — sentinel origin-wins + cause as a field |
 | `retryable.go` | — | `isRetryable(pred, err)` — nil-predicate default shared by retry + breaker |
 | `misconfigured.go` | — | `newMisconfigured(policy, knob)` — refuses every call with `PolicyMisconfigured` (ADR 0031) |
@@ -71,6 +71,15 @@ returns `nil` and the primary error is not surfaced at all — that masking is
 the policy; a caller who needs to count activations instruments the fallback
 `Operation`, which is their own closure.
 
+The cancellation rule is applied a second time, **after** a failed fallback,
+because the check before it cannot see a context that dies while plan B runs —
+and plan B starts on whatever budget the primary left, so that is the likelier
+moment. A fallback that fails with a dead context returns `ctx.Err()`, never
+`FALLBACK_FAILED`; one that **succeeds** despite the late cancellation still
+returns `nil`, because the work was done. A double failure on a live context is
+unchanged: `FALLBACK_FAILED` with both fields.
+`Test_fallbackRunner_RunCancelledDuringFallback` pins both halves.
+
 ## Hedging — the two hazards, and how each is answered
 
 Hedging is the only policy here that runs an `Operation` **concurrently with
@@ -114,16 +123,45 @@ was meant to hide. Three mechanics bound it:
 
 `MaxHedges` is the contrast that locates ADR 0031's clamp/refuse line: "issue
 at least one duplicate" is an obvious floor, so a non-positive value clamps to
-1 exactly as `Burst` and the bulkhead limit do.
+1 exactly as `Burst` and the bulkhead limit do. It has no ceiling and needs
+none: it bounds how many duplicates a call may issue, and **no per-call
+allocation grows with it**. That was not always true — the result channel used
+to be buffered to `MaxHedges+1`, so `math.MaxInt` overflowed into a `make()`
+panic on every call and a large budget allocated a channel per call that could
+never fill. `Test_hedge_RunWithAnUnboundedDuplicateBudget` pins it.
 
 Mechanics: one goroutine per attempt (including the first, so `Run` stays free
 to watch the delay elapse) and one ticker per call — **this is the only policy
 in the package that is not allocation-trivial**, which is the price of racing.
-Losers are cancelled through a shared derived context and their results land in
-a channel buffered to the attempt count, so a straggler can neither block nor
-leak. When every launched attempt has failed, the **first failure to arrive** is
-returned verbatim — no sentinel is minted, by the same first-to-finish rule that
-decides a success.
+Losers are cancelled through a shared derived context, and every attempt hands
+its outcome to `Run` over an **unbuffered** channel or, once that context is
+done, drops it — so a straggler can neither block nor leak, whatever the
+budget. When every launched attempt has failed, the **first failure to arrive**
+is returned verbatim — no sentinel is minted, by the same first-to-finish rule
+that decides a success.
+
+**A panic reaches the caller, with its ORIGINAL value.** Hedging is the only
+policy that runs the `Operation` on goroutines of its own, and a panic that
+reaches the top of any goroutine ends the process — under every other policy the
+same panic unwinds through the caller's goroutine, where `net/http` or the
+caller's `recover` contains it. So `attemptOutcome.capture` recovers it on the
+attempt's own goroutine (the only place `recover()` can see it) and `Run`
+re-raises it on the caller's goroutine, ahead of any error, with the value
+unchanged: the caller's `recover` compares **equal** to what was panicked with,
+and `http.ErrAbortHandler` still aborts a handler silently. The kernel `group` /
+`singleflight` shape — a `PanicValue` wrapper carrying the stack — was
+deliberately NOT used: a wrapper breaks that equality, and with it the one
+sentinel `net/http` recognises by identity, turning a deliberate abort into a
+logged crash. **The cost, stated rather than hidden:** the re-raised panic's
+stack is the re-raise site inside `Run`, not the `Operation`'s frame — a value
+re-raised on another goroutine cannot carry the panicking goroutine's stack
+without being wrapped. There is no side channel for it. A copy that panics after
+`Run` has returned (a loser, once a winner was found or the caller went away) is
+recovered and **dropped**: there is no caller's goroutine left to raise it on,
+and raising it on its own would end the process. A panic racing the caller's
+cancellation can be dropped the same way, because `Run` does not wait for its
+copies. `Test_hedge_RunReRaisesAPanicWithItsOriginalValue` and
+`Test_hedge_RunDropsALosersLatePanic` pin both halves.
 
 ## Do NOT
 
@@ -140,6 +178,11 @@ decides a success.
 - Let `hedge` react to a failure by issuing another copy. That is retrying, it
   is `NewRetry`'s job, and it would make the duplicate load scale with breakage
   instead of with slowness.
+- Re-raise a hedged copy's panic as a wrapper to carry its stack. It breaks
+  value equality in the caller's `recover` and turns `http.ErrAbortHandler`
+  into a logged crash; the lost stack is the documented price.
+- Size anything per call from `MaxHedges` — the budget is a count of
+  duplicates, and `math.MaxInt` is a value a caller may legitimately write.
 - Add adaptive concurrency (AIMD) or deadline propagation here without an ADR:
   both change what a policy may do on the caller's behalf, and both need
   measurement rather than a plausible implementation.

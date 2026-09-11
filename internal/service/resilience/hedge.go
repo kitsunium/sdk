@@ -56,9 +56,30 @@ type hedge struct {
 // the cap is reached the duplicate is simply not issued and the call proceeds
 // on its first attempt alone — degrading to no-hedging, never to a rejection.
 //
+// # A panic reaches the caller, with its original value
+//
+// This is the one policy that runs the Operation on goroutines of its own, and
+// a panic that reaches the top of any goroutine ends the process — where under
+// every other policy the same panic reaches the caller's goroutine and is
+// contained by net/http or by the caller's own recover. So a copy's panic is
+// recovered on that copy's goroutine and re-raised from Run, on the caller's
+// goroutine, with the Operation's ORIGINAL value: the caller's recover compares
+// equal to exactly what was panicked with, and http.ErrAbortHandler still
+// aborts a handler silently instead of being logged as a crash.
+//
+// What does NOT survive is the stack. The re-raised panic's stack is the
+// re-raise site inside Run, not the Operation's frame: a value re-raised on
+// another goroutine cannot carry the panicking goroutine's stack without being
+// wrapped, and wrapping it would break both http.ErrAbortHandler and value
+// equality. A copy that panics after Run has returned — a loser, once a winner
+// was found or the caller went away — is recovered and dropped; it never
+// reaches the caller and never ends the process.
+//
 // Run costs one goroutine per attempt (including the first, so the delay stays
 // observable) and one ticker per call: this is the one policy in the package
-// that is not allocation-trivial, which is the price of racing.
+// that is not allocation-trivial, which is the price of racing. Neither cost
+// grows with cfg.MaxHedges, which bounds how many duplicates a call may issue
+// and nothing else.
 //
 // A false cfg.Idempotent, a non-positive cfg.Delay, or a non-positive
 // cfg.MaxInFlight is refused: every call returns PolicyMisconfigured without
@@ -94,19 +115,29 @@ func NewHedge(cfg HedgeConfig) coreres.Runner {
 // Run races duplicate attempts and returns the first success, or — when every
 // attempt it launched has failed — the first error it received, verbatim.
 //
+// A copy that PANICS is re-raised here, on the caller's goroutine, with the
+// value it panicked with — see NewHedge for what that preserves and what it
+// cannot.
+//
 // Goroutine lifecycle: one goroutine per attempt (the first, plus up to
 // maxHedges duplicates), all started here and all owned by this call. Each
-// deposits its outcome into a channel buffered to the attempt count and exits,
-// so a loser that outlives Run neither blocks nor leaks; the deferred cancel
-// tells every one of them to stop the moment a winner is known.
+// hands its outcome to this loop over an unbuffered channel or, once the
+// attempts' shared context is done, drops it and exits — so a loser that
+// outlives Run neither blocks nor leaks, and a loser's late panic ends there
+// instead of ending the process. The deferred cancel is what tells every one
+// of them to stop the moment a winner is known.
 func (h *hedge) Run(ctx context.Context, op coreres.Operation) error {
 	//: one cancellable context shared by every attempt, so the losers are told
 	//: to stop the moment a winner is known (deferred cancel covers every exit).
 	actx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	//: buffered to the first attempt plus its duplicate budget, so a straggler
-	//: finishing after Run has returned can deposit its result rather than leak.
-	results := make(chan error, h.maxHedges+1)
+	//: unbuffered, and deliberately NOT sized to the duplicate budget: an
+	//: attempt hands its outcome over or, once actx is done, drops it (see
+	//: attempt), so no straggler ever needs a slot to deposit into. Sizing it
+	//: maxHedges+1 overflowed into a make() panic on every call at a budget of
+	//: math.MaxInt, and made a merely large budget allocate, per call, a
+	//: channel the call could never fill.
+	results := make(chan attemptOutcome)
 	//: the first attempt runs in a goroutine too — Run must stay free to watch
 	//: the delay elapse while that attempt is outstanding.
 	go h.attempt(actx, op, results)
@@ -122,9 +153,16 @@ func (h *hedge) Run(ctx context.Context, op coreres.Operation) error {
 		case <-ctx.Done():
 			//: the caller went away; the deferred cancel stops the attempts.
 			return ctx.Err()
-		case err := <-results:
+		case outcome := <-results:
+			//: a copy that panicked is a fault, not an outcome, and it outranks
+			//: every error: re-raised on the caller's goroutine with the value
+			//: it carried, exactly where any other policy would have let it
+			//: surface. The deferred cancel still stops the other copies.
+			if outcome.panicked {
+				panic(outcome.raised)
+			}
 			//: an undecided race keeps waiting on the copies still outstanding.
-			if decided, verdict := race.record(err); decided {
+			if decided, verdict := race.record(outcome.err); decided {
 				//: the race is over.
 				return verdict
 			}
@@ -159,16 +197,31 @@ func (h *hedge) claimHedge(launched int) bool {
 	return h.acquire()
 }
 
-// attempt runs one copy of op and deposits its outcome.
-func (h *hedge) attempt(ctx context.Context, op coreres.Operation, out chan<- error) {
-	//: out is buffered to the attempt count, so this never blocks — even when
-	//: Run has already returned with another attempt's result.
-	out <- op(ctx)
+// attempt runs one copy of op and hands its outcome to Run.
+//
+// The copy runs under attemptOutcome.capture, which recovers a panic on THIS
+// goroutine — the only place it can be recovered. Every other policy runs the
+// Operation on the caller's goroutine, where net/http or the caller's own
+// recover contains a panic; here the same panic, left alone, ended the process.
+func (h *hedge) attempt(ctx context.Context, op coreres.Operation, out chan<- attemptOutcome) {
+	var outcome attemptOutcome
+	outcome.capture(ctx, op)
+	select {
+	//: Run is still deciding the race and takes the outcome.
+	case out <- outcome:
+	//: the attempts' context is done: Run has returned with a winner, or the
+	//: caller went away and Run is returning that instead — either way nobody
+	//: will read this. Dropping it is what lets a straggler exit rather than
+	//: block forever, and it is where a loser's late panic ends: there is no
+	//: goroutine left to re-raise it on except this one, and re-raising it
+	//: here would end the process.
+	case <-ctx.Done():
+	}
 }
 
 // duplicate runs one hedged copy of op, holding its in-flight slot for as long
 // as the copy actually runs.
-func (h *hedge) duplicate(ctx context.Context, op coreres.Operation, out chan<- error) {
+func (h *hedge) duplicate(ctx context.Context, op coreres.Operation, out chan<- attemptOutcome) {
 	//: the slot is held for the whole duplicate call, not until Run returns: a
 	//: loser that has not yet noticed the cancellation is still consuming the
 	//: downstream, and the cap exists to count exactly that.

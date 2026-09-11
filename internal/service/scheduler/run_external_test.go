@@ -3,6 +3,7 @@ package scheduler_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -338,6 +339,51 @@ func TestJobPanicIsRecoveredAndReported(t *testing.T) {
 	second := h.next(t)
 	if want := engineOrigin.Add(2 * time.Hour); !second.Scheduled.Equal(want) {
 		t.Errorf("scheduler stopped after a panic: next fire %s, want %s", second.Scheduled, want)
+	}
+}
+
+// TestAJobPanicCarriesTheJobsOwnStack pins that the recovered report still
+// names the code that panicked. A panic recovered without its stack is a
+// crash report pointing at the recover site — the engine, which did nothing
+// wrong — while the job's own frame is lost; service/events, service/queue and
+// service/cli already capture it on the same path. The recovered value stays a
+// field and JOB_PANICKED stays the origin, so the stack changes what the
+// report says, not what it is.
+//
+// The frame is asserted by FILE, as service/events does, because `go test`
+// and Bazel spell the external test package differently while the file name
+// is the same under both.
+//
+// Mutation: dropping the stack field from invoke failed with `stack field =
+// "", want the panicking job's frame (run_external_test.go)`.
+func TestAJobPanicCarriesTheJobsOwnStack(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.add(t, coresched.EntryValue{
+		Name: "panicky", Schedule: everySchedule(t, time.Hour),
+		Job: func(context.Context) error { panic("job exploded") },
+	})
+	h.start(t)
+	h.tick(time.Hour)
+	result := h.next(t)
+	origin, ok := errors.AsType[*kerrs.Error](result.Err)
+	if !ok || origin.Code() != coresched.CodeJobPanicked {
+		t.Fatalf("err = %v, want JOB_PANICKED as the origin", result.Err)
+	}
+	fields := map[string]string{}
+	for _, field := range kerrs.FieldsOf(result.Err) {
+		fields[field.Key()] = field.StringValue()
+	}
+	if !strings.Contains(fields["stack"], "run_external_test.go") {
+		t.Fatalf("stack field = %q, want the panicking job's frame (run_external_test.go)", fields["stack"])
+	}
+	//: and the engine frames that ran it, so it is a whole stack rather than
+	//: the recover site alone.
+	if !strings.Contains(fields["stack"], "scheduler/run.go") {
+		t.Errorf("stack field lost the engine's frames: %q", fields["stack"])
+	}
+	if fields["panic"] != "job exploded" || fields["job"] != "panicky" {
+		t.Errorf("panic/job fields = %q/%q, want %q/%q", fields["panic"], fields["job"], "job exploded", "panicky")
 	}
 }
 

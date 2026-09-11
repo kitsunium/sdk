@@ -16,7 +16,7 @@ a cron expression is, so cron's refusals cannot live there.
 |---|---|
 | `cron.go` | `Parse` / `ParseInLocation`, `cronSchedule`, the calendar walk, the POSIX day rule |
 | `field_spec.go` | `fieldSpec` — one field's bounds, name table and hint; the item/range/step parser |
-| `cursor.go` | `cursor` — the wall-clock calendar position the walk advances |
+| `cursor.go` | `cursor` — the wall-clock calendar position the walk advances; `materialise` + `earliest` resolve it to an instant, the first one on a fall-back day |
 | `every.go` | `Every(period)` — the fixed-interval Schedule |
 | `scheduler.go` | the engine struct, `New`, `Add`, `begin`/`finish`, `emit` |
 | `config.go` | `Config` — `Clock clock.Timed` + `OnResult func(ResultValue)` |
@@ -29,6 +29,10 @@ a cron expression is, so cron's refusals cannot live there.
 Five fields: `minute hour day-of-month month day-of-week` — `0-59`, `0-23`,
 `1-31`, `1-12` or `JAN`–`DEC`, `0-6` or `SUN`–`SAT` (Sunday = 0). Per field:
 `*`, a value, `a-b`, a comma list, `*/n`, `a-b/n`. Names are case-insensitive.
+A step wider than its span selects the span's start alone, however large the
+number: `*/40` and `*/9223372036854775807` on day-of-month both mean the 1st.
+The item walk ends on the distance left to the span's end, never on
+`value + step`, because that sum overflows (it panicked, before).
 Macros: `@yearly`/`@annually`, `@monthly`, `@weekly`, `@daily`/`@midnight`,
 `@hourly`.
 
@@ -52,14 +56,24 @@ calendar normaliser (`Feb 30` → `Mar 1`, `hour 24` → next day). Only once ev
 field matches is the candidate **materialised** into the target location, and it
 is accepted only if the fields come back unchanged.
 
-That one mechanic produces both DST behaviours without a special case:
+That mechanic produces the spring-forward behaviour on its own, and the
+fall-back one with a single explicit step:
 
 - **Spring forward** — `time.Date` normalises a non-existent local time into the
   neighbouring offset (02:30 → 03:30), the field comparison fails, the minute is
   skipped. `0 2 * * *` skips the transition day entirely.
-- **Fall back** — `time.Date` returns the FIRST occurrence, the fields match, and
-  the strictly-increasing contract means the second occurrence is never revisited.
-  The job fires once.
+- **Fall back** — the repeated reading exists twice, and `time.Date` does **not**
+  promise which one it returns. Its lookup lands on the LATER occurrence in every
+  zone east of UTC (measured: 02:30 on 2026-10-25 in Europe/Berlin comes back as
+  01:30Z, not 00:30Z) and on the earlier one west of it, which is why a suite that
+  only tested New York stayed green while Berlin fired an hour late.
+  `cursor.earliest` therefore asks for the first occurrence explicitly: when the
+  zone in force began by moving the clock back, the same fields are tried under
+  the previous offset, and the earlier instant wins if it reads back unchanged.
+  The shift comes from the zone table, not from an assumed hour —
+  `Australia/Lord_Howe` moves by thirty minutes. The strictly-increasing contract
+  then means the second occurrence is never revisited. The job fires once, at the
+  first.
 
 Doing both with one `time.Time` in the target location is how implementations
 end up shifting a job by an hour twice a year.
@@ -88,7 +102,9 @@ never from `time.Now`, so a parse verdict never depends on the day it runs.
   deadline. `Run` waits for all of them before returning.
 - **A panicking job is recovered** into `core/scheduler.JobPanicked` and the
   scheduler keeps running; the recovered value travels as a field, never as the
-  wrap origin. A job's ordinary error is reported **verbatim**.
+  wrap origin, and so does the `stack`, captured inside the recover while the
+  job's frames are still on it (the `events` / `queue` / `cli` rule). A job's
+  ordinary error is reported **verbatim**.
 - **`OnResult` is serialised** (so it need not be concurrency-safe) and is **not**
   panic-recovered (it is the caller's own code).
 - **The entry set is frozen for the duration of a `Run`** and thaws when it
@@ -121,8 +137,8 @@ Tests:
 
 | File | Covers |
 |---|---|
-| `cron_external_test.go` | every accepted form's first instant; every refusal's CODE; the POSIX day rule and its contrast; strict monotonicity |
-| `cron_dst_external_test.go` | spring-forward skip, fall-back fires once (asserted in UTC), the days either side, and a UTC control. Imports `time/tzdata` so `LoadLocation` resolves everywhere — the DST tests never skip |
-| `run_external_test.go` | the engine on a `ManualClock`: cadence, injected-clock timestamps, missed deadlines, overlap both ways, panic recovery, verbatim job errors, the legitimate empty scheduler, `Add` refusals, the frozen entry set, the drain, reuse, exhausted and misbehaving schedules |
+| `cron_external_test.go` | every accepted form's first instant; every refusal's CODE; the POSIX day rule and its contrast; strict monotonicity; a `MaxInt64` step meaning what a merely large one does, with a panic reported as a failure |
+| `cron_dst_external_test.go` | spring-forward skip, fall-back fires once at the FIRST occurrence (asserted in UTC) in New York and — where `time.Date` picks the later one — in Europe/Berlin and Australia/Lord_Howe's thirty-minute shift, the days either side, and a UTC control. Imports `time/tzdata` so `LoadLocation` resolves everywhere — the DST tests never skip |
+| `run_external_test.go` | the engine on a `ManualClock`: cadence, injected-clock timestamps, missed deadlines, overlap both ways, panic recovery and the panicking job's own stack, verbatim job errors, the legitimate empty scheduler, `Add` refusals, the frozen entry set, the drain, reuse, exhausted and misbehaving schedules |
 | `config_external_test.go` | the zero-`Config` fallbacks, jobs running with no hook, independent entries, and the refusal echo clip |
 | `nosleep_external_test.go` | the wall-clock-wait audit, plus the fixture proving it detects a violation |

@@ -54,6 +54,12 @@ func (f *fileStore) Regenerate(ctx context.Context, current coresession.ID, subj
 		//: InvalidID.
 		return coresession.SessionValue{}, coresession.InvalidID
 	}
+	//: a subject the frame could not read back is refused at the door, not
+	//: discovered as a corrupt record after the working one was retired.
+	if boundErr := boundSubject(subject); boundErr != nil {
+		//: PayloadTooLarge — nothing minted, the old record untouched.
+		return coresession.SessionValue{}, boundErr
+	}
 	next, mintErr := mintID(f.source)
 	//: minted before the lock.
 	if mintErr != nil {
@@ -95,6 +101,8 @@ func (f *fileStore) rotateLocked(current, next coresession.ID, subject string) (
 	//: write the NEW record first. If this fails the old identifier still
 	//: works, which is a worse security posture than the new one but a better
 	//: one than a caller holding an identifier that names no session at all.
+	//: A failure of the directory flush AFTER the rename is reported and not
+	//: undone (see flushLocked); the old record is then still intact.
 	if writeErr := f.writeLocked(rotated); writeErr != nil {
 		//: StoreUnavailable.
 		return record{}, writeErr
@@ -103,11 +111,30 @@ func (f *fileStore) rotateLocked(current, next coresession.ID, subject string) (
 	//: neither identifier resolves.
 	if removeErr := f.removeLocked(live.digest); removeErr != nil {
 		//: StoreUnavailable — reported, and the caller retries the whole
-		//: rotation rather than being told it succeeded.
-		return record{}, removeErr
+		//: rotation rather than being told it succeeded. The new record goes
+		//: with the failed rotation: the caller is never given its identifier,
+		//: so leaving it would keep a second live, subject-bound session that
+		//: nobody can reach, and every retry would add another.
+		return record{}, f.withdrawLocked(rotated.digest, removeErr)
 	}
 	//: rotated.
 	return rotated, nil
+}
+
+// withdrawLocked removes a record this operation published and is abandoning,
+// and returns the failure that caused it to be abandoned. That failure stays
+// the answer: a withdrawal that fails as well is attached to it as a field and
+// never replaces it, because the reason the rotation failed is what the caller
+// needs. The caller MUST hold the store lock.
+func (f *fileStore) withdrawLocked(digest string, cause error) error {
+	//: the same removal Destroy uses, flush included.
+	if withdrawErr := f.removeLocked(digest); withdrawErr != nil {
+		//: the cause keeps its code; the withdrawal failure is diagnostic.
+		return kerrs.Wrap(cause, kerrs.WrapParams{}, kerrs.String("withdraw", withdrawErr.Error()))
+	}
+	//: withdrawn; the store holds only what it held before the rotation began
+	//: — minus the old record, if its unlink was not what failed.
+	return cause
 }
 
 // Destroy removes the session. It is idempotent.
@@ -139,14 +166,25 @@ func (f *fileStore) Sweep(ctx context.Context) (removed int, err error) {
 		//: one pass over the directory; the lock is held throughout, which is
 		//: why sweeping is the caller's decision and not a background loop.
 		removed = f.sweepEntries(entries)
-		//: a sweep never fails on one bad record.
-		return nil
+		//: a sweep never fails on one bad record, and an empty pass changed
+		//: nothing that needs flushing.
+		if removed == 0 {
+			//: nothing unlinked.
+			return nil
+		}
+		//: ONE flush for the whole pass rather than one per record: the lock
+		//: is held throughout, and a device round trip per removal under it
+		//: would stall every other operation for no stronger guarantee.
+		return f.flushLocked("sync-dir-sweep")
 	})
-	//: the count is meaningful even when the lock failed — it is zero.
+	//: the count is meaningful even when the lock failed — it is zero — and
+	//: when only the flush failed, it counts removals every reader already
+	//: sees and a crash may still undo.
 	return removed, lockErr
 }
 
-// sweepEntries removes every expired or unreadable record. The caller MUST hold
+// sweepEntries unlinks every expired or unreadable record and reports how many
+// it unlinked; the directory flush is the caller's, once. The caller MUST hold
 // the store lock.
 func (f *fileStore) sweepEntries(entries []os.DirEntry) int {
 	now := f.win.clk.Now()
@@ -169,7 +207,8 @@ func (f *fileStore) sweepEntries(entries []os.DirEntry) int {
 			continue
 		}
 		//: best effort: a file that cannot be removed is retried next sweep.
-		if f.removeLocked(digest) == nil {
+		//: Unlinked only — Sweep flushes the directory once for the pass.
+		if f.unlinkLocked(digest) == nil {
 			removed++
 		}
 	}
@@ -193,7 +232,8 @@ func recordDigest(entry os.DirEntry) (digest string, ok bool) {
 	}
 	digest = strings.TrimSuffix(name, recordSuffix)
 	//: a file with the right suffix and the wrong stem is not one of ours
-	//: either — and refusing it here is what keeps a hand-made filename from
-	//: reaching recordPath.
-	return digest, len(digest) == digestLen
+	//: either — and since Sweep deletes whatever it recognises and cannot
+	//: read, recognising by length alone deleted any foreign file that merely
+	//: had 64 characters. Recognition is recordPath's own test, exactly.
+	return digest, isDigest(digest)
 }

@@ -54,6 +54,11 @@ func (m *memoryStore) Regenerate(_ context.Context, current coresession.ID, subj
 		//: InvalidID.
 		return coresession.SessionValue{}, coresession.InvalidID
 	}
+	//: bounded here too, although this store has no frame: see boundSubject.
+	if boundErr := boundSubject(subject); boundErr != nil {
+		//: PayloadTooLarge — nothing minted, the old record untouched.
+		return coresession.SessionValue{}, boundErr
+	}
 	next, mintErr := mintID(m.source)
 	//: minted BEFORE the lock, so a slow or blocking entropy source does not
 	//: hold every other session's operations behind it.

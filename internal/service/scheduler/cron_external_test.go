@@ -1,6 +1,8 @@
 package scheduler_test
 
 import (
+	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -220,4 +222,67 @@ func TestNextIsStrictlyIncreasing(t *testing.T) {
 		}
 		cursor = next
 	}
+}
+
+// TestAHugeStepMeansWhatALargeOneMeans pins that a step is bounded by the
+// field it walks, however large the number written.
+//
+// "0 0 */9223372036854775807 * *" used to PANIC: the item loop advanced with
+// value += step, and on a field whose floor is 1 — day-of-month, month, or an
+// a-b range starting above 0 — the sum wrapped to MinInt64 and indexed the
+// membership set below zero, in a parser whose every other failure is a typed
+// refusal. A step wider than its span is not an error — "*/40" on day-of-month
+// already means "the 1st and nothing else" — so the huge step must mean
+// exactly what the merely large one does, and each case is compared against
+// that twin rather than against a literal.
+//
+// The step is the largest the build's int holds — MaxInt64 on a 64-bit build,
+// MaxInt32 on a 32-bit one, where a MaxInt64 step is out of strconv's range
+// and already refused — so the overflow is provoked on every architecture.
+//
+// Mutation: restoring the loop's "value <= hi; value += step" bound failed
+// every case with `Parse("0 0 */9223372036854775807 * *") panicked: runtime
+// error: index out of range [-9223372036854775808]`, and under GOARCH=386 with
+// `Parse("0 0 */2147483647 * *") panicked: runtime error: index out of range
+// [-2147483648]`.
+func TestAHugeStepMeansWhatALargeOneMeans(t *testing.T) {
+	t.Parallel()
+	huge := strconv.Itoa(math.MaxInt)
+	tests := []struct {
+		name string
+		huge string
+		twin string
+	}{
+		{"day-of-month", "0 0 */" + huge + " * *", "0 0 */40 * *"},
+		{"month", "0 0 1 */" + huge + " *", "0 0 1 */13 *"},
+		{"a range whose floor is above zero", "0 1-5/" + huge + " * * *", "0 1 * * *"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, gotOK := firstFireWithoutPanic(t, tc.huge)
+			want, wantOK := firstFireWithoutPanic(t, tc.twin)
+			if gotOK != wantOK || !got.Equal(want) {
+				t.Errorf("%q first fires at %s (%v); %q, which means the same, at %s (%v)",
+					tc.huge, got.Format(time.RFC3339), gotOK, tc.twin, want.Format(time.RFC3339), wantOK)
+			}
+		})
+	}
+}
+
+// firstFireWithoutPanic parses expr and returns its first instant after
+// utcOrigin. A panic becomes a test failure naming the expression, so a
+// regression reports which input crashed instead of killing the test binary.
+func firstFireWithoutPanic(t *testing.T, expr string) (fireAt time.Time, ok bool) {
+	t.Helper()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("Parse(%q) panicked: %v", expr, recovered)
+		}
+	}()
+	schedule, err := svcsched.Parse(expr)
+	if err != nil {
+		t.Fatalf("Parse(%q) was refused: %v", expr, err)
+	}
+	return schedule(utcOrigin)
 }
