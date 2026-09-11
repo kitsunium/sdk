@@ -1,0 +1,63 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "authz",
+    srcs = [
+        "abac.go",
+        "authz.go",
+        "codes.go",
+        "combinators.go",
+        "combine.go",
+        "conditions.go",
+        "errors.go",
+        "grant_value.go",
+        "rbac.go",
+        "rbac_config.go",
+        "validate.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/authz",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/authz",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":authz",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "authz_test",
+    size = "small",
+    srcs = [
+        "abac_external_test.go",
+        "authz_bench_test.go",
+        "check_external_test.go",
+        "combine_external_test.go",
+        "conditions_external_test.go",
+        "rbac_external_test.go",
+    ],
+    deps = [
+        ":authz",
+        "//internal/core/authz",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

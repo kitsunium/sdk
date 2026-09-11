@@ -10,6 +10,13 @@ go_library(
         "load.go",
         "merge.go",
         "poll_watcher.go",
+        "schema.go",
+        "schema_defaults.go",
+        "schema_keys.go",
+        "schema_presence.go",
+        "schema_reject.go",
+        "schema_source.go",
+        "schema_spec.go",
         "wrap.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/config",
@@ -20,7 +27,9 @@ go_library(
     deps = [
         "//internal/core/codec",
         "//internal/core/config",
+        "//internal/core/validation",
         "//internal/kernel/errs",
+        "//internal/service/validation",
     ],
 )
 
@@ -45,14 +54,20 @@ go_test(
         "merge_internal_test.go",
         "poll_watcher_external_test.go",
         "poll_watcher_internal_test.go",
+        "schema_bench_test.go",
+        "schema_external_test.go",
+        "schema_keys_internal_test.go",
+        "schema_shape_external_test.go",
         "wrap_internal_test.go",
     ],
     embed = [":config"],
     deps = [
         "//internal/core/codec",
         "//internal/core/config",
+        "//internal/core/validation",
         "//internal/kernel/errs",
         "//internal/service/codec/json",
+        "//internal/service/validation",
     ],
 )
 

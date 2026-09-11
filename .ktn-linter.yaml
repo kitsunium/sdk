@@ -283,6 +283,17 @@ rules:
       # each parameter to a one-method interface would replace the single domain
       # type with two synthetic ones and obscure that both are the same thing.
       - "**/pkg/v1/tlsid/**"
+      # Same false positive again, on the authz evaluators. Check, evaluateRBAC
+      # and lookupAttr all take `request coreauthz.RequestValue`, and that type
+      # is fixed by the FUNC ports they implement — coreauthz.Policy is
+      # `func(context.Context, RequestValue) (Decision, error)` and
+      # coreauthz.Condition is `func(RequestValue) (bool, error)`. Narrowing the
+      # parameter to the suggested one-method interface makes the function stop
+      # satisfying the port, which is a compile error, so the suggestion is
+      # unactionable. The suggestion is also wrong on the merits here: a policy
+      # that took `interface{ Action() string }` could no longer read the
+      # attributes, which is the half of the request ABAC exists for.
+      - "**/internal/service/authz/**"
       # New takes a tlsid.Identity, the domain's single TLS value type. Narrowing
       # it to a one-method interface would hide that the client and the server
       # consume the very same identity, which is the point of sharing it.
@@ -582,6 +593,18 @@ rules:
       # "constructor NewNewStateValue()", which is not a name anything could
       # satisfy — the same broken suggestion the jwk and metrics entries record.)
       - "**/internal/core/trace/**"
+      # core/authz.AttrValue has FOUR constructors on purpose — AttrString,
+      # AttrInt64, AttrBool and AttrStrings — one per kind, each taking only
+      # the payload its kind can hold. That is what makes the kind part of the
+      # attribute's identity instead of a field somebody can forget to set, and
+      # it is why the zero AttrValue is KindInvalid and gets DROPPED by
+      # NewRequestValue rather than stored as a fact nothing can read. The
+      # single NewAttrValue(key, kind, text, number, flag, list) the rule asks
+      # for would take all four payloads plus a kind and let any combination of
+      # them through — precisely the "poorly initialized struct" the rule
+      # exists to prevent, same shape as the jwk.KeyValue entry above. (The
+      # message here likewise reads "constructor NewNewAttrValue()".)
+      - "**/internal/core/authz/**"
 
   # KTN-GOROUTINE-SYNCMAP / KTN-GOROUTINE-ATOMICVAL (phase 4) — the suggested
   # replacements cannot express what this map is for.
@@ -730,6 +753,46 @@ rules:
       # compare a snapshot without racing the server that produced it. A
       # pointer would hand out a view that mutates underneath the reader.
       - "**/pkg/v1/server/**"
+      # authz.AttrValue (80 B) — all nine findings in the authz tree are this
+      # one type; RequestValue is 56 B and is not flagged. Three reasons, and
+      # the third is measured rather than argued.
+      #
+      #   1. Contract. An AttrValue is a fact a Policy JUDGES. A pointer would
+      #      let a policy mutate the attribute it is authorising against — the
+      #      same argument core/net.RequestValue is excluded under, one layer
+      #      down. Immutability here is a security property, not a style.
+      #
+      #   2. Mechanics. The attributes live in a map[string]AttrValue, and Go
+      #      map values are NOT ADDRESSABLE: r.attrs[k].Contains(x) does not
+      #      compile with a pointer receiver. A pointer receiver would force a
+      #      copy into a local at every call site — the exact copy the rule is
+      #      trying to remove, plus a name. Making the map hold *AttrValue
+      #      instead trades one hot-path copy for one heap allocation PER
+      #      ATTRIBUTE on the per-request construction path, which is already
+      #      the allocating half of the domain.
+      #
+      #   3. Measurement. The obvious shrink was tried and does not pay.
+      #      Folding the bool into the int64 payload and reordering takes the
+      #      struct to 72 B — still over the 64 B threshold, so it would not
+      #      silence the rule either way — and it is a TRADE rather than a win:
+      #      7-15 % SLOWER on every allocation-free evaluation benchmark (the
+      #      only tight ones: CheckAllow 210 -> 225, ABACAllow 117 -> 135),
+      #      ~9 % faster and 128 B smaller on construction, and within noise
+      #      end to end. 80 is five whole 16-byte moves and 72 is not, so the
+      #      memmove out of the map gets slower despite copying less. Reverted;
+      #      the numbers, the spreads and a first measurement that was WRONG
+      #      are in internal/service/authz/BENCH.md §"The 80-byte AttrValue was
+      #      measured, and the first answer was wrong".
+      #
+      # Getting under 64 B would mean deleting the `key` member, which is what
+      # lets the caller write one flat NewRequest(subj, act, res, attrs...)
+      # list instead of building a map at the call site. Not worth it: the
+      # evaluation path allocates ZERO as it stands.
+      - "**/internal/core/authz/**"
+      # The pkg/v1 facade forwards the same value types unchanged; a pointer
+      # here would diverge the public API from the port it aliases, exactly as
+      # ADR 0016 avoids for process.Spec above.
+      - "**/pkg/v1/authz/**"
       # crypto/jwk.KeyValue (176 B) — the value receiver is the security
       # mechanism, not a style choice, and it is the SAME precedent as
       # core/net.IdentityValue and core/crypto.Key above.

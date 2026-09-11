@@ -19,6 +19,7 @@ go_test(
     name = "snapshot_test",
     size = "small",
     srcs = [
+        "snapshot_bench_test.go",
         "snapshot_external_test.go",
         "snapshot_integration_test.go",
     ],

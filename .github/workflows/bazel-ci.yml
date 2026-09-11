@@ -117,6 +117,14 @@ jobs:
       - name: exemption invariant — alloc lane covers every !race test
         run: bash scripts/pre-commit/check-alloc-lane-coverage.sh
 
+      # Guards the invariant the errs AST audit depends on: it judges only the
+      # files staged as its runfiles via //:audit_sources, so a package that
+      # declares codes but is missing from that list is audited by nothing AND
+      # passes green. ADR 0020 records this gap once already; all five
+      # internal/service/net/* packages had silently reopened it.
+      - name: audit-coverage invariant — every code-declaring package is audited
+        run: bash scripts/pre-commit/check-audit-coverage.sh
+
       - name: coverage
         run: |
           bazel coverage --combined_report=lcov //...
