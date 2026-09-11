@@ -76,7 +76,10 @@ type Conn struct {
 	wbuf []byte
 	// closeSent records that this endpoint has already put a Close frame on the
 	// wire. RFC 6455 §5.5.1 allows exactly one, and a second would be read as a
-	// frame arriving after the closing handshake finished. Guarded by wmu.
+	// frame arriving after the closing handshake finished. It also refuses
+	// every OTHER frame from that point on: done closes only after the Close
+	// has been written and the lock released, so without this a Send or a Ping
+	// queued on the lock would follow the Close onto the wire. Guarded by wmu.
 	closeSent bool
 
 	// msg accumulates the message being reassembled. Reader goroutine only.
@@ -555,6 +558,18 @@ func (c *Conn) sendFrame(op corenet.WSOpCode, payload []byte) error {
 	if eerr := c.ended(); eerr != nil {
 		//: the connection is over.
 		return eerr
+	}
+	//: done is closed only by terminate, which every path that sends a Close
+	//: runs AFTER sendClose has released this lock — so a Send or a Ping
+	//: queued on the lock behind the Close finds done still open and would
+	//: put its frame on the wire after the Close. §5.5.1 forbids a data frame
+	//: there, and this endpoint sends no control frame there either, because
+	//: every path that sends a Close ends the connection at once. closeSent is
+	//: guarded by this lock, so reading it here closes the window exactly.
+	if c.closeSent {
+		//: the closing handshake has begun; nothing may follow the Close.
+		return errs.Wrap(corenet.WSConnClosed, errs.WrapParams{},
+			errs.String("why", "a Close frame has already been sent"))
 	}
 	//: one frame, whole.
 	return c.writeLocked(op, payload)

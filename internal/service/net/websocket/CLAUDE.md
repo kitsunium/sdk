@@ -159,6 +159,18 @@ Two consequences are deliberate and documented:
 - **One Close frame, ever.** §5.5.1 allows exactly one per endpoint, and
   `closeSent` is set before the write so a failed attempt cannot leave the door
   open for a second on a socket that is already gone.
+- **Nothing follows the Close.** §5.5.1 forbids a data frame after it, and
+  `sendFrame` refuses EVERY frame once `closeSent` is set — data, Ping and the
+  Pong the reader owes alike, because every path that sends a Close ends the
+  connection at once. The `done` check alone did not cover it: `terminate`
+  closes `done` only after `sendClose` has released the write lock, so a Send or
+  a Ping queued on the lock behind the Close found `done` still open and
+  followed the Close onto the wire. `closeSent` is guarded by that same lock,
+  which is what makes the check exact. `Test_Conn_sendFrame` holds the window
+  open deterministically and is mutation-checked;
+  `Test_Conn_sendFrameUnderARacingClose` races real senders against
+  `CloseWith` and samples it, reliably only under `-race` — the numbers are in
+  its doc comment.
 
 ## permessage-deflate is NOT negotiated, and the refusal is enforced twice
 
