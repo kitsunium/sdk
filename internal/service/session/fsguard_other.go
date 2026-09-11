@@ -39,16 +39,16 @@ import (
 // login.
 const platformNative bool = false
 
-// lockExclusive reports the shared UnsupportedPlatform sentinel. It is
+// tryLockExclusive reports the shared UnsupportedPlatform sentinel. It is
 // unreachable in practice — the constructor refuses first — and exists so the
 // package compiles on every GOOS, which is ADR 0018's build bar.
-func lockExclusive(_ *os.File) error {
+func tryLockExclusive(_ *os.File) (taken bool, err error) {
 	//: the same typed answer every unimplemented primitive gives, everywhere.
-	return coreproc.UnsupportedPlatform
+	return false, coreproc.UnsupportedPlatform
 }
 
 // unlockFile reports the shared UnsupportedPlatform sentinel, as
-// [lockExclusive] does and for the same reason.
+// [tryLockExclusive] does and for the same reason.
 func unlockFile(_ *os.File) error {
 	//: uniform contract even where the capability is absent.
 	return coreproc.UnsupportedPlatform

@@ -56,6 +56,7 @@ go_test(
         "dirsync_internal_test.go",
         "encode_internal_test.go",
         "entropy_internal_test.go",
+        "file_cancel_external_test.go",
         "file_store_external_test.go",
         "fixation_external_test.go",
         "sealer_external_test.go",

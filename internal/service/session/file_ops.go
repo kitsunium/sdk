@@ -22,6 +22,12 @@ import (
 // whole record atomically: two atomic writes, one lost update. rename(2) makes
 // the PUBLICATION indivisible; only the lock makes the read-modify-write cycle
 // indivisible, and they are different guarantees.
+//
+// Both waits observe ctx (ADR 0073). The in-process gate is a channel rather
+// than a sync.Mutex because a Mutex cannot be abandoned, and the flock is
+// LOCK_NB plus a poll on the injected clock because a blocking LOCK_EX parks
+// the thread inside a syscall no cancellation reaches. A request whose caller
+// has hung up stops waiting for a lock nobody will read the result of.
 func (f *fileStore) withLock(ctx context.Context, fn func() error) (err error) {
 	//: cancellation is checked before the wait, so a caller who has already
 	//: given up does not queue behind someone else's operation.
@@ -30,15 +36,19 @@ func (f *fileStore) withLock(ctx context.Context, fn func() error) (err error) {
 		return ctxErr
 	}
 	//: the in-process half FIRST — flock does not exclude goroutines that
-	//: share this descriptor (see fileStore.mu). Held for the whole cycle,
+	//: share this descriptor (see fileStore.gate). Held for the whole cycle,
 	//: so it is released only after the flock is.
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	//: blocks until the lock is free; it is held for microseconds.
-	if lockErr := lockExclusive(f.lock); lockErr != nil {
+	if gateErr := f.enter(ctx); gateErr != nil {
+		//: the caller's own context, as StoreUnavailable.
+		return gateErr
+	}
+	defer f.leave()
+	//: the cross-process half, polled rather than blocked on.
+	if lockErr := f.takeFlock(ctx); lockErr != nil {
 		//: LockFailed — without serialisation the store cannot keep its word,
-		//: so the operation is refused rather than attempted unlocked.
-		return wrapAs(LockFailed, lockErr)
+		//: so the operation is refused rather than attempted unlocked — or
+		//: StoreUnavailable when it was the caller who left.
+		return lockErr
 	}
 	//: released on every path, including a panic in fn.
 	defer func() {
@@ -52,6 +62,94 @@ func (f *fileStore) withLock(ctx context.Context, fn func() error) (err error) {
 	}()
 	//: fn owns the critical section.
 	return fn()
+}
+
+// noDone is the never-ready channel a nil context stands in for. A nil
+// receive-only channel blocks forever, which is exactly what "no cancellation"
+// means in a select.
+var noDone <-chan struct{}
+
+// enter takes the in-process gate, or reports the caller's own departure.
+//
+// The gate is a one-slot channel and not a sync.Mutex for one reason: a Mutex
+// has no abandonable Lock. A goroutine parked in mu.Lock() cannot be told its
+// request was cancelled, so a store shared by a handful of handlers turned one
+// slow operation into a queue nobody could leave.
+func (f *fileStore) enter(ctx context.Context) error {
+	//: a nil context is read as "no deadline", matching checkContext.
+	if ctx == nil {
+		//: an unabandonable wait is then the caller's own choice.
+		f.gate <- struct{}{}
+		//: entered.
+		return nil
+	}
+	select {
+	//: the slot was free, or its holder has just left.
+	case f.gate <- struct{}{}:
+		//: entered.
+		return nil
+	//: the caller stopped waiting.
+	case <-ctx.Done():
+		//: the cause travels as a field; the typed shape stays uniform.
+		return wrapAs(coresession.StoreUnavailable, ctx.Err(), kerrs.String("op", "gate"))
+	}
+}
+
+// leave releases the in-process gate.
+func (f *fileStore) leave() {
+	//: the slot is always ours here — enter is the only writer, and it is
+	//: paired with exactly one leave.
+	<-f.gate
+}
+
+// takeFlock polls for the cross-process lock until it has it or ctx ends.
+//
+// The poll interval is the caller's (FileConfig.Poll), armed on the injected
+// clock, so a test drives contention without sleeping and production waits on
+// the real one.
+func (f *fileStore) takeFlock(ctx context.Context) error {
+	for {
+		taken, flockErr := tryLockExclusive(f.lock)
+		//: the call itself failed.
+		if flockErr != nil {
+			//: LockFailed.
+			return wrapAs(LockFailed, flockErr)
+		}
+		//: ours.
+		if taken {
+			//: acquired.
+			return nil
+		}
+		//: another process holds it: wait out one interval, or the caller's
+		//: patience.
+		if waitErr := f.waitPoll(ctx); waitErr != nil {
+			//: StoreUnavailable, carrying the caller's context error.
+			return waitErr
+		}
+	}
+}
+
+// waitPoll waits one poll interval or until ctx ends.
+func (f *fileStore) waitPoll(ctx context.Context) error {
+	timer := f.clk.NewTimer(f.poll)
+	defer timer.Stop()
+	//: a nil context never selects, so it waits out the interval exactly as a
+	//: caller with no deadline expects.
+	done := noDone
+	//: the caller's own cancellation, where there is one.
+	if ctx != nil {
+		done = ctx.Done()
+	}
+	select {
+	//: the caller stopped waiting.
+	case <-done:
+		//: the cause travels as a field; the typed shape stays uniform.
+		return wrapAs(coresession.StoreUnavailable, ctx.Err(), kerrs.String("op", "lock"))
+	//: try again.
+	case <-timer.C():
+		//: another attempt.
+		return nil
+	}
 }
 
 // checkContext reports a cancelled or expired context as a retryable backend

@@ -83,7 +83,7 @@ func (r *flushRecorder) reset() {
 
 // flushObservedStore builds a file store whose directory flushes go through
 // rec, skipping where the file store honestly refuses to exist.
-func flushObservedStore(t *testing.T, clk clock.Clock, rec *flushRecorder) *fileStore {
+func flushObservedStore(t *testing.T, clk clock.Timed, rec *flushRecorder) *fileStore {
 	t.Helper()
 	store, err := NewFileStore(FileConfig{
 		IdleTimeout: 30 * time.Minute, AbsoluteTimeout: 100 * time.Minute, Clock: clk,

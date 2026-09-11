@@ -113,6 +113,14 @@
 // every write through a temporary file and rename(2), and serialises every
 // read-modify-write under one exclusive lock.
 //
+// Waiting for that lock is ABANDONABLE, in both halves: the flock is taken
+// without blocking and retried every FileConfig.Poll on the injected clock,
+// and the in-process gate is a channel rather than a mutex. A blocking flock(2)
+// parks the thread inside a syscall no cancellation can reach, so a request
+// whose client had hung up kept waiting for a lock nobody would read the
+// result of. A caller whose context ends gets StoreUnavailable, carrying its
+// own context error.
+//
 // Those guarantees rest on flock(2) and on a filesystem that enforces Unix
 // permissions. Where they do not exist — Windows, wasip1, and any other GOOS
 // without flock(2) — [NewFileStore] returns the SDK's [UnsupportedPlatform]
@@ -167,7 +175,9 @@ type Sealer = coresession.Sealer
 type Config = svcsession.Config
 
 // FileConfig is the public alias for the file store's construction parameters.
-// Its Key field takes a pkg/v1/crypto.Key.
+// Its Key field takes a pkg/v1/crypto.Key, and its Clock is a clock.Timed
+// because the store both stamps time and waits on it — the poll between lock
+// attempts is armed on it, so a test drives contention without sleeping.
 type FileConfig = svcsession.FileConfig
 
 var (
