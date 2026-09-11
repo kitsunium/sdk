@@ -100,18 +100,66 @@ func (c cursor) nextMonth() cursor {
 // not exist", which the walk then skips.
 //
 // The ambiguous case — a wall-clock reading that happens twice on a
-// fall-back day — needs no special handling: time.Date resolves it to the
-// FIRST occurrence, the fields match, and the walk's strictly-increasing
-// contract means the second occurrence is never revisited. The job runs once.
+// fall-back day — resolves to the EARLIER occurrence, and it has to be asked
+// for. time.Date documents that it guarantees neither, and its lookup (the
+// zone in force at the reading taken as a UTC instant) returns the LATER one
+// in every zone east of UTC: 02:30 on 2026-10-25 in Europe/Berlin comes back
+// as 01:30Z, not 00:30Z. Only zones west of UTC, New York among them, happen
+// to come back first. See [cursor.earliest]. The walk's strictly-increasing
+// contract then means the second occurrence is never revisited: the job runs
+// once, at the first.
 func (c cursor) materialise(loc *time.Location) (time.Time, bool) {
 	//: ask the location to place these fields on its own timeline.
 	got := time.Date(c.year(), c.t.Month(), c.day(), c.hour(), c.minute(), 0, 0, loc)
 	//: a reading that came back different is a reading that does not exist.
-	if got.Year() != c.year() || got.Month() != c.t.Month() || got.Day() != c.day() ||
-		got.Hour() != c.hour() || got.Minute() != c.minute() {
+	if !c.readsAs(got) {
 		//: the walk treats it as a minute the calendar skipped.
 		return time.Time{}, false
 	}
-	//: the wall-clock reading exists in loc and this is its instant.
-	return got, true
+	//: the wall-clock reading exists in loc; its first occurrence is the answer.
+	return c.earliest(got), true
+}
+
+// readsAs reports whether t, read in its own location, shows exactly the
+// cursor's wall-clock fields. Date and Clock each resolve the zone once, where
+// the five single-field accessors would resolve it five times.
+func (c cursor) readsAs(t time.Time) bool {
+	year, month, day := t.Date()
+	hour, minute, _ := t.Clock()
+	//: every field the cron grid has, and nothing finer.
+	return year == c.year() && month == c.t.Month() && day == c.day() &&
+		hour == c.hour() && minute == c.minute()
+}
+
+// earliest returns the first occurrence of got's wall-clock reading: got
+// itself, unless the zone in force at got began by moving the clock BACK and
+// got lies in the stretch that transition repeated — in which case the same
+// reading also occurred under the previous, larger offset, that many seconds
+// earlier. The shift is read from the zone table rather than assumed to be an
+// hour, because it is not always one: Australia/Lord_Howe moves by thirty
+// minutes. Nothing here allocates; the walk calls it once per full match.
+func (c cursor) earliest(got time.Time) time.Time {
+	start, _ := got.ZoneBounds()
+	//: a zone in force since the start of recorded time has no predecessor.
+	if start.IsZero() {
+		//: the only occurrence there is.
+		return got
+	}
+	_, offset := got.Zone()
+	_, previous := start.Add(-time.Nanosecond).Zone()
+	//: only a transition that moved the clock back repeats a reading; one
+	//: that moved it forward, or changed only the zone's name, repeats none.
+	if previous <= offset {
+		//: got is the only occurrence.
+		return got
+	}
+	earlier := got.Add(-time.Duration(previous-offset) * time.Second)
+	//: it is an occurrence only if it still reads as the same wall clock —
+	//: outside the repeated stretch it lands on a different reading.
+	if c.readsAs(earlier) {
+		//: the first of the two.
+		return earlier
+	}
+	//: got was past the repeated stretch, so it is the only occurrence.
+	return got
 }
