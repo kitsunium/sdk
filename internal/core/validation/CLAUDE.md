@@ -5,7 +5,7 @@
 Declares the **value-checking port**: `Constraint[T]` (what checks), plus the
 two domain values it produces — `ViolationValue` (one located failure) and
 `ReportValue` (all of them) — and the path grammar every violation speaks. The
-14th core sibling, admitted by **ADR 0046**. The concrete constraints, the
+15th core sibling, admitted by **ADR 0046**. The concrete constraints, the
 combinators and the struct-tag front end live in `internal/service/validation`.
 
 Code range: `0.2.15.*` (ADR 0046).

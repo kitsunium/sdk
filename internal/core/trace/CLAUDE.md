@@ -5,7 +5,7 @@
 Declares the SDK's **distributed-tracing port**: the `Tracer`/`Span` pair an
 application instruments against, the immutable `SpanContextValue` that travels
 between processes, the OpenTelemetry trace data model, and the W3C Trace Context
-propagation format. The 17th core sibling, admitted by **ADR 0051**.
+propagation format. The 18th core sibling, admitted by **ADR 0051**.
 
 Like `metrics` since ADR 0044, it speaks the OpenTelemetry model and imports
 **none** of OpenTelemetry's code. OTel is a published specification; this SDK

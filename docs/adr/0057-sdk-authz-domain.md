@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
-- **Amends**: `internal/core/CLAUDE.md` §Purpose — an 18th core sibling
+- **Amends**: `internal/core/CLAUDE.md` §Purpose — a 24th core sibling
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values are never inert), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (published ports), [ADR 0041](0041-sdk-scheduler-domain.md) (the FUNC-port precedent), [ADR 0046](0046-sdk-validation-domain.md) (a message names the rule and the bound, never the value), [ADR 0042](0042-sdk-token-domain.md) / [ADR 0045](0045-sdk-session-domain.md) (where a subject comes from), [ADR 0026](0026-sdk-resilience-domain.md) (no-registry precedent)
 
 ## Context
@@ -39,7 +39,7 @@ Three states cost one enum value and remove both.
 
 ## Decision
 
-**Add `internal/core/authz` as the 18th core sibling** (the port, the domain
+**Add `internal/core/authz` as the 24th core sibling** (the port, the domain
 values, the typed sentinels — block `0.2.26.*`), **and `internal/service/authz`
 above it** (the RBAC and ABAC evaluators, the combiner, the closure and the
 built-in conditions — block `0.3.56.*`), with `pkg/v1/authz` as the alias
@@ -369,7 +369,7 @@ correct engine wrong.
 
 ## Consequences / Semantics
 
-- **18th core sibling**; the `internal/core` purpose statement widens. Blocks
+- **24th core sibling**; the `internal/core` purpose statement widens. Blocks
   `0.2.26.*` (port) and `0.3.56.*` (evaluators, conditions, construction
   refusals) are allocated in the ADR 0035 ownership table in the same change.
 - **`errs.HasCode(err, CodePermissionDenied)` answers true for every refusal**,

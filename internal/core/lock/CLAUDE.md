@@ -4,7 +4,7 @@
 
 The SDK's mutual-exclusion **domain**: the `Locker` port that hands out named
 exclusive leases, the `Lease` a holder gets back, and the `Deadliner` sibling
-through which a lease says whether it can expire at all. The 17th core sibling,
+through which a lease says whether it can expire at all. The 19th core sibling,
 admitted by **ADR 0052**. The concrete lockers — in-process and file-backed —
 live in `internal/service/lock`.
 

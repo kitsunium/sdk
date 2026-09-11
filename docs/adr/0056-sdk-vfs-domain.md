@@ -44,7 +44,7 @@ this machine it is the common case. That number is the argument for the domain.
 
 ## Decision
 
-Admit `vfs` as the 18th core sibling: a port in `internal/core/vfs`, two
+Admit `vfs` as the 23rd core sibling: a port in `internal/core/vfs`, two
 implementations in `internal/service/vfs`, a facade in `pkg/v1/vfs`. Code blocks
 `0.2.25.*` (port) and `0.3.55.*` (implementations).
 

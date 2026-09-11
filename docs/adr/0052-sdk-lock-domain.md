@@ -34,7 +34,7 @@ consumer usually cannot:
 
 ## Decision
 
-Add `lock` as the **17th core sibling**: `internal/core/lock` (`0.2.21.*`),
+Add `lock` as the **19th core sibling**: `internal/core/lock` (`0.2.21.*`),
 `internal/service/lock` (`0.3.51.*`), `pkg/v1/lock`. Two implementations ship —
 in-process and file-backed. **No registry.**
 
@@ -344,7 +344,7 @@ sentence, not a weaker one.
 
 ## Consequences
 
-- **Core** gains its 17th sibling, `0.2.21.*`: `LOCK_MISCONFIGURED`,
+- **Core** gains its 19th sibling, `0.2.21.*`: `LOCK_MISCONFIGURED`,
   `LOCK_NOT_HELD`, `LOCK_BACKEND_FAILED`, `LOCK_NAME_REJECTED`.
 - **Service** gains `0.3.51.*`: `LOCK_FENCE_CORRUPT`, `LOCK_DIRECTORY_UNSAFE`,
   `LOCK_KEEPALIVE_LOST`. Both ranges are allocated in `codeRangeOwners` in the

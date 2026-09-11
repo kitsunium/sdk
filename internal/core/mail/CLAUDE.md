@@ -7,7 +7,7 @@ ADR 0039 capability siblings `BatchSender` and `Outbox`, their union
 `FullTransport`, the message as a VALUE (`MessageValue`, `AddressValue`,
 `AttachmentValue`, `HeaderFieldValue`), the SMTP `EnvelopeValue` derived from it, and the guards every
 implementation runs — `Validate`, `ValidateHeaderName`, `ValidateHeaderValue`,
-`ValidateAddress`, `ValidateAttachment`. The 26th core sibling, admitted by
+`ValidateAddress`, `ValidateAttachment`. The 28th core sibling, admitted by
 **ADR 0064**.
 
 MIME composition and the SMTP session live in `internal/service/mail`. Nothing
