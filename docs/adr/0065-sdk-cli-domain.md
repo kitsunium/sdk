@@ -234,11 +234,14 @@ non-zero, which breaks every `--help` smoke test in every CI system.
 The 0 is earned by the answer, not by the question. A help the diagnostic
 stream refused — a closed pipe, a full disk, a writer that took part of the
 page — is an answer nobody received, so `-h` then returns `HELP_WRITE_FAILED`
-with EX_IOERR and the stream's own error beneath it. The three usage rows keep
-their 64 even when the help could not be written: there the usage error is the
-verdict and the help is its actionable half. (Amended 2026-09-11: the first
-version returned 0 whatever the write did, so `tool -h > /dev/full` exited 0
-with nothing written.)
+with EX_IOERR and the stream's own error beneath it — or, when that error is
+itself an SDK error, in a field, because wrapping it would let origin-wins hand
+the code and the exit status to the stream. The three usage rows keep their 64
+even when the help could not be written: there the usage error is the verdict
+and the help is its actionable half. (Amended 2026-09-11: the first version
+returned 0 whatever the write did, so `tool -h > /dev/full` exited 0 with
+nothing written; the next wrapped every stream error, so a typed one took the
+verdict over.)
 
 **The engine writes the help; the caller writes the error.** One voice per
 artefact. The help is generated and only the SDK can render it; how an error is

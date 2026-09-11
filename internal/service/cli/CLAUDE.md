@@ -46,9 +46,12 @@ Code range: `0.3.62.*` (ADR 0065).
 - **`-h` is status 0 only when the page was delivered.** `writeHelp` returns
   the stream's error (`io.ErrShortWrite` for a writer that took part of the
   page silently), and the `-h` path turns it into `HelpWriteFailed` (EX_IOERR)
-  with that error beneath it. The usage paths discard it on purpose: there the
-  usage error is the verdict. Pinned by `TestAHelpNobodyReceivedIsNotASuccess`
-  and `TestAFailedHelpWriteKeepsTheUsageVerdict`.
+  with that error beneath it — or in `cause` and `cause_code` fields when it
+  is itself an `*errs.Error`, which origin-wins would otherwise let take over
+  the code and the exit status. The usage paths discard it on purpose: there the usage error
+  is the verdict. Pinned by `TestAHelpNobodyReceivedIsNotASuccess`,
+  `TestATypedStreamErrorDoesNotTakeOverTheHelpVerdict` and
+  `TestAFailedHelpWriteKeepsTheUsageVerdict`.
 - **The only recovered panic is an `Action`'s.** A panicking Go program exits
   with status 2, which sysexits gives no meaning; recovering keeps the value
   AND the originating stack as fields and lets `main` decide. The recovered

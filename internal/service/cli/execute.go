@@ -85,8 +85,8 @@ func (e *executor) reportParse(cmd corecli.CommandValue, path []string, set *fla
 		//: asking a question is not a failure, so a help the stream took is
 		//: status 0 — and one it did not is an answer nobody received.
 		if werr := e.writeHelp(cmd, path, set); werr != nil {
-			//: the writer's own error stays matchable beneath the verdict.
-			return kerrs.Wrap(werr, helpWriteWrap, kerrs.String("command", joined))
+			//: HELP_WRITE_FAILED and EX_IOERR, whatever the stream reported.
+			return helpWriteFailure(werr, joined)
 		}
 		//: the answer was delivered.
 		return nil
@@ -99,6 +99,27 @@ func (e *executor) reportParse(cmd corecli.CommandValue, path []string, set *fla
 	//: and never as Public.
 	return kerrs.Wrap(InvalidFlags, kerrs.WrapParams{}, withHelpFailure(werr,
 		kerrs.String("command", joined), kerrs.String("flag_error", cause.Error()))...)
+}
+
+// helpWriteFailure is the -h verdict when the stream did not take the help.
+//
+// An untyped stream error is wrapped, so errors.Is still finds it beneath
+// HELP_WRITE_FAILED. A typed one is not: origin-wins would hand the verdict to
+// the stream — its code, and its exit status where the contract promises
+// EX_IOERR — and a diagnostic stream that is itself SDK code returns exactly
+// that. Its text travels as a field instead, as a tier failure's does in the
+// cache domain.
+func helpWriteFailure(werr error, command string) error {
+	//: the same test Wrap makes, so the two can never disagree.
+	if typedErr, typed := errors.AsType[*kerrs.Error](werr); typed {
+		//: the sentinel is the origin; the stream's refusal and its own code
+		//: are diagnostic.
+		return kerrs.Wrap(HelpWriteFailed, kerrs.WrapParams{},
+			kerrs.String("command", command), kerrs.String("cause", werr.Error()),
+			kerrs.String("cause_code", typedErr.Code().String()))
+	}
+	//: the writer's own error stays matchable beneath the verdict.
+	return kerrs.Wrap(werr, helpWriteWrap, kerrs.String("command", command))
 }
 
 // withHelpFailure returns fields, plus one naming the stream's error when the

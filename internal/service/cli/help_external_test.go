@@ -159,6 +159,35 @@ func TestAFailedHelpWriteKeepsTheUsageVerdict(t *testing.T) {
 	}
 }
 
+// TestATypedStreamErrorDoesNotTakeOverTheHelpVerdict pins the stream that is
+// itself SDK code. Its refusal is an *errs.Error, and wrapping that as the
+// cause let origin-wins hand the -h verdict to the stream: its code, and its
+// exit status in place of the EX_IOERR the contract promises. Its text rides
+// in a field instead. Seen failing with the typed error wrapped as the cause,
+// as before: "Execute = [64.1.1.1 <- 0.3.62.5 SINK_CLOSED] The sink is closed".
+func TestATypedStreamErrorDoesNotTakeOverTheHelpVerdict(t *testing.T) {
+	t.Parallel()
+	typed := kerrs.NewRuntime(kerrs.Pack(0x40, 1, 1, 1), "SINK_CLOSED",
+		"The sink is closed", "test: a diagnostic stream that reports typed errors")
+	app, err := newWithErrOutput(t, refusingWriter{err: typed}, group("tool", leaf("a", noop)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got := app.Execute(t.Context(), []string{"-h"})
+	if code, _ := kerrs.CodeOf(got); code != svccli.CodeHelpWriteFailed {
+		t.Fatalf("Execute = %v, want HELP_WRITE_FAILED as the verdict, not the stream's code", got)
+	}
+	if status := kerrs.ExitCodeOf(got); status != 74 {
+		t.Errorf("exit status %d, want EX_IOERR (74)", status)
+	}
+	fields := fieldText(got)
+	for _, want := range []string{"cause=" + typed.Error(), "cause_code=" + typed.Code().String()} {
+		if !strings.Contains(fields, want) {
+			t.Errorf("the stream's own refusal left no %q on the verdict; fields:\n%s", want, fields)
+		}
+	}
+}
+
 // refusingWriter refuses every write with err, as a closed pipe or a full disk
 // does.
 type refusingWriter struct {
