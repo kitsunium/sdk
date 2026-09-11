@@ -99,6 +99,17 @@
 # that the obvious hostile input (megabytes of ".") does not force the scan at
 # all, while a separator-free token of the same size does. Each is
 # mutation-checked in its own doc comment.
+#
+# A third guard joined them in 2026-09, in jwkbind_alloc_internal_test.go: a
+# JWK Set verification must derive NO key, because NewSetVerifier binds every
+# member once at construction. It used to bind per token, and for an EC key
+# that was a full PKIX round trip — x509.MarshalPKIXPublicKey immediately
+# re-parsed by x509.ParsePKIXPublicKey — at 28.2 % of the verification's
+# allocated objects and 8.3 % of its CPU. Re-deriving the key produces exactly
+# the same binding and exactly the same verdict, so no functional test in the
+# package can see the regression; only a malloc count can. The gate is the
+# DELTA against a single-key verification of the SAME token, which measures 0,
+# and its mutation reports 49.0 per call.
 //internal/service/token:token_test
 # The two claims that decide whether tracing belongs in a DEFAULT middleware
 # stack, neither of which had a gate — or a number — until 2026-09. A traced

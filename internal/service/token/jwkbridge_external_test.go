@@ -2,6 +2,7 @@ package token_test
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/x509"
 	"testing"
 	"time"
@@ -268,4 +269,69 @@ func TestUnsupportedJWKsAreRefused(t *testing.T) {
 	if _, err := svctoken.NewVerifierFromJWK(jwk.KeyValue{}, laxConfig()); !errs.HasCode(err, coretoken.CodeKeyUnsuitable) {
 		t.Fatalf("zero JWK: got %v, want KEY_UNSUITABLE", err)
 	}
+}
+
+// TestUnverifiableCandidatesStillCountAgainstTheBound pins the property the
+// 2026-09 pre-binding refactor could most easily have destroyed, and destroyed
+// invisibly: MaxKeyCandidates bounds the keys PUBLISHED under one kid, not the
+// subset this SDK happens to be able to verify with.
+//
+// NewSetVerifier now derives every member's binding once at construction, and
+// the obvious shape for that is to keep only the members that bound. That is a
+// silent widening of a denial-of-service bound: a publisher who lists six keys
+// under one kid, three of them on curves the SDK refuses, would go from
+// KEY_ID_AMBIGUOUS to three full signature verifications per request — and
+// every functional test in this file would still pass, because the surviving
+// keys behave identically. indexByKid therefore records a refused member as an
+// UNUSABLE entry rather than dropping it.
+//
+// MUTATION (2026-09-11): indexByKid's append was made conditional —
+// `if berr != nil { continue }`. Observed: `four published candidates at a
+// bound of three: got <nil>, want KEY_ID_AMBIGUOUS` — the token VERIFIED,
+// because two of the four were dropped before the bound was applied. Restored;
+// the file's SHA-256 is byte-identical to the pre-mutation one.
+func TestUnverifiableCandidatesStillCountAgainstTheBound(t *testing.T) {
+	t.Parallel()
+	manual := clock.NewManualClock(epoch)
+	signing := testECKey(t)
+	//: two P-384 keys the jwk package represents happily and this package
+	//: refuses: kty=EC with a crv the SDK signs nothing on.
+	set := jwk.NewSet(
+		p384JWK(t, "crowded"), p384JWK(t, "crowded"),
+		ecJWK(t, &testECKey(t).PublicKey, "crowded"),
+		ecJWK(t, &signing.PublicKey, "crowded"),
+	)
+	verifier, err := svctoken.NewSetVerifier(set, svctoken.VerifierConfig{
+		MaxKeyCandidates: 3, Clock: manual,
+	})
+	if err != nil {
+		t.Fatalf("NewSetVerifier: %v", err)
+	}
+	issuer, err := svctoken.NewES256Issuer(signing, svctoken.IssuerConfig{
+		Lifetime: time.Hour, Clock: manual, KeyID: "crowded",
+	})
+	if err != nil {
+		t.Fatalf("NewES256Issuer: %v", err)
+	}
+	//: a genuinely valid token, signed by a member of the set — so the only
+	//: thing that can refuse it is the candidate bound.
+	minted, err := issuer.Issue(coretoken.NewClaimsValue().WithSubject("u"))
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if _, verr := verifier.Verify(minted); !errs.HasCode(verr, svctoken.CodeKeyIDAmbiguous) {
+		t.Fatalf("four published candidates at a bound of three: got %v, want KEY_ID_AMBIGUOUS", verr)
+	}
+}
+
+// p384JWK renders a fresh P-384 public key as a JWK carrying kid. It is
+// representable by the jwk package and refused by bindJWK, which is exactly
+// the member shape the bound has to keep counting.
+func p384JWK(t *testing.T, kid string) jwk.KeyValue {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P384(), nil)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	return ecJWK(t, &priv.PublicKey, kid)
 }

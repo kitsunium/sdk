@@ -59,7 +59,7 @@ exactly as trustworthy as the key itself.
 | `jwt.go` | the six JWT constructors |
 | `keys.go` + `hs256_binding.go` / `es256_*.go` / `ed25519_*.go` | the algorithm-bound key contracts and their five implementations |
 | `paseto.go` / `paseto_issuer.go` / `paseto_verifier.go` | PASETO v4.public |
-| `jwkbridge.go` | `NewVerifierFromJWK`, `NewSetVerifier`, `setVerifier` |
+| `jwkbridge.go` | `NewVerifierFromJWK`, `NewSetVerifier`, `setVerifier`, `boundKeyValue` + `indexByKid` (the set is bound ONCE, at construction — see §Cost) |
 | `token_compliance.go` | the compile-time contract assertions |
 | `codes.go` / `errors.go` | `Code*` + `HeaderUnsupported` (.1), `KeyNotFound` (.2), `KeyIDMissing` (.3), `KeyIDAmbiguous` (.4), `FooterMismatch` (.5), `SchemeUnsupported` (.6), `DuplicateMember` (.7) |
 
@@ -129,6 +129,32 @@ three an issuer stamps on its own.
 
 Issuing costs **2.1–2.4× less** than verifying, on all four. `Verify`
 allocates on every call; there is no zero-allocation claim here to hold.
+
+**A JWK Set verification costs what a single-key one costs, plus the `kid`
+header.** `NewSetVerifier` derives every member's binding ONCE at construction,
+so selecting a key from a set is a map read over a slice the constructor already
+built — measured at **exactly 0 additional allocations** with the token held
+constant.
+
+| Verify against a JWK Set (realistic claims) | ns | allocs | surcharge over single-key |
+|---|---:|---:|---:|
+| **HS256** | **29 846** | 126 | +717 ns · +5 allocs |
+| EdDSA | 119 894 | 119 | +194 ns · +5 allocs |
+| ES256 | 142 713 | 139 | +845 ns · +5 allocs |
+
+All three surcharges are **+5 allocations and +95–96 B, identically** — the `kid`
+member's own parsing cost, which any token carrying one pays. Before 2026-09 the
+ES256 row read **+55 allocations**: `Verify` re-derived the key per token, and
+for an EC key that meant `x509.MarshalPKIXPublicKey` immediately re-parsed by
+`x509.ParsePKIXPublicKey`, at **8.3 % of the CPU and 28.2 % of the allocated
+objects**. Building the verifier now costs **8 434 ns per key**, once per JWKS
+refresh: break-even is under one request for a one-key set and **44 requests**
+for a sixty-four-key one. `BENCH.md` §16 has the before/after tables, the
+profiles and the reconciliation.
+
+`jwk.Set.AllByKid`'s O(n) scan was measured too and is **refuted as a cost**:
+**10.12 ns per set member** and one 176 B allocation, i.e. 0.53 % of a JWK Set
+verification's allocations and half a percent of its latency. See `internal/service/crypto/jwk/BENCH.md` §4.
 
 **"Is verification mostly crypto?" has two opposite answers.** HS256 is
 **4.5 % signature, 95.5 % this package**; every asymmetric option is
@@ -269,8 +295,9 @@ examples in the PASETO specification rather than against this implementation —
 an off-by-one in a length prefix produces signatures that verify perfectly
 against themselves and against nobody else's.
 
-Two allocation guards live in `split_alloc_internal_test.go` under
-`//go:build !race`, so the race suite does not compile them and
+Three allocation guards live under `//go:build !race` — two in
+`split_alloc_internal_test.go` and one in `jwkbind_alloc_internal_test.go` — so
+the race suite does not compile them and
 `//internal/service/token:token_test` in `tools/alloc-lane-targets.txt` is
 their ONLY lane (rule 12). They pin the two claims §Bounds makes and nothing
 enforced before 2026-09: `TestSplitCompactAllocatesNothing` (a well-formed
@@ -284,6 +311,20 @@ the walk is `strings.IndexByte` into a fixed array and scanning eight megabytes
 allocates nothing. Its input is separator-FREE for a related reason — a token
 of megabytes of `.` is short-circuited three bytes in by the segment-count
 check, so it never exercises the length bound at all.
+
+`TestSetVerificationDoesNotRederiveTheKey` is the third: it counts a JWKS
+verification's allocations against a single-key verification of the **same
+token** and budgets the delta, which is 0. Its mutation — the key derivation
+put back inside the candidate loop — reports `49.0 per call`. Two non-`!race`
+guards ship with it and both are in the race suite:
+`TestUnverifiableCandidatesStillCountAgainstTheBound` (a member the SDK cannot
+verify with still counts against `MaxKeyCandidates`, because the bound counts
+what the publisher listed — its mutation makes a token that must be refused
+verify, and it is the ONLY test in the package that catches it) and
+`TestABindRefusalIsNotANilInterface` (`bindECJWK` returns `bindP256Public`'s
+VALUE type through an interface result, so a refused binding is not a nil
+interface — which is why `boundKeyValue` carries a `usable` boolean). Each
+carries its mutation and the observed failure in its doc comment.
 
 ## Linter exemptions
 
