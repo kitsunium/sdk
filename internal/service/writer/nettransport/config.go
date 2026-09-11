@@ -31,9 +31,13 @@ type NetConfig struct {
 	// allowlist for consumer-controlled URLs. Nil falls back to a
 	// timeout-bounded client that refuses redirects (CheckRedirect returns
 	// http.ErrUseLastResponse), NOT http.DefaultClient — so a redirect cannot
-	// bypass the validated target — on a connection pool of its own cloned from
-	// http.DefaultTransport, proxy environment included, which the sink's Close
-	// releases.
+	// bypass the validated target — on a connection pool of its own, which the
+	// sink's Close releases: a clone of http.DefaultTransport while that is the
+	// stdlib's *http.Transport, proxy environment included. A process that
+	// replaced http.DefaultTransport with another RoundTripper gets a fresh
+	// transport that keeps only the proxy environment and the idle reaping,
+	// never that RoundTripper — whatever it carries reaches this writer only
+	// through an HTTPClient that carries it.
 	//
 	// A supplied client is used AS-IS, Transport included, and its pool is the
 	// caller's: the sink's Close leaves it alone, so a caller that built one for

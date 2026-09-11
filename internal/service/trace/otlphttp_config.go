@@ -28,7 +28,12 @@ type OTLPHTTPConfig struct {
 
 	// Client is the http.Client the POST rides on. When nil, a client bounded
 	// by Timeout and refusing every redirect is built, on a connection pool of
-	// its own cloned from http.DefaultTransport — proxy environment included.
+	// its own: a clone of http.DefaultTransport while that is the stdlib's
+	// *http.Transport, proxy environment included. A process that replaced
+	// http.DefaultTransport with another RoundTripper gets a fresh transport
+	// that keeps only the proxy environment and the idle reaping, never that
+	// RoundTripper — routing, an mTLS identity or a policy that lives in one
+	// reaches this exporter only through a Client that carries it.
 	//
 	// A supplied client is used AS-IS, including its own timeout, redirect
 	// policy and Transport — it is the seam a caller uses to install a proxy,
