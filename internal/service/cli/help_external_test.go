@@ -1,11 +1,15 @@
 package cli_test
 
 import (
+	"errors"
 	"flag"
+	"io"
 	"strings"
 	"testing"
 
 	corecli "github.com/kitsunium/sdk/internal/core/cli"
+	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	svccli "github.com/kitsunium/sdk/internal/service/cli"
 )
 
 // TestHelpNamesEveryDeclaredCommandAndFlag is CLAUDE.md rule 11 applied to the
@@ -88,6 +92,91 @@ func TestHelpIsWrittenInOnePiece(t *testing.T) {
 	if counter.calls != 1 {
 		t.Errorf("the help took %d Write calls, want 1", counter.calls)
 	}
+}
+
+// TestAHelpNobodyReceivedIsNotASuccess pins that -h is status 0 only when the
+// diagnostic stream took the page. `tool -h > /dev/full` used to exit 0 with
+// nothing written, and a script reading that status believed the help had been
+// delivered. The writer's own error stays matchable beneath the verdict, and a
+// writer that took part of the page without saying why is io.ErrShortWrite.
+// Seen failing with the write's error discarded again: both rows reported
+// "Execute = <nil>".
+func TestAHelpNobodyReceivedIsNotASuccess(t *testing.T) {
+	t.Parallel()
+	closed := errors.New("the pipe is closed")
+	type tc struct {
+		name  string
+		w     io.Writer
+		cause error
+	}
+	tests := []tc{
+		{"a stream that refuses the page", refusingWriter{err: closed}, closed},
+		{"a stream that takes part of it silently", halfWriter{}, io.ErrShortWrite},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		app, err := newWithErrOutput(t, c.w, group("tool", leaf("a", noop)))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		got := app.Execute(t.Context(), []string{"-h"})
+		if !kerrs.HasCode(got, svccli.CodeHelpWriteFailed) {
+			t.Fatalf("%s: Execute = %v, want HELP_WRITE_FAILED", c.name, got)
+		}
+		if !errors.Is(got, c.cause) {
+			t.Errorf("%s: Execute = %v, want the stream's own error beneath it", c.name, got)
+		}
+		if code := kerrs.ExitCodeOf(got); code != 74 {
+			t.Errorf("%s: exit status %d, want EX_IOERR (74)", c.name, code)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestAFailedHelpWriteKeepsTheUsageVerdict pins the other half: after a bad
+// command line the help is the actionable half of the answer and the usage
+// error is the verdict, so a stream that refuses the help does not turn
+// EX_USAGE into EX_IOERR — and the missing page still travels on the verdict,
+// as a field, rather than vanishing.
+func TestAFailedHelpWriteKeepsTheUsageVerdict(t *testing.T) {
+	t.Parallel()
+	app, err := newWithErrOutput(t, refusingWriter{err: io.ErrClosedPipe}, group("tool", leaf("a", noop)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got := app.Execute(t.Context(), []string{"nope"})
+	if !kerrs.HasCode(got, svccli.CodeUnknownCommand) {
+		t.Fatalf("Execute = %v, want UNKNOWN_COMMAND to stay the verdict", got)
+	}
+	//: the verdict stays, and the page nobody received is still visible.
+	if fields := fieldText(got); !strings.Contains(fields, "help_write_error="+io.ErrClosedPipe.Error()) {
+		t.Errorf("the failed help write left no trace on the verdict; fields:\n%s", fields)
+	}
+}
+
+// refusingWriter refuses every write with err, as a closed pipe or a full disk
+// does.
+type refusingWriter struct {
+	err error
+}
+
+// Write accepts nothing and reports the stream's error.
+func (w refusingWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
+// halfWriter takes half of what it is given and reports no error, which
+// io.Writer forbids and which a buggy stream still does.
+type halfWriter struct{}
+
+// Write takes half of p and reports success.
+func (halfWriter) Write(p []byte) (int, error) {
+	return len(p) / 2, nil
 }
 
 // TestSubCommandsAreListedInDeclarationOrder pins that the order is the

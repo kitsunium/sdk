@@ -82,17 +82,38 @@ func (e *executor) reportParse(cmd corecli.CommandValue, path []string, set *fla
 	//: value, which it is not: the operator asked a question and got an
 	//: answer, so the help goes out and the status is 0.
 	if errors.Is(cause, flag.ErrHelp) {
-		e.writeHelp(cmd, path, set)
-		//: asking a question is not a failure, so the status is 0.
+		//: asking a question is not a failure, so a help the stream took is
+		//: status 0 — and one it did not is an answer nobody received.
+		if werr := e.writeHelp(cmd, path, set); werr != nil {
+			//: the writer's own error stays matchable beneath the verdict.
+			return kerrs.Wrap(werr, helpWriteWrap, kerrs.String("command", joined))
+		}
+		//: the answer was delivered.
 		return nil
 	}
 	//: a genuine usage error: the help is the actionable half and the SDK
-	//: writes it; the error is the caller's to render.
-	e.writeHelp(cmd, path, set)
+	//: writes it; the error is the caller's to render, and it stays the
+	//: verdict even if the help could not be written.
+	werr := e.writeHelp(cmd, path, set)
 	//: flag's own text quotes the operator's value, so it travels as a field
 	//: and never as Public.
-	return kerrs.Wrap(InvalidFlags, kerrs.WrapParams{},
-		kerrs.String("command", joined), kerrs.String("flag_error", cause.Error()))
+	return kerrs.Wrap(InvalidFlags, kerrs.WrapParams{}, withHelpFailure(werr,
+		kerrs.String("command", joined), kerrs.String("flag_error", cause.Error()))...)
+}
+
+// withHelpFailure returns fields, plus one naming the stream's error when the
+// help that should have accompanied a usage verdict was not delivered. The
+// verdict stays the usage error — the operator's mistake earned it — and the
+// missing page stays visible to whoever reads that error.
+func withHelpFailure(werr error, fields ...kerrs.FieldValue) []kerrs.FieldValue {
+	//: a delivered help adds nothing to the verdict.
+	if werr == nil {
+		//: the verdict's own fields, untouched.
+		return fields
+	}
+	//: the stream's text names a descriptor or a path, never the operator's
+	//: input, and a field is log-only.
+	return append(fields, kerrs.String("help_write_error", werr.Error()))
 }
 
 // resolveChild picks the sub-command rest names, or reports why it cannot.
@@ -103,10 +124,11 @@ func (e *executor) resolveChild(
 	//: a group declares no action of its own, so an empty rest is an
 	//: incomplete command line and never a successful no-op.
 	if len(rest) == 0 {
-		e.writeHelp(cmd, path, set)
+		//: the help is secondary here; MissingCommand stays the verdict.
+		werr := e.writeHelp(cmd, path, set)
 		//: an incomplete command line, never a successful no-op.
 		return corecli.CommandValue{}, kerrs.Wrap(MissingCommand, kerrs.WrapParams{},
-			kerrs.String("command", joined))
+			withHelpFailure(werr, kerrs.String("command", joined))...)
 	}
 	name := rest[0]
 	//: a linear scan over the declared order, which the benchmarks show is
@@ -122,11 +144,12 @@ func (e *executor) resolveChild(
 		}
 	}
 	//: the help that just went out lists every name that would have worked,
-	//: which is why this domain ships no edit-distance suggester.
-	e.writeHelp(cmd, path, set)
+	//: which is why this domain ships no edit-distance suggester. Secondary
+	//: here too: UnknownCommand stays the verdict.
+	werr := e.writeHelp(cmd, path, set)
 	//: the mistyped token is echoed in a field, never in Public.
 	return corecli.CommandValue{}, kerrs.Wrap(UnknownCommand, kerrs.WrapParams{},
-		kerrs.String("command", joined), kerrs.String("token", name))
+		withHelpFailure(werr, kerrs.String("command", joined), kerrs.String("token", name))...)
 }
 
 // dispatch assembles the invocation and runs the leaf's Action under a guard.

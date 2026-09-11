@@ -220,6 +220,7 @@ first time a caller uses an idiom it had not heard of.
 | what happened | help written? | status |
 |---|---|---|
 | `-h` / `-help` / `--help` | yes | **0** |
+| `-h`, and the stream refused the page | no | 74 |
 | unknown sub-command | yes | 64 |
 | no sub-command under a group | yes | 64 |
 | a flag `flag` refused | yes | 64 |
@@ -229,6 +230,15 @@ because the status already does — and the status is the thing a script reads.
 `-h` returning nil is not a convenience: `flag` hands back `ErrHelp`, which
 *is* an error value, and treating it as one would make `tool --help` exit
 non-zero, which breaks every `--help` smoke test in every CI system.
+
+The 0 is earned by the answer, not by the question. A help the diagnostic
+stream refused — a closed pipe, a full disk, a writer that took part of the
+page — is an answer nobody received, so `-h` then returns `HELP_WRITE_FAILED`
+with EX_IOERR and the stream's own error beneath it. The three usage rows keep
+their 64 even when the help could not be written: there the usage error is the
+verdict and the help is its actionable half. (Amended 2026-09-11: the first
+version returned 0 whatever the write did, so `tool -h > /dev/full` exited 0
+with nothing written.)
 
 **The engine writes the help; the caller writes the error.** One voice per
 artefact. The help is generated and only the SDK can render it; how an error is
@@ -534,6 +544,7 @@ of the work, where the exit status is.
 | `0.3.62.2` | `MISSING_COMMAND` | service | 64 |
 | `0.3.62.3` | `INVALID_FLAGS` | service | 64 |
 | `0.3.62.4` | `COMMAND_PANICKED` | service | 70 |
+| `0.3.62.5` | `HELP_WRITE_FAILED` | service | 74 |
 
 ## Measurements
 

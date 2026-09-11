@@ -181,6 +181,11 @@ var (
 	// value and the originating stack travel as fields; the status stays
 	// EX_SOFTWARE (70).
 	CommandPanicked = svccli.CommandPanicked
+	// HelpWriteFailed is returned when -h asked for the help and the stream it
+	// goes to did not take the page — a closed pipe, a full disk. The
+	// stream's own error stays matchable beneath it; EX_IOERR (74). A bad
+	// command line keeps its EX_USAGE even when its help could not be written.
+	HelpWriteFailed = svccli.HelpWriteFailed
 )
 
 // New validates a whole command tree and returns the [Executor] that runs it.

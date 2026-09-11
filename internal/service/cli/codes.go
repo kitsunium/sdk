@@ -27,3 +27,10 @@ const CodeInvalidFlags errs.Code = 0x00_03_3E_03 // 0.3.62.3
 // command's failure so main still gets a typed exit status instead of the
 // runtime's 2.
 const CodeCommandPanicked errs.Code = 0x00_03_3E_04 // 0.3.62.4
+
+// CodeHelpWriteFailed identifies a help request (-h) whose answer the
+// diagnostic stream did not take: a closed pipe, a full disk, a writer that
+// accepted only part of the page. Asking a question is not a failure, but an
+// answer nobody received is, so this is EX_IOERR and not the 0 a delivered
+// help earns.
+const CodeHelpWriteFailed errs.Code = 0x00_03_3E_05 // 0.3.62.5
