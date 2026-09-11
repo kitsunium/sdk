@@ -6,12 +6,21 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
-// port is the shape a registry would publish: a small interface every fixture
+// Namer is the shape a registry would publish: a small interface every fixture
 // below satisfies, so what Unusable judges is the VALUE and never the type set.
-type port interface{ Name() string }
+type Namer interface{ Name() string }
+
+// The fixtures satisfy it at COMPILE time, so a broken one is a build error
+// rather than a case that silently stops covering what it claims to.
+var (
+	_ Namer = (*pointerPlug)(nil)
+	_ Namer = valuePlug{}
+	_ Namer = slicePlug{}
+	_ Namer = funcPlug(nil)
+)
 
 // pointerPlug is the ordinary shape — a pointer receiver, so a nil of its type
-// satisfies port while being unable to serve one call.
+// satisfies Namer while being unable to serve one call.
 type pointerPlug struct{ name string }
 
 func (p *pointerPlug) Name() string { return p.name }
@@ -52,18 +61,18 @@ func TestUnusableNamesTheTwoShapesARegistryCannotStore(t *testing.T) {
 	var nilFunc funcPlug
 	tests := []struct {
 		name string
-		v    any
+		v    Namer
 		want string
 	}{
-		{"untyped nil says so without a type", nil, "nil"},
-		{"a typed nil pointer names its type", port(nilPointer), "nil *plugin_test.pointerPlug"},
-		{"a nil func plug-in is caught before comparability", port(nilFunc), "nil plugin_test.funcPlug"},
-		{"a slice field makes the type uncomparable", port(slicePlug{name: "s"}), "plugin_test.slicePlug is not comparable"},
-		{"a non-nil func is still uncomparable", port(funcPlug(func() string { return "f" })), "plugin_test.funcPlug is not comparable"},
-		{"a comparable value passes", port(valuePlug{name: "v"}), ""},
-		{"a live pointer passes", port(&pointerPlug{name: "p"}), ""},
+		{"a nil port carries no plug-in at all", nil, "nil"},
+		{"a typed nil pointer names its type", Namer(nilPointer), "nil *plugin_test.pointerPlug"},
+		{"a nil func plug-in is caught before comparability", Namer(nilFunc), "nil plugin_test.funcPlug"},
+		{"a slice field makes the type uncomparable", Namer(slicePlug{name: "s"}), "plugin_test.slicePlug is not comparable"},
+		{"a non-nil func is still uncomparable", Namer(funcPlug(func() string { return "f" })), "plugin_test.funcPlug is not comparable"},
+		{"a comparable value passes", Namer(valuePlug{name: "v"}), ""},
+		{"a live pointer passes", Namer(&pointerPlug{name: "p"}), ""},
 	}
-	runCase := func(t *testing.T, v any, want string) {
+	runCase := func(t *testing.T, v Namer, want string) {
 		t.Helper()
 		if got := plugin.Unusable(v); got != want {
 			t.Errorf("Unusable() = %q, want %q", got, want)
@@ -84,7 +93,7 @@ func TestUnusableNamesTheTwoShapesARegistryCannotStore(t *testing.T) {
 // into the registry, where the message no longer names the plug-in.
 func TestAPassingValueSurvivesTheComparisonARegistryWillMake(t *testing.T) {
 	t.Parallel()
-	passing := []port{valuePlug{name: "v"}, &pointerPlug{name: "p"}}
+	passing := []Namer{valuePlug{name: "v"}, &pointerPlug{name: "p"}}
 	for _, p := range passing {
 		if why := plugin.Unusable(p); why != "" {
 			t.Fatalf("fixture %T refused: %s", p, why)

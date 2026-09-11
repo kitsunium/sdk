@@ -108,6 +108,8 @@ func (f *fileStore) leave() {
 // clock, so a test drives contention without sleeping and production waits on
 // the real one.
 func (f *fileStore) takeFlock(ctx context.Context) error {
+	//: attempt, wait, attempt again — never a blocking flock(2), which parks
+	//: the thread inside a syscall no cancellation can reach.
 	for {
 		taken, flockErr := tryLockExclusive(f.lock)
 		//: the call itself failed.

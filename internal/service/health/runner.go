@@ -132,7 +132,12 @@ func (h *health) boundRun(e *entry, run *inflight) (release func()) {
 			//: nothing to announce.
 		}
 	}()
-	return func() { close(released) }
+	//: the release the body's own return runs; closing is what ends the
+	//: goroutine above when the budget has not fired.
+	return func() {
+		//: called exactly once, by perform, on the one path that reaches it.
+		close(released)
+	}
 }
 
 // invoke calls the check body with its panic recovered, and wraps a failure so

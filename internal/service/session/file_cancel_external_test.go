@@ -84,6 +84,10 @@ func absentID(t *testing.T) coresession.ID {
 // Seen failing against the blocking LOCK_EX: the operation never returned and
 // the test binary was killed by its own timeout, the goroutine parked in
 // syscall.Flock under session.(*fileStore).withLock.
+// # Goroutine lifetime
+//
+// One goroutine parks on the lock. It ends when the cancel below reaches it,
+// and the receive after it is what proves that happened.
 func TestACallerWhoLeftStopsWaitingForTheLock(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewManualClock(time.Unix(1700000000, 0))
@@ -112,6 +116,11 @@ func TestACallerWhoLeftStopsWaitingForTheLock(t *testing.T) {
 // TestTheLockIsTakenOnceTheHolderLeaves is the other half: the wait is a poll,
 // so it must end in success as well as in refusal. Without this, "cancellable"
 // would be satisfied by a store that never acquires the lock at all.
+// # Goroutine lifetime
+//
+// One goroutine performs the operation while the test holds the lock. It ends
+// when the operation returns, which the release plus one clock step below
+// cause, and the receive is what waits for it.
 func TestTheLockIsTakenOnceTheHolderLeaves(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewManualClock(time.Unix(1700000000, 0))
@@ -147,6 +156,11 @@ func TestTheLockIsTakenOnceTheHolderLeaves(t *testing.T) {
 // Seen failing with the gate's wait made unabandonable — the plain channel send
 // that a sync.Mutex's Lock is: "panic: deadlock: all goroutines in bubble are
 // blocked", the second caller parked in session.(*fileStore).enter.
+// # Goroutine lifetime
+//
+// Two goroutines, both inside the synctest bubble, which is what makes their
+// end assertable: the second is released by the cancel, the first by the
+// release and the clock step, and a bubble cannot close while either remains.
 func TestAGoroutineWaitingOnTheGateCanLeaveToo(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

@@ -58,14 +58,14 @@ const openFlagsForRaw int = os.O_APPEND | os.O_CREATE | os.O_WRONLY | syscall.O_
 // anything else is reported as unrecognised rather than silently mislabelled.
 const (
 	// magicTmpfs is TMPFS_MAGIC — the page cache, with no device behind it.
-	magicTmpfs int64 = 0x01021994
+	magicTmpfs uint32 = 0x01021994
 	// magicExt is EXT2/3/4's shared magic; this machine's /home is ext4.
-	magicExt int64 = 0xEF53
+	magicExt uint32 = 0xEF53
 	// magicOverlay is OVERLAYFS_SUPER_MAGIC, which a container's writable
 	// layer is.
-	magicOverlay int64 = 0x794C7630
+	magicOverlay uint32 = 0x794C7630
 	// magicXFS is XFS_SUPER_MAGIC, common on cloud instances.
-	magicXFS int64 = 0x58465342
+	magicXFS uint32 = 0x58465342
 )
 
 // benchLine is the payload every row carries unless it says otherwise: the text
@@ -102,9 +102,10 @@ func fsName(b *testing.B, dir string) string {
 		//: an unreadable filesystem type is stated, never guessed.
 		return "unknown"
 	}
-	//: Statfs_t.Type is int64 on 64-bit Linux and int32 on 386, so the
-	//: comparison is made at one width rather than at the platform's.
-	switch int64(st.Type) {
+	//: Statfs_t.Type is int64 on 64-bit Linux and int32 on 386, so neither
+	//: width can be written down here. Every magic fits in 32 bits, so the
+	//: comparison is made there — a real conversion on both platforms.
+	switch uint32(st.Type) {
 	//: the page cache, no device behind it.
 	case magicTmpfs:
 		return "tmpfs"
@@ -120,7 +121,7 @@ func fsName(b *testing.B, dir string) string {
 	//: anything else is visibly unrecognised, and the magic goes to the log
 	//: rather than into a row name nobody can compare across machines.
 	default:
-		b.Logf("statfs %s: unrecognised magic %#x", dir, int64(st.Type))
+		b.Logf("statfs %s: unrecognised magic %#x", dir, uint32(st.Type))
 		return "unrecognised"
 	}
 }

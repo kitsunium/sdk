@@ -21,6 +21,10 @@ import (
 	"github.com/kitsunium/sdk/internal/service/net/server"
 )
 
+// testServerName is the name the self-signed certificate is issued for, so a
+// client can verify it the standard way rather than skipping verification.
+const testServerName string = "kitsunium-test"
+
 const (
 	// pollInterval is how often waitFor re-checks its condition. Polling beats a
 	// fixed sleep: it is both faster in the common case and far less flaky.
@@ -206,10 +210,6 @@ func selfSignedIdentity(t *testing.T) corenet.IdentityValue {
 	}
 	return id
 }
-
-// testServerName is the name the self-signed certificate is issued for, so a
-// client can verify it the standard way rather than skipping verification.
-const testServerName string = "kitsunium-test"
 
 // newSelfSignedIdentity is selfSignedIdentity without a *testing.T — the
 // adoption child has none — and it also returns the certificate, so a client
