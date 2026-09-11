@@ -69,6 +69,24 @@ func NewVerifierFromJWK(key jwk.KeyValue, cfg VerifierConfig) (verifier coretoke
 // unbounded loop would let a publisher — or anybody who can influence the
 // document — price every request. Past MaxKeyCandidates the token is refused
 // with KeyIDAmbiguous rather than verified slowly.
+//
+// # The set is bound ONCE, here
+//
+// Every member's verifying binding is derived at construction, not per token.
+// A JWK is a key's SERIALISED form and the binding is the same key in the
+// shape a primitive consumes; deriving it reads the key's own kty/crv/x/y and
+// nothing a token supplies, so it is a fixed function of material that is
+// fixed for this verifier's lifetime. Doing it per request cost a full PKIX
+// round trip — `x509.MarshalPKIXPublicKey` immediately re-parsed by
+// `x509.ParsePKIXPublicKey` — measured at 8.3 % of an ES256 JWKS
+// verification's CPU and 28.2 % of its allocated objects. See
+// `internal/service/crypto/jwk/BENCH.md`.
+//
+// What deliberately did NOT move is the ORDER. Which key is selected, the
+// candidate bound, and the algorithm comparison against the binding all still
+// happen per token and in the same sequence, because that sequence is ADR
+// 0042's security property. Nothing here is keyed on, or cached against,
+// anything the token carries.
 func NewSetVerifier(set jwk.Set, cfg VerifierConfig) (verifier coretoken.Verifier, err error) {
 	policy, perr := newPolicy(cfg)
 	//: every bound and knob is validated once, here.
@@ -82,16 +100,47 @@ func NewSetVerifier(set jwk.Set, cfg VerifierConfig) (verifier coretoken.Verifie
 		return nil, errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
 			errs.String("knob", "empty JWK Set"))
 	}
-	//: bound to the set, not to one key.
-	return &setVerifier{set: set, policy: policy}, nil
+	//: bound to the set, not to one key — and bound once, not once per token.
+	return &setVerifier{byKid: indexByKid(set), policy: policy}, nil
 }
 
 // setVerifier authenticates JWS compact tokens against a JWK Set.
 type setVerifier struct {
-	// set is the trusted key material.
-	set jwk.Set
+	// byKid holds the set's members grouped by their "kid", in document order,
+	// each with its binding already derived. Members carrying no kid are
+	// absent: a lookup by id never means "match the keys that have no id",
+	// which is jwk.Set.AllByKid's own rule preserved here.
+	byKid map[string][]boundKeyValue
 	// policy is the validated verification policy.
 	policy policyValue
+}
+
+// indexByKid groups set's members by kid, deriving each member's binding once.
+//
+// A member the SDK verifies nothing with is INDEXED ANYWAY, as an unusable
+// entry. Dropping it would silently widen MaxKeyCandidates: the bound counts
+// the keys published under one kid, so a set whose kid names six keys — three
+// of them RSA — must still be refused as ambiguous rather than quietly
+// resolved down to three. The per-token loop skips an unusable entry exactly
+// as it used to skip a bind failure.
+func indexByKid(set jwk.Set) map[string][]boundKeyValue {
+	index := make(map[string][]boundKeyValue)
+	//: document order is preserved, because the caller's ranking survives it.
+	for _, key := range set.Keys() {
+		kid := key.Kid()
+		//: a keyless member can never be selected by kid; leave it out.
+		if kid == "" {
+			//: nothing to index it under.
+			continue
+		}
+		binding, berr := bindJWK(key)
+		//: the refusal is recorded, never returned — a published set
+		//: legitimately holds keys for algorithms we do not do, and that was
+		//: never a reason to refuse the whole verifier.
+		index[kid] = append(index[kid], boundKeyValue{binding: binding, usable: berr == nil})
+	}
+	//: one entry per published kid.
+	return index
 }
 
 // Verify selects candidate keys by kid and authenticates against them.
@@ -110,18 +159,17 @@ func (v *setVerifier) Verify(token string) (claims coretoken.ClaimsValue, err er
 	}
 	//: try each candidate; the first whose signature verifies wins.
 	for _, candidate := range candidates {
-		binding, berr := bindJWK(candidate)
 		//: a candidate the SDK cannot verify with is skipped, not fatal — a
 		//: published set legitimately holds keys for algorithms we do not do.
-		if berr != nil {
+		if !candidate.usable {
 			continue
 		}
 		//: the algorithm gate, per candidate, before any primitive runs.
-		if herr := v.policy.checkHeader(parts.header, binding.algorithm()); herr != nil {
+		if herr := v.policy.checkHeader(parts.header, candidate.binding.algorithm()); herr != nil {
 			continue
 		}
 		//: authenticate.
-		if binding.verify(parts.input, parts.signature) {
+		if candidate.binding.verify(parts.input, parts.signature) {
 			//: authenticated: now the claims may be decoded and judged.
 			return v.policy.decodeAndValidate(parts.payload, joseShape{})
 		}
@@ -133,13 +181,15 @@ func (v *setVerifier) Verify(token string) (claims coretoken.ClaimsValue, err er
 }
 
 // candidates resolves the keys to try for kid, refusing both ends.
-func (v *setVerifier) candidates(kid string) (keys []jwk.KeyValue, err error) {
+func (v *setVerifier) candidates(kid string) (keys []boundKeyValue, err error) {
 	//: a set verifier selects by id; it does not try everything it holds.
 	if kid == "" {
-		//: refuse, and name the missing header.
+		//: refuse, and name the missing header. This check stays FIRST: the
+		//: index deliberately holds no entry for the empty kid, but a lookup
+		//: that reached it must never be the thing that decides.
 		return nil, KeyIDMissing
 	}
-	matches := v.set.AllByKid(kid)
+	matches := v.byKid[kid]
 	//: no key under that id.
 	if len(matches) == 0 {
 		//: refuse without saying which ids the set does hold.

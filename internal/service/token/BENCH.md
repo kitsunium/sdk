@@ -1,4 +1,4 @@
-<!-- generated from internal/service/token/{token,refusal,stage,parsing}_bench_test.go — run `cd internal/service && GOWORK=off go test -run=NONE -bench=. -benchmem -benchtime=1s -count=3 ./token/` in THREE separate processes to refresh -->
+<!-- generated from internal/service/token/{token,refusal,stage,parsing,jwkset}_bench_test.go — run `cd internal/service && GOWORK=off go test -run=NONE -bench=. -benchmem -benchtime=1s -count=3 ./token/` in THREE separate processes to refresh -->
 # Benchmarks — `internal/service/token`
 
 Token **verification runs on every authenticated request**, and it is the only
@@ -747,3 +747,260 @@ is `(max−min)/median` across all nine.
 | `BenchmarkVerifyStage/3_signature` | 1 299.0 | 2.9 % | 544 | 7 |
 | `BenchmarkVerifyStage/4_decodeAndValidate` | 21 102.0 | 2.2 % | 4 974 | 87 |
 | `BenchmarkVerifyStage/whole` | 28 660.0 | 3.9 % | 7 121 | 121 |
+
+---
+
+## 16. The JWK Set verifier — a second campaign, 2026-09-11
+
+Everything above measures the four SINGLE-KEY verifiers. `NewSetVerifier` — the
+JWKS path, the one a service that fetches a published key set actually runs —
+had never been benchmarked, here or in `pkg/v1/token/BENCH.md`. This section is
+that measurement and the change it produced. It is **additive**: no row above
+was re-run or re-numbered, and §2.1's ES256 figure is used below as the
+denominator it always was.
+
+Same method as §Method: median of nine across three processes, `-benchtime=1s`,
+typed sinks, pprof first. Full machine stamp and the complete jwk-side
+decomposition are in **`internal/service/crypto/jwk/BENCH.md`**, which was
+written with this section and holds the profiles verbatim.
+
+### 16.1 The finding
+
+**A JWK Set verification under ES256 spent 8.3 % of its CPU and 28.2 % of its
+allocated objects rebuilding a key that never changes.**
+
+`setVerifier.Verify` called `bindJWK` inside its per-token candidate loop.
+For an EC key that reached `jwk.KeyValue.ECDSAPublic()`, which rebuilds two
+`big.Int`s and runs `x509.MarshalPKIXPublicKey` — and `bindECJWK` handed the
+resulting DER straight back to `x509.ParsePKIXPublicKey` on the next line. A
+full ASN.1 round trip, per request, to reconstruct a key fixed for the
+verifier's lifetime. The code's own comment said so: *"the DER came from jwk
+one line ago, so a failure here is a bug, not input."*
+
+The allocation profile, verbatim:
+
+```
+         0     0%  2.31%     120635 28.24%  ...token.bindJWK
+         0     0% 17.27%      73857 17.29%  ...crypto/jwk.KeyValue.ECDSAPublic
+      2531  0.59% 18.44%      63204 14.80%  crypto/x509.MarshalPKIXPublicKey
+      4991  1.17% 20.18%      50549 11.83%  encoding/asn1.MarshalWithParams
+      2531  0.59% 37.18%      27841  6.52%  crypto/x509.ParsePKIXPublicKey
+```
+
+`NewSetVerifier` now derives every member's binding **once, at construction**.
+
+### 16.2 What it bought
+
+| row | before | after | change |
+|---|---:|---:|---:|
+| `SetVerify/ES256` | 155 200 ns | **142 713 ns** | **−8.0 %** |
+| · B/op | 10 649 | 7 892 | −25.9 % |
+| · allocs/op | 189 | **139** | **−26.5 %** |
+| `SetVerify/HS256` | 30 492 ns · 130 | 29 846 ns · 126 | −2.1 % · −4 |
+| `SetVerify/EdDSA` | 119 379 ns · 122 | 119 894 ns · 119 | +0.4 % · −3 |
+| `SetVerifyRotation` (2 candidates) | 278 182 ns · 260 | 255 596 ns · **160** | −8.1 % · **−38.5 %** |
+| `SetVerifyRefusal/unknown_kid` (n=64) | 6 775 ns | 6 199 ns | −8.5 % |
+| `SetVerifyRefusal/no_kid` | 4 934 ns | 4 935 ns | **+0.02 %** |
+| `SetVerifierConstruction/n=1` | 130.9 ns · 1 | 8 752 ns · 54 | the moved work |
+| `SetVerifierConstruction/n=64` | 131.4 ns · 1 | 540 050 ns · 3 213 | the moved work |
+
+**The EdDSA row is flat and that is the point.** Held against ES256's −8.0 %,
+it isolates the cost as EC-specific: an Ed25519 or symmetric binding is a
+`bytes.Clone`, an EC one is an ASN.1 encoder. The three key families' derivation
+cost **50 / 3 / 4 allocations** respectively.
+
+**`no_kid` is unchanged to within one nanosecond** (4 934 against 4 935, on a
+2.0 % spread). That refusal never touches the key
+index — `candidates` refuses an empty kid first — so a row that moved would have
+meant the selection order had moved with it.
+
+**The construction cost is real and is paid once per JWKS refresh.** At 8 434 ns
+per key (regression over the four sizes), a sixty-four-key set costs 540 µs to
+build and saves 12 487 ns per verification: **break-even at 44 requests**, under
+one request for a single-key set. A refresh interval is measured in hours.
+
+### 16.3 The JWKS surcharge, before and after
+
+What selecting a key from a set costs over verifying with one bound directly
+(§2.1's rows).
+
+| algorithm | before | after |
+|---|---:|---:|
+| **ES256** | +13 916 ns (+9.9 %) · **+55 allocs** | +845 ns (+0.6 %) · **+5 allocs** |
+| HS256 | +1 692 ns (+5.9 %) · +9 allocs | +717 ns (+2.5 %) · **+5 allocs** |
+| EdDSA | +1 870 ns (+1.6 %) · +8 allocs | +194 ns (+0.2 %) · **+5 allocs** |
+
+**All three now land on +5 allocations and +95–96 B, identically** — three
+independent key families agreeing on one number, which is what "the
+family-specific work moved to construction" predicts and is the strongest
+cross-check in this section.
+
+**And that residual +5 is the `kid` header, not the selection.** The two columns
+compare different tokens: a JWKS token carries a `kid` member the single-key one
+does not, and parsing it costs five allocations and ninety-five bytes wherever
+it happens. The +5 reproduced across two independent nine-sample campaigns with
+a harness refactor in between.
+`TestSetVerificationDoesNotRederiveTheKey` removes the confound by giving both
+verifiers the **same** token: the delta is **exactly 0 over 200 calls, three
+runs in a row** (16 200 against 16 200). Selection is a map read over a slice
+the constructor already built.
+
+### 16.4 The set-size slope, and a refuted hypothesis
+
+The second hypothesis this campaign was asked to test was `jwk.Set.AllByKid`:
+a linear scan with a per-call `append` into a nil slice, on every verification.
+Every mechanical claim in it is true — no map index, `KeyValue` is 176 B, one
+match is one allocation — and it is **0.53 % of a JWK Set verification's
+allocations and half a percent of its latency.** Refuted as a cost, and
+measured rather than dismissed; the slope (**10.12 ns per set member**) and its
+decomposition are in `internal/service/crypto/jwk/BENCH.md` §4.
+
+End to end, sweeping 1 → 64 keys moved a whole verification by **2 215 ns
+(1.4 %)** before and **783 ns (0.55 %)** after — both smaller than the rows'
+own 0.6–3.1 % spread. `match=first` and `match=last` agree at every size in both
+arms, which is the control the sweep exists to provide: the scan has no early
+exit, so a divergence would have been a broken harness.
+
+**A kid-less token does not "try every candidate".** That prediction was tested
+and is false: `candidates` refuses an empty `kid` with `KEY_ID_MISSING` before
+the set is consulted at all, and the row costs **4 935 ns** — 3.5 % of an
+accepted ES256 token, and cheaper than every other selection outcome. It belongs
+in §5's family: no refusal costs more than the acceptance it replaces.
+
+### 16.5 What was REFUSED, and the property it would have weakened
+
+**Anything that moves, caches or reorders SELECTION.** ADR 0042's design is that
+the algorithm is bound by the constructor, never read from the token, and that
+the header is compared against the binding before any key reaches a primitive.
+Only the *derivation* of the binding moved; which key is selected, the
+`MaxKeyCandidates` bound, and the per-candidate `checkHeader` all still run per
+token, in the same order, over the same inputs. **No structure here is keyed on
+anything the token supplies except the `kid` lookup itself, which is the same
+selection `AllByKid` performed.**
+
+**Dropping unbindable members from the index** — the obvious shape for
+pre-binding, and a silent widening of a denial-of-service bound.
+`MaxKeyCandidates` counts the keys **published** under one kid, not the subset
+this SDK can verify with, so a publisher listing six keys under one kid with
+three of them on refused curves must still get `KEY_ID_AMBIGUOUS` rather than
+three signature verifications per request. `indexByKid` records a refused member
+as an *unusable* entry instead. Guarded — see 16.6, whose mutation is exactly
+this.
+
+**Making the map do the nil check.** `bindJWK`'s refusals are not all nil
+interfaces: `bindECJWK` ends in `return bindP256Public(public)`, whose first
+result is the **value type** `es256Verifying`, so a refusal there arrives as a
+NON-nil `verifyingKey` wrapping a zero struct whose `verify` would dereference a
+nil `*ecdsa.PublicKey`. `bindOctJWK` and `bindOKPJWK` have the same shape.
+`boundKeyValue.usable` is a boolean for that reason. **All three inner refusals
+are unreachable today** — `jwk` validates length, curve and point first — so
+this is defence against a future edit and **not** a fix for a panic anything can
+currently produce, which is stated here and in the field's own comment so
+nobody inherits a claim nothing can reproduce.
+
+### 16.6 The three guards this campaign added
+
+**`TestSetVerificationDoesNotRederiveTheKey`** (`jwkbind_alloc_internal_test.go`,
+`//go:build !race`, gated by the existing `//internal/service/token:token_test`
+entry in `tools/alloc-lane-targets.txt`). Counts total `runtime.MemStats.Mallocs`
+over 200 JWKS verifications against 200 single-key verifications **of the same
+token**, and budgets the delta at 200 (one per call) against a clean measurement
+of 0. *Mutation:* the derivation put back inside the loop. *Observed:* `a JWKS
+verification allocated 9800 more than a single-key one over 200 calls (49.0 per
+call), budget 200`. Restored byte-identical by SHA-256.
+
+**`TestUnverifiableCandidatesStillCountAgainstTheBound`**
+(`jwkbridge_external_test.go`). Four keys under one kid, two of them P-384 —
+representable by `jwk`, refused by `bindJWK` — against a bound of three.
+*Mutation:* `indexByKid`'s append made conditional on the bind succeeding.
+*Observed:* `four published candidates at a bound of three: got <nil>, want
+KEY_ID_AMBIGUOUS` — **the token verified**. Running the whole package under that
+mutation produced exactly one failure, this one: every other test in the file
+passes, because the surviving keys behave identically. Restored byte-identical.
+
+**`TestABindRefusalIsNotANilInterface`** (`jwkbind_internal_test.go`). Pins the
+typed-nil shape 16.5 describes, through a helper that reproduces `bindECJWK`'s
+own `return bindP256Public(public)`. *Mutation:* the helper's result type
+narrowed to the concrete `es256Verifying`. *Observed:* the package no longer
+compiles — `invalid operation: binding == nil (mismatched types es256Verifying
+and untyped nil)` — which is the compiler making the test's point for it, and is
+why the assertion goes through an interface-returning helper rather than the
+concrete result.
+
+### 16.7 Rows discarded, and the reconciliation
+
+**One row-set discarded.** The first draft of the set-size sweep keyed its sets
+`"k0"`…`"k63"` and measured `match=last` **43 % slower** than `match=first` at
+n=64 — a difference a scan with no early exit cannot produce. The cause was the
+**kid's length, not the match's position**: Go compares strings by length first,
+so a two-octet lookup fails on length against fifty-four of the sixty-four
+members while a three-octet one reaches `memcmp` for all but ten. The harness
+was measuring its own key-naming scheme. Fixed-width kids removed it; the note
+lives at `benchJWKSKid` and at `jwk`'s `benchKid`.
+
+**One arithmetic contradiction chased to its cause.** The component
+decomposition of the removed work sums to 7 128 ns; the end-to-end delta is
+12 487 ns — 75 % more. GC pressure was the obvious explanation and is
+**refuted**: re-running both arms at `GOGC=100`, `GOGC=400` and `GOGC=off`
+moved the delta only between 12.6 and 13.2 µs, a 4.4 % range. What reconciles it
+is the CPU profile taken *in situ*: `bindJWK` at **8.27 %** of the verification,
+against the end-to-end delta's **8.05 %** — **2.7 % apart** as a share, which is
+the only directly comparable form. The same code costs 8 434 ns timed alone and
+12 953 ns timed between a P-256 scalar multiplication and an
+eighty-one-allocation JSON decode — **1.48×**, and it is cache locality, not
+collection. `internal/service/crypto/jwk/BENCH.md` §7 has the table.
+
+**The allocation column does not inflate**: 49, 50.1 and 50 across the three
+instruments that report it. That asymmetry is why the regression gate counts
+allocations and not nanoseconds.
+
+**Two independent confirmations that the harness is sound.** §2.1's published
+`BenchmarkVerify/ES256/realistic` — measured by a different campaign on a
+different day — reproduces here at **141 284 ns / 7 795 B / 134 allocs** against
+**142 029 / 7 796 / 134**: 0.52 % on time, identical on allocations, one byte
+apart on B/op. And that same row measures 141 284 in the *before* binary and
+141 868 in the *after* one — **0.41 % apart**, inside its own 2.0–2.7 % spread —
+while the JWKS row moves 8.0 %. The control that does not move is what proves
+the two arms are genuinely different code.
+
+**One transient that did not reproduce is recorded rather than dropped.** An
+exploratory arm measured `BenchmarkPrimitive/ed25519_verify` at a 17.7 % spread;
+the published campaign measures the same row at 2.4 % and 2.7 % on identical
+code. It was the box, not the benchmark.
+
+### 16.8 Full results — the JWKS rows
+
+Median of nine (three processes × `-count=3`), `-benchtime=1s`. The *before*
+column is the same binary with `jwkbridge.go` at commit `91063bf`.
+
+| benchmark | before ns | after ns | spread (after) | after B/op | after allocs |
+|---|---:|---:|---:|---:|---:|
+| `BenchmarkSetVerify/ES256` | 155 200 | 142 713 | 1.8 % | 7 892 | 139 |
+| `BenchmarkSetVerify/EdDSA` | 119 379 | 119 894 | 2.0 % | 6 705 | 119 |
+| `BenchmarkSetVerify/HS256` | 30 492 | 29 846 | 1.7 % | 7 216 | 126 |
+| `BenchmarkSetVerifySize/n=1/match=first` | 155 337 | 142 474 | 1.5 % | 7 893 | 139 |
+| `BenchmarkSetVerifySize/n=1/match=last` | 155 388 | 142 917 | 2.8 % | 7 893 | 139 |
+| `BenchmarkSetVerifySize/n=4/match=first` | 155 733 | 142 241 | 1.5 % | 7 892 | 139 |
+| `BenchmarkSetVerifySize/n=4/match=last` | 155 539 | 142 869 | 0.9 % | 7 893 | 139 |
+| `BenchmarkSetVerifySize/n=16/match=first` | 155 321 | 142 134 | 1.5 % | 7 892 | 139 |
+| `BenchmarkSetVerifySize/n=16/match=last` | 156 000 | 142 439 | 2.6 % | 7 892 | 139 |
+| `BenchmarkSetVerifySize/n=64/match=first` | 156 732 | 142 320 | 1.7 % | 7 893 | 139 |
+| `BenchmarkSetVerifySize/n=64/match=last` | 157 536 | 142 909 | 1.8 % | 7 892 | 139 |
+| `BenchmarkSetVerifyRotation` | 278 182 | 255 596 | 1.5 % | 9 093 | 160 |
+| `BenchmarkSetVerifyRefusal/no_kid` | 4 934.0 | 4 935.0 | 1.9 % | 1 634 | 27 |
+| `BenchmarkSetVerifyRefusal/unknown_kid` | 6 775.0 | 6 199.0 | 2.2 % | 1 730 | 32 |
+| `BenchmarkSetVerifierConstruction/n=1` | 130.9 | 8 752.0 | 2.9 % | 3 304 | 54 |
+| `BenchmarkSetVerifierConstruction/n=4` | 131.2 | 33 064 | 2.3 % | 11 696 | 204 |
+| `BenchmarkSetVerifierConstruction/n=16` | 131.1 | 134 664 | 3.6 % | 47 384 | 809 |
+| `BenchmarkSetVerifierConstruction/n=64` | 131.4 | 540 050 | 2.6 % | 189 528 | 3 213 |
+
+Re-measured controls, both arms, for the cross-checks in 16.7:
+
+| benchmark | before ns | after ns | published (§15) |
+|---|---:|---:|---:|
+| `BenchmarkVerify/ES256/realistic` | 141 284 | 141 868 | 142 029 |
+| `BenchmarkVerify/EdDSA/realistic` | 117 509 | 119 700 | 119 406 |
+| `BenchmarkVerify/HS256/realistic` | 28 800 | 29 129 | 28 905 |
+| `BenchmarkPrimitive/ecdsa_p256_verify` | 110 069 | 110 406 | 109 891 |
+| `BenchmarkPrimitive/ed25519_verify` | 88 929 | 89 668 | 88 621 |
+| `BenchmarkPrimitive/hmac_sha256_verify` | 1 261.0 | 1 242.0 | 1 299.0 |

@@ -100,6 +100,44 @@ guarantees and no publisher promises to preserve.
 Same principle as ADR 0031: where any SDK-chosen answer would be arbitrary,
 refuse rather than guess quietly.
 
+**`AllByKid` is O(n) and stays O(n)**, deliberately. Measured at **10.12 ns per
+set member** with one 176 B allocation for the match — 0.09 % of an ES256 token
+verification at n=1 and 0.54 % at n=64 (`BENCH.md` §4). A `map[string][]KeyValue`
+field on `Set` was refused for a reason that outranks the number: `Set` is an
+**immutable value**, copied by every constructor and accessor, and a map field
+is a reference two copies would share. A consumer that needs an index builds one
+— `internal/service/token`'s set verifier does, at construction, because it
+needs the derived binding grouped with it and that does not belong in a key
+format. See `BENCH.md` §10.
+
+## Cost
+
+Measured in `BENCH.md` — median of nine samples across three separate
+processes. The one number that matters to a caller:
+
+| accessor | ns | B | allocs |
+|---|---:|---:|---:|
+| `ECDSAPublic()` (EC) | **3 870** | 1 288 | **30** |
+| `Ed25519Public()` (OKP) | 42.9 | 32 | 1 |
+| `Secret()` (oct) | 44.5 | 32 | 1 |
+
+**The EC accessor costs 90× the other two**, because RFC 7518 §6.2.1 stores an
+EC key as bare coordinates while `service/crypto/ecdsasig` consumes PKIX, so
+somebody has to run `x509.MarshalPKIXPublicKey` — and `encoding/asn1.Marshal`
+walks a struct reflectively. That is not a defect here; it is the reason a
+consumer must call it **once**, not per request.
+
+It was being called per request. `internal/service/token`'s JWK Set verifier
+rebuilt the key on every token — marshal to DER, then immediately
+`x509.ParsePKIXPublicKey` the DER back — at **8.3 % of that verification's CPU
+and 28.2 % of its allocated objects**. Fixed on the consumer's side in 2026-09;
+nothing in this package changed. `BENCH.md` is the whole argument, with the
+profiles verbatim.
+
+`Parse` costs 2 857 ns (EC) / 1 388 (OKP) / 1 352 (oct); `ParseSet` is linear at
+**3 690 ns per additional member** across a 16× range, so there is no hidden
+quadratic in the set decoder.
+
 ## Validation — what Parse actually checks
 
 1. `kty` present, and one of `EC` / `OKP` / `oct`.
@@ -169,6 +207,13 @@ Test vectors are published ones — RFC 7515 §A.3.1 (private ES256 key),
 RFC 7517 §A.1 (public P-256 key), RFC 8037 §A.1/§A.3 (Ed25519 keypair and its
 thumbprint) — so a regression in the on-curve or scalar-consistency checks
 fails here instead of being masked by material this package generated itself.
+
+`jwk_bench_test.go` reuses those same vectors. Its `benchKid` helper renders
+FIXED-WIDTH kids, and that is load-bearing rather than tidy: Go compares strings
+by length first, so a ragged `"k0"`…`"k63"` scheme made a two-octet lookup fail
+on length against fifty-four of sixty-four members and measured `match=last`
+43 % slower than `match=first` — on a scan that has no early exit and therefore
+cannot produce that difference. `BENCH.md` §9 records the discarded row-set.
 
 ## Linter exemptions
 

@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "token",
     srcs = [
+        "bound_key_value.go",
         "bounds_value.go",
         "claims_codec.go",
         "codes.go",
@@ -67,7 +68,10 @@ go_test(
     name = "token_test",
     srcs = [
         "encoding_internal_test.go",
+        "jwkbind_alloc_internal_test.go",
+        "jwkbind_internal_test.go",
         "jwkbridge_external_test.go",
+        "jwkset_bench_test.go",
         "jwt_external_test.go",
         "parsing_bench_test.go",
         "paseto_external_test.go",
