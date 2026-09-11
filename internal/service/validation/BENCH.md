@@ -87,6 +87,59 @@ rules = 9 rule evaluations and 4 path descents per validation.
   which is the right way round: the accepting path is the one that runs on
   every valid request.
 
+## `singleflight` on `planFor`: measured, and refused
+
+ADR 0049 shipped `kernel/singleflight` and named two candidates for it that it
+had not checked. `planFor` is one of them. It is checked here, and the answer is
+no.
+
+**What the redundancy actually is.** `planFor` reads a `sync.Map`, and on a miss
+compiles without holding anything, then publishes with `LoadOrStore`. So N
+goroutines meeting a type for the first time simultaneously can each compile it,
+and the first published plan wins. That is deliberate — the plans are equivalent,
+so the redundancy costs CPU and never correctness — and it happens **once per
+(type, stopAtFirst) per process**.
+
+**The arithmetic**, from numbers measured on this machine:
+
+| | ns | allocs |
+|---|---:|---:|
+| one plan compile (`PlanCompile`, above) | 5 003 | 39 |
+| one `singleflight.Do`, uncontended (`internal/kernel/singleflight/BENCH.md`) | 2 032 | 6 |
+
+For an N-way cold-start race on one type:
+
+| | today | with `singleflight` |
+|---|---|---|
+| N = 2 | 10 006 ns of CPU | 5 003 + 2×2 032 = 9 067 ns |
+| N = 8 | 40 024 ns of CPU | 5 003 + 8×2 032 = 21 259 ns |
+
+So it does win arithmetically past two racers — by **19 µs, once per type**.
+
+**And it is still refused**, because that is the whole prize. Against it:
+
+- **six allocations and 2 µs added to every first sight**, including the
+  overwhelmingly common one where nothing races at all and today's cost is a
+  compile and a map store;
+- **a goroutine per leading call** — `singleflight` runs `fn` on its own, which
+  is what makes an abandoning caller not condemn the others. That machinery is
+  the right answer for an origin fetch that takes milliseconds and can be
+  cancelled. A 5 µs pure-CPU compile that no caller ever abandons needs none
+  of it;
+- **a new dependency edge** from `service/validation` to `kernel/singleflight`,
+  to save 19 µs at boot;
+- and the redundancy it removes is **already harmless**: two goroutines compile
+  the same tags into two identical plans, and `LoadOrStore` publishes one.
+
+A service registering two hundred validated types would save **3.8 ms at boot**,
+and only if every one of those two hundred types were raced eight ways at the
+same instant. That is the ceiling, not the expectation.
+
+**What would reopen it**: a compile that grows expensive enough to matter — if
+`compileStruct` ever reaches the hundreds of microseconds, the balance flips —
+or a plan cache that has to be invalidated, which would turn a once-per-process
+compile into a recurring one.
+
 ## Gates
 
 - `TestTagAndCodePathsAgree` — the two front ends must produce the same

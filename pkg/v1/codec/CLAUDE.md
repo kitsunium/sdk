@@ -44,8 +44,12 @@ registry, **never** a codec `Format` (ADR 0014 §Why-not).
 
 **Dep-light:** the transform schemes are **stdlib only** (`compress/gzip`,
 `compress/flate`, `compress/zlib`), so the compression verbs add **zero** new
-vendor modules beyond what the codec facade already carries. zstd/snappy/s2 are deferred opt-in
-follow-ups behind their own imports. `CompressAlgorithm = transform.Algorithm`
+vendor modules beyond what the codec facade already carries. zstd and s2 ship in
+`third-party/transform` (ADR 0066) and are deliberately **not** reachable from
+here: the frame's `algID` table is frozen at `gzip=0x01` / `flate=0x02`, so
+`MarshalCompressed(f, "zstd", v)` returns `UnknownCompressor` — the same
+registered-but-not-framed position `zlib` has held since ADR 0014.
+`CompressAlgorithm = transform.Algorithm`
 is a type alias so consumers name a compressor without importing `internal/*`.
 
 ## Conventions

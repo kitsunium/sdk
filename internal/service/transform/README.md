@@ -44,8 +44,9 @@ is the default-level `ZlibCompressor`.
 (`maxDecompressedBytes`). An over-cap stream returns the scheme's failure
 sentinel instead of driving an OOM — the conservative layer-local backstop. The
 full ratio-aware decompression-bomb guard lives in the `pkg/v1/codec` frame
-layer (a later commit). The wave ships **stdlib only**; zstd / snappy / s2 are
-deferred.
+layer (a later commit). This package ships **stdlib only**; the vendor
+compressors (zstd, s2) live in `third-party/transform` behind their own opt-in
+import, with their own ceiling (ADR 0066).
 
 ## Error codes (range `0.3.26.*`)
 
