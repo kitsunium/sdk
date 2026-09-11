@@ -56,8 +56,17 @@ Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf 
 - **AST audit (`registry_external_test.go`).** Enforces three invariants across `internal/` + `pkg/` + `third-party/` — over every package shipped in the `//:audit_sources` filegroup, which since ADR 0020 is the COMPLETE set of `errs.Define` emitters (ring + every logger middleware/sink were previously excluded — issue #35):
   1. Every `errs.Define` Public is a string literal (no `fmt.Sprintf`, no concat).
   2. Reason mirrors EITHER `screamingSnake(varName)` (bare style, `WriterNil` ↔ `"WRITER_NIL"`) OR `screamingSnake(CodeConst − "Code")` (namespaced style per ADR 0006, `CodeRingFull` ↔ `"RING_FULL"` while the short var `Full` would not). Either derivation passes — ADR 0020.
-  3. Code identifiers are unique across the SDK.
+  3. No two `errs.Define` calls resolve to the same **numeric Code value**. Keyed on the resolved value, not the identifier name: two distinct identifiers folding to one dotted-quad (aliases, masked expressions) is exactly the collision the old name-keyed audit passed green (V1/V93/V100).
   Failure fails `bazel test //internal/kernel/errs:errs_test` (also run by `make test`). **Adding a new `errs.Define` emitter requires an `audit_srcs` filegroup in its `BUILD.bazel` AND an entry in `//:audit_sources`** — otherwise it ships unaudited under Bazel.
+- **Range-ownership audit (`registry_ownership_external_test.go`, ADR 0035).** The audit above answers *is this code unique*; it structurally cannot see two packages sharing an `MM.LL.PP` with different `SS` bytes — no value ever collides, so range squatting passed green. Two further checks close that:
+  1. `TestAuditPrefixExclusivity` — no range is declared by two packages.
+  2. `TestAuditPrefixOwnership` — every declared range is present in `codeRangeOwners` and matches. Catches a package moving into a range that is reserved but unused, which exclusivity alone cannot see.
+
+  Keyed on Code **constant declarations**, not `Define` call sites: `internal/core/codec` declares the whole `0.2.2.*` block and never calls `Define`, so a Define-keyed audit was blind to it. `codeRangeOwners` is **hand-maintained and never generated** — a table derived from `docs/error-codes.yaml` (itself generated from the constants) would record any squatter as the rightful owner and stay green.
+
+  Out of scope, deliberately: cross-package selector values are re-exports, not definitions; `iota` groups are skipped because the only one is this package's Layer-0 block, already enforced at runtime by `validateDefineArgs`; a `Code`-typed constant not named `Code*` is machinery, not an allocation (the CIDR masks `MaskByMajor` … `MaskExact`).
+
+  **Adding a domain costs one line in `codeRangeOwners`, in the same commit as its codes.** Never renumber a published code to fit the table — correct the table. `TestAuditPrefixChecksDetectViolations` proves both checks fail on the violations they claim to catch.
 - **Meta-codes are documentary.** 0.0.0.1..6 (`CodeInvalidCode / Reason / Public / Private / CodeString / WrapParams`) appear in Define panic messages and in `newValidationError` outputs; they are NEVER returned to callers as sentinel `*Error` values.
 
 ## How to declare a sentinel (emitter packages)

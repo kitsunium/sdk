@@ -1,6 +1,6 @@
 # ADR 0022 — HCL codec, quarantined under third-party/ (M5)
 
-- **Status**: Accepted
+- **Status**: Accepted (decision stands; §Context.1 + §Why not mechanism corrected by [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) — HCL *introduces* the banned `x/sys`, it does not downgrade it)
 - **Date**: 2026-06-21
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0003 (codec package, M5), ADR 0012 (third-party quarantine for vendor-heavy integrations), ADR 0021 (BSON codec — the library-backed-in-service precedent this ADR deliberately does NOT follow), ADR 0005/0006 (error-code registry)

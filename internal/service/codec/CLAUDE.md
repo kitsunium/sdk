@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Fourteen wire-format codecs covering 22 registered Format names, one Go package each, all implementing `internal/core/codec.Codec`. Blank-importing a package registers its singleton(s) with the core registry so it becomes resolvable by Name / MIME type / file extension. `pkg/v1/codec` blank-imports all fourteen in one shot; downstream applications can import only the formats they need. The `baseenc` package registers 9 distinct Format names (base64, base64url, base32, base16, hex, ascii85, base45, base58, base62) under a single Go package so swapping base-N variants is a Format-string change, identical to swapping json↔cbor.
+Fifteen wire-format codecs covering 23 registered Format names, one Go package each, all implementing `internal/core/codec.Codec`. Blank-importing a package registers its singleton(s) with the core registry so it becomes resolvable by Name / MIME type / file extension. `pkg/v1/codec` blank-imports all fifteen in one shot; downstream applications can import only the formats they need. The `baseenc` package registers 9 distinct Format names (base64, base64url, base32, base16, hex, ascii85, base45, base58, base62) under a single Go package so swapping base-N variants is a Format-string change, identical to swapping json↔cbor.
 
 ## Contents
 
@@ -15,8 +15,10 @@ Fourteen wire-format codecs covering 22 registered Format names, one Go package 
 | `cbor/`        | CBOR (RFC 8949) — fxamacker/cbor/v2           | `0.3.6.*`  | yes | yes |
 | `csv/`         | CSV (RFC 4180) — `[][]string`                 | `0.3.8.*`  | no  | yes |
 | `flatbuffers/` | FlatBuffers passthrough (already-encoded `[]byte`) | `0.3.23.*` | no  | yes |
+| `form/`        | `application/x-www-form-urlencoded` — `url.Values` | `0.3.40.*` | no  | yes |
 | `json/`        | JSON (RFC 8259) — encoding/json               | `0.3.2.*`  | yes | yes |
 | `msgpack/`     | MessagePack — vmihailenco/msgpack/v5          | `0.3.7.*`  | yes | yes |
+| `multipart/`   | multipart/form-data (RFC 7578) — mime/multipart | `0.3.41.*` | yes | yes |
 | `ndjson/`      | Newline-delimited JSON                        | `0.3.11.*` | no  | yes |
 | `pem/`         | PEM block (RFC 7468) — encoding/pem           | `0.3.10.*` | no  | yes |
 | `tlv/`         | Self-describing TLV (reflection-driven binary)| `0.3.22.*` | yes | yes |
@@ -46,7 +48,7 @@ The `PP` slots above are authoritative — verified against each `codes.go`. New
 - **Registration without `init()`**: each codec exposes `var Codec codec.Codec = codec.Register(&xxxCodec{})`. Initialiser order is deterministic and the AST audit forbids `init()` in this tree.
 - **Stateless singletons**: `New()` returns the same `Codec` singleton, except when a codec exposes an opt-in mode (`csv.NewWithEscape(bool)` returns a fresh instance not added to the registry).
 - **Defensive copies on `MIMETypes()` / `Extensions()`**: every implementer returns `slices.Clone(table)` so callers cannot mutate the package-level slice.
-- **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `scannerMaxCapacity`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/codec`.
+- **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `scannerMaxCapacity`, `form.maxFormBytes`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`, `form.maxFormPairs`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/codec`. They are `const`, not constructor options: a tunable bound whose zero value silently means "unlimited" is exactly what ADR 0031 forbids.
 - **Errors use the package's dotted-quad code**: every wrapped failure carries the `CodeXxxMarshalFailed` / `CodeXxxUnmarshalFailed` / `CodeXxxValueInvalid` constant from `codes.go`. Wrapping an `*errs.Error` cause is a no-op for params (origin wins).
 - **Optional extensions are opt-in by interface assertion**: callers use `if a, ok := c.(codec.Appender); ok { … }` — the public registry does not promise any extension.
 
@@ -66,8 +68,10 @@ The `PP` slots above are authoritative — verified against each `codes.go`. New
 - `cbor/`        — see `cbor/CLAUDE.md`
 - `csv/`         — see `csv/CLAUDE.md`
 - `flatbuffers/` — see `flatbuffers/CLAUDE.md`
+- `form/`        — see `form/CLAUDE.md`
 - `json/`        — see `json/CLAUDE.md`
 - `msgpack/`     — see `msgpack/CLAUDE.md`
+- `multipart/`   — see `multipart/CLAUDE.md`
 - `ndjson/`      — see `ndjson/CLAUDE.md`
 - `pem/`         — see `pem/CLAUDE.md`
 - `tlv/`         — see `tlv/CLAUDE.md`

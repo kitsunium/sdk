@@ -5,15 +5,18 @@
 // a Generator the way transform resolves an Algorithm to a Compressor.
 //
 // No generation bodies live here; concrete generators (UUIDv4/UUIDv7/ULID/
-// snowflake) live under internal/service/id/ and self-register via a
-// package-level var initialiser when imported — no init(). The canonical
-// external form of every identifier is its string rendering, so Generator.New
-// returns a string (UUIDs dashed-hex, ULID Crockford base32, snowflake decimal).
+// snowflake/NanoID/KSUID) live under internal/service/id/ and self-register via
+// a package-level var initialiser when imported — no init(). TypeID lives there
+// too but is NOT registered: it carries a caller-chosen type prefix, and there
+// is no prefix the SDK could invent on their behalf, so New("typeid") returns
+// UnknownScheme by design. The canonical external form of every identifier is
+// its string rendering, so Generator.New returns a string (UUIDs dashed-hex,
+// ULID Crockford base32, snowflake decimal, KSUID base62, NanoID URL-safe).
 package id
 
 // Scheme is the typed key under which a Generator registers (e.g. "uuidv4",
-// "uuidv7", "ulid", "snowflake"). The zero value Scheme("") is reserved
-// invalid, mirroring codec.Format and transform.Algorithm.
+// "uuidv7", "ulid", "snowflake", "nanoid", "ksuid"). The zero value Scheme("")
+// is reserved invalid, mirroring codec.Format and transform.Algorithm.
 type Scheme string
 
 // String implements fmt.Stringer and returns the raw identifier.

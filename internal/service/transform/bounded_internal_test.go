@@ -1,6 +1,6 @@
 // Package transform — white-box tests for the shared bounded-decompression
-// helper and the overflow→sentinel backstop wired through gzip/flate. The
-// overflow cases drive the cap-parameterised flateDecompress/gzipDecompress
+// helper and the overflow→sentinel backstop wired through gzip, flate and zlib.
+// The overflow cases drive the cap-parameterised {gzip,flate,zlib}Decompress
 // cores with an explicit small cap, so no shared state is mutated and the cases
 // stay race-free under parallel execution.
 package transform
@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"errors"
 	"io"
 	"strings"
@@ -53,6 +54,17 @@ func compressBomb(t *testing.T, scheme string, n int) []byte {
 		//: close flushes the gzip trailer.
 		if err := w.Close(); err != nil {
 			t.Fatalf("gzip close: %v", err)
+		}
+	case "zlib":
+		//: zlib writer path — same DEFLATE body under an RFC 1950 envelope.
+		w := zlib.NewWriter(&buf)
+		//: write n zero bytes; the writer compresses them to a tiny blob.
+		if _, err := w.Write(make([]byte, n)); err != nil {
+			t.Fatalf("zlib write: %v", err)
+		}
+		//: close flushes the Adler-32 trailer.
+		if err := w.Close(); err != nil {
+			t.Fatalf("zlib close: %v", err)
 		}
 	default:
 		//: flate writer path; NewWriter only errors on an invalid level.
@@ -183,6 +195,36 @@ func Test_gzipDecompress(t *testing.T) {
 			//: the decode must match the expected sentinel (nil = success).
 			if _, err := gzipDecompress(nil, bomb, tc.max); err != tc.wantErr {
 				t.Fatalf("gzipDecompress(max=%d) err=%v want %v", tc.max, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// Test_zlibDecompress drives zlibDecompress end-to-end: a clean round-trip under
+// the production cap, and a bomb under a lowered cap that must trip the
+// overflow→ZlibFailed backstop. The zlib envelope shares the DEFLATE body with
+// flate, so it inherits the same bomb ratio and needs the same bound.
+func Test_zlibDecompress(t *testing.T) {
+	t.Parallel()
+	//: table over the in-bounds round-trip and the over-cap overflow.
+	cases := []struct {
+		name    string
+		max     int64
+		wantErr error
+	}{
+		{"under-cap-round-trips", maxDecompressedBytes, nil},
+		{"over-cap-fails-closed", loweredCapBytes, ZlibFailed},
+	}
+	//: drive each cap relationship through zlibDecompress.
+	for _, tc := range cases {
+		//: each case is independent and parallel-safe (no shared state).
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: a 4 MiB zero bomb inflates far past the lowered cap.
+			bomb := compressBomb(t, "zlib", overflowPayloadBytes)
+			//: the decode must match the expected sentinel (nil = success).
+			if _, err := zlibDecompress(nil, bomb, tc.max); err != tc.wantErr {
+				t.Fatalf("zlibDecompress(max=%d) err=%v want %v", tc.max, err, tc.wantErr)
 			}
 		})
 	}

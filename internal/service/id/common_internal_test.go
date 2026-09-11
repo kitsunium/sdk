@@ -13,6 +13,19 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// fieldValue returns the rendering of the first field named key along err's
+// chain, or "" when no such field exists. The parse refusals in this package
+// deliberately carry a "rule" field instead of echoing their input, so the
+// tests assert on that field rather than on a message.
+func fieldValue(err error, key string) string {
+	for _, f := range errs.FieldsOf(err) {
+		if f.Key() == key {
+			return f.StringValue()
+		}
+	}
+	return ""
+}
+
 // Test_readRandom pins that the buffer is filled and that a CSPRNG fault
 // arrives typed. Silence here would be the worst outcome: an identifier full of
 // zeros is still 36 characters long and still parses.

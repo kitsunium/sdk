@@ -8,6 +8,7 @@ import (
 	"flag"
 	"io"
 	"math"
+	"net/url"
 	"os"
 	"reflect"
 	"runtime"
@@ -53,6 +54,7 @@ var expectedAppenders = []string{
 	"asn1-der",
 	"pem",
 	"csv",
+	"form",
 	"base64",
 	"base64url",
 	"base32",
@@ -63,6 +65,7 @@ var expectedAppenders = []string{
 	"base58",
 	"base62",
 	"bson",
+	"multipart",
 }
 
 // registeredAppenders is the package-level Appender registry snapshot
@@ -752,6 +755,7 @@ func codecAdapters() map[codec.Format]codecAdapter {
 		codec.NDJSON:  ndjsonAdapter(),
 		codec.XML:     xmlAdapter(),
 		codec.CSV:     csvAdapter(),
+		codec.Form:    formAdapter(),
 		codec.ASN1DER: asn1Adapter(),
 		codec.PEM:     pemAdapter(),
 		//: TLV (when registered) — tlv decodes structs to map[string]any
@@ -775,6 +779,10 @@ func codecAdapters() map[codec.Format]codecAdapter {
 		//: BSON needs a top-level document and has no uint64/sub-ms-time
 		//: support, so it uses a dedicated document fixture (not complexRT).
 		codec.Format("bson"): bsonAdapter(),
+		//: multipart is JSON-mediated for any non-FormValue value, so the
+		//: universal complexRT shape round-trips through its single
+		//: JSON-envelope part exactly as it does through json itself.
+		codec.Multipart: universalAdapter("multipart"),
 	}
 }
 
@@ -974,6 +982,44 @@ func csvAdapter() codecAdapter {
 			if !reflect.DeepEqual(got, sampleCSV()) {
 				//: surface the diff.
 				t.Errorf("%s: round-trip mismatch\n  got:  %#v\n  want: %#v", name, got, sampleCSV())
+			}
+		},
+	}
+}
+
+// sampleForm is the urlencoded round-trip fixture. It deliberately carries a
+// repeated key: repetition is the format's ONLY array syntax, so a fixture
+// without one would not exercise the semantics the codec commits to.
+func sampleForm() url.Values {
+	//: fresh map per call so subtests cannot mutate a shared fixture.
+	return url.Values{
+		"name": {"Ada Lovelace"},
+		"tag":  {"analytical", "engine", "note G"},
+		"raw":  {"a=b&c=d 100%"},
+	}
+}
+
+// formAdapter builds the round-trip adapter for the urlencoded form codec.
+// The format models a flat multimap of strings, so the universal fixture
+// cannot apply.
+func formAdapter() codecAdapter {
+	return codecAdapter{
+		encode: func() ([]byte, error) {
+			//: form-specific multimap fixture.
+			return codec.Marshal(codec.Form, sampleForm())
+		},
+		decodeAndCheck: func(t *testing.T, name string, data []byte) {
+			t.Helper()
+			//: decode into a fresh url.Values target.
+			var got url.Values
+			if err := codec.Unmarshal(codec.Form, data, &got); err != nil {
+				//: codec rejected its own output.
+				t.Fatalf("%s: Unmarshal err=%v", name, err)
+			}
+			//: structural equality — repeated values must survive in order.
+			if !reflect.DeepEqual(got, sampleForm()) {
+				//: surface the diff.
+				t.Errorf("%s: round-trip mismatch\n  got:  %#v\n  want: %#v", name, got, sampleForm())
 			}
 		},
 	}
@@ -1526,10 +1572,31 @@ func TestAppendRoundTrip_AllCodecs(t *testing.T) {
 					}
 				},
 			})
+		//: form appends a flat multimap; the repeated key in the fixture is
+		//: what proves Append preserves the format's only array syntax.
+		case "form":
+			vals := sampleForm()
+			tests = append(tests, tc{
+				name:     string(f),
+				format:   f,
+				appender: a,
+				value:    vals,
+				decode: func(t *testing.T, name string, data []byte) {
+					t.Helper()
+					var got url.Values
+					if err := codec.Unmarshal(f, data, &got); err != nil {
+						t.Fatalf("%s: Unmarshal err=%v", name, err)
+					}
+					if !reflect.DeepEqual(got, vals) {
+						t.Errorf("%s: append round-trip mismatch", name)
+					}
+				},
+			})
 		//: Universal-any group: json + yaml + toml + cbor + msgpack +
-		//: every baseenc variant (baseenc is JSON-mediated). All accept
-		//: complexRT natively without going through the promotion path.
-		case "json", "yaml", "toml", "cbor", "msgpack", "base64", "base64url", "base32", "base16", "hex", "ascii85", "base45":
+		//: multipart + every baseenc variant (baseenc and multipart are
+		//: JSON-mediated). All accept complexRT natively without going
+		//: through the promotion path.
+		case "json", "yaml", "toml", "cbor", "msgpack", "multipart", "base64", "base64url", "base32", "base16", "hex", "ascii85", "base45":
 			//: capture the codec + fixture + decode hook.
 			val := tweakForCodec(string(f), sampleComplex())
 			tests = append(tests, tc{
@@ -1868,7 +1935,7 @@ type universalRoundtripUser struct {
 // codec.Marshal(F, User) + codec.Unmarshal(F, data, &back) MUST yield
 // back == User for every Format the registry knows. Failure here means
 // the facade promotion path regressed for at least one codec —
-// previously 5/22 codecs rejected this very call shape.
+// previously 5 of the then-22 codecs rejected this very call shape.
 func TestUniversalRoundtripAllCodecs(t *testing.T) {
 	t.Parallel()
 	//: canonical fixture; struct intentionally small so the binary

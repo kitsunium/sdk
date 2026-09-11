@@ -11,7 +11,7 @@ The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at f
 
 | Major | Purpose | State |
 |---|---|---|
-| `v1/` | Stable public API for logging, error introspection, and codec dispatch (14 codecs covering 22 Format names — incl. base-N family via uniform `codec.Marshal`/`Unmarshal`) | Shipping |
+| `v1/` | Stable public API for logging, error introspection, and codec dispatch (15 codecs covering 24 Format names — incl. base-N family via uniform `codec.Marshal`/`Unmarshal`) | Shipping |
 
 ## Versioning policy
 
@@ -29,7 +29,7 @@ The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at f
 - Public functions are thin wrappers: validation + delegation. No business logic in this layer.
 - **No constructors for internal types — except the error model.** The concrete `*errs.Error` type stays unexported, but since ADR 0019 the error *model* is constructable through the public facade: `pkg/v1/errs.New` / `Wrap` (+ `Field` helpers `String`/`Int`/…, `WrapParams`, `MinAppMajor`/`MaxMajor`) mint typed errors validated at runtime (returning a typed `CodeInvalid*` error, never panicking). Consumers still cannot forge an `*errs.Error` by struct literal — they go through the validated constructors. Deliberate exception: the error model is meant to be shared (downstreams migrate off `fmt.Errorf` onto it); every *other* internal type (logger handlers, codec internals) keeps its constructors private. Introspection is unchanged via `pkg/v1/errs.*Of(err)` (`CodeOf`, `ReasonOf`, `PublicOf`, `PrivateOf`, `HTTPStatusOf`, `ExitCodeOf`, `HasCode`, `HasReason`); `CodeOf` returns the typed `Code` — octets compose via `code.Layer()` / `code.Major()` / `code.Package()` / `code.Serial()`.
 - **ldflags injection.** `pkg/v1/logger.Version` is the single injection point; all other packages read via `logger.FrameworkVersion()`, which falls back to the `"dev"` sentinel when unset.
-- **`pkg/v1/codec` blank-imports all 14 service codec packages** so `import _ "github.com/kitsunium/sdk/pkg/v1/codec"` activates the full registry (asn1, baseenc, bson, cbor, csv, flatbuffers, json, msgpack, ndjson, pem, tlv, toml, xml, yaml). The baseenc package registers 9 distinct Format names (`base64`, `base64url`, `base32`, `base16`, `hex`, `ascii85`, `base45`, `base58`, `base62`).
+- **`pkg/v1/codec` blank-imports all 16 service codec packages** so `import _ "github.com/kitsunium/sdk/pkg/v1/codec"` activates the full registry (asn1, baseenc, bson, cbor, csv, flatbuffers, form, json, msgpack, multipart, ndjson, pem, tlv, toml, xml, yaml). The baseenc package registers 9 distinct Format names (`base64`, `base64url`, `base32`, `base16`, `hex`, `ascii85`, `base45`, `base58`, `base62`).
 - **Uniform dispatch.** Every encoding format — text, binary, base-N — is reached the same way: `codec.Marshal(format, v)` / `codec.Unmarshal(data, &v)`. Format-swap at runtime is a single string change. The SDK does NOT ship a parallel byte-level API; callers needing raw base-N bytes without the JSON envelope call stdlib `encoding/{base64,base32,hex,ascii85}` directly.
 
 ## Subtree

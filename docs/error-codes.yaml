@@ -706,6 +706,10 @@ codes:
     const: CodeFlateFailed
     hex: "0x00_03_1A_02"
     package: internal/service/transform
+  - code: "0.3.26.3"
+    const: CodeZlibFailed
+    hex: "0x00_03_1A_03"
+    package: internal/service/transform
   - code: "0.3.27.1"
     const: CodeRotFileOpenFailed
     hex: "0x00_03_1B_01"
@@ -834,6 +838,58 @@ codes:
     const: CodeIDClockStalled
     hex: "0x00_03_27_03"
     package: internal/service/id
+  - code: "0.3.39.4"
+    const: CodeIDInvalidSize
+    hex: "0x00_03_27_04"
+    package: internal/service/id
+  - code: "0.3.39.5"
+    const: CodeIDInvalidPrefix
+    hex: "0x00_03_27_05"
+    package: internal/service/id
+  - code: "0.3.39.6"
+    const: CodeIDMalformed
+    hex: "0x00_03_27_06"
+    package: internal/service/id
+  - code: "0.3.39.7"
+    const: CodeIDTimestampRange
+    hex: "0x00_03_27_07"
+    package: internal/service/id
+  - code: "0.3.40.1"
+    const: CodeFormValueInvalid
+    hex: "0x00_03_28_01"
+    package: internal/service/codec/form
+  - code: "0.3.40.2"
+    const: CodeFormUnmarshalFailed
+    hex: "0x00_03_28_02"
+    package: internal/service/codec/form
+  - code: "0.3.40.3"
+    const: CodeFormMultiValue
+    hex: "0x00_03_28_03"
+    package: internal/service/codec/form
+  - code: "0.3.41.1"
+    const: CodeMultipartMarshalFailed
+    hex: "0x00_03_29_01"
+    package: internal/service/codec/multipart
+  - code: "0.3.41.2"
+    const: CodeMultipartUnmarshalFailed
+    hex: "0x00_03_29_02"
+    package: internal/service/codec/multipart
+  - code: "0.3.41.3"
+    const: CodeMultipartValueInvalid
+    hex: "0x00_03_29_03"
+    package: internal/service/codec/multipart
+  - code: "0.3.41.4"
+    const: CodeMultipartBoundaryInvalid
+    hex: "0x00_03_29_04"
+    package: internal/service/codec/multipart
+  - code: "0.3.41.5"
+    const: CodeMultipartLimitExceeded
+    hex: "0x00_03_29_05"
+    package: internal/service/codec/multipart
+  - code: "0.3.41.6"
+    const: CodeMultipartLimitsInvalid
+    hex: "0x00_03_29_06"
+    package: internal/service/codec/multipart
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

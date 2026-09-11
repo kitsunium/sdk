@@ -5,13 +5,15 @@
 // Algorithm to a Compressor the way codec resolves a Format to a Codec.
 //
 // No algorithm bodies and no vendor types live here; concrete compressors live
-// under internal/service/transform/ (stdlib gzip/flate today) and self-register
-// via a package-level var initialiser when imported — no init().
+// under internal/service/transform/ (stdlib gzip/flate/zlib today) and
+// self-register via a package-level var initialiser when imported — no init().
 package transform
 
 // Algorithm is the typed key under which a Compressor registers (e.g. "gzip",
-// "flate"). The zero value Algorithm("") is reserved invalid, mirroring
-// codec.Format and crypto.Algorithm.
+// "flate", "zlib"). The zero value Algorithm("") is reserved invalid, mirroring
+// codec.Format and crypto.Algorithm. Note that "flate" is the raw DEFLATE
+// stream of RFC 1951 and "zlib" is the RFC 1950 envelope HTTP misnames
+// "deflate" — distinct Algorithms, not aliases.
 type Algorithm string
 
 // String implements fmt.Stringer and returns the raw identifier.

@@ -50,6 +50,7 @@ go_test(
         "prefix_matcher_bench_test.go",
         "prefix_matcher_external_test.go",
         "registry_external_test.go",
+        "registry_ownership_external_test.go",
         "trail_internal_test.go",
         "trailof_external_test.go",
         "validate_internal_test.go",
