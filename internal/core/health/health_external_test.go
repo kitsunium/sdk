@@ -143,6 +143,10 @@ func TestWorstNeverLetsDegradedMaskUnhealthy(t *testing.T) {
 		{"one unhealthy sinks the set", healthy, unhealthy, unhealthy},
 		{"degraded does not mask unhealthy", degraded, unhealthy, unhealthy},
 		{"the fold is symmetric", unhealthy, degraded, unhealthy},
+		//: a cast value used to rank above Healthy and vanish from the fold —
+		//: "Worst(healthy, unknown) = healthy" before the ranking.
+		{"a value outside the three sinks the set", healthy, corehealth.Status(42), unhealthy},
+		{"and does so from either side", corehealth.Status(42), degraded, unhealthy},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
