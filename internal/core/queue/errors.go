@@ -17,8 +17,10 @@ const exitConfig int = 78
 const exitTempFail int = 75
 
 var (
-	// QueueMisconfigured refuses a PolicyValue a broker cannot honour, and a
-	// non-positive Extend duration. The "field" field names which value.
+	// QueueMisconfigured refuses a PolicyValue a broker cannot honour — a
+	// zero with opposite readings, or a duration past MaxDeadlineOffset — and
+	// an Extend duration that is non-positive or reaches past what a durable
+	// broker can record. The "field" field names which value.
 	//
 	// It is a refusal and not a clamp for the fields whose zero has two
 	// opposite readings — see PolicyValue's documentation, which also names

@@ -88,6 +88,8 @@ if reader, ok := broker.(queue.DeadLetterReader); ok {
 
 \[Policy.RetryDelay\] and \[Policy.MaxMessageBytes\] are CLAMPED, because their zeros have one reading each and it is harmless: no extra delay, and [DefaultMaxMessageBytes](<#DefaultMaxMessageBytes>).
 
+Both durations are also bounded from ABOVE by [MaxDeadlineOffset](<#MaxDeadlineOffset>), a century, and refused past it — not as a judgement about leases but because the durable broker writes every deadline into a file name as Unix nanoseconds, which end in 2262. A deadline past that could not be read back, and the message it names would never be delivered again. The math.MaxInt64 somebody reaches for to mean "never" is 292 years, so it is refused rather than stranding the message; an extension that would reach past 2262 is refused by both brokers for the same reason.
+
 ### Two brokers
 
 [NewFile](<#NewFile>) is the real one: its state is a directory, it survives the process, and two brokers over one directory — in one process or in twenty — are one queue.
@@ -131,6 +133,12 @@ const DefaultMaxMessageBytes int = corequeue.DefaultMaxMessageBytes
 const DefaultPollInterval time.Duration = svcqueue.DefaultPollInterval
 ```
 
+<a name="MaxDeadlineOffset"></a>MaxDeadlineOffset is the ceiling on \[Policy.VisibilityTimeout\] and \[Policy.RetryDelay\]: a century, refused above it rather than clamped, because a deadline past 2262 cannot be written into the durable broker's file names and read back.
+
+```go
+const MaxDeadlineOffset time.Duration = corequeue.MaxDeadlineOffset
+```
+
 ## Variables
 
 <a name="QueueMisconfigured"></a>
@@ -171,7 +179,7 @@ var (
 ```
 
 <a name="Consume"></a>
-## func [Consume](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L267>)
+## func [Consume](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L282>)
 
 ```go
 func Consume(ctx context.Context, broker Broker, cfg ConsumerConfig) error
@@ -184,7 +192,7 @@ It returns nil when ctx ends — a cancelled consumer is a stopped consumer, not
 cfg.HandlerIsIdempotent must be true; see the package documentation.
 
 <a name="Broker"></a>
-## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L156>)
+## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L171>)
 
 Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings \([DeadLetterReader](<#DeadLetterReader>), [LeaseExtender](<#LeaseExtender>)\) reached by type assertion.
 
@@ -193,7 +201,7 @@ type Broker = corequeue.Broker
 ```
 
 <a name="NewFile"></a>
-### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L243>)
+### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L258>)
 
 ```go
 func NewFile(cfg FileConfig) (broker Broker, err error)
@@ -204,7 +212,7 @@ NewFile returns the durable broker: its whole state is the directory in cfg.Dir,
 It refuses at construction — never at first use — a policy it cannot honour, a directory it cannot use safely, and a platform with no atomic replace or no flushable directory handle.
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L253>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L268>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (broker Broker, err error)
@@ -215,7 +223,7 @@ NewMemory returns the in\-process test double: the port's full semantics, no dir
 It refuses the same policies [NewFile](<#NewFile>) refuses, through the same guard, which is what makes it an honest double.
 
 <a name="ConsumerConfig"></a>
-## type [ConsumerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L201>)
+## type [ConsumerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L216>)
 
 ConsumerConfig is the public alias for [Consume](<#Consume>)'s configuration.
 
@@ -224,7 +232,7 @@ type ConsumerConfig = svcqueue.ConsumerConfig
 ```
 
 <a name="DeadLetter"></a>
-## type [DeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L184>)
+## type [DeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L199>)
 
 DeadLetter is the public alias for one abandoned message and its cause.
 
@@ -233,7 +241,7 @@ type DeadLetter = corequeue.DeadLetterValue
 ```
 
 <a name="DeadLetterReader"></a>
-## type [DeadLetterReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L188>)
+## type [DeadLetterReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L203>)
 
 DeadLetterReader is the public alias for the capability of reading the dead\-letter store back. Both brokers here implement it.
 
@@ -242,7 +250,7 @@ type DeadLetterReader = corequeue.DeadLetterReader
 ```
 
 <a name="Delivery"></a>
-## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L167>)
+## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L182>)
 
 Delivery is the public alias for one message handed to one consumer, carrying the lease that proves the claim and the count that says whether this is a retry.
 
@@ -251,7 +259,7 @@ type Delivery = corequeue.DeliveryValue
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L195>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L210>)
 
 FileConfig is the public alias for [NewFile](<#NewFile>)'s configuration.
 
@@ -260,7 +268,7 @@ type FileConfig = svcqueue.FileConfig
 ```
 
 <a name="Handler"></a>
-## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L159>)
+## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L174>)
 
 Handler is the public alias for the function that processes one delivery.
 
@@ -269,7 +277,7 @@ type Handler = corequeue.Handler
 ```
 
 <a name="Lease"></a>
-## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L170>)
+## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L185>)
 
 Lease is the public alias for a consumer's exclusive claim on one message.
 
@@ -278,7 +286,7 @@ type Lease = corequeue.LeaseValue
 ```
 
 <a name="LeaseExtender"></a>
-## type [LeaseExtender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L192>)
+## type [LeaseExtender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L207>)
 
 LeaseExtender is the public alias for the capability of renewing a lease a handler is still working under. Both brokers here implement it.
 
@@ -287,7 +295,7 @@ type LeaseExtender = corequeue.LeaseExtender
 ```
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L198>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L213>)
 
 MemoryConfig is the public alias for [NewMemory](<#NewMemory>)'s configuration.
 
@@ -296,7 +304,7 @@ type MemoryConfig = svcqueue.MemoryConfig
 ```
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L162>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L177>)
 
 Message is the public alias for one unit of work as the broker minted it.
 
@@ -305,7 +313,7 @@ type Message = corequeue.MessageValue
 ```
 
 <a name="Nack"></a>
-## type [Nack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L178>)
+## type [Nack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L193>)
 
 Nack is the public alias for what \[Broker.Nack\] decided: retried, or dead\-lettered.
 
@@ -314,7 +322,7 @@ type Nack = corequeue.NackValue
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L181>)
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L196>)
 
 Policy is the public alias for the delivery discipline a broker enforces.
 
@@ -323,7 +331,7 @@ type Policy = corequeue.PolicyValue
 ```
 
 <a name="Receipt"></a>
-## type [Receipt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L174>)
+## type [Receipt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L189>)
 
 Receipt is the public alias for the opaque handle to one lease. Do not parse it and do not construct one.
 

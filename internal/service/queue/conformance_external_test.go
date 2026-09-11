@@ -565,49 +565,55 @@ func TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry(t *testing.T) {
 	}
 }
 
-// TestTheDurableBrokerRefusesAnExtensionItsNamesCannotCarry is the same bound
-// on the one duration Validate never sees: Extend's, which a handler chooses
-// at runtime. Its deadline is now+by, written into the in-flight name like any
+// TestBothBrokersRefuseAnExtensionANameCannotCarry is the same bound on the
+// one duration Validate never sees: Extend's, which a handler chooses at
+// runtime. Its deadline is now+by, written into the in-flight name like any
 // other, so a by that carries it past 2262 would strand the message exactly as
 // an unbounded visibility timeout did — and the refusal comes BEFORE anything
 // is renamed, so the lease the handler already holds is untouched and still
 // acknowledgeable.
 //
-// It runs on the file broker only. The memory broker keeps its deadlines as
-// time.Time, which saturates instead of wrapping, and still accepts such a by;
-// that asymmetry is recorded in this package's CLAUDE.md rather than hidden.
+// It runs on both brokers. The memory broker's time.Time could hold the
+// deadline, but a double that accepted what the durable broker refuses would
+// let a handler pass its tests and strand messages in production.
 //
-// Seen failing: with Extend's representability check removed, it printed
+// Seen failing: with Extend's representability check removed from the file
+// broker, and then from the memory one, each printed
 //
 //	Extend(by = math.MaxInt64) = <nil>, want CodeQueueMisconfigured
-func TestTheDurableBrokerRefusesAnExtensionItsNamesCannotCarry(t *testing.T) {
+func TestBothBrokersRefuseAnExtensionANameCannotCarry(t *testing.T) {
 	t.Parallel()
-	clk := clock.NewManualClock(epoch)
-	broker := newFileBrokerWithClock(t, t.TempDir(), clk)
-	publish(t, broker, "slow")
-	delivery := receiveOne(t, broker)
+	for _, factory := range bothBrokers() {
+		t.Run(factory.name, func(t *testing.T) {
+			t.Parallel()
+			clk := clock.NewManualClock(epoch)
+			broker := factory.make(t, clk, defaultPolicy())
+			publish(t, broker, "slow")
+			delivery := receiveOne(t, broker)
 
-	_, err := extender(t, broker).Extend(t.Context(), delivery.Lease.Receipt, math.MaxInt64)
-	if !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
-		t.Fatalf("Extend(by = math.MaxInt64) = %v, want CodeQueueMisconfigured", err)
-	}
-	if got := fieldValue(err, "field"); got != "Extend.by" {
-		t.Errorf("field = %q, want %q", got, "Extend.by")
-	}
-	//: nothing moved: the lease the handler holds is still the one it has.
-	if ackErr := broker.Ack(t.Context(), delivery.Lease.Receipt); ackErr != nil {
-		t.Fatalf("Ack(original receipt) after the refused Extend = %v, want nil", ackErr)
-	}
-	//: and the largest extension the names CAN carry is honoured.
-	publish(t, broker, "slower")
-	again := receiveOne(t, broker)
-	farthest := time.Unix(0, math.MaxInt64).Sub(clk.Now())
-	renewed, extendErr := extender(t, broker).Extend(t.Context(), again.Lease.Receipt, farthest)
-	if extendErr != nil {
-		t.Fatalf("Extend(by = up to the last nameable instant) = %v, want nil", extendErr)
-	}
-	if ackErr := broker.Ack(t.Context(), renewed.Receipt); ackErr != nil {
-		t.Fatalf("Ack(renewed) = %v, want nil — the renewed name must read back", ackErr)
+			_, err := extender(t, broker).Extend(t.Context(), delivery.Lease.Receipt, math.MaxInt64)
+			if !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
+				t.Fatalf("Extend(by = math.MaxInt64) = %v, want CodeQueueMisconfigured", err)
+			}
+			if got := fieldValue(err, "field"); got != "Extend.by" {
+				t.Errorf("field = %q, want %q", got, "Extend.by")
+			}
+			//: nothing moved: the lease the handler holds is still the one it has.
+			if ackErr := broker.Ack(t.Context(), delivery.Lease.Receipt); ackErr != nil {
+				t.Fatalf("Ack(original receipt) after the refused Extend = %v, want nil", ackErr)
+			}
+			//: and the largest extension a name CAN carry is honoured.
+			publish(t, broker, "slower")
+			again := receiveOne(t, broker)
+			farthest := time.Unix(0, math.MaxInt64).Sub(clk.Now())
+			renewed, extendErr := extender(t, broker).Extend(t.Context(), again.Lease.Receipt, farthest)
+			if extendErr != nil {
+				t.Fatalf("Extend(by = up to the last nameable instant) = %v, want nil", extendErr)
+			}
+			if ackErr := broker.Ack(t.Context(), renewed.Receipt); ackErr != nil {
+				t.Fatalf("Ack(renewed) = %v, want nil — the renewed lease must read back", ackErr)
+			}
+		})
 	}
 }
 

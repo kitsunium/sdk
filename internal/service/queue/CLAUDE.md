@@ -63,11 +63,11 @@ Two consequences of "the state is a name" are enforced rather than assumed:
   stranded. `core/queue.MaxDeadlineOffset` bounds the policy's durations for
   both brokers; `Extend`'s `by` never passes through `Validate`, so the file
   broker checks the deadline itself (`nameable`) and refuses before anything
-  is renamed. The memory broker keeps `time.Time`, which saturates instead of
-  wrapping, and does NOT refuse such a `by` — the one place the double is more
-  permissive than the durable broker, which is why
-  `TestTheDurableBrokerRefusesAnExtensionItsNamesCannotCarry` runs on the file
-  broker only.
+  is renamed. The memory broker keeps `time.Time`, which would hold such a
+  deadline, and refuses the same `by` anyway, in the same order: it is the
+  double, and a double more permissive than the durable broker is a test that
+  passes where production strands the message.
+  `TestBothBrokersRefuseAnExtensionANameCannotCarry` runs on both.
 
 ## Where `internal/service/vfs` is used, and where it stops
 

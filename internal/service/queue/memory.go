@@ -278,9 +278,13 @@ func (b *memoryBroker) Nack(
 func (b *memoryBroker) Extend(
 	ctx context.Context, receipt corequeue.ReceiptValue, by time.Duration,
 ) (lease corequeue.LeaseValue, err error) {
-	//: the two readings of a non-positive renewal are opposites.
-	if by <= 0 {
-		//: QueueMisconfigured, naming the argument.
+	//: the two readings of a non-positive renewal are opposites. And a by
+	//: whose deadline the durable broker cannot write into a name is refused
+	//: too, in the same order: time.Time would hold it, but this broker is
+	//: that one's double, and a double more permissive than production lets a
+	//: handler pass its tests and strand messages.
+	if by <= 0 || !nameable(b.clk.Now().Add(by)) {
+		//: QueueMisconfigured, naming the argument, exactly as the file broker.
 		return corequeue.LeaseValue{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
 			kerrs.String("field", "Extend.by"), kerrs.Int64("value_ns", int64(by)))
 	}

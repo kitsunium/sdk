@@ -198,6 +198,18 @@ refuses a non-positive renewal for the identical reason.
 
 - `RetryDelay` zero means "eligible as soon as the nack returns". Negative is
   read as zero.
+
+**BOUNDED FROM ABOVE**, which is arithmetic rather than a reading.
+`VisibilityTimeout` and `RetryDelay` are refused past `MaxDeadlineOffset`, a
+century: every deadline is now plus one of them, the durable broker writes it
+into a file name as Unix nanoseconds, and those end on 2262-04-11. Past it the
+number wraps negative, the name cannot be read back, and the message is never
+reclaimed while its receipt reads `UNKNOWN_RECEIPT` — the `math.MaxInt64`
+somebody writes to mean "never" is 292 years, so it did exactly that.
+`Extend`'s duration never passes through `Validate`, so each broker checks the
+extended instant itself and refuses before anything moves; the memory broker
+refuses the same `by` although `time.Time` could hold it, because it is the
+durable broker's double. (Amended 2026-09-11: neither bound existed at first.)
 - `MaxMessageBytes` zero means `DefaultMaxMessageBytes` (1 MiB — NATS's
   default, Kafka's default `message.max.bytes`, four times SQS's maximum).
   Negative is refused, because it is not a bound and the caller who wrote it
