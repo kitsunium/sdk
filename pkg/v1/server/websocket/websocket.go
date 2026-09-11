@@ -90,11 +90,12 @@
 //
 // Behind a proxy that terminates TLS, the request reaches this server in
 // plaintext whatever the browser used, so the default rule cannot see the
-// scheme and does not compare it: there, an http:// page for the same host is
-// accepted. X-Forwarded-Proto is not consulted, because where no proxy
-// overwrites it the client wrote it. [AllowOrigins] closes that gap — it names
-// the scheme outright — and replaces the default rule entirely;
-// [AllowAnyOrigin] removes the check, by name.
+// scheme. It does not guess it either: a request carrying Forwarded or
+// X-Forwarded-Proto on a connection this server did not terminate is refused,
+// with a message naming what to configure. Only the PRESENCE of those headers
+// is read, never their value — one a client writes can make the check stricter
+// and never looser. [AllowOrigins] names the origins outright and replaces the
+// default rule entirely; [AllowAnyOrigin] removes the check, by name.
 //
 // # One goroutine always reads
 //

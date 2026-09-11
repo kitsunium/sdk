@@ -134,12 +134,18 @@ Two consequences are deliberate and documented:
   `*tls.Conn`, and the engine hands it exactly that — the Origin must also be
   `https`, because an `http://` page for the same host is the downgrade the
   check exists to notice. When the request arrives in plaintext, as it does
-  behind a TLS-terminating proxy, the scheme is invisible and is NOT compared,
-  so an `http://` page for the same host is accepted there: **that gap is
-  real, and `AllowOrigins` is what closes it**, since it names the scheme.
+  behind a TLS-terminating proxy, the scheme is invisible and is NOT compared.
   Requiring the Origin's scheme to EQUAL the request's would have answered 403
-  to every browser behind every proxy; `X-Forwarded-Proto` is not consulted,
-  because where no proxy overwrites it the client wrote it. The flip side: a
+  to every browser behind every proxy, and `X-Forwarded-Proto`'s VALUE is not
+  consulted, because where no proxy overwrites it the client wrote it. Its
+  PRESENCE is (ADR 0069): a request carrying `Forwarded` or `X-Forwarded-Proto`
+  on a connection this process did not terminate is REFUSED by the default
+  rule, naming `AllowOrigins` — reading presence can only make the check
+  stricter, so a header a stranger writes opens no way in, and the downgrade a
+  plaintext hop used to hide is closed by default
+  (`TestTheDefaultRuleRefusesWhenAProxyAnnouncedTheScheme`). Headers a FORWARD
+  proxy adds (`Via`, `X-Forwarded-For`) are not read: they say a request was
+  relayed, not that a scheme was translated. The flip side: a
   proxy that re-encrypts to this server makes `r.TLS` non-nil even when
   browsers reach it over plain http, and such a deployment is refused until
   `AllowOrigins` names its `http://` origin. The truth table is
