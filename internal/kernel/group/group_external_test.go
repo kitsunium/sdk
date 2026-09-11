@@ -3,6 +3,7 @@ package group_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -71,6 +72,57 @@ func TestFirstErrorIsReportedAndBecomesTheContextCause(t *testing.T) {
 	}
 	if cause := context.Cause(ctx); !errors.Is(cause, errTask) {
 		t.Fatalf("context.Cause(returned ctx) = %v, want %v", cause, errTask)
+	}
+}
+
+// TestWaitAndTheContextCauseNameTheSameFailure pins New's promise under the
+// load it is easiest to break under: many tasks failing at once. Every task
+// returns its own error, so "the first" is decided by the race, and the only
+// thing the test can hold the group to is agreement — the error Wait reports
+// and the cause a sibling reads from its context must be the same value.
+// Recording the first error and cancelling with it were two steps, and every
+// failing task cancelled: a task that lost the race to record could still win
+// the race to cancel, making its OWN error the context's cause while Wait
+// reported another. The rounds loop is what makes the window reachable in a
+// single run; `go test -race -count=200 -run WaitAndTheContextCause` is the
+// long form.
+//
+// Seen failing: with fail() cancelling on every call rather than only in the
+// branch that recorded the first error, a single run printed
+//
+//	round 3: Wait() = task 41 failed, context.Cause = task 7 failed — two
+//	different answers to "why did the group stop?"
+//
+// (round and task numbers vary from run to run).
+func TestWaitAndTheContextCauseNameTheSameFailure(t *testing.T) {
+	t.Parallel()
+	const tasks, rounds int = 64, 500
+	failures := make([]error, tasks)
+	for i := range failures {
+		failures[i] = fmt.Errorf("task %d failed", i) //nolint:err113 // the test's own distinct failures
+	}
+	for round := range rounds {
+		g, ctx := group.New(t.Context(), group.Unlimited)
+		start := make(chan struct{})
+		for _, failure := range failures {
+			g.Go(failOnceReleased(start, failure))
+		}
+		//: every task is parked on the same edge, so they all fail at once.
+		close(start)
+		err := g.Wait()
+		if cause := context.Cause(ctx); cause != err {
+			t.Fatalf("round %d: Wait() = %v, context.Cause = %v — two different answers to "+
+				"\"why did the group stop?\"", round, err, cause)
+		}
+	}
+}
+
+// failOnceReleased returns a task that parks until start is closed and then
+// fails with failure, so a whole batch of them fails on the same edge.
+func failOnceReleased(start <-chan struct{}, failure error) func(context.Context) error {
+	return func(context.Context) error {
+		<-start
+		return failure
 	}
 }
 

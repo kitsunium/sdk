@@ -193,15 +193,28 @@ func (g *Group) run(fn func(ctx context.Context) error) {
 // Later errors are dropped on purpose: the group reports the failure that
 // STARTED the shutdown, and almost every error after it is a consequence of the
 // cancellation the first one caused. Reporting a cascade would bury the cause.
+//
+// Only the call that records the first error cancels. Recording and cancelling
+// are two steps, and the first cancel is the one whose cause sticks, so if
+// every failing task cancelled, a task that lost the race to record could win
+// the race to cancel — and context.Cause would name a different error than
+// Wait returns. TestWaitAndTheContextCauseNameTheSameFailure is the guard.
 func (g *Group) fail(err error) {
 	g.mu.Lock()
+	first := g.err == nil
 	//: first writer wins; the rest are the wake of this one.
-	if g.err == nil {
+	if first {
 		g.err = err
 	}
 	g.mu.Unlock()
+	//: a later failure has nothing to add: the group is already stopping, or
+	//: is about to, with the cause Wait will report.
+	if !first {
+		//: only the recording call cancels, so the cause cannot be overtaken.
+		return
+	}
 	//: cancel with the cause so a sibling reading context.Cause learns WHY it
-	//: is being stopped. Repeated cancels are no-ops and keep the first cause.
+	//: is being stopped — the same error Wait returns.
 	g.cancel(err)
 }
 
