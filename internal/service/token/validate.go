@@ -9,6 +9,7 @@ package token
 import (
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
@@ -24,9 +25,35 @@ func validateIssuerConfig(cfg IssuerConfig) error {
 		return errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
 			errs.String("knob", "Lifetime"))
 	}
+	//: the three strings this config stamps into tokens — "iss" into the
+	//: payload, "typ" and "kid" into the header — are text JSON must carry as
+	//: itself, for the reason checkClaimText gives. They are fixed for the
+	//: issuer's life, so they are refused here rather than on every Issue.
+	if knob := nonUTF8Knob(cfg); knob != "" {
+		//: name the knob, never its value.
+		return errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+			errs.String("knob", knob), errs.String("problem", "not valid UTF-8"))
+	}
 	//: a zero Lifetime is legal — the caller may stamp exp on each claim set,
 	//: and stampIssuedClaims refuses at Issue time if they do not.
 	return nil
+}
+
+// nonUTF8Knob names the first IssuerConfig string that is not valid UTF-8, or
+// returns "" when every one of them is.
+func nonUTF8Knob(cfg IssuerConfig) string {
+	names := [...]string{"Issuer", "Type", "KeyID"}
+	values := [...]string{cfg.Issuer, cfg.Type, cfg.KeyID}
+	//: in declaration order, so the refusal is deterministic.
+	for i, value := range values {
+		//: an unset knob is empty and trivially valid.
+		if !utf8.ValidString(value) {
+			//: the first offender.
+			return names[i]
+		}
+	}
+	//: all three are text.
+	return ""
 }
 
 // validateClaims applies the policy's temporal and identity checks to an

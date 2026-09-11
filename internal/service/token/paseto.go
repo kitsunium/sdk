@@ -41,7 +41,9 @@ const (
 	// pasetoSigLen is the Ed25519 signature width appended to the payload.
 	pasetoSigLen int = ed25519.SignatureSize
 	// maxFooterLen bounds a decoded footer. A footer carries a key id or a
-	// small hint; it is not a second payload.
+	// small hint; it is not a second payload. Every verifier here refuses a
+	// longer one as TooLarge before looking at its signature, so both
+	// constructors refuse to be CONFIGURED with one (see checkFooterLen).
 	maxFooterLen int = 1 << 10
 )
 
@@ -62,6 +64,13 @@ func NewPasetoV4Issuer(priv ed25519.PrivateKey, cfg PasetoIssuerConfig) (issuer 
 	if verr := validateIssuerConfig(issuing); verr != nil {
 		//: propagate PolicyMisconfigured.
 		return nil, verr
+	}
+	//: a footer this package's own verifiers refuse would make every token
+	//: this issuer mints one the SDK refuses (ADR 0042 §D3's rule, applied to
+	//: the footer): refused here instead of once per token, downstream.
+	if ferr := checkFooterLen(cfg.Footer); ferr != nil {
+		//: propagate PolicyMisconfigured.
+		return nil, ferr
 	}
 	//: bound for life.
 	return &pasetoIssuer{
@@ -84,8 +93,33 @@ func NewPasetoV4Verifier(pub ed25519.PublicKey, cfg PasetoVerifierConfig) (verif
 		//: propagate PolicyMisconfigured.
 		return nil, perr
 	}
+	//: the mirror of the issuer's check: a token carrying a footer this long
+	//: is refused as TooLarge before the comparison, and one carrying any
+	//: other footer mismatches — so this verifier could never accept anything.
+	if ferr := checkFooterLen(cfg.Footer); ferr != nil {
+		//: propagate PolicyMisconfigured.
+		return nil, ferr
+	}
 	//: bound for life.
 	return &pasetoVerifier{bound: binding, policy: policy, cfg: cfg}, nil
+}
+
+// checkFooterLen refuses a configured footer longer than maxFooterLen, the
+// bound the verifier applies to a token's decoded footer.
+//
+// It is the SAME constant on purpose, compared the same way: the issuer and
+// the verifier must agree on it exactly, because a footer one byte past the
+// verifier's bound is not a slightly large footer — it is a token nothing in
+// this package will accept.
+func checkFooterLen(footer []byte) error {
+	//: at the bound is accepted, exactly as decodeSegment accepts it.
+	if len(footer) > maxFooterLen {
+		//: name the knob and the limit, never the footer.
+		return errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+			errs.String("knob", "Footer"), errs.Int("limit", maxFooterLen))
+	}
+	//: a footer every verifier here can read.
+	return nil
 }
 
 // checkPasetoScheme refuses every version+purpose except v4.public, telling a

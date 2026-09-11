@@ -9,9 +9,15 @@
 //
 //	switch {
 //	case errs.HasCode(err, token.CodeExpired):          // 401, refresh
-//	case errs.HasCode(err, token.CodeAudienceMismatch): // 403, wrong service
+//	case errs.HasCode(err, token.CodeAudienceMismatch): // 401, wrong service
 //	case errs.HasCode(err, token.CodeSignatureInvalid): // 401, and alert
 //	}
+//
+// All three answer 401, and a token addressed to another service is no
+// exception: RFC 6750 §3.1 spends invalid_token — and 401 — on a token that is
+// "invalid for other reasons", while 403 (insufficient_scope) says the token
+// is valid HERE and merely too weak, which an audience mismatch is not. What
+// differs between the rows is what the caller does next, not the status.
 package token
 
 import (

@@ -13,10 +13,12 @@ These are RE\-EXPORTS, not declarations: the ranges 0.2.13.\*, 0.3.44.\* and 0.3
 ```
 switch {
 case errs.HasCode(err, token.CodeExpired):          // 401, refresh
-case errs.HasCode(err, token.CodeAudienceMismatch): // 403, wrong service
+case errs.HasCode(err, token.CodeAudienceMismatch): // 401, wrong service
 case errs.HasCode(err, token.CodeSignatureInvalid): // 401, and alert
 }
 ```
+
+All three answer 401, and a token addressed to another service is no exception: RFC 6750 §3.1 spends invalid\_token — and 401 — on a token that is "invalid for other reasons", while 403 \(insufficient\_scope\) says the token is valid HERE and merely too weak, which an audience mismatch is not. What differs between the rows is what the caller does next, not the status.
 
 Package token — the algorithm and registered\-claim vocabulary.
 
@@ -81,13 +83,20 @@ Parsing is the only way to obtain a [JWK](<#JWK>): the type has no exported fiel
 
 ### Testing time without sleeping
 
-Both configs take a \[clock.Clock\]. Pass a kernel ManualClock and an expiry test moves time by assignment instead of by sleeping:
+Every config has a Clock field, and it takes any value with the two methods Now and Since — so the fake is one a test writes itself, and an expiry test moves time by assignment instead of by sleeping:
 
 ```
-manual := clock.NewManualClock(time.Unix(1000, 0))
-ver, _ := token.NewHS256Verifier(secret, token.VerifierConfig{Clock: manual})
-manual.Advance(2 * time.Hour) // now the token is expired, deterministically
+type fakeClock struct{ now time.Time }
+
+func (c *fakeClock) Now() time.Time                  { return c.now }
+func (c *fakeClock) Since(t time.Time) time.Duration { return c.now.Sub(t) }
+
+fake := &fakeClock{now: time.Unix(1000, 0)}
+ver, _ := token.NewHS256Verifier(secret, token.VerifierConfig{Clock: fake})
+fake.now = fake.now.Add(2 * time.Hour) // now the token is expired, deterministically
 ```
+
+Move it between calls, or guard it with a mutex if a verifier reads it from another goroutine at the same time.
 
 ### Claims are not printable
 
@@ -443,7 +452,7 @@ var (
 ```
 
 <a name="PrivateClaim"></a>
-## func [PrivateClaim](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L152>)
+## func [PrivateClaim](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L161>)
 
 ```go
 func PrivateClaim[T any](claims Claims, name string) (value T, found bool, err error)
@@ -456,7 +465,7 @@ It lives here rather than on the Claims value because "what shape is a scope cla
 The second result reports presence, which is how a claim explicitly set to JSON null is told apart from one that was never sent.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L106>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L115>)
 
 Algorithm is the public alias for the signature algorithm a token issuer or verifier is bound to.
 
@@ -489,7 +498,7 @@ const AlgorithmPasetoV4Public Algorithm = coretoken.AlgorithmPasetoV4Public
 ```
 
 <a name="Claims"></a>
-## type [Claims](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L109>)
+## type [Claims](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L118>)
 
 Claims is the public alias for a token's immutable claim set.
 
@@ -498,7 +507,7 @@ type Claims = coretoken.ClaimsValue
 ```
 
 <a name="NewClaims"></a>
-### func [NewClaims](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L138>)
+### func [NewClaims](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L147>)
 
 ```go
 func NewClaims() Claims
@@ -507,7 +516,7 @@ func NewClaims() Claims
 NewClaims returns an empty claim set to build on with the With\* methods.
 
 <a name="SetPrivateClaim"></a>
-### func [SetPrivateClaim](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L171>)
+### func [SetPrivateClaim](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L180>)
 
 ```go
 func SetPrivateClaim[T any](claims Claims, name string, value T) (updated Claims, err error)
@@ -516,7 +525,7 @@ func SetPrivateClaim[T any](claims Claims, name string, value T) (updated Claims
 SetPrivateClaim returns a copy of claims carrying name encoded as JSON. It refuses an empty name, one of the seven registered names, and a claim set already at its private\-claim cap.
 
 <a name="Issuer"></a>
-## type [Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L112>)
+## type [Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L121>)
 
 Issuer is the public alias for the token\-minting port.
 
@@ -563,7 +572,7 @@ func NewPasetoV4Issuer(priv ed25519.PrivateKey, cfg PasetoIssuerConfig) (issuer 
 NewPasetoV4Issuer returns a PASETO v4.public issuer signing with Ed25519.
 
 <a name="IssuerConfig"></a>
-## type [IssuerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L118>)
+## type [IssuerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L127>)
 
 IssuerConfig is the public alias for the JWT issuing policy.
 
@@ -636,7 +645,7 @@ type Key = corecrypto.Key
 ```
 
 <a name="PasetoIssuerConfig"></a>
-## type [PasetoIssuerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L129>)
+## type [PasetoIssuerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L138>)
 
 PasetoIssuerConfig is the public alias for the PASETO v4.public issuing policy. It is a separate type rather than [IssuerConfig](<#IssuerConfig>) plus two extras because PASETO has no header parameters: there is nothing for a Type or a KeyID to set, and publishing knobs the format ignores is how a configuration field ends up doing nothing. Its equivalent of a "kid" is the Footer, which the signature covers.
 
@@ -645,7 +654,7 @@ type PasetoIssuerConfig = svctoken.PasetoIssuerConfig
 ```
 
 <a name="PasetoVerifierConfig"></a>
-## type [PasetoVerifierConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L135>)
+## type [PasetoVerifierConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L144>)
 
 PasetoVerifierConfig is the public alias for the PASETO v4.public verification policy. Same shape decision as its issuing counterpart: no RequireType, no MaxKeyCandidates, because PASETO has neither a "typ" to require nor a "kid" to select on.
 
@@ -654,7 +663,7 @@ type PasetoVerifierConfig = svctoken.PasetoVerifierConfig
 ```
 
 <a name="Verifier"></a>
-## type [Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L115>)
+## type [Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L124>)
 
 Verifier is the public alias for the token\-authenticating port.
 
@@ -699,7 +708,7 @@ func NewPasetoV4Verifier(pub ed25519.PublicKey, cfg PasetoVerifierConfig) (verif
 NewPasetoV4Verifier returns a PASETO v4.public verifier bound to pub. A token of any other PASETO version or purpose — including v4.local — is refused with [SchemeUnsupported](<#Malformed>).
 
 <a name="NewSetVerifier"></a>
-### func [NewSetVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L173>)
+### func [NewSetVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L179>)
 
 ```go
 func NewSetVerifier(set JWKSet, cfg VerifierConfig) (verifier Verifier, err error)
@@ -708,6 +717,8 @@ func NewSetVerifier(set JWKSet, cfg VerifierConfig) (verifier Verifier, err erro
 NewSetVerifier returns a JWT verifier selecting a key from set by the token's "kid" header.
 
 The kid chooses which key to TRY; the signature decides whether the token is valid. A token with no kid is refused with [KeyIDMissing](<#Malformed>) rather than tried against every key in the set. When several keys share a kid — legal during a rotation, since RFC 7517 §4.5 only SHOULD\-s uniqueness — the candidates are tried in document order up to VerifierConfig.MaxKeyCandidates, past which the token is refused with [KeyIDAmbiguous](<#Malformed>).
+
+A set no token could ever verify against is refused here, with [PolicyMisconfigured](<#Malformed>), rather than built into a verifier that refuses everything: an empty set, and one whose every member either carries no kid or is a key this package does not verify with \(P\-384, P\-521\). A single key published without a kid belongs to [NewVerifierFromJWK](<#NewVerifierFromJWK>).
 
 <a name="NewVerifierFromJWK"></a>
 ### func [NewVerifierFromJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L159>)
@@ -721,7 +732,7 @@ NewVerifierFromJWK returns a JWT verifier bound to the algorithm key's own kty/c
 The key's advisory members are enforced: a "use" other than "sig", a "key\_ops" without "verify", or an "alg" contradicting the key type all refuse the key.
 
 <a name="VerifierConfig"></a>
-## type [VerifierConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L121>)
+## type [VerifierConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L130>)
 
 VerifierConfig is the public alias for the JWT verification policy.
 

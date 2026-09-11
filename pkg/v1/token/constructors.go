@@ -170,6 +170,12 @@ func NewVerifierFromJWK(key JWK, cfg VerifierConfig) (verifier Verifier, err err
 // rotation, since RFC 7517 §4.5 only SHOULD-s uniqueness — the candidates are
 // tried in document order up to VerifierConfig.MaxKeyCandidates, past which the
 // token is refused with [KeyIDAmbiguous].
+//
+// A set no token could ever verify against is refused here, with
+// [PolicyMisconfigured], rather than built into a verifier that refuses
+// everything: an empty set, and one whose every member either carries no kid
+// or is a key this package does not verify with (P-384, P-521). A single key
+// published without a kid belongs to [NewVerifierFromJWK].
 func NewSetVerifier(set JWKSet, cfg VerifierConfig) (verifier Verifier, err error) {
 	//: delegate to the service constructor.
 	return svctoken.NewSetVerifier(set, cfg)
