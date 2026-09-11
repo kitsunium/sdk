@@ -34,6 +34,7 @@ go_library(
     ],
     deps = [
         "//internal/kernel/errs",
+        "//internal/kernel/plugin",
         "//internal/kernel/snapshot",
     ],
 )
@@ -62,6 +63,7 @@ go_test(
         "exporter_external_test.go",
         "exporter_internal_test.go",
         "model_external_test.go",
+        "registry_guard_external_test.go",
     ],
     embed = [":metrics"],
     deps = ["//internal/kernel/errs"],

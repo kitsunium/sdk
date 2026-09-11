@@ -13,7 +13,8 @@ Go SDK providing a normed, performant toolbox for downstream applications. Twent
 internal/
 ├── kernel/        stdlib-only AND generic primitives
 │                  batcher, buffer, cache, clock, errs, group, heap,
-│                  recycler, ring, singleflight, snapshot, topic, worker
+│                  plugin, recycler, ring, singleflight, snapshot, topic,
+│                  worker
 ├── core/          domain interfaces + domain values
 │                  authz, cache, cli, codec (+ scratch), config, crypto,
 │                  events,
@@ -260,5 +261,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0068 — the layer firewall is a checked GRAPH, because Gazelle's visibility admits the whole repository: ADR 0004 put kernel → core → service → pkg/v1 on `package_group` + `visibility` and promised that a rogue import fails `bazel build`, but Gazelle mirrors Go's `internal/` rule and gives every package under `//internal` the visibility `//:__subpackages__` — the whole repo — and no directive removes it (105 of 193 BUILD files). Demonstrated, not argued: a throwaway kernel package importing core built. So `scripts/check-layer-deps.sh` asserts four `bazel query` expressions empty — kernel reaches only kernel, core no service/pkg/third-party, service no pkg/third-party, pkg no third-party — in `make lint` and CI, failing closed; `# keep` on 105 visibility attributes was refused as the same failure moved — `docs/adr/0068-layer-firewall-is-a-checked-graph.md`
 - ADR 0069 — behind a proxy that announces the scheme, the default WebSocket origin rule refuses instead of guessing: `Forwarded` and `X-Forwarded-Proto` are read by PRESENCE and never by value, so a header a stranger writes can only make the check stricter; where TLS ended in this process the scheme is known first-hand and the announcement is ignored, and the refusal names `AllowOrigins`. Amends ADR 0047 §D7 — `docs/adr/0069-websocket-origin-behind-a-proxy.md`
 - ADR 0070 — the two keys the logger writes itself are reserved: an attribute named `trace_id` or `span_id` at the TOP level renders as `attr.trace_id`, because two members of one JSON object with the same name let a decoder keep the caller's value as the line's correlation — renamed and never dropped, grouped keys untouched, one predicate for every writer. Amends ADR 0062 — `docs/adr/0070-logger-reserves-the-correlation-keys.md`
+- ADR 0071 — a registry refuses a plug-in it cannot store, at the call that publishes it: `if x == nil` let a TYPED nil through (measured — stored, and handed back by `Lookup`, to fail at the first dispatch) and let a NON-COMPARABLE plug-in reach the duplicate check, where `==` panics with Go's `comparing uncomparable type` instead of the domain's conflict. One kernel primitive, `plugin.Unusable`, answers for the fifteen registrars in eight core packages; it returns a REASON rather than a bool or an error, and each registrar keeps its own dotted-quad code — `docs/adr/0071-a-registry-refuses-what-it-cannot-store.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

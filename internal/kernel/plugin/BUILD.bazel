@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "plugin",
+    srcs = ["plugin.go"],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/plugin",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":plugin",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "plugin_test",
+    srcs = ["plugin_external_test.go"],
+    deps = [":plugin"],
+)

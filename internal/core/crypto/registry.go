@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
@@ -35,11 +36,16 @@ var (
 // IFACE-PLUGIN: the registry hands plug-in AEAD instances back to callers so
 // each scheme keeps its concrete type unexported; the stable contract is the
 // AEAD interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func Register(a AEAD) AEAD {
-	//: nil registration is always a programming error.
-	if a == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(a); why != "" {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.Register [%s DUPLICATE_REGISTRATION]: nil AEAD", CodeDuplicateRegistration))
+		panic(fmt.Sprintf("crypto.Register [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
 	}
 	//: publish under the scheme name first via the shared registry; either
 	//: conflict turns into a boot-time panic with the doc code.

@@ -1,7 +1,11 @@
 // Package crypto — the process-wide Signer registry + GenerateKey / Sign / Verify dispatch.
 package crypto
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
+)
 
 // signers maps each Algorithm to its Signer. Backed by the shared read-mostly
 // schemeRegistry — register once at import, dispatch is lock-free.
@@ -14,11 +18,16 @@ var signers = schemeRegistry[Signer]{verb: "RegisterSigner"}
 // IFACE-PLUGIN: the registry hands plug-in Signer instances back to callers so
 // each scheme keeps its concrete type unexported; the contract is the Signer
 // interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func RegisterSigner(s Signer) Signer {
-	//: nil registration is always a programming error.
-	if s == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(s); why != "" {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterSigner [%s DUPLICATE_REGISTRATION]: nil Signer", CodeDuplicateRegistration))
+		panic(fmt.Sprintf("crypto.RegisterSigner [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
 	}
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := signers.publish(s.Algorithm(), s); err != nil {

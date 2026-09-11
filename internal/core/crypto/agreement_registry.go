@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
 // agreements maps each Algorithm to its Agreement scheme. Backed by the shared
@@ -18,11 +19,16 @@ var agreements = schemeRegistry[Agreement]{verb: "RegisterAgreement"}
 // IFACE-PLUGIN: the registry hands plug-in Agreement instances back to callers
 // so each scheme keeps its concrete type unexported; the contract is the
 // Agreement interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func RegisterAgreement(a Agreement) Agreement {
-	//: nil registration is always a programming error.
-	if a == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(a); why != "" {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterAgreement [%s DUPLICATE_REGISTRATION]: nil Agreement", CodeDuplicateRegistration))
+		panic(fmt.Sprintf("crypto.RegisterAgreement [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
 	}
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := agreements.publish(a.Algorithm(), a); err != nil {

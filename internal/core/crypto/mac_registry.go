@@ -1,7 +1,11 @@
 // Package crypto — the process-wide MAC registry + MACTag / MACVerify dispatch.
 package crypto
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
+)
 
 // macs maps each Algorithm to its MAC. Backed by the shared read-mostly
 // schemeRegistry — register once at import, dispatch is lock-free.
@@ -13,11 +17,16 @@ var macs = schemeRegistry[MAC]{verb: "RegisterMAC"}
 //
 // IFACE-PLUGIN: the registry hands plug-in MAC instances back to callers so each
 // scheme keeps its concrete type unexported; the contract is the MAC interface.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func RegisterMAC(m MAC) MAC {
-	//: nil registration is always a programming error.
-	if m == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(m); why != "" {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterMAC [%s DUPLICATE_REGISTRATION]: nil MAC", CodeDuplicateRegistration))
+		panic(fmt.Sprintf("crypto.RegisterMAC [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
 	}
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := macs.publish(m.Algorithm(), m); err != nil {

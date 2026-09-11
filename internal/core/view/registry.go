@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
@@ -76,12 +77,16 @@ func loadRegistry() map[Engine]Factory {
 // IFACE-PLUGIN: the registry hands plug-in Factory instances back to callers so
 // each engine keeps its concrete type unexported; the stable contract is the
 // Factory interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func Register(f Factory) Factory {
 	//: a nil registration is always a programming error, and it is one the
 	//: importing package can fix — so it fails at import, not at first render.
-	if f == nil {
+	if why := plugin.Unusable(f); why != "" {
 		//: panic so the offending import is visible at boot.
-		panic(EngineInvalid.Error())
+		panic(EngineInvalid.Error() + ": " + why)
 	}
 	name := f.Engine()
 	//: Engine("") is the reserved invalid zero value; refusing it at boot keeps

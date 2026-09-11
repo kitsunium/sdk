@@ -4,6 +4,8 @@ package crypto
 import (
 	"fmt"
 	"io"
+
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
 // streamSealers maps each Algorithm to its StreamSealer. Backed by the shared
@@ -17,11 +19,16 @@ var streamSealers = schemeRegistry[StreamSealer]{verb: "RegisterStreamSealer"}
 // IFACE-PLUGIN: the registry hands plug-in StreamSealer instances back to
 // callers so each scheme keeps its concrete type unexported; the contract is the
 // StreamSealer interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func RegisterStreamSealer(s StreamSealer) StreamSealer {
-	//: nil registration is always a programming error.
-	if s == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(s); why != "" {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterStreamSealer [%s DUPLICATE_REGISTRATION]: nil StreamSealer", CodeDuplicateRegistration))
+		panic(fmt.Sprintf("crypto.RegisterStreamSealer [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
 	}
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := streamSealers.publish(s.Algorithm(), s); err != nil {
