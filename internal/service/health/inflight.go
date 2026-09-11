@@ -4,6 +4,7 @@ package health
 
 import (
 	"context"
+	"sync/atomic"
 
 	corehealth "github.com/kitsunium/sdk/internal/core/health"
 )
@@ -30,4 +31,20 @@ type inflight struct {
 	done chan struct{}
 	// result is written exactly once, before done is closed.
 	result corehealth.ResultValue
+	// expired records that a BUDGET is what cancelled this run, so the
+	// outcome can say so. Without it, a body that honours its context returns
+	// ctx.Err() and the run publishes an ordinary failure — and the next probe
+	// to join reads a plain cancellation where the truth is CHECK_TIMEOUT.
+	expired atomic.Bool
+}
+
+// expire announces to the body that its budget is over and records that this is
+// why. Idempotent: the waiting side and the run's own timer can both reach it,
+// and they mean the same thing.
+func (r *inflight) expire() {
+	//: the flag FIRST — perform reads it only after the body returns, but a
+	//: body that returns instantly on cancellation must not beat it there.
+	r.expired.Store(true)
+	//: the announcement itself; the SDK cannot kill a goroutine.
+	r.cancel()
 }

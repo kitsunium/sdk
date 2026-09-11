@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
+
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
 // hashers maps each Algorithm to its Hasher. Separate from the AEAD registry:
@@ -20,11 +22,16 @@ var hashers = schemeRegistry[Hasher]{verb: "RegisterHasher"}
 // IFACE-PLUGIN: the registry hands plug-in Hasher instances back to callers so
 // each scheme keeps its concrete type unexported; the stable contract is the
 // Hasher interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func RegisterHasher(h Hasher) Hasher {
-	//: nil registration is always a programming error.
-	if h == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(h); why != "" {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterHasher [%s DUPLICATE_REGISTRATION]: nil Hasher", CodeDuplicateRegistration))
+		panic(fmt.Sprintf("crypto.RegisterHasher [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
 	}
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := hashers.publish(h.Algorithm(), h); err != nil {

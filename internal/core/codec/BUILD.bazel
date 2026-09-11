@@ -15,6 +15,7 @@ go_library(
     visibility = ["//internal/core:core_consumers"],
     deps = [
         "//internal/kernel/errs",
+        "//internal/kernel/plugin",
         "//internal/kernel/snapshot",
     ],
 )
@@ -32,6 +33,7 @@ go_test(
         "appender_external_test.go",
         "format_external_test.go",
         "registry_external_test.go",
+        "registry_guard_external_test.go",
         "registry_internal_test.go",
     ],
     embed = [":codec"],

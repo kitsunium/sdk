@@ -62,7 +62,7 @@ None are negotiated, permessage\-deflate included. The server sends no Sec\-WebS
 
 The browser's same\-origin policy does not apply to WebSocket: any page can open a connection to this server, and the browser attaches the user's cookies to the handshake. By default an Origin header, when present, must name the request's own host and port — and, when this server terminates TLS itself, the https scheme as well, because an http:// page for the same host is exactly the downgrade the check exists to notice. A request with no Origin \(a CLI, a service, a Go client\) is allowed, because there is no ambient credential to abuse; the opaque "null" origin is refused.
 
-Behind a proxy that terminates TLS, the request reaches this server in plaintext whatever the browser used, so the default rule cannot see the scheme and does not compare it: there, an http:// page for the same host is accepted. X\-Forwarded\-Proto is not consulted, because where no proxy overwrites it the client wrote it. [AllowOrigins](<#AllowOrigins>) closes that gap — it names the scheme outright — and replaces the default rule entirely; [AllowAnyOrigin](<#AllowAnyOrigin>) removes the check, by name.
+Behind a proxy that terminates TLS, the request reaches this server in plaintext whatever the browser used, so the default rule cannot see the scheme. It does not guess it either: a request carrying Forwarded or X\-Forwarded\-Proto on a connection this server did not terminate is refused, with a message naming what to configure. Only the PRESENCE of those headers is read, never their value — one a client writes can make the check stricter and never looser. [AllowOrigins](<#AllowOrigins>) names the origins outright and replaces the default rule entirely; [AllowAnyOrigin](<#AllowAnyOrigin>) removes the check, by name.
 
 ### One goroutine always reads
 
@@ -208,7 +208,7 @@ var (
 ```
 
 <a name="AcceptKey"></a>
-## func [AcceptKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L398>)
+## func [AcceptKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L399>)
 
 ```go
 func AcceptKey(key string) string
@@ -219,7 +219,7 @@ AcceptKey computes the Sec\-WebSocket\-Accept value for a client's Sec\-WebSocke
 It is exported for tests and for anyone writing a client handshake by hand. The digest is SHA\-1 by the RFC's own instruction and is not a security primitive: its job is to prove the server parsed the handshake rather than replaying it, so a cached 101 cannot pass for a live upgrade.
 
 <a name="DrainSignal"></a>
-## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L409>)
+## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L410>)
 
 ```go
 func DrainSignal(ctx context.Context) <-chan struct{}
@@ -230,7 +230,7 @@ DrainSignal returns the channel closed when the server serving this request begi
 [Conn](<#Conn>) watches it for you. It is re\-exported here because a handler often wants to stop its own work at the same moment, and a nil channel blocks forever, so a select that watches it needs no nil check.
 
 <a name="CloseCode"></a>
-## type [CloseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L277>)
+## type [CloseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L278>)
 
 CloseCode is the status code a Close frame carries \(RFC 6455 §7.4\).
 
@@ -271,7 +271,7 @@ const (
 ```
 
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L271>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L272>)
 
 Conn is one upgraded WebSocket connection.
 
@@ -282,7 +282,7 @@ type Conn = svcws.Conn
 ```
 
 <a name="Upgrade"></a>
-### func [Upgrade](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L291>)
+### func [Upgrade](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L292>)
 
 ```go
 func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (conn *Conn, err error)
@@ -295,7 +295,7 @@ On failure it has ALREADY written the HTTP response — a 426 carrying the versi
 The socket is taken over from net/http. It is no longer the HTTP server's to close, nor this SDK's listener engine's: it is the handler's until \[Conn.Close\].
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L274>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L275>)
 
 Message is one complete WebSocket application message.
 
@@ -304,7 +304,7 @@ type Message = corenet.WSMessageValue
 ```
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L280>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L281>)
 
 Option configures a Conn.
 
@@ -313,7 +313,7 @@ type Option = svcws.Option
 ```
 
 <a name="AllowAnyOrigin"></a>
-### func [AllowAnyOrigin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L386>)
+### func [AllowAnyOrigin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L387>)
 
 ```go
 func AllowAnyOrigin() Option
@@ -324,7 +324,7 @@ AllowAnyOrigin disables the origin check.
 It has to be written out because the browser's same\-origin policy does not apply to WebSocket: any page may open a connection to this server and the browser will attach the user's cookies to the handshake. Reach for it when authentication does not ride on ambient credentials — a bearer token, a signed ticket — which is exactly when the origin proves nothing anyway.
 
 <a name="AllowOrigins"></a>
-### func [AllowOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L374>)
+### func [AllowOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L375>)
 
 ```go
 func AllowOrigins(origins ...string) Option
@@ -335,7 +335,7 @@ AllowOrigins replaces the default same\-origin rule with an exact allowlist.
 The comparison is on the whole Origin header — scheme, host and port — case\-insensitively. Matching the host alone would accept http:// for an https server, which is the downgrade the check exists to notice. Behind a proxy that terminates TLS this is the only way to have the scheme checked at all: the request arrives in plaintext there, so the default rule cannot see which scheme the browser used.
 
 <a name="MaxFrameSize"></a>
-### func [MaxFrameSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L329>)
+### func [MaxFrameSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L330>)
 
 ```go
 func MaxFrameSize(n int64) Option
@@ -346,7 +346,7 @@ MaxFrameSize bounds one frame's ANNOUNCED payload length.
 It is separate from [MaxMessageSize](<#MaxMessageSize>) because it is enforced at a different moment: against the header, before a byte is read or allocated. A ceiling above the message ceiling can never be reached and is refused as a mistake.
 
 <a name="MaxMessageSize"></a>
-### func [MaxMessageSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L319>)
+### func [MaxMessageSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L320>)
 
 ```go
 func MaxMessageSize(n int64) Option
@@ -357,7 +357,7 @@ MaxMessageSize bounds one reassembled message.
 Zero is clamped to [DefaultMaxMessageSize](<#DefaultMaxMessageSize>), negative is refused. There is deliberately no "unbounded" setting: the length is announced by the peer in a 64\-bit field, and fragmentation lets it keep announcing more, so an unbounded ceiling is not a configuration choice — it is a remote memory allocator.
 
 <a name="PingInterval"></a>
-### func [PingInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L344>)
+### func [PingInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L345>)
 
 ```go
 func PingInterval(d time.Duration) Option
@@ -370,7 +370,7 @@ Zero does not mean "never": it is clamped to [DefaultPingInterval](<#DefaultPing
 The heartbeat counts frames the handler has READ, so it keeps a connection open only while one goroutine loops on \[Conn.Receive\]; a connection nobody reads is ended within two intervals, however healthy the peer.
 
 <a name="Subprotocols"></a>
-### func [Subprotocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L308>)
+### func [Subprotocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L309>)
 
 ```go
 func Subprotocols(names ...string) Option
@@ -383,7 +383,7 @@ The SERVER's order decides. A client advertises what it can speak; choosing amon
 Each name must be an RFC 7230 token, since the chosen one is written into the response verbatim; a name with a space, a comma or a quote is refused at Upgrade. The list is copied, so reusing the slice changes nothing later.
 
 <a name="WithoutPing"></a>
-### func [WithoutPing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L351>)
+### func [WithoutPing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L352>)
 
 ```go
 func WithoutPing() Option
@@ -392,7 +392,7 @@ func WithoutPing() Option
 WithoutPing disables the heartbeat, and with it the connection's only liveness check. Use it where the transport provides its own.
 
 <a name="WriteTimeout"></a>
-### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L361>)
+### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L362>)
 
 ```go
 func WriteTimeout(d time.Duration) Option

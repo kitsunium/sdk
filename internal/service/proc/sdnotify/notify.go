@@ -2,9 +2,12 @@
 package sdnotify
 
 import (
+	"context"
+	"errors"
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -15,7 +18,28 @@ import (
 // libsystemd; a send failure when the socket is set returns NotifyFailed. An
 // empty state map under a set socket still opens and closes the connection,
 // matching libsystemd's "ping" behaviour.
-func Notify(state map[string]string) (err error) {
+//
+// It waits as long as the supervisor makes it wait: a unixgram write blocks
+// once the receiving buffer is full, and this call carries no deadline. A
+// caller whose own work is bounded wants [NotifyContext].
+func Notify(state map[string]string) error {
+	//: an unbounded context arms nothing — identical to the original send.
+	return NotifyContext(context.Background(), state)
+}
+
+// NotifyContext is [Notify] bounded by ctx: the datagram's write observes ctx's
+// deadline, and its cancellation.
+//
+// It exists because the write is the only unbounded step in the call. The
+// socket belongs to the supervisor, so a supervisor that stops reading — paused,
+// stopped, or simply slow — blocks the writer with nothing the process can do
+// about it. Where that write sits under a lock a health probe also takes, one
+// stuck supervisor stops every later probe from answering: the readiness the
+// datagram was meant to announce becomes unobservable because announcing it
+// hung.
+//
+// ctx bounds the WRITE, not the dial: a unixgram dial takes no round trip.
+func NotifyContext(ctx context.Context, state map[string]string) (err error) {
 	//: an unset NOTIFY_SOCKET disables notification entirely — a silent no-op.
 	raw, ok := os.LookupEnv(envNotifySocket)
 	//: nothing to do, and reporting an error here would break unsupervised runs.
@@ -48,15 +72,92 @@ func Notify(state map[string]string) (err error) {
 		//: propagate the typed InvalidNotification produced by encodePayload.
 		return err
 	}
+	//: the write is the only step ctx can bound, and the only one that waits.
+	return writeDatagram(ctx, conn, payload, raw)
+}
+
+// writeDatagram sends payload over conn under ctx's bound, and names a failure
+// after the socket it could not reach.
+func writeDatagram(ctx context.Context, conn writeDeadliner, payload, socket string) error {
+	//: make the write observe ctx before performing it.
+	stop, err := boundWrite(ctx, conn)
+	//: the only failure here is a socket already closed, and it is the write's
+	//: fault to report — but it is reported, not swallowed.
+	if err != nil {
+		//: wrap it as NotifyFailed like any other send fault.
+		return wrapNotify(err, socket)
+	}
+	//: release the watcher as soon as the write is over.
+	if stop != nil {
+		//: nothing was armed when it is nil.
+		defer stop()
+	}
 	//: a single Write delivers the whole datagram.
 	_, err = conn.Write([]byte(payload))
 	//: a write fault means the supervisor did not receive the notification.
 	if err != nil {
-		//: wrap the write fault as NotifyFailed.
-		return wrapNotify(err, raw)
+		//: the caller's own reason travels WITH the fault when it is already
+		//: known. The bound reaches the socket as a write deadline, so a
+		//: CANCELLATION would otherwise be indistinguishable from an expiry —
+		//: both surface as os.ErrDeadlineExceeded — and errors.Is could not
+		//: answer "did I give up, or was the supervisor too slow?".
+		//:
+		//: On a cancellation the answer is definite: the deadline in the past
+		//: is set BY context.AfterFunc, which runs only once ctx is done, so
+		//: ctx.Err() is context.Canceled by the time the write returns. On an
+		//: EXPIRY the two timers are independent — the socket's deadline and
+		//: the context's fire at the same instant and either may win — so
+		//: ctx.Err() may still be nil here. That case needs nothing: the write
+		//: already reports os.ErrDeadlineExceeded, which is what a caller reads
+		//: for "too slow". Join is therefore an addition where one exists, and
+		//: never the only carrier of anything.
+		return wrapNotify(errors.Join(err, ctx.Err()), socket)
 	}
-	//: the datagram was delivered (the deferred close may still set err).
+	//: the datagram was delivered (the caller's deferred close may still fail).
 	return nil
+}
+
+// writeDeadliner is everything the send needs of a connection: a bound and the
+// write it bounds. Taking it rather than *net.UnixConn is also what makes the
+// two testable without a socket.
+type writeDeadliner interface {
+	SetWriteDeadline(t time.Time) error
+	Write(b []byte) (n int, err error)
+}
+
+// boundWrite makes conn's write observe ctx, and returns the watcher's stop
+// func — nil when ctx can never be done, which is the plain [Notify] case and
+// arms nothing at all.
+//
+// A deadline already known is set directly because it is exact and costs no
+// goroutine; the AfterFunc is what covers a cancellation with no deadline, and
+// it is the only mechanism that reaches a write already in progress — a
+// net.Conn has no other way to be interrupted.
+func boundWrite(ctx context.Context, conn writeDeadliner) (stop func() bool, err error) {
+	//: a context that can never be done bounds nothing.
+	if ctx.Done() == nil {
+		//: nothing armed, nothing to release.
+		return nil, nil
+	}
+	//: an explicit deadline is handed to the kernel as one.
+	if deadline, ok := ctx.Deadline(); ok {
+		//: a refusal means the socket is already closed; report it rather than
+		//: proceeding to a write whose failure would name something else.
+		if err := conn.SetWriteDeadline(deadline); err != nil {
+			//: the caller wraps it as a send fault.
+			return nil, err
+		}
+	}
+	//: and cancellation arrives as a deadline in the past, which unblocks a
+	//: write already waiting on the supervisor's buffer.
+	return context.AfterFunc(ctx, func() {
+		//: nothing can be returned from here, and nothing needs to be: a
+		//: refusal means the write is already returning with its own fault.
+		if err := conn.SetWriteDeadline(time.Now()); err != nil {
+			//: the write reports what went wrong.
+			return
+		}
+	}), nil
 }
 
 // wrapNotify restates the NotifyFailed sentinel fields around a stdlib/syscall
@@ -76,6 +177,18 @@ func wrapNotify(cause error, socket string) error {
 func Ready() error {
 	//: READY=1 is the canonical startup-complete signal.
 	return Notify(map[string]string{"READY": "1"})
+}
+
+// ReadyContext is [Ready] bounded by ctx — see [NotifyContext].
+func ReadyContext(ctx context.Context) error {
+	//: READY=1 is the canonical startup-complete signal.
+	return NotifyContext(ctx, map[string]string{"READY": "1"})
+}
+
+// StatusContext is [Status] bounded by ctx — see [NotifyContext].
+func StatusContext(ctx context.Context, msg string) error {
+	//: STATUS carries human-readable progress; the value is sent verbatim.
+	return NotifyContext(ctx, map[string]string{"STATUS": msg})
 }
 
 // Reloading notifies the supervisor that a configuration reload has begun

@@ -90,7 +90,7 @@ func (h *health) readiness(ctx context.Context, current phase) corehealth.Report
 		//: that announced READY kept showing its last healthy STATUS line for
 		//: the whole drain, since the only announce sat below this return.
 		//: One datagram, on the change; later polls owe nothing.
-		h.announce(corehealth.StatusUnhealthy)
+		h.announce(ctx, corehealth.StatusUnhealthy)
 		//: no check is run — dialling a dependency to reconfirm a decision
 		//: already taken would only add load to a shutdown.
 		return h.shortCircuit(corehealth.ProbeReadiness, "draining",
@@ -103,7 +103,7 @@ func (h *health) readiness(ctx context.Context, current phase) corehealth.Report
 			corehealth.StatusUnhealthy, StartupPending)
 	}
 	report := h.evaluateAll(ctx, corehealth.ProbeReadiness)
-	h.announce(report.Status)
+	h.announce(ctx, report.Status)
 	//: the aggregate of every readiness check, dependency calls included.
 	return report
 }

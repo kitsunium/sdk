@@ -32,7 +32,8 @@ func TestABudgetExpiryIsAFailureAndSaysSo(t *testing.T) {
 	mustAddReadiness(t, registry, corehealth.ReadinessCheckValue{
 		Name: "db", Check: blocking(release, cancelled),
 	})
-	report := probeUnderClock(t, registry, clk, corehealth.ProbeReadiness, 1)
+	//: two timers: the probe's, and the run's own budget.
+	report := probeUnderClock(t, registry, clk, corehealth.ProbeReadiness, 2)
 	result := resultFor(t, report, "db")
 	if result.Status != corehealth.StatusUnhealthy {
 		t.Errorf("a timed-out critical check = %v, want unhealthy", result.Status)
@@ -104,8 +105,10 @@ func TestACancelledCallerStopsWaitingAndLeavesTheRunAlone(t *testing.T) {
 		reports := make(chan corehealth.ReportValue, 2)
 		go func() { reports <- registry.Probe(callerCtx, corehealth.ProbeReadiness) }()
 		runCtx := <-runs
-		//: the probe is parked on its budget before its caller leaves.
-		clk.BlockUntil(1)
+		//: the probe is parked on its budget before its caller leaves. Two
+		//: timers: the probe's own, and the run's — which is the whole point
+		//: here, since it is what will still expire once this caller is gone.
+		clk.BlockUntil(2)
 		cancel()
 		synctest.Wait()
 		var first corehealth.ReportValue
@@ -126,9 +129,11 @@ func TestACancelledCallerStopsWaitingAndLeavesTheRunAlone(t *testing.T) {
 			t.Fatalf("the caller's departure cancelled the shared run: %v", err)
 		}
 		//: the next probe JOINS that run: parked on its own budget first, so
-		//: the release below cannot reach a run nobody has joined yet.
+		//: the release below cannot reach a run nobody has joined yet. The
+		//: run's timer is still armed — the clock never moved — while the
+		//: departed probe's own was stopped on its way out, so two again.
 		go func() { reports <- registry.Probe(context.Background(), corehealth.ProbeReadiness) }()
-		clk.BlockUntil(1)
+		clk.BlockUntil(2)
 		releaseOnce()
 		second := resultFor(t, <-reports, "db")
 		if second.Status != corehealth.StatusHealthy || second.Err != nil {
@@ -138,6 +143,147 @@ func TestACancelledCallerStopsWaitingAndLeavesTheRunAlone(t *testing.T) {
 			t.Errorf("%d check bodies ran, want 1 — the second probe started a run of its own", got)
 		}
 	})
+}
+
+// TestARunAbandonedByEveryCallerStillExpires is the other half of
+// [TestACancelledCallerStopsWaitingAndLeavesTheRunAlone], and the defect that
+// half had left open.
+//
+// A departing caller deliberately cancels nothing: its context is its own,
+// while the run belongs to every probe waiting on it. But when the LAST caller
+// leaves, the budget lived only on the waiting side — so a run nobody was
+// waiting for was cancelled by nobody, and its body was never told its time was
+// up. That is the ordinary shape of a polled endpoint behind a proxy with a
+// shorter timeout of its own: every probe departs early, and a check that
+// honours its context holds its dependency's connection for the whole outage
+// while every probe reports a timeout.
+//
+// The budget now belongs to the RUN, so it expires whether or not anyone is
+// left. The clock is the only thing that moves: no caller is waiting.
+//
+// Seen failing with health.boundRun removed: "panic: deadlock: all goroutines
+// in bubble are blocked", raised at the clk.BlockUntil(2) below — with the
+// budget on the waiting side only, the run arms no timer of its own, so the
+// second one this test waits for never exists and nothing can move the clock
+// on to the expiry that is the subject.
+func TestARunAbandonedByEveryCallerStillExpires(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		registry, clk := newRegistry(t, svchealth.Config{})
+		release := make(chan struct{})
+		releaseOnce := sync.OnceFunc(func() { close(release) })
+		//: whatever happens below, the body is let go before the bubble ends.
+		defer releaseOnce()
+		runs := make(chan context.Context, 1)
+		mustAddReadiness(t, registry, corehealth.ReadinessCheckValue{
+			Name: "db", Check: func(ctx context.Context) error {
+				runs <- ctx
+				select {
+				//: a body that honours its context, which is the shape this
+				//: test is about: the one that CAN be let go, and was not.
+				case <-ctx.Done():
+					return ctx.Err()
+				//: the fallback, so a regression deadlocks the bubble rather
+				//: than hanging the whole binary.
+				case <-release:
+					return nil
+				}
+			},
+		})
+		callerCtx, cancel := context.WithCancel(context.Background())
+		reports := make(chan corehealth.ReportValue, 1)
+		go func() { reports <- registry.Probe(callerCtx, corehealth.ProbeReadiness) }()
+		runCtx := <-runs
+		//: the probe's timer and the run's.
+		clk.BlockUntil(2)
+		//: the only caller leaves. Nothing is waiting on the run now.
+		cancel()
+		<-reports
+		synctest.Wait()
+		//: departure alone must still not cancel it — that is the neighbouring
+		//: test's contract, re-asserted here because this one moves the clock
+		//: next and would otherwise not distinguish the two causes.
+		if err := runCtx.Err(); err != nil {
+			t.Fatalf("the caller's departure cancelled the shared run: %v", err)
+		}
+		//: only the run's own timer is left; the departed probe stopped its own.
+		clk.BlockUntil(1)
+		clk.Advance(budget)
+		synctest.Wait()
+		if err := runCtx.Err(); err == nil {
+			t.Fatal("the run was never told its budget was over: <nil>")
+		}
+	})
+}
+
+// TestAProbeJoiningAnExpiredRunReadsATimeout closes the gap the run-owned
+// budget opened. Cancelling the run is an ANNOUNCEMENT, and a check that
+// HONOURS its context answers it by returning ctx.Err() — an ordinary failure
+// wearing no timeout. The probe that was waiting when the budget fired gets
+// health.abandoned's verdict either way, but the result the run PUBLISHES is
+// what every probe joining afterwards reads, and a plain "context canceled" is
+// not what happened: the check was too slow.
+//
+// The body waits for a release before returning, which is what makes the window
+// reachable: the run is expired and still outstanding, so the second probe
+// joins it rather than starting its own, and then reads the published result.
+//
+// Seen failing with the classification removed (perform building the result
+// straight from the body's error): "TimedOut = false" and "[0.3.59.1
+// CHECK_FAILED] A health check reported a failure" — so a dependency that was
+// simply too slow looked like an ordinary failure to every probe after the
+// first.
+// # Goroutine lifetime
+//
+// Two probes, each on its own goroutine, plus the body the registry runs. The
+// first ends at the clock advance, the second when the release lets the body
+// return, and both are received from before the test exits — the body's
+// goroutine is the run's, and it ends with it.
+func TestAProbeJoiningAnExpiredRunReadsATimeout(t *testing.T) {
+	t.Parallel()
+	registry, clk := newRegistry(t, svchealth.Config{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int64
+	mustAddReadiness(t, registry, corehealth.ReadinessCheckValue{
+		Name: "db", Check: func(ctx context.Context) error {
+			//: only the first entry announces; the run is shared.
+			if calls.Add(1) == 1 {
+				close(entered)
+			}
+			<-ctx.Done()
+			//: held here so the run stays outstanding while it is joined.
+			<-release
+			//: the shape under test: a body that honours its cancellation.
+			return ctx.Err()
+		},
+	})
+	first := make(chan corehealth.ReportValue, 1)
+	go func() { first <- registry.Probe(context.Background(), corehealth.ProbeReadiness) }()
+	<-entered
+	//: the probe's timer and the run's own.
+	clk.BlockUntil(2)
+	clk.Advance(budget)
+	//: the waiter's own verdict, which was never in doubt.
+	if got := resultFor(t, <-first, "db"); !got.TimedOut {
+		t.Error("the waiting probe reported TimedOut = false, want the budget's verdict")
+	}
+	//: a second probe joins the expired, still-outstanding run.
+	second := make(chan corehealth.ReportValue, 1)
+	go func() { second <- registry.Probe(context.Background(), corehealth.ProbeReadiness) }()
+	//: it is parked on its own budget over that run; letting the body go now
+	//: makes it read the PUBLISHED result rather than its own timeout.
+	clk.BlockUntil(1)
+	close(release)
+	joined := resultFor(t, <-second, "db")
+	if !joined.TimedOut {
+		t.Errorf("a probe joining the expired run got TimedOut = %v, want true", joined.TimedOut)
+	}
+	if !errs.HasCode(joined.Err, svchealth.CodeCheckTimeout) {
+		t.Errorf("a probe joining the expired run got %v, want CHECK_TIMEOUT", joined.Err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("the body ran %d times, want 1 — the second probe must not start its own", got)
+	}
 }
 
 // TestABudgetExpiryStillHonoursCriticality pins that a non-critical check that
@@ -151,7 +297,8 @@ func TestABudgetExpiryStillHonoursCriticality(t *testing.T) {
 	mustAddReadiness(t, registry, corehealth.ReadinessCheckValue{
 		Name: "recommendations", Check: blocking(release, cancelled), NonCritical: true,
 	})
-	report := probeUnderClock(t, registry, clk, corehealth.ProbeReadiness, 1)
+	//: two timers: the probe's, and the run's own budget.
+	report := probeUnderClock(t, registry, clk, corehealth.ProbeReadiness, 2)
 	if report.Status != corehealth.StatusDegraded {
 		t.Errorf("a timed-out non-critical check = %v, want degraded", report.Status)
 	}
@@ -180,9 +327,22 @@ func TestAWedgedCheckCostsOneGoroutineNotOnePerPoll(t *testing.T) {
 	mustAddReadiness(t, registry, corehealth.ReadinessCheckValue{
 		Name: "db", Check: wedged(release, &calls),
 	})
-	//: three consecutive polls, each timing out on its own budget.
+	//: three consecutive polls, each timing out on its own budget. The FIRST
+	//: arms two timers — the probe's and the run's own — while the two that
+	//: join the wedged run arm only their own, the run's watcher having
+	//: cancelled and exited when its budget fired on poll one.
+	//
+	//: waiting for that second timer is also what makes the count below
+	//: deterministic: the run arms it, so it exists only once the body's
+	//: goroutine is running. Waiting for the probe's timer alone used to let
+	//: the clock advance before the body had been entered, and the assertion
+	//: then read 0 — reliably outside the race lane, never inside it.
 	for poll := range 3 {
-		report := probeUnderClock(t, registry, clk, corehealth.ProbeReadiness, 1)
+		waits := 1
+		if poll == 0 {
+			waits = 2
+		}
+		report := probeUnderClock(t, registry, clk, corehealth.ProbeReadiness, waits)
 		if !resultFor(t, report, "db").TimedOut {
 			t.Fatalf("poll %d did not time out", poll)
 		}
@@ -242,8 +402,8 @@ func TestConcurrentProbesShareOneMeasurement(t *testing.T) {
 	go func() { reports <- registry.Probe(context.Background(), corehealth.ProbeReadiness) }()
 	<-entered
 	go func() { reports <- registry.Probe(context.Background(), corehealth.ProbeReadiness) }()
-	//: both probes are now waiting on their own budget timer over one run.
-	clk.BlockUntil(2)
+	//: three timers: one per waiting probe, plus the run's own budget.
+	clk.BlockUntil(3)
 	close(release)
 	for range 2 {
 		report := <-reports
@@ -374,7 +534,9 @@ func TestABudgetIsNeverZero(t *testing.T) {
 			})
 			reports := make(chan corehealth.ReportValue, 1)
 			go func() { reports <- registry.Probe(context.Background(), corehealth.ProbeReadiness) }()
-			clk.BlockUntil(1)
+			//: two timers: the probe's, and the run's own budget — both armed
+			//: with the same resolved value, which is what this asserts.
+			clk.BlockUntil(2)
 			//: one nanosecond short of the resolved budget must NOT fire; a
 			//: clamp that landed on zero would already have reported by now.
 			clk.Advance(c.want - 1)

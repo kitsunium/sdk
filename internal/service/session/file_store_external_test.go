@@ -29,7 +29,7 @@ type fileFixture struct {
 
 // newFileFixture builds a file store in a directory it creates, and skips the
 // test where the file store honestly refuses to exist.
-func newFileFixture(t *testing.T, clk clock.Clock) fileFixture {
+func newFileFixture(t *testing.T, clk clock.Timed) fileFixture {
 	t.Helper()
 	dir := storeDir(t)
 	key := testKey(t)

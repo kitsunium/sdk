@@ -74,11 +74,12 @@ func (h *health) evaluate(ctx context.Context, e *entry) corehealth.ResultValue 
 // perform runs one check body and publishes its result to everyone waiting.
 func (h *health) perform(e *entry, run *inflight) {
 	begun := h.clk.Now()
+	//: the run's budget is its own, and expires whether or not anyone is left
+	//: waiting for it.
+	release := h.boundRun(e, run)
 	err := h.invoke(e, run)
-	result := corehealth.ResultValue{
-		Name: e.name, Status: e.verdict(err), At: h.clk.Now(),
-		Took: h.clk.Since(begun), Err: err,
-	}
+	release()
+	result := h.outcome(e, run, err, begun)
 	//: published BEFORE the entry is released, so a probe arriving in between
 	//: joins a finished run and gets its answer at once.
 	run.result = result
@@ -86,6 +87,80 @@ func (h *health) perform(e *entry, run *inflight) {
 	//: a startup check that just passed shrinks the set the phase reads.
 	if e.finish(result) {
 		h.startupPassed()
+	}
+}
+
+// outcome turns a finished body into the result every later probe will read.
+//
+// A run whose budget expired reports a TIMEOUT even when the body came back on
+// its own, because the body coming back is what cancelling it was FOR: a check
+// that honours its context returns ctx.Err(), which is an ordinary failure
+// wearing no timeout, and the next probe to join this run would read a plain
+// cancellation where the truth is that the check was too slow. The waiter that
+// was there when the budget fired already got [health.abandoned]'s verdict;
+// this is the same verdict, for everybody who arrives after.
+//
+// A body that SUCCEEDED despite the cancellation keeps its success: the answer
+// is late, not wrong, and a later probe reading a real healthy measurement is
+// more useful than one reading a timeout nobody is waiting on any more.
+func (h *health) outcome(e *entry, run *inflight, err error, begun time.Time) corehealth.ResultValue {
+	//: the ordinary path, and the late-but-successful one.
+	if err == nil || !run.expired.Load() {
+		//: whatever the body said.
+		return corehealth.ResultValue{
+			Name: e.name, Status: e.verdict(err), At: h.clk.Now(),
+			Took: h.clk.Since(begun), Err: err,
+		}
+	}
+	//: the budget is why it stopped, so the budget is what it reports.
+	return h.abandoned(e, run)
+}
+
+// boundRun arms the budget the RUN owns, and returns the release its caller
+// runs when the body returns.
+//
+// The budget used to live only on the waiting side, so the run's context was
+// cancelled by whichever probe sat out the whole budget — and a run every
+// caller had left was cancelled by nobody. That is the ordinary shape of a
+// polled endpoint behind a proxy with its own, shorter timeout: each probe
+// departs early (health.departed, which deliberately cancels nothing, since
+// one caller's context is not the shared run's), the run keeps the next probe
+// from starting a second body, and the body itself is never told its time is
+// up. A check that honours its context then holds its dependency's connection
+// for the entire outage while every probe reports a timeout.
+//
+// The announcement is the same one [health.abandoned] makes and means the same
+// thing: the SDK cannot kill a goroutine, so cancelling the context is the
+// only thing it can do, and the body decides what that means.
+//
+// # Goroutine lifetime
+//
+// One goroutine per run, and it does NOT last the outage: it ends at the
+// budget — having cancelled — or at the release, whichever comes first. So a
+// wedged dependency still costs one goroutine for the whole outage (the body),
+// plus this one for the length of one budget.
+func (h *health) boundRun(e *entry, run *inflight) (release func()) {
+	//: armed on the INJECTED clock, like every other budget here.
+	timer := h.clk.NewTimer(e.budget)
+	released := make(chan struct{})
+	go func() {
+		defer timer.Stop()
+		select {
+		//: the body had its budget and did not answer.
+		case <-timer.C():
+			//: tell it so, and record that a budget is why — a liveness body
+			//: has no context and hears nothing either way.
+			run.expire()
+		//: the body answered first.
+		case <-released:
+			//: nothing to announce.
+		}
+	}()
+	//: the release the body's own return runs; closing is what ends the
+	//: goroutine above when the budget has not fired.
+	return func() {
+		//: called exactly once, by perform, on the one path that reaches it.
+		close(released)
 	}
 }
 
@@ -178,7 +253,9 @@ func (h *health) wrapFailure(e *entry, err error) error {
 func (h *health) abandoned(e *entry, run *inflight) corehealth.ResultValue {
 	//: tell the body its time is up; it decides what that means. A liveness
 	//: body has no context and hears nothing, which its own doc comment says.
-	run.cancel()
+	//: Through expire, so a body that returns its ctx.Err() is still reported
+	//: as a timeout to the probes that join this run afterwards.
+	run.expire()
 	err := kerrs.Wrap(CheckTimeout, kerrs.WrapParams{},
 		kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()),
 		kerrs.String("budget", e.budget.String()))

@@ -20,6 +20,7 @@ go_library(
     ],
     deps = [
         "//internal/kernel/errs",
+        "//internal/kernel/plugin",
         "//internal/kernel/snapshot",
     ],
 )
@@ -38,6 +39,7 @@ go_test(
     size = "small",
     srcs = [
         "registry_external_test.go",
+        "registry_guard_external_test.go",
         "view_external_test.go",
     ],
     # keep: TestTrustHTMLIsTheOnlyTrustConstructorTheDomainOffers parses this

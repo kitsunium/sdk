@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0070](0070-logger-reserves-the-correlation-keys.md) — a caller's attribute named `trace_id` or `span_id` is renamed rather than written beside the field
 - **Related**: [ADR 0051](0051-sdk-trace-domain.md) (`trace`, whose span context this reads), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (a published shape while v0), [ADR 0004](0004-sdk-bazel-build-system.md) (layer visibility), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (a zero value must not be the dangerous one)
 
 ## Context

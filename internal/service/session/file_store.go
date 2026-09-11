@@ -8,13 +8,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
+	"time"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	coresession "github.com/kitsunium/sdk/internal/core/session"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
 // dirMode is the only mode a session directory may have: owner-only. Anything
@@ -92,7 +93,7 @@ type fileStore struct {
 	// leaving two holders. Never unlinking them leaks a file per session. One
 	// lock, held for microseconds per operation, avoids both.
 	lock *os.File
-	// mu serialises the read-modify-write cycle BETWEEN GOROUTINES, which
+	// gate serialises the read-modify-write cycle BETWEEN GOROUTINES, which
 	// the flock above does not. Measured on linux/amd64: flock on the SAME
 	// open file description is a lock CONVERSION, not a wait — it succeeds
 	// immediately. Since this store holds one descriptor for its whole
@@ -102,7 +103,17 @@ type fileStore struct {
 	// Cross-PROCESS exclusion was always intact; cross-goroutine never was,
 	// and no test that only spawns processes could see it. Taken BEFORE the
 	// flock, the same order internal/service/lock's nameGate uses.
-	mu sync.Mutex
+	//
+	// It is a one-slot CHANNEL rather than a sync.Mutex because a Mutex has no
+	// abandonable Lock: a goroutine parked in it cannot be told its caller has
+	// gone (ADR 0073).
+	gate chan struct{}
+	// clk is the time source the poll between flock attempts is armed on, so
+	// contention is deterministic under a ManualClock and nothing here sleeps.
+	clk clock.Waiter
+	// poll is the interval between attempts while another PROCESS holds the
+	// lock (FileConfig.Poll).
+	poll time.Duration
 	// key seals every record.
 	key corecrypto.Key
 	// win is the validated deadline policy and the clock behind it.
@@ -217,7 +228,8 @@ func openLocked(cfg FileConfig) (store coresession.Store, err error) {
 	//: crypto/rand.Reader and a real fsync, always, in production. Tests reach
 	//: the fields.
 	return &fileStore{
-		dir: cfg.Dir, lock: lock, key: cfg.Key,
+		dir: cfg.Dir, lock: lock, key: cfg.Key, gate: make(chan struct{}, 1),
+		clk: cfg.waiter(), poll: cfg.pollInterval(),
 		win: cfg.window(), source: rand.Reader, syncDir: flushDirectory,
 	}, nil
 }

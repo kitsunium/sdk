@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 	ksnap "github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
@@ -45,11 +46,16 @@ var registry ksnap.Value[map[ExporterName]SpanExporter]
 //
 // IFACE-PLUGIN: the registry hands plug-in SpanExporter instances back to
 // callers so each backend keeps its concrete type unexported.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func RegisterExporter(e SpanExporter) SpanExporter {
-	//: nil registration is always a programming error.
-	if e == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(e); why != "" {
 		//: panic with the dotted-quad code at boot.
-		panic(DuplicateRegistration.Error())
+		panic(DuplicateRegistration.Error() + ": " + why)
 	}
 	//: publish; a conflict panics at boot.
 	if err := publishExporter(e.Name(), e); err != nil {

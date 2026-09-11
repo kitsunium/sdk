@@ -35,7 +35,7 @@ var origin = time.Date(2031, 3, 7, 4, 5, 6, 0, time.UTC)
 // store that persists and one that does not.
 type factory struct {
 	name  string
-	build func(t *testing.T, clk clock.Clock) coresession.Store
+	build func(t *testing.T, clk clock.Timed) coresession.Store
 }
 
 // factories returns the stores every contract test iterates over.
@@ -47,7 +47,7 @@ func factories() []factory {
 }
 
 // newMemory builds an in-process store on the given clock.
-func newMemory(t *testing.T, clk clock.Clock) coresession.Store {
+func newMemory(t *testing.T, clk clock.Timed) coresession.Store {
 	t.Helper()
 	store, err := svcsession.NewMemoryStore(svcsession.Config{
 		IdleTimeout: idleWindow, AbsoluteTimeout: absoluteCeiling, Clock: clk,
@@ -60,7 +60,7 @@ func newMemory(t *testing.T, clk clock.Clock) coresession.Store {
 
 // newFile builds an on-disk store in a fresh directory, skipping the test on a
 // platform where the file store honestly refuses to exist.
-func newFile(t *testing.T, clk clock.Clock) coresession.Store {
+func newFile(t *testing.T, clk clock.Timed) coresession.Store {
 	t.Helper()
 	store, err := svcsession.NewFileStore(svcsession.FileConfig{
 		IdleTimeout: idleWindow, AbsoluteTimeout: absoluteCeiling, Clock: clk,

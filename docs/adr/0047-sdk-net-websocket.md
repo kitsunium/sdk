@@ -3,6 +3,8 @@
 - **Status**: Accepted — **§D7 and §D8 amended 2026-09-11** (what the default
   origin rule can see of the scheme; "frames" means frames the handler has
   read). The original text of both is preserved; each amendment follows it.
+- **Amended by**: [ADR 0069](0069-websocket-origin-behind-a-proxy.md) — the
+  default origin rule refuses behind a proxy that announces the scheme
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
 - **Extends**: [ADR 0029](0029-sdk-net-domain.md) — the network domain gains a

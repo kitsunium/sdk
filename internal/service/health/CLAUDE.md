@@ -12,13 +12,13 @@ panic recovery, the staleness bound, the drain latch, and the HTTP handler
 |---|---|
 | `health.go`, `entry.go` | the registry and one registered check |
 | `inflight.go` | one execution of a check, shared by every probe waiting on it |
-| `runner.go` | runs a check under its timeout, recovers a panic; a caller whose own context ends stops waiting WITHOUT cancelling the shared run (`departed`) |
+| `runner.go` | runs a check under its timeout, recovers a panic; a caller whose own context ends stops waiting WITHOUT cancelling the shared run (`departed`), while the run's own budget (`boundRun`) cancels it whether or not anyone is still waiting |
 | `probe.go` | answers a probe: startup gating, drain latch, aggregation |
 | `handler.go` | the HTTP surface; renders only the `errs` Public half |
 | `handler_config.go` | `HandlerConfig` — the one knob the three handlers take |
 | `body.go` | the wire shape of a probe response, and of one check inside it |
 | `component.go` | the `lifecycle` bridge; a not-serving startup report with no error to join still fails `Start` (`STARTUP_PENDING`) |
-| `notify.go` | opt-in `sd_notify`, delegating to `service/proc/sdnotify`; a datagram counts as announced only once DELIVERED, decided and sent under one lock; the STATUS line follows the readiness verdict into a drain (`TestDrainingIsAnnouncedToTheSupervisor`), and a serving verdict measured before `Drain` is never announced after it — the phase is read under the same lock (`TestAVerdictMeasuredBeforeTheDrainIsNotAnnouncedAfterIt`) |
+| `notify.go` | opt-in `sd_notify`, delegating to `service/proc/sdnotify`; a datagram counts as announced only once DELIVERED, decided and sent under one lock; the STATUS line follows the readiness verdict into a drain (`TestDrainingIsAnnouncedToTheSupervisor`), and a serving verdict measured before `Drain` is never announced after it — the phase is read under the same lock (`TestAVerdictMeasuredBeforeTheDrainIsNotAnnouncedAfterIt`). The send is BOUNDED by the probe's own deadline, else by the budget a check gets (ADR 0072), which is what makes serialising it affordable: an unbounded write to a deaf supervisor held that lock and stopped every later probe from answering |
 | `config.go` | timeouts and staleness, with their ADR 0031 clamps and refusals |
 
 ## The three behaviours worth knowing
@@ -38,6 +38,17 @@ answering. That is what lets an orchestrator take a replica out of rotation
 is bounded twice — by the check's budget and by the caller's own context — and
 only the budget cancels the run: a probe whose caller went away leaves the run
 for the next probe to join, so a wedged dependency still costs one goroutine.
+**The budget belongs to the RUN** (ADR 0072), armed in `perform`, so it expires
+even when every caller has left — otherwise a run nobody waits for is cancelled
+by nobody, which is the ordinary shape behind a proxy whose own timeout is
+shorter. One consequence is visible to any test driving the manual clock: a
+check measured for the first time arms TWO timers, the probe's and the run's,
+and `probeUnderClock`'s `waits` counts timers. The run also REMEMBERS that a
+budget is what cancelled it (`inflight.expire`), because a body that honours its
+context returns `ctx.Err()` — an ordinary failure wearing no timeout — and the
+result it publishes is what every probe joining afterwards reads. A body that
+succeeds despite the cancellation keeps its success: a late answer is not a
+wrong one.
 
 ## Sentinels (`0.3.59.*`)
 
@@ -69,10 +80,15 @@ The Bazel target carries `data = ["//:audit_sources"]` because
 `audit_srcs` filegroup and the matching `//:audit_sources` entry are what make
 those files reachable inside the sandbox (rule 12).
 
-`TestACancelledCallerStopsWaitingAndLeavesTheRunAlone` runs in a
-`testing/synctest` bubble, and that is not a way around the audit above:
-`synctest.Wait` waits for goroutines to block, not for time to pass, and the
-manual clock is never advanced in it. It is what turns "the probe returned at
-once" into an assertion that fails immediately, rather than a regression that
-hangs until the binary's timeout. The two sd_notify tests that make a first
-datagram fail live beside the others in `notify_linux_external_test.go`.
+`TestACancelledCallerStopsWaitingAndLeavesTheRunAlone` and
+`TestARunAbandonedByEveryCallerStillExpires` run in a `testing/synctest`
+bubble, and that is not a way around the audit above: `synctest.Wait` waits for
+goroutines to block, not for time to pass. The first never advances the manual
+clock at all, which is what turns "the probe returned at once" into an
+assertion that fails immediately rather than a regression that hangs until the
+binary's timeout; the second advances it deliberately, once, to reach the run's
+own expiry — still the manual clock, never the wall one. The two sd_notify tests that make a first
+datagram fail live beside the others in `notify_linux_external_test.go`, and
+`notify_bounded_external_test.go` holds the ones that make a supervisor stop
+reading — Linux-only, because the state they need comes from a kernel mechanism
+(the receive queue's length bound) measured there.

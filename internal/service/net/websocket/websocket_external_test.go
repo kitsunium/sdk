@@ -636,6 +636,122 @@ func TestOriginIsCheckedByDefault(t *testing.T) {
 	})
 }
 
+// TestTheDefaultRuleRefusesWhenAProxyAnnouncedTheScheme pins the other half of
+// the proxy case. Behind a TLS-terminating proxy the request arrives in
+// plaintext, so the default rule compares host and port alone — and an http
+// page on the same host then connects, which is exactly the downgrade the
+// origin check exists to notice.
+//
+// The presence of a header announcing the scheme (RFC 7239's Forwarded, or
+// X-Forwarded-Proto) says a proxy translated it and this server cannot see it.
+// The default therefore refuses and names what to configure, rather than
+// comparing a scheme it does not have. Only PRESENCE is read, never the value:
+// a header a stranger writes can make the check stricter and never looser, so
+// consulting it adds no way in. Where TLS ended in this process the scheme is
+// known first-hand and the announcement is ignored.
+//
+// Seen failing without the check: the two announced rows answered 101 where
+// they now answer 403 — and the empty-value row answered 101 for as long as the
+// presence test was Header.Get, which reports "" for a header nobody sent and
+// for one sent empty alike.
+func TestTheDefaultRuleRefusesWhenAProxyAnnouncedTheScheme(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// tls reports whether the server terminates TLS itself.
+		tls bool
+		// origin is the Origin header, "" for none; "{host}" stands for the
+		// address the request is sent to.
+		origin string
+		// forwarded are the raw proxy headers to add.
+		forwarded []string
+		opts      []websocket.Option
+		status    int
+	}
+	tests := []tc{
+		{
+			name:   "a proxy announced the scheme: the same host is no longer enough",
+			origin: "https://{host}", forwarded: []string{"X-Forwarded-Proto: https"},
+			status: http.StatusForbidden,
+		},
+		{
+			name:   "RFC 7239's header says the same thing",
+			origin: "https://{host}", forwarded: []string{"Forwarded: proto=https;for=198.51.100.7"},
+			status: http.StatusForbidden,
+		},
+		{
+			//: a header SENT EMPTY is still a header sent, and a proxy that
+			//: emits one is still a proxy. Header.Get cannot tell it from a
+			//: header nobody sent — both are "" — which is why the check reads
+			//: the map. Seen failing against Get: 101 instead of 403.
+			name:   "an empty announcement is an announcement",
+			origin: "https://{host}", forwarded: []string{"X-Forwarded-Proto:"},
+			status: http.StatusForbidden,
+		},
+		{
+			name:   "an allowlist names the origins the proxy hides",
+			origin: "https://app.example", forwarded: []string{"X-Forwarded-Proto: https"},
+			opts:   []websocket.Option{websocket.AllowOrigins("https://app.example")},
+			status: http.StatusSwitchingProtocols,
+		},
+		{
+			name:   "any origin, said out loud, still means any",
+			origin: "https://evil.example", forwarded: []string{"X-Forwarded-Proto: https"},
+			opts:   []websocket.Option{websocket.AllowAnyOrigin()},
+			status: http.StatusSwitchingProtocols,
+		},
+		{
+			name:   "a relayed request that announces no scheme is not a translation",
+			origin: "http://{host}", forwarded: []string{"X-Forwarded-For: 198.51.100.7", "Via: 1.1 squid"},
+			status: http.StatusSwitchingProtocols,
+		},
+		{
+			name:   "no Origin at all is still a non-browser client",
+			origin: "", forwarded: []string{"X-Forwarded-Proto: https"},
+			status: http.StatusSwitchingProtocols,
+		},
+		{
+			name: "TLS ends here: the announcement is ignored",
+			tls:  true, origin: "https://{host}", forwarded: []string{"X-Forwarded-Proto: http"},
+			status: http.StatusSwitchingProtocols,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var srv *httptest.Server
+		var peer *wsPeer
+		//: the same two shapes the scheme test uses: TLS terminated here, or
+		//: the plaintext hop a proxy hands its backend.
+		if c.tls {
+			srv, _ = echoTLSServer(t, c.opts...)
+			peer = rawDialTLS(t, srv)
+		} else {
+			srv, _ = echoServer(t, c.opts...)
+			peer = rawDial(t, srv)
+		}
+		host := srv.Listener.Addr().String()
+		extra := make([]string, 0, len(c.forwarded)+1)
+		origin := strings.ReplaceAll(c.origin, "{host}", host)
+		//: an absent header is a different case from an empty one.
+		if origin != "" {
+			extra = append(extra, "Origin: "+origin)
+		}
+		extra = append(extra, c.forwarded...)
+
+		resp := peer.handshake(t, srv, extra...)
+
+		if resp.StatusCode != c.status {
+			t.Fatalf("status = %d, want %d (Origin: %q, %v)", resp.StatusCode, c.status, origin, c.forwarded)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // TestDefaultOriginRuleComparesTheSchemeWhereTLSEndsHere pins ADR 0047 §D7's
 // scheme clause, and exactly where the default rule stops being able to apply
 // it.

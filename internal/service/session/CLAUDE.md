@@ -26,7 +26,7 @@ Code range: `0.3.46.*` (ADR 0045). The stores also emit the core sentinels
 | `compare.go` | `digestsEqual` — `crypto/subtle` |
 | `memory_store.go` / `memory_write.go` | `memoryStore` |
 | `file_store.go` / `file_ops.go` / `file_write.go` / `file_publish.go` | `fileStore` |
-| `fsguard_unix.go` / `fsguard_other.go` | the two OS mechanics, and the honest refusal |
+| `fsguard_unix.go` / `fsguard_other.go` | the two OS mechanics (`tryLockExclusive` is `LOCK_NB` — ADR 0073), and the honest refusal |
 | `sealer.go` | `sealer` + `NewSealer` |
 | `codes.go` / `errors.go` | `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` |
 
@@ -37,7 +37,7 @@ Code range: `0.3.46.*` (ADR 0045). The stores also emit the core sentinels
 | Survives a restart | no | yes |
 | Scope | one process | one host, one directory |
 | Records sealed at rest | no — see below | yes, AES-256-GCM |
-| Honours `ctx` | no — it never blocks | yes, checked before the lock |
+| Honours `ctx` | no — it never blocks | yes, and BOTH waits can be left (ADR 0073) |
 | Cross-process safe | n/a | yes, one exclusive `flock` per operation |
 | Available everywhere | yes | linux/darwin/freebsd/openbsd/netbsd/dragonfly only |
 
@@ -106,6 +106,14 @@ which is `io.Closer` and therefore needed no new interface (ADR 0039).
 slides the idle window. That is the cost of a sliding expiry on a persistent
 store, and it is stated rather than hidden.
 
+Neither wait for it blocks unabandonably (ADR 0073). `flock` is `LOCK_NB` plus a
+poll on the injected clock — a blocking `LOCK_EX` parks the thread inside a
+syscall no cancellation reaches, so a request whose client hung up kept waiting
+for a lock nobody would read the result of — and the in-process gate is a
+one-slot channel rather than a `sync.Mutex`, whose `Lock` cannot be told its
+caller has gone. A caller who leaves gets `STORE_UNAVAILABLE` with its own
+context error in the fields.
+
 ### Every rename and every unlink is flushed
 
 POSIX does not make a rename or an unlink survive a crash until the containing
@@ -130,9 +138,12 @@ Three rules come with it:
 
 ## Conventions
 
-- **Nothing waits on the wall clock, and nothing sleeps.** Both stores take
-  `clock.Clock` — the *narrow* half (ADR 0039): a store reads time, it never
-  waits on it. Every expiry assertion in the suite advances a `ManualClock`.
+- **Nothing waits on the wall clock, and nothing sleeps.** The memory store
+  takes `clock.Clock` — the *narrow* half (ADR 0039), since it only reads time.
+  The file store takes `clock.Timed`, because it also WAITS: the poll between
+  lock attempts is armed on it (ADR 0073), which is what makes contention
+  assertable without sleeping. Every expiry assertion in the suite advances a
+  `ManualClock`, and so does every contention one.
 - **Every contract test runs against BOTH stores** from one table
   (`store_external_test.go`'s `factories`). A contract only one store honours is
   not a contract, and the fixation guard in particular has to be identical in a
@@ -236,8 +247,9 @@ cd internal/service && GOWORK=off go test -race -cover ./session
 |---|---|
 | `store_external_test.go` | the lifecycle, the sliding window, the ceiling ending a continuously-used session, expired-record dropping across a backwards clock step, idempotent `Destroy`, the zero identifier, and `Sweep` — all against both stores |
 | `fixation_external_test.go` | the fixation attack end to end, `Save`'s refusal of a forged subject, the ordinary data path, the two rotation lifetime rules, a dead session refusing to be re-authenticated, the 4 KiB subject bound (4096 accepted and read back, 4097 refused with the session untouched) in both stores, and the ADR 0031 constructor refusals |
+| `file_cancel_external_test.go` | both waits being left: a cancelled caller parked on the lock poll, the poll ending in ACQUISITION once the holder goes (so "cancellable" is not satisfied by a store that never acquires), and a goroutine cancelled while parked on the in-process gate — in a `synctest` bubble, because the cancel has to happen after it is parked there or the context check at the top of `withLock` answers instead |
 | `file_store_external_test.go` | directory and record modes on disk, the operator-owned refusal, no identifier anywhere on disk, filename binding via AAD, tamper/truncation/foreign-key refusal, survival across a reopen, the failed-publish invariant checked byte-for-byte (a failure at temp creation), a sweep that leaves foreign `*.session` files alone, and context cancellation. The rename-onto-a-directory test fails at `Save`'s read and never reaches the rename — its doc says so |
 | `dirsync_internal_test.go` | the directory flush after every rename and unlink, observed through `syncDir` (after the change, once per sweep, again on a retried `Destroy`); a failed flush reported and not rolled back; a failed rotation withdrawing the record it published when the old record's unlink fails, and undoing nothing when only the flush after it does; and the orphan cleanup behind a rename that really fails, over a temporary that was written, synced and closed |
 | `sealer_external_test.go` | round trip, cookie-safety, nonce freshness, the seven non-oracle failures, one spelling per sealed value, the empty-purpose refusal, and that opening is not authorising |
 | `entropy_internal_test.go` | the collision guard on `New` **and** on `Regenerate`, and the refusal to mint from partial entropy |
-| `encode_internal_test.go` | frame determinism, round trip, nine malformed frames (a panic reported as a failure), and the payload caps. Two of the frames — a `0xffffffff` string length, and a `0xffffffff` entry count with nothing after it — can only fail where `int` is 32 bits: run them with `GOARCH=386 go test` |
+| `encode_internal_test.go` | frame determinism, round trip, nine malformed frames (a panic reported as a failure), and the payload caps. Two of the frames — a `0xffffffff` string length, and a `0xffffffff` entry count with nothing after it — can only fail where `int` is 32 bits: run them with `GOARCH=386 go test`, which CI's `test-386` job now does on every PR |

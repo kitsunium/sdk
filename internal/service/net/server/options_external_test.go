@@ -4,6 +4,7 @@ package server_test
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +30,8 @@ const (
 	// refuseChildEnv marks the re-executed half of TestAdopt and carries the
 	// socket name the child's group asks for.
 	refuseChildEnv string = "KITSUNIUM_ADOPT_REFUSE_CHILD"
+	// childTLSEnv asks the adopting child to give its group a TLS identity.
+	childTLSEnv string = "KITSUNIUM_ADOPT_CHILD_TLS"
 )
 
 // TestMain runs the child half of an adoption test when the parent marks it,
@@ -68,10 +71,23 @@ func refuseInheritedSocket(requested string) int {
 }
 
 // serveInheritedSocket is the child half: it adopts the socket it was handed at
-// fd 3 and proves it serves traffic on it. It returns the process exit code.
+// fd 3 and proves it serves traffic on it — over TLS when the parent asked for
+// an identity, verified against exactly the certificate the group was given.
+// It returns the process exit code.
 func serveInheritedSocket(addr string) int {
 	srv := server.New()
-	srv.Group("api", server.Adopt("api")).HandleFunc(echoHandler)
+	options := []server.GroupOption{server.Adopt("api")}
+	var roots *x509.CertPool
+	if os.Getenv(childTLSEnv) != "" {
+		id, cert, err := newSelfSignedIdentity()
+		if err != nil {
+			return reportChild("self-signed identity: %v", err)
+		}
+		options = append(options, server.TLS(id))
+		roots = x509.NewCertPool()
+		roots.AddCert(cert)
+	}
+	srv.Group("api", options...).HandleFunc(echoHandler)
 	if err := srv.Start(context.Background()); err != nil {
 		return reportChild("adopting an inherited socket failed: %v", err)
 	}
@@ -98,7 +114,7 @@ func serveInheritedSocket(addr string) int {
 		return reportChild("adopted address = %q, want the inherited %q",
 			state.Listeners[0].Address, addr)
 	}
-	if err := echoInherited(addr, "inherited"); err != nil {
+	if err := echoInherited(addr, "inherited", roots); err != nil {
 		return reportChild("the adopted socket did not serve: %v", err)
 	}
 	return 0
@@ -114,9 +130,19 @@ func reportChild(format string, args ...any) int {
 	return 1
 }
 
-// echoOnce dials addr, sends one line and checks it comes back.
-func echoInherited(addr, line string) error {
-	conn, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
+// echoInherited dials addr, sends one line and checks it comes back — over TLS,
+// trusting only roots, when roots is non-nil.
+func echoInherited(addr, line string, roots *x509.CertPool) error {
+	dialer := &stdnet.Dialer{Timeout: 5 * time.Second}
+	var conn stdnet.Conn
+	var err error
+	if roots != nil {
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
+			RootCAs: roots, ServerName: testServerName, MinVersion: tls.VersionTLS12,
+		})
+	} else {
+		conn, err = dialer.Dial("tcp", addr)
+	}
 	if err != nil {
 		return err
 	}
@@ -1226,9 +1252,16 @@ func TestAdopt_ServesTheInheritedSocket(t *testing.T) {
 		name string
 		// socketName is the name published in LISTEN_FDNAMES.
 		socketName string
+		// tls gives the adopting group an identity. Seen failing before the
+		// adopted path shared the bind path's layers: the plaintext echo
+		// handler sent the client's own ClientHello back, and the child's
+		// handshake failed with "received unexpected handshake message of
+		// type *tls.clientHelloMsg when waiting for *tls.serverHelloMsg".
+		tls bool
 	}
 	tests := []tc{
 		{name: "a socket published as api", socketName: "api"},
+		{name: "the same socket under the group's TLS identity", socketName: "api", tls: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -1254,6 +1287,9 @@ func TestAdopt_ServesTheInheritedSocket(t *testing.T) {
 			"LISTEN_FDNAMES="+c.socketName,
 			childAddrEnv+"="+addr,
 		)
+		if c.tls {
+			cmd.Env = append(cmd.Env, childTLSEnv+"=1")
+		}
 
 		out, runErr := cmd.CombinedOutput()
 

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
@@ -80,14 +81,19 @@ func loadAliasIndex(p *snapshot.Value[map[string]Format]) map[string]Format {
 // IFACE-PLUGIN: the registry hands plug-in codec instances back to callers
 // so each domain can keep its concrete codec type unexported; the only
 // stable contract is the Codec interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func Register(c Codec) Codec {
-	//: nil registration is always a programming error.
-	if c == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(c); why != "" {
 		//: panic so the offender is visible at boot. A nil Codec is a
 		//: nil-argument programmer error, not a duplicate — its own dotted-quad
 		//: code (CODEC_NIL) keeps operator triage honest. %s renders the
 		//: canonical dotted-quad via Code.String() (matching the log-parser regex).
-		panic(fmt.Sprintf("codec.Register [%s CODEC_NIL]: nil Codec", CodeCodecNil))
+		panic(fmt.Sprintf("codec.Register [%s CODEC_NIL]: %s", CodeCodecNil, why))
 	}
 	//: the canonical Format is the primary key.
 	name := Format(c.Name())

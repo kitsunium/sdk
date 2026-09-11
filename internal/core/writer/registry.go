@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
@@ -52,11 +53,16 @@ func loadRegistry() map[Name]Factory {
 // IFACE-PLUGIN: the registry hands plug-in factory instances back to callers
 // so each writer keeps its concrete type unexported; the stable contract is
 // the Factory interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func Register(f Factory) Factory {
-	//: nil registration is always a programming error.
-	if f == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(f); why != "" {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("writer.Register [%s WRITER_NIL]: nil Factory", CodeWriterNil))
+		panic(fmt.Sprintf("writer.Register [%s WRITER_NIL]: %s", CodeWriterNil, why))
 	}
 	//: the canonical Name is the primary key.
 	name := f.Name()

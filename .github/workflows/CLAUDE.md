@@ -18,7 +18,13 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate) and `sdk-release.yml` 
 
 ## bazel-ci.yml (the SDK lane)
 
-Single job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
+Three jobs: `bazel` (the gate), `cross-build` (every module COMPILES on every
+supported GOOS/GOARCH) and `test-386` (the 32-bit RUNTIME). The last two run raw
+`go` rather than Bazel, for the reason stated under Do NOT below: Bazel here
+builds for the host only, so a platform it cannot reach is covered by the
+toolchain that can, or by nothing.
+
+Job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
 
 1. `bazel-contrib/setup-bazel@…` — caches `bazelisk`, disk cache keyed on `.bazelrc`+`.bazelversion`+`MODULE.bazel`+all `go.mod`/`go.sum`, plus the repository cache.
 2. **Drift check** — `bazel mod tidy && bazel run //:gazelle`, then `git diff --exit-code` AND a check for untracked `BUILD.bazel`/`go.mod`/`go.sum`. Catches both modifications and new files (post-audit finding #11).
@@ -31,6 +37,26 @@ Single job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
 7. `bazel coverage --combined_report=lcov //...` → uploaded as `coverage-${{ github.run_number }}` artifact (per-run unique name so concurrent runs don't dedupe, post-audit finding #28). Note coverage runs under the default (race-on) config, so it does **not** reflect the step-5 tests.
 
 Concurrency: `${{ github.workflow }}-${{ github.ref }}` with cancel-in-progress.
+
+### cross-build (the build bar) and test-386 (the runtime bar)
+
+`cross-build` runs `go build ./...` per module across eleven GOOS/GOARCH cells,
+including linux/386 and linux/arm, so a platform-specific low-level call can
+never silently drop a package (ADR 0018's build bar; local equivalent
+`bash scripts/cross-platform-audit.sh`).
+
+`test-386` RUNS the four workspace modules' tests on linux/386. Compiling and
+behaving are different questions, and the gap between them is where a 64-bit
+assumption survives: `int(0xffffffff)` is `-1` where `int` is 32 bits and passes
+every `> cap` check, which is exactly the bound `internal/service/session`'s
+at-rest frame relies on — two of its malformed frames can only fail there.
+Adding the job found two defects immediately: a bench helper that did not
+compile (`Statfs_t.Type` is `int32` on 386 and `int64` elsewhere) and a test
+synthesising a slice longer than a 32-bit `len` can hold.
+
+Linux/amd64 runners execute 386 binaries natively, so there is no emulation. It
+runs without `-race`, which has no 386 support at all — which also makes it the
+SECOND lane to compile the `//go:build !race` files, after the alloc lane.
 
 ## sdk-release.yml (the SDK release lane)
 
@@ -53,6 +79,12 @@ Concurrency: `sdk-release-${{ github.ref }}` with `cancel-in-progress: false` (N
 
 ## Do NOT
 
-- Re-introduce a `go test` matrix here — drift between local Bazel and CI defeats ADR 0004's "single build system" decision.
+- Re-introduce a `go test` lane for a platform **Bazel already covers**. That is
+  the drift ADR 0004's "single build system" decision exists to prevent: two
+  lanes running the same tests on the same platform, disagreeing, with nobody
+  sure which is authoritative. A lane for a platform Bazel CANNOT build for is
+  the opposite case — `cross-build` and `test-386` exist precisely because
+  Bazel here builds for the host, and the alternative to raw `go` there is no
+  coverage at all.
 - Drop the drift check; gazelle-generated `BUILD.bazel` files must be committed.
 - Edit the template-inherited workflows here for SDK reasons.

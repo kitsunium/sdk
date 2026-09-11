@@ -136,3 +136,7 @@ check_adr_index() {
 
 check_adr_index "docs/adr/CLAUDE.md" '^\| `[0-9]{4}' "the Contents table"
 check_adr_index "$doc"               '^- ADR [0-9]{4}' "the Reference list"
+# The THIRD index. It was not checked, and it had silently lost 23 of the 74
+# ADRs on disk — including every one written since 0061. An index nothing
+# verifies is a list of the ADRs somebody remembered.
+check_adr_index "docs/CLAUDE.md"     '^\| `adr/[0-9]{4}' "the Contents table"

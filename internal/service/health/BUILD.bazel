@@ -49,6 +49,7 @@ go_test(
         "handler_external_test.go",
         "harness_external_test.go",
         "nosleep_external_test.go",
+        "notify_bounded_external_test.go",
         "notify_external_test.go",
         "notify_linux_external_test.go",
         "probe_external_test.go",

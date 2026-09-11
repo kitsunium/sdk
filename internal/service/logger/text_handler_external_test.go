@@ -465,3 +465,61 @@ func TestTextHandler_FramesEveryByteAsTheEncoderDoes(t *testing.T) {
 		})
 	}
 }
+
+// TestTextHandler_ATopLevelAttributeCannotSpellTheSDKsOwnFields is the
+// reservation, on the legacy single-writer handler: it renders trace_id and
+// span_id itself rather than through the encoder, so it has its own two write
+// sites and needs its own case. A record emitted inside a span carrying a
+// caller attribute of the same name would otherwise put the key twice on one
+// line, and a parser keeping the last wins would read the caller's value as
+// the span the line came from — the identity the ADR 0062 correlation exists
+// to be trusted for.
+//
+// Under a group the key already carries the group's prefix and is left alone,
+// which is also what pins that the reservation is asked at the TOP level only.
+//
+// Seen failing with the reservation removed:
+//
+//	top level: line "… INFO m trace_id=4bf92f3577b34da6a3ce929d0e0e4736
+//	  span_id=00f067aa0ba902b7 trace_id=\"forged\"\n" spells trace_id 2 times
+func TestTextHandler_ATopLevelAttributeCannotSpellTheSDKsOwnFields(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		groups  []string
+		wantSub string
+	}{
+		{"top level: the attribute is renamed", nil, ` attr.trace_id="forged"`},
+		{"grouped: the prefix already keeps them apart", []string{"http"}, ` http.trace_id="forged"`},
+	}
+	runCase := func(t *testing.T, name string, groups []string, wantSub string) {
+		t.Helper()
+		var buf bytes.Buffer
+		var h corelogger.Handler = mustNewText(t, &buf, level.Debug)
+		//: walk the group list so the grouped write site is the one reached.
+		for _, g := range groups {
+			h = h.WithGroup(g)
+		}
+		rec := corelogger.RecordEvent{
+			Level: level.Info, Message: "m", TraceContext: forgeryProbeSpan,
+			Attrs: []corelogger.AttrValue{{Key: corelogger.TraceIDKey, Value: corelogger.StringValue("forged")}},
+		}
+		if err := h.Handle(t.Context(), rec); err != nil {
+			t.Fatalf("%s: Handle err = %v", name, err)
+		}
+		line := buf.String()
+		if !strings.Contains(line, wantSub) {
+			t.Errorf("%s: line %q does not contain %q", name, line, wantSub)
+		}
+		//: one trace_id key on the line, whatever the caller logged.
+		if got := strings.Count(line, " "+corelogger.TraceIDKey+"="); got != 1 {
+			t.Errorf("%s: line %q spells %s %d times, want exactly 1", name, line, corelogger.TraceIDKey, got)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc.name, tc.groups, tc.wantSub)
+		})
+	}
+}

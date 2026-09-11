@@ -1,7 +1,11 @@
 // Package crypto — the process-wide Deriver registry + Subkey dispatch.
 package crypto
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
+)
 
 // derivers maps each Algorithm to its Deriver. A distinct capability beside
 // AEAD/Hasher/Signer; backed by the shared read-mostly schemeRegistry — register
@@ -16,11 +20,16 @@ var derivers = schemeRegistry[Deriver]{verb: "RegisterDeriver"}
 // IFACE-PLUGIN: the registry hands plug-in Deriver instances back to callers so
 // each scheme keeps its concrete type unexported; the stable contract is the
 // Deriver interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func RegisterDeriver(d Deriver) Deriver {
-	//: nil registration is always a programming error.
-	if d == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(d); why != "" {
 		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterDeriver [%s DUPLICATE_REGISTRATION]: nil Deriver", CodeDuplicateRegistration))
+		panic(fmt.Sprintf("crypto.RegisterDeriver [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
 	}
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := derivers.publish(d.Algorithm(), d); err != nil {

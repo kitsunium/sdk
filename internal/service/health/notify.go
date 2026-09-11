@@ -3,6 +3,7 @@
 package health
 
 import (
+	"context"
 	"errors"
 
 	corehealth "github.com/kitsunium/sdk/internal/core/health"
@@ -37,14 +38,14 @@ const statusState string = "STATUS"
 // reported the replica ready. The same ordering left a STATUS= line that failed
 // recorded as the supervisor's current text, stale until the aggregate happened
 // to change again.
-func (h *health) announce(status corehealth.Status) {
+func (h *health) announce(ctx context.Context, status corehealth.Status) {
 	//: the SDK sends nothing it was not asked to send — a datagram is a
 	//: process-wide, observable side effect.
 	if !h.cfg.Notify {
 		//: silent by default.
 		return
 	}
-	state, err := h.notify(status)
+	state, err := h.notify(ctx, status)
 	//: two ways there is nothing left to do. Either nothing was owed or the
 	//: datagram went out — which includes the documented no-op that returns
 	//: nil when $NOTIFY_SOCKET is unset, so an unsupervised binary stays silent
@@ -79,11 +80,18 @@ func (h *health) announce(status corehealth.Status) {
 // one-way, so once it has begun a serving status is owed to nobody, and the
 // decision reads the phase where it can no longer change under it.
 //
-// The price is stated rather than hidden: sdnotify's datagram write carries no
-// deadline, so a supervisor socket that stops draining holds this lock, and
-// every readiness probe after it waits behind that one send — where the
-// unserialised version blocked only the probe that owed the datagram.
-func (h *health) notify(status corehealth.Status) (state string, err error) {
+// The send is BOUNDED, which is what makes serialising it affordable. A
+// unixgram write blocks once the supervisor's receive buffer is full, and
+// nothing in this process can make it drain; an unbounded send under this lock
+// meant one stuck supervisor stopped every later readiness probe from
+// answering at all — the readiness the datagram announces, made unobservable by
+// the act of announcing it. The bound is the PROBE's deadline where the caller
+// set one, so the announcement can never outlive the answer it belongs to, and
+// otherwise the same budget one check gets (Config.DefaultTimeout, else
+// DefaultCheckTimeout): a datagram nobody is reading is exactly as unavailable
+// as a dependency nobody is answering, and the registry already has a number
+// for that.
+func (h *health) notify(ctx context.Context, status corehealth.Status) (state string, err error) {
 	h.notifyMu.Lock()
 	defer h.notifyMu.Unlock()
 	//: a verdict measured before the drain, arriving after it.
@@ -98,9 +106,14 @@ func (h *health) notify(status corehealth.Status) (state string, err error) {
 		//: nothing sent, nothing to commit.
 		return "", nil
 	}
+	//: bound the datagram before sending it, so the lock is held for a stated
+	//: time rather than for as long as the supervisor takes.
+	sendCtx, release := h.sendBudget(ctx)
+	defer release()
 	//: a failed send commits nothing, so the next probe decides again — and
-	//: owes the supervisor the same datagram.
-	if serr := send(); serr != nil {
+	//: owes the supervisor the same datagram. A send that ran out of budget is
+	//: one of those failures: the datagram did not go out.
+	if serr := send(sendCtx); serr != nil {
 		//: the caller routes it to the hook.
 		return state, serr
 	}
@@ -110,9 +123,52 @@ func (h *health) notify(status corehealth.Status) (state string, err error) {
 	return state, nil
 }
 
+// sendBudget derives the context one datagram is allowed to take, and returns
+// the release that must run on every path out.
+//
+// The probe's own deadline wins whenever it has one: the announcement belongs
+// to that answer and must not outlive it, and a deadline the caller set needs
+// no machinery at all — sdnotify hands it to the kernel as the socket's write
+// deadline. Without one it takes the budget a check would get, because an
+// unreadable notify socket and an unresponsive dependency are the same kind of
+// wait and the registry already states how long it tolerates one.
+//
+// # Goroutine lifetime
+//
+// The second branch starts ONE goroutine per datagram, and it is armed on the
+// INJECTED clock rather than through context.WithTimeout — this package waits
+// on no wall clock, which its own AST audit enforces, and a budget that cannot
+// be moved by a test is a budget nothing verifies. It ends on whichever comes
+// first: the timer, or the returned release, which every caller defers. It
+// therefore cannot outlive the send.
+func (h *health) sendBudget(ctx context.Context) (bounded context.Context, release func()) {
+	//: a caller who set a deadline has already stated the bound.
+	if _, ok := ctx.Deadline(); ok {
+		//: nothing armed, nothing to release.
+		return ctx, func() {}
+	}
+	//: otherwise the registry's own per-check budget, never zero.
+	bounded, cancel := context.WithCancel(ctx)
+	timer := h.clk.NewTimer(h.cfg.checkBudget(0))
+	go func() {
+		defer timer.Stop()
+		select {
+		//: the supervisor had its budget and did not read.
+		case <-timer.C():
+			//: unblocks the write, which then reports what went wrong.
+			cancel()
+		//: the send finished, or the caller left first.
+		case <-bounded.Done():
+			//: nothing to do; the deferred Stop releases the timer.
+		}
+	}()
+	//: the cancel releases both the context and the watcher above.
+	return bounded, cancel
+}
+
 // owed decides what, if anything, this aggregate owes the supervisor. It reads
 // the announced state and changes nothing: only a delivered datagram does.
-func (h *health) owed(status corehealth.Status) (state string, send func() error) {
+func (h *health) owed(status corehealth.Status) (state string, send func(ctx context.Context) error) {
 	//: the first serving aggregate is the readiness the supervisor waits for.
 	//: A not-serving aggregate before it says nothing at all: a unit that has
 	//: never been ready is exactly what systemd already assumes.
@@ -124,7 +180,7 @@ func (h *health) owed(status corehealth.Status) (state string, send func() error
 			return "", nil
 		}
 		//: READY=1, owed until it is delivered once.
-		return readyState, sdnotify.Ready
+		return readyState, sdnotify.ReadyContext
 	}
 	//: after READY, only a change is worth a datagram.
 	if status == h.lastNotified {
@@ -134,5 +190,8 @@ func (h *health) owed(status corehealth.Status) (state string, send func() error
 	//: a serving/not-serving change after readiness, as a human-readable line.
 	//: It names the aggregate and nothing else: a STATUS line is shown in
 	//: `systemctl status`, which is at least as public as a probe body.
-	return statusState, func() error { return sdnotify.Status("health: " + status.String()) }
+	return statusState, func(ctx context.Context) error {
+		//: the aggregate's own words, bounded by the probe that measured it.
+		return sdnotify.StatusContext(ctx, "health: "+status.String())
+	}
 }

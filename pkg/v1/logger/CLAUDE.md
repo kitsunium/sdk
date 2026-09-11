@@ -86,6 +86,14 @@ ADR 0039 never came into play.
   `Record` FIELD (`Record.TraceContext`), which is why `WithGroup("http")`
   cannot turn them into `http.trace_id`. `trace_flags` is deliberately not
   emitted.
+- **The two keys are RESERVED at the top level** (ADR 0070). An attribute named
+  `trace_id` or `span_id` renders as `attr.trace_id` / `attr.span_id` rather
+  than beside the SDK's field: two members of one JSON object with that name
+  let a decoder keep the caller's value as the line's correlation. It is
+  RENAMED and never dropped, and a grouped key (`http.trace_id`) is untouched.
+  The whole `attr.` namespace goes with them — a key already inside it is
+  prefixed again — because a rename that is not injective just moves the
+  collision one name over.
 - **No span ⇒ nothing emitted.** Not `trace_id=""`, not 32 zeroes. An all-zero
   identifier is invalid under W3C Trace Context §3.2.2.3/§3.2.2.4 and would put
   an unjoinable field on every line logged outside a request.
@@ -141,8 +149,10 @@ ADR 0039 never came into play.
 - Forge SDK errors from consumer code via `errs.Define` — introspect via `pkg/v1/errs` accessors instead.
 - Add `trace_id` / `span_id` yourself with `logger.String(...)`. They are stamped
   automatically from the context, as top-level record fields; a hand-added
-  attribute would be group-prefixed, would cost a second allocation, and would
-  disagree with the automatic one under `WithGroup` (ADR 0062).
+  attribute costs a second allocation and renders under `attr.` at the top level
+  (ADR 0070) or group-prefixed under `WithGroup` — in neither case as the
+  correlation (ADR 0062). To carry somebody else's identifier, name it for what
+  it is: `logger.String("upstream_trace_id", id)`.
 - Import `internal/core/trace` from anywhere else in the logging tree.
   `tracecontext.go` is the only place the two domains meet, on purpose.
 

@@ -17,6 +17,7 @@ go_library(
     ],
     deps = [
         "//internal/kernel/errs",
+        "//internal/kernel/plugin",
         "//internal/kernel/snapshot",
     ],
 )
@@ -36,6 +37,7 @@ go_test(
     srcs = [
         "codes_external_test.go",
         "registry_external_test.go",
+        "registry_guard_external_test.go",
         "registry_internal_test.go",
         "transform_external_test.go",
     ],

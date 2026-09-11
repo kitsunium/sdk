@@ -35,6 +35,7 @@ go_library(
     deps = [
         "//internal/core/metrics",
         "//internal/kernel/errs",
+        "//internal/kernel/plugin",
         "//internal/kernel/snapshot",
     ],
 )
@@ -60,6 +61,7 @@ go_test(
     srcs = [
         "carrier_external_test.go",
         "model_external_test.go",
+        "registry_guard_external_test.go",
         "trace_bench_test.go",
         "trace_state_external_test.go",
         "traceparent_external_test.go",

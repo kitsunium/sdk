@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
@@ -24,11 +25,16 @@ var registry snapshot.Value[map[Scheme]Generator]
 // IFACE-PLUGIN: the registry hands plug-in Generator instances back to callers
 // so each scheme keeps its concrete type unexported; the contract is the
 // Generator interface itself.
+//
+// "Nil" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a
+// plug-in whose type is not comparable both satisfy the port and neither can
+// serve one call (see internal/kernel/plugin).
 func Register(g Generator) Generator {
-	//: nil registration is always a programming error.
-	if g == nil {
+	//: a typed nil and a non-comparable plug-in both satisfy the port and
+	//: neither can serve — refuse at import, where the offender is named.
+	if why := plugin.Unusable(g); why != "" {
 		//: panic so the offender is visible at boot with the dotted-quad code.
-		panic(DuplicateRegistration.Error())
+		panic(DuplicateRegistration.Error() + ": " + why)
 	}
 	//: publish under the scheme name; a conflict turns into a boot-time panic.
 	if err := publishGenerator(g.Scheme(), g); err != nil {

@@ -107,6 +107,12 @@ func wedged(release <-chan struct{}, calls *atomic.Int64) corehealth.Check {
 // The BlockUntil is the whole reason this is deterministic: it proves the
 // timer exists BEFORE the clock is moved, so the advance can never race ahead
 // of the arming and produce a probe that simply never times out.
+//
+// `waits` counts TIMERS, not probes, and a check being measured for the first
+// time arms two: one for the probe waiting on it, and one for the RUN itself,
+// which owns its budget so that it expires even when every caller has left. A
+// probe that JOINS a run whose budget already fired arms only its own, because
+// that run's watcher cancelled and exited at the expiry.
 func probeUnderClock(tb testing.TB, registry corehealth.Health, clk *clock.ManualClock,
 	probe corehealth.Probe, waits int,
 ) corehealth.ReportValue {

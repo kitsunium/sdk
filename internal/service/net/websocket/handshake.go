@@ -5,6 +5,7 @@ import (
 	"bufio"
 	stdnet "net"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 
@@ -194,6 +195,16 @@ func verifyOrigin(w http.ResponseWriter, r *http.Request, cfg *config) error {
 		return refuse(w, http.StatusForbidden, "origin", origin,
 			"the origin is not in the allowlist")
 	}
+	//: a proxy conveyed a scheme this server cannot verify, so the default
+	//: rule would compare host and port alone and accept the downgrade it
+	//: exists to notice. The caller names the origins instead.
+	if forwardedScheme(r) {
+		//: refuse, naming what to configure.
+		return refuse(w, http.StatusForbidden, "origin", origin,
+			"a proxy forwarded this request, so the scheme the browser used is not visible here "+
+				"and the default same-origin rule cannot see a downgrade; "+
+				"use AllowOrigins to name the origins, or AllowAnyOrigin")
+	}
 	//: the default: same origin as the request itself, as far as this server
 	//: can see the request's origin — see sameOrigin for where that stops.
 	if sameOrigin(origin, r) {
@@ -204,6 +215,40 @@ func verifyOrigin(w http.ResponseWriter, r *http.Request, cfg *config) error {
 	return refuse(w, http.StatusForbidden, "origin", origin,
 		"the origin names another host, or plain http on a connection this server encrypted; "+
 			"use AllowOrigins or AllowAnyOrigin to permit it")
+}
+
+// forwardedScheme reports that a proxy in front of this server announced the
+// scheme the browser used, and that this server did not terminate TLS itself —
+// so the announcement is the only source for the scheme, and it is one a client
+// can write.
+//
+// Presence alone is read, never the value: a header a stranger wrote can then
+// only make this check STRICTER, never looser. That is the whole reason it is
+// safe to consult headers here at all. Where TLS ended in this process the
+// scheme is known first-hand and the announcement is irrelevant.
+func forwardedScheme(r *http.Request) bool {
+	//: TLS ended here: the scheme is known, whatever a header claims.
+	if r.TLS != nil {
+		//: nothing forwarded that matters.
+		return false
+	}
+	//: RFC 7239's header and the de-facto one every TLS-terminating proxy
+	//: sets. Headers a FORWARD proxy adds on the client's side (Via,
+	//: X-Forwarded-For) are deliberately not read: they say a request was
+	//: relayed, not that a scheme was translated.
+	for _, name := range []string{"Forwarded", "X-Forwarded-Proto"} {
+		//: PRESENCE, which is not Header.Get: that returns "" both for a header
+		//: nobody sent and for one sent empty, and a proxy that emits an empty
+		//: value is still a proxy. Reading the map directly is the only way to
+		//: tell the two apart, and the canonical key is what net/http stored it
+		//: under.
+		if _, sent := r.Header[textproto.CanonicalMIMEHeaderKey(name)]; sent {
+			//: the scheme is announced rather than observed.
+			return true
+		}
+	}
+	//: no proxy announced a scheme.
+	return false
 }
 
 // sameOrigin reports whether an Origin header names the request's own origin,
