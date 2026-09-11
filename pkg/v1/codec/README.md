@@ -38,7 +38,7 @@ Single blank import \(\`import \_ "github.com/kitsunium/sdk/pkg/v1/codec"\`\) ac
 | cbor         | codec.CBOR        | application/cbor           | .cbor               | yes       | IoT / mobile (RFC 8949) |
 | msgpack      | codec.MsgPack     | application/msgpack        | .msgpack / .mpk     | yes       | RPC payloads |
 | bson         | codec.BSON        | application/bson           | .bson               | —         | MongoDB documents (top level must be a document) |
-| multipart    | codec.Multipart   | multipart/form-data        | —                   | yes       | uploads / form posts (native shape multipart.FormValue) |
+| multipart    | codec.Multipart   | multipart/form-data        | —                   | yes       | uploads / form posts (native shape codec.MultipartForm) |
 | tlv          | codec.TLV         | application/x-tlv          | .tlv                | yes       | custom binary streams, self-describing |
 | flatbuffers  | codec.FlatBuffers | application/x-flatbuffers  | .fbs / .bin         | —         | zero-copy passthrough |
 | base64       | codec.Base64      | application/base64         | .b64 / .base64      | yes       | text-safe wrap (JSON → base-N) |
@@ -133,6 +133,8 @@ Package codec — compressed\-frame verbs \(ADR 0014 D1\). MarshalCompressed and
 
 Package codec — declares the sentinel \*errs.Error values the facade emits when dispatch fails.
 
+Package codec — the multipart/form\-data value types, and the one helper a consumer needs to send what Marshal\(Multipart, …\) returns. The format is a container whose delimiter lives in the Content\-Type header, which the Codec contract cannot carry, so the facade publishes the two shapes the codec speaks natively and the function that recovers that header from the body.
+
 Package codec — JSON\-bridge promotion path for codecs whose runtime preconditions reject the public Marshal\(F, any\) / Unmarshal\(F, \*, any\) contract. Six of the twenty\-three registered codecs constrain their input shape: csv expects \[\]\[\]string, ndjson expects \[\]T, pem expects \*pem.Block, flatbuffers expects \[\]byte or BytesProvider, form expects url.Values, tlv's decoder cannot project composites into typed targets. Without promotion the facade's "format\-swap is a single string change" promise is a lie for 6/23. Promotion intercepts the VALUE\_INVALID / FLATBUFFERS\_BAD\_\* / UNMARSHAL\_FAILED responses, encodes the value to JSON, wraps the bytes in a codec\-specific container the codec will accept, and reverses the pipeline on Unmarshal. The fast \(native\-shape\) path is untouched so existing callers see zero overhead. See TestUniversalRoundtripAllCodecs for the contract pin.
 
 ## Index
@@ -142,6 +144,7 @@ Package codec — JSON\-bridge promotion path for codecs whose runtime precondit
 - [func Marshal\(f Format, v any\) \(encoded \[\]byte, err error\)](<#Marshal>)
 - [func MarshalCompressed\(f Format, algo CompressAlgorithm, v any\) \(box \[\]byte, err error\)](<#MarshalCompressed>)
 - [func MarshalMany\(v any, formats ...Format\) \(encodedByFormat map\[Format\]\[\]byte, err error\)](<#MarshalMany>)
+- [func MultipartContentType\(body \[\]byte\) \(value string, err error\)](<#MultipartContentType>)
 - [func Unmarshal\(f Format, data \[\]byte, v any\) error](<#Unmarshal>)
 - [func UnmarshalCompressed\(box \[\]byte, v any\) error](<#UnmarshalCompressed>)
 - [type Codec](<#Codec>)
@@ -154,6 +157,8 @@ Package codec — JSON\-bridge promotion path for codecs whose runtime precondit
   - [func Available\(\) \[\]Format](<#Available>)
   - [func FromExtension\(ext string\) \(f Format, ok bool\)](<#FromExtension>)
   - [func FromMIME\(mime string\) \(f Format, ok bool\)](<#FromMIME>)
+- [type MultipartForm](<#MultipartForm>)
+- [type MultipartPart](<#MultipartPart>)
 
 
 ## Constants
@@ -252,6 +257,17 @@ out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
 // out[codec.JSON], out[codec.CBOR], out[codec.MsgPack] all populated
 // when err == nil.
 ```
+
+<a name="MultipartContentType"></a>
+## func [MultipartContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L40>)
+
+```go
+func MultipartContentType(body []byte) (value string, err error)
+```
+
+MultipartContentType returns the Content\-Type header value — "multipart/form\-data; boundary=…", quoted when the boundary needs it — for a body Marshal\(Multipart, …\) returned. Send it alongside the bytes: the boundary is announced in that header, and since the Codec contract has nowhere to hand one back, it is read off the body's first delimiter line. A body with no recoverable delimiter is refused with the codec's BOUNDARY\_INVALID.
+
+A caller streaming through NewEncoder\(Multipart, w\) must set the header before the first byte instead: the Encoder returned has a Boundary\(\) string method, and mime.FormatMediaType builds the same value from it.
 
 <a name="Unmarshal"></a>
 ## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L284>)
@@ -407,11 +423,11 @@ const (
     // document — struct or map — not a scalar). ADR 0021.
     BSON Format = "bson"
     // Multipart denotes RFC 7578 multipart/form-data. Its native Go shape is
-    // a multipart.FormValue; any other value travels as a single
-    // JSON-mediated part. The RFC 2046 boundary lives in the Content-Type
-    // header, which the Codec contract cannot carry — the codec re-emits it
-    // in the body, and multipart.ContentType recovers the header value from
-    // the bytes Marshal returned.
+    // a [MultipartForm] of [MultipartPart] sections; any other value travels
+    // as a single JSON-mediated part. The RFC 2046 boundary lives in the
+    // Content-Type header, which the Codec contract cannot carry — the codec
+    // re-emits it in the body, and [MultipartContentType] recovers the header
+    // value from the bytes Marshal returned.
     Multipart Format = "multipart"
 )
 ```
@@ -442,5 +458,25 @@ func FromMIME(mime string) (f Format, ok bool)
 ```
 
 FromMIME resolves a MIME string to its registered Format.
+
+<a name="MultipartForm"></a>
+## type [MultipartForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L16>)
+
+MultipartForm is the native Go shape of the [Multipart](<#JSON>) format: a whole multipart/form\-data body — its RFC 2046 boundary and its parts, in wire order. Marshal one to build an upload; Unmarshal into a \*MultipartForm to read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal always fills it with the one it recovered, so a decode → encode round trip reproduces the original framing byte for byte.
+
+```go
+type MultipartForm = svcmultipart.FormValue
+```
+
+<a name="MultipartPart"></a>
+## type [MultipartPart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L27>)
+
+MultipartPart is one section of a [MultipartForm](<#MultipartForm>): a named field, optionally a filename and a media type, and the bytes themselves — a file upload is a part with FileName and ContentType set. Marshal also accepts a single MultipartPart or a \[\]MultipartPart.
+
+Name is required. Name, FileName and ContentType are written into the part's header block, so a CR, an LF or a NUL in any of them is refused — never escaped — with the codec's VALUE\_INVALID naming the field. A UTF\-8 filename is written as\-is \(RFC 7578 §4.2\).
+
+```go
+type MultipartPart = svcmultipart.PartValue
+```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)
