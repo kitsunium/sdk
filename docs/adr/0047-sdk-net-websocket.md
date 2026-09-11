@@ -1,6 +1,8 @@
 # ADR 0047 — WebSocket (RFC 6455), server side, in the stdlib
 
-- **Status**: Accepted
+- **Status**: Accepted — **§D7 and §D8 amended 2026-09-11** (what the default
+  origin rule can see of the scheme; "frames" means frames the handler has
+  read). The original text of both is preserved; each amendment follows it.
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
 - **Extends**: [ADR 0029](0029-sdk-net-domain.md) — the network domain gains a
@@ -146,6 +148,28 @@ CLI, a service or a Go client has no ambient credential to abuse. The opaque
 `AllowOrigins(…)` replaces the rule; `AllowAnyOrigin()` removes it, by a name a
 reviewer can grep for.
 
+> **Amendment (2026-09-11) — what the default can see of the scheme.** The
+> paragraph above promised a comparison the code did not make: the default
+> compared the host alone, nothing in the package read `r.TLS`, and a script on
+> `http://host` could open `wss://host`, pass the default, and carry the user's
+> cookies. The default now compares the scheme where the server can OBSERVE it:
+> when TLS ends in this process — `r.TLS` is non-nil, which `net/http` sets only
+> for a connection it received as a `*tls.Conn`, and the engine hands it exactly
+> that — the Origin must be `https`. Where the server cannot observe it, the
+> scheme is not compared. Behind a TLS-terminating proxy the request arrives in
+> plaintext whatever the browser used, so demanding that the Origin's scheme
+> EQUAL the request's would refuse every browser behind every proxy, and
+> `X-Forwarded-Proto` is not trusted, because where no proxy overwrites it the
+> client wrote it. That leaves a stated gap — behind such a proxy an `http://`
+> page for the same host is accepted — and `AllowOrigins(…)`, which names the
+> scheme outright, is what closes it. The converse is a refusal, not a hole: a
+> proxy that re-encrypts to this server makes `r.TLS` non-nil even for browsers
+> that reached it over plain http, and such a deployment must name its
+> `http://` origin in `AllowOrigins(…)`.
+> `TestDefaultOriginRuleComparesTheSchemeWhereTLSEndsHere` pins the truth table
+> and is mutation-checked: restoring the host-only rule fails exactly its
+> TLS-plus-`http://` row.
+
 ### D8 — the heartbeat counts frames, not pongs, and it is the only liveness check
 
 A peer that vanishes without closing leaves a socket that is perfectly readable
@@ -158,6 +182,44 @@ answer.
 Per ADR 0031, a zero interval is clamped rather than meaning "never" —
 "never" is `WithoutPing()`, and that option's doc comment says that it disables
 the connection's only liveness check.
+
+> **Amendment (2026-09-11) — "frames" means frames the handler has READ.** The
+> count the heartbeat watches moves inside `Receive` and nowhere else, so a
+> frame the peer sent on time but that still sits in the socket buffer has not
+> been counted. That was left implicit, and it turned a shape the documentation
+> presented as normal — a handler that pushes and never calls `Receive` — into
+> a connection ended about 60 s in at the default interval, with the peer's
+> Pong waiting unread behind it.
+>
+> The count stays where it is. What changes is that a reading goroutine is now
+> a CONTRACT, stated where a caller reads it — on `Conn`, `Receive`, `Done` and
+> `PingInterval`, and in the façade's package documentation with the
+> push-handler shape spelled out: **every connection needs exactly one goroutine
+> looping on `Receive` for its whole life**, a push-only handler included,
+> discarding what it reads if it expects nothing. Why a contract and not a
+> mechanism:
+>
+> - that loop is also where the peer's Ping is answered (RFC 6455 §5.5.2) and
+>   its Close replied to (§5.5.1). A connection nobody reads was never a
+>   conforming endpoint; the heartbeat ending it is the audible form of a
+>   failure that was already there, and a quieter liveness rule would only have
+>   hidden it;
+> - a reader started inside `Conn` is refused. It would have to own the
+>   reassembly buffer, so either every message is copied out — an allocation per
+>   message where `TestSteadyStateReceiveAllocatesNothing` gates zero, and the
+>   end of "valid until the next `Receive`" — or the reader stops at the first
+>   message the handler has not taken, which is exactly where the Pong queued
+>   behind it stops being read;
+> - liveness by matched Pongs is refused too. It reverses the reason this
+>   section exists — a chatty peer could be probed to death — and it repairs
+>   nothing, because a Pong has to be read before it can be matched.
+>
+> The algorithm is unchanged. `TestHeartbeatEndsAConnectionNobodyReads` pins
+> the limit as a limit — a handler that never reads is ended inside [2, 3)
+> intervals, with a peer that answered every Ping — so that moving it is a
+> decision rather than a side effect, and
+> `TestHeartbeatKeepsAPushConnectionWhileItsReaderRuns` pins the other half: a
+> push handler whose reader runs outlives every probe its peer answers.
 
 ### D9 — a hijacked connection is the handler's, and the engine was closing it
 

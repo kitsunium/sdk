@@ -26,7 +26,9 @@ import (
 //	kty=EC,  crv=P-256     -> ES256
 //	kty=OKP, crv=Ed25519   -> EdDSA
 //
-// Every other key — RSA, P-384, P-521 — is refused with KeyUnsuitable. The SDK
+// P-384 and P-521 are represented by the jwk package and refused HERE with
+// KeyUnsuitable. RSA never gets this far: jwk.Parse refuses it first, as
+// UNSUPPORTED_KEY_TYPE, because the SDK models no RSA scheme at all. The SDK
 // signs with none of them, and a verifier that pretends otherwise would promise
 // an interop the crypto domain cannot honour.
 //
@@ -120,8 +122,9 @@ type setVerifier struct {
 // A member the SDK verifies nothing with is INDEXED ANYWAY, as an unusable
 // entry. Dropping it would silently widen MaxKeyCandidates: the bound counts
 // the keys published under one kid, so a set whose kid names six keys — three
-// of them RSA — must still be refused as ambiguous rather than quietly
-// resolved down to three. The per-token loop skips an unusable entry exactly
+// of them P-384 — must still be refused as ambiguous rather than quietly
+// resolved down to three. (Not RSA: a set carrying an RSA member never exists,
+// because jwk.ParseSet refuses the whole document.) The per-token loop skips an unusable entry exactly
 // as it used to skip a bind failure.
 func indexByKid(set jwk.Set) map[string][]boundKeyValue {
 	index := make(map[string][]boundKeyValue)
@@ -227,7 +230,8 @@ func bindJWK(key jwk.KeyValue) (binding verifyingKey, err error) {
 	case key.Kty() == jwk.TypeOKP && key.Crv() == jwk.CurveEd25519:
 		//: bound to EdDSA.
 		return bindOKPJWK(key)
-	//: RSA, P-384, P-521 and anything else: representable, not verifiable.
+	//: P-384, P-521 and any other curve jwk represents: representable, not
+	//: verifiable. RSA never reaches this switch — jwk.Parse refuses it.
 	default:
 		//: refuse rather than promise an interop the SDK cannot honour.
 		return nil, keyUnsuitable("no token algorithm for this kty/crv")

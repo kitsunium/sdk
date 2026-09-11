@@ -247,7 +247,15 @@ covers is not a perimeter:
 - **Supporting RSA (`RS256`/`PS256`).** Rejected for now: the SDK registers no
   RSA signer (ADR 0014 §Out of scope), and adding one for JWT alone would put a
   primitive in the crypto domain that nothing else uses. The consequence is
-  stated where it bites — an RSA JWK is refused with `KeyUnsuitable`.
+  stated where it bites — an RSA JWK is refused at PARSE time with
+  `UNSUPPORTED_KEY_TYPE` (0.3.42.3), because `service/crypto/jwk` does not model
+  RSA at all, so it never reaches a verifier. *(Corrected 2026-09-11: this line
+  said the refusal was `KeyUnsuitable`, which is what P-384 and P-521 get at bind
+  time; RSA is stopped one step earlier.)* It bites harder than a single key: a
+  JWK Set is parsed whole or refused whole, so a published set carrying ONE RSA
+  member — the common shape for large identity providers — is refused entirely,
+  and loading its usable members means splitting the document and calling
+  `ParseJWK` per member.
 - **P-384 / P-521 (`ES384`/`ES512`).** Rejected: `service/crypto/jwk` can
   represent them because a published JWK Set routinely carries them, but the SDK
   signs with neither, and a verifier that pretended otherwise would promise

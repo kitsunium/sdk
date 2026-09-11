@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-10T00:00:00Z -->
+<!-- updated: 2026-09-11T00:00:00Z -->
 # internal/service/net/websocket/
 
 ## Purpose
@@ -103,13 +103,21 @@ Two consequences are deliberate and documented:
 - **Control frames are exempt from the caller's frame ceiling.** §5.5 already
   caps them at 125 bytes; applying a smaller user bound on top would make `Ping`
   unanswerable to enforce a limit that was never about control frames.
-- **The heartbeat is the only liveness check, and it counts FRAMES, not
-  pongs.** A peer that vanishes without closing leaves a socket that is
-  perfectly readable and simply never produces another byte — no error, no close
-  frame, nothing. The heartbeat sends a Ping and, one interval later, ends the
-  connection if not a single frame has arrived since. Counting any frame rather
-  than a matching Pong means a chatty peer is never probed to death, and a
-  silent one is obliged to answer.
+- **The heartbeat is the only liveness check, and it counts frames the handler
+  has READ — not pongs, and not frames that merely arrived.** A peer that
+  vanishes without closing leaves a socket that is perfectly readable and simply
+  never produces another byte — no error, no close frame, nothing. The heartbeat
+  sends a Ping and, one interval later, ends the connection if not a single
+  frame has been read since. Counting any frame rather than a matching Pong
+  means a chatty peer is never probed to death, and a silent one is obliged to
+  answer. Counting frames READ is the price: `rx` moves only inside `Receive`,
+  so a handler that stops reading looks exactly like a vanished peer — the
+  peer's Pong waits unread in the socket buffer, and the connection is ended
+  within two intervals (≈60 s at the default) however healthy the peer is.
+  Hence the reader contract in §Concurrency and ADR 0047 §D8's 2026-09-11
+  amendment. `TestHeartbeatEndsAConnectionNobodyReads` pins that limit, as a
+  limit; `TestHeartbeatKeepsAPushConnectionWhileItsReaderRuns` pins the other
+  half.
 - **A zero ping interval is clamped; a negative one is refused** (ADR 0031).
   "Never" has its own spelling, `WithoutPing()`, and it disables liveness
   detection entirely — which is stated on the option rather than discovered.
@@ -120,6 +128,24 @@ Two consequences are deliberate and documented:
   default-on switch. A request with NO `Origin` is allowed — a CLI, a service, a
   Go client — because there is no ambient credential to abuse. The opaque
   `null` origin is refused, since it is equal to nothing including itself.
+- **The default origin rule compares the scheme only where it can see it.**
+  Host and port are always compared. When TLS ends in this process — `r.TLS`
+  is non-nil, which net/http guarantees only for a connection it received as a
+  `*tls.Conn`, and the engine hands it exactly that — the Origin must also be
+  `https`, because an `http://` page for the same host is the downgrade the
+  check exists to notice. When the request arrives in plaintext, as it does
+  behind a TLS-terminating proxy, the scheme is invisible and is NOT compared,
+  so an `http://` page for the same host is accepted there: **that gap is
+  real, and `AllowOrigins` is what closes it**, since it names the scheme.
+  Requiring the Origin's scheme to EQUAL the request's would have answered 403
+  to every browser behind every proxy; `X-Forwarded-Proto` is not consulted,
+  because where no proxy overwrites it the client wrote it. The flip side: a
+  proxy that re-encrypts to this server makes `r.TLS` non-nil even when
+  browsers reach it over plain http, and such a deployment is refused until
+  `AllowOrigins` names its `http://` origin. The truth table is
+  `TestDefaultOriginRuleComparesTheSchemeWhereTLSEndsHere`, mutation-checked.
+  Before 2026-09-11 the default compared the host alone, while ADR 0047 §D7
+  promised it compared the scheme too.
 - **The server's subprotocol preference decides.** A client advertises what it
   can speak; choosing among those is the server's call, or a client that listed
   a deprecated dialect first could pin the server to it forever. No overlap is
@@ -180,15 +206,36 @@ goroutine while the handler writes from another, and a handler fanning messages
 in from several producers is the normal shape. Two interleaved frames are not
 two messages, they are one corrupt stream.
 
-Reads are single-goroutine by contract: the protocol is one ordered frame
-stream, so two concurrent `Receive` calls would each take half of a message.
-There is no lock that would make that correct, so there is none.
+**Exactly one goroutine loops on `Receive` for the connection's whole life —
+not two, and not zero.** This is a contract a caller must meet, and it is
+stated on `Conn`, `Receive`, `Done` and `PingInterval`, and in the façade's
+package documentation, because that is where a caller reads.
 
-Two goroutines per connection, both owned by the `Conn` and both joined by
-`Close`:
+- **Not two:** the protocol is one ordered frame stream, so two concurrent
+  `Receive` calls would each take half of a message. There is no lock that
+  would make that correct, so there is none.
+- **Not zero:** `Receive` is where the peer's Ping is answered (§5.5.2), where
+  its Close is replied to (§5.5.1), and the only place `rx` moves. A connection
+  nobody reads answers no Ping, completes no closing handshake, and is ended by
+  the heartbeat within two intervals with a live peer on the other end. A
+  handler that only pushes therefore still runs the loop, in a goroutine of its
+  own, discarding what it reads.
+
+A reader inside `Conn` was considered and refused. It would have to own the
+reassembly buffer, so either every message is copied out — an allocation per
+message, where `TestSteadyStateReceiveAllocatesNothing` gates zero — or the
+reader stops at the first message the handler has not taken, which is exactly
+where the Pong behind it stops being read. Basing liveness on matched Pongs
+instead was refused too: it reverses §D8, and a Pong still has to be READ to be
+matched.
+
+Two goroutines per connection are the `Conn`'s own, both joined by `Close`:
 
 - the **watcher**, which turns the drain signal into a closing handshake;
 - the **heartbeat**, which is not started at all when it is disabled.
+
+The reading goroutine above is the CALLER's, and needs no joining: once the
+connection ends — `Close` included — its `Receive` returns the terminal error.
 
 `terminate()` (end + close the socket) is separate from `Close()` (terminate,
 then join) on purpose: the heartbeat and the watcher call `terminate` when their
@@ -282,7 +329,17 @@ was entertained.
 - Allocate from a frame's announced length before the ceiling has been checked
   against it.
 - Retain a `Receive` result past the next `Receive` without copying it.
-- Call `Receive` from two goroutines.
+- Call `Receive` from two goroutines — or from none. A connection nobody reads
+  is ended by the heartbeat within two intervals; see §Concurrency.
+- "Fix" that by starting a reader inside `Conn`, or by basing liveness on
+  matched Pongs. The first breaks `Receive`'s aliasing and its zero-allocation
+  read; the second reverses ADR 0047 §D8 and still needs a reader to see the
+  Pong.
+- Make the default origin rule demand that the Origin's scheme equal the
+  REQUEST's, or trust `X-Forwarded-Proto` to decide it. The first refuses every
+  browser behind a TLS-terminating proxy; the second believes a header the
+  client wrote wherever no proxy overwrites it. The gap they would close is
+  `AllowOrigins`'s to close.
 - Add permessage-deflate without the ADR that decides it. See above.
 - Write anything to stdout (ADR 0030). The only output is the connection.
 - Make a refusal cheaper by making it conditional, by moving a check off the
@@ -301,7 +358,7 @@ bazel test --config=race //internal/service/net/websocket:websocket_test
 
 # Fallback (go test — quick local iteration)
 cd internal/service && GOWORK=off go test -race -cover ./net/websocket/...
-# expected: coverage ~93%
+# expected: coverage ~94%
 
 # The allocation guards. They carry //go:build !race, so the race suite above
 # does NOT compile them and this is their only lane (rule 12):

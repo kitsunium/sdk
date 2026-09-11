@@ -25,6 +25,11 @@ const crlf string = "\r\n"
 // no other — so it can never satisfy a same-origin rule.
 const nullOrigin string = "null"
 
+// httpsScheme is the only scheme an Origin may carry when this server
+// terminated the request's TLS itself: the browser demonstrably connected over
+// https, so a page it loaded over plain http is a different origin.
+const httpsScheme string = "https"
+
 // Upgrade completes the RFC 6455 opening handshake and returns the connection.
 //
 // On failure it has already written an HTTP response — a 426 carrying the
@@ -189,18 +194,34 @@ func verifyOrigin(w http.ResponseWriter, r *http.Request, cfg *config) error {
 		return refuse(w, http.StatusForbidden, "origin", origin,
 			"the origin is not in the allowlist")
 	}
-	//: the default: same origin as the request itself.
-	if sameOrigin(origin, r.Host) {
+	//: the default: same origin as the request itself, as far as this server
+	//: can see the request's origin — see sameOrigin for where that stops.
+	if sameOrigin(origin, r) {
 		//: allowed.
 		return nil
 	}
 	//: refuse.
 	return refuse(w, http.StatusForbidden, "origin", origin,
-		"the origin does not match the request host; use AllowOrigins or AllowAnyOrigin to permit it")
+		"the origin names another host, or plain http on a connection this server encrypted; "+
+			"use AllowOrigins or AllowAnyOrigin to permit it")
 }
 
-// sameOrigin reports whether an Origin header names the request's own host.
-func sameOrigin(origin, host string) bool {
+// sameOrigin reports whether an Origin header names the request's own origin,
+// as far as this server can see it.
+//
+// The host and port are always compared. The scheme is compared only when this
+// server terminated TLS itself, because only then does it KNOW the browser used
+// https — and a page loaded over plain http for the same host is exactly the
+// downgrade an origin check exists to notice: anyone who can inject into that
+// page gets an encrypted socket carrying the user's cookies.
+//
+// Behind a TLS-terminating proxy the request arrives in plaintext whatever the
+// browser used, so the scheme is invisible here and is NOT compared: requiring
+// the Origin's scheme to equal the request's would refuse every browser behind
+// every proxy. [AllowOrigins] is what closes that gap, since it names the
+// scheme outright. X-Forwarded-Proto is deliberately not consulted — where no
+// proxy overwrites it, the client wrote it.
+func sameOrigin(origin string, r *http.Request) bool {
 	//: an opaque origin is equal to nothing, including itself.
 	if strings.EqualFold(origin, nullOrigin) {
 		//: never same-origin.
@@ -213,8 +234,24 @@ func sameOrigin(origin, host string) bool {
 		return false
 	}
 	//: host and port together; DNS is case-insensitive, ports are not, but a
-	//: port is digits either way so one fold comparison covers both.
-	return strings.EqualFold(parsed.Host, host)
+	//: port is digits either way so one fold comparison covers both. The
+	//: scheme is a separate question with a separate answer.
+	return strings.EqualFold(parsed.Host, r.Host) && schemeConsistent(parsed.Scheme, r)
+}
+
+// schemeConsistent reports whether an Origin's scheme agrees with what this
+// server can see of the scheme the browser used.
+func schemeConsistent(scheme string, r *http.Request) bool {
+	//: net/http populates r.TLS only on a connection it received as a
+	//: *tls.Conn, i.e. when TLS ended in THIS process. Without it the request
+	//: may still have been https up to a proxy, and nothing here can tell.
+	if r.TLS == nil {
+		//: invisible, so not compared — AllowOrigins is what names it.
+		return true
+	}
+	//: the browser demonstrably used https; the same host over another scheme
+	//: is another origin. Schemes are case-insensitive (RFC 3986 §3.1).
+	return strings.EqualFold(scheme, httpsScheme)
 }
 
 // slicesContainsFold reports whether list holds want, case-insensitively.

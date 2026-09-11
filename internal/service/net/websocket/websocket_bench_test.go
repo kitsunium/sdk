@@ -798,8 +798,11 @@ func benchEchoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	//: the socket is the handler's from here, so the handler closes it. The
-	//: closure is not decoration: a deferred CALL would evaluate Close at the
-	//: defer statement and end the connection before the first frame.
+	//: closure is not decoration. `defer swallowErr(conn.Close())` would pass
+	//: Close as an ARGUMENT, and a defer evaluates its arguments at the defer
+	//: statement — ending the connection before the first frame. The closure
+	//: defers the Close itself. (`defer conn.Close()` would be correct, and
+	//: would drop the error; that form is the one this comment is not about.)
 	defer func() { swallowErr(conn.Close()) }()
 	//: echo until the peer or the benchmark ends the connection.
 	for {

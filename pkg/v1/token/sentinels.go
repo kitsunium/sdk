@@ -1,13 +1,17 @@
-// Package token — the typed verdicts an issuer or a verifier returns.
+// Package token — the typed verdicts an issuer, a verifier or a key loader
+// returns.
 //
 // Match them with errs.HasCode (the codes are re-exported in codes.go) or
 // errs.HasReason. Their Public halves name WHICH check refused a token and
 // never echo a value out of it — not an audience, not an issuer, not a key id,
-// not a claim.
+// not a claim. The JWK* verdicts are the key loaders' — ParseJWK and
+// ParseJWKSet — and hold a key document to the same rule: they name the rule a
+// member broke, never the member's value.
 package token
 
 import (
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
+	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
 	svctoken "github.com/kitsunium/sdk/internal/service/token"
 )
 
@@ -80,4 +84,25 @@ var (
 	// DuplicateMember is returned when a header or claims object repeats a
 	// member name (RFC 8725 §2.6).
 	DuplicateMember = svctoken.DuplicateMember
+
+	// JWKMalformed is returned by ParseJWK / ParseJWKSet for a document that is
+	// not the JSON shape RFC 7517 describes — invalid JSON, a key that is not an
+	// object, or a set whose "keys" is not an array.
+	JWKMalformed = jwk.Malformed
+	// JWKMissingMember is returned for a key missing a member its declared type
+	// requires ("kty", "crv", "x", "y" or "k"), or a set missing "keys".
+	JWKMissingMember = jwk.MissingMember
+	// JWKUnsupportedKeyType is returned for a "kty" other than EC, OKP or oct.
+	// RSA is refused here on purpose: the SDK verifies nothing with RSA.
+	JWKUnsupportedKeyType = jwk.UnsupportedKeyType
+	// JWKUnsupportedCurve is returned for an unknown "crv", or a known one
+	// paired with the wrong "kty" (P-256 under OKP, Ed25519 under EC).
+	JWKUnsupportedCurve = jwk.UnsupportedCurve
+	// JWKInvalidEncoding is returned for a member that is not unpadded
+	// base64url, or not the fixed length its curve mandates.
+	JWKInvalidEncoding = jwk.InvalidEncoding
+	// JWKKeyMismatch is returned for well-encoded material that is not a key on
+	// the declared curve: an off-curve point, an out-of-range scalar, or a "d"
+	// that does not derive the declared public key.
+	JWKKeyMismatch = jwk.KeyMismatch
 )

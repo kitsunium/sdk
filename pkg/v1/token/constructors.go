@@ -1,6 +1,7 @@
 // Package token — the constructor set, one per algorithm, plus the JWK
-// bridges. Each constructor accepts only the Go key type its algorithm can
-// use, which is what makes algorithm confusion a call that does not compile.
+// loaders and bridges. Each constructor accepts only the Go key type its
+// algorithm can use, which is what makes algorithm confusion a call that does
+// not compile.
 package token
 
 import (
@@ -17,10 +18,22 @@ import (
 // pkg/v1/crypto.NewKey, or derive one with pkg/v1/kdf; never type one.
 type Key = corecrypto.Key
 
-// JWK is the public alias for a parsed JSON Web Key.
+// JWK is the public alias for a parsed JSON Web Key (RFC 7517). Obtain one
+// from [ParseJWK]: the type has no exported field and deliberately no
+// UnmarshalJSON, so json.Unmarshal decodes nothing into a JWK — and reports no
+// error. A JWK field in a configuration struct therefore stays the zero JWK,
+// which [NewVerifierFromJWK] refuses with [KeyUnsuitable]; decode that field
+// as a json.RawMessage and hand it to ParseJWK instead.
+//
+// json.Marshal renders a JWK's public members only. A symmetric ("oct") key
+// has no public form — its "k" member is the secret itself — so json.Marshal
+// refuses it rather than publish it; private members leave only through the
+// key's MarshalPrivate method, which says so at the call site.
 type JWK = jwk.KeyValue
 
-// JWKSet is the public alias for a parsed JSON Web Key Set.
+// JWKSet is the public alias for a parsed JSON Web Key Set (RFC 7517 §5).
+// Obtain one from [ParseJWKSet], or assemble one from parsed keys with
+// [NewJWKSet].
 type JWKSet = jwk.Set
 
 // NewHS256Issuer returns a JWT issuer signing with HMAC-SHA-256 under secret.
@@ -81,9 +94,64 @@ func NewPasetoV4Verifier(pub ed25519.PublicKey, cfg PasetoVerifierConfig) (verif
 	return svctoken.NewPasetoV4Verifier(pub, cfg)
 }
 
+// ParseJWK decodes one JSON Web Key document (RFC 7517 §4) into the [JWK] that
+// [NewVerifierFromJWK] and [NewJWKSet] take. Fetching the document is the
+// application's job: this package performs no I/O, so the bytes come from
+// wherever the application already trusts — a configuration file, or a key
+// endpoint it queried itself.
+//
+// It is the only way to turn bytes into a JWK, and it validates before it
+// returns one: every member the key type requires present, every member
+// unpadded base64url (RFC 7515 §2), coordinates at the curve's fixed length,
+// the point on the declared curve, and — when a private "d" is present — the
+// scalar deriving exactly the declared public key. Members it does not model
+// are ignored (RFC 7517 §4).
+//
+// A refusal returns the zero JWK and an error carrying one of
+// [CodeJWKMalformed], [CodeJWKMissingMember], [CodeJWKUnsupportedKeyType],
+// [CodeJWKUnsupportedCurve], [CodeJWKInvalidEncoding] or [CodeJWKKeyMismatch];
+// its message names the rule that failed and never a member's value. An RSA
+// key is refused here, with [CodeJWKUnsupportedKeyType], because the SDK
+// verifies nothing with RSA.
+func ParseJWK(document []byte) (key JWK, err error) {
+	//: delegate to the single validating entry point.
+	return jwk.Parse(document)
+}
+
+// ParseJWKSet decodes a JSON Web Key Set document (RFC 7517 §5) — typically the
+// body an issuer serves at its jwks_uri, fetched by the application — into the
+// [JWKSet] that [NewSetVerifier] takes.
+//
+// Every member is validated exactly as [ParseJWK] validates one, and the set is
+// accepted whole or not at all: one refused member refuses the document, with
+// that member's own CodeJWK* code and its index attached, rather than yielding
+// a set that silently holds fewer keys than were published. A set carrying an
+// RSA member is therefore refused, with [CodeJWKUnsupportedKeyType].
+//
+// The "keys" member is required — absent or null is refused with
+// [CodeJWKMissingMember] — while an empty array is a valid empty set, which
+// [NewSetVerifier] then refuses because it could never verify anything.
+func ParseJWKSet(document []byte) (set JWKSet, err error) {
+	//: delegate to the set decoder, which runs every member through the same
+	//: validating entry point as ParseJWK.
+	return jwk.ParseSet(document)
+}
+
+// NewJWKSet assembles a [JWKSet] from keys already parsed, in the given order —
+// the order in which [NewSetVerifier] tries candidates sharing a "kid". It
+// validates nothing further: the material of every non-zero JWK already passed
+// [ParseJWK], and a zero JWK in a set can never verify a token.
+func NewJWKSet(keys ...JWK) JWKSet {
+	//: delegate; the set copies the slice, so a later edit of the caller's
+	//: slice cannot reach it.
+	return jwk.NewSet(keys...)
+}
+
 // NewVerifierFromJWK returns a JWT verifier bound to the algorithm key's own
 // kty/crv imply: oct to HS256, EC P-256 to ES256, OKP Ed25519 to EdDSA. Every
-// other key — RSA, P-384, P-521 — is refused with [KeyUnsuitable].
+// other key the SDK can represent — P-384, P-521 — is refused with
+// [KeyUnsuitable]; an RSA key never gets this far, because [ParseJWK] refuses
+// it with [CodeJWKUnsupportedKeyType].
 //
 // The key's advisory members are enforced: a "use" other than "sig", a
 // "key_ops" without "verify", or an "alg" contradicting the key type all refuse

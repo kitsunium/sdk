@@ -31,7 +31,18 @@ type NetConfig struct {
 	// allowlist for consumer-controlled URLs. Nil falls back to a
 	// timeout-bounded client that refuses redirects (CheckRedirect returns
 	// http.ErrUseLastResponse), NOT http.DefaultClient — so a redirect cannot
-	// bypass the validated target.
+	// bypass the validated target — on a connection pool of its own cloned from
+	// http.DefaultTransport, proxy environment included, which the sink's Close
+	// releases.
+	//
+	// A supplied client is used AS-IS, Transport included, and its pool is the
+	// caller's: the sink's Close leaves it alone, so a caller that built one for
+	// this writer alone releases it with CloseIdleConnections after closing the
+	// writer. One whose Transport is http.DefaultTransport (a nil Transport is)
+	// shares that pool with the whole process, and anything that empties it —
+	// every httptest.Server.Close, every http.DefaultClient.CloseIdleConnections
+	// — can make a delivered record read as a failed write, which a failover or
+	// retry then duplicates. Give such a client a Transport of its own.
 	HTTPClient *http.Client
 	// MinLevel is the optional per-writer severity floor; the zero value
 	// (level.Info) inherits the handler-global level.

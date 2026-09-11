@@ -41,7 +41,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 
 ## Conventions
 
-- **Imports allowed**: stdlib + `internal/kernel/*` + `internal/core/*` + third-party libraries that codec wrappers delegate to (e.g. `github.com/fxamacker/cbor/v2`, `gopkg.in/yaml.v3`). Never `pkg/*`.
+- **Imports allowed**: stdlib + `internal/kernel/*` + `internal/core/*` + **other `internal/service/*` packages** + third-party libraries that codec wrappers delegate to (e.g. `github.com/fxamacker/cbor/v2`, `gopkg.in/yaml.v3`). Never `pkg/*`. A service package composing a sibling is permitted by the `service_consumers` group in `internal/service/BUILD.bazel`, which lists `//internal/service/...`, and several domains are built on it by decision rather than by accident — `queue` composes `service/vfs` for its atomic, durable writes (ADR 0054 §D7), `token` composes `service/crypto/jwk`, `lifecycle` delegates signals and `sd_notify` to `service/proc`. This line used to omit the sibling case, and an automated review read the omission as a layer rule.
 - **Concurrent safety**: every public type honours the "safe for concurrent use" contract inherited from the core interface it implements. Codec singletons are stateless; logger handlers serialise writes via `sync.Mutex` or async ring buffer.
 - **Error wrapping**: `errs.Wrap(cause, WrapParams{…})` when the cause is a stdlib / third-party error; the `errs.WrapParams` fields are SILENTLY IGNORED when the cause is already an `*errs.Error` (origin wins). See `internal/kernel/errs/README.md`.
 - **Codec registration**: each codec exports `var Codec codec.Codec = codec.Register(&xxxCodec{})` at package load — no `init()`. Blank-importing the package is enough to make it resolvable by Name / MIME / Extension.

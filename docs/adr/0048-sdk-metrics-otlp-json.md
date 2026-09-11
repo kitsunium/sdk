@@ -196,6 +196,33 @@ other one in this tree (`writer/nettransport`), not like a library call.
   not capped: its size is a property of the caller's own cardinality, any
   SDK-chosen ceiling would be arbitrary (ADR 0031 §refuse), and the collector
   already answers `413` for one it will not take.
+- **Its own connection pool.** *(Amended 2026-09-11.)* The default client
+  used to carry no `Transport` of its own, so it rode the process-wide
+  `http.DefaultTransport` — and therefore any other code in the process that
+  called `CloseIdleConnections` on it. For a response with no body, `net/http`
+  returns the connection to the idle pool BEFORE handing the response to the
+  caller; a `CloseIdleConnections` landing in that window turns an answer that
+  had already ARRIVED into a transport fault, `OTLP_EXPORT_UNAVAILABLE`. That is
+  not a cosmetic misreport: a `200` becomes retryable, so a caller's retry
+  replays points the collector had already accepted and **double-counts a
+  delta window**; a `429` loses its `Retry-After`; a `413` becomes retryable.
+  It surfaced as a test that failed a few times in hundreds, because every
+  parallel test's `httptest.Server.Close()` empties the process pool. The
+  default client now owns a clone of `http.DefaultTransport` (a fresh transport
+  with `ProxyFromEnvironment` if the default was replaced by a foreign
+  `RoundTripper`), with `CheckRedirect` and `Timeout` unchanged. A
+  caller-supplied client is still used as-is — including its transport, so one
+  that shares the process pool keeps this exposure, and giving it a `Transport`
+  of its own is how a caller closes it. Each exporter owns a pool; one exporter
+  per collector is the intended shape.
+- **The drain is bounded too.** *(Amended 2026-09-11.)* After the verdict the
+  body is drained so the connection can be reused, and that drain was the one
+  read here with no limit — so a collector streaming an endless body held a
+  caller-supplied, deadline-free client forever. It reads through the same
+  `io.LimitReader` now. Worth knowing when reading the tests: Go 1.27's own
+  transport already drains up to 256 KiB after an early close, so the SDK drain
+  only decides reuse for a response larger than that, or for a round-tripper
+  that is not an `*http.Transport`.
 - **No redirects.** The default client returns `http.ErrUseLastResponse`
   (CWE-918). A `30x` from anything in front of the collector would otherwise
   bounce the POST — `Authorization` header included — at whatever host the

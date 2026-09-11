@@ -1,13 +1,19 @@
 package nettransport
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -16,6 +22,27 @@ import (
 // to it is refused — the deterministic signal that net.Dial ran (the nil-dialer
 // fallback branch) on a host where loopback connect is otherwise blocked.
 const closedLoopbackAddr = "127.0.0.1:1"
+
+// endlessBodyBudget is how long a send to a collector that never stops sending
+// may take before the test stops waiting. It is deliberately generous: the
+// bounded drain reads one megabyte at most over loopback and returns in
+// milliseconds, so the budget exists only to turn a regression into a failure
+// rather than a hang, and a tight one would turn a slow CI host into a failure.
+const endlessBodyBudget time.Duration = 30 * time.Second
+
+// reuseSends is how many sends the keep-alive tests make against one endpoint;
+// Test_postRecord_keepAlive says why it is three.
+const reuseSends int32 = 3
+
+// proxyChildEnv tells the re-executed test binary which of the default client's
+// two transports to build. It is set only on that child, so
+// Test_newHTTPTransport_proxyChild returns at once in every ordinary run.
+const proxyChildEnv string = "KTN_NETTRANSPORT_PROXY_CHILD"
+
+// unresolvableURL is an endpoint that never resolves (".invalid", RFC 2606), so
+// a record sent to it can only arrive through the proxy the child's environment
+// names.
+const unresolvableURL string = "http://collector.invalid:4318/ingest"
 
 // roundTripFunc adapts a function to http.RoundTripper so the HTTP seam tests
 // inject a canned response with no real socket (the bazel sandbox restricts
@@ -321,7 +348,9 @@ func assertNilDialerShipsOverTCP(t *testing.T, name string) {
 	if lerr != nil {
 		t.Fatalf("%s: net.Listen: %v", name, lerr)
 	}
-	defer swallowErr(ln.Close())
+	//: a closure, so the listener closes at return: `defer swallowErr(ln.Close())`
+	//: evaluates its argument — the Close — at the defer statement itself.
+	defer func() { swallowErr(ln.Close()) }()
 	got := make(chan string, 1)
 	ready := make(chan struct{})
 	go func() {
@@ -333,7 +362,8 @@ func assertNilDialerShipsOverTCP(t *testing.T, name string) {
 			got <- "accept-err:" + aerr.Error()
 			return
 		}
-		defer swallowErr(conn.Close())
+		//: closed after the read, not before it — see the listener's defer.
+		defer func() { swallowErr(conn.Close()) }()
 		buf := make([]byte, 64)
 		n, rerr := conn.Read(buf)
 		//: a read failure publishes its diagnostic so the test fails loud.
@@ -376,7 +406,13 @@ func loopbackConnectWorks() bool {
 	if err != nil {
 		return false
 	}
-	defer swallowErr(ln.Close())
+	//: a closure, so the listener closes at return. `defer swallowErr(ln.Close())`
+	//: closed it at the defer statement, so the dial below was refused on every
+	//: host — 0 of 1 000 probes said true where loopback plainly works — and the
+	//: real-socket arms this probe gates never ran; worse, when a parallel test's
+	//: server was handed the freed port in between, the probe said true against
+	//: somebody else's listener.
+	defer func() { swallowErr(ln.Close()) }()
 	accepted := make(chan struct{})
 	ready := make(chan struct{})
 	go func() {
@@ -412,10 +448,10 @@ func loopbackConnectWorks() bool {
 func Test_newHTTPSeam_realServer(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		status     int
-		closeFirst bool
-		wantErr    bool
+		name    string
+		status  int
+		hangUp  bool
+		wantErr bool
 	}{
 		{"2xx handler accepts payload and sets Content-Type", http.StatusOK, false, false},
 		{"5xx handler rejects payload", http.StatusInternalServerError, false, true},
@@ -427,7 +463,7 @@ func Test_newHTTPSeam_realServer(t *testing.T) {
 			t.Parallel()
 			//: a body-read failure inside the handler/transport publishes empty so
 			//: the verbatim-body assertion below fails loud rather than silently.
-			gotCT, gotBody := runHTTPSeamCase(t, realServer, tc.status, tc.closeFirst)
+			gotCT, gotBody := runHTTPSeamCase(t, realServer, tc.status, tc.hangUp)
 			//: the 2xx arm proves the body and header reached the server verbatim.
 			if !tc.wantErr {
 				if gotCT != contentTypeJSON {
@@ -443,27 +479,39 @@ func Test_newHTTPSeam_realServer(t *testing.T) {
 
 // runHTTPSeamCase exercises newHTTPSeam for one case and returns the Content-Type
 // and body the server/transport observed. It fatals when the send verdict (error
-// vs nil) disagrees with the closeFirst/status expectation. realServer selects a
+// vs nil) disagrees with the hangUp/status expectation. realServer selects a
 // true httptest socket; otherwise an in-process RoundTripper drives the same seam.
-func runHTTPSeamCase(t *testing.T, realServer bool, status int, closeFirst bool) (gotCT, gotBody string) {
+func runHTTPSeamCase(t *testing.T, realServer bool, status int, hangUp bool) (gotCT, gotBody string) {
 	t.Helper()
 	//: a non-2xx status or a torn-down server is the failure expectation.
-	wantErr := closeFirst || status >= httpStatusCeil || status < httpStatusFloor
+	wantErr := hangUp || status >= httpStatusCeil || status < httpStatusFloor
 	if realServer {
-		gotCT, gotBody = httpSeamViaServer(t, status, closeFirst, wantErr)
+		gotCT, gotBody = httpSeamViaServer(t, status, hangUp, wantErr)
 		return gotCT, gotBody
 	}
-	gotCT, gotBody = httpSeamViaTransport(t, status, closeFirst, wantErr)
+	gotCT, gotBody = httpSeamViaTransport(t, status, hangUp, wantErr)
 	return gotCT, gotBody
 }
 
 // httpSeamViaServer runs the case against a real httptest server.
-func httpSeamViaServer(t *testing.T, status int, closeFirst, wantErr bool) (gotCT, gotBody string) {
+//
+// The hang-up arm keeps the server UP and has it take the connection and close
+// it without a byte of answer, so the POST fails at the transport layer. It used
+// to close the server first and dial the port it had just freed, and a freed
+// loopback port is handed to one of the next 50 listeners 0.8 % of the time
+// (measured: 160 in 20 000) — a parallel test's server could take it and answer
+// with a 2xx, turning the expected transport error into a delivery.
+func httpSeamViaServer(t *testing.T, status int, hangUp, wantErr bool) (gotCT, gotBody string) {
 	t.Helper()
 	//: buffered channels carry the handler's observations back race-free.
 	ctCh := make(chan string, 1)
 	bodyCh := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//: the hang-up arm is a collector that disconnects without answering.
+		if hangUp {
+			hangUpOn(w)
+			return
+		}
 		ctCh <- r.Header.Get("Content-Type")
 		body, rerr := io.ReadAll(r.Body)
 		//: a drain failure publishes empty so the verbatim check fails loud.
@@ -473,18 +521,12 @@ func httpSeamViaServer(t *testing.T, status int, closeFirst, wantErr bool) (gotC
 		bodyCh <- string(body)
 		w.WriteHeader(status)
 	}))
-	//: the close-first arm tears the server down before the send so the POST
-	//: fails at the transport layer (real connection-refused).
-	if closeFirst {
-		srv.Close()
-	} else {
-		//: t.Cleanup (not defer) is required with parallel subtests.
-		t.Cleanup(srv.Close)
-	}
+	//: t.Cleanup (not defer) is required with parallel subtests.
+	t.Cleanup(srv.Close)
 	send, closer := newHTTPSeam(srv.URL, srv.Client())
 	assertSeamSend(t, send, closer, wantErr)
-	//: the closed-server arm never reached the handler — return empty captures.
-	if closeFirst {
+	//: the hang-up arm never reached the observing half of the handler.
+	if hangUp {
 		return "", ""
 	}
 	return <-ctCh, <-bodyCh
@@ -492,14 +534,14 @@ func httpSeamViaServer(t *testing.T, status int, closeFirst, wantErr bool) (gotC
 
 // httpSeamViaTransport runs the case against an in-process RoundTripper that drains
 // the request body and validates the header exactly as a server would.
-func httpSeamViaTransport(t *testing.T, status int, closeFirst, wantErr bool) (gotCT, gotBody string) {
+func httpSeamViaTransport(t *testing.T, status int, hangUp, wantErr bool) (gotCT, gotBody string) {
 	t.Helper()
 	//: a recording transport captures the seam's request without a socket.
-	rt := &recordingRoundTripper{status: status, fail: closeFirst}
+	rt := &recordingRoundTripper{status: status, fail: hangUp}
 	send, closer := newHTTPSeam("http://collector.local/ingest", &http.Client{Transport: rt})
 	assertSeamSend(t, send, closer, wantErr)
 	//: the transport-error arm produced no observations — return empty captures.
-	if closeFirst {
+	if hangUp {
 		return "", ""
 	}
 	return rt.gotCT, rt.gotBody
@@ -549,4 +591,415 @@ func (rt *recordingRoundTripper) RoundTrip(r *http.Request) (*http.Response, err
 	rt.gotBody = string(body)
 	//: a canned response with an empty, closable body and the wanted status.
 	return &http.Response{StatusCode: rt.status, Body: io.NopCloser(strings.NewReader(""))}, nil
+}
+
+// idleCloseRecorder is a supplied client's transport that answers every request
+// with a bodiless 204 and counts the CloseIdleConnections calls http.Client
+// forwards to it — the call the closer must not make on a pool that is not the
+// sink's.
+type idleCloseRecorder struct {
+	// closed counts the CloseIdleConnections calls received.
+	closed atomic.Int32
+}
+
+// RoundTrip answers with a bodiless 204, satisfying http.RoundTripper.
+func (rt *idleCloseRecorder) RoundTrip(r *http.Request) (*http.Response, error) {
+	//: a canned delivery with an empty, closable body.
+	return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody, Request: r}, nil
+}
+
+// CloseIdleConnections records the call instead of closing anything.
+func (rt *idleCloseRecorder) CloseIdleConnections() {
+	//: counted, so the test can assert it never happened.
+	rt.closed.Add(1)
+}
+
+// Test_postRecord_boundedDrain pins the one read of a remote-controlled length
+// the seam makes: the drain after the verdict. The client is the server's own,
+// which has NO timeout — a supplied HTTPClient is used as-is — so nothing but
+// the drain's bound can end the send. Two framings: chunked with no end, and a
+// declared length the body never reaches, which net/http's own post-close drain
+// does not even attempt, so the seam's bound is all there is.
+//
+// Seen failing: with the drain back to an unbounded io.Copy, both cases ran out
+// the 30s budget and printed
+//
+//	chunked: send has not returned 30s into a response body that never ends; the drain after the verdict is unbounded
+//
+// and the suite finished rather than hung, because the budget severs the socket.
+//
+// Goroutine lifecycle: one sender goroutine per case, ending when send returns.
+// The case receives on `returned` on both paths — on the budget path only after
+// severing the socket, which is what makes send return — so the receive joins
+// it and nothing outlives the case. The channel is buffered, so the send never
+// parks either way.
+func Test_postRecord_boundedDrain(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		contentLength string
+	}{
+		{"chunked", ""},
+		{"declared length", strconv.FormatInt(1<<40, 10)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				//: a status line promising an answer, then bytes that never end.
+				if tc.contentLength != "" {
+					w.Header().Set("Content-Length", tc.contentLength)
+				}
+				w.WriteHeader(http.StatusOK)
+				streamForever(w, r)
+			}))
+			t.Cleanup(srv.Close)
+			send, closer := newHTTPSeam(srv.URL, srv.Client())
+			t.Cleanup(func() { swallowErr(closer()) })
+			budget, cancel := context.WithTimeout(t.Context(), endlessBodyBudget)
+			t.Cleanup(cancel)
+			returned := make(chan error, 1)
+			go func() { returned <- send(t.Context(), []byte("rec")) }()
+			select {
+			case serr := <-returned:
+				//: a 200 whose body never ends is still a delivery.
+				if serr != nil {
+					t.Errorf("%s: send: %v, want the 200 to stand — the drain must not change the verdict", tc.name, serr)
+				}
+			case <-budget.Done():
+				//: sever the socket, so the stuck send and the handler feeding it
+				//: end with this test instead of outliving it.
+				srv.CloseClientConnections()
+				<-returned
+				t.Fatalf("%s: send has not returned %v into a response body that never ends; "+
+					"the drain after the verdict is unbounded", tc.name, endlessBodyBudget)
+			}
+		})
+	}
+}
+
+// Test_postRecord_keepAlive proves the bound did not break the one thing the
+// drain is for: handing the connection back to the keep-alive pool, which
+// net/http does only once it has seen the response end. postRecord reads
+// nothing of a body itself, so every byte of an answer is the drain's.
+//
+// Two endpoints. A bodiless 204 — Loki's answer to a push — ends at the status
+// line, so the drain finds nothing: the baseline. And a 200 carrying 512 KiB
+// under a declared length: only the drain can reach its end, and the declared
+// length is above the 256 KiB net/http drains by itself after an early Close
+// (its maxPostCloseReadBytes; it does not try for a response declaring more), so
+// nothing else can save the connection.
+//
+// The assertion is "fewer connections than sends", not "exactly one": net/http
+// declines to recycle a connection whose request write it has not seen
+// confirmed within 50 ms of reading the response, which is scheduling rather
+// than this seam, and Go's own suite raises that grace to an hour for exactly
+// that reason. What the drain decides is whether reuse happens at all; without
+// it, every send opens a connection of its own.
+//
+// Seen failing: with postRecord's drain reduced to nothing — a zero-byte
+// LimitReader — the 512 KiB case printed, in 10 runs out of 10,
+//
+//	512 KiB past net/http's own drain: 3 sends opened 3 connections; not one found its predecessor's idle, so the drain never reached the end of the response
+//
+// while the bodiless case passed.
+func Test_postRecord_keepAlive(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"bodiless 204", http.StatusNoContent, ""},
+		{"512 KiB past net/http's own drain", http.StatusOK, strings.Repeat(" ", 512<<10)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv, connections := countingIngest(t, tc.status, tc.body)
+			//: the server's own client, whose pool is this test's alone — every
+			//: httptest.Server.Close empties http.DefaultTransport's.
+			send, closer := newHTTPSeam(srv.URL, srv.Client())
+			t.Cleanup(func() { swallowErr(closer()) })
+			for index := range reuseSends {
+				//: every send is a delivery.
+				if serr := send(t.Context(), []byte("rec")); serr != nil {
+					t.Fatalf("%s: send %d: %v", tc.name, index, serr)
+				}
+			}
+			//: one reuse at least, or the drain never reached an end.
+			if opened := connections.Load(); opened >= reuseSends {
+				t.Fatalf("%s: %d sends opened %d connections; not one found its predecessor's idle, so "+
+					"the drain never reached the end of the response", tc.name, reuseSends, opened)
+			}
+		})
+	}
+}
+
+// Test_newHTTPClient_ownsItsPool pins the fix for a verdict net/http can get
+// wrong. The default client used to ride http.DefaultTransport, which every
+// httptest.Server.Close, every http.DefaultClient.CloseIdleConnections — and
+// this package's own closer — empties; and net/http puts a bodiless answer's
+// connection back in the pool BEFORE handing the answer to the waiting round
+// trip, so an emptying landing in between reported "connection broken" for a
+// record already delivered. A failover or retry then sent it again: a
+// duplicated log line. The OTLP exporters in service/metrics and service/trace
+// failed that way under load, 4 times in 800 runs, on identical code.
+//
+// That window is microseconds wide, so this test does not chase it: it proves
+// the precondition is gone, deterministically. Each send is followed by the
+// very call that caused it, on the process pool, and a later send must still
+// find a connection an earlier one left — which only a pool the process cannot
+// reach can offer. "Fewer connections than sends", for the reason
+// Test_postRecord_keepAlive gives; the shared pool can never satisfy it,
+// because every sweep closes the one connection it holds.
+//
+// Seen failing: with newHTTPClient's Transport removed, so that the default
+// client rode http.DefaultTransport again, it printed, in 10 runs out of 10,
+//
+//	a sweep of the process pool leaves its connection alone: 3 sends opened 3 connections; emptying the process pool closed the sink's, so the default client still rides http.DefaultTransport
+func Test_newHTTPClient_ownsItsPool(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+	}{
+		{"a sweep of the process pool leaves its connection alone"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: bodiless, because that is the answer the race turns into a fault.
+			srv, connections := countingIngest(t, http.StatusNoContent, "")
+			send, closer := newHTTPSeam(srv.URL, nil)
+			t.Cleanup(func() { swallowErr(closer()) })
+			for index := range reuseSends {
+				//: every send is a delivery, sweep or no sweep.
+				if serr := send(t.Context(), []byte("rec")); serr != nil {
+					t.Fatalf("%s: send %d: a 204 is a delivery, got %v", tc.name, index, serr)
+				}
+				//: what every httptest.Server.Close does to the process pool.
+				http.DefaultClient.CloseIdleConnections()
+			}
+			//: one reuse at least, which a swept pool cannot give.
+			if opened := connections.Load(); opened >= reuseSends {
+				t.Fatalf("%s: %d sends opened %d connections; emptying the process pool closed the "+
+					"sink's, so the default client still rides http.DefaultTransport", tc.name, reuseSends, opened)
+			}
+		})
+	}
+}
+
+// Test_newHTTPSeam_closer pins who owns which pool when a sink closes. The
+// default client's pool is the sink's, so the closer releases it — a closed
+// sink must not keep its connections until the idle timeout. A supplied
+// client's pool is the caller's, so the closer leaves it alone: for a client
+// with a nil Transport that pool is http.DefaultTransport, and emptying it is
+// the call that turns another client's delivered answer into a transport fault.
+//
+// Seen failing: with the closer a no-op for the default client, the first case
+// printed, in 10 runs out of 10,
+//
+//	the default client's own pool is released: two sends around a Close opened 1 connection(s), want 2 — the closer did not release the sink's own pool
+//
+// and with the closer calling CloseIdleConnections on a supplied client, as it
+// used to, the second printed, in 10 runs out of 10,
+//
+//	a supplied client's pool is left to its owner: the closer called CloseIdleConnections on the caller's client 1 time(s)
+func Test_newHTTPSeam_closer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		supplied bool
+	}{
+		{"the default client's own pool is released", false},
+		{"a supplied client's pool is left to its owner", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			//: supplied arm — the closer must not reach into the caller's pool.
+			if tc.supplied {
+				recorder := &idleCloseRecorder{}
+				send, closer := newHTTPSeam(unresolvableURL, &http.Client{Transport: recorder})
+				assertSeamSend(t, send, closer, false)
+				if calls := recorder.closed.Load(); calls != 0 {
+					t.Fatalf("%s: the closer called CloseIdleConnections on the caller's client %d time(s)", tc.name, calls)
+				}
+				return
+			}
+			//: default arm — a send, the closer, then a send that must dial anew.
+			srv, connections := countingIngest(t, http.StatusNoContent, "")
+			send, closer := newHTTPSeam(srv.URL, nil)
+			assertSeamSend(t, send, closer, false)
+			assertSeamSend(t, send, closer, false)
+			//: exactly two: the closer closed the pooled connection in between.
+			if opened := connections.Load(); opened != 2 {
+				t.Fatalf("%s: two sends around a Close opened %d connection(s), want 2 — the closer did not "+
+					"release the sink's own pool", tc.name, opened)
+			}
+		})
+	}
+}
+
+// Test_newHTTPTransport_proxy pins what the dedicated transport must not lose:
+// the proxy environment. A writer that stopped honouring HTTP_PROXY would fail
+// exactly in the deployments that set one, and no test on loopback could notice
+// — net/http never proxies a loopback address, and it reads the environment once
+// per process. So the send runs in a child process started with HTTP_PROXY
+// pointing at this test's server and an endpoint that cannot resolve: the proxy
+// seeing the record is the only way the child can deliver it. Both branches of
+// newHTTPTransport are driven — the clone, and the fallback taken when
+// http.DefaultTransport is no *http.Transport.
+//
+// Seen failing: with newHTTPTransport returning a bare &http.Transport{}, both
+// cases printed
+//
+//	clone of http.DefaultTransport: the child's record did not reach the endpoint through HTTP_PROXY: exit status 1
+//
+// above the child's own line naming why — it had tried to resolve the endpoint
+// itself: `dial tcp: lookup collector.invalid …: no such host`. With the
+// default client's Transport removed altogether, the fallback case failed too,
+// the client having fallen through to the nil process default: `http: no
+// Client.Transport or DefaultTransport`.
+func Test_newHTTPTransport_proxy(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		transport string
+	}{
+		{"clone of http.DefaultTransport", "clone"},
+		{"fallback for a replaced http.DefaultTransport", "fallback"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var forwarded atomic.Value
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				//: the whole record first, then where it was headed.
+				_, drainErr := io.Copy(io.Discard, r.Body)
+				swallowErr(drainErr)
+				forwarded.Store(r.RequestURI)
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(proxy.Close)
+			child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^Test_newHTTPTransport_proxyChild$") //nolint:gosec
+			child.Env = append(withoutProxyEnvironment(os.Environ()),
+				"HTTP_PROXY="+proxy.URL, proxyChildEnv+"="+tc.transport)
+			//: the child exits non-zero when its record did not arrive.
+			if output, err := child.CombinedOutput(); err != nil {
+				t.Fatalf("%s: the child's record did not reach the endpoint through HTTP_PROXY: %v\n%s", tc.name, err, output)
+			}
+			//: and the proxy is where it arrived, addressed to the endpoint.
+			if got, _ := forwarded.Load().(string); got != unresolvableURL {
+				t.Fatalf("%s: the proxy forwarded %q, want %q", tc.name, got, unresolvableURL)
+			}
+		})
+	}
+}
+
+// Test_newHTTPTransport_proxyChild is the child of Test_newHTTPTransport_proxy:
+// one record sent with the default client, through whatever proxy the parent put
+// in the environment. It returns at once unless the parent set proxyChildEnv —
+// returning rather than skipping, since this package's tests never skip — so
+// `go test ./...` discovers it and it costs nothing (CLAUDE.md rule 12). It is
+// not parallel: its fallback case replaces http.DefaultTransport, a process
+// global, which is harmless only because the child runs nothing else.
+func Test_newHTTPTransport_proxyChild(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{"one record through the proxy the parent named"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mode := os.Getenv(proxyChildEnv)
+			//: not the child: the parent is the test that asserts.
+			if mode == "" {
+				return
+			}
+			//: a process default that is no *http.Transport — nil here, so a
+			//: fallback that routed through it would fail rather than pass.
+			if mode == "fallback" {
+				http.DefaultTransport = nil
+			}
+			send, closer := newHTTPSeam(unresolvableURL, nil)
+			t.Cleanup(func() { swallowErr(closer()) })
+			//: delivered, or the transport did not take it through the proxy.
+			if serr := send(t.Context(), []byte("rec")); serr != nil {
+				t.Fatalf("%s: the %s transport did not take the record through HTTP_PROXY: %v (cause: %v)",
+					tc.name, mode, serr, errors.Unwrap(serr))
+			}
+		})
+	}
+}
+
+// countingIngest starts an ingestion endpoint answering every request with
+// status and body — under a declared Content-Length when there is a body — and
+// counts the connections it accepts.
+func countingIngest(t *testing.T, status int, body string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	connections := &atomic.Int32{}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//: the whole request first, so the client's write is over before the
+		//: answer starts; net/http recycles nothing it is still writing to.
+		_, drainErr := io.Copy(io.Discard, r.Body)
+		swallowErr(drainErr)
+		//: a declared length, so net/http's own post-close drain can see it.
+		if body != "" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		}
+		w.WriteHeader(status)
+		_, writeErr := io.WriteString(w, body)
+		swallowErr(writeErr)
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		//: one count per accepted connection.
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return srv, connections
+}
+
+// streamForever writes a response body until the client goes away: what a
+// broken or hostile collector looks like from the seam's side — a status line
+// that promised an answer, then bytes that never end.
+func streamForever(w http.ResponseWriter, r *http.Request) {
+	chunk := []byte(strings.Repeat("x", 32<<10))
+	//: until the client hangs up or the server gives up on the request.
+	for r.Context().Err() == nil {
+		//: a failed write is the client gone.
+		if _, werr := w.Write(chunk); werr != nil {
+			return
+		}
+	}
+}
+
+// hangUpOn takes the connection from under net/http and closes it without
+// writing a byte: a collector that disconnects without answering.
+func hangUpOn(w http.ResponseWriter) {
+	conn, _, herr := http.NewResponseController(w).Hijack()
+	//: nothing to hang up if the connection could not be taken.
+	if herr != nil {
+		return
+	}
+	swallowErr(conn.Close())
+}
+
+// withoutProxyEnvironment returns env minus every variable net/http reads to
+// choose a proxy, so the child sees exactly the one its parent sets.
+func withoutProxyEnvironment(env []string) []string {
+	kept := make([]string, 0, len(env))
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		//: every spelling net/http consults, in either case.
+		switch strings.ToUpper(name) {
+		case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "REQUEST_METHOD":
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
 }

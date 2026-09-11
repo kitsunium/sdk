@@ -27,12 +27,18 @@ type OTLPHTTPConfig struct {
 	Endpoint string
 
 	// Client is the http.Client the POST rides on. When nil, a client bounded
-	// by Timeout and refusing every redirect is built.
+	// by Timeout and refusing every redirect is built, on a connection pool of
+	// its own cloned from http.DefaultTransport — proxy environment included.
 	//
-	// A supplied client is used AS-IS, including its own timeout and redirect
-	// policy — it is the seam a caller uses to install a proxy, an mTLS
-	// identity or an SSRF allowlist, and second-guessing it here would defeat
-	// that.
+	// A supplied client is used AS-IS, including its own timeout, redirect
+	// policy and Transport — it is the seam a caller uses to install a proxy,
+	// an mTLS identity or an SSRF allowlist, and second-guessing it here would
+	// defeat that. One whose Transport is http.DefaultTransport (a nil
+	// Transport is) shares that pool with the whole process, and anything that
+	// empties it — every httptest.Server.Close, every
+	// http.DefaultClient.CloseIdleConnections — can make a response that had
+	// already arrived read as a transport fault, so a 200 comes back retryable.
+	// Give such a client a Transport of its own.
 	Client *http.Client
 
 	// Headers are set on every request before Content-Type, so a hosted

@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09T00:00:00Z -->
+<!-- updated: 2026-09-11T00:00:00Z -->
 # pkg/v1/server/websocket/
 
 ## Purpose
@@ -44,10 +44,22 @@ discussed, and the package stands alone for a consumer using plain `net/http`.
   buffer.** Valid until the next `Receive`; keep it longer and copy it. That is
   what makes a steady-state read allocate nothing, and it is the same rule
   `server.Conn.Buffer()` already carries.
-- **`Done()` and the `Send`/`Receive` refusal are both load-bearing.** A handler
-  that selects on `Done()` stops between messages; a handler that only loops on
-  `Receive` stops on the next one. Either alone leaves a shape that cannot be
-  told a deployment is under way.
+- **Exactly one goroutine loops on `Receive` for the connection's whole life —
+  a push-only handler included.** That loop is where Pings are answered
+  (§5.5.2), where the peer's Close is replied to (§5.5.1), and the only place
+  the heartbeat sees the peer alive, because it counts frames the handler has
+  READ. A handler that never reads is ended within two ping intervals (≈60 s
+  at the default) with a healthy peer on the other end — pinned as a limit by
+  `TestHeartbeatEndsAConnectionNobodyReads` in the service package. The package
+  doc comment carries the push-handler shape, reader goroutine included, so it
+  reaches the generated README. A reader started inside `Conn` was refused: it
+  would break `Receive`'s aliasing and its zero-allocation read (ADR 0047 §D8,
+  amended 2026-09-11).
+- **`Done()` and the `Send`/`Receive` refusal are both load-bearing.** The
+  reading goroutine stops on its next `Receive`; a pushing goroutine selects on
+  `Done()` and stops between events, and its `Send` refuses from the same
+  instant. Either alone leaves a goroutine that cannot be told a deployment is
+  under way.
 - **A close code that must never travel is refused, in both directions.**
   `CloseWith(CloseAbnormal, …)` is an error, and a peer that sends 1006 fails
   the connection. One predicate — `CloseCode.Sendable` — answers both, so the
@@ -60,6 +72,13 @@ discussed, and the package stands alone for a consumer using plain `net/http`.
   `AllowAnyOrigin()` — a name a reviewer can grep for. The browser's same-origin
   policy does not apply to WebSocket, so the default-off switch is the
   difference between an endpoint and a CSRF primitive.
+- **The default rule compares the scheme only where it can see it.** When this
+  server terminates TLS itself the Origin must be `https` as well as name the
+  request's host; behind a TLS-terminating proxy the request arrives in
+  plaintext, the scheme is invisible, and an `http://` page for the same host is
+  accepted. That gap is stated in the package doc comment rather than guessed
+  away: `AllowOrigins` closes it, and `X-Forwarded-Proto` is not consulted
+  because where no proxy overwrites it the client wrote it.
 - **The sentinels are the engine's own values, not copies.**
   `TestSentinelsAreMatchableThroughTheFacade` pins that `errors.Is` still
   answers across the module boundary; re-declared sentinels would quietly answer
@@ -106,7 +125,9 @@ overwhelmingly a browser's `WebSocket`, which needs nothing from this SDK.
   (`cd pkg/v1 && go generate ./server/...`, or `make docs-readme`).
 - Add logic here; it belongs in `internal/service/net/websocket`.
 - Call `Conn.Receive` from more than one goroutine — the protocol is one ordered
-  frame stream and two readers would each take half of a message.
+  frame stream and two readers would each take half of a message — or from
+  none: a connection nobody reads answers no Ping and is ended by the
+  heartbeat within two intervals.
 - Retain a `Message.Data` past the next `Receive` without copying it.
 - Add a WebSocket client without the decision above being taken first.
 

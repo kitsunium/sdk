@@ -81,24 +81,78 @@
 //
 // The browser's same-origin policy does not apply to WebSocket: any page can
 // open a connection to this server, and the browser attaches the user's cookies
-// to the handshake. By default an Origin header, when present, must match the
-// request's own host; a request with no Origin (a CLI, a service, a Go client)
-// is allowed, because there is no ambient credential to abuse. [AllowOrigins]
-// replaces the rule with an allowlist and [AllowAnyOrigin] removes it, by name.
+// to the handshake. By default an Origin header, when present, must name the
+// request's own host and port — and, when this server terminates TLS itself,
+// the https scheme as well, because an http:// page for the same host is
+// exactly the downgrade the check exists to notice. A request with no Origin (a
+// CLI, a service, a Go client) is allowed, because there is no ambient
+// credential to abuse; the opaque "null" origin is refused.
+//
+// Behind a proxy that terminates TLS, the request reaches this server in
+// plaintext whatever the browser used, so the default rule cannot see the
+// scheme and does not compare it: there, an http:// page for the same host is
+// accepted. X-Forwarded-Proto is not consulted, because where no proxy
+// overwrites it the client wrote it. [AllowOrigins] closes that gap — it names
+// the scheme outright — and replaces the default rule entirely;
+// [AllowAnyOrigin] removes the check, by name.
+//
+// # One goroutine always reads
+//
+// Every connection needs exactly one goroutine looping on [Conn.Receive] for
+// its whole life — including a connection the handler only ever writes to.
+// That loop is where the peer's Ping is answered (RFC 6455 §5.5.2), where its
+// Close is replied to (§5.5.1), and the only place the heartbeat can see that
+// the peer is alive. A handler that pushes runs it in a goroutine of its own
+// and discards what it reads:
+//
+//	func push(w http.ResponseWriter, r *http.Request) {
+//		conn, err := websocket.Upgrade(w, r)
+//		if err != nil {
+//			return
+//		}
+//		defer conn.Close()
+//
+//		go func() { // the reader: required even with nothing to read
+//			for {
+//				if _, rerr := conn.Receive(); rerr != nil {
+//					return
+//				}
+//			}
+//		}()
+//
+//		for {
+//			select {
+//			case <-conn.Done():
+//				return
+//			case event := <-events: // the application's own feed
+//				if serr := conn.SendText(event); serr != nil {
+//					return
+//				}
+//			}
+//		}
+//	}
+//
+// The reading goroutine needs no joining: the deferred Close ends the
+// connection, and its Receive returns the terminal error.
 //
 // # Liveness and shutdown
 //
 // A peer that vanishes without closing leaves a socket that is perfectly
-// readable and will simply never produce another byte. [PingInterval] is the
-// only thing that turns that silence into an ending; zero is clamped to
-// [DefaultPingInterval] rather than meaning "never", and "never" is spelled
-// [WithoutPing].
+// readable and will simply never produce another byte. The heartbeat is the
+// only thing that turns that silence into an ending: every [PingInterval] it
+// sends a Ping, and one interval later it ends the connection if the handler
+// has READ no frame since. It counts frames the handler has read, not frames
+// that arrived — a Pong the peer sent on time is silence to it until
+// [Conn.Receive] reads it — so a connection nobody reads is ended within two
+// intervals, about a minute at [DefaultPingInterval], however healthy the peer
+// is. Zero is clamped to [DefaultPingInterval] rather than meaning "never", and
+// "never" is spelled [WithoutPing].
 //
 // [Conn.Done] closes when the peer sends Close, when the socket dies, when the
-// handler closes it, or when the server begins draining — in which case the
-// connection sends a 1001 "going away" of its own accord. [Conn.Receive] and
-// [Conn.Send] refuse from the same instant, so a handler that only loops on
-// them terminates too.
+// heartbeat gives up, when the handler closes it, or when the server begins
+// draining — in which case the connection sends a 1001 "going away" of its own
+// accord. [Conn.Receive] and [Conn.Send] refuse from the same instant, so the
+// reading loop and a pushing loop both terminate too.
 //
 // # Clients
 //
@@ -206,9 +260,13 @@ var (
 
 // Conn is one upgraded WebSocket connection.
 //
-// Writes are safe for concurrent use; reads are not. The protocol is a single
-// ordered frame stream, so two concurrent readers would each take half of a
-// message — exactly one goroutine calls [Conn.Receive].
+// Exactly one goroutine loops on [Conn.Receive] for the connection's whole
+// life. Never two: the protocol is a single ordered frame stream, so two
+// readers would each take half of a message. Never zero: that loop is also
+// where Pings are answered, where the peer's Close is replied to and where the
+// heartbeat sees the peer alive, so a connection nobody reads is ended within
+// two ping intervals — see the package documentation for the push-handler
+// shape. Writes are safe for concurrent use.
 type Conn = svcws.Conn
 
 // Message is one complete WebSocket application message.
@@ -274,6 +332,10 @@ func MaxFrameSize(n int64) Option {
 // connection with the heartbeat silently disabled works perfectly on loopback
 // and then stops noticing peers that vanish — which is how a mobile client
 // normally leaves. A negative interval is refused; "never" is [WithoutPing].
+//
+// The heartbeat counts frames the handler has READ, so it keeps a connection
+// open only while one goroutine loops on [Conn.Receive]; a connection nobody
+// reads is ended within two intervals, however healthy the peer.
 func PingInterval(d time.Duration) Option {
 	//: forwarded unchanged.
 	return svcws.PingInterval(d)
@@ -300,7 +362,10 @@ func WriteTimeout(d time.Duration) Option {
 //
 // The comparison is on the whole Origin header — scheme, host and port —
 // case-insensitively. Matching the host alone would accept http:// for an https
-// server, which is the downgrade the check exists to notice.
+// server, which is the downgrade the check exists to notice. Behind a proxy
+// that terminates TLS this is the only way to have the scheme checked at all:
+// the request arrives in plaintext there, so the default rule cannot see which
+// scheme the browser used.
 func AllowOrigins(origins ...string) Option {
 	//: forwarded unchanged.
 	return svcws.AllowOrigins(origins...)

@@ -27,7 +27,7 @@ Code range: `0.3.50.*` (ADR 0051).
 | `record_error.go` | `RecordError` — the conventional `exception` event |
 | `otlp_request.go` | the Go mirror of `trace.proto` / `common.proto` / `resource.proto`, in FIELD-NUMBER order |
 | `exporter_otlpjson.go` | `EncodeOTLPJSON` + the writer-bound exporter + `OTLPJSON` (registered, stderr) |
-| `exporter_otlphttp.go` | `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPTracesPath` — the only file with an outbound socket |
+| `exporter_otlphttp.go` | `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPTracesPath` + the default client's own connection pool (`newOTLPTransport`) — the only file with an outbound socket |
 | `otlphttp_config.go` | `OTLPHTTPConfig` |
 | `otlp_export_response.go` | the partial-success body + the lenient 64-bit decoder |
 | `http_server.go` | `ServerMiddleware` + the semantic-convention keys + `statusRecorder` |
@@ -135,6 +135,43 @@ The retryable set is spelled out — 429/502/503/504 and a transport fault — b
 **5xx is not retryable as a class**: a 500 or a 501 means the same request will
 fail the same way. An **empty batch is a no-op**, not a POST.
 
+The bounded response read covers the drain too: after the verdict, what is left
+of the body is drained through `DefaultOTLPMaxResponseBytes` — the default, not
+the configured cap, which bounds memory — and closed. Unbounded, a collector
+streaming an endless body held `Export` forever whenever the client had no
+deadline.
+
+**The default client owns its connection pool, because a shared one gave wrong
+verdicts.** It used to ride `http.DefaultTransport`, and net/http puts a
+BODILESS response's connection back in the idle pool *before* handing the
+response to the waiting round trip; a `CloseIdleConnections` on that pool
+landing in between closes the connection under it, and the round trip reports
+`HTTP/1.x transport connection broken: http: CloseIdleConnections called` for an
+answer that had already arrived. Every `httptest.Server.Close` and every
+`http.DefaultClient.CloseIdleConnections` in the process is such a call. The
+verdict was then `OTLP_EXPORT_UNAVAILABLE` whatever the collector said: a 200
+became retryable — the caller's retry replays spans the collector accepted — a
+429 lost its `Retry-After`, a 413 became retryable. It was found as a flake in the
+metrics sibling, whose tests run in parallel; the code here was identical, and
+this file's older tests hid it only by running sequentially.
+`TestOTLPHTTPDefaultClientOwnsItsConnectionPool` proves the isolation
+deterministically.
+
+The pool is a clone of `http.DefaultTransport` taken at construction, proxy
+environment included; where that default has been replaced by something other
+than an `*http.Transport`, a fresh transport with `Proxy:
+http.ProxyFromEnvironment` and net/http's 90 s idle timeout stands in.
+`TestOTLPHTTPDefaultClientHonoursTheProxyEnvironment` drives both branches
+through a real `HTTP_PROXY` in a CHILD process, because net/http reads the proxy
+environment once per process and never proxies loopback;
+`TestOTLPHTTPProxyChild` self-skips unless `KTN_OTLP_TRACE_PROXY_CHILD` is set, so
+it needs no tag and no compensating lane (CLAUDE.md rule 12). A caller-SUPPLIED
+client is used as given, `Transport` included — one riding `http.DefaultTransport`
+keeps the exposure, and a `Transport` of its own removes it. The `SpanExporter`
+port has no lifecycle method, so nothing closes the pool: idle connections are
+reaped by the idle timeout, and one exporter per collector, built once, is the
+intended shape.
+
 ## The middlewares
 
 Both are `internal/core/net`'s OWN generic middleware type, instantiated:
@@ -183,6 +220,12 @@ Four decisions:
 - **Do NOT register `NewOTLPHTTPExporter`, or give it a default endpoint.**
 - **Do NOT retry inside `Export`.** `resilience` owns backoff; a hidden one cannot
   be tuned or cancelled, and `Export` has no context to cancel it with.
+- **Do NOT build the default client without its own `Transport`.** A nil one is
+  `http.DefaultTransport`, which any code in the process can empty. Nor replace,
+  wrap or clone the `Transport` of a caller-SUPPLIED client: that is theirs.
+- **Do NOT drain a response without a bound**, nor by the configured
+  `MaxResponseBytes`, which caps memory and would cost a caller who lowered it
+  connection reuse on a conforming response.
 - **Do NOT forward `Flush`/`Hijack` from `statusRecorder`.** See above.
 - **Do NOT decode the encoder's own output in a conformance test.**
 - **Do NOT put the path in a span name.**

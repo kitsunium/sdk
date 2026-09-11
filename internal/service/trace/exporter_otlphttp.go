@@ -31,7 +31,18 @@ const DefaultOTLPTimeout time.Duration = 10 * time.Second
 // is deliberately not capped, because its size is a property of the caller's own
 // span volume, any SDK-chosen ceiling would be arbitrary (ADR 0031 §refuse), and
 // the collector already answers 413 for one it will not take.
+//
+// It also bounds the drain that recycles the connection after the verdict —
+// always this default rather than OTLPHTTPConfig.MaxResponseBytes, for the
+// reason closeOTLPResponse gives.
 const DefaultOTLPMaxResponseBytes int64 = 1 << 20
+
+// otlpFallbackIdleTimeout is how long the default client's fallback transport
+// keeps an idle connection — see newOTLPTransport. It is net/http's own
+// DefaultTransport value, so the fallback reaps its pool exactly as the clone it
+// stands in for does, rather than holding a connection for as long as the
+// collector tolerates it.
+const otlpFallbackIdleTimeout time.Duration = 90 * time.Second
 
 // otlpContentType is what the specification requires for the JSON encoding.
 const otlpContentType string = "application/json"
@@ -205,24 +216,71 @@ func checkOTLPEndpoint(endpoint string) error {
 	return nil
 }
 
-// newOTLPClient builds the default client: bounded by timeout, and refusing to
-// follow a redirect.
+// newOTLPClient builds the default client: bounded by timeout, refusing to
+// follow a redirect, and riding a connection pool of its own.
 //
 // The redirect refusal is CWE-918. A 30x from a collector — or from anything
 // sitting in front of one — would otherwise bounce a POST carrying the caller's
 // Authorization header to whatever host the response names, past an allowlist
 // that only ever saw the configured endpoint. ErrUseLastResponse stops the chain
 // and hands the 30x back as-is, where it is classified as a permanent rejection.
+//
+// The pool is newOTLPTransport's, which says why it is not the process's.
 func newOTLPClient(timeout time.Duration) *http.Client {
 	//: Timeout covers dial, write, read and body — the whole round trip.
 	return &http.Client{
 		Timeout: timeout,
+		//: this exporter's own pool, which nothing else in the process can empty.
+		Transport: newOTLPTransport(),
 		//: stop at the first redirect and return that response.
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			//: the stdlib signal for "hand it back", not an error verdict.
 			return http.ErrUseLastResponse
 		},
 	}
+}
+
+// newOTLPTransport returns the connection pool the default client owns: a clone
+// of http.DefaultTransport, so every setting a process expects of an outbound
+// client — the proxy environment first of all — carries over, and none of its
+// connections do.
+//
+// # Why the default client does not share http.DefaultTransport
+//
+// Because anything in the process can empty that pool, and net/http turns doing
+// so at the wrong instant into a wrong verdict. A response with no body is put
+// back in the idle pool BEFORE the waiting round trip is handed it, and a
+// CloseIdleConnections landing in that window closes the connection under it:
+// the round trip then reports "connection broken" for a response that had
+// already arrived. Here that made a 200 a retryable OTLPExportUnavailable — the
+// caller's retry replays spans the collector accepted, and the backend stores
+// them twice — a 429 lose its Retry-After, and a 413 retryable. Every
+// httptest.Server.Close and every http.DefaultClient.CloseIdleConnections is
+// such a call, made by code this exporter cannot see.
+//
+// A caller-supplied OTLPHTTPConfig.Client is used as given, Transport included,
+// so one that rides http.DefaultTransport inherits that exposure; giving it a
+// Transport of its own is how it avoids it.
+//
+// The clone is a snapshot taken at construction. A process that has replaced
+// http.DefaultTransport with something other than an *http.Transport leaves
+// nothing to clone, and a fresh transport that still honours the proxy
+// environment stands in; one that routes traffic through a custom RoundTripper
+// passes it as OTLPHTTPConfig.Client.
+//
+// Each exporter therefore owns a pool, and nothing here closes it: the
+// SpanExporter port has no lifecycle method, so idle connections are reaped by
+// the transport's idle timeout. One exporter per collector, built once, is the
+// intended shape; building one per export holds a pool per call until then.
+func newOTLPTransport() *http.Transport {
+	//: the process default, while it is still the stdlib's type.
+	if base, isTransport := http.DefaultTransport.(*http.Transport); isTransport {
+		//: every setting, the Proxy function included, and none of the pool.
+		return base.Clone()
+	}
+	//: replaced by a foreign RoundTripper: keep the proxy environment and the
+	//: idle reaping the clone would have had.
+	return &http.Transport{Proxy: http.ProxyFromEnvironment, IdleConnTimeout: otlpFallbackIdleTimeout}
 }
 
 // Name implements core/trace.SpanExporter.
@@ -235,8 +293,9 @@ func (e *otlpHTTPExporter) Name() coretrace.ExporterName {
 //
 // Nothing here panics and nothing blocks past the client's deadline: an encoding
 // refusal returns before any socket is touched, a transport fault returns the
-// transient sentinel, and every response path drains and closes the body so the
-// keep-alive connection returns to the pool.
+// transient sentinel, and every response path drains a BOUNDED remainder and
+// closes the body, so the keep-alive connection returns to the pool whenever the
+// body ends within that bound.
 //
 // An EMPTY batch is a no-op rather than a POST. A request carrying zero spans
 // costs a round trip to say nothing, and an export loop on a quiet service would
@@ -304,12 +363,31 @@ func (e *otlpHTTPExporter) Export(spans coretrace.SpansValue) error {
 // closeOTLPResponse drains what is left of the body and closes it, so the
 // connection returns to the keep-alive pool.
 //
+// The drain is BOUNDED, by DefaultOTLPMaxResponseBytes, because it is a read of
+// the same remote-controlled length the verdict's read is bounded by, and the
+// only one that was not: a collector streaming an endless body held Export here
+// forever whenever the client had no deadline. The default client's Timeout
+// covers the body; a caller-supplied client is used as-is and may carry none.
+// Past the bound the body is closed unread. net/http recycles only a connection
+// whose response it has seen end, and the drain it attempts itself after an
+// early Close is bounded as well, so a body that runs past both costs the
+// connection — which is correct: reading on to save one handshake is exactly
+// what the bound refuses.
+//
+// It is the DEFAULT and not OTLPHTTPConfig.MaxResponseBytes on purpose. That knob
+// bounds what is read into MEMORY; this read keeps nothing, and a caller who
+// lowered the cap must not lose connection reuse on a conforming response for it.
+//
+// The bound is on BYTES, not on time: a collector that stops sending mid-body is
+// bounded only by the client's deadline, which is why the default client carries
+// one.
+//
 // Both outcomes are DELIBERATELY discarded: the delivery verdict was already
 // computed from the status line, so a teardown fault cannot change it, and
 // reporting one would replace a correct verdict with a misleading one.
 func closeOTLPResponse(response *http.Response) {
-	//: drain the unread remainder so the connection is reusable.
-	_, drainErr := io.Copy(io.Discard, response.Body)
+	//: drain the unread remainder so the connection is reusable, and no more.
+	_, drainErr := io.Copy(io.Discard, io.LimitReader(response.Body, DefaultOTLPMaxResponseBytes))
 	//: the drain outcome is irrelevant to a verdict already reached.
 	swallowOTLPTeardown(drainErr)
 	//: close it; same reasoning.

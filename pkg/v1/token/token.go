@@ -41,6 +41,28 @@
 // material a relying party fetched from a publisher it trusts — never from the
 // token.
 //
+// # Loading a published key
+//
+// A relying party that verifies against an issuer's published keys fetches the
+// key document itself — this package performs no I/O, follows no jwks_uri and
+// caches nothing (ADR 0042) — and hands the bytes to [ParseJWKSet], or to
+// [ParseJWK] for a single key:
+//
+//	set, err := token.ParseJWKSet(body) // the issuer's JWK Set, as fetched
+//	ver, err := token.NewSetVerifier(set, token.VerifierConfig{
+//	    Issuer:   "https://auth.example.com",
+//	    Audience: "api",
+//	})
+//
+// Parsing is the only way to obtain a [JWK]: the type has no exported field
+// and no UnmarshalJSON, so its validation — strict base64url, coordinates at
+// the curve's fixed length, the point on its curve, a private "d" deriving
+// exactly the declared public key — is not a step a caller can skip by
+// decoding some other way. [NewJWKSet] assembles a set from keys already
+// parsed. A refusal carries one of the CodeJWK* codes, matchable with
+// errs.HasCode; a set is accepted whole or not at all, so one RSA member —
+// the SDK verifies nothing with RSA — refuses the document.
+//
 // # What is always refused
 //
 //   - "alg":"none" in any capitalisation (RFC 7519 §6). [Algorithm] is an enum

@@ -37,7 +37,6 @@ go_test(
     ],
     deps = [
         ":token",
-        "//internal/service/crypto/jwk",
         "//pkg/v1/crypto",
         "//pkg/v1/errs",
     ],
