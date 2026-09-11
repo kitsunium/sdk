@@ -18,7 +18,7 @@ panic recovery, the staleness bound, the drain latch, and the HTTP handler
 | `handler_config.go` | `HandlerConfig` — the one knob the three handlers take |
 | `body.go` | the wire shape of a probe response, and of one check inside it |
 | `component.go` | the `lifecycle` bridge; a not-serving startup report with no error to join still fails `Start` (`STARTUP_PENDING`) |
-| `notify.go` | opt-in `sd_notify`, delegating to `service/proc/sdnotify`; a datagram counts as announced only once DELIVERED, decided and sent under one lock; the STATUS line follows the readiness verdict into a drain (`TestDrainingIsAnnouncedToTheSupervisor`) |
+| `notify.go` | opt-in `sd_notify`, delegating to `service/proc/sdnotify`; a datagram counts as announced only once DELIVERED, decided and sent under one lock; the STATUS line follows the readiness verdict into a drain (`TestDrainingIsAnnouncedToTheSupervisor`), and a serving verdict measured before `Drain` is never announced after it — the phase is read under the same lock (`TestAVerdictMeasuredBeforeTheDrainIsNotAnnouncedAfterIt`) |
 | `config.go` | timeouts and staleness, with their ADR 0031 clamps and refusals |
 
 ## The three behaviours worth knowing

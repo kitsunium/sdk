@@ -245,6 +245,72 @@ func TestAFailedStatusIsSentAgain(t *testing.T) {
 	}
 }
 
+// TestAVerdictMeasuredBeforeTheDrainIsNotAnnouncedAfterIt pins the order of
+// the two announcements a drain races. A readiness probe measures its
+// dependencies before it announces, so one that began while serving can
+// finish after Drain — after another probe has already sent the drain's
+// "unhealthy" — and its "healthy" used to go out last, leaving the supervisor
+// showing a healthy unit for the rest of the drain. The probe is held inside
+// its check to make the interleaving exact rather than likely.
+//
+// Goroutine lifecycle: the one goroutine it starts runs the held probe, and is
+// joined through the channel it closes before anything is asserted.
+//
+// Seen failing without the phase check in notify: the datagram after the
+// drain's was "health: healthy", not the sentinel.
+func TestAVerdictMeasuredBeforeTheDrainIsNotAnnouncedAfterIt(t *testing.T) {
+	//: not parallel — $NOTIFY_SOCKET is process-wide.
+	listener, socketPath := supervisorSocket(t)
+	t.Setenv("NOTIFY_SOCKET", socketPath)
+	registry, _ := newRegistry(t, svchealth.Config{Notify: true})
+	var hold atomic.Bool
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	mustAddReadiness(t, registry, corehealth.ReadinessCheckValue{
+		Name: "db", Check: func(ctx context.Context) error {
+			//: only the probe the test holds waits here.
+			if hold.CompareAndSwap(true, false) {
+				close(entered)
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+			}
+			return nil
+		},
+	})
+	ctx := context.Background()
+	//: READY=1, delivered.
+	registry.Probe(ctx, corehealth.ProbeReadiness)
+	//: a probe that has read "serving" and is measuring its dependency.
+	hold.Store(true)
+	stale := make(chan struct{})
+	go func() {
+		defer close(stale)
+		registry.Probe(ctx, corehealth.ProbeReadiness)
+	}()
+	<-entered
+	registry.Drain()
+	//: the drain's own announcement.
+	registry.Probe(ctx, corehealth.ProbeReadiness)
+	//: the stale probe finishes, healthy, after the drain was announced.
+	close(release)
+	<-stale
+	if err := svcsdnotify.Status("sentinel"); err != nil {
+		t.Fatalf("Status = %v, want nil", err)
+	}
+	if got := recvOne(t, listener); !got.Ready() {
+		t.Fatalf("the first datagram is %v, want READY=1", got.State)
+	}
+	if got := recvOne(t, listener); got.Status != "health: unhealthy" {
+		t.Fatalf("the datagram after READY is %v, want STATUS=health: unhealthy", got.State)
+	}
+	if got := recvOne(t, listener); got.Status != "sentinel" {
+		t.Errorf("the datagram after the drain's is %v, want the sentinel — a verdict measured "+
+			"before the drain was announced after it", got.State)
+	}
+}
+
 // TestDrainingIsAnnouncedToTheSupervisor pins that the STATUS line follows the
 // readiness verdict into a drain. The draining short-circuit returned before
 // the only announce, so a unit that had announced READY kept showing

@@ -71,6 +71,14 @@ func (h *health) announce(status corehealth.Status) {
 // supervisor showing the OLDER status line, recorded here as the newer one —
 // with nothing left that would ever correct it.
 //
+// The phase is read under the same lock. A readiness probe measures its
+// dependencies BEFORE it announces, so one that began while the process was
+// serving can finish after Drain, and after another probe has already
+// announced the drain; its serving aggregate would then be sent last and leave
+// the supervisor showing healthy for the rest of the drain. Draining is
+// one-way, so once it has begun a serving status is owed to nobody, and the
+// decision reads the phase where it can no longer change under it.
+//
 // The price is stated rather than hidden: sdnotify's datagram write carries no
 // deadline, so a supervisor socket that stops draining holds this lock, and
 // every readiness probe after it waits behind that one send — where the
@@ -78,6 +86,11 @@ func (h *health) announce(status corehealth.Status) {
 func (h *health) notify(status corehealth.Status) (state string, err error) {
 	h.notifyMu.Lock()
 	defer h.notifyMu.Unlock()
+	//: a verdict measured before the drain, arriving after it.
+	if status.Serving() && h.phase() == phaseDraining {
+		//: nothing owed: the drain's own announcement stands.
+		return "", nil
+	}
 	state, send := h.owed(status)
 	//: nothing new to tell the supervisor — one datagram per change, never
 	//: one per poll.
