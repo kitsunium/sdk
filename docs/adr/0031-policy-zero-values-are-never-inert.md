@@ -70,6 +70,31 @@ the caller's requirement.
   values by ordinary arithmetic (`budget/window` with a zero window), not by a
   caller typing them.
 
+### Later applications
+
+The two policies added after this ADR were designed under it rather than
+retrofitted, and one of them extends the rule past numbers:
+
+- **`FallbackConfig.Fallback` (nil) → refuse.** The secondary operation is the
+  whole content of the policy. Running the primary and passing its error
+  through is the inert case exactly — a policy that does nothing while the
+  caller believes plan B is wired up — and a no-op fallback returning nil would
+  be worse still, reporting success for work that never ran.
+- **`HedgeConfig.Delay` and `MaxInFlight` (non-positive) → refuse.** A zero
+  delay duplicates every call the instant it starts, which is not an inert
+  policy but an inverted one: a load amplifier under a resilience policy's name.
+  `MaxInFlight` is the rarer knob where *both* directions of a guess are
+  harmful — a conservative SDK default silently stops hedging under exactly the
+  load hedging was bought for, and a generous one restores the amplifier.
+  `MaxHedges` clamps to 1 for the same reason `Burst` does.
+- **`HedgeConfig.Idempotent` (false) → refuse.** This one extends the ADR from
+  *values the SDK cannot pick* to *preconditions the SDK cannot check*. Hedging
+  is correct only on an idempotent operation, its breach is a silent double
+  effect rather than an error, and no amount of documentation makes a call site
+  reviewable. Making the assertion a required field puts it in the diff, in the
+  review, and in `grep`. The same instrument, applied to a semantic
+  precondition: the zero value is an explicit refusal, never an inert policy.
+
 ### How a refusal is delivered
 
 The constructors return a bare `Runner`, not `(Runner, error)`. Changing that
@@ -173,6 +198,6 @@ it does not provide, which is the specific harm this ADR names.
 
 ## References
 
-- Impl: `internal/service/resilience/{breaker.go,ratelimit.go,timeout.go,misconfigured.go}`, `internal/core/resilience/{codes.go,errors.go}`.
+- Impl: `internal/service/resilience/{breaker.go,ratelimit.go,timeout.go,misconfigured.go}`, `internal/core/resilience/{codes.go,errors.go}`; later applications in `internal/service/resilience/{fallback.go,hedge.go}` (see §Later applications).
 - ADR 0026 §Decision 2 — the five policies and their constructors.
 - ADR 0030 — the sibling decision on defaults that are unsafe rather than inert.

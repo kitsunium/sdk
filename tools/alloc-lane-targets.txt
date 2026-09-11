@@ -33,6 +33,9 @@
 //internal/kernel/snapshot:snapshot_test
 # encwrite frame-overflow probe (AllocsPerRun-based).
 //internal/service/logger/middleware/encwrite:encwrite_test
+# Labelled-series lookup allocation gate — the claim that resolving an existing
+# series (including one already folded into overflow) costs zero allocations.
+//internal/service/metrics:metrics_test
 # Build().Send() one-alloc-per-emit contract — the guard behind the
 # "zero-allocation logger" claim in README.md / CLAUDE.md.
 //pkg/v1/logger:logger_test

@@ -165,7 +165,7 @@ silently:
   activation is unimplemented upstream. The server adopts inherited *stream*
   listeners today and builds `net.FilePacketConn` from `sdlisten.Files()` for
   the datagram case; promoting that into `sdlisten` is left to a follow-up.
-- **`pkg/v1/metrics` is label-free in v1** (ADR 0027 deferred labels).
+- **`pkg/v1/metrics` was label-free when this ADR was written** (ADR 0027 deferred labels); it now carries labelled series with a bounded cardinality, so a per-connection dimension is expressible — subject to that bound.
   Per-listener and per-group dimensions are therefore encoded **into the
   instrument name** (`net.server.<group>.conns.accepted`). When ADR 0027 grows
   labels, the names collapse into labels — a facade-internal change.

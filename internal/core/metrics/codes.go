@@ -17,6 +17,10 @@ const CodeExportFailed errs.Code = 0x00_02_09_02 // 0.2.9.2
 // bound to a DIFFERENT instrument kind (e.g. a Counter name fetched as a Gauge).
 const CodeInstrumentKindConflict errs.Code = 0x00_02_09_03 // 0.2.9.3
 
+// CodeInvalidLabel identifies an instrument fetched with a label set that
+// cannot name a series: a label with an empty Key, or the same Key twice.
+const CodeInvalidLabel errs.Code = 0x00_02_09_04 // 0.2.9.4
+
 // CodeDuplicateRegistration identifies a boot-time Exporter registry collision:
 // a nil exporter, or a distinct exporter claiming an already-registered Name.
 const CodeDuplicateRegistration errs.Code = 0x00_02_09_05 // 0.2.9.5

@@ -21,7 +21,10 @@ alias(
 
 go_test(
     name = "metrics_test",
-    srcs = ["metrics_external_test.go"],
+    srcs = [
+        "labels_external_test.go",
+        "metrics_external_test.go",
+    ],
     deps = [":metrics"],
 )
 

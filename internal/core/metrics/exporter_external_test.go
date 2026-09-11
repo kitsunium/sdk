@@ -228,7 +228,9 @@ func TestExport(t *testing.T) {
 		{
 			name: "a registered exporter carrying data",
 			key:  "export-ok",
-			snap: metrics.SnapshotValue{Counters: map[string]int64{"requests": 3}},
+			snap: metrics.SnapshotValue{Counters: map[string][]metrics.CounterValue{
+				"requests": {{Value: 3}},
+			}},
 		},
 		{
 			name:     "a name nobody registered",

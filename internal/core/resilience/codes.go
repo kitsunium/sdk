@@ -28,3 +28,7 @@ const CodeTimeoutExceeded errs.Code = 0x00_02_08_05 // 0.2.8.5
 // CodePolicyMisconfigured identifies a policy built with a configuration it
 // cannot honour, whose every call is refused without running the operation.
 const CodePolicyMisconfigured errs.Code = 0x00_02_08_06 // 0.2.8.6
+
+// CodeFallbackFailed identifies a fallback policy whose primary AND secondary
+// operations both failed (both errors travel as fields — neither is dropped).
+const CodeFallbackFailed errs.Code = 0x00_02_08_07 // 0.2.8.7

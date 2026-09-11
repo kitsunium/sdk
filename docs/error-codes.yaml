@@ -290,6 +290,10 @@ codes:
     const: CodePolicyMisconfigured
     hex: "0x00_02_08_06"
     package: internal/core/resilience
+  - code: "0.2.8.7"
+    const: CodeFallbackFailed
+    hex: "0x00_02_08_07"
+    package: internal/core/resilience
   - code: "0.2.9.1"
     const: CodeUnknownExporter
     hex: "0x00_02_09_01"
@@ -301,6 +305,10 @@ codes:
   - code: "0.2.9.3"
     const: CodeInstrumentKindConflict
     hex: "0x00_02_09_03"
+    package: internal/core/metrics
+  - code: "0.2.9.4"
+    const: CodeInvalidLabel
+    hex: "0x00_02_09_04"
     package: internal/core/metrics
   - code: "0.2.9.5"
     const: CodeDuplicateRegistration

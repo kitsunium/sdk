@@ -22,7 +22,10 @@ alias(
 go_test(
     name = "resilience_test",
     srcs = ["resilience_external_test.go"],
-    deps = [":resilience"],
+    deps = [
+        ":resilience",
+        "//pkg/v1/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

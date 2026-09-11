@@ -1,20 +1,51 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/metrics .
 
 // Package metrics is the public facade for the SDK's observability domain — the
-// natural twin of the logger. A [Collector] (from [NewMeter]) mints lock-free
-// [Counter]/[Gauge]/[Histogram] instruments by name; [Collector.Collect] takes a
-// [Snapshot] that an [Exporter] ships out. The stdlib text exporter
-// (name "text", stderr) is registered on import; [Export] dispatches by name.
-// It writes to stderr so that importing this package never arms a writer on
-// stdout, which a process may be using as a protocol channel (ADR 0030); pass
-// os.Stdout to [NewTextExporter] to opt in explicitly.
+// natural twin of the logger. A [Meter] (from [NewMeter]) mints lock-free
+// [Counter]/[Gauge]/[Histogram] instruments; [Meter.Collect] takes a [Snapshot]
+// that an [Exporter] ships out. The stdlib text exporter (name "text", stderr)
+// is registered on import; [Export] dispatches by name. It writes to stderr so
+// that importing this package never arms a writer on stdout, which a process
+// may be using as a protocol channel (ADR 0030); pass os.Stdout to
+// [NewTextExporter] to opt in explicitly.
 //
 //	m := metrics.NewMeter()
 //	m.Counter("requests").Add(1)
 //	_ = metrics.Export("text", m.Collect())
 //
-// v1 is label-free (instruments are name-keyed); labelled dimensions and the
-// Prometheus/OTLP exporters are deferred (ADR 0027).
+// # Labels and series
+//
+// An instrument is identified by its name AND its labels. One name plus one
+// label set is one SERIES, and every fetch of that pair returns the same
+// instrument, so observations accumulate in one place wherever they are made:
+//
+//	m.Counter("requests", metrics.Label{Key: "method", Value: "GET"}).Inc()
+//
+// Label order does not matter — a label set is a set. Passing no labels names
+// the dimensionless series, which is exactly what a call without labels always
+// meant. A label KEY is structure: it is written at the call site and constant
+// for the process, so an empty or repeated key is a programmer error and
+// panics with [InvalidLabel]. A label VALUE is data and may be anything.
+//
+// # Cardinality
+//
+// Distinct label values create distinct series, and an unbounded stream of
+// them is a memory incident rather than a reporting inconvenience. Every Meter
+// therefore bounds how many series ONE instrument name may hold —
+// [DefaultMaxSeriesPerInstrument] unless [NewMeterWithConfig] says otherwise.
+// Past the bound, further label sets are folded into a single aggregated
+// series carrying the label [OverflowLabelKey]="true": memory stays bounded,
+// no observation is dropped, and the condition is visible in every snapshot
+// from then on. What is lost is the breakdown — once folded, an observation's
+// own labels are gone.
+//
+// A non-positive MaxSeriesPerInstrument clamps to the default. There is no
+// setting that means "unbounded" (ADR 0031); a caller who wants a very large
+// bound writes a very large number, where a reviewer can see it.
+//
+// A [Snapshot] maps each instrument name to its series, which is the shape
+// every per-series wire format wants. The Prometheus and OTLP exporters remain
+// deferred (ADR 0027).
 package metrics
 
 import (
@@ -22,6 +53,18 @@ import (
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
+)
+
+const (
+	// DefaultMaxSeriesPerInstrument is the cardinality bound NewMeter applies,
+	// and the value a non-positive MeterConfig knob clamps to.
+	DefaultMaxSeriesPerInstrument int = svcmetrics.DefaultMaxSeriesPerInstrument
+	// OverflowLabelKey is the reserved label naming a meter's aggregated
+	// overflow series. It appears in a snapshot only once an instrument has
+	// exceeded its cardinality bound.
+	OverflowLabelKey string = coremetrics.OverflowLabelKey
+	// OverflowLabelValue is the only value ever stored under OverflowLabelKey.
+	OverflowLabelValue string = coremetrics.OverflowLabelValue
 )
 
 // Meter is the public alias for the instrument factory.
@@ -39,8 +82,20 @@ type Histogram = coremetrics.Histogram
 // Snapshot is the public alias for a whole-meter point-in-time copy.
 type Snapshot = coremetrics.SnapshotValue
 
-// HistogramValue is the public alias for a per-histogram snapshot value.
+// Label is the public alias for one dimension of a series.
+type Label = coremetrics.LabelValue
+
+// CounterValue is the public alias for a per-series counter snapshot value.
+type CounterValue = coremetrics.CounterValue
+
+// GaugeValue is the public alias for a per-series gauge snapshot value.
+type GaugeValue = coremetrics.GaugeValue
+
+// HistogramValue is the public alias for a per-series histogram snapshot value.
 type HistogramValue = coremetrics.HistogramValue
+
+// MeterConfig is the public alias for a Meter's cardinality configuration.
+type MeterConfig = svcmetrics.MeterConfig
 
 // Exporter is the public alias for a snapshot shipper.
 type Exporter = coremetrics.Exporter
@@ -55,12 +110,23 @@ var (
 	ExportFailed = coremetrics.ExportFailed
 	// InstrumentKindConflict is raised when a name is reused across kinds.
 	InstrumentKindConflict = coremetrics.InstrumentKindConflict
+	// InvalidLabel is raised when a label set has an empty or repeated key.
+	InvalidLabel = coremetrics.InvalidLabel
 )
 
-// NewMeter returns a fresh in-memory Meter (Counter/Gauge/Histogram + Collect).
+// NewMeter returns a fresh in-memory Meter (Counter/Gauge/Histogram + Collect)
+// bounded at DefaultMaxSeriesPerInstrument series per instrument name.
 func NewMeter() Meter {
 	//: delegate to the service in-memory meter.
 	return svcmetrics.NewMeter()
+}
+
+// NewMeterWithConfig returns a fresh in-memory Meter honouring cfg. A
+// non-positive MaxSeriesPerInstrument clamps to
+// DefaultMaxSeriesPerInstrument — it never means unbounded.
+func NewMeterWithConfig(cfg MeterConfig) Meter {
+	//: delegate to the service in-memory meter.
+	return svcmetrics.NewMeterWithConfig(cfg)
 }
 
 // NewTextExporter returns a text Exporter writing to dst under name (not
