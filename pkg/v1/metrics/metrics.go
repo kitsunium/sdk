@@ -169,7 +169,8 @@
 //
 //   - Temporality. The format has none, and a server reads every counter as
 //     cumulative. A delta snapshot is REFUSED ([UnsupportedTemporality]) rather
-//     than mis-labelled.
+//     than mis-labelled, and so is a hand-built one whose temporality was left
+//     unresolved, which would otherwise pass as cumulative.
 //   - The attribute's TYPE. A Prometheus label value is a string, so
 //     Int64("v", 1) and String("v", "1") — two series here — become one there.
 //   - The Resource and the Scope, which have nowhere to go. In particular
@@ -451,7 +452,8 @@ var (
 	// histogram.
 	ReservedLabelName = svcmetrics.ReservedLabelName
 	// UnsupportedTemporality is returned by the Prometheus connector when the
-	// snapshot is a delta one, which the exposition format cannot express.
+	// snapshot is not cumulative — a delta one, which the exposition format
+	// cannot express, or a hand-built one whose temporality is unresolved.
 	UnsupportedTemporality = svcmetrics.UnsupportedTemporality
 	// OTLPUnresolvedTemporality is returned by the OTLP/JSON encoder when a
 	// metric's temporality is neither delta nor cumulative. The schema's

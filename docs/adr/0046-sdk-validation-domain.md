@@ -134,6 +134,13 @@ file. A path built from Go field names would name something that appears
 nowhere in the input the user is being asked to fix. The programmatic `Field`
 takes the name as an argument, so the caller is always in control.
 
+The same fact decides embeddings. An embedded struct with no json name — or a
+pointer to one — adds **no** segment: `encoding/json` promotes its fields into
+the enclosing object, so `Common.zip` names nothing the operator can write and
+the path is `zip`. A json-named embedding keeps its name, and an embedded
+non-struct is keyed by its type name, exactly as `encoding/json` keys it.
+(Amended 2026-09-11: the first version added the Go name of every embedding.)
+
 **A map key is NOT in the grammar**, and that is a decision, not an omission —
 see *Deferred*.
 
@@ -291,8 +298,13 @@ runtime bar are both trivial on all 8 GOOS.
   that reaches **itself** is refused at compile time; two fields of the same
   type (a diamond) compile fine.
 - **A nil pointer contributes nothing.** `dive` through a nil pointer descends
-  into nothing; requiring it to be present is `required`, a different question
-  asked at the field.
+  into nothing — a nil `*[]T` or `*[N]T` included — and requiring it to be
+  present is `required`, a different question asked at the field. For a slice
+  of pointers, `dive,required` asks that question of each ELEMENT pointer: a
+  nil element is the violation, exactly as `required` on a `*T` field and
+  `Each(…, Required[*T]())` mean it. (Amended 2026-09-11: `dive` on a pointer
+  to a collection used to panic, and `dive,required` asked about the pointee,
+  so a nil element passed.)
 - **`Matches` runs RE2.** Go's regexp does not backtrack, so a pattern cannot be
   turned into a denial of service by the value it is shown. That is what makes
   it acceptable to run one on untrusted input, and it is why the SDK imposes no
@@ -375,7 +387,12 @@ published surface to break. `internal/core/config.Validator` is untouched.
   randomised map iteration, and "collect everything" stops being diffable), and
   an unambiguous rendering of an arbitrary key in the path grammar. Both are
   answerable — sorted `cmp.Ordered` keys, `%q`-quoted segments — and neither
-  should be answered in the same change that establishes the grammar.
+  should be answered in the same change that establishes the grammar. The
+  quoted segment would also settle the one ambiguity the grammar already has:
+  a member NAME containing `.`, `[` or `]` (`json:"log.level"` is legal)
+  renders a path indistinguishable from a nested or indexed one. It is
+  documented on `JoinField` and deferred with map descent rather than answered
+  for member names alone.
 - **A `Violation` → message catalogue / i18n.** `Rule` + `Path` + `Code` are
   deliberately enough for an application to look up its own translated string.
   The SDK will not ship a message bundle.

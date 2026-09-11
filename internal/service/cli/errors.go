@@ -11,6 +11,10 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // not the other needs to be able to tell them apart.
 const exitUsage int = 64
 
+// exitIOErr matches sysexits EX_IOERR (74): an error occurred while doing I/O —
+// here, on the stream the help is written to.
+const exitIOErr int = 74
+
 var (
 	// UnknownCommand is returned when a token does not name any child of the
 	// group that was reached.
@@ -58,4 +62,26 @@ var (
 	CommandPanicked = errs.Define(CodeCommandPanicked, "COMMAND_PANICKED",
 		"The command panicked and was recovered",
 		"service/cli: the Action panicked; the fields carry the command path, the panic value and the originating stack")
+
+	// HelpWriteFailed is returned when -h asked for the help and the
+	// diagnostic stream did not take it.
+	//
+	// Only the -h path returns it. After a bad command line the usage error is
+	// the verdict and the help is the actionable half of it, so a failed write
+	// there does not replace the status the operator's mistake earned.
+	HelpWriteFailed = errs.Define(CodeHelpWriteFailed, "HELP_WRITE_FAILED",
+		"The help could not be written",
+		"service/cli: the diagnostic stream refused the help -h asked for, or took part of it; the fields carry the command path",
+		errs.WithExitCode(exitIOErr))
+
+	// helpWriteWrap is the WrapParams the engine attaches to the writer's own
+	// error. Its fields mirror HelpWriteFailed, so errors.Is answers both the
+	// sentinel and the cause the writer reported.
+	helpWriteWrap = errs.WrapParams{
+		Code:     CodeHelpWriteFailed,
+		Reason:   "HELP_WRITE_FAILED",
+		Public:   "The help could not be written",
+		Private:  "service/cli: the diagnostic stream refused the help -h asked for, or took part of it; the fields carry the command path",
+		ExitCode: exitIOErr,
+	}
 )

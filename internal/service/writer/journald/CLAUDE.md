@@ -114,7 +114,7 @@ question and two of them change what reaches the journal.
 ### One security property asserted by a comment and enforced by no test
 
 The frame is correct **only because** the SDK's own encoders strip CR, LF and
-NUL — which the in-tree text encoder does, in `appendSanitizedMessage`. But
+NUL — which the in-tree text encoder does, in `encoder.AppendSanitized`. But
 `Encoder` is a public port, this package neither imports nor tests against any
 encoder, and the sink validates nothing. A custom encoder that emits a raw
 newline turns `MESSAGE=x\nPRIORITY=0\n` into a journal entry carrying a

@@ -2,8 +2,11 @@
 package metrics
 
 import (
+	"math"
 	"sync"
 	"testing"
+
+	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 )
 
 // Test_memSum_Add pins monotonicity, which is the ONLY difference between a
@@ -211,13 +214,48 @@ func Test_memSum_collect(t *testing.T) {
 // An observable callback reports an ABSOLUTE total (goroutines alive, bytes
 // allocated since boot). Under cumulative temporality that IS the report; under
 // delta it is not, and the meter has to difference successive observations
-// itself. An observed series is also never swapped to zero on collection —
-// doing so would report the same delta twice, once as itself and once as its
-// own negation.
+// itself. Each step of a case is one collection: the callback runs first and
+// either reports a total or, where the step reads `unreported`, runs without
+// mentioning the series at all; the reader follows.
+//
+// Two rules decide the delta answers, and each was a defect before it was a
+// row here:
+//
+//   - A series the callback did not report saw nothing in that window, so it
+//     reports ZERO — what an untouched synchronous series reports. The last
+//     window used to be re-emitted instead, on every collection until the
+//     series came back, and a backend summing deltas counted it each time.
+//     previous survives the silence, so a series that returns is differenced
+//     against its last reading rather than against zero.
+//   - A MONOTONIC total that went down restarted behind the callback (a process
+//     restart resets it), so the window is the new total: counted from zero
+//     since the reset. It is never a negative delta on a sum whose metric says
+//     Monotonic. An up-down total is a signed quantity and keeps its signed
+//     window.
+//
+// The cumulative path is deliberately untouched by both: a silent callback
+// leaves the last total standing, and a decrease is published as reported,
+// because a cumulative reader decides for itself what a drop means.
+//
+// MUTATION-CHECKED, one mutation per rule, each restoring one defect and
+// nothing else. Deleting collect's zero-reports gate, so every observed series
+// is read with s.v.Load() whatever its callback did this collection, fails the
+// three silence rows: `collection #2 = 5, want 0` on the first, and
+// `collection #2 = 10, want 0` where the silence precedes a restart. Deleting
+// observe's monotonic reset fails the two decrease rows on an observable
+// counter, at `collection #2 = -7, want 3` and `collection #3 = -6, want 4`.
+// Applying the reset to every sum instead of a monotonic one fails the two
+// up-down rows, at `collection #2 = 3, want -7` and
+// `collection #4 = 2, want -3`. The code before the fix failed the silence and
+// decrease rows the same way.
 func Test_memSum_observe(t *testing.T) {
 	t.Parallel()
+	//: a collection in which the callback did not report the series — a
+	//: sentinel, since no row reports the most negative total there is.
+	const unreported int64 = math.MinInt64
 	type tc struct {
 		name      string
+		build     func() *memSum
 		delta     bool
 		absolutes []int64
 		want      []int64
@@ -225,39 +263,156 @@ func Test_memSum_observe(t *testing.T) {
 	tests := []tc{
 		{
 			name:      "cumulative reports the absolute value",
+			build:     newObservableCounter,
 			absolutes: []int64{10, 15, 15, 40},
 			want:      []int64{10, 15, 15, 40},
 		},
 		{
+			//: the cumulative path is untouched by both delta rules.
+			name:      "cumulative keeps the last total through a silence and publishes a decrease as reported",
+			build:     newObservableCounter,
+			absolutes: []int64{10, unreported, 4},
+			want:      []int64{10, 10, 4},
+		},
+		{
 			name:      "delta reports the difference",
+			build:     newObservableCounter,
 			delta:     true,
 			absolutes: []int64{10, 15, 15, 40},
 			//: the first window starts at zero, then 5, then nothing, then 25.
 			want: []int64{10, 5, 0, 25},
 		},
 		{
-			//: an observable that resets (a process restart behind the
-			//: callback) reports a negative window rather than a silent gap.
-			//: Naming it here records what the SDK does not attempt to hide.
-			name:      "delta reports a decreasing absolute as a negative window",
+			name:      "delta reports an empty window for a collection that did not report the series",
+			build:     newObservableCounter,
 			delta:     true,
-			absolutes: []int64{10, 4},
-			want:      []int64{10, -6},
+			absolutes: []int64{5, unreported, 8},
+			//: 5, then NOTHING rather than 5 again, then 8 - 5.
+			want: []int64{5, 0, 3},
+		},
+		{
+			name:      "delta reports an empty window for every collection of a long silence",
+			build:     newObservableUpDownCounter,
+			delta:     true,
+			absolutes: []int64{5, unreported, unreported, 2},
+			//: previous is still 5 when the series returns, so 2 - 5.
+			want: []int64{5, 0, 0, -3},
+		},
+		{
+			name:      "a delta monotonic total that went down restarted, so the window is the new total",
+			build:     newObservableCounter,
+			delta:     true,
+			absolutes: []int64{10, 3, 7},
+			//: 10, then the 3 counted since the restart, then 7 - 3.
+			want: []int64{10, 3, 4},
+		},
+		{
+			name:      "a delta monotonic total that returns lower after a silence restarted during it",
+			build:     newObservableCounter,
+			delta:     true,
+			absolutes: []int64{10, unreported, 4},
+			want:      []int64{10, 0, 4},
+		},
+		{
+			//: an up-down total may legitimately fall, and says so.
+			name:      "a delta up-down total that went down reports a signed window",
+			build:     newObservableUpDownCounter,
+			delta:     true,
+			absolutes: []int64{10, 3},
+			want:      []int64{10, -7},
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		sum := newObservableCounter()
+		sum := c.build()
 		for i, absolute := range c.absolutes {
-			sum.observe(absolute, c.delta)
-			//: collect must not consume an observed series.
-			if got := sum.collect(c.delta); got != c.want[i] {
-				t.Errorf("collect #%d = %d, want %d", i+1, got, c.want[i])
+			//: the callback runs first, and may not mention the series.
+			if absolute != unreported {
+				sum.observe(absolute, c.delta)
 			}
-			//: and reading it twice must report the same thing, because the
-			//: value was produced by the callback and not by the reader.
+			//: then the collection reads it.
 			if got := sum.collect(c.delta); got != c.want[i] {
-				t.Errorf("a second collect #%d = %d, want %d", i+1, got, c.want[i])
+				t.Errorf("collection #%d = %d, want %d", i+1, got, c.want[i])
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestDeltaObservableThatStopsReportingReportsZero pins the silence rule end
+// to end, through a real Collect, in the shape it takes in production: the
+// callback keeps running and simply stops mentioning one attribute set — a
+// shard that was drained, a pool that was closed.
+//
+// Three windows. {shard=a} reports 5, is absent from the second collection,
+// then reports 8, and a delta reader must see 5, 0 and 3: the silent window is
+// EMPTY, and the return is differenced against 5, the last reading, rather
+// than against zero. {shard=b} reports throughout, so the silence of one series
+// is not mistaken for the silence of the instrument.
+//
+// MUTATION-CHECKED with the same deleted zero-reports gate: both cases fail at
+// `window #2: shard a = 5, want 0` — the second window re-emits the first,
+// which is what the code before the fix did too, and it would have gone on
+// re-emitting it on every collection until the shard came back.
+func TestDeltaObservableThatStopsReportingReportsZero(t *testing.T) {
+	t.Parallel()
+	//: what the callback reports in each collection; a shard missing from a
+	//: window is one the callback does not mention in it.
+	windows := []map[string]int64{
+		{"a": 5, "b": 1},
+		{"b": 2},
+		{"a": 8, "b": 2},
+	}
+	//: what a delta reader must see, series by series.
+	want := []map[string]int64{
+		{"a": 5, "b": 1},
+		{"a": 0, "b": 1},
+		{"a": 3, "b": 0},
+	}
+	type tc struct {
+		name     string
+		register func(m *memMeter, observe coremetrics.Int64Callback)
+	}
+	tests := []tc{
+		{
+			name: "an observable counter",
+			register: func(m *memMeter, observe coremetrics.Int64Callback) {
+				m.ObservableCounter("shard_items", observe)
+			},
+		},
+		{
+			name: "an observable up-down counter",
+			register: func(m *memMeter, observe coremetrics.Int64Callback) {
+				m.ObservableUpDownCounter("shard_items", observe)
+			},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		m := newMemMeter(MeterConfig{Temporality: coremetrics.TemporalityDelta})
+		window := 0
+		c.register(m, func(observe coremetrics.ObserveInt64) {
+			//: a fixed shard order, so the reports are deterministic.
+			for _, shard := range []string{"a", "b"} {
+				if value, ok := windows[window][shard]; ok {
+					observe(value, coremetrics.String("shard", shard))
+				}
+			}
+		})
+		for window = range windows {
+			got := make(map[string]int64, len(want[window]))
+			for _, point := range m.Collect().Sums["shard_items"].Points {
+				got[point.Attrs[0].Str()] = point.Value
+			}
+			for shard, value := range want[window] {
+				if got[shard] != value {
+					t.Errorf("window #%d: shard %s = %d, want %d", window+1, shard, got[shard], value)
+				}
 			}
 		}
 	}

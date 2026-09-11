@@ -232,8 +232,10 @@ func extractNDJSON(rows *[]stdjson.RawMessage) func() ([]byte, error) {
 func extractCSV(table *[][]string) func() ([]byte, error) {
 	//: closure captures the container.
 	return func() ([]byte, error) {
-		//: header + body row must exist; body's first column has the json.
-		if len(*table) < csvPromotionRowCount || len((*table)[1]) < 1 {
+		//: exactly the header row and one single-column body row, as the wrap
+		//: stage writes them; anything else was not produced by promotion,
+		//: and an extra row or column would be dropped without a word.
+		if !isCSVPromotion(*table) {
 			//: typed sentinel.
 			return nil, promoteContainerFailed("malformed csv promotion container")
 		}
@@ -249,14 +251,25 @@ func extractForm(values *url.Values) func() ([]byte, error) {
 		//: the wrap stage writes exactly one value under formPromotionKey;
 		//: anything else means these bytes were not produced by promotion.
 		payload := (*values)[formPromotionKey]
-		//: refuse a body that does not carry the promotion pair.
-		if len(payload) != 1 {
+		//: refuse a body that does not carry the promotion pair alone — a
+		//: second key would be decoded past without a word.
+		if len(*values) != 1 || len(payload) != 1 {
 			//: typed sentinel.
 			return nil, promoteContainerFailed("malformed form promotion container")
 		}
 		//: cast back to bytes for json.Unmarshal.
 		return []byte(payload[0]), nil
 	}
+}
+
+// isCSVPromotion reports whether table has exactly the shape the csv wrap
+// stage writes: the promotion header alone on the first row, and one column on
+// the second.
+func isCSVPromotion(table [][]string) bool {
+	//: two rows, one column each, and the header the wrap stage writes.
+	return len(table) == csvPromotionRowCount &&
+		len(table[0]) == 1 && table[0][0] == csvPromotionHeader &&
+		len(table[1]) == 1
 }
 
 // extractPEM returns the inner-bytes closure for a pem container.

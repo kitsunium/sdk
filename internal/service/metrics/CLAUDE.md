@@ -104,9 +104,17 @@ Consequences, stated rather than discovered:
 - **A series that saw nothing in a delta window reports zero**, rather than
   disappearing. Omitting it would make a series flicker in and out of a
   dashboard, and the cardinality bound already keeps the set finite.
-- **An OBSERVED series is never swapped.** Its callback already stored the right
-  number for the window (§Observables), and swapping would report the same delta
-  twice — once as itself, once as its own negation.
+- **An OBSERVED series is never swapped, and still consumes its window.** `v`
+  is not its accumulator: `observe` OVERWRITES it with the whole window each
+  time the callback reports the series, derived from `previous` and never from
+  `v` (§Observables). What a delta read consumes is the *report*, which the
+  `reports` counter tallies. A series the callback did not mention in this
+  collection therefore reports **zero**, like any series that saw nothing — it
+  used to re-emit its last window on every collection until it came back, and a
+  backend summing deltas counted it each time. `previous` survives the silence,
+  so the return is differenced against the last reading.
+  `TestDeltaObservableThatStopsReportingReportsZero` drives the three windows
+  through `Collect`.
 - **A gauge is untouched by either setting.** It carries no temporality, in this
   package and in the OTel model.
 
@@ -119,8 +127,16 @@ otherwise deadlock behind its own collection.
 
 - The callback reports the **absolute** total (the OTel contract). Under
   cumulative that value IS the report; under delta the meter stores
-  `absolute − previous` and remembers `absolute`. `previous` is a plain field,
-  not an atomic, because `collectMu` makes `Collect` the only writer.
+  `absolute − previous` and remembers `absolute`. `previous` and `reports` are
+  plain fields, not atomics, because `collectMu` makes `Collect` the only
+  writer.
+- **A monotonic total that went DOWN is a reset.** Under delta the window is
+  then the new `absolute` — what the source counted since it restarted from
+  zero (a process restart behind the callback) — because differencing it would
+  put a negative delta on a sum whose metric says `Monotonic`. An
+  `ObservableUpDownCounter` is signed and keeps its signed window; the
+  cumulative path publishes a decrease as reported, and a cumulative reader
+  reads the drop as a reset itself.
 - **Registrations accumulate**, as the OTel API specifies: a second callback
   under one name adds to the first rather than replacing it, so two packages can
   contribute to one instrument.
@@ -223,7 +239,10 @@ double quote too — the two exporters follow the two grammars they are writing,
 which is not an inconsistency. A
 string attribute value is quoted and escaped; a bool, integer or double is
 printed **bare**, so the attribute's TYPE is visible rather than flattened the
-way a wire format flattens it. A histogram renders its observation count only —
+way a wire format flattens it. Attribute keys and instrument names go through
+the same escape, unquoted: they are normally literals, but one line per series
+is the format's only framing, and a newline in a key or a name forged exactly
+the line the value escaping exists to prevent. A histogram renders its observation count only —
 the bucket layout is reachable through the Snapshot API, and this is a
 diagnostic, not a wire format.
 
@@ -344,7 +363,7 @@ Each row below has an executable test.
 
 | Lost | What happens | Why it is a loss and not a bug |
 |---|---|---|
-| **Temporality** | a delta snapshot is **REFUSED**, `UNSUPPORTED_TEMPORALITY` (`0.3.45.4`), nothing written | the format has no temporality field and a Prometheus server reads every counter as cumulative — `rate()` differences successive scrapes itself. Handing it deltas means differencing numbers that are already differences (the reported rate becomes the second derivative) and every window smaller than the last reads as a counter reset. Nothing in the document would say so and no dashboard would look broken. Refusing is safe for the same reason refusing a name is: a meter's temporality is fixed at construction, so this fails on the first scrape or never |
+| **Temporality** | a delta snapshot is **REFUSED**, `UNSUPPORTED_TEMPORALITY` (`0.3.45.4`), nothing written — and so is an unresolved or cast temporality, which the OTLP encoder refuses too, rather than being emitted as if it were cumulative | the format has no temporality field and a Prometheus server reads every counter as cumulative — `rate()` differences successive scrapes itself. Handing it deltas means differencing numbers that are already differences (the reported rate becomes the second derivative) and every window smaller than the last reads as a counter reset. Nothing in the document would say so and no dashboard would look broken. Refusing is safe for the same reason refusing a name is: a meter's temporality is fixed at construction, so this fails on the first scrape or never |
 | **The attribute's TYPE** | every value is rendered to a string; `Int64("v", 1)` and `String("v", "1")` — two series in the snapshot — become ONE series on the wire | a Prometheus label value **is** a string; there is no second option and no encoding avoids it. Unlike a mangled NAME, there is no injective alternative here, which is exactly why this one is documented rather than refused. The rendering follows the OTel→Prometheus interoperability specification |
 | **`Resource`** | dropped entirely; no `target_info` metric is emitted | `service.name` cannot even be SPELLED — a Prometheus label name is `[a-zA-Z_][a-zA-Z0-9_]*` and the dot is outside it. The interoperability spec answers this by mangling the key; this connector refuses non-injective name rewriting everywhere else in this very file, and consistency with our own rule beats consistency with theirs. Whatever producer identity a Prometheus deployment has comes from the scrape target's own labels (`job`, `instance`), which the server attaches |
 | **`InstrumentationScope`** | dropped entirely | same wall: the format has no place for a second identity, and `otel_scope_name` would be an invented label the caller never wrote |
@@ -680,7 +699,8 @@ map is cloned at construction so a later caller mutation cannot change the wire.
   Prometheus text exposition connector.
 - Emit a `target_info` metric to smuggle the Resource through. It needs the same
   non-injective mangling, on the one key (`service.name`) that most matters.
-- Let a delta snapshot reach the Prometheus wire. It is refused, on purpose.
+- Let a delta snapshot reach the Prometheus wire, or an unresolved one pass as
+  cumulative. Both are refused, on purpose.
 - Invent a fourth escape sequence. The 0.0.4 parser rejects anything but
   `\\`, `\"` and `\n`, so a `\r` would cost the whole scrape.
 - Emit a placeholder `# HELP`, or one for an empty description. The format makes

@@ -19,9 +19,23 @@ import (
 // one shot rather than letting it grow.
 const partHeaderFields int = 2
 
-// quoteEscaper mirrors mime/multipart's own (unexported) escaper: a quoted
-// header parameter escapes the backslash and the double quote, nothing else.
-// RFC 7578 §5.1 leaves other characters alone deliberately.
+// forbiddenHeaderOctets are the three octets no part header value may carry.
+// mime/multipart.Writer.CreatePart writes every header value verbatim, so a CR
+// or an LF inside one does not corrupt the field — it ENDS the line, and the
+// rest of the value is read back as a header line of its own or, after an
+// empty line, as the start of the body. NUL ends the value for any consumer
+// written in C. The same three octets ADR 0064's mail header gate refuses.
+const forbiddenHeaderOctets string = "\r\n\x00"
+
+// quoteEscaper escapes the two characters that can end or bend a quoted header
+// parameter: the backslash and the double quote.
+//
+// It is deliberately NOT a copy of mime/multipart's own (unexported) escaper,
+// which also percent-encodes CR and LF. That encoding is a REPAIR — the part
+// would carry a filename the caller never supplied while Encode reported
+// success. This package refuses those octets instead, before any header is
+// built (see forbiddenHeaderOctets), so a value reaching this replacer holds no
+// CR, LF or NUL left to encode.
 //
 //nolint:gochecknoglobals // strings.Replacer is immutable and safe to share.
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
@@ -95,6 +109,14 @@ func (e *multipartEncoder) writePart(part *PartValue) error {
 		//: typed refusal — a programming error, not a wire fault.
 		return valueInvalid("part carries no field name")
 	}
+	//: a CR, LF or NUL in a header value would end its line and write the rest
+	//: as header lines the caller never wrote — refused before CreatePart puts
+	//: a byte on the wire, and never repaired (ADR 0064's stance).
+	if field, found := injectedHeaderField(part); found {
+		//: typed refusal naming the field; the value is never echoed.
+		return valueInvalid("a part header value carries a CR, LF or NUL",
+			errs.String("field", field))
+	}
 	//: open the part; CreatePart writes the delimiter + header block.
 	body, cerr := e.inner.CreatePart(partHeader(part))
 	//: header write failure.
@@ -109,6 +131,30 @@ func (e *multipartEncoder) writePart(part *PartValue) error {
 	}
 	//: part complete.
 	return nil
+}
+
+// injectedHeaderField reports the first of the three caller-supplied header
+// values carrying a forbidden octet, in declaration order, so a part with two
+// bad values still names one of them deterministically. It reports the FIELD
+// and never the value: the value is exactly the string an attacker chose.
+func injectedHeaderField(part *PartValue) (field string, found bool) {
+	//: the field name lands in Content-Disposition's name= parameter.
+	if strings.ContainsAny(part.Name, forbiddenHeaderOctets) {
+		//: name the field, not its value.
+		return "Name", true
+	}
+	//: the filename lands in Content-Disposition's filename= parameter.
+	if strings.ContainsAny(part.FileName, forbiddenHeaderOctets) {
+		//: name the field, not its value.
+		return "FileName", true
+	}
+	//: the media type is written as the whole Content-Type value.
+	if strings.ContainsAny(part.ContentType, forbiddenHeaderOctets) {
+		//: name the field, not its value.
+		return "ContentType", true
+	}
+	//: every header value fits on its own line.
+	return "", false
 }
 
 // partHeader builds the RFC 7578 header block for part.
@@ -175,13 +221,14 @@ func marshalFailed(cause error, detail string) error {
 }
 
 // valueInvalid builds the typed ValueInvalid error for a rejected argument
-// shape, with a call-site specific Private diagnostic.
-func valueInvalid(detail string) error {
+// shape, with a call-site specific Private diagnostic and any fields that
+// locate the problem (never a caller-supplied value).
+func valueInvalid(detail string, fields ...errs.FieldValue) error {
 	//: typed sentinel so callers route on CodeMultipartValueInvalid.
 	return errs.Wrap(nil, errs.WrapParams{
 		Code:    CodeMultipartValueInvalid,
 		Reason:  "VALUE_INVALID",
 		Public:  "multipart codec rejected the value shape",
 		Private: "service/codec/multipart: " + detail,
-	})
+	}, fields...)
 }

@@ -268,7 +268,7 @@ func appendHistograms(buf []byte, metrics map[string]coremetrics.HistogramMetric
 func appendMetricHeader(buf []byte, header metricHeader) []byte {
 	//: the header word plus the instrument it qualifies.
 	buf = append(buf, "# metric "...)
-	buf = append(buf, header.name...)
+	buf = appendEscapedValue(buf, header.name)
 	buf = append(buf, ' ')
 	buf = append(buf, header.kind...)
 	//: a gauge has no window to name.
@@ -295,8 +295,9 @@ func appendMetricHeader(buf []byte, header metricHeader) []byte {
 
 // appendSeriesLine appends "name{k=v,…} value\n" to buf.
 func appendSeriesLine(buf []byte, name string, attrs []coremetrics.AttrValue, value string) []byte {
-	//: the instrument name opens the line.
-	buf = append(buf, name...)
+	//: the instrument name opens the line, escaped for the same reason as a
+	//: key (see appendAttrPair).
+	buf = appendEscapedValue(buf, name)
 	//: the attribute set, or nothing at all when the series has none.
 	buf = appendAttrs(buf, attrs)
 	//: value, then terminate the line.
@@ -335,9 +336,15 @@ func appendAttrs(buf []byte, attrs []coremetrics.AttrValue) []byte {
 // That asymmetry is the point of this exporter. Every wire format the SDK
 // targets flattens a bool into the two letters "true"; a diagnostic that did
 // the same would hide the one thing the typed attribute model added.
+//
+// The key is escaped exactly as a string value is. It is structure, and
+// normally a literal at the call site — but a key derived from data, or one in
+// a hand-built snapshot, can carry a newline, and one line per series is this
+// format's only framing, so an unescaped key forged the very line the value
+// escaping exists to prevent. For an ordinary key the bytes are unchanged.
 func appendAttrPair(buf []byte, attr coremetrics.AttrValue) []byte {
-	//: the key is structure — validated non-empty, so it needs no escaping.
-	buf = append(buf, attr.Key...)
+	//: the key, escaped like a value so it cannot end the line.
+	buf = appendEscapedValue(buf, attr.Key)
 	buf = append(buf, '=')
 	//: only a string can carry a byte that would break the line.
 	if attr.Kind() == coremetrics.AttrKindString {

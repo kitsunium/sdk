@@ -7,9 +7,11 @@ package multipart
 
 import (
 	"bufio"
+	"bytes"
 	stdjson "encoding/json"
 	"errors"
 	"io"
+	"math"
 	stdmp "mime/multipart"
 	"reflect"
 
@@ -118,30 +120,25 @@ func (d *multipartDecoder) fetch() {
 }
 
 // readInto drains one *mime/multipart.Part into the look-ahead slot, refusing
-// an over-cap body rather than materialising it.
+// an over-budget body rather than materialising it.
 func (d *multipartDecoder) readInto(src *stdmp.Part) {
-	//: read one byte past the per-part cap so an over-cap body is detected as
-	//: overflow rather than silently truncated (transform/bounded.go's shape).
-	body, overflow, rerr := readBounded(src, d.count.limits.MaxPartBytes)
-	//: a read fault mid-body is a wire failure.
-	if rerr != nil {
-		//: park the wrapped failure.
-		d.pendErr = unmarshalFailed(rerr, "Decoder: reading a part body failed")
+	//: RFC 7578 §4.2: every part MUST carry a form-data name, and PartValue
+	//: declares Name required — the encoder refuses to write a part without
+	//: one, so a decode that produced one would hand back a value this codec
+	//: cannot re-encode. Refused before the body is read, since it is not
+	//: going to be kept.
+	if src.FormName() == "" {
+		//: a malformed body, not a caller mistake.
+		d.pendErr = unmarshalFailed(nil, "Decoder: a part carries no form-data name (RFC 7578 §4.2)")
 		//: nothing buffered.
 		return
 	}
-	//: an over-cap body is refused by the bound, not by the reader.
-	if overflow {
-		//: park the typed LIMIT_EXCEEDED naming the knob and its ceiling.
-		d.pendErr = limitExceeded("MaxPartBytes", d.count.limits.MaxPartBytes,
-			d.count.limits.MaxPartBytes+1)
-		//: nothing buffered.
-		return
-	}
-	//: charge the part count and the aggregate total.
-	if lerr := d.count.admitPart(int64(len(body))); lerr != nil {
-		//: park the typed LIMIT_EXCEEDED.
-		d.pendErr = lerr
+	//: materialise the body under the byte budget and charge it.
+	body, berr := d.readBody(src)
+	//: a read fault or a crossed bound, already typed.
+	if berr != nil {
+		//: park it for the next Decode.
+		d.pendErr = berr
 		//: nothing buffered.
 		return
 	}
@@ -154,13 +151,45 @@ func (d *multipartDecoder) readInto(src *stdmp.Part) {
 	}
 }
 
+// readBody materialises one part body under the tighter of the two byte
+// bounds — MaxPartBytes, or what is left of MaxTotalBytes — and charges it
+// against the counter. At most one byte past that budget is pulled from src,
+// so the aggregate holds for the LAST part too, and an over-budget body is
+// refused naming the bound that stopped it.
+func (d *multipartDecoder) readBody(src io.Reader) (body []byte, err error) {
+	//: the tighter bound, the knob that sets it, and that knob's ceiling.
+	knob, ceiling, budget := d.count.readBudget()
+	//: read one byte past the budget so an over-budget body is detected as
+	//: overflow rather than silently truncated (transform/bounded.go's shape).
+	read, overflow, rerr := readBounded(src, budget)
+	//: a read fault mid-body is a wire failure.
+	if rerr != nil {
+		//: typed UNMARSHAL_FAILED.
+		return nil, unmarshalFailed(rerr, "Decoder: reading a part body failed")
+	}
+	//: an over-budget body is refused by the bound, not by the reader.
+	if overflow {
+		//: the observed magnitude — the part, or the running total — is at
+		//: least one past the ceiling of the knob that bound the read.
+		return nil, limitExceeded(knob, ceiling, probeSize(ceiling))
+	}
+	//: charge the part count and the aggregate total.
+	if lerr := d.count.admitPart(int64(len(read))); lerr != nil {
+		//: typed LIMIT_EXCEEDED.
+		return nil, lerr
+	}
+	//: within every bound.
+	return read, nil
+}
+
 // readBounded drains r into a fresh buffer, refusing to materialise more than
 // max bytes. Mirrors internal/service/transform.readAllBounded: the extra byte
 // on the LimitReader is what separates a legitimately cap-sized payload from
-// one that wanted to exceed the cap.
+// one that wanted to exceed the cap. See probeSize for the one max that gets
+// no extra byte.
 func readBounded(r io.Reader, max int64) (body []byte, overflow bool, err error) {
-	//: LimitReader stops at max+1 so overflow is observable.
-	limited := io.LimitReader(r, max+1)
+	//: LimitReader stops one byte past max so overflow is observable.
+	limited := io.LimitReader(r, probeSize(max))
 	//: ReadAll over the bounded reader is the single allocation point.
 	buf, rerr := io.ReadAll(limited)
 	//: a read fault is surfaced verbatim for the caller to wrap.
@@ -175,6 +204,23 @@ func readBounded(r io.Reader, max int64) (body []byte, overflow bool, err error)
 	}
 	//: within bounds.
 	return buf, false, nil
+}
+
+// probeSize returns bound+1 — the read limit that makes a body over bound
+// observable — or bound itself when bound is math.MaxInt64.
+//
+// bound+1 wraps to math.MinInt64 there, and io.LimitReader reads nothing at all
+// through a negative limit: with MaxPartBytes at MaxInt64, which resolve
+// accepts, every part decoded silently empty. No []byte can hold more than
+// MaxInt64 bytes, so at that bound there is no overflow for the probe to see.
+func probeSize(bound int64) int64 {
+	//: below the int64 ceiling the probe byte fits.
+	if bound < math.MaxInt64 {
+		//: one past the bound.
+		return bound + 1
+	}
+	//: saturate rather than wrap negative.
+	return bound
 }
 
 // publishPart copies part through the caller's *PartValue, refusing a nil one.
@@ -226,11 +272,17 @@ func isSettablePointer(v any) bool {
 // sniffReader wraps r in a bufio.Reader and recovers the boundary from the
 // stream WITHOUT consuming it: Peek leaves the delimiter line in the buffer so
 // mime/multipart.Reader still sees a complete body.
+//
+// It reads no further than the answer needs. The head is examined as it
+// arrives, and the sniff returns once the first delimiter line is complete, so
+// a producer that sends a short prefix and then pauses is not made to fill the
+// whole window first — it used to be, which stalled NewDecoder on a live
+// stream until 4 KiB or the end arrived.
 func sniffReader(r io.Reader) (buffered *bufio.Reader, boundary string, err error) {
-	//: size the buffer to the sniff window so one Peek covers it.
+	//: size the buffer to the sniff window so the head always fits in it.
 	br := bufio.NewReaderSize(r, boundarySniffWindow)
 	//: Peek does not advance the reader; a short stream returns what it has.
-	head, perr := br.Peek(boundarySniffWindow)
+	head, perr := peekHead(br)
 	//: anything other than "the stream is shorter than the window" is fatal.
 	if perr != nil && !errIsEOF(perr) && !errors.Is(perr, bufio.ErrBufferFull) {
 		//: wrap the transport failure.
@@ -245,6 +297,71 @@ func sniffReader(r io.Reader) (buffered *bufio.Reader, boundary string, err erro
 	}
 	//: the buffered reader still holds every byte the caller supplied.
 	return br, found, nil
+}
+
+// peekHead peeks at br until the first delimiter line is complete, the sniff
+// window is full, or the stream ends — whichever comes first.
+//
+// A first line ending in "--" is not complete for this purpose. It can be a
+// zero-part body's close delimiter or a boundary that itself ends in "--", and
+// telling those apart needs the bytes after it, so that one line still waits
+// for the window or the end of the stream, exactly as every line used to.
+func peekHead(br peeker) (head []byte, err error) {
+	want := 1
+	//: grow the peek one arrival at a time; the window bounds the loop.
+	for {
+		head, err = br.Peek(want)
+		//: a short stream, a full window or a transport failure ends it.
+		if err != nil || len(head) >= boundarySniffWindow {
+			//: the caller sorts EOF from failure.
+			return head, err
+		}
+		//: take everything already buffered, not only what was asked for.
+		head, err = br.Peek(br.Buffered())
+		//: Peek within the buffered count cannot fail; stay defensive.
+		if err != nil {
+			//: surface it rather than guess.
+			return head, err
+		}
+		//: a complete, unambiguous delimiter line is all Boundary reads.
+		if delimiterLineComplete(head) {
+			//: enough to answer.
+			return head, nil
+		}
+		//: one byte more than is buffered: Peek blocks only until it arrives.
+		want = len(head) + 1
+	}
+}
+
+// peeker is the part of *bufio.Reader peekHead reads through: a look at the
+// buffered bytes that consumes none of them.
+type peeker interface {
+	// Peek returns the next n bytes without advancing the reader.
+	Peek(n int) ([]byte, error)
+	// Buffered returns how many bytes can be peeked without a read.
+	Buffered() int
+}
+
+// delimiterLineComplete reports whether head already holds the whole first
+// "--" line — terminated by its LF — and that line does not end in "--".
+func delimiterLineComplete(head []byte) bool {
+	//: walk the complete lines only; a trailing partial line may still grow.
+	for cursor := 0; ; {
+		offset := bytes.IndexByte(head[cursor:], '\n')
+		//: no LF yet — the line being scanned is not complete.
+		if offset < 0 {
+			//: keep reading.
+			return false
+		}
+		line := bytes.TrimSuffix(head[cursor:cursor+offset], []byte{'\r'})
+		//: the first delimiter-looking line decides.
+		if candidate, ok := bytes.CutPrefix(line, []byte(delimiterPrefix)); ok {
+			//: complete unless the candidate is the one ambiguous shape.
+			return !bytes.HasSuffix(candidate, []byte(delimiterPrefix))
+		}
+		//: a preamble line; move past it.
+		cursor += offset + 1
+	}
 }
 
 // unmarshalFailed wraps cause with the UnmarshalFailed sentinel and a

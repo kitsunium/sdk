@@ -1,6 +1,7 @@
 package validation_test
 
 import (
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -43,6 +44,84 @@ type diamond struct {
 	Shipping address `json:"shipping" validate:"dive"`
 }
 
+// item is one element of a dived collection.
+type item struct {
+	SKU string `json:"sku" validate:"required"`
+}
+
+// withSlicePointer and withArrayPointer dive through a pointer to a
+// collection, the shape an optional list takes in a decoded document.
+type withSlicePointer struct {
+	Items *[]item `json:"items" validate:"dive"`
+}
+
+type withArrayPointer struct {
+	Items *[3]item `json:"items" validate:"dive"`
+}
+
+// withRequiredElements asks for every element to be PRESENT;
+// withOptionalElements dives the same slice without asking.
+type withRequiredElements struct {
+	Items []*item `json:"items" validate:"dive,required"`
+}
+
+type withOptionalElements struct {
+	Items []*item `json:"items" validate:"dive"`
+}
+
+// withRequiredCounts puts presence on pointers to a type whose zero value is a
+// legitimate reading, which is the reason to declare a pointer at all.
+type withRequiredCounts struct {
+	Counts []*int `json:"counts" validate:"dive,required"`
+}
+
+// Common is embedded by the promotion fixtures below. encoding/json lifts the
+// members of an embedded struct into the object that embeds it, so "zip" is a
+// key of that object and "Common" is a key of nothing.
+type Common struct {
+	Zip string `json:"zip" validate:"required"`
+}
+
+type withEmbedded struct {
+	Common `validate:"dive"`
+}
+
+type withEmbeddedPointer struct {
+	*Common `validate:"dive"`
+}
+
+// withOptionOnlyEmbedding names no key either: an empty json name is no name,
+// and JSON promotes it exactly as it promotes an untagged one.
+type withOptionOnlyEmbedding struct {
+	Common `json:",omitzero" validate:"dive"`
+}
+
+// withNamedEmbedding gives the embedding a json name, which makes it an
+// ordinary member with a key of its own.
+type withNamedEmbedding struct {
+	Common `json:"common" validate:"dive"`
+}
+
+// Label is not a struct, and JSON keys an embedded non-struct by its type name.
+type Label string
+
+type withEmbeddedLabel struct {
+	Label `validate:"required"`
+}
+
+// The width fixtures sit at the edges of their field's own range.
+type (
+	withFullInt8Range struct {
+		Level int8 `json:"level" validate:"min=-128,max=127"`
+	}
+	withFloat32Ceiling struct {
+		Ratio float32 `json:"ratio" validate:"max=0.1"`
+	}
+	withUint8Set struct {
+		Level uint8 `json:"level" validate:"oneof=0|255"`
+	}
+)
+
 // mustStruct compiles a validator the case expects to compile.
 func mustStruct[T any](tb testing.TB, cfg svcvalidation.StructConfig) corevalidation.Constraint[T] {
 	tb.Helper()
@@ -51,6 +130,13 @@ func mustStruct[T any](tb testing.TB, cfg svcvalidation.StructConfig) corevalida
 		tb.Fatalf("Struct refused a legal type: %v", err)
 	}
 	return constraint
+}
+
+// pathsOf validates value from the root with the tags of T and returns where
+// each violation is, in report order.
+func pathsOf[T any](tb testing.TB, cfg svcvalidation.StructConfig, value T) []string {
+	tb.Helper()
+	return mustStruct[T](tb, cfg)(corevalidation.RootPath, value).Paths()
 }
 
 // TestStructBuildsTheDocumentedPath is the tag path's headline claim: a
@@ -142,6 +228,157 @@ func TestPathUsesTheJSONNameWhenThereIsOne(t *testing.T) {
 	}
 }
 
+// TestAPromotedEmbeddingAddsNoPathSegment follows the json name one step
+// further, to the one member JSON does not key at all. An embedded struct with
+// no json name is PROMOTED: its members become members of the object that
+// embeds it, so the key an operator writes is "zip" and never "Common.zip".
+// config.Load decodes every format through that JSON round trip, so a path
+// naming the embedding points at something no input contains.
+//
+// The rule is encoding/json's own, and each row mirrors what json.Marshal
+// produces for the same type: promoted when the embedded type is a struct, or
+// a pointer to one, and its json name is empty. A json name makes it an
+// ordinary member with a key; an embedded non-struct is keyed by its type name.
+//
+// MUTATION-CHECKED, three ways. Naming every embedding by its Go name, as
+// shipped, fails the three promoted rows with
+// `paths = [Common.zip], want [zip]`, as the code before the fix did.
+// Promoting an embedding whose json tag names it fails the named row with
+// `paths = [zip], want [common.zip]`. Promoting every anonymous field without
+// a json name, struct or not, fails the Label row with
+// `paths = [], want [Label]` — a promoted scalar is located at its parent,
+// here the root.
+func TestAPromotedEmbeddingAddsNoPathSegment(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		paths func(tb testing.TB) []string
+		want  []string
+	}
+	collect := svcvalidation.StructConfig{}
+	tests := []tc{
+		{
+			name: "an untagged embedded struct",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withEmbedded{})
+			},
+			want: []string{"zip"},
+		},
+		{
+			name: "an untagged embedded pointer to a struct",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withEmbeddedPointer{Common: &Common{}})
+			},
+			want: []string{"zip"},
+		},
+		{
+			name: "an embedding whose json tag carries options and no name",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withOptionOnlyEmbedding{})
+			},
+			want: []string{"zip"},
+		},
+		{
+			name: "an embedding with a json name keeps its segment",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withNamedEmbedding{})
+			},
+			want: []string{"common.zip"},
+		},
+		{
+			name: "an embedded non-struct is keyed by its type name",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withEmbeddedLabel{})
+			},
+			want: []string{"Label"},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := c.paths(t); !slices.Equal(got, c.want) {
+			t.Errorf("paths = %v, want %v", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestTagBoundsAreParsedAtTheFieldsWidth is the accepting half of the width
+// refusals in TestTheDialectRefusesByName: a literal is read as a value of the
+// FIELD's type, so a bound at the very edge of the field's range compiles and
+// holds, and an inclusive float32 ceiling admits the float32 its own literal
+// spells. Read at 64 bits, max=0.1 is the double nearest 0.1, which the
+// float32 nearest 0.1 (0.100000001…) exceeds — the field set to exactly the
+// value in its tag would be refused.
+//
+// MUTATION-CHECKED: parsing the float bound at 64 bits again fails the
+// float32 row with `paths = [ratio], want []`, as the code before the fix did.
+func TestTagBoundsAreParsedAtTheFieldsWidth(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		paths func(tb testing.TB) []string
+		want  []string
+	}
+	collect := svcvalidation.StructConfig{}
+	tests := []tc{
+		{
+			name: "the lowest int8 meets min=-128",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withFullInt8Range{Level: -128})
+			},
+		},
+		{
+			name: "the highest int8 meets max=127",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withFullInt8Range{Level: 127})
+			},
+		},
+		{
+			name: "a float32 set to its ceiling's own literal is within it",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withFloat32Ceiling{Ratio: 0.1})
+			},
+		},
+		{
+			name: "a float32 above its ceiling is not",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withFloat32Ceiling{Ratio: 0.2})
+			},
+			want: []string{"ratio"},
+		},
+		{
+			name: "the highest uint8 is a member of a set that names it",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withUint8Set{Level: 255})
+			},
+		},
+		{
+			name: "a uint8 the set does not name is refused",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withUint8Set{Level: 7})
+			},
+			want: []string{"level"},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := c.paths(t); !slices.Equal(got, c.want) {
+			t.Errorf("paths = %v, want %v", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // TestDiveThroughAPointer pins both halves: a present pointer is walked, an
 // absent one contributes nothing. Requiring it to be present is `required`, a
 // different question asked at the field.
@@ -154,6 +391,165 @@ func TestDiveThroughAPointer(t *testing.T) {
 	report := rules(corevalidation.RootPath, withPointer{Home: &address{Zip: "x"}})
 	if len(report) != 1 || report[0].Path != "home.zip" {
 		t.Errorf("report = %v, want home.zip", report.Paths())
+	}
+}
+
+// TestDiveThroughAPointerToACollection is TestDiveThroughAPointer for the
+// other thing dive reaches: a pointer to a slice or an array follows the same
+// one-level pointer rule a pointer to a struct does. An absent collection
+// contributes nothing; a present one is walked element by element, and its
+// violations are located exactly as a bare slice's would be.
+//
+// MUTATION-CHECKED: elementsStep reading the field without first following
+// the pointer — which is how it shipped, the compiler having resolved the
+// pointer and then dropped the fact — compiles every row, and every row then
+// panics on its first validation, nil or not. The slice rows panic with
+// `reflect: call of reflect.Value.Len on ptr to non-array Value`; the array
+// rows get one call further, because reflect answers Len on a pointer to an
+// array with the array's length, and panic with
+// `reflect: call of reflect.Value.Index on ptr Value`. The code before the fix
+// panicked identically. Each shape was run alone, since the first panic ends
+// the test binary.
+func TestDiveThroughAPointerToACollection(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		paths func(tb testing.TB) []string
+		want  []string
+	}
+	collect := svcvalidation.StructConfig{}
+	tests := []tc{
+		{
+			name: "a nil pointer to a slice holds nothing to be wrong about",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withSlicePointer{})
+			},
+		},
+		{
+			name: "a present slice is walked element by element",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withSlicePointer{Items: &[]item{{SKU: "a"}, {}}})
+			},
+			want: []string{"items[1].sku"},
+		},
+		{
+			name: "a nil pointer to an array holds nothing to be wrong about",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withArrayPointer{})
+			},
+		},
+		{
+			name: "a present array is walked element by element",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withArrayPointer{Items: &[3]item{{SKU: "a"}, {}, {SKU: "c"}}})
+			},
+			want: []string{"items[1].sku"},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := c.paths(t); !slices.Equal(got, c.want) {
+			t.Errorf("paths = %v, want %v", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestDiveRequiredAsksAboutTheElementPointer pins what `required` means after
+// dive when the elements are pointers: the ELEMENT is present, which for a
+// pointer is "not nil" — the same question `required` asks of a pointer field,
+// and the one the programmatic Each(…, Required[*T]()) asks. So a nil element
+// is a violation located at the element itself, a non-nil pointer to a zero
+// value is present (that is what declaring a pointer buys), and plain dive,
+// which asks nothing, still passes over a nil element in silence.
+//
+// MUTATION-CHECKED, twice. Letting a nil element return before any rule runs,
+// and asking presence of the value behind the pointer — exactly how it
+// shipped — fails four rows: `paths = [], want [items[0]]` for the lone nil
+// and again under stop-at-first,
+// `paths = [items[2] items[2].sku], want [items[1] items[2].sku]` for the mixed
+// slice, where the nil element vanished and the present zero one was reported
+// absent, and `paths = [counts[1]], want [counts[0]]`, the same inversion on
+// the counts. Asking presence of the pointer AND again of the value behind it
+// fails the two rows with a present zero:
+// `paths = [items[1] items[2] items[2].sku], want [items[1] items[2].sku]` and
+// `paths = [counts[0] counts[1]], want [counts[0]]` — the value a caller
+// declared a pointer to be able to send, refused as missing. The code before
+// the fix failed the first four rows the same way.
+func TestDiveRequiredAsksAboutTheElementPointer(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		paths func(tb testing.TB) []string
+		want  []string
+	}
+	collect := svcvalidation.StructConfig{}
+	tests := []tc{
+		{
+			name: "a nil element is absent",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withRequiredElements{Items: []*item{nil}})
+			},
+			want: []string{"items[0]"},
+		},
+		{
+			name: "plain dive asks nothing of a nil element",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withOptionalElements{Items: []*item{nil}})
+			},
+		},
+		{
+			//: the absent element stops there; the present zero one is
+			//: walked, and its own member rule fires.
+			name: "absence and a present element's own rules are reported in index order",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withRequiredElements{Items: []*item{{SKU: "a"}, nil, {}}})
+			},
+			want: []string{"items[1]", "items[2].sku"},
+		},
+		{
+			name: "stop-at-first stops at the first absent element",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, svcvalidation.StructConfig{StopAtFirst: true},
+					withRequiredElements{Items: []*item{nil, nil}})
+			},
+			want: []string{"items[0]"},
+		},
+		{
+			name: "a non-nil pointer to a zero value is present",
+			paths: func(tb testing.TB) []string {
+				return pathsOf(tb, collect, withRequiredCounts{Counts: []*int{nil, new(int)}})
+			},
+			want: []string{"counts[0]"},
+		},
+		{
+			//: the programmatic spelling of the same rule answers the same.
+			name: "the code path asks the same question",
+			paths: func(testing.TB) []string {
+				rules := svcvalidation.Must(svcvalidation.Each("counts",
+					func(value withRequiredCounts) []*int { return value.Counts },
+					svcvalidation.Required[*int]()))
+				return rules(corevalidation.RootPath, withRequiredCounts{Counts: []*int{nil, new(int)}}).Paths()
+			},
+			want: []string{"counts[0]"},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := c.paths(t); !slices.Equal(got, c.want) {
+			t.Errorf("paths = %v, want %v", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 

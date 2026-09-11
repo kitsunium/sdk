@@ -234,7 +234,10 @@ connector loses, each with an executable test:
   cumulative. A delta snapshot is **REFUSED** (`UNSUPPORTED_TEMPORALITY`,
   `0.3.45.4`), not mis-labelled — `rate()` over values that are already
   differences reports the second derivative, and every decrease reads as a
-  counter reset.
+  counter reset. So is an unresolved or cast temporality, which a Meter never
+  produces and a hand-built snapshot can: emitting it as cumulative would be a
+  guess, the one ADR 0048 §4 refuses on the OTLP wire. (Amended 2026-09-11:
+  the first version refused delta only and let an unresolved value through.)
 - **The attribute's TYPE**: a Prometheus label value *is* a string.
   `Int64("v", 1)` and `String("v", "1")` — two series here — become one there.
   Unlike a mangled name, there is no injective alternative: the target has one

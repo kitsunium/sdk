@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09T00:00:00Z -->
+<!-- updated: 2026-09-11T00:00:00Z -->
 # internal/service/codec/multipart/
 
 ## Purpose
@@ -61,9 +61,14 @@ validated by `mime/multipart.Writer.SetBoundary` and used verbatim.
 
 **2. Decoding from `[]byte` — solved for every real body, NOT solved in
 general.** `Unmarshal` recovers the delimiter with `Boundary(data)`: it scans a
-bounded window for the first `--`-prefixed line, then *confirms* the candidate
-by looking for the matching closing delimiter `--<boundary>--` (a zero-part
-body is nothing but that line, so the trailing `--` is stripped and re-checked).
+bounded window for the first `--`-prefixed line and takes what follows as the
+candidate. Only a line that itself ends in `--` is ambiguous — a zero-part
+body is nothing but its close delimiter, while a boundary may also end in
+`--` — and only then is the body searched for `--<boundary>--` to decide
+between the two readings. Any other valid candidate is the answer whether its
+close delimiter is found or not, so the body is not searched at all: the
+search used to run on every body, before any size limit, and cost 132 ms per
+63 MiB of hyphens against 3 µs now.
 This is exact for every body this package produced and for every RFC 7578
 producer in the wild, because form-data producers emit no preamble.
 
@@ -78,7 +83,13 @@ worse than saying so.
 
 **3. Streaming — solved by an extension interface.** `NewDecoder(r io.Reader)`
 sniffs the head of the stream with `bufio.Reader.Peek`, which does **not**
-consume it, so `mime/multipart.Reader` still sees a complete body. But an HTTP
+consume it, so `mime/multipart.Reader` still sees a complete body. The sniff
+reads no further than the answer needs: it returns once the first delimiter
+line is complete, rather than waiting for the whole 4 KiB window — which used to
+stall `NewDecoder` on a live producer that sent a short prefix and paused. Only
+a first line ending in `--` still waits for the window or the end of the
+stream, since only the bytes after it can tell a zero-part body from a
+boundary that itself ends in `--`. But an HTTP
 server already *has* the authoritative boundary, and an HTTP client must set
 the header *before* it writes the first body byte — neither fits
 `NewEncoder(w) Encoder` / `NewDecoder(r) Decoder`, whose signatures the domain
@@ -113,17 +124,44 @@ There is deliberately no spelling of "unlimited".
 The refusal happens **at construction**, not at first use, because
 `NewWithLimits` is a new API with no existing call sites — the `(value, error)`
 shape ADR 0031 records as the preferred v2 form costs nothing here. The per-part
-read uses the `internal/service/transform/bounded.go` template: an
-`io.LimitReader(r, max+1)` so an over-cap part is detected as *overflow* rather
-than silently truncated.
+read uses the `internal/service/transform/bounded.go` template — an
+`io.LimitReader` one byte past the bound, so an over-cap part is detected as
+*overflow* rather than silently truncated — with two corrections:
+
+- **The bound is the tighter of `MaxPartBytes` and what is left of
+  `MaxTotalBytes`** (`counter.readBudget`). Reading to `MaxPartBytes` first and
+  charging the total afterwards let the LAST part overrun the aggregate by up to
+  a whole part — 1.5× with the defaults, unbounded when `MaxPartBytes` exceeds
+  `MaxTotalBytes` — and the refusal now names the knob that actually stopped the
+  read (the per-part cap on a tie, matching `admitPart`'s order).
+- **No probe byte at `math.MaxInt64`** (`probeSize`). `max+1` wraps negative
+  there, `io.LimitReader` reads nothing through a negative limit, and with
+  `MaxPartBytes` at `MaxInt64` — an accepted value — every part decoded
+  silently empty. No `[]byte` can exceed that bound, so there is nothing to probe.
+
+## Header values are refused, never repaired
+
+`Name`, `FileName` and `ContentType` are written into the part's header block,
+and `mime/multipart.Writer.CreatePart` writes header values **verbatim**: a CR
+or LF inside one ends the line, and the rest becomes header lines — or, after an
+empty line, body — the caller never wrote. The encoder refuses a CR, LF or NUL
+in any of the three with `VALUE_INVALID` **before** `CreatePart` writes a byte,
+naming the field (`field` = `Name` / `FileName` / `ContentType`) and never the
+value — ADR 0064's stance on mail headers. It deliberately does not do what
+`mime/multipart`'s own escaper does (percent-encode CR and LF): that is a
+repair, delivering a filename the caller never supplied while reporting
+success. Quotes and backslashes are still escaped inside the quoted parameters
+(`quoteEscaper`), and UTF-8 is written raw (RFC 7578 §4.2). Pinned by
+`TestEncoderRefusesHeaderInjection` and `TestEncodedHeadersReparseWithTheStdlib`,
+which requires the stdlib reader to read back exactly the header block asked for.
 
 ## Error codes (range `0.3.41.*`)
 
 | Code | Var | Trigger |
 |---|---|---|
 | `0.3.41.1` | `MarshalFailed`    | `mime/multipart` failed writing a part header/body/closing delimiter, or `encoding/json` rejected the value on the JSON-mediated path |
-| `0.3.41.2` | `UnmarshalFailed`  | malformed part header, truncated body, non-JSON `_json` part, or a body with no `_json` part when the target is not a `*FormValue` |
-| `0.3.41.3` | `ValueInvalid`     | `PartValue` with no `Name`; nil `*FormValue` / `*PartValue`; decode target that is not a non-nil pointer |
+| `0.3.41.2` | `UnmarshalFailed`  | malformed part header, truncated body, a part with no form-data name (RFC 7578 §4.2 — the encoder refuses to write one, so it is refused on the way in too), non-JSON `_json` part, or a body with no `_json` part when the target is not a `*FormValue` |
+| `0.3.41.3` | `ValueInvalid`     | `PartValue` with no `Name`; a CR, LF or NUL in `Name` / `FileName` / `ContentType` (field `field` names which, never the value); nil `*FormValue` / `*PartValue`; decode target that is not a non-nil pointer |
 | `0.3.41.4` | `BoundaryInvalid`  | delimiter not recoverable from the body, or a caller-supplied boundary outside RFC 2046 (1–70 bchars, no trailing space) |
 | `0.3.41.5` | `LimitExceeded`    | `MaxPartBytes` / `MaxParts` / `MaxTotalBytes` crossed — fields carry `knob`, `bound`, `got` |
 | `0.3.41.6` | `LimitsInvalid`    | a negative `LimitsConfig` field (ADR 0031 refusal) — field carries `knob` |
@@ -165,6 +203,8 @@ to never sees it.
 - Reach for `mime/multipart` directly from another package in this tree —
   cross-codec composition belongs in `pkg/v1/codec` or in the caller.
 - Add a file extension to make `FromExtension` "work". See §Extensions.
+- Percent-encode or strip a CR / LF / NUL in a part header value to make it
+  "fit". It is refused. See §Header values.
 - Let a zero `LimitsConfig` field mean "unlimited". See §Memory bounds.
 - Assume `Boundary(data)` is authoritative. It is a recovery. See §2 above.
 - Trust `More()` alone to mean "no error happened" — it answers true once for a

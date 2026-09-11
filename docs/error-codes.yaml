@@ -1874,6 +1874,10 @@ codes:
     const: CodeCommandPanicked
     hex: "0x00_03_3E_04"
     package: internal/service/cli
+  - code: "0.3.62.5"
+    const: CodeHelpWriteFailed
+    hex: "0x00_03_3E_05"
+    package: internal/service/cli
   - code: "0.3.63.1"
     const: CodeZstdFailed
     hex: "0x00_03_3F_01"

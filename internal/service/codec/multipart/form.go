@@ -26,10 +26,17 @@ type FormValue struct {
 // part body is read whole under LimitsConfig.MaxPartBytes. A consumer moving
 // objects too large for that ceiling raises it with NewWithLimits, or reaches
 // for mime/multipart directly — see CLAUDE.md §Not covered.
+//
+// Name, FileName and ContentType are written into the part's header block, so
+// a CR, an LF or a NUL in any of them is refused with ValueInvalid naming the
+// field: a line break there would end the header line and let the rest of the
+// value write headers of its own. Nothing is escaped or repaired on the way.
 type PartValue struct {
-	// Name is the form field name (Content-Disposition name=). Required.
+	// Name is the form field name (Content-Disposition name=). Required: Encode
+	// refuses a part without one, and decoding refuses a body carrying one.
 	Name string
 	// FileName is the optional filename= parameter; empty for a plain field.
+	// UTF-8 is written as-is (RFC 7578 §4.2); only CR, LF and NUL are refused.
 	FileName string
 	// ContentType is the optional per-part media type; empty omits the header.
 	ContentType string

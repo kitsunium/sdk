@@ -4,6 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"maps"
+	"math"
+	"mime"
+	stdmp "mime/multipart"
+	"net/textproto"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +17,10 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/codec/multipart"
 )
+
+// injectedMarker is the header line every injection case tries to smuggle in.
+// It must never reach the wire, and never reach the error either.
+const injectedMarker string = "X-Injected: 1"
 
 type payload struct {
 	Name string `json:"name"`
@@ -221,6 +230,19 @@ func TestUnmarshalFailures(t *testing.T) {
 		{"truncated part header", []byte("--b\r\nContent"), &multipart.FormValue{}, "UNMARSHAL_FAILED"},
 		{"no json part for a value target", body, &payload{}, "UNMARSHAL_FAILED"},
 		{"non-pointer target", jsonBody(t), payload{}, "VALUE_INVALID"},
+		//: RFC 7578 §4.2 requires a name on every part, and the encoder
+		//: refuses to write one without — decoding it used to yield a
+		//: PartValue this codec could not re-encode.
+		{
+			"a part with no form-data name",
+			[]byte("--b\r\nContent-Disposition: form-data\r\n\r\nx\r\n--b--\r\n"),
+			&multipart.FormValue{}, "UNMARSHAL_FAILED",
+		},
+		{
+			"a part that is not form-data at all",
+			[]byte("--b\r\nContent-Disposition: attachment; filename=\"a.txt\"\r\n\r\nx\r\n--b--\r\n"),
+			&multipart.FormValue{}, "UNMARSHAL_FAILED",
+		},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -591,6 +613,130 @@ func TestDecodeRefusesOversizedPart(t *testing.T) {
 	}
 }
 
+// TestDecodeChargesTheLastPartAgainstTheAggregate is the public face of the
+// aggregate fix. With MaxPartBytes 64 and MaxTotalBytes 100, a 60-byte part
+// leaves a 40-byte budget, so a 70-byte second part is stopped by the
+// AGGREGATE one byte past that budget — and the refusal says so, where the
+// decoder used to read on to the per-part cap and name MaxPartBytes instead. A
+// body that lands exactly on the aggregate is admitted.
+//
+// SEEN FAILING against the original decoder, and again with readBudget
+// reverted to the per-part cap:
+//
+//	the last part crosses the aggregate first: refusal names "MaxPartBytes",
+//	  want the bound that stopped the read, "MaxTotalBytes"
+func TestDecodeChargesTheLastPartAgainstTheAggregate(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		sizes    []int
+		wantKnob string
+	}
+	tests := []tc{
+		{"the last part crosses the aggregate first", []int{60, 70}, "MaxTotalBytes"},
+		{"a body exactly at the aggregate is admitted", []int{60, 40}, ""},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		form := multipart.FormValue{}
+		for i, size := range tc.sizes {
+			form.Parts = append(form.Parts, multipart.PartValue{Name: string(rune('a' + i)), Data: bytes.Repeat([]byte("A"), size)})
+		}
+		//: the DEFAULT-bounded codec writes the fixture, so only decoding is judged.
+		data, merr := multipart.New().Marshal(form)
+		if merr != nil {
+			t.Fatalf("%s: fixture Marshal err=%v", tc.name, merr)
+		}
+		bounded, cerr := multipart.NewWithLimits(multipart.LimitsConfig{MaxPartBytes: 64, MaxTotalBytes: 100})
+		if cerr != nil {
+			t.Fatalf("%s: NewWithLimits err=%v", tc.name, cerr)
+		}
+		var back multipart.FormValue
+		uerr := bounded.Unmarshal(data, &back)
+		if tc.wantKnob == "" {
+			if uerr != nil || len(back.Parts) != len(tc.sizes) {
+				t.Fatalf("%s: Unmarshal err=%v, %d parts want %d", tc.name, uerr, len(back.Parts), len(tc.sizes))
+			}
+			return
+		}
+		if !errs.HasReason(uerr, "LIMIT_EXCEEDED") {
+			t.Fatalf("%s: expected LIMIT_EXCEEDED, got %v", tc.name, uerr)
+		}
+		knob := ""
+		for _, f := range errs.FieldsOf(uerr) {
+			if f.Key() == "knob" {
+				knob = f.StringValue()
+			}
+		}
+		if knob != tc.wantKnob {
+			t.Errorf("%s: refusal names %q, want the bound that stopped the read, %q", tc.name, knob, tc.wantKnob)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestDecodeAtTheInt64Ceiling pins the one accepted bound the per-part probe
+// could not add a byte to. MaxPartBytes = math.MaxInt64 is a valid LimitsConfig
+// value, and the probe read limit was bound+1, which wraps negative there:
+// io.LimitReader reads nothing through a negative limit, so every part decoded
+// silently EMPTY and Unmarshal reported success. Both ceilings are set in the
+// second case because that is the setting where the per-part cap, not the
+// remaining aggregate, bounds the first read.
+//
+// SEEN FAILING against the original decoder, both cases, with no error at all:
+//
+//	part 0 decoded as {Name:field FileName: ContentType: Data:[]}
+//	  want {Name:field FileName: ContentType: Data:[118 97 108 117 101]}
+//
+// Once the aggregate budget bounds the read, the first case no longer reaches
+// the wrap; restoring the wrap in probeSize fails the second case alone.
+func TestDecodeAtTheInt64Ceiling(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		limits multipart.LimitsConfig
+	}
+	tests := []tc{
+		{"MaxPartBytes at MaxInt64", multipart.LimitsConfig{MaxPartBytes: math.MaxInt64}},
+		{"both byte ceilings at MaxInt64", multipart.LimitsConfig{MaxPartBytes: math.MaxInt64, MaxTotalBytes: math.MaxInt64}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		c, cerr := multipart.NewWithLimits(tc.limits)
+		if cerr != nil {
+			t.Fatalf("%s: NewWithLimits err=%v", tc.name, cerr)
+		}
+		want := sampleForm()
+		data, merr := c.Marshal(want)
+		if merr != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, merr)
+		}
+		var back multipart.FormValue
+		if uerr := c.Unmarshal(data, &back); uerr != nil {
+			t.Fatalf("%s: Unmarshal err=%v", tc.name, uerr)
+		}
+		if len(back.Parts) != len(want.Parts) {
+			t.Fatalf("%s: decoded %d parts want %d", tc.name, len(back.Parts), len(want.Parts))
+		}
+		for i := range want.Parts {
+			if !partEqual(back.Parts[i], want.Parts[i]) {
+				t.Errorf("%s: part %d decoded as %+v want %+v", tc.name, i, back.Parts[i], want.Parts[i])
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // TestRegisteredViaImport verifies the codec self-registers on package load,
 // including the parameter-bearing header form an HTTP server actually holds.
 func TestRegisteredViaImport(t *testing.T) {
@@ -611,6 +757,199 @@ func TestRegisteredViaImport(t *testing.T) {
 		t.Helper()
 		if !tc.check() {
 			t.Errorf("%s: lookup failed", tc.name)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// TestEncoderRefusesHeaderInjection is the regression for a part header built
+// from caller-influenced strings. mime/multipart.Writer.CreatePart writes every
+// header value verbatim, so a CR or an LF in PartValue.Name, FileName or
+// ContentType does not corrupt the header — it ENDS the line, and the rest of
+// the value becomes a header line of its own, or, after an empty line, the
+// start of the body. The refusal is the one ADR 0064 applies to mail headers:
+// refused, never repaired. It must name the FIELD, carry nothing of the value,
+// and leave nothing behind on any of the three write paths.
+//
+// SEEN FAILING against the unfixed encoder, all twelve cases, for example:
+//
+//	ContentType carries \r\n (Encode): expected VALUE_INVALID (0.3.41.3), got <nil>
+//	ContentType carries \r\n: Encode wrote 141 bytes before refusing: "--48ae…\r\n
+//	  Content-Disposition: form-data; name=\"f\"\r\nContent-Type: x\r\nX-Injected: 1\r\n\r\nb"
+//
+// — the smuggled line is a real header on the wire. Also mutation-checked: an
+// LF-only filter, the usual half-fix, fails exactly the six \r and \x00 cases;
+// putting the value in the Private diagnostic fails all twelve with "refusal
+// repeats the value"; refusing after CreatePart instead of before fails all
+// twelve with "Encode wrote 136 bytes before refusing".
+func TestEncoderRefusesHeaderInjection(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		field string
+		part  multipart.PartValue
+	}
+	var tests []tc
+	for _, octets := range []string{"\r\n", "\n", "\r", "\x00"} {
+		value := "x" + octets + injectedMarker
+		label := strings.NewReplacer("\r", `\r`, "\n", `\n`, "\x00", `\x00`).Replace(octets)
+		tests = append(tests,
+			tc{"Name carries " + label, "Name", multipart.PartValue{Name: value, Data: []byte("b")}},
+			tc{"FileName carries " + label, "FileName", multipart.PartValue{Name: "f", FileName: value, Data: []byte("b")}},
+			tc{"ContentType carries " + label, "ContentType", multipart.PartValue{Name: "f", ContentType: value, Data: []byte("b")}},
+		)
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		streaming, ok := multipart.New().(codec.StreamingCodec)
+		if !ok {
+			t.Fatalf("%s: codec does not implement StreamingCodec", tc.name)
+		}
+		var wire bytes.Buffer
+		enc := streaming.NewEncoder(&wire)
+		assertHeaderRefused(t, tc.name+" (Encode)", tc.field, enc.Encode(tc.part))
+		if wire.Len() != 0 {
+			t.Errorf("%s: Encode wrote %d bytes before refusing: %q", tc.name, wire.Len(), wire.Bytes())
+		}
+		data, merr := multipart.New().Marshal(multipart.FormValue{Parts: []multipart.PartValue{tc.part}})
+		assertHeaderRefused(t, tc.name+" (Marshal)", tc.field, merr)
+		if data != nil {
+			t.Errorf("%s: Marshal returned %d bytes alongside the refusal", tc.name, len(data))
+		}
+		appender, ok := multipart.New().(codec.Appender)
+		if !ok {
+			t.Fatalf("%s: codec does not implement Appender", tc.name)
+		}
+		prefix := []byte("PREFIX")
+		out, aerr := appender.Append(slices.Clone(prefix), tc.part)
+		assertHeaderRefused(t, tc.name+" (Append)", tc.field, aerr)
+		if !bytes.Equal(out, prefix) {
+			t.Errorf("%s: Append mutated dst on refusal: %q", tc.name, out)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// assertHeaderRefused checks that err is the codec's VALUE_INVALID, that it
+// names field, and that no rendering of it repeats the injected value.
+func assertHeaderRefused(t *testing.T, name, field string, err error) {
+	t.Helper()
+	if !errs.HasCode(err, multipart.CodeMultipartValueInvalid) || !errs.HasReason(err, "VALUE_INVALID") {
+		t.Errorf("%s: expected VALUE_INVALID (0.3.41.3), got %v", name, err)
+		return
+	}
+	named := false
+	renderings := []string{err.Error(), errs.PublicOf(err), errs.PrivateOf(err)}
+	for _, f := range errs.FieldsOf(err) {
+		named = named || (f.Key() == "field" && f.StringValue() == field)
+		renderings = append(renderings, f.StringValue())
+	}
+	if !named {
+		t.Errorf("%s: refusal does not name field %q: fields %v", name, field, errs.FieldsOf(err))
+	}
+	for _, text := range renderings {
+		if strings.Contains(text, "X-Injected") {
+			t.Errorf("%s: refusal repeats the value: %q", name, text)
+		}
+	}
+}
+
+// TestEncodedHeadersReparseWithTheStdlib is the other half of the injection
+// fix: every body the codec DOES write must read back, through the stdlib
+// mime/multipart reader and the Content-Type header a real server would be
+// handed, with exactly the header block the caller asked for — no line more,
+// no line less. It covers the escapes the refusal must not disturb: quotes and
+// backslashes in both quoted parameters, a UTF-8 filename (RFC 7578 §4.2 has
+// form-data send it raw), and the JSON-mediated _json part.
+//
+// It passes on the unfixed encoder as well: it pins what the fix must not
+// break. MUTATION-CHECKED: dropping the quote escape on FileName fails "quotes
+// and backslashes" — the stdlib can no longer parse the disposition, so even
+// the field name reads back as "" — and emitting Content-Type when it is empty
+// fails "plain field" and "quotes and backslashes":
+//
+//	header block map["Content-Disposition":[…] "Content-Type":[""]],
+//	  want exactly map["Content-Disposition":[…]]
+func TestEncodedHeadersReparseWithTheStdlib(t *testing.T) {
+	t.Parallel()
+	type wantPart struct {
+		header   textproto.MIMEHeader
+		formName string
+		fileName string
+		body     string
+	}
+	disposition := func(value string) textproto.MIMEHeader {
+		return textproto.MIMEHeader{"Content-Disposition": {value}}
+	}
+	typed := func(value, contentType string) textproto.MIMEHeader {
+		return textproto.MIMEHeader{"Content-Disposition": {value}, "Content-Type": {contentType}}
+	}
+	type tc struct {
+		name  string
+		value any
+		want  []wantPart
+	}
+	tests := []tc{
+		{"plain field", multipart.PartValue{Name: "field", Data: []byte("value")}, []wantPart{
+			{disposition(`form-data; name="field"`), "field", "", "value"},
+		}},
+		{"file part", multipart.PartValue{Name: "upload", FileName: "a.txt", ContentType: "text/plain", Data: []byte("file")}, []wantPart{
+			{typed(`form-data; name="upload"; filename="a.txt"`, "text/plain"), "upload", "a.txt", "file"},
+		}},
+		{"quotes and backslashes", multipart.PartValue{Name: `a"b\c`, FileName: `q"uo\te.txt`, Data: []byte("x")}, []wantPart{
+			{disposition(`form-data; name="a\"b\\c"; filename="q\"uo\\te.txt"`), `a"b\c`, `q"uo\te.txt`, "x"},
+		}},
+		{"utf-8 filename", multipart.PartValue{Name: "cv", FileName: "résumé-日本語.pdf", ContentType: "application/pdf", Data: []byte("%PDF")}, []wantPart{
+			{typed(`form-data; name="cv"; filename="résumé-日本語.pdf"`, "application/pdf"), "cv", "résumé-日本語.pdf", "%PDF"},
+		}},
+		{"json-mediated value", payload{Name: "Ada", Age: 36}, []wantPart{
+			{typed(`form-data; name="_json"`, "application/json"), multipart.JSONPartName, "", `{"name":"Ada","age":36}`},
+		}},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		data, err := multipart.New().Marshal(tc.value)
+		if err != nil {
+			t.Fatalf("%s: Marshal err=%v", tc.name, err)
+		}
+		header, herr := multipart.ContentType(data)
+		if herr != nil {
+			t.Fatalf("%s: ContentType err=%v", tc.name, herr)
+		}
+		_, params, perr := mime.ParseMediaType(header)
+		if perr != nil {
+			t.Fatalf("%s: the stdlib refuses the Content-Type %q: %v", tc.name, header, perr)
+		}
+		reader := stdmp.NewReader(bytes.NewReader(data), params["boundary"])
+		for i, want := range tc.want {
+			part, nerr := reader.NextPart()
+			if nerr != nil {
+				t.Fatalf("%s: part %d: NextPart err=%v\n%s", tc.name, i, nerr, data)
+			}
+			body, rerr := io.ReadAll(part)
+			if rerr != nil {
+				t.Fatalf("%s: part %d: reading the body err=%v", tc.name, i, rerr)
+			}
+			if !maps.EqualFunc(part.Header, want.header, slices.Equal) {
+				t.Errorf("%s: part %d: header block %q, want exactly %q", tc.name, i, part.Header, want.header)
+			}
+			if part.FormName() != want.formName || part.FileName() != want.fileName || string(body) != want.body {
+				t.Errorf("%s: part %d: read back (%q, %q, %q), want (%q, %q, %q)", tc.name, i,
+					part.FormName(), part.FileName(), body, want.formName, want.fileName, want.body)
+			}
+		}
+		if _, nerr := reader.NextPart(); !errors.Is(nerr, io.EOF) {
+			t.Errorf("%s: a part beyond the %d expected, or a broken close: %v", tc.name, len(tc.want), nerr)
 		}
 	}
 	for _, tc := range tests {

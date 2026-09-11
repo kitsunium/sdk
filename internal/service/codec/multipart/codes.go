@@ -11,13 +11,15 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 const CodeMultipartMarshalFailed errs.Code = 0x00_03_29_01 // 0.3.41.1
 
 // CodeMultipartUnmarshalFailed identifies a failure while parsing a
-// multipart/form-data body: a malformed part header, a missing closing
-// delimiter, or a JSON-mediated part whose payload is not valid JSON.
+// multipart/form-data body: a malformed part header, a part with no form-data
+// name, a missing closing delimiter, or a JSON-mediated part whose payload is
+// not valid JSON.
 const CodeMultipartUnmarshalFailed errs.Code = 0x00_03_29_02 // 0.3.41.2
 
 // CodeMultipartValueInvalid identifies a Marshal / Unmarshal / Encode call
 // whose argument shape the codec cannot honour — an Unmarshal target that is
-// not a non-nil pointer, or a Part carrying no field name.
+// not a non-nil pointer, a Part carrying no field name, or a Part whose Name,
+// FileName or ContentType carries a CR, LF or NUL (field "field" names which).
 const CodeMultipartValueInvalid errs.Code = 0x00_03_29_03 // 0.3.41.3
 
 // CodeMultipartBoundaryInvalid identifies a boundary the codec cannot use:

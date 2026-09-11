@@ -32,7 +32,10 @@ const helpIndent string = "  "
 // It is assembled into a buffer and flushed once. A help page interleaved with
 // another goroutine's output is a page nobody can read, and a partial one is
 // worse: it stops mid-list, which reads as "these are all the commands".
-func (e *executor) writeHelp(cmd corecli.CommandValue, path []string, set *flag.FlagSet) {
+//
+// The returned error is the stream's: nil once the whole page was taken,
+// io.ErrShortWrite for a writer that took part of it without saying why.
+func (e *executor) writeHelp(cmd corecli.CommandValue, path []string, set *flag.FlagSet) error {
 	var out strings.Builder
 	joined := strings.Join(path, " ")
 	//: the one-liner, when the command declares one. The root may not.
@@ -56,7 +59,16 @@ func (e *executor) writeHelp(cmd corecli.CommandValue, path []string, set *flag.
 		out.WriteString(" <command> -h\" for more information about a command.\n")
 	}
 	//: one Write. A reader never sees half a help page.
-	_, _ = e.errOut.Write([]byte(out.String()))
+	page := []byte(out.String())
+	written, err := e.errOut.Write(page)
+	//: io.Writer must report a short write as an error; a writer that does
+	//: not has still delivered a page that stops mid-list.
+	if err == nil && written < len(page) {
+		//: name the short write the writer did not.
+		return io.ErrShortWrite
+	}
+	//: nil once the whole page was taken, the stream's own error otherwise.
+	return err
 }
 
 // writeUsage renders the single usage line the declaration implies.

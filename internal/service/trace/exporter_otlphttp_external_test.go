@@ -188,6 +188,7 @@ func TestOTLPHTTPClassification(t *testing.T) {
 		{"200 unparseable body", http.StatusOK, `not json at all`, nil, false},
 		{"200 partial success as a string", http.StatusOK, `{"partialSuccess":{"rejectedSpans":"3"}}`, svctrace.OTLPPartialSuccess, false},
 		{"200 partial success as a number", http.StatusOK, `{"partialSuccess":{"rejectedSpans":3}}`, svctrace.OTLPPartialSuccess, false},
+		{"200 partial success as an escaped string", http.StatusOK, `{"partialSuccess":{"rejectedSpans":"\u0033"}}`, svctrace.OTLPPartialSuccess, false},
 		{"429", http.StatusTooManyRequests, "", svctrace.OTLPExportUnavailable, true},
 		{"502", http.StatusBadGateway, "", svctrace.OTLPExportUnavailable, true},
 		{"503", http.StatusServiceUnavailable, "", svctrace.OTLPExportUnavailable, true},

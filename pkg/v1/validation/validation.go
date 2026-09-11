@@ -35,7 +35,10 @@
 // Member names come from the json tag when the field has one, else the Go
 // field name. That is not a preference: the SDK's own config.Load decodes
 // every format — TOML, YAML, env, JSON — through a JSON round trip, so the
-// json name is literally the key the operator wrote.
+// json name is literally the key the operator wrote. For the same reason an
+// embedded struct with no json name adds no segment of its own: encoding/json
+// promotes its fields into the enclosing object, so an untagged Common
+// embedding reports "zip", not "Common.zip".
 //
 // # Everything, not the first thing
 //
@@ -141,7 +144,9 @@ type Report = corevalidation.ReportValue
 type StructConfig = svcvalidation.StructConfig
 
 // JoinField extends a path with a member name — JoinField("user", "zip") is
-// "user.zip".
+// "user.zip". The grammar does not quote, so a member name that itself
+// contains '.', '[' or ']' yields a path indistinguishable from a nested or
+// indexed one.
 func JoinField(base, name string) string {
 	//: delegate to the core grammar.
 	return corevalidation.JoinField(base, name)

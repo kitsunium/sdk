@@ -374,16 +374,18 @@ func carve[V any](
 				continue
 			}
 			size := state.seriesCap()
+			var window []V
 			//: the sizes sum to storeLen; the guard turns a broken invariant
-			//: into a slower collection rather than a panic in the scrape path.
-			window := arena[offset : offset : offset+size]
-			//: stand-alone window when the arena would overrun.
+			//: into a slower collection rather than a panic in the scrape path,
+			//: which is why it runs BEFORE the three-index slice — whose own
+			//: bounds check would otherwise panic first.
 			if offset+size > cap(arena) {
 				//: correctness before the allocation budget.
 				window = make([]V, 0, size)
 			} else {
 				//: capping at offset+size stops one name's appends from
 				//: spilling into the next name's window.
+				window = arena[offset : offset : offset+size]
 				offset += size
 			}
 			//: hand the slot to the collector.

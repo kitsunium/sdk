@@ -5,6 +5,7 @@
 package validation
 
 import (
+	"errors"
 	"reflect"
 	"strconv"
 	"unicode/utf8"
@@ -15,16 +16,21 @@ import (
 // decimalBase is the radix every tag argument is parsed in.
 const decimalBase int = 10
 
-// bitSize64 is the width tag arguments are parsed at; the closures then read
-// the field through Int()/Uint()/Float(), which are all 64-bit.
-const bitSize64 int = 64
-
 // oneOfSeparator splits the allowed values of a oneof rule. It is '|' rather
 // than ',' because ',' already separates the rules of the tag itself, and a
 // list that could be cut in half by the outer separator is a list that will be.
 const oneOfSeparator string = "|"
 
 // buildNumeric compiles min= / max= against a numeric field.
+//
+// The argument is read as a value of the FIELD's type — its width, not 64 bits.
+// Read wider, min=200 on an int8 compiles to a floor no int8 reaches and
+// refuses every value it is ever shown, while max=300 on a uint8 compiles to a
+// ceiling every uint8 is already under and never fires: two constraints that
+// cannot be honoured, looking like two that can (ADR 0031). A literal that
+// does not fit is refused here. One that fits is rounded as Go rounds a
+// constant of that type, which is also what keeps an inclusive float32 bound
+// inclusive: max=0.1 admits the float32 its own literal spells.
 func buildNumeric(name string, typ reflect.Type, rule, arg string, hasArg bool) (check fieldCheck, err error) {
 	//: a bound with no value is a typo that would otherwise compare against 0.
 	if !hasArg || arg == "" {
@@ -42,15 +48,15 @@ func buildNumeric(name string, typ reflect.Type, rule, arg string, hasArg bool) 
 	//: signed integers read through Value.Int().
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		//: signed comparison.
-		return signedBound(name, rule, arg, boundSpec{upper: upper, rule: reported, message: message})
+		return signedBound(name, rule, arg, typ, boundSpec{upper: upper, rule: reported, message: message})
 	//: unsigned integers read through Value.Uint().
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		//: unsigned comparison.
-		return unsignedBound(name, rule, arg, boundSpec{upper: upper, rule: reported, message: message})
+		return unsignedBound(name, rule, arg, typ, boundSpec{upper: upper, rule: reported, message: message})
 	//: floats read through Value.Float().
 	case reflect.Float32, reflect.Float64:
 		//: floating comparison.
-		return floatBound(name, rule, arg, boundSpec{upper: upper, rule: reported, message: message})
+		return floatBound(name, rule, arg, typ, boundSpec{upper: upper, rule: reported, message: message})
 	//: a string has no ordering this rule means; the caller wanted minlen.
 	case reflect.String:
 		//: the single most likely mistake — name the rule that was meant.
@@ -74,14 +80,15 @@ type boundSpec struct {
 	message string
 }
 
-// signedBound compiles a bound over a signed integer field.
-func signedBound(name, rule, arg string, spec boundSpec) (check fieldCheck, err error) {
-	//: parse at compile time; a bad literal never reaches a request.
-	limit, parseErr := strconv.ParseInt(arg, decimalBase, bitSize64)
+// signedBound compiles a bound over a signed integer field of type typ.
+func signedBound(name, rule, arg string, typ reflect.Type, spec boundSpec) (check fieldCheck, err error) {
+	//: parse at compile time, at the field's own width; a bad literal never
+	//: reaches a request.
+	limit, parseErr := strconv.ParseInt(arg, decimalBase, typ.Bits())
 	//: refuse rather than default to zero.
 	if parseErr != nil {
 		//: name what the argument must be.
-		return nil, rejectRule(name, rule, "the argument is not a whole number")
+		return nil, rejectRule(name, rule, literalClause(parseErr, "the argument", "is not a whole number", typ))
 	}
 	//: one comparison per validation.
 	return func(path string, fieldValue reflect.Value) corevalidation.ReportValue {
@@ -95,14 +102,14 @@ func signedBound(name, rule, arg string, spec boundSpec) (check fieldCheck, err 
 	}, nil
 }
 
-// unsignedBound compiles a bound over an unsigned integer field.
-func unsignedBound(name, rule, arg string, spec boundSpec) (check fieldCheck, err error) {
-	//: parse at compile time.
-	limit, parseErr := strconv.ParseUint(arg, decimalBase, bitSize64)
+// unsignedBound compiles a bound over an unsigned integer field of type typ.
+func unsignedBound(name, rule, arg string, typ reflect.Type, spec boundSpec) (check fieldCheck, err error) {
+	//: parse at compile time, at the field's own width.
+	limit, parseErr := strconv.ParseUint(arg, decimalBase, typ.Bits())
 	//: a negative bound on an unsigned field is a design mistake, not a bound.
 	if parseErr != nil {
 		//: name what the argument must be.
-		return nil, rejectRule(name, rule, "the argument is not a non-negative whole number")
+		return nil, rejectRule(name, rule, literalClause(parseErr, "the argument", "is not a non-negative whole number", typ))
 	}
 	//: one comparison per validation.
 	return func(path string, fieldValue reflect.Value) corevalidation.ReportValue {
@@ -116,14 +123,15 @@ func unsignedBound(name, rule, arg string, spec boundSpec) (check fieldCheck, er
 	}, nil
 }
 
-// floatBound compiles a bound over a floating-point field.
-func floatBound(name, rule, arg string, spec boundSpec) (check fieldCheck, err error) {
-	//: parse at compile time.
-	limit, parseErr := strconv.ParseFloat(arg, bitSize64)
+// floatBound compiles a bound over a floating-point field of type typ.
+func floatBound(name, rule, arg string, typ reflect.Type, spec boundSpec) (check fieldCheck, err error) {
+	//: parse at compile time, at the field's own width: a float32 bound is
+	//: the float32 its literal spells, which is the value the field compares.
+	limit, parseErr := strconv.ParseFloat(arg, typ.Bits())
 	//: refuse rather than default to zero.
 	if parseErr != nil {
 		//: name what the argument must be.
-		return nil, rejectRule(name, rule, "the argument is not a number")
+		return nil, rejectRule(name, rule, literalClause(parseErr, "the argument", "is not a number", typ))
 	}
 	//: one comparison per validation. NaN fails both comparisons and is
 	//: therefore refused by either bound — which is the right answer: NaN is
@@ -137,6 +145,21 @@ func floatBound(name, rule, arg string, spec boundSpec) (check fieldCheck, err e
 		//: outside the bound.
 		return one(path, spec.rule, spec.message, CodeOutOfRange)
 	}, nil
+}
+
+// literalClause explains why a numeric tag literal was refused. A literal the
+// field's width cannot hold is a different mistake from one that is not a
+// number at all — the fix is the literal, or the field's type — so it gets its
+// own clause, naming the field's KIND: the name of a defined type such as
+// Level would hide the width that decided it.
+func literalClause(parseErr error, subject, malformed string, typ reflect.Type) string {
+	//: a number, but not one this field can hold.
+	if errors.Is(parseErr, strconv.ErrRange) {
+		//: e.g. "the argument is out of range for this field's kind (int8)".
+		return subject + " is out of range for this field's kind (" + typ.Kind().String() + ")"
+	}
+	//: not a number of the expected shape at all.
+	return subject + " " + malformed
 }
 
 // withinBound picks the half of the comparison the rule asked for.

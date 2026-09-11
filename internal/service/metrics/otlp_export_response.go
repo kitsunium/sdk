@@ -48,8 +48,17 @@ func (v *otlpLenientInt64) UnmarshalJSON(data []byte) error {
 		//: leave the zero.
 		return nil
 	}
-	//: unwrap the string form; a bare number is left as it is.
-	parsed, err := strconv.ParseInt(strings.Trim(text, `"`), decimalBase, floatBitSize)
+	//: the string form is a JSON string, escapes included ("\u0034\u0032" is a
+	//: valid spelling of "42"), so it is decoded as one rather than trimmed;
+	//: a bare number is left as it is.
+	if strings.HasPrefix(text, `"`) {
+		//: a malformed string is as opaque as a malformed number.
+		if err := json.Unmarshal(data, &text); err != nil {
+			//: surface it so the caller falls back to the 200.
+			return err
+		}
+	}
+	parsed, err := strconv.ParseInt(text, decimalBase, floatBitSize)
 	//: an unparseable count is the caller's cue to treat the body as opaque.
 	if err != nil {
 		//: surface it so otlpPartialSuccessOf can fall back to the 200.

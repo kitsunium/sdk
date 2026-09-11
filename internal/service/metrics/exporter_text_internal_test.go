@@ -158,6 +158,18 @@ func Test_appendSeriesLine(t *testing.T) {
 			},
 			value: "1", want: "requests{n=1,s=\"1\"} 1\n",
 		},
+		{
+			//: a key is escaped like a value: unescaped, this one forged a
+			//: second line that read as a series of its own.
+			name: "a key carrying a newline stays on its line", metric: "requests",
+			attrs: []coremetrics.AttrValue{coremetrics.String("a\nforged 1\nb", "v")},
+			value: "7", want: "requests{a\\nforged 1\\nb=\"v\"} 7\n",
+		},
+		{
+			//: and so is the instrument name that opens the line.
+			name: "a name carrying a newline stays on its line", metric: "x\nforged",
+			value: "1", want: "x\\nforged 1\n",
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

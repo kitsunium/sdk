@@ -640,6 +640,11 @@ func TestPrometheusTypesANonMonotonicSumAsAGauge(t *testing.T) {
 // Refusing is safe for the same reason refusing a name is: a meter's
 // temporality is fixed at construction, so this fails on the first scrape or
 // never — it cannot start failing under traffic.
+//
+// An unresolved or cast temporality is refused too. A Meter never produces
+// one, a hand-built snapshot can, and emitting it as cumulative would be the
+// guess the OTLP encoder refuses. Seen failing with the old check, which
+// refused delta only: both rows reported "Export = <nil>".
 func TestPrometheusRefusesADeltaSnapshot(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -648,6 +653,10 @@ func TestPrometheusRefusesADeltaSnapshot(t *testing.T) {
 	}
 	delta := func(m coremetrics.SumMetricValue) coremetrics.SumMetricValue {
 		m.Temporality = coremetrics.TemporalityDelta
+		return m
+	}
+	unresolved := func(m coremetrics.SumMetricValue, t coremetrics.Temporality) coremetrics.SumMetricValue {
+		m.Temporality = t
 		return m
 	}
 	tests := []tc{
@@ -667,6 +676,18 @@ func TestPrometheusRefusesADeltaSnapshot(t *testing.T) {
 			name: "a delta histogram",
 			snap: coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
 				"latency": {Temporality: coremetrics.TemporalityDelta, Points: []coremetrics.HistogramValue{{Count: 1}}},
+			}},
+		},
+		{
+			name: "an unresolved counter",
+			snap: coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
+				"requests_total": unresolved(promCounter(coremetrics.SumValue{Value: 7}), coremetrics.TemporalityUnspecified),
+			}},
+		},
+		{
+			name: "a temporality cast into existence",
+			snap: coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
+				"latency": {Temporality: coremetrics.Temporality(9), Points: []coremetrics.HistogramValue{{Count: 1}}},
 			}},
 		},
 	}

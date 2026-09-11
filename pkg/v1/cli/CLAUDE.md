@@ -20,7 +20,7 @@ over `internal/core/cli` and `internal/service/cli`, plus the two helpers a
 | `FlagSource` | func | `svccli.FlagSource` — a `config.Source` over the flags that were TYPED |
 | `Status` | func | 0 for nil, `errs.ExitCodeOf` otherwise |
 | `Success` | const | 0 |
-| the eight sentinels | var | re-exported from both layers |
+| the nine sentinels | var | re-exported from both layers |
 
 ## Why this shape
 

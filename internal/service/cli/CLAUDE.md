@@ -20,7 +20,7 @@ Code range: `0.3.62.*` (ADR 0065).
 | `help.go` | the generated help: usage line, sub-command table, `PrintDefaults` |
 | `flagsource.go` | `FlagSource(InvocationValue) *FlagSourceValue` — a `config.Source` over `flag.Visit` |
 | `codes.go` | `Code*` constants — range 0.3.62.* |
-| `errors.go` | `UnknownCommand` / `MissingCommand` / `InvalidFlags` / `CommandPanicked` (`errs.Define`) |
+| `errors.go` | `UnknownCommand` / `MissingCommand` / `InvalidFlags` / `CommandPanicked` / `HelpWriteFailed` (`errs.Define`) |
 | `BENCH.md` | the numbers, and the conclusion that nothing here is worth optimising |
 
 ## Conventions
@@ -43,6 +43,12 @@ Code range: `0.3.62.*` (ADR 0065).
   once. A `Binder` that panics is deliberately **not** recovered: it runs
   inside the caller's own `main`, and a recovered panic there would replace a
   stack pointing at the bug with a sentence about a tree.
+- **`-h` is status 0 only when the page was delivered.** `writeHelp` returns
+  the stream's error (`io.ErrShortWrite` for a writer that took part of the
+  page silently), and the `-h` path turns it into `HelpWriteFailed` (EX_IOERR)
+  with that error beneath it. The usage paths discard it on purpose: there the
+  usage error is the verdict. Pinned by `TestAHelpNobodyReceivedIsNotASuccess`
+  and `TestAFailedHelpWriteKeepsTheUsageVerdict`.
 - **The only recovered panic is an `Action`'s.** A panicking Go program exits
   with status 2, which sysexits gives no meaning; recovering keeps the value
   AND the originating stack as fields and lets `main` decide. The recovered

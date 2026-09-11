@@ -56,6 +56,7 @@ func TestStatusDelegatesRatherThanInventing(t *testing.T) {
 		{"a missing command is EX_USAGE", cli.MissingCommand, 64},
 		{"bad flags are EX_USAGE", cli.InvalidFlags, 64},
 		{"a panic is EX_SOFTWARE", cli.CommandPanicked, 70},
+		{"an undelivered help is EX_IOERR", cli.HelpWriteFailed, 74},
 		{"an untyped error is EX_SOFTWARE", errors.New("plain"), 70},
 	}
 	for _, tc := range tests {

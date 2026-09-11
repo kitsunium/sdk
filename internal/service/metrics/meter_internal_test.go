@@ -271,3 +271,26 @@ func Test_memMeter_CollectConcurrent(t *testing.T) {
 		})
 	}
 }
+
+// Test_carveSurvivesABrokenSizeInvariant pins the guard in carve. The per-name
+// sizes are supposed to sum to the store's length; when they do not, the guard
+// must hand that name a stand-alone window — a slower collection — instead of
+// panicking inside a scrape. It used to sit AFTER the three-index slice it
+// protects, so the slice's own bounds check panicked first and the guard never
+// ran. Seen failing with the guard moved back below the slice: "slice bounds out
+// of range [::3] with capacity 1".
+func Test_carveSurvivesABrokenSizeInvariant(t *testing.T) {
+	t.Parallel()
+	//: one name claims three series while the store holds one.
+	names := map[string]*nameState{"c": {kind: kindCounter, series: 3}}
+	var windows int
+	for _, slot := range carve[int](1, names, groupSum) {
+		windows++
+		if got := cap(slot.window); got != 3 {
+			t.Errorf("window capacity %d, want the name's own 3", got)
+		}
+	}
+	if windows != 1 {
+		t.Errorf("carved %d windows, want 1", windows)
+	}
+}
