@@ -1,0 +1,58 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "events",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "events.go",
+        "on.go",
+        "publish.go",
+        "state.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/events",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/events",
+        "//internal/kernel/errs",
+        "//internal/kernel/snapshot",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":events",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "events_test",
+    size = "small",
+    srcs = [
+        "dispatch_external_test.go",
+        "events_bench_test.go",
+        "halt_external_test.go",
+        "harness_external_test.go",
+        "registration_external_test.go",
+    ],
+    deps = [
+        ":events",
+        "//internal/core/events",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
