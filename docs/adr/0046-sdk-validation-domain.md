@@ -387,7 +387,12 @@ published surface to break. `internal/core/config.Validator` is untouched.
   randomised map iteration, and "collect everything" stops being diffable), and
   an unambiguous rendering of an arbitrary key in the path grammar. Both are
   answerable — sorted `cmp.Ordered` keys, `%q`-quoted segments — and neither
-  should be answered in the same change that establishes the grammar.
+  should be answered in the same change that establishes the grammar. The
+  quoted segment would also settle the one ambiguity the grammar already has:
+  a member NAME containing `.`, `[` or `]` (`json:"log.level"` is legal)
+  renders a path indistinguishable from a nested or indexed one. It is
+  documented on `JoinField` and deferred with map descent rather than answered
+  for member names alone.
 - **A `Violation` → message catalogue / i18n.** `Rule` + `Path` + `Code` are
   deliberately enough for an application to look up its own translated string.
   The SDK will not ship a message bundle.

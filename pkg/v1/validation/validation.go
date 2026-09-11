@@ -144,7 +144,9 @@ type Report = corevalidation.ReportValue
 type StructConfig = svcvalidation.StructConfig
 
 // JoinField extends a path with a member name — JoinField("user", "zip") is
-// "user.zip".
+// "user.zip". The grammar does not quote, so a member name that itself
+// contains '.', '[' or ']' yields a path indistinguishable from a nested or
+// indexed one.
 func JoinField(base, name string) string {
 	//: delegate to the core grammar.
 	return corevalidation.JoinField(base, name)

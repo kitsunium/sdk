@@ -24,12 +24,18 @@ const (
 //	JoinField("user", "address")       == "user.address"
 //	JoinField("user.addresses[2]", "zip") == "user.addresses[2].zip"
 //
-// The member name is the GO FIELD NAME, not a serialization tag. The SDK
-// cannot know which of a field's tags — json, xml, yaml, form — names it on
-// the surface a given caller is answering, and picking one would be wrong on
-// the others; the Go name is the single identifier that is always right and
-// always greppable. A caller answering a JSON API rewrites the paths at that
-// edge, where the mapping is known.
+// name is whatever the calling front end names the member. The struct-tag
+// front end passes the json tag's name when the field has one, else the Go
+// field name (ADR 0046): the SDK's own config.Load decodes every format through
+// a JSON round trip, so the json name is the key the operator actually wrote.
+// The programmatic Field takes the name as an argument, so there the caller
+// decides.
+//
+// The grammar does not quote. A member name that itself contains '.', '[' or
+// ']' — json:"log.level" is legal — yields a path indistinguishable from a
+// nested or indexed one. The quoted segment that would disambiguate it is the
+// same one map descent needs, and ADR 0046 §Deferred defers both together
+// rather than growing the grammar for one of them.
 func JoinField(base, name string) string {
 	//: at the root there is no parent to separate from.
 	if base == RootPath {

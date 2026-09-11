@@ -137,7 +137,7 @@ var (
 ```
 
 <a name="Check"></a>
-## func [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L176>)
+## func [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L178>)
 
 ```go
 func Check[T any](value T, constraints ...Constraint[T]) error
@@ -146,16 +146,16 @@ func Check[T any](value T, constraints ...Constraint[T]) error
 Check runs constraints against value at the root path and converts the result to the SDK error model — the one\-line bridge to config.Validator.
 
 <a name="JoinField"></a>
-## func [JoinField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L148>)
+## func [JoinField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L150>)
 
 ```go
 func JoinField(base, name string) string
 ```
 
-JoinField extends a path with a member name — JoinField\("user", "zip"\) is "user.zip".
+JoinField extends a path with a member name — JoinField\("user", "zip"\) is "user.zip". The grammar does not quote, so a member name that itself contains '.', '\[' or '\]' yields a path indistinguishable from a nested or indexed one.
 
 <a name="JoinIndex"></a>
-## func [JoinIndex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L155>)
+## func [JoinIndex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L157>)
 
 ```go
 func JoinIndex(base string, index int) string
@@ -173,7 +173,7 @@ type Constraint[T any] = corevalidation.Constraint[T]
 ```
 
 <a name="All"></a>
-### func [All](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L162>)
+### func [All](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L164>)
 
 ```go
 func All[T any](constraints ...Constraint[T]) Constraint[T]
@@ -182,7 +182,7 @@ func All[T any](constraints ...Constraint[T]) Constraint[T]
 All runs every constraint and reports everything they found. It is the default shape of the engine; All with no constraint accepts everything.
 
 <a name="AtLeast"></a>
-### func [AtLeast](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L213>)
+### func [AtLeast](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L215>)
 
 ```go
 func AtLeast[T cmp.Ordered](lo T) Constraint[T]
@@ -191,7 +191,7 @@ func AtLeast[T cmp.Ordered](lo T) Constraint[T]
 AtLeast refuses a value below lo; the bound is inclusive. It is the programmatic spelling of the \`min=\` struct tag, and both report the rule "min".
 
 <a name="AtMost"></a>
-### func [AtMost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L220>)
+### func [AtMost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L222>)
 
 ```go
 func AtMost[T cmp.Ordered](hi T) Constraint[T]
@@ -200,7 +200,7 @@ func AtMost[T cmp.Ordered](hi T) Constraint[T]
 AtMost refuses a value above hi; the bound is inclusive. It is the programmatic spelling of the \`max=\` struct tag.
 
 <a name="Between"></a>
-### func [Between](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L227>)
+### func [Between](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L229>)
 
 ```go
 func Between[T cmp.Ordered](lo, hi T) (constraint Constraint[T], err error)
@@ -209,7 +209,7 @@ func Between[T cmp.Ordered](lo, hi T) (constraint Constraint[T], err error)
 Between refuses a value outside \[lo, hi\]. lo \> hi is refused at construction: an inverted interval is satisfied by nothing.
 
 <a name="Count"></a>
-### func [Count](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L241>)
+### func [Count](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L243>)
 
 ```go
 func Count[E any](minLen, maxLen int) (constraint Constraint[[]E], err error)
@@ -218,7 +218,7 @@ func Count[E any](minLen, maxLen int) (constraint Constraint[[]E], err error)
 Count refuses a slice whose element count falls outside \[min, max\]. max may be [Unbounded](<#RootPath>). Count\(1, Unbounded\) is how presence is expressed for a slice.
 
 <a name="Each"></a>
-### func [Each](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L198>)
+### func [Each](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L200>)
 
 ```go
 func Each[T, E any](name string, get func(T) []E, constraints ...Constraint[E]) (constraint Constraint[T], err error)
@@ -227,7 +227,7 @@ func Each[T, E any](name string, get func(T) []E, constraints ...Constraint[E]) 
 Each applies constraints to every element of a slice member of T reached through get, locating each element's violations at "name\[i\]".
 
 <a name="Field"></a>
-### func [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L191>)
+### func [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L193>)
 
 ```go
 func Field[T, F any](name string, get func(T) F, constraints ...Constraint[F]) (constraint Constraint[T], err error)
@@ -236,7 +236,7 @@ func Field[T, F any](name string, get func(T) F, constraints ...Constraint[F]) (
 Field applies constraints to a member of T reached through get, locating every violation at the parent path extended by name. It uses no reflection.
 
 <a name="First"></a>
-### func [First](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L169>)
+### func [First](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L171>)
 
 ```go
 func First[T any](constraints ...Constraint[T]) Constraint[T]
@@ -245,7 +245,7 @@ func First[T any](constraints ...Constraint[T]) Constraint[T]
 First runs the constraints in order and stops at the one that refuses. It is a real short\-circuit, not a filtered report.
 
 <a name="Length"></a>
-### func [Length](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L234>)
+### func [Length](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L236>)
 
 ```go
 func Length(minRunes, maxRunes int) (constraint Constraint[string], err error)
@@ -254,7 +254,7 @@ func Length(minRunes, maxRunes int) (constraint Constraint[string], err error)
 Length refuses a string whose RUNE count falls outside \[min, max\]. max may be [Unbounded](<#RootPath>). It counts runes, not grapheme clusters.
 
 <a name="Matches"></a>
-### func [Matches](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L256>)
+### func [Matches](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L258>)
 
 ```go
 func Matches(pattern string) (constraint Constraint[string], err error)
@@ -263,7 +263,7 @@ func Matches(pattern string) (constraint Constraint[string], err error)
 Matches refuses a string the pattern does not match. The pattern is compiled at construction, and Go's RE2 has no backtracking — a pattern cannot be turned into a denial of service by the value it is shown.
 
 <a name="Must"></a>
-### func [Must](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L184>)
+### func [Must](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L186>)
 
 ```go
 func Must[T any](constraint Constraint[T], err error) Constraint[T]
@@ -272,7 +272,7 @@ func Must[T any](constraint Constraint[T], err error) Constraint[T]
 Must returns constraint, panicking when err is non\-nil. It is the regexp.MustCompile idiom, for a package\-level validator built from literals at init. Do NOT use it on a bound that comes from configuration.
 
 <a name="OneOf"></a>
-### func [OneOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L248>)
+### func [OneOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L250>)
 
 ```go
 func OneOf[T comparable](allowed ...T) (constraint Constraint[T], err error)
@@ -281,7 +281,7 @@ func OneOf[T comparable](allowed ...T) (constraint Constraint[T], err error)
 OneOf refuses a value absent from allowed. An empty allowed set is refused at construction: it is a forgotten argument, not a permissive rule.
 
 <a name="Required"></a>
-### func [Required](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L205>)
+### func [Required](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L207>)
 
 ```go
 func Required[T comparable]() Constraint[T]
@@ -290,7 +290,7 @@ func Required[T comparable]() Constraint[T]
 Required refuses the zero value of T. It cannot distinguish "not supplied" from "supplied as zero" — declare the field as a pointer when that matters.
 
 <a name="Struct"></a>
-### func [Struct](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L268>)
+### func [Struct](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/validation/validation.go#L270>)
 
 ```go
 func Struct[T any](cfg StructConfig) (constraint Constraint[T], err error)
