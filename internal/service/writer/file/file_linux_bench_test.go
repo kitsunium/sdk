@@ -102,7 +102,9 @@ func fsName(b *testing.B, dir string) string {
 		//: an unreadable filesystem type is stated, never guessed.
 		return "unknown"
 	}
-	switch st.Type {
+	//: Statfs_t.Type is int64 on 64-bit Linux and int32 on 386, so the
+	//: comparison is made at one width rather than at the platform's.
+	switch int64(st.Type) {
 	//: the page cache, no device behind it.
 	case magicTmpfs:
 		return "tmpfs"
@@ -118,7 +120,7 @@ func fsName(b *testing.B, dir string) string {
 	//: anything else is visibly unrecognised, and the magic goes to the log
 	//: rather than into a row name nobody can compare across machines.
 	default:
-		b.Logf("statfs %s: unrecognised magic %#x", dir, st.Type)
+		b.Logf("statfs %s: unrecognised magic %#x", dir, int64(st.Type))
 		return "unrecognised"
 	}
 }
