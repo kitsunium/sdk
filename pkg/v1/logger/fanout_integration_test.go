@@ -1,0 +1,95 @@
+//go:build !race
+
+package logger_test
+
+import (
+	"testing"
+
+	"github.com/kitsunium/sdk/pkg/v1/logger"
+)
+
+// TestFanoutWidthAddsNoAllocation pins the half of the SDK's "one alloc per
+// emit" claim that TestV116BuildSendAllocatesOnePerEmit never touched. That
+// guard measures DEPTH — the handler's attrs clone on a single sink — and says
+// nothing about WIDTH, so a fan-out that allocated once per record on every
+// healthy write went unnoticed until a profile found it.
+//
+// The defect: multi.fanoutSink.Write opened its error slate with
+// make([]error, 0, len(s.branches)). A capacity that is not a constant leaves
+// the compiler's implicit stack budget at three branches, so every record cost
+// a heap allocation — including the ordinary one where no branch fails and the
+// slate stays empty — and the cost appeared only once a service happened to
+// wire a third sink.
+//
+// The assertion is DIFFERENTIAL, against width 1 rather than a hardcoded
+// count: it keeps biting when the baseline emit cost legitimately changes, and
+// it fails on the one thing actually forbidden — a branch count visible in the
+// allocation profile. multi.New does not short-circuit a single branch, so the
+// baseline runs through the very same fanoutSink and the delta isolates the
+// width and nothing else.
+//
+// Verified to bite rather than merely to pass: with the pre-sized slate
+// restored, widths 3, 4 and 8 report one allocation more than width 1 while
+// width 2 stays at the baseline — the three-branch escape threshold showing
+// through, which is also why width 2 is kept in the table.
+//
+// Carries //go:build !race (testing.AllocsPerRun reports +1 under -race) and
+// no t.Parallel (AllocsPerRun reads a process-global counter, so a concurrent
+// sibling would corrupt the measurement). Run via
+// `bazel test --config=pure //pkg/v1/logger:logger_test`, covered by the
+// race-off alloc lane in tools/alloc-lane-targets.txt (rule 12).
+func TestFanoutWidthAddsNoAllocation(t *testing.T) {
+	ctx := t.Context()
+	type tc struct {
+		name  string
+		width int
+	}
+	tests := []tc{
+		{name: "two branches cost what one costs", width: 2},
+		{name: "three branches cost what one costs", width: 3},
+		{name: "four branches cost what one costs", width: 4},
+		{name: "eight branches cost what one costs", width: 8},
+	}
+	//: emitAllocs wires a Logger fanning out to width discard sinks and reports
+	//: what one Send costs on it.
+	emitAllocs := func(t *testing.T, width int) float64 {
+		t.Helper()
+		//: appended rather than indexed into a sized slice: branches is a slice
+		//: of INTERFACES, so the zero value a fill would write is nil — and
+		//: multi.New drops nil entries, which would silently measure a fan-out
+		//: narrower than the one named by the case.
+		branches := make([]logger.Sink, 0, width)
+		//: every branch is the same do-nothing sink, so a per-branch allocation
+		//: could only come from the fan-out itself.
+		for range width {
+			branches = append(branches, discardSink{})
+		}
+		lg, err := logger.NewWithSink(logger.SinkConfig{
+			Sink:    logger.Multi(branches...),
+			Encoder: logger.TextEncoder(),
+		})
+		if err != nil {
+			t.Fatalf("NewWithSink(width=%d) err = %v", width, err)
+		}
+		//: warm the pool so the measured runs hit the recycled-builder path.
+		logger.Build(lg, logger.LevelInfo).Str("warm", "up").Send(ctx, "warm")
+		return testing.AllocsPerRun(2000, func() {
+			b := logger.Build(lg, logger.LevelInfo).Str("k1", "v1").Int("n1", 1)
+			allocSink = b
+			b.Send(ctx, "msg")
+		})
+	}
+	base := emitAllocs(t, 1)
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got := emitAllocs(t, tc.width)
+		//: strictly equal, never "at most base+k": widening a fan-out must not
+		//: show up in the allocation profile at all.
+		if got != base {
+			t.Errorf("%s: allocs/op at width %d = %v, want %v (the width-1 baseline) — fan-out width must cost nothing", tc.name, tc.width, got, base)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
+	}
+}

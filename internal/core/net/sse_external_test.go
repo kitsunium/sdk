@@ -10,6 +10,20 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// sseExhaustiveAlphabet is the alphabet the equivalence corpus is enumerated
+// over. It is exactly the bytes that decide a terminator scan — a payload byte,
+// a line feed and a carriage return — so enumerating every string over it up to
+// a length covers every arrangement of LF, CR, CRLF, LFCR, CRCR, a leading
+// terminator, a trailing one and a run of them.
+const sseExhaustiveAlphabet string = "a\n\r"
+
+// sseExhaustiveLen is how long the enumerated strings go. It is deliberately
+// above EIGHT: strings.IndexAny — the oracle's primitive — switches strategy at
+// len(s) > 8, decoding a rune per byte below that and building an ASCII set
+// above it, so a corpus that stopped at eight would only ever exercise one of
+// the two code paths the oracle itself has.
+const sseExhaustiveLen int = 9
+
 // Test_SSEEventValue_AppendTo pins the wire form field by field, and above all
 // pins the one property that makes the format survivable: a newline inside a
 // value is not escaped, it SPLITS the value into another data line. A client
@@ -281,4 +295,144 @@ func reassemble(frame string) string {
 		values = append(values, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
 	}
 	return strings.Join(values, "\n")
+}
+
+// TestSSELineSplitStrategiesAgreeExhaustively is the correctness gate under
+// every performance claim BENCH.md makes about the terminator scan.
+//
+// The four strategies in sseStrategies are judged against splitIndexAny, the
+// form this package shipped before the campaign, over every string of length 0
+// to 9 in {'a', '\n', '\r'} — 29 524 payloads — plus a set of hand-written
+// multi-byte cases, because a terminator scan that looked at runes instead of
+// bytes would agree on all of the first corpus and disagree on those.
+//
+// It judges the TRANSCRIPTIONS against each other, which is what makes the
+// BENCH.md comparison honest — a strategy that were faster because it split
+// differently would prove nothing. The guard on the PRODUCTION encoder is
+// TestAppendToMatchesTheIndexAnyOracle below; the two are separate on purpose
+// and neither substitutes for the other.
+//
+// MUTATION-CHECKED. Changing splitCursor's CRLF `skip = 2` to `skip = 1` — the
+// spurious-empty-line bug sseCRLFWidth is named for — fails it at
+// `cursor: payload "aaaaaaa\r\n": 3 lines, want 2 (["aaaaaaa" "" ""] vs
+// ["aaaaaaa" ""])`.
+func TestSSELineSplitStrategiesAgreeExhaustively(t *testing.T) {
+	t.Parallel()
+	//: the enumerated corpus first: every arrangement of the three deciding
+	//: bytes, short enough to enumerate and long enough to cross the oracle's
+	//: own strategy switch.
+	sseForEachPayload(sseExhaustiveLen, func(payload string) {
+		sseAssertStrategiesAgree(t, payload)
+	})
+	//: then the cases an enumeration over ASCII cannot reach.
+	for _, payload := range []string{
+		"é\nè",
+		"日本\r\n語",
+		" line separator is NOT a terminator here ",
+		strings.Repeat("ü", 40) + "\r" + strings.Repeat("ø", 40),
+		string([]byte{0xFF, 0xFE, '\n', 0x80, '\r', '\n', 0xC0}),
+	} {
+		sseAssertStrategiesAgree(t, payload)
+	}
+}
+
+// TestAppendToMatchesTheIndexAnyOracle closes the loop the strategy comparison
+// leaves open: agreeing on a line split proves nothing if AppendTo does not use
+// that split. It re-encodes every payload of the exhaustive corpus from the
+// ORACLE's lines and requires the bytes to be identical to AppendTo's.
+//
+// MUTATION-CHECKED, three ways, all against the production encoder:
+//   - `skip = sseCRLFWidth` → `skip = 1` in appendSSEData (CRLF read as two
+//     terminators) fails at `payload "aaaaaaa\r\n": frame
+//     "data: aaaaaaa\ndata:\ndata:\n\n", want "data: aaaaaaa\ndata:\n\n"`;
+//   - `lf < cr` → `lf > cr` in sseFirstTerminator (the later cursor wins) fails
+//     at `payload "aaaaaaa\n\r": frame "data: aaaaaaa\n\ndata:\n\n", want
+//     "data: aaaaaaa\ndata:\ndata:\n\n"` — note the frame that is no longer a
+//     frame, since the premature blank line ENDS it;
+//   - `cr := strings.IndexByte(data, '\r')` → `cr := -1` (only the line feed
+//     terminates) fails at `payload "aaaaaaaa\r": frame "data: aaaaaaaa\r\n\n",
+//     want "data: aaaaaaaa\ndata:\n\n"` — a raw CR left inside a data line.
+func TestAppendToMatchesTheIndexAnyOracle(t *testing.T) {
+	t.Parallel()
+	var buf []byte
+	var lines []string
+	sseForEachPayload(sseExhaustiveLen, func(payload string) {
+		//: an empty payload is not a frame at all — Validate refuses it — so
+		//: the oracle comparison starts at one byte.
+		if payload == "" {
+			return
+		}
+		frame, err := corenet.SSEEventValue{Data: payload}.AppendTo(buf[:0])
+		if err != nil {
+			t.Fatalf("payload %q: AppendTo = %v, want nil", payload, err)
+		}
+		lines = splitIndexAny(lines[:0], payload)
+		want := sseEncodeFromLines(lines)
+		if string(frame) != want {
+			t.Fatalf("payload %q: frame %q, want %q", payload, frame, want)
+		}
+		buf = frame
+	})
+}
+
+// sseAssertStrategiesAgree runs every entry of sseStrategies over one payload
+// and requires each to produce exactly the oracle's lines.
+func sseAssertStrategiesAgree(t *testing.T, payload string) {
+	t.Helper()
+	want := splitIndexAny(nil, payload)
+	for _, s := range sseStrategies {
+		got := s.split(nil, payload)
+		if len(got) != len(want) {
+			t.Fatalf("%s: payload %q: %d lines, want %d (%q vs %q)", s.name, payload, len(got), len(want), got, want)
+		}
+		//: compare line by line so the failure names the position, which is
+		//: what tells a CRLF bug apart from a lone-CR bug.
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("%s: payload %q: line %d = %q, want %q", s.name, payload, i, got[i], want[i])
+			}
+		}
+	}
+}
+
+// sseForEachPayload calls visit with every string of length 0 to maxLen over
+// sseExhaustiveAlphabet.
+func sseForEachPayload(maxLen int, visit func(payload string)) {
+	buf := make([]byte, 0, maxLen)
+	var enumerate func(depth int)
+	enumerate = func(depth int) {
+		visit(string(buf))
+		//: the enumeration stops at the configured length.
+		if depth == maxLen {
+			return
+		}
+		//: one child per alphabet byte, restoring the buffer on the way out.
+		for i := range len(sseExhaustiveAlphabet) {
+			buf = append(buf, sseExhaustiveAlphabet[i])
+			enumerate(depth + 1)
+			buf = buf[:len(buf)-1]
+		}
+	}
+	enumerate(0)
+}
+
+// sseEncodeFromLines renders the frame a data-only event has, given its lines.
+// It is written from the format rather than from the encoder, so it is an
+// independent statement of what the bytes must be.
+func sseEncodeFromLines(lines []string) string {
+	var b strings.Builder
+	//: one "data:" line per line, with the conventional space only on a
+	//: non-empty value.
+	for _, line := range lines {
+		b.WriteString("data:")
+		//: an empty value would otherwise leave trailing whitespace on the wire.
+		if line != "" {
+			b.WriteByte(' ')
+			b.WriteString(line)
+		}
+		b.WriteByte('\n')
+	}
+	//: the blank line terminates the frame.
+	b.WriteByte('\n')
+	return b.String()
 }

@@ -103,6 +103,24 @@ name.
   points at the wrong place. CRLF, CR and LF are all recognised, and all three
   normalise to LF on reassembly: the VALUE round-trips, its byte spelling does
   not, and the type comment says so.
+- **The SSE terminator scan keeps a cursor per byte and never rescans.** The
+  format has no escape, so finding the terminators in `Data` is the only
+  per-byte work an event stream does — and `strings.IndexAny`, the obvious call,
+  has no `bytealg` path: above eight bytes it builds a 32-byte ASCII set per
+  call and walks the string byte by byte, below eight it decodes a rune per
+  byte. A profile put it at **91 %** of encoding a 4 KiB single-line frame,
+  against 7 % for the `memmove` that is the actual work. `strings.IndexByte` is
+  the assembly-backed primitive, but it finds ONE byte, and the two obvious ways
+  to call it twice are each quadratic on half the possible payloads — unbounded,
+  a payload of LF-terminated lines rescans its whole tail for a CR that is not
+  there; with the CR scan bounded by the LF, the exact mirror (CR-terminated,
+  no LF) does the same. Both were measured at **16× SLOWER** than the code they
+  replaced before either was believed. What ships finds both terminators once
+  over the whole payload and moves each cursor only FORWARD, so each byte is
+  examined at most once per terminator whatever the payload's shape:
+  **2.1×–6.4×**, and the same substitution in `validateSSELine` is worth 1.7×
+  more. `BENCH.md` prints the profile, all four strategies and the corpus that
+  exposes each blow-up.
 - **An SSE `event:` with no `data:` is refused.** Every client discards a frame
   whose data buffer is empty and discards the event type with it, so a caller
   who names an event would watch it silently not arrive. A retry-only or id-only
@@ -123,6 +141,22 @@ name.
   checked once, in `ParseWSFrameHeader`. Masking is a security requirement and
   not ceremony: it stops a hostile script steering a browser into emitting bytes
   a transparent intermediary would read as a second HTTP request.
+- **The masking transform moves a WORD at a time, and the byte order cancels.**
+  It runs over every inbound byte with no fast path and no way to opt out, so a
+  CPU profile put **88.99 %** of a 4 KiB receive in `ApplyWSMask` alone. It now
+  takes 32 bytes per iteration, then 8, then 1 — **16.1×** the byte-at-a-time
+  throughput, **6.17×** on the whole in-situ receive path — with no assembly, no
+  build-tagged per-architecture file and no `unsafe`, which is the only reason
+  it can be one implementation across all eight GOOS the SDK targets (ADR 0018).
+  The compiler renders each word as a single memory-destination XOR; there is no
+  vector instruction involved and none is wanted. Endianness safety is not a
+  property of choosing little-endian — it is a property of using **one** order
+  for the payload word AND the key word, under which a fixed-order decode is a
+  bijection and XOR stays bytewise. Mixing two, or reinterpreting the slice as
+  words with `unsafe`, is what breaks it, and the second is why `unsafe` is
+  absent: a native-order reinterpretation would agree with a little-endian key
+  on this VM and disagree on a big-endian host, which is a defect no test here
+  can see. Every claim above is measured in `BENCH.md`.
 - **`WSCloseCode.Sendable` answers for both directions.** A peer that sends 1006
   is committing exactly the protocol error this endpoint must not commit, so one
   predicate governs both and the two cannot drift. `Echoable` exists because
@@ -148,6 +182,54 @@ name.
   domain needs it. It is declared here because the repo's bar for a shared
   primitive is two real consumers arising from an actual duplication, and today
   there is one. The doc comment on the type says so.
+
+## Cost
+
+Full numbers, methodology and the rejected alternatives are in `BENCH.md`. The
+facts that decide how this package is used:
+
+| WebSocket | |
+|---|---|
+| `ApplyWSMask`, 4 KiB | **186.8 ns** — 21.9 GB/s, 0 allocs |
+| `ValidateWSText`, 4 KiB ASCII | 140.7 ns — 29.1 GB/s, 0 allocs |
+| `ParseWSFrameHeader` | 29.5 ns, 0 allocs |
+
+| Server-Sent Events | |
+|---|---|
+| `AppendTo`, single-line 256 B | **57.85 ns** — 4.4 GB/s, 0 allocs |
+| `AppendTo`, single-line 4 KiB | **430.8 ns** — 9.5 GB/s, 0 allocs |
+| `AppendTo`, id + event + 256 B | 98.32 ns, 0 allocs |
+| `AppendSSEComment` (keep-alive) | 19.99 ns, 0 allocs |
+| `Validate` | 12.2 ns data-only, 36.3 ns with id + event |
+
+- **Masking is no longer what caps an inbound connection.** It was 96 % of the
+  per-byte work on an ASCII text message and is now 57 %, within 1.3× of UTF-8
+  validation. `BENCH.md` still opens with that inversion because the previous
+  version of this file asserted the opposite and was right at the time.
+- **The slowest per-byte thing here is now `ValidateWSText` on multibyte text**,
+  at 1.05 GB/s against 21.9 for the mask. Counting only this package's two
+  per-byte passes, 4 KiB of three-byte runes costs 12.5× what the same byte
+  count costs in ASCII; before the widening it was 2.2×, because the mask was
+  expensive on both sides of the comparison. That is where the next per-byte win
+  is, if one is ever wanted.
+- **Per-FRAME cost is what a fragmented message pays.** With the mask 16×
+  cheaper, 256 frames carrying 64 KiB improved only 2.53× against 9.06× for the
+  same bytes in one frame. A peer chooses its own chunk size and a server cannot
+  refuse it, so this is the axis a peer can turn against the reader for free.
+- **An SSE frame is now bounded by the memory hierarchy, not by a scan.**
+  Encoding got **2.56×–4.62×** faster, `Validate` 1.73× and the keep-alive
+  comment 1.59×, by replacing `strings.IndexAny` — which had no `bytealg` path
+  and was 91 % of a 4 KiB frame — with two forward cursors over `IndexByte`.
+  The scan is still the largest profile entry at 65 %, and now it should be:
+  two assembly passes is the floor for proving two bytes are absent.
+- **A multi-line SSE payload costs 2.4× a single-line one of the same size**
+  (33 653 ns against 6 582 for 64 KiB with CRLF every 64 bytes), because every
+  line is a separate `data:` field and a CRLF cut refreshes BOTH cursors. That
+  is per-FIELD cost, not per-byte cost, and it is the axis a payload's shape
+  turns rather than its size.
+
+The whole file is allocation-free except `ParseWSClosePayload`, which returns
+the close reason as a string once per connection.
 
 ## Error range
 
@@ -225,6 +307,31 @@ ABI constants instead of `x/net/ipv4`.
   is how permessage-deflate is refused where the wire can verify it.
 - Treat `crypto/sha1` here as a security primitive, or "upgrade" it. RFC 6455
   §1.3 fixes the algorithm; changing it produces a server that talks to nothing.
+- Reach for `unsafe`, assembly or a build-tagged per-architecture file to make
+  `ApplyWSMask` faster. It is already 16× the byte-at-a-time form in pure
+  stdlib, the remaining bottleneck at realistic sizes is the memory hierarchy
+  rather than the CPU, and every one of those three costs the single-implementation
+  property ADR 0018 requires.
+- Read the payload with one `binary` byte order and build the key word with
+  another, or with hand-written shifts that assume a memory layout. One order,
+  used for both, is the entire endianness argument — and a mismatch is wrong on
+  every host, not only on the big-endian ones nobody here can test.
+- Delete `applyWSMaskReference` from `websocket_frame_external_test.go`, or
+  "simplify" it to call `ApplyWSMask`. It is the RFC §5.3 transform transcribed
+  and the oracle every masking test is judged against; an oracle that calls the
+  implementation proves the implementation equals itself.
+- Delete `splitIndexAny` from `sse_bench_test.go`, or "simplify" it to call
+  `appendSSEData`. It is the terminator scan this package shipped before the
+  campaign, transcribed, and it is the oracle both SSE equivalence tests are
+  judged against — over every string of length 0 to 9 in `{'a', '\n', '\r'}`.
+  The bound is 9 rather than 8 because `strings.IndexAny` itself changes
+  strategy at `len(s) > 8`, so a corpus stopping at eight would exercise only
+  one of the oracle's own two code paths.
+- Rewrite `appendSSEData`'s two cursors as an `IndexByte` pair per line. It
+  reads as the same thing and is quadratic — in one of two mirror-image halves
+  depending on which scan is left unbounded, both measured at 16× slower than
+  the `IndexAny` form they would replace. The forward-only refresh IS the
+  algorithm, not an optimisation layered on it.
 
 ## Verification
 

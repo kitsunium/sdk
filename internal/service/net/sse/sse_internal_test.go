@@ -2,6 +2,9 @@
 package sse
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,3 +124,128 @@ func Test_resolve(t *testing.T) {
 		})
 	}
 }
+
+// TestFrameBufferRetentionIsBounded is the guard under maxRetainedFrameCapacity,
+// and it is a RETENTION test rather than an allocation one on purpose: a
+// benchmark's B/op column counts bytes ALLOCATED, and the defect here is bytes
+// still HELD long after they were allocated. The two are not the same
+// measurement and one cannot stand in for the other.
+//
+// A stream keeps its encode buffer for its whole life. With no ceiling at all,
+// one outsized event therefore pinned its own size until the client
+// disconnected — invisible in every allocation profile, because the allocation
+// happened once and legitimately.
+//
+// The release is deliberately not immediate. An oversized buffer is kept while
+// the frames still USE it and given back on the first one that does not, which
+// is what keeps a stream that genuinely sends outsized frames from re-growing
+// one on every send. This test walks both halves of that.
+//
+// MUTATION-CHECKED, both clauses of retain's condition:
+//   - deleting the whole condition (unbounded retention, the shape this
+//     replaced) fails at `after an outsized frame and a small one the stream
+//     still holds 1056768 bytes, want at most 512` — which is also the
+//     measurement: ONE one-mebibyte event pinned 1 056 768 bytes per stream for
+//     the rest of that stream's life, and on ten thousand streams that is
+//     10.6 GB bought by an event that happened once;
+//   - dropping the `len(frame) < cap(frame)/2` half (release on size alone)
+//     fails at `an outsized frame did not keep its buffer: held 512 bytes` —
+//     the 3.89× regression the second clause exists to prevent.
+func TestFrameBufferRetentionIsBounded(t *testing.T) {
+	t.Parallel()
+	stream, _ := retentionStream(t)
+	defer retentionClose(t, stream)
+	//: an ordinary frame sits inside the pre-sized buffer and does not grow it.
+	retentionSend(t, stream, strings.Repeat("x", 64))
+	if got := stream.heldCapacity(); got != initialFrameCapacity {
+		t.Fatalf("a 64-byte frame left the stream holding %d bytes, want %d", got, initialFrameCapacity)
+	}
+	//: a frame under the ceiling is retained unconditionally, because that is
+	//: what makes the next send of the same size free.
+	retentionSend(t, stream, strings.Repeat("x", maxRetainedFrameCapacity/2))
+	atCeiling := stream.heldCapacity()
+	if atCeiling <= initialFrameCapacity {
+		t.Fatalf("a frame under the ceiling was not retained: held %d bytes", atCeiling)
+	}
+	if atCeiling > maxRetainedFrameCapacity {
+		t.Fatalf("a frame under the ceiling grew the buffer past it: held %d bytes", atCeiling)
+	}
+	//: an outsized frame KEEPS its buffer, because the next frame may well be
+	//: the same size — that is the half a plain size cap gets wrong.
+	retentionSend(t, stream, strings.Repeat("x", 1<<20))
+	outsized := stream.heldCapacity()
+	if outsized <= maxRetainedFrameCapacity {
+		t.Fatalf("an outsized frame did not keep its buffer: held %d bytes", outsized)
+	}
+	//: and the first frame that stops needing it gives it back.
+	retentionSend(t, stream, strings.Repeat("x", 64))
+	if got := stream.heldCapacity(); got > initialFrameCapacity {
+		t.Fatalf("after an outsized frame and a small one the stream still holds %d bytes, want at most %d", got, initialFrameCapacity)
+	}
+	t.Logf("retention: 64 B → %d B held; %d B → %d B held; 1 MiB → %d B held; 64 B again → %d B held",
+		initialFrameCapacity, maxRetainedFrameCapacity/2, atCeiling, outsized, stream.heldCapacity())
+}
+
+// heldCapacity reports how many bytes the stream's encode buffer is holding. It
+// is a test-only accessor because the field is guarded by mu and the whole
+// point of the measurement is to read it from outside a write.
+func (s *Stream) heldCapacity() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	//: capacity, not length: the buffer is reused from index zero every time,
+	//: so its LENGTH between frames says nothing about what it retains.
+	return cap(s.frame)
+}
+
+// retentionStream opens a stream on a discarding response.
+func retentionStream(t *testing.T) (*Stream, *retentionWriter) {
+	t.Helper()
+	w := &retentionWriter{header: make(http.Header)}
+	stream, err := New(w, httptest.NewRequest(http.MethodGet, "/events", nil))
+	//: a refusal would leave nothing to measure.
+	if err != nil {
+		t.Fatalf("New() = %v, want a stream", err)
+	}
+	return stream, w
+}
+
+// retentionSend writes one event of the given payload or fails the test.
+func retentionSend(t *testing.T, stream *Stream, payload string) {
+	t.Helper()
+	//: a refused frame never reaches the buffer at all.
+	if err := stream.Send(corenet.SSEEventValue{Data: payload}); err != nil {
+		t.Fatalf("Send(%d bytes) = %v, want nil", len(payload), err)
+	}
+}
+
+// retentionClose closes a stream or fails the test.
+func retentionClose(t *testing.T, stream *Stream) {
+	t.Helper()
+	//: Close cannot fail today; asserting it keeps that true.
+	if err := stream.Close(); err != nil {
+		t.Errorf("Close() = %v, want nil", err)
+	}
+}
+
+// retentionWriter is a response that flushes and discards.
+type retentionWriter struct {
+	header http.Header
+}
+
+// Header implements http.ResponseWriter.
+func (w *retentionWriter) Header() http.Header {
+	//: the map itself, so a caller's Set is visible here.
+	return w.header
+}
+
+// Write implements http.ResponseWriter by discarding.
+func (w *retentionWriter) Write(p []byte) (int, error) {
+	//: a discard never fails, so the test measures retention and nothing else.
+	return len(p), nil
+}
+
+// WriteHeader implements http.ResponseWriter.
+func (w *retentionWriter) WriteHeader(int) {}
+
+// Flush implements http.Flusher, which is the streaming contract.
+func (w *retentionWriter) Flush() {}

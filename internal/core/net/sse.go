@@ -163,7 +163,21 @@ func AppendSSEComment(dst []byte, text string) (wire []byte, err error) {
 // validateSSELine refuses a line terminator in a field the format cannot split.
 func validateSSELine(field, value string) error {
 	//: LF and CR both terminate a line in this format, so both are fatal here.
-	if strings.ContainsAny(value, "\n\r") {
+	//: Two byte searches rather than ContainsAny: both terminators are ASCII,
+	//: so a UTF-8 continuation byte is never one of them and the two forms
+	//: agree on every input — while ContainsAny either builds a 32-byte ASCII
+	//: set per call or, for a value of eight bytes or fewer, decodes a rune per
+	//: byte. IndexByte is the assembly-backed primitive. Measured in BENCH.md;
+	//: the same substitution is made for the same reason in
+	//: internal/service/proc/sdnotify.
+	//: The empty test is not redundant with them, it is the row that made the
+	//: substitution a win instead of a wash: Validate calls this for id AND
+	//: event whether the frame carries them or not, and on the empty string
+	//: ContainsAny returns without looking at anything while two IndexByte
+	//: calls still happen. Guarding it took a data-only Validate from 26.2 ns
+	//: back to 12.4 against ContainsAny's 20.9, and costs nothing measurable
+	//: where the value IS present.
+	if value != "" && (strings.IndexByte(value, '\n') >= 0 || strings.IndexByte(value, '\r') >= 0) {
 		//: refuse rather than truncate — see the type's doc comment.
 		return errs.Wrap(SSEFieldInvalid, errs.WrapParams{},
 			errs.String("field", field),
@@ -199,38 +213,95 @@ func validateSSERetry(retry time.Duration) error {
 }
 
 // appendSSEData writes the payload as one "data:" line per line it contains.
+//
+// The scan is what this function costs. Both terminator cursors are found once
+// over the WHOLE payload and afterwards only ever move FORWARD, so each of the
+// two searches reads each stretch of the payload exactly once and the walk is
+// linear whatever shape the payload has. The obvious alternative — an IndexByte
+// pair per line — is quadratic on half of the possible payloads, and which half
+// depends on which of the two scans is left unbounded: bound neither and a
+// payload of LF-terminated lines re-reads its whole tail looking for a CR that
+// is not there; bound the CR scan by the LF and the mirror payload, CR-only,
+// does the same. Both are measured in BENCH.md and both are refused.
 func appendSSEData(dst []byte, data string) []byte {
-	rest := data
+	lf := strings.IndexByte(data, '\n')
+	cr := strings.IndexByte(data, '\r')
+	at := 0
 	//: walk the payload one line at a time until the last one is written.
 	for {
-		line, tail, more := cutSSELine(rest)
-		dst = appendSSEField(dst, "data", line)
-		//: the last line has no terminator after it, so the loop ends here.
-		if !more {
+		idx := sseFirstTerminator(lf, cr)
+		//: no terminator left, so the remainder is the final line.
+		if idx < 0 {
 			//: every line is written.
-			return dst
+			return appendSSEField(dst, "data", data[at:])
 		}
-		rest = tail
+		dst = appendSSEField(dst, "data", data[at:idx])
+		at = idx + sseTerminatorWidth(data, idx)
+		//: refresh only a cursor this cut consumed or overtook, resuming AT the
+		//: new position rather than at the start — that is the whole linearity
+		//: argument, so these are not an optimisation on top of a correct loop,
+		//: they ARE the loop.
+		lf = sseAdvance(data, lf, at, '\n')
+		cr = sseAdvance(data, cr, at, '\r')
 	}
 }
 
-// cutSSELine splits off the first line, recognising LF, CR and CRLF alike —
-// the three terminators the format treats as equivalent.
-func cutSSELine(s string) (line, rest string, more bool) {
-	idx := strings.IndexAny(s, "\n\r")
-	//: no terminator means this is the final line.
-	if idx < 0 {
-		//: the whole remainder is one line.
-		return s, "", false
-	}
-	skip := 1
+// sseTerminatorWidth reports how many bytes the terminator at idx occupies.
+func sseTerminatorWidth(data string, idx int) int {
 	//: CRLF is one terminator, not two — treating it as two would emit a
 	//: spurious empty data line between every pair of lines.
-	if s[idx] == '\r' && idx+1 < len(s) && s[idx+1] == '\n' {
-		skip = sseCRLFWidth
+	if data[idx] == '\r' && idx+1 < len(data) && data[idx+1] == '\n' {
+		//: the pair, counted once.
+		return sseCRLFWidth
 	}
-	//: the line, and what follows the terminator.
-	return s[:idx], s[idx+skip:], true
+	//: a lone LF or a lone CR.
+	return 1
+}
+
+// sseAdvance returns where the next b sits at or after at, re-scanning only
+// when the cut just made consumed or overtook the cursor it is given.
+//
+// The untouched case is not an optimisation: a cursor still ahead of the cut is
+// already the answer, and re-scanning for it would read the same bytes again on
+// every line, which is what makes the obvious per-line form quadratic.
+func sseAdvance(data string, cursor, at int, b byte) int {
+	//: absent stays absent, and a cursor beyond the cut is still correct.
+	if cursor < 0 || cursor >= at {
+		//: nothing to re-scan.
+		return cursor
+	}
+	//: consumed or overtaken — look for the next one, from here forward only.
+	return sseIndexFrom(data, at, b)
+}
+
+// sseFirstTerminator returns whichever of the two cursors comes first, with -1
+// meaning that terminator is absent from the rest of the payload.
+func sseFirstTerminator(lf, cr int) int {
+	//: an absent LF leaves the CR to decide, absent or not.
+	if lf < 0 {
+		//: the carriage return, or -1 when there is none either.
+		return cr
+	}
+	//: an absent CR, or one after the LF, leaves the LF.
+	if cr < 0 || lf < cr {
+		//: the line feed cuts.
+		return lf
+	}
+	//: the carriage return is the earlier of the two.
+	return cr
+}
+
+// sseIndexFrom returns the index of b at or after from in s, expressed in s's
+// own coordinates, or -1 when the rest of s does not carry it.
+func sseIndexFrom(s string, from int, b byte) int {
+	idx := strings.IndexByte(s[from:], b)
+	//: a miss over the remainder stays a miss over the whole string.
+	if idx < 0 {
+		//: absent from here on.
+		return -1
+	}
+	//: re-base onto the whole string, which is what the cursors are kept in.
+	return from + idx
 }
 
 // appendSSEField writes one "name: value" line, or ": value" when name is empty

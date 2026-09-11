@@ -71,7 +71,9 @@ alias(
 go_test(
     name = "rlimit_test",
     srcs = [
+        "rlimit_bench_test.go",
         "rlimit_external_test.go",
+        "rlimit_linux_bench_test.go",
         "rlimit_linux_internal_test.go",
         "rlimit_other_test.go",
         "rlimit_value_default_internal_test.go",

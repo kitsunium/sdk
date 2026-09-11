@@ -8,6 +8,7 @@ go_library(
         "encoder.go",
         "json.go",
         "text.go",
+        "timestamp.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/logger/encoder",
     visibility = [
@@ -32,10 +33,13 @@ alias(
 go_test(
     name = "encoder_test",
     srcs = [
+        "encoder_bench_test.go",
         "json_external_test.go",
         "json_internal_test.go",
         "text_external_test.go",
         "text_internal_test.go",
+        "timestamp_bench_test.go",
+        "timestamp_internal_test.go",
         "trace_context_external_test.go",
     ],
     embed = [":encoder"],

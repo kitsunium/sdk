@@ -63,6 +63,28 @@ stdlib (`os`) + `internal/kernel/errs` + `internal/core/net`. Never `pkg/*`.
 - Return a partially-loaded identity when one file failed — a half-configured
   TLS identity is worse than none, because it looks configured.
 
+## Cost — deliberately not benchmarked
+
+**This package does no work per request and none per handshake, so it ships a
+paragraph instead of a `BENCH.md`.** Its whole surface is `Load`, which calls
+`os.ReadFile` at most four times and hands the bytes to
+`corenet.NewIdentityValue`. It is invoked once, at wiring time; no internal
+caller reaches it on a request path, and `go build -gcflags=-m` reports not one
+heap escape in the package. The identity it produces is consumed once, to build
+a transport or a listener, and from there every handshake is `crypto/tls` over a
+config the SDK never touches again.
+
+Benchmarking `Load` would measure `os.ReadFile` and `x509.ParseCertificate` —
+the operating system and the standard library — and print the result under this
+package's name. The one number that would genuinely be about certificate
+material, how long a PEM bundle takes to parse, belongs to
+`core/net.NewIdentityValue` and is paid once per process.
+
+That emptiness is ADR 0029's split working as intended: the filesystem I/O is
+here, every validation rule is in `internal/core/net`, so disk-sourced and
+memory-sourced material are held to one standard. What remains on this side is
+`os.ReadFile` plus four error wraps. There is nothing here to regress.
+
 ## Verification
 
 ```

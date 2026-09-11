@@ -69,6 +69,29 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
   confinement path behind `Available()` and `t.Skip`s with a reason otherwise,
   still asserting the typed-error contract.
 
+## Performance — see `BENCH.md`
+
+**`Available()` is a wiring-time call, not a per-spawn predicate.** It is 5.9 µs
+and eight allocations, because the honest delegation probe really attempts a
+`MkdirTemp` under the mount — and a refused `mkdir` on cgroupfs costs ~2.5× the
+same refusal on tmpfs (the kernel takes the cgroup mutex before saying no). Call
+it once and remember the answer.
+
+The pure half — `validateName` (48 ns, zero allocations), `withinRoot` (180 ns),
+`maxOrValue` (2.8 ns for `"max"`, 44 ns for a number), `applyOptions` (24 ns) —
+sums to under 500 ns and is not worth attention.
+
+The SDK's own share of a controller write is **~700 ns and two allocations**
+(`filepath.Join` + the decimal rendering); everything else is `os.WriteFile` and
+the filesystem under it.
+
+**The live verbs are NOT characterised.** `BENCH.md` documents in full why: this
+container mounts cgroup v2 read-write with every controller enabled and delegates
+it to nobody (`mkdir` is EACCES at the root and inside the caller's own scope), so
+`Available()` is false and `Create`/`Add`/`Set*Max`/`Kill`/`Freeze`/`Delete` have
+no measurable path. Re-run on a delegated host and compare against the ~700 ns
+floor; the difference is cgroupfs.
+
 ## Do NOT
 
 - Call `errs.Define` — all 22 codes live in `core/proc`. Restate the sentinel

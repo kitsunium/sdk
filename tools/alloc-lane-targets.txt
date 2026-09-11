@@ -36,6 +36,25 @@
 # Labelled-series lookup allocation gate — the claim that resolving an existing
 # series (including one already folded into overflow) costs zero allocations.
 //internal/service/metrics:metrics_test
+# An unexercised failover branch must cost nothing: the healthy write returns
+# on the first sink and its error slate stays empty, so chain DEPTH must not
+# appear in the allocation profile.
+//internal/service/logger/middleware/failover:failover_test
 # Build().Send() one-alloc-per-emit contract — the guard behind the
-# "zero-allocation logger" claim in README.md / CLAUDE.md.
+# "zero-allocation logger" claim in README.md / CLAUDE.md. Also pins fan-out
+# WIDTH, which that per-emit claim never covered.
 //pkg/v1/logger:logger_test
+# The two steady-state allocation claims RFC 6455's frame reader is sold on:
+# the reassembly buffer is reused across messages and the write buffer across
+# frames, so neither Receive nor Send allocates once a connection is warm. Both
+# are stated in Receive's doc comment, in initialWriteCapacity's and in the
+# package CLAUDE.md, and both were unguarded until 2026-09. Each is
+# mutation-checked in its own doc comment.
+//internal/service/net/websocket:websocket_test
+# The two allocation claims an event stream is sold on, neither of which had a
+# gate: initialFrameCapacity's "a steady-state send allocates nothing" (true,
+# but only above the buffer's high-water mark) and the price of the retention
+# ceiling that now bounds that mark — an outsized frame must allocate, because
+# the alternative is pinning its size for the stream's whole life. Each is
+# mutation-checked in its own doc comment.
+//internal/service/net/sse:sse_test

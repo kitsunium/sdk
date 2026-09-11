@@ -5,7 +5,6 @@ package transform
 
 import (
 	"bytes"
-	"compress/gzip"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -30,8 +29,11 @@ func (gzipCompressor) Algorithm() coretransform.Algorithm {
 func (gzipCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
 	//: encode into a buffer pre-seeded with dst so the result is caller-owned.
 	buf := bytes.NewBuffer(dst)
-	//: stdlib gzip writer streams compressed bytes into buf.
-	w := gzip.NewWriter(buf)
+	//: a recycled writer streams compressed bytes into buf; see pool.go for why
+	//: constructing one per call was 99 % of this path's allocated bytes.
+	w := takeGzipWriter(buf)
+	//: return the encoder on every exit, including the two failure paths.
+	defer releaseGzipWriter(w)
 	//: a Write fault is rare (buffer-backed) but must still be surfaced.
 	if _, werr := w.Write(src); werr != nil {
 		//: wrap the stdlib error under the gzip sentinel.
@@ -61,17 +63,20 @@ func (gzipCompressor) Decompress(dst, src []byte) (decoded []byte, err error) {
 // wrapped gzip error. max is an explicit parameter so the overflow backstop is
 // testable without mutating shared state.
 func gzipDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
-	//: a gzip reader validates the header up-front; a bad header fails here.
-	r, rerr := gzip.NewReader(bytes.NewReader(src))
+	//: a recycled gzip reader validates the header up-front, exactly as a fresh
+	//: one does; a bad header fails here either way.
+	box, rerr := takeGzipReader(bytes.NewReader(src))
 	//: malformed header — surface the failure via the gzip sentinel.
 	if rerr != nil {
 		//: wrap the header error under the gzip sentinel.
 		return dst, errs.Wrap(rerr, gzipWrap)
 	}
+	//: return the decoder on every exit below.
+	defer releaseGzipReader(box)
 	//: drain the reader through the shared bounded helper at the given cap.
-	plain, overflow, derr := readAllBounded(r, max)
+	plain, overflow, derr := readAllBounded(box.rc, max)
 	//: fold a Close fault into the result so the reader error is never dropped.
-	if cerr := r.Close(); cerr != nil && derr == nil {
+	if cerr := box.rc.Close(); cerr != nil && derr == nil {
 		//: a clean drain followed by a Close fault still fails decompression.
 		derr = cerr
 	}

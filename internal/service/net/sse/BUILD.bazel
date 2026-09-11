@@ -32,6 +32,8 @@ alias(
 go_test(
     name = "sse_test",
     srcs = [
+        "sse_alloc_internal_test.go",
+        "sse_bench_test.go",
         "sse_external_test.go",
         "sse_internal_test.go",
     ],

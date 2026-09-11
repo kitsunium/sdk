@@ -123,6 +123,26 @@ Footgun: a binary linking this package that is run with the sentinel env var set
 will re-exec. `Start` sets it only on the trampoline child and strips it before
 the `execve`, so a normal run never has it; do not set it by hand.
 
+**Cost — measured, see `BENCH.md`.** The trampoline is not a micro-optimisation
+question: it is **5.8×** a direct spawn (3 654 µs vs 626 µs for `/bin/true`),
+because the child it execs first is `os.Executable()` — the SUPERVISOR's binary,
+which must be loaded, relocated and fully package-initialised before `setrlimit`
+runs. The multiplier therefore scales with the size of the caller's binary, not
+the target's (measured against a 5.3 MB binary; a 50 MB service binary pays more).
+`Nice` and `OOMScoreAdj` do NOT trigger it — they are applied post-start on the
+live pid — so a limit expressible either way is orders of magnitude cheaper as
+`Nice`/`OOMScoreAdj`/a post-spawn `cgroup.Group.Add` than as `Rlimits`.
+
+## Performance
+
+`BENCH.md` answers "how much of `Start` is the kernel and how much is SDK
+overhead": **0.06 %** is SDK preparation (377 ns of a 626 µs `/bin/true` launch),
+and a CPU profile of a launch puts **zero** samples in any preparation function.
+Nothing on the direct-spawn path was optimised, because nothing on it is
+measurable. The two costs that are worth a caller's attention are the trampoline
+above and `StdioCapture`, whose pipe + null-device setup is 4.9 % of a launch —
+both descriptor and exec costs, neither of them this package's own code.
+
 ## Tests
 
 `exec_external_test.go` (black-box) covers the ADR acceptance criteria:

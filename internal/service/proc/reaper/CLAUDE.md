@@ -48,6 +48,21 @@ exactly one definition of each exported symbol compiles per GOOS.
 - **LastError** — exposes the most recent background-sweep error (RWMutex
   guarded) since the loop cannot return one to a caller.
 
+## Performance — see `BENCH.md`
+
+`ReapOnce` on an idle supervisor is **283 ns and ZERO allocations** — one
+`wait4(-1, WNOHANG)` returning `ECHILD`. There is no polling frequency at which
+this package's own code becomes the cost; `WithOnReap` adds 5 ns and can be wired
+unconditionally.
+
+A `Start`/`Stop` cycle is **86 µs — 300× a sweep** — and a CPU profile puts 57 %
+of it in `runtime.futex` under the scheduler and 9 % in `runtime.ensureSigM`. That
+is the price of the contract (`Stop` blocks until the loop goroutine is gone, the
+SIGCHLD subscription is detached and a final drain has run), not an inefficiency
+in it. **A reaper is a per-process object**: construct and `Start` it once, not per
+test case or per request. `IsPID1` is a real `getpid(2)` (119 ns), deliberately
+uncached — hoist it, do not loop on it.
+
 ## Do NOT
 
 - Treat `ECHILD` as an error — it is the normal "drained" terminus.
