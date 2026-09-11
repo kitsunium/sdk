@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"flag"
+	"io"
 	"testing"
 
 	corecli "github.com/kitsunium/sdk/internal/core/cli"
@@ -181,4 +182,29 @@ func fieldsCarryPath(tb testing.TB, err error, want string) {
 		}
 	}
 	tb.Errorf("no field carries the path %q; fields = %v", want, kerrs.FieldsOf(err))
+}
+
+// TestTheTreeIsFrozenAtNew pins that the executor walks the tree New
+// validated, not the caller's. CommandValue is a value, but its Commands
+// slices were the caller's arrays: renaming a child after New changed which
+// command ran — unvalidated, and racing with any Execute in flight. Seen
+// failing without the copy: "Execute(serve) = UNKNOWN_COMMAND after the
+// caller renamed its own slice".
+func TestTheTreeIsFrozenAtNew(t *testing.T) {
+	t.Parallel()
+	ran := false
+	children := []corecli.CommandValue{leaf("serve", func(context.Context, corecli.InvocationValue) error {
+		ran = true
+		return nil
+	})}
+	root := corecli.CommandValue{Name: "tool", Summary: "s", Commands: children}
+	app, err := svccli.New(svccli.Config{Output: io.Discard, ErrOutput: io.Discard}, root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	//: the caller edits its own array after the fact.
+	children[0].Name = "renamed"
+	if err := app.Execute(t.Context(), []string{"serve"}); err != nil || !ran {
+		t.Fatalf("Execute(serve) = %v, ran = %v, after the caller renamed its own slice; want the validated tree", err, ran)
+	}
 }

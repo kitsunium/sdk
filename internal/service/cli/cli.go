@@ -50,6 +50,11 @@ type executor struct {
 // panic there would replace a stack pointing at the bug with a sentence about
 // a tree.
 func New(cfg Config, root corecli.CommandValue) (runner corecli.Executor, err error) {
+	//: the tree the executor walks must be the one validate saw. CommandValue
+	//: is copied by value but its Commands slices are the caller's, so a caller
+	//: editing them after New used to change what ran — unvalidated, and
+	//: racing with any Execute in flight.
+	root = cloneTree(root)
 	//: the root is the only command whose Summary is optional: nothing lists
 	//: it beside its siblings, because it has none.
 	if refused := validate(root, nil, true); refused != nil {
@@ -63,6 +68,24 @@ func New(cfg Config, root corecli.CommandValue) (runner corecli.Executor, err er
 		out:    cfg.resolveOutput(),
 		errOut: cfg.resolveErrOutput(),
 	}, nil
+}
+
+// cloneTree returns cmd with every Commands slice copied, all the way down. A
+// nil slice stays nil, so a leaf is still a leaf.
+func cloneTree(cmd corecli.CommandValue) corecli.CommandValue {
+	//: a leaf has nothing to share with the caller.
+	if cmd.Commands == nil {
+		//: the value itself is already a copy.
+		return cmd
+	}
+	children := make([]corecli.CommandValue, len(cmd.Commands))
+	//: each child is cloned in turn, so no level keeps the caller's array.
+	for index, child := range cmd.Commands {
+		children[index] = cloneTree(child)
+	}
+	cmd.Commands = children
+	//: the copy, owned by the executor alone.
+	return cmd
 }
 
 // validate checks one command and recurses into its children. parents is the
