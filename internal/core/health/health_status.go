@@ -60,9 +60,14 @@ func (s Status) String() string {
 // Degraded serves. That is the whole meaning of marking a check non-critical:
 // if a degraded replica were removed from routing, a "non-critical" cache
 // outage would take the fleet down just as thoroughly as a critical one.
+//
+// A Status outside the three does NOT serve — String already calls it
+// "unknown", and a verdict nobody minted is the one that must not authorise
+// routing (the zero-value rule of the type comment, applied to every other
+// value nobody assigned on purpose).
 func (s Status) Serving() bool {
-	//: the two serving states are the two above the floor.
-	return s != StatusUnhealthy
+	//: exactly the two serving states, never "anything but the floor".
+	return s == StatusDegraded || s == StatusHealthy
 }
 
 // Worst returns the more severe of two statuses, which is the SDK's whole

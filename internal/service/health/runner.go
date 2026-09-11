@@ -6,6 +6,7 @@ package health
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corehealth "github.com/kitsunium/sdk/internal/core/health"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -31,6 +32,11 @@ import (
 // The goroutine's only shared state is the run it was given: it writes
 // `result` before closing `done`, and every waiter reads `result` only after
 // `done` closes.
+//
+// The caller can stop waiting too. Its context is its own — a lifecycle
+// startup interrupted by a signal, an HTTP client that hung up — and a waiter
+// that ignored it sat out the whole budget for an answer nobody would read.
+// That is [health.departed], and unlike the budget it cancels nothing.
 func (h *health) evaluate(ctx context.Context, e *entry) corehealth.ResultValue {
 	//: a replayable success costs nothing and starts nothing.
 	if replay, ok := e.fresh(h.clk.Now()); ok {
@@ -42,6 +48,7 @@ func (h *health) evaluate(ctx context.Context, e *entry) corehealth.ResultValue 
 	if mine {
 		go h.perform(e, run)
 	}
+	armed := h.clk.Now()
 	//: the budget is armed on the INJECTED clock, so a test moves it without
 	//: sleeping and production waits on the real one.
 	timer := h.clk.NewTimer(e.budget)
@@ -56,6 +63,11 @@ func (h *health) evaluate(ctx context.Context, e *entry) corehealth.ResultValue 
 	case <-timer.C():
 		//: announce, stop waiting, and report.
 		return h.abandoned(e, run)
+	//: the caller stopped waiting first. A nil Done — context.Background —
+	//: never selects, so a caller with no deadline waits exactly as before.
+	case <-ctx.Done():
+		//: stop waiting, and leave the shared run alone.
+		return h.departed(ctx, e, h.clk.Since(armed))
 	}
 }
 
@@ -175,5 +187,37 @@ func (h *health) abandoned(e *entry, run *inflight) corehealth.ResultValue {
 	return corehealth.ResultValue{
 		Name: e.name, Status: e.verdict(err), TimedOut: true,
 		At: h.clk.Now(), Took: e.budget, Err: err,
+	}
+}
+
+// departed reports a check whose CALLER stopped waiting before it answered:
+// the probe's context ended before the check returned and before its budget.
+//
+// It is abandoned's mirror, and the difference is the whole point — the run is
+// NOT cancelled. That context belonged to one caller, while the run belongs to
+// every probe waiting on it, which is why entry.claim detached it from the
+// context that started it. So this probe stops waiting, the run keeps going,
+// the next probe JOINS it rather than starting a second body, and that probe's
+// own budget is what announces a timeout. A wedged dependency still costs one
+// goroutine for the whole outage.
+//
+// The result is still a failure, and still CheckTimeout with TimedOut set: the
+// check said nothing within the time this probe had. What changes is whose
+// time ran out, and the chain says so — the caller's context error is the
+// cause, so errors.Is(err, context.Canceled) tells a departure apart from an
+// expired budget, and Took is how long this probe actually waited.
+func (h *health) departed(ctx context.Context, e *entry, waited time.Duration) corehealth.ResultValue {
+	//: read from the sentinel so the identity cannot drift from it.
+	err := kerrs.Wrap(ctx.Err(), kerrs.WrapParams{
+		Code:     CheckTimeout.Code(),
+		Reason:   CheckTimeout.Reason(),
+		Public:   CheckTimeout.Public(),
+		Private:  "service/health: the caller's context ended before the check answered; its run was left running for the next probe",
+		ExitCode: CheckTimeout.ExitCode(),
+	}, kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()))
+	//: a failure like any other, through the same criticality rule.
+	return corehealth.ResultValue{
+		Name: e.name, Status: e.verdict(err), TimedOut: true,
+		At: h.clk.Now(), Took: waited, Err: err,
 	}
 }

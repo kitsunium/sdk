@@ -4,8 +4,11 @@ package health_test
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	corehealth "github.com/kitsunium/sdk/internal/core/health"
@@ -48,6 +51,93 @@ func TestABudgetExpiryIsAFailureAndSaysSo(t *testing.T) {
 	//: the announcement reached the body. It is an announcement and nothing
 	//: more: the goroutine is not killed and nothing it holds is closed.
 	<-cancelled
+}
+
+// TestACancelledCallerStopsWaitingAndLeavesTheRunAlone pins both halves of a
+// caller's departure.
+//
+// A probe used to wait only for its run or its budget, so a caller whose own
+// context ended — a lifecycle startup interrupted by SIGTERM, a client that
+// hung up — sat out the whole budget for an answer nobody would read. It must
+// return at once. And it must return WITHOUT cancelling the run: that run is
+// shared by every probe waiting on it, so the next probe joins it rather than
+// starting a second body, and a wedged dependency keeps costing one goroutine.
+//
+// "At once" is asserted without a clock: inside a synctest bubble,
+// synctest.Wait returns when every other goroutine is durably blocked, so a
+// probe still parked on its budget is SEEN still parked — the manual clock is
+// never advanced, which is how "promptly" and "not at the budget" become the
+// same assertion.
+//
+// MUTATION (2026-09-11): the `case <-ctx.Done()` arm was deleted. Observed:
+// `the cancelled probe is still waiting — it would have sat out its 2s budget
+// for a caller that has gone`. Restored; SHA-256 of runner.go identical to the
+// pre-mutation file.
+//
+// MUTATION (2026-09-11): the ctx.Done arm made to cancel the shared run before
+// departing (`run.cancel()`, as abandoned does for an expired budget).
+// Observed: `the caller's departure cancelled the shared run: context
+// canceled`. Restored; SHA-256 identical.
+func TestACancelledCallerStopsWaitingAndLeavesTheRunAlone(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		registry, clk := newRegistry(t, svchealth.Config{})
+		release := make(chan struct{})
+		releaseOnce := sync.OnceFunc(func() { close(release) })
+		//: whatever happens below, the body is let go before the bubble ends.
+		defer releaseOnce()
+		runs := make(chan context.Context, 2)
+		var calls atomic.Int64
+		mustAddReadiness(t, registry, corehealth.ReadinessCheckValue{
+			Name: "db", Check: func(ctx context.Context) error {
+				calls.Add(1)
+				runs <- ctx
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-release:
+					return nil
+				}
+			},
+		})
+		callerCtx, cancel := context.WithCancel(context.Background())
+		reports := make(chan corehealth.ReportValue, 2)
+		go func() { reports <- registry.Probe(callerCtx, corehealth.ProbeReadiness) }()
+		runCtx := <-runs
+		//: the probe is parked on its budget before its caller leaves.
+		clk.BlockUntil(1)
+		cancel()
+		synctest.Wait()
+		var first corehealth.ReportValue
+		select {
+		case first = <-reports:
+		default:
+			t.Fatalf("the cancelled probe is still waiting — it would have sat out its %v budget for a caller that has gone", budget)
+		}
+		result := resultFor(t, first, "db")
+		if !errs.HasCode(result.Err, svchealth.CodeCheckTimeout) || !errors.Is(result.Err, context.Canceled) {
+			t.Errorf("the departed probe reported %v, want CHECK_TIMEOUT caused by the caller's context", result.Err)
+		}
+		if !result.TimedOut || result.Took != 0 {
+			t.Errorf("TimedOut = %v, Took = %v; want true and 0 — the clock never moved", result.TimedOut, result.Took)
+		}
+		//: the shared run heard nothing about one caller leaving.
+		if err := runCtx.Err(); err != nil {
+			t.Fatalf("the caller's departure cancelled the shared run: %v", err)
+		}
+		//: the next probe JOINS that run: parked on its own budget first, so
+		//: the release below cannot reach a run nobody has joined yet.
+		go func() { reports <- registry.Probe(context.Background(), corehealth.ProbeReadiness) }()
+		clk.BlockUntil(1)
+		releaseOnce()
+		second := resultFor(t, <-reports, "db")
+		if second.Status != corehealth.StatusHealthy || second.Err != nil {
+			t.Errorf("the joining probe got %v (%v), want the run's own healthy answer", second.Status, second.Err)
+		}
+		if got := calls.Load(); got != 1 {
+			t.Errorf("%d check bodies ran, want 1 — the second probe started a run of its own", got)
+		}
+	})
 }
 
 // TestABudgetExpiryStillHonoursCriticality pins that a non-critical check that

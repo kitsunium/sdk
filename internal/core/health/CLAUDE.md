@@ -19,7 +19,7 @@ and fail faster. **The probe caused the outage.**
 | `SelfCheck func() error` | a **liveness** check. It receives **no context, on purpose** — see below. |
 | `Health` | registry + probe answering; implementations MUST be concurrency-safe. |
 | `Probe` | `ProbeStartup` / `ProbeReadiness` / `ProbeLiveness`. |
-| `Status`, `Worst`, `Status.Serving()` | the aggregate verdict and its combination rule. |
+| `Status`, `Worst`, `Status.Serving()` | the aggregate verdict and its combination rule. `Serving` is true for exactly `StatusDegraded` and `StatusHealthy`; a `Status` outside the three does not serve. |
 | `ResultValue` | one check's outcome, carried into the report. |
 
 ## Why the two checks are different types

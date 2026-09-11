@@ -44,7 +44,8 @@ type health struct {
 	clk clock.Timed
 	// hookMu serialises OnReport so the hook need not be concurrency-safe.
 	hookMu sync.Mutex
-	// mu guards the registration sets and the three state fields below.
+	// mu guards the registration sets and the two phase fields below,
+	// startupPending and draining.
 	//
 	// It is an RWMutex because the two hot paths — [health.phase], read once
 	// per probe, and [health.entriesFor], read once per probe per probe kind —
@@ -65,10 +66,17 @@ type health struct {
 	startupPending int
 	// draining records that Drain was called. It is one-way; see Drain.
 	draining bool
-	// notified records that READY=1 has been sent, so it is sent once.
+	// notifyMu serialises the whole sd_notify step — decide, send, commit —
+	// and guards the two fields below. It is not mu: the send is a syscall,
+	// and a probe's phase read must never queue behind a datagram. See
+	// [health.notify] for why the three steps share one critical section.
+	notifyMu sync.Mutex
+	// notified records that READY=1 has been DELIVERED, so it is sent once —
+	// and sent again after a failure, because a failure never sets it.
 	notified bool
-	// lastNotified is the aggregate readiness status last announced, so a
-	// STATUS= datagram is sent on change rather than on every poll.
+	// lastNotified is the aggregate readiness status last DELIVERED, so a
+	// STATUS= datagram is sent on change rather than on every poll, and a
+	// change whose datagram failed is still owed.
 	lastNotified corehealth.Status
 }
 

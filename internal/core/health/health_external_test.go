@@ -171,6 +171,25 @@ func TestServingIsTrueForDegraded(t *testing.T) {
 	}
 }
 
+// TestAStatusNobodyMintedDoesNotServe pins the fail-closed half of Serving. A
+// Status is a uint8, so every value past the three is representable — through
+// a conversion, a decode, or a Health written outside the SDK — and "anything
+// but unhealthy serves" routed traffic to all of them while String rendered
+// them "unknown". Unknown is not a serving state.
+//
+// MUTATION (2026-09-11): Serving put back to `return s != StatusUnhealthy`.
+// Observed: `Status(3) serves; a verdict nobody minted must not authorise
+// routing`, and the same for 42 and 255. Restored; SHA-256 of
+// health_status.go identical to the fixed file.
+func TestAStatusNobodyMintedDoesNotServe(t *testing.T) {
+	t.Parallel()
+	for _, status := range []corehealth.Status{3, 42, 255} {
+		if status.Serving() {
+			t.Errorf("Status(%d) serves; a verdict nobody minted must not authorise routing", status)
+		}
+	}
+}
+
 // TestStringsAreTheContract pins the spellings. An operator greps them and a
 // dashboard parses them, so they are not a formatting detail — and a value the
 // package never mints must say "unknown" rather than print a number.
