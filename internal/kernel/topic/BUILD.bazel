@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "topic",
+    srcs = [
+        "delivery.go",
+        "listener.go",
+        "state.go",
+        "topic.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/topic",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+    deps = ["//internal/kernel/snapshot"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":topic",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "topic_test",
+    size = "small",
+    srcs = [
+        "topic_bench_test.go",
+        "topic_external_test.go",
+        "topic_internal_test.go",
+    ],
+    embed = [":topic"],
+)

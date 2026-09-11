@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "group",
+    srcs = [
+        "collect.go",
+        "group.go",
+        "panic.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/group",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":group",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "group_test",
+    size = "small",
+    srcs = [
+        "group_bench_test.go",
+        "group_external_test.go",
+        "group_internal_test.go",
+    ],
+    embed = [":group"],
+)

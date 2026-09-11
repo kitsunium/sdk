@@ -7,7 +7,11 @@ go_library(
     srcs = ["cache.go"],
     importpath = "github.com/kitsunium/sdk/pkg/v1/cache",
     visibility = ["//visibility:public"],
-    deps = ["//internal/kernel/cache"],
+    deps = [
+        "//internal/core/cache",
+        "//internal/kernel/cache",
+        "//internal/service/cache",
+    ],
 )
 
 alias(
@@ -19,5 +23,15 @@ alias(
 go_test(
     name = "cache_test",
     srcs = ["cache_external_test.go"],
-    deps = [":cache"],
+    deps = [
+        ":cache",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
 )
