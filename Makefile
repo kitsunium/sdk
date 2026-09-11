@@ -102,6 +102,10 @@ lint:
 	# merges silently left it describing a tree that no longer existed. Both
 	# invariants key on what is ON DISK, never on a maintained number.
 	bash scripts/pre-commit/check-domain-docs.sh
+	# Gazelle gives every internal/ package //:__subpackages__ visibility, which
+	# admits the whole repository, so the layer direction is asserted on the
+	# build graph instead of assumed from visibility (ADR 0068).
+	bash scripts/check-layer-deps.sh
 	# The SDK is bound by the invariants it imposes on consumers. Running the
 	# guard here is what keeps ADR 0033 from being a tool nobody executes.
 	$(MAKE) --no-print-directory guard

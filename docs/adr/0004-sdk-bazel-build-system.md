@@ -5,6 +5,7 @@
 **Deciders**: @kodflow
 **Supersedes**: none
 **Related**: ADR 0001 (multi-module layout), ADR 0002 (errs registry), context `.claude/contexts/bazel-9-go-sdk.md`
+**Amended by**: [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) — §Layer firewall's mechanism: Gazelle gives every `internal/` package `//:__subpackages__` visibility, so the direction is asserted on the build graph instead
 
 ## Context
 
