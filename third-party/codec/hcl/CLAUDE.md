@@ -46,6 +46,33 @@ module stays dep-light.
 | `0.3.37.2` | `UnmarshalFailed` | `hclsimple.Decode` diagnostics (syntax/schema) |
 | `0.3.37.3` | `SizeExceeded` | `len(data)` exceeds `maxHCLBytes` (10 MiB) |
 
+## Cost
+
+Measured in `BENCH.md`, against the two in-tree codecs a consumer
+gets without opting into anything, encoding the **same Go value**:
+
+| large document (257 attributes) | HCL | JSON | CBOR |
+|---|---:|---:|---:|
+| `Marshal` | 2 957 891 ns | 37 731 ns | 16 570 ns |
+| `Unmarshal` | 2 667 091 ns | 76 682 ns | 54 412 ns |
+| bytes allocated / allocations | 2 672 515 B / **14 215** | 6 579 B / 2 | 5 378 B / **1** |
+| wire bytes | 7 851 | 6 391 | 5 275 |
+
+**HCL Marshal is 29–78× JSON and 91–179× CBOR**, it allocates 2.67 MB to produce
+7.8 KB, and its output is the largest of the three. The unit cost is **≈11.6 µs
+and ≈55 heap allocations per attribute**, and it scales per attribute rather than
+amortising: `gohcl.EncodeIntoBody` builds an editable syntax tree, re-tokenises
+its own output and walks it by Unicode grapheme cluster to align `=` signs — it
+is `terraform fmt`'s engine, not a serialiser — and re-parses the struct tags by
+reflection on every call.
+
+`Append` is `Marshal` plus a copy and therefore **saves nothing**: identical
+`allocs/op` (14 215) and the same `B/op`, measured across nine samples. CBOR's
+`Append` is allocation-free; JSON's saves one.
+
+**Choose this codec when the file must be HCL, never for speed or size.** The
+ADR 0022/0034 dependency argument and the cost point the same way.
+
 ## Do NOT
 
 - Add HCL to `pkg/v1/codec`'s blank imports — it would pull `go-cty` into the

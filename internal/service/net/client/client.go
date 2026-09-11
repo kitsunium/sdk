@@ -4,6 +4,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -14,6 +15,17 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// maxPresizedRead bounds how far the peer's own Content-Length is believed.
+//
+// The bound is deliberately NOT the configured ceiling. Sizing the buffer from
+// an unverified header up to MaxResponseSize turns a ten-byte reply carrying
+// "Content-Length: 8388608" into an 8 MiB allocation per request — a
+// memory-amplification a peer buys for nothing, multiplied by every call in
+// flight. 64 KiB is above the size of nearly every JSON API response, so the
+// hint still buys the single-allocation read where it matters, and a peer that
+// lies wins 64 KiB rather than the whole ceiling.
+const maxPresizedRead int64 = 64 << 10
 
 // Client performs guarded outbound HTTP calls.
 //
@@ -62,8 +74,37 @@ func New(cfg corenet.ClientConfig, id corenet.IdentityValue, policy corenet.Poli
 			CheckRedirect: redirectLimiter(full.MaxRedirects),
 		},
 		base:    base,
-		headers: full.DefaultHeaders,
+		headers: canonicalHeaders(full.DefaultHeaders),
 	}, nil
+}
+
+// canonicalHeaders rewrites the configured default names into the canonical
+// form net/http stores headers under, once, here.
+//
+// http.Header.Get and http.Header.Set both canonicalise their argument, and
+// that conversion ALLOCATES for a name that is not already canonical and not
+// one of net/http's interned common names — which is to say, for exactly the
+// custom "x-request-source" headers a caller writes in lowercase because
+// nothing said not to. Doing it per request charged that twice per header per
+// call for a configuration that was never wrong, only spelled differently.
+//
+// A caller who configures two spellings of one name still gets one of them,
+// unpredictably, exactly as before — but now the choice is made once here
+// rather than freshly on every request from a map iteration order that is
+// randomised per range.
+func canonicalHeaders(configured map[string]string) map[string]string {
+	//: no configured defaults means no map to build.
+	if len(configured) == 0 {
+		//: applyHeaders ranges over nil without incident.
+		return nil
+	}
+	out := make(map[string]string, len(configured))
+	//: canonicalise every name once, at construction.
+	for name, value := range configured {
+		out[http.CanonicalHeaderKey(name)] = value
+	}
+	//: every key is now in the form net/http will look it up under.
+	return out
 }
 
 // HTTP returns the underlying *http.Client.
@@ -111,7 +152,7 @@ func (c *Client) Do(req *http.Request) (resp corenet.ResponseValue, err error) {
 		//: unwrap the *url.Error envelope so the domain code stays matchable.
 		return corenet.ResponseValue{}, unwrapClientError(derr)
 	}
-	body, berr := io.ReadAll(raw.Body)
+	body, berr := readBody(raw.Body, raw.ContentLength)
 	cerr := raw.Body.Close()
 	out := corenet.ResponseValue{Status: raw.StatusCode, Header: raw.Header, Body: body}
 	//: an over-sized body fails here rather than arriving truncated.
@@ -138,6 +179,37 @@ func (c *Client) Do(req *http.Request) (resp corenet.ResponseValue, err error) {
 	return out, nil
 }
 
+// readBody reads the guarded response body in full, sized from the peer's own
+// Content-Length when that hint is usable.
+//
+// io.ReadAll cannot do this: it starts at 512 bytes and grows by append, so a
+// 1 MiB body is reallocated about a dozen times and roughly twice its own size
+// is allocated and copied.
+//
+// The hint is the PEER'S claim and is treated as one — clamped by
+// maxPresizedRead, and ignored entirely when negative, which is what
+// net/http reports for a chunked or HTTP/2 body of unknown length. The ceiling
+// is NOT enforced here and must not be: body is the cappedBody installed by the
+// guard, which refuses an over-sized payload rather than truncating it, and it
+// does so whatever buffer this function hands it.
+func readBody(source io.Reader, hint int64) (payload []byte, err error) {
+	//: an unknown length, a peer that sent none, or a claim past the bound —
+	//: all three fall back to the stdlib's own growth schedule, which is also
+	//: what makes a peer announcing a colossal length cost nothing extra.
+	if hint <= 0 || hint > maxPresizedRead {
+		//: no reservation is made on this peer's word.
+		return io.ReadAll(source)
+	}
+	//: MinRead is added because bytes.Buffer.ReadFrom reserves that much before
+	//: EVERY read, so a buffer sized to exactly the body is reallocated once
+	//: more at the end and the hint buys nothing.
+	buf := bytes.NewBuffer(make([]byte, 0, hint+bytes.MinRead))
+	_, rerr := buf.ReadFrom(source)
+	//: ReadFrom grows past the hint on its own if the peer sent more than it
+	//: claimed, so a short hint truncates nothing.
+	return buf.Bytes(), rerr
+}
+
 // bodyError types a failure that happened while reading the response body.
 //
 // The ceiling's own refusal already carries a domain code and is handed back
@@ -159,6 +231,9 @@ func bodyError(err error) error {
 }
 
 // applyHeaders adds the configured defaults without overriding the caller.
+//
+// The keys were canonicalised by canonicalHeaders at construction, which is
+// what keeps Get and Set on their non-allocating fast path here.
 func (c *Client) applyHeaders(req *http.Request) {
 	//: a caller-set header always wins over a configured default.
 	for key, value := range c.headers {

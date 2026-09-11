@@ -58,9 +58,12 @@ filegroup(
 go_test(
     name = "trace_test",
     srcs = [
+        "alloc_external_test.go",
         "exporter_otlphttp_external_test.go",
         "exporter_otlpjson_external_test.go",
         "http_middleware_external_test.go",
+        "http_server_bench_test.go",
+        "recorder_bench_test.go",
         "recorder_external_test.go",
         "sampler_external_test.go",
         "testhelpers_external_test.go",

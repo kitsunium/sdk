@@ -222,7 +222,7 @@ that "a steady-state send allocates nothing". It is TRUE, and it had no gate:
 The claim holds only ABOVE the buffer's high-water mark — the first frame of a
 given size legitimately grows it — and the doc comment now says so, beside the
 ceiling that bounds how high the mark may go. The three rows are pinned by
-`AllocsPerRun` gates in `sse_alloc_internal_test.go`, which is `//go:build !race`
+malloc-total gates in `sse_alloc_internal_test.go`, which is `//go:build !race`
 because the race detector allocates shadow state on every memory access; the
 race-off alloc lane is its only gate, and `//internal/service/net/sse:sse_test`
 is in `tools/alloc-lane-targets.txt` for that reason (SDK-wide rule 12).

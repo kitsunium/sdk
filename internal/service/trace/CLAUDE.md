@@ -19,7 +19,7 @@ Code range: `0.3.50.*` (ADR 0051).
 |---|---|
 | `tracer.go` | package doc + `Tracer` + `NewTracer` + `Start` (the mint/sample/inherit sequence) |
 | `config.go` | `TracerConfig` + every clamp, applied once in `resolved()` |
-| `span.go` | the recording `span`: mutex-guarded attrs/events/status, idempotent `End` |
+| `span.go` | the recording `span`: mutex-guarded attrs/events/status, idempotent `End`; `finish` TRANSFERS its slices to the exported value rather than cloning them, and `sortedIncoming` skips the clone `SortAttrs` makes when there is one attribute to merge — both in §Cost |
 | `noop_span.go` | the span an unsampled trace gets — and why it still carries a context |
 | `sampler.go` | `AlwaysSample` / `NeverSample` / `ParentBased` / `Ratio` |
 | `idgen.go` | `NewTraceID` / `NewSpanID` + `readRandom` |
@@ -202,11 +202,85 @@ Four decisions:
 | `TestOTLPHTTPDoesNotFollowARedirect` | the credentialled POST never leaves the configured host |
 | `TestServerMiddlewarePreservesWriterCapabilities` | Flush works, Hijack reports `ErrNotSupported` |
 | `TestClientMiddlewareInjectsAndClonesTheRequest` | the caller's `*http.Request` is untouched |
+| `TestServerMiddlewareStaysWithinItsPerRequestAllocationBudget` | 12 allocations sampled, 10 unsampled — the §Cost argument, guarded (`!race` lane) |
+| `TestRecordingAtCapacityAllocatesNothing` | refusing a span costs less than keeping it (`!race` lane) |
+| `TestRecorderTakesAnExclusiveLockOnEveryPath` | `Recorder.mu` is a `sync.Mutex`; see §Cost |
+| `TestTheValueASinkReceivesIsFinal` | `finish` TRANSFERS its slices, so nothing that happens to an ended span reaches the exported value |
 
-## Benchmarks
+## Cost
 
-There are none, and therefore no `BENCH.md` (rule 9). The allocation claim this
-SDK defends is on `metrics`' observation path; a span is a per-operation object
-that allocates by construction, and a benchmark here would pin a number nothing
-depends on. Batching (ADR 0051 §Deferred) brings a measurable hot path and a
-`BENCH.md` with it.
+Measured, in `BENCH.md`. The two units named here as unmeasured now are, and
+both produced a change.
+
+### A traced HTTP request
+
+| | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| the same handler, no middleware | 5.1 | 0 | 0 |
+| root (no inbound header), sampled | 2 098 | 1 720 | **12** |
+| root, unsampled | 1 154 | 888 | **10** |
+| child (valid `traceparent`), sampled | 2 346 | 1 736 | **13** |
+| child, unsampled | 1 391 | 904 | **11** |
+
+Against a full SDK HTTP request measured on the **same box**
+(`//internal/service/net/server`'s `BenchmarkHTTP_Adapter`, 162 900 ns /
+5 148 B / **63 allocs**), tracing costs **+1.3 % of latency and +19 % of the
+allocation rate**. Latency and allocation rate give opposite answers and only
+the second one decides anything: nobody rejects a middleware over 1.3 %, while
+a fifth more allocations per request is GC pressure paid by every goroutine in
+the process. That is the number to put in front of a team asking whether tracing
+belongs in a **default** middleware stack, and
+`TestServerMiddlewareStaysWithinItsPerRequestAllocationBudget` guards it.
+
+It also prices a sampling ratio honestly: an unsampled request is 55 % of a
+sampled one in TIME and 83 % of it in ALLOCATIONS, because ten of the twelve are
+paid before anything is recorded. Turning the rate down buys much less than the
+latency figures suggest.
+
+### `Recorder.record` — the lock was the wrong one
+
+`record` takes the exclusive side on every span end from every request
+goroutine; `Len` and `Dropped` take the shared side once per collection
+interval; and `Collect`, which is what an export actually calls, takes the
+exclusive side too. The field held a `sync.RWMutex`, so a read-write lock was
+optimising the rarest path and taxing the busiest one. It is a `sync.Mutex` now.
+
+| goroutines | `Mutex` | `RWMutex` | RWMutex costs |
+|---:|---:|---:|---:|
+| record at capacity, 1 → 8 | 33.2 → 130.6 ns | 52.9 → 166.3 ns | **1.27×–1.65×** |
+| record while an operator polls `Len`, 1 → 8 | 83.3 → 136.8 ns | 228.4 → 1 228 ns | **2.7×–9.0×** |
+| `Len` with 4-8 concurrent readers | 79.5 → 93.4 ns | 66.2 → 75.9 ns | RWMutex **1.20×–1.23× faster** |
+
+The middle row is the one that settles it, because it is the scenario the
+RWMutex's own field comment named. The bottom row is what the change **cost**,
+stated rather than hidden: with four or more goroutines doing nothing but
+polling, the rejected lock wins — on a scenario this type's contract excludes,
+since `Collect` DRAINS and a Recorder therefore has exactly one reader. At that
+one reader the `Mutex` is marginally faster anyway.
+
+`TestRecorderTakesAnExclusiveLockOnEveryPath` fails the build on a change back,
+and the rejected design stays in `recorder_bench_test.go` as a control so the
+price is still re-runnable.
+
+### What was refused
+
+Three further allocations were priced and left in place, each because removing
+it would weaken a stated property — the full argument is in `BENCH.md` §4:
+
+- **`http.Header.Get("traceparent")`**, 87 ns and 1 allocation per header read,
+  purely because `TraceParentHeader` is lowercase. It must be, for `Inject`;
+  the fix is a second lookup-only constant in `internal/core/trace`, not here.
+  The local workaround is a `Carrier` adapter, which is exactly the thing
+  `serveTraced`'s comment says this middleware deliberately does not have.
+- **The doubled span context**, 4 of the 12 allocations and the largest group in
+  the profile. It is the price of having exactly ONE inheritance path; removing
+  it either changes which span parents a request that carries no `traceparent`,
+  or reopens the hand-passed parent `Start`'s doc refuses by name.
+- **Pooling `&statusRecorder{}`**, 1 allocation. It is handed to a
+  caller-supplied handler, and this type is the one ADR 0051 records as the
+  place ADR 0047's defect came back one layer up. A pool adds use-after-return
+  to that family for one object.
+
+### Batching
+
+ADR 0051 §Deferred brings a third unit, still unmeasured.

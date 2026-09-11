@@ -79,7 +79,16 @@ func (t *tracedRoundTripper) RoundTrip(request *http.Request) (response *http.Re
 		Kind: coretrace.SpanKindClient,
 		Attrs: []coremetrics.AttrValue{
 			coremetrics.String(HTTPRequestMethodKey, request.Method),
-			coremetrics.String(URLFullKey, request.URL.String()),
+			//: Redacted(), never String(): url.URL.String() renders userinfo
+			//: verbatim, so a caller who dials https://user:secret@host puts that
+			//: password into a span attribute, which the exporter then ships to a
+			//: telemetry backend that is very often a different trust domain from
+			//: the credential. Redacted() replaces the password with "xxxxx" and
+			//: changes nothing else. It does NOT touch the query string, so a
+			//: secret passed as ?api_key= still travels — that one the SDK cannot
+			//: fix without guessing which parameters are sensitive, and it is
+			//: stated in URLFullKey's own doc rather than left to be discovered.
+			coremetrics.String(URLFullKey, request.URL.Redacted()),
 			coremetrics.String(ServerAddressKey, request.URL.Host),
 		},
 	})

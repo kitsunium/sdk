@@ -1,9 +1,10 @@
 <!-- updated: 2026-09-09 -->
 # SDK — idéation de features (cartographie écosystème Go ↔ SDK ↔ framework)
 
-> Restaure le chemin référencé par `docs/adr/0013-sdk-crypto-domain.md:157`. Le
-> fichier d'origine n'existait plus sur disque : `.claude/contexts/` est
-> gitignoré (`.gitignore:38`). **Voir §9 — ce document devrait être tracké.**
+> Référencé par `docs/adr/0013-sdk-crypto-domain.md:157`. Ce document a vécu
+> sous `.claude/contexts/`, que `.gitignore` exclut ; il a été **déplacé sous
+> `docs/`** — voir §11 pour la raison, qui n'existait pas quand la question
+> a été posée.
 
 ## 1. Méthode et sources
 
@@ -356,11 +357,21 @@ rebaser dès que T02 touche le registre.
 
 ## 11. Point d'intendance
 
-Ce fichier est **gitignoré** (`.gitignore:38 → .claude/contexts/`). C'est déjà
-ce qui a fait disparaître la version référencée par `docs/adr/0013:157` : l'ADR
-pointe aujourd'hui vers un chemin vide. Deux options — le tracker (exception
-`!/.claude/contexts/` comme pour `.claude/commands/`), ou déplacer ce document
-sous `docs/` et corriger le lien de l'ADR 0013. À trancher.
+**Tranché : déplacé sous `docs/`, et `.claude/contexts/` reste ignoré.**
+
+La question posait deux options — suivre `.claude/contexts/` par une exception
+`.gitignore`, ou déplacer ce document sous `docs/`. La première a d'abord été
+retenue (`!/.claude/contexts/`), puis abandonnée pour une raison qui n'existait
+pas quand la question a été écrite : le gate `post-commit` du dépôt refuse tout
+fichier suivi sous un répertoire `.claude/` comme « artefact d'agent ». La PR
+#143 a borné son exemption à trois chemins exacts, ceux que le `Dockerfile` du
+devcontainer copie réellement, et a documenté pourquoi l'élargir aveuglerait le
+gate sur des fichiers d'agent ajoutés ailleurs.
+
+Un document qu'un ADR cite est de la documentation, et la documentation vit sous
+`docs/`. Le lien de l'ADR 0013 pointe désormais ici et ne peut plus disparaître
+d'un clone. Ne pas rouvrir l'exception : un fichier suivi sous `.claude/contexts/`
+fait échouer `post-commit`, et `post-commit` est un check requis par ruleset.
 
 ---
 

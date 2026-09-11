@@ -32,15 +32,20 @@ alias(
 go_test(
     name = "file_test",
     srcs = [
+        "file_alloc_external_test.go",
         "file_external_test.go",
         "file_internal_test.go",
+        "file_linux_bench_test.go",
     ],
     embed = [":file"],
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
         "//internal/core/writer",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/logger",
+        "//internal/service/logger/encoder",
         "//internal/service/logger/sink/file",
     ],
 )

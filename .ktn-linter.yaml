@@ -565,6 +565,35 @@ rules:
   KTN-GOROUTINE-RWOVERMU:
     exclude:
       - "**/internal/service/session/**"
+      #
+      # service/trace/recorder.go — the rule's advice here is CORRECT about the
+      # code and WRONG about the workload, and the difference was measured
+      # rather than argued. Recorder.Len and Recorder.Dropped really are
+      # read-only, so the heuristic fires accurately; what it cannot see is that
+      # they run ONCE PER COLLECTION INTERVAL while Recorder.record takes the
+      # exclusive side once per span from every request goroutine — and that
+      # Collect, the call an export actually makes, takes the exclusive side
+      # too, so the shared side was serving nothing else.
+      #
+      # This field DID hold a sync.RWMutex, on exactly the reasoning the rule
+      # states. internal/service/trace/BENCH.md §2 prices it: 1.27x-1.65x slower
+      # on record with no reader at all, and 2.7x-9.0x slower in the mixed shape
+      # the RWMutex's own field comment named — spans arriving while an operator
+      # polls Len — because a writer's Lock must drain the in-flight reader and
+      # pays a park/unpark round trip on every acquisition. Every figure is a
+      # median of fifteen samples across five processes, and reproduces with the
+      # two locks' roles swapped.
+      #
+      # What following the rule would cost is stated rather than hidden: with
+      # FOUR OR MORE goroutines doing nothing but polling Len, the RWMutex is
+      # 1.20x-1.23x faster. That scenario is one this type's contract excludes —
+      # Collect DRAINS, so a Recorder has exactly one reader — and at that one
+      # reader the Mutex is marginally faster anyway.
+      #
+      # TestRecorderTakesAnExclusiveLockOnEveryPath pins the choice through
+      # reflect, so this exclusion cannot quietly become permission to drift
+      # back. Scoped to the one file that holds the lock.
+      - "**/internal/service/trace/recorder.go"
 
   # KTN-GOROUTINE-DOUBLECLOSE (error) — the guard the rule asks for would
   # SILENCE the defect it exists to catch.

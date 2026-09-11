@@ -26,17 +26,95 @@
 package metrics
 
 import (
+	"runtime"
 	"testing"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 )
 
-// allocRuns is how many iterations testing.AllocsPerRun averages over. Enough
-// to amortise the first-call warm-up the helper already discards.
+// allocRuns is how many fetches each claim performs inside the measured window.
+// Enough that a regression allocating on a doubling schedule has crossed
+// several growth steps by the end.
 const allocRuns int = 200
+
+// allocRuntimeWarmup is how many times a measured closure is exercised on a
+// THROWAWAY meter before the window opens, and it warms the Go runtime rather
+// than this package.
+//
+// asFullMeter widens the frozen Meter port to FullMeter with a type assertion,
+// which the runtime serves from a per-call-site cache it builds LAZILY and on
+// purpose: runtime/iface.go gates the build behind `cheaprand()&1023 != 0`, so
+// roughly one assertion in 1024 pays for the cache and buildTypeAssertCache
+// allocates it. The result is one ~64-byte allocation landing at an
+// unpredictable point about a thousand calls into the process, attributable to
+// no line in this repository — measured, one stray in 1 of every 40 windows,
+// in all three sub-cases, from the single call site inside asFullMeter.
+//
+// It is invisible to testing.AllocsPerRun, because 1 over 200 is 0 after the
+// integer division — the same rounding that hides a real regression also hid
+// this. Thirty thousand calls put the probability that the cache is still
+// unbuilt at (1023/1024)^30000, about 2e-13; measured, 0 strays in 160 windows.
+//
+// It runs on a throwaway meter, and that is not tidiness. The cache is the
+// runtime's, per call site and process-global, so any meter can pay for it —
+// while the state this file polices is PER METER. Warming through the meter
+// under test would push any accumulating regression far past its own growth
+// steps, which is the same blindness the integer division produces, moved into
+// the harness.
+const allocRuntimeWarmup int = 30000
+
+// mallocsOver reports the TOTAL heap allocations f performs across runs calls,
+// rather than the per-call average testing.AllocsPerRun reports.
+//
+// The gap between those two is the whole cardinality story of this package. A
+// meter's entire job is to hold state that GROWS — a series map, a name table,
+// an overflow ledger, and, the moment anyone adds one, a slice: recently-seen
+// keys, a sampled-exemplar ring, a per-name arrival log. Every one of those
+// allocates on a doubling step and not on the observations in between, so the
+// regression this file is meant to catch is amortised BY CONSTRUCTION rather
+// than by accident. testing.AllocsPerRun ends in
+// `float64(mallocs / uint64(runs))` — INTEGER division, documented in the
+// stdlib as being there so a caller can write `== 1` instead of `< 2` — and so
+// reports exactly 0.0 for any defect allocating less than once per call.
+// Measured here: a growing lookup log on the fetch path allocates 7 times in
+// 200 fetches and AllocsPerRun calls that 0.
+//
+// A total is not subject to that rounding. The bookkeeping mirrors
+// AllocsPerRun's otherwise — pin GOMAXPROCS so no other P allocates into the
+// count, warm up so lazily-initialised state is not attributed to the loop, and
+// read the counter either side. There is deliberately NO runtime.GC(): an
+// explicit collection returns before its sweep finishes, so the residual work
+// allocates INSIDE the window; AllocsPerRun does not call it either, for the
+// same reason.
+//
+// One caller-side obligation comes with counting totals: anything the RUNTIME
+// initialises lazily now shows up too. See allocRuntimeWarmup.
+func mallocsOver(runs int, f func()) uint64 {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	//: warm up so first-call initialisation is not counted as steady state.
+	f()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range runs {
+		f()
+	}
+	runtime.ReadMemStats(&after)
+	//: Mallocs is cumulative and monotonic, so the difference is the total.
+	return after.Mallocs - before.Mallocs
+}
 
 // TestLookupIsAllocationFree pins zero allocations on every resolved-series
 // fetch, across the attribute counts and KINDS a caller realistically writes.
+//
+// MUTATION-CHECKED, and the mutation is the one every metrics library
+// eventually ships: a `lookupLog []int` field on memMeter with
+// `s.meter.lookupLog = append(s.meter.lookupLog, len(key))` opening
+// seriesStore.lookup — a per-observation record of which keys are being asked
+// for, the natural first step towards cardinality diagnostics. All five cases
+// fail at `200 resolved fetches performed 7 allocations, want 0`. Seven, not
+// two hundred: the slice doubles, so it allocates on the growth steps and not
+// on the fetches between them. testing.AllocsPerRun measured the same mutated
+// fetch, three separate runs, and reported 0 every time. See mallocsOver.
 func TestLookupIsAllocationFree(t *testing.T) {
 	type tc struct {
 		name   string
@@ -85,11 +163,11 @@ func TestLookupIsAllocationFree(t *testing.T) {
 		//: about creating it, which allocates by construction.
 		m.Counter("http_requests_total", c.labels...).Inc()
 
-		got := testing.AllocsPerRun(allocRuns, func() {
+		got := mallocsOver(allocRuns, func() {
 			m.Counter("http_requests_total", c.labels...).Inc()
 		})
 		if got != 0 {
-			t.Errorf("a resolved fetch allocates %v times per call, want 0", got)
+			t.Errorf("%d resolved fetches performed %d allocations, want 0", allocRuns, got)
 		}
 	}
 	for _, c := range tests {
@@ -103,6 +181,10 @@ func TestLookupIsAllocationFree(t *testing.T) {
 // other synchronous instrument kinds, which share the lookup path but not its
 // code — including the UpDownCounter, whose series live in the SAME store as a
 // Counter's and are told apart by the instrument-kind byte that opens the key.
+//
+// MUTATION-CHECKED with the same appending lookupLog: all three cases fail at
+// `200 resolved fetches performed 7 allocations, want 0`, and
+// testing.AllocsPerRun reported 0 for the same mutated path.
 func TestEveryInstrumentLookupIsAllocationFree(t *testing.T) {
 	labels := []coremetrics.AttrValue{
 		coremetrics.String("status", "200"),
@@ -137,12 +219,23 @@ func TestEveryInstrumentLookupIsAllocationFree(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
+		//: the runtime's lazy assertion cache is spent on a meter nothing
+		//: measures, so the one under test starts with its own state fresh.
+		warm := NewMeter()
+		for range allocRuntimeWarmup {
+			c.fetch(warm)
+		}
 		m := NewMeter()
+		//: widened ONCE, here: passing a FullMeter to a Meter parameter is an
+		//: interface-to-interface conversion, and one inside the window would
+		//: be a second lazily-cached call site charging the meter for the
+		//: runtime's bookkeeping.
+		var port coremetrics.Meter = m
 		//: warm the series into existence.
-		c.fetch(m)
+		c.fetch(port)
 
-		if got := testing.AllocsPerRun(allocRuns, func() { c.fetch(m) }); got != 0 {
-			t.Errorf("a resolved fetch allocates %v times per call, want 0", got)
+		if got := mallocsOver(allocRuns, func() { c.fetch(port) }); got != 0 {
+			t.Errorf("%d resolved fetches performed %d allocations, want 0", allocRuns, got)
 		}
 	}
 	for _, c := range tests {
@@ -160,6 +253,14 @@ func TestEveryInstrumentLookupIsAllocationFree(t *testing.T) {
 // misses the read lock every time. If that path allocated, exceeding the
 // cardinality bound would trade a memory leak for GC pressure — a different
 // failure with the same cause, which is not a bound at all.
+//
+// MUTATION-CHECKED with the same appending lookupLog: fails at
+// `200 overflowing fetches performed 6 allocations, want 0` — six rather than
+// the seven the other arms report, because this path enters the store once per
+// observation rather than twice. testing.AllocsPerRun reported 0. And the
+// arithmetic is the point: a bound that costs one allocation per observation
+// once it is REACHED has replaced the leak with the GC pressure this test
+// exists to refuse, and the old form of the assertion could not see it.
 func TestOverflowLookupIsAllocationFree(t *testing.T) {
 	m := NewMeterWithConfig(MeterConfig{MaxSeriesPerInstrument: 1})
 	//: spend the one admitted slot, then force the overflow series to exist.
@@ -175,12 +276,12 @@ func TestOverflowLookupIsAllocationFree(t *testing.T) {
 	}
 	i := 0
 
-	got := testing.AllocsPerRun(allocRuns, func() {
+	got := mallocsOver(allocRuns, func() {
 		i++
 		m.Counter("http_requests_total", coremetrics.String("id", ids[i%len(ids)])).Inc()
 	})
 	if got != 0 {
-		t.Errorf("an overflowing fetch allocates %v times per call, want 0", got)
+		t.Errorf("%d overflowing fetches performed %d allocations, want 0", allocRuns, got)
 	}
 
 	//: and the fold really happened — one admitted series plus one overflow.
@@ -201,6 +302,10 @@ func TestOverflowLookupIsAllocationFree(t *testing.T) {
 // instrument constructors would have put a second string on a variadic call the
 // compiler has to prove non-escaping, which is exactly the proof this whole file
 // exists to protect.
+//
+// MUTATION-CHECKED with the same appending lookupLog: fails at
+// `200 fetches on a described meter performed 7 allocations, want 0`, and
+// testing.AllocsPerRun reported 0 for the same mutated path.
 func TestDescribedMeterLookupIsAllocationFree(t *testing.T) {
 	labels := []coremetrics.AttrValue{
 		coremetrics.String("status", "200"),
@@ -212,11 +317,11 @@ func TestDescribedMeterLookupIsAllocationFree(t *testing.T) {
 	//: create the series first — this gate is about RESOLVING one.
 	m.Counter("http_requests_total", labels...).Inc()
 
-	got := testing.AllocsPerRun(allocRuns, func() {
+	got := mallocsOver(allocRuns, func() {
 		m.Counter("http_requests_total", labels...).Inc()
 	})
 	if got != 0 {
-		t.Errorf("a fetch on a described meter allocates %v times per call, want 0", got)
+		t.Errorf("%d fetches on a described meter performed %d allocations, want 0", allocRuns, got)
 	}
 	//: and the description really is on the snapshot, so the gate is not
 	//: passing by measuring a meter that quietly dropped it.

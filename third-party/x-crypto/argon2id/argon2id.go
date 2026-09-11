@@ -204,8 +204,22 @@ func parseParams(field string) (memCost, timeCost uint32, threads uint8, ok bool
 
 // validCosts reports whether the parsed argon2 m/t/p costs are positive and
 // within their Verify-time bounds: p<=255 prevents the uint8 cast wrapping
-// (256 -> 0), while the m/t caps bound the work + allocation a hostile or
-// corrupt PHC string can request.
+// (256 -> 0), while maxMem bounds the ALLOCATION a hostile or corrupt PHC
+// string can request.
+//
+// It does NOT bound the work, and the distinction is measured rather than
+// assumed. argon2's cost is the PRODUCT m x t, while maxMem and maxTime are
+// checked independently, so the pair (m=2 GiB, t=2^20) passes here. Scaling
+// the 0.884 ms per MiB per pass measured in BENCH.md, one such stored string
+// occupies a verification goroutine for WEEKS — 2.2 s and 2 GiB already at
+// t=1. The allocation half of the old wording was true and tight; the work
+// half did not follow from it.
+//
+// Left as it is on purpose: the caps are a compatibility surface, since
+// narrowing them makes previously-verifiable stored hashes unverifiable, and
+// reaching this path at all requires an attacker who can already write the
+// credential store. The fix, if it is wanted, is a bound on the PRODUCT rather
+// than a tighter cap on either factor.
 func validCosts(memVal, timeVal, parVal int) bool {
 	//: every axis must be positive AND under its cap.
 	return memVal > 0 && timeVal > 0 && parVal > 0 &&

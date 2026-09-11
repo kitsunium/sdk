@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "token",
     srcs = [
+        "bound_key_value.go",
         "bounds_value.go",
         "claims_codec.go",
         "codes.go",
@@ -67,10 +68,18 @@ go_test(
     name = "token_test",
     srcs = [
         "encoding_internal_test.go",
+        "jwkbind_alloc_internal_test.go",
+        "jwkbind_internal_test.go",
         "jwkbridge_external_test.go",
+        "jwkset_bench_test.go",
         "jwt_external_test.go",
+        "parsing_bench_test.go",
         "paseto_external_test.go",
+        "refusal_bench_test.go",
         "security_external_test.go",
+        "split_alloc_internal_test.go",
+        "stage_bench_test.go",
+        "token_bench_test.go",
     ],
     embed = [":token"],
     deps = [
@@ -78,6 +87,8 @@ go_test(
         "//internal/core/token",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/crypto/ed25519sig",
+        "//internal/service/crypto/hmacsha2",
         "//internal/service/crypto/jwk",
     ],
 )

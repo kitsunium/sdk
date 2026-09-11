@@ -18,7 +18,7 @@ reach into `internal/*` — they ship with the umbrella module, not `pkg/v1`).
 
 | File | Role |
 |---|---|
-| `argon2id.go` | `PasswordHasher` singleton, `argon2idPW` (`Algorithm`/`Hash`/`Verify`/`NeedsRehash`), `encodePHC`/`decodePHC`/`parseParams`/`parseUintField` helpers |
+| `argon2id.go` | `PasswordHasher` singleton, `argon2idPW` (`Algorithm`/`Hash`/`Verify`/`NeedsRehash`), `encodePHC`/`decodePHC`/`decodeSaltDigest`/`parseParams`/`validCosts` helpers |
 
 No `codes.go`/`errors.go` — it returns the shared `core/crypto` sentinels
 (`PasswordHashFailed`, `InvalidPasswordHash`) and mints no codes.
@@ -42,6 +42,50 @@ $argon2id$v=19$m=19456,t=2,p=1$<b64-salt>$<b64-digest>
   with `subtle.ConstantTimeCompare`. Malformed PHC → `InvalidPasswordHash`;
   mismatch → `(false, nil)` (non-oracle).
 - **NeedsRehash** — true when stored `m`/`t`/`p` is below current policy.
+
+## Cost
+
+**Every number here is large on purpose.** A password hash is slow and
+memory-hungry so that an attacker's guess costs what an honest login costs. Full
+calibration ladders — memory, iterations, parallelism — are in
+`BENCH.md`; the shipped policy is:
+
+| | ns/op | human | B/op |
+|---|---:|---:|---:|
+| `Hash` (`m=19456, t=2, p=1`) | 34 344 488 | **34.3 ms** | **19 926 768** |
+| `Verify`, correct | 34 302 634 | 34.3 ms | 19 927 899 |
+| `Verify`, wrong | 33 616 555 | 33.6 ms | 19 927 871 |
+| `Verify`, malformed PHC | 114.3 | **114 ns** | 64 |
+| `NeedsRehash` | 2 720 | 2.7 µs | 272 |
+| PBKDF2-SHA256 `Hash` (the dep-free default) | 142 033 404 | 142.0 ms | 1 279 |
+
+Four things an operator needs from that table:
+
+- **argon2id is 4.1× FASTER than the SDK's default PBKDF2**, at each scheme's
+  shipped policy. You do not buy argon2id with latency — you buy it with
+  **15 600× the memory**, and the memory is the defence.
+- **Peak RSS ≈ `concurrency × 19.9 MB`.** Eight concurrent logins is 159 MB; a
+  hundred is **2.0 GB**. `-benchmem` reports it exactly (`B/op` = `m` × 1024 +
+  ~2.2 KB), because argon2 allocates the whole block matrix in one `make`.
+  Size the login path's concurrency limit, not just its CPU.
+- **Portable tuning figures**, since the totals above are not portable:
+  `cost(t) ≈ 1.9 ms + t × 15.7 ms` at `m = 19 MiB`, i.e. **0.884 ms per MiB per
+  pass**. Memory is linear to ~32 MiB and **super-linear beyond**, which is the
+  memory-hardness working.
+- **`p` is a latency knob, not a cost knob.** `p=8` cuts a login from 33.3 ms to
+  13.0 ms at identical memory and leaves an attacker's per-guess cost unchanged.
+  Raising `p` without raising `m` or `t` weakens the policy.
+
+`Verify` recomputes the digest in full and decides with
+`subtle.ConstantTimeCompare`; the right/wrong gap measures 2.0 % and **flips sign
+between runs**, which is what noise looks like. **That comparison is not to be
+optimised or replaced.**
+
+One measured observation, reported and deliberately not acted on:
+`maxMem` (2 GiB) and `maxTime` (2²⁰) are **independent** caps, so they bound the
+allocation a hostile stored PHC can request but not the *work* — their product
+is the cost. A single `Verify` of a PHC declaring `m=2GiB, t=1` costs **≥2.2 s**
+and 2 GiB; at `t=2²⁰` it is ≥25 days. See BENCH.md §"What the caps do not bound".
 
 ## Do NOT
 

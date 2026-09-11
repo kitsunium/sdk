@@ -6,47 +6,54 @@ deadlines, policy, a bounded response read. Every number below is measured
 against a **loopback** origin that answers immediately, so the network is held
 at its floor and what remains is the SDK's own contribution.
 
-## The wrapper is 5.5 % of an outbound call
+## The wrapper is 1.2 % of an outbound call
 
 | | ns/op | B/op | allocs |
 |---|---:|---:|---:|
-| `Get`, admitted | 186 823 | 8 969 | 101 |
-| `Get`, four query parameters | 193 312 | 9 392 | 108 |
-| `New` | 1 201 | 1 368 | 9 |
+| `Get`, admitted | 189 200 | 8 896 | 99 |
+| `Get`, four query parameters | 185 126 | 9 358 | 106 |
+| `New` | 1 094 | 1 368 | 9 |
 
-101 allocations sounds like a lot until the profile attributes them. On
+99 allocations sounds like a lot until the profile attributes them. On
 `alloc_objects`, the SDK's own flat share — `guard.RoundTrip`, which is where
-the policy check and the per-phase deadlines live — is **5.53 %**. Everything
+the policy check and the per-phase deadlines live — is **1.17 %**. Everything
 else under `Client.Get` is `net/http`: `Request.write`, `setRequestCancel`,
 `persistConn.roundTrip`, `MIMEHeader.Set`, `Transport.getConn`.
 
-So **94 % of what an outbound call costs is the standard library doing HTTP**,
-and adding identity, policy and bounded reads on top costs about a twentieth of
+That share used to be 5.53 %, and the drop is not a re-measurement: the guard
+allocated a `CallValue` and a closure on EVERY request to feed an observation
+hook that is nil by default, which its own comment described as costing "one
+comparison per call". Both are now built only when a hook is installed, so the
+guard's single remaining allocation is the bounded body reader — the one it
+genuinely needs — and a REFUSED round trip allocates none at all.
+
+So **99 % of what an outbound call costs is the standard library doing HTTP**,
+and adding identity, policy and bounded reads on top costs about a hundredth of
 it. That is the number that judges a wrapper, and it is the reason ADR 0029
 adapts `net/http` rather than reimplementing it.
 
-Four query parameters cost 6.5 µs and seven allocations — real, but 3 % of the
-call.
+Four query parameters cost seven allocations — real, but under 1 % of the
+call's bytes.
 
 ## A refused path costs 5 % of an admitted one, and never dials
 
 | | ns/op | B/op | allocs |
 |---|---:|---:|---:|
-| `Get`, admitted | 186 823 | 8 969 | 101 |
-| `Get`, **denied by policy** | **9 123** | 2 826 | 35 |
+| `Get`, admitted | 189 200 | 8 896 | 99 |
+| `Get`, **denied by policy** | **9 140** | 2 729 | 34 |
 
 **20× cheaper**, and the socket is never touched — the policy runs before the
 transport. That is what makes a broad policy affordable: a service can deny by
 default and enumerate what it allows without paying for the denials.
 
-The 35 allocations that remain are the typed refusal and its fields, which is
+The 34 allocations that remain are the typed refusal and its fields, which is
 what lets a caller route on `errs.HasCode` and see the path that was refused in
 the private half.
 
 ## The connection pool scales
 
-`Get` across eight goroutines sharing one client is **37 843 ns** against
-186 823 serial — **4.9×**. The pool is doing its job; the residue from a
+`Get` across eight goroutines sharing one client is **37 316 ns** against
+189 200 serial — **5.1×**. The pool is doing its job; the residue from a
 theoretical 8× is the loopback origin, which is a single `httptest` server
 answering all eight.
 
@@ -82,9 +89,9 @@ to answer is "what do I add", and 5.5 % of the allocations is that answer.
 ## Results (medians of three)
 
 ```
-BenchmarkGet_Admitted-8             186823.0 ns/op    8969 B/op  101 allocs/op
+BenchmarkGet_Admitted-8             189200.0 ns/op    8896 B/op   99 allocs/op
 BenchmarkGet_WithQuery-8            193312.0 ns/op    9392 B/op  108 allocs/op
-BenchmarkGet_PolicyRefused-8          9123.0 ns/op    2826 B/op   35 allocs/op
+BenchmarkGet_PolicyRefused-8          9140.0 ns/op    2729 B/op   34 allocs/op
 BenchmarkGet_Parallel-8              37843.0 ns/op   12717 B/op  119 allocs/op
 BenchmarkNew-8                        1201.0 ns/op    1368 B/op    9 allocs/op
 ```

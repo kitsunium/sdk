@@ -28,12 +28,70 @@ No `codes.go` / `errors.go` — the gate never originates an error.
 - `Flush` / `Close` delegate verbatim — the gate buffers nothing and owns no
   resources.
 
+## Cost
+
+Measured in `BENCH.md` (median of five runs, AMD EPYC 7351P). The numbers this
+package is bought for are the first two rows, and they are the answer to "what
+does a severity floor cost the records it discards".
+
+| | ns/op | allocs |
+|---|---:|---:|
+| a **dropped** record (`min=Error`, record at `Info`) | **6.84** | **0** |
+| the same record with no gate installed at all | 5.95 | 0 |
+| a record the gate passes | 13.58 | 0 |
+| `New(inner, Info)` — the "inherit" sentinel | 3.07 | 0 |
+| `New(inner, Error)` — a real floor | 29.99 | 1 (24 B) |
+
+- **A drop costs about 1 ns over an ungated sink and removes a 302 ns write** —
+  the cheapest destination this SDK has, and 1 868 ns if the destination is a
+  container's stderr (`../console/BENCH.md` §1). The gate repays itself **over
+  300×** on its first discarded record.
+
+  The precision is deliberately coarse, and that is the honest reading. Under a
+  median of nine samples across three separate processes the drop cost is
+  0.95 ns (6.862 against 5.911) — but the ungated arm's own spread over those
+  nine is 5.867 to 6.398, i.e. 0.53 ns, more than half the quantity being
+  measured. A first pass reported 0.89 ns from three samples in one process;
+  two digits there implied a precision this machine does not have. The
+  conclusion is unaffected, because it never depended on the second digit: one
+  nanosecond against three hundred is the same decision whatever the first is.
+- **Neither direction allocates.** An allocation profile at `-memprofilerate=1`
+  over 529 020 912 dropped records does not contain `gateSink.Write` at all.
+  `TestGateAllocatesNothingInEitherDirection` pins it, mutation-checked in its
+  own doc comment, and is covered by the race-off alloc lane
+  (`tools/alloc-lane-targets.txt`, SDK-wide rule 12).
+- **The comparison itself is not measurable, and its SIGN is not stable.**
+  Against the same delegation with the branch deleted it read +0.05 ns over
+  three samples in one process and −0.04 ns over nine across three — the gated
+  path measuring marginally *faster* than the ungated one, which is only
+  possible if the difference is noise. Reported as unmeasurable rather than as a
+  number with a direction. What a passing record pays is a second
+  interface hop carrying the 104-byte `RecordEvent` by value — 2.65 ns of which
+  is the copy, 39 % of a whole drop. The port is frozen (ADR 0039) and the copy
+  is also what stops a sink mutating a record its `multi` siblings will see;
+  refused, with the price stated.
+- **The immutable floor scales linearly**: 0.931 ns/op across eight goroutines
+  against 6.89 ns serially — linear to within 9 %, i.e. no shared mutable state
+  at all. A `Leveler`-based
+  dynamic floor was measured and refused — see the Do NOT below.
+
 ## Do NOT
 
 - Use this to express a per-writer floor of exactly `Info` while the handler
   global is lower — `min == Info` is the "inherit" sentinel and is unwrapped.
   Restrict via a higher level (`Warn` / `Error`) instead.
 - Add buffering or I/O here — the gate is a pure pass-through filter.
+- Make the floor dynamic by holding a `level.Leveler`. It was built and measured
+  (`BENCH.md` §3): the atomic load is FREE — a `*level.Var` held concretely is
+  indistinguishable from an immutable field, serial and at eight-way parallelism
+  — but reading it through the `Leveler` **port** costs 1.19–1.23× per record
+  for a capability nothing in the tree asks for, and an `RWMutex` spelling costs
+  43.5× under contention and 160× with the floor actually moving. Reconfiguration is
+  already `writer.Open` again. Note that `level.Var`'s own doc comment describes
+  this arrangement ("a gate may read Level on the hot path while a control
+  goroutine raises or lowers the floor via `Set`") and **no gate in this
+  repository implements it** — that comment describes a consumer that does not
+  exist.
 
 ## Verification
 

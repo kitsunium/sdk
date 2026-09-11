@@ -4,13 +4,41 @@ package failover_test
 
 import (
 	"context"
+	"runtime"
+	"runtime/debug"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/service/logger/middleware/failover"
 )
 
-// allocSink defeats dead-code elimination in the AllocsPerRun probe.
+// failoverRuns is the iteration count both arms share.
+const failoverRuns int = 2000
+
+// allocRuntimeWarmup is how many calls warmRuntimeCaches spends on a THROWAWAY
+// chain before either arm is measured, and it exists because a DIFFERENTIAL
+// assertion is uniquely fragile to a stray allocation: one landing in either arm
+// fails the comparison, and it fails it in whichever direction the stray fell.
+//
+// This guard did exactly that under Bazel, 1 run in 15: the DEPTH-1 BASELINE
+// caught the stray and the measured arms did not, so it reported "depth 4
+// performed 0 allocations, want 1" — the tested arms cleaner than the reference,
+// which is nonsense as a regression signal.
+//
+// The cause is the runtime, not this package. runtime/iface.go builds its
+// per-call-site type-switch cache LAZILY, gated behind `cheaprand()&1023 != 0`,
+// so about one miss in 1024 pays for it and buildInterfaceSwitchCache allocates.
+// It is invisible to testing.AllocsPerRun, which integer-divides it to 0.0, and
+// it is exactly what a total-counting window sees. Thirty thousand calls put the
+// probability the cache is still unbuilt at (1023/1024)^30000, about 2e-13.
+//
+// The THROWAWAY chain is load-bearing. The cache is process-global and per call
+// site, so anything can pay for it, while warming through the object under test
+// would push an accumulating regression past its own growth steps — the same
+// blindness this file counts totals to avoid.
+const allocRuntimeWarmup int = 30000
+
+// allocSink defeats dead-code elimination in the allocation probe.
 var allocSink int
 
 // TestChainDepthAddsNoAllocationOnTheHealthyPath pins the property the failover
@@ -36,6 +64,58 @@ var allocSink int
 // no t.Parallel (AllocsPerRun reads a process-global counter). It runs in
 // exactly one lane — `make test-alloc`, via the entry this commit adds to
 // tools/alloc-lane-targets.txt (rule 12).
+// mallocsOver totals the allocations f performs across runs, because
+// testing.AllocsPerRun cannot see an amortised one: its last line is
+// `float64(mallocs / uint64(runs))`, an INTEGER division the stdlib documents
+// as being there so a caller can write `== 1` instead of `< 2`. Anything
+// allocating less than once per call reports exactly 0.0 — measured, an
+// `append` to a doubling slice over 2 000 calls reports "0". A total does not
+// round: the sibling guard in pkg/v1/logger catches that same shape at 2 002
+// against 2 012.
+//
+// The bookkeeping mirrors AllocsPerRun's otherwise — pin GOMAXPROCS so no other
+// P allocates into the count, warm up so lazily-initialised state is not
+// attributed to the loop, read the counter either side. Deliberately no
+// runtime.GC(): a collection returns before its sweep finishes, so the residual
+// work allocates INSIDE the window.
+func mallocsOver(runs int, f func()) uint64 {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	//: collection held off for the window, for the reason the sibling guard in
+	//: pkg/v1/logger states at length: this assertion is DIFFERENTIAL, and a
+	//: collection landing in one arm and not the other is a difference that is
+	//: not a measurement. Nothing on this path is pooled, so the exposure is
+	//: smaller here than there — it is taken anyway, so the two guards behind
+	//: the same claim cannot drift into being measured differently.
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	//: warm up so first-call initialisation is not counted as steady state.
+	f()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range runs {
+		f()
+	}
+	runtime.ReadMemStats(&after)
+	//: Mallocs is cumulative and monotonic, so the difference is the total.
+	return after.Mallocs - before.Mallocs
+}
+
+// warmRuntimeCaches drives a chain nothing else will touch, so neither measured
+// arm pays for the runtime's lazily-built caches.
+func warmRuntimeCaches(t *testing.T, payload []byte) {
+	t.Helper()
+	sink, err := failover.New(&controlledSink{})
+	if err != nil {
+		t.Fatalf("building the warm-up chain: %v", err)
+	}
+	ctx := context.Background()
+	//: the write path is what both arms walk, so it is what is warmed.
+	for range allocRuntimeWarmup {
+		if _, werr := sink.Write(ctx, corelogger.RecordEvent{}, payload); werr != nil {
+			t.Fatalf("warming the runtime caches: %v", werr)
+		}
+	}
+}
+
 func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 	ctx := context.Background()
 	payload := []byte("a log line that no branch will refuse\n")
@@ -51,7 +131,7 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 	}
 	//: writeAllocs builds a depth-deep chain whose FIRST branch always accepts
 	//: and reports what one write costs on it.
-	writeAllocs := func(t *testing.T, depth int) float64 {
+	writeAllocs := func(t *testing.T, depth int) uint64 {
 		t.Helper()
 		//: appended rather than indexed into a sized slice: branches is a slice
 		//: of INTERFACES, so the zero value a fill would write is nil — and
@@ -68,7 +148,7 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("New(depth=%d) err = %v", depth, err)
 		}
-		return testing.AllocsPerRun(2000, func() {
+		return mallocsOver(failoverRuns, func() {
 			n, werr := sink.Write(ctx, corelogger.RecordEvent{}, payload)
 			//: read both results so the call cannot be optimised away.
 			if werr != nil {
@@ -77,6 +157,8 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 			allocSink = n
 		})
 	}
+	//: before either arm, and never through a chain an arm measures.
+	warmRuntimeCaches(t, payload)
 	base := writeAllocs(t, 1)
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -84,7 +166,7 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 		//: strictly equal, never "at most base+k": an unused fallback must not
 		//: show up in the allocation profile at all.
 		if got != base {
-			t.Errorf("%s: allocs/op at depth %d = %v, want %v (the depth-1 baseline) — an unexercised fallback must cost nothing", tc.name, tc.depth, got, base)
+			t.Errorf("%s: %d writes at depth %d performed %d allocations, want %d (the depth-1 baseline) — an unexercised fallback must cost nothing", tc.name, failoverRuns, tc.depth, got, base)
 		}
 	}
 	for _, tc := range tests {
