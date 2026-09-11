@@ -179,6 +179,12 @@ func appendJSONAttr(dst []byte, groups []string, a corelogger.AttrValue) []byte 
 		dst = appendJSONEscaped(dst, g)
 		dst = append(dst, jsonGroupSeparator)
 	}
+	//: a top-level attribute may not spell one of the SDK's own fields; inside
+	//: a group the prefix above already keeps it apart.
+	if len(groups) == 0 && ReservesKey(a.Key) {
+		//: "attr." needs no escaping.
+		dst = append(dst, ReservedPrefix...)
+	}
 	dst = appendJSONEscaped(dst, a.Key)
 	dst = append(dst, '"', ':')
 	//: hand back the buffer with the encoded attribute value appended.

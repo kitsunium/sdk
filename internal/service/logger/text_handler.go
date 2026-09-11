@@ -230,6 +230,12 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) [
 		dst = encoder.AppendSanitized(dst, g)
 		dst = append(dst, groupSeparator)
 	}
+	//: a top-level attribute may not spell one of the SDK's own fields; inside
+	//: a group the prefix above already keeps it apart.
+	if len(groups) == 0 && encoder.ReservesKey(a.Key) {
+		//: rendered under attr.<key> instead.
+		dst = append(dst, encoder.ReservedPrefix...)
+	}
 	//: now append the bare key=value (without the leading space appendAttr
 	//: writes); the key is scrubbed exactly as the encoder scrubs it.
 	dst = encoder.AppendSanitized(dst, a.Key)
@@ -286,6 +292,11 @@ func appendAttr(dst []byte, a corelogger.AttrValue) []byte {
 	//: separator between message and first attr, and between consecutive attrs;
 	//: the key is scrubbed exactly as the grouped path and the encoder scrub it.
 	dst = append(dst, ' ')
+	//: this path IS the top level, so the two SDK fields are reserved here.
+	if encoder.ReservesKey(a.Key) {
+		//: rendered under attr.<key> instead.
+		dst = append(dst, encoder.ReservedPrefix...)
+	}
 	dst = encoder.AppendSanitized(dst, a.Key)
 	dst = append(dst, '=')
 	//: delegate the value to appendValueOnly so the grouped and ungrouped

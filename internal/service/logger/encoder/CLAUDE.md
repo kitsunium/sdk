@@ -35,6 +35,8 @@ the `text` encoder; `ndjson` / `json` land in follow-up commits.
   attacker-influenced key cannot inject a frame boundary (V110).
 - Group prefix: `g1.g2.…` joined by `groupSeparator` ('.'); each group **name**
   segment is also framing-byte-scrubbed (V110).
+- Reserved keys (ADR 0070): a top-level attribute named `trace_id` or `span_id`
+  renders as `attr.trace_id` / `attr.span_id`. Renamed, never dropped.
 - Trace context (ADR 0062): `trace_id=<32 lowercase hex> span_id=<16 lowercase hex>`,
   emitted between the header and the attributes, **unquoted** (they are record
   fields rather than attribute values, are fixed-length hex, and an operator
@@ -94,6 +96,12 @@ A future structured encoder may populate the range.
   It is a top-level field: a group prefix on it produces `http.trace_id`, which
   no ingestion pipeline recognises. There is a named test for that.
 - Render an absent trace context as an empty or all-zero id — see ADR 0062 §3.
+- Write a TOP-LEVEL attribute key without asking `ReservesKey` first. `trace_id`
+  and `span_id` are the SDK's own fields, and a second member of that name lets
+  a decoder keeping the last one read the caller's value as the line's
+  correlation; the attribute renders as `attr.trace_id` instead (ADR 0070). A
+  GROUPED key already carries its prefix and is left alone — asking there would
+  rename `http.trace_id`, which collides with nothing.
 - Call `strconv.AppendQuote` or `time.Time.AppendFormat` directly on the hot
   path again. Both are still reachable — as the documented FALLBACK inside
   `appendQuotedString` and `appendTimestamp` — but a new call site bypasses the

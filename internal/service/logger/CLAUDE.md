@@ -42,6 +42,12 @@ Logger ── Handler (genericHandler / TextHandler)
   stays at **0 mallocs per emit**. `TestTextHandler_FramesEveryByteAsTheEncoderDoes`
   sweeps all 256 byte values through each of the four positions and requires the
   handler's line to be byte-identical to the encoder's.
+  The same handler renders the correlation itself, so ADR 0070's reservation is
+  applied here too and at its own two write sites: a TOP-LEVEL attribute named
+  `trace_id` or `span_id` goes out as `attr.trace_id`, since a second field of
+  that name lets a decoder keeping the last one read the caller's value as the
+  span the line came from. A grouped key already carries its prefix and is left
+  alone (`TestTextHandler_ATopLevelAttributeCannotSpellTheSDKsOwnFields`).
 - The `Builder` (builder.go) is the chainable, recycler-backed fluent API
   returned by `Build(lg, lv)`. Per-call cost in steady state: **one** heap
   allocation per emit once `recordPool` is warm — the pool recycles the

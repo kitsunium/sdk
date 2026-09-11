@@ -196,6 +196,12 @@ func appendAttrWithGroups(dst []byte, groups []string, a corelogger.AttrValue) [
 	//: render the attribute key followed by '=' and the typed value; the key
 	//: runs through the same framing-byte scrub as Message and group names so
 	//: no attacker-influenceable field can forge a frame boundary (V110).
+	//: a top-level attribute may not spell one of the SDK's own fields; inside
+	//: a group the prefix above already keeps it apart.
+	if len(groups) == 0 && ReservesKey(a.Key) {
+		//: rendered under attr.<key> instead.
+		dst = append(dst, ReservedPrefix...)
+	}
 	dst = AppendSanitized(dst, a.Key)
 	dst = append(dst, '=')
 	//: hand back the buffer with the encoded attribute appended.

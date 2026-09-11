@@ -128,6 +128,14 @@
 //     so [Logger.WithGroup] never renames them to "http.trace_id" and
 //     a Sink can read the identity off the record instead of parsing
 //     it back out of a formatted line.
+//   - Both names are RESERVED at the top level. An attribute called
+//     "trace_id" or "span_id" renders as "attr.trace_id" /
+//     "attr.span_id", because two fields of one name let a decoder
+//     keep the caller's value as the line's correlation. It is
+//     renamed and never dropped, and a key under [Logger.WithGroup]
+//     already carries its prefix and is untouched. To log somebody
+//     else's identifier, name it for what it is:
+//     logger.String("upstream_trace_id", id).
 //   - When no span is in scope NOTHING is emitted — not an empty
 //     value and not the all-zero identifier, both of which W3C Trace
 //     Context declares invalid. Most lines a service logs are outside

@@ -167,3 +167,89 @@ func TestJSONEncoderRendersTraceContext(t *testing.T) {
 		})
 	}
 }
+
+// TestATopLevelAttributeCannotSpellTheSDKsOwnFields pins the reservation. The
+// SDK writes trace_id and span_id as top-level fields of every record emitted
+// inside a span (ADR 0062). An attribute carrying one of those keys at the top
+// level would put two members of the same name in one JSON object — a decoder
+// keeps one of them, and which one is its business — so the correlation could
+// be replaced on the way in by a value from anywhere. The attribute is renamed
+// rather than dropped: nothing logged is lost, and nothing logged can be taken
+// for the span the line came from.
+//
+// Inside a group the key already carries the group's prefix, so it cannot
+// collide and is left exactly as it was.
+//
+// Seen failing with the reservation removed: one JSON object carrying
+// `"trace_id":"4bf92f35…","span_id":"00f067aa…","trace_id":"forged-trace"`,
+// reported as `spells trace_id 2 times, want exactly 1`.
+func TestATopLevelAttributeCannotSpellTheSDKsOwnFields(t *testing.T) {
+	t.Parallel()
+	spanned := corelogger.TraceContextValue{TraceID: traceIDFixture, SpanID: spanIDFixture}
+	forged := []corelogger.AttrValue{
+		{Key: corelogger.TraceIDKey, Value: corelogger.StringValue("forged-trace")},
+		{Key: corelogger.SpanIDKey, Value: corelogger.StringValue("forged-span")},
+	}
+	tests := []struct {
+		name     string
+		enc      encoder.Encoder
+		groups   []string
+		wantSubs []string
+	}{
+		{
+			name: "json, top level: the attribute is renamed and the field stands",
+			enc:  encoder.NewJSON(clock.System),
+			wantSubs: []string{
+				`"trace_id":"` + traceHexFixture + `"`, `"span_id":"` + spanHexFixture + `"`,
+				`"attr.trace_id":"forged-trace"`, `"attr.span_id":"forged-span"`,
+			},
+		},
+		{
+			name: "text, top level: the attribute is renamed and the field stands",
+			enc:  encoder.NewText(clock.System),
+			wantSubs: []string{
+				" trace_id=" + traceHexFixture, " span_id=" + spanHexFixture,
+				" attr.trace_id=\"forged-trace\"", " attr.span_id=\"forged-span\"",
+			},
+		},
+		{
+			name: "json, grouped: the group's prefix already keeps them apart",
+			enc:  encoder.NewJSON(clock.System), groups: []string{"http"},
+			wantSubs: []string{
+				`"trace_id":"` + traceHexFixture + `"`,
+				`"http.trace_id":"forged-trace"`, `"http.span_id":"forged-span"`,
+			},
+		},
+		{
+			name: "text, grouped: the group's prefix already keeps them apart",
+			enc:  encoder.NewText(clock.System), groups: []string{"http"},
+			wantSubs: []string{
+				" trace_id=" + traceHexFixture,
+				" http.trace_id=\"forged-trace\"", " http.span_id=\"forged-span\"",
+			},
+		},
+	}
+	runCase := func(t *testing.T, name string, enc encoder.Encoder, groups []string, wantSubs []string) {
+		t.Helper()
+		line := encodedRecord(enc, groups, corelogger.RecordEvent{
+			Level: level.Info, Message: "m", TraceContext: spanned, Attrs: forged,
+		})
+		for _, want := range wantSubs {
+			if !strings.Contains(line, want) {
+				t.Errorf("%s: line %q does not contain %q", name, line, want)
+			}
+		}
+		//: exactly one correlation field of each name, whatever the caller logged.
+		for _, key := range []string{corelogger.TraceIDKey, corelogger.SpanIDKey} {
+			if got := strings.Count(line, `"`+key+`"`) + strings.Count(line, " "+key+"="); got != 1 {
+				t.Errorf("%s: line %q spells %s %d times, want exactly 1", name, line, key, got)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.name, c.enc, c.groups, c.wantSubs)
+		})
+	}
+}
