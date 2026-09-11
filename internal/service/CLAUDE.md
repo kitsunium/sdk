@@ -11,9 +11,10 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 |---|---|---|
 | `logger/` | v2 one-alloc-per-emit multi-sink architecture (`builder`, `encoder`, `sink/{console,file,syslog,memory}`, `middleware/{multi,async,route,failover,sample,recover,encwrite,tee}`) realising `core/logger.Handler` + `Logger` | `0.3.1.*` (and per-component slots, see logger CLAUDE.md) |
 | `codec/` | 16 wire-format codecs over 24 Format names (asn1, baseenc[9], bson, cbor, csv, flatbuffers, form, json, msgpack, multipart, ndjson, pem, tlv, toml, xml, yaml), each implementing `core/codec.Codec`; all satisfy `Appender`, most also `StreamingCodec` | `0.3.2.*` … `0.3.40.*` (one PP slot per codec) |
+| `crypto/` | stdlib-only schemes behind the eight `core/crypto` ports (aesgcm, streamaead, stdhash, hmacsha2, ecdsasig, ed25519sig, hkdfsha256, pbkdf2pw, x25519), the keyenvelope/keytree compositions, and the `jwk` key format (RFC 7517 JWK + JWK Set) | schemes emit core sentinels `0.2.4.*`; `jwk` owns `0.3.42.*` |
 | `id/` | identifier generators (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID) implementing `core/id.Generator`; stdlib-only, cross-OS, self-registered except TypeID (ADR 0024) | `0.3.39.*` |
 | `resilience/` | concrete reliability policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging) implementing `core/resilience.Runner`; stdlib + kernel clock, cross-OS (ADR 0026) | (emits core sentinels `0.2.8.*`) |
-| `metrics/` | in-memory Meter + lock-free instruments + stdlib text exporter, implementing `core/metrics`; labelled series with a per-name cardinality bound and an aggregated overflow series; allocation-free lookup (see its `BENCH.md`); stdlib-only, cross-OS (ADR 0027) | (emits core sentinels `0.2.9.*`) |
+| `metrics/` | in-memory Meter + lock-free instruments + the stdlib `text` and `prometheus` exporters, implementing `core/metrics`; labelled series with a per-name cardinality bound and an aggregated overflow series; allocation-free lookup (see its `BENCH.md`); stdlib-only, cross-OS (ADR 0027) | `0.3.45.*` (+ core sentinels `0.2.9.*`) |
 | `config/` | env+file sources, merge+decode+validate `Load[T]`, cross-OS poll watcher, implementing `core/config`; codec-dispatched file parse (ADR 0028) | (emits core sentinels `0.2.10.*`) |
 
 ## Module
@@ -40,9 +41,10 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 
 - `logger/` — see `internal/service/logger/README.md` (full contract, error catalogue, output format)
 - `codec/` — see `internal/service/codec/CLAUDE.md` (16 codec packages + per-codec error ranges)
+- `crypto/` — see `internal/service/crypto/CLAUDE.md` (scheme packages, the keyenvelope/keytree compositions, and the `jwk` key format)
 - `id/` — see `internal/service/id/CLAUDE.md` (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024)
 - `resilience/` — see `internal/service/resilience/CLAUDE.md` (retry/breaker/ratelimit/bulkhead/timeout/fallback/hedging — ADR 0026)
-- `metrics/` — see `internal/service/metrics/CLAUDE.md` (in-memory meter + text exporter — ADR 0027)
+- `metrics/` — see `internal/service/metrics/CLAUDE.md` (in-memory meter + text and Prometheus exporters — ADR 0027)
 - `config/` — see `internal/service/config/CLAUDE.md` (env+file loader + poll watcher — ADR 0028)
 
 ## Verification

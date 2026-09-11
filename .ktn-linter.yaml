@@ -174,6 +174,14 @@ rules:
       # does: it is the domain's single TLS value type, and narrowing it to a
       # one-method interface would hide that both ends share it.
       - "**/internal/service/net/server/**"
+      # Stream.Send takes a core/net.SSEEventValue, the domain's event-stream
+      # frame. The suggested `interface{ AppendTo([]byte) ([]byte, error) }`
+      # would let any caller append arbitrary bytes to an open stream, which is
+      # precisely what the value type exists to prevent: it validates that no
+      # single-line field carries a terminator before a byte reaches the wire.
+      # Narrowing the parameter would move that guarantee from the type system
+      # to a convention.
+      - "**/internal/service/net/sse/**"
       # The slog bridge converts a stdlib slog.Value, whose type is fixed by the
       # slog.Handler contract it implements — the same contract-required-type
       # class as the AEAD Key below. The suggested `interface{ Any() any }` is
@@ -239,6 +247,21 @@ rules:
       # and StreamGroup is not constructed directly at all — Server.Group mints
       # it, so a public constructor would be a second, worse way in.
       - "**/internal/service/net/server/**"
+      # Same again for the event-stream package: sse.New(w, r) is the Go
+      # convention for a package producing one main type, and the rule's own
+      # message here reads "constructor NewNewStream()", which is not a name
+      # anything could satisfy — the same broken suggestion the jwk entry below
+      # records.
+      - "**/internal/service/net/sse/**"
+      # crypto/jwk.KeyValue has no from-parts constructor ON PURPOSE. Every
+      # KeyValue comes out of Parse or a From* bridge, and each of those
+      # validates the material — coordinates at the curve's fixed length, the
+      # point actually on the curve, "d" actually deriving the declared "x"/"y".
+      # A NewKeyValue(kty, crv, x, y, d) would be a second way in that skips all
+      # of it, i.e. exactly the "poorly initialized struct" the rule exists to
+      # prevent. (The rule's own message here reads "constructor
+      # NewNewKeyValue()", which is not a name anything could satisfy.)
+      - "**/internal/service/crypto/jwk/**"
 
   KTN-VAR-NILSLICE:
     exclude:
@@ -292,6 +315,24 @@ rules:
       # compare a snapshot without racing the server that produced it. A
       # pointer would hand out a view that mutates underneath the reader.
       - "**/pkg/v1/server/**"
+      # crypto/jwk.KeyValue (176 B) — the value receiver is the security
+      # mechanism, not a style choice, and it is the SAME precedent as
+      # core/net.IdentityValue and core/crypto.Key above.
+      #
+      # MarshalJSON MUST be on a value receiver: it is what makes plain
+      # json.Marshal (and a struct field, and a []KeyValue) render the PUBLIC
+      # JWK. Move the method set to pointers and a non-pointer KeyValue silently
+      # stops going through it — the safe default the package exists to provide
+      # would be reachable only by callers who already knew to take an address.
+      # The same argument covers String/GoString: redaction that only fires on a
+      # pointer is redaction that does not fire. And immutability is the second
+      # half — a *KeyValue would let a holder mutate a key AFTER its coordinates
+      # were validated against the curve.
+      #
+      # The type is 176 B because a JWK genuinely carries three strings of
+      # metadata plus three octet slices; shrinking it under the 64 B threshold
+      # would mean dropping members the format defines.
+      - "**/internal/service/crypto/jwk/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue.

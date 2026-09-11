@@ -3,15 +3,41 @@
 // Package metrics is the public facade for the SDK's observability domain — the
 // natural twin of the logger. A [Meter] (from [NewMeter]) mints lock-free
 // [Counter]/[Gauge]/[Histogram] instruments; [Meter.Collect] takes a [Snapshot]
-// that an [Exporter] ships out. The stdlib text exporter (name "text", stderr)
-// is registered on import; [Export] dispatches by name. It writes to stderr so
-// that importing this package never arms a writer on stdout, which a process
-// may be using as a protocol channel (ADR 0030); pass os.Stdout to
+// that an [Exporter] ships out. Two stdlib exporters are registered on import —
+// "text" (a one-line-per-series diagnostic) and "prometheus" (the Prometheus
+// text exposition format) — and [Export] dispatches by name. Both write to
+// stderr so that importing this package never arms a writer on stdout, which a
+// process may be using as a protocol channel (ADR 0030); pass os.Stdout to
 // [NewTextExporter] to opt in explicitly.
 //
 //	m := metrics.NewMeter()
 //	m.Counter("requests").Add(1)
 //	_ = metrics.Export("text", m.Collect())
+//
+// # Scraping
+//
+// The registered "prometheus" exporter is a diagnostic; a scrape endpoint binds
+// its own with [NewPrometheusExporter] and hands it the response writer:
+//
+//	http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+//	    w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+//	    _ = metrics.NewPrometheusExporter("scrape", w).Export(m.Collect())
+//	})
+//
+// It writes one "# TYPE" header per instrument name followed by that name's
+// series, renders a histogram as the cumulative _bucket ladder (including the
+// mandatory le="+Inf" line) plus _sum and _count, and escapes every label value
+// so a value carrying a quote or a newline cannot forge a line a reader parses
+// as another series.
+//
+// It REFUSES, rather than rewrites, a name the format cannot spell: a metric
+// name must match [a-zA-Z_:][a-zA-Z0-9_:]* and a label name
+// [a-zA-Z_][a-zA-Z0-9_]*. An instrument name is written at the call site and
+// constant for the process, so a rejected one is rejected on the first scrape
+// or never — whereas mapping the offending characters to "_" would silently
+// merge two distinct instruments into one metric family. The refusal is typed
+// ([InvalidMetricName], [InvalidLabelName], [ReservedLabelName]) and leaves the
+// writer untouched, because a truncated exposition parses as a complete one.
 //
 // # Labels and series
 //
@@ -44,8 +70,9 @@
 // bound writes a very large number, where a reviewer can see it.
 //
 // A [Snapshot] maps each instrument name to its series, which is the shape
-// every per-series wire format wants. The Prometheus and OTLP exporters remain
-// deferred (ADR 0027).
+// every per-series wire format wants — and the shape the Prometheus exporter
+// above consumes without a regrouping pass. The OTLP exporter remains deferred
+// to a third-party package (ADR 0027); the Prometheus protobuf format does too.
 package metrics
 
 import (
@@ -112,6 +139,15 @@ var (
 	InstrumentKindConflict = coremetrics.InstrumentKindConflict
 	// InvalidLabel is raised when a label set has an empty or repeated key.
 	InvalidLabel = coremetrics.InvalidLabel
+	// InvalidMetricName is returned by the Prometheus exporter when an
+	// instrument name is not a valid Prometheus metric name.
+	InvalidMetricName = svcmetrics.InvalidMetricName
+	// InvalidLabelName is returned by the Prometheus exporter when a label key
+	// is not a valid Prometheus label name.
+	InvalidLabelName = svcmetrics.InvalidLabelName
+	// ReservedLabelName is returned by the Prometheus exporter when a label key
+	// is legal but reserved — a "__" prefix, or "le" on a histogram.
+	ReservedLabelName = svcmetrics.ReservedLabelName
 )
 
 // NewMeter returns a fresh in-memory Meter (Counter/Gauge/Histogram + Collect)
@@ -134,6 +170,15 @@ func NewMeterWithConfig(cfg MeterConfig) Meter {
 func NewTextExporter(name ExporterName, dst io.Writer) Exporter {
 	//: delegate to the service constructor.
 	return svcmetrics.NewTextExporter(name, dst)
+}
+
+// NewPrometheusExporter returns an Exporter rendering the Prometheus text
+// exposition format to dst under name (not auto-registered). Hand it the
+// http.ResponseWriter of a /metrics handler; the registered "prometheus"
+// exporter targets stderr and is a diagnostic, not a scrape endpoint.
+func NewPrometheusExporter(name ExporterName, dst io.Writer) Exporter {
+	//: delegate to the service constructor.
+	return svcmetrics.NewPrometheusExporter(name, dst)
 }
 
 // RegisterExporter adds e to the process-wide exporter registry.

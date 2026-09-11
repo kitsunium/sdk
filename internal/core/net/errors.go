@@ -162,4 +162,43 @@ var (
 		"The request path is not in normalised form",
 		"core/net: the path carries a literal or percent-encoded dot segment",
 		errs.WithExitCode(exitNoPerm))
+
+	// SSEFieldInvalid is returned for a Server-Sent Events frame the wire format
+	// cannot carry. The format has no escape mechanism: a newline inside a value
+	// SPLITS it rather than being quoted, so an id or an event name carrying one
+	// would arrive as a different value plus a stray field. It is refused, never
+	// truncated — a silently shortened id is a resume token that points at the
+	// wrong place.
+	SSEFieldInvalid = errs.Define(CodeSSEFieldInvalid, "SSE_FIELD_INVALID",
+		"The event cannot be represented in the event-stream format",
+		"core/net: an SSE frame carried a line terminator in a single-line field, an unrepresentable retry, or no field at all",
+		errs.WithExitCode(exitUsage))
+
+	// SSEFlushUnsupported is returned when the ResponseWriter cannot be flushed.
+	// Without a flush the events accumulate in the transport buffer and reach the
+	// client only when the handler returns, so an endless stream delivers nothing
+	// at all — the failure is total and silent, which is why it is refused at
+	// construction rather than discovered in production.
+	SSEFlushUnsupported = errs.Define(CodeSSEFlushUnsupported, "SSE_FLUSH_UNSUPPORTED",
+		"The response cannot be streamed",
+		"core/net: the http.ResponseWriter implements neither Flush nor http.Flusher",
+		errs.WithExitCode(exitSoftware))
+
+	// SSEStreamClosed is returned by a send on a stream that has already ended:
+	// the client disconnected, the server began draining, or the handler closed
+	// it. It is the terminal outcome a streaming handler loops until.
+	SSEStreamClosed = errs.Define(CodeSSEStreamClosed, "SSE_STREAM_CLOSED",
+		"The event stream is closed",
+		"core/net: the SSE stream ended — peer gone, server draining, or closed by the handler",
+		errs.WithExitCode(exitUnavailable))
+
+	// SSEStreamMisconfigured is returned for a stream option the domain refuses
+	// to interpret rather than guess at (ADR 0031). A zero keep-alive interval is
+	// CLAMPED to the domain default, because a working keep-alive needs no
+	// explanation; a negative one is REFUSED, because no value the SDK invented
+	// for it would be defensible and "never" already has an explicit spelling.
+	SSEStreamMisconfigured = errs.Define(CodeSSEStreamMisconfigured, "SSE_STREAM_MISCONFIGURED",
+		"The event stream options are not valid",
+		"core/net: a negative keep-alive interval or write budget was supplied",
+		errs.WithExitCode(exitConfig))
 )

@@ -418,6 +418,22 @@ codes:
     const: CodeUnsafePath
     hex: "0x00_02_0B_16"
     package: internal/core/net
+  - code: "0.2.11.23"
+    const: CodeSSEFieldInvalid
+    hex: "0x00_02_0B_17"
+    package: internal/core/net
+  - code: "0.2.11.24"
+    const: CodeSSEFlushUnsupported
+    hex: "0x00_02_0B_18"
+    package: internal/core/net
+  - code: "0.2.11.25"
+    const: CodeSSEStreamClosed
+    hex: "0x00_02_0B_19"
+    package: internal/core/net
+  - code: "0.2.11.26"
+    const: CodeSSEStreamMisconfigured
+    hex: "0x00_02_0B_1A"
+    package: internal/core/net
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"
@@ -898,6 +914,62 @@ codes:
     const: CodeMultipartLimitsInvalid
     hex: "0x00_03_29_06"
     package: internal/service/codec/multipart
+  - code: "0.3.42.1"
+    const: CodeJWKMalformed
+    hex: "0x00_03_2A_01"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.2"
+    const: CodeJWKMissingMember
+    hex: "0x00_03_2A_02"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.3"
+    const: CodeJWKUnsupportedKeyType
+    hex: "0x00_03_2A_03"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.4"
+    const: CodeJWKUnsupportedCurve
+    hex: "0x00_03_2A_04"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.5"
+    const: CodeJWKInvalidEncoding
+    hex: "0x00_03_2A_05"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.6"
+    const: CodeJWKKeyMismatch
+    hex: "0x00_03_2A_06"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.7"
+    const: CodeJWKNoPublicForm
+    hex: "0x00_03_2A_07"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.8"
+    const: CodeJWKNoPrivateMaterial
+    hex: "0x00_03_2A_08"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.9"
+    const: CodeJWKTypeMismatch
+    hex: "0x00_03_2A_09"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.10"
+    const: CodeJWKKeyNotFound
+    hex: "0x00_03_2A_0A"
+    package: internal/service/crypto/jwk
+  - code: "0.3.42.11"
+    const: CodeJWKAmbiguousKid
+    hex: "0x00_03_2A_0B"
+    package: internal/service/crypto/jwk
+  - code: "0.3.45.1"
+    const: CodeInvalidMetricName
+    hex: "0x00_03_2D_01"
+    package: internal/service/metrics
+  - code: "0.3.45.2"
+    const: CodeInvalidLabelName
+    hex: "0x00_03_2D_02"
+    package: internal/service/metrics
+  - code: "0.3.45.3"
+    const: CodeReservedLabelName
+    hex: "0x00_03_2D_03"
+    package: internal/service/metrics
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

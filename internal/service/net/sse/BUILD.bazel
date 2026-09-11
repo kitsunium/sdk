@@ -1,0 +1,43 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "sse",
+    srcs = [
+        "options.go",
+        "sse.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/net/sse",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/errs",
+        "//internal/kernel/worker",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":sse",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "sse_test",
+    srcs = [
+        "sse_external_test.go",
+        "sse_internal_test.go",
+    ],
+    embed = [":sse"],
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)
