@@ -27,7 +27,7 @@ a service that composes several large messages at once is sized by the peak.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | `jaimerias-que-tu-te-connect` (worktree `agent-ace2e3861a9550f84`) |
-| Git commit         | `0b9dee0` (pre-commit) |
+| Git commit         | `ea4888b` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run |
 

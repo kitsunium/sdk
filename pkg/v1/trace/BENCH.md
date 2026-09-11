@@ -108,7 +108,7 @@ tracing, which against any real HTTP handler is noise.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | dd900cd |
+| Git commit         | 30d65b1 |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=500ms -count=3`, medians |
 

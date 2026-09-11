@@ -216,7 +216,7 @@ conclusion here and the nanoseconds do not.
 | Library            | `github.com/hashicorp/hcl/v2` v2.24.0 |
 | Reference arms     | `internal/service/codec/json`, `internal/service/codec/cbor` (same repo, same run) |
 | Git branch         | `jaimerias-que-tu-te-connect` |
-| Git commit         | `f6082f7` (pre-commit) |
+| Git commit         | `c411206` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s -test.count=3`, × 3 processes |
 

@@ -98,7 +98,7 @@ attempts, so the number would be the backoff schedule, which the caller chose.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | e076197 |
+| Git commit         | 0bfbf60 |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run, machine under load |
 

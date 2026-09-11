@@ -85,7 +85,7 @@ reaches `AppendIdentity`, never joins a series key and never participates in a
 comparison.
 
 Re-run after the change on the same box (2026-09-10, go1.27.1, branch
-`agent-a8b94605d1380fe5e`, commit `c30e2ad`), every figure inside the noise of
+`agent-a8b94605d1380fe5e`, commit `94dd6e7`), every figure inside the noise of
 the reference table below and **every allocation column unchanged at zero**:
 
 ```
@@ -124,7 +124,7 @@ one map read per instrument NAME per collection, in
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | 39c0b37 |
+| Git commit         | 4304a83 |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run, machine under load |
 

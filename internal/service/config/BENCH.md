@@ -14,7 +14,7 @@
 | Architecture      | amd64 |
 | Go toolchain      | go1.27.1 linux/amd64 |
 | Git branch        | `agent-afbe1d8f07195288a` |
-| Git commit        | `0b9dee0` (the tree the schema was added to) |
+| Git commit        | `ea4888b` (the tree the schema was added to) |
 | Generated (UTC)   | 2026-09-10 |
 | Bench wall-clock  | `-benchtime=1s -count=5`, median quoted; the two `Load*` figures were re-taken at `-benchtime=500ms -count=9` because their difference is smaller than this box's noise band |
 

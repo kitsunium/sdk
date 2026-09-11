@@ -20,7 +20,7 @@ comparison is against calling the tasks directly.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | `agent-a46efa5095b1886a4` (worktree off `jaimerias-que-tu-te-connect`) |
-| Git commit         | `af712a6` (pre-commit) |
+| Git commit         | `482ec37` (pre-commit) |
 | Generated (UTC)    | 2026-09-09 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run |
 

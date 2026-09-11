@@ -109,7 +109,7 @@ what a thousand-job engine depends on.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | 9a7d1ca |
+| Git commit         | 47a9e94 |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run |
 

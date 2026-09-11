@@ -29,7 +29,7 @@ cost of a real `Put`. The round trip is the only honest measurement of the
 | Architecture       | arm64 |
 | Go toolchain       | go1.26.4 linux/arm64 |
 | Git branch         | feat/issue-18-kernel-buffer-bench |
-| Git commit         | f3b1610 |
+| Git commit         | 9c61f89 |
 | Generated (UTC)    | 2026-06-19 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run |
 

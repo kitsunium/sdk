@@ -359,7 +359,7 @@ is PHC handling, and PHC handling is measured directly: `NeedsRehash`, which is
 | Reference arm      | `internal/service/crypto/pbkdf2pw` (same repo, same run) |
 | Shipped policy     | `m=19456` KiB, `t=2`, `p=1`, 128-bit salt, 256-bit digest |
 | Git branch         | `jaimerias-que-tu-te-connect` |
-| Git commit         | `f6082f7` (pre-commit) |
+| Git commit         | `c411206` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s -test.count=3`, × 3 processes |
 

@@ -150,7 +150,7 @@ exactly the mechanism [ADR 0046](0046-sdk-validation-domain.md) uses and which
 the ticket asked to follow.
 
 **Reproducibility envelope** — AMD EPYC 7351P (8 vCPU), 15 GiB, Linux
-6.12.101+deb13-amd64, Go 1.27.1, `206e835`, `-benchtime=400ms -count=3`, median
+6.12.101+deb13-amd64, Go 1.27.1, [`69e5664`](https://github.com/kitsunium/sdk/commit/69e5664385eb7f3edcf63b94e49c29954166beb0), `-benchtime=400ms -count=3`, median
 of three. The harness is a throwaway, deliberately not committed: it exists to
 answer one question, and shipping it would be shipping the mapper's skeleton.
 

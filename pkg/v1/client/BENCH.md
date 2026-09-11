@@ -82,7 +82,7 @@ to answer is "what do I add", and 5.5 % of the allocations is that answer.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | 9ca128c |
+| Git commit         | 0f39f25 |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=500ms -count=3`, medians |
 

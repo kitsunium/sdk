@@ -33,7 +33,7 @@ into two performance tiers these benchmarks lock in:
 | Architecture       | arm64 |
 | Go toolchain       | go1.26.4 linux/arm64 |
 | Git branch         | feat/issue-17-kernel-errs-bench |
-| Git commit         | f3b1610 |
+| Git commit         | 9c61f89 |
 | Generated (UTC)    | 2026-06-19 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run |
 

@@ -40,7 +40,7 @@ Reproducing the *actual* scenario — HCL added to a copy of
 | `+ github.com/hashicorp/hcl/v2 v2.23.0` | **added at `v0.20.0`**, pulled by `golang.org/x/tools v0.21.1` (HCL itself asks only for `v0.5.0`) |
 
 The git history agrees: `internal/service/go.mod` did not require `x/sys` before
-commit `ce5c0a1`, does not require it after, and that commit adds HCL to the
+commit [`ce5c0a1`](https://github.com/kitsunium/sdk/commit/ce5c0a1fc3bd30ecc3567e9c116aa48cd11af205), does not require it after, and that commit adds HCL to the
 **root** module. The `v0.33` figure in ADR 0022 belongs to a different module
 than the one the sentence is about.
 

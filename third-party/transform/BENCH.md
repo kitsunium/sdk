@@ -28,7 +28,7 @@ the SDK already had and what a new scheme has to beat to be worth a dependency.
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Library            | `github.com/klauspost/compress` v1.19.2 |
 | Git branch         | `jaimerias-que-tu-te-connect` (worktree `agent-a8f4a4d4391f85351`) |
-| Git commit         | `459e635` (pre-commit) |
+| Git commit         | `2b55a33` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, `-cpu=1`, best of 3 |
 | Corpus size        | 4 MiB per corpus |

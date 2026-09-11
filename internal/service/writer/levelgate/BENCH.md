@@ -242,7 +242,7 @@ figure reappears exactly as the delta between the two `writer.Open` rows in
 | Architecture | amd64 |
 | Go toolchain | go1.27.1 linux/amd64 |
 | Git branch | jaimerias-que-tu-te-connect |
-| Git commit | 35edd8c |
+| Git commit | 1be196a |
 | Generated | 2026-09-10 |
 | Bench wall-clock | `-benchtime=1s`, `-count=5`, medians |
 | Load average at start | 0.23 |

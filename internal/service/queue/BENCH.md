@@ -23,7 +23,7 @@ its answer sizes their system wrong by three orders of magnitude:
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | `agent-ae0099f209a4afcb2` |
-| Git commit         | `db8c492` (pre-commit) |
+| Git commit         | `7ef449f` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run, 391 s total |
 

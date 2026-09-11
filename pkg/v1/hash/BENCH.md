@@ -153,7 +153,7 @@ avoiding.
 | Architecture       | amd64 (`GOAMD64=v1`) |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | c30e2ad |
+| Git commit         | 94dd6e7 |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s -test.count=3`, machine under load |
 

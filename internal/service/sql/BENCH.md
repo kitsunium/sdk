@@ -14,7 +14,7 @@
 | Architecture      | amd64 |
 | Go toolchain      | go1.27.1 linux/amd64 |
 | Git branch        | `agent-a96ced10f61bb1f1a` |
-| Git commit        | `fdf7bdc` (the tree this domain was added to) |
+| Git commit        | `e01714c` (the tree this domain was added to) |
 | Generated (UTC)   | 2026-09-10 |
 | Bench wall-clock  | `-benchtime=1s -count=5`, median quoted |
 | Race detector     | **off** — a race build changes allocation behaviour |
