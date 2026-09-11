@@ -3,6 +3,8 @@ package websocket
 
 import (
 	"math"
+	"slices"
+	"strings"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -73,10 +75,18 @@ type config struct {
 // as the way to say "none agreed". Failing the handshake instead would be a
 // stricter rule than the protocol has, and it would break every client that
 // advertises an optional dialect.
+//
+// Each name must be an RFC 7230 token, which is what RFC 6455 §4.1 requires
+// of a subprotocol: the chosen one is written verbatim into the response, so a
+// name carrying a space, a comma or a quote would put a malformed handshake on
+// the wire — it is refused at Upgrade instead. The list is copied here, so a
+// caller reusing the slice it passed cannot change later handshakes, or race
+// with the ones in flight.
 func Subprotocols(names ...string) Option {
+	snapshot := slices.Clone(names)
 	//: applied in order by Upgrade, so a later option deliberately wins.
 	return func(c *config) {
-		c.subprotocols = names
+		c.subprotocols = snapshot
 	}
 }
 
@@ -166,10 +176,13 @@ func WriteTimeout(d time.Duration) Option {
 // the only way to have the scheme checked at all: the request arrives in
 // plaintext there, so the default rule cannot see which scheme the browser
 // used (see sameOrigin).
+//
+// The list is copied here, for the same reason Subprotocols copies its own.
 func AllowOrigins(origins ...string) Option {
+	snapshot := slices.Clone(origins)
 	//: applied in order by Upgrade, so a later option deliberately wins.
 	return func(c *config) {
-		c.allowedOrigins = origins
+		c.allowedOrigins = snapshot
 		c.anyOrigin = false
 	}
 }
@@ -225,6 +238,16 @@ func resolve(opts []Option) (resolved config, err error) {
 
 // refuseUninterpretable rejects the values no SDK-chosen reading could justify.
 func refuseUninterpretable(cfg *config) error {
+	//: a subprotocol is echoed verbatim into the response; one that is not a
+	//: token would make that response a malformed handshake.
+	for index, name := range cfg.subprotocols {
+		//: RFC 6455 §4.1 via RFC 7230 §3.2.6.
+		if !isToken(name) {
+			//: the index, since the name itself is what is malformed.
+			return misconfigured("Subprotocols", int64(index),
+				"a subprotocol name must be a non-empty RFC 7230 token")
+		}
+	}
 	//: a negative interval is not a shorter one and not "never"; there is no
 	//: reading of it the SDK could pick without inventing intent.
 	if cfg.pingInterval < 0 {
@@ -289,6 +312,37 @@ func clampToDefaults(cfg *config) {
 		cfg.maxFrameSize = DefaultMaxFrameSize
 	}
 	//: every field now carries a number somebody decided on.
+}
+
+// isToken reports whether s is an RFC 7230 §3.2.6 token: one or more tchar —
+// ALPHA, DIGIT, or one of !#$%&'*+-.^_`|~ — and nothing else.
+func isToken(s string) bool {
+	//: the empty string is not a token.
+	if s == "" {
+		//: nothing to name.
+		return false
+	}
+	//: every byte must be a tchar; UTF-8 has none above 0x7E.
+	for i := range len(s) {
+		//: one of the three classes, or the name is not a token.
+		if c := s[i]; !isTokenChar(c) {
+			//: a separator, a control, a space or a non-ASCII byte.
+			return false
+		}
+	}
+	//: a token.
+	return true
+}
+
+// isTokenChar reports whether c is an RFC 7230 tchar.
+func isTokenChar(c byte) bool {
+	//: letters and digits are the common case.
+	if ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9') {
+		//: a tchar.
+		return true
+	}
+	//: the fifteen punctuation characters RFC 7230 admits.
+	return strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
 }
 
 // misconfigured builds the ADR 0031 refusal for one named option.

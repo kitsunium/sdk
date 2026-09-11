@@ -201,7 +201,8 @@ const DefaultMaxFrameSize int64 = svcws.DefaultMaxFrameSize
 // The close codes RFC 6455 §7.4.1 defines. [CloseNoStatus], [CloseAbnormal] and
 // [CloseTLSHandshake] describe the ABSENCE of a close frame: they may be
 // observed through [Conn.PeerCloseCode] and must never be sent, which
-// [Conn.CloseWith] enforces.
+// [Conn.CloseWith] enforces — as it refuses [CloseExtensionRequired], the one
+// code only a client may open a closing handshake with.
 const (
 	// CloseNormal is a completed purpose, on either side.
 	CloseNormal CloseCode = corenet.WSCloseNormal
@@ -300,6 +301,10 @@ func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (conn *Conn
 // dialect first could pin the server to it forever. No overlap is not a failure
 // — the upgrade succeeds with no subprotocol, which RFC 6455 §4.2.2 names as
 // the way to say "none agreed".
+//
+// Each name must be an RFC 7230 token, since the chosen one is written into
+// the response verbatim; a name with a space, a comma or a quote is refused at
+// Upgrade. The list is copied, so reusing the slice changes nothing later.
 func Subprotocols(names ...string) Option {
 	//: forwarded unchanged.
 	return svcws.Subprotocols(names...)

@@ -208,7 +208,7 @@ var (
 ```
 
 <a name="AcceptKey"></a>
-## func [AcceptKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L393>)
+## func [AcceptKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L398>)
 
 ```go
 func AcceptKey(key string) string
@@ -219,7 +219,7 @@ AcceptKey computes the Sec\-WebSocket\-Accept value for a client's Sec\-WebSocke
 It is exported for tests and for anyone writing a client handshake by hand. The digest is SHA\-1 by the RFC's own instruction and is not a security primitive: its job is to prove the server parsed the handshake rather than replaying it, so a cached 101 cannot pass for a live upgrade.
 
 <a name="DrainSignal"></a>
-## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L404>)
+## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L409>)
 
 ```go
 func DrainSignal(ctx context.Context) <-chan struct{}
@@ -230,7 +230,7 @@ DrainSignal returns the channel closed when the server serving this request begi
 [Conn](<#Conn>) watches it for you. It is re\-exported here because a handler often wants to stop its own work at the same moment, and a nil channel blocks forever, so a select that watches it needs no nil check.
 
 <a name="CloseCode"></a>
-## type [CloseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L276>)
+## type [CloseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L277>)
 
 CloseCode is the status code a Close frame carries \(RFC 6455 §7.4\).
 
@@ -238,7 +238,7 @@ CloseCode is the status code a Close frame carries \(RFC 6455 §7.4\).
 type CloseCode = corenet.WSCloseCode
 ```
 
-<a name="CloseNormal"></a>The close codes RFC 6455 §7.4.1 defines. [CloseNoStatus](<#CloseNormal>), [CloseAbnormal](<#CloseNormal>) and [CloseTLSHandshake](<#CloseNormal>) describe the ABSENCE of a close frame: they may be observed through \[Conn.PeerCloseCode\] and must never be sent, which \[Conn.CloseWith\] enforces.
+<a name="CloseNormal"></a>The close codes RFC 6455 §7.4.1 defines. [CloseNoStatus](<#CloseNormal>), [CloseAbnormal](<#CloseNormal>) and [CloseTLSHandshake](<#CloseNormal>) describe the ABSENCE of a close frame: they may be observed through \[Conn.PeerCloseCode\] and must never be sent, which \[Conn.CloseWith\] enforces — as it refuses [CloseExtensionRequired](<#CloseNormal>), the one code only a client may open a closing handshake with.
 
 ```go
 const (
@@ -271,7 +271,7 @@ const (
 ```
 
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L270>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L271>)
 
 Conn is one upgraded WebSocket connection.
 
@@ -282,7 +282,7 @@ type Conn = svcws.Conn
 ```
 
 <a name="Upgrade"></a>
-### func [Upgrade](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L290>)
+### func [Upgrade](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L291>)
 
 ```go
 func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (conn *Conn, err error)
@@ -295,7 +295,7 @@ On failure it has ALREADY written the HTTP response — a 426 carrying the versi
 The socket is taken over from net/http. It is no longer the HTTP server's to close, nor this SDK's listener engine's: it is the handler's until \[Conn.Close\].
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L273>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L274>)
 
 Message is one complete WebSocket application message.
 
@@ -304,7 +304,7 @@ type Message = corenet.WSMessageValue
 ```
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L279>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L280>)
 
 Option configures a Conn.
 
@@ -313,7 +313,7 @@ type Option = svcws.Option
 ```
 
 <a name="AllowAnyOrigin"></a>
-### func [AllowAnyOrigin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L381>)
+### func [AllowAnyOrigin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L386>)
 
 ```go
 func AllowAnyOrigin() Option
@@ -324,7 +324,7 @@ AllowAnyOrigin disables the origin check.
 It has to be written out because the browser's same\-origin policy does not apply to WebSocket: any page may open a connection to this server and the browser will attach the user's cookies to the handshake. Reach for it when authentication does not ride on ambient credentials — a bearer token, a signed ticket — which is exactly when the origin proves nothing anyway.
 
 <a name="AllowOrigins"></a>
-### func [AllowOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L369>)
+### func [AllowOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L374>)
 
 ```go
 func AllowOrigins(origins ...string) Option
@@ -335,7 +335,7 @@ AllowOrigins replaces the default same\-origin rule with an exact allowlist.
 The comparison is on the whole Origin header — scheme, host and port — case\-insensitively. Matching the host alone would accept http:// for an https server, which is the downgrade the check exists to notice. Behind a proxy that terminates TLS this is the only way to have the scheme checked at all: the request arrives in plaintext there, so the default rule cannot see which scheme the browser used.
 
 <a name="MaxFrameSize"></a>
-### func [MaxFrameSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L324>)
+### func [MaxFrameSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L329>)
 
 ```go
 func MaxFrameSize(n int64) Option
@@ -346,7 +346,7 @@ MaxFrameSize bounds one frame's ANNOUNCED payload length.
 It is separate from [MaxMessageSize](<#MaxMessageSize>) because it is enforced at a different moment: against the header, before a byte is read or allocated. A ceiling above the message ceiling can never be reached and is refused as a mistake.
 
 <a name="MaxMessageSize"></a>
-### func [MaxMessageSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L314>)
+### func [MaxMessageSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L319>)
 
 ```go
 func MaxMessageSize(n int64) Option
@@ -357,7 +357,7 @@ MaxMessageSize bounds one reassembled message.
 Zero is clamped to [DefaultMaxMessageSize](<#DefaultMaxMessageSize>), negative is refused. There is deliberately no "unbounded" setting: the length is announced by the peer in a 64\-bit field, and fragmentation lets it keep announcing more, so an unbounded ceiling is not a configuration choice — it is a remote memory allocator.
 
 <a name="PingInterval"></a>
-### func [PingInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L339>)
+### func [PingInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L344>)
 
 ```go
 func PingInterval(d time.Duration) Option
@@ -370,7 +370,7 @@ Zero does not mean "never": it is clamped to [DefaultPingInterval](<#DefaultPing
 The heartbeat counts frames the handler has READ, so it keeps a connection open only while one goroutine loops on \[Conn.Receive\]; a connection nobody reads is ended within two intervals, however healthy the peer.
 
 <a name="Subprotocols"></a>
-### func [Subprotocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L303>)
+### func [Subprotocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L308>)
 
 ```go
 func Subprotocols(names ...string) Option
@@ -380,8 +380,10 @@ Subprotocols declares the subprotocols this server speaks, most preferred first.
 
 The SERVER's order decides. A client advertises what it can speak; choosing among those is the server's call, or a client that listed a deprecated dialect first could pin the server to it forever. No overlap is not a failure — the upgrade succeeds with no subprotocol, which RFC 6455 §4.2.2 names as the way to say "none agreed".
 
+Each name must be an RFC 7230 token, since the chosen one is written into the response verbatim; a name with a space, a comma or a quote is refused at Upgrade. The list is copied, so reusing the slice changes nothing later.
+
 <a name="WithoutPing"></a>
-### func [WithoutPing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L346>)
+### func [WithoutPing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L351>)
 
 ```go
 func WithoutPing() Option
@@ -390,7 +392,7 @@ func WithoutPing() Option
 WithoutPing disables the heartbeat, and with it the connection's only liveness check. Use it where the transport provides its own.
 
 <a name="WriteTimeout"></a>
-### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L356>)
+### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L361>)
 
 ```go
 func WriteTimeout(d time.Duration) Option

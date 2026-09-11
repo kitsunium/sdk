@@ -340,6 +340,18 @@ func (c *Conn) CloseWith(code corenet.WSCloseCode, reason string) error {
 		//: the error already names what was wrong with the code or the reason.
 		return verr
 	}
+	//: 1010 travels, but only from a CLIENT: it says the server did not
+	//: negotiate an extension the client needs (§7.4.1), so a server opening a
+	//: closing handshake with it states something that cannot be true. Echoing
+	//: a client's own 1010 does not come through here, and stays allowed.
+	if code == corenet.WSCloseExtensionRequired {
+		c.terminate()
+		c.join()
+		//: the same refusal as any code that must not travel from this side.
+		return errs.Wrap(corenet.WSInvalidPayload, errs.WrapParams{},
+			errs.Int("close_code", int(code)),
+			errs.String("why", "1010 is a client's code; a server never initiates a close with it"))
+	}
 	//: a closing handshake the peer may never see is still worth attempting;
 	//: it is what turns an abrupt disconnect into a stated ending.
 	swallowErr(c.sendClose(code, reason))
