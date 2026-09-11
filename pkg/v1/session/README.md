@@ -148,7 +148,9 @@ var (
     // LockFailed is returned when the store-wide exclusive lock could not be
     // taken; the operation is refused rather than run unserialised.
     LockFailed = svcsession.LockFailed
-    // PayloadTooLarge is returned by Save for a payload above the store's caps.
+    // PayloadTooLarge is returned by Save for a payload above the store's caps,
+    // and by Regenerate for a subject longer than 4096 bytes — refused before
+    // anything is minted, so the old session is untouched.
     PayloadTooLarge = svcsession.PayloadTooLarge
     // InvalidPurpose is returned by NewSealer for an empty purpose.
     InvalidPurpose = svcsession.InvalidPurpose
@@ -187,7 +189,7 @@ type ID = coresession.ID
 ```
 
 <a name="NewID"></a>
-### func [NewID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L254>)
+### func [NewID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L256>)
 
 ```go
 func NewID(raw []byte) (id ID, err error)
@@ -196,7 +198,7 @@ func NewID(raw []byte) (id ID, err error)
 NewID builds an ID from exactly [IDLen](<#IDLen>) raw bytes. Most callers want [ParseID](<#ParseID>); this is for a Store implementation that holds raw identifier bytes.
 
 <a name="ParseID"></a>
-### func [ParseID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L246>)
+### func [ParseID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L248>)
 
 ```go
 func ParseID(encoded string) (id ID, err error)
@@ -214,7 +216,7 @@ type Sealer = coresession.Sealer
 ```
 
 <a name="NewSealer"></a>
-### func [NewSealer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L237>)
+### func [NewSealer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L239>)
 
 ```go
 func NewSealer(key corecrypto.Key, purpose string) (sealer Sealer, err error)
@@ -232,7 +234,7 @@ type Session = coresession.SessionValue
 ```
 
 <a name="NewSession"></a>
-### func [NewSession](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L262>)
+### func [NewSession](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L264>)
 
 ```go
 func NewSession(state State) (session Session, err error)
@@ -259,7 +261,7 @@ type Store = coresession.Store
 ```
 
 <a name="NewFileStore"></a>
-### func [NewFileStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L229>)
+### func [NewFileStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L231>)
 
 ```go
 func NewFileStore(cfg FileConfig) (store Store, err error)
@@ -268,7 +270,7 @@ func NewFileStore(cfg FileConfig) (store Store, err error)
 NewFileStore returns a Store keeping one sealed file per session in cfg.Dir. It refuses — at construction — an unusable configuration, an unsafe directory, and a platform without flock\(2\) and enforced Unix permissions.
 
 <a name="NewMemoryStore"></a>
-### func [NewMemoryStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L221>)
+### func [NewMemoryStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/session/session.go#L223>)
 
 ```go
 func NewMemoryStore(cfg Config) (store Store, err error)

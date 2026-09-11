@@ -272,6 +272,72 @@ func TestRegenerateRefusesADeadSession(t *testing.T) {
 	}
 }
 
+// TestASubjectLongerThanTheFrameHoldsIsRefused pins that both stores bound a
+// subject at the same length, and bound it BEFORE anything is minted, written
+// or retired.
+//
+// The file store's frame refuses any decoded string over 4 KiB, the subject
+// included, and nothing refused one on the way in: a 4097-byte subject was
+// written, Regenerate retired the record that worked, and every later load of
+// the new session failed as RECORD_CORRUPT — while the memory store, which has
+// no frame at all, took the same subject without complaint. A port whose two
+// stores disagree on what they accept is two contracts, so the limit is one
+// refusal, at the door, in both.
+//
+// Mutation: removing the boundSubject call from both Regenerate methods
+// failed both cases with "Regenerate(4097-byte subject) = <nil>, want
+// CodePayloadTooLarge".
+func TestASubjectLongerThanTheFrameHoldsIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, f := range factories() {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := f.build(t, clock.NewManualClock(origin))
+			fresh, err := store.New(ctx)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if saveErr := store.Save(ctx, fresh.Set("cart", "2 items")); saveErr != nil {
+				t.Fatalf("Save: %v", saveErr)
+			}
+			//: exactly at the cap: accepted, and — the half the file store used
+			//: to get wrong one byte later — read back.
+			atCap := strings.Repeat("s", 4096)
+			bound, regenErr := store.Regenerate(ctx, fresh.ID(), atCap)
+			if regenErr != nil {
+				t.Fatalf("Regenerate(4096-byte subject): %v", regenErr)
+			}
+			if reloaded, loadErr := store.Load(ctx, bound.ID()); loadErr != nil || reloaded.Subject() != atCap {
+				t.Fatalf("Load after a 4096-byte subject = (%d bytes, %v), want it back", len(reloaded.Subject()), loadErr)
+			}
+			//: one byte past it: refused, with nothing to show for it.
+			refused, refusedErr := store.Regenerate(ctx, bound.ID(), atCap+"s")
+			if !errs.HasCode(refusedErr, svcsession.CodePayloadTooLarge) {
+				t.Fatalf("Regenerate(4097-byte subject) = %v, want CodePayloadTooLarge", refusedErr)
+			}
+			if !refused.ID().IsZero() {
+				t.Error("a refused Regenerate returned a session")
+			}
+			//: the subject is personal data and never reaches the error.
+			for _, field := range errs.FieldsOf(refusedErr) {
+				if strings.Contains(field.StringValue(), "sss") {
+					t.Errorf("the refusal carried the subject in field %q", field.Key())
+				}
+			}
+			//: and the session it named is untouched: same identifier, same
+			//: principal, same data.
+			survivor, loadErr := store.Load(ctx, bound.ID())
+			if loadErr != nil || survivor.Subject() != atCap {
+				t.Fatalf("Load of the session the refused call named = %v, want it intact", loadErr)
+			}
+			if value, _ := survivor.Get("cart"); value != "2 items" {
+				t.Errorf("cart = %q after a refused Regenerate, want %q", value, "2 items")
+			}
+		})
+	}
+}
+
 // TestConstructorsRefuseAnInertPolicy pins ADR 0031 for this domain. A zero
 // timeout read as "expires immediately" would produce a store in which every
 // session is already dead — a login loop with no error message anywhere.

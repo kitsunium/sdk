@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -404,13 +405,17 @@ func TestAFailedPublishLeavesThePreviousRecord(t *testing.T) {
 	}
 }
 
-// TestARenameOntoADirectoryLeavesNothingBehind reaches the last publication
-// failure path: the temporary file is written and synced successfully and only
-// the SWITCH fails. It is provoked by putting a non-empty directory where the
-// record file belongs, which rename(2) refuses on every Unix.
+// TestARenameOntoADirectoryLeavesNothingBehind puts a non-empty directory
+// where the record file belongs and pins that Save then fails, reports it, and
+// leaves no orphan behind.
 //
-// What is asserted is the cleanup contract rather than which step failed: a
-// failed publish leaves no orphan behind, and never reports success.
+// It does NOT reach the rename, despite the name it was given: Save reads the
+// record first, and reading a directory fails ("is a directory", op=read)
+// before publish ever creates a temporary — so its "no orphan" is true of a
+// publication that never started. Removing publish's orphan cleanup leaves it
+// green. The rename failure itself, over a temporary that really was written,
+// synced and closed, is TestAFailedRenameLeavesNoOrphan in
+// dirsync_internal_test.go, which calls publish directly.
 func TestARenameOntoADirectoryLeavesNothingBehind(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -441,6 +446,64 @@ func TestARenameOntoADirectoryLeavesNothingBehind(t *testing.T) {
 	}
 	if leftovers := orphans(t, fixture.dir); len(leftovers) != 0 {
 		t.Errorf("a failed publish left %d temporary files behind", len(leftovers))
+	}
+}
+
+// TestSweepLeavesAForeignFileAlone pins that Sweep deletes only files that are
+// records by NAME, not every file it cannot read.
+//
+// A sweep removes an unreadable record — it can never be loaded again — so
+// what counts as a record file decides what a sweep may delete. The test used
+// to be a suffix and a 64-character stem, while ID.Digest only ever produces
+// 64 LOWERCASE HEX characters: any other file of that shape in the directory,
+// being unreadable as a session, was swept. The directory is the store's own
+// 0700 one, which makes this rare rather than impossible. A genuinely dead
+// record is swept beside them, so the test cannot pass by a sweep that
+// deletes nothing.
+//
+// Mutation: reducing isDigest to the length check — recognition by suffix and
+// length alone, as before — failed with `Sweep removed 3, want 1 — the dead
+// record and nothing else` and `a foreign file was swept: "zzzz…zzzz.session"`.
+// Reverting recordDigest alone does NOT fail it, and should not: recordPath
+// applies the same test, so the unlink is refused anyway.
+func TestSweepLeavesAForeignFileAlone(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	manual := clock.NewManualClock(origin)
+	fixture := newFileFixture(t, manual)
+	if _, err := fixture.store.New(ctx); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	manual.Advance(idleWindow + time.Minute)
+	//: right suffix, right length, not a digest: not hex, and hex in the one
+	//: case Digest never writes.
+	foreign := []string{
+		strings.Repeat("z", 64) + ".session",
+		strings.Repeat("AB", 32) + ".session",
+	}
+	for _, name := range foreign {
+		if err := os.WriteFile(filepath.Join(fixture.dir, name), []byte("not a session"), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+	sweeper, ok := fixture.store.(coresession.Sweeper)
+	if !ok {
+		t.Fatal("the file store does not implement Sweeper")
+	}
+	removed, err := sweeper.Sweep(ctx)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("Sweep removed %d, want 1 — the dead record and nothing else", removed)
+	}
+	for _, name := range foreign {
+		if content, readErr := os.ReadFile(filepath.Join(fixture.dir, name)); readErr != nil || string(content) != "not a session" {
+			t.Errorf("a foreign file was swept: %q (%v)", name, readErr)
+		}
+	}
+	if left := fixture.records(t); len(left) != len(foreign) {
+		t.Errorf("%d *.session files remain, want only the %d foreign ones", len(left), len(foreign))
 	}
 }
 

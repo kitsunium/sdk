@@ -100,9 +100,27 @@ func (f *fileStore) liveLocked(id coresession.ID, now time.Time) (rec record, er
 	return rec, nil
 }
 
-// removeLocked deletes a record file. An already-absent file is success: the
-// caller asked for it to be gone and it is. The caller MUST hold the store lock.
+// removeLocked deletes a record file and flushes the directory, so the removal
+// survives a power cut — for Destroy, the difference between a revocation and
+// a revocation a crash can undo. An already-absent file is success: the caller
+// asked for it to be gone and it is. The directory is flushed on that path
+// too, because the call that DID unlink it may be the one whose flush failed,
+// and a retried Destroy must be able to make that revocation durable. The
+// caller MUST hold the store lock.
 func (f *fileStore) removeLocked(digest string) error {
+	//: the unlink first; the flush only makes sense once it has happened.
+	if unlinkErr := f.unlinkLocked(digest); unlinkErr != nil {
+		//: InvalidID or StoreUnavailable; nothing changed on disk.
+		return unlinkErr
+	}
+	//: gone from every reader's view; now make that survive a crash.
+	return f.flushLocked("sync-dir-remove")
+}
+
+// unlinkLocked deletes a record file WITHOUT flushing the directory — the half
+// of removeLocked a sweep repeats per record before flushing once for the whole
+// pass. An already-absent file is success. The caller MUST hold the store lock.
+func (f *fileStore) unlinkLocked(digest string) error {
 	path, pathErr := recordPath(f.dir, digest)
 	//: a malformed digest never reaches the filesystem.
 	if pathErr != nil {

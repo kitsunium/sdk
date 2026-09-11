@@ -16,6 +16,15 @@ import (
 // purpose does not open under another even though both use the same key.
 const cookieAAD string = "kitsunium/sdk/session/cookie/v1|"
 
+// sealedEncoding renders and reads a sealed value: unpadded base64url, decoded
+// STRICTLY. Unless a box is a multiple of three bytes long — today's is not —
+// the last character of its encoding carries bits no byte uses; a lenient
+// decoder ignores them and several cookie strings would open to one session,
+// and the AEAD cannot object, because the bytes it authenticates are
+// identical. Built once, because Strict returns a new copy of the encoding on
+// every call.
+var sealedEncoding = base64.RawURLEncoding.Strict()
+
 // sealer seals an identifier under one key and one purpose, both bound at
 // construction and neither readable from the sealed value.
 //
@@ -73,8 +82,9 @@ func (s sealer) Seal(id coresession.ID) (sealed string, err error) {
 		//: the cause travels as a field, never as the origin.
 		return "", wrapAs(coresession.SealInvalid, sealErr)
 	}
-	//: cookie-safe rendering, no padding to be stripped by a proxy.
-	return base64.RawURLEncoding.EncodeToString(box), nil
+	//: cookie-safe rendering, no padding to be stripped by a proxy, and the
+	//: unused bits clear — the one spelling Open accepts.
+	return sealedEncoding.EncodeToString(box), nil
 }
 
 // Open reverses [sealer.Seal].
@@ -87,8 +97,9 @@ func (s sealer) Seal(id coresession.ID) (sealed string, err error) {
 // reasoning that makes crypto.Open non-oracle, carried one layer up rather than
 // undone here.
 func (s sealer) Open(sealed string) (id coresession.ID, err error) {
-	box, decodeErr := base64.RawURLEncoding.DecodeString(sealed)
-	//: not even base64 — same verdict as a forged tag.
+	box, decodeErr := sealedEncoding.DecodeString(sealed)
+	//: not even base64, or a second spelling of a real value — same verdict
+	//: as a forged tag.
 	if decodeErr != nil {
 		//: SealInvalid, with no detail.
 		return coresession.ID{}, coresession.SealInvalid

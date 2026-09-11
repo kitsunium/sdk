@@ -122,6 +122,57 @@ func TestParseIDRoundTripsRevealAndRefusesEverythingElse(t *testing.T) {
 	}
 }
 
+// TestAnIdentifierHasExactlyOneSpelling pins the claim ParseID makes — "two
+// spellings of one identifier cannot exist" — at the one place base64 lets
+// them exist. An identifier is session.IDLen bytes, 256 bits, and the 43
+// characters that spell it carry 258, so the last character holds two bits no
+// byte uses. A lenient decoder ignores them, and four different cookies then
+// name one session; ADR 0042 refuses the same thing for tokens for the same
+// reason.
+//
+// The respelled value is first proved to decode to the SAME bytes under the
+// lenient decoder, so the refusal below cannot pass merely because the input
+// was garbage.
+//
+// Mutation: decoding with base64.RawURLEncoding instead of its Strict() form
+// failed with `ParseID(a second spelling of the same identifier) = (<redacted>,
+// <nil>), want CodeInvalidID`.
+func TestAnIdentifierHasExactlyOneSpelling(t *testing.T) {
+	t.Parallel()
+	canonical := mustID(t, sampleRaw()).Reveal()
+	respelled := setUnusedLowBit(t, canonical)
+	lenient, err := base64.RawURLEncoding.DecodeString(respelled)
+	if err != nil || !bytes.Equal(lenient, sampleRaw()) {
+		t.Fatalf("the respelling is not the same identifier under a lenient decoder (%v); the test would prove nothing", err)
+	}
+	id, parseErr := session.ParseID(respelled)
+	if !errs.HasCode(parseErr, session.CodeInvalidID) {
+		t.Fatalf("ParseID(a second spelling of the same identifier) = (%v, %v), want CodeInvalidID", id, parseErr)
+	}
+	if !id.IsZero() {
+		t.Error("ParseID returned an identifier alongside its refusal")
+	}
+}
+
+// setUnusedLowBit sets the lowest bit of the final character of an unpadded
+// base64url string. That bit carries no data whenever the length is not a
+// multiple of four, so the result is another spelling of the same bytes.
+func setUnusedLowBit(t *testing.T, encoded string) string {
+	t.Helper()
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	//: a length that is a multiple of four has no spare bits to set.
+	if len(encoded)%4 == 0 {
+		t.Fatalf("a %d-character encoding has no unused bits", len(encoded))
+	}
+	last := strings.IndexByte(alphabet, encoded[len(encoded)-1])
+	//: a canonical encoding leaves the spare bits clear; one already set means
+	//: the input was not canonical and there is nothing to respell.
+	if last&1 == 1 {
+		t.Fatalf("the final character of %q already has its low bit set", encoded)
+	}
+	return encoded[:len(encoded)-1] + string(alphabet[last|1])
+}
+
 // TestRevealIsCookieSafe pins that the canonical form needs no escaping to be
 // used verbatim as a cookie value — the whole reason it is base64URL and
 // unpadded.

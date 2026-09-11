@@ -1,6 +1,7 @@
 package session_test
 
 import (
+	"bytes"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -139,6 +140,65 @@ func TestOpenIsNotAnOracle(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestASealedValueHasExactlyOneSpelling pins the sealer's half of the
+// one-spelling rule core/session.ParseID keeps. A sealed box is not a multiple
+// of three bytes long, so the last base64url character of a sealed value
+// carries bits no byte uses; a lenient decoder ignores them, and several
+// cookie strings then open to one session. The AEAD cannot catch it — the
+// bytes it authenticates are identical — so the refusal has to be the
+// decoder's.
+//
+// The respelled value is first proved to decode to the SAME box under the
+// lenient decoder, so the refusal cannot pass merely because it was damaged.
+//
+// Mutation: decoding with base64.RawURLEncoding instead of its Strict() form
+// failed with `Open(a second spelling of a valid sealed value) =
+// (<redacted>, <nil>), want CodeSealInvalid`.
+func TestASealedValueHasExactlyOneSpelling(t *testing.T) {
+	t.Parallel()
+	sealer, err := svcsession.NewSealer(testKey(t), "example.test/sid")
+	if err != nil {
+		t.Fatalf("NewSealer: %v", err)
+	}
+	sealed, sealErr := sealer.Seal(sampleID(t))
+	if sealErr != nil {
+		t.Fatalf("Seal: %v", sealErr)
+	}
+	respelled := setUnusedLowBit(t, sealed)
+	canonicalBox, canonicalErr := base64.RawURLEncoding.DecodeString(sealed)
+	lenientBox, lenientErr := base64.RawURLEncoding.DecodeString(respelled)
+	if canonicalErr != nil || lenientErr != nil || !bytes.Equal(canonicalBox, lenientBox) {
+		t.Fatalf("the respelling is not the same box under a lenient decoder (%v, %v); the test would prove nothing",
+			canonicalErr, lenientErr)
+	}
+	opened, openErr := sealer.Open(respelled)
+	if !errs.HasCode(openErr, coresession.CodeSealInvalid) {
+		t.Fatalf("Open(a second spelling of a valid sealed value) = (%v, %v), want CodeSealInvalid", opened, openErr)
+	}
+	if !opened.IsZero() {
+		t.Error("Open returned an identifier alongside its refusal")
+	}
+}
+
+// setUnusedLowBit sets the lowest bit of the final character of an unpadded
+// base64url string. That bit carries no data whenever the length is not a
+// multiple of four, so the result is another spelling of the same bytes.
+func setUnusedLowBit(t *testing.T, encoded string) string {
+	t.Helper()
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	//: a length that is a multiple of four has no spare bits to set.
+	if len(encoded)%4 == 0 {
+		t.Fatalf("a %d-character encoding has no unused bits", len(encoded))
+	}
+	last := strings.IndexByte(alphabet, encoded[len(encoded)-1])
+	//: a canonical encoding leaves the spare bits clear; one already set means
+	//: the input was not canonical and there is nothing to respell.
+	if last&1 == 1 {
+		t.Fatalf("the final character of %q already has its low bit set", encoded)
+	}
+	return encoded[:len(encoded)-1] + string(alphabet[last|1])
 }
 
 // TestSealerRefusesAnUnusableConstruction pins ADR 0031 for the sealer: an

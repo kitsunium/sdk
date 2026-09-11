@@ -12,7 +12,9 @@ the suite advances a `ManualClock` instead of sleeping.
 The file store seals every record with AES-256-GCM, binds each record to its own
 filename, names files by `ID.Digest` so no identifier is ever on disk, narrows
 and then *asserts* owner-only permissions, publishes through a temporary file and
-`rename(2)`, and serialises every read-modify-write under one exclusive `flock`.
+`rename(2)`, flushes the directory after every rename and unlink so a power cut
+cannot undo a publication or a revocation, and serialises every read-modify-write
+under one exclusive `flock`.
 Where those mechanics do not exist — Windows, wasip1, any GOOS without
 `flock(2)` — it returns `proc.UnsupportedPlatform` at construction rather than
 pretending.

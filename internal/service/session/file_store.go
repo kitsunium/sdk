@@ -71,6 +71,10 @@ const recordAAD string = "kitsunium/sdk/session/record/v1|"
 //     directory, synced, and moved into place with rename(2). A reader sees the
 //     old record or the new one, never a half-written one, and a failed write
 //     leaves the previous record intact rather than publishing an empty file.
+//   - DURABLE CHANGES. Every rename and every unlink is followed by an fsync
+//     of the directory, because POSIX does not make either survive a crash
+//     until the directory itself is flushed — without it a power cut may bring
+//     back a record Destroy removed, which is a revocation undone.
 //   - SERIALISED READ-MODIFY-WRITE. Every operation runs under one store-wide
 //     exclusive flock, so two processes sharing the directory cannot lose an
 //     update between a read and the write that follows it.
@@ -105,6 +109,13 @@ type fileStore struct {
 	win window
 	// source is the entropy behind every minted identifier.
 	source io.Reader
+	// syncDir flushes a directory's entries to the device. It is
+	// flushDirectory in production and a field only so that
+	// dirsync_internal_test.go can observe WHEN it runs and make it fail: a
+	// failing directory fsync cannot be provoked on a real filesystem, and an
+	// untested failure path is one that has never run — the reason tempRecord
+	// is an interface too.
+	syncDir func(dir string) error
 }
 
 // NewFileStore returns a Store that keeps every session in cfg.Dir.
@@ -203,10 +214,11 @@ func openLocked(cfg FileConfig) (store coresession.Store, err error) {
 			err = firstFailure(err, closeErr, "lock-close")
 		}
 	}()
-	//: crypto/rand.Reader, always, in production. Tests reach the field.
+	//: crypto/rand.Reader and a real fsync, always, in production. Tests reach
+	//: the fields.
 	return &fileStore{
 		dir: cfg.Dir, lock: lock, key: cfg.Key,
-		win: cfg.window(), source: rand.Reader,
+		win: cfg.window(), source: rand.Reader, syncDir: flushDirectory,
 	}, nil
 }
 
@@ -248,15 +260,37 @@ func assertPrivateDir(dir string) error {
 // recordPath maps a digest to its file, refusing anything that is not the exact
 // shape ID.Digest produces.
 func recordPath(dir, digest string) (path string, err error) {
-	//: the digest is always 64 hex characters. Checking it before it reaches
-	//: filepath.Join means no value from outside this package can ever steer a
-	//: path, whatever a future caller does with the Store port.
-	if len(digest) != digestLen {
+	//: the digest is always 64 lowercase hex characters. Checking it before it
+	//: reaches filepath.Join means no value from outside this package can ever
+	//: steer a path, whatever a future caller does with the Store port.
+	if !isDigest(digest) {
 		//: InvalidID rather than a filesystem error.
 		return "", coresession.InvalidID
 	}
 	//: one flat directory: a session store holds live sessions, not an archive.
 	return filepath.Join(dir, digest+recordSuffix), nil
+}
+
+// isDigest reports whether s has the exact shape ID.Digest produces: 64
+// lowercase hexadecimal characters. It is the ONE test both recordPath and
+// recordDigest apply, so building a record's path and recognising a record's
+// file cannot drift apart — and what a sweep recognises is what it deletes.
+func isDigest(s string) bool {
+	//: the length first; it is the cheap half.
+	if len(s) != digestLen {
+		//: not a SHA-256 in hex.
+		return false
+	}
+	//: then every character: hex.EncodeToString writes only 0-9 and a-f.
+	for i := range len(s) {
+		//: an uppercase letter is hex too, but never Digest's.
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			//: not a digest this store wrote.
+			return false
+		}
+	}
+	//: a digest's shape, and nothing looser.
+	return true
 }
 
 // aad returns the additional authenticated data binding a record to its own
@@ -335,7 +369,32 @@ func (f *fileStore) writeLocked(rec record) error {
 		return wrapAs(coresession.StoreUnavailable, sealErr, kerrs.String("op", "seal"))
 	}
 	//: generate beside, then switch by rename(2).
-	return f.publish(path, box)
+	if publishErr := f.publish(path, box); publishErr != nil {
+		//: nothing was published; the previous record is intact.
+		return publishErr
+	}
+	//: and make the switch survive a power cut.
+	return f.flushLocked("sync-dir-publish")
+}
+
+// flushLocked makes the directory's latest renames and unlinks durable. The
+// caller MUST hold the store lock.
+//
+// POSIX does not require a rename or an unlink to survive a crash until the
+// containing directory is flushed: after a power cut the filesystem may
+// legally present the directory as it was before, which for Destroy means the
+// revoked session is back. A failure here arrives AFTER the change is visible
+// to every reader, so it is reported as StoreUnavailable and deliberately NOT
+// rolled back — undoing a rename to repair a durability problem would be a
+// second write that can fail the same way (ADR 0056 D7).
+func (f *fileStore) flushLocked(op string) error {
+	//: the op field says which change is visible but not yet durable.
+	if syncErr := f.syncDir(f.dir); syncErr != nil {
+		//: StoreUnavailable — retryable, and a retry flushes again.
+		return wrapAs(coresession.StoreUnavailable, syncErr, kerrs.String("op", op))
+	}
+	//: durable.
+	return nil
 }
 
 // publish writes payload to a temporary file in the same directory and moves it
@@ -347,6 +406,11 @@ func (f *fileStore) writeLocked(rec record) error {
 // power cut. And on EVERY failure path the temporary file is removed and the
 // previous record is left exactly as it was: a failed write must never replace
 // a good record with an empty one.
+//
+// The directory flush that makes the rename itself durable is the caller's
+// next step ([fileStore.flushLocked]), and it is outside this function on
+// purpose: the cleanup below is for failures BEFORE the switch, and a flush
+// that fails after it has nothing to clean up and nothing to undo.
 func (f *fileStore) publish(path string, payload []byte) (err error) {
 	tmp, createErr := os.CreateTemp(f.dir, tempPattern)
 	//: a temp file that cannot be created is a backend fault.

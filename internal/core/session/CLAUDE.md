@@ -16,7 +16,7 @@ Code range: `0.2.14.*` (ADR 0045).
 |---|---|
 | `session.go` | package doc + `Store` (5 methods, FROZEN) + `Sweeper` (the first sibling) |
 | `sealer.go` | `Sealer` — `Seal(ID) (string, error)` / `Open(string) (ID, error)` |
-| `id.go` | `ID` + `IDLen` + `NewID` / `ParseID`; `Reveal` / `Digest` / `Equal` / `IsZero` / redacting `String` + `GoString` |
+| `id.go` | `ID` + `IDLen` + `NewID` / `ParseID` (strict base64url, one spelling); `Reveal` / `Digest` / `Equal` / `IsZero` / redacting `String` + `GoString` |
 | `session_value.go` | `SessionValue` + `NewSessionValue` (its only producer) — accessors, copy-on-write `Set` / `Delete`, `ExpiresAt` / `LiveAt`, shape-only `String` |
 | `state_value.go` | `StateValue` — the exported description a third-party `Store` hands to `NewSessionValue` |
 | `codes.go` | `Code*` constants — range 0.2.14.* |
@@ -75,7 +75,10 @@ port: no method but `Regenerate` takes a string) and
 `crypto/rand`. `String`/`GoString` render `"<redacted>"`; `Reveal` is the only
 exit and is spelled to read like a mistake outside a cookie; `Equal` uses
 `crypto/subtle`; `Digest` is the SHA-256 a store indexes and names files by, so
-the secret is never a map key, never a filename and never at rest. No `Public`,
+the secret is never a map key, never a filename and never at rest. `ParseID`
+decodes STRICTLY: 43 characters carry 258 bits for 256, and a lenient decoder
+would accept all four settings of the two spare bits as the same identifier —
+one session, four cookies. No `Public`,
 no `Private` and no `Field` in this domain ever carries one — a `Public` is read
 by third parties, which is the `errs` split applied to the same problem.
 
@@ -151,6 +154,6 @@ cd internal/core && GOWORK=off go test -race -cover ./session
 
 | File | Covers |
 |---|---|
-| `id_external_test.go` | length refusal, the single accepted spelling, cookie-safety of `Reveal`, `Digest` against an independently computed SHA-256, `Equal` at every length, and redaction under `%v` / `%s` / `%#v` / `%+v` / `%q` and inside a struct |
+| `id_external_test.go` | length refusal, the single accepted spelling — including a respelling through the unused trailing bits, proved to decode to the same bytes under a lenient decoder before it is refused — cookie-safety of `Reveal`, `Digest` against an independently computed SHA-256, `Equal` at every length, and redaction under `%v` / `%s` / `%#v` / `%+v` / `%q` and inside a struct |
 | `session_value_external_test.go` | the earlier-deadline rule in both directions, the `NewSessionValue` clamp, the exclusive `LiveAt` boundary, copy-on-write `Set`/`Delete`/`Data`, sorted `Keys`, and shape-only rendering |
 | `port_external_test.go` | the two fixation guards and the ADR 0039 freeze — `Store` is exactly five methods, `Sweeper` is separate, and `Store` must NOT satisfy it |

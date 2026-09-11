@@ -205,7 +205,9 @@ var (
 	// LockFailed is returned when the store-wide exclusive lock could not be
 	// taken; the operation is refused rather than run unserialised.
 	LockFailed = svcsession.LockFailed
-	// PayloadTooLarge is returned by Save for a payload above the store's caps.
+	// PayloadTooLarge is returned by Save for a payload above the store's caps,
+	// and by Regenerate for a subject longer than 4096 bytes — refused before
+	// anything is minted, so the old session is untouched.
 	PayloadTooLarge = svcsession.PayloadTooLarge
 	// InvalidPurpose is returned by NewSealer for an empty purpose.
 	InvalidPurpose = svcsession.InvalidPurpose
