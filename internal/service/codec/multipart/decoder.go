@@ -7,6 +7,7 @@ package multipart
 
 import (
 	"bufio"
+	"bytes"
 	stdjson "encoding/json"
 	"errors"
 	"io"
@@ -260,11 +261,17 @@ func isSettablePointer(v any) bool {
 // sniffReader wraps r in a bufio.Reader and recovers the boundary from the
 // stream WITHOUT consuming it: Peek leaves the delimiter line in the buffer so
 // mime/multipart.Reader still sees a complete body.
+//
+// It reads no further than the answer needs. The head is examined as it
+// arrives, and the sniff returns once the first delimiter line is complete, so
+// a producer that sends a short prefix and then pauses is not made to fill the
+// whole window first — it used to be, which stalled NewDecoder on a live
+// stream until 4 KiB or the end arrived.
 func sniffReader(r io.Reader) (buffered *bufio.Reader, boundary string, err error) {
-	//: size the buffer to the sniff window so one Peek covers it.
+	//: size the buffer to the sniff window so the head always fits in it.
 	br := bufio.NewReaderSize(r, boundarySniffWindow)
 	//: Peek does not advance the reader; a short stream returns what it has.
-	head, perr := br.Peek(boundarySniffWindow)
+	head, perr := peekHead(br)
 	//: anything other than "the stream is shorter than the window" is fatal.
 	if perr != nil && !errIsEOF(perr) && !errors.Is(perr, bufio.ErrBufferFull) {
 		//: wrap the transport failure.
@@ -279,6 +286,71 @@ func sniffReader(r io.Reader) (buffered *bufio.Reader, boundary string, err erro
 	}
 	//: the buffered reader still holds every byte the caller supplied.
 	return br, found, nil
+}
+
+// peekHead peeks at br until the first delimiter line is complete, the sniff
+// window is full, or the stream ends — whichever comes first.
+//
+// A first line ending in "--" is not complete for this purpose. It can be a
+// zero-part body's close delimiter or a boundary that itself ends in "--", and
+// telling those apart needs the bytes after it, so that one line still waits
+// for the window or the end of the stream, exactly as every line used to.
+func peekHead(br peeker) (head []byte, err error) {
+	want := 1
+	//: grow the peek one arrival at a time; the window bounds the loop.
+	for {
+		head, err = br.Peek(want)
+		//: a short stream, a full window or a transport failure ends it.
+		if err != nil || len(head) >= boundarySniffWindow {
+			//: the caller sorts EOF from failure.
+			return head, err
+		}
+		//: take everything already buffered, not only what was asked for.
+		head, err = br.Peek(br.Buffered())
+		//: Peek within the buffered count cannot fail; stay defensive.
+		if err != nil {
+			//: surface it rather than guess.
+			return head, err
+		}
+		//: a complete, unambiguous delimiter line is all Boundary reads.
+		if delimiterLineComplete(head) {
+			//: enough to answer.
+			return head, nil
+		}
+		//: one byte more than is buffered: Peek blocks only until it arrives.
+		want = len(head) + 1
+	}
+}
+
+// peeker is the part of *bufio.Reader peekHead reads through: a look at the
+// buffered bytes that consumes none of them.
+type peeker interface {
+	// Peek returns the next n bytes without advancing the reader.
+	Peek(n int) ([]byte, error)
+	// Buffered returns how many bytes can be peeked without a read.
+	Buffered() int
+}
+
+// delimiterLineComplete reports whether head already holds the whole first
+// "--" line — terminated by its LF — and that line does not end in "--".
+func delimiterLineComplete(head []byte) bool {
+	//: walk the complete lines only; a trailing partial line may still grow.
+	for cursor := 0; ; {
+		offset := bytes.IndexByte(head[cursor:], '\n')
+		//: no LF yet — the line being scanned is not complete.
+		if offset < 0 {
+			//: keep reading.
+			return false
+		}
+		line := bytes.TrimSuffix(head[cursor:cursor+offset], []byte{'\r'})
+		//: the first delimiter-looking line decides.
+		if candidate, ok := bytes.CutPrefix(line, []byte(delimiterPrefix)); ok {
+			//: complete unless the candidate is the one ambiguous shape.
+			return !bytes.HasSuffix(candidate, []byte(delimiterPrefix))
+		}
+		//: a preamble line; move past it.
+		cursor += offset + 1
+	}
 }
 
 // unmarshalFailed wraps cause with the UnmarshalFailed sentinel and a

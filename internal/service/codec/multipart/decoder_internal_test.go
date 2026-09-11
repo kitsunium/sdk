@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
+	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -395,5 +397,110 @@ func TestSniffReaderPreservesStream(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
 		})
+	}
+}
+
+// TestSniffReaderDoesNotWaitForTheWindow pins that the sniff returns once the
+// first delimiter line is complete. It used to Peek the whole 4 KiB window, so
+// a producer that sent a short prefix and paused stalled NewDecoder until it
+// sent 4 KiB or closed the stream. The pausing reader here holds the rest of
+// the body until the test releases it; the wait is bounded so a regression
+// fails instead of hanging. Seen failing with the single Peek restored:
+// "sniffReader was still waiting for the window after 10s".
+//
+// Goroutine lifecycle: one goroutine, ending when sniffReader returns — at
+// once when the fix holds, or when the cleanup releases the reader when it
+// does not. The result channel is buffered, so it never parks on a receiver
+// that timed out.
+func TestSniffReaderDoesNotWaitForTheWindow(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	r := &pausingReader{
+		prefix:  []byte("--abc\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nx"),
+		rest:    []byte("\r\n--abc--\r\n"),
+		release: release,
+	}
+	type result struct {
+		boundary string
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, boundary, err := sniffReader(r)
+		done <- result{boundary, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil || got.boundary != "abc" {
+			t.Fatalf("sniffReader = %q, %v; want \"abc\", nil", got.boundary, got.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("sniffReader was still waiting for the window after 10s")
+	}
+}
+
+// TestSniffReaderWaitsOutTheAmbiguousLine pins the one line that must still
+// wait: "--ab--" can be a zero-part body's close delimiter or a boundary that
+// itself ends in "--", and only the bytes after it tell which. Fed one byte at
+// a time, a sniff that answered on the first complete line read "ab" where the
+// body's boundary is "ab--" — seen failing so, with the ambiguity check
+// removed. The unambiguous body beside it is recovered and left unconsumed.
+func TestSniffReaderWaitsOutTheAmbiguousLine(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		body string
+		want string
+	}
+	tests := []tc{
+		{"a boundary ending in two hyphens", "--ab--\r\nbody\r\n--ab----\r\n", "ab--"},
+		{"a zero-part body", "--abc--\r\n", "abc"},
+		{"an ordinary body", "--abc\r\nbody\r\n--abc--\r\n", "abc"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		buffered, boundary, err := sniffReader(iotest.OneByteReader(strings.NewReader(c.body)))
+		if err != nil {
+			t.Fatalf("%s: sniffReader err=%v", c.name, err)
+		}
+		if boundary != c.want {
+			t.Errorf("%s: boundary %q, want %q", c.name, boundary, c.want)
+		}
+		rest, rerr := io.ReadAll(buffered)
+		if rerr != nil || string(rest) != c.body {
+			t.Errorf("%s: the sniff consumed the stream: rest %q, err %v", c.name, rest, rerr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// pausingReader hands out prefix, then blocks until release is closed before
+// handing out rest and the end of the stream — a live producer that sent a
+// first chunk and is waiting on something else.
+type pausingReader struct {
+	prefix  []byte
+	rest    []byte
+	release chan struct{}
+	stage   int
+}
+
+// Read serves the prefix, then waits for release, then the rest, then EOF.
+func (r *pausingReader) Read(p []byte) (int, error) {
+	switch r.stage {
+	case 0:
+		r.stage++
+		return copy(p, r.prefix), nil
+	case 1:
+		<-r.release
+		r.stage++
+		return copy(p, r.rest), nil
+	default:
+		return 0, io.EOF
 	}
 }

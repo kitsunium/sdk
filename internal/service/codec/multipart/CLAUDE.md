@@ -83,7 +83,13 @@ worse than saying so.
 
 **3. Streaming — solved by an extension interface.** `NewDecoder(r io.Reader)`
 sniffs the head of the stream with `bufio.Reader.Peek`, which does **not**
-consume it, so `mime/multipart.Reader` still sees a complete body. But an HTTP
+consume it, so `mime/multipart.Reader` still sees a complete body. The sniff
+reads no further than the answer needs: it returns once the first delimiter
+line is complete, rather than waiting for the whole 4 KiB window — which used to
+stall `NewDecoder` on a live producer that sent a short prefix and paused. Only
+a first line ending in `--` still waits for the window or the end of the
+stream, since only the bytes after it can tell a zero-part body from a
+boundary that itself ends in `--`. But an HTTP
 server already *has* the authoritative boundary, and an HTTP client must set
 the header *before* it writes the first body byte — neither fits
 `NewEncoder(w) Encoder` / `NewDecoder(r) Decoder`, whose signatures the domain
