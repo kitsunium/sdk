@@ -296,6 +296,42 @@ func TestSystemTickerDelivers(t *testing.T) {
 	}
 }
 
+// TestSystemTickerLeavesNoStaleTickAcrossStopAndReset pins, on the real
+// ticker, the premise TestManualTickerStopAndResetLeaveNoStaleTick holds the
+// double to. Since Go 1.23 a time.Ticker's channel is synchronous: a tick that
+// fell due while nobody was receiving is not buffered, and after Stop or Reset
+// returns it is never received. The sleep only makes a tick fall due; the
+// assertion does not depend on how many did, so it cannot flake on a slow
+// machine — at worst it stops exercising the stale case.
+//
+// Seen failing: with systemTicker.Stop made a no-op, the Stop case printed
+// "a tick was receivable after Stop", because the ticker kept ticking.
+func TestSystemTickerLeavesNoStaleTickAcrossStopAndReset(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		after func(clock.Ticker)
+	}{
+		{"Stop", func(tk clock.Ticker) { tk.Stop() }},
+		{"Reset", func(tk clock.Ticker) { tk.Reset(time.Hour) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tk := clock.System.NewTicker(time.Millisecond)
+			defer tk.Stop()
+			//: twenty periods with nobody receiving.
+			time.Sleep(20 * time.Millisecond)
+			tc.after(tk)
+			//: a moment for a tick that should not exist to show up anyway.
+			time.Sleep(5 * time.Millisecond)
+			if _, stale := pending(tk.C()); stale {
+				t.Fatalf("a tick was receivable after %s", tc.name)
+			}
+		})
+	}
+}
+
 // twoMethodDouble is the shape every downstream hand-written clock double has:
 // Now and Since, nothing else. pkg/v1/cache.Config is a type alias whose Clock
 // field carries clock.Clock, so this exact shape is compilable by consumers of

@@ -14,11 +14,13 @@ type Ticker interface {
 	// C returns the channel on which each tick instant is delivered. The same
 	// channel is returned by every call; it is never closed.
 	C() <-chan time.Time
-	// Stop halts the Ticker. It does NOT close the channel and does NOT
-	// discard an already-delivered tick, so a concurrent receiver never sees a
-	// spurious zero value — the same guarantee time.Ticker.Stop makes.
+	// Stop halts the Ticker. It does NOT close the channel, so a concurrent
+	// receiver never sees a spurious zero value, and after Stop returns no
+	// tick from before the call is received — the guarantee time.Ticker.Stop
+	// makes since Go 1.23, whose channel is synchronous.
 	Stop()
-	// Reset halts the Ticker and restarts it with period d. It PANICS on a
-	// non-positive d; see the package comment.
+	// Reset halts the Ticker and restarts it with period d: no tick from
+	// before the call is received after it, and the next arrives once d has
+	// elapsed. It PANICS on a non-positive d; see the package comment.
 	Reset(d time.Duration)
 }

@@ -293,38 +293,34 @@ func (m *ManualClock) retire(w *manualWait) {
 	}
 }
 
-// stopWait disarms w and reports whether it was armed, draining any pending
-// delivery when drainPending is set.
-func (m *ManualClock) stopWait(w *manualWait, drainPending bool) bool {
+// stopWait disarms w, drains any pending delivery, and reports whether it was
+// armed.
+func (m *ManualClock) stopWait(w *manualWait) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	//: the report is "was it still armed", read before the mutation.
 	was := w.linked
 	m.retire(w)
-	//: timers promise no stale value survives Stop (Go 1.23+); tickers
-	//: deliberately keep a delivered tick so a receiver sees no zero value.
-	if drainPending {
-		//: clear the one-slot buffer.
-		drainWait(w)
-	}
+	//: no value prepared before Stop is received after it — the promise Go
+	//: 1.23+ makes for time.Timer AND time.Ticker alike, whose channels are
+	//: synchronous. The buffer here is the double's stand-in for that.
+	drainWait(w)
 	//: hand back the pre-mutation state.
 	return was
 }
 
-// resetWait re-arms w for d from now and reports whether it was armed,
-// draining any pending delivery when drainPending is set. A ticker's period is
-// replaced by d; a timer's stays zero.
-func (m *ManualClock) resetWait(w *manualWait, d time.Duration, drainPending bool) bool {
+// resetWait re-arms w for d from now, draining any pending delivery, and
+// reports whether it was armed. A ticker's period is replaced by d; a timer's
+// stays zero.
+func (m *ManualClock) resetWait(w *manualWait, d time.Duration) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	//: the report mirrors Timer.Reset: "was it still armed".
 	was := w.linked
 	m.retire(w)
-	//: same stale-value rule as stopWait.
-	if drainPending {
-		//: clear the one-slot buffer before re-arming.
-		drainWait(w)
-	}
+	//: same stale-value rule as stopWait: the next value is the one the new
+	//: arming produces, and nothing from the old one.
+	drainWait(w)
 	//: only a ticker carries a cadence to replace.
 	if w.period > 0 {
 		//: the caller already validated d through requirePositivePeriod.

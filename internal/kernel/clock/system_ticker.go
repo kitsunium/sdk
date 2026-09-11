@@ -17,9 +17,10 @@ func (t systemTicker) C() <-chan time.Time {
 	return t.tk.C
 }
 
-// Stop halts the ticker without closing or draining its channel.
+// Stop halts the ticker without closing its channel.
 func (t systemTicker) Stop() {
-	//: delegate; time.Ticker.Stop deliberately leaves a delivered tick alone.
+	//: delegate; since Go 1.23 the runtime itself guarantees that a tick
+	//: nobody received before Stop is never received after it.
 	t.tk.Stop()
 }
 
