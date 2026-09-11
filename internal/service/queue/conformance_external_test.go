@@ -3,6 +3,7 @@ package queue_test
 import (
 	"errors"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -615,6 +616,73 @@ func TestBothBrokersRefuseAnExtensionANameCannotCarry(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAnExtensionIsStoredAtTheInstantItWasChecked pins that Extend reads the
+// clock once. The memory broker checked now+by against the range a name can
+// carry and then stored a second now+by, so a clock that moved between the two
+// readings stored a deadline past the one the check accepted — past what the
+// durable broker can name, the very asymmetry the check exists to remove. The
+// file broker already read once; both are held to it.
+//
+// Seen failing on the memory broker with the second reading restored: the
+// renewed lease expired two seconds past the last nameable instant.
+func TestAnExtensionIsStoredAtTheInstantItWasChecked(t *testing.T) {
+	t.Parallel()
+	last := time.Unix(0, math.MaxInt64)
+	for _, factory := range bothBrokers() {
+		t.Run(factory.name, func(t *testing.T) {
+			t.Parallel()
+			clk := &steppingClock{now: epoch, step: time.Second}
+			broker := factory.make(t, clk, defaultPolicy())
+			publish(t, broker, "slow")
+			delivery := receiveOne(t, broker)
+			//: up to the last nameable instant, measured from where the clock
+			//: stands before it starts moving on every reading.
+			by := last.Sub(epoch)
+			clk.arm()
+			renewed, err := extender(t, broker).Extend(t.Context(), delivery.Lease.Receipt, by)
+			if err != nil {
+				t.Fatalf("Extend(by = up to the last nameable instant) = %v, want nil", err)
+			}
+			if renewed.ExpiresAt.After(last) {
+				t.Fatalf("the renewed lease expires at %v, past the last nameable instant %v its check was made against",
+					renewed.ExpiresAt, last)
+			}
+		})
+	}
+}
+
+// steppingClock moves on by step every time it is read once armed, so a
+// broker that reads it twice in one call sees two different instants.
+type steppingClock struct {
+	mu    sync.Mutex
+	now   time.Time
+	step  time.Duration
+	armed bool
+}
+
+// Now returns the current instant and, once armed, moves the clock on.
+func (c *steppingClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now
+	if c.armed {
+		c.now = c.now.Add(c.step)
+	}
+	return now
+}
+
+// Since is Now minus t.
+func (c *steppingClock) Since(t time.Time) time.Duration {
+	return c.Now().Sub(t)
+}
+
+// arm makes every later reading move the clock on.
+func (c *steppingClock) arm() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.armed = true
 }
 
 // containsSubstring is strings.Contains, spelled locally so the assertion
