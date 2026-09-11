@@ -40,7 +40,7 @@ type httpAdapter struct {
 	// server down, so an unguarded read is a genuine race, not a formality.
 	mu sync.RWMutex
 	// waiters maps a handed-over connection to the ServeConn blocked on it.
-	waiters map[stdnet.Conn]chan struct{}
+	waiters map[stdnet.Conn]*connWaiter
 	// bridge feeds accepted connections to http.Server.
 	bridge *chanListener
 	// server is the net/http instance driving the protocol.
@@ -76,7 +76,7 @@ func newHTTPAdapter(h http.Handler) *httpAdapter {
 	//: listener accepted it.
 	return &httpAdapter{
 		handler:  h,
-		waiters:  make(map[stdnet.Conn]chan struct{}, expectedLiveConns),
+		waiters:  make(map[stdnet.Conn]*connWaiter, expectedLiveConns),
 		draining: make(chan struct{}),
 	}
 }
@@ -97,7 +97,7 @@ func (a *httpAdapter) ServeConn(ctx context.Context, c corenet.Conn) error {
 		//: nothing will serve it, so let the engine reclaim it now.
 		return corenet.ServerClosed
 	}
-	done := a.register(raw)
+	waiter := a.register(raw)
 	defer a.unregister(raw)
 	//: the bridge closed before the hand-off landed, so nothing will serve this
 	//: connection and the engine should reclaim it now.
@@ -107,25 +107,51 @@ func (a *httpAdapter) ServeConn(ctx context.Context, c corenet.Conn) error {
 	}
 	select {
 	//: net/http has finished with the connection.
-	case <-done:
-		//: net/http closed the connection; the engine may reclaim it.
-		return nil
+	case <-waiter.done:
 	//: the server is draining; release the connection rather than wait on a
 	//: keep-alive that may never see another request.
 	case <-ctx.Done():
-		//: draining — do not hold the drain open on an idle keep-alive.
-		return nil
 	}
+	//: checked on BOTH paths, not only under <-done. A hijack that lands while
+	//: the drain is cancelling this context leaves both cases ready, and select
+	//: chooses between ready cases at random — so reading the flag only on one
+	//: of them would sever an upgraded connection roughly half the time.
+	if waiter.hijacked.Load() {
+		markHijacked(c)
+	}
+	//: either way the engine is done with this connection; whether it may close
+	//: the socket is what the flag above just decided.
+	return nil
 }
 
-// register creates the completion channel for a handed-over connection.
-func (a *httpAdapter) register(raw stdnet.Conn) chan struct{} {
-	done := make(chan struct{})
+// markHijacked records that a pooled connection is no longer the engine's to
+// close.
+//
+// A hijacked socket has left the HTTP lifecycle entirely: net/http stops
+// tracking it, and the handler that took it over speaks its own protocol on it
+// for as long as it likes. The engine must therefore stop closing it on the way
+// out, exactly as net/http stops closing and waiting for it — see
+// http.Server.Shutdown's own documented carve-out for WebSockets.
+func markHijacked(c corenet.Conn) {
+	pooled, ok := c.(*conn)
+	//: a handler that received something other than the pooled wrapper — a
+	//: middleware's own type — has nothing here to mark, and nothing here would
+	//: have closed it either.
+	if !ok {
+		//: not ours to hand over.
+		return
+	}
+	pooled.hijacked = true
+}
+
+// register creates the completion state for a handed-over connection.
+func (a *httpAdapter) register(raw stdnet.Conn) *connWaiter {
+	waiter := &connWaiter{done: make(chan struct{})}
 	a.mu.Lock()
-	a.waiters[raw] = done
+	a.waiters[raw] = waiter
 	a.mu.Unlock()
 	//: registered before the hand-off, so ConnState can never fire first.
-	return done
+	return waiter
 }
 
 // unregister drops the completion channel once ServeConn is done with it.
@@ -144,16 +170,26 @@ func (a *httpAdapter) onConnState(raw stdnet.Conn, state http.ConnState) {
 		return
 	}
 	a.mu.Lock()
-	done, waiting := a.waiters[raw]
+	waiter, waiting := a.waiters[raw]
 	//: delete under the lock so a second terminal state cannot double-close.
 	if waiting {
 		delete(a.waiters, raw)
 	}
 	a.mu.Unlock()
-	//: release the engine goroutine holding this connection.
-	if waiting {
-		close(done)
+	//: nothing is waiting on this connection.
+	if !waiting {
+		//: already released, or never registered.
+		return
 	}
+	//: recorded BEFORE the release, so the goroutine woken by the close is
+	//: guaranteed to observe it. net/http fires this hook synchronously from
+	//: inside Hijack, before the handler is handed the socket, so the flag is
+	//: set by the time anyone can use the connection.
+	if state == http.StateHijacked {
+		waiter.hijacked.Store(true)
+	}
+	//: release the engine goroutine holding this connection.
+	waiter.release()
 }
 
 // launch starts the net/http serving goroutine for this adapter.

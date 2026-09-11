@@ -434,6 +434,34 @@ codes:
     const: CodeSSEStreamMisconfigured
     hex: "0x00_02_0B_1A"
     package: internal/core/net
+  - code: "0.2.11.27"
+    const: CodeWSHandshakeFailed
+    hex: "0x00_02_0B_1B"
+    package: internal/core/net
+  - code: "0.2.11.28"
+    const: CodeWSUpgradeUnsupported
+    hex: "0x00_02_0B_1C"
+    package: internal/core/net
+  - code: "0.2.11.29"
+    const: CodeWSProtocolViolation
+    hex: "0x00_02_0B_1D"
+    package: internal/core/net
+  - code: "0.2.11.30"
+    const: CodeWSMessageTooLarge
+    hex: "0x00_02_0B_1E"
+    package: internal/core/net
+  - code: "0.2.11.31"
+    const: CodeWSInvalidPayload
+    hex: "0x00_02_0B_1F"
+    package: internal/core/net
+  - code: "0.2.11.32"
+    const: CodeWSConnClosed
+    hex: "0x00_02_0B_20"
+    package: internal/core/net
+  - code: "0.2.11.33"
+    const: CodeWSConnMisconfigured
+    hex: "0x00_02_0B_21"
+    package: internal/core/net
   - code: "0.2.12.1"
     const: CodeInvalidEntry
     hex: "0x00_02_0C_01"
@@ -514,6 +542,14 @@ codes:
     const: CodeLifetimeTooLong
     hex: "0x00_02_0D_10"
     package: internal/core/token
+  - code: "0.2.15.1"
+    const: CodeValidationFailed
+    hex: "0x00_02_0F_01"
+    package: internal/core/validation
+  - code: "0.2.15.2"
+    const: CodeConstraintMisconfigured
+    hex: "0x00_02_0F_02"
+    package: internal/core/validation
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"
@@ -1098,6 +1134,34 @@ codes:
     const: CodeReservedLabelName
     hex: "0x00_03_2D_03"
     package: internal/service/metrics
+  - code: "0.3.47.1"
+    const: CodeRequired
+    hex: "0x00_03_2F_01"
+    package: internal/service/validation
+  - code: "0.3.47.2"
+    const: CodeOutOfRange
+    hex: "0x00_03_2F_02"
+    package: internal/service/validation
+  - code: "0.3.47.3"
+    const: CodeLengthOutOfRange
+    hex: "0x00_03_2F_03"
+    package: internal/service/validation
+  - code: "0.3.47.4"
+    const: CodeNotInSet
+    hex: "0x00_03_2F_04"
+    package: internal/service/validation
+  - code: "0.3.47.5"
+    const: CodePatternMismatch
+    hex: "0x00_03_2F_05"
+    package: internal/service/validation
+  - code: "0.3.47.6"
+    const: CodeInvalidRule
+    hex: "0x00_03_2F_06"
+    package: internal/service/validation
+  - code: "0.3.47.7"
+    const: CodeUnsupportedTarget
+    hex: "0x00_03_2F_07"
+    package: internal/service/validation
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

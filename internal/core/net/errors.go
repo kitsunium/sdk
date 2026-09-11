@@ -201,4 +201,67 @@ var (
 		"The event stream options are not valid",
 		"core/net: a negative keep-alive interval or write budget was supplied",
 		errs.WithExitCode(exitConfig))
+
+	// WSHandshakeFailed is returned when an HTTP request is not a valid RFC 6455
+	// opening handshake. The upgrade is refused with an HTTP status rather than
+	// a Close frame, because at that point there is no WebSocket connection to
+	// close — the response is still an ordinary HTTP one.
+	WSHandshakeFailed = errs.Define(CodeWSHandshakeFailed, "WS_HANDSHAKE_FAILED",
+		"The WebSocket handshake is not valid",
+		"core/net: the request does not satisfy RFC 6455 §4.2.1, or its origin was refused",
+		errs.WithExitCode(exitDataErr))
+
+	// WSUpgradeUnsupported is returned when the response's connection cannot be
+	// hijacked. It is deliberately distinct from a failed handshake: the request
+	// was fine and the peer did nothing wrong — this stack cannot take over the
+	// socket, which is a deployment fact (HTTP/2, or a middleware that wraps the
+	// ResponseWriter without forwarding Unwrap), not a client error.
+	WSUpgradeUnsupported = errs.Define(CodeWSUpgradeUnsupported, "WS_UPGRADE_UNSUPPORTED",
+		"The connection cannot be upgraded",
+		"core/net: the http.ResponseWriter exposes no http.Hijacker, so the socket cannot be taken over",
+		errs.WithExitCode(exitSoftware))
+
+	// WSProtocolViolation is returned for a frame RFC 6455 forbids. Every case it
+	// covers FAILS THE CONNECTION rather than being skipped: a peer that sent a
+	// frame this endpoint ignored believes it said something, and the two would
+	// be desynchronised from that point on.
+	WSProtocolViolation = errs.Define(CodeWSProtocolViolation, "WS_PROTOCOL_VIOLATION",
+		"The WebSocket frame is not valid",
+		"core/net: the frame violates RFC 6455 framing — masking, reserved bits/opcodes, control-frame shape, minimal length, or fragmentation order",
+		errs.WithExitCode(exitDataErr))
+
+	// WSMessageTooLarge is returned when a frame or a reassembled message exceeds
+	// the connection's ceiling. The check runs against the ANNOUNCED length,
+	// before any buffer is sized from it: allocating from a 64-bit integer the
+	// peer chose is a denial of service in one line.
+	WSMessageTooLarge = errs.Define(CodeWSMessageTooLarge, "WS_MESSAGE_TOO_LARGE",
+		"The WebSocket message is larger than the accepted size",
+		"core/net: the frame or the accumulated message exceeded the configured ceiling",
+		errs.WithExitCode(exitDataErr))
+
+	// WSInvalidPayload is returned for a payload the protocol cannot carry: text
+	// that is not UTF-8, a close code that must never be sent, or a close reason
+	// past the control-frame ceiling. It is one sentinel for both directions on
+	// purpose — the rule a peer broke is the rule this endpoint must not break.
+	WSInvalidPayload = errs.Define(CodeWSInvalidPayload, "WS_INVALID_PAYLOAD",
+		"The WebSocket payload is not valid",
+		"core/net: invalid UTF-8, an unsendable close code, or an oversized close reason",
+		errs.WithExitCode(exitDataErr))
+
+	// WSConnClosed is returned by any operation on a connection that has ended.
+	// It is the terminal outcome a receive loop runs until, and it carries the
+	// close code the peer sent when there was one.
+	WSConnClosed = errs.Define(CodeWSConnClosed, "WS_CONN_CLOSED",
+		"The WebSocket connection is closed",
+		"core/net: the connection ended — peer close, server draining, closed by the handler, or a dead socket",
+		errs.WithExitCode(exitUnavailable))
+
+	// WSConnMisconfigured is returned for an option the domain refuses to
+	// interpret rather than guess at (ADR 0031). A zero ping interval is CLAMPED
+	// to the domain default, because a working heartbeat needs no explanation; a
+	// negative one is REFUSED, and "never" has its own spelling.
+	WSConnMisconfigured = errs.Define(CodeWSConnMisconfigured, "WS_CONN_MISCONFIGURED",
+		"The WebSocket options are not valid",
+		"core/net: a negative interval or budget, or a non-positive size ceiling, was supplied",
+		errs.WithExitCode(exitConfig))
 )

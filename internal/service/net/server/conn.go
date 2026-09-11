@@ -27,6 +27,21 @@ type conn struct {
 	scratch *[]byte
 	// timeouts are the group's per-phase bounds, refreshed per operation.
 	timeouts corenet.TimeoutsValue
+	// hijacked records that the socket's ownership has left the engine — a
+	// handler took the response over and now speaks its own protocol on it
+	// (WebSocket, or any other upgrade).
+	//
+	// It is deliberately NOT called "adopted": in this package that word
+	// already means a listener inherited from a supervisor (adopt.go), and the
+	// two would be impossible to tell apart in a stack trace.
+	//
+	// It exists because the engine closes every connection it serves on the way
+	// out, which is exactly right until the moment a handler takes the socket
+	// over: net/http reports StateHijacked immediately, the engine's ServeConn
+	// returns, and the deferred close then severed a connection the handler was
+	// still using. Written and read on the connection's own serve goroutine, so
+	// it needs no synchronisation of its own.
+	hijacked bool
 }
 
 // Read implements net.Conn, bounding this read before it starts.
@@ -139,4 +154,7 @@ func (c *conn) reset() {
 	c.group = ""
 	c.scratch = nil
 	c.timeouts = corenet.TimeoutsValue{}
+	//: a pooled wrapper that kept this flag would make the NEXT connection
+	//: unclosable, which is a descriptor leak per reuse.
+	c.hijacked = false
 }

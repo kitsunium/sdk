@@ -29,9 +29,11 @@ in the dimension that motivated the domain, whatever else it gained.
 | `DrainSignal` | the shutdown signal a handler holding a connection open watches |
 | `ListenFailed` … `ConnLimitReached` | sentinels |
 
-`sse/` is the Server-Sent Events half, in its own subpackage — see
-`pkg/v1/server/sse/CLAUDE.md`, which also records why there is no SSE **client**
-and what would have to change in `internal/core/net/response.go` for one.
+`sse/` is the Server-Sent Events half and `websocket/` is WebSocket (RFC 6455),
+each in its own subpackage — see `pkg/v1/server/sse/CLAUDE.md` and
+`pkg/v1/server/websocket/CLAUDE.md`. Both also record why there is no **client**
+for their protocol and what would have to change in
+`internal/core/net/response.go` for one.
 
 ## Why-this-shape
 
@@ -57,6 +59,12 @@ and what would have to change in `internal/core/net/response.go` for one.
   response the drain exists to let it finish, so the warning is additive
   instead. An absent signal is a nil channel — receiving from nil blocks
   forever, so a `select` that watches it needs no nil check.
+- **A hijacked connection is the handler's, and the drain does not wait for it**
+  (ADR 0047 §D9). `websocket/` and anything else that takes the socket over stop
+  being closed by the engine — a defect that predated WebSocket had the engine
+  severing every hijacked socket the instant `net/http` reported it, so no
+  upgrade could work at all. The carve-out matches `net/http`'s own; the drain
+  signal is what reaches such a connection instead of the budget.
 
 ## Do NOT
 
@@ -85,4 +93,5 @@ cd pkg && GOWORK=off go test -race -cover ./v1/server/...
 ## Reference
 
 - ADR 0029 — `docs/adr/0029-sdk-net-domain.md`
+- ADR 0047 — WebSocket — `docs/adr/0047-sdk-net-websocket.md`
 - `internal/core/net/CLAUDE.md`, `internal/service/net/server/CLAUDE.md`
