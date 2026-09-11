@@ -39,6 +39,30 @@ import (
 // every call — has happened several times by the end.
 const allocRuns int = 500
 
+// allocRuntimeWarmup is how many emits warmRuntimeCaches spends on a THROWAWAY
+// handler before any window is measured. It is not about this package.
+//
+// An emit reaches the sink through type switches over non-empty interfaces, and
+// the runtime serves those from a per-call-site cache it builds LAZILY on
+// purpose: runtime/iface.go gates the build behind `cheaprand()&1023 != 0`, so
+// about one miss in 1024 pays for it and buildInterfaceSwitchCache allocates.
+// The result is a handful of allocations landing at an unpredictable point
+// roughly a thousand calls into the process, attributable to no line here.
+//
+// It is invisible to testing.AllocsPerRun — 6 over 500 is 0 after the integer
+// division — and it is exactly what a total-counting window sees. Measured: this
+// guard failed 1 run in 10 under Bazel at "500 emits performed 506 allocations
+// against 500 with no transport", the sibling file guard failed 2 in 5 the same
+// way, and holding the collector off fixed NEITHER. Thirty thousand emits put
+// the probability the cache is still unbuilt at (1023/1024)^30000, about 2e-13.
+//
+// The THROWAWAY handler is load-bearing rather than tidy. The cache is the
+// runtime's — per call site, process-global — so any handler can pay for it,
+// while what this file polices is per writer. Warming through the object under
+// test would leave an accumulating regression far past its own growth steps,
+// which is the same blindness the integer division produces.
+const allocRuntimeWarmup int = 30000
+
 // mallocsOver reports the TOTAL number of heap allocations f performs across
 // runs calls, rather than the per-call average.
 //
@@ -138,6 +162,8 @@ func (allocNoopSink) Close() error                  { return nil }
 // actually notice, a doubling of the logger's advertised allocation budget.
 func TestConsoleWriterAddsNoAllocationToAnEmit(t *testing.T) {
 	ctx := context.Background()
+	//: before anything is measured, and never through the sink under test.
+	warmRuntimeCaches(t)
 	sink := allocSink(t)
 	rec := corelogger.RecordEvent{Level: level.Info}
 	line := []byte("2026-09-10T20:15:11.482Z INFO msg=\"request served\" status=200\n")
@@ -162,6 +188,24 @@ func TestConsoleWriterAddsNoAllocationToAnEmit(t *testing.T) {
 // emitCost totals the allocations of allocRuns full emits through sink: the
 // text encoder and the generic handler above it, which is the shape a consumer
 // runs.
+// warmRuntimeCaches builds the runtime's lazy interface-switch caches through a
+// handler and sink nothing else will touch, so no measured window pays for them.
+func warmRuntimeCaches(t *testing.T) {
+	t.Helper()
+	h, err := servicelogger.NewHandler(encoder.NewText(clock.System), allocNoopSink{}, level.Info)
+	if err != nil {
+		t.Fatalf("building the warm-up handler: %v", err)
+	}
+	ctx := context.Background()
+	rec := corelogger.RecordEvent{Level: level.Info, Message: "warm"}
+	//: the emit path is what the measured windows walk, so it is what is warmed.
+	for range allocRuntimeWarmup {
+		if herr := h.Handle(ctx, rec); herr != nil {
+			t.Fatalf("warming the runtime caches: %v", herr)
+		}
+	}
+}
+
 func emitCost(t *testing.T, sink corelogger.Sink) uint64 {
 	t.Helper()
 	h, err := servicelogger.NewHandler(encoder.NewText(clock.System), sink, level.Info)
