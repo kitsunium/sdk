@@ -76,11 +76,35 @@ type (
 	withNegativeSize struct {
 		Name string `validate:"minlen=-1"`
 	}
+	//: a literal the field's own width cannot hold. Parsed at 64 bits it
+	//: compiles to a floor no int8 reaches or a ceiling every uint8 is under
+	//: — a check that refuses everything, or one that never fires.
+	withMinBeyondInt8 struct {
+		Level int8 `validate:"min=200"`
+	}
+	withMaxBeyondUint8 struct {
+		Level uint8 `validate:"max=300"`
+	}
+	withMinBeyondFloat32 struct {
+		Ratio float32 `validate:"min=1e39"`
+	}
+	withOneOfBeyondInt8 struct {
+		Level int8 `validate:"oneof=-129|0"`
+	}
+	withOneOfBeyondUint8 struct {
+		Level uint8 `validate:"oneof=1|300"`
+	}
 )
 
 // TestTheDialectRefusesByName is the deliverable's other half: every construct
 // the SDK declines to support is declined explicitly, at COMPILE time, with a
 // message that says what to do instead.
+//
+// The five width rows are MUTATION-CHECKED one parser at a time: reading the
+// signed bound, the unsigned bound, the float bound, the signed oneof entries
+// or the unsigned oneof entries at 64 bits again fails exactly its own row, at
+// `must be refused at compile time, not accepted and quietly ignored` — which
+// is what all five did before the literal was read at the field's width.
 func TestTheDialectRefusesByName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -109,6 +133,13 @@ func TestTheDialectRefusesByName(t *testing.T) {
 		{"a bound with no argument", compileOf[withMissingArg], "numeric argument"},
 		{"required with an argument", compileOf[withRequiredArg], "no argument"},
 		{"a negative size", compileOf[withNegativeSize], "negative"},
+		//: the clause names the field's KIND, which is what has to change
+		//: when the bound was right and the field too narrow.
+		{"min beyond an int8", compileOf[withMinBeyondInt8], "out of range for this field's kind (int8)"},
+		{"max beyond a uint8", compileOf[withMaxBeyondUint8], "out of range for this field's kind (uint8)"},
+		{"min beyond a float32", compileOf[withMinBeyondFloat32], "out of range for this field's kind (float32)"},
+		{"a oneof entry beyond an int8", compileOf[withOneOfBeyondInt8], "entry -129 is out of range for this field's kind (int8)"},
+		{"a oneof entry beyond a uint8", compileOf[withOneOfBeyondUint8], "entry 300 is out of range for this field's kind (uint8)"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

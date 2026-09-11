@@ -32,11 +32,11 @@ func buildOneOf(name string, typ reflect.Type, arg string, hasArg bool) (check f
 	//: signed integers: every entry is parsed at compile time.
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		//: signed membership.
-		return signedOneOf(name, values)
+		return signedOneOf(name, values, typ)
 	//: unsigned integers, same shape.
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		//: unsigned membership.
-		return unsignedOneOf(name, values)
+		return unsignedOneOf(name, values, typ)
 	//: anything else, refused by name.
 	default:
 		//: a float set would compare by exact equality, which is a trap; a
@@ -91,8 +91,8 @@ func stringOneOf(values []string) fieldCheck {
 	}
 }
 
-// signedOneOf compiles membership over a signed integer field.
-func signedOneOf(name string, values []string) (check fieldCheck, err error) {
+// signedOneOf compiles membership over a signed integer field of type typ.
+func signedOneOf(name string, values []string, typ reflect.Type) (check fieldCheck, err error) {
 	//: parse every entry at compile time; one bad entry refuses the rule
 	//: rather than silently shrinking the set.
 	set := make(map[int64]struct{}, len(values))
@@ -100,12 +100,13 @@ func signedOneOf(name string, values []string) (check fieldCheck, err error) {
 	parsed := make([]int64, 0, len(values))
 	//: parse.
 	for _, value := range values {
-		//: base 10, 64-bit.
-		number, parseErr := strconv.ParseInt(value, decimalBase, bitSize64)
+		//: base 10, at the field's own width — an entry the field cannot hold
+		//: is a member nothing can ever match, the set silently one smaller.
+		number, parseErr := strconv.ParseInt(value, decimalBase, typ.Bits())
 		//: refuse.
 		if parseErr != nil {
 			//: name the entry that failed.
-			return nil, rejectRule(name, tagOneOf, "the entry "+clip(value)+" is not a whole number")
+			return nil, rejectRule(name, tagOneOf, literalClause(parseErr, "the entry "+clip(value), "is not a whole number", typ))
 		}
 		//: record.
 		set[number] = struct{}{}
@@ -126,20 +127,20 @@ func signedOneOf(name string, values []string) (check fieldCheck, err error) {
 	}, nil
 }
 
-// unsignedOneOf compiles membership over an unsigned integer field.
-func unsignedOneOf(name string, values []string) (check fieldCheck, err error) {
+// unsignedOneOf compiles membership over an unsigned integer field of type typ.
+func unsignedOneOf(name string, values []string, typ reflect.Type) (check fieldCheck, err error) {
 	//: same shape as signedOneOf, over the unsigned accessor.
 	set := make(map[uint64]struct{}, len(values))
 	//: keep the parsed values for the message, in declaration order.
 	parsed := make([]uint64, 0, len(values))
 	//: parse.
 	for _, value := range values {
-		//: base 10, 64-bit, non-negative.
-		number, parseErr := strconv.ParseUint(value, decimalBase, bitSize64)
+		//: base 10, non-negative, at the field's own width.
+		number, parseErr := strconv.ParseUint(value, decimalBase, typ.Bits())
 		//: refuse.
 		if parseErr != nil {
 			//: name the entry that failed.
-			return nil, rejectRule(name, tagOneOf, "the entry "+clip(value)+" is not a non-negative whole number")
+			return nil, rejectRule(name, tagOneOf, literalClause(parseErr, "the entry "+clip(value), "is not a non-negative whole number", typ))
 		}
 		//: record.
 		set[number] = struct{}{}

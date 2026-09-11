@@ -35,7 +35,10 @@
 // Member names come from the json tag when the field has one, else the Go
 // field name. That is not a preference: the SDK's own config.Load decodes
 // every format — TOML, YAML, env, JSON — through a JSON round trip, so the
-// json name is literally the key the operator wrote.
+// json name is literally the key the operator wrote. For the same reason an
+// embedded struct with no json name adds no segment of its own: encoding/json
+// promotes its fields into the enclosing object, so an untagged Common
+// embedding reports "zip", not "Common.zip".
 //
 // # Everything, not the first thing
 //

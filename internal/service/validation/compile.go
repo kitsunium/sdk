@@ -70,8 +70,17 @@ func compileStruct(typ reflect.Type, stopAtFirst bool, visiting map[reflect.Type
 // compileField turns one field's validate tag into zero, one or two steps: the
 // field's own rules, and its descent.
 func compileField(field reflect.StructField, index int, raw string, stopAtFirst bool, visiting map[reflect.Type]bool) (steps []planStep, err error) {
-	//: the name this field will carry in every path.
+	//: the name this field carries in a path, and in every refusal.
 	name := pathName(field)
+	//: the segment it adds to a path, which is the name — except for an
+	//: embedding JSON promotes, whose members are keys of the object that
+	//: embeds it and are located under that object's own path.
+	segment := name
+	//: see promotedEmbedding.
+	if promotedEmbedding(field) {
+		//: JoinField treats an empty member as "no descent happened".
+		segment = ""
+	}
 	//: rules before dive apply to the field; rules after it apply to elements.
 	head, tail, hasDive := splitDive(parseTag(raw))
 	//: compile the field's own rules against its static type.
@@ -90,7 +99,7 @@ func compileField(field reflect.StructField, index int, raw string, stopAtFirst 
 	//: the field's own rules, if it has any.
 	if len(checks) != 0 {
 		//: one step per field keeps stop-at-first exact.
-		steps = append(steps, fieldStep(index, name, checks, stopAtFirst))
+		steps = append(steps, fieldStep(index, segment, checks, stopAtFirst))
 	}
 	//: no descent requested.
 	if !hasDive {
@@ -98,7 +107,7 @@ func compileField(field reflect.StructField, index int, raw string, stopAtFirst 
 		return steps, nil
 	}
 	//: compile the descent.
-	diveStep, diveErr := compileDive(field.Type, name, index, diveSpec{
+	diveStep, diveErr := compileDive(field.Type, name, segment, index, diveSpec{
 		tail: tail, stopAtFirst: stopAtFirst, visiting: visiting,
 	})
 	//: a refused descent refuses the field.
@@ -136,13 +145,14 @@ func compileChecks(name string, typ reflect.Type, items []string) (checks []fiel
 	return checks, nil
 }
 
-// fieldStep runs one field's compiled checks, located under base.
-func fieldStep(index int, name string, checks []fieldCheck, stopAtFirst bool) planStep {
+// fieldStep runs one field's compiled checks, located under base extended by
+// segment.
+func fieldStep(index int, segment string, checks []fieldCheck, stopAtFirst bool) planStep {
 	//: the closure captures the resolved index — a validation performs no
 	//: field-name lookup.
 	return func(base string, structValue reflect.Value) corevalidation.ReportValue {
 		//: the field's path, in the core grammar.
-		path := corevalidation.JoinField(base, name)
+		path := corevalidation.JoinField(base, segment)
 		//: the field's value, by index.
 		fieldValue := structValue.Field(index)
 		//: nil report — an accepting field allocates nothing.
@@ -191,6 +201,35 @@ func pathName(field reflect.StructField) string {
 	return name
 }
 
+// promotedEmbedding reports whether field is an embedding JSON PROMOTES: its
+// members become members of the enclosing object and the embedding itself has
+// no key, so a path that named it would name something no input contains.
+//
+// It is encoding/json's own rule, because JSON is what decides the keys an
+// operator writes (see jsonTagName): an anonymous field is promoted when its
+// json tag gives it no name and its type is a struct or a pointer to one. A
+// json name makes it an ordinary member; json:"-" takes it off the wire
+// altogether, so there is no promoted key to follow either; and an embedded
+// non-struct is keyed by its type name. pathName already names all three.
+func promotedEmbedding(field reflect.StructField) bool {
+	//: only an embedding can be promoted.
+	if !field.Anonymous {
+		//: an ordinary member.
+		return false
+	}
+	//: the name is everything before the first option, as in pathName.
+	name, _, _ := strings.Cut(field.Tag.Get(jsonTagName), tagSeparator)
+	//: a json name, or the opt-out, keeps the field out of promotion.
+	if name != "" {
+		//: keyed by that name, or not on the wire at all.
+		return false
+	}
+	//: JSON follows one pointer to find the struct, as derefType does.
+	target, _ := derefType(field.Type)
+	//: only a struct has members to promote.
+	return target.Kind() == reflect.Struct
+}
+
 // parseTag splits a validate tag into its rule items, dropping empties so a
 // trailing comma is a typo rather than a failure.
 func parseTag(raw string) []string {
@@ -227,4 +266,34 @@ func splitDive(items []string) (head, tail []string, hasDive bool) {
 	}
 	//: no descent.
 	return items, nil, false
+}
+
+// splitPresence divides the rule items that follow dive into the presence rule
+// and everything else — but only for a POINTER element, where the two ask about
+// different values: presence about the pointer, which is exactly what a nil
+// element lacks, and the rest about the value behind it. For any other element
+// both ask about the same value, so the items stay one list, in tag order.
+func splitPresence(items []string, pointer bool) (presence, rest []string) {
+	//: one value to ask about, one list.
+	if !pointer {
+		//: declaration order is evaluation order.
+		return nil, items
+	}
+	//: route each item by its rule name; the rule compiler still sees every
+	//: item, so a malformed `required=x` is refused exactly as before.
+	for _, item := range items {
+		//: the rule is everything before the argument.
+		rule, _, _ := strings.Cut(item, argSeparator)
+		//: presence is asked of the pointer.
+		if rule == tagRequired {
+			//: in tag order among its own kind.
+			presence = append(presence, item)
+			//: next item.
+			continue
+		}
+		//: everything else is asked of the value behind it.
+		rest = append(rest, item)
+	}
+	//: both halves, each in tag order.
+	return presence, rest
 }
