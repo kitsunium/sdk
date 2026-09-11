@@ -43,7 +43,12 @@ even when every caller has left — otherwise a run nobody waits for is cancelle
 by nobody, which is the ordinary shape behind a proxy whose own timeout is
 shorter. One consequence is visible to any test driving the manual clock: a
 check measured for the first time arms TWO timers, the probe's and the run's,
-and `probeUnderClock`'s `waits` counts timers.
+and `probeUnderClock`'s `waits` counts timers. The run also REMEMBERS that a
+budget is what cancelled it (`inflight.expire`), because a body that honours its
+context returns `ctx.Err()` — an ordinary failure wearing no timeout — and the
+result it publishes is what every probe joining afterwards reads. A body that
+succeeds despite the cancellation keeps its success: a late answer is not a
+wrong one.
 
 ## Sentinels (`0.3.59.*`)
 

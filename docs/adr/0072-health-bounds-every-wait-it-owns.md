@@ -55,6 +55,15 @@ not anyone is left waiting, and cancels the run's context at expiry — the same
 announcement `abandoned` makes, meaning the same thing: the SDK cannot kill a
 goroutine, so cancelling is all it can do and the body decides what that means.
 
+And the run REMEMBERS that a budget is why it was cancelled. A check that
+honours its context answers the announcement by returning `ctx.Err()`, which is
+an ordinary failure wearing no timeout; the result the run publishes is what
+every probe joining afterwards reads, so without the flag a dependency that was
+simply too slow looks like a cancellation. Both sides — the waiter's expiry and
+the run's own — go through one `inflight.expire`, and a body that SUCCEEDS
+despite the cancellation keeps its success, because a late answer is not a
+wrong one.
+
 ## Consequences
 
 - A deaf supervisor now costs one budget per announcement instead of the
@@ -102,8 +111,10 @@ block forever now fails, and a run nobody waits for now ends at its budget.
 
 - `internal/service/proc/sdnotify/notify.go` (`NotifyContext`, `boundWrite`),
   `internal/service/health/notify.go` (`sendBudget`),
-  `internal/service/health/runner.go` (`boundRun`).
+  `internal/service/health/runner.go` (`boundRun`, `outcome`),
+  `internal/service/health/inflight.go` (`expire`).
 - `TestNotifyContextStopsWaitingWhenTheSupervisorStopsReading`,
   `TestADeafSupervisorCannotStopTheProbeFromAnswering`,
   `TestAProbeWithNoDeadlineStillBoundsItsAnnouncement`,
-  `TestARunAbandonedByEveryCallerStillExpires`.
+  `TestARunAbandonedByEveryCallerStillExpires`,
+  `TestAProbeJoiningAnExpiredRunReadsATimeout`.

@@ -3,6 +3,7 @@ package sdnotify
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"strconv"
@@ -95,8 +96,12 @@ func writeDatagram(ctx context.Context, conn writeDeadliner, payload, socket str
 	_, err = conn.Write([]byte(payload))
 	//: a write fault means the supervisor did not receive the notification.
 	if err != nil {
-		//: wrap the write fault as NotifyFailed.
-		return wrapNotify(err, socket)
+		//: the caller's own reason travels WITH the fault when there is one.
+		//: The bound is applied as a write deadline, so a cancellation and an
+		//: expiry both surface as os.ErrDeadlineExceeded and a caller could not
+		//: tell "I gave up" from "the supervisor was too slow" — joining ctx's
+		//: error puts both in the chain, where errors.Is answers either way.
+		return wrapNotify(errors.Join(err, ctx.Err()), socket)
 	}
 	//: the datagram was delivered (the caller's deferred close may still fail).
 	return nil

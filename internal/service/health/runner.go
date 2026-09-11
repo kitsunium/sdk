@@ -79,10 +79,7 @@ func (h *health) perform(e *entry, run *inflight) {
 	release := h.boundRun(e, run)
 	err := h.invoke(e, run)
 	release()
-	result := corehealth.ResultValue{
-		Name: e.name, Status: e.verdict(err), At: h.clk.Now(),
-		Took: h.clk.Since(begun), Err: err,
-	}
+	result := h.outcome(e, run, err, begun)
 	//: published BEFORE the entry is released, so a probe arriving in between
 	//: joins a finished run and gets its answer at once.
 	run.result = result
@@ -91,6 +88,32 @@ func (h *health) perform(e *entry, run *inflight) {
 	if e.finish(result) {
 		h.startupPassed()
 	}
+}
+
+// outcome turns a finished body into the result every later probe will read.
+//
+// A run whose budget expired reports a TIMEOUT even when the body came back on
+// its own, because the body coming back is what cancelling it was FOR: a check
+// that honours its context returns ctx.Err(), which is an ordinary failure
+// wearing no timeout, and the next probe to join this run would read a plain
+// cancellation where the truth is that the check was too slow. The waiter that
+// was there when the budget fired already got [health.abandoned]'s verdict;
+// this is the same verdict, for everybody who arrives after.
+//
+// A body that SUCCEEDED despite the cancellation keeps its success: the answer
+// is late, not wrong, and a later probe reading a real healthy measurement is
+// more useful than one reading a timeout nobody is waiting on any more.
+func (h *health) outcome(e *entry, run *inflight, err error, begun time.Time) corehealth.ResultValue {
+	//: the ordinary path, and the late-but-successful one.
+	if err == nil || !run.expired.Load() {
+		//: whatever the body said.
+		return corehealth.ResultValue{
+			Name: e.name, Status: e.verdict(err), At: h.clk.Now(),
+			Took: h.clk.Since(begun), Err: err,
+		}
+	}
+	//: the budget is why it stopped, so the budget is what it reports.
+	return h.abandoned(e, run)
 }
 
 // boundRun arms the budget the RUN owns, and returns the release its caller
@@ -125,8 +148,9 @@ func (h *health) boundRun(e *entry, run *inflight) (release func()) {
 		select {
 		//: the body had its budget and did not answer.
 		case <-timer.C():
-			//: tell it so; a liveness body has no context and hears nothing.
-			run.cancel()
+			//: tell it so, and record that a budget is why — a liveness body
+			//: has no context and hears nothing either way.
+			run.expire()
 		//: the body answered first.
 		case <-released:
 			//: nothing to announce.
@@ -229,7 +253,9 @@ func (h *health) wrapFailure(e *entry, err error) error {
 func (h *health) abandoned(e *entry, run *inflight) corehealth.ResultValue {
 	//: tell the body its time is up; it decides what that means. A liveness
 	//: body has no context and hears nothing, which its own doc comment says.
-	run.cancel()
+	//: Through expire, so a body that returns its ctx.Err() is still reported
+	//: as a timeout to the probes that join this run afterwards.
+	run.expire()
 	err := kerrs.Wrap(CheckTimeout, kerrs.WrapParams{},
 		kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()),
 		kerrs.String("budget", e.budget.String()))

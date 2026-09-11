@@ -216,6 +216,76 @@ func TestARunAbandonedByEveryCallerStillExpires(t *testing.T) {
 	})
 }
 
+// TestAProbeJoiningAnExpiredRunReadsATimeout closes the gap the run-owned
+// budget opened. Cancelling the run is an ANNOUNCEMENT, and a check that
+// HONOURS its context answers it by returning ctx.Err() — an ordinary failure
+// wearing no timeout. The probe that was waiting when the budget fired gets
+// health.abandoned's verdict either way, but the result the run PUBLISHES is
+// what every probe joining afterwards reads, and a plain "context canceled" is
+// not what happened: the check was too slow.
+//
+// The body waits for a release before returning, which is what makes the window
+// reachable: the run is expired and still outstanding, so the second probe
+// joins it rather than starting its own, and then reads the published result.
+//
+// Seen failing with the classification removed (perform building the result
+// straight from the body's error): "TimedOut = false" and "[0.3.59.1
+// CHECK_FAILED] A health check reported a failure" — so a dependency that was
+// simply too slow looked like an ordinary failure to every probe after the
+// first.
+// # Goroutine lifetime
+//
+// Two probes, each on its own goroutine, plus the body the registry runs. The
+// first ends at the clock advance, the second when the release lets the body
+// return, and both are received from before the test exits — the body's
+// goroutine is the run's, and it ends with it.
+func TestAProbeJoiningAnExpiredRunReadsATimeout(t *testing.T) {
+	t.Parallel()
+	registry, clk := newRegistry(t, svchealth.Config{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int64
+	mustAddReadiness(t, registry, corehealth.ReadinessCheckValue{
+		Name: "db", Check: func(ctx context.Context) error {
+			//: only the first entry announces; the run is shared.
+			if calls.Add(1) == 1 {
+				close(entered)
+			}
+			<-ctx.Done()
+			//: held here so the run stays outstanding while it is joined.
+			<-release
+			//: the shape under test: a body that honours its cancellation.
+			return ctx.Err()
+		},
+	})
+	first := make(chan corehealth.ReportValue, 1)
+	go func() { first <- registry.Probe(context.Background(), corehealth.ProbeReadiness) }()
+	<-entered
+	//: the probe's timer and the run's own.
+	clk.BlockUntil(2)
+	clk.Advance(budget)
+	//: the waiter's own verdict, which was never in doubt.
+	if got := resultFor(t, <-first, "db"); !got.TimedOut {
+		t.Error("the waiting probe reported TimedOut = false, want the budget's verdict")
+	}
+	//: a second probe joins the expired, still-outstanding run.
+	second := make(chan corehealth.ReportValue, 1)
+	go func() { second <- registry.Probe(context.Background(), corehealth.ProbeReadiness) }()
+	//: it is parked on its own budget over that run; letting the body go now
+	//: makes it read the PUBLISHED result rather than its own timeout.
+	clk.BlockUntil(1)
+	close(release)
+	joined := resultFor(t, <-second, "db")
+	if !joined.TimedOut {
+		t.Errorf("a probe joining the expired run got TimedOut = %v, want true", joined.TimedOut)
+	}
+	if !errs.HasCode(joined.Err, svchealth.CodeCheckTimeout) {
+		t.Errorf("a probe joining the expired run got %v, want CHECK_TIMEOUT", joined.Err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("the body ran %d times, want 1 — the second probe must not start its own", got)
+	}
+}
+
 // TestABudgetExpiryStillHonoursCriticality pins that a non-critical check that
 // times out degrades rather than sinks the probe. A timeout is a failure, and
 // a failure goes through the same rule every other failure does.

@@ -99,6 +99,12 @@ func TestNotifyContextStopsWaitingWhenTheSupervisorStopsReading(t *testing.T) {
 	if !errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Errorf("err = %v, want it to carry os.ErrDeadlineExceeded", err)
 	}
+	//: and the caller's own reason, because the bound reaches the socket as a
+	//: write deadline either way: without it in the chain, a caller could not
+	//: tell an expiry from a cancellation.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want it to carry context.DeadlineExceeded", err)
+	}
 	//: a generous ceiling: what is under test is that it RETURNS, not its
 	//: precision. Without the bound it never does.
 	if elapsed > 5*time.Second {
@@ -135,6 +141,12 @@ func TestNotifyContextIsCancellableWithNoDeadlineAtAll(t *testing.T) {
 		}
 		if !errs.HasCode(err, coreproc.CodeNotifyFailed) {
 			t.Errorf("err = %v, want NOTIFY_FAILED", err)
+		}
+		//: a cancellation reaches the socket as a deadline in the past, so it
+		//: is indistinguishable from an expiry unless ctx's own error travels
+		//: with it. Seen failing before it did: errors.Is said false.
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want it to carry context.Canceled", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("a cancelled send never returned")
