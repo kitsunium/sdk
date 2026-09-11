@@ -154,5 +154,5 @@ sentinels are enforced for Public-is-literal / reason / uniqueness from day one.
 
 ## References
 
-- Feature roadmap: `.claude/contexts/sdk-feature-ideation.md` (crypto domain section)
+- Feature roadmap: `docs/sdk-feature-ideation.md` (crypto domain section)
 - `internal/core/crypto/CLAUDE.md`, `internal/service/crypto/aesgcm/CLAUDE.md`, `pkg/v1/crypto/CLAUDE.md`
