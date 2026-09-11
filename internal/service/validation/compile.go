@@ -63,6 +63,11 @@ func compileStruct(typ reflect.Type, stopAtFirst bool, visiting map[reflect.Type
 		//: contribute.
 		steps = append(steps, fieldSteps...)
 	}
+	//: every rule compiled; now refuse one no JSON key could ever feed.
+	if reachErr := checkJSONReach(typ); reachErr != nil {
+		//: InvalidRule, naming the field its key does not reach.
+		return nil, reachErr
+	}
 	//: the plan, with its mode baked in.
 	return &structPlan{steps: steps, stopAtFirst: stopAtFirst}, nil
 }
