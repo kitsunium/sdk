@@ -177,6 +177,12 @@ with `MissingMember` — and it is pinned by
 `TestParseIsTheOnlyDecodeEntryPoint` so it stays a documented property rather
 than a surprise.
 
+The same zero struct is why `Parse` and `ParseSet` test for JSON `null` first:
+`json.Unmarshal` accepts `null` into a struct and leaves it zero, so a `null`
+key, a `null` set document and a `null` member of `"keys"` each read as
+`MissingMember`. None of them is an object at all, and each is now `Malformed`
+— the code a caller routing on the refusal needs.
+
 ## Do NOT
 
 - **Do not add remote JWKS retrieval here** (HTTP fetch, cache, TTL, OpenID

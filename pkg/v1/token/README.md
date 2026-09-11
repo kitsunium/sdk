@@ -614,7 +614,7 @@ type JWKSet = jwk.Set
 ```
 
 <a name="NewJWKSet"></a>
-### func [NewJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L144>)
+### func [NewJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L146>)
 
 ```go
 func NewJWKSet(keys ...JWK) JWKSet
@@ -623,7 +623,7 @@ func NewJWKSet(keys ...JWK) JWKSet
 NewJWKSet assembles a [JWKSet](<#JWKSet>) from keys already parsed, in the given order — the order in which [NewSetVerifier](<#NewSetVerifier>) tries candidates sharing a "kid". It validates nothing further: the material of every non\-zero JWK already passed [ParseJWK](<#ParseJWK>), and a zero JWK in a set can never verify a token.
 
 <a name="ParseJWKSet"></a>
-### func [ParseJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L134>)
+### func [ParseJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L136>)
 
 ```go
 func ParseJWKSet(document []byte) (set JWKSet, err error)
@@ -633,7 +633,7 @@ ParseJWKSet decodes a JSON Web Key Set document \(RFC 7517 §5\) — typically t
 
 Every member is validated exactly as [ParseJWK](<#ParseJWK>) validates one, and the set is accepted whole or not at all: one refused member refuses the document, with that member's own CodeJWK\* code and its index attached, rather than yielding a set that silently holds fewer keys than were published. A set carrying an RSA member is therefore refused, with [CodeJWKUnsupportedKeyType](<#CodeJWKUnsupportedKeyType>).
 
-The "keys" member is required — absent or null is refused with [CodeJWKMissingMember](<#CodeJWKMissingMember>) — while an empty array is a valid empty set, which [NewSetVerifier](<#NewSetVerifier>) then refuses because it could never verify anything.
+The "keys" member is required — absent or null is refused with [CodeJWKMissingMember](<#CodeJWKMissingMember>) — while an empty array is a valid empty set, which [NewSetVerifier](<#NewSetVerifier>) then refuses because it could never verify anything. A document, or a member, that is JSON null is not an object at all and is refused with [CodeJWKMalformed](<#CodeJWKMalformed>).
 
 <a name="Key"></a>
 ## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L19>)
@@ -708,7 +708,7 @@ func NewPasetoV4Verifier(pub ed25519.PublicKey, cfg PasetoVerifierConfig) (verif
 NewPasetoV4Verifier returns a PASETO v4.public verifier bound to pub. A token of any other PASETO version or purpose — including v4.local — is refused with [SchemeUnsupported](<#Malformed>).
 
 <a name="NewSetVerifier"></a>
-### func [NewSetVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L179>)
+### func [NewSetVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L181>)
 
 ```go
 func NewSetVerifier(set JWKSet, cfg VerifierConfig) (verifier Verifier, err error)
@@ -721,7 +721,7 @@ The kid chooses which key to TRY; the signature decides whether the token is val
 A set no token could ever verify against is refused here, with [PolicyMisconfigured](<#Malformed>), rather than built into a verifier that refuses everything: an empty set, and one whose every member either carries no kid or is a key this package does not verify with \(P\-384, P\-521\). A single key published without a kid belongs to [NewVerifierFromJWK](<#NewVerifierFromJWK>).
 
 <a name="NewVerifierFromJWK"></a>
-### func [NewVerifierFromJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L159>)
+### func [NewVerifierFromJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L161>)
 
 ```go
 func NewVerifierFromJWK(key JWK, cfg VerifierConfig) (verifier Verifier, err error)

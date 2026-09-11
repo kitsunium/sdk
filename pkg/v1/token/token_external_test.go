@@ -254,6 +254,12 @@ func TestAMalformedJWKIsRefusedWithAMatchableCode(t *testing.T) {
 			token.CodeJWKMalformed, token.JWKMalformed,
 		},
 		{
+			//: json.Unmarshal takes null into a struct and leaves it zero, so
+			//: this read as a key missing its kty, in a key and in a set alike.
+			"JSON null where a key object belongs", `null`,
+			token.CodeJWKMalformed, token.JWKMalformed,
+		},
+		{
 			"an EC key without y", `{"kty":"EC","crv":"P-256","x":"` + rfc7515X + `"}`,
 			token.CodeJWKMissingMember, token.JWKMissingMember,
 		},
@@ -287,6 +293,18 @@ func TestAMalformedJWKIsRefusedWithAMatchableCode(t *testing.T) {
 				t.Errorf("ParseJWKSet kept %d key(s) out of a refused document", set.Len())
 			}
 		})
+	}
+}
+
+// TestANullJWKSetEnvelopeIsMalformed pins the envelope half: a JWK Set
+// document that is JSON null is not a set whose keys are missing, it is not an
+// object at all. It read as JWKMissingMember before.
+func TestANullJWKSetEnvelopeIsMalformed(t *testing.T) {
+	t.Parallel()
+	set, err := token.ParseJWKSet([]byte(`null`))
+	expectRoutable(t, "ParseJWKSet(null)", err, token.CodeJWKMalformed, token.JWKMalformed)
+	if set.Len() != 0 {
+		t.Errorf("ParseJWKSet(null) kept %d key(s)", set.Len())
 	}
 }
 

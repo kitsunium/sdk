@@ -44,8 +44,18 @@ func NewSet(keys ...KeyValue) Set {
 // The "keys" member is required (RFC 7517 §5.1): an absent or null one is
 // MissingMember, not an empty set. An empty ARRAY is a valid empty set — that
 // is a publisher saying "no keys right now", which is different from a document
-// that forgot to say anything.
+// that forgot to say anything. A document, or a member, that is JSON null is
+// Malformed: it is no object at all, which json.Unmarshal would otherwise let
+// through as a zero struct reading like a missing member.
 func ParseSet(document []byte) (set Set, err error) {
+	//: a null ENVELOPE is not a set document with its keys missing, it is not
+	//: a JSON object at all — the same refusal Parse gives a null key. A null
+	//: member of "keys" reaches Parse, and is refused there.
+	if isJSONNull(document) {
+		//: the sentinel itself, so its HTTP status and exit code survive.
+		return Set{}, errs.Wrap(Malformed, errs.WrapParams{},
+			errs.String("why", "the document is JSON null, not a JWK Set object"))
+	}
 	var raw setJSON
 	//: the envelope first; members stay raw so Parse sees each one whole.
 	if uerr := json.Unmarshal(document, &raw); uerr != nil {

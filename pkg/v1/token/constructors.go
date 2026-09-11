@@ -130,7 +130,9 @@ func ParseJWK(document []byte) (key JWK, err error) {
 //
 // The "keys" member is required — absent or null is refused with
 // [CodeJWKMissingMember] — while an empty array is a valid empty set, which
-// [NewSetVerifier] then refuses because it could never verify anything.
+// [NewSetVerifier] then refuses because it could never verify anything. A
+// document, or a member, that is JSON null is not an object at all and is
+// refused with [CodeJWKMalformed].
 func ParseJWKSet(document []byte) (set JWKSet, err error) {
 	//: delegate to the set decoder, which runs every member through the same
 	//: validating entry point as ParseJWK.
