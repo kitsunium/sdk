@@ -132,6 +132,10 @@ func Test_validateTypePrefix(t *testing.T) {
 		{"a single character", "u", ""},
 		{"an interior underscore", "user_account", ""},
 		{"several interior underscores", "a_b_c_d", ""},
+		//: the specification's regex puts [a-z_]{0,61} between the first and
+		//: last letters, so a run of underscores in the interior is legal — a
+		//: check refusing "__" was seen failing this row.
+		{"consecutive interior underscores", "user__account", ""},
 		{"the maximum length", strings.Repeat("a", typeIDMaxPrefix), ""},
 		{"the empty prefix", "", "empty"},
 		{"one character too long", strings.Repeat("a", typeIDMaxPrefix+1), "too_long"},
