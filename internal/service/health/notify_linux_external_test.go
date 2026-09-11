@@ -244,3 +244,37 @@ func TestAFailedStatusIsSentAgain(t *testing.T) {
 		t.Errorf("the next datagram is %v, want the sentinel", got.State)
 	}
 }
+
+// TestDrainingIsAnnouncedToTheSupervisor pins that the STATUS line follows the
+// readiness verdict into a drain. The draining short-circuit returned before
+// the only announce, so a unit that had announced READY kept showing
+// "health: healthy" in systemctl status for the whole drain while every probe
+// answered unhealthy. Seen failing without the announce: the datagram after
+// READY was the sentinel, not "health: unhealthy".
+func TestDrainingIsAnnouncedToTheSupervisor(t *testing.T) {
+	//: not parallel — $NOTIFY_SOCKET is process-wide.
+	listener, socketPath := supervisorSocket(t)
+	t.Setenv("NOTIFY_SOCKET", socketPath)
+	registry, _ := newRegistry(t, svchealth.Config{Notify: true})
+	switchableReadiness(t, registry)
+	ctx := context.Background()
+	//: READY=1, delivered.
+	registry.Probe(ctx, corehealth.ProbeReadiness)
+	registry.Drain()
+	//: two polls during the drain: one change, so one datagram.
+	registry.Probe(ctx, corehealth.ProbeReadiness)
+	registry.Probe(ctx, corehealth.ProbeReadiness)
+	if err := svcsdnotify.Status("sentinel"); err != nil {
+		t.Fatalf("Status = %v, want nil", err)
+	}
+	if got := recvOne(t, listener); !got.Ready() {
+		t.Fatalf("the first datagram is %v, want READY=1", got.State)
+	}
+	if got := recvOne(t, listener); got.Status != "health: unhealthy" {
+		t.Fatalf("the datagram after READY is %v, want STATUS=health: unhealthy — "+
+			"the drain was never announced", got.State)
+	}
+	if got := recvOne(t, listener); got.Status != "sentinel" {
+		t.Errorf("the next datagram is %v, want the sentinel — a drain is one change, not one per poll", got.State)
+	}
+}
