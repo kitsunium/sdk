@@ -3,7 +3,7 @@
 
 ## Purpose
 
-`application/x-www-form-urlencoded` — the encoding every HTML form POSTs and
+`application/x-www-form-urlencoded` — the default encoding of an HTML form POST, and
 every query string carries. Pairs of percent-escaped `key=value` joined by
 `&`, with space written as `+`. Stdlib-only: `net/url` supplies the decode
 half, the encode half is hand-rolled so `Append` can write into a caller-owned
@@ -118,8 +118,13 @@ being retried through the JSON bridge and re-labelled `PROMOTE_FAILED`.
   would disable the guard while believing they configured it. With constants
   there is no zero value to misread; raising a bound is a reviewed source
   change. The pair ceiling is checked from the `'&'` count **before**
-  parsing, so an over-long body is refused without allocating a map
-  (`url.ParseQuery` has no pair limit of its own).
+  parsing, so an over-long body is refused without allocating a map. It is
+  `url.ParseQuery`'s own bound: since Go 1.24 the stdlib counts `'&'` + 1
+  against the same 10 000 (`GODEBUG=urlmaxqueryparams`), so the codec and
+  `r.ParseForm()` refuse the same bodies — a trailing `'&'` counted as a pair
+  by both, which `TestPairCeilingMatchesParseQuery` pins. The codec keeps its
+  own check because the stdlib's can be lifted at run time and a `const`
+  cannot.
 - **`net/url` owns the decode half.** `'+'` → space, `%XX` folding and the
   post-Go-1.17 refusal of `;` as a separator are stdlib behaviour, not
   re-implemented here. Re-implementing them is how a form decoder drifts from
