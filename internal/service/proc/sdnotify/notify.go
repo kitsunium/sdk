@@ -96,11 +96,21 @@ func writeDatagram(ctx context.Context, conn writeDeadliner, payload, socket str
 	_, err = conn.Write([]byte(payload))
 	//: a write fault means the supervisor did not receive the notification.
 	if err != nil {
-		//: the caller's own reason travels WITH the fault when there is one.
-		//: The bound is applied as a write deadline, so a cancellation and an
-		//: expiry both surface as os.ErrDeadlineExceeded and a caller could not
-		//: tell "I gave up" from "the supervisor was too slow" — joining ctx's
-		//: error puts both in the chain, where errors.Is answers either way.
+		//: the caller's own reason travels WITH the fault when it is already
+		//: known. The bound reaches the socket as a write deadline, so a
+		//: CANCELLATION would otherwise be indistinguishable from an expiry —
+		//: both surface as os.ErrDeadlineExceeded — and errors.Is could not
+		//: answer "did I give up, or was the supervisor too slow?".
+		//:
+		//: On a cancellation the answer is definite: the deadline in the past
+		//: is set BY context.AfterFunc, which runs only once ctx is done, so
+		//: ctx.Err() is context.Canceled by the time the write returns. On an
+		//: EXPIRY the two timers are independent — the socket's deadline and
+		//: the context's fire at the same instant and either may win — so
+		//: ctx.Err() may still be nil here. That case needs nothing: the write
+		//: already reports os.ErrDeadlineExceeded, which is what a caller reads
+		//: for "too slow". Join is therefore an addition where one exists, and
+		//: never the only carrier of anything.
 		return wrapNotify(errors.Join(err, ctx.Err()), socket)
 	}
 	//: the datagram was delivered (the caller's deferred close may still fail).
