@@ -93,6 +93,17 @@ codec rather than through a sixth entry in the facade's constrained-codec table.
   Rejected: it works for every producer that exists in practice, and refusing it
   would make the format the only registry member without the universal verb.
 
+## Breaking changes
+
+None. `BoundaryCodec` and `BoundaryProvider` are new extension interfaces
+discovered by type assertion, so no existing `Codec` implementation or signature
+changes — which is why they are extensions rather than a widened `Codec`
+(§Why not; ADR 0039).
+
+## Deferred
+
+None.
+
 ## References
 
 - `internal/service/codec/multipart/CLAUDE.md` §The boundary problem, §Not covered

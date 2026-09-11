@@ -86,6 +86,19 @@ far been reachable through `New`.** TypeID is not, and the reason generalises.
   Rejected: changing production behaviour to make a test reachable. Driving the
   sampler directly is the honest way.
 
+## Breaking changes
+
+None. Three schemes and four codes are added in the block `internal/service/id`
+already owns; no registered scheme, code or signature changes. The one semantic
+change — the `Scheme` registry is no longer exhaustive — is a documentation
+contract (§Consequences), not an API one.
+
+## Deferred
+
+- **An `AvailableSchemes()` enumeration.** Named in §Consequences only to state
+  what it would have to say — registered generators, or every scheme. Nothing
+  needs it today, so it is not built.
+
 ## References
 
 - `internal/service/id/CLAUDE.md`, `internal/service/id/{nanoid,ksuid,typeid}.go`

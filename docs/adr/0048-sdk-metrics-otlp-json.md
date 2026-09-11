@@ -15,7 +15,7 @@ change. This is that change.
 
 Until now the domain had one wire and it was the wrong one. The Prometheus text
 exposition connector is kept because a Prometheus deployment is a real
-destination, but ADR 0044 §Decision 8 enumerates what it drops on the floor:
+destination, but [ADR 0044](0044-metrics-adopts-the-otel-data-model.md) §Decision 8 enumerates what it drops on the floor:
 temporality (refused outright), the attribute's type, the `Resource`, the
 `InstrumentationScope`, and every OTel-conventional dotted key. A model that
 carries all five and a wire that carries none of them is a model nobody can

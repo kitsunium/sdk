@@ -105,6 +105,19 @@ not a data defect: nothing was wrong, and nothing prevented it from going wrong.
   `golang.org/x/tools` without breaking its Bazel build (ADR 0033 records the
   same constraint). The audit lives where the kernel is stdlib-only.
 
+## Breaking changes
+
+None for consumers: no public symbol moves and no code value changes — a
+published code is never renumbered (§Decision 4). For contributors, a code
+declared in a range `codeRangeOwners` does not map to its package now fails
+`TestAuditPrefixOwnership`; the remedy is the one-line allocation §Decision 4
+describes, in the same change as the codes.
+
+## Deferred
+
+None. What the audit does not judge is scoped in §Decision 5, each exclusion
+beside the mechanism that covers it instead.
+
 ## References
 
 - ADR 0005 §Registry, ADR 0006, ADR 0020 · rule 3 and rule 12 in root `CLAUDE.md`
