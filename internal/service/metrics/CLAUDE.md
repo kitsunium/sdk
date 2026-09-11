@@ -104,9 +104,17 @@ Consequences, stated rather than discovered:
 - **A series that saw nothing in a delta window reports zero**, rather than
   disappearing. Omitting it would make a series flicker in and out of a
   dashboard, and the cardinality bound already keeps the set finite.
-- **An OBSERVED series is never swapped.** Its callback already stored the right
-  number for the window (§Observables), and swapping would report the same delta
-  twice — once as itself, once as its own negation.
+- **An OBSERVED series is never swapped, and still consumes its window.** `v`
+  is not its accumulator: `observe` OVERWRITES it with the whole window each
+  time the callback reports the series, derived from `previous` and never from
+  `v` (§Observables). What a delta read consumes is the *report*, which the
+  `reports` counter tallies. A series the callback did not mention in this
+  collection therefore reports **zero**, like any series that saw nothing — it
+  used to re-emit its last window on every collection until it came back, and a
+  backend summing deltas counted it each time. `previous` survives the silence,
+  so the return is differenced against the last reading.
+  `TestDeltaObservableThatStopsReportingReportsZero` drives the three windows
+  through `Collect`.
 - **A gauge is untouched by either setting.** It carries no temporality, in this
   package and in the OTel model.
 
@@ -119,8 +127,16 @@ otherwise deadlock behind its own collection.
 
 - The callback reports the **absolute** total (the OTel contract). Under
   cumulative that value IS the report; under delta the meter stores
-  `absolute − previous` and remembers `absolute`. `previous` is a plain field,
-  not an atomic, because `collectMu` makes `Collect` the only writer.
+  `absolute − previous` and remembers `absolute`. `previous` and `reports` are
+  plain fields, not atomics, because `collectMu` makes `Collect` the only
+  writer.
+- **A monotonic total that went DOWN is a reset.** Under delta the window is
+  then the new `absolute` — what the source counted since it restarted from
+  zero (a process restart behind the callback) — because differencing it would
+  put a negative delta on a sum whose metric says `Monotonic`. An
+  `ObservableUpDownCounter` is signed and keeps its signed window; the
+  cumulative path publishes a decrease as reported, and a cumulative reader
+  reads the drop as a reset itself.
 - **Registrations accumulate**, as the OTel API specifies: a second callback
   under one name adds to the first rather than replacing it, so two packages can
   contribute to one instrument.
