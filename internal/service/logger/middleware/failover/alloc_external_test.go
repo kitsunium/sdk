@@ -15,6 +15,29 @@ import (
 // failoverRuns is the iteration count both arms share.
 const failoverRuns int = 2000
 
+// allocRuntimeWarmup is how many calls warmRuntimeCaches spends on a THROWAWAY
+// chain before either arm is measured, and it exists because a DIFFERENTIAL
+// assertion is uniquely fragile to a stray allocation: one landing in either arm
+// fails the comparison, and it fails it in whichever direction the stray fell.
+//
+// This guard did exactly that under Bazel, 1 run in 15: the DEPTH-1 BASELINE
+// caught the stray and the measured arms did not, so it reported "depth 4
+// performed 0 allocations, want 1" — the tested arms cleaner than the reference,
+// which is nonsense as a regression signal.
+//
+// The cause is the runtime, not this package. runtime/iface.go builds its
+// per-call-site type-switch cache LAZILY, gated behind `cheaprand()&1023 != 0`,
+// so about one miss in 1024 pays for it and buildInterfaceSwitchCache allocates.
+// It is invisible to testing.AllocsPerRun, which integer-divides it to 0.0, and
+// it is exactly what a total-counting window sees. Thirty thousand calls put the
+// probability the cache is still unbuilt at (1023/1024)^30000, about 2e-13.
+//
+// The THROWAWAY chain is load-bearing. The cache is process-global and per call
+// site, so anything can pay for it, while warming through the object under test
+// would push an accumulating regression past its own growth steps — the same
+// blindness this file counts totals to avoid.
+const allocRuntimeWarmup int = 30000
+
 // allocSink defeats dead-code elimination in the allocation probe.
 var allocSink int
 
@@ -76,6 +99,23 @@ func mallocsOver(runs int, f func()) uint64 {
 	return after.Mallocs - before.Mallocs
 }
 
+// warmRuntimeCaches drives a chain nothing else will touch, so neither measured
+// arm pays for the runtime's lazily-built caches.
+func warmRuntimeCaches(t *testing.T, payload []byte) {
+	t.Helper()
+	sink, err := failover.New(&controlledSink{})
+	if err != nil {
+		t.Fatalf("building the warm-up chain: %v", err)
+	}
+	ctx := context.Background()
+	//: the write path is what both arms walk, so it is what is warmed.
+	for range allocRuntimeWarmup {
+		if _, werr := sink.Write(ctx, corelogger.RecordEvent{}, payload); werr != nil {
+			t.Fatalf("warming the runtime caches: %v", werr)
+		}
+	}
+}
+
 func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 	ctx := context.Background()
 	payload := []byte("a log line that no branch will refuse\n")
@@ -117,6 +157,8 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 			allocSink = n
 		})
 	}
+	//: before either arm, and never through a chain an arm measures.
+	warmRuntimeCaches(t, payload)
 	base := writeAllocs(t, 1)
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

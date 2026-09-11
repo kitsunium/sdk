@@ -44,6 +44,29 @@ import (
 // per-record regression is unmistakable and small enough to stay fast.
 const fanoutRuns int = 2000
 
+// allocRuntimeWarmup is how many calls warmRuntimeCaches spends on a THROWAWAY
+// Logger before either arm is measured, and it exists because a DIFFERENTIAL
+// assertion is uniquely fragile to a stray allocation: one landing in either arm
+// fails the comparison, and it fails it in whichever direction the stray fell.
+//
+// This guard did exactly that under Bazel, 1 run in 15: the DEPTH-1 BASELINE
+// caught the stray and the measured arms did not, so it reported "depth 4
+// performed 0 allocations, want 1" — the tested arms cleaner than the reference,
+// which is nonsense as a regression signal.
+//
+// The cause is the runtime, not this package. runtime/iface.go builds its
+// per-call-site type-switch cache LAZILY, gated behind `cheaprand()&1023 != 0`,
+// so about one miss in 1024 pays for it and buildInterfaceSwitchCache allocates.
+// It is invisible to testing.AllocsPerRun, which integer-divides it to 0.0, and
+// it is exactly what a total-counting window sees. Thirty thousand calls put the
+// probability the cache is still unbuilt at (1023/1024)^30000, about 2e-13.
+//
+// The THROWAWAY Logger is load-bearing. The cache is process-global and per call
+// site, so anything can pay for it, while warming through the object under test
+// would push an accumulating regression past its own growth steps — the same
+// blindness this file counts totals to avoid.
+const allocRuntimeWarmup int = 30000
+
 // mallocsOver totals the allocations f performs across runs, and exists because
 // testing.AllocsPerRun cannot see an amortised one. Its last line is
 // `float64(mallocs / uint64(runs))` — an INTEGER division, documented in the
@@ -82,6 +105,24 @@ func mallocsOver(runs int, f func()) uint64 {
 	runtime.ReadMemStats(&after)
 	//: Mallocs is cumulative and monotonic, so the difference is the total.
 	return after.Mallocs - before.Mallocs
+}
+
+// warmRuntimeCaches emits through a Logger nothing else will touch, so neither
+// measured arm pays for the runtime's lazily-built caches.
+func warmRuntimeCaches(t *testing.T) {
+	t.Helper()
+	lg, err := logger.NewWithSink(logger.SinkConfig{
+		Sink:    logger.Multi(discardSink{}),
+		Encoder: logger.TextEncoder(),
+	})
+	if err != nil {
+		t.Fatalf("building the warm-up Logger: %v", err)
+	}
+	ctx := t.Context()
+	//: the emit path is what both arms walk, so it is what is warmed.
+	for range allocRuntimeWarmup {
+		logger.Build(lg, logger.LevelInfo).Str("k1", "v1").Int("n1", 1).Send(ctx, "warm")
+	}
 }
 
 func TestFanoutWidthAddsNoAllocation(t *testing.T) {
@@ -125,6 +166,8 @@ func TestFanoutWidthAddsNoAllocation(t *testing.T) {
 			b.Send(ctx, "msg")
 		})
 	}
+	//: before either arm, and never through a Logger an arm measures.
+	warmRuntimeCaches(t)
 	base := emitAllocs(t, 1)
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
