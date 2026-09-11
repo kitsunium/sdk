@@ -120,6 +120,19 @@ func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityV
 		return nil, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
 	}
+	//: the same layers an adopted socket gets, from the same function.
+	return layered(raw, id, trackCloses), nil
+}
+
+// layered puts a group's layers over a raw stream listener: the close tracker
+// when the group has a ceiling to keep counting, then TLS when it carries an
+// identity. It is the ONE place that decides them, for a socket this process
+// bound and for one a supervisor handed over alike.
+//
+// The adopted path used to add the tracker and never TLS, so a group with an
+// identity served an inherited socket in plaintext and reported no error —
+// the supervisor passes a raw socket, and TLS is this process's layer to add.
+func layered(raw stdnet.Listener, id corenet.IdentityValue, trackCloses bool) stdnet.Listener {
 	//: the tracker goes UNDER TLS, so net/http still receives the concrete
 	//: *tls.Conn it type-asserts on to populate Request.TLS.
 	if trackCloses {
@@ -128,11 +141,11 @@ func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityV
 	//: without an identity the listener stays plaintext.
 	if id.IsZero() {
 		//: no identity, so the listener stays plaintext.
-		return raw, nil
+		return raw
 	}
 	//: ServerConfig also carries the mutual-TLS setting, so one call covers
 	//: both TLS and mTLS and they cannot drift apart.
-	return tls.NewListener(raw, id.ServerConfig()), nil
+	return tls.NewListener(raw, id.ServerConfig())
 }
 
 // boundListener pairs a live listener with the group that owns it.

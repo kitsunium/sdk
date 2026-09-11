@@ -270,6 +270,13 @@ in-flight cap already uses in the resilience domain.
 makes a zero-downtime restart possible: the socket survives the exec, so no
 connection is lost and no bind races.
 
+- **An adopted socket gets exactly the layers a bound one does**, from the
+  same function (`layered`): the close tracker when the group has a ceiling,
+  then TLS when it carries an identity. The adopted path used to add the
+  tracker and never TLS, so `Adopt` + `TLS` served the inherited socket in
+  plaintext and reported nothing — the supervisor hands over a raw socket, and
+  TLS is this process's layer to add. `TestAdopt_ServesTheInheritedSocket` now
+  runs the adoption across an exec under a TLS identity too.
 - **A named socket the supervisor did not pass fails startup.** Binding one
   instead would lose the very property activation provides, and lose it
   invisibly — the process would look healthy while dropping the connections the

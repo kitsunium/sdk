@@ -200,13 +200,29 @@ func listenTCP(t *testing.T) *stdnet.TCPListener {
 // selfSignedIdentity builds a server TLS identity for the handshake tests.
 func selfSignedIdentity(t *testing.T) corenet.IdentityValue {
 	t.Helper()
+	id, _, err := newSelfSignedIdentity()
+	if err != nil {
+		t.Fatalf("self-signed identity: %v", err)
+	}
+	return id
+}
+
+// testServerName is the name the self-signed certificate is issued for, so a
+// client can verify it the standard way rather than skipping verification.
+const testServerName string = "kitsunium-test"
+
+// newSelfSignedIdentity is selfSignedIdentity without a *testing.T — the
+// adoption child has none — and it also returns the certificate, so a client
+// can trust exactly that one.
+func newSelfSignedIdentity() (corenet.IdentityValue, *x509.Certificate, error) {
 	key, kerr := ecdsa.GenerateKey(elliptic.P256(), nil)
 	if kerr != nil {
-		t.Fatalf("generate key: %v", kerr)
+		return corenet.IdentityValue{}, nil, kerr
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "kitsunium-test"},
+		Subject:               pkix.Name{CommonName: testServerName},
+		DNSNames:              []string{testServerName},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		IsCA:                  true,
@@ -215,11 +231,15 @@ func selfSignedIdentity(t *testing.T) corenet.IdentityValue {
 	}
 	der, cerr := x509.CreateCertificate(nil, tmpl, tmpl, &key.PublicKey, key)
 	if cerr != nil {
-		t.Fatalf("create certificate: %v", cerr)
+		return corenet.IdentityValue{}, nil, cerr
+	}
+	cert, perr := x509.ParseCertificate(der)
+	if perr != nil {
+		return corenet.IdentityValue{}, nil, perr
 	}
 	keyDER, merr := x509.MarshalECPrivateKey(key)
 	if merr != nil {
-		t.Fatalf("marshal key: %v", merr)
+		return corenet.IdentityValue{}, nil, merr
 	}
 	id, ierr := corenet.NewIdentityValue(corenet.IdentityParams{
 		CertPEM:    pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
@@ -227,9 +247,9 @@ func selfSignedIdentity(t *testing.T) corenet.IdentityValue {
 		MinVersion: tls.VersionTLS12,
 	})
 	if ierr != nil {
-		t.Fatalf("identity: %v", ierr)
+		return corenet.IdentityValue{}, nil, ierr
 	}
-	return id
+	return id, cert, nil
 }
 
 // TestNew pins that a freshly built server is USABLE and has bound nothing.

@@ -257,12 +257,11 @@ func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHand
 			return err
 		}
 		//: one accept goroutine per adopted descriptor.
-		for _, ln := range listeners {
-			//: an inherited socket is counted by the ceiling exactly as a bound
-			//: one is, hijacked connections included.
-			if group.tracksCloses() {
-				ln = &trackedListener{Listener: ln}
-			}
+		for _, raw := range listeners {
+			//: an inherited socket gets exactly the layers a bound one does —
+			//: counted by the ceiling, hijacked connections included, and
+			//: served over TLS when the group carries an identity.
+			ln := layered(raw, group.identity, group.tracksCloses())
 			addr := corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}
 			bound := &boundListener{group: group.name, addr: addr, ln: ln}
 			s.mu.Lock()
