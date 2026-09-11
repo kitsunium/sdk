@@ -49,6 +49,14 @@ Cinq questions, une seule réponse « non » suffit à exclure du SDK :
 
 ## 3. Ce que le SDK couvre déjà (référence, pour ne pas re-proposer)
 
+> **Instantané du 2026-09-09**, pris avant la vague Phase-B que ce document a
+> lancée : `codec` compte depuis 24 formats (`form`, `multipart`), `transform`
+> ajoute `zlib`, `id` ajoute NanoID, KSUID et TypeID, et les plages `0.3.40`
+> et `0.3.41` sont prises. L'inventaire vivant est la liste des domaines du
+> `CLAUDE.md` racine, et la table des plages est `codeRangeOwners`
+> (ADR 0035) — pas ce tableau, laissé tel qu'il était pour garder le point de
+> départ des décisions qui suivent.
+
 | Besoin | Couvert par | Réserve |
 |---|---|---|
 | Logging structuré | `logger` (1 alloc/emit, multi-sink, 8 middlewares) | — |
@@ -245,9 +253,12 @@ drivers Postgres/MySQL/SQLite · OTLP + client Prometheus · CLDR/ICU · gRPC ·
 GraphQL · vfs S3 · Vault / 1Password · fsnotify · QUIC/HTTP3 · sanitizer HTML
 (`x/net/html`).
 
-**Filtre obligatoire, précédent ADR 0022** : `hcl` + `go-cty` rétrogradaient
-`x/sys` dans `internal/service` — d'où la quarantaine. Vérifier l'impact sur le
-graphe de dépendances **avant** de décider du placement, jamais après.
+**Filtre obligatoire, précédent ADR 0022 corrigé par ADR 0034** : `hcl/v2`
+(via `x/tools`) **introduirait** `x/sys` — banni — dans `internal/service` ;
+il ne rétrograde rien, MVS ne sélectionnant jamais une version inférieure
+(§12.2 B). La quarantaine tient pour cette raison et parce qu'elle n'impose
+pas un graphe aux consommateurs qui ne s'en servent pas. Mesurer l'impact sur
+le graphe de dépendances **avant** de décider du placement, jamais après.
 
 ## 8. Tier E — framework, explicitement PAS le SDK
 

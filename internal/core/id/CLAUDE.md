@@ -10,15 +10,16 @@ resolves a `Scheme` to a `Generator` the way transform resolves an `Algorithm`
 to a `Compressor`.
 
 No generation bodies live here; concrete schemes (UUIDv4/v7, ULID, snowflake,
-NanoID, KSUID, TypeID) live under `internal/service/id/` and self-register via a
-package-level `var` at import — no `init()`. The canonical external form of
+NanoID, KSUID, TypeID) live under `internal/service/id/`, and all of them but
+TypeID self-register via a package-level `var` at import — no `init()`. The canonical external form of
 every id is its string rendering, so `Generator.New` returns a `string`.
 
 **TypeID is the one scheme that does NOT self-register**, and the registry is
 what makes that legible: a TypeID carries a caller-chosen type prefix, so there
 is no generator the SDK could publish under `"typeid"` without inventing that
 prefix. `Lookup("typeid")` misses and `New("typeid")` returns `UnknownScheme` —
-the correct answer, not a gap (ADR 0031; see `internal/service/id/CLAUDE.md`).
+the correct answer, not a gap (ADR 0038, applying ADR 0031; see
+`internal/service/id/CLAUDE.md`).
 
 Code range: `0.2.7.*` (ADR 0024).
 

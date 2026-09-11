@@ -11,7 +11,7 @@ The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at f
 
 | Major | Purpose | State |
 |---|---|---|
-| `v1/` | Stable public API for logging, error introspection, and codec dispatch (15 codecs covering 24 Format names — incl. base-N family via uniform `codec.Marshal`/`Unmarshal`) | Shipping |
+| `v1/` | Stable public API for logging, error introspection, and codec dispatch (16 codecs covering 24 Format names — incl. base-N family via uniform `codec.Marshal`/`Unmarshal`) | Shipping |
 
 ## Versioning policy
 
