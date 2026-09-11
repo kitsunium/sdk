@@ -308,6 +308,44 @@ func TestDuplicateMembersAreRefused(t *testing.T) {
 	}
 }
 
+// TestTextThatIsNotUTF8IsRefusedOnVerify covers RFC 8725 §3.7 on the reading
+// side. encoding/json does not refuse invalid UTF-8, it replaces each bad byte
+// with U+FFFD, so two tokens a careless or hostile issuer signed with "a\xff"
+// and "a\xfe" as their subject both verified — as the same subject. Seen
+// failing without the check: both rows verified, with Subject "a\ufffd".
+func TestTextThatIsNotUTF8IsRefusedOnVerify(t *testing.T) {
+	t.Parallel()
+	secret := testSecret(t, 12)
+	verifier, err := svctoken.NewHS256Verifier(secret, laxConfig())
+	if err != nil {
+		t.Fatalf("NewHS256Verifier: %v", err)
+	}
+	sign := hmacSigner(secret)
+	type tc struct {
+		name    string
+		header  string
+		payload string
+	}
+	tests := []tc{
+		{"a subject ending in 0xff", `{"alg":"HS256","typ":"JWT"}`, "{\"sub\":\"a\xff\"}"},
+		{"a subject ending in 0xfe", `{"alg":"HS256","typ":"JWT"}`, "{\"sub\":\"a\xfe\"}"},
+		{"a header member", "{\"alg\":\"HS256\",\"typ\":\"J\xffT\"}", `{"sub":"a"}`},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		claims, verr := verifier.Verify(forge(c.header, c.payload, sign))
+		if !errs.HasCode(verr, coretoken.CodeMalformed) {
+			t.Fatalf("%s: Verify = (%q, %v), want MALFORMED", c.name, claims.Subject(), verr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // TestCritHeaderIsRefused covers RFC 7515 §4.1.11: the parameters "crit" names
 // MUST be understood. This package understands none, so its presence is a
 // rejection — "ignore what you do not understand" is how a security-relevant

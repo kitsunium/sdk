@@ -45,6 +45,30 @@ func withPrivate(t *testing.T, claims coretoken.ClaimsValue, name, raw string) c
 	return updated
 }
 
+// TestIssueRefusesAPrivateClaimThatIsNotJSON pins rule 2 on the issue path.
+// WithPrivateRaw copies its bytes without parsing them, and json.Marshal then
+// refused them with an untyped *json.MarshalerError — an error no errs matcher
+// could route. putPrivate now holds each raw value to JSON first, and the
+// marshal error is typed besides. Seen failing with both removed: "Issue =
+// json: error calling MarshalJSON for type *jsontext.Value: invalid character
+// 'n' looking for beginning of object key string, want ISSUE_FAILED" — with
+// either one alone left in, the refusal is typed.
+func TestIssueRefusesAPrivateClaimThatIsNotJSON(t *testing.T) {
+	t.Parallel()
+	base := coretoken.NewClaimsValue()
+	for format, issuer := range textFormats(t) {
+		t.Run(format, func(t *testing.T) {
+			minted, err := issuer.Issue(withPrivate(t, base, "p", `{not json`))
+			if !errs.HasCode(err, coretoken.CodeIssueFailed) || minted != "" {
+				t.Fatalf("Issue = %v, want ISSUE_FAILED", err)
+			}
+			if _, err := issuer.Issue(withPrivate(t, base, "p", `{"ok":true}`)); err != nil {
+				t.Fatalf("the valid twin was refused: %v", err)
+			}
+		})
+	}
+}
+
 // TestIssueRefusesClaimTextThatIsNotUTF8 pins RFC 8725 §3.7 on the ISSUE path,
 // where nothing else enforces it.
 //
@@ -193,7 +217,7 @@ func TestMultiByteTextRoundTripsExactly(t *testing.T) {
 func TestIssuerConfigTextIsRefusedAtConstruction(t *testing.T) {
 	t.Parallel()
 	secret := testSecret(t, 83)
-	_, edPriv := testEdKey(t)
+	edPub, edPriv := testEdKey(t)
 	for name, cfg := range map[string]svctoken.IssuerConfig{
 		"JWS Issuer": {Issuer: notUTF8, Lifetime: time.Hour},
 		"JWS Type":   {Type: notUTF8, Lifetime: time.Hour},
@@ -206,6 +230,21 @@ func TestIssuerConfigTextIsRefusedAtConstruction(t *testing.T) {
 	pasetoCfg := svctoken.PasetoIssuerConfig{Issuer: notUTF8, Lifetime: time.Hour}
 	if _, err := svctoken.NewPasetoV4Issuer(edPriv, pasetoCfg); !errs.HasCode(err, coretoken.CodePolicyMisconfigured) {
 		t.Errorf("PASETO Issuer: got %v, want POLICY_MISCONFIGURED", err)
+	}
+	//: the verifier side: a token is refused unless it is UTF-8, so an expected
+	//: value that is not could never match one. Seen failing without the check:
+	//: every row built a verifier ("got <nil>").
+	for name, cfg := range map[string]svctoken.VerifierConfig{
+		"JWS verifier Issuer":      {Issuer: notUTF8},
+		"JWS verifier Audience":    {Audience: notUTF8},
+		"JWS verifier RequireType": {RequireType: notUTF8Twin},
+	} {
+		if _, err := svctoken.NewHS256Verifier(secret, cfg); !errs.HasCode(err, coretoken.CodePolicyMisconfigured) {
+			t.Errorf("%s: got %v, want POLICY_MISCONFIGURED", name, err)
+		}
+	}
+	if _, err := svctoken.NewPasetoV4Verifier(edPub, svctoken.PasetoVerifierConfig{Audience: notUTF8}); !errs.HasCode(err, coretoken.CodePolicyMisconfigured) {
+		t.Errorf("PASETO verifier Audience: got %v, want POLICY_MISCONFIGURED", err)
 	}
 	//: multi-byte text is text, in the header as anywhere else.
 	valid := svctoken.IssuerConfig{Issuer: "https://clé.example", Type: "at+jwt", KeyID: "clé-1", Lifetime: time.Hour}

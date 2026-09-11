@@ -36,10 +36,21 @@ type claimShape interface {
 
 // decodeClaims turns a raw claims object into a ClaimsValue under shape.
 //
-// The three refusals happen in cost order, cheapest first: nesting depth (a
-// linear scan), duplicate members (one streaming pass), then member count.
-// Only after all three does encoding/json build anything.
+// The refusals happen in cost order, cheapest first: text that is not UTF-8
+// and nesting depth (two linear scans), duplicate members (one streaming pass),
+// then member count. Only after all of them does encoding/json build anything.
+//
+// UTF-8 is checked because encoding/json does not refuse invalid bytes — it
+// replaces each with U+FFFD — so without it "a\xff" and "a\xfe" from a careless
+// or hostile issuer would verify as one subject. RFC 8259 §8.1 makes JSON
+// exchanged between systems UTF-8, and RFC 8725 §3.7 asks the reader to hold
+// the writer to it.
 func decodeClaims(raw []byte, maxDepth int, shape claimShape) (claims coretoken.ClaimsValue, err error) {
+	//: two byte strings must never decode to one claim value.
+	if !utf8.Valid(raw) {
+		//: refused before anything is decoded, never repaired.
+		return coretoken.ClaimsValue{}, malformed("claims are not UTF-8")
+	}
 	//: bound the nesting before a decoder allocates a frame per level.
 	if derr := checkJSONDepth(raw, maxDepth); derr != nil {
 		//: the depth verdict already names the limit.
@@ -219,7 +230,16 @@ func encodeClaims(claims coretoken.ClaimsValue, shape claimShape) (raw []byte, e
 		return nil, perr
 	}
 	//: sorted-key marshal of a validated member set.
-	return json.Marshal(members)
+	payload, merr := json.Marshal(members)
+	//: unreachable once putPrivate has held every raw value to JSON, and kept
+	//: typed anyway: rule 2 admits no untyped error out of this package.
+	if merr != nil {
+		//: IssueFailed, origin wins; the stdlib's text travels as a field.
+		return nil, errs.Wrap(coretoken.IssueFailed, errs.WrapParams{},
+			errs.String("claim", "encoding/json refused the claims object: "+merr.Error()))
+	}
+	//: the claims object, ready to sign.
+	return payload, nil
 }
 
 // checkClaimText refuses a claim set whose registered string claims are not
@@ -271,6 +291,14 @@ func putPrivate(members map[string]json.RawMessage, claims coretoken.ClaimsValue
 		if !utf8.ValidString(name) || !utf8.Valid(value) {
 			//: the name is the caller's vocabulary, so it is not echoed either.
 			return textNotUTF8("a private claim")
+		}
+		//: WithPrivateRaw copies its bytes without parsing them, so this is the
+		//: first reader that can hold them to JSON; json.Marshal would refuse
+		//: them anyway, with an untyped *json.MarshalerError.
+		if !json.Valid(value) {
+			//: IssueFailed naming the problem, never the claim.
+			return errs.Wrap(coretoken.IssueFailed, errs.WrapParams{},
+				errs.String("claim", "a private claim is not valid JSON"))
 		}
 		members[name] = value
 	}

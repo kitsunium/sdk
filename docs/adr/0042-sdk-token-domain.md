@@ -193,7 +193,7 @@ code; trivial build bar on all 8 GOOS.
 | §3.4 Validate Cryptographic Inputs | **covered** — EC points validated via `ECDH()`, key lengths checked, ES256 signature length exact |
 | §3.5 Sufficient Key Entropy | **partial** — length is structural (a 256-bit `crypto.Key`); entropy is not measurable here |
 | §3.6 Avoid Compression of Encryption Inputs | **not applicable** — no JWE |
-| §3.7 Use UTF-8 | **covered by delegation** — `encoding/json` is UTF-8 only; base64url decoding is strict |
+| §3.7 Use UTF-8 | **covered on both sides** — `Issue` refuses invalid UTF-8 in every claim text it writes, and `Verify` refuses a header or claims object that is not UTF-8 before decoding it; base64url decoding is strict. (Amended 2026-09-11: this row said "covered by delegation", but `encoding/json` does not refuse invalid UTF-8 — it replaces each bad byte with U+FFFD, so the SDK minted such tokens and verified two different subjects as one. The check costs 20–30 ns on a realistic claims object.) |
 | §3.8 Validate Issuer and Subject | **partial** — `iss` is checked when configured; "the key belongs to that issuer" stays the caller's; `sub` is not validated |
 | §3.9 Use and Validate Audience | **covered** — `aud` must contain the configured audience |
 | §3.10 Do Not Trust Received Claims | **partial** — `kid` only ever indexes a caller-supplied key set; `jku`/`x5u` are ignored because nothing here fetches; claim-VALUE sanitisation is the application's |
