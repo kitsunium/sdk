@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"maps"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
@@ -22,9 +23,13 @@ func newTable(n int) *table {
 }
 
 // package-level sinks so the compiler cannot prove the loads dead.
+// parallelSink is the one a RunParallel body writes: every worker stores its
+// last load when it finishes, concurrently, so a plain variable there is a data
+// race the race detector reports whenever the benchmarks run under -race.
 var (
-	tableSink *table
-	intSink   int
+	tableSink    *table
+	intSink      int
+	parallelSink atomic.Pointer[table]
 )
 
 // BenchmarkLoad is the number the whole package exists for: a single
@@ -66,7 +71,7 @@ func BenchmarkLoad_Parallel(b *testing.B) {
 		for pb.Next() {
 			local = v.Load()
 		}
-		tableSink = local
+		parallelSink.Store(local)
 	})
 }
 
@@ -82,7 +87,7 @@ func BenchmarkLoad_ParallelMutexBaseline(b *testing.B) {
 			local = cur
 			mu.RUnlock()
 		}
-		tableSink = local
+		parallelSink.Store(local)
 	})
 }
 

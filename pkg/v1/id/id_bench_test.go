@@ -1,6 +1,7 @@
 package id_test
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/id"
@@ -10,6 +11,10 @@ import (
 var (
 	strSink string
 	errSink error
+	// parallelStrSink is what a RunParallel body writes: every worker stores
+	// its last identifier when it finishes, concurrently, so a plain string
+	// there is a data race the detector reports under -race.
+	parallelStrSink atomic.Pointer[string]
 )
 
 // BenchmarkUUIDv4 through BenchmarkKSUID are the point of this file: seven
@@ -95,7 +100,7 @@ func BenchmarkSnowflakeParallel(b *testing.B) {
 			}
 			local = generated
 		}
-		strSink = local
+		parallelStrSink.Store(&local)
 	})
 }
 
