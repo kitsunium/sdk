@@ -16,7 +16,7 @@ consumer engine.
 | Configs | `FileConfig`, `MemoryConfig`, `ConsumerConfig` |
 | Constructors | `NewFile`, `NewMemory` |
 | Engine | `Consume` |
-| Constants | `DefaultMaxMessageBytes`, `DefaultPollInterval` |
+| Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval` |
 | Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `ConsumerMisconfigured`, `HandlerPanicked` |
 
 ## Why this shape

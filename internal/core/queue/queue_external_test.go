@@ -1,6 +1,7 @@
 package queue_test
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -85,6 +86,84 @@ func TestNormalizedReadsANegativeRetryDelayAsNoDelay(t *testing.T) {
 	if got := policy.Normalized().RetryDelay; got != 0 {
 		t.Fatalf("Normalized().RetryDelay = %v, want 0", got)
 	}
+}
+
+// TestPolicyRefusesADeadlineOffsetPastTheCeiling pins MaxDeadlineOffset from
+// both sides. Above it a deadline set today may not be representable as int64
+// Unix nanoseconds — math.MaxInt64 certainly is not — and the durable broker
+// would strand the message behind a name it cannot read back; at it, the
+// policy is honoured, and a negative retry delay is still "no delay" rather
+// than a refusal.
+//
+// Seen failing: with Validate's two ceiling checks removed, the refusing cases
+// printed
+//
+//	Validate() = <nil>, want a refusal naming "VisibilityTimeout"
+//	Validate() = <nil>, want a refusal naming "RetryDelay"
+func TestPolicyRefusesADeadlineOffsetPastTheCeiling(t *testing.T) {
+	t.Parallel()
+	const past time.Duration = corequeue.MaxDeadlineOffset + time.Nanosecond
+	cases := []struct {
+		name   string
+		policy corequeue.PolicyValue
+		field  string // empty: the policy is accepted
+	}{
+		{"visibility timeout at the ceiling", corequeue.PolicyValue{
+			VisibilityTimeout: corequeue.MaxDeadlineOffset, MaxDeliveries: 1,
+		}, ""},
+		{"visibility timeout one nanosecond past it", corequeue.PolicyValue{
+			VisibilityTimeout: past, MaxDeliveries: 1,
+		}, "VisibilityTimeout"},
+		{"visibility timeout of math.MaxInt64", corequeue.PolicyValue{
+			VisibilityTimeout: math.MaxInt64, MaxDeliveries: 1,
+		}, "VisibilityTimeout"},
+		{"retry delay at the ceiling", corequeue.PolicyValue{
+			VisibilityTimeout: usableTimeout, RetryDelay: corequeue.MaxDeadlineOffset, MaxDeliveries: 1,
+		}, ""},
+		{"retry delay one nanosecond past it", corequeue.PolicyValue{
+			VisibilityTimeout: usableTimeout, RetryDelay: past, MaxDeliveries: 1,
+		}, "RetryDelay"},
+		{"retry delay of math.MaxInt64", corequeue.PolicyValue{
+			VisibilityTimeout: usableTimeout, RetryDelay: math.MaxInt64, MaxDeliveries: 1,
+		}, "RetryDelay"},
+		{"retry delay of math.MinInt64, which is still no delay", corequeue.PolicyValue{
+			VisibilityTimeout: usableTimeout, RetryDelay: math.MinInt64, MaxDeliveries: 1,
+		}, ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			err := testCase.policy.Validate()
+			if testCase.field == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				if got := testCase.policy.Normalized().RetryDelay; got < 0 {
+					t.Fatalf("Normalized().RetryDelay = %v, want a negative delay read as 0", got)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate() = <nil>, want a refusal naming %q", testCase.field)
+			}
+			if !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
+				t.Fatalf("Validate() code = %v, want CodeQueueMisconfigured", err)
+			}
+			if got := fieldNamed(err); got != testCase.field {
+				t.Fatalf("Validate() names field %q, want %q", got, testCase.field)
+			}
+		})
+	}
+}
+
+// fieldNamed returns the "field" field a refusal carries.
+func fieldNamed(err error) string {
+	for _, field := range errs.FieldsOf(err) {
+		if field.Key() == "field" {
+			return field.StringValue()
+		}
+	}
+	return ""
 }
 
 // TestMaxDeliveriesOfOneIsALegitimatePolicy guards against somebody "fixing"

@@ -18,6 +18,28 @@ import (
 // the alternative to any bound at all is one producer filling a disk.
 const DefaultMaxMessageBytes int = 1 << 20
 
+// MaxDeadlineOffset is the furthest ahead of now a deadline built from a
+// policy may lie: the ceiling on [PolicyValue.VisibilityTimeout] and
+// [PolicyValue.RetryDelay], REFUSED above it rather than clamped.
+//
+// It is not a judgement about how long a lease should last — ADR 0054 argues
+// against even an hour. It is the representable range, with a margin. Every
+// deadline is now plus one of these durations, and a durable broker records it
+// as Unix nanoseconds in an int64 — that is the form a filename carries, and
+// time.Time.UnixNano's own range — which ends on 2262-04-11. Past that instant
+// the number wraps negative, and a name carrying it cannot be read back: the
+// message it names is never reclaimed and never delivered, and its receipt
+// reads [UnknownReceipt]. math.MaxInt64, the value somebody reaches for to
+// mean "never", is 292 years, so it wraps a deadline set today.
+//
+// A century keeps every deadline representable for any clock reading before
+// 2162, and no lease or retry delay has a reading anywhere near it. Validate
+// has no clock, so a fixed ceiling is the only bound it can check; an
+// implementation that computes a deadline from its own clock at runtime — a
+// lease extension, whose duration Validate never sees — checks the instant
+// itself.
+const MaxDeadlineOffset time.Duration = 100 * 365 * 24 * time.Hour
+
 // PolicyValue is the delivery discipline a broker enforces: how long a lease
 // lasts, how many attempts a message gets, how long a failure waits, and how
 // large a payload may be.
@@ -47,6 +69,10 @@ const DefaultMaxMessageBytes int = 1 << 20
 //
 // Both branches in one struct is the point. A domain in which every zero is
 // refused teaches a reader nothing except that the author was nervous.
+//
+// The two durations are bounded from ABOVE as well, by [MaxDeadlineOffset],
+// and that refusal is about arithmetic rather than about readings: a deadline
+// further out than that cannot be recorded by the durable broker at all.
 type PolicyValue struct {
 	// VisibilityTimeout is how long a [Broker.Receive] hides a message from
 	// every other consumer. It is the deadline the consumer is racing, and
@@ -57,7 +83,8 @@ type PolicyValue struct {
 	// picked up: a message held by a process that has been SIGKILLed
 	// reappears exactly this long after it was leased, and not before.
 	//
-	// A non-positive value is refused ([QueueMisconfigured]).
+	// A non-positive value is refused ([QueueMisconfigured]), and so is one
+	// above [MaxDeadlineOffset].
 	VisibilityTimeout time.Duration
 	// RetryDelay is how long a NACKED message stays invisible before it
 	// becomes eligible again, measured from the nack.
@@ -67,7 +94,8 @@ type PolicyValue struct {
 	// a second wait would punish a crashed consumer more than a failing one.
 	//
 	// Zero is a working value and means "eligible as soon as the nack
-	// returns". Negative is read as zero.
+	// returns". Negative is read as zero. Above [MaxDeadlineOffset] it is
+	// refused ([QueueMisconfigured]).
 	RetryDelay time.Duration
 	// MaxDeliveries is how many times one message may be handed to a
 	// consumer before the broker gives up and dead-letters it. It is
@@ -95,8 +123,9 @@ type PolicyValue struct {
 // a test double for the second. It is the same instrument core/vfs's
 // ValidatePath and ValidatePerm are, for the same reason.
 func (p PolicyValue) Validate() error {
-	//: the lease lifetime, whose two zero readings are opposites.
-	if p.VisibilityTimeout <= 0 {
+	//: the lease lifetime, whose two zero readings are opposites — and whose
+	//: deadline, past MaxDeadlineOffset, strands the message it names.
+	if p.VisibilityTimeout <= 0 || p.VisibilityTimeout > MaxDeadlineOffset {
 		//: QueueMisconfigured, naming the field.
 		return errs.Wrap(QueueMisconfigured, errs.WrapParams{},
 			errs.String("field", "VisibilityTimeout"),
@@ -114,8 +143,17 @@ func (p PolicyValue) Validate() error {
 		return errs.Wrap(QueueMisconfigured, errs.WrapParams{},
 			errs.String("field", "MaxMessageBytes"), errs.Int("value", p.MaxMessageBytes))
 	}
-	//: RetryDelay is deliberately absent: every value of it, including a
-	//: negative one, has exactly one sensible reading.
+	//: every value of RetryDelay at or below the ceiling has exactly one
+	//: sensible reading, a negative one included — it is "no delay", and
+	//: Normalized says so. Above it, the retry deadline strands the message
+	//: exactly as an unbounded lease would.
+	if p.RetryDelay > MaxDeadlineOffset {
+		//: QueueMisconfigured, naming the field.
+		return errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+			errs.String("field", "RetryDelay"),
+			errs.Int64("value_ns", int64(p.RetryDelay)))
+	}
+	//: a policy a broker can honour.
 	return nil
 }
 

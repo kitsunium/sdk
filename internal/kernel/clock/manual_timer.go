@@ -22,11 +22,11 @@ func (t *manualTimer) C() <-chan time.Time {
 // Stop disarms the timer, reporting whether it was still armed.
 func (t *manualTimer) Stop() bool {
 	//: drain, so no value from a previous arming survives Stop.
-	return t.clk.stopWait(t.w, true)
+	return t.clk.stopWait(t.w)
 }
 
 // Reset re-arms the timer for d, reporting whether it was still armed.
 func (t *manualTimer) Reset(d time.Duration) bool {
 	//: drain, so no value from a previous arming survives Reset.
-	return t.clk.resetWait(t.w, d, true)
+	return t.clk.resetWait(t.w, d)
 }

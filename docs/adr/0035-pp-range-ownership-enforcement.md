@@ -63,10 +63,15 @@ not a data defect: nothing was wrong, and nothing prevented it from going wrong.
 5. **Scope, stated rather than assumed.**
    - Cross-package selector values (`core.CodeFoo`) are **re-exports, not
      definitions**, and confer no ownership.
-   - `iota`-based groups are skipped: the only one is kernel/errs' Layer-0
-     meta-code block, and Layer 0 is already **enforced at runtime** by
-     `validateDefineArgs`, which panics on a `Define` with `Layer==0` outside its
-     whitelist. That is a stronger mechanism than this audit.
+   - kernel/errs' Layer-0 meta-code block is the one exemption: Layer 0 is
+     already **enforced at runtime** by `validateDefineArgs`, which panics on a
+     `Define` with `Layer==0` outside its whitelist — a stronger mechanism than
+     this audit. The block is recognised by VALUE, not skipped by shape.
+     (Amended 2026-09-11: the first version skipped every `iota` group, and
+     every conversion spec `CodeX = errs.Code(0x…)`, so a squatter in either
+     spelling passed unseen. Both are now evaluated and audited as
+     declarations, and a `Code`-named spec the audit cannot classify is
+     reported as unresolved and FAILS, rather than being left out.)
    - A `Code`-typed constant not named `Code*` is type machinery, not an
      allocation — kernel/errs' CIDR masks (`MaskByMajor` … `MaskExact`) are
      `Code`-typed by design. `Code*` naming is the convention ADR 0020 already

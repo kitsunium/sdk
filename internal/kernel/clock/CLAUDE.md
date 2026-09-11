@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09T00:00:00Z -->
+<!-- updated: 2026-09-11T00:00:00Z -->
 # internal/kernel/clock/
 
 ## Purpose
@@ -58,7 +58,7 @@ per `KTN-INTERFACE-FILENAME`.
 | `system.go` | `systemClock` + the `System` singleton |
 | `system_timer.go` / `system_ticker.go` | the `*time.Timer` / `*time.Ticker` adapters |
 | `manual.go` | `ManualClock` and every method on it |
-| `manual_wait.go` | `manualWait` + `fireWait` / `drainWait` / `rearmWait` |
+| `manual_wait.go` | `manualWait` + `fireWait` / `drainWait` / `rearmWait`, and the `maxDuration` bound the rearm stays under |
 | `manual_timer.go` / `manual_ticker.go` | the handles `ManualClock` hands out |
 | `clock_compliance.go` | every compile-time interface assertion |
 
@@ -208,6 +208,21 @@ runs a `ManualClock` *inside* a bubble and shows the two clocks are independent.
   anyway, and the alternative — one send per elapsed period — makes
   `Advance(time.Hour)` on a nanosecond ticker an unbounded loop. To observe N
   ticks, call `Advance(period)` N times and drain between calls.
+- **The rearm is O(1) however far the clock jumps, and it cannot go
+  backwards.** `time.Time.Sub` saturates at ~292 years, and past that distance
+  `period × steps` wrapped negative: the deadline moved backwards, stayed due,
+  and a `Set` three centuries ahead looped forever under the lock. A ticker
+  left that far behind now re-arms one period after the target — strictly
+  after it, within one period of it, and off its phase, since the phase is not
+  computable in a `Duration` there. `TestManualSetFarPastATickerDeadlineReturns`
+  bounds the call with a wall-clock wait, so a regression fails instead of
+  hanging the binary.
+- **`Stop` and `Reset` drain, on BOTH handles.** Since Go 1.23 a `time.Timer`
+  or `time.Ticker` channel is synchronous, and nothing prepared before a
+  `Stop`/`Reset` is received after it — for tickers too, which this package
+  once claimed the opposite of. `TestSystemTickerLeavesNoStaleTickAcrossStopAndReset`
+  pins that on the real ticker and
+  `TestManualTickerStopAndResetLeaveNoStaleTick` holds the double to it.
 
 ## Typical use
 

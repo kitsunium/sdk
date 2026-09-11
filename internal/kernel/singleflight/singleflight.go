@@ -108,13 +108,21 @@ func (g *Group[K, V]) Forget(key K) {
 	delete(g.calls, key)
 }
 
-// InFlight reports how many distinct keys are currently executing. It is a
+// InFlight reports how many keys a [Group.Do] arriving now would JOIN rather
+// than start — the deduplication entries currently registered. It is a
 // point-in-time reading, useful for a gauge or a test — never for a decision,
 // since the number can change between the read and the next statement.
+//
+// It is NOT a count of running calls. A key that was Forgotten, or whose every
+// caller abandoned it, stops being counted while its fn may still be running —
+// Forget drops the entry and not the work, and abandonment is a departure and
+// not a kill — so a forgotten key that a later Do re-issued counts ONCE while
+// two calls for it run.
 func (g *Group[K, V]) InFlight() int {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	//: the map holds exactly the keys that have a call in flight.
+	//: the map holds exactly the keys a new Do would join; a retired call
+	//: that is still running is no longer in it.
 	return len(g.calls)
 }
 

@@ -84,11 +84,26 @@ func (b *fileBroker) nackDead(
 }
 
 // Extend renews a lease and mints the receipt that replaces it.
+//
+// A by whose deadline a name cannot carry — one that reaches past
+// 2262-04-11 — is refused with QueueMisconfigured, before anything is renamed,
+// so the lease the caller already holds is untouched. Validate bounds the
+// policy's own durations with corequeue.MaxDeadlineOffset; this one is chosen
+// at runtime and never passes through it, so the instant itself is checked.
 func (b *fileBroker) Extend(
 	ctx context.Context, receipt corequeue.ReceiptValue, by time.Duration,
 ) (lease corequeue.LeaseValue, err error) {
 	//: the two readings of a non-positive renewal are opposites.
 	if by <= 0 {
+		//: QueueMisconfigured, naming the argument.
+		return corequeue.LeaseValue{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+			kerrs.String("field", "Extend.by"), kerrs.Int64("value_ns", int64(by)))
+	}
+	deadline := b.clk.Now().Add(by)
+	//: a deadline the names cannot carry would rename the message to a name
+	//: nothing reads back, and hand the caller a receipt that is already
+	//: unknown — the message stranded by the very call meant to keep it.
+	if !nameable(deadline) {
 		//: QueueMisconfigured, naming the argument.
 		return corequeue.LeaseValue{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
 			kerrs.String("field", "Extend.by"), kerrs.Int64("value_ns", int64(by)))
@@ -109,7 +124,7 @@ func (b *fileBroker) Extend(
 	}
 	//: the deadline lives IN the name, so the only atomic way to change it is
 	//: to replace the name — which is why Extend returns a new receipt.
-	return b.renameLease(name, held, entropy, b.clk.Now().Add(by).UnixNano())
+	return b.renameLease(name, held, entropy, deadline.UnixNano())
 }
 
 // renameLease moves an in-flight message to a new deadline.

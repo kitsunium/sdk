@@ -267,34 +267,67 @@ func TestManualTimerReset(t *testing.T) {
 	}
 }
 
-func TestManualTickerStopKeepsDeliveredTick(t *testing.T) {
+// TestManualTickerStopAndResetLeaveNoStaleTick holds the manual ticker to the
+// ticker it doubles. Since Go 1.23 a time.Ticker's channel is synchronous, and
+// the runtime guarantees that no tick prepared before a Stop or a Reset is
+// received after it — TestSystemTickerLeavesNoStaleTickAcrossStopAndReset
+// pins that on the real one. A double that kept the undelivered tick would
+// hand a caller who stopped a ticker one more wake-up, and hand a caller who
+// reset it a tick immediately instead of after the new period.
+//
+// Seen failing: with manualTicker's Stop and Reset restored to not draining,
+// the two cases printed
+//
+//	a tick delivered before Stop was still receivable after it (at 2031-03-07
+//	04:05:07.000000789 +0000 UTC)
+//	a tick delivered before Reset was still receivable after it (at 2031-03-07
+//	04:05:07.000000789 +0000 UTC) — the next one belongs after the new period
+func TestManualTickerStopAndResetLeaveNoStaleTick(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
-		period time.Duration
+		name  string
+		reset bool
 	}{
-		//: time.Ticker.Stop deliberately does NOT drain, so a concurrent
-		//: receiver never observes a spurious zero value. Mirror it exactly.
-		{"a delivered tick survives Stop", time.Second},
+		{"Stop", false},
+		{"Reset", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			m := clock.NewManualClock(testEpoch)
-			tk := m.NewTicker(tc.period)
-			m.Advance(tc.period)
-			tk.Stop()
-			at, got := pending(tk.C())
-			if !got {
-				t.Fatal("Stop discarded an already-delivered tick")
+			tk := m.NewTicker(time.Second)
+			defer tk.Stop()
+			//: a tick falls due and nobody receives it.
+			m.Advance(time.Second)
+			if !tc.reset {
+				tk.Stop()
+				if at, stale := pending(tk.C()); stale {
+					t.Fatalf("a tick delivered before Stop was still receivable after it (at %v)", at)
+				}
+				//: and the ticker is halted from here on.
+				m.Advance(10 * time.Second)
+				if _, more := pending(tk.C()); more {
+					t.Error("a stopped ticker kept ticking")
+				}
+				return
 			}
-			if want := testEpoch.Add(tc.period); !at.Equal(want) {
-				t.Errorf("surviving tick = %v, want %v", at, want)
+			tk.Reset(time.Minute)
+			if at, stale := pending(tk.C()); stale {
+				t.Fatalf("a tick delivered before Reset was still receivable after it (at %v) — the "+
+					"next one belongs after the new period", at)
 			}
-			//: but the ticker is halted from here on.
-			m.Advance(10 * tc.period)
-			if _, more := pending(tk.C()); more {
-				t.Error("a stopped ticker kept ticking")
+			//: nothing until the new period has elapsed in full.
+			m.Advance(time.Minute - time.Nanosecond)
+			if at, early := pending(tk.C()); early {
+				t.Fatalf("a tick arrived at %v, before the new period elapsed", at)
+			}
+			m.Advance(time.Nanosecond)
+			at, ticked := pending(tk.C())
+			if !ticked {
+				t.Fatal("no tick when the new period elapsed")
+			}
+			if want := testEpoch.Add(time.Second + time.Minute); !at.Equal(want) {
+				t.Errorf("tick after Reset = %v, want %v", at, want)
 			}
 		})
 	}
@@ -525,6 +558,89 @@ func TestManualIsSafeUnderConcurrentUse(t *testing.T) {
 			want := testEpoch.Add(time.Duration(tc.goroutines*tc.steps) * time.Millisecond)
 			if got := m.Now(); !got.Equal(want) {
 				t.Errorf("Now() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestManualSetFarPastATickerDeadlineReturns pins the rearm against the one
+// input that defeats its single multiplication: a ticker left behind by close
+// to the whole time.Duration range. time.Time.Sub saturates at ~292 years, so
+// a Set three centuries past a deadline hands rearmWait an elapsed of
+// math.MaxInt64, and period*(elapsed/period+1) wraps NEGATIVE — the deadline
+// moves backwards, stays due, and advanceTo fires it again, forever, holding
+// the clock's lock. The wait below runs on the wall clock because the defect
+// is a loop that never yields: nothing else could bound it, and a regression
+// must FAIL here rather than hang the binary until its own timeout. Nothing
+// deferred touches the clock either, since a deferred Stop would queue behind
+// the spinning lock and turn the failure back into a hang.
+//
+// Goroutine lifecycle: one per subtest, started here to run Set and closing
+// done when it returns. On the failure path it never returns and outlives the
+// subtest, spinning until the binary exits — that is the defect reported, not
+// a leak of the test's making.
+//
+// Seen failing: with rearmWait restored to its unguarded multiplication, both
+// cases printed
+//
+//	Set(+300y) past a 1ns ticker's deadline did not return within 10s: the
+//	rearm overflowed, moved the deadline backwards, and advanceTo kept firing it
+//	under the lock
+//
+// (and "… past a 1h0m0s ticker's deadline …" for the second).
+func TestManualSetFarPastATickerDeadlineReturns(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		period time.Duration
+	}{
+		//: every instant is a tick, so the next one is target+1ns whatever
+		//: the rearm does — the delivered instant is exact.
+		{"a nanosecond ticker", time.Nanosecond},
+		//: a period that does not divide the jump: only "within one period
+		//: after target" is a property of the contract.
+		{"an hour ticker", time.Hour},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := clock.NewManualClock(testEpoch)
+			tk := m.NewTicker(tc.period)
+			target := testEpoch.AddDate(300, 0, 0)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				m.Set(target)
+			}()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("Set(+300y) past a %v ticker's deadline did not return within 10s: the rearm "+
+					"overflowed, moved the deadline backwards, and advanceTo kept firing it under the lock", tc.period)
+			}
+			defer tk.Stop()
+			if got := m.Now(); !got.Equal(target) {
+				t.Fatalf("Now() after Set = %v, want %v", got, target)
+			}
+			//: the one tick the jump delivers carries the deadline it was due at.
+			at, ticked := pending(tk.C())
+			if !ticked {
+				t.Fatal("the jump delivered no tick; the ticker was due")
+			}
+			if want := testEpoch.Add(tc.period); !at.Equal(want) {
+				t.Errorf("delivered tick = %v, want the original deadline %v", at, want)
+			}
+			//: still armed, strictly after target and within one period of it.
+			if got := m.Pending(); got != 1 {
+				t.Fatalf("Pending() after the jump = %d, want 1 — a ticker survives its tick", got)
+			}
+			m.Advance(tc.period)
+			next, again := pending(tk.C())
+			if !again {
+				t.Fatalf("no tick within one period (%v) after target", tc.period)
+			}
+			if !next.After(target) || next.After(target.Add(tc.period)) {
+				t.Errorf("next tick = %v, want one in (%v, %v]", next, target, target.Add(tc.period))
 			}
 		})
 	}

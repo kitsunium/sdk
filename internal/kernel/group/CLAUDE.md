@@ -82,7 +82,12 @@ Go has no way to abandon a goroutine.
   reporting the cascade would bury the cause.
 - **The first error is the context's `Cause`.** The group cancels with
   `context.WithCancelCause`, so a sibling reading `context.Cause(ctx)` can tell
-  "another task failed, with this" from "the parent went away".
+  "another task failed, with this" from "the parent went away". It is the
+  **same** error `Wait` returns because only the call that records it
+  cancels: when every failing task cancelled, one that lost the race to record
+  could still win the race to cancel, and the two answers disagreed under
+  concurrent failures. `TestWaitAndTheContextCauseNameTheSameFailure` (64
+  tasks × 500 rounds) caught it in 20 runs out of 20.
 - **A late submission still runs**, with an already-cancelled context. Skipping
   it silently would be the worse half of the trade — a task that never ran and
   never said so.

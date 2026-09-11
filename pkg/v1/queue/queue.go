@@ -120,6 +120,15 @@
 // zeros have one reading each and it is harmless: no extra delay, and
 // [DefaultMaxMessageBytes].
 //
+// Both durations are also bounded from ABOVE by [MaxDeadlineOffset], a
+// century, and refused past it — not as a judgement about leases but because
+// the durable broker writes every deadline into a file name as Unix
+// nanoseconds, which end in 2262. A deadline past that could not be read
+// back, and the message it names would never be delivered again. The
+// math.MaxInt64 somebody reaches for to mean "never" is 292 years, so it is
+// refused rather than stranding the message; an extension that would reach
+// past 2262 is refused by both brokers for the same reason.
+//
 // # Two brokers
 //
 // [NewFile] is the real one: its state is a directory, it survives the
@@ -145,6 +154,12 @@ import (
 // DefaultMaxMessageBytes is the payload bound applied when
 // [Policy.MaxMessageBytes] is left at zero: one mebibyte.
 const DefaultMaxMessageBytes int = corequeue.DefaultMaxMessageBytes
+
+// MaxDeadlineOffset is the ceiling on [Policy.VisibilityTimeout] and
+// [Policy.RetryDelay]: a century, refused above it rather than clamped,
+// because a deadline past 2262 cannot be written into the durable broker's
+// file names and read back.
+const MaxDeadlineOffset time.Duration = corequeue.MaxDeadlineOffset
 
 // DefaultPollInterval is how long an idle worker waits before asking again
 // when [ConsumerConfig.PollInterval] is left at zero.

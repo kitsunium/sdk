@@ -58,7 +58,11 @@ type LeaseExtender interface {
 	// needed to know.
 	//
 	// A non-positive by is [QueueMisconfigured]: the two readings of zero —
-	// "lapse now" and "never lapse" — are opposites and both harmful.
+	// "lapse now" and "never lapse" — are opposites and both harmful. So is a
+	// by whose deadline reaches past what a durable implementation can record
+	// (2262, Unix nanoseconds): it is refused before anything moves, and the
+	// lease the caller holds stays valid. Validate never sees this duration,
+	// so [MaxDeadlineOffset] cannot bound it; the instant itself is checked.
 	Extend(ctx context.Context, receipt ReceiptValue, by time.Duration) (LeaseValue, error)
 }
 

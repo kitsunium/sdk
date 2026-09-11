@@ -2,6 +2,7 @@ package queue_test
 
 import (
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -500,6 +501,119 @@ func TestBothBrokersRefuseTheSamePolicies(t *testing.T) {
 		Dir: t.TempDir(), Policy: broken,
 	}); !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
 		t.Fatalf("NewFile(broken) = %v, want CodeQueueMisconfigured", err)
+	}
+}
+
+// TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry pins the upper bound
+// Validate puts on the two durations every deadline is built from. A
+// visibility timeout of math.MaxInt64 — the value somebody reaches for to mean
+// "never" — is 292 years, so the durable broker's lease deadline now+timeout
+// wrapped negative: pad wrote a sign, parseNano refused the name on the way
+// back, and the leased message was stranded in inflight/ for good, never
+// reclaimed, never delivered, its receipt reading UNKNOWN_RECEIPT. The retry
+// delay did the same to a nacked message in ready/. Both brokers share the
+// guard, so both refuse, which is what keeps the memory broker an honest
+// double.
+//
+// Seen failing: with Validate's two new bounds removed, both cases printed,
+// for the memory broker and the file broker alike,
+//
+//	NewMemory(VisibilityTimeout = math.MaxInt64) = <nil>, want CodeQueueMisconfigured
+//	NewFile(RetryDelay = math.MaxInt64) = <nil>, want CodeQueueMisconfigured
+func TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		field  string
+		policy corequeue.PolicyValue
+	}{
+		{"VisibilityTimeout = math.MaxInt64", "VisibilityTimeout", corequeue.PolicyValue{
+			VisibilityTimeout: math.MaxInt64, MaxDeliveries: testDeliveries,
+		}},
+		{"RetryDelay = math.MaxInt64", "RetryDelay", corequeue.PolicyValue{
+			VisibilityTimeout: testVisibility, RetryDelay: math.MaxInt64, MaxDeliveries: testDeliveries,
+		}},
+	}
+	builders := []struct {
+		name  string
+		build func(t *testing.T, policy corequeue.PolicyValue) error
+	}{
+		{"NewMemory", func(_ *testing.T, policy corequeue.PolicyValue) error {
+			_, err := svcqueue.NewMemory(svcqueue.MemoryConfig{Policy: policy, Clock: clock.NewManualClock(epoch)})
+			return err
+		}},
+		{"NewFile", func(t *testing.T, policy corequeue.PolicyValue) error {
+			_, err := svcqueue.NewFile(svcqueue.FileConfig{
+				Dir: t.TempDir(), Policy: policy, Clock: clock.NewManualClock(epoch),
+			})
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		for _, builder := range builders {
+			t.Run(builder.name+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				err := builder.build(t, tc.policy)
+				if !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
+					t.Fatalf("%s(%s) = %v, want CodeQueueMisconfigured", builder.name, tc.name, err)
+				}
+				if got := fieldValue(err, "field"); got != tc.field {
+					t.Errorf("field = %q, want %q", got, tc.field)
+				}
+			})
+		}
+	}
+}
+
+// TestBothBrokersRefuseAnExtensionANameCannotCarry is the same bound on the
+// one duration Validate never sees: Extend's, which a handler chooses at
+// runtime. Its deadline is now+by, written into the in-flight name like any
+// other, so a by that carries it past 2262 would strand the message exactly as
+// an unbounded visibility timeout did — and the refusal comes BEFORE anything
+// is renamed, so the lease the handler already holds is untouched and still
+// acknowledgeable.
+//
+// It runs on both brokers. The memory broker's time.Time could hold the
+// deadline, but a double that accepted what the durable broker refuses would
+// let a handler pass its tests and strand messages in production.
+//
+// Seen failing: with Extend's representability check removed from the file
+// broker, and then from the memory one, each printed
+//
+//	Extend(by = math.MaxInt64) = <nil>, want CodeQueueMisconfigured
+func TestBothBrokersRefuseAnExtensionANameCannotCarry(t *testing.T) {
+	t.Parallel()
+	for _, factory := range bothBrokers() {
+		t.Run(factory.name, func(t *testing.T) {
+			t.Parallel()
+			clk := clock.NewManualClock(epoch)
+			broker := factory.make(t, clk, defaultPolicy())
+			publish(t, broker, "slow")
+			delivery := receiveOne(t, broker)
+
+			_, err := extender(t, broker).Extend(t.Context(), delivery.Lease.Receipt, math.MaxInt64)
+			if !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
+				t.Fatalf("Extend(by = math.MaxInt64) = %v, want CodeQueueMisconfigured", err)
+			}
+			if got := fieldValue(err, "field"); got != "Extend.by" {
+				t.Errorf("field = %q, want %q", got, "Extend.by")
+			}
+			//: nothing moved: the lease the handler holds is still the one it has.
+			if ackErr := broker.Ack(t.Context(), delivery.Lease.Receipt); ackErr != nil {
+				t.Fatalf("Ack(original receipt) after the refused Extend = %v, want nil", ackErr)
+			}
+			//: and the largest extension a name CAN carry is honoured.
+			publish(t, broker, "slower")
+			again := receiveOne(t, broker)
+			farthest := time.Unix(0, math.MaxInt64).Sub(clk.Now())
+			renewed, extendErr := extender(t, broker).Extend(t.Context(), again.Lease.Receipt, farthest)
+			if extendErr != nil {
+				t.Fatalf("Extend(by = up to the last nameable instant) = %v, want nil", extendErr)
+			}
+			if ackErr := broker.Ack(t.Context(), renewed.Receipt); ackErr != nil {
+				t.Fatalf("Ack(renewed) = %v, want nil — the renewed lease must read back", ackErr)
+			}
+		})
 	}
 }
 

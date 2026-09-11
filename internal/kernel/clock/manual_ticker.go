@@ -18,16 +18,18 @@ func (t *manualTicker) C() <-chan time.Time {
 	return t.w.ch
 }
 
-// Stop halts the ticker without draining an already-delivered tick.
+// Stop halts the ticker and discards a tick delivered but not yet received.
 func (t *manualTicker) Stop() {
-	//: no drain — time.Ticker.Stop leaves a delivered tick for the receiver.
-	t.clk.stopWait(t.w, false)
+	//: drain, matching time.Ticker.Stop since Go 1.23: its channel is
+	//: synchronous, so a tick nobody received before Stop is never received.
+	t.clk.stopWait(t.w)
 }
 
 // Reset restarts the ticker with period d, panicking on a non-positive d.
 func (t *manualTicker) Reset(d time.Duration) {
 	//: identical refusal to systemTicker.Reset, message included.
 	requirePositivePeriod("Ticker.Reset", d)
-	//: no drain, matching time.Ticker.Reset.
-	t.clk.resetWait(t.w, d, false)
+	//: drain, matching time.Ticker.Reset since Go 1.23: the next tick is the
+	//: one the new period produces, not one left over from the old.
+	t.clk.resetWait(t.w, d)
 }

@@ -4,6 +4,7 @@
 package queue
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -298,6 +299,18 @@ func isHex(field string) bool {
 	}
 	//: acceptable.
 	return true
+}
+
+// nameable reports whether at can be written into a name and read back.
+//
+// An instant in a name is nanoWidth digits of a NON-NEGATIVE int64, so the
+// grammar covers the Unix epoch to 2262-04-11T23:47:16.854775807Z and nothing
+// else. Outside that range UnixNano wraps, pad writes a sign, and parseNano
+// refuses the name on the way back in — so a message renamed to such a name
+// is stranded: never reclaimed, never delivered, its receipt unreadable.
+func nameable(at time.Time) bool {
+	//: both ends, because either end of int64 nanoseconds is a sign away.
+	return !at.Before(time.Unix(0, 0)) && !at.After(time.Unix(0, math.MaxInt64))
 }
 
 // pad renders an instant as nanoWidth zero-padded digits.

@@ -9,9 +9,17 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+// layerZeroOwner is the one package whose iota-numbered Layer-0 codes the
+// audit exempts. Layer 0 is ENFORCED reserved for it at runtime by
+// validateDefineArgs (a Define with Layer==0 outside the whitelist panics),
+// which is stronger than this audit — and codeRangeOwners, deliberately, has
+// no 0.0.0.* entry to judge them against.
+const layerZeroOwner string = "internal/kernel/errs"
 
 // codeRangeOwners is the authoritative MM.LL.PP -> owning package table for the
 // ADR 0005 registry invariant "each package owns a PP slot".
@@ -135,11 +143,11 @@ type codeDecl struct {
 	pos     string
 }
 
-// isCodeTyped reports whether a ValueSpec is typed as the errs Code type,
-// accepting both the cross-package form (`errs.Code`, every emitter) and the
-// in-package form (`Code`, kernel/errs' own meta-codes).
-func isCodeTyped(spec *ast.ValueSpec) bool {
-	switch typ := spec.Type.(type) {
+// isCodeType reports whether expr names the errs Code type, accepting both the
+// cross-package form (`errs.Code`, every emitter) and the in-package form
+// (`Code`, kernel/errs' own meta-codes).
+func isCodeType(expr ast.Expr) bool {
+	switch typ := expr.(type) {
 	case *ast.SelectorExpr:
 		return typ.Sel != nil && typ.Sel.Name == "Code"
 	case *ast.Ident:
@@ -148,12 +156,33 @@ func isCodeTyped(spec *ast.ValueSpec) bool {
 	return false
 }
 
-// mentionsIota reports whether expr references iota. Such a spec is skipped:
-// the only iota-based Code group in the tree is kernel/errs' Layer=0 meta-code
-// block, and Layer 0 is ENFORCED reserved for that package at runtime by
-// validateDefineArgs (a Define with Layer==0 outside the whitelist panics).
-// That mechanism is stronger than this audit, so re-checking it here would add
-// a resolver special case for no gain.
+// unparen strips any parentheses around expr.
+func unparen(expr ast.Expr) ast.Expr {
+	for {
+		paren, ok := expr.(*ast.ParenExpr)
+		if !ok {
+			return expr
+		}
+		expr = paren.X
+	}
+}
+
+// isCodeConversion reports whether expr converts a value to the Code type —
+// `errs.Code(0x…)`, the spelling that declares a code with no declared type.
+func isCodeConversion(expr ast.Expr) bool {
+	call, ok := unparen(expr).(*ast.CallExpr)
+	return ok && len(call.Args) == 1 && isCodeType(unparen(call.Fun))
+}
+
+// isCodeNamed reports whether name follows the registry convention ADR 0020
+// derives a Reason from: the word Code, then the reason's own words. Codec and
+// CodecUnavailable begin with the same four letters and are not codes.
+func isCodeNamed(name string) bool {
+	rest, found := strings.CutPrefix(name, "Code")
+	return found && (rest == "" || rest[0] < 'a' || rest[0] > 'z')
+}
+
+// mentionsIota reports whether expr references iota.
 func mentionsIota(expr ast.Expr) (found bool) {
 	ast.Inspect(expr, func(n ast.Node) bool {
 		if ident, ok := n.(*ast.Ident); ok && ident.Name == "iota" {
@@ -165,17 +194,149 @@ func mentionsIota(expr ast.Expr) (found bool) {
 	return found
 }
 
-// collectCodeDeclsInDir resolves every Code constant declaration in the .go
-// files of dir. Ownership is keyed on DECLARATIONS, not on errs.Define call
-// sites: internal/core/codec declares the whole 0.2.2.* block and never calls
-// Define (it formats the code into its registry errors), so a Define-keyed
-// audit is blind to a range that is very much allocated.
+// withIota returns expr with every iota replaced by index, the position of its
+// ConstSpec in the declaration, so an iota group resolves like any other
+// constant expression. It rebuilds exactly the nodes foldConst folds; an iota
+// anywhere else is left in place for the resolver to refuse loudly.
+func withIota(expr ast.Expr, index int) ast.Expr {
+	switch node := expr.(type) {
+	case *ast.Ident:
+		if node.Name == "iota" {
+			return &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(index)}
+		}
+		return node
+	case *ast.ParenExpr:
+		return &ast.ParenExpr{X: withIota(node.X, index)}
+	case *ast.BinaryExpr:
+		return &ast.BinaryExpr{X: withIota(node.X, index), Op: node.Op, Y: withIota(node.Y, index)}
+	case *ast.CallExpr:
+		args := make([]ast.Expr, len(node.Args))
+		for i, arg := range node.Args {
+			args[i] = withIota(arg, index)
+		}
+		return &ast.CallExpr{Fun: node.Fun, Args: args}
+	}
+	return expr
+}
+
+// classifyCodeSpec decides what one declared name is to the audit. declared is
+// the expression to resolve when the name allocates a code; complaint is set
+// when the name looks like a code but is declared like nothing the audit can
+// judge. Both empty: not a code, nothing to audit.
 //
-// A value that is a cross-package selector (`core.CodeFoo`) is a re-export, not
-// a new definition, and is skipped — pkg/v1 aliasing an internal sentinel does
-// not make it an owner. Anything else that fails to resolve is reported in
-// unresolved and MUST be treated as a failure, for the same fail-loud reason
-// scanCodeValues gives.
+// A name allocates when it is typed errs.Code, or has no declared type and is
+// a conversion to it, or has no declared type and aliases another constant by
+// name (resolved, so it is judged by the value it carries). A cross-package
+// selector is a re-export and never a definition — pkg/v1 aliasing an internal
+// sentinel does not make it an owner. A Code-typed name not spelled Code* is
+// type machinery (kernel/errs' CIDR masks), and an explicitly non-Code type is
+// not a code whatever it is called. Everything else named like a code — an
+// untyped literal, a variable with no value — is the complaint, because a
+// spec skipped in silence is a squat the ownership check never sees.
+func classifyCodeSpec(name string, typ, value ast.Expr) (declared ast.Expr, complaint string) {
+	typed := typ != nil && isCodeType(typ)
+	converted := typ == nil && value != nil && isCodeConversion(value)
+	//: type machinery, or a name no convention ties to a code.
+	if (typed || converted) && !strings.HasPrefix(name, "Code") || !typed && !converted && !isCodeNamed(name) {
+		return nil, ""
+	}
+	//: a Code with no value this audit can read — a variable left at its zero.
+	if value == nil {
+		return nil, "declares no value the audit can read"
+	}
+	//: a re-export: the owner is the package the selector names. Bare, as
+	//: before — a parenthesised selector stays the resolver's to refuse.
+	if _, isSel := value.(*ast.SelectorExpr); isSel {
+		return nil, ""
+	}
+	//: the declared and the converted spellings of an allocation.
+	if typed || converted {
+		return value, ""
+	}
+	//: an explicit type that is not Code: not a code, whatever its name.
+	if typ != nil {
+		return nil, ""
+	}
+	//: an untyped alias of a constant of this package: judged by its value.
+	if _, isIdent := unparen(value).(*ast.Ident); isIdent {
+		return value, ""
+	}
+	return nil, "is named like a code but declared as neither errs.Code, a conversion to it, " +
+		"an alias of a constant, nor a cross-package re-export"
+}
+
+// collectGenDeclCodes resolves the code declarations of one const or var
+// declaration. A ConstSpec with no expression list repeats the type and the
+// expressions of the last one that had them, with iota advanced — which is how
+// every name of an iota group gets a value to resolve rather than a skip.
+func collectGenDeclCodes(
+	gen *ast.GenDecl, fset *token.FileSet, syms map[string]ast.Expr, pkg string,
+) (decls []codeDecl, unresolved []string) {
+	var lastType ast.Expr
+	var lastValues []ast.Expr
+	for index, spec := range gen.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		typ, values := vs.Type, vs.Values
+		if gen.Tok == token.CONST && len(values) == 0 {
+			typ, values = lastType, lastValues
+		} else {
+			lastType, lastValues = typ, values
+		}
+		for i, name := range vs.Names {
+			var value ast.Expr
+			if i < len(values) {
+				value = values[i]
+			}
+			declared, complaint := classifyCodeSpec(name.Name, typ, value)
+			if complaint != "" {
+				unresolved = append(unresolved, fmt.Sprintf("%s: %s %s",
+					fset.Position(name.Pos()), name.Name, complaint))
+				continue
+			}
+			if declared == nil {
+				continue
+			}
+			usesIota := mentionsIota(declared)
+			if usesIota {
+				declared = withIota(declared, index)
+			}
+			resolved, rerr := resolveCodeValue(declared, syms, map[string]bool{})
+			if rerr != nil {
+				unresolved = append(unresolved, fmt.Sprintf(
+					"%s: cannot resolve Code declaration %s: %v",
+					fset.Position(name.Pos()), name.Name, rerr))
+				continue
+			}
+			//: kernel/errs' own meta-codes, and only those: iota-numbered,
+			//: Layer 0, in the one package Layer 0 belongs to.
+			if usesIota && pkg == layerZeroOwner && (resolved>>16)&0xFF == 0 {
+				continue
+			}
+			decls = append(decls, codeDecl{
+				value:   resolved,
+				prefix:  resolved &^ 0xFF,
+				varName: name.Name,
+				pkg:     pkg,
+				pos:     fset.Position(name.Pos()).String(),
+			})
+		}
+	}
+	return decls, unresolved
+}
+
+// collectCodeDeclsInDir resolves every Code declaration in the .go files of
+// dir. Ownership is keyed on DECLARATIONS, not on errs.Define call sites:
+// internal/core/codec declares the whole 0.2.2.* block and never calls Define
+// (it formats the code into its registry errors), so a Define-keyed audit is
+// blind to a range that is very much allocated.
+//
+// What counts as a declaration, and what is a re-export, is classifyCodeSpec's
+// to say. Anything that fails to resolve, and anything named like a code that
+// cannot be classified, is reported in unresolved and MUST be treated as a
+// failure, for the same fail-loud reason scanCodeValues gives.
 func collectCodeDeclsInDir(dir, pkg string) (decls []codeDecl, unresolved []string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -201,48 +362,9 @@ func collectCodeDeclsInDir(dir, pkg string) (decls []codeDecl, unresolved []stri
 			if !ok {
 				continue
 			}
-			for _, spec := range gen.Specs {
-				vs, ok := spec.(*ast.ValueSpec)
-				if !ok || vs.Type == nil || !isCodeTyped(vs) {
-					continue
-				}
-				for i, name := range vs.Names {
-					//: a spec with no RHS continues an iota group — see mentionsIota.
-					if i >= len(vs.Values) {
-						continue
-					}
-					//: a Code-typed constant that is not named Code* is type
-					//: machinery, not an allocation — kernel/errs' CIDR masks
-					//: (MaskByMajor … MaskExact) are Code-typed by design.
-					//: Code* naming is the registry convention ADR 0020 relies
-					//: on to derive a Reason from the constant identifier.
-					if !strings.HasPrefix(name.Name, "Code") {
-						continue
-					}
-					value := vs.Values[i]
-					if mentionsIota(value) {
-						continue
-					}
-					//: a cross-package selector is an alias, never a definition.
-					if _, isSel := value.(*ast.SelectorExpr); isSel {
-						continue
-					}
-					resolved, rerr := resolveCodeValue(value, syms, map[string]bool{})
-					if rerr != nil {
-						unresolved = append(unresolved, fmt.Sprintf(
-							"%s: cannot resolve Code declaration %s: %v",
-							fset.Position(name.Pos()), name.Name, rerr))
-						continue
-					}
-					decls = append(decls, codeDecl{
-						value:   resolved,
-						prefix:  resolved &^ 0xFF,
-						varName: name.Name,
-						pkg:     pkg,
-						pos:     fset.Position(name.Pos()).String(),
-					})
-				}
-			}
+			found, unres := collectGenDeclCodes(gen, fset, syms, pkg)
+			decls = append(decls, found...)
+			unresolved = append(unresolved, unres...)
 		}
 	}
 	return decls, unresolved
@@ -372,6 +494,12 @@ func TestAuditPrefixOwnership(t *testing.T) {
 // worth having. A green audit proves nothing until it has been shown to fail on
 // the violation it claims to catch — the same lesson rule 12 records about
 // tests that were excluded from every lane and therefore verified nothing.
+//
+// The conversion and iota cases were seen failing against the collector that
+// skipped every spec without a declared type and every spec mentioning iota:
+// the conversion squat printed "exclusivity: want 1 violations, got 0: []" and
+// "ownership: want 1 violations, got 0: []", and each of the other four
+// printed the ownership line — the squats were not reported at all.
 func TestAuditPrefixChecksDetectViolations(t *testing.T) {
 	t.Parallel()
 	const owner = "internal/service/fixture"
@@ -454,6 +582,120 @@ const CodeAlias errs.Code = CodeOne
 			wantExcl:  0,
 			wantOwned: 0,
 		},
+		//: the conversion spelling: no declared type, so the collector used to
+		//: skip the spec before reading its value — a squat in this form was
+		//: invisible to both checks.
+		{
+			name: "a conversion-form declaration squatting another range is caught",
+			files: map[string]string{
+				owner: `package fixture
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+const CodeOwned errs.Code = 0x00_03_40_01
+`,
+				"internal/service/converter": `package converter
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+const CodeConverted = errs.Code(0x00_03_40_02)
+`,
+			},
+			wantExcl:  1,
+			wantOwned: 1,
+		},
+		//: the same spelling inside a block, next to an untyped alias of it —
+		//: both allocate in the intruder's name.
+		{
+			name: "a conversion in a const block and its untyped alias are caught",
+			files: map[string]string{
+				"internal/service/intruder": `package intruder
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+const (
+	CodeBlocked = errs.Code(0x00_03_40_05)
+	CodeAliased = CodeBlocked
+)
+`,
+			},
+			wantExcl:  0,
+			wantOwned: 1,
+		},
+		//: an iota group outside kernel/errs: the continuation specs carry no
+		//: value of their own, and the whole group used to be skipped on the
+		//: strength of a rationale that only covers Layer 0.
+		{
+			name: "an iota group squatting another range is caught",
+			files: map[string]string{
+				"internal/service/iotasquatter": `package iotasquatter
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+const (
+	CodeFirst errs.Code = 0x00_03_40_10 + iota
+	CodeSecond
+	CodeThird
+)
+`,
+			},
+			wantExcl:  0,
+			wantOwned: 1,
+		},
+		//: the one iota group the old skip was written for: kernel/errs' own
+		//: meta-codes, Layer 0, which validateDefineArgs reserves at runtime.
+		{
+			name: "kernel/errs' own Layer-0 iota block is still exempt",
+			files: map[string]string{
+				"internal/kernel/errs": `package errs
+
+type Code uint32
+
+const (
+	CodeInvalidCode Code = iota + 0x00_00_00_01
+	CodeInvalidReason
+	CodeInvalidPublic
+)
+`,
+			},
+			wantExcl:  0,
+			wantOwned: 0,
+		},
+		//: the exemption is Layer 0 IN kernel/errs, not "an iota group": the
+		//: same block anywhere else is a range nobody allocated.
+		{
+			name: "a Layer-0 iota block outside kernel/errs is caught",
+			files: map[string]string{
+				"internal/service/layerzero": `package layerzero
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+const (
+	CodeMeta errs.Code = iota + 0x00_00_00_01
+	CodeMore
+)
+`,
+			},
+			wantExcl:  0,
+			wantOwned: 1,
+		},
+		//: and it is Layer 0, not "anything kernel/errs writes with iota".
+		{
+			name: "a kernel/errs iota block outside Layer 0 is caught",
+			files: map[string]string{
+				"internal/kernel/errs": `package errs
+
+type Code uint32
+
+const (
+	CodeStray Code = iota + 0x00_03_40_20
+	CodeStrayer
+)
+`,
+			},
+			wantExcl:  0,
+			wantOwned: 1,
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -490,6 +732,79 @@ const CodeAlias errs.Code = CodeOne
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
+		})
+	}
+}
+
+// TestAuditPrefixCollectorFailsLoudOnAnUnclassifiableCodeSpec is the other
+// half of classifying the conversion spelling: a spec NAMED like a code that
+// the collector can classify neither as a Code declaration nor as a
+// re-export used to be skipped in silence, and a skipped declaration is a
+// range squat the ownership audit never sees. It is reported as unresolved
+// instead, which both real-tree audits turn into a failure. The second case
+// is the guard against the rule biting names that only begin with the
+// letters: Codec, CodecUnavailable, a function re-exported by selector, and a
+// constant whose explicit type says it is not a code.
+//
+// Seen failing: against the collector that skipped them, the first case
+// printed "unresolved: want 2, got 0: []"; with only the untyped-literal
+// complaint silenced it printed "unresolved: want 2, got 1", naming CodeUnset.
+func TestAuditPrefixCollectorFailsLoudOnAnUnclassifiableCodeSpec(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name           string
+		source         string
+		wantUnresolved int
+		wantDecls      int
+	}{
+		{
+			name: "an untyped constant and a valueless variable named like codes are unresolved",
+			source: `package vague
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+const CodeUntyped = 0x00_03_40_07
+
+var CodeUnset errs.Code
+`,
+			wantUnresolved: 2,
+			wantDecls:      0,
+		},
+		{
+			name: "names that only begin with Code, and explicit non-codes, are left alone",
+			source: `package quiet
+
+import (
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/core/codec"
+)
+
+var Codec codec.Codec = newCodec()
+
+var CodecUnavailable = errs.Define(0x01_02_00_01, "CODEC_UNAVAILABLE", "p", "q")
+
+var CodeOf = errs.CodeOf
+
+const CodeVerifierLength int = 43
+`,
+			wantUnresolved: 0,
+			wantDecls:      0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "codes.go"), []byte(tc.source), 0o600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			decls, unresolved := collectCodeDeclsInDir(dir, "internal/service/fixture")
+			if len(unresolved) != tc.wantUnresolved {
+				t.Errorf("unresolved: want %d, got %d: %v", tc.wantUnresolved, len(unresolved), unresolved)
+			}
+			if len(decls) != tc.wantDecls {
+				t.Errorf("declarations: want %d, got %d: %+v", tc.wantDecls, len(decls), decls)
+			}
 		})
 	}
 }
