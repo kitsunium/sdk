@@ -1,0 +1,67 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "i18n",
+    srcs = [
+        "accept.go",
+        "codes.go",
+        "entry_value.go",
+        "errors.go",
+        "load.go",
+        "negotiate.go",
+        "negotiator.go",
+        "plural.go",
+        "plural_value.go",
+        "printer.go",
+        "printer_link.go",
+        "store.go",
+        "store_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/i18n",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/codec",
+        "//internal/core/i18n",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":i18n",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "i18n_test",
+    size = "small",
+    srcs = [
+        "i18n_bench_test.go",
+        "load_external_test.go",
+        "negotiate_external_test.go",
+        "plural_external_test.go",
+        "printer_external_test.go",
+        "store_external_test.go",
+    ],
+    deps = [
+        ":i18n",
+        "//internal/core/i18n",
+        "//internal/kernel/errs",
+        "//internal/service/codec/json",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
