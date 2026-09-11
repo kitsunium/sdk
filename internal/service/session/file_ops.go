@@ -29,6 +29,11 @@ func (f *fileStore) withLock(ctx context.Context, fn func() error) (err error) {
 		//: StoreUnavailable — retryable.
 		return ctxErr
 	}
+	//: the in-process half FIRST — flock does not exclude goroutines that
+	//: share this descriptor (see fileStore.mu). Held for the whole cycle,
+	//: so it is released only after the flock is.
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	//: blocks until the lock is free; it is held for microseconds.
 	if lockErr := lockExclusive(f.lock); lockErr != nil {
 		//: LockFailed — without serialisation the store cannot keep its word,

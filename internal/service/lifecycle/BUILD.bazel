@@ -1,0 +1,70 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "lifecycle",
+    srcs = [
+        "codes.go",
+        "config.go",
+        "errors.go",
+        "lifecycle.go",
+        "run.go",
+        "start.go",
+        "stop.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/lifecycle",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/lifecycle",
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/proc/sdnotify",
+        "//internal/service/proc/signal",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":lifecycle",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "lifecycle_test",
+    size = "small",
+    srcs = [
+        "harness_external_test.go",
+        "nosleep_external_test.go",
+        "run_external_test.go",
+        "run_unix_external_test.go",
+        "start_external_test.go",
+        "stop_external_test.go",
+    ],
+    # keep: TestPackageNeverWaitsOnTheWallClock parses this package's own .go
+    # files at runtime. Bazel's sandbox strips the source-tree relationship, so
+    # the sources have to reach the test as runfiles — the same mechanism
+    # //internal/kernel/errs uses for its AST audits.
+    data = ["//:audit_sources"],
+    deps = [
+        ":lifecycle",
+        "//internal/core/lifecycle",
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

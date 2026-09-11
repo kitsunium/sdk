@@ -1,0 +1,75 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "lock",
+    srcs = [
+        "codes.go",
+        "config.go",
+        "errors.go",
+        "fence.go",
+        "file.go",
+        "file_config.go",
+        "file_lease.go",
+        "flock_other.go",
+        "flock_unix.go",
+        "gate.go",
+        "holding.go",
+        "keepalive.go",
+        "lock_compliance.go",
+        "memory.go",
+        "memory_lease.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/lock",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/lock",
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":lock",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "lock_test",
+    size = "small",
+    srcs = [
+        "file_contention_unix_test.go",
+        "file_external_test.go",
+        "keepalive_external_test.go",
+        "memory_external_test.go",
+        "nosleep_external_test.go",
+    ],
+    # keep: TestPackageNeverWaitsOnTheWallClock parses this package's own .go
+    # files at runtime. Bazel's sandbox strips the source-tree relationship, so
+    # the sources have to reach the test as runfiles — the same mechanism
+    # //internal/kernel/errs uses for its AST audits.
+    data = ["//:audit_sources"],
+    deps = [
+        ":lock",
+        "//internal/core/lock",
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

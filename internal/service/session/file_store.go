@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
@@ -87,6 +88,17 @@ type fileStore struct {
 	// leaving two holders. Never unlinking them leaks a file per session. One
 	// lock, held for microseconds per operation, avoids both.
 	lock *os.File
+	// mu serialises the read-modify-write cycle BETWEEN GOROUTINES, which
+	// the flock above does not. Measured on linux/amd64: flock on the SAME
+	// open file description is a lock CONVERSION, not a wait — it succeeds
+	// immediately. Since this store holds one descriptor for its whole
+	// lifetime (deliberately, see the comment above), every goroutine
+	// re-locks that one description and every one of them proceeds. Eight
+	// goroutines reached full occupancy of the counted section on every run.
+	// Cross-PROCESS exclusion was always intact; cross-goroutine never was,
+	// and no test that only spawns processes could see it. Taken BEFORE the
+	// flock, the same order internal/service/lock's nameGate uses.
+	mu sync.Mutex
 	// key seals every record.
 	key corecrypto.Key
 	// win is the validated deadline policy and the clock behind it.
