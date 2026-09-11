@@ -1,11 +1,11 @@
 // Package token — the dotted-quad codes a consumer routes on.
 //
-// These are RE-EXPORTS, not declarations: the ranges 0.2.13.* and 0.3.44.* are
-// owned by internal/core/token and internal/service/token, and the errs
-// ownership audit skips a cross-package selector for exactly this reason
-// (ADR 0035). Matching on a code rather than on a reason string is the
-// stronger contract — a code is a number in docs/error-codes.yaml, a reason is
-// a spelling.
+// These are RE-EXPORTS, not declarations: the ranges 0.2.13.*, 0.3.44.* and
+// 0.3.42.* are owned by internal/core/token, internal/service/token and
+// internal/service/crypto/jwk, and the errs ownership audit skips a
+// cross-package selector for exactly this reason (ADR 0035). Matching on a code
+// rather than on a reason string is the stronger contract — a code is a number
+// in docs/error-codes.yaml, a reason is a spelling.
 //
 //	switch {
 //	case errs.HasCode(err, token.CodeExpired):          // 401, refresh
@@ -16,6 +16,7 @@ package token
 
 import (
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
+	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
 	svctoken "github.com/kitsunium/sdk/internal/service/token"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -107,3 +108,29 @@ const CodeSchemeUnsupported errs.Code = svctoken.CodeSchemeUnsupported
 // CodeDuplicateMember identifies a header or claims object repeating a member
 // name (0.3.44.7).
 const CodeDuplicateMember errs.Code = svctoken.CodeDuplicateMember
+
+// CodeJWKMalformed identifies a key document that is not the JSON shape
+// RFC 7517 describes — invalid JSON, a key that is not an object, or a set
+// whose "keys" is not an array (0.3.42.1).
+const CodeJWKMalformed errs.Code = jwk.CodeJWKMalformed
+
+// CodeJWKMissingMember identifies a key missing a member its declared type
+// requires, or a set missing "keys" (0.3.42.2).
+const CodeJWKMissingMember errs.Code = jwk.CodeJWKMissingMember
+
+// CodeJWKUnsupportedKeyType identifies a "kty" other than EC, OKP or oct — RSA
+// included, since the SDK verifies nothing with RSA (0.3.42.3).
+const CodeJWKUnsupportedKeyType errs.Code = jwk.CodeJWKUnsupportedKeyType
+
+// CodeJWKUnsupportedCurve identifies an unknown "crv", or one paired with the
+// wrong "kty" (0.3.42.4).
+const CodeJWKUnsupportedCurve errs.Code = jwk.CodeJWKUnsupportedCurve
+
+// CodeJWKInvalidEncoding identifies a member that is not unpadded base64url, or
+// not the fixed length its curve mandates (0.3.42.5).
+const CodeJWKInvalidEncoding errs.Code = jwk.CodeJWKInvalidEncoding
+
+// CodeJWKKeyMismatch identifies material that is not a key on the declared
+// curve: an off-curve point, an out-of-range scalar, or a "d" that does not
+// derive the declared public key (0.3.42.6).
+const CodeJWKKeyMismatch errs.Code = jwk.CodeJWKKeyMismatch
