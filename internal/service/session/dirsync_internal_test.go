@@ -8,6 +8,7 @@ package session
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -35,6 +36,10 @@ var errFlushRefused = errors.New("fsync: input/output error") //nolint:err113 //
 type flushRecorder struct {
 	seen    [][]string
 	results []error
+	// hooks run one per flush, after it has recorded what it saw and before
+	// it answers: the one point at which a test can change the directory
+	// between two steps of an operation.
+	hooks []func(dir string)
 }
 
 // flush is the syncDir replacement.
@@ -49,6 +54,11 @@ func (r *flushRecorder) flush(dir string) error {
 	r.seen = append(r.seen, names)
 	if listErr != nil {
 		return listErr
+	}
+	if len(r.hooks) != 0 {
+		hook := r.hooks[0]
+		r.hooks = r.hooks[1:]
+		hook(dir)
 	}
 	if len(r.results) == 0 {
 		return nil
@@ -266,13 +276,14 @@ func TestAFailedFlushIsReportedAndNotRolledBack(t *testing.T) {
 // Before, that error path returned at once and the new record — live, bound to
 // the principal, and named by an identifier the caller was never given —
 // stayed on disk until it expired, and every retry of the failed login
-// published another. The failure is provoked at the directory flush after the
-// old record's unlink, a rotation's second flush; the first follows the new
-// record's rename, and the recorder shows the new record in place by then, so
-// the withdrawal asserted below is not vacuous.
+// published another. The unlink of the old record is made to fail for real:
+// the flush that follows the new record's rename swaps the old record's file
+// for a non-empty directory, which remove(2) refuses. The recorder shows the
+// new record in place by then, so the withdrawal asserted below is not
+// vacuous.
 //
-// Mutation: returning removeErr without withdrawing failed both cases with "a
-// failed rotation left 1 record file(s) behind".
+// Mutation: returning the unlink's error without withdrawing failed both cases
+// with "the new record ... is still on disk".
 func TestAFailedRotationWithdrawsTheRecordItPublished(t *testing.T) {
 	t.Parallel()
 	errWithdrawRefused := errors.New("fsync: no space left on device") //nolint:err113 // a second test double, told apart from the first by its text
@@ -281,8 +292,8 @@ func TestAFailedRotationWithdrawsTheRecordItPublished(t *testing.T) {
 		results        []error
 		withdrawFailed bool
 	}{
-		{"the withdrawal succeeds", []error{nil, errFlushRefused}, false},
-		{"the withdrawal fails too, and the cause stays the answer", []error{nil, errFlushRefused, errWithdrawRefused}, true},
+		{"the withdrawal succeeds", nil, false},
+		{"the withdrawal's flush fails too, and the cause stays the answer", []error{nil, errWithdrawRefused}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,36 +307,100 @@ func TestAFailedRotationWithdrawsTheRecordItPublished(t *testing.T) {
 			}
 			rec.reset()
 			rec.results = tc.results
+			oldPath := filepath.Join(store.dir, fileOf(fresh))
+			rec.hooks = []func(string){func(string) { pinInPlace(t, oldPath) }}
 			rotated, regenErr := store.Regenerate(ctx, fresh.ID(), "alice")
-			if !errs.HasCode(regenErr, coresession.CodeStoreUnavailable) || fieldOf(regenErr, "op") != "sync-dir-remove" {
-				t.Fatalf("Regenerate = %v, want CodeStoreUnavailable from retiring the old record", regenErr)
+			if !errs.HasCode(regenErr, coresession.CodeStoreUnavailable) || fieldOf(regenErr, "op") != "remove" {
+				t.Fatalf("Regenerate = %v, want CodeStoreUnavailable from the old record's unlink", regenErr)
 			}
 			if !rotated.ID().IsZero() {
 				t.Error("a failed Regenerate returned a session")
 			}
-			//: the first flush ran with BOTH records present: the new one was
-			//: published before anything failed.
-			if seen := rec.take(); len(seen) == 0 || len(seen[0]) != 2 {
-				t.Fatalf("the flushes saw %q; the new record was never published, so this proves nothing", seen)
-			}
-			leftovers, globErr := filepath.Glob(filepath.Join(store.dir, "*"+recordSuffix))
-			if globErr != nil {
-				t.Fatalf("Glob: %v", globErr)
-			}
+			newName := publishedBeside(t, rec.take(), fileOf(fresh))
 			//: nothing survives under an identifier nobody was given.
-			if len(leftovers) != 0 {
-				t.Errorf("a failed rotation left %d record file(s) behind: %q", len(leftovers), leftovers)
+			if _, statErr := os.Stat(filepath.Join(store.dir, newName)); !errors.Is(statErr, fs.ErrNotExist) {
+				t.Errorf("the new record %s is still on disk after the failed rotation (stat: %v)", newName, statErr)
 			}
-			//: the reason the rotation failed is still the answer; a failed
-			//: withdrawal is recorded beside it, never in its place.
-			if cause := fieldOf(regenErr, "cause"); cause != errFlushRefused.Error() {
-				t.Errorf("cause = %q, want the retirement's own failure %q", cause, errFlushRefused.Error())
-			}
+			//: a failed withdrawal is recorded beside the cause, never in its place.
 			if recorded := fieldOf(regenErr, "withdraw") != ""; recorded != tc.withdrawFailed {
 				t.Errorf("withdraw field present = %v, want %v", recorded, tc.withdrawFailed)
 			}
 		})
 	}
+}
+
+// TestAFlushFailureAfterTheRetirementIsNotUndone pins the other side of the
+// rollback above. Once the old record's unlink has succeeded, the rotation has
+// happened in every reader's view, and a failure of the flush that makes it
+// durable is reported and not undone — the store's one rule for flushes. The
+// rotation used to withdraw the new record here as well, which left neither
+// identifier resolving, the one state its order of steps exists to prevent;
+// restoring the old record instead would be the second write ADR 0056 D7
+// refuses.
+//
+// Mutation: withdrawing on this failure as before failed with "the new
+// record ... is gone".
+func TestAFlushFailureAfterTheRetirementIsNotUndone(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	rec := &flushRecorder{}
+	store := flushObservedStore(t, clock.NewManualClock(time.Date(2031, 3, 7, 4, 5, 6, 0, time.UTC)), rec)
+	fresh, err := store.New(ctx)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rec.reset()
+	//: the new record's flush succeeds; the old record's, after its unlink, does not.
+	rec.results = []error{nil, errFlushRefused}
+	rotated, regenErr := store.Regenerate(ctx, fresh.ID(), "alice")
+	if !errs.HasCode(regenErr, coresession.CodeStoreUnavailable) || fieldOf(regenErr, "op") != "sync-dir-remove" {
+		t.Fatalf("Regenerate = %v, want CodeStoreUnavailable from flushing the retirement", regenErr)
+	}
+	if !rotated.ID().IsZero() {
+		t.Error("a failed Regenerate returned a session")
+	}
+	newName := publishedBeside(t, rec.take(), fileOf(fresh))
+	if _, statErr := os.Stat(filepath.Join(store.dir, newName)); statErr != nil {
+		t.Errorf("the new record %s is gone after a flush failure (stat: %v); nothing may be undone here", newName, statErr)
+	}
+	//: and the retirement stands: the old identifier names nothing.
+	if _, loadErr := store.Load(ctx, fresh.ID()); !errs.HasCode(loadErr, coresession.CodeNotFound) {
+		t.Errorf("Load(old identifier) = %v, want NotFound — the unlink happened", loadErr)
+	}
+}
+
+// pinInPlace replaces the record file at path with a non-empty directory, so
+// the unlink the store attempts next fails with ENOTEMPTY rather than
+// succeeding.
+func pinInPlace(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Remove(path); err != nil {
+		t.Errorf("remove %s: %v", path, err)
+		return
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Errorf("mkdir %s: %v", path, err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(path, "pin"), nil, 0o600); err != nil {
+		t.Errorf("pin %s: %v", path, err)
+	}
+}
+
+// publishedBeside returns the record file the first flush of a rotation saw
+// beside the old one: the new record's, which a failed Regenerate never names.
+func publishedBeside(t *testing.T, seen [][]string, oldName string) string {
+	t.Helper()
+	if len(seen) == 0 || len(seen[0]) != 2 {
+		t.Fatalf("the flushes saw %q; the new record was never published, so this proves nothing", seen)
+	}
+	for _, name := range seen[0] {
+		if name != oldName {
+			return name
+		}
+	}
+	t.Fatalf("the first flush saw only the old record twice: %q", seen[0])
+	return ""
 }
 
 // TestAFailedRenameLeavesNoOrphan executes the cleanup publish promises on
