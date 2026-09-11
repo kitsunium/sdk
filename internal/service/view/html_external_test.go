@@ -189,6 +189,37 @@ func TestATemplateThatReadsANilModelIsNotRefusedAtConstruction(t *testing.T) {
 	}
 }
 
+// TestASelfRecursiveTemplateIsRefusedAtConstruction pins that a template which
+// reaches itself through {{template}} calls with no condition on the way is a
+// defect of the tree, refused with the tree's other defects. The probe used to
+// execute it with a nil model, let text/template stop it 100 000 calls down,
+// and discard that error like any nil-model failure — so the renderer came up
+// and every render recursed that deep and failed. A guarded recursion, which is
+// how a nested model is legitimately rendered, must still build. Seen failing
+// without the check: "NewHTML accepted a template that never returns" for both
+// the direct and the indirect cycle.
+func TestASelfRecursiveTemplateIsRefusedAtConstruction(t *testing.T) {
+	for name, body := range map[string]string{
+		"a template that calls itself": `{{define "loop"}}{{template "loop" .}}{{end}}{{template "loop" .}}`,
+		"two templates calling each other": `{{define "a"}}{{template "b" .}}{{end}}` +
+			`{{define "b"}}<p>{{template "a" .}}</p>{{end}}{{template "a" .}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			renderer, err := svcview.NewHTML(coreview.Config{FS: page("p.html", body)})
+			if renderer != nil {
+				t.Fatal("NewHTML accepted a template that never returns")
+			}
+			if !errors.Is(err, svcview.TemplateParseFailed) {
+				t.Fatalf("err = %v, want TemplateParseFailed", err)
+			}
+		})
+	}
+	guarded := `{{define "node"}}{{if .Next}}{{template "node" .Next}}{{end}}{{end}}{{template "node" .}}`
+	if _, gerr := svcview.NewHTML(coreview.Config{FS: page("tree.html", guarded)}); gerr != nil {
+		t.Fatalf("NewHTML refused a guarded recursion: %v", gerr)
+	}
+}
+
 // TestASourceFailureIsNotAParseFailure: the two have different operators and
 // different fixes, so they carry different codes.
 func TestASourceFailureIsNotAParseFailure(t *testing.T) {
