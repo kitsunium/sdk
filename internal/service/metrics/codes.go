@@ -20,9 +20,10 @@ const CodeInvalidLabelName errs.Code = 0x00_03_2D_02 // 0.3.45.2
 // prefix, or "le" on a histogram, where it names the bucket's upper bound.
 const CodeReservedLabelName errs.Code = 0x00_03_2D_03 // 0.3.45.3
 
-// CodeUnsupportedTemporality identifies a delta snapshot handed to the
-// Prometheus exporter, whose exposition format has no temporality field and
-// whose server reads every counter as cumulative.
+// CodeUnsupportedTemporality identifies a snapshot that is not cumulative —
+// delta, or an unresolved temporality — handed to the Prometheus exporter,
+// whose exposition format has no temporality field and whose server reads
+// every counter as cumulative.
 const CodeUnsupportedTemporality errs.Code = 0x00_03_2D_04 // 0.3.45.4
 
 // CodeOTLPUnresolvedTemporality identifies a snapshot handed to the OTLP/JSON

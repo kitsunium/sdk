@@ -22,8 +22,9 @@ var (
 		"An attribute key is reserved by the Prometheus exposition format",
 		"service/metrics: a \"__\" prefix is reserved for the server's internal labels, and \"le\" is reserved for a histogram's bucket bound")
 
-	// UnsupportedTemporality is returned when a delta snapshot is handed to
-	// the Prometheus exporter.
+	// UnsupportedTemporality is returned when a snapshot that is not
+	// cumulative — delta, or an unresolved temporality — is handed to the
+	// Prometheus exporter.
 	UnsupportedTemporality = errs.Define(CodeUnsupportedTemporality, "UNSUPPORTED_TEMPORALITY",
 		"The Prometheus exposition format carries cumulative metrics only",
 		"service/metrics: the text exposition format has no temporality field and the server reads every counter as cumulative; build the meter with TemporalityCumulative for this exporter")

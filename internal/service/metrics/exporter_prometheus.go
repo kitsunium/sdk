@@ -61,7 +61,8 @@ var Prometheus = coremetrics.RegisterExporter(newPrometheusExporter(prometheusEx
 // predates most of it and has no field for the parts it lacks. What is lost,
 // and why each loss is a loss rather than a bug, is enumerated in
 // internal/service/metrics/CLAUDE.md §What the Prometheus connector loses. The
-// short list: temporality (delta is REFUSED rather than mis-labelled), the
+// short list: temporality (anything but cumulative is REFUSED rather than
+// mis-labelled), the
 // attribute's TYPE, the Resource, the Scope, and exemplars the SDK does not
 // produce at all.
 //
@@ -517,7 +518,9 @@ func promFloat(value float64) string {
 	return strconv.FormatFloat(value, 'g', -1, floatBitSize)
 }
 
-// checkTemporality refuses a delta metric.
+// checkTemporality refuses a metric whose temporality is not cumulative:
+// delta, and also an unresolved or cast value, which a Meter never produces
+// and a hand-built snapshot can.
 //
 // The exposition format has no temporality field, and a Prometheus server reads
 // every counter as cumulative: `rate()` differences successive scrapes itself.
@@ -532,11 +535,13 @@ func promFloat(value float64) string {
 // fails on the first scrape or never. It cannot start failing under traffic.
 func checkTemporality(name string, temporality coremetrics.Temporality) error {
 	//: cumulative is the only temporality this wire can carry.
-	if temporality != coremetrics.TemporalityDelta {
+	if temporality == coremetrics.TemporalityCumulative {
 		//: representable.
 		return nil
 	}
-	//: origin wins on wrap — the sentinel keeps its code/reason/public.
+	//: delta would be misread, and an unresolved or cast value would have to
+	//: be guessed — the OTLP encoder refuses the same values for that reason.
+	//: Origin wins on wrap: the sentinel keeps its code/reason/public.
 	return errs.Wrap(UnsupportedTemporality, errs.WrapParams{}, errs.String("metric", name))
 }
 
