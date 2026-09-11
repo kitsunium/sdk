@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"testing/synctest"
@@ -204,4 +205,59 @@ func TestAGoroutineWaitingOnTheGateCanLeaveToo(t *testing.T) {
 			t.Errorf("the first caller ended with %v, want the absent record's own verdict", err)
 		}
 	})
+}
+
+// lateCancel is a context that reports itself live the FIRST time it is asked
+// and cancelled afterwards, with a nil Done channel so no select ever sees it.
+//
+// It models one instant that cannot otherwise be reached from outside: the
+// caller was still waiting when withLock checked at entry, and had gone by the
+// time the lock was in hand. Every wait in between is a select, and a select
+// whose cancellation becomes ready at the same moment as the acquisition picks
+// between them at random — so the real race exists and lands here.
+type lateCancel struct {
+	context.Context
+	asked atomic.Int64
+}
+
+// Err reports live once, then cancelled.
+func (c *lateCancel) Err() error {
+	//: the first ask is withLock's entry check, which must pass.
+	if c.asked.Add(1) == 1 {
+		//: still live.
+		return nil
+	}
+	//: gone by the time the lock is held.
+	return context.Canceled
+}
+
+// Done never fires, so the gate and the poll cannot take the cancellation arm:
+// what the test drives is the CHECK, not the waits, which have tests of their
+// own above.
+func (c *lateCancel) Done() <-chan struct{} { return nil }
+
+// TestACallerThatLeavesWhileAcquiringDoesNotRunTheSection pins the check that
+// closes the race the three waits leave open. Without it, a caller that had
+// already gone could still have its record read, its idle window slid and its
+// record republished — work nobody would read, done under a lock everyone else
+// is waiting for.
+//
+// Nothing holds the lock here, so every wait succeeds at once and the only
+// thing between this caller and the critical section is the check under test.
+//
+// Seen failing with the post-acquisition check removed: New returned <nil> and
+// a record was created for a caller that had gone.
+func TestACallerThatLeavesWhileAcquiringDoesNotRunTheSection(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewManualClock(time.Unix(1700000000, 0))
+	fixture := newFileFixture(t, clk)
+	ctx := &lateCancel{Context: t.Context()}
+	_, err := fixture.store.New(ctx)
+	if !errs.HasCode(err, coresession.CodeStoreUnavailable) {
+		t.Errorf("a caller that left while acquiring got %v, want STORE_UNAVAILABLE", err)
+	}
+	//: and nothing was written for it.
+	if got := fixture.records(t); len(got) != 0 {
+		t.Errorf("the store holds %d record(s), want none — the section ran", len(got))
+	}
 }

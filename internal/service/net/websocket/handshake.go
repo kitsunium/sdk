@@ -5,6 +5,7 @@ import (
 	"bufio"
 	stdnet "net"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 
@@ -236,8 +237,12 @@ func forwardedScheme(r *http.Request) bool {
 	//: X-Forwarded-For) are deliberately not read: they say a request was
 	//: relayed, not that a scheme was translated.
 	for _, name := range []string{"Forwarded", "X-Forwarded-Proto"} {
-		//: any value at all, including one this server cannot parse.
-		if r.Header.Get(name) != "" {
+		//: PRESENCE, which is not Header.Get: that returns "" both for a header
+		//: nobody sent and for one sent empty, and a proxy that emits an empty
+		//: value is still a proxy. Reading the map directly is the only way to
+		//: tell the two apart, and the canonical key is what net/http stored it
+		//: under.
+		if _, sent := r.Header[textproto.CanonicalMIMEHeaderKey(name)]; sent {
 			//: the scheme is announced rather than observed.
 			return true
 		}

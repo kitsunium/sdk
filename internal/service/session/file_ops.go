@@ -60,6 +60,18 @@ func (f *fileStore) withLock(ctx context.Context, fn func() error) (err error) {
 			err = cmp.Or(err, wrapAs(LockFailed, unlockErr))
 		}
 	}()
+	//: and one last look before the section runs. Every wait above is a select,
+	//: and a select whose cancellation becomes ready at the same instant as the
+	//: acquisition picks between them at random — so a caller that had already
+	//: gone could still have its record read, its idle window slid and its
+	//: record republished. The check is here rather than only at entry because
+	//: that is where the race leaves it: cheap, and it makes "a caller who
+	//: leaves gets STORE_UNAVAILABLE" true in the one case where it was a coin
+	//: toss.
+	if ctxErr := checkContext(ctx); ctxErr != nil {
+		//: StoreUnavailable — the lock is released by the defers above.
+		return ctxErr
+	}
 	//: fn owns the critical section.
 	return fn()
 }

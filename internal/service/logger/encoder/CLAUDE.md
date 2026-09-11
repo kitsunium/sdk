@@ -36,7 +36,11 @@ the `text` encoder; `ndjson` / `json` land in follow-up commits.
 - Group prefix: `g1.g2.…` joined by `groupSeparator` ('.'); each group **name**
   segment is also framing-byte-scrubbed (V110).
 - Reserved keys (ADR 0070): a top-level attribute named `trace_id` or `span_id`
-  renders as `attr.trace_id` / `attr.span_id`. Renamed, never dropped.
+  renders as `attr.trace_id` / `attr.span_id`. Renamed, never dropped. The whole
+  `attr.` namespace is reserved with them, so a key already inside it is
+  prefixed in turn (`attr.trace_id` → `attr.attr.trace_id`) — without that the
+  rename is not injective and two caller keys collide where the SDK's field no
+  longer does.
 - Trace context (ADR 0062): `trace_id=<32 lowercase hex> span_id=<16 lowercase hex>`,
   emitted between the header and the attributes, **unquoted** (they are record
   fields rather than attribute values, are fixed-length hex, and an operator

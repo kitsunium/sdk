@@ -177,6 +177,12 @@ func TestJSONEncoderRendersTraceContext(t *testing.T) {
 // rather than dropped: nothing logged is lost, and nothing logged can be taken
 // for the span the line came from.
 //
+// The rename has to be INJECTIVE, which prefixing alone is not: a caller
+// logging both trace_id and a literal attr.trace_id would land both on
+// "attr.trace_id" and the ambiguity would survive one name over. So the whole
+// attr. namespace is reserved with the two keys, and a key already inside it is
+// prefixed in turn — attr.trace_id becomes attr.attr.trace_id.
+//
 // Inside a group the key already carries the group's prefix, so it cannot
 // collide and is left exactly as it was.
 //
@@ -189,6 +195,10 @@ func TestATopLevelAttributeCannotSpellTheSDKsOwnFields(t *testing.T) {
 	forged := []corelogger.AttrValue{
 		{Key: corelogger.TraceIDKey, Value: corelogger.StringValue("forged-trace")},
 		{Key: corelogger.SpanIDKey, Value: corelogger.StringValue("forged-span")},
+		//: a caller already inside the escape namespace. Without escaping it in
+		//: turn, this one and the first would both render "attr.trace_id" and
+		//: the ambiguity would simply move one name over.
+		{Key: encoder.ReservedPrefix + corelogger.TraceIDKey, Value: corelogger.StringValue("already-prefixed")},
 	}
 	tests := []struct {
 		name     string
@@ -202,6 +212,7 @@ func TestATopLevelAttributeCannotSpellTheSDKsOwnFields(t *testing.T) {
 			wantSubs: []string{
 				`"trace_id":"` + traceHexFixture + `"`, `"span_id":"` + spanHexFixture + `"`,
 				`"attr.trace_id":"forged-trace"`, `"attr.span_id":"forged-span"`,
+				`"attr.attr.trace_id":"already-prefixed"`,
 			},
 		},
 		{
@@ -210,6 +221,7 @@ func TestATopLevelAttributeCannotSpellTheSDKsOwnFields(t *testing.T) {
 			wantSubs: []string{
 				" trace_id=" + traceHexFixture, " span_id=" + spanHexFixture,
 				" attr.trace_id=\"forged-trace\"", " attr.span_id=\"forged-span\"",
+				" attr.attr.trace_id=\"already-prefixed\"",
 			},
 		},
 		{
@@ -218,6 +230,7 @@ func TestATopLevelAttributeCannotSpellTheSDKsOwnFields(t *testing.T) {
 			wantSubs: []string{
 				`"trace_id":"` + traceHexFixture + `"`,
 				`"http.trace_id":"forged-trace"`, `"http.span_id":"forged-span"`,
+				`"http.attr.trace_id":"already-prefixed"`,
 			},
 		},
 		{
@@ -226,6 +239,7 @@ func TestATopLevelAttributeCannotSpellTheSDKsOwnFields(t *testing.T) {
 			wantSubs: []string{
 				" trace_id=" + traceHexFixture,
 				" http.trace_id=\"forged-trace\"", " http.span_id=\"forged-span\"",
+				" http.attr.trace_id=\"already-prefixed\"",
 			},
 		},
 	}
@@ -237,6 +251,14 @@ func TestATopLevelAttributeCannotSpellTheSDKsOwnFields(t *testing.T) {
 		for _, want := range wantSubs {
 			if !strings.Contains(line, want) {
 				t.Errorf("%s: line %q does not contain %q", name, line, want)
+			}
+		}
+		//: no key is rendered twice, whatever the caller logged — which is the
+		//: whole claim, and what makes the rename injective rather than merely
+		//: prefixing.
+		for _, key := range []string{"attr.trace_id", "attr.attr.trace_id"} {
+			if got := strings.Count(line, `"`+key+`"`) + strings.Count(line, " "+key+"="); got > 1 {
+				t.Errorf("%s: line %q spells %s %d times, want at most 1", name, line, key, got)
 			}
 		}
 		//: exactly one correlation field of each name, whatever the caller logged.

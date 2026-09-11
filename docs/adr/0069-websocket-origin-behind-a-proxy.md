@@ -34,6 +34,9 @@ The default rule reads the **presence** of a scheme-announcing header, never
 its value, and refuses when it finds one on a connection this process did not
 terminate:
 
+- presence is read from the header MAP and not through `Header.Get`, which
+  returns `""` for a header nobody sent and for one sent empty alike — and a
+  proxy that emits an empty value is still a proxy;
 - the headers read are RFC 7239's `Forwarded` and the de-facto
   `X-Forwarded-Proto`. Headers a FORWARD proxy adds on the client's side
   (`Via`, `X-Forwarded-For`) are deliberately not read: they say a request was

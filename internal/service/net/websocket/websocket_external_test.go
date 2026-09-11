@@ -651,7 +651,9 @@ func TestOriginIsCheckedByDefault(t *testing.T) {
 // known first-hand and the announcement is ignored.
 //
 // Seen failing without the check: the two announced rows answered 101 where
-// they now answer 403.
+// they now answer 403 — and the empty-value row answered 101 for as long as the
+// presence test was Header.Get, which reports "" for a header nobody sent and
+// for one sent empty alike.
 func TestTheDefaultRuleRefusesWhenAProxyAnnouncedTheScheme(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -675,6 +677,15 @@ func TestTheDefaultRuleRefusesWhenAProxyAnnouncedTheScheme(t *testing.T) {
 		{
 			name:   "RFC 7239's header says the same thing",
 			origin: "https://{host}", forwarded: []string{"Forwarded: proto=https;for=198.51.100.7"},
+			status: http.StatusForbidden,
+		},
+		{
+			//: a header SENT EMPTY is still a header sent, and a proxy that
+			//: emits one is still a proxy. Header.Get cannot tell it from a
+			//: header nobody sent — both are "" — which is why the check reads
+			//: the map. Seen failing against Get: 101 instead of 403.
+			name:   "an empty announcement is an announcement",
+			origin: "https://{host}", forwarded: []string{"X-Forwarded-Proto:"},
 			status: http.StatusForbidden,
 		},
 		{

@@ -55,6 +55,14 @@ Both waits observe the caller's context.
   is v0, said out loud (ADR 0040); `clock.System` and `clock.ManualClock` both
   satisfy `Timed`, so only a hand-written `Clock`-only double is affected.
 
+And the context is checked ONE more time, after both waits and before the
+critical section. Each wait is a select, and a select whose cancellation becomes
+ready at the same instant as the acquisition picks between them at random — so
+without it a caller that had already gone could still have its record read, its
+idle window slid and its record republished, under a lock everyone else is
+waiting for. The check makes the rule below true in the case where it was a coin
+toss.
+
 A caller who leaves receives `STORE_UNAVAILABLE` carrying its own context error
 as a field — the retryable backend fault every other unavailability here uses,
 rather than a new code, because "this store could not serve you" is what
@@ -100,6 +108,9 @@ rather than discovered.
   `file_config.go` (`Poll`, `DefaultPoll`, `waiter`).
 - `TestACallerWhoLeftStopsWaitingForTheLock`,
   `TestTheLockIsTakenOnceTheHolderLeaves`,
-  `TestAGoroutineWaitingOnTheGateCanLeaveToo`.
+  `TestAGoroutineWaitingOnTheGateCanLeaveToo`, and
+  `TestACallerThatLeavesWhileAcquiringDoesNotRunTheSection`, whose context
+  double reports itself live once and cancelled afterwards — the one instant
+  the race lands on, and not otherwise reachable from outside.
 - ADR 0052 §"`flock(2)` was measured before use" — the eight-goroutine
   measurement this store's gate exists for.

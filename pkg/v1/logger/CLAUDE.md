@@ -91,6 +91,9 @@ ADR 0039 never came into play.
   than beside the SDK's field: two members of one JSON object with that name
   let a decoder keep the caller's value as the line's correlation. It is
   RENAMED and never dropped, and a grouped key (`http.trace_id`) is untouched.
+  The whole `attr.` namespace goes with them — a key already inside it is
+  prefixed again — because a rename that is not injective just moves the
+  collision one name over.
 - **No span ⇒ nothing emitted.** Not `trace_id=""`, not 32 zeroes. An all-zero
   identifier is invalid under W3C Trace Context §3.2.2.3/§3.2.2.4 and would put
   an unjoinable field on every line logged outside a request.

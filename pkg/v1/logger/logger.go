@@ -133,8 +133,11 @@
 //     "attr.span_id", because two fields of one name let a decoder
 //     keep the caller's value as the line's correlation. It is
 //     renamed and never dropped, and a key under [Logger.WithGroup]
-//     already carries its prefix and is untouched. To log somebody
-//     else's identifier, name it for what it is:
+//     already carries its prefix and is untouched. The whole "attr."
+//     namespace is reserved with them, so a key already inside it is
+//     prefixed again — otherwise the rename would not be one-to-one
+//     and two of your own keys could collide. To log somebody else's
+//     identifier, name it for what it is:
 //     logger.String("upstream_trace_id", id).
 //   - When no span is in scope NOTHING is emitted — not an empty
 //     value and not the all-zero identifier, both of which W3C Trace

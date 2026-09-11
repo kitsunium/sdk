@@ -51,8 +51,16 @@ its own two write sites.
 - **The prefix is `attr.`**, spelled once as `encoder.ReservedPrefix`, and the
   reserved set is `encoder.ReservesKey` — one predicate, so a future key the
   SDK writes itself is reserved in every writer by editing one function.
+- **The whole `attr.` namespace is reserved with the two keys**, because the
+  rename has to be INJECTIVE and prefixing alone is not: a caller logging both
+  `trace_id` and a literal `attr.trace_id` would land both on `attr.trace_id`
+  and the ambiguity would survive one name over. A key already inside the
+  namespace is prefixed in turn — `attr.trace_id` renders `attr.attr.trace_id`
+  — which makes the mapping one-to-one, so two distinct keys always render
+  distinct.
 
-The set is exactly the two keys ADR 0062 introduced. `ts`, `level`, `msg` and
+The set is the two keys ADR 0062 introduced, plus the namespace they escape
+into and nothing else. `ts`, `level`, `msg` and
 `framework_version` are deliberately NOT reserved: they are not a security
 boundary, they predate every caller in the wild, and reserving them now would
 rename attributes in lines nobody has a problem with.
@@ -65,8 +73,9 @@ rename attributes in lines nobody has a problem with.
 - A record outside a span still emits neither key (ADR 0062), and the
   reservation applies anyway — the rename does not depend on a span being
   present, so a line does not change shape depending on whether it was traced.
-- No cost on the common path: the check is two string comparisons per
-  top-level attribute, and no attribute in the SDK's own emission is affected.
+- No allocation on the common path: the check is two string comparisons and a
+  prefix test per top-level attribute, all on the stack, and no attribute in the
+  SDK's own emission is affected. The alloc lane is unchanged at 1 alloc/emit.
 
 ## Breaking changes
 
@@ -99,7 +108,7 @@ not. No API changes.
   `ReservesKey`), `encoder/json.go`, `encoder/text.go`,
   `internal/service/logger/text_handler.go`.
 - `TestATopLevelAttributeCannotSpellTheSDKsOwnFields` (encoder, JSON and text,
-  grouped and not) and
+  grouped and not, including a caller key already inside the namespace) and
   `TestTextHandler_ATopLevelAttributeCannotSpellTheSDKsOwnFields`.
 - RFC 8259 §4 (an object's members are not required to be unique, and no
   behaviour is prescribed when they are not).
