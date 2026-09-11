@@ -86,6 +86,11 @@ func (h *health) readiness(ctx context.Context, current phase) corehealth.Report
 	//: terminal, and checked first: a draining process is not ready however
 	//: healthy its dependencies are.
 	if current == phaseDraining {
+		//: the supervisor is told what the probe answers: without it, a unit
+		//: that announced READY kept showing its last healthy STATUS line for
+		//: the whole drain, since the only announce sat below this return.
+		//: One datagram, on the change; later polls owe nothing.
+		h.announce(corehealth.StatusUnhealthy)
 		//: no check is run — dialling a dependency to reconfirm a decision
 		//: already taken would only add load to a shutdown.
 		return h.shortCircuit(corehealth.ProbeReadiness, "draining",

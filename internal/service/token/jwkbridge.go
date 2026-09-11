@@ -89,6 +89,14 @@ func NewVerifierFromJWK(key jwk.KeyValue, cfg VerifierConfig) (verifier coretoke
 // happen per token and in the same sequence, because that sequence is ADR
 // 0042's security property. Nothing here is keyed on, or cached against,
 // anything the token carries.
+//
+// # A set that can verify nothing is refused
+//
+// Binding at construction is also what lets a useless set be refused there
+// (ADR 0031): an empty set, and one whose every member either has no kid or is
+// unusable, are both PolicyMisconfigured rather than a verifier that refuses
+// every token. The unusable members of a set that IS accepted still count
+// against MaxKeyCandidates — see indexByKid.
 func NewSetVerifier(set jwk.Set, cfg VerifierConfig) (verifier coretoken.Verifier, err error) {
 	policy, perr := newPolicy(cfg)
 	//: every bound and knob is validated once, here.
@@ -102,8 +110,68 @@ func NewSetVerifier(set jwk.Set, cfg VerifierConfig) (verifier coretoken.Verifie
 		return nil, errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
 			errs.String("knob", "empty JWK Set"))
 	}
+	index := indexByKid(set)
+	//: a set with members can still be that same verifier. A member without a
+	//: kid is never selected — candidates refuses the empty kid first — and an
+	//: unusable one is skipped by Verify, so a set holding only those refuses
+	//: every token it will ever see, for exactly the reason an empty set does.
+	if !selectable(index) {
+		//: refuse, and say which constructor a kid-less key belongs to.
+		return nil, unverifiableSet(set.Len(), indexedCount(index))
+	}
 	//: bound to the set, not to one key — and bound once, not once per token.
-	return &setVerifier{byKid: indexByKid(set), policy: policy}, nil
+	return &setVerifier{byKid: index, policy: policy}, nil
+}
+
+// selectable reports whether index holds at least one member a token could be
+// verified against: indexed under a kid, and bound to an algorithm this package
+// implements.
+//
+// It asks only whether such a member EXISTS. An unusable member stays in the
+// index, and keeps counting against MaxKeyCandidates, whatever this returns —
+// that is indexByKid's rule, and this function only reads the index it built.
+func selectable(index map[string][]boundKeyValue) bool {
+	//: one usable member under any kid is enough to verify something.
+	for _, group := range index {
+		//: an unusable member can never be the one that verifies.
+		if slices.ContainsFunc(group, func(member boundKeyValue) bool { return member.usable }) {
+			//: this verifier can verify at least one token.
+			return true
+		}
+	}
+	//: nothing indexed, or nothing indexed that this package can verify with.
+	return false
+}
+
+// indexedCount reports how many members index holds across every kid.
+func indexedCount(index map[string][]boundKeyValue) int {
+	count := 0
+	//: every kid's group, usable or not.
+	for _, group := range index {
+		count += len(group)
+	}
+	//: the members that carried a kid.
+	return count
+}
+
+// unverifiableSet is the PolicyMisconfigured refusal for a JWK Set that no
+// token could ever verify against.
+//
+// It is built from the sentinel's own code, reason, public message and exit
+// code — so errors.Is and errs.HasCode both still match PolicyMisconfigured —
+// rather than by wrapping the sentinel, because origin-wins would inherit the
+// sentinel's generic Private, and the one thing worth telling an operator here
+// is specific: a key published without a kid is a single key, and
+// NewVerifierFromJWK is the constructor that verifies with one.
+func unverifiableSet(members, withKid int) error {
+	//: counts only — never a kid, never key material.
+	return errs.Wrap(nil, errs.WrapParams{
+		Code:     coretoken.PolicyMisconfigured.Code(),
+		Reason:   coretoken.PolicyMisconfigured.Reason(),
+		Public:   coretoken.PolicyMisconfigured.Public(),
+		Private:  "service/token: no JWK Set member has both a kid and a key this package verifies with; a key published without a kid is verified with NewVerifierFromJWK",
+		ExitCode: coretoken.PolicyMisconfigured.ExitCode(),
+	}, errs.String("knob", "JWK Set"), errs.Int("members", members), errs.Int("members_with_kid", withKid))
 }
 
 // setVerifier authenticates JWS compact tokens against a JWK Set.

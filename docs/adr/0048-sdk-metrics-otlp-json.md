@@ -218,8 +218,10 @@ other one in this tree (`writer/nettransport`), not like a library call.
 - **The drain is bounded too.** *(Amended 2026-09-11.)* After the verdict the
   body is drained so the connection can be reused, and that drain was the one
   read here with no limit — so a collector streaming an endless body held a
-  caller-supplied, deadline-free client forever. It reads through the same
-  `io.LimitReader` now. Worth knowing when reading the tests: Go 1.27's own
+  caller-supplied, deadline-free client forever. It reads through an
+  `io.LimitReader` bounded by `DefaultOTLPMaxResponseBytes` now — the default,
+  not the configured `MaxResponseBytes`, which bounds the verdict read only.
+  Worth knowing when reading the tests: Go 1.27's own
   transport already drains up to 256 KiB after an early close, so the SDK drain
   only decides reuse for a response larger than that, or for a round-tripper
   that is not an `*http.Transport`.

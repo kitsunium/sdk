@@ -84,6 +84,71 @@ func TestStartupGatesTheLifecycle(t *testing.T) {
 	}
 }
 
+// TestAnUnexplainedFailingStartupStillFailsStart pins that the lifecycle bridge
+// refuses a not-serving startup report even when nothing in it says why.
+//
+// The gate joins the failing results' errors, and errors.Join of nothing is a
+// genuine nil — which lifecycle reads as a successful Start. So a Health that
+// reports "unhealthy" with no errored result used to declare the application
+// UP, the opposite of what the report said, while the comment beside the Join
+// claimed it could not. This package's registry never produces such a report;
+// the bridge accepts any Health, so it must refuse one anyway. The last case is
+// the guard on the other side: when the report does carry the caller's error,
+// that error is what comes back — the sentinel is not a new wrapper for it.
+//
+// MUTATION (2026-09-11): the `len(failed) == 0` branch was deleted, so every
+// failing report went straight to errors.Join. Observed: `unhealthy, no
+// results: Start = <nil>, want STARTUP_PENDING — a report that is not serving
+// declared the application up`, and the same for `unhealthy results carrying
+// no error` and `a status outside the three`. Restored; SHA-256 of
+// component.go identical to the fixed file.
+//
+// MUTATION (2026-09-11): the gate made to return startupUnexplained for EVERY
+// failing report. Observed: `a failure with the caller's own error: Start =
+// [0.3.59.4 STARTUP_PENDING] The process is still starting and is not
+// accepting traffic yet, want the caller's own error through errors.Is` — and
+// the pre-existing TestStartupGatesTheLifecycle failed beside it. Restored;
+// SHA-256 identical.
+//
+// MUTATION (2026-09-11): core/health's Serving put back to `return s !=
+// StatusUnhealthy`. Observed, in this test: `a status outside the three: Start
+// = <nil>, want STARTUP_PENDING …` — a verdict nobody minted counted as a
+// finished startup. Restored; SHA-256 of health_status.go identical.
+func TestAnUnexplainedFailingStartupStillFailsStart(t *testing.T) {
+	t.Parallel()
+	unexplained := []struct {
+		name   string
+		report corehealth.ReportValue
+	}{
+		{"unhealthy, no results", corehealth.ReportValue{
+			Probe: corehealth.ProbeStartup, Status: corehealth.StatusUnhealthy,
+		}},
+		{"unhealthy results carrying no error", corehealth.ReportValue{
+			Probe: corehealth.ProbeStartup, Status: corehealth.StatusUnhealthy,
+			Results: []corehealth.ResultValue{{Name: "migrations", Status: corehealth.StatusUnhealthy}},
+		}},
+		//: relies on Status.Serving being false outside the three.
+		{"a status outside the three", corehealth.ReportValue{
+			Probe: corehealth.ProbeStartup, Status: corehealth.Status(7),
+		}},
+	}
+	for _, tc := range unexplained {
+		err := svchealth.Component(scriptedHealth{report: tc.report}, "health").Start(context.Background())
+		if !errs.HasCode(err, svchealth.CodeStartupPending) || !errors.Is(err, svchealth.StartupPending) {
+			t.Errorf("%s: Start = %v, want STARTUP_PENDING — a report that is not serving declared the application up", tc.name, err)
+		}
+	}
+	//: a failure that DOES say why keeps saying it in the caller's words.
+	explained := corehealth.ReportValue{
+		Probe: corehealth.ProbeStartup, Status: corehealth.StatusUnhealthy,
+		Results: []corehealth.ResultValue{{Name: "migrations", Status: corehealth.StatusUnhealthy, Err: errDependency}},
+	}
+	err := svchealth.Component(scriptedHealth{report: explained}, "health").Start(context.Background())
+	if !errors.Is(err, errDependency) || errs.HasCode(err, svchealth.CodeStartupPending) {
+		t.Errorf("a failure with the caller's own error: Start = %v, want the caller's own error through errors.Is", err)
+	}
+}
+
 // TestAnEmptyRegistryStartsAndDrainsCleanly pins the smallest legitimate
 // wiring: a component with no checks at all starts, stops, and takes the
 // replica out of rotation on the way (ADR 0031).

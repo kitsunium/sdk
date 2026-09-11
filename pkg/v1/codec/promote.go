@@ -1,11 +1,11 @@
 // Package codec — JSON-bridge promotion path for codecs whose runtime
 // preconditions reject the public Marshal(F, any) / Unmarshal(F, *,
-// any) contract. Six of the twenty-three registered codecs constrain
+// any) contract. Six of the twenty-four registered codecs constrain
 // their input shape: csv expects [][]string, ndjson expects []T, pem
 // expects *pem.Block, flatbuffers expects []byte or BytesProvider,
 // form expects url.Values, tlv's decoder cannot project composites
 // into typed targets. Without promotion the facade's "format-swap is
-// a single string change" promise is a lie for 6/23. Promotion
+// a single string change" promise is a lie for 6/24. Promotion
 // intercepts the VALUE_INVALID / FLATBUFFERS_BAD_* / UNMARSHAL_FAILED
 // responses, encodes the value to JSON, wraps the bytes in a
 // codec-specific container the codec will accept, and reverses the

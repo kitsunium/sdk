@@ -130,7 +130,9 @@ func ParseJWK(document []byte) (key JWK, err error) {
 //
 // The "keys" member is required — absent or null is refused with
 // [CodeJWKMissingMember] — while an empty array is a valid empty set, which
-// [NewSetVerifier] then refuses because it could never verify anything.
+// [NewSetVerifier] then refuses because it could never verify anything. A
+// document, or a member, that is JSON null is not an object at all and is
+// refused with [CodeJWKMalformed].
 func ParseJWKSet(document []byte) (set JWKSet, err error) {
 	//: delegate to the set decoder, which runs every member through the same
 	//: validating entry point as ParseJWK.
@@ -170,6 +172,12 @@ func NewVerifierFromJWK(key JWK, cfg VerifierConfig) (verifier Verifier, err err
 // rotation, since RFC 7517 §4.5 only SHOULD-s uniqueness — the candidates are
 // tried in document order up to VerifierConfig.MaxKeyCandidates, past which the
 // token is refused with [KeyIDAmbiguous].
+//
+// A set no token could ever verify against is refused here, with
+// [PolicyMisconfigured], rather than built into a verifier that refuses
+// everything: an empty set, and one whose every member either carries no kid
+// or is a key this package does not verify with (P-384, P-521). A single key
+// published without a kid belongs to [NewVerifierFromJWK].
 func NewSetVerifier(set JWKSet, cfg VerifierConfig) (verifier Verifier, err error) {
 	//: delegate to the service constructor.
 	return svctoken.NewSetVerifier(set, cfg)

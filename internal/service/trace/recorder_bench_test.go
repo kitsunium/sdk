@@ -38,6 +38,10 @@ const benchCapacity int = svctrace.DefaultMaxSpans
 var (
 	lenSink     int
 	droppedSink uint64
+	// parallelLenSink is what a RunParallel body writes: every worker stores
+	// its last reading when it finishes, concurrently, so a plain int there is
+	// a data race the detector reports under -race.
+	parallelLenSink atomic.Int64
 )
 
 // benchSpanValue is the span every arm records: five attributes and a status,
@@ -347,7 +351,7 @@ func BenchmarkRecorderLen(b *testing.B) {
 		for pb.Next() {
 			last = recorder.Len()
 		}
-		lenSink = last
+		parallelLenSink.Store(int64(last))
 	})
 }
 
@@ -363,6 +367,6 @@ func BenchmarkRecorderLen_RWMutexControl(b *testing.B) {
 		for pb.Next() {
 			last = recorder.length()
 		}
-		lenSink = last
+		parallelLenSink.Store(int64(last))
 	})
 }

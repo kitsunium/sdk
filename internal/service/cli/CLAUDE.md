@@ -46,15 +46,23 @@ Code range: `0.3.62.*` (ADR 0065).
 - **`-h` is status 0 only when the page was delivered.** `writeHelp` returns
   the stream's error (`io.ErrShortWrite` for a writer that took part of the
   page silently), and the `-h` path turns it into `HelpWriteFailed` (EX_IOERR)
-  with that error beneath it. The usage paths discard it on purpose: there the
-  usage error is the verdict. Pinned by `TestAHelpNobodyReceivedIsNotASuccess`
-  and `TestAFailedHelpWriteKeepsTheUsageVerdict`.
+  with that error beneath it — or in `cause` and `cause_code` fields when it
+  is itself an `*errs.Error`, which origin-wins would otherwise let take over
+  the code and the exit status. The usage paths discard it on purpose: there the usage error
+  is the verdict. Pinned by `TestAHelpNobodyReceivedIsNotASuccess`,
+  `TestATypedStreamErrorDoesNotTakeOverTheHelpVerdict` and
+  `TestAFailedHelpWriteKeepsTheUsageVerdict`.
 - **The only recovered panic is an `Action`'s.** A panicking Go program exits
   with status 2, which sysexits gives no meaning; recovering keeps the value
   AND the originating stack as fields and lets `main` decide. The recovered
   value is a FIELD and never the wrap origin, so a `panic(*errs.Error)` cannot
   hijack `COMMAND_PANICKED` — pinned by
   `TestAPanicCarryingAnErrsErrorCannotHijackTheCode`.
+- **The tree is copied at `New`, before it is validated.** `CommandValue` is a
+  value but its `Commands` slices were the caller's arrays, so editing them
+  afterwards changed what ran — unvalidated, and racing with any `Execute` in
+  flight. `cloneTree` copies every level; `TestTheTreeIsFrozenAtNew` renames a
+  child in the caller's slice and requires the validated name to still run.
 - **The engine is concurrency-safe; a `Binder`'s destination is not.** No
   per-invocation state is held here, but `fs.IntVar(&shared, …)` targets the
   caller's memory. The safe pattern — allocate per call, read back through

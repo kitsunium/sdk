@@ -92,14 +92,26 @@ func rejected(part, problem, key string) error {
 // §"origin wins" refuses. It is the same normalisation config.Load performs at
 // its Source boundary, and for the same reason: Fill is caller code, so the
 // error can be anything.
+//
+// An untyped cause is labelled AND kept. It used to survive only as a string
+// field, so a fill returning sql.ErrNoRows came back as an error for which
+// errors.Is(err, sql.ErrNoRows) was false — the caller's own "not found" was
+// indistinguishable from an outage. Wrapping the cause itself keeps both
+// answers: errs.HasCode sees CACHE_FILL_FAILED, errors.Is sees the cause.
 func fillFailure(key string, cause error) error {
 	//: a cause already carrying a dotted quad keeps it, trail and all.
 	if _, typed := kerrs.CodeOf(cause); typed {
 		//: the origin's own diagnosis.
 		return cause
 	}
-	//: label the untyped failure so Load's contract holds whoever wrote fill.
-	return kerrs.Wrap(corecache.CacheFillFailed, kerrs.WrapParams{},
-		kerrs.String("key", key),
-		kerrs.String("cause", cause.Error()))
+	//: label the untyped failure so Load's contract holds whoever wrote fill,
+	//: with the cause IN the chain. The identity is read from the sentinel so
+	//: it cannot drift from it; the cause field keeps the log line it always
+	//: had.
+	return kerrs.Wrap(cause, kerrs.WrapParams{
+		Code:    corecache.CacheFillFailed.Code(),
+		Reason:  corecache.CacheFillFailed.Reason(),
+		Public:  corecache.CacheFillFailed.Public(),
+		Private: corecache.CacheFillFailed.Private(),
+	}, kerrs.String("key", key), kerrs.String("cause", cause.Error()))
 }

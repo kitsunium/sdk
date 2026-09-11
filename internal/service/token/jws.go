@@ -5,6 +5,7 @@ package token
 import (
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -55,6 +56,12 @@ type headerValue struct {
 
 // parseJOSEHeader reads a decoded JOSE header object.
 func parseJOSEHeader(raw []byte) (header headerValue, err error) {
+	//: encoding/json would turn invalid UTF-8 into U+FFFD rather than refuse
+	//: it, so the header is held to UTF-8 before it is read, as the claims are.
+	if !utf8.Valid(raw) {
+		//: refused, never repaired.
+		return headerValue{}, malformed("JOSE header is not UTF-8")
+	}
 	//: bound the nesting first — the header is small and flat.
 	if derr := checkJSONDepth(raw, maxHeaderDepth); derr != nil {
 		//: propagate TooDeep.

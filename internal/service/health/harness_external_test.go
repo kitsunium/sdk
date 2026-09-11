@@ -162,3 +162,30 @@ func mustAddStartup(tb testing.TB, registry corehealth.Health, check corehealth.
 // Every substring of it that names infrastructure is asserted absent from a
 // probe body.
 var errDependency = errors.New("dial tcp 10.0.3.14:5432: connect: connection refused")
+
+// scriptedHealth is a corehealth.Health written OUTSIDE this package, answering
+// every probe with one fixed report. It is how the suite reaches the reports
+// this package's registry never produces — a failure with no error, a Status
+// outside the three — which the lifecycle bridge and the handlers must still
+// refuse, because they accept any Health.
+type scriptedHealth struct {
+	// report is what every Probe returns.
+	report corehealth.ReportValue
+}
+
+// AddStartup accepts and ignores the check: the report is scripted.
+func (scriptedHealth) AddStartup(corehealth.StartupCheckValue) error { return nil }
+
+// AddReadiness accepts and ignores the check: the report is scripted.
+func (scriptedHealth) AddReadiness(corehealth.ReadinessCheckValue) error { return nil }
+
+// AddLiveness accepts and ignores the check: the report is scripted.
+func (scriptedHealth) AddLiveness(corehealth.LivenessCheckValue) error { return nil }
+
+// Probe returns the scripted report, whichever probe was asked for.
+func (s scriptedHealth) Probe(context.Context, corehealth.Probe) corehealth.ReportValue {
+	return s.report
+}
+
+// Drain does nothing: the scripted report does not change.
+func (scriptedHealth) Drain() {}

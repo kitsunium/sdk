@@ -104,6 +104,11 @@ func TestParseRejects(t *testing.T) {
 	}{
 		{"not JSON at all", `{`, jwk.CodeJWKMalformed},
 		{"JSON but not an object", `["EC"]`, jwk.CodeJWKMalformed},
+		//: json.Unmarshal accepts null into a struct and leaves it zero, which
+		//: then read as a JWK missing its kty — MISSING_MEMBER, for a document
+		//: that is not an object at all.
+		{"the document is null", `null`, jwk.CodeJWKMalformed},
+		{"null with whitespace around it", " null\n", jwk.CodeJWKMalformed},
 		{"kty absent", `{"crv":"P-256","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`, jwk.CodeJWKMissingMember},
 		{"kty empty", `{"kty":"","crv":"P-256"}`, jwk.CodeJWKMissingMember},
 		{"RSA is not modelled", `{"kty":"RSA","n":"AQAB","e":"AQAB"}`, jwk.CodeJWKUnsupportedKeyType},

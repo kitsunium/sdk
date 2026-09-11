@@ -52,14 +52,14 @@ exactly as trustworthy as the key itself.
 | `validate.go` | the shared post-authentication claim checks + `stampIssuedClaims` |
 | `encoding.go` / `depth_scan.go` | bounded segment split, strict base64url, JSON depth + duplicate-member checks, PASETO `PAE` |
 | `jsonstring.go` | `quoteJSONString` / `quoteJSONStrings` — JSON string rendering with no error channel |
-| `claims_codec.go` | the shared claims traversal + the `claimShape` contract |
+| `claims_codec.go` | the shared claims traversal + the `claimShape` contract + the issue-side UTF-8 refusal (`checkClaimText`, `putPrivate`) + the verify-side refusals of text that is not UTF-8 and of a registered claim sent as JSON null (`nullRegisteredClaim` — `encoding/json` would decode `"aud": null` as an audience of `[""]` and `"nbf": null` as 1970; a private claim may still be null) |
 | `jose_shape.go` / `paseto_shape.go` | the two claim-value encodings (NumericDate vs RFC 3339) |
 | `jws.go` / `jws_parts.go` | `headerValue`, the JOSE header parse, `checkHeader` (the algorithm gate), `jwsPartsValue` |
 | `jws_issuer.go` / `jws_verifier.go` | the JWS issuer and single-key verifier |
 | `jwt.go` | the six JWT constructors |
 | `keys.go` + `hs256_binding.go` / `es256_*.go` / `ed25519_*.go` | the algorithm-bound key contracts and their five implementations |
 | `paseto.go` / `paseto_issuer.go` / `paseto_verifier.go` | PASETO v4.public |
-| `jwkbridge.go` | `NewVerifierFromJWK`, `NewSetVerifier`, `setVerifier`, `boundKeyValue` + `indexByKid` (the set is bound ONCE, at construction — see §Cost) |
+| `jwkbridge.go` | `NewVerifierFromJWK`, `NewSetVerifier`, `setVerifier`, `boundKeyValue` + `indexByKid` (the set is bound ONCE, at construction — see §Cost) + `selectable` (a set no token could verify against is refused `POLICY_MISCONFIGURED`) |
 | `token_compliance.go` | the compile-time contract assertions |
 | `codes.go` / `errors.go` | `Code*` + `HeaderUnsupported` (.1), `KeyNotFound` (.2), `KeyIDMissing` (.3), `KeyIDAmbiguous` (.4), `FooterMismatch` (.5), `SchemeUnsupported` (.6), `DuplicateMember` (.7) |
 
@@ -70,10 +70,10 @@ exactly as trustworthy as the key itself.
 | §3.1 Perform Algorithm Verification | **covered** | The algorithm is bound at construction and the header is only ever compared to it. There is no way to express "accept whatever the token says". |
 | §3.2 Use Appropriate Algorithms | **covered** | Closed set: HS256, ES256, EdDSA, PASETO v4.public. `none` has no representation in the `Algorithm` enum. Agility is a new constructor, not a config string. |
 | §3.3 Validate All Cryptographic Operations | **covered** | One verdict, whole-token: a failed signature returns `SignatureInvalid` and the ZERO claim set. There is no partial-acceptance path. |
-| §3.4 Validate Cryptographic Inputs | **covered** | EC public keys are validated as curve points via `(*ecdsa.PublicKey).ECDH()`, not merely measured; Ed25519 key lengths are checked before the stdlib would panic; ES256 signatures must be exactly 64 octets. |
+| §3.4 Validate Cryptographic Inputs | **covered** | EC public keys are validated as curve points via `(*ecdsa.PublicKey).ECDH()`, not merely measured; an ES256 private key's scalar must be present, in range, and derive exactly its declared public point (go1.27's `ecdsa` dereferences a nil `D` on the first `Sign`, and signs with a mismatched one without comparing); Ed25519 key lengths are checked before the stdlib would panic; ES256 signatures must be exactly 64 octets. |
 | §3.5 Sufficient Key Entropy | **partial** | The LENGTH half is structural: HS256 takes a `core/crypto.Key`, fixed at 256 bits, so a short passphrase cannot become one. The ENTROPY half is **not measurable here** — a 32-byte key of ASCII is still 32 bytes. Derive one (`pkg/v1/kdf`); do not type one. |
 | §3.6 Avoid Compression of Encryption Inputs | **not applicable** | No JWE, no compression. |
-| §3.7 Use UTF-8 | **covered by delegation** | `encoding/json` is UTF-8 only, and the base64url decoder is strict, so there is no second encoding to admit. |
+| §3.7 Use UTF-8 | **covered on both paths** | An issuer refuses every string it would write that is not valid UTF-8: `iss`/`sub`/`jti`/each `aud` and every private claim's name and bytes at `Issue` (`ISSUE_FAILED`), and the configured `Issuer`/`Type`/`KeyID` at construction (`POLICY_MISCONFIGURED`). Nothing downstream would: `quoteJSONString` passes bytes through, `json.Marshal` REWRITES a bad map key to U+FFFD, and `encoding/json`'s decoder turns `a\xff` and `a\xfe` into one string — so two subjects the caller kept apart would verify as one. A token some OTHER issuer wrote is held to the same rule on the way in: `parseJOSEHeader` and `decodeClaims` refuse a header or claims object that is not UTF-8 (`MALFORMED`) before `encoding/json` can replace a bad byte — without it, subjects `a\xff` and `a\xfe` both verified as `a\ufffd` (`TestTextThatIsNotUTF8IsRefusedOnVerify`). It costs 20–30 ns on a realistic claims object. The base64url decoder is strict, so there is no second encoding to admit either. |
 | §3.8 Validate Issuer and Subject | **partial** | `VerifierConfig.Issuer` is checked when set. The section's stronger requirement — that the KEY belongs to the claimed issuer — is the caller's: this package verifies against the key it was handed and cannot know whose it is. `NewSetVerifier` narrows it (the set comes from one publisher), it does not close it. **`sub` is not validated**: only the application knows what a subject may be. |
 | §3.9 Use and Validate Audience | **covered** | `VerifierConfig.Audience` must appear in `aud`. Not required by default, because a single-recipient deployment legitimately mints without one — set it and it is enforced. |
 | §3.10 Do Not Trust Received Claims | **partial** | `kid` is used only as a map key into a caller-supplied `jwk.Set`; it never reaches a query, a path or a URL. **`jku` and `x5u` are ignored entirely** — this package fetches nothing, so there is no SSRF surface to whitelist. Sanitising claim VALUES before the application uses them is out of scope, and is stated as such. |
@@ -256,6 +256,11 @@ Two more PASETO decisions:
   not a footer, so an unconstrained footer would be data this package
   authenticated and then dropped. `PasetoVerifierConfig.Footer` is compared
   with `subtle.ConstantTimeCompare`; empty means "the token must carry none".
+  It is also bounded: a verifier refuses a decoded footer past `maxFooterLen`
+  (1 KiB) as `TOO_LARGE` before reading the signature, so BOTH constructors
+  refuse a longer configured footer (`POLICY_MISCONFIGURED`) — an issuer with
+  one would mint only tokens the SDK refuses, and a verifier with one could
+  never match anything.
 - **The configs are FLAT, not embedded.** `PasetoIssuerConfig` has no `Type`
   and no `KeyID` because PASETO has no header to put them in. Embedding
   `IssuerConfig` would have published two knobs this format silently ignores.
@@ -325,6 +330,19 @@ verify, and it is the ONLY test in the package that catches it) and
 VALUE type through an interface result, so a refused binding is not a nil
 interface — which is why `boundKeyValue` carries a `usable` boolean). Each
 carries its mutation and the observed failure in its doc comment.
+
+Four refusals at construction or at `Issue`, each paired with a test of the
+accepting side so an over-eager fix cannot pass unnoticed, and each carrying
+its mutations and their observed failures in its doc comment:
+`TestIssueRefusesClaimTextThatIsNotUTF8` / `TestMultiByteTextRoundTripsExactly`
+/ `TestIssuerConfigTextIsRefusedAtConstruction` (§3.7 on the issue path),
+`TestASetThatCanVerifyNothingIsRefused` (a JWK Set of only kid-less or unusable
+members — the unusable members of an ACCEPTED set still count against
+`MaxKeyCandidates`), `TestAPrivateKeyThatIsNotOneKeyIsRefused` /
+`TestEveryWayToObtainAP256KeyStillIssues` (an ES256 scalar that is nil, out of
+range, or another key's), and `TestPasetoFooterBoundIsOneNumberOnBothSides` (a
+footer exactly at the bound verifies; one octet past it is refused on both
+sides).
 
 ## Linter exemptions
 

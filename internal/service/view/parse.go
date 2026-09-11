@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"path"
 	"slices"
+	"text/template/parse"
 
 	coreview "github.com/kitsunium/sdk/internal/core/view"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -38,6 +39,12 @@ func newRenderer(cfg coreview.Config) (built *renderer, err error) {
 	if walkErr := tree.parseTree(); walkErr != nil {
 		//: hand the typed verdict straight back; it already names the file.
 		return nil, walkErr
+	}
+	//: a template that calls itself with no condition on the way recurses
+	//: forever on every render; refused before the probe would execute it.
+	if loopErr := tree.refuseEndlessRecursion(); loopErr != nil {
+		//: it names the template the cycle was found at.
+		return nil, loopErr
 	}
 	//: force the escaping plan NOW; see probeEscaping for what that buys.
 	if probeErr := tree.probeEscaping(); probeErr != nil {
@@ -133,6 +140,83 @@ func selected(entry string, ext []string) bool {
 	}
 	//: path.Ext, not filepath.Ext: an fs.FS path is always slash-separated.
 	return slices.Contains(ext, path.Ext(entry))
+}
+
+// refuseEndlessRecursion refuses a template that reaches itself again through
+// {{template}} calls with no condition on the path.
+//
+// Such a template recurses on every render until text/template stops it at
+// its depth limit, 100 000 calls down, and the render fails — so it is a
+// defect of the TREE, and it is refused with the tree's other defects. Only a
+// call at a template's top level counts: one inside an {{if}}, a {{range}} or a
+// {{with}} may never run, which is how a legitimate recursion over a nested
+// model ends. The graph is read from the parse trees before anything
+// executes, rather than recognised by the stdlib's error text afterwards.
+func (p *parser) refuseEndlessRecursion() error {
+	calls := make(map[string][]string, p.count)
+	names := make([]string, 0, p.count)
+	//: one edge list per template: the calls it makes whatever its data.
+	for _, each := range p.set.Templates() {
+		//: the anchor, and a template with no body, call nothing.
+		if each.Tree == nil || each.Tree.Root == nil {
+			continue
+		}
+		calls[each.Name()] = unconditionalCalls(each.Tree.Root)
+		names = append(names, each.Name())
+	}
+	//: sorted, so the template a refusal names does not depend on map order.
+	slices.Sort(names)
+	//: a cycle anywhere in the graph is a template that never returns.
+	for _, name := range names {
+		//: depth-first from each template, the path so far kept on the side.
+		if reachesItself(name, name, calls, make(map[string]bool, len(names))) {
+			//: the template the cycle was found at; its members are its calls.
+			return raise(TemplateParseFailed, nil, errs.String("template", name),
+				errs.String("why", "it calls itself through {{template}} with no condition on the way"))
+		}
+	}
+	//: every call chain ends.
+	return nil
+}
+
+// unconditionalCalls lists the templates list calls at its own top level —
+// the calls that happen whatever the data is.
+func unconditionalCalls(list *parse.ListNode) []string {
+	var called []string
+	//: nested lists belong to {{if}}, {{range}} and {{with}}, and are skipped.
+	for _, node := range list.Nodes {
+		//: a {{template}} (or a {{block}}, parsed into one) calls by name.
+		if call, isCall := node.(*parse.TemplateNode); isCall {
+			called = append(called, call.Name)
+		}
+	}
+	//: the unconditional callees, in document order.
+	return called
+}
+
+// reachesItself reports whether following calls from current leads back to
+// origin. seen stops a walk from re-entering a template it already expanded.
+func reachesItself(origin, current string, calls map[string][]string, seen map[string]bool) bool {
+	//: each callee is one more step down the recursion.
+	for _, callee := range calls[current] {
+		//: back at the start: the recursion has no way out.
+		if callee == origin {
+			//: a cycle through origin.
+			return true
+		}
+		//: a template already expanded on this walk adds nothing new.
+		if seen[callee] {
+			continue
+		}
+		seen[callee] = true
+		//: follow the callee's own unconditional calls.
+		if reachesItself(origin, callee, calls, seen) {
+			//: the cycle closes further down.
+			return true
+		}
+	}
+	//: every path from here ends.
+	return false
 }
 
 // probeEscaping forces html/template to build each template's contextual

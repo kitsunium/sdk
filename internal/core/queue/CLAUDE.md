@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The SDK's ASYNCHRONOUS, DURABLE message queue port — ADR 0054. The 18th core
+The SDK's ASYNCHRONOUS, DURABLE message queue port — ADR 0054. The 21st core
 sibling, and the right-hand column of the frontier table ADR 0053 §D1 wrote
 down before this domain existed.
 

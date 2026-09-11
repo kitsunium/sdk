@@ -164,6 +164,9 @@ var (
 // filesystem's guarantees rest on, and [RootUnavailable] when the directory
 // cannot be opened. Both are construction-time refusals, so a misconfiguration
 // is reported where the program is wired rather than on the first write.
+//
+// The filesystem holds the directory's descriptor and additionally implements
+// io.Closer, which releases it; every call after Close fails.
 func NewOS(root string) (filesystem FullFS, err error) {
 	//: delegate to the service constructor.
 	return svcvfs.NewOS(root)

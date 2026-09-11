@@ -132,6 +132,14 @@ jobs:
       - name: domain-doc invariant — the root CLAUDE.md still describes the tree
         run: bash scripts/pre-commit/check-domain-docs.sh
 
+      # Guards the layer direction kernel → core → service → pkg/v1. ADR 0004
+      # put it on Bazel visibility, but Gazelle gives every package under an
+      # internal/ directory //:__subpackages__, which admits the whole
+      # repository — a kernel package importing core was shown to build. The
+      # direction is therefore asserted on the dependency graph (ADR 0068).
+      - name: layer invariant — no layer depends on one above it
+        run: bash scripts/check-layer-deps.sh
+
       - name: coverage
         run: |
           bazel coverage --combined_report=lcov //...

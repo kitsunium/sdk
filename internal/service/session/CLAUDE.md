@@ -186,11 +186,15 @@ Two more rules sit on the same call:
   that worked and the new session loaded as `RECORD_CORRUPT`. The memory store has
   no frame, and bounds it all the same, because a subject one store keeps and the
   other cannot read back would make the port two contracts.
-- **A rotation that cannot retire the old record withdraws the new one**
+- **A rotation whose old record cannot be UNLINKED withdraws the new one**
   (`withdrawLocked`). The caller receives no new identifier, so the record would
   otherwise stay live and bound to the principal with nobody able to reach it,
-  one more per retry. The retirement's failure stays the answer; a withdrawal
-  that fails too is attached as a `withdraw` field.
+  one more per retry. The unlink's failure stays the answer; a withdrawal that
+  fails too is attached as a `withdraw` field. Once the unlink has happened,
+  a failed flush after it is reported and NOTHING is undone, as for every other
+  flush: withdrawing the new record there used to leave neither identifier
+  resolving, the state the order of the steps exists to prevent
+  (`TestAFlushFailureAfterTheRetirementIsNotUndone`).
 
 ## Do NOT
 
@@ -233,7 +237,7 @@ cd internal/service && GOWORK=off go test -race -cover ./session
 | `store_external_test.go` | the lifecycle, the sliding window, the ceiling ending a continuously-used session, expired-record dropping across a backwards clock step, idempotent `Destroy`, the zero identifier, and `Sweep` — all against both stores |
 | `fixation_external_test.go` | the fixation attack end to end, `Save`'s refusal of a forged subject, the ordinary data path, the two rotation lifetime rules, a dead session refusing to be re-authenticated, the 4 KiB subject bound (4096 accepted and read back, 4097 refused with the session untouched) in both stores, and the ADR 0031 constructor refusals |
 | `file_store_external_test.go` | directory and record modes on disk, the operator-owned refusal, no identifier anywhere on disk, filename binding via AAD, tamper/truncation/foreign-key refusal, survival across a reopen, the failed-publish invariant checked byte-for-byte (a failure at temp creation), a sweep that leaves foreign `*.session` files alone, and context cancellation. The rename-onto-a-directory test fails at `Save`'s read and never reaches the rename — its doc says so |
-| `dirsync_internal_test.go` | the directory flush after every rename and unlink, observed through `syncDir` (after the change, once per sweep, again on a retried `Destroy`); a failed flush reported and not rolled back; a failed rotation withdrawing the record it published; and the orphan cleanup behind a rename that really fails, over a temporary that was written, synced and closed |
+| `dirsync_internal_test.go` | the directory flush after every rename and unlink, observed through `syncDir` (after the change, once per sweep, again on a retried `Destroy`); a failed flush reported and not rolled back; a failed rotation withdrawing the record it published when the old record's unlink fails, and undoing nothing when only the flush after it does; and the orphan cleanup behind a rename that really fails, over a temporary that was written, synced and closed |
 | `sealer_external_test.go` | round trip, cookie-safety, nonce freshness, the seven non-oracle failures, one spelling per sealed value, the empty-purpose refusal, and that opening is not authorising |
 | `entropy_internal_test.go` | the collision guard on `New` **and** on `Regenerate`, and the refusal to mint from partial entropy |
 | `encode_internal_test.go` | frame determinism, round trip, nine malformed frames (a panic reported as a failure), and the payload caps. Two of the frames — a `0xffffffff` string length, and a `0xffffffff` entry count with nothing after it — can only fail where `int` is 32 bits: run them with `GOARCH=386 go test` |

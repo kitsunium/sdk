@@ -141,6 +141,26 @@ func TestStatusCodesFollowServingNotHealth(t *testing.T) {
 	}
 }
 
+// TestAStatusOutsideTheThreeIsNotServed pins the handler end of Status.Serving
+// failing closed. The handlers accept any Health, and a verdict outside the
+// three — whose body already reads "unknown" — used to answer 200: an
+// orchestrator routing traffic on a status the SDK cannot even name.
+//
+// MUTATION (2026-09-11): core/health's Serving put back to `return s !=
+// StatusUnhealthy`. Observed: `Status(7): code = 200, want 503 — an unknown
+// verdict must not keep the replica in rotation`. Restored; SHA-256 of
+// health_status.go identical to the fixed file.
+func TestAStatusOutsideTheThreeIsNotServed(t *testing.T) {
+	t.Parallel()
+	unknown := scriptedHealth{report: corehealth.ReportValue{
+		Probe: corehealth.ProbeReadiness, Status: corehealth.Status(7),
+	}}
+	recorder := serve(t, svchealth.NewReadinessHandler(unknown, svchealth.HandlerConfig{}), http.MethodGet)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Errorf("Status(7): code = %d, want 503 — an unknown verdict must not keep the replica in rotation", recorder.Code)
+	}
+}
+
 // TestTheResponseIsNotCacheable pins the headers. An intermediary replaying
 // yesterday's 200 is indistinguishable from a healthy replica, which turns the
 // endpoint into a source of the exact wrong answer.

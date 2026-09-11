@@ -278,12 +278,15 @@ func (b *memoryBroker) Nack(
 func (b *memoryBroker) Extend(
 	ctx context.Context, receipt corequeue.ReceiptValue, by time.Duration,
 ) (lease corequeue.LeaseValue, err error) {
+	//: one reading of the clock, as the file broker takes: a deadline checked
+	//: at one instant and stored from another could be one the check refused.
+	deadline := b.clk.Now().Add(by)
 	//: the two readings of a non-positive renewal are opposites. And a by
 	//: whose deadline the durable broker cannot write into a name is refused
 	//: too, in the same order: time.Time would hold it, but this broker is
 	//: that one's double, and a double more permissive than production lets a
 	//: handler pass its tests and strand messages.
-	if by <= 0 || !nameable(b.clk.Now().Add(by)) {
+	if by <= 0 || !nameable(deadline) {
 		//: QueueMisconfigured, naming the argument, exactly as the file broker.
 		return corequeue.LeaseValue{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
 			kerrs.String("field", "Extend.by"), kerrs.Int64("value_ns", int64(by)))
@@ -303,7 +306,7 @@ func (b *memoryBroker) Extend(
 	}
 	delete(b.inflight, record.receipt)
 	b.seq++
-	record.expiresAt = b.clk.Now().Add(by)
+	record.expiresAt = deadline
 	record.receipt = b.mintReceipt()
 	b.inflight[record.receipt] = record
 	//: the previous heap entry is deliberately left where it is: it will be

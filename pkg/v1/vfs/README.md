@@ -147,7 +147,7 @@ type FullFS = corevfs.FullFS
 ```
 
 <a name="NewMem"></a>
-### func [NewMem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/vfs/vfs.go#L177>)
+### func [NewMem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/vfs/vfs.go#L180>)
 
 ```go
 func NewMem() FullFS
@@ -158,7 +158,7 @@ NewMem returns an empty in\-memory filesystem containing only its root.
 It takes no arguments on purpose: every knob it could offer would be one a consumer's test has to set before it can assert anything, and the value of this type is that a filesystem double costs one line.
 
 <a name="NewOS"></a>
-### func [NewOS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/vfs/vfs.go#L167>)
+### func [NewOS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/vfs/vfs.go#L170>)
 
 ```go
 func NewOS(root string) (filesystem FullFS, err error)
@@ -167,6 +167,8 @@ func NewOS(root string) (filesystem FullFS, err error)
 NewOS opens root as a filesystem confined to that directory tree.
 
 It returns proc.UnsupportedPlatform on a GOOS that lacks the mechanics this filesystem's guarantees rest on, and [RootUnavailable](<#InvalidPath>) when the directory cannot be opened. Both are construction\-time refusals, so a misconfiguration is reported where the program is wired rather than on the first write.
+
+The filesystem holds the directory's descriptor and additionally implements io.Closer, which releases it; every call after Close fails.
 
 <a name="WritableFS"></a>
 ## type [WritableFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/vfs/vfs.go#L111>)

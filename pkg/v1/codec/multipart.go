@@ -12,7 +12,9 @@ import svcmultipart "github.com/kitsunium/sdk/internal/service/codec/multipart"
 // order. Marshal one to build an upload; Unmarshal into a *MultipartForm to
 // read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal
 // always fills it with the one it recovered, so a decode → encode round trip
-// reproduces the original framing byte for byte.
+// keeps the original delimiter — and reproduces the whole body byte for byte
+// only for a body this codec encoded, since a part header other than the name,
+// filename and media type is not carried through.
 type MultipartForm = svcmultipart.FormValue
 
 // MultipartPart is one section of a [MultipartForm]: a named field, optionally

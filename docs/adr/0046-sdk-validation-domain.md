@@ -139,7 +139,16 @@ pointer to one — adds **no** segment: `encoding/json` promotes its fields into
 the enclosing object, so `Common.zip` names nothing the operator can write and
 the path is `zip`. A json-named embedding keeps its name, and an embedded
 non-struct is keyed by its type name, exactly as `encoding/json` keys it.
-(Amended 2026-09-11: the first version added the Go name of every embedding.)
+Promotion also means competition: a shallower field of the same name hides a
+promoted one, and two at one depth, both tagged or both not, make the key
+ambiguous — `encoding/json` then decodes it into NEITHER and says nothing. A
+rule on such a field would judge a value no input can set, at a path whose key
+belongs to another field, so the compiler refuses it as `INVALID_RULE`,
+resolving keys with `encoding/json`'s own rule; a field JSON ignores outright
+(unexported, `json:"-"`) is not a candidate and is not judged. (Amended
+2026-09-11: the first version added the Go name of every embedding; the next
+promoted without resolving the competition, so two embeddings promoting one
+tagged key reported both violations at the same path.)
 
 **A map key is NOT in the grammar**, and that is a decision, not an omission —
 see *Deferred*.
@@ -196,18 +205,21 @@ three `Address` (see `internal/service/validation/BENCH.md`):
 
 | | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| programmatic, value accepted | 705 | 96 | 6 |
-| **tag, value accepted** | **890** | **144** | **7** |
-| `Struct[T]` on a compiled type | 103 | 24 | 1 |
-| one full plan compilation | 5 003 | 1 424 | 39 |
+| programmatic, value accepted | 716 | 96 | 6 |
+| **tag, value accepted** | **935** | **144** | **7** |
+| `Struct[T]` on a compiled type | 92 | 24 | 1 |
+| one full plan compilation | 6 836 | 1 744 | 51 |
 
-**The cache is worth 48×** (5.0 µs to compile, 103 ns to fetch): without it a
-validation of this shape would cost ~5.9 µs instead of ~1.0 µs, with string
+**The cache is worth 74×** (6.8 µs to compile, 92 ns to fetch): without it a
+validation of this shape would cost ~7.8 µs instead of ~1.0 µs, with string
 splitting and `reflect.StructField` lookups on the hot path of every field of
-every request. **Reflection itself costs 26 %**, not an order of magnitude —
-185 ns and one allocation — because the plan leaves nothing to discover at
-validation time. And `Struct[T]` at 103 ns is what makes the `config.Validator`
-bridge above honest: the method can look the plan up on every call.
+every request. **Reflection itself costs 31 %**, not an order of magnitude —
+219 ns and one allocation — because the plan leaves nothing to discover at
+validation time. And `Struct[T]` at 92 ns is what makes the `config.Validator`
+bridge above honest: the method can look the plan up on every call. (Amended
+2026-09-11: re-measured once the compile learnt to resolve which field each
+JSON key reaches; at acceptance the compile was 5 003 ns, the cache 48× and
+reflection 26 %.)
 
 Both front ends produce the **identical violation** — same path, rule name and
 code — which `TestTagAndCodePathsAgree` pins, so moving a rule from a tag into

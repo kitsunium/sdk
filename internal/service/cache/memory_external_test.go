@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strconv"
 	"sync"
@@ -327,6 +328,56 @@ func TestATypedFillErrorKeepsItsOwnCode(t *testing.T) {
 	}
 	if !errs.HasCode(err, corecache.CodeCacheBackendFailed) {
 		t.Fatalf("Load returned %v, want the origin's own code", err)
+	}
+}
+
+// TestAnUntypedFillErrorKeepsItsIdentity pins the other half of the Load
+// boundary: an untyped fill error is LABELLED, not replaced.
+//
+// It used to survive only as a string field, so a fill that returned
+// sql.ErrNoRows came back as an error for which errors.Is(err, sql.ErrNoRows)
+// was false — the caller's own "there is no such row" read exactly like "the
+// origin is down". Both matchers must answer now, through the memory store and
+// through the chain, and the wire-safe rendering must still be the sentinel's
+// alone: keeping the cause is not a reason to print it.
+//
+// MUTATION (2026-09-11): fillFailure's untyped branch put back to wrapping the
+// sentinel (`kerrs.Wrap(corecache.CacheFillFailed, kerrs.WrapParams{}, …)`, the
+// cause kept only as a field). Observed: `memory: errors.Is(err,
+// sql.ErrNoRows) = false for [0.2.18.3 CACHE_FILL_FAILED] The cache fill
+// function failed and nothing was stored; the caller's own error is lost`, and
+// the same for `chain`. Restored; SHA-256 of refuse.go identical to the
+// pre-mutation file.
+func TestAnUntypedFillErrorKeepsItsIdentity(t *testing.T) {
+	t.Parallel()
+	chain, err := svccache.NewChain(svccache.ChainConfig{},
+		newStore(t, svccache.MemoryConfig{MaxEntries: 8}), newStore(t, svccache.MemoryConfig{MaxEntries: 8}))
+	if err != nil {
+		t.Fatalf("NewChain: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		store corecache.Store[string]
+	}{
+		{"memory", newStore(t, svccache.MemoryConfig{MaxEntries: 8})},
+		{"chain", chain},
+	} {
+		loader, ok := tc.store.(corecache.Loader[string])
+		if !ok {
+			t.Fatalf("%s: the store does not implement Loader", tc.name)
+		}
+		_, lerr := loader.Load(t.Context(), "k", func(context.Context) (corecache.EntryValue[string], error) {
+			return corecache.EntryValue[string]{}, sql.ErrNoRows
+		})
+		if !errors.Is(lerr, sql.ErrNoRows) {
+			t.Errorf("%s: errors.Is(err, sql.ErrNoRows) = false for %v; the caller's own error is lost", tc.name, lerr)
+		}
+		if !errs.HasCode(lerr, corecache.CodeCacheFillFailed) || !errors.Is(lerr, corecache.CacheFillFailed) {
+			t.Errorf("%s: Load returned %v, want CACHE_FILL_FAILED as well", tc.name, lerr)
+		}
+		if lerr != nil && lerr.Error() != corecache.CacheFillFailed.Error() {
+			t.Errorf("%s: Error() = %q, want the sentinel's rendering alone — the cause is kept, not printed", tc.name, lerr.Error())
+		}
 	}
 }
 

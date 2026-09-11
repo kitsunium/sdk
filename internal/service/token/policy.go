@@ -4,6 +4,7 @@ package token
 
 import (
 	"time"
+	"unicode/utf8"
 
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
@@ -41,6 +42,15 @@ func newPolicy(cfg VerifierConfig) (policy policyValue, err error) {
 		//: name the knob.
 		return policyValue{}, misconfigured("MaxLifetime")
 	}
+	//: a token is refused unless it is UTF-8 (decodeClaims, parseJOSEHeader),
+	//: so an expected Issuer, Audience or RequireType that is not could never
+	//: equal what a token carries: a verifier that refuses every token, built
+	//: without a word. Refused here, as validateIssuerConfig refuses its own.
+	if knob := nonUTF8VerifierKnob(cfg); knob != "" {
+		//: name the knob, never its value.
+		return policyValue{}, errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+			errs.String("knob", knob), errs.String("problem", "not valid UTF-8"))
+	}
 	bounds, berr := resolveBounds(cfg)
 	//: propagate the bound's own verdict unchanged.
 	if berr != nil {
@@ -56,6 +66,23 @@ func newPolicy(cfg VerifierConfig) (policy policyValue, err error) {
 		allowMissingExpiry: cfg.AllowMissingExpiry,
 		timeSource:         resolveClock(cfg.Clock),
 	}, nil
+}
+
+// nonUTF8VerifierKnob names the first VerifierConfig string a token is compared
+// against that is not valid UTF-8, or returns "" when every one of them is.
+func nonUTF8VerifierKnob(cfg VerifierConfig) string {
+	names := [...]string{"Issuer", "Audience", "RequireType"}
+	values := [...]string{cfg.Issuer, cfg.Audience, cfg.RequireType}
+	//: in declaration order, so the refusal is deterministic.
+	for i, value := range values {
+		//: an unset knob is empty and trivially valid.
+		if !utf8.ValidString(value) {
+			//: the first offender.
+			return names[i]
+		}
+	}
+	//: all three are text.
+	return ""
 }
 
 // misconfigured returns the PolicyMisconfigured verdict naming one knob.

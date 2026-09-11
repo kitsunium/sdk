@@ -5,6 +5,7 @@ package queue
 import (
 	"cmp"
 	"context"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -116,6 +117,33 @@ func NewFile(cfg FileConfig) (broker corequeue.Broker, err error) {
 		root: root, publisher: publisher,
 		policy: cfg.Policy.Normalized(), clk: clockOrSystem(cfg.Clock),
 	}, nil
+}
+
+// Close releases the broker's directory descriptors: its own root, and the
+// one its atomic publisher holds.
+//
+// It satisfies io.Closer, reached by type assertion (ADR 0039) exactly as the
+// session file store's Close is, so the frozen Broker port grows no method.
+// os.Root closes itself once garbage collected, but a process that opens
+// brokers in a loop should get its descriptors back when it says so. The
+// messages stay on disk: Close ends this broker's use of them, and every call
+// after it fails.
+func (b *fileBroker) Close() error {
+	rootErr := b.root.Close()
+	var publisherErr error
+	//: the publisher is internal/service/vfs's OS filesystem, which owns a
+	//: root of its own.
+	if closer, ok := b.publisher.(io.Closer); ok {
+		publisherErr = closer.Close()
+	}
+	//: both are released whatever the first answered; the broker's own
+	//: descriptor speaks first.
+	if closeErr := cmp.Or(rootErr, publisherErr); closeErr != nil {
+		//: QueueBackendFailed, the cause kept.
+		return backendFailed("close", "", closeErr)
+	}
+	//: released.
+	return nil
 }
 
 // Publish writes payload into the queue and flushes it.

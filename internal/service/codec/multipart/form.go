@@ -8,8 +8,12 @@ package multipart
 //
 // Boundary is the one field that has no equivalent in the codec.Codec
 // contract, which carries no Content-Type. Empty on Marshal means "generate
-// one"; Unmarshal always fills it with the delimiter it recovered, so a
-// decode → encode round trip reproduces the original framing byte for byte.
+// one"; Unmarshal always fills it with the delimiter it recovered, so a decode
+// → encode round trip keeps the original delimiter. It reproduces the whole
+// body byte for byte only for a body this package encoded: a PartValue models
+// a part's name, filename, media type and bytes, so any other part header — a
+// Content-Transfer-Encoding, a custom one — and another producer's header
+// order or casing are not carried through.
 type FormValue struct {
 	// Boundary is the RFC 2046 delimiter framing the parts.
 	Boundary string

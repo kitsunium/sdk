@@ -5,7 +5,7 @@
 Declares the **filesystem port**: `WritableFS` (the four write verbs), its
 ADR 0039 capability sibling `AtomicWriter`, their union `FullFS`, the two guards
 every implementation runs (`ValidatePath` / `ValidateWritePath`, `ValidatePerm`),
-and the eight typed sentinels both filesystems answer with. The 18th core
+and the eight typed sentinels both filesystems answer with. The 23rd core
 sibling, admitted by **ADR 0056**.
 
 Reading is **not** declared here. `FS` is a type *alias* of `io/fs.FS`, so the

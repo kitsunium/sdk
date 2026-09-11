@@ -4,6 +4,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/x509"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -321,6 +323,77 @@ func TestUnverifiableCandidatesStillCountAgainstTheBound(t *testing.T) {
 	}
 	if _, verr := verifier.Verify(minted); !errs.HasCode(verr, svctoken.CodeKeyIDAmbiguous) {
 		t.Fatalf("four published candidates at a bound of three: got %v, want KEY_ID_AMBIGUOUS", verr)
+	}
+}
+
+// TestASetThatCanVerifyNothingIsRefused pins ADR 0031's refuse half for key
+// sets. An empty set was always refused; a set with members can be exactly as
+// useless, because a member without a kid is never selected and an unusable
+// member is always skipped. Built anyway, it is a verifier that refuses every
+// token it will ever see — the case the empty-set check says it exists for.
+//
+// The accepting half matters as much: one usable member is enough, however
+// many unusable ones sit beside it or under its own kid. Those still count
+// against MaxKeyCandidates, which TestUnverifiableCandidatesStillCountAgainst-
+// TheBound pins separately.
+//
+// MUTATION (2026-09-11): the `!selectable(index)` refusal in NewSetVerifier was
+// deleted. Observed: `a zero JWK: got <nil>, want POLICY_MISCONFIGURED`, the
+// same for `kid-less usable keys` and `only unusable members`, then the Fatalf
+// `a kid-less set: Private = "", want it to name NewVerifierFromJWK` — no
+// error at all to read a Private from. Restored; SHA-256 of jwkbridge.go
+// identical to the pre-mutation file.
+//
+// MUTATION (2026-09-11): selectable made to answer "is anything indexed"
+// (`return len(index) > 0`), ignoring usable. Observed, and only this:
+// `only unusable members: got <nil>, want POLICY_MISCONFIGURED`. Restored;
+// SHA-256 identical.
+//
+// MUTATION (2026-09-11): unverifiableSet made to wrap the sentinel
+// (`errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{})`), so
+// origin-wins inherits the generic Private. Observed, and only this: `a
+// kid-less set: Private = "core/token: issuer or verifier built with a
+// configuration it cannot honour; fields name the knob", want it to name
+// NewVerifierFromJWK`. Restored; SHA-256 identical.
+func TestASetThatCanVerifyNothingIsRefused(t *testing.T) {
+	t.Parallel()
+	manual := clock.NewManualClock(epoch)
+	signing := testECKey(t)
+	for name, set := range map[string]jwk.Set{
+		"a zero JWK":            jwk.NewSet(jwk.KeyValue{}),
+		"kid-less usable keys":  jwk.NewSet(ecJWK(t, &signing.PublicKey, ""), ecJWK(t, &testECKey(t).PublicKey, "")),
+		"only unusable members": jwk.NewSet(p384JWK(t, "legacy"), p384JWK(t, "other")),
+	} {
+		_, err := svctoken.NewSetVerifier(set, laxConfig())
+		//: both matchers answer: the refusal is PolicyMisconfigured by code AND
+		//: by sentinel identity, not a look-alike.
+		if !errs.HasCode(err, coretoken.CodePolicyMisconfigured) || !errors.Is(err, coretoken.PolicyMisconfigured) {
+			t.Errorf("%s: got %v, want POLICY_MISCONFIGURED", name, err)
+		}
+	}
+	//: the Private half is the actionable one: a kid-less key is one key.
+	_, err := svctoken.NewSetVerifier(jwk.NewSet(ecJWK(t, &signing.PublicKey, "")), laxConfig())
+	if private := errs.PrivateOf(err); !strings.Contains(private, "NewVerifierFromJWK") {
+		t.Fatalf("a kid-less set: Private = %q, want it to name NewVerifierFromJWK", private)
+	}
+	//: one usable member among unusable ones — one of them under its own kid.
+	set := jwk.NewSet(p384JWK(t, "legacy"), p384JWK(t, "current"), ecJWK(t, &signing.PublicKey, "current"))
+	verifier, err := svctoken.NewSetVerifier(set, svctoken.VerifierConfig{Clock: manual})
+	if err != nil {
+		t.Fatalf("one usable member beside P-384 ones: NewSetVerifier = %v, want acceptance", err)
+	}
+	issuer, err := svctoken.NewES256Issuer(signing, svctoken.IssuerConfig{
+		Lifetime: time.Hour, Clock: manual, KeyID: "current",
+	})
+	if err != nil {
+		t.Fatalf("NewES256Issuer: %v", err)
+	}
+	minted, err := issuer.Issue(coretoken.NewClaimsValue().WithSubject("u"))
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if _, verr := verifier.Verify(minted); verr != nil {
+		t.Fatalf("the usable member's token: Verify = %v, want acceptance", verr)
 	}
 }
 

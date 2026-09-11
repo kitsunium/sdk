@@ -147,6 +147,68 @@ func TestPasetoFooterIsAuthenticatedAndExpected(t *testing.T) {
 	}
 }
 
+// TestPasetoFooterBoundIsOneNumberOnBothSides pins that a footer the SDK's own
+// verifiers refuse can be CONFIGURED on neither side.
+//
+// Every verifier here refuses a decoded footer past maxFooterLen as TOO_LARGE
+// before it reads the signature. An issuer that accepted a longer one would
+// mint nothing but tokens this SDK refuses — against ADR 0042 §D3's rule that
+// the SDK never mints what it would refuse — and a verifier expecting one could
+// never match any token at all. The bound is exercised at both edges: a footer
+// exactly AT it is accepted and verifies end to end, so the construction check
+// is not merely stricter than the wire check, and one octet past it is refused
+// on both sides.
+//
+// MUTATION (2026-09-11): the checkFooterLen call in NewPasetoV4Issuer was
+// deleted. Observed, and only this: `1025-byte footer: NewPasetoV4Issuer =
+// (built true, <nil>), want POLICY_MISCONFIGURED`. A probe against the same
+// mutation confirmed the symptom the check prevents: that issuer minted without
+// complaint, and a verifier answered its token `[0.2.13.10 TOO_LARGE] The
+// token exceeds the accepted size` — the footer is decoded, and refused, before
+// it is ever compared. Restored; SHA-256 of paseto.go identical to the
+// pre-mutation file.
+//
+// MUTATION (2026-09-11): the checkFooterLen call in NewPasetoV4Verifier was
+// deleted. Observed, and only this: `1025-byte footer: NewPasetoV4Verifier =
+// <nil>, want POLICY_MISCONFIGURED`. Restored; SHA-256 identical.
+//
+// MUTATION (2026-09-11): checkFooterLen made off by one (`>=`). Observed:
+// `1024-byte footer: NewPasetoV4Issuer = [0.2.13.13 POLICY_MISCONFIGURED] The
+// token policy is misconfigured, want acceptance`. Restored; SHA-256
+// identical.
+func TestPasetoFooterBoundIsOneNumberOnBothSides(t *testing.T) {
+	t.Parallel()
+	manual := clock.NewManualClock(epoch)
+	//: 1 KiB is maxFooterLen, the bound decodeSegment applies to the footer.
+	atBound, pastBound := []byte(strings.Repeat("f", 1024)), []byte(strings.Repeat("f", 1025))
+	pub, priv := testEdKey(t)
+	issuer, err := svctoken.NewPasetoV4Issuer(priv, svctoken.PasetoIssuerConfig{
+		Lifetime: time.Hour, Clock: manual, Footer: atBound,
+	})
+	if err != nil {
+		t.Fatalf("1024-byte footer: NewPasetoV4Issuer = %v, want acceptance", err)
+	}
+	verifier, err := svctoken.NewPasetoV4Verifier(pub, svctoken.PasetoVerifierConfig{Clock: manual, Footer: atBound})
+	if err != nil {
+		t.Fatalf("1024-byte footer: NewPasetoV4Verifier = %v, want acceptance", err)
+	}
+	minted, err := issuer.Issue(coretoken.NewClaimsValue().WithSubject("u"))
+	if err != nil {
+		t.Fatalf("1024-byte footer: Issue = %v", err)
+	}
+	if _, verr := verifier.Verify(minted); verr != nil {
+		t.Fatalf("1024-byte footer: the SDK refused a token it minted: %v", verr)
+	}
+	pastIssuer, err := svctoken.NewPasetoV4Issuer(priv, svctoken.PasetoIssuerConfig{Lifetime: time.Hour, Footer: pastBound})
+	//: the issuer is never printed — %v on it would render its private key.
+	if !errs.HasCode(err, coretoken.CodePolicyMisconfigured) {
+		t.Errorf("1025-byte footer: NewPasetoV4Issuer = (built %t, %v), want POLICY_MISCONFIGURED", pastIssuer != nil, err)
+	}
+	if _, verr := svctoken.NewPasetoV4Verifier(pub, svctoken.PasetoVerifierConfig{Footer: pastBound}); !errs.HasCode(verr, coretoken.CodePolicyMisconfigured) {
+		t.Errorf("1025-byte footer: NewPasetoV4Verifier = %v, want POLICY_MISCONFIGURED", verr)
+	}
+}
+
 // TestPasetoImplicitAssertionMustMatch pins v4's out-of-band context: it is
 // signed but never transmitted, so a token only verifies for a recipient that
 // already knows it.

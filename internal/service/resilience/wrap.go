@@ -15,5 +15,14 @@ func wrapAs(sentinel *kerrs.Error, cause error) error {
 		return sentinel
 	}
 	//: wrap the sentinel (origin-wins keeps its code) + carry the cause message.
-	return kerrs.Wrap(sentinel, kerrs.WrapParams{}, kerrs.String("cause", cause.Error()))
+	return wrapAsFields(sentinel, kerrs.String("cause", cause.Error()))
+}
+
+// wrapAsFields returns the sentinel as the error origin with fields attached.
+// It is the one place a resilience outcome is built, for the one-cause shape
+// wrapAs gives and for FallbackFailed's two named halves alike, so a change to
+// how a policy wraps its sentinel reaches every policy at once.
+func wrapAsFields(sentinel *kerrs.Error, fields ...kerrs.FieldValue) error {
+	//: the sentinel is the origin, so no field can hijack the policy's code.
+	return kerrs.Wrap(sentinel, kerrs.WrapParams{}, fields...)
 }

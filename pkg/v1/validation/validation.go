@@ -38,7 +38,11 @@
 // json name is literally the key the operator wrote. For the same reason an
 // embedded struct with no json name adds no segment of its own: encoding/json
 // promotes its fields into the enclosing object, so an untagged Common
-// embedding reports "zip", not "Common.zip".
+// embedding reports "zip", not "Common.zip". And a rule on a field
+// encoding/json never decodes a key into — hidden by a shallower field of the
+// same name, or tied with another at its depth, which JSON resolves to
+// neither — is refused when the type compiles, since no input could ever set
+// the value it judges.
 //
 // # Everything, not the first thing
 //

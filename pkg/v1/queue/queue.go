@@ -255,6 +255,14 @@ var (
 // It refuses at construction — never at first use — a policy it cannot
 // honour, a directory it cannot use safely, and a platform with no atomic
 // replace or no flushable directory handle.
+//
+// The broker holds two directory descriptors and additionally implements
+// io.Closer, which releases them — reached by type assertion, as the session
+// file store's is, so Broker grows no method:
+//
+//	if closer, ok := broker.(io.Closer); ok { defer closer.Close() }
+//
+// The messages stay on disk; every call after Close fails.
 func NewFile(cfg FileConfig) (broker Broker, err error) {
 	//: the facade is a delegation; the broker lives in internal/service.
 	return svcqueue.NewFile(cfg)

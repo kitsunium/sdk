@@ -97,7 +97,16 @@ func bindP256Public(pub *ecdsa.PublicKey) (binding es256Verifying, err error) {
 	return es256Verifying{key: pub}, nil
 }
 
-// bindP256Private validates an ECDSA private key for ES256.
+// bindP256Private validates an ECDSA private key for ES256: its curve, its
+// public point, its scalar, and that the scalar and the point are one key.
+//
+// The last two are checked here because nothing later would. crypto/ecdsa
+// reads D only when it signs — as of go1.27 it dereferences it on the first
+// Sign, so a nil scalar passes construction and panics inside Issue — and it
+// signs with D without ever comparing D·G to (X, Y). A struct whose halves came
+// from two different keys therefore mints tokens that the key's own public
+// half, the one the verifier is handed, refuses: every token, until someone
+// notices that the issuer was wrong from the start.
 func bindP256Private(priv *ecdsa.PrivateKey) (binding es256Signing, err error) {
 	//: a nil key is a construction-site mistake, and ES256 is P-256 only.
 	if priv == nil || priv.Curve != elliptic.P256() {
@@ -106,9 +115,28 @@ func bindP256Private(priv *ecdsa.PrivateKey) (binding es256Signing, err error) {
 	}
 	//: validate the public half's point too — a private key whose public half
 	//: is off-curve is corrupt, and signing with it leaks.
-	if _, cerr := priv.PublicKey.ECDH(); cerr != nil {
+	public, cerr := priv.PublicKey.ECDH()
+	//: an off-curve or identity point.
+	if cerr != nil {
 		//: refuse.
 		return es256Signing{}, keyUnsuitable("P-256 private key's public half is not a valid curve point")
+	}
+	//: the scalar is read before ECDH() below can dereference it: a missing
+	//: or non-positive D is not a private key at all.
+	if priv.D == nil || priv.D.Sign() <= 0 {
+		//: refuse at construction, never at the first Issue.
+		return es256Signing{}, keyUnsuitable("P-256 private key has no positive scalar")
+	}
+	derived, derr := priv.ECDH()
+	//: ECDH() range-checks the scalar against the group order.
+	if derr != nil {
+		//: a scalar at or past the order.
+		return es256Signing{}, keyUnsuitable("P-256 private scalar is out of range")
+	}
+	//: D·G must BE the declared point, or the two halves are two keys.
+	if !derived.PublicKey().Equal(public) {
+		//: refuse the key that would sign what its own public half refuses.
+		return es256Signing{}, keyUnsuitable("P-256 private scalar does not match its public point")
 	}
 	//: bound.
 	return es256Signing{key: priv}, nil

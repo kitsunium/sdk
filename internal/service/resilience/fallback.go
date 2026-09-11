@@ -94,8 +94,8 @@ func (f fallbackRunner) Run(ctx context.Context, op coreres.Operation) error {
 	//: tried and also broke. Promoting either to the wrap origin is worse
 	//: still: origin-wins would let an *errs.Error half hijack the policy's
 	//: code, which is the rule wrapAs exists to enforce. So the sentinel is
-	//: the origin and both messages travel as fields.
-	return kerrs.Wrap(coreres.FallbackFailed, kerrs.WrapParams{},
+	//: the origin and both messages travel as fields, through the same builder.
+	return wrapAsFields(coreres.FallbackFailed,
 		kerrs.String("primary", primaryErr.Error()),
 		kerrs.String("fallback", fallbackErr.Error()))
 }

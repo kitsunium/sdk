@@ -32,6 +32,14 @@ import (
 // carried through to a later Marshal: re-emitting a member we never understood
 // would be vouching for it.
 func Parse(document []byte) (key KeyValue, err error) {
+	//: json.Unmarshal accepts null into a struct and leaves it zero, which
+	//: would then read as a JWK missing its kty. A null document is not a
+	//: JWK object at all, and a caller routing on the code must be told so.
+	if isJSONNull(document) {
+		//: the sentinel itself, so its HTTP status and exit code survive.
+		return KeyValue{}, errs.Wrap(Malformed, errs.WrapParams{},
+			errs.String("why", "the document is JSON null, not a JWK object"))
+	}
 	var raw keyJSON
 	//: one strict pass; unknown members fall on the floor by struct shape.
 	if uerr := json.Unmarshal(document, &raw); uerr != nil {
@@ -45,6 +53,13 @@ func Parse(document []byte) (key KeyValue, err error) {
 	}
 	//: shape validated, now the cryptographic content.
 	return fromWire(raw)
+}
+
+// isJSONNull reports whether document is the JSON literal null, surrounding
+// whitespace aside.
+func isJSONNull(document []byte) bool {
+	//: RFC 8259 allows whitespace around any value, the top level included.
+	return bytes.Equal(bytes.TrimSpace(document), []byte("null"))
 }
 
 // fromWire validates a decoded keyJSON and builds the immutable KeyValue.

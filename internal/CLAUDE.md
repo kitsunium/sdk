@@ -29,7 +29,7 @@ core  ──┼──▶ service ──▶ (pkg/v1 re-exports / consumes)
 | `internal/service/**`| stdlib + kernel + core (+ vetted third-party encoders for codec/*) |
 | `pkg/v1/**` (consumes) | stdlib + kernel + core + service |
 
-Any import going "upward" fails `bazel build` before it ever reaches `ktn-linter`. `.golangci.yml` ships a code-quality second-opinion ruleset only; the layer firewall is now Bazel visibility.
+Any import going "upward" fails `make lint` and CI: `scripts/check-layer-deps.sh` asserts the direction on the build graph (ADR 0068). Visibility does not — Gazelle gives every package under `internal/` the visibility `//:__subpackages__`, which admits the whole repository, so an upward import builds. `.golangci.yml` ships a code-quality second-opinion ruleset only.
 
 ## Modules
 
@@ -70,7 +70,9 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
 # Primary (Bazel — source of truth for CI)
 bazel test --config=race //internal/...
 
-# Visibility firewall — kernel must have zero outgoing go_library edges
+# Layer firewall — every layer reaches only what is below it (ADR 0068)
+bash scripts/check-layer-deps.sh
+# expected: exit 0; the kernel query alone:
 bazel query 'kind("go_library", deps(//internal/kernel/...)) except //internal/kernel/...'
 # expected: empty result
 

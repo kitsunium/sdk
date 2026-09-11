@@ -60,9 +60,14 @@ func (s Status) String() string {
 // Degraded serves. That is the whole meaning of marking a check non-critical:
 // if a degraded replica were removed from routing, a "non-critical" cache
 // outage would take the fleet down just as thoroughly as a critical one.
+//
+// A Status outside the three does NOT serve — String already calls it
+// "unknown", and a verdict nobody minted is the one that must not authorise
+// routing (the zero-value rule of the type comment, applied to every other
+// value nobody assigned on purpose).
 func (s Status) Serving() bool {
-	//: the two serving states are the two above the floor.
-	return s != StatusUnhealthy
+	//: exactly the two serving states, never "anything but the floor".
+	return s == StatusDegraded || s == StatusHealthy
 }
 
 // Worst returns the more severe of two statuses, which is the SDK's whole
@@ -71,8 +76,25 @@ func (s Status) Serving() bool {
 // It exists as a named function rather than an inline min so the rule has one
 // definition and one test, and so a reader looking for "how does one failing
 // check affect the whole probe" finds a function rather than an idiom.
+//
+// A value outside the three ranks with Unhealthy. Status is ordered
+// worst-first, so a plain min would rank a cast value like Status(42) ABOVE
+// Healthy and let Worst(Healthy, Status(42)) answer Healthy — the fail-open
+// Serving already refuses for the same value.
 func Worst(a, b Status) Status {
 	//: Status is ordered worst-first, so the more severe verdict is the
-	//: smaller value. Degraded can therefore never mask Unhealthy.
-	return min(a, b)
+	//: smaller value. Degraded can therefore never mask Unhealthy, and a value
+	//: no verdict spells is folded in as the most severe one.
+	return min(ranked(a), ranked(b))
+}
+
+// ranked returns s, or StatusUnhealthy for a value outside the three.
+func ranked(s Status) Status {
+	//: a verdict nobody can serve on sorts with the one nobody serves on.
+	if s > StatusHealthy {
+		//: not one of the three.
+		return StatusUnhealthy
+	}
+	//: one of the three, as it is.
+	return s
 }

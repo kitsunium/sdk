@@ -280,13 +280,36 @@ func (c *chainStore[V]) fillOnce(ctx context.Context, key string, fill corecache
 }
 
 // tierFailure labels a tier's error with its position and the operation.
+//
+// An untyped cause is labelled AND kept, the rule fillFailure follows: it used
+// to survive only as a string field, so a tier returning a backend's own
+// sentinel came back as an error for which errors.Is on that sentinel was
+// false. A typed cause still yields CACHE_TIER_FAILED as the code — the
+// position is the information the caller cannot reconstruct — which wrapping
+// it would lose to origin-wins, so it keeps travelling as fields. "Typed" is
+// decided by errors.AsType, the test Wrap itself makes: a direct assertion
+// missed an *errs.Error behind fmt.Errorf's %w, and Wrap then found it and
+// handed it the verdict.
 func tierFailure(position int, operation, key string, cause error) error {
-	//: origin-wins keeps CACHE_TIER_FAILED as the code even when the cause is
-	//: itself an *errs.Error — the position is the information the caller
-	//: cannot reconstruct, and it is what the fields carry.
-	return kerrs.Wrap(CacheTierFailed, kerrs.WrapParams{},
+	fields := []kerrs.FieldValue{
 		kerrs.Int("position", position),
 		kerrs.String("operation", operation),
 		kerrs.String("key", key),
-		kerrs.String("cause", cause.Error()))
+		kerrs.String("cause", cause.Error()),
+	}
+	//: a typed cause would take over the code if wrapped; label it instead.
+	if typedErr, typed := errors.AsType[*kerrs.Error](cause); typed {
+		//: CACHE_TIER_FAILED, the cause's text and its own code in fields.
+		return kerrs.Wrap(CacheTierFailed, kerrs.WrapParams{},
+			append(fields, kerrs.String("cause_code", typedErr.Code().String()))...)
+	}
+	//: an untyped cause, IN the chain: HasCode sees CACHE_TIER_FAILED and
+	//: errors.Is sees the cause. The identity is read from the sentinel so it
+	//: cannot drift from it.
+	return kerrs.Wrap(cause, kerrs.WrapParams{
+		Code:    CacheTierFailed.Code(),
+		Reason:  CacheTierFailed.Reason(),
+		Public:  CacheTierFailed.Public(),
+		Private: CacheTierFailed.Private(),
+	}, fields...)
 }

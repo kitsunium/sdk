@@ -78,12 +78,21 @@
 //
 // # Testing time without sleeping
 //
-// Both configs take a [clock.Clock]. Pass a kernel ManualClock and an expiry
-// test moves time by assignment instead of by sleeping:
+// Every config has a Clock field, and it takes any value with the two methods
+// Now and Since — so the fake is one a test writes itself, and an expiry test
+// moves time by assignment instead of by sleeping:
 //
-//	manual := clock.NewManualClock(time.Unix(1000, 0))
-//	ver, _ := token.NewHS256Verifier(secret, token.VerifierConfig{Clock: manual})
-//	manual.Advance(2 * time.Hour) // now the token is expired, deterministically
+//	type fakeClock struct{ now time.Time }
+//
+//	func (c *fakeClock) Now() time.Time                  { return c.now }
+//	func (c *fakeClock) Since(t time.Time) time.Duration { return c.now.Sub(t) }
+//
+//	fake := &fakeClock{now: time.Unix(1000, 0)}
+//	ver, _ := token.NewHS256Verifier(secret, token.VerifierConfig{Clock: fake})
+//	fake.now = fake.now.Add(2 * time.Hour) // now the token is expired, deterministically
+//
+// Move it between calls, or guard it with a mutex if a verifier reads it from
+// another goroutine at the same time.
 //
 // # Claims are not printable
 //

@@ -639,7 +639,7 @@ func TestOTLPHTTPDefaultClientHonoursTheProxyEnvironment(t *testing.T) {
 			}))
 			t.Cleanup(proxy.Close)
 			child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestOTLPHTTPProxyChild$") //nolint:gosec
-			child.Env = append(withoutProxyEnvironment(os.Environ()),
+			child.Env = append(childEnvironment(os.Environ()),
 				"HTTP_PROXY="+proxy.URL, proxyChildEnv+"="+mode.transport)
 			if output, err := child.CombinedOutput(); err != nil {
 				t.Fatalf("the child's export did not reach the collector through HTTP_PROXY: %v\n%s", err, output)
@@ -716,14 +716,25 @@ func TestOTLPHTTPProxyChild(t *testing.T) {
 	}
 }
 
-// withoutProxyEnvironment returns env minus every variable net/http reads to
-// choose a proxy, so the child sees exactly the one its parent sets.
-func withoutProxyEnvironment(env []string) []string {
+// childEnvironment returns env minus the two families of variables that would
+// make the child a different process from the one the test means to run.
+//
+// Every variable net/http reads to choose a proxy goes, so the child sees
+// exactly the one its parent sets. So do Bazel's coverage outputs: under
+// `bazel coverage` the generated test main points -test.coverprofile at
+// $COVERAGE_OUTPUT_FILE.cover, so each child inherited the parent's profile
+// path, and the two children this test starts in parallel shared one file —
+// one converted it to LCOV while the other was still writing it, and exited 2
+// on "invalid go cover line" after its own PASS. That failed CI's coverage step
+// on a change that touched no Go code. A child told nowhere to write coverage
+// writes none.
+func childEnvironment(env []string) []string {
 	kept := make([]string, 0, len(env))
 	for _, entry := range env {
 		name, _, _ := strings.Cut(entry, "=")
 		switch strings.ToUpper(name) {
-		case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "REQUEST_METHOD":
+		case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "REQUEST_METHOD",
+			"COVERAGE_OUTPUT_FILE", "COVERAGE_DIR":
 			continue
 		}
 		kept = append(kept, entry)

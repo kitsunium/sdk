@@ -308,6 +308,76 @@ func TestDuplicateMembersAreRefused(t *testing.T) {
 	}
 }
 
+// TestTextThatIsNotUTF8IsRefusedOnVerify covers RFC 8725 §3.7 on the reading
+// side. encoding/json does not refuse invalid UTF-8, it replaces each bad byte
+// with U+FFFD, so two tokens a careless or hostile issuer signed with "a\xff"
+// and "a\xfe" as their subject both verified — as the same subject. Seen
+// failing without the check: both rows verified, with Subject "a\ufffd".
+func TestTextThatIsNotUTF8IsRefusedOnVerify(t *testing.T) {
+	t.Parallel()
+	secret := testSecret(t, 12)
+	verifier, err := svctoken.NewHS256Verifier(secret, laxConfig())
+	if err != nil {
+		t.Fatalf("NewHS256Verifier: %v", err)
+	}
+	sign := hmacSigner(secret)
+	type tc struct {
+		name    string
+		header  string
+		payload string
+	}
+	tests := []tc{
+		{"a subject ending in 0xff", `{"alg":"HS256","typ":"JWT"}`, "{\"sub\":\"a\xff\"}"},
+		{"a subject ending in 0xfe", `{"alg":"HS256","typ":"JWT"}`, "{\"sub\":\"a\xfe\"}"},
+		{"a header member", "{\"alg\":\"HS256\",\"typ\":\"J\xffT\"}", `{"sub":"a"}`},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		claims, verr := verifier.Verify(forge(c.header, c.payload, sign))
+		if !errs.HasCode(verr, coretoken.CodeMalformed) {
+			t.Fatalf("%s: Verify = (%q, %v), want MALFORMED", c.name, claims.Subject(), verr)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestANullRegisteredClaimIsRefused pins that a registered claim sent as JSON
+// null is malformed rather than absent. encoding/json decodes null into any
+// target and leaves the zero there, so a signed token saying "aud": null was
+// read as an audience of [""], "nbf": null as 1970 and "sub": null as an
+// empty subject. Seen failing without the check: six rows verified, and
+// "exp": null was read as 1970 and came back EXPIRED instead of MALFORMED.
+func TestANullRegisteredClaimIsRefused(t *testing.T) {
+	t.Parallel()
+	secret := testSecret(t, 13)
+	verifier, err := svctoken.NewHS256Verifier(secret, laxConfig())
+	if err != nil {
+		t.Fatalf("NewHS256Verifier: %v", err)
+	}
+	sign := hmacSigner(secret)
+	for _, payload := range []string{
+		`{"iss":null}`, `{"sub":null}`, `{"aud":null}`, `{"jti":null}`,
+		`{"nbf":null}`, `{"iat":null}`, `{"exp": null }`,
+	} {
+		t.Run(payload, func(t *testing.T) {
+			t.Parallel()
+			_, verr := verifier.Verify(forge(`{"alg":"HS256","typ":"JWT"}`, payload, sign))
+			if !errs.HasCode(verr, coretoken.CodeMalformed) {
+				t.Fatalf("Verify(%s) = %v, want MALFORMED", payload, verr)
+			}
+		})
+	}
+	//: a PRIVATE claim may be null: its meaning is the application's.
+	if _, verr := verifier.Verify(forge(`{"alg":"HS256","typ":"JWT"}`, `{"tenant":null}`, sign)); verr != nil {
+		t.Fatalf("a null private claim was refused: %v", verr)
+	}
+}
+
 // TestCritHeaderIsRefused covers RFC 7515 §4.1.11: the parameters "crit" names
 // MUST be understood. This package understands none, so its presence is a
 // rejection — "ignore what you do not understand" is how a security-relevant

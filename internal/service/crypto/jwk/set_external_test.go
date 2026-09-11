@@ -56,6 +56,10 @@ func TestParseSetRejects(t *testing.T) {
 	}{
 		{"keys member absent", `{"issuer":"x"}`, jwk.CodeJWKMissingMember},
 		{"keys member null", `{"keys":null}`, jwk.CodeJWKMissingMember},
+		//: a null ENVELOPE is not an object at all, and neither is a null
+		//: member; both read as MISSING_MEMBER before.
+		{"the envelope is null", `null`, jwk.CodeJWKMalformed},
+		{"a member is null", `{"keys":[null]}`, jwk.CodeJWKMalformed},
 		{"keys member is not an array", `{"keys":{}}`, jwk.CodeJWKMalformed},
 		{"a member is not an object", `{"keys":["EC"]}`, jwk.CodeJWKMalformed},
 		//: a bad member keeps ITS OWN code through the set wrapper — origin

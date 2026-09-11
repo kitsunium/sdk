@@ -41,6 +41,13 @@ func (a Algorithm) Known() bool {
 // Decompress follow the append-to-dst convention of the stdlib (dst may be nil)
 // so callers can reuse buffers on the hot path.
 //
+// src must not overlap dst's spare capacity, dst[len(dst):cap(dst)]: every
+// scheme writes its output there while it is still reading src, so an aliased
+// src is overwritten mid-read and the output is corrupt. Reusing one buffer
+// means passing buf[:0] as dst and a DIFFERENT buffer as src — the same rule
+// as copy-free encoders across the stdlib, stated here because no scheme can
+// check it cheaply.
+//
 // IFACE-PLUGIN: the registry stores plug-in scheme instances behind this
 // interface — concrete scheme types stay unexported per package.
 type Compressor interface {

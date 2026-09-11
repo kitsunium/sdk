@@ -135,7 +135,7 @@ Package codec — declares the sentinel \*errs.Error values the facade emits whe
 
 Package codec — the multipart/form\-data value types, and the one helper a consumer needs to send what Marshal\(Multipart, …\) returns. The format is a container whose delimiter lives in the Content\-Type header, which the Codec contract cannot carry, so the facade publishes the two shapes the codec speaks natively and the function that recovers that header from the body.
 
-Package codec — JSON\-bridge promotion path for codecs whose runtime preconditions reject the public Marshal\(F, any\) / Unmarshal\(F, \*, any\) contract. Six of the twenty\-three registered codecs constrain their input shape: csv expects \[\]\[\]string, ndjson expects \[\]T, pem expects \*pem.Block, flatbuffers expects \[\]byte or BytesProvider, form expects url.Values, tlv's decoder cannot project composites into typed targets. Without promotion the facade's "format\-swap is a single string change" promise is a lie for 6/23. Promotion intercepts the VALUE\_INVALID / FLATBUFFERS\_BAD\_\* / UNMARSHAL\_FAILED responses, encodes the value to JSON, wraps the bytes in a codec\-specific container the codec will accept, and reverses the pipeline on Unmarshal. The fast \(native\-shape\) path is untouched so existing callers see zero overhead. See TestUniversalRoundtripAllCodecs for the contract pin.
+Package codec — JSON\-bridge promotion path for codecs whose runtime preconditions reject the public Marshal\(F, any\) / Unmarshal\(F, \*, any\) contract. Six of the twenty\-four registered codecs constrain their input shape: csv expects \[\]\[\]string, ndjson expects \[\]T, pem expects \*pem.Block, flatbuffers expects \[\]byte or BytesProvider, form expects url.Values, tlv's decoder cannot project composites into typed targets. Without promotion the facade's "format\-swap is a single string change" promise is a lie for 6/24. Promotion intercepts the VALUE\_INVALID / FLATBUFFERS\_BAD\_\* / UNMARSHAL\_FAILED responses, encodes the value to JSON, wraps the bytes in a codec\-specific container the codec will accept, and reverses the pipeline on Unmarshal. The fast \(native\-shape\) path is untouched so existing callers see zero overhead. See TestUniversalRoundtripAllCodecs for the contract pin.
 
 ## Index
 
@@ -259,7 +259,7 @@ out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
 ```
 
 <a name="MultipartContentType"></a>
-## func [MultipartContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L40>)
+## func [MultipartContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L42>)
 
 ```go
 func MultipartContentType(body []byte) (value string, err error)
@@ -460,16 +460,16 @@ func FromMIME(mime string) (f Format, ok bool)
 FromMIME resolves a MIME string to its registered Format.
 
 <a name="MultipartForm"></a>
-## type [MultipartForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L16>)
+## type [MultipartForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L18>)
 
-MultipartForm is the native Go shape of the [Multipart](<#JSON>) format: a whole multipart/form\-data body — its RFC 2046 boundary and its parts, in wire order. Marshal one to build an upload; Unmarshal into a \*MultipartForm to read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal always fills it with the one it recovered, so a decode → encode round trip reproduces the original framing byte for byte.
+MultipartForm is the native Go shape of the [Multipart](<#JSON>) format: a whole multipart/form\-data body — its RFC 2046 boundary and its parts, in wire order. Marshal one to build an upload; Unmarshal into a \*MultipartForm to read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal always fills it with the one it recovered, so a decode → encode round trip keeps the original delimiter — and reproduces the whole body byte for byte only for a body this codec encoded, since a part header other than the name, filename and media type is not carried through.
 
 ```go
 type MultipartForm = svcmultipart.FormValue
 ```
 
 <a name="MultipartPart"></a>
-## type [MultipartPart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L27>)
+## type [MultipartPart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L29>)
 
 MultipartPart is one section of a [MultipartForm](<#MultipartForm>): a named field, optionally a filename and a media type, and the bytes themselves — a file upload is a part with FileName and ContentType set. Marshal also accepts a single MultipartPart or a \[\]MultipartPart.
 

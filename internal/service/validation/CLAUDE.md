@@ -26,6 +26,8 @@ refusal.
 | `plan.go` | the compiled `structPlan` and its `(type, mode)` cache |
 | `plan_key.go` | `planKey` — the `(type, mode)` identity of a compiled plan |
 | `compile.go` | the tag compiler: field walk, name and path-segment derivation (`promotedEmbedding`), tag parsing (`splitDive`, `splitPresence`) |
+| `json_reach.go` | `checkJSONReach` — the key-to-field resolution of `encoding/json`, re-derived, and the refusal of a rule its key does not reach |
+| `json_level.go` / `reach_member.go` | the two values that resolution walks: an embedded struct to descend into, and a constrained field located by index path |
 | `dive.go` | the `dive` descent — nested structs, slices, arrays, and one pointer to any of them |
 | `element_plan.go` | `elementPlan` — one dived element's rules, presence asked of a pointer element before it is followed |
 | `rules.go` | the dialect: accepted rules, and the ones refused BY NAME |
@@ -80,7 +82,7 @@ no vocabulary here, and a caller writes them as a `Constraint` and composes.
   also why the bounds are echoed: they are the caller's own literals.
 - **The plan is compiled once per `(type, mode)`** and cached in a `sync.Map`.
   A compile FAILURE is not cached: it is a source defect that fails the same
-  way every time. See `BENCH.md` — compiling is 5.0 µs, fetching is 103 ns.
+  way every time. See `BENCH.md` — compiling is 6.8 µs, fetching is 92 ns.
 - **`dive` is explicit.** A nested struct is never walked automatically:
   automatic recursion would walk into `time.Time`, `net.IP` and every other
   struct that happens to be a field. A type that reaches itself is refused at
@@ -105,6 +107,16 @@ no vocabulary here, and a caller writes them as a `Constraint` and composes.
   embedding keeps its segment, `json:"-"` keeps the Go name, and an embedded
   non-struct is keyed by its type name. A refusal still names the field by its
   `pathName`, since a refusal is read by the developer looking for it.
+- **A rule is only accepted on a field its key reaches.** Promotion is also
+  competition: a shallower field of the same name hides a promoted one, and a
+  tie at one depth (both tagged, or neither) makes `encoding/json` decode the
+  key into NEITHER, silently. `checkJSONReach` refuses a rule on a hidden or
+  tied field as `INVALID_RULE` at compile, resolving keys with `encoding/json`'s
+  own `typeFields`/`dominantField` re-derived (`json_reach.go`), compared by
+  index path so a tag name JSON rejects cannot blur it. A field JSON ignores
+  outright — unexported, `json:"-"` — is not a candidate and keeps its old
+  behaviour. The test's oracle is `json.Unmarshal` itself, not the resolution
+  it mirrors (`TestARuleIsRefusedExactlyWhenNoJSONKeyReachesItsField`).
 - **A numeric literal is read at the FIELD's width** (`reflect.Type.Bits`), in
   `min`/`max` and in every `oneof` entry. A literal the width cannot hold is
   refused as `INVALID_RULE`, naming the kind: `min=200` on an `int8` could never

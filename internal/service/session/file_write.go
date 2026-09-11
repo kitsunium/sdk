@@ -73,7 +73,8 @@ func (f *fileStore) Regenerate(ctx context.Context, current coresession.ID, subj
 		//: propagate the first failure unchanged.
 		return rotateErr
 	})
-	//: any failure leaves the old record exactly as it was.
+	//: a failure before the old record's retirement leaves it exactly as it
+	//: was; a flush failure after it is reported and not undone.
 	if lockErr != nil {
 		//: the typed verdict.
 		return coresession.SessionValue{}, lockErr
@@ -109,13 +110,24 @@ func (f *fileStore) rotateLocked(current, next coresession.ID, subject string) (
 	}
 	//: and only then retire the old one, so there is no instant in which
 	//: neither identifier resolves.
-	if removeErr := f.removeLocked(live.digest); removeErr != nil {
-		//: StoreUnavailable — reported, and the caller retries the whole
-		//: rotation rather than being told it succeeded. The new record goes
-		//: with the failed rotation: the caller is never given its identifier,
-		//: so leaving it would keep a second live, subject-bound session that
-		//: nobody can reach, and every retry would add another.
-		return record{}, f.withdrawLocked(rotated.digest, removeErr)
+	if unlinkErr := f.unlinkLocked(live.digest); unlinkErr != nil {
+		//: StoreUnavailable, and nothing was retired: the old record still
+		//: works, so the rotation is abandoned whole and the caller retries it
+		//: rather than being told it succeeded. The new record goes with it:
+		//: the caller is never given its identifier, so leaving it would keep
+		//: a second live, subject-bound session that nobody can reach, and
+		//: every retry would add another.
+		return record{}, f.withdrawLocked(rotated.digest, unlinkErr)
+	}
+	//: the old record is gone from every reader's view; now make that survive
+	//: a crash. A failure here is reported and NOT undone, the store's one rule
+	//: for flushes (see flushLocked): withdrawing the new record as well left
+	//: neither identifier resolving — the state the order above exists to
+	//: prevent — and restoring the old one would be the second write ADR 0056
+	//: D7 refuses.
+	if flushErr := f.flushLocked("sync-dir-remove"); flushErr != nil {
+		//: StoreUnavailable, op sync-dir-remove.
+		return record{}, flushErr
 	}
 	//: rotated.
 	return rotated, nil
@@ -132,8 +144,7 @@ func (f *fileStore) withdrawLocked(digest string, cause error) error {
 		//: the cause keeps its code; the withdrawal failure is diagnostic.
 		return kerrs.Wrap(cause, kerrs.WrapParams{}, kerrs.String("withdraw", withdrawErr.Error()))
 	}
-	//: withdrawn; the store holds only what it held before the rotation began
-	//: — minus the old record, if its unlink was not what failed.
+	//: withdrawn; the store holds what it held before the rotation began.
 	return cause
 }
 

@@ -8,6 +8,7 @@ import (
 
 	corehealth "github.com/kitsunium/sdk/internal/core/health"
 	corelc "github.com/kitsunium/sdk/internal/core/lifecycle"
+	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Component adapts a registry to core/lifecycle: its Start runs the startup
@@ -47,7 +48,8 @@ func Component(registry corehealth.Health, name string) corelc.ComponentValue {
 //
 // It reports the checks' OWN errors, joined, rather than a sentinel of its
 // own: the caller registered those checks and wrote those errors, and
-// relabelling them here would cost them their errors.Is.
+// relabelling them here would cost them their errors.Is. The one exception is
+// a refusal with no error to report at all — see startupUnexplained.
 func startupGate(registry corehealth.Health) corelc.Start {
 	//: a closure over the registry, because lifecycle.Start is a FUNC port —
 	//: there is no interface here to hang a method on (ADR 0050).
@@ -60,10 +62,37 @@ func startupGate(registry corehealth.Health) corelc.Start {
 			//: startup complete; readiness takes over from here.
 			return nil
 		}
-		//: errors.Join yields a genuine nil for an empty slice, so a report
-		//: that is unhealthy for no recorded reason cannot fake a success.
-		return errors.Join(failures(report)...)
+		failed := failures(report)
+		//: errors.Join of an empty slice is a genuine nil, and lifecycle reads a
+		//: nil Start as SUCCESS — so a report that is not serving and names no
+		//: failure would declare the application up. It never reaches Join.
+		if len(failed) == 0 {
+			//: still a refusal, just an unexplained one.
+			return startupUnexplained(report.Status.String())
+		}
+		//: the caller's own errors, verbatim, so their errors.Is keeps working.
+		return errors.Join(failed...)
 	}
+}
+
+// startupUnexplained is the refusal for a startup report that is not serving
+// and carries no error saying why.
+//
+// This package's own registry never produces one — every result it reports as
+// failing carries its error — so the path is reached through a Health written
+// elsewhere, or a Status outside the three. It is StartupPending's code,
+// reason, public message and exit code, so errors.Is and errs.HasCode both
+// match it; the Private is this path's own, because wrapping the sentinel would
+// inherit one describing a readiness short-circuit instead.
+func startupUnexplained(status string) error {
+	//: read from the sentinel so the identity cannot drift from it.
+	return kerrs.Wrap(nil, kerrs.WrapParams{
+		Code:     StartupPending.Code(),
+		Reason:   StartupPending.Reason(),
+		Public:   StartupPending.Public(),
+		Private:  "service/health: the startup probe did not report serving and no result carried an error; the field carries the status it reported",
+		ExitCode: StartupPending.ExitCode(),
+	}, kerrs.String("probe", corehealth.ProbeStartup.String()), kerrs.String("status", status))
 }
 
 // drainGate returns a lifecycle Stop that marks the registry draining and

@@ -2,6 +2,7 @@ package vfs_test
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -270,4 +271,26 @@ func TestTheDiskFilesystemPublishesAtomicallyUnderConcurrentReaders(t *testing.T
 		}
 	}
 	<-done
+}
+
+// TestTheOSFilesystemClosesItsRoot pins io.Closer on the OS filesystem: Close
+// releases the directory descriptor, and a read after it fails typed instead
+// of reaching a descriptor that is gone. os.Root would otherwise hold it until
+// a collection ran its finalizer.
+func TestTheOSFilesystemClosesItsRoot(t *testing.T) {
+	t.Parallel()
+	filesystem, err := svcvfs.NewOS(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewOS: %v", err)
+	}
+	closer, ok := filesystem.(io.Closer)
+	if !ok {
+		t.Fatal("the OS filesystem does not implement io.Closer")
+	}
+	if cerr := closer.Close(); cerr != nil {
+		t.Fatalf("Close() = %v, want nil", cerr)
+	}
+	if _, rerr := fs.ReadDir(filesystem, "."); !kerrs.HasCode(rerr, corevfs.CodeReadFailed) {
+		t.Fatalf("ReadDir after Close = %v, want READ_FAILED", rerr)
+	}
 }

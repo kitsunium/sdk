@@ -4,6 +4,7 @@
 package queue
 
 import (
+	"encoding/hex"
 	"math"
 	"strconv"
 	"strings"
@@ -205,8 +206,10 @@ func parseReady(base string) (name nameValue, ok bool) {
 // anyway, which is the second of the two locks on that door.
 func parseInflight(base string) (name nameValue, ok bool) {
 	fields, split := splitName(base, suffixMessage, inflightFields)
-	//: not a receipt this broker could have minted.
-	if !split {
+	//: not a receipt this broker could have minted — and an in-flight name
+	//: always carries a lease, where assemble lets an empty one through for
+	//: the two states that have none.
+	if !split || fields[posLease] == "" {
 		//: the caller reports UnknownReceipt, or skips the entry.
 		return nameValue{}, false
 	}
@@ -234,10 +237,13 @@ func parseDead(base string) (name nameValue, ok bool) {
 func assemble(at, enqueued, entropy, deliveries, lease string) (name nameValue, ok bool) {
 	atNanos, atOK := parseNano(at)
 	enqueuedNanos, enqueuedOK := parseNano(enqueued)
-	count, countErr := strconv.Atoi(deliveries)
+	count, countOK := parseCount(deliveries)
 	//: every field is checked, because this function also validates the
-	//: receipts a caller hands back.
-	if !atOK || !enqueuedOK || countErr != nil || count < 0 || !isHex(entropy) || !isHex(lease) {
+	//: receipts a caller hands back — and each to the exact width and spelling
+	//: the renderers write, so a stray file with a short entropy field, or a
+	//: second spelling of a count, is skipped rather than delivered as a
+	//: message this broker never enqueued.
+	if !atOK || !enqueuedOK || !countOK || !randomFieldsWellFormed(entropy, lease) {
 		//: refused.
 		return nameValue{}, false
 	}
@@ -282,6 +288,34 @@ func parseNano(field string) (nanos int64, ok bool) {
 	}
 	//: a usable instant.
 	return value, true
+}
+
+// parseCount reads a delivery count spelled exactly as padCount writes it.
+// strconv.Atoi alone also takes "+01" and "0001", second names for one message.
+func parseCount(field string) (count int, ok bool) {
+	count, err := strconv.Atoi(field)
+	//: a number, non-negative, and in padCount's own spelling.
+	if err != nil || count < 0 || padCount(count) != field {
+		//: refused.
+		return 0, false
+	}
+	//: the count as written.
+	return count, true
+}
+
+// randomFieldsWellFormed reports whether entropy and lease are exactly as wide
+// as randomHex writes them. lease may be empty: a queued message and a dead
+// letter carry none, and parseInflight refuses an empty one itself.
+func randomFieldsWellFormed(entropy, lease string) bool {
+	//: the identity's entropy always; the lease's only when there is one.
+	return isHexOfWidth(entropy, idEntropyBytes) && (lease == "" || isHexOfWidth(lease, leaseEntropyBytes))
+}
+
+// isHexOfWidth reports whether field is exactly the lower-case hex encoding of
+// n random bytes, which is what randomHex writes.
+func isHexOfWidth(field string, n int) bool {
+	//: the width first; it is the cheap half and the one the review found open.
+	return len(field) == hex.EncodedLen(n) && isHex(field)
 }
 
 // isHex reports whether field is lower-case hexadecimal, the empty string

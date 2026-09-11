@@ -16,7 +16,7 @@ pull loop that runs handlers on goroutines it owns).
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |
 | `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory |
-| `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry |
+| `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
 | `file_dead.go` | `Nack`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
 | `consume.go` | `Consume`, the pull loop, the panic guard |
@@ -46,17 +46,22 @@ rename. So:
 
 Two consequences of "the state is a name" are enforced rather than assumed:
 
-- **The states are checked like the root.** `prepareState` runs the same rule
-  `checkQueueDir` runs on `Dir` (`unusableBecause`) on each of `ready/`,
-  `inflight/` and `dead/`, through `os.Mkdir` + `os.Lstat` — never `MkdirAll`
-  or `Stat`, which both follow a symlink. Only the root used to be checked, so
-  under a root the rule accepts (a group share, a sticky `/tmp`-like
-  directory) another account could pre-create a world-writable `ready/` and
-  plant or unlink messages. A state that is a symlink is refused whatever it
-  points at. `TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust`.
-  What the rule still does NOT see is an owner: a sticky world-writable state
-  owned by another account passes it, as the root does. Closing that needs a
-  uid comparison, which is platform code.
+- **The states are checked like the root, one notch stricter.**
+  `prepareState` runs the root's rule (`unusableBecause`) on each of `ready/`,
+  `inflight/` and `dead/` through `os.Mkdir` + `os.Lstat` — never `MkdirAll`
+  or `Stat`, which both follow a symlink — plus one refusal of its own
+  (`stateUnusableBecause`): a state any account outside the owner and group
+  can write is refused EVEN with the sticky bit. At the root, sticky stops the
+  states being replaced, which is all the root needs; in a state it only stops
+  an unlink, and a planted entry is a delivered message. Only the root used to
+  be checked, so under a root the rule accepts (a group share, a sticky
+  `/tmp`-like directory) another account could pre-create `ready/` and plant or
+  unlink messages; then the root's rule was applied as it stood, and a sticky
+  world-writable `ready/` still passed. A state that is a symlink is refused
+  whatever it points at. `TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust`.
+  What the rule still does NOT see is an owner inside the group: a
+  group-writable state another member made is trusted, as the group share
+  itself is.
 - **An instant a name cannot carry is never written.** A name's instants are
   19 digits of a non-negative int64, so the grammar ends on 2262-04-11; past
   it `pad` wrote a sign, `parseNano` refused the name, and the message was
@@ -154,9 +159,16 @@ the code.
 
 ## Do NOT
 
-- Add a `Close`. The durable broker holds one `os.Root` (the `service/vfs`
-  precedent) and no per-message handle, and nothing about the queue's contents
-  lives in this process — which is what makes it genuinely inter-process.
+- Give `Close` any duty beyond releasing descriptors. The durable broker holds
+  TWO directory descriptors — its own `os.Root` and the one inside its
+  `service/vfs` publisher (this rule used to say one, and to refuse a `Close`
+  on that basis) — and nothing about the queue's contents lives in this
+  process, which is what makes it genuinely inter-process. So `Close` is an
+  `io.Closer` reached by type assertion, as the session file store's is: it
+  releases both descriptors, flushes nothing and owns nothing, and every call
+  after it fails. `os.Root` would release them at the next collection anyway;
+  `TestClosingTheDurableBrokerReleasesBothDescriptors` holds the collector off
+  to prove `Close` does it without one.
 - Flush on `Ack`, `Nack` or `Receive`. See above; it buys nothing.
 - Add a sweeper goroutine, a timer, or a background reclaim. Expiry is noticed
   by whoever looks next, in both brokers, deliberately.

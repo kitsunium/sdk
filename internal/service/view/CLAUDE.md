@@ -83,6 +83,23 @@ half-built set.
   `sync.Map`; a struct of strings and ints is pruned without touching a value.
   Measured (`BENCH.md`): **445.9 ns** for a typed model, **13 657 ns** for the
   equivalent `map[string]any`.
+- **The context is checked BEFORE execution, and only then.** `html/template`
+  has no cancellation point, and running `Execute` on a goroutine to abandon
+  it on `ctx.Done()` would leak that goroutine, still executing, for every
+  cancelled render. So a template looping over a caller-supplied collection —
+  `{{range .}}{{end}}` over a million items emits no byte, so `MaxBytes` never
+  trips — runs to its end. That is a limit stated, not solved: bound the DATA
+  a render is handed, since the template cannot be interrupted.
+- **A template that never returns is refused at construction.**
+  `refuseEndlessRecursion` reads the parse trees before anything executes and
+  refuses a cycle of `{{template}}` calls made at a template's TOP level —
+  calls that happen whatever the data is. A call inside `{{if}}`, `{{range}}`
+  or `{{with}}` does not count, which is how a nested model is legitimately
+  rendered recursively. The probe used to execute such a template, let
+  `text/template` stop it 100 000 calls down, and discard that error like any
+  nil-model failure. `TestASelfRecursiveTemplateIsRefusedAtConstruction`
+  covers a direct and an indirect cycle, and a guarded recursion that must
+  still build.
 - **Cycles follow `encoding/json`'s policy.** Pointers are recorded only past
   `startDetectingCyclesAfter` (1000), so a normal model allocates no
   bookkeeping. Two named tests drive an immediate self-loop and a 1200-link
