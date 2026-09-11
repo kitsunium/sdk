@@ -1,0 +1,77 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "trace",
+    srcs = [
+        "codes.go",
+        "config.go",
+        "errors.go",
+        "exporter_otlphttp.go",
+        "exporter_otlpjson.go",
+        "http_client.go",
+        "http_server.go",
+        "idgen.go",
+        "noop_span.go",
+        "numeric.go",
+        "otlp_export_response.go",
+        "otlp_request.go",
+        "otlphttp_config.go",
+        "record_error.go",
+        "recorder.go",
+        "recorder_config.go",
+        "sampler.go",
+        "span.go",
+        "tracer.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/trace",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/metrics",
+        "//internal/core/net",
+        "//internal/core/trace",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":trace",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_test(
+    name = "trace_test",
+    srcs = [
+        "exporter_otlphttp_external_test.go",
+        "exporter_otlpjson_external_test.go",
+        "http_middleware_external_test.go",
+        "recorder_external_test.go",
+        "sampler_external_test.go",
+        "testhelpers_external_test.go",
+        "tracer_external_test.go",
+    ],
+    deps = [
+        ":trace",
+        "//internal/core/metrics",
+        "//internal/core/net",
+        "//internal/core/trace",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)

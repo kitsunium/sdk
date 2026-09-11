@@ -64,6 +64,14 @@ vocabulary:
     # AsyncMeter / FullMeter family that says, at a glance, which capabilities a
     # parameter requires. Same argument as ConnHandler above.
     - github.com/kitsunium/sdk/internal/core/metrics.UpDownMeter
+    # core/trace.Tracer is OpenTelemetry's own vocabulary for the type that
+    # starts spans — the word the entire domain, the specification and every
+    # backend are discussed in — exactly as Meter is for the type that mints
+    # instruments. The -er form the rule would impose, "Starter", names the
+    # METHOD rather than the role, and it collides with the ordinary English
+    # meaning of the word in a domain full of things that start. Same argument
+    # as UpDownMeter above and ConnHandler further up.
+    - github.com/kitsunium/sdk/internal/core/trace.Tracer
 
 # ── Global options ────────────────────────────────────────────────────────────
 
@@ -249,6 +257,15 @@ rules:
       - "**/internal/core/session/**"
       - "**/internal/service/session/**"
       - "**/pkg/v1/session/**"
+      # The trace domain is the same class as the token one above. The OTLP
+      # encoder's helpers take core/trace.StatusValue, SpanValue, LinkValue and
+      # SpanContextValue — the domain's own immutable value types, each fixed by
+      # the OTLP payload it renders. The suggestion for StatusValue is the
+      # clearest tell: `interface{ Resolved() trace.StatusValue }` mentions the
+      # very type it proposes to remove, so it cannot be written at all.
+      - "**/internal/core/trace/**"
+      - "**/internal/service/trace/**"
+      - "**/pkg/v1/trace/**"
 
   # KTN-VAR-NILSLICE (info) — "prefer a nil slice to an empty one".
   #
@@ -366,13 +383,23 @@ rules:
       #     NewHeap() would stutter, which the same linter's naming rules
       #     discourage elsewhere — the net/client entry above records the very
       #     same trade.
-      #
       # (The rule's own messages here read "constructor NewNewTopic()",
       # "NewNewSubscriber()", "NewNewGroup()" and "NewNewHeap()", none of which
       # is a name anything could satisfy.)
       - "**/internal/kernel/topic/**"
       - "**/internal/kernel/group/**"
       - "**/internal/kernel/heap/**"
+      # core/trace.StateValue is the parsed W3C `tracestate` list, and it has no
+      # from-parts constructor ON PURPOSE: every instance comes out of
+      # ParseTraceState or Insert, each of which validates the key against
+      # `simple-key`/`multi-tenant-key` and the value against `value = 0*255(chr)
+      # nblk-chr` before an entry reaches the list. A NewStateValue(entries)
+      # would be a second way in that skips all of it and produces a header the
+      # next hop is required to discard — exactly the "poorly initialized
+      # struct" the rule exists to prevent. (The rule's own message here reads
+      # "constructor NewNewStateValue()", which is not a name anything could
+      # satisfy — the same broken suggestion the jwk and metrics entries record.)
+      - "**/internal/core/trace/**"
 
   # KTN-GOROUTINE-SYNCMAP / KTN-GOROUTINE-ATOMICVAL (phase 4) — the suggested
   # replacements cannot express what this map is for.
@@ -397,6 +424,22 @@ rules:
   KTN-GOROUTINE-ATOMICVAL:
     exclude:
       - "**/internal/kernel/singleflight/**"
+
+  # KTN-STRUCT-ROLE-STUTTER (phase 4) — the package name IS the signal's name.
+  #
+  # `trace.Tracer` and `trace.TracerConfig` read as stutters because the package
+  # is named after the SIGNAL (a trace) and the type after the thing that
+  # produces it (a Tracer) — which is OpenTelemetry's own vocabulary, the word
+  # every backend, dashboard and specification section uses, and the exact pair
+  # `metrics.Meter` / `metrics.MeterConfig` would be if the metrics package were
+  # named `metric`. Renaming either would cost the reader the word the whole
+  # domain is discussed in to save two characters at a call site; renaming the
+  # PACKAGE to `tracing` would break the symmetry with `logger` and `metrics`
+  # and would still stutter against `tracing.Tracer`. Scoped to the service
+  # implementation, which is the only place a concrete struct carries the name.
+  KTN-STRUCT-ROLE-STUTTER:
+    exclude:
+      - "**/internal/service/trace/**"
 
   KTN-VAR-NILSLICE:
     exclude:
@@ -446,6 +489,22 @@ rules:
       # it exactly once per client, at construction.
       - "**/internal/service/net/client/**"
       - "**/pkg/v1/client/**"
+      # The trace domain — value semantics ARE the contract, for four types
+      # (ADR 0051). SpanValue (296 B) is a FINISHED span handed to a SpanSink,
+      # and SpansValue (80 B) is a batch handed to a SpanExporter: both are
+      # published, immutable, and may be delivered to more than one consumer.
+      # A pointer would let one sink mutate the span another is about to read —
+      # the same immutability-is-a-security-property argument core/net makes for
+      # RequestValue, one signal up. LinkValue (88 B) carries a whole
+      # SpanContextValue on purpose, so that a link's own sampled bit and
+      # tracestate travel with it; SpanParams is the caller's literal at a Start
+      # call site, copied once per span immediately before work that dwarfs it.
+      # The exporter port's Export(SpansValue) mirrors core/metrics.Exporter's
+      # Export(SnapshotValue) exactly, and diverging the two signals' ports
+      # would be a worse cost than one copy per export.
+      - "**/internal/core/trace/**"
+      - "**/internal/service/trace/**"
+      - "**/pkg/v1/trace/**"
       # StateValue (96 B) is returned by value so a caller can hold, log or
       # compare a snapshot without racing the server that produced it. A
       # pointer would hand out a view that mutates underneath the reader.
@@ -630,10 +689,20 @@ rules:
   # returns the port, so the only satisfaction evidence is the `var _ Store[…] =
   # (*memoryStore[…])(nil)` block in cache_compliance.go, which the rule does
   # not read.
+  # The third entry is the same class on a FUNC port rather than an interface.
+  # AlwaysSample, NeverSample and discardSpan have their signatures fixed by
+  # core/trace.Sampler and core/trace.SpanSink, both of which are func types
+  # (ADR 0041) precisely so a published port cannot grow a method at all. The
+  # rule looks for an INTERFACE that requires the parameter and finds none,
+  # because there is no interface to find — the signature is no less required
+  # for it. AlwaysSample and NeverSample genuinely do not read their input;
+  # that is what makes them the two NAMED endpoints of the sampling policy, and
+  # naming the parameter would suggest the answer depends on it.
   KTN-FUNC-BLANKPARAM:
     exclude:
       - "**/internal/service/proc/cgroup/cgroup_other.go"
       - "**/internal/service/cache/**"
+      - "**/internal/service/trace/**"
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on
