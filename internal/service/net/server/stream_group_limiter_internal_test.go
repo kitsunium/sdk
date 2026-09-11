@@ -2,14 +2,26 @@
 package server
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
+	"io"
+	stdnet "net"
+	"net/http"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// slotWait bounds how long a ceiling test waits for a slot, a socket or a
+// serve goroutine. It is a failure deadline, never a synchronisation delay:
+// every wait it bounds ends the instant its condition holds.
+const slotWait time.Duration = 5 * time.Second
 
 // Test_newConnLimiter pins that ZERO means "no ceiling" rather than "a ceiling
 // of zero".
@@ -49,8 +61,10 @@ func Test_newConnLimiter(t *testing.T) {
 		if limiter == nil {
 			t.Fatalf("a group with MaxConns=%d got no ceiling", c.maxConns)
 		}
-		if limiter.runner == nil {
-			t.Error("the ceiling has no runner to admit or reject with")
+		//: the semaphore's capacity IS the ceiling; any other size admits a
+		//: different number of connections than the one the operator set.
+		if got := cap(limiter.slots); got != c.maxConns {
+			t.Errorf("the ceiling admits %d connections at once, want %d", got, c.maxConns)
 		}
 		//: the ceiling is carried alongside so a refusal can name the number it
 		//: hit, which is what an operator needs to decide whether to raise it.
@@ -74,11 +88,11 @@ func Test_newConnLimiter(t *testing.T) {
 // confirmed started before the admission under test, so the ceiling is genuinely
 // full rather than racily so.
 //
-// The bulkhead from the resilience domain is reused rather than reimplemented —
-// a connection ceiling is exactly a reject-mode semaphore — but its sentinel
-// must not escape: a net consumer has no reason to know the resilience domain
-// exists. And the refusal is counted, because RejectedConns is how an operator
-// tells a saturated server from an idle one.
+// A connection ceiling is exactly a reject-mode semaphore — the resilience
+// bulkhead's shape, which it used to reuse — and the refusal is the net
+// domain's own CONN_LIMIT_REACHED: a net consumer has no reason to know the
+// resilience domain exists. And the refusal is counted, because RejectedConns
+// is how an operator tells a saturated server from an idle one.
 func Test_Server_admit(t *testing.T) {
 	t.Parallel()
 	failure := errors.New("handler failed")
@@ -225,5 +239,213 @@ func Test_Server_admit_ReleasesItsSlot(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// Test_Server_admit_HijackedConnectionKeepsItsSlot pins the whole life of a
+// hijacked connection's slot under a ceiling of one: while the connection is
+// open, admission refuses with CONN_LIMIT_REACHED; once its handler closes
+// it, the slot comes back and a new connection is served.
+//
+// The slot used to be held only while ServeConn ran, and ServeConn returns at
+// the hijack — so every upgraded WebSocket gave its slot back while it stayed
+// open, and MaxConns bounded nothing an upgrade reached. The refusal is asked
+// of admit directly, so it is the domain's own code that is checked and not
+// merely a closed socket.
+//
+// The TLS case is not a repeat. On a TLS listener the tracker sits UNDER the
+// *tls.Conn net/http hands the handler, so the slot comes back only if
+// tls.Conn.Close reaches it, and it is held at all only if the engine looks
+// beneath the TLS layer to find it.
+//
+// Nothing here waits on the clock. The engine's serve goroutine is awaited
+// through ActiveConns before the refusal is asked for, and the slot's return
+// through the semaphore itself — a claim that completes the instant Close
+// gives the slot back. The deadlines only bound a failure.
+//
+// MUTATION-CHECKED, four ways. Returning every slot when ServeConn returns —
+// the defect — fails both cases with:
+//
+//	admit = <nil> (handler ran: true) while a hijacked connection held the only slot, want CONN_LIMIT_REACHED
+//
+// a trackedConn.Close that never returns the slot fails both with:
+//
+//	the slot never came back within 5s after the hijacked connection closed
+//
+// a hijackedTracker that does not look beneath the TLS layer fails the TLS
+// case alone, with the admit message above; and a listener that puts the
+// tracker ABOVE TLS instead of under it fails the TLS case with:
+//
+//	the hijacking handler answered "HELD plain\n", want "HELD tls\n"
+func Test_Server_admit_HijackedConnectionKeepsItsSlot(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// secured serves the group over TLS, where the tracker is under the
+		// *tls.Conn rather than being the socket net/http sees.
+		secured bool
+		// held is what the hijacking handler answers, which says whether
+		// net/http saw the request as TLS.
+		held string
+	}
+	tests := []tc{
+		{name: "a plaintext listener", held: "HELD plain\n"},
+		{name: "a TLS listener", secured: true, held: "HELD tls\n"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		release := make(chan struct{})
+		closed := make(chan struct{})
+		releaseHandler := sync.OnceFunc(func() { close(release) })
+		//: registered before the server, so it runs after the server is gone
+		//: and still frees a handler an early failure left holding its socket.
+		t.Cleanup(func() {
+			releaseHandler()
+			select {
+			case <-closed:
+			case <-time.After(slotWait):
+			}
+		})
+		srv := newTestServer(t)
+		opts := []GroupOption{Listen("tcp", "127.0.0.1:0"), MaxConns(1)}
+		if c.secured {
+			opts = append(opts, TLS(testIdentity(t)))
+		}
+		group := srv.Group("api", opts...).HandleHTTP(holdingMux(t, release, closed))
+		if err := srv.Start(t.Context()); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		addr := srv.State().Listeners[0].Address
+		if line := askCeilinged(t, addr, c.secured, "/take"); line != c.held {
+			t.Fatalf("the hijacking handler answered %q, want %q", line, c.held)
+		}
+		//: the engine is done with the hijacked connection, so whatever it
+		//: does with the slot, it has done.
+		awaitNoActiveConns(t, srv)
+
+		var ran bool
+		err := srv.admit(t.Context(), group.limiter, &conn{Conn: &fakeSocket{}},
+			corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
+				ran = true
+				return nil
+			}))
+		if ran || !errs.HasCode(err, corenet.CodeConnLimitReached) {
+			t.Fatalf("admit = %v (handler ran: %v) while a hijacked connection held the only slot, "+
+				"want CONN_LIMIT_REACHED", err, ran)
+		}
+
+		releaseHandler()
+		select {
+		case <-closed:
+		case <-time.After(slotWait):
+			t.Fatalf("the hijacking handler never closed its socket within %s", slotWait)
+		}
+		//: the slot comes back when the socket closes — awaited by claiming it.
+		select {
+		case group.limiter.slots <- struct{}{}:
+			group.limiter.release()
+		case <-time.After(slotWait):
+			t.Fatalf("the slot never came back within %s after the hijacked connection closed", slotWait)
+		}
+		if line := askCeilinged(t, addr, c.secured, "/ok"); line != "HTTP/1.1 200 OK\r\n" {
+			t.Fatalf("a connection after the hijacked one closed got %q, want %q", line, "HTTP/1.1 200 OK\r\n")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// holdingMux serves /take by hijacking the connection, writing one line on it
+// and holding it until release closes, then closing it and closing closed; and
+// /ok with an empty 200.
+//
+// The line says whether the request arrived with Request.TLS set, because a
+// tracker placed above the TLS layer would still carry HTTP — tls.Conn
+// handshakes on its first Read — while hiding the *tls.Conn net/http asserts
+// on, and every HTTPS request would arrive looking like plaintext.
+func holdingMux(t *testing.T, release <-chan struct{}, closed chan<- struct{}) *http.ServeMux {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/take", func(w http.ResponseWriter, r *http.Request) {
+		defer close(closed)
+		held := "HELD plain\n"
+		if r.TLS != nil {
+			held = "HELD tls\n"
+		}
+		socket, buffered, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		//: proof for the client that the connection is now the handler's.
+		if _, werr := buffered.WriteString(held); werr != nil {
+			t.Errorf("write: %v", werr)
+		}
+		if ferr := buffered.Flush(); ferr != nil {
+			t.Errorf("flush: %v", ferr)
+		}
+		<-release
+		if cerr := socket.Close(); cerr != nil {
+			t.Errorf("close: %v", cerr)
+		}
+	})
+	mux.HandleFunc("/ok", func(http.ResponseWriter, *http.Request) {})
+	//: both routes the test drives.
+	return mux
+}
+
+// askCeilinged sends one GET for path on a fresh connection to addr, over TLS
+// when secured, and returns the first line of whatever comes back.
+func askCeilinged(t *testing.T, addr string, secured bool, path string) string {
+	t.Helper()
+	var (
+		socket stdnet.Conn
+		err    error
+	)
+	if secured {
+		socket, err = tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // a self-signed test identity
+	} else {
+		socket, err = stdnet.Dial("tcp", addr)
+	}
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	//: closed when the test ends, so a hijacked connection stays open until the
+	//: handler, not the client, decides it is over.
+	t.Cleanup(func() { swallowErr(socket.Close()) })
+	if derr := socket.SetDeadline(time.Now().Add(slotWait)); derr != nil {
+		t.Fatalf("deadline: %v", derr)
+	}
+	if _, werr := io.WriteString(socket, "GET "+path+" HTTP/1.1\r\nHost: x\r\n\r\n"); werr != nil {
+		t.Fatalf("write: %v", werr)
+	}
+	line, rerr := bufio.NewReader(socket).ReadString('\n')
+	if rerr != nil {
+		t.Fatalf("read: %v", rerr)
+	}
+	//: the status line, or the hijacking handler's own line.
+	return line
+}
+
+// awaitNoActiveConns returns once the server reports no connection being
+// served — once every serve goroutine has finished, since ActiveConns drops
+// only after a connection's slot and socket are settled.
+//
+// It yields rather than sleeps: the condition, not an interval, ends the wait,
+// and slotWait only bounds a failure.
+func awaitNoActiveConns(t *testing.T, srv *Server) {
+	t.Helper()
+	deadline := time.Now().Add(slotWait)
+	for srv.State().ActiveConns != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("ActiveConns = %d after %s, want 0 — a serve goroutine never returned",
+				srv.State().ActiveConns, slotWait)
+		}
+		runtime.Gosched()
 	}
 }

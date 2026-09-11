@@ -132,6 +132,10 @@ func (a *httpAdapter) ServeConn(ctx context.Context, c corenet.Conn) error {
 // for as long as it likes. The engine must therefore stop closing it on the way
 // out, exactly as net/http stops closing and waiting for it — see
 // http.Server.Shutdown's own documented carve-out for WebSockets.
+//
+// It stops being the engine's to close, not the ceiling's to count: under
+// MaxConns the flag set here is what makes admit hand the connection's slot to
+// the socket, which returns it when it closes (see trackedConn).
 func markHijacked(c corenet.Conn) {
 	pooled, ok := c.(*conn)
 	//: a handler that received something other than the pooled wrapper — a

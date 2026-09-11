@@ -837,6 +837,11 @@ func Test_Server_serve(t *testing.T) {
 		//: a panicking handler closes its own connection and nothing more.
 		{name: "a handler that panics", panics: true},
 		{name: "a handler under a ceiling", maxConns: 4},
+		//: the slot is settled by a deferred call, so a panic cannot leak it —
+		//: and a leaked slot wedges the group after MaxConns connections.
+		//: Settling it after ServeConn instead of in a defer fails this case
+		//: with "1 ceiling slots are still held after the handler ended".
+		{name: "a handler that panics under a ceiling", panics: true, maxConns: 1},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -881,6 +886,10 @@ func Test_Server_serve(t *testing.T) {
 		srv.liveMu.RUnlock()
 		if live != 0 {
 			t.Errorf("%d sockets are still registered as live", live)
+		}
+		//: and the ceiling got its slot back, however the handler ended.
+		if group.limiter != nil && len(group.limiter.slots) != 0 {
+			t.Errorf("%d ceiling slots are still held after the handler ended", len(group.limiter.slots))
 		}
 	}
 	for _, c := range tests {

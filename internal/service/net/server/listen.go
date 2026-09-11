@@ -91,7 +91,11 @@ func reusePortControl(network, address string, rawConn syscall.RawConn) error {
 // identity. TLS is applied here rather than inside the accept loop so the
 // handshake is driven by the connection's own goroutine, which is what keeps a
 // slow or hostile peer from stalling the accept path for everyone else.
-func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded bool) (ln stdnet.Listener, err error) {
+//
+// trackCloses hands out sockets that report their own Close (see trackedConn),
+// for a group whose ceiling must keep counting a connection a handler took
+// over.
+func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool) (ln stdnet.Listener, err error) {
 	//: reject an unserved family before touching the OS.
 	if _, ok := streamNetworks[addr.Network]; !ok {
 		//: refuse an unserved family before touching the OS.
@@ -115,6 +119,11 @@ func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityV
 		//: surface the address that could not be bound.
 		return nil, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
+	}
+	//: the tracker goes UNDER TLS, so net/http still receives the concrete
+	//: *tls.Conn it type-asserts on to populate Request.TLS.
+	if trackCloses {
+		raw = &trackedListener{Listener: raw}
 	}
 	//: without an identity the listener stays plaintext.
 	if id.IsZero() {

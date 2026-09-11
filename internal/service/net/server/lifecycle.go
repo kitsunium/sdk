@@ -258,6 +258,11 @@ func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHand
 		}
 		//: one accept goroutine per adopted descriptor.
 		for _, ln := range listeners {
+			//: an inherited socket is counted by the ceiling exactly as a bound
+			//: one is, hijacked connections included.
+			if group.tracksCloses() {
+				ln = &trackedListener{Listener: ln}
+			}
 			addr := corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}
 			bound := &boundListener{group: group.name, addr: addr, ln: ln}
 			s.mu.Lock()
@@ -294,7 +299,7 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 	opened := 0
 	//: every shard binds the same address; the kernel spreads accepts across them.
 	for range count {
-		ln, err := listen(ctx, addr, group.identity, count > 1)
+		ln, err := listen(ctx, addr, group.identity, count > 1, group.tracksCloses())
 		//: a shard that will not bind aborts startup rather than serving a
 		//: quietly smaller set than the operator asked for.
 		if err != nil {
