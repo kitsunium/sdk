@@ -63,10 +63,7 @@ type ProductValue struct {
 // It tolerates a nil receiver, as every method here does: the one code path
 // that runs when nothing else is working must not be the one that panics.
 //
-// Parameters: none.
-//
-// Returns:
-//   - name: the product's name, or "entitlement" when there is none.
+// It returns the product's name, or "entitlement" when there is none.
 func (p *ProductValue) Label() string {
 	//: a nil product is a Service built without one — the same fallback, not a
 	//: panic. Every method here tolerates it for that reason.
@@ -88,11 +85,8 @@ func (p *ProductValue) Label() string {
 // verifier that will refuse with RosterUnreachable — the documented fallback,
 // and a very different outcome from a panic at construction.
 //
-// Parameters: none.
-//
-// Returns:
-//   - origins: the product's publication points, or nil when there is no
-//     product.
+// It returns the product's publication points, or nil when there is no
+// product.
 func (p *ProductValue) PublishedOrigins() []coreent.OriginValue {
 	//: a nil product names no publication point.
 	if p == nil {

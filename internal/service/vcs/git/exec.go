@@ -78,11 +78,8 @@ var (
 // subcommand when that subcommand honours diff.external, and unchanged
 // otherwise.
 //
-// Parameters:
-//   - args: the git subcommand and its arguments.
-//
-// Returns:
-//   - guarded: args, with the flag injected when applicable.
+// It takes the git subcommand and its arguments, and returns them with the
+// flag injected when applicable.
 func extDiffGuard(args []string) []string {
 	//: Nothing to guard without a subcommand, and only diff-producing
 	//: subcommands accept (or need) the flag.
