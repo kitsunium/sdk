@@ -130,6 +130,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_3D_00: "internal/service/mail",
 	0x00_03_3E_00: "internal/service/cli",
 	0x00_03_3F_00: "third-party/transform",
+	0x00_03_41_00: "third-party/entitlement",
 	0x01_01_00_00: "pkg/v1/logger",
 	0x01_01_01_00: "pkg/v1/logger/slogbridge",
 	0x01_02_00_00: "pkg/v1/codec",
