@@ -125,3 +125,46 @@ func TestTheTwoOptInsAreDistinct(t *testing.T) {
 		})
 	}
 }
+
+// TestTheFacadeCarriesWhatACallerCannotReimplement pins the two symbols a
+// consumer needs and cannot reasonably rebuild.
+//
+// Both were missing until a real consumer tried to migrate onto this package
+// and found them unreachable. CandidateListSentinel has to be the SAME string
+// the service compares against — a caller inventing its own would wire a flag
+// that never matches — and StdinIsTerminal is the seam that keeps the consent
+// decision testable without a pty.
+func TestTheFacadeCarriesWhatACallerCannotReimplement(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		got    string
+		want   string
+		reason string
+	}{
+		{
+			name:   "the candidate-list sentinel",
+			got:    selfupdate.CandidateListSentinel,
+			want:   "__list__",
+			reason: "a caller wires this into its own flag; a different value never matches",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			//: The value is the contract, not just its presence.
+			if tt.got != tt.want {
+				t.Errorf("= %q, want %q (%s)", tt.got, tt.want, tt.reason)
+			}
+		})
+	}
+
+	//: StdinIsTerminal has no assertable value under `go test` — stdin is not a
+	//: character device there — so what is pinned is that it answers at all,
+	//: which is what a caller needs from the seam.
+	t.Run("stdin detection answers without a pty", func(t *testing.T) {
+		t.Parallel()
+		selfupdate.StdinIsTerminal()
+	})
+}
