@@ -94,6 +94,11 @@ if applied.Applied() {
   the kernel enforces, `memlimit` reads the bound already on us and tunes the
   collector. Nothing in `memlimit` enforces anything.
 
+## Breaking changes
+
+None. `memlimit` is a new capability in this change set: no existing symbol
+changes shape, and nothing in the SDK imports it.
+
 ## Alternatives considered
 
 - **Leave it to consumers.** It is six lines — but it is six lines that were
@@ -115,3 +120,29 @@ if applied.Applied() {
   indistinguishable, which is the shape a caller cannot log usefully. The
   ergonomics are preserved by `Applied()`; the information is preserved by
   `Source`.
+
+## Deferred
+
+- **A cgroup mount whose root is not `/`.** `/proc/self/mountinfo` field 3 is the
+  mount's root within its filesystem, and a bind mount with a non-`/` root means
+  a membership path from `/proc/self/cgroup` has to be translated relative to it
+  before it names a readable file. The derivation does not do that translation.
+  The failure mode is fail-safe — the candidate file is simply absent, the
+  derivation reports `MemorySourceUnconstrained` and the runtime default stands —
+  and the shape is rare enough that it could not be exercised here. Left as it
+  came from the source implementation rather than changed untested.
+- **The 90% derivation truncates before multiplying** (`allowance / 100 * 90`).
+  Within a few bytes of the 64 MiB floor this can decline a cap the exact
+  computation would have accepted — an allowance of 74,565,405 bytes derives
+  67,108,860 where the floored exact value is 67,108,864. The ordering is the
+  source implementation's and is deliberate against int64 overflow on a very
+  large allowance. Kept, so the versement stays faithful; the divergence is
+  recorded here rather than silently corrected.
+
+## References
+
+- [ADR 0016](0016-sdk-process-supervision-domain.md) — the `proc` domain this extends
+- [ADR 0031](0031-policy-zero-values-are-never-inert.md) — why `MemorySource`'s zero is left unminted
+- [ADR 0001](0001-sdk-go-multimodule-layout.md) — the four layers this is placed in
+- `runtime/debug.SetMemoryLimit` — https://pkg.go.dev/runtime/debug#SetMemoryLimit
+- cgroup v2 `memory.max` — https://docs.kernel.org/admin-guide/cgroup-v2.html
