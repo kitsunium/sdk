@@ -56,6 +56,15 @@ func NewSubjectID() string {
 // The parameter is named subject rather than uuid because the stdlib package
 // of that name is imported here.
 func (p *ProductValue) GenerateKeyPair(sshDir, subject string) (publicKey string, err error) {
+	//: Validate BEFORE building any path. Every other entry point into this
+	//: file's key paths (LoadPublicKey, SignerFromFile) checks the subject
+	//: first; this one did not, so a subject like "../authorized_keys" wrote
+	//: both halves of a key pair outside sshDir.
+	if !validSubject(subject) {
+		//: Refuse rather than write anywhere the caller did not name.
+		return "", fmt.Errorf("%w: subject %q is not a canonical v4 UUID", ErrNoLicense, subject)
+	}
+
 	//: A fresh machine, a container or a CI runner has no ~/.ssh yet, and
 	//: failing there would make enrolment impossible in exactly the places
 	//: that need it most. MkdirAll is a no-op when the directory exists, so

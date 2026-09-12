@@ -5,9 +5,16 @@ package entitlement
 import (
 	"errors"
 	"net/url"
+	"strings"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// unusableHost is the single bucket every origin that names no fetchable host
+// falls into. It is one shared value, not the URL itself: returning the URL made
+// two DIFFERENT malformed entries look like two different hosts and satisfy the
+// redundancy requirement, while neither could ever be fetched.
+const unusableHost string = "\x00unusable"
 
 // minRedundantHosts is the number of DISTINCT hosts a product's origin list
 // must span to count as redundant. Two branches on one host share that host's
@@ -104,80 +111,113 @@ func (p *ProductValue) Validate() error {
 	//: a nil product has no origins, which is the first thing Validate refuses.
 	if p == nil {
 		//: report it as the same misconfiguration rather than panicking.
-		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeProductInvalid,
-			Reason:  "PRODUCT_INVALID",
-			Public:  "the entitlement product is misconfigured",
-			Private: "third-party/entitlement: no product was supplied",
-		})
+		return misconfigured("no product was supplied")
 	}
 
-	names := make(map[string]bool, len(p.Origins))
-	urls := make(map[string]string, len(p.Origins))
-	hosts := make(map[string]bool, len(p.Origins))
-	var problems []error
-
+	seen := newOriginScan(len(p.Origins))
 	//: Walk every origin: each one can fail independently.
 	for _, origin := range p.Origins {
-		//: An origin that cannot be named cannot be reported when it fails.
-		if origin.Name == "" || origin.BundleURL == "" {
-			problems = append(problems, errs.Wrap(nil, errs.WrapParams{
-				Code:    CodeProductInvalid,
-				Reason:  "PRODUCT_INVALID",
-				Public:  "the entitlement product is misconfigured",
-				Private: "third-party/entitlement: an origin has an empty Name or BundleURL",
-			}))
-
-			continue
-		}
-		//: A repeated name makes two failures indistinguishable in a log.
-		if names[origin.Name] {
-			problems = append(problems, errs.Wrap(nil, errs.WrapParams{
-				Code:    CodeProductInvalid,
-				Reason:  "PRODUCT_INVALID",
-				Public:  "the entitlement product is misconfigured",
-				Private: "third-party/entitlement: origin name used twice: " + origin.Name,
-			}))
-		}
-		names[origin.Name] = true
-		//: Two entries at one URL are one origin listed twice, not a fallback.
-		if other, dup := urls[origin.BundleURL]; dup {
-			problems = append(problems, errs.Wrap(nil, errs.WrapParams{
-				Code:    CodeProductInvalid,
-				Reason:  "PRODUCT_INVALID",
-				Public:  "the entitlement product is misconfigured",
-				Private: "third-party/entitlement: origins " + other + " and " + origin.Name + " publish at the same URL",
-			}))
-		}
-		urls[origin.BundleURL] = origin.Name
-		hosts[hostOf(origin.BundleURL)] = true
+		seen.admit(origin)
 	}
 
 	//: Redundancy that shares a host is not redundancy.
-	if len(hosts) < minRedundantHosts {
-		problems = append(problems, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeProductInvalid,
-			Reason:  "PRODUCT_INVALID",
-			Public:  "the entitlement product is misconfigured",
-			Private: "third-party/entitlement: origins span fewer than two distinct hosts, so one outage takes them all down",
-		}))
+	if len(seen.hosts) < minRedundantHosts {
+		seen.problems = append(seen.problems,
+			misconfigured("origins span fewer than two distinct hosts, so one outage takes them all down"))
 	}
 
 	//: Join so a caller fixing a list sees every problem, not the first.
-	return errors.Join(problems...)
+	return errors.Join(seen.problems...)
 }
 
-// hostOf extracts the host from a bundle URL for the redundancy check. A URL it
-// cannot parse yields the whole string, which groups malformed entries together
-// rather than counting each as its own host.
+// misconfigured builds the one refusal every Validate failure carries, so the
+// code, reason and public text are written once.
+func misconfigured(detail string) error {
+	//: one sentinel shape, one private detail per call site.
+	return errs.Wrap(nil, errs.WrapParams{
+		Code:    CodeProductInvalid,
+		Reason:  "PRODUCT_INVALID",
+		Public:  "the entitlement product is misconfigured",
+		Private: "third-party/entitlement: " + detail,
+	})
+}
+
+// originScan is Validate's accumulator: what it has seen so far, and what it has
+// to say about it.
+type originScan struct {
+	names    map[string]bool
+	urls     map[string]string
+	hosts    map[string]bool
+	problems []error
+}
+
+// newOriginScan pre-sizes an accumulator for a list of n origins.
+func newOriginScan(n int) *originScan {
+	//: three small maps, sized once.
+	return &originScan{
+		names: make(map[string]bool, n),
+		urls:  make(map[string]string, n),
+		hosts: make(map[string]bool, n),
+	}
+}
+
+// admit folds one origin into the scan, recording every way it fails.
+func (s *originScan) admit(origin OriginValue) {
+	//: An origin that cannot be named cannot be reported when it fails.
+	if origin.Name == "" || origin.BundleURL == "" {
+		s.problems = append(s.problems, misconfigured("an origin has an empty Name or BundleURL"))
+
+		return
+	}
+	//: A repeated name makes two failures indistinguishable in a log.
+	if s.names[origin.Name] {
+		s.problems = append(s.problems, misconfigured("origin name used twice: "+origin.Name))
+	}
+	s.names[origin.Name] = true
+	//: Two entries at one URL are one origin listed twice, not a fallback.
+	if other, dup := s.urls[origin.BundleURL]; dup {
+		s.problems = append(s.problems,
+			misconfigured("origins "+other+" and "+origin.Name+" publish at the same URL"))
+	}
+	s.urls[origin.BundleURL] = origin.Name
+
+	host := hostOf(origin.BundleURL)
+	//: An entry naming no fetchable host contributes NOTHING to the count.
+	//: Counting the shared bucket would let one real origin plus one
+	//: unfetchable entry add up to the two hosts this requires.
+	if host == unusableHost {
+		s.problems = append(s.problems,
+			misconfigured("origin "+origin.Name+" names no fetchable http(s) host"))
+
+		return
+	}
+	s.hosts[host] = true
+}
+
+// hostOf extracts the DNS host an origin resolves to, for the redundancy check.
+//
+// Two normalisations matter, and both were defects before they were rules:
+//
+//   - the PORT is dropped. https://h/a and https://h:8443/a are one machine and
+//     one outage; counting them as two hosts is how a list looks redundant
+//     while being a single point of failure.
+//   - the case is folded, because DNS is case-insensitive and Example.com and
+//     example.com are the same name.
+//
+// Anything that does not parse, names no host, or is not http(s) collapses into
+// unusableHost, which Validate then refuses outright and never counts — so
+// neither a pile of unfetchable entries nor one real origin beside one
+// unfetchable entry can add up to redundancy.
 func hostOf(bundleURL string) string {
 	parsed, err := url.Parse(bundleURL)
-	//: An unparseable URL is not a host anyone can be redundant across.
-	if err != nil || parsed.Host == "" {
-		//: Group malformed entries rather than inflating the host count.
-		return bundleURL
+	//: One refusal for the three ways an entry names no fetchable host: it
+	//: does not parse, it carries no host (a relative URL), or its scheme is
+	//: not one the fetch can use. All three land in the same shared bucket.
+	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		//: One shared bucket for everything unfetchable.
+		return unusableHost
 	}
 
-	//: The host the origin actually resolves to.
-	return parsed.Host
+	//: Hostname() already strips the port; fold the case DNS ignores.
+	return strings.ToLower(parsed.Hostname())
 }
