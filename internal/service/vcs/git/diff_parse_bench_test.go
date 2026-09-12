@@ -78,3 +78,85 @@ func BenchmarkGitResolve(b *testing.B) {
 		}
 	}
 }
+
+// benchSet builds one populated changed-set from the synthetic payloads, so the
+// query benchmarks below measure a LOOKUP and never the parse that filled it.
+func benchSet() (set *ChangedSetValue, root string) {
+	unified, nameStatus := syntheticDiffPayloads(benchFileCount, benchHunksPerFile)
+	root = "/repo"
+	set = NewChangedSetValue(root)
+	parseNameStatus(nameStatus, root, set, nil)
+	parseUnifiedDiff(unified, root, set, nil)
+
+	//: Hand back both, since every query needs a path rooted the same way.
+	return set, root
+}
+
+// BenchmarkChangedSetContainsLine pins the query a caller runs MOST: one per
+// diagnostic, per file, on every run. Resolve is paid once; this is paid
+// thousands of times, and the ratio between them is the only number that
+// decides whether a caller may query freely or must batch.
+//
+// The hit case walks the file's folded ranges; the miss case is the common one
+// (a file the branch did not touch) and must not.
+func BenchmarkChangedSetContainsLine(b *testing.B) {
+	set, root := benchSet()
+	hit := root + "/pkg/p00/file000.go"
+	miss := root + "/pkg/p00/untouched.go"
+
+	b.Run("hit", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			//: A line inside the first hunk of a changed file.
+			if !set.ContainsLine(hit, 10) {
+				b.Fatal("expected a hit on a changed line")
+			}
+		}
+	})
+	b.Run("miss_unchanged_file", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			//: A file the branch never touched — the common case by far.
+			if set.ContainsLine(miss, 10) {
+				b.Fatal("expected a miss on an untouched file")
+			}
+		}
+	})
+	b.Run("miss_unchanged_line", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			//: A changed FILE, at a line between two hunks.
+			if set.ContainsLine(hit, 5) {
+				b.Fatal("expected a miss on an unchanged line")
+			}
+		}
+	})
+}
+
+// BenchmarkChangedSetContainsFile pins the file-level membership query, which a
+// caller runs once per file rather than once per finding.
+func BenchmarkChangedSetContainsFile(b *testing.B) {
+	set, root := benchSet()
+	path := root + "/pkg/p00/file000.go"
+	b.ReportAllocs()
+	for b.Loop() {
+		//: Membership of a file the branch touched.
+		if !set.ContainsFile(path) {
+			b.Fatal("expected a hit on a changed file")
+		}
+	}
+}
+
+// BenchmarkChangedSetContainsDir pins the directory query, which is what a
+// package-scoped analyser asks before it walks anything.
+func BenchmarkChangedSetContainsDir(b *testing.B) {
+	set, root := benchSet()
+	dir := root + "/pkg/p00"
+	b.ReportAllocs()
+	for b.Loop() {
+		//: A directory holding at least one changed file.
+		if !set.ContainsDir(dir) {
+			b.Fatal("expected a hit on a touched directory")
+		}
+	}
+}
