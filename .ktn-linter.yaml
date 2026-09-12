@@ -524,6 +524,32 @@ rules:
       # Same both-halves-of-the-type case as the pkg/v1/tlsid handshake test
       # above.
       - "**/internal/service/health/harness_external_test.go"
+      # The entitlement verifier's two single-method roster readers —
+      # VerifyCI (ci.go) and matchSubject (service.go). Same class as the
+      # session ID above, in the same dangerous form: the parameter is the
+      # VENDOR-SIGNED ROSTER, and it is the only document in the domain
+      # carrying the vendor's signature. The suggested `interface{
+      # CIEntitlementFor(...) }` and `interface{ SubjectFor(...) }` would be
+      # satisfied by any type with that method — including one supplied by the
+      # party being checked, which is precisely the substitution a signed
+      # document exists to make impossible. The rule reaches only these two of
+      # the six functions taking *coreent.RosterValue, and only because they
+      # happen to read ONE method; ciSeat, authorise, ciRefusalIsFinal and
+      # rememberRoster cross the same boundary and are not flagged.
+      - "**/internal/service/entitlement/ci.go"
+      - "**/internal/service/entitlement/service.go"
+      # The enrolment writer, GenerateKeyPair (third-party/entitlement). It
+      # reads one method off the product, and the suggested `interface{
+      # Label() string }` would silently DELETE a documented contract: every
+      # ProductValue method tolerates a nil receiver, so GenerateKeyPair(nil,
+      # dir, subject) works today and returns the "entitlement" fallback,
+      # whereas the same call through an interface panics on a nil interface
+      # value before any method runs. That contract has its own regression
+      # test (TestGenerateKeyPairOnANilProduct) because a review found the
+      # panic; narrowing the type would reintroduce it under a different
+      # spelling. The sibling call in the same flow, IssueURL, keeps the same
+      # parameter and is not flagged only because it reads a FIELD.
+      - "**/third-party/entitlement/enroll.go"
 
   # KTN-VAR-NILSLICE (info) — "prefer a nil slice to an empty one".
   #

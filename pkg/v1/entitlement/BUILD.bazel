@@ -1,0 +1,21 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "entitlement",
+    srcs = ["entitlement.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/entitlement",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/entitlement",
+        "//internal/kernel/errs",
+        "//internal/service/entitlement",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":entitlement",
+    visibility = ["//visibility:public"],
+)

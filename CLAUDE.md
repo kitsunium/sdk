@@ -17,7 +17,7 @@ internal/
 │                  worker
 ├── core/          domain interfaces + domain values
 │                  authz, cache, cli, codec (+ scratch), config, crypto,
-│                  events,
+│                  entitlement, events,
 │                  health, i18n, id, lifecycle, lock, logger, logger/level,
 │                  mail, metrics, net, proc, queue, resilience, scheduler,
 │                  selfupdate, session, sql, token, trace, transform,
@@ -69,6 +69,8 @@ internal/
                            + untracked, hardened invocations)
                    selfupdate (signed release -> verified archive -> atomic
                            replacement, with consent and escalation opt-ins)
+                   entitlement (vendor-signed roster -> grant, with an
+                           offline cache, an anti-rollback ratchet and a CI seat)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── cache/     (the ADR 0025 primitive AND the ADR 0049 domain, side by side)
@@ -98,10 +100,12 @@ pkg/
     └── vfs/        (io/fs reading unchanged + atomic publication — ADR 0056)
     └── git/        (what a branch changed; degrades, never empties — ADR 0076)
     └── selfupdate/ (signature THEN digest THEN disk; no key, no install — ADR 0077)
+    └── entitlement/ (signed roster -> grant; bring your own Identity — ADR 0079)
     └── view/       (html/template, one trust type, parse once — ADR 0058)
 third-party/       opt-in vendor integrations (root module only)
                    aws/writer/{cloudwatch,s3}, codec/{hcl,protobuf},
-                   entitlement (signed roster + proven possession — ADR 0078),
+                   entitlement (the ssh Identity + enrolment ONLY; the
+                     mechanism is pkg/v1/entitlement — ADR 0079),
                    db/writer/{clickhouse,mysql,redis},
                    transform (zstd + s2 — ADR 0066),
                    x-crypto/{argon2id,xchacha}
@@ -279,5 +283,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0076 — what a branch changed is a value that can say it does not know: `Resolve` returns NO error, because a resolver that cannot tell what changed must never answer with an empty set — "nothing changed" and "I could not tell" are opposite instructions, and a scoped review receiving the first passes on a branch it never examined. Degrading produces `FullFallback` + a `Reason`; the zero `ResolutionValue` is neither readable shape, so a caller who skipped `Degraded()` cannot read "nothing changed" out of a value nothing minted (ADR 0031). The set spans the three-dot merge-base delta, the index, the working tree and untracked files. Every git invocation is hardened against a hostile `.git/config`: `core.fsmonitor` set to a script executed 5 times on read-only queries before the guard and 0 after, and `diff.external` needs `--no-ext-diff` because setting it empty makes git execute `""` and abort — with what is NOT hardened listed too. The `.go` suffix + generated-file filter the source hard-coded becomes `Config.Include`, nil admitting everything. Versed from `kodflow/ktn-linter` `pkg/git` — `docs/adr/0076-what-a-branch-changed-is-a-value-that-can-say-it-does-not-know.md`
 - ADR 0077 — a self-update is an order of operations, and a product name is not part of it: comparing an archive's SHA-256 against a checksum file fetched from beside it verifies NOTHING, because whoever substitutes the archive substitutes the manifest too. The digest counts only after a detached ed25519 signature over that manifest verifies against a key linked into the build — and reversing the two leaves every log line identical, which is why the suite asserts the order. A build with no vendor key installs nothing: verify-if-present fails OPEN and makes the guarantee a property of a build flag nobody inspects. Eighteen codes in three classes (retryable / fixable by an opt-in / supply-chain, where no retry helps and no manual install is safe), re-exported from the facade as `pkg/v1/authz` does. Host, repositories, asset pattern, binary name and both env vars move into `SourceValue`, the env names DERIVED by uppercase-and-fold so `ktn-linter` still yields `KTN_LINTER_AUTO_UPGRADE`. Adds `golang.org/x/mod/semver`, which `go list -deps` shows is stdlib-pure. Versed from `kodflow/ktn-linter` `pkg/updater` — `docs/adr/0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md`
 - ADR 0078 — entitlement ships under `third-party/` because proving key possession brings `x/sys` with it: the mechanism is generic (vendor-signed roster with a bounded window, possession PROVEN rather than asserted, an offline cache re-verifying the signature on every read, an anti-rollback clock ratchet, a CI seat from the runner's OIDC provenance rather than a shared secret) but `x/crypto/ssh` pulls `x/term` and through it introduces `x/sys` — banned SDK-wide — measured with a probe module the way ADR 0034 insists (`x/sys v0.48.0 // indirect`). So it is quarantined in the root module exactly as the HCL codec (ADR 0022/0034) and the AWS writers (ADR 0012) are, and `pkg/v1` consumers inherit nothing. The vendor's origins, cache directory, OIDC audience and enrolment URL become `ProductValue`, whose every method tolerates a nil receiver because the one code path that runs when nothing else is working must not be the one that panics; and `ProductValue.Validate` is the source's own origins-are-distinct TEST turned into an API, since moving the origins to the caller would have moved that property out of reach with them. Fifteen typed sentinels, and "cannot decide" still never reads as "no" — `RosterUnreachable` names the NETWORK, because reporting an outage as a revocation is the one wrong answer. Versed from `kodflow/ktn-linter` `pkg/license` — `docs/adr/0078-entitlement-is-quarantined-because-ssh-brings-x-sys.md`
+- ADR 0079 — the entitlement split: `x/sys` was never in the mechanism, only in the identity: ADR 0078 quarantined the WHOLE domain under `third-party/` and recorded the split as the better long-term shape it deliberately was not doing, so a versement stayed diffable against its source — a reason that expired the moment the versement landed. Measured rather than assumed: 4 146 of 4 835 production lines reach no ssh import at all, so `x/sys` is in the IDENTITY and the quarantine was drawn along the package the dependency happened to arrive in. The domain splits along the four-layer contract — a three-method `Identity` port in `internal/core` (`Discover`/`Fingerprint`/`ProvePossession`, none of which says "ssh"), the engine in `internal/service/entitlement`, a facade in `pkg/v1/entitlement`, and ONLY the ssh implementation left under `third-party/`. Measured on the `pkg` module with `GOWORK=off`: 8 modules before, 8 after — the public API gains a complete machine-entitlement mechanism and ZERO dependencies, because the service's one non-stdlib import (`x/mod/semver`) was already in that graph. Code range rebased `0.3.65.*` -> `0.2.35.*`. A consumer with a TPM, a cloud KMS, a hardware token or its own key format implements three methods and inherits none of the root module — `docs/adr/0079-the-entitlement-split-x-sys-was-never-in-the-mechanism.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

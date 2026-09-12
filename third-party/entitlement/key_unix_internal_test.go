@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
 
 // TestCheckPrivateKeyMode pins the POSIX half of the permission gate: mode bits
@@ -55,8 +57,8 @@ func TestCheckPrivateKeyMode(t *testing.T) {
 			err := checkPrivateKeyMode(info, path)
 			if tt.wantErr {
 				//: Refusing loudly beats authorizing on a machine-wide secret.
-				if !errors.Is(err, ErrNoPossession) {
-					t.Errorf("checkPrivateKeyMode(%#o) error = %v, want %v (%s)", tt.mode, err, ErrNoPossession, tt.reason)
+				if !errors.Is(err, coreent.ErrNoPossession) {
+					t.Errorf("checkPrivateKeyMode(%#o) error = %v, want %v (%s)", tt.mode, err, coreent.ErrNoPossession, tt.reason)
 				}
 				return
 			}

@@ -2,20 +2,33 @@
 
 ## Purpose
 
-Machine entitlement: turns local key material plus a vendor-signed roster —
-freshly fetched, or the last one this machine authenticated when no origin
-answers — into a `GrantValue`, or refuses with one of fifteen typed sentinels
-(ADR 0078).
+The **ssh implementation of `internal/core/entitlement.Identity`**, plus
+enrolment: minting a subject identity locally and turning it into a request the
+vendor can act on (ADR 0079).
 
-**Lives under `third-party/` (root module), NOT `internal/service`**, because
-`golang.org/x/crypto/ssh` pulls `golang.org/x/term` and through it **introduces**
-`golang.org/x/sys` — **banned SDK-wide** — into the dep-light service module.
-Measured, not assumed: a probe module importing only `x/crypto/ssh` requires
-`x/sys v0.48.0` indirect. Quarantining here mirrors ADR 0022/0034 (the HCL
-codec) and ADR 0012 (the AWS writers). **Opt-in**: nothing in `pkg/v1` imports
-it, so public-API consumers inherit nothing.
+The mechanism this identity feeds — roster, signature, offline cache,
+anti-rollback ratchet, CI seat, version floor — is NOT here. It lives in
+`internal/service/entitlement` behind the public `pkg/v1/entitlement` facade,
+and importing that facade costs a consumer zero additional modules.
 
-Error range `0.3.65.*` (`0x00_03_41_*`).
+**Lives under `third-party/` (root module)** because `golang.org/x/crypto/ssh`
+pulls `golang.org/x/term` and through it **introduces** `golang.org/x/sys` —
+**banned SDK-wide**. Measured, not assumed: a probe module importing only
+`x/crypto/ssh` requires `x/sys v0.48.0` indirect. Quarantining here mirrors
+ADR 0022/0034 (the HCL codec) and ADR 0012 (the AWS writers).
+
+Its error codes are `internal/core/entitlement`'s, range `0.2.35.*`; this
+package mints none of its own.
+
+## Contents
+
+| File | Role |
+|---|---|
+| `sshidentity.go` | `SSHIdentity` — the three port methods over a key directory |
+| `sshidentity_compliance.go` | the compile-time proof that it still satisfies the port |
+| `discover.go` | which subject this machine is enrolled as, and the refusal to guess |
+| `key.go` / `key_unix.go` / `key_windows.go` | load, fingerprint, prove possession, permission checks |
+| `enroll.go` | `NewSubjectID`, `GenerateKeyPair`, `IssueURL` |
 
 ## What it is NOT
 
@@ -24,51 +37,35 @@ is removable by definition. It stops casual sharing and makes revocation real
 for cooperative installs, and the package doc says so rather than implying
 otherwise.
 
-## The trust model has exactly one anchor
-
-`vendor`, the ed25519 public key the consuming binary links in. Everything else
-— the roster, the per-subject keys, the host serving them — is untrusted input.
-A hostile endpoint can serve whatever it likes; it cannot forge a signature made
-with the vendor's private half.
-
 ## Why-this-shape
 
-- **One thing on disk: the last bundle authenticated.** Cached bytes go back
-  through `ParseBundle` on every read, so the signature is re-checked and a
-  frozen copy stops authorising at its own `ExpiresAt`, at most `RosterLifetime`
-  after it was signed.
-- **The frozen CLOCK is not answered, and cannot be.** Every source of time an
-  offline process can read belongs to the party being checked. The ratchet
-  (`checkClock`) raises the cost; it does not close the hole. Stated, not
-  implied.
-- **"Cannot decide" is never "no".** A cold `Verify` reaches the network FIRST;
-  only when no origin answers does the cache substitute, inside `currentRoster`,
-  so the update floor, the CI seat, the subject match and the grant deadline all
-  run unchanged on it. Failure with nothing cached is `RosterUnreachable` — and
-  it names the NETWORK, because the network is what failed.
-- **`ProductValue` carries everything vendor-specific.** Origins, cache
-  directory, OIDC audience, enrolment URL. The source implementation kept all
-  four as package constants, which is the only reason a correct implementation
-  served exactly one binary.
-- **`ProductValue.Validate` is a test that became an API.** The source asserted
-  over its own shipped constants that origins are distinct, uniquely named, and
-  span at least two HOSTS — because branches on one host share that host's
-  outage. Moving the origins to the caller would have moved that property out of
-  reach with them.
-- **Every method on `ProductValue` tolerates a nil receiver.** A `Service` built
-  without a product gets the documented fallbacks rather than a panic on the one
-  path that runs when nothing else is working.
-- **`ProductValue` methods take a pointer receiver.** 72 bytes — four strings
-  and a slice header — and copying all of it to read one field is what
-  KTN-VAR-BIGSTRUCT exists to catch.
+- **Possession is proven against material the user ALREADY has.** A file this
+  package invented would need a lifecycle — where it lives, who may read it, what
+  happens on rotation — that a user's own key directory already has.
+- **`DiscoverSubject` refuses rather than guesses.** Several identities in one
+  directory is ambiguous, and picking one would silently decide which licence
+  gets verified, which one a rotation overwrites, and which one `status`
+  reports. It sorts only so the diagnostic is stable, never to choose.
+- **A stray `.pub` must not win.** `usableIdentities` narrows to the subjects
+  whose private half is present as a real FILE — a directory or a FIFO named
+  `<uuid>.pub` stats without error and would otherwise count as an identity.
+- **`GenerateKeyPair` validates the subject BEFORE building any path.** It is
+  the only entry point here that WRITES, and a subject like
+  `../authorized_keys` wrote both halves outside the caller's directory until
+  a review caught it. `TestGenerateKeyPairRefusesAPathTraversal` pins it.
+- **The published half is world-readable on purpose.** The roster hands it to
+  everyone, so protecting it locally would be theatre. The private half is
+  `0600` and `SignerFromFile` refuses anything looser.
 
 ## Do NOT
 
-- Add a second trust anchor, or a fallback that verifies less.
 - Reintroduce an origin, a cache directory, an audience or an enrolment URL as a
-  package constant. That is `ProductValue`'s job, and the suite injects a product
-  naming a vendor the implementation never mentioned so a reintroduced constant
-  fails rather than passes.
+  package constant. That is `svcent.ProductValue`'s job, and the suite injects a
+  product naming a vendor the implementation never mentioned so a reintroduced
+  constant fails rather than passes.
+- Add the verification mechanism back here. It is `internal/service/entitlement`
+  now, and the whole point of ADR 0079 is that a consumer can reach it without
+  this module's dependency graph.
 - Move this to `internal/service`. The measurement above is why, and it is
   reproducible in one `go mod tidy`.
 

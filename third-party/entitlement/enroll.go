@@ -12,6 +12,9 @@ import (
 	"uuid"
 
 	"golang.org/x/crypto/ssh"
+
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+	svcent "github.com/kitsunium/sdk/internal/service/entitlement"
 )
 
 // requestLabel marks a first enrolment; the workflow keys off it.
@@ -55,14 +58,14 @@ func NewSubjectID() string {
 //
 // The parameter is named subject rather than uuid because the stdlib package
 // of that name is imported here.
-func (p *ProductValue) GenerateKeyPair(sshDir, subject string) (publicKey string, err error) {
+func GenerateKeyPair(product *svcent.ProductValue, sshDir, subject string) (publicKey string, err error) {
 	//: Validate BEFORE building any path. Every other entry point into this
 	//: file's key paths (LoadPublicKey, SignerFromFile) checks the subject
 	//: first; this one did not, so a subject like "../authorized_keys" wrote
 	//: both halves of a key pair outside sshDir.
 	if !validSubject(subject) {
 		//: Refuse rather than write anywhere the caller did not name.
-		return "", fmt.Errorf("%w: subject %q is not a canonical v4 UUID", ErrNoLicense, subject)
+		return "", fmt.Errorf("%w: subject %q is not a canonical v4 UUID", coreent.ErrNoLicense, subject)
 	}
 
 	//: A fresh machine, a container or a CI runner has no ~/.ssh yet, and
@@ -81,7 +84,7 @@ func (p *ProductValue) GenerateKeyPair(sshDir, subject string) (publicKey string
 		return "", fmt.Errorf("generating key: %w", genErr)
 	}
 
-	block, marshalErr := ssh.MarshalPrivateKey(priv, p.keyComment(subject))
+	block, marshalErr := ssh.MarshalPrivateKey(priv, product.Label()+" entitlement "+subject)
 	//: A private half we cannot serialise is unusable.
 	if marshalErr != nil {
 		//: Refuse rather than write half an identity.
@@ -114,15 +117,15 @@ func (p *ProductValue) GenerateKeyPair(sshDir, subject string) (publicKey string
 // IssueURL builds the prefilled enrolment request. The CLI never holds a
 // GitHub token: it hands the user a link, and the account that opens the
 // issue is the identity the workflow binds the UUID to.
-func (p *ProductValue) IssueURL(subject, publicKey string, rotation bool) string {
-	//: Same nil-receiver contract as every other method here: read through a
-	//: local copy so a nil product yields the zero ProductValue, whose empty
-	//: EnrolURL is already the documented "no self-service path". No extra
-	//: return value — the empty base IS the answer, not a sentinel for one.
-	product := ProductValue{}
+func IssueURL(product *svcent.ProductValue, subject, publicKey string, rotation bool) string {
+	//: Same nil tolerance the product's own methods carry: read through a local
+	//: copy so a nil product yields the zero value, whose empty EnrolURL is
+	//: already the documented "no self-service path". No extra return value —
+	//: the empty base IS the answer, not a sentinel for one.
+	resolved := svcent.ProductValue{}
 	//: A real product supplies its own enrolment base.
-	if p != nil {
-		product = *p
+	if product != nil {
+		resolved = *product
 	}
 	label := requestLabel
 	//: A rotation must be distinguishable so the workflow can demand that
@@ -146,5 +149,5 @@ func (p *ProductValue) IssueURL(subject, publicKey string, rotation bool) string
 	query.Set("labels", label)
 	query.Set("body", body)
 	//: Return a link the user can open without any credential of ours.
-	return product.EnrolURL + "?" + query.Encode()
+	return resolved.EnrolURL + "?" + query.Encode()
 }

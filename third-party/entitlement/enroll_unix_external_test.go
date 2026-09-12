@@ -70,7 +70,7 @@ func TestGenerateKeyPairPosixModes(t *testing.T) {
 				}
 			}
 
-			_, err := testProduct.GenerateKeyPair(sshDir, sampleUUID)
+			_, err := entitlement.GenerateKeyPair(&testProduct, sshDir, sampleUUID)
 			if tt.wantErr {
 				//: root ignores the permission bits, so the write SUCCEEDS
 				//: there and refusing would be the wrong assertion. What this
@@ -82,17 +82,17 @@ func TestGenerateKeyPairPosixModes(t *testing.T) {
 				//: not run is not a test.
 				if os.Geteuid() == 0 {
 					if err != nil {
-						t.Errorf("testProduct.GenerateKeyPair() error = %v, want nil — root is not bound by the mode", err)
+						t.Errorf("entitlement.GenerateKeyPair(&testProduct, ) error = %v, want nil — root is not bound by the mode", err)
 					}
 					return
 				}
 				if err == nil {
-					t.Errorf("testProduct.GenerateKeyPair() succeeded into a read-only directory (%s)", tt.reason)
+					t.Errorf("entitlement.GenerateKeyPair(&testProduct, ) succeeded into a read-only directory (%s)", tt.reason)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("testProduct.GenerateKeyPair() error = %v, want nil", err)
+				t.Fatalf("entitlement.GenerateKeyPair(&testProduct, ) error = %v, want nil", err)
 			}
 
 			info, statErr := os.Stat(sshDir)
@@ -108,7 +108,7 @@ func TestGenerateKeyPairPosixModes(t *testing.T) {
 				t.Fatalf("stat private key: %v", keyErr)
 			}
 			//: Anything looser makes the secret machine-wide, and
-			//: SignerFromFile would rightly refuse it afterwards: enrolment
+			//: entitlement.SignerFromFile would rightly refuse it afterwards: enrolment
 			//: must not produce a key its own verifier rejects.
 			if keyInfo.Mode().Perm() != ownerOnly {
 				t.Errorf("private key mode = %#o, want %#o", keyInfo.Mode().Perm(), ownerOnly)

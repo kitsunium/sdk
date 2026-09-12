@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
 
 // TestGrantValue_Expired pins the daemon's ageing rule: memory of a past
@@ -21,17 +21,17 @@ func TestGrantValue_Expired(t *testing.T) {
 		want bool
 	}{
 		{name: "fresh grant is usable", now: verified.Add(time.Minute), want: false},
-		{name: "just inside the window is usable", now: verified.Add(entitlement.RosterLifetime - time.Second), want: false},
-		{name: "exactly at the boundary is still usable", now: verified.Add(entitlement.RosterLifetime), want: false},
-		{name: "one nanosecond past the boundary stops", now: verified.Add(entitlement.RosterLifetime + time.Nanosecond), want: true},
-		{name: "past the window it must stop", now: verified.Add(entitlement.RosterLifetime + time.Second), want: true},
+		{name: "just inside the window is usable", now: verified.Add(coreent.RosterLifetime - time.Second), want: false},
+		{name: "exactly at the boundary is still usable", now: verified.Add(coreent.RosterLifetime), want: false},
+		{name: "one nanosecond past the boundary stops", now: verified.Add(coreent.RosterLifetime + time.Nanosecond), want: true},
+		{name: "past the window it must stop", now: verified.Add(coreent.RosterLifetime + time.Second), want: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			g := entitlement.GrantValue{Subject: sampleUUID, VerifiedAt: verified}
+			g := coreent.GrantValue{Subject: sampleUUID, VerifiedAt: verified}
 			if got := g.Expired(tt.now); got != tt.want {
 				t.Errorf("Expired(%v) = %v, want %v", tt.now, got, tt.want)
 			}

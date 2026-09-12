@@ -14,6 +14,8 @@ import (
 	"regexp"
 
 	"golang.org/x/crypto/ssh"
+
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
 
 // nonceSize is the length of the challenge signed to prove possession. 32
@@ -70,7 +72,7 @@ func LoadPublicKey(sshDir, uuid string) (pub ssh.PublicKey, err error) {
 	//: Validate before composing a path: the identifier is untrusted input.
 	if !validSubject(uuid) {
 		//: Refuse a subject that could escape the key directory.
-		return nil, fmt.Errorf("%w: %q is not a canonical subject", ErrKeyMismatch, uuid)
+		return nil, fmt.Errorf("%w: %q is not a canonical subject", coreent.ErrKeyMismatch, uuid)
 	}
 	path := PublicKeyPath(sshDir, uuid)
 	raw, readErr := os.ReadFile(path)
@@ -79,18 +81,18 @@ func LoadPublicKey(sshDir, uuid string) (pub ssh.PublicKey, err error) {
 	//: someone chasing the wrong fix.
 	if errors.Is(readErr, fs.ErrNotExist) {
 		//: Never enrolled, or the key was removed.
-		return nil, fmt.Errorf("%w: %s", ErrNoLicense, path)
+		return nil, fmt.Errorf("%w: %s", coreent.ErrNoLicense, path)
 	}
 	//: Any other read failure is an access problem, not an absent licence.
 	if readErr != nil {
 		//: Report the access failure with its cause.
-		return nil, fmt.Errorf("%w: reading %s: %w", ErrNoPossession, path, readErr)
+		return nil, fmt.Errorf("%w: reading %s: %w", coreent.ErrNoPossession, path, readErr)
 	}
 	parsed, _, _, _, parseErr := ssh.ParseAuthorizedKey(raw)
 	//: A key we cannot parse cannot be compared to the roster.
 	if parseErr != nil {
 		//: Refuse rather than authorize on an unreadable identity.
-		return nil, fmt.Errorf("%w: parsing %s: %w", ErrKeyMismatch, path, parseErr)
+		return nil, fmt.Errorf("%w: parsing %s: %w", coreent.ErrKeyMismatch, path, parseErr)
 	}
 	//: Return the parsed key so the caller can fingerprint it.
 	return parsed, nil
@@ -115,26 +117,26 @@ func ProvePossession(signer ssh.Signer, pub ssh.PublicKey) error {
 	if signer.PublicKey().Type() != pub.Type() ||
 		!bytes.Equal(signer.PublicKey().Marshal(), pub.Marshal()) {
 		//: Answering with another identity's key is the copied-.pub attack.
-		return fmt.Errorf("%w: signer is not the published key", ErrKeyMismatch)
+		return fmt.Errorf("%w: signer is not the published key", coreent.ErrKeyMismatch)
 	}
 
 	var nonce [nonceSize]byte
 	//: Without entropy the challenge is predictable and proves nothing.
 	if _, err := rand.Read(nonce[:]); err != nil {
 		//: Refuse rather than sign a guessable challenge.
-		return fmt.Errorf("%w: drawing challenge: %w", ErrNoPossession, err)
+		return fmt.Errorf("%w: drawing challenge: %w", coreent.ErrNoPossession, err)
 	}
 
 	sig, err := signer.Sign(rand.Reader, nonce[:])
 	//: An agent that refuses to sign (locked, key removed) proves nothing.
 	if err != nil {
 		//: A locked or emptied agent cannot establish possession.
-		return fmt.Errorf("%w: %w", ErrNoPossession, err)
+		return fmt.Errorf("%w: %w", coreent.ErrNoPossession, err)
 	}
 	//: The signature must verify against the published half, not the signer's.
 	if verifyErr := pub.Verify(nonce[:], sig); verifyErr != nil {
 		//: Signature does not match the identity being claimed.
-		return fmt.Errorf("%w: %w", ErrNoPossession, verifyErr)
+		return fmt.Errorf("%w: %w", coreent.ErrNoPossession, verifyErr)
 	}
 	//: Possession established for this call only.
 	return nil
@@ -147,7 +149,7 @@ func SignerFromFile(sshDir, uuid string) (signer ssh.Signer, err error) {
 	//: Validate before composing a path: the identifier is untrusted input.
 	if !validSubject(uuid) {
 		//: Refuse a subject that could escape the key directory.
-		return nil, fmt.Errorf("%w: %q is not a canonical subject", ErrKeyMismatch, uuid)
+		return nil, fmt.Errorf("%w: %q is not a canonical subject", coreent.ErrKeyMismatch, uuid)
 	}
 	path := PrivateKeyPath(sshDir, uuid)
 	info, statErr := os.Stat(path)
@@ -155,12 +157,12 @@ func SignerFromFile(sshDir, uuid string) (signer ssh.Signer, err error) {
 	//: needs enrolment, the other needs a chmod.
 	if errors.Is(statErr, fs.ErrNotExist) {
 		//: Never enrolled — no private half on this machine.
-		return nil, fmt.Errorf("%w: %s", ErrNoLicense, path)
+		return nil, fmt.Errorf("%w: %s", coreent.ErrNoLicense, path)
 	}
 	//: Any other stat failure is an access problem, not an absent licence.
 	if statErr != nil {
 		//: Report the access failure with its cause.
-		return nil, fmt.Errorf("%w: stat %s: %w", ErrNoPossession, path, statErr)
+		return nil, fmt.Errorf("%w: stat %s: %w", coreent.ErrNoPossession, path, statErr)
 	}
 	//: A world-readable private key is not private. What "readable beyond
 	//: its owner" MEANS is platform-specific, so the test lives in
@@ -177,13 +179,13 @@ func SignerFromFile(sshDir, uuid string) (signer ssh.Signer, err error) {
 	//: problem rather than an absent licence.
 	if readErr != nil {
 		//: Report the access failure with its cause.
-		return nil, fmt.Errorf("%w: reading %s: %w", ErrNoPossession, path, readErr)
+		return nil, fmt.Errorf("%w: reading %s: %w", coreent.ErrNoPossession, path, readErr)
 	}
 	parsed, parseErr := ssh.ParsePrivateKey(raw)
 	//: Encrypted keys land here too: the linter never prompts, use ssh-agent.
 	if parseErr != nil {
 		//: No usable signer means no possession proof.
-		return nil, fmt.Errorf("%w: %w", ErrNoPossession, parseErr)
+		return nil, fmt.Errorf("%w: %w", coreent.ErrNoPossession, parseErr)
 	}
 	//: Return a signer able to answer a challenge.
 	return parsed, nil

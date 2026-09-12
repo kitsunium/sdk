@@ -13,7 +13,7 @@ import (
 // uuidShape matches the canonical v4 form the key filename must carry.
 var uuidShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
-// TestNewSubjectID pins the identifier shape, because DiscoverSubject finds an
+// TestNewSubjectID pins the identifier shape, because entitlement.DiscoverSubject finds an
 // enrolment by matching the filename against that exact pattern.
 func TestNewSubjectID(t *testing.T) {
 	t.Parallel()
@@ -34,14 +34,14 @@ func TestNewSubjectID(t *testing.T) {
 			for range tt.runs {
 				got := entitlement.NewSubjectID()
 				//: The version nibble and the variant bits are asserted by
-				//: uuidShape itself, which is what DiscoverSubject matches
+				//: uuidShape itself, which is what entitlement.DiscoverSubject matches
 				//: filenames against; stdlib uuid must keep satisfying it.
 				if !uuidShape.MatchString(got) {
-					t.Errorf("NewSubjectID() = %q, want canonical v4 form", got)
+					t.Errorf("entitlement.NewSubjectID() = %q, want canonical v4 form", got)
 				}
 				//: Collisions would silently merge two clients' identities.
 				if seen[got] {
-					t.Errorf("NewSubjectID() repeated %q", got)
+					t.Errorf("entitlement.NewSubjectID() repeated %q", got)
 				}
 				seen[got] = true
 			}
@@ -66,10 +66,10 @@ func TestGenerateKeyPair(t *testing.T) {
 			t.Parallel()
 
 			dir := t.TempDir()
-			authorized, err := testProduct.GenerateKeyPair(dir, tt.uuid)
+			authorized, err := entitlement.GenerateKeyPair(&testProduct, dir, tt.uuid)
 			//: A generation failure would leave the user unenrollable.
 			if err != nil {
-				t.Fatalf("testProduct.GenerateKeyPair() error = %v, want nil", err)
+				t.Fatalf("entitlement.GenerateKeyPair(&testProduct, ) error = %v, want nil", err)
 			}
 			if !strings.HasPrefix(authorized, "ssh-ed25519 ") {
 				t.Errorf("public key = %q, want an ssh-ed25519 authorized-keys line", authorized)
@@ -88,14 +88,14 @@ func TestGenerateKeyPair(t *testing.T) {
 
 			//: The pair must be immediately usable end to end.
 			if _, loadErr := entitlement.SignerFromFile(dir, tt.uuid); loadErr != nil {
-				t.Errorf("SignerFromFile() after generation: %v", loadErr)
+				t.Errorf("entitlement.SignerFromFile() after generation: %v", loadErr)
 			}
 			discovered, discErr := entitlement.DiscoverSubject(dir)
 			if discErr != nil {
-				t.Fatalf("DiscoverSubject() after generation: %v", discErr)
+				t.Fatalf("entitlement.DiscoverSubject() after generation: %v", discErr)
 			}
 			if discovered != tt.uuid {
-				t.Errorf("DiscoverSubject() = %q, want %q", discovered, tt.uuid)
+				t.Errorf("entitlement.DiscoverSubject() = %q, want %q", discovered, tt.uuid)
 			}
 		})
 	}
@@ -119,18 +119,18 @@ func TestIssueURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := testProduct.IssueURL(sampleUUID, "ssh-ed25519 AAAA test\n", tt.rotation)
+			got := entitlement.IssueURL(&testProduct, sampleUUID, "ssh-ed25519 AAAA test\n", tt.rotation)
 			//: The label is what routes the issue to the right workflow.
 			if !strings.Contains(got, tt.wantLabel) {
-				t.Errorf("testProduct.IssueURL() = %q, want it to carry label %q", got, tt.wantLabel)
+				t.Errorf("entitlement.IssueURL(&testProduct, ) = %q, want it to carry label %q", got, tt.wantLabel)
 			}
 			//: The subject must travel or the vendor cannot act on it.
 			if !strings.Contains(got, sampleUUID) {
-				t.Errorf("testProduct.IssueURL() = %q, want it to carry the subject", got)
+				t.Errorf("entitlement.IssueURL(&testProduct, ) = %q, want it to carry the subject", got)
 			}
 			//: A token in the link would defeat the point of the design.
 			if strings.Contains(strings.ToLower(got), "token") {
-				t.Errorf("testProduct.IssueURL() = %q, want no credential in the link", got)
+				t.Errorf("entitlement.IssueURL(&testProduct, ) = %q, want no credential in the link", got)
 			}
 		})
 	}
@@ -179,9 +179,9 @@ func TestGenerateKeyPairCreatesDirectory(t *testing.T) {
 				}
 			}
 
-			_, err := testProduct.GenerateKeyPair(sshDir, sampleUUID)
+			_, err := entitlement.GenerateKeyPair(&testProduct, sshDir, sampleUUID)
 			if err != nil {
-				t.Fatalf("testProduct.GenerateKeyPair() error = %v, want nil", err)
+				t.Fatalf("entitlement.GenerateKeyPair(&testProduct, ) error = %v, want nil", err)
 			}
 
 			info, statErr := os.Stat(sshDir)

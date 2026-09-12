@@ -6,16 +6,20 @@ import (
 	"testing"
 
 	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
+
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+
+	svcent "github.com/kitsunium/sdk/internal/service/entitlement"
 )
 
-// testProduct is the ProductValue the external suite injects. Every field
+// testProduct is the svcent.ProductValue the external suite injects. Every field
 // differs from what the source implementation hard-coded, so an assertion that
 // happens to match a reintroduced constant fails rather than passes.
-var testProduct = entitlement.ProductValue{
+var testProduct = svcent.ProductValue{
 	Name:       "widget",
 	CIAudience: "widget-entitlement",
 	EnrolURL:   "https://example.invalid/widget/issues/new",
-	Origins: []entitlement.OriginValue{
+	Origins: []coreent.OriginValue{
 		{Name: "primary", BundleURL: "https://example.invalid/widget/roster.signed.json"},
 	},
 }
@@ -28,13 +32,13 @@ func TestRedundancyCountsHostsNotStrings(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		origins  []entitlement.OriginValue
+		origins  []coreent.OriginValue
 		wantFail bool
 		reason   string
 	}{
 		{
 			name: "two ports on one host are one host",
-			origins: []entitlement.OriginValue{
+			origins: []coreent.OriginValue{
 				{Name: "a", BundleURL: "https://one.example.invalid/roster.signed.json"},
 				{Name: "b", BundleURL: "https://one.example.invalid:8443/roster.signed.json"},
 			},
@@ -43,7 +47,7 @@ func TestRedundancyCountsHostsNotStrings(t *testing.T) {
 		},
 		{
 			name: "casing is not a second host",
-			origins: []entitlement.OriginValue{
+			origins: []coreent.OriginValue{
 				{Name: "a", BundleURL: "https://One.Example.Invalid/roster.signed.json"},
 				{Name: "b", BundleURL: "https://one.example.invalid/roster.signed.json"},
 			},
@@ -52,7 +56,7 @@ func TestRedundancyCountsHostsNotStrings(t *testing.T) {
 		},
 		{
 			name: "two unfetchable entries are not two hosts",
-			origins: []entitlement.OriginValue{
+			origins: []coreent.OriginValue{
 				{Name: "a", BundleURL: "one"},
 				{Name: "b", BundleURL: "two"},
 			},
@@ -61,7 +65,7 @@ func TestRedundancyCountsHostsNotStrings(t *testing.T) {
 		},
 		{
 			name: "a non-http scheme is not an origin",
-			origins: []entitlement.OriginValue{
+			origins: []coreent.OriginValue{
 				{Name: "a", BundleURL: "https://one.example.invalid/roster.signed.json"},
 				{Name: "b", BundleURL: "file:///etc/roster.signed.json"},
 			},
@@ -70,7 +74,7 @@ func TestRedundancyCountsHostsNotStrings(t *testing.T) {
 		},
 		{
 			name: "two real hosts still pass",
-			origins: []entitlement.OriginValue{
+			origins: []coreent.OriginValue{
 				{Name: "a", BundleURL: "https://one.example.invalid/roster.signed.json"},
 				{Name: "b", BundleURL: "https://two.example.invalid/roster.signed.json"},
 			},
@@ -81,7 +85,7 @@ func TestRedundancyCountsHostsNotStrings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			product := entitlement.ProductValue{Name: "p", Origins: tt.origins}
+			product := svcent.ProductValue{Name: "p", Origins: tt.origins}
 			err := product.Validate()
 			//: Redundancy is a property of HOSTS, never of URL strings.
 			if (err != nil) != tt.wantFail {
@@ -95,7 +99,7 @@ func TestRedundancyCountsHostsNotStrings(t *testing.T) {
 // before any path is built from it.
 //
 // Every other entry point into this package's key paths checks the subject
-// first; GenerateKeyPair did not, so "../authorized_keys" wrote both halves of a
+// first; entitlement.GenerateKeyPair did not, so "../authorized_keys" wrote both halves of a
 // key pair outside the directory the caller named.
 func TestGenerateKeyPairRefusesAPathTraversal(t *testing.T) {
 	t.Parallel()
@@ -114,36 +118,37 @@ func TestGenerateKeyPairRefusesAPathTraversal(t *testing.T) {
 			t.Parallel()
 
 			dir := t.TempDir()
-			product := entitlement.ProductValue{Name: "widget"}
-			_, err := product.GenerateKeyPair(dir, tt.subject)
+			product := new(svcent.ProductValue)
+			product.Name = "widget"
+			_, err := entitlement.GenerateKeyPair(product, dir, tt.subject)
 			//: A subject that is not a canonical v4 UUID names no key pair.
 			if err == nil {
-				t.Fatalf("GenerateKeyPair(%q) = nil error, want a refusal", tt.subject)
+				t.Fatalf("entitlement.GenerateKeyPair(%q) = nil error, want a refusal", tt.subject)
 			}
 			//: And nothing may have been written anywhere.
 			entries, readErr := os.ReadDir(dir)
 			if readErr == nil && len(entries) != 0 {
-				t.Errorf("GenerateKeyPair(%q) wrote %d entries, want none", tt.subject, len(entries))
+				t.Errorf("entitlement.GenerateKeyPair(%q) wrote %d entries, want none", tt.subject, len(entries))
 			}
 		})
 	}
 }
 
 // TestANilProductDoesNotPanic pins the nil-receiver contract the package
-// documents for every ProductValue method.
+// documents for every svcent.ProductValue method.
 //
-// GenerateKeyPair dereferenced p.Name directly, so a nil product panicked on the
+// entitlement.GenerateKeyPair dereferenced p.Name directly, so a nil product panicked on the
 // one call an operator makes when they have nothing else set up yet.
 func TestANilProductDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
-		call func(p *entitlement.ProductValue) any
+		call func(p *svcent.ProductValue) any
 	}{
-		{name: "AutoUpgradeEnv-equivalent: the cache directory", call: func(p *entitlement.ProductValue) any { return p.DefaultCacheDir() }},
-		{name: "Validate", call: func(p *entitlement.ProductValue) any { return p.Validate() }},
-		{name: "IssueURL", call: func(p *entitlement.ProductValue) any { return p.IssueURL("s", "k", false) }},
+		{name: "AutoUpgradeEnv-equivalent: the cache directory", call: func(p *svcent.ProductValue) any { return p.DefaultCacheDir() }},
+		{name: "Validate", call: func(p *svcent.ProductValue) any { return p.Validate() }},
+		{name: "IssueURL", call: func(p *svcent.ProductValue) any { return entitlement.IssueURL(p, "s", "k", false) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -173,16 +178,16 @@ func TestGenerateKeyPairOnANilProduct(t *testing.T) {
 
 			defer func() {
 				if r := recover(); r != nil {
-					t.Errorf("GenerateKeyPair panicked on a nil product: %v", r)
+					t.Errorf("entitlement.GenerateKeyPair panicked on a nil product: %v", r)
 				}
 			}()
-			var product *entitlement.ProductValue
+			var product *svcent.ProductValue
 			//: A canonical v4 UUID, so the refusal cannot come from the subject.
 			//: The outcome is not what this asserts — only that the call
 			//: RETURNED rather than panicking — so the error is reported for
 			//: the record and never failed on.
-			_, genErr := product.GenerateKeyPair(t.TempDir(), "6ba7b810-9dad-41d1-80b4-00c04fd430c8")
-			t.Logf("GenerateKeyPair on a nil product returned: %v", genErr)
+			_, genErr := entitlement.GenerateKeyPair(product, t.TempDir(), "6ba7b810-9dad-41d1-80b4-00c04fd430c8")
+			t.Logf("entitlement.GenerateKeyPair on a nil product returned: %v", genErr)
 		})
 	}
 }

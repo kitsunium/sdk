@@ -14,6 +14,10 @@ import (
 	"time"
 
 	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
+
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+
+	svcent "github.com/kitsunium/sdk/internal/service/entitlement"
 )
 
 // originState is what one origin serves in a fallback test.
@@ -115,11 +119,11 @@ func originNameFromURL(url string) string {
 }
 
 // testOrigins builds an origin list whose URLs encode the given names.
-func testOrigins(names ...string) []entitlement.OriginValue {
-	origins := make([]entitlement.OriginValue, 0, len(names))
+func testOrigins(names ...string) []coreent.OriginValue {
+	origins := make([]coreent.OriginValue, 0, len(names))
 	//: One origin per name, in the order the service must try them.
 	for _, name := range names {
-		origins = append(origins, entitlement.OriginValue{
+		origins = append(origins, coreent.OriginValue{
 			Name:      name,
 			BundleURL: "https://" + name + "/roster.signed.json",
 		})
@@ -130,7 +134,7 @@ func testOrigins(names ...string) []entitlement.OriginValue {
 
 // signPair marshals a roster and wraps it with its signature in the single
 // bundle a publication point serves.
-func signPair(t *testing.T, priv ed25519.PrivateKey, roster entitlement.RosterValue) []byte {
+func signPair(t *testing.T, priv ed25519.PrivateKey, roster coreent.RosterValue) []byte {
 	t.Helper()
 
 	raw, err := json.Marshal(roster)
@@ -138,7 +142,7 @@ func signPair(t *testing.T, priv ed25519.PrivateKey, roster entitlement.RosterVa
 	if err != nil {
 		t.Fatalf("marshalling roster: %v", err)
 	}
-	bundle, err := json.Marshal(entitlement.BundleValue{
+	bundle, err := json.Marshal(svcent.BundleValue{
 		Payload:   base64.StdEncoding.EncodeToString(raw),
 		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, raw)),
 	})
@@ -232,11 +236,11 @@ func TestVerifyFallsBackAcrossOrigins(t *testing.T) {
 			dir := t.TempDir()
 			fingerprint := enrol(t, dir, sampleUUID)
 			now := time.Now()
-			subjects := map[string]entitlement.SubjectValue{sampleUUID: {Fingerprint: fingerprint}}
+			subjects := map[string]coreent.SubjectValue{sampleUUID: {Fingerprint: fingerprint}}
 
-			current := entitlement.RosterValue{IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), Subjects: subjects}
+			current := coreent.RosterValue{IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), Subjects: subjects}
 			//: A window that closed before `now`: signed correctly, but past.
-			expired := entitlement.RosterValue{IssuedAt: now.Add(-48 * time.Hour), ExpiresAt: now.Add(-24 * time.Hour), Subjects: subjects}
+			expired := coreent.RosterValue{IssuedAt: now.Add(-48 * time.Hour), ExpiresAt: now.Add(-24 * time.Hour), Subjects: subjects}
 
 			getter := &multiOriginGetter{
 				states:  tt.states,
@@ -245,7 +249,7 @@ func TestVerifyFallsBackAcrossOrigins(t *testing.T) {
 				forged:  signPair(t, attackerPriv, current),
 			}
 
-			svc := entitlement.NewServiceWithOrigins(getter, dir, vendorPub, testOrigins(tt.order...))
+			svc := svcent.NewServiceWithOrigins(getter, entitlement.NewSSHIdentity(dir), vendorPub, testOrigins(tt.order...))
 			_, verifyErr := svc.Verify(now)
 
 			if (verifyErr == nil) != tt.wantOK {
@@ -283,10 +287,10 @@ func TestVerifyWithNoOriginsRefuses(t *testing.T) {
 			dir := t.TempDir()
 			enrol(t, dir, sampleUUID)
 
-			svc := entitlement.NewServiceWithOrigins(&multiOriginGetter{}, dir, vendorPub, nil)
+			svc := svcent.NewServiceWithOrigins(&multiOriginGetter{}, entitlement.NewSSHIdentity(dir), vendorPub, nil)
 			_, verifyErr := svc.Verify(time.Now())
 
-			if !errors.Is(verifyErr, entitlement.ErrRosterUnreachable) {
+			if !errors.Is(verifyErr, coreent.ErrRosterUnreachable) {
 				t.Errorf("Verify() error = %v, want ErrRosterUnreachable (%s)", verifyErr, tt.reason)
 			}
 		})
@@ -312,13 +316,13 @@ func TestOriginsAreDistinct(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		origins  []entitlement.OriginValue
+		origins  []coreent.OriginValue
 		wantFail bool
 		reason   string
 	}{
 		{
 			name: "two distinct hosts pass",
-			origins: []entitlement.OriginValue{
+			origins: []coreent.OriginValue{
 				{Name: "branch", BundleURL: "https://raw.example.invalid/p/roster.signed.json"},
 				{Name: "pages", BundleURL: "https://pages.example.invalid/p/roster.signed.json"},
 			},
@@ -326,7 +330,7 @@ func TestOriginsAreDistinct(t *testing.T) {
 		},
 		{
 			name: "one host is refused however many entries",
-			origins: []entitlement.OriginValue{
+			origins: []coreent.OriginValue{
 				{Name: "branch", BundleURL: "https://one.example.invalid/a/roster.signed.json"},
 				{Name: "other", BundleURL: "https://one.example.invalid/b/roster.signed.json"},
 			},
@@ -335,7 +339,7 @@ func TestOriginsAreDistinct(t *testing.T) {
 		},
 		{
 			name: "the same URL twice is one origin listed twice",
-			origins: []entitlement.OriginValue{
+			origins: []coreent.OriginValue{
 				{Name: "a", BundleURL: "https://one.example.invalid/roster.signed.json"},
 				{Name: "b", BundleURL: "https://one.example.invalid/roster.signed.json"},
 			},
@@ -344,7 +348,7 @@ func TestOriginsAreDistinct(t *testing.T) {
 		},
 		{
 			name: "a duplicate name is refused",
-			origins: []entitlement.OriginValue{
+			origins: []coreent.OriginValue{
 				{Name: "dup", BundleURL: "https://one.example.invalid/roster.signed.json"},
 				{Name: "dup", BundleURL: "https://two.example.invalid/roster.signed.json"},
 			},
@@ -353,7 +357,7 @@ func TestOriginsAreDistinct(t *testing.T) {
 		},
 		{
 			name:     "an empty field is refused",
-			origins:  []entitlement.OriginValue{{Name: "", BundleURL: "https://one.example.invalid/r.json"}},
+			origins:  []coreent.OriginValue{{Name: "", BundleURL: "https://one.example.invalid/r.json"}},
 			wantFail: true,
 			reason:   "an origin that cannot be named cannot be reported when it fails",
 		},
@@ -373,7 +377,7 @@ func TestOriginsAreDistinct(t *testing.T) {
 			//: constants. Moving the origins to the caller would have moved
 			//: the property out of reach with them, so it became a method any
 			//: consumer can call — and this is its suite.
-			product := entitlement.ProductValue{Name: "p", Origins: tt.origins}
+			product := svcent.ProductValue{Name: "p", Origins: tt.origins}
 			err := product.Validate()
 			if (err != nil) != tt.wantFail {
 				t.Errorf("Validate() error = %v, wantFail %t (%s)", err, tt.wantFail, tt.reason)
@@ -419,7 +423,7 @@ func TestNewServiceWithOrigins(t *testing.T) {
 			}
 			getter := &multiOriginGetter{states: states}
 
-			svc := entitlement.NewServiceWithOrigins(getter, dir, vendorPub, testOrigins(tt.origins...))
+			svc := svcent.NewServiceWithOrigins(getter, entitlement.NewSSHIdentity(dir), vendorPub, testOrigins(tt.origins...))
 			_, verifyErr := svc.Verify(time.Now())
 
 			//: Every origin was down, so this must refuse.
@@ -466,17 +470,17 @@ func TestBundleRequiresBothHalves(t *testing.T) {
 			fingerprint := enrol(t, dir, sampleUUID)
 			now := time.Now()
 
-			raw, err := json.Marshal(entitlement.RosterValue{
+			raw, err := json.Marshal(coreent.RosterValue{
 				IssuedAt:  now.Add(-time.Hour),
 				ExpiresAt: now.Add(time.Hour),
-				Subjects:  map[string]entitlement.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
+				Subjects:  map[string]coreent.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
 			})
 			//: A failure here is an environment problem, not a test outcome.
 			if err != nil {
 				t.Fatalf("marshalling roster: %v", err)
 			}
 
-			value := entitlement.BundleValue{
+			value := svcent.BundleValue{
 				Payload:   base64.StdEncoding.EncodeToString(raw),
 				Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(vendorPriv, raw)),
 			}
@@ -498,7 +502,7 @@ func TestBundleRequiresBothHalves(t *testing.T) {
 				states:  map[string]originState{"solo": originHealthy},
 				current: bundle,
 			}
-			svc := entitlement.NewServiceWithOrigins(getter, dir, vendorPub, testOrigins("solo"))
+			svc := svcent.NewServiceWithOrigins(getter, entitlement.NewSSHIdentity(dir), vendorPub, testOrigins("solo"))
 
 			if _, verifyErr := svc.Verify(now); verifyErr == nil {
 				t.Errorf("Verify() = nil error, want a refusal (%s)", tt.reason)

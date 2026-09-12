@@ -69,6 +69,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_02_20_00: "internal/core/cli",
 	0x00_02_21_00: "internal/core/vcs",
 	0x00_02_22_00: "internal/core/selfupdate",
+	0x00_02_23_00: "internal/core/entitlement",
 	0x00_03_01_00: "internal/service/logger",
 	0x00_03_02_00: "internal/service/codec/json",
 	0x00_03_03_00: "internal/service/codec/xml",
