@@ -157,6 +157,8 @@ func (p *PolicyValue) lockouts() []string {
 	//: every recovery command must be reachable when the entitlement is what
 	//: is broken, or a lapsed machine has no path back short of a reinstall.
 	for _, recovery := range p.RecoveryPaths {
+		//: a recovery command that is GATED is the lockout; the entry being
+		//: unreachable is a different fault, reported by unreachableEntries.
 		if !p.Exempt(strings.Split(recovery, pathSeparator)) {
 			faults = append(faults,
 				"recovery path "+quote(recovery)+" is not exempt: an operator whose "+

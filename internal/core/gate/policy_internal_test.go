@@ -121,6 +121,7 @@ func TestPolicyValue_ExemptNil(t *testing.T) {
 		{name: "the bare root", path: nil},
 		{name: "a named command", path: []string{"version"}},
 	}
+	//: one row per shape a caller might ask a nil policy about.
 	for _, tt := range tests {
 		//: one row per shape a caller might ask a nil policy about.
 		t.Run(tt.name, func(t *testing.T) {
@@ -274,6 +275,7 @@ func TestPolicyValue_Validate(t *testing.T) {
 			reason: "one start-up reports the whole list",
 		},
 	}
+	//: one row per fault, plus the joined case and the passing one.
 	for _, tt := range tests {
 		//: one row per fault, plus the joined case and the passing one.
 		t.Run(tt.name, func(t *testing.T) {
@@ -282,6 +284,7 @@ func TestPolicyValue_Validate(t *testing.T) {
 			err := tt.policy.Validate()
 			//: a usable policy returns a genuine nil.
 			if tt.wantOK {
+				//: anything else means a working policy was refused.
 				if err != nil {
 					t.Fatalf("Validate() = %v, want nil — %s", err, tt.reason)
 				}
@@ -301,6 +304,8 @@ func TestPolicyValue_Validate(t *testing.T) {
 			//: each expected fault must be named; a joined error that reports
 			//: only the first is the defect this row exists for.
 			for _, want := range tt.wantSubs {
+				//: a report naming only the first fault is the defect this
+				//: row exists for.
 				if !strings.Contains(message, want) {
 					t.Errorf("Validate() private detail does not mention %q: %s", want, message)
 				}

@@ -141,6 +141,7 @@ func TestDecide(t *testing.T) {
 			reason: "showing help must not require an entitlement",
 		},
 	}
+	//: one row per ordering the classifier must get right.
 	for _, tt := range tests {
 		//: one row per ordering the classifier must get right.
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,6 +222,7 @@ func TestDecideCarriesTheCauseWhole(t *testing.T) {
 			reason:   "an upgrading caller reads the required version off it",
 		},
 	}
+	//: one row per refusal a caller has to tell apart.
 	for _, tt := range tests {
 		//: one row per refusal a caller has to tell apart.
 		t.Run(tt.name, func(t *testing.T) {
