@@ -20,11 +20,26 @@ package; the service and `core/entitlement` stay internal.
 | `New` | func | delegates verbatim to `svcent.NewService` |
 | `RosterLifetime` | const | 24 h — the window a signed roster stays usable |
 | `Code*` | const | the fifteen codes, for `errs.HasCode` |
+| `Err*` | var | the fourteen sentinels, for `errors.Is` |
+| `Bundle` | type alias | the one-document roster form, for a caller that serves or caches one |
+| `Getter` | type alias | the roster HTTP surface, substitutable in a consumer's own suite |
+| `UpdateRequiredError` | type alias | the version-floor refusal, carrying both versions |
+| `NewWithGetter` | func | a verifier whose fetches go through your client |
+| `RequiresUpdate` / `UpdateRefusal` | func | the version floor, without a Service |
 
-The codes are re-exported deliberately, following `pkg/v1/authz` and
-`pkg/v1/selfupdate`: a consumer of THIS domain must distinguish "cannot decide"
-from "decided no", and a facade that hid the codes would force it to match on
-message text.
+**Both spellings of "why" are exported, and they must agree.** The codes follow
+`pkg/v1/authz` and `pkg/v1/selfupdate`; the sentinels follow `pkg/v1/vfs` and
+`pkg/v1/cache`. A consumer of THIS domain must distinguish "cannot decide" from
+"decided no", and it will reach for `errors.Is` or for `errs.HasCode` depending
+on where it came from — a facade offering only one would force the other half of
+its callers onto message text.
+
+The first cut of this package exported fifteen `Code*` and **not one** sentinel,
+which made it unusable by the consumer it was written for.
+`TestTheFacadeCarriesBothWaysOfAskingWhy` pairs every sentinel with its code so a
+mismatched re-export fails rather than drifts, and the suite lives in an
+`_test` package with no access to the internal layers — a test that imported
+them would have passed against the incomplete facade.
 
 ## Bring your own identity
 

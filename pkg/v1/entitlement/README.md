@@ -39,7 +39,12 @@ What is NOT answered, and cannot be locally, is a frozen CLOCK: every source of 
 ## Index
 
 - [Constants](<#constants>)
+- [Variables](<#variables>)
+- [func RequiresUpdate\(current, floor string\) bool](<#RequiresUpdate>)
+- [func UpdateRefusal\(current, floor string\) error](<#UpdateRefusal>)
+- [type Bundle](<#Bundle>)
 - [type CIEntitlement](<#CIEntitlement>)
+- [type Getter](<#Getter>)
 - [type Grant](<#Grant>)
 - [type Identity](<#Identity>)
 - [type Origin](<#Origin>)
@@ -47,7 +52,9 @@ What is NOT answered, and cannot be locally, is a frozen CLOCK: every source of 
 - [type Roster](<#Roster>)
 - [type Service](<#Service>)
   - [func New\(identity Identity, vendor \[\]byte, product \*Product\) \*Service](<#New>)
+  - [func NewWithGetter\(client Getter, identity Identity, vendor \[\]byte, product \*Product\) \*Service](<#NewWithGetter>)
 - [type Subject](<#Subject>)
+- [type UpdateRequiredError](<#UpdateRequiredError>)
 
 
 ## Constants
@@ -148,8 +155,105 @@ const CodeUpdateRequired errs.Code = coreent.CodeUpdateRequired
 const RosterLifetime time.Duration = coreent.RosterLifetime
 ```
 
+## Variables
+
+<a name="ErrNoLicense"></a>The fourteen sentinels, re\-exported so errors.Is answers on them. They are the SAME values core declares, not copies, so a caller may compare across the facade boundary; each also carries the matching Code above, so errs.HasCode and errors.Is are two ways of asking one question.
+
+A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable says "cannot decide", and treating it as "decided no" turns an outage into a revocation.
+
+```go
+var (
+    // ErrNoLicense identifies a machine with no entitlement key at all.
+    ErrNoLicense error = coreent.ErrNoLicense
+
+    // ErrRosterUnsigned identifies a roster carrying no valid vendor signature.
+    ErrRosterUnsigned error = coreent.ErrRosterUnsigned
+
+    // ErrRosterStale identifies a roster that verified but whose window has closed.
+    ErrRosterStale error = coreent.ErrRosterStale
+
+    // ErrRevoked identifies a subject absent from a roster that was itself valid.
+    ErrRevoked error = coreent.ErrRevoked
+
+    // ErrLicenseExpired identifies a subject whose own term has closed.
+    ErrLicenseExpired error = coreent.ErrLicenseExpired
+
+    // ErrKeyMismatch identifies a local key that does not match the published fingerprint.
+    ErrKeyMismatch error = coreent.ErrKeyMismatch
+
+    // ErrRosterUnreachable identifies a check that could not decide either way.
+    ErrRosterUnreachable error = coreent.ErrRosterUnreachable
+
+    // ErrAmbiguousLicense identifies more than one identity on one machine.
+    ErrAmbiguousLicense error = coreent.ErrAmbiguousLicense
+
+    // ErrCIUnverifiable identifies a CI run whose provenance could not be proven.
+    ErrCIUnverifiable error = coreent.ErrCIUnverifiable
+
+    // ErrCIUnknownKey identifies a CI token signed by a key the issuer does not publish.
+    ErrCIUnknownKey error = coreent.ErrCIUnknownKey
+
+    // ErrCINotEntitled identifies a CI account the roster does not cover.
+    ErrCINotEntitled error = coreent.ErrCINotEntitled
+
+    // ErrNoPossession identifies a holder who could not prove possession.
+    ErrNoPossession error = coreent.ErrNoPossession
+
+    // ErrClockRegressed identifies a clock behind the last signed document this machine verified.
+    ErrClockRegressed error = coreent.ErrClockRegressed
+
+    // ErrUpdateRequired identifies a build below the floor the roster mandates.
+    ErrUpdateRequired error = coreent.ErrUpdateRequired
+)
+```
+
+<a name="RequiresUpdate"></a>
+## func [RequiresUpdate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L243>)
+
+```go
+func RequiresUpdate(current, floor string) bool
+```
+
+RequiresUpdate reports whether current is below the floor a roster mandates.
+
+Parameters:
+
+- current: the running build's version.
+- floor: the minimum the roster requires; an empty floor requires nothing.
+
+Returns:
+
+- required: true when the running build is below the floor.
+
+<a name="UpdateRefusal"></a>
+## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L256>)
+
+```go
+func UpdateRefusal(current, floor string) error
+```
+
+UpdateRefusal builds the typed refusal for a build below the roster's floor.
+
+Parameters:
+
+- current: the running build's version.
+- floor: the minimum the roster requires.
+
+Returns:
+
+- err: an \*UpdateRequiredError carrying both versions.
+
+<a name="Bundle"></a>
+## type [Bundle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L207>)
+
+Bundle is the one\-document roster form: the raw roster and its detached signature in a single object, because two documents cannot be fetched atomically. It aliases the service type \(ADR 0074\) — a caller BUILDS one to serve or to cache, which is why it is public at all.
+
+```go
+type Bundle = svcent.BundleValue
+```
+
 <a name="CIEntitlement"></a>
-## type [CIEntitlement](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L129>)
+## type [CIEntitlement](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L181>)
 
 CIEntitlement is a roster's seat for a continuous\-integration account.
 
@@ -157,8 +261,17 @@ CIEntitlement is a roster's seat for a continuous\-integration account.
 type CIEntitlement = coreent.CIEntitlementValue
 ```
 
+<a name="Getter"></a>
+## type [Getter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L212>)
+
+Getter performs the roster HTTP GETs. A consumer substitutes it to exercise the admission logic without a network, which is the only way to test a refusal path that depends on what an origin answered.
+
+```go
+type Getter = svcent.Getter
+```
+
 <a name="Grant"></a>
-## type [Grant](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L133>)
+## type [Grant](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L185>)
 
 Grant is a verified entitlement, with the deadline past which it must be re\-verified and whether it was decided offline.
 
@@ -167,7 +280,7 @@ type Grant = coreent.GrantValue
 ```
 
 <a name="Identity"></a>
-## type [Identity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L120>)
+## type [Identity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L172>)
 
 Identity is the machine's half of the proof. It aliases the core port.
 
@@ -176,7 +289,7 @@ type Identity = coreent.Identity
 ```
 
 <a name="Origin"></a>
-## type [Origin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L136>)
+## type [Origin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L188>)
 
 Origin is one place a roster is published.
 
@@ -185,7 +298,7 @@ type Origin = coreent.OriginValue
 ```
 
 <a name="Product"></a>
-## type [Product](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L140>)
+## type [Product](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L192>)
 
 Product names the vendor whose roster this binary trusts. It aliases the service type: these are one engine's construction parameters \(ADR 0074\).
 
@@ -194,7 +307,7 @@ type Product = svcent.ProductValue
 ```
 
 <a name="Roster"></a>
-## type [Roster](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L123>)
+## type [Roster](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L175>)
 
 Roster is a published, vendor\-signed entitlement roster.
 
@@ -203,7 +316,7 @@ type Roster = coreent.RosterValue
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L143>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L195>)
 
 Service verifies entitlement. It aliases the service handle \(ADR 0074\).
 
@@ -212,7 +325,7 @@ type Service = svcent.Service
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L146>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L198>)
 
 ```go
 func New(identity Identity, vendor []byte, product *Product) *Service
@@ -220,13 +333,42 @@ func New(identity Identity, vendor []byte, product *Product) *Service
 
 New returns a verifier for the given identity, vendor key and product.
 
+<a name="NewWithGetter"></a>
+### func [NewWithGetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L230>)
+
+```go
+func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Product) *Service
+```
+
+NewWithGetter returns a verifier whose roster fetches go through client.
+
+Parameters:
+
+- client: the HTTP surface the roster is fetched over.
+- identity: the machine's half of the proof.
+- vendor: the ed25519 public key the binary links in.
+- product: the vendor\-specific facts; a nil product uses the fallbacks.
+
+Returns:
+
+- service: the verifier.
+
 <a name="Subject"></a>
-## type [Subject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L126>)
+## type [Subject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L178>)
 
 Subject is one entry in a roster: an identity and what it is entitled to.
 
 ```go
 type Subject = coreent.SubjectValue
+```
+
+<a name="UpdateRequiredError"></a>
+## type [UpdateRequiredError](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L218>)
+
+UpdateRequiredError carries the two versions a version\-floor refusal is about. It exists as a TYPE rather than a message because a caller that cannot read the required version out of the refusal re\-runs the upgrade, gets the same refusal, and loops forever.
+
+```go
+type UpdateRequiredError = svcent.UpdateRequiredError
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)
