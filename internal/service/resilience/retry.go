@@ -3,6 +3,7 @@ package resilience
 
 import (
 	"context"
+	"math"
 	"math/rand/v2"
 	"time"
 
@@ -43,6 +44,13 @@ func NewRetry(cfg RetryConfig) coreres.Runner {
 	if cfg.Multiplier < defaultMultiplier && cfg.Multiplier <= 1 {
 		//: standard exponential doubling.
 		cfg.Multiplier = defaultMultiplier
+	}
+	//: NaN FIRST: Go's min/max propagate it, so min(max(NaN, 0), 1) is NaN, and
+	//: NaN <= 0 is false — it would sail past every later guard into a
+	//: float-to-int conversion Go leaves implementation-defined.
+	if math.IsNaN(cfg.Jitter) {
+		//: an unspecifiable width is no width.
+		cfg.Jitter = noJitter
 	}
 	//: a jitter wider than the delay is a different policy; clamp into [0, 1].
 	cfg.Jitter = min(max(cfg.Jitter, noJitter), maxJitter)
@@ -131,13 +139,24 @@ func (r *retryRunner) backoff(attempt int) time.Duration {
 // assert neither precisely.
 func (r *retryRunner) jittered(delay time.Duration) time.Duration {
 	//: the zero value is the deterministic backoff this policy always had.
-	if r.cfg.Jitter <= noJitter {
+	//: NewRetry normalises NaN, so this comparison is total.
+	if r.cfg.Jitter <= noJitter || delay <= 0 {
 		//: unchanged.
 		return delay
 	}
+	//: Jitter is clamped into [0, 1], so the product never exceeds delay and the
+	//: conversion is always in range.
 	width := int64(float64(delay) * r.cfg.Jitter)
+	//: A widened wait must stay REPRESENTABLE. delay+width wraps negative past
+	//: MaxInt64, and time.NewTimer fires a negative duration immediately — so
+	//: the overflow would abolish the backoff at exactly the attempt where it is
+	//: longest, which is the worst possible moment to stop waiting.
+	if headroom := math.MaxInt64 - int64(delay); width > headroom {
+		//: spread across what is left rather than past the end of the type.
+		width = headroom
+	}
 	//: rand.Int64N panics on a non-positive bound, which a sub-nanosecond
-	//: delay or a rounded-to-zero width reaches. Nothing to spread there.
+	//: delay, a rounded-to-zero width or an exhausted headroom reaches.
 	if width <= 0 {
 		//: unchanged.
 		return delay

@@ -98,6 +98,14 @@ Two contracts were tightened during review, both before any release:
     different claims, and a suite that cannot assert the first without the
     second can assert neither precisely.
 
+  **This is a published-shape change, and ADR 0040 is why it is allowed.**
+  `pkg/v1/resilience.RetryConfig` is an alias onto the service type, so its
+  arity changed: `{MaxAttempts, BaseDelay, MaxDelay, Multiplier, Retryable}`
+  became `{…, Jitter}`. Any downstream UNKEYED composite literal stops
+  compiling. That is permitted only because `pkg` is still v0 and Go promises
+  nothing across v0 minors — a licence that expires at `pkg/v1.0.0`, after
+  which the same edit would need a sibling type or a `pkg/v2` path.
+
   The trigger was a concrete consumer: `kodflow/ktn-linter` carried its own
   jittered dial backoff for the proxy→daemon socket handshake, with the
   thundering-herd reason written beside it, because this policy could not

@@ -4,6 +4,7 @@ package resilience
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -393,6 +394,89 @@ func Test_retryRunner_jitterSpreadsCallers(t *testing.T) {
 			if len(seen) < tt.wantMin {
 				t.Errorf("jittered() produced %d distinct waits over %d draws, want at least %d — %s",
 					len(seen), jitterDraws, tt.wantMin, tt.reason)
+			}
+		})
+	}
+}
+
+// Test_NewRetry_jitterEdges pins the two inputs that escape an ordinary clamp.
+//
+// Both were found on review of the change that introduced Jitter, and both are
+// the same class of defect: a value that passes every guard written for
+// ordinary numbers and then reaches an operation with no defined answer.
+func Test_NewRetry_jitterEdges(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		jitter float64
+		delay  time.Duration
+		lo, hi time.Duration
+		reason string
+	}{
+		{
+			//: Go's min/max PROPAGATE NaN, so min(max(NaN, 0), 1) is NaN, and
+			//: NaN <= 0 is false. It sails past every later guard into
+			//: int64(float64(delay) * NaN), which Go leaves
+			//: implementation-defined — this platform answers MinInt64.
+			name:   "a not-a-number jitter is normalised, not clamped",
+			jitter: math.NaN(), delay: time.Second,
+			lo: time.Second, hi: time.Second,
+			reason: "an unspecifiable width must become no width, on every platform",
+		},
+		{
+			//: delay+width wraps negative past MaxInt64, and time.NewTimer
+			//: fires a negative duration IMMEDIATELY — abolishing the backoff
+			//: at exactly the attempt where it is longest.
+			name:   "a delay at the top of the type stays representable",
+			jitter: 0.5, delay: math.MaxInt64,
+			lo: math.MaxInt64, hi: math.MaxInt64,
+			reason: "a widened wait that wraps negative is not a wait at all",
+		},
+		{
+			name:   "a delay just under the top leaves a little headroom",
+			jitter: 0.5, delay: math.MaxInt64 - 1000,
+			lo: math.MaxInt64 - 1000, hi: math.MaxInt64,
+			reason: "spread across what is left rather than past the end of the type",
+		},
+		{
+			name:   "a negative delay is handed back untouched",
+			jitter: 0.5, delay: -time.Second,
+			lo: -time.Second, hi: -time.Second,
+			reason: "nothing to widen, and a random negative width would be worse",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			//: Through NewRetry, because the NaN normalisation lives there.
+			runner, ok := NewRetry(RetryConfig{Jitter: tt.jitter}).(*retryRunner)
+			if !ok {
+				t.Fatalf("NewRetry() did not return a *retryRunner")
+			}
+			//: Asserted on the CONFIG, not on the outcome, and deliberately.
+			//: int64(float64(delay) * NaN) is implementation-defined: this
+			//: platform answers MinInt64, which the width <= 0 guard happens to
+			//: catch, so an outcome assertion would pass here and say nothing
+			//: about the platform where it does not. What must hold everywhere
+			//: is that NaN never reaches that conversion at all.
+			if math.IsNaN(runner.cfg.Jitter) {
+				t.Fatalf("NewRetry(Jitter: NaN) stored NaN — min/max propagate it, " +
+					"so the clamp alone does not normalise it")
+			}
+			for range jitterDraws {
+				got := runner.jittered(tt.delay)
+				//: A negative result is the failure this row exists for, and it
+				//: is reported as such rather than as an out-of-range number.
+				if got < 0 && tt.lo >= 0 {
+					t.Fatalf("jittered(%v) = %v — NEGATIVE, so time.NewTimer fires "+
+						"immediately and the backoff is gone (%s)", tt.delay, got, tt.reason)
+				}
+				if got < tt.lo || got > tt.hi {
+					t.Fatalf("jittered(%v) with Jitter=%v = %v, want within [%v, %v] — %s",
+						tt.delay, tt.jitter, got, tt.lo, tt.hi, tt.reason)
+				}
 			}
 		})
 	}
