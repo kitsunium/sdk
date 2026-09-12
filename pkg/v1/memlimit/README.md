@@ -51,7 +51,7 @@ Control groups are a Linux facility. Off Linux no limit file is readable, so App
 
 
 <a name="Limit"></a>
-## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/memlimit/pkg/v1/memlimit/memlimit.go#L87>)
+## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/memlimit/memlimit.go#L87>)
 
 Limit is an immutable record of one derivation: the allowance read, the limit derived, and the source that decided it. It aliases the core proc type.
 
@@ -60,7 +60,7 @@ type Limit = coreproc.MemoryLimitValue
 ```
 
 <a name="Apply"></a>
-### func [Apply](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/memlimit/pkg/v1/memlimit/memlimit.go#L96>)
+### func [Apply](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/memlimit/memlimit.go#L96>)
 
 ```go
 func Apply() Limit
@@ -71,7 +71,7 @@ Apply derives the Go soft memory limit from the tightest control\-group cap gove
 It stands aside — leaving the runtime default in place — when GOMEMLIMIT is already set, when no cgroup declares a cap, and when the derived limit is too small to be useful. Those three are told apart by Limit.Source.
 
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/memlimit/pkg/v1/memlimit/memlimit.go#L83>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/memlimit/memlimit.go#L83>)
 
 Source names what decided the soft memory limit. It aliases the core proc type.
 
