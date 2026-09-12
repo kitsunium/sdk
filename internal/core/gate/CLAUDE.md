@@ -34,6 +34,10 @@ on purpose.
   own repair command locks a lapsed machine out with no path back short of
   reinstalling, and nothing about the policy LOOKS wrong — the exemption list is
   simply missing an entry. `Validate` refuses it.
+- **An entry no path can equal is a lockout wearing a disguise.** `"license "`
+  with a trailing space matches nothing, so the exemption never fires and the
+  command stays gated — while the list LOOKS complete. `Validate` refuses it,
+  and the bare-root `""` is the one legitimate empty entry.
 - **`Validate` returns ONE error naming every fault**, not an `errors.Join`. A
   joined error has no single `Private` detail, so `errs.PrivateOf` reports the
   first fault's and a structured-logging caller would still fix them one

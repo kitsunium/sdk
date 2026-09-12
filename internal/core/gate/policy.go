@@ -112,6 +112,12 @@ func (p *PolicyValue) Validate() error {
 	}
 
 	var faults []string
+	//: an entry that can never match is a silent lockout: the exemption list
+	//: LOOKS complete and the command it names stays gated. It is the same
+	//: failure RecoveryPaths guards against, one level down, and it is why
+	//: this is checked before anything else reads the lists.
+	faults = append(faults, unmatchable("ExemptExact", p.ExemptExact)...)
+	faults = append(faults, unmatchable("ExemptSubtree", p.ExemptSubtree)...)
 	//: an unset action is the one field with no safe guess; see UpdateAction.
 	if !p.OnUpdateRequired.Valid() {
 		faults = append(faults,
@@ -161,4 +167,40 @@ func quote(path string) string {
 
 	//: an ordinary quoted path.
 	return `"` + path + `"`
+}
+
+// unmatchable reports every entry in a path list that no real command path can
+// equal, so a policy carrying one is refused rather than quietly not applying.
+//
+// A path is built by joining command names with a single space, and a command
+// name contains no space — the cli domain refuses one. So an entry with a
+// leading space, a trailing space or a doubled space cannot be produced by any
+// invocation, and the exemption it was written for never fires. Nothing about
+// the policy looks wrong; the command it names is simply still gated.
+//
+// Parameters:
+//   - field: the field name, for the message.
+//   - paths: the entries to check.
+//
+// Returns:
+//   - faults: one message per unmatchable entry.
+func unmatchable(field string, paths []string) []string {
+	var faults []string
+	//: every entry, because each is independently wrong or right.
+	for _, path := range paths {
+		//: the bare root is the one legitimate empty entry.
+		if path == "" {
+			continue
+		}
+		//: a trimmed or collapsed entry that differs is one no path can equal.
+		if strings.TrimSpace(path) != path || strings.Contains(path, pathSeparator+pathSeparator) {
+			faults = append(faults,
+				field+" entry "+quote(path)+" has stray whitespace, so no command path can "+
+					"equal it: the exemption it was written for never applies and the command "+
+					"stays gated")
+		}
+	}
+
+	//: whatever was found, possibly nothing.
+	return faults
 }

@@ -65,6 +65,9 @@ rather than typos:
 - **A gated recovery command** — a machine whose entitlement lapsed has no path
   back short of reinstalling, and nothing about the policy looks wrong.
   `RecoveryPaths` is what turns that from a comment into a refusal.
+- **An entry no path can equal** — `"license "` with a trailing space matches
+  nothing, so the exemption never fires and the command stays gated while the
+  list looks complete. The bare-root `""` is the one legitimate empty entry.
 
 ## Two lists, because one cannot say it
 

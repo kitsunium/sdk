@@ -97,6 +97,13 @@ The policy names the commands that repair a refused entitlement, and `Validate`
 REFUSES a policy in which any of them is gated. So does a policy that exempts
 nothing at all: such a binary cannot be repaired from inside itself.
 
+And so does an entry no command path can ever equal. A path joins command names
+with ONE space and a name contains none, so `"license "` — a trailing space —
+matches nothing: the exemption never fires and the command it was written for
+stays gated. That is the same lockout as a missing entry wearing the disguise of
+a present one, and it is the reason this check runs before anything else reads
+the lists.
+
 `Validate` returns **one** error naming every fault rather than an
 `errors.Join` of several. That distinction is the difference between a promise
 and a delivered one — a joined error has no single `Private` detail, so

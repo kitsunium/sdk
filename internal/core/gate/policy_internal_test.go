@@ -187,6 +187,46 @@ func TestPolicyValue_Validate(t *testing.T) {
 			reason:   "every invocation would need an entitlement, including the ones that repair it",
 		},
 		{
+			//: THE silent lockout one level down. The list LOOKS complete and
+			//: the command it names is still gated, because no path can ever
+			//: equal an entry with a trailing space.
+			name: "a subtree entry with a trailing space",
+			policy: &PolicyValue{
+				ExemptSubtree:    []string{"license "},
+				OnUpdateRequired: UpdateRefuse,
+			},
+			wantSubs: []string{"ExemptSubtree entry", "stays gated"},
+			reason:   "no command path can equal it, so the exemption never applies",
+		},
+		{
+			name: "an exact entry with a leading space",
+			policy: &PolicyValue{
+				ExemptExact:      []string{" version"},
+				OnUpdateRequired: UpdateRefuse,
+			},
+			wantSubs: []string{"ExemptExact entry", "stays gated"},
+			reason:   "same failure on the other list",
+		},
+		{
+			name: "an entry with a doubled separator",
+			policy: &PolicyValue{
+				ExemptExact:      []string{"license  create"},
+				OnUpdateRequired: UpdateRefuse,
+			},
+			wantSubs: []string{"stray whitespace"},
+			reason:   "a path joins names with ONE space, so two can never appear",
+		},
+		{
+			//: The one legitimate empty entry, which must NOT be refused.
+			name: "the bare root entry is not stray whitespace",
+			policy: &PolicyValue{
+				ExemptExact:      []string{"", "version"},
+				OnUpdateRequired: UpdateRefuse,
+			},
+			wantOK: true,
+			reason: "the empty string IS the bare root invocation",
+		},
+		{
 			//: Joined, because a policy corrected one refusal at a time takes
 			//: as many start-ups as it has faults.
 			name:   "every fault at once",
