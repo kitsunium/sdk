@@ -208,7 +208,7 @@ var (
 ```
 
 <a name="RequiresUpdate"></a>
-## func [RequiresUpdate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L243>)
+## func [RequiresUpdate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L235>)
 
 ```go
 func RequiresUpdate(current, floor string) bool
@@ -216,17 +216,10 @@ func RequiresUpdate(current, floor string) bool
 
 RequiresUpdate reports whether current is below the floor a roster mandates.
 
-Parameters:
-
-- current: the running build's version.
-- floor: the minimum the roster requires; an empty floor requires nothing.
-
-Returns:
-
-- required: true when the running build is below the floor.
+It takes the running build's version and the minimum the roster requires — an empty floor requires nothing — and reports whether the build is below it.
 
 <a name="UpdateRefusal"></a>
-## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L256>)
+## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L244>)
 
 ```go
 func UpdateRefusal(current, floor string) error
@@ -234,14 +227,7 @@ func UpdateRefusal(current, floor string) error
 
 UpdateRefusal builds the typed refusal for a build below the roster's floor.
 
-Parameters:
-
-- current: the running build's version.
-- floor: the minimum the roster requires.
-
-Returns:
-
-- err: an \*UpdateRequiredError carrying both versions.
+It takes the running build's version and the minimum the roster requires, and returns an \*UpdateRequiredError carrying both.
 
 <a name="Bundle"></a>
 ## type [Bundle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L207>)
@@ -334,7 +320,7 @@ func New(identity Identity, vendor []byte, product *Product) *Service
 New returns a verifier for the given identity, vendor key and product.
 
 <a name="NewWithGetter"></a>
-### func [NewWithGetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L230>)
+### func [NewWithGetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L226>)
 
 ```go
 func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Product) *Service
@@ -342,16 +328,7 @@ func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Pro
 
 NewWithGetter returns a verifier whose roster fetches go through client.
 
-Parameters:
-
-- client: the HTTP surface the roster is fetched over.
-- identity: the machine's half of the proof.
-- vendor: the ed25519 public key the binary links in.
-- product: the vendor\-specific facts; a nil product uses the fallbacks.
-
-Returns:
-
-- service: the verifier.
+client is the HTTP surface the roster is fetched over, identity the machine's half of the proof, vendor the ed25519 public key the binary links in, and product the vendor\-specific facts — a nil product uses the documented fallbacks.
 
 <a name="Subject"></a>
 ## type [Subject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L178>)

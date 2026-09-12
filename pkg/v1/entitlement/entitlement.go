@@ -219,14 +219,10 @@ type UpdateRequiredError = svcent.UpdateRequiredError
 
 // NewWithGetter returns a verifier whose roster fetches go through client.
 //
-// Parameters:
-//   - client: the HTTP surface the roster is fetched over.
-//   - identity: the machine's half of the proof.
-//   - vendor: the ed25519 public key the binary links in.
-//   - product: the vendor-specific facts; a nil product uses the fallbacks.
-//
-// Returns:
-//   - service: the verifier.
+// client is the HTTP surface the roster is fetched over, identity the machine's
+// half of the proof, vendor the ed25519 public key the binary links in, and
+// product the vendor-specific facts — a nil product uses the documented
+// fallbacks.
 func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Product) *Service {
 	//: delegate verbatim to the service implementation.
 	return svcent.NewServiceWithGetter(client, identity, vendor, product)
@@ -234,12 +230,8 @@ func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Pro
 
 // RequiresUpdate reports whether current is below the floor a roster mandates.
 //
-// Parameters:
-//   - current: the running build's version.
-//   - floor: the minimum the roster requires; an empty floor requires nothing.
-//
-// Returns:
-//   - required: true when the running build is below the floor.
+// It takes the running build's version and the minimum the roster requires —
+// an empty floor requires nothing — and reports whether the build is below it.
 func RequiresUpdate(current, floor string) bool {
 	//: delegate verbatim to the service implementation.
 	return svcent.RequiresUpdate(current, floor)
@@ -247,12 +239,8 @@ func RequiresUpdate(current, floor string) bool {
 
 // UpdateRefusal builds the typed refusal for a build below the roster's floor.
 //
-// Parameters:
-//   - current: the running build's version.
-//   - floor: the minimum the roster requires.
-//
-// Returns:
-//   - err: an *UpdateRequiredError carrying both versions.
+// It takes the running build's version and the minimum the roster requires, and
+// returns an *UpdateRequiredError carrying both.
 func UpdateRefusal(current, floor string) error {
 	//: delegate verbatim to the service implementation.
 	return svcent.UpdateRefusal(current, floor)
