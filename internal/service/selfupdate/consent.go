@@ -29,6 +29,10 @@ import (
 	coreupd "github.com/kitsunium/sdk/internal/core/selfupdate"
 )
 
+// nullDevicePath is the well-known sink whose reads return EOF forever. It is a
+// CHARACTER DEVICE, which is exactly why the mode test alone cannot exclude it.
+const nullDevicePath string = "/dev/null"
+
 // AutoUpgradeEnv authorises an upgrade the user did not explicitly request —
 // the licence gate's mandatory update. Set it to 1/true/yes/on for CI images,
 // devcontainers and hook-driven runs where no one can answer a prompt.
@@ -173,10 +177,6 @@ func askUpgradeConsent(out io.Writer, in io.Reader) bool {
 	}
 }
 
-// nullDevicePath is the well-known sink whose reads return EOF forever. It is a
-// CHARACTER DEVICE, which is exactly why the mode test alone cannot exclude it.
-const nullDevicePath string = "/dev/null"
-
 // StdinIsTerminal reports whether a human could answer a prompt on this
 // process's standard input.
 //
@@ -198,14 +198,11 @@ const nullDevicePath string = "/dev/null"
 // the alternative is a comment claiming a precision this does not have.
 func StdinIsTerminal() bool {
 	info, err := os.Stdin.Stat()
-	//: A stat we cannot read is not evidence of a human.
-	if err != nil {
+	//: One refusal for the two ways stdin is decisively not a terminal: a stat
+	//: we cannot read is not evidence of a human, and a pipe, a regular file or
+	//: a closed descriptor is not a character device.
+	if err != nil || !terminalLike(info.Mode()) {
 		//: Assume unattended.
-		return false
-	}
-	//: A pipe, a file or a closed descriptor is not a terminal.
-	if !terminalLike(info.Mode()) {
-		//: Nobody is behind it.
 		return false
 	}
 

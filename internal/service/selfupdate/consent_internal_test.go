@@ -150,7 +150,12 @@ func Test_isNullDevice(t *testing.T) {
 				if err != nil {
 					t.Skipf("%s unavailable: %v", nullDevicePath, err)
 				}
-				t.Cleanup(func() { _ = f.Close() })
+				t.Cleanup(func() {
+					//: A fixture handle that will not close is worth reporting.
+					if closeErr := f.Close(); closeErr != nil {
+						t.Logf("close: %v", closeErr)
+					}
+				})
 
 				//: The handle the case stats.
 				return f
@@ -166,7 +171,12 @@ func Test_isNullDevice(t *testing.T) {
 				if err != nil {
 					t.Fatalf("temp: %v", err)
 				}
-				t.Cleanup(func() { _ = f.Close() })
+				t.Cleanup(func() {
+					//: A fixture handle that will not close is worth reporting.
+					if closeErr := f.Close(); closeErr != nil {
+						t.Logf("close: %v", closeErr)
+					}
+				})
 
 				//: An ordinary file, excluded by the mode test anyway.
 				return f

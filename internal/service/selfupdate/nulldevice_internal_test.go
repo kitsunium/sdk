@@ -23,7 +23,12 @@ func TestStdinFromNullIsNotATerminal(t *testing.T) {
 			if err != nil {
 				t.Skipf("%s unavailable: %v", nullDevicePath, err)
 			}
-			defer func() { _ = null.Close() }()
+			defer func() {
+				//: A fixture handle that will not close is worth reporting.
+				if closeErr := null.Close(); closeErr != nil {
+					t.Logf("close: %v", closeErr)
+				}
+			}()
 
 			original := os.Stdin
 			os.Stdin = null
