@@ -148,7 +148,16 @@ const CodeUnknownArchive errs.Code = coreupd.CodeUnknownArchive
 // operator did not opt into. Recoverable, but only through the opt-in.
 const CodeElevationNotAuthorised errs.Code = coreupd.CodeElevationNotAuthorised
 
-// Fetcher performs the HTTP GETs a self-update needs. It aliases the core port.
+// CandidateListSentinel is the tag value meaning "list the candidates rather
+// than install one".
+//
+// It exists because a CLI flag taking an optional value has to spell "the flag
+// was given without a value" AS a value. A caller wires it into its own flag
+// definition, so the sentinel has to be reachable from outside the package that
+// consumes it.
+const CandidateListSentinel string = svcupd.CandidateListSentinel
+
+// Getter performs the HTTP GETs a self-update needs. It aliases the core port.
 type Getter = coreupd.Getter
 
 // FileSystem is the disk half of replacing a running binary. It aliases the core
@@ -192,4 +201,16 @@ func New(version string, src Source) *Service {
 func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copier Copier) *Service {
 	//: delegate verbatim to the service implementation.
 	return svcupd.NewUpdaterWithDeps(version, src, client, fs, copier)
+}
+
+// StdinIsTerminal reports whether a human could answer a prompt on this
+// process's standard input.
+//
+// It is a free function rather than something AuthoriseUnattendedUpgrade works
+// out for itself, and that is the point: the consent decision stays testable
+// without a pty, because the CALLER supplies the answer. Pass the result as the
+// interactive argument.
+func StdinIsTerminal() bool {
+	//: delegate verbatim to the service implementation.
+	return svcupd.StdinIsTerminal()
 }

@@ -246,10 +246,23 @@ func TestStdinIsTerminal(t *testing.T) {
 					}
 					return
 				}
-				//: Same mode, same answer — the accessor must not invent one.
-				want := info.Mode()&os.ModeCharDevice != 0
-				if got := selfupdate.StdinIsTerminal(); got != want {
-					t.Errorf("StdinIsTerminal() = %v, want %v for mode %v", got, want, info.Mode())
+				//: The mode is NECESSARY but not sufficient, and this
+				//: expectation used to say otherwise — which is how the null
+				//: device read as a terminal. A non-character-device is
+				//: decisively not a terminal; a character device may still be
+				//: /dev/null, which the accessor excludes by identity.
+				if info.Mode()&os.ModeCharDevice == 0 {
+					if selfupdate.StdinIsTerminal() {
+						t.Errorf("StdinIsTerminal() = true for mode %v, want false", info.Mode())
+					}
+
+					return
+				}
+				//: A character device: the only wrong answer is claiming a
+				//: terminal when stdin is the null device.
+				nullInfo, statErr := os.Stat("/dev/null")
+				if statErr == nil && os.SameFile(info, nullInfo) && selfupdate.StdinIsTerminal() {
+					t.Error("StdinIsTerminal() = true with stdin on the null device, want false")
 				}
 			},
 		},

@@ -125,3 +125,104 @@ func Test_terminalLike(t *testing.T) {
 		})
 	}
 }
+
+// Test_isNullDevice pins the exclusion the mode test cannot make.
+//
+// /dev/null IS a character device — os.Stat reports ModeCharDevice on it — so
+// terminalLike answers true for it, and a caller redirecting stdin from it was
+// told a human was present. The consent path then wrote a prompt to a reader
+// that answers EOF forever, instead of refusing immediately as unattended.
+func Test_isNullDevice(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		open   func(t *testing.T) *os.File
+		want   bool
+		reason string
+	}{
+		{
+			name: "the null device is one",
+			open: func(t *testing.T) *os.File {
+				t.Helper()
+				f, err := os.Open(nullDevicePath)
+				//: A platform without /dev/null has nothing to assert here.
+				if err != nil {
+					t.Skipf("%s unavailable: %v", nullDevicePath, err)
+				}
+				t.Cleanup(func() {
+					//: A fixture handle that will not close is worth reporting.
+					if closeErr := f.Close(); closeErr != nil {
+						t.Logf("close: %v", closeErr)
+					}
+				})
+
+				//: The handle the case stats.
+				return f
+			},
+			want:   true,
+			reason: "it passes the mode test and answers every prompt with EOF",
+		},
+		{
+			name: "a regular file is not",
+			open: func(t *testing.T) *os.File {
+				t.Helper()
+				f, err := os.CreateTemp(t.TempDir(), "stdin-*")
+				if err != nil {
+					t.Fatalf("temp: %v", err)
+				}
+				t.Cleanup(func() {
+					//: A fixture handle that will not close is worth reporting.
+					if closeErr := f.Close(); closeErr != nil {
+						t.Logf("close: %v", closeErr)
+					}
+				})
+
+				//: An ordinary file, excluded by the mode test anyway.
+				return f
+			},
+			want:   false,
+			reason: "a redirect from a file is already excluded by mode",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			info, err := tt.open(t).Stat()
+			//: A handle that cannot be stat'd tells the case nothing.
+			if err != nil {
+				t.Fatalf("stat: %v", err)
+			}
+			//: Identity, not name — a symlink or bind mount must still match.
+			if got := isNullDevice(info); got != tt.want {
+				t.Errorf("isNullDevice() = %t, want %t (%s)", got, tt.want, tt.reason)
+			}
+		})
+	}
+}
+
+// Test_terminalLikeDoesNotExcludeTheNullDevice pins WHY the identity check has
+// to exist: the mode test alone cannot make this distinction, and the comment
+// that claimed it could was wrong.
+func Test_terminalLikeDoesNotExcludeTheNullDevice(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ name string }{{name: "the null device is a character device"}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			info, err := os.Stat(nullDevicePath)
+			//: A platform without /dev/null has nothing to assert here.
+			if err != nil {
+				t.Skipf("%s unavailable: %v", nullDevicePath, err)
+			}
+			//: This is the finding, asserted rather than described: the mode
+			//: test says "terminal" for something that is not one.
+			if !terminalLike(info.Mode()) {
+				t.Error("terminalLike(/dev/null) = false; the identity check would then be dead code")
+			}
+		})
+	}
+}
