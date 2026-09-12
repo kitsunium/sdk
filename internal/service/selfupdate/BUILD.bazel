@@ -53,6 +53,7 @@ go_test(
         "elevation_external_test.go",
         "elevation_internal_test.go",
         "interfaces_external_test.go",
+        "nulldevice_internal_test.go",
         "osfilesystem_internal_test.go",
         "review_internal_test.go",
         "signature_external_test.go",

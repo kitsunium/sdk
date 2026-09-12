@@ -173,11 +173,29 @@ func askUpgradeConsent(out io.Writer, in io.Reader) bool {
 	}
 }
 
+// nullDevicePath is the well-known sink whose reads return EOF forever. It is a
+// CHARACTER DEVICE, which is exactly why the mode test alone cannot exclude it.
+const nullDevicePath string = "/dev/null"
+
 // StdinIsTerminal reports whether a human could answer a prompt on this
 // process's standard input.
 //
-// Callers pass the result to AuthoriseUnattendedUpgrade rather than letting
-// it detect its own terminal, so the decision stays testable without a pty.
+// Callers pass the result to AuthoriseUnattendedUpgrade rather than letting it
+// detect its own terminal, so the decision stays testable without a pty.
+//
+// # What this can and cannot tell apart
+//
+// A pipe, a regular file and a closed descriptor are excluded by the mode: none
+// is a character device. The null device IS one, and is excluded by identity —
+// os.SameFile against /dev/null, which is stdlib and portable, rather than a
+// path comparison a redirect would defeat.
+//
+// What remains indistinguishable, without a cgo or x/sys ioctl this module
+// cannot take (x/sys is banned SDK-wide), is one character device from another:
+// stdin redirected from /dev/zero or /dev/random reads as a terminal here. Both
+// answer a prompt with bytes nobody typed, so a caller in that position should
+// set the unattended opt-in rather than rely on detection. Said out loud because
+// the alternative is a comment claiming a precision this does not have.
 func StdinIsTerminal() bool {
 	info, err := os.Stdin.Stat()
 	//: A stat we cannot read is not evidence of a human.
@@ -185,13 +203,39 @@ func StdinIsTerminal() bool {
 		//: Assume unattended.
 		return false
 	}
-	//: Delegate the mode test so it is assertable without a real terminal.
-	return terminalLike(info.Mode())
+	//: A pipe, a file or a closed descriptor is not a terminal.
+	if !terminalLike(info.Mode()) {
+		//: Nobody is behind it.
+		return false
+	}
+
+	//: The null device passes the mode test and answers every prompt with EOF,
+	//: so exclude it by identity rather than by name.
+	return !isNullDevice(info)
 }
 
-// terminalLike reports whether a file mode is that of a character device —
-// what a tty is, and what a pipe, a regular file and /dev/null are not.
+// isNullDevice reports whether info describes the null device.
+//
+// os.SameFile compares what the filesystem says, so it holds through a symlink
+// or a bind mount — a path comparison against the string "/dev/null" would not.
+func isNullDevice(info os.FileInfo) bool {
+	nullInfo, err := os.Stat(nullDevicePath)
+	//: A platform with no /dev/null cannot have stdin pointing at it.
+	if err != nil {
+		//: Nothing to exclude.
+		return false
+	}
+
+	//: Identity, not name.
+	return os.SameFile(info, nullInfo)
+}
+
+// terminalLike reports whether a file mode is that of a character device.
+//
+// It excludes a pipe, a regular file and a closed descriptor. It does NOT
+// exclude the null device, which is a character device too — StdinIsTerminal
+// handles that separately, and this comment used to claim otherwise.
 func terminalLike(mode os.FileMode) bool {
-	//: A pipe (`echo x | tool run`) or a redirect has no one behind it.
+	//: A pipe (`echo x | tool run`) or a redirect to a file has no one behind it.
 	return mode&os.ModeCharDevice != 0
 }
