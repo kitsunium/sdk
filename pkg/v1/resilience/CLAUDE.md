@@ -15,6 +15,7 @@ cross-OS portable.
 | `Operation` / `Runner` | aliases onto `core/resilience` |
 | `RetryConfig` / `BreakerConfig` / `RateLimiterConfig` / `FallbackConfig` / `HedgeConfig` | aliases onto `service/resilience` |
 | `RetryConfig.Retryable` / `BreakerConfig.Retryable` / `FallbackConfig.Retryable` | `func(error) bool` — deterministic errors return verbatim (nil = replay/count/fall-back on everything) |
+| `RetryConfig.Jitter` | `float64` — widens each backoff by `[0, Jitter)` of itself, ADDED, clamped into `[0, 1]`. **0 is the deterministic backoff**, so an existing caller's timing is unchanged. Applied after the `MaxDelay` cap, so **when one is configured** a wait's ceiling is `MaxDelay * (1 + Jitter)`; a zero `MaxDelay` is no cap, so there is none to raise (ADR 0026) |
 | `HedgeConfig.Idempotent` | **mandatory** `bool` — the caller's in-code assertion that duplicating the operation is safe; false refuses the policy |
 | `NewRetry` / `NewCircuitBreaker` / `NewRateLimiter` / `NewBulkhead` / `NewTimeout` / `NewFallback` / `NewHedge` | constructors |
 | `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `FallbackFailed` | sentinels (`errs.HasReason`/`HasCode`), all `EX_TEMPFAIL`; `FallbackFailed` carries the `primary` + `fallback` messages as fields |

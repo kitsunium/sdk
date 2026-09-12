@@ -167,8 +167,13 @@ copies. `Test_hedge_RunReRaisesAPanicWithItsOriginalValue` and
 
 - Relabel an `*errs.Error` cause via plain `errs.Wrap(cause, …)` — origin-wins
   would let the cause hijack the policy code; use `wrapAs`.
-- Add jitter/wait-mode without an ADR note (still-deferred items of ADR 0026;
-  the retryable-error classifier is the one that has landed).
+- Add wait-mode without an ADR note (a still-deferred item of ADR 0026; the
+  retryable-error classifier and retry jitter are the two that have landed).
+- Make `RetryConfig.Jitter` apply by default, or move it inside `backoff`. Its
+  zero value being "deterministic" is what made it safe to land on a shipped
+  policy — every existing caller's timing is unchanged — and keeping `backoff`
+  pure is what lets the suite assert the growth curve separately from the
+  randomisation.
 - Call `cfg.Retryable` with a nil error — the call sites gate on `err != nil`
   first, so the predicate only ever classifies real failures.
 - Default `HedgeConfig.Idempotent` to true, or demote it to a doc comment. It is

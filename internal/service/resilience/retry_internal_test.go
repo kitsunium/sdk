@@ -4,12 +4,17 @@ package resilience
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
 	coreres "github.com/kitsunium/sdk/internal/core/resilience"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// jitterDraws is how many samples each bounds assertion takes. Enough that a
+// uniform draw escaping its range is found, cheap enough to stay in a unit test.
+const jitterDraws int = 2000
 
 // Test_retryRunner_backoff pins the geometric growth and the ceiling.
 //
@@ -263,6 +268,227 @@ func Test_retryRunner_RunCancelled(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
+		})
+	}
+}
+
+// Test_retryRunner_jittered pins the field ADR 0026 deferred, and pins the
+// thing that matters most about it: the ZERO value must not change a single
+// existing caller's timing.
+//
+// Deterministic backoff is what every Retry in this repository has today, so a
+// jitter that applied by default would silently re-time every retry loop in
+// every consumer. The zero value being "no jitter" is not a convenience — it is
+// what makes this field safe to land on a shipped policy.
+func Test_retryRunner_jittered(t *testing.T) {
+	t.Parallel()
+
+	const delay time.Duration = 100 * time.Millisecond
+
+	tests := []struct {
+		name   string
+		jitter float64
+		delay  time.Duration
+		lo, hi time.Duration
+		reason string
+	}{
+		{
+			name: "the zero value is the deterministic backoff", jitter: 0,
+			delay: delay, lo: delay, hi: delay,
+			reason: "an existing caller's timing must be untouched",
+		},
+		{
+			name: "a negative jitter clamps to none", jitter: -1,
+			delay: delay, lo: delay, hi: delay,
+			reason: "a negative width would shorten the backoff it is meant to widen",
+		},
+		{
+			name: "half the delay, the common choice", jitter: 0.5,
+			delay: delay, lo: delay, hi: delay + delay/2,
+			reason: "uniform in [delay, delay*1.5)",
+		},
+		{
+			name: "a jitter above one clamps to one", jitter: 99,
+			delay: delay, lo: delay, hi: 2 * delay,
+			reason: "wider than the delay is a randomised wait, not a jittered backoff",
+		},
+		{
+			//: rand.Int64N panics on a non-positive bound. A one-nanosecond
+			//: delay rounds the width to zero and would reach it.
+			name: "a delay too small to split does not panic", jitter: 0.5,
+			delay: 1, lo: 1, hi: 1,
+			reason: "there is nothing to spread inside one nanosecond",
+		},
+		{
+			name: "a zero delay does not panic", jitter: 0.5,
+			delay: 0, lo: 0, hi: 0,
+			reason: "no delay, no jitter",
+		},
+	}
+	//: one row per shape the function must survive.
+	for _, tt := range tests {
+		//: each shape is its own subtest, so a failure names the case.
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &retryRunner{cfg: RetryConfig{Jitter: clampJitterForTest(tt.jitter)}}
+			//: Many draws, because one draw from a uniform proves nothing about
+			//: its bounds — and because a panic is the failure mode being
+			//: guarded in two of these rows.
+			//: many draws, because one sample from a uniform proves nothing
+			//: about its bounds.
+			for range jitterDraws {
+				got := r.jittered(tt.delay)
+				//: outside the row's bounds is the defect this pins.
+				if got < tt.lo || got > tt.hi {
+					t.Fatalf("jittered(%v) with Jitter=%v = %v, want within [%v, %v] — %s",
+						tt.delay, tt.jitter, got, tt.lo, tt.hi, tt.reason)
+				}
+			}
+		})
+	}
+}
+
+// clampJitterForTest mirrors the clamp NewRetry applies, so these cases exercise
+// jittered() with the value a real construction would have handed it.
+func clampJitterForTest(j float64) float64 {
+	//: same clamp as NewRetry — the runner never sees an out-of-range value.
+	return min(max(j, noJitter), maxJitter)
+}
+
+// Test_retryRunner_jitterSpreadsCallers is the claim the field exists FOR, and
+// it is asserted rather than assumed: a jittered backoff must actually produce
+// different waits for callers that failed together.
+//
+// Without this, a Jitter field that silently returned the delay unchanged would
+// pass every bounds check above.
+func Test_retryRunner_jitterSpreadsCallers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		jitter  float64
+		wantMin int
+		reason  string
+	}{
+		{
+			name: "jitter produces many distinct waits", jitter: 0.5, wantMin: 100,
+			reason: "callers that failed together must not retry together",
+		},
+		{
+			name: "no jitter produces exactly one", jitter: 0, wantMin: 1,
+			reason: "the deterministic backoff is deterministic",
+		},
+	}
+	//: two rows: jittered, and the deterministic control.
+	for _, tt := range tests {
+		//: each row is its own subtest, so a failure names the case.
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &retryRunner{cfg: RetryConfig{Jitter: tt.jitter}}
+			seen := make(map[time.Duration]struct{}, jitterDraws)
+			//: One draw per notional caller failing at the same instant.
+			//: one draw per notional caller failing at the same instant.
+			for range jitterDraws {
+				seen[r.jittered(time.Second)] = struct{}{}
+			}
+			//: The deterministic case must collapse to one value exactly; the
+			//: jittered case must spread far past it.
+			if tt.jitter == 0 && len(seen) != 1 {
+				t.Fatalf("jittered() produced %d distinct waits with no jitter, want exactly 1 — %s",
+					len(seen), tt.reason)
+			}
+			if len(seen) < tt.wantMin {
+				t.Errorf("jittered() produced %d distinct waits over %d draws, want at least %d — %s",
+					len(seen), jitterDraws, tt.wantMin, tt.reason)
+			}
+		})
+	}
+}
+
+// Test_NewRetry_jitterEdges pins the two inputs that escape an ordinary clamp.
+//
+// Both were found on review of the change that introduced Jitter, and both are
+// the same class of defect: a value that passes every guard written for
+// ordinary numbers and then reaches an operation with no defined answer.
+func Test_NewRetry_jitterEdges(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		jitter float64
+		delay  time.Duration
+		lo, hi time.Duration
+		reason string
+	}{
+		{
+			//: Go's min/max PROPAGATE NaN, so min(max(NaN, 0), 1) is NaN, and
+			//: NaN <= 0 is false. It sails past every later guard into
+			//: int64(float64(delay) * NaN), which Go leaves
+			//: implementation-defined — this platform answers MinInt64.
+			name:   "a not-a-number jitter is normalised, not clamped",
+			jitter: math.NaN(), delay: time.Second,
+			lo: time.Second, hi: time.Second,
+			reason: "an unspecifiable width must become no width, on every platform",
+		},
+		{
+			//: delay+width wraps negative past MaxInt64, and time.NewTimer
+			//: fires a negative duration IMMEDIATELY — abolishing the backoff
+			//: at exactly the attempt where it is longest.
+			name:   "a delay at the top of the type stays representable",
+			jitter: 0.5, delay: math.MaxInt64,
+			lo: math.MaxInt64, hi: math.MaxInt64,
+			reason: "a widened wait that wraps negative is not a wait at all",
+		},
+		{
+			name:   "a delay just under the top leaves a little headroom",
+			jitter: 0.5, delay: math.MaxInt64 - 1000,
+			lo: math.MaxInt64 - 1000, hi: math.MaxInt64,
+			reason: "spread across what is left rather than past the end of the type",
+		},
+		{
+			name:   "a negative delay is handed back untouched",
+			jitter: 0.5, delay: -time.Second,
+			lo: -time.Second, hi: -time.Second,
+			reason: "nothing to widen, and a random negative width would be worse",
+		},
+	}
+	//: one row per input that escapes an ordinary clamp.
+	for _, tt := range tests {
+		//: each input is its own subtest, so a failure names it.
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			//: Through NewRetry, because the NaN normalisation lives there.
+			runner, ok := NewRetry(RetryConfig{Jitter: tt.jitter}).(*retryRunner)
+			if !ok {
+				t.Fatalf("NewRetry() did not return a *retryRunner")
+			}
+			//: Asserted on the CONFIG, not on the outcome, and deliberately.
+			//: int64(float64(delay) * NaN) is implementation-defined: this
+			//: platform answers MinInt64, which the width <= 0 guard happens to
+			//: catch, so an outcome assertion would pass here and say nothing
+			//: about the platform where it does not. What must hold everywhere
+			//: is that NaN never reaches that conversion at all.
+			if math.IsNaN(runner.cfg.Jitter) {
+				t.Fatalf("NewRetry(Jitter: NaN) stored NaN — min/max propagate it, " +
+					"so the clamp alone does not normalise it")
+			}
+			//: many draws, because the randomness is what could escape.
+			for range jitterDraws {
+				got := runner.jittered(tt.delay)
+				//: A negative result is the failure this row exists for, and it
+				//: is reported as such rather than as an out-of-range number.
+				if got < 0 && tt.lo >= 0 {
+					t.Fatalf("jittered(%v) = %v — NEGATIVE, so time.NewTimer fires "+
+						"immediately and the backoff is gone (%s)", tt.delay, got, tt.reason)
+				}
+				if got < tt.lo || got > tt.hi {
+					t.Fatalf("jittered(%v) with Jitter=%v = %v, want within [%v, %v] — %s",
+						tt.delay, tt.jitter, got, tt.lo, tt.hi, tt.reason)
+				}
+			}
 		})
 	}
 }
