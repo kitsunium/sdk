@@ -3,9 +3,9 @@ module github.com/kitsunium/sdk/pkg
 go 1.27
 
 require (
-	github.com/kitsunium/sdk/internal/core v0.1.16
-	github.com/kitsunium/sdk/internal/kernel v0.1.16
-	github.com/kitsunium/sdk/internal/service v0.1.16
+	github.com/kitsunium/sdk/internal/core v0.1.29
+	github.com/kitsunium/sdk/internal/kernel v0.1.29
+	github.com/kitsunium/sdk/internal/service v0.1.29
 )
 
 require (
@@ -18,9 +18,3 @@ require (
 	go.mongodb.org/mongo-driver v1.17.9 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/kitsunium/sdk/internal/core => ../internal/core
-
-replace github.com/kitsunium/sdk/internal/kernel => ../internal/kernel
-
-replace github.com/kitsunium/sdk/internal/service => ../internal/service
