@@ -930,6 +930,150 @@ codes:
     const: CodeReservedFlag
     hex: "0x00_02_20_04"
     package: internal/core/cli
+  - code: "0.2.33.1"
+    const: CodeRepositoryUnresolved
+    hex: "0x00_02_21_01"
+    package: internal/core/vcs
+  - code: "0.2.33.2"
+    const: CodeCommandFailed
+    hex: "0x00_02_21_02"
+    package: internal/core/vcs
+  - code: "0.2.33.3"
+    const: CodePathAbsent
+    hex: "0x00_02_21_03"
+    package: internal/core/vcs
+  - code: "0.2.34.1"
+    const: CodeNoVendorKey
+    hex: "0x00_02_22_01"
+    package: internal/core/selfupdate
+  - code: "0.2.34.2"
+    const: CodeSignatureMissing
+    hex: "0x00_02_22_02"
+    package: internal/core/selfupdate
+  - code: "0.2.34.3"
+    const: CodeSignatureInvalid
+    hex: "0x00_02_22_03"
+    package: internal/core/selfupdate
+  - code: "0.2.34.4"
+    const: CodeChecksumMissing
+    hex: "0x00_02_22_04"
+    package: internal/core/selfupdate
+  - code: "0.2.34.5"
+    const: CodeChecksumMismatch
+    hex: "0x00_02_22_05"
+    package: internal/core/selfupdate
+  - code: "0.2.34.6"
+    const: CodeArchiveTooLarge
+    hex: "0x00_02_22_06"
+    package: internal/core/selfupdate
+  - code: "0.2.34.7"
+    const: CodeAPIBodyTooLarge
+    hex: "0x00_02_22_07"
+    package: internal/core/selfupdate
+  - code: "0.2.34.8"
+    const: CodeInsecureRedirect
+    hex: "0x00_02_22_08"
+    package: internal/core/selfupdate
+  - code: "0.2.34.9"
+    const: CodeUnexpectedStatus
+    hex: "0x00_02_22_09"
+    package: internal/core/selfupdate
+  - code: "0.2.34.10"
+    const: CodeDownloadFailed
+    hex: "0x00_02_22_0A"
+    package: internal/core/selfupdate
+  - code: "0.2.34.11"
+    const: CodeDevBuild
+    hex: "0x00_02_22_0B"
+    package: internal/core/selfupdate
+  - code: "0.2.34.12"
+    const: CodeCandidateNotFound
+    hex: "0x00_02_22_0C"
+    package: internal/core/selfupdate
+  - code: "0.2.34.13"
+    const: CodeNotPrerelease
+    hex: "0x00_02_22_0D"
+    package: internal/core/selfupdate
+  - code: "0.2.34.14"
+    const: CodeDraftRelease
+    hex: "0x00_02_22_0E"
+    package: internal/core/selfupdate
+  - code: "0.2.34.15"
+    const: CodeInvalidTag
+    hex: "0x00_02_22_0F"
+    package: internal/core/selfupdate
+  - code: "0.2.34.16"
+    const: CodeBinaryNotInArchive
+    hex: "0x00_02_22_10"
+    package: internal/core/selfupdate
+  - code: "0.2.34.17"
+    const: CodeUnknownArchive
+    hex: "0x00_02_22_11"
+    package: internal/core/selfupdate
+  - code: "0.2.34.18"
+    const: CodeElevationNotAuthorised
+    hex: "0x00_02_22_12"
+    package: internal/core/selfupdate
+  - code: "0.2.35.1"
+    const: CodeNoLicence
+    hex: "0x00_02_23_01"
+    package: internal/core/entitlement
+  - code: "0.2.35.2"
+    const: CodeRosterUnsigned
+    hex: "0x00_02_23_02"
+    package: internal/core/entitlement
+  - code: "0.2.35.3"
+    const: CodeRosterStale
+    hex: "0x00_02_23_03"
+    package: internal/core/entitlement
+  - code: "0.2.35.4"
+    const: CodeRevoked
+    hex: "0x00_02_23_04"
+    package: internal/core/entitlement
+  - code: "0.2.35.5"
+    const: CodeLicenceExpired
+    hex: "0x00_02_23_05"
+    package: internal/core/entitlement
+  - code: "0.2.35.6"
+    const: CodeKeyMismatch
+    hex: "0x00_02_23_06"
+    package: internal/core/entitlement
+  - code: "0.2.35.7"
+    const: CodeRosterUnreachable
+    hex: "0x00_02_23_07"
+    package: internal/core/entitlement
+  - code: "0.2.35.8"
+    const: CodeAmbiguousLicence
+    hex: "0x00_02_23_08"
+    package: internal/core/entitlement
+  - code: "0.2.35.9"
+    const: CodeCIUnverifiable
+    hex: "0x00_02_23_09"
+    package: internal/core/entitlement
+  - code: "0.2.35.10"
+    const: CodeCIUnknownKey
+    hex: "0x00_02_23_0A"
+    package: internal/core/entitlement
+  - code: "0.2.35.11"
+    const: CodeCINotEntitled
+    hex: "0x00_02_23_0B"
+    package: internal/core/entitlement
+  - code: "0.2.35.12"
+    const: CodeNoPossession
+    hex: "0x00_02_23_0C"
+    package: internal/core/entitlement
+  - code: "0.2.35.13"
+    const: CodeClockRegressed
+    hex: "0x00_02_23_0D"
+    package: internal/core/entitlement
+  - code: "0.2.35.14"
+    const: CodeUpdateRequired
+    hex: "0x00_02_23_0E"
+    package: internal/core/entitlement
+  - code: "0.2.35.15"
+    const: CodeProductInvalid
+    hex: "0x00_02_23_0F"
+    package: internal/core/entitlement
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
