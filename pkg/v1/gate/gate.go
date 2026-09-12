@@ -19,7 +19,10 @@
 // verifier returned and says what to do; the effects stay in your control flow,
 // where they can be refused, logged or tested.
 //
-//	decision := gate.Decide(policy, invocation.Path[1:], service.Verify(time.Now()))
+//	decision := gate.Decide(policy, invocation.Path[1:], func() error {
+//		_, err := service.Verify(time.Now())
+//		return err
+//	})
 //	switch decision.Outcome {
 //	case gate.OutcomeAllow:
 //		// run the command; decision.FloorUnmet may still want reporting
@@ -86,22 +89,25 @@ type Outcome = coregate.Outcome
 
 // Decide classifies one invocation.
 //
-// Exemption is checked FIRST, before verifyErr is read: an exempt command runs
-// whatever the verifier said, or the command that repairs a licence stops
-// working on exactly the machine that needs it. The version floor is checked
-// BEFORE a refusal is propagated, because an out-of-date binary must be told to
-// upgrade whether or not its entitlement is also in order.
+// Exemption is checked FIRST, and verify is not CALLED when it holds — which
+// is why this takes a function rather than an error. A shell-completion hook or
+// a `license status` on a machine whose licence is broken must not pay for a
+// network round trip, and neither should have to remember not to run one.
+//
+// The version floor is checked BEFORE a refusal is propagated, because an
+// out-of-date binary must be told to upgrade whether or not its entitlement is
+// also in order.
 //
 // Parameters:
 //   - policy: the product's gate policy. A nil policy exempts nothing.
 //   - path: the command path relative to the root, root NOT included. Nil is
 //     the bare root invocation.
-//   - verifyErr: what your entitlement verification returned; nil means it
-//     passed.
+//   - verify: your entitlement verification, CALLED AT MOST ONCE and only
+//     when the invocation is not exempt. Nil refuses.
 //
 // Returns:
 //   - decision: what to do, and everything the verifier said.
-func Decide(policy *Policy, path []string, verifyErr error) Decision {
+func Decide(policy *Policy, path []string, verify func() error) Decision {
 	//: delegate verbatim to the service implementation.
-	return svcgate.Decide(policy, path, verifyErr)
+	return svcgate.Decide(policy, path, verify)
 }

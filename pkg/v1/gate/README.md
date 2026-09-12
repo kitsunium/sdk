@@ -21,7 +21,10 @@ This package owns the first two as values and leaves the third to you.
 [Decide](<#Decide>) does not verify — that is pkg/v1/entitlement. It does not upgrade — that is pkg/v1/selfupdate. And it never ends your process. It reads what your verifier returned and says what to do; the effects stay in your control flow, where they can be refused, logged or tested.
 
 ```
-decision := gate.Decide(policy, invocation.Path[1:], service.Verify(time.Now()))
+decision := gate.Decide(policy, invocation.Path[1:], func() error {
+	_, err := service.Verify(time.Now())
+	return err
+})
 switch decision.Outcome {
 case gate.OutcomeAllow:
 	// run the command; decision.FloorUnmet may still want reporting
@@ -41,7 +44,7 @@ default:
 
 - [Constants](<#constants>)
 - [type Decision](<#Decision>)
-  - [func Decide\(policy \*Policy, path \[\]string, verifyErr error\) Decision](<#Decide>)
+  - [func Decide\(policy \*Policy, path \[\]string, verify func\(\) error\) Decision](<#Decide>)
 - [type Outcome](<#Outcome>)
 - [type Policy](<#Policy>)
 - [type UpdateAction](<#UpdateAction>)
@@ -56,7 +59,7 @@ const CodePolicyInvalid errs.Code = coregate.CodePolicyInvalid
 ```
 
 <a name="Decision"></a>
-## type [Decision](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L77>)
+## type [Decision](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L80>)
 
 Decision is what the gate concluded about one invocation. It carries no method that acts.
 
@@ -65,28 +68,30 @@ type Decision = coregate.DecisionValue
 ```
 
 <a name="Decide"></a>
-### func [Decide](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L104>)
+### func [Decide](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L110>)
 
 ```go
-func Decide(policy *Policy, path []string, verifyErr error) Decision
+func Decide(policy *Policy, path []string, verify func() error) Decision
 ```
 
 Decide classifies one invocation.
 
-Exemption is checked FIRST, before verifyErr is read: an exempt command runs whatever the verifier said, or the command that repairs a licence stops working on exactly the machine that needs it. The version floor is checked BEFORE a refusal is propagated, because an out\-of\-date binary must be told to upgrade whether or not its entitlement is also in order.
+Exemption is checked FIRST, and verify is not CALLED when it holds — which is why this takes a function rather than an error. A shell\-completion hook or a \`license status\` on a machine whose licence is broken must not pay for a network round trip, and neither should have to remember not to run one.
+
+The version floor is checked BEFORE a refusal is propagated, because an out\-of\-date binary must be told to upgrade whether or not its entitlement is also in order.
 
 Parameters:
 
 - policy: the product's gate policy. A nil policy exempts nothing.
 - path: the command path relative to the root, root NOT included. Nil is the bare root invocation.
-- verifyErr: what your entitlement verification returned; nil means it passed.
+- verify: your entitlement verification, CALLED AT MOST ONCE and only when the invocation is not exempt. Nil refuses.
 
 Returns:
 
 - decision: what to do, and everything the verifier said.
 
 <a name="Outcome"></a>
-## type [Outcome](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L85>)
+## type [Outcome](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L88>)
 
 Outcome is what the caller should do with an invocation. Its zero value is unclaimed, so a decision nobody made never reads as "allow".
 
@@ -113,7 +118,7 @@ const OutcomeUpgrade Outcome = coregate.OutcomeUpgrade
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L73>)
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L76>)
 
 Policy is one product's gate policy: what runs unchecked, what must never be gated, and what a mandated upgrade does. Its zero value is refused by Validate.
 
@@ -122,7 +127,7 @@ type Policy = coregate.PolicyValue
 ```
 
 <a name="UpdateAction"></a>
-## type [UpdateAction](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L81>)
+## type [UpdateAction](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L84>)
 
 UpdateAction is what happens when the vendor mandates a newer build. Its zero value is unclaimed, because refusing and upgrading are opposite answers.
 

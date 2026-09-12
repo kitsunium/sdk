@@ -126,7 +126,7 @@ func TestAConsumerCanActOnEveryOutcome(t *testing.T) {
 
 			policy := shipped()
 			policy.OnUpdateRequired = tt.action
-			decision := gate.Decide(policy, tt.path, tt.verifyErr)
+			decision := gate.Decide(policy, tt.path, func() error { return tt.verifyErr })
 			//: the value a consumer switches on.
 			if decision.Outcome != tt.want {
 				t.Fatalf("Decide().Outcome = %v, want %v — %s",
@@ -165,7 +165,7 @@ func TestTheCauseSurvivesTheFacade(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			decision := gate.Decide(shipped(), []string{"lint"}, tt.verifyErr)
+			decision := gate.Decide(shipped(), []string{"lint"}, func() error { return tt.verifyErr })
 			//: the spelling most callers reach for first.
 			if !errors.Is(decision.Cause, tt.sentinel) {
 				t.Errorf("errors.Is(Decide().Cause, %v) = false — %s", tt.sentinel, tt.reason)

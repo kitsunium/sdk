@@ -63,6 +63,18 @@ The cost is one `switch` at the call site. The benefit is that the decision is a
 pure function of three inputs, so a product can test its own policy without a
 network, a signing key or a subprocess.
 
+`Decide` takes a **verifier function**, not a verification result, and that is
+not a style choice. An error parameter forces the caller to verify BEFORE the
+gate can say whether verification was needed — so `version`, `help` and
+`completion` all pay for a network round trip they are exempt from, and
+`completion` runs from a shell hook where one is actively hostile. The function
+form makes "exemption first" structural rather than documentary: the verifier is
+not called at all when the invocation is exempt, and the suite counts the calls,
+because counting is the only way to assert that something did not happen.
+
+It still does not verify. It calls back into a function the caller supplied, at
+the moment the decision needs one.
+
 ### 2. Two exemption lists, and a separator boundary
 
 `ExemptExact` matches a whole path. `ExemptSubtree` matches a path and every

@@ -14,7 +14,7 @@ the service and `core/gate` stay internal.
 | `Decision` | type alias | `= coregate.DecisionValue` — outcome, cause, and two facts the outcome loses |
 | `UpdateAction` | type alias | `UpdateRefuse` / `UpdateApply` / `UpdateWarn`; zero unclaimed |
 | `Outcome` | type alias | `OutcomeAllow` / `OutcomeRefuse` / `OutcomeUpgrade`; zero unclaimed |
-| `Decide` | func | the classifier; performs nothing |
+| `Decide` | func | the classifier; performs nothing, and calls your verifier at most once |
 | `CodePolicyInvalid` | const | for `errs.HasCode` on a `Validate` refusal |
 
 ## It performs nothing, and that is the design
@@ -23,7 +23,10 @@ the service and `core/gate` stay internal.
 that is `pkg/v1/selfupdate`. And it never ends your process.
 
 ```go
-decision := gate.Decide(policy, invocation.Path[1:], service.Verify(time.Now()))
+decision := gate.Decide(policy, invocation.Path[1:], func() error {
+	_, err := service.Verify(time.Now())
+	return err
+})
 switch decision.Outcome {
 case gate.OutcomeAllow:
 	// run it; decision.FloorUnmet may still want reporting
@@ -37,6 +40,13 @@ default:
 
 `Path[1:]` because the gate wants the path RELATIVE to the root; `cli.Invocation`
 includes the binary's own name first.
+
+## The verifier is a function, and is not called when exempt
+
+`Decide` takes `func() error`, not an `error`. An error parameter would force
+you to verify **before** the gate can say whether verification was needed — so a
+shell-completion hook and a `license status` on a broken machine would both pay
+for a network round trip they are exempt from.
 
 ## Upgrade AT MOST ONCE
 

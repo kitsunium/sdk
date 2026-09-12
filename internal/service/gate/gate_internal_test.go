@@ -137,7 +137,26 @@ func TestDecide(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := Decide(tt.policy, tt.path, tt.verifyErr)
+			calls := 0
+			got := Decide(tt.policy, tt.path, func() error {
+				calls++
+
+				return tt.verifyErr
+			})
+			//: An exempt invocation must not pay for a verification it is
+			//: exempt from — `completion` runs from a shell hook where a
+			//: network round trip would be hostile. Counting is the only
+			//: way to assert something did NOT happen.
+			if tt.wantExempt && calls != 0 {
+				t.Errorf("Decide() called the verifier %d time(s) on an exempt "+
+					"invocation, want 0 — %s", calls, tt.reason)
+			}
+			//: And a gated one must pay exactly once: twice is two round
+			//: trips where the caller budgeted for one.
+			if !tt.wantExempt && calls != 1 {
+				t.Errorf("Decide() called the verifier %d time(s) on a gated "+
+					"invocation, want exactly 1 — %s", calls, tt.reason)
+			}
 			//: the outcome is what the caller switches on.
 			if got.Outcome != tt.want {
 				t.Fatalf("Decide().Outcome = %v, want %v — %s", got.Outcome, tt.want, tt.reason)
@@ -198,11 +217,51 @@ func TestDecideCarriesTheCauseWhole(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := Decide(policyWith(coregate.UpdateRefuse), []string{"lint"}, tt.verifyErr)
+			got := Decide(policyWith(coregate.UpdateRefuse), []string{"lint"},
+				func() error { return tt.verifyErr })
 			//: errors.Is must answer through Cause exactly as it would on the
 			//: verifier's own error.
 			if !errors.Is(got.Cause, tt.sentinel) {
 				t.Errorf("errors.Is(Decide().Cause, %v) = false — %s", tt.sentinel, tt.reason)
+			}
+		})
+	}
+}
+
+// TestDecideRefusesWithoutAVerifier pins that a nil verifier refuses.
+//
+// It is a programming error rather than a configuration one, and the answer is
+// still the refusing direction: nothing vouched for this invocation, so nothing
+// may run on the strength of it.
+func TestDecideRefusesWithoutAVerifier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		path   []string
+		want   coregate.Outcome
+		reason string
+	}{
+		{
+			name: "a gated command with no verifier", path: []string{"lint"},
+			want:   coregate.OutcomeRefuse,
+			reason: "nothing vouched for it",
+		},
+		{
+			name: "an exempt command needs no verifier", path: []string{"version"},
+			want:   coregate.OutcomeAllow,
+			reason: "exemption is settled before a verifier is ever reached for",
+		},
+	}
+	//: one row per side of the exemption boundary.
+	for _, tt := range tests {
+		//: each side is its own subtest, so a failure names it.
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			//: a nil function, which is what a caller that forgot one passes.
+			if got := Decide(policyWith(coregate.UpdateRefuse), tt.path, nil); got.Outcome != tt.want {
+				t.Errorf("Decide(…, nil).Outcome = %v, want %v — %s", got.Outcome, tt.want, tt.reason)
 			}
 		})
 	}

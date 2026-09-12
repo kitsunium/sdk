@@ -18,10 +18,13 @@ import (
 //
 // The ORDER is the contract, and it is the part worth reading twice.
 //
-// Exemption is checked FIRST, before verifyErr is even looked at. A caller runs
-// the verifier for its own reasons — a daemon may already hold a grant — but an
-// exempt command must run whatever the verifier said, or `license status` stops
-// working on exactly the machine an operator is trying to diagnose.
+// Exemption is checked FIRST, and verify is not CALLED at all when it holds.
+// That is why this takes a function rather than an error: a caller handed an
+// already-computed result has already paid for it, and an exempt command must
+// not pay. `completion` runs from a shell hook where a network round trip would
+// be hostile, and `license status` must work on exactly the machine whose
+// licence is broken — neither can afford a verification, and neither should
+// have to remember not to run one.
 //
 // The floor is checked BEFORE the refusal is propagated, because an
 // out-of-date binary must be told to upgrade whether or not its entitlement is
@@ -34,19 +37,27 @@ import (
 //     is the refusing direction.
 //   - path: the command path relative to the root, root NOT included. Nil is
 //     the bare root invocation.
-//   - verifyErr: what the caller's entitlement verification returned. Nil
-//     means it passed.
+//   - verify: the caller's entitlement verification, CALLED AT MOST ONCE and
+//     only when the invocation is not exempt. Nil is treated as a
+//     verification that did not happen, which refuses.
 //
 // Returns:
 //   - decision: what the caller should do, and everything the verifier said.
-func Decide(policy *coregate.PolicyValue, path []string, verifyErr error) coregate.DecisionValue {
-	//: Exempt first, and without reading verifyErr: an exempt command runs
-	//: whatever the verifier said, which is the whole point of exempting it.
+func Decide(policy *coregate.PolicyValue, path []string, verify func() error) coregate.DecisionValue {
+	//: Exempt first, and WITHOUT calling verify: an exempt command must not
+	//: pay for a verification it is exempt from.
 	if policy.Exempt(path) {
 		//: Allowed, and recorded as never checked rather than as checked and
 		//: allowed — a caller must not seed a watchdog from an exemption.
 		return coregate.DecisionValue{Outcome: coregate.OutcomeAllow, Exempt: true}
 	}
+	//: A nil verifier verified nothing, which is the refusing direction — the
+	//: same one an absent policy takes.
+	if verify == nil {
+		//: Nothing vouched for this invocation.
+		return coregate.DecisionValue{Outcome: coregate.OutcomeRefuse}
+	}
+	verifyErr := verify()
 	//: A verification that passed and a floor that is met is the ordinary path.
 	if verifyErr == nil {
 		//: Entitled.

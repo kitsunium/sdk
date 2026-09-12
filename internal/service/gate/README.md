@@ -7,15 +7,15 @@ facade, not this package.
 ## API
 
 ```go
-func Decide(policy *coregate.PolicyValue, path []string, verifyErr error) coregate.DecisionValue
+func Decide(policy *coregate.PolicyValue, path []string, verify func() error) coregate.DecisionValue
 ```
 
 That is the whole surface, and it performs nothing.
 
 ## The order
 
-1. **Exempt?** Read first, before `verifyErr`. An exempt command runs whatever
-   the verifier said.
+1. **Exempt?** Read first, and `verify` is **not called** when it holds — an
+   exempt command must not pay for a verification it is exempt from.
 2. **Clean verification?** Allow.
 3. **Version floor?** Apply the policy's `UpdateAction` — refuse, ask the caller
    to upgrade, or allow with `FloorUnmet` set.

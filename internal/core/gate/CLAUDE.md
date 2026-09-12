@@ -49,6 +49,12 @@ on purpose.
   must not seed a watchdog from an exemption. And `UpdateWarn` allows the
   invocation while the floor is still unmet, which the caller has to report.
 
+- **`Decide` takes a verifier, not a result.** An error parameter forces the
+  caller to verify before the gate can say whether verification was needed, so
+  every exempt command pays for a round trip it is exempt from. The function
+  form makes "exemption first" structural, and the service suite counts the
+  calls — counting is the only way to assert something did NOT happen.
+
 ## Do NOT
 
 - Verify anything here, or upgrade anything, or end a process. Those are
