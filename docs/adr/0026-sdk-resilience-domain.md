@@ -77,8 +77,34 @@ Two contracts were tightened during review, both before any release:
 
 ## Deferred
 
-- Retry jitter. (The retryable-error classifier that shipped alongside it in
-  this list has since landed as `RetryConfig.Retryable` / `BreakerConfig.Retryable`
+- ~~Retry jitter.~~ **Landed** as `RetryConfig.Jitter`, on the same terms as the
+  retryable-error classifier below: an opt-in parameter on an existing policy,
+  not a new policy, whose ZERO value preserves the behaviour decided above. A
+  `float64` fraction of the computed delay, drawn uniformly from `[0, Jitter)`
+  and ADDED to it, clamped into `[0, 1]`.
+
+  Three things the implementation decides, which the deferral did not:
+
+  - **Additive, not proportional.** `delay + U[0, delay*J)` keeps the average
+    wait growing monotonically with the attempt. Full jitter — `U[0, delay)` —
+    spreads harder but lets a late attempt wait less than an early one, which
+    turns a backoff into a lottery.
+  - **Applied AFTER `MaxDelay`.** The cap bounds the growth; jitter spreads
+    callers *around* the bound rather than being squeezed flat against it. The
+    consequence is stated in the field's own doc: the effective ceiling on one
+    wait becomes `MaxDelay * (1 + Jitter)`.
+  - **`backoff` stays a pure function of the attempt number**, and jitter is
+    applied in `wait`. The deterministic growth and the randomisation are two
+    different claims, and a suite that cannot assert the first without the
+    second can assert neither precisely.
+
+  The trigger was a concrete consumer: `kodflow/ktn-linter` carried its own
+  jittered dial backoff for the proxy→daemon socket handshake, with the
+  thundering-herd reason written beside it, because this policy could not
+  express it.
+
+- (The retryable-error classifier that shipped alongside jitter in this list has
+  since landed as `RetryConfig.Retryable` / `BreakerConfig.Retryable`
   — a `func(error) bool` whose `nil` value preserves the behaviour decided above.
   The Decision section is unchanged: the classifier is an opt-in parameter on the
   two existing policies, not a new policy.)

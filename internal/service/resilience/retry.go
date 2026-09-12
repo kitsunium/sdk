@@ -3,6 +3,7 @@ package resilience
 
 import (
 	"context"
+	"math/rand/v2"
 	"time"
 
 	coreres "github.com/kitsunium/sdk/internal/core/resilience"
@@ -13,6 +14,12 @@ const (
 	defaultMultiplier float64 = 2
 	// minAttempts is the floor on the attempt budget.
 	minAttempts int = 1
+	// maxJitter is the ceiling on RetryConfig.Jitter. Above 1 the random
+	// component would exceed the delay it widens, which is a different policy
+	// (randomised wait) wearing this one's name.
+	maxJitter float64 = 1
+	// noJitter is the deterministic backoff, and the zero value.
+	noJitter float64 = 0
 )
 
 // retryRunner retries op with capped exponential backoff between attempts.
@@ -37,6 +44,8 @@ func NewRetry(cfg RetryConfig) coreres.Runner {
 		//: standard exponential doubling.
 		cfg.Multiplier = defaultMultiplier
 	}
+	//: a jitter wider than the delay is a different policy; clamp into [0, 1].
+	cfg.Jitter = min(max(cfg.Jitter, noJitter), maxJitter)
 	//: stateless config holder — safe to share.
 	return &retryRunner{cfg: cfg}
 }
@@ -81,7 +90,7 @@ func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 // wait sleeps the backoff for the given attempt, returning ctx.Err on cancel.
 func (r *retryRunner) wait(ctx context.Context, attempt int) error {
 	//: a deadline-aware sleep: whichever fires first wins.
-	timer := time.NewTimer(r.backoff(attempt))
+	timer := time.NewTimer(r.jittered(r.backoff(attempt)))
 	//: always release the timer.
 	defer timer.Stop()
 	//: race the backoff timer against context cancellation.
@@ -111,4 +120,30 @@ func (r *retryRunner) backoff(attempt int) time.Duration {
 	}
 	//: the grown (uncapped) delay.
 	return time.Duration(delay)
+}
+
+// jittered widens delay by a uniform random fraction of itself, or returns it
+// unchanged when no jitter is configured.
+//
+// It is separate from backoff so backoff stays a PURE function of the attempt
+// number: the deterministic growth and the randomisation are two different
+// claims, and a suite that cannot assert the first without the second can
+// assert neither precisely.
+func (r *retryRunner) jittered(delay time.Duration) time.Duration {
+	//: the zero value is the deterministic backoff this policy always had.
+	if r.cfg.Jitter <= noJitter {
+		//: unchanged.
+		return delay
+	}
+	width := int64(float64(delay) * r.cfg.Jitter)
+	//: rand.Int64N panics on a non-positive bound, which a sub-nanosecond
+	//: delay or a rounded-to-zero width reaches. Nothing to spread there.
+	if width <= 0 {
+		//: unchanged.
+		return delay
+	}
+
+	//: uniform in [delay, delay+width) — additive, so the average wait keeps
+	//: growing with the attempt rather than being pulled back toward zero.
+	return delay + time.Duration(rand.Int64N(width))
 }
