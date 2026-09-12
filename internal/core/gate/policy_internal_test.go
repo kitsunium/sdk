@@ -40,6 +40,14 @@ func TestPolicyValue_Exempt(t *testing.T) {
 			reason: "nil and empty are the same invocation",
 		},
 		{
+			//: The shape a caller coming from a space-joined string produces:
+			//: strings.Split("", " ") is [""], not []. It must be the bare root
+			//: too, or every such consumer's root invocation is gated.
+			name: "a single empty element is the bare root as well",
+			path: []string{""}, want: true,
+			reason: "strings.Split of an empty path yields one empty element",
+		},
+		{
 			name: "a named exact exemption", path: []string{"version"}, want: true,
 			reason: "version carries nothing to protect",
 		},
@@ -86,20 +94,18 @@ func TestPolicyValue_Exempt(t *testing.T) {
 			reason: "matching by name alone would exempt every command called version",
 		},
 	}
+	//: one row per shape the matcher must get right.
 	for _, tt := range tests {
-		//: one row per shape the matcher must get right.
-		for _, tc := range []struct{ policy *PolicyValue }{{policy: shipped()}} {
-			//: each shape is its own subtest, so a failure names the path.
-			t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+		//: each shape is its own subtest, so a failure names the path.
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-				//: the matcher's whole contract is this one answer.
-				if got := tc.policy.Exempt(tt.path); got != tt.want {
-					t.Errorf("Exempt(%q) = %v, want %v — %s",
-						strings.Join(tt.path, " "), got, tt.want, tt.reason)
-				}
-			})
-		}
+			//: the matcher's whole contract is this one answer.
+			if got := shipped().Exempt(tt.path); got != tt.want {
+				t.Errorf("Exempt(%q) = %v, want %v — %s",
+					strings.Join(tt.path, " "), got, tt.want, tt.reason)
+			}
+		})
 	}
 }
 
