@@ -1,44 +1,20 @@
-// Package selfupdate replaces the running binary with a newer signed release.
+// Package selfupdate — the ports, aliased from core.
+//
+// They are ALIASES rather than a second declaration: a service-local copy of a
+// contract the core layer owns compiles fine and drifts silently, and a caller
+// holding one of each would find them interchangeable right up until a method
+// is added to one of them.
 package selfupdate
 
-import (
-	"io"
-	"net/http"
-	"os"
-)
+import coreupd "github.com/kitsunium/sdk/internal/core/selfupdate"
 
-// Getter defines the interface for HTTP GET operations.
-// This allows for dependency injection and easier testing.
-type Getter interface {
-	// Get performs an HTTP GET request.
-	Get(url string) (*http.Response, error)
-}
+// Getter performs the HTTP GETs a self-update needs. It aliases the core port.
+type Getter = coreupd.Getter
 
-// FileSystem defines the interface for file system operations.
-// This allows for dependency injection and easier testing.
-type FileSystem interface {
-	// Executable returns the path of the current executable.
-	Executable() (string, error)
+// FileSystem is the disk half of replacing a running binary. It aliases the
+// core port.
+type FileSystem = coreupd.FileSystem
 
-	// EvalSymlinks resolves symlinks in the given path.
-	EvalSymlinks(path string) (string, error)
-
-	// CreateTemp creates a temporary file.
-	CreateTemp(dir, pattern string) (*os.File, error)
-
-	// Chmod changes file permissions.
-	Chmod(name string, mode os.FileMode) error
-
-	// Rename renames a file.
-	Rename(oldpath, newpath string) error
-
-	// Remove removes a file.
-	Remove(name string) error
-}
-
-// Copier defines the interface for io.Copy operations.
-// This allows for dependency injection and easier testing.
-type Copier interface {
-	// Copy copies from src to dst.
-	Copy(dst io.Writer, src io.Reader) (int64, error)
-}
+// Copier streams the verified archive to its destination. It aliases the core
+// port.
+type Copier = coreupd.Copier

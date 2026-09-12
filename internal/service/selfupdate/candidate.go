@@ -111,7 +111,7 @@ func (u *Service) getReleases() (releases []releaseInfo, getErr error) {
 	//: Propagate network errors to caller.
 	if err != nil {
 		//: Wrap error to add context about the operation.
-		return nil, fmt.Errorf("fetching releases: %w", err)
+		return nil, fmt.Errorf("%w: fetching releases: %w", coreupd.DownloadFailed, err)
 	}
 	defer func() {
 		//: Prevent resource leaks from unclosed response body.
@@ -147,7 +147,7 @@ func (u *Service) getReleaseByTag(tag string) (release releaseInfo, getErr error
 	//: Propagate network errors to caller.
 	if err != nil {
 		//: Wrap error with context about which tag was requested.
-		return releaseInfo{}, fmt.Errorf("fetching release %s: %w", tag, err)
+		return releaseInfo{}, fmt.Errorf("%w: fetching release %s: %w", coreupd.DownloadFailed, tag, err)
 	}
 	defer func() {
 		//: Prevent resource leak from unclosed body.

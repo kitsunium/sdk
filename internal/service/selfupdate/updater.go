@@ -520,10 +520,17 @@ func (u *Service) writeAndReplaceBinary(content io.Reader, execPath string) (err
 		//: Wrap error to indicate operation.
 		return fmt.Errorf("creating temp file: %w", err)
 	}
+	tmpPath := tmpFile.Name()
+	closed := false
+	//: Safety net for the early returns below. The SUCCESS path closes
+	//: explicitly before the rename — see why immediately after the write.
 	defer func() {
+		//: An already-closed file must not be closed twice.
+		if closed {
+			return
+		}
 		err = errors.Join(err, tmpFile.Close())
 	}()
-	tmpPath := tmpFile.Name()
 
 	// Write content to temp file
 	err = u.writeTempFileContent(tmpFile, content)
@@ -532,6 +539,21 @@ func (u *Service) writeAndReplaceBinary(content io.Reader, execPath string) (err
 		u.fs.Remove(tmpPath)
 		//: Return write error.
 		return err
+	}
+
+	// Close BEFORE the rename, and treat a close failure as a write failure.
+	//
+	// Deferring the close past finalizeReplacement meant the rename happened
+	// while buffered bytes might still be unwritten, and a close-time error —
+	// a delayed I/O fault, a quota, a full device — arrived AFTER the old
+	// executable had already been replaced. The caller then saw a failure with
+	// a possibly truncated binary in place and no way back.
+	closed = true
+	//: A close that fails means the staged bytes are not all on disk.
+	if closeErr := tmpFile.Close(); closeErr != nil {
+		u.fs.Remove(tmpPath)
+		//: Report it as what it is: the write did not complete.
+		return fmt.Errorf("writing temp file: %w", closeErr)
 	}
 
 	//: Proceed with atomic replacement of executable.

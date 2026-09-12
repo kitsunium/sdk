@@ -54,6 +54,7 @@ go_test(
         "elevation_internal_test.go",
         "interfaces_external_test.go",
         "osfilesystem_internal_test.go",
+        "review_internal_test.go",
         "signature_external_test.go",
         "signature_internal_test.go",
         "source_external_test.go",

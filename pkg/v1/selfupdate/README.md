@@ -47,6 +47,14 @@ Replacing a binary in a directory the user cannot write needs a SECOND opt\-in. 
 
 Both variable names are derived from Source.Product — \`widget\` yields WIDGET\_AUTO\_UPGRADE and WIDGET\_ALLOW\_SUDO — by uppercasing and folding punctuation to underscore.
 
+### Two limits a caller must know before relying on this
+
+\*\*A compromised release host can serve an OLDER signed release.\*\* The manifest is signed, but it carries the version\-independent asset name and no signed release tag, so a host that answers a request for v2 with v1's manifest, signature and archive passes every check here and installs v1. Verification proves the bytes came from the vendor; it does not prove they are the version that was asked for. Closing it needs the tag INSIDE the signed document, which is a release\-format decision rather than a code one.
+
+\*\*Windows is not supported for the replacement step.\*\* Archive and binary naming handle it, but Windows will not let a running executable be renamed over, and the privilege fallback is \`sudo \-n mv\`. Every update that reaches replacement on Windows fails.
+
+Both are recorded in ADR 0077 §Deferred rather than left to be discovered.
+
 ### What this package does not do
 
 It does not roll back. The replacement is atomic \(temp file, chmod, rename\) so there is no window where the binary is half\-written, but once the rename lands the previous version is gone. A caller that needs to return to it keeps its own copy.
@@ -176,7 +184,7 @@ const CodeUnknownArchive errs.Code = coreupd.CodeUnknownArchive
 ```
 
 <a name="Candidate"></a>
-## type [Candidate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L150>)
+## type [Candidate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L167>)
 
 Candidate is one release candidate. It aliases the core value type.
 
@@ -185,7 +193,7 @@ type Candidate = svcupd.CandidateValue
 ```
 
 <a name="Copier"></a>
-## type [Copier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L143>)
+## type [Copier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L160>)
 
 Copier streams the verified archive to its destination. It aliases the core port.
 
@@ -194,7 +202,7 @@ type Copier = coreupd.Copier
 ```
 
 <a name="FileSystem"></a>
-## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L139>)
+## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L156>)
 
 FileSystem is the disk half of replacing a running binary. It aliases the core port.
 
@@ -203,7 +211,7 @@ type FileSystem = coreupd.FileSystem
 ```
 
 <a name="Getter"></a>
-## type [Getter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L135>)
+## type [Getter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L152>)
 
 Fetcher performs the HTTP GETs a self\-update needs. It aliases the core port.
 
@@ -212,7 +220,7 @@ type Getter = coreupd.Getter
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L159>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L176>)
 
 Service replaces the running binary with a newer signed release. It aliases the service type — the engine handle, per ADR 0074.
 
@@ -221,7 +229,7 @@ type Service = svcupd.Service
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L167>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L184>)
 
 ```go
 func New(version string, src Source) *Service
@@ -232,7 +240,7 @@ New returns a Service for the given running version and release source.
 The returned Service carries NO vendor key and therefore installs nothing: chain WithVendorKey with the build's linked\-in anchor. That is the safe direction — a Service that verified only when a key happened to be present would make the security property depend on a build flag.
 
 <a name="NewWithDeps"></a>
-### func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L175>)
+### func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L192>)
 
 ```go
 func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copier Copier) *Service
@@ -241,7 +249,7 @@ func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copie
 NewWithDeps returns a Service with its three ports injected, for a caller that supplies its own HTTP policy or a test that supplies doubles. A nil fs or copier is legal on paths that never reach the disk.
 
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L155>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L172>)
 
 Source says where releases come from and what they are called. It aliases the service type: these are one engine's construction parameters, which ADR 0074 places with the engine rather than in the contract layer.
 
@@ -250,7 +258,7 @@ type Source = svcupd.SourceValue
 ```
 
 <a name="Update"></a>
-## type [Update](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L147>)
+## type [Update](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L164>)
 
 Update is the outcome of a version check or an install. It aliases the core value type.
 

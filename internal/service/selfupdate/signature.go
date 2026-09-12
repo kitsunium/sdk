@@ -164,7 +164,7 @@ func (u *Service) fetchSignature(tag string) (signature []byte, fetchErr error) 
 	//: Propagate network errors to caller.
 	if err != nil {
 		//: Wrap with asset+tag context so the failed download is identifiable.
-		return nil, fmt.Errorf("downloading %s for tag %s: %w", signatureAssetName, tag, err)
+		return nil, fmt.Errorf("%w: downloading %s for tag %s: %w", coreupd.DownloadFailed, signatureAssetName, tag, err)
 	}
 	defer func() {
 		//: Prevent resource leak from unclosed response.
@@ -191,7 +191,7 @@ func (u *Service) fetchSignature(tag string) (signature []byte, fetchErr error) 
 	//: Propagate body read failures with asset+tag context.
 	if err != nil {
 		//: Wrap to identify the signature read phase in operator logs.
-		return nil, fmt.Errorf("reading %s for tag %s: %w", signatureAssetName, tag, err)
+		return nil, fmt.Errorf("%w: reading %s for tag %s: %w", coreupd.DownloadFailed, signatureAssetName, tag, err)
 	}
 	//: A body past the cap is not a signature; an untrusted endpoint must not
 	//: choose how much memory we spend.

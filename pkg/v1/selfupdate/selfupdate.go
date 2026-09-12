@@ -56,6 +56,23 @@
 // WIDGET_AUTO_UPGRADE and WIDGET_ALLOW_SUDO — by uppercasing and folding
 // punctuation to underscore.
 //
+// # Two limits a caller must know before relying on this
+//
+// **A compromised release host can serve an OLDER signed release.** The manifest
+// is signed, but it carries the version-independent asset name and no signed
+// release tag, so a host that answers a request for v2 with v1's manifest,
+// signature and archive passes every check here and installs v1. Verification
+// proves the bytes came from the vendor; it does not prove they are the version
+// that was asked for. Closing it needs the tag INSIDE the signed document,
+// which is a release-format decision rather than a code one.
+//
+// **Windows is not supported for the replacement step.** Archive and binary
+// naming handle it, but Windows will not let a running executable be renamed
+// over, and the privilege fallback is `sudo -n mv`. Every update that reaches
+// replacement on Windows fails.
+//
+// Both are recorded in ADR 0077 §Deferred rather than left to be discovered.
+//
 // # What this package does not do
 //
 // It does not roll back. The replacement is atomic (temp file, chmod, rename)

@@ -95,7 +95,7 @@ func decodeJSONBody(body io.Reader, capBytes int64, into any) error {
 	//: Propagate stream read failures to the caller's phase wrapper.
 	if err != nil {
 		//: Wrap to identify the read phase in operator logs.
-		return fmt.Errorf("reading release API response: %w", err)
+		return fmt.Errorf("%w: reading release API response: %w", coreupd.DownloadFailed, err)
 	}
 	//: Refuse a body beyond the cap instead of decoding a truncated prefix.
 	if int64(len(raw)) > capBytes {

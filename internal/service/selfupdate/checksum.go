@@ -107,7 +107,7 @@ func (u *Service) fetchChecksums(tag string) (manifest string, fetchErr error) {
 	//: Propagate network errors to caller.
 	if err != nil {
 		//: Wrap with asset+tag context so the failed download is identifiable.
-		return "", fmt.Errorf("downloading %s for tag %s: %w", checksumsAssetName, tag, err)
+		return "", fmt.Errorf("%w: downloading %s for tag %s: %w", coreupd.DownloadFailed, checksumsAssetName, tag, err)
 	}
 	defer func() {
 		//: Prevent resource leak from unclosed response.
@@ -128,12 +128,23 @@ func (u *Service) fetchChecksums(tag string) (manifest string, fetchErr error) {
 		return "", fmt.Errorf("%w: status %d fetching %s for tag %s", coreupd.DownloadFailed, resp.StatusCode, checksumsAssetName, tag)
 	}
 
-	// Read the manifest body (size-capped defence-in-depth).
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumsBytes))
+	// Read the manifest body (size-capped defence-in-depth). One byte PAST the
+	// cap, like bufferArchive and readCappedAPIBody: reading exactly the cap
+	// cannot tell a manifest that fits from one that was truncated, and a
+	// truncated manifest fails ed25519 verification — reporting a size problem
+	// as a supply-chain signature failure, which is the worst possible advice.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumsBytes+1))
 	//: Propagate body read failures with asset+tag context.
 	if err != nil {
 		//: Wrap to identify the manifest read phase in operator logs.
-		return "", fmt.Errorf("reading %s for tag %s: %w", checksumsAssetName, tag, err)
+		return "", fmt.Errorf("%w: reading %s for tag %s: %w", coreupd.DownloadFailed, checksumsAssetName, tag, err)
+	}
+	//: Refuse an oversized manifest AS oversized, before anything can mistake
+	//: its truncation for a forged signature.
+	if int64(len(raw)) > maxChecksumsBytes {
+		//: Raise the size sentinel, never the signature one.
+		return "", fmt.Errorf("%w: %s for tag %s exceeds %d bytes",
+			coreupd.ArchiveTooLarge, checksumsAssetName, tag, maxChecksumsBytes)
 	}
 
 	//: Return the raw manifest text for line-by-line parsing.

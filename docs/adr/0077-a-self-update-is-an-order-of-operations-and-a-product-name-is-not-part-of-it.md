@@ -137,6 +137,25 @@ changes shape, and nothing else in the SDK imports it.
 
 ## Deferred
 
+- **A compromised host can serve an older signed release.** The signed manifest
+  carries the version-independent asset name and no release tag, so answering a
+  request for v2 with v1's manifest, signature and archive passes every check
+  and installs v1. Verification proves provenance, not freshness. The fix is the
+  tag inside the signed document — a release-FORMAT decision, not a code one,
+  and one that would break every existing signed release on the day it landed.
+  Stated in the package doc as a limit, not buried here.
+- **Windows cannot complete the replacement.** The archive and binary naming
+  handle it, and the rename cannot: Windows does not allow a running executable
+  to be renamed over, and the privilege fallback is `sudo -n mv`. The known
+  shapes are rename-old-aside-then-write-new, or a post-exit installer. Neither
+  is written, so Windows is documented as unsupported for the replacement step
+  rather than silently failing.
+- **The elevated path can cross filesystems.** When the install directory is not
+  writable the staging falls back to the OS temp directory, and `sudo mv` across
+  filesystems becomes copy-and-remove rather than a rename — so an interruption
+  can leave a partial or absent root-owned executable. Same-filesystem staging
+  under the target, with the elevation applied to the rename, is the fix.
+
 - **No rollback.** The previous binary is gone once the rename lands. Keeping it
   would mean a policy for where, for how long, and what happens when the disk is
   full — a design in its own right, and one nothing in the SDK needs yet.
