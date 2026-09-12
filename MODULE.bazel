@@ -59,5 +59,6 @@ use_repo(
     "in_gopkg_yaml_v3",
     "org_golang_google_protobuf",
     "org_golang_x_crypto",
+    "org_golang_x_mod",
     "org_mongodb_go_mongo_driver",
 )

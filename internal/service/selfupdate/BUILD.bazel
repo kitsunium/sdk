@@ -1,0 +1,70 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "selfupdate",
+    srcs = [
+        "candidate.go",
+        "checksum.go",
+        "consent.go",
+        "elevation.go",
+        "interfaces.go",
+        "osfilesystem.go",
+        "osfilesystem_compliance.go",
+        "release_info.go",
+        "signature.go",
+        "source.go",
+        "stdiocopier.go",
+        "stdiocopier_compliance.go",
+        "transport.go",
+        "update_info.go",
+        "updater.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/selfupdate",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/selfupdate",
+        "@org_golang_x_mod//semver",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":selfupdate",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "selfupdate_test",
+    srcs = [
+        "candidate_external_test.go",
+        "candidate_internal_test.go",
+        "checksum_external_test.go",
+        "checksum_internal_test.go",
+        "consent_external_test.go",
+        "consent_internal_test.go",
+        "elevation_external_test.go",
+        "elevation_internal_test.go",
+        "interfaces_external_test.go",
+        "osfilesystem_internal_test.go",
+        "review_internal_test.go",
+        "signature_external_test.go",
+        "signature_internal_test.go",
+        "source_external_test.go",
+        "source_internal_test.go",
+        "stdiocopier_internal_test.go",
+        "transport_external_test.go",
+        "transport_internal_test.go",
+        "updater_external_test.go",
+        "updater_internal_test.go",
+    ],
+    embed = [":selfupdate"],
+    deps = ["//internal/core/selfupdate"],
+)
