@@ -20,7 +20,8 @@ internal/
 │                  events,
 │                  health, i18n, id, lifecycle, lock, logger, logger/level,
 │                  mail, metrics, net, proc, queue, resilience, scheduler,
-│                  session, sql, token, trace, transform, validation, vfs,
+│                  session, sql, token, trace, transform, validation, vcs,
+│                  vfs,
 │                  view, writer
 └── service/       concrete implementations
                    authz  (RBAC + ABAC + deny-overrides + Check)
@@ -63,6 +64,8 @@ internal/
                    validation (constraints + combinators + struct-tag plan)
                    view   (html/template engine + trust scan + parse-once)
                    vfs    (os.Root-confined FS + memory FS + atomic publish)
+                   vcs    (git changed-set: merge-base + index + worktree
+                           + untracked, hardened invocations)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── cache/     (the ADR 0025 primitive AND the ADR 0049 domain, side by side)
@@ -90,6 +93,7 @@ pkg/
     └── queue/      (durable at-least-once broker, no lock — ADR 0054)
     └── sql/        (ports over database/sql, no driver, no ORM — ADR 0055)
     └── vfs/        (io/fs reading unchanged + atomic publication — ADR 0056)
+    └── git/        (what a branch changed; degrades, never empties — ADR 0076)
     └── view/       (html/template, one trust type, parse once — ADR 0058)
 third-party/       opt-in vendor integrations (root module only)
                    aws/writer/{cloudwatch,s3}, codec/{hcl,protobuf},
@@ -267,5 +271,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0073 — the session file store's two waits can be abandoned: `flock(LOCK_EX)` parks a thread inside a syscall no cancellation reaches, so a cancelled request waited for a lock nobody would read the result of, and the in-process half was a `sync.Mutex` whose `Lock` cannot be told its caller left. Both now observe the context — `LOCK_NB` plus a poll on the injected clock (`FileConfig.Poll`, the same 25 ms default as the `lock` domain, whose ADR 0052 had answered the same question the other way) and a one-slot channel gate; `FileConfig.Clock` widens to `clock.Timed` under the ADR 0040 v0 licence. Amends ADR 0045 — `docs/adr/0073-session-waits-are-abandonable.md`
 - ADR 0074 — what a public alias may point at: the axis is OWNERSHIP, not value-versus-handle. A type the port speaks lives in core; a type meaningful to exactly one engine — its handle, its `Option` closures, and above all its construction parameters (`sql.Config`, `session.FileConfig`, the five `resilience` configs) — lives with that engine, because hoisting a `*sql.DB` or an SMTP TLS mode into the contract layer makes core describe one backend. Measured: 233 core aliases, 69 service, 3 kernel. Nothing moved; the rule now describes the code — `docs/adr/0074-what-a-public-alias-may-point-at.md`
 - ADR 0075 — the SDK reads the cgroup cap that already bounds this process, not only the ones it writes for others: `cgroup` writes a group to bound a child and `rlimit` sets a kernel-enforced ceiling, but nothing read the cap already on the caller — and the Go runtime does not either (`GOMAXPROCS` is cgroup-aware since 1.25, the memory limit never was), so a service in a 512 MiB container is SIGKILLed where a soft limit would have pushed the collector. `memlimit` reads `/proc/self/cgroup` rather than the mount root, minimises across ancestors and across both hierarchies, keeps 10% headroom and declines under 64 MiB. Every outcome is a VALUE — `Apply` cannot fail — and `MemorySource` names which of the three declining outcomes happened, with the enum's zero left unminted per ADR 0031. Versed from `kodflow/ktn-linter` `pkg/memlimit` — `docs/adr/0075-reading-the-cgroup-cap-that-already-bounds-us.md`
+- ADR 0076 — what a branch changed is a value that can say it does not know: `Resolve` returns NO error, because a resolver that cannot tell what changed must never answer with an empty set — "nothing changed" and "I could not tell" are opposite instructions, and a scoped review receiving the first passes on a branch it never examined. Degrading produces `FullFallback` + a `Reason`; the zero `ResolutionValue` is neither readable shape, so a caller who skipped `Degraded()` cannot read "nothing changed" out of a value nothing minted (ADR 0031). The set spans the three-dot merge-base delta, the index, the working tree and untracked files. Every git invocation is hardened against a hostile `.git/config`: `core.fsmonitor` set to a script executed 5 times on read-only queries before the guard and 0 after, and `diff.external` needs `--no-ext-diff` because setting it empty makes git execute `""` and abort — with what is NOT hardened listed too. The `.go` suffix + generated-file filter the source hard-coded becomes `Config.Include`, nil admitting everything. Versed from `kodflow/ktn-linter` `pkg/git` — `docs/adr/0076-what-a-branch-changed-is-a-value-that-can-say-it-does-not-know.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

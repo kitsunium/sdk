@@ -1,0 +1,53 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "git",
+    srcs = [
+        "changed_set.go",
+        "changed_set_compliance.go",
+        "config.go",
+        "diff_parse.go",
+        "exec.go",
+        "gitdir.go",
+        "resolve.go",
+        "show.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/vcs/git",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/vcs",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":git",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "git_test",
+    srcs = [
+        "changed_set_external_test.go",
+        "changed_set_internal_test.go",
+        "diff_parse_bench_test.go",
+        "diff_parse_internal_test.go",
+        "exec_internal_test.go",
+        "gitdir_external_test.go",
+        "gitdir_internal_test.go",
+        "resolve_external_test.go",
+        "resolve_internal_test.go",
+        "show_external_test.go",
+    ],
+    embed = [":git"],
+    deps = ["//internal/core/vcs"],
+)

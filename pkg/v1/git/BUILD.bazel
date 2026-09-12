@@ -1,0 +1,30 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "git",
+    srcs = ["git.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/git",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/vcs",
+        "//internal/kernel/errs",
+        "//internal/service/vcs/git",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":git",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "git_test",
+    srcs = ["git_external_test.go"],
+    deps = [
+        ":git",
+        "//pkg/v1/errs",
+    ],
+)
