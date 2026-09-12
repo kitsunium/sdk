@@ -68,7 +68,7 @@ type Decision = coregate.DecisionValue
 ```
 
 <a name="Decide"></a>
-### func [Decide](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L110>)
+### func [Decide](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L108>)
 
 ```go
 func Decide(policy *Policy, path []string, verify func() error) Decision
@@ -80,15 +80,9 @@ Exemption is checked FIRST, and verify is not CALLED when it holds — which is 
 
 The version floor is checked BEFORE a refusal is propagated, because an out\-of\-date binary must be told to upgrade whether or not its entitlement is also in order.
 
-Parameters:
+policy is your gate policy; a nil one refuses everything, including a verification that would have passed. path is the command path relative to the root, root NOT included, with nil meaning the bare root invocation. verify is your entitlement verification, CALLED AT MOST ONCE and only when the invocation is not exempt; a nil verify refuses.
 
-- policy: the product's gate policy. A nil policy exempts nothing.
-- path: the command path relative to the root, root NOT included. Nil is the bare root invocation.
-- verify: your entitlement verification, CALLED AT MOST ONCE and only when the invocation is not exempt. Nil refuses.
-
-Returns:
-
-- decision: what to do, and everything the verifier said.
+It returns what to do, and everything the verifier said.
 
 <a name="Outcome"></a>
 ## type [Outcome](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/gate/gate.go#L88>)

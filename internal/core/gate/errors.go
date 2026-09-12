@@ -12,12 +12,9 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // misconfigured builds the refusal every Validate fault carries, so the code,
 // reason and public text are written once.
 //
-// Parameters:
-//   - detail: what is wrong, for the operator's own log. It names no value a
-//     caller supplied beyond the command path already in their policy.
-//
-// Returns:
-//   - err: the typed refusal.
+// It takes detail — what is wrong, for the operator's own log, naming no value
+// a caller supplied beyond the command path already in their policy — and
+// returns the typed refusal.
 func misconfigured(detail string) error {
 	//: one sentinel shape, one private detail per call site.
 	return errs.Wrap(nil, errs.WrapParams{

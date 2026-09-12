@@ -24,12 +24,8 @@ const (
 	OutcomeUpgrade
 )
 
-// String names the outcome for a diagnostic.
-//
-// Parameters: none.
-//
-// Returns:
-//   - name: the outcome's name, or "unset" for the zero value.
+// String names the outcome for a diagnostic, spelling the unclaimed zero value
+// "unset" rather than inventing a name for it.
 func (o Outcome) String() string {
 	//: a small closed set, so a switch is the whole implementation.
 	switch o {

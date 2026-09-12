@@ -98,15 +98,13 @@ type Outcome = coregate.Outcome
 // out-of-date binary must be told to upgrade whether or not its entitlement is
 // also in order.
 //
-// Parameters:
-//   - policy: the product's gate policy. A nil policy exempts nothing.
-//   - path: the command path relative to the root, root NOT included. Nil is
-//     the bare root invocation.
-//   - verify: your entitlement verification, CALLED AT MOST ONCE and only
-//     when the invocation is not exempt. Nil refuses.
+// policy is your gate policy; a nil one refuses everything, including a
+// verification that would have passed. path is the command path relative to the
+// root, root NOT included, with nil meaning the bare root invocation. verify is
+// your entitlement verification, CALLED AT MOST ONCE and only when the
+// invocation is not exempt; a nil verify refuses.
 //
-// Returns:
-//   - decision: what to do, and everything the verifier said.
+// It returns what to do, and everything the verifier said.
 func Decide(policy *Policy, path []string, verify func() error) Decision {
 	//: delegate verbatim to the service implementation.
 	return svcgate.Decide(policy, path, verify)

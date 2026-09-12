@@ -5,6 +5,7 @@ package gate
 import (
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // pathSeparator joins a command path for comparison. A space cannot appear in a
@@ -59,12 +60,9 @@ type PolicyValue struct {
 
 // Exempt reports whether the command at path runs without the check.
 //
-// Parameters:
-//   - path: the command path relative to the root, root NOT included. A nil or
-//     empty path is the bare root invocation.
-//
-// Returns:
-//   - exempt: true when the command runs unchecked.
+// path is the command path relative to the root, root NOT included; a nil or
+// empty path — and a single empty element, which is what splitting an empty
+// string yields — is the bare root invocation.
 func (p *PolicyValue) Exempt(path []string) bool {
 	//: a nil policy exempts nothing, which is the refusing direction. Every
 	//: accessor here tolerates one for the same reason: the code path that
@@ -99,10 +97,7 @@ func (p *PolicyValue) Exempt(path []string) bool {
 // error has no single Private detail, so errs.PrivateOf reports the first
 // fault's and a structured-logging caller would still see them one at a time.
 //
-// Parameters: none.
-//
-// Returns:
-//   - err: one typed refusal whose private detail names every fault, or nil.
+// It returns one typed refusal whose private detail names every fault, or nil.
 func (p *PolicyValue) Validate() error {
 	//: a nil policy is a gate nobody configured, and it fails the same way as
 	//: an empty one rather than panicking.
@@ -112,12 +107,47 @@ func (p *PolicyValue) Validate() error {
 	}
 
 	var faults []string
-	//: an entry that can never match is a silent lockout: the exemption list
-	//: LOOKS complete and the command it names stays gated. It is the same
-	//: failure RecoveryPaths guards against, one level down, and it is why
-	//: this is checked before anything else reads the lists.
-	faults = append(faults, unmatchable("ExemptExact", p.ExemptExact)...)
+	//: entries no invocation can produce, first: they make a list LOOK
+	//: complete while the command it names stays gated.
+	faults = append(faults, p.unreachableEntries()...)
+	//: then the two lockouts, and the one field with no safe guess.
+	faults = append(faults, p.lockouts()...)
+	//: a usable policy returns a genuine nil, not a wrapped empty list.
+	if len(faults) == 0 {
+		//: nothing to report.
+		return nil
+	}
+
+	//: one refusal, every fault in it, so one start-up is enough to fix them.
+	return misconfigured(strings.Join(faults, "; "))
+}
+
+// unreachableEntries reports every list entry no command path can equal, so a
+// policy carrying one is refused rather than quietly not applying it.
+func (p *PolicyValue) unreachableEntries() []string {
+	faults := unmatchable("ExemptExact", p.ExemptExact)
 	faults = append(faults, unmatchable("ExemptSubtree", p.ExemptSubtree)...)
+	faults = append(faults, unmatchable("RecoveryPaths", p.RecoveryPaths)...)
+	//: an empty SUBTREE root is not the bare root, and it is not "everything"
+	//: either: it exempts only the bare invocation, which ExemptExact already
+	//: says. Refusing beats the two alternatives — silently covering one
+	//: command reads as a subtree that does not work, and covering the whole
+	//: tree would turn one stray entry into a gate that gates nothing.
+	if slices.Contains(p.ExemptSubtree, "") {
+		faults = append(faults,
+			"ExemptSubtree contains the empty path: a subtree root must name a command. "+
+				"The bare root invocation belongs in ExemptExact, and an empty subtree "+
+				"root would either cover nothing useful or cover everything")
+	}
+
+	//: whatever was found, possibly nothing.
+	return faults
+}
+
+// lockouts reports the ways this policy would leave a machine with no path back
+// — plus the one field that has no safe default.
+func (p *PolicyValue) lockouts() []string {
+	var faults []string
 	//: an unset action is the one field with no safe guess; see UpdateAction.
 	if !p.OnUpdateRequired.Valid() {
 		faults = append(faults,
@@ -140,24 +170,69 @@ func (p *PolicyValue) Validate() error {
 			"no command is exempt: every invocation would require an entitlement, "+
 				"including the ones that repair it")
 	}
-	//: a usable policy returns a genuine nil, not a wrapped empty list.
-	if len(faults) == 0 {
-		//: nothing to report.
-		return nil
+
+	//: whatever was found, possibly nothing.
+	return faults
+}
+
+// unmatchable reports every entry in a path list that no real command path can
+// equal, so a policy carrying one is refused rather than quietly not applying.
+//
+// A path is built by joining command names with a single space, and a command
+// name contains no whitespace at all — the cli domain refuses a name with a
+// space in it, and a tab or a newline could not be typed as one either. So an
+// entry carrying stray whitespace of ANY kind cannot be produced by any
+// invocation, and the exemption it was written for never fires. Nothing about
+// the policy looks wrong; the command it names is simply still gated.
+//
+// It takes field for the message and paths to check, and returns one message
+// per unmatchable entry.
+func unmatchable(field string, paths []string) []string {
+	var faults []string
+	//: every entry, because each is independently wrong or right.
+	for _, path := range paths {
+		//: the bare root is the one legitimate empty entry; ExemptSubtree's
+		//: own refusal above is what rejects it there.
+		if path == "" {
+			continue
+		}
+		//: any whitespace that is not the single separator makes this a path
+		//: no invocation can produce — a tab, a newline, a leading or trailing
+		//: space, or two separators in a row.
+		if strayWhitespace(path) {
+			faults = append(faults,
+				field+" entry "+quote(path)+" carries stray whitespace, so no command path "+
+					"can equal it: the exemption it was written for never applies and the "+
+					"command stays gated")
+		}
 	}
 
-	//: one refusal, every fault in it, so one start-up is enough to fix them.
-	return misconfigured(strings.Join(faults, "; "))
+	//: whatever was found, possibly nothing.
+	return faults
+}
+
+// strayWhitespace reports whether path carries whitespace no command path can.
+//
+// It takes the space-joined path and returns true when the path is unreachable.
+func strayWhitespace(path string) bool {
+	//: a trimmed entry that differs, or a doubled separator, is unreachable.
+	if strings.TrimSpace(path) != path || strings.Contains(path, pathSeparator+pathSeparator) {
+		//: unreachable.
+		return true
+	}
+
+	//: and so is any whitespace that is not the separator itself — a tab or a
+	//: newline survives TrimSpace in the middle of a string.
+	return strings.ContainsFunc(path, func(r rune) bool {
+		return unicode.IsSpace(r) && string(r) != pathSeparator
+	})
 }
 
 // quote renders a path for a message, spelling the bare root invocation as
 // something an operator can recognise rather than as an empty pair of quotes.
 //
-// Parameters:
-//   - path: the space-joined command path.
-//
-// Returns:
-//   - rendered: the path in quotes, or a phrase for the bare root.
+// It takes the space-joined command path and returns it in quotes, or a phrase
+// for the bare root.
 func quote(path string) string {
 	//: the empty path is the bare root, and "" would read as a missing value.
 	if path == "" {
@@ -167,40 +242,4 @@ func quote(path string) string {
 
 	//: an ordinary quoted path.
 	return `"` + path + `"`
-}
-
-// unmatchable reports every entry in a path list that no real command path can
-// equal, so a policy carrying one is refused rather than quietly not applying.
-//
-// A path is built by joining command names with a single space, and a command
-// name contains no space — the cli domain refuses one. So an entry with a
-// leading space, a trailing space or a doubled space cannot be produced by any
-// invocation, and the exemption it was written for never fires. Nothing about
-// the policy looks wrong; the command it names is simply still gated.
-//
-// Parameters:
-//   - field: the field name, for the message.
-//   - paths: the entries to check.
-//
-// Returns:
-//   - faults: one message per unmatchable entry.
-func unmatchable(field string, paths []string) []string {
-	var faults []string
-	//: every entry, because each is independently wrong or right.
-	for _, path := range paths {
-		//: the bare root is the one legitimate empty entry.
-		if path == "" {
-			continue
-		}
-		//: a trimmed or collapsed entry that differs is one no path can equal.
-		if strings.TrimSpace(path) != path || strings.Contains(path, pathSeparator+pathSeparator) {
-			faults = append(faults,
-				field+" entry "+quote(path)+" has stray whitespace, so no command path can "+
-					"equal it: the exemption it was written for never applies and the command "+
-					"stays gated")
-		}
-	}
-
-	//: whatever was found, possibly nothing.
-	return faults
 }

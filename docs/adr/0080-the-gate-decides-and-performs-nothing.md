@@ -98,11 +98,19 @@ REFUSES a policy in which any of them is gated. So does a policy that exempts
 nothing at all: such a binary cannot be repaired from inside itself.
 
 And so does an entry no command path can ever equal. A path joins command names
-with ONE space and a name contains none, so `"license "` — a trailing space —
-matches nothing: the exemption never fires and the command it was written for
-stays gated. That is the same lockout as a missing entry wearing the disguise of
-a present one, and it is the reason this check runs before anything else reads
-the lists.
+with ONE space and a name contains no whitespace AT ALL, so `"license "` — a
+trailing space — and `"license\tcreate"` — a tab — match nothing: the exemption
+never fires and the command it was written for stays gated. That is the same
+lockout as a missing entry wearing the disguise of a present one, and it is the
+reason this check runs before anything else reads the lists. It applies to
+`RecoveryPaths` too: an unreachable recovery path is a recovery path that does
+not exist.
+
+An empty SUBTREE root is refused for a related reason. It is not the bare root —
+`ExemptExact` already says that — and it is not "everything" either. The two
+available meanings are both wrong: covering only the bare invocation reads as a
+subtree that silently does not work, and covering the whole tree would turn one
+stray entry into a gate that gates nothing.
 
 `Validate` returns **one** error naming every fault rather than an
 `errors.Join` of several. That distinction is the difference between a promise
@@ -111,7 +119,19 @@ and a delivered one — a joined error has no single `Private` detail, so
 still fix them one start-up at a time. The first version of this package joined;
 its own test caught it.
 
-### 4. Both enums leave zero unclaimed
+### 4. A nil policy refuses, including a verification that passed
+
+The documentation said "a nil policy exempts nothing and refuses" and the code
+allowed: a nil policy with a clean verification fell through to the
+ordinary-path branch. Review caught it.
+
+Refusing is the only safe answer to invent. The policy is what says which
+commands may run at all, so without one there is no answer — and `verify` is not
+called either, because no verification can change a refusal that is already
+settled. Same reasoning as the exemption check: do not pay for an answer that
+cannot matter.
+
+### 5. Both enums leave zero unclaimed
 
 `UpdateAction`'s zero is not a default because refusing and upgrading are
 opposite answers: a binary distributed to machines an operator does not own must
@@ -119,7 +139,7 @@ not replace itself uninvited, and one distributed to a fleet that tracks the
 floor must not stop working instead. `Outcome`'s zero is not a default because a
 decision nobody made must not read as "allow". ADR 0031.
 
-### 5. `DecisionValue` carries two facts `Outcome` loses
+### 6. `DecisionValue` carries two facts `Outcome` loses
 
 `Exempt` distinguishes never-checked from checked-and-allowed. They are the same
 outcome and a very different fact: a daemon that seeds a watchdog from a

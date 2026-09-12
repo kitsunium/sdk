@@ -217,6 +217,41 @@ func TestPolicyValue_Validate(t *testing.T) {
 			reason:   "a path joins names with ONE space, so two can never appear",
 		},
 		{
+			//: An empty SUBTREE root is not the bare root and is not
+			//: "everything": it would cover only the bare invocation, which
+			//: ExemptExact already says. Refusing beats covering the whole
+			//: tree, which would turn one stray entry into a gate that gates
+			//: nothing.
+			name: "an empty subtree root",
+			policy: &PolicyValue{
+				ExemptSubtree:    []string{""},
+				OnUpdateRequired: UpdateRefuse,
+			},
+			wantSubs: []string{"ExemptSubtree contains the empty path"},
+			reason:   "a subtree root must name a command",
+		},
+		{
+			//: A tab survives TrimSpace in the middle of a string, so the
+			//: separator-only check missed it.
+			name: "an entry carrying a tab",
+			policy: &PolicyValue{
+				ExemptExact:      []string{"license\tcreate"},
+				OnUpdateRequired: UpdateRefuse,
+			},
+			wantSubs: []string{"stray whitespace"},
+			reason:   "a command name contains no whitespace of any kind",
+		},
+		{
+			name: "a recovery path carrying stray whitespace",
+			policy: &PolicyValue{
+				ExemptExact:      []string{"upgrade"},
+				RecoveryPaths:    []string{"upgrade "},
+				OnUpdateRequired: UpdateRefuse,
+			},
+			wantSubs: []string{"RecoveryPaths entry"},
+			reason:   "an unreachable recovery path is a recovery path that does not exist",
+		},
+		{
 			//: The one legitimate empty entry, which must NOT be refused.
 			name: "the bare root entry is not stray whitespace",
 			policy: &PolicyValue{

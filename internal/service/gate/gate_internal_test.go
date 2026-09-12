@@ -34,15 +34,16 @@ func TestDecide(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		policy     *coregate.PolicyValue
-		path       []string
-		verifyErr  error
-		want       coregate.Outcome
-		wantExempt bool
-		wantFloor  bool
-		wantCause  bool
-		reason     string
+		name        string
+		policy      *coregate.PolicyValue
+		path        []string
+		verifyErr   error
+		want        coregate.Outcome
+		wantExempt  bool
+		wantNoCalls bool
+		wantFloor   bool
+		wantCause   bool
+		reason      string
 	}{
 		{
 			name:   "a gated command with a clean verification runs",
@@ -111,18 +112,26 @@ func TestDecide(t *testing.T) {
 			reason: "an unset action must not silently become one of the three",
 		},
 		{
-			name:   "a nil policy exempts nothing and refuses",
+			//: A gate nobody configured refuses everything, and does not pay
+			//: for a verification that cannot change the answer. The policy is
+			//: what says which commands may run at all.
+			name:   "a nil policy refuses without verifying",
 			policy: nil, path: []string{"version"},
-			verifyErr: errRevoked,
-			want:      coregate.OutcomeRefuse, wantCause: true,
-			reason: "a gate nobody configured must not allow anything",
+			verifyErr:   nil,
+			want:        coregate.OutcomeRefuse,
+			wantNoCalls: true,
+			reason:      "a gate nobody configured must not allow anything, not even a clean verification",
 		},
 		{
-			name:   "a nil policy on the floor refuses too",
+			//: THE case review caught: a nil policy plus a verification that
+			//: PASSED used to fall through and allow, contradicting the
+			//: fail-closed contract this package documents.
+			name:   "a nil policy refuses a clean verification too",
 			policy: nil, path: []string{"lint"},
-			verifyErr: errFloor,
-			want:      coregate.OutcomeRefuse, wantFloor: true, wantCause: true,
-			reason: "there is no action to read, and an absent decision refuses",
+			verifyErr:   nil,
+			want:        coregate.OutcomeRefuse,
+			wantNoCalls: true,
+			reason:      "the documentation said refuse and the code allowed",
 		},
 		{
 			name:   "the bare root is exempt",
@@ -147,13 +156,13 @@ func TestDecide(t *testing.T) {
 			//: exempt from — `completion` runs from a shell hook where a
 			//: network round trip would be hostile. Counting is the only
 			//: way to assert something did NOT happen.
-			if tt.wantExempt && calls != 0 {
-				t.Errorf("Decide() called the verifier %d time(s) on an exempt "+
-					"invocation, want 0 — %s", calls, tt.reason)
+			if (tt.wantExempt || tt.wantNoCalls) && calls != 0 {
+				t.Errorf("Decide() called the verifier %d time(s) when it should not "+
+					"have, want 0 — %s", calls, tt.reason)
 			}
 			//: And a gated one must pay exactly once: twice is two round
 			//: trips where the caller budgeted for one.
-			if !tt.wantExempt && calls != 1 {
+			if !tt.wantExempt && !tt.wantNoCalls && calls != 1 {
 				t.Errorf("Decide() called the verifier %d time(s) on a gated "+
 					"invocation, want exactly 1 — %s", calls, tt.reason)
 			}

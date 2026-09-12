@@ -42,24 +42,18 @@ const (
 	UpdateWarn
 )
 
-// Valid reports whether this action was set to one of the three answers.
-//
-// Parameters: none.
-//
-// Returns:
-//   - valid: false for the unclaimed zero value.
+// Valid reports whether this action was set to one of the three answers. It is
+// false for the unclaimed zero value, and false for anything past the last
+// action — a value from a newer build of this package that this one cannot
+// honour.
 func (a UpdateAction) Valid() bool {
 	//: the zero value is unclaimed, and everything past the last action is a
 	//: value from a newer build of this package that this one cannot honour.
 	return a >= UpdateRefuse && a <= UpdateWarn
 }
 
-// String names the action for a diagnostic.
-//
-// Parameters: none.
-//
-// Returns:
-//   - name: the action's name, or "unset" for the zero value.
+// String names the action for a diagnostic, spelling the unclaimed zero value
+// "unset" rather than inventing a name for it.
 func (a UpdateAction) String() string {
 	//: a small closed set, so a switch is the whole implementation.
 	switch a {

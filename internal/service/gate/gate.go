@@ -32,18 +32,25 @@ import (
 // "your licence is broken" to somebody whose answer is "run upgrade" sends them
 // to the wrong place.
 //
-// Parameters:
-//   - policy: the product's gate policy. A nil policy exempts nothing, which
-//     is the refusing direction.
-//   - path: the command path relative to the root, root NOT included. Nil is
-//     the bare root invocation.
-//   - verify: the caller's entitlement verification, CALLED AT MOST ONCE and
-//     only when the invocation is not exempt. Nil is treated as a
-//     verification that did not happen, which refuses.
+// policy is the product's gate policy; a nil one refuses everything, including
+// a verification that would have passed. path is the command path relative to
+// the root, root NOT included, with nil meaning the bare root invocation.
+// verify is the caller's entitlement verification, CALLED AT MOST ONCE and only
+// when the invocation is not exempt; a nil verify refuses, because nothing
+// vouched for the invocation.
 //
-// Returns:
-//   - decision: what the caller should do, and everything the verifier said.
+// It returns what the caller should do, and everything the verifier said.
 func Decide(policy *coregate.PolicyValue, path []string, verify func() error) coregate.DecisionValue {
+	//: A gate nobody configured refuses everything, INCLUDING a verification
+	//: that passed. The documentation said so and the code did not: a nil
+	//: policy fell through to the clean-verification branch and allowed. The
+	//: policy is what says which commands may run at all, so without one there
+	//: is no answer to give — and the fail-closed direction is the only safe
+	//: one to invent.
+	if policy == nil {
+		//: Nothing configured this gate; nothing runs through it.
+		return coregate.DecisionValue{Outcome: coregate.OutcomeRefuse}
+	}
 	//: Exempt first, and WITHOUT calling verify: an exempt command must not
 	//: pay for a verification it is exempt from.
 	if policy.Exempt(path) {
@@ -78,16 +85,13 @@ func Decide(policy *coregate.PolicyValue, path []string, verify func() error) co
 
 // floorDecision applies the policy's UpdateAction to a build below the floor.
 //
-// Parameters:
-//   - policy: the product's gate policy.
-//   - cause: the floor refusal, which names the required version.
-//
-// Returns:
-//   - decision: what the caller should do, with FloorUnmet set in every branch.
+// It takes the policy and the floor refusal — which names the required version
+// — and returns what the caller should do, with FloorUnmet set in every branch.
 func floorDecision(policy *coregate.PolicyValue, cause error) coregate.DecisionValue {
 	decision := coregate.DecisionValue{Cause: cause, FloorUnmet: true}
-	//: A nil policy has no action to read, and refusing is the direction an
-	//: absent decision must take.
+	//: A nil policy is refused by Decide before reaching here, so this guard
+	//: is for a direct caller inside this package rather than a reachable
+	//: branch of Decide's flow. Refusing is the direction either way.
 	if policy == nil {
 		//: Refuse.
 		decision.Outcome = coregate.OutcomeRefuse

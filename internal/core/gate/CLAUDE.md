@@ -35,9 +35,14 @@ on purpose.
   reinstalling, and nothing about the policy LOOKS wrong — the exemption list is
   simply missing an entry. `Validate` refuses it.
 - **An entry no path can equal is a lockout wearing a disguise.** `"license "`
-  with a trailing space matches nothing, so the exemption never fires and the
-  command stays gated — while the list LOOKS complete. `Validate` refuses it,
-  and the bare-root `""` is the one legitimate empty entry.
+  with a trailing space, or `"license\tcreate"` with a tab, matches nothing —
+  so the exemption never fires and the command stays gated while the list LOOKS
+  complete. `Validate` refuses any stray whitespace on all three lists, and the
+  bare-root `""` is the one legitimate empty entry in `ExemptExact`.
+- **An empty SUBTREE root is refused.** Its two available meanings are both
+  wrong: covering only the bare invocation reads as a subtree that silently does
+  not work, and covering everything would turn one stray entry into a gate that
+  gates nothing.
 - **`Validate` returns ONE error naming every fault**, not an `errors.Join`. A
   joined error has no single `Private` detail, so `errs.PrivateOf` reports the
   first fault's and a structured-logging caller would still fix them one

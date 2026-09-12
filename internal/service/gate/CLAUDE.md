@@ -22,9 +22,12 @@ and the process exit stay in the caller's control flow.
     order: the action is the same either way, and reporting "your licence is
     broken" to somebody whose answer is "run upgrade" sends them to the wrong
     place.
-- **A nil policy exempts nothing and refuses.** That is the direction an absent
-  decision must take, and it is the path that runs when a caller has configured
-  nothing at all.
+- **A nil policy refuses everything, including a verification that passed** —
+  and does not call `verify` at all. The documentation said so and the first
+  version of the code did not: a nil policy fell through to the ordinary-path
+  branch and allowed. Review caught it. No verification can change a refusal
+  that is already settled, so paying for one would be the same waste the
+  exemption check avoids.
 - **An unset `UpdateAction` refuses** rather than defaulting to one of the
   three. It is reachable only from a policy that never went through `Validate`,
   and refusing is the direction `Validate` would have taken at start-up.
