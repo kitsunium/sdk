@@ -46,6 +46,7 @@ filegroup(
         "//internal/core/trace:audit_srcs",
         "//internal/core/transform:audit_srcs",
         "//internal/core/validation:audit_srcs",
+        "//internal/core/vcs:audit_srcs",
         "//internal/core/vfs:audit_srcs",
         "//internal/core/view:audit_srcs",
         "//internal/core/writer:audit_srcs",

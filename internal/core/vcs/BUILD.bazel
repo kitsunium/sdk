@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "vcs",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "line_range.go",
+        "vcs.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/vcs",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":vcs",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

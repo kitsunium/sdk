@@ -85,6 +85,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0073-session-waits-are-abandonable.md` | The session store's two waits can be abandoned, because a blocking flock cannot (amends ADR 0045) | Accepted |
 | `adr/0074-what-a-public-alias-may-point-at.md` | A public alias points at the layer that OWNS the type, and a single engine's configuration is owned by that engine | Accepted |
 | `adr/0075-reading-the-cgroup-cap-that-already-bounds-us.md` | The SDK reads the cgroup cap that already bounds this process, not only the ones it writes for others | Accepted |
+| `adr/0076-what-a-branch-changed-is-a-value-that-can-say-it-does-not-know.md` | What a branch changed is a value that can say it does not know, and running git against a repository you do not control is hardened | Accepted |
 
 This table is one of THREE indexes of the same ADRs — the others are
 `docs/adr/CLAUDE.md`'s Contents table and the root `CLAUDE.md` Reference list —
