@@ -87,6 +87,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0075-reading-the-cgroup-cap-that-already-bounds-us.md` | The SDK reads the cgroup cap that already bounds this process, not only the ones it writes for others | Accepted |
 | `adr/0076-what-a-branch-changed-is-a-value-that-can-say-it-does-not-know.md` | What a branch changed is a value that can say it does not know, and running git against a repository you do not control is hardened | Accepted |
 | `adr/0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md` | A self-update is an order of operations, and a product name is not part of it | Accepted |
+| `adr/0078-entitlement-is-quarantined-because-ssh-brings-x-sys.md` | Entitlement ships under third-party/ because proving key possession brings x/sys with it | Accepted |
 
 This table is one of THREE indexes of the same ADRs — the others are
 `docs/adr/CLAUDE.md`'s Contents table and the root `CLAUDE.md` Reference list —
