@@ -219,10 +219,10 @@ type UpdateRequiredError = svcent.UpdateRequiredError
 
 // NewWithGetter returns a verifier whose roster fetches go through client.
 //
-// client is the HTTP surface the roster is fetched over, identity the machine's
-// half of the proof, vendor the ed25519 public key the binary links in, and
-// product the vendor-specific facts — a nil product uses the documented
-// fallbacks.
+// It takes client, the HTTP surface the roster is fetched over; identity, the
+// machine's half of the proof; vendor, the ed25519 public key the binary links
+// in; and product, the vendor-specific facts — a nil product uses the
+// documented fallbacks.
 func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Product) *Service {
 	//: delegate verbatim to the service implementation.
 	return svcent.NewServiceWithGetter(client, identity, vendor, product)

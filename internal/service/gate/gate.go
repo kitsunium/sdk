@@ -32,12 +32,12 @@ import (
 // "your licence is broken" to somebody whose answer is "run upgrade" sends them
 // to the wrong place.
 //
-// policy is the product's gate policy; a nil one refuses everything, including
-// a verification that would have passed. path is the command path relative to
-// the root, root NOT included, with nil meaning the bare root invocation.
-// verify is the caller's entitlement verification, CALLED AT MOST ONCE and only
-// when the invocation is not exempt; a nil verify refuses, because nothing
-// vouched for the invocation.
+// It takes policy, the product's gate policy — a nil one refuses everything,
+// including a verification that would have passed; path, the command path
+// relative to the root with the root itself NOT included, where nil is the bare
+// root invocation; and verify, the caller's entitlement verification, CALLED AT
+// MOST ONCE and only when the invocation is not exempt, with a nil verify
+// refusing because nothing vouched for the invocation.
 //
 // It returns what the caller should do, and everything the verifier said.
 func Decide(policy *coregate.PolicyValue, path []string, verify func() error) coregate.DecisionValue {

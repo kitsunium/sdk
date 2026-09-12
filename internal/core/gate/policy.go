@@ -60,9 +60,9 @@ type PolicyValue struct {
 
 // Exempt reports whether the command at path runs without the check.
 //
-// path is the command path relative to the root, root NOT included; a nil or
-// empty path — and a single empty element, which is what splitting an empty
-// string yields — is the bare root invocation.
+// It takes the command path relative to the root, with the root itself NOT
+// included. A nil path, an empty one, and a single empty element — which is what
+// splitting an empty string yields — are all the bare root invocation.
 func (p *PolicyValue) Exempt(path []string) bool {
 	//: a nil policy exempts nothing, which is the refusing direction. Every
 	//: accessor here tolerates one for the same reason: the code path that

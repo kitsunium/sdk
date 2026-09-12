@@ -328,7 +328,7 @@ func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Pro
 
 NewWithGetter returns a verifier whose roster fetches go through client.
 
-client is the HTTP surface the roster is fetched over, identity the machine's half of the proof, vendor the ed25519 public key the binary links in, and product the vendor\-specific facts — a nil product uses the documented fallbacks.
+It takes client, the HTTP surface the roster is fetched over; identity, the machine's half of the proof; vendor, the ed25519 public key the binary links in; and product, the vendor\-specific facts — a nil product uses the documented fallbacks.
 
 <a name="Subject"></a>
 ## type [Subject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L178>)
