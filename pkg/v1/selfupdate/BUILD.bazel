@@ -1,0 +1,30 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "selfupdate",
+    srcs = ["selfupdate.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/selfupdate",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/selfupdate",
+        "//internal/kernel/errs",
+        "//internal/service/selfupdate",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":selfupdate",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "selfupdate_test",
+    srcs = ["selfupdate_external_test.go"],
+    deps = [
+        ":selfupdate",
+        "//pkg/v1/errs",
+    ],
+)

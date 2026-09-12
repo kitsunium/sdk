@@ -40,6 +40,7 @@ filegroup(
         "//internal/core/queue:audit_srcs",
         "//internal/core/resilience:audit_srcs",
         "//internal/core/scheduler:audit_srcs",
+        "//internal/core/selfupdate:audit_srcs",
         "//internal/core/session:audit_srcs",
         "//internal/core/sql:audit_srcs",
         "//internal/core/token:audit_srcs",

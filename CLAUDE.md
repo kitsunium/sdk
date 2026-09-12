@@ -20,7 +20,8 @@ internal/
 │                  events,
 │                  health, i18n, id, lifecycle, lock, logger, logger/level,
 │                  mail, metrics, net, proc, queue, resilience, scheduler,
-│                  session, sql, token, trace, transform, validation, vcs,
+│                  selfupdate, session, sql, token, trace, transform,
+│                  validation, vcs,
 │                  vfs,
 │                  view, writer
 └── service/       concrete implementations
@@ -66,6 +67,8 @@ internal/
                    vfs    (os.Root-confined FS + memory FS + atomic publish)
                    vcs    (git changed-set: merge-base + index + worktree
                            + untracked, hardened invocations)
+                   selfupdate (signed release -> verified archive -> atomic
+                           replacement, with consent and escalation opt-ins)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── cache/     (the ADR 0025 primitive AND the ADR 0049 domain, side by side)
@@ -94,6 +97,7 @@ pkg/
     └── sql/        (ports over database/sql, no driver, no ORM — ADR 0055)
     └── vfs/        (io/fs reading unchanged + atomic publication — ADR 0056)
     └── git/        (what a branch changed; degrades, never empties — ADR 0076)
+    └── selfupdate/ (signature THEN digest THEN disk; no key, no install — ADR 0077)
     └── view/       (html/template, one trust type, parse once — ADR 0058)
 third-party/       opt-in vendor integrations (root module only)
                    aws/writer/{cloudwatch,s3}, codec/{hcl,protobuf},
@@ -272,5 +276,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0074 — what a public alias may point at: the axis is OWNERSHIP, not value-versus-handle. A type the port speaks lives in core; a type meaningful to exactly one engine — its handle, its `Option` closures, and above all its construction parameters (`sql.Config`, `session.FileConfig`, the five `resilience` configs) — lives with that engine, because hoisting a `*sql.DB` or an SMTP TLS mode into the contract layer makes core describe one backend. Measured: 233 core aliases, 69 service, 3 kernel. Nothing moved; the rule now describes the code — `docs/adr/0074-what-a-public-alias-may-point-at.md`
 - ADR 0075 — the SDK reads the cgroup cap that already bounds this process, not only the ones it writes for others: `cgroup` writes a group to bound a child and `rlimit` sets a kernel-enforced ceiling, but nothing read the cap already on the caller — and the Go runtime does not either (`GOMAXPROCS` is cgroup-aware since 1.25, the memory limit never was), so a service in a 512 MiB container is SIGKILLed where a soft limit would have pushed the collector. `memlimit` reads `/proc/self/cgroup` rather than the mount root, minimises across ancestors and across both hierarchies, keeps 10% headroom and declines under 64 MiB. Every outcome is a VALUE — `Apply` cannot fail — and `MemorySource` names which of the three declining outcomes happened, with the enum's zero left unminted per ADR 0031. Versed from `kodflow/ktn-linter` `pkg/memlimit` — `docs/adr/0075-reading-the-cgroup-cap-that-already-bounds-us.md`
 - ADR 0076 — what a branch changed is a value that can say it does not know: `Resolve` returns NO error, because a resolver that cannot tell what changed must never answer with an empty set — "nothing changed" and "I could not tell" are opposite instructions, and a scoped review receiving the first passes on a branch it never examined. Degrading produces `FullFallback` + a `Reason`; the zero `ResolutionValue` is neither readable shape, so a caller who skipped `Degraded()` cannot read "nothing changed" out of a value nothing minted (ADR 0031). The set spans the three-dot merge-base delta, the index, the working tree and untracked files. Every git invocation is hardened against a hostile `.git/config`: `core.fsmonitor` set to a script executed 5 times on read-only queries before the guard and 0 after, and `diff.external` needs `--no-ext-diff` because setting it empty makes git execute `""` and abort — with what is NOT hardened listed too. The `.go` suffix + generated-file filter the source hard-coded becomes `Config.Include`, nil admitting everything. Versed from `kodflow/ktn-linter` `pkg/git` — `docs/adr/0076-what-a-branch-changed-is-a-value-that-can-say-it-does-not-know.md`
+- ADR 0077 — a self-update is an order of operations, and a product name is not part of it: comparing an archive's SHA-256 against a checksum file fetched from beside it verifies NOTHING, because whoever substitutes the archive substitutes the manifest too. The digest counts only after a detached ed25519 signature over that manifest verifies against a key linked into the build — and reversing the two leaves every log line identical, which is why the suite asserts the order. A build with no vendor key installs nothing: verify-if-present fails OPEN and makes the guarantee a property of a build flag nobody inspects. Eighteen codes in three classes (retryable / fixable by an opt-in / supply-chain, where no retry helps and no manual install is safe), re-exported from the facade as `pkg/v1/authz` does. Host, repositories, asset pattern, binary name and both env vars move into `SourceValue`, the env names DERIVED by uppercase-and-fold so `ktn-linter` still yields `KTN_LINTER_AUTO_UPGRADE`. Adds `golang.org/x/mod/semver`, which `go list -deps` shows is stdlib-pure. Versed from `kodflow/ktn-linter` `pkg/updater` — `docs/adr/0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`
