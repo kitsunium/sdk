@@ -17,7 +17,10 @@ package vcs
 // can ask about. It is FROZEN at four methods.
 //
 // Every path argument is absolute. Implementations normalise through
-// filepath.Clean before comparing, so a caller need not.
+// filepath.Clean before comparing, so a caller need not — but Clean is LEXICAL,
+// and that is the one thing a caller does have to know: a path that traverses a
+// symlink will not match one that does not, even when both name the same file.
+// Query with paths resolved the same way the resolution resolved its root.
 //
 // The three Contains methods are not interchangeable and none implies another in
 // the direction a caller might assume: a pure rename or a deletion touches a

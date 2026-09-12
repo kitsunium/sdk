@@ -135,6 +135,29 @@ and nothing else in the SDK imports it.
 
 ## Deferred
 
+- **A path reached through a symlink does not match.** `Resolve` stores paths at
+  git's canonical top-level while the `Contains*` methods compare with
+  `filepath.Clean`, which is LEXICAL. A caller querying a path that traverses a
+  symlink gets false for a file that did change — the dangerous direction, since
+  it under-reports. Canonicalising on every query would cost an `EvalSymlinks`
+  syscall per call; canonicalising once at construction would still not fix a
+  caller whose own paths are lexical. Stated in the port comment instead: query
+  with paths resolved the same way `Resolve` resolved the root.
+- **A COPY marks its source touched.** `git diff -M -C` reports `C### old new`,
+  and both sides go through `markPath`, so the unchanged `old` enters the set.
+  It over-reports, which is the safe direction, and it is the source
+  implementation's behaviour. Splitting rename from copy is a one-line change
+  and a semantics change, so it is recorded rather than slipped into a
+  versement.
+- **A failed shallow probe reads as "not shallow".** `git rev-parse
+  --is-shallow-repository` failing makes `isShallow` answer false, so a shallow
+  checkout whose probe is unsupported gets a scoped set instead of the full
+  fallback. The code comment already said so; it is now recorded as a decision.
+- **A stale `origin/HEAD` is not re-checked against the candidate list.**
+  `resolveBaseRef` trusts a successful `symbolic-ref` without verifying the
+  commit still exists, so a stale symbolic ref degrades where `origin/main`
+  would have worked. Fail-safe (everything in scope), and rare.
+
 - **Only `git`.** No second implementation, and therefore no way to know which
   parts of the contract are git-shaped. `ChangedSet` is deliberately narrow so a
   second one would have little to disagree with, but the claim is untested.

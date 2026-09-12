@@ -62,7 +62,11 @@ func TestShowFile(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{name: "committed file returns its content", relPath: "f.txt", want: "hello blob"},
+		//: The trailing newline is the FILE's, and the source implementation's
+		//: trim removed it. This expectation changed with the behaviour: a
+		//: blob comes back verbatim now, because trimming a file silently
+		//: rewrites its content and makes a whitespace-only file read as empty.
+		{name: "committed file returns its content", relPath: "f.txt", want: "hello blob\n"},
 		{name: "absent path returns an error", relPath: "missing.txt", wantErr: true},
 	}
 

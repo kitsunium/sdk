@@ -9,6 +9,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/vcs",
+        "//internal/kernel/errs",
         "//internal/service/vcs/git",
     ],
 )
@@ -22,5 +23,8 @@ alias(
 go_test(
     name = "git_test",
     srcs = ["git_external_test.go"],
-    deps = [":git"],
+    deps = [
+        ":git",
+        "//pkg/v1/errs",
+    ],
 )

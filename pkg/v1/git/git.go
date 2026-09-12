@@ -64,8 +64,22 @@ import (
 	"context"
 
 	corevcs "github.com/kitsunium/sdk/internal/core/vcs"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcgit "github.com/kitsunium/sdk/internal/service/vcs/git"
 )
+
+// CodeRepositoryUnresolved identifies a path that is not inside a readable
+// repository. Match it with errs.HasCode: it is the one refusal a caller can act
+// on by falling back to a non-VCS path.
+const CodeRepositoryUnresolved errs.Code = corevcs.CodeRepositoryUnresolved
+
+// CodeCommandFailed identifies a version-control command that exited non-zero —
+// a corrupted object store, a permission error, a missing binary.
+const CodeCommandFailed errs.Code = corevcs.CodeCommandFailed
+
+// CodePathAbsent identifies a path that does not exist at the requested commit,
+// which is deliberately distinct from a successful read of an empty file.
+const CodePathAbsent errs.Code = corevcs.CodePathAbsent
 
 // ChangedSet is what a branch changed, queryable by line, file or directory. It
 // aliases the core vcs port.

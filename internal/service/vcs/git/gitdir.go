@@ -46,8 +46,16 @@ func GitDir(ctx context.Context, root string) (gitDir string, err error) {
 	out, err := runGitOutput(ctx, abs, "rev-parse", "--git-dir")
 	//: A failed probe means "no repository here" — never cache failures.
 	if err != nil {
-		//: Surface the failure to the caller.
-		return "", err
+		//: Re-label as REPOSITORY_UNRESOLVED rather than passing the generic
+		//: COMMAND_FAILED up. This IS the condition that sentinel names, and a
+		//: caller cannot tell "not a repository" from "git broke" otherwise.
+		//: The cause travels, so the git stderr is still reachable.
+		return "", errs.Wrap(err, errs.WrapParams{
+			Code:    corevcs.CodeRepositoryUnresolved,
+			Reason:  "REPOSITORY_UNRESOLVED",
+			Public:  "the path is not inside a readable repository",
+			Private: "service/vcs/git: rev-parse --git-dir failed for " + abs,
+		})
 	}
 	dir := out
 	//: rev-parse may answer with a root-relative path (".git"); anchor it so

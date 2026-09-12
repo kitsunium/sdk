@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/git"
 )
 
@@ -137,4 +138,103 @@ func TestGitDirRefusesANonRepository(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGitDirRefusalIsTyped pins that "not a repository" arrives as
+// RepositoryUnresolved rather than the generic command failure.
+//
+// The distinction is the point of declaring two sentinels. A caller deciding
+// whether to fall back to a non-VCS path needs "there is no repository here",
+// and cannot act on "some git command exited non-zero" — which is also what a
+// corrupted object store, a permission error or a missing binary produce.
+func TestGitDirRefusalIsTyped(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ name string }{{name: "an empty temporary directory"}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := git.GitDir(t.Context(), t.TempDir())
+			//: Outside a repository there is no git directory to name.
+			if err == nil {
+				t.Fatal("GitDir() = nil error outside a repository, want a refusal")
+			}
+			//: And the refusal must name THAT condition, not "git failed".
+			if !errs.HasCode(err, git.CodeRepositoryUnresolved) {
+				t.Errorf("GitDir() err = %v, want code %v", err, git.CodeRepositoryUnresolved)
+			}
+		})
+	}
+}
+
+// TestShowFileReturnsTheBlobVerbatim pins that a committed file's leading and
+// trailing whitespace survives the round trip.
+//
+// The runner every other call in this package uses trims its output, which is
+// right for a SHA and wrong for a file. Trimming here silently rewrites content:
+// a file that is one newline reads as empty, and a caller diffing what it read
+// against what is on disk sees a change nobody made.
+func TestShowFileReturnsTheBlobVerbatim(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "trailing newline is the file's", content: "package p\n"},
+		{name: "leading blank line is the file's", content: "\n\npackage p\n"},
+		{name: "trailing spaces are the file's", content: "package p\n   "},
+		{name: "a whitespace-only file is not an empty one", content: "\n \t\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := initRepoWith(t, "blob.txt", tt.content)
+			got, err := git.ShowFile(t.Context(), root, "HEAD", "blob.txt")
+			//: A committed path must be readable at the commit that added it.
+			if err != nil {
+				t.Fatalf("ShowFile() error = %v", err)
+			}
+			//: Byte-for-byte: the content is the file's, not a field to tidy.
+			if got != tt.content {
+				t.Errorf("ShowFile() = %q, want %q", got, tt.content)
+			}
+		})
+	}
+}
+
+// initRepoWith builds a one-commit repository whose single file carries the
+// given content verbatim, and returns its root.
+func initRepoWith(t *testing.T, name, content string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"config", "user.email", "test@example.invalid"},
+		{"config", "user.name", "Test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		//: A git that cannot initialise makes every assertion meaningless.
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("git %v unavailable: %v: %s", args, err, out)
+		}
+	}
+	//: 0o600 keeps the fixture out of the umask's way; content is verbatim.
+	if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, args := range [][]string{{"add", "."}, {"commit", "-qm", "seed"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+
+	//: The repository root the case reads back from.
+	return root
 }

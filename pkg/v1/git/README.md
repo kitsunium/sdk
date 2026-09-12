@@ -45,6 +45,7 @@ Every invocation is hardened against a hostile \`.git/config\`, which travels wi
 
 ## Index
 
+- [Constants](<#constants>)
 - [func GitDir\(ctx context.Context, root string\) \(gitDir string, err error\)](<#GitDir>)
 - [func ShowFile\(ctx context.Context, repoRoot, sha, relPath string\) \(content string, err error\)](<#ShowFile>)
 - [type ChangedSet](<#ChangedSet>)
@@ -55,8 +56,28 @@ Every invocation is hardened against a hostile \`.git/config\`, which travels wi
   - [func Resolve\(ctx context.Context, cfg Config\) Resolution](<#Resolve>)
 
 
+## Constants
+
+<a name="CodeCommandFailed"></a>CodeCommandFailed identifies a version\-control command that exited non\-zero — a corrupted object store, a permission error, a missing binary.
+
+```go
+const CodeCommandFailed errs.Code = corevcs.CodeCommandFailed
+```
+
+<a name="CodePathAbsent"></a>CodePathAbsent identifies a path that does not exist at the requested commit, which is deliberately distinct from a successful read of an empty file.
+
+```go
+const CodePathAbsent errs.Code = corevcs.CodePathAbsent
+```
+
+<a name="CodeRepositoryUnresolved"></a>CodeRepositoryUnresolved identifies a path that is not inside a readable repository. Match it with errs.HasCode: it is the one refusal a caller can act on by falling back to a non\-VCS path.
+
+```go
+const CodeRepositoryUnresolved errs.Code = corevcs.CodeRepositoryUnresolved
+```
+
 <a name="GitDir"></a>
-## func [GitDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L105>)
+## func [GitDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L119>)
 
 ```go
 func GitDir(ctx context.Context, root string) (gitDir string, err error)
@@ -67,7 +88,7 @@ GitDir resolves the git directory governing root — the one holding HEAD and th
 It never assumes \`.git\` is a directory: in a linked worktree or a submodule it is a \`gitdir:\` pointer FILE, and this follows it. The result is absolute and cleaned. Failures are not memoized, so a later \`git init\` is picked up.
 
 <a name="ShowFile"></a>
-## func [ShowFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L112>)
+## func [ShowFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L126>)
 
 ```go
 func ShowFile(ctx context.Context, repoRoot, sha, relPath string) (content string, err error)
@@ -76,7 +97,7 @@ func ShowFile(ctx context.Context, repoRoot, sha, relPath string) (content strin
 ShowFile returns the content of relPath at commit sha. A path absent at that commit is an error, which is what lets a caller tell "deleted" from "emptied".
 
 <a name="ChangedSet"></a>
-## type [ChangedSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L72>)
+## type [ChangedSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L86>)
 
 ChangedSet is what a branch changed, queryable by line, file or directory. It aliases the core vcs port.
 
@@ -85,7 +106,7 @@ type ChangedSet = corevcs.ChangedSet
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L85>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L99>)
 
 Config is where the repository is and which files the caller counts as changed. It aliases the service type: these are one implementation's construction parameters, which is what ADR 0074 says belongs with the engine.
 
@@ -94,7 +115,7 @@ type Config = svcgit.Config
 ```
 
 <a name="Include"></a>
-## type [Include](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L89>)
+## type [Include](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L103>)
 
 Include decides which files belong in the changed set. A nil Include admits every file.
 
@@ -103,7 +124,7 @@ type Include = svcgit.IncludeFunc
 ```
 
 <a name="LineRange"></a>
-## type [LineRange](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L76>)
+## type [LineRange](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L90>)
 
 LineRange is an inclusive, 1\-based run of changed lines. It aliases the core vcs value type.
 
@@ -112,7 +133,7 @@ type LineRange = corevcs.LineRangeValue
 ```
 
 <a name="Resolution"></a>
-## type [Resolution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L80>)
+## type [Resolution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L94>)
 
 Resolution is the outcome of resolving a changed set, including the degraded outcome where none could be trusted. It aliases the core vcs value type.
 
@@ -121,7 +142,7 @@ type Resolution = corevcs.ResolutionValue
 ```
 
 <a name="Resolve"></a>
-### func [Resolve](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L94>)
+### func [Resolve](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L108>)
 
 ```go
 func Resolve(ctx context.Context, cfg Config) Resolution

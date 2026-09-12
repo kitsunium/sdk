@@ -131,6 +131,36 @@ func runGitOutput(ctx context.Context, repo string, args ...string) (gitOutput s
 	return strings.TrimSpace(string(stdout)), nil
 }
 
+// runGitBlob is runGitOutput without the trim: it returns stdout verbatim.
+//
+// The trim is right for every probe in this package — a SHA, a ref name, a
+// top-level path all arrive with a trailing newline nobody wants. It is wrong
+// for a file's contents, where leading and trailing whitespace is the file's,
+// and where a whitespace-only blob would otherwise come back empty.
+func runGitBlob(ctx context.Context, repo string, args ...string) (blob string, err error) {
+	//: Same hardening as every other invocation; only the trim differs.
+	full := append(append([]string{"-C", repo}, hardenedGitConfig...), extDiffGuard(args)...)
+	cmd := exec.CommandContext(ctx, "git", full...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	stdout, runErr := cmd.Output()
+	//: A non-zero exit here means the path is absent at that commit.
+	if runErr != nil {
+		//: Same typed refusal as runGitOutput, with the stderr in Private.
+		return "", errs.Wrap(runErr, errs.WrapParams{
+			Code:    corevcs.CodeCommandFailed,
+			Reason:  "COMMAND_FAILED",
+			Public:  "the version-control command failed",
+			Private: "service/vcs/git: git " + strings.Join(args, " ") + ": " + strings.TrimSpace(stderr.String()),
+		})
+	}
+
+	//: Verbatim — the bytes are the file's, not a field to be tidied.
+	return string(stdout), nil
+}
+
 // gitProbe runs a git subcommand purely for its success/failure signal,
 // discarding stdout. Used by boolean probes (is-shallow, ref existence) where
 // the exit code is the answer.
