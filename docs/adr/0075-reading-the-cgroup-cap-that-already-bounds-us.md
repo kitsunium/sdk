@@ -131,6 +131,12 @@ changes shape, and nothing in the SDK imports it.
   derivation reports `MemorySourceUnconstrained` and the runtime default stands —
   and the shape is rare enough that it could not be exercised here. Left as it
   came from the source implementation rather than changed untested.
+- **Octal escapes in `/proc/self/mountinfo` are not decoded.** The kernel encodes
+  space, tab, newline and backslash in the path fields as `\040`, `\011`, `\012`
+  and `\134`. The parser keeps the token verbatim, so a cgroup filesystem mounted
+  at a path containing one of those characters yields a candidate path no file
+  answers to. Fail-safe again — the cap reads as absent — and from the source
+  implementation. Recorded rather than fixed blind.
 - **The 90% derivation truncates before multiplying** (`allowance / 100 * 90`).
   Within a few bytes of the 64 MiB floor this can decline a cap the exact
   computation would have accepted — an allowance of 74,565,405 bytes derives
