@@ -427,6 +427,15 @@ func openFromZip(body io.Reader, want string) (binary io.Reader, cleanup func(),
 		if filepath.Base(f.Name) != want {
 			continue
 		}
+		//: And skip anything that is not a REGULAR file. A directory or a
+		//: symlink can carry the same basename and appear first, and the
+		//: replacement path would then install an empty payload or the link's
+		//: target bytes as the executable. The archive is authenticated by
+		//: then, so this is not an attack — it is a packaging mistake that
+		//: would produce an unrunnable binary with no error anywhere.
+		if !f.FileInfo().Mode().IsRegular() {
+			continue
+		}
 		rc, err := f.Open()
 		//: Opening the entry can fail on corrupt central directory.
 		if err != nil {

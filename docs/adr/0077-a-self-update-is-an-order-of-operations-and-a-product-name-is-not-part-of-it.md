@@ -137,6 +137,17 @@ changes shape, and nothing else in the SDK imports it.
 
 ## Deferred
 
+- **75 `fmt.Errorf` call sites in `internal/service/selfupdate`.** SDK-wide rule
+  2 bans `fmt.Errorf` and `errors.New` in production code; this package is the
+  largest violation in the tree, against 3 in `internal/service/cache` and 1
+  each in `codec` and `logger`. The sentinels ARE typed and every site wraps one
+  with `%w`, so `errors.Is` and `errs.HasCode` work — what is missing is the
+  Public/Private split on the context each site adds. Converting 75 sites in the
+  change that MOVES them would have made the diff unreviewable against its
+  source, which is the one property a versement has to keep. It is the next
+  change this package should receive, and the package's CLAUDE.md says so where
+  a maintainer will read it.
+
 - **A compromised host can serve an older signed release.** The signed manifest
   carries the version-independent asset name and no release tag, so answering a
   request for v2 with v1's manifest, signature and archive passes every check

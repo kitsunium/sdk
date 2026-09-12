@@ -19,11 +19,15 @@ type UpdateValue struct {
 
 // CandidateValue is one release candidate: a developer channel entry that is
 // never what a stable check returns.
+//
+// All three fields are carried VERBATIM as the release host reported them. They
+// are displayed to an operator choosing a candidate, never parsed and never
+// compared — the ordering decision is made on Tag by semver, elsewhere.
 type CandidateValue struct {
 	// Tag is the release tag, e.g. "v1.9.0-rc.3".
 	Tag string
-	// Published is the RFC 3339 publication timestamp as the release host
-	// reported it, carried verbatim rather than parsed: it is displayed, never
-	// compared.
-	Published string
+	// Name is the release's human title, which a host may leave empty.
+	Name string
+	// CreatedAt is the RFC 3339 publication timestamp, as text.
+	CreatedAt string
 }

@@ -14,13 +14,9 @@ import (
 // tagPattern validates that a tag contains only safe characters for URL construction.
 var tagPattern *regexp.Regexp = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*)?$`)
 
-// CandidateValue represents one available release candidate.
-// It contains the tag, display name, and creation timestamp from GitHub.
-type CandidateValue struct {
-	Tag       string
-	Name      string
-	CreatedAt string
-}
+// CandidateValue is one release candidate. It ALIASES the core value rather
+// than redeclaring it, for the same reason UpdateValue does.
+type CandidateValue = coreupd.CandidateValue
 
 // ListCandidates returns all available release candidates.
 func (u *Service) ListCandidates() (candidates []CandidateValue, listErr error) {
