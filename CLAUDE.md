@@ -42,8 +42,8 @@ internal/
                            form, json, msgpack, multipart, ndjson, pem, tlv, toml,
                            xml, yaml)
                    queue  (file broker + memory broker + Consume loop)
-                   proc   (cgroup, exec, reaper, rlimit, sdlisten,
-                           sdnotify, signal)
+                   proc   (cgroup, exec, memlimit, reaper, rlimit,
+                           sdlisten, sdnotify, signal)
                    i18n   (CLDR plural table + catalogue + negotiator + printer)
                    id     (uuidv4, uuidv7, ulid, snowflake, nanoid,
                            ksuid, typeid)
@@ -74,7 +74,7 @@ pkg/
     ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024, ADR 0038)
     ├── lifecycle/ (ordered start, reverse stop, per-component budget — ADR 0050)
     ├── lock/      (Locker/Lease/Deadliner + memory & flock lockers — ADR 0052)
-    ├── proc/      (+ cgroup, process, reaper, rlimit, sdlisten,
+    ├── proc/      (+ cgroup, memlimit, process, reaper, rlimit, sdlisten,
     │                 sdnotify, signal)
     ├── metrics/   (the OTel data model, zero OTel imports — ADR 0044)
     └── scheduler/ (Parse/ParseInLocation/Every + the engine — ADR 0041)
@@ -266,5 +266,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0072 — `health` bounds every wait it owns: the sd_notify announcement had no deadline, and a unixgram write blocks once the receiver's queue is full (measured — a brand new sender stops at 514 small datagrams), so under the lock that serialises announcements one deaf supervisor stopped every later probe from answering. `sdnotify.NotifyContext` bounds the write by the PROBE's context, falling back to the budget a check would get, armed on the injected clock. And a check RUN now owns its budget instead of borrowing the waiter's, so a run every caller left is still told its time is up. Amends ADR 0060 — `docs/adr/0072-health-bounds-every-wait-it-owns.md`
 - ADR 0073 — the session file store's two waits can be abandoned: `flock(LOCK_EX)` parks a thread inside a syscall no cancellation reaches, so a cancelled request waited for a lock nobody would read the result of, and the in-process half was a `sync.Mutex` whose `Lock` cannot be told its caller left. Both now observe the context — `LOCK_NB` plus a poll on the injected clock (`FileConfig.Poll`, the same 25 ms default as the `lock` domain, whose ADR 0052 had answered the same question the other way) and a one-slot channel gate; `FileConfig.Clock` widens to `clock.Timed` under the ADR 0040 v0 licence. Amends ADR 0045 — `docs/adr/0073-session-waits-are-abandonable.md`
 - ADR 0074 — what a public alias may point at: the axis is OWNERSHIP, not value-versus-handle. A type the port speaks lives in core; a type meaningful to exactly one engine — its handle, its `Option` closures, and above all its construction parameters (`sql.Config`, `session.FileConfig`, the five `resilience` configs) — lives with that engine, because hoisting a `*sql.DB` or an SMTP TLS mode into the contract layer makes core describe one backend. Measured: 233 core aliases, 69 service, 3 kernel. Nothing moved; the rule now describes the code — `docs/adr/0074-what-a-public-alias-may-point-at.md`
+- ADR 0075 — the SDK reads the cgroup cap that already bounds this process, not only the ones it writes for others: `cgroup` writes a group to bound a child and `rlimit` sets a kernel-enforced ceiling, but nothing read the cap already on the caller — and the Go runtime does not either (`GOMAXPROCS` is cgroup-aware since 1.25, the memory limit never was), so a service in a 512 MiB container is SIGKILLed where a soft limit would have pushed the collector. `memlimit` reads `/proc/self/cgroup` rather than the mount root, minimises across ancestors and across both hierarchies, keeps 10% headroom and declines under 64 MiB. Every outcome is a VALUE — `Apply` cannot fail — and `MemorySource` names which of the three declining outcomes happened, with the enum's zero left unminted per ADR 0031. Versed from `kodflow/ktn-linter` `pkg/memlimit` — `docs/adr/0075-reading-the-cgroup-cap-that-already-bounds-us.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

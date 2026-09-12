@@ -1,0 +1,36 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "memlimit",
+    srcs = [
+        "cgroup.go",
+        "memlimit.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/memlimit",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = ["//internal/core/proc"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":memlimit",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "memlimit_test",
+    srcs = [
+        "cgroup_internal_test.go",
+        "memlimit_internal_test.go",
+    ],
+    embed = [":memlimit"],
+    deps = ["//internal/core/proc"],
+)
