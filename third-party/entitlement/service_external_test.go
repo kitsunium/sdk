@@ -19,6 +19,10 @@ import (
 	"time"
 
 	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
+
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+
+	svcent "github.com/kitsunium/sdk/internal/service/entitlement"
 )
 
 // ciSeatKeyBits matches the smallest modulus the verifier accepts.
@@ -70,7 +74,7 @@ func enrol(t *testing.T, dir, uuid string) string {
 }
 
 // publishRoster signs a roster listing the given subjects.
-func publishRoster(t *testing.T, subjects map[string]entitlement.SubjectValue, iat, exp time.Time) (getter *stubGetter, vendor ed25519.PublicKey) {
+func publishRoster(t *testing.T, subjects map[string]coreent.SubjectValue, iat, exp time.Time) (getter *stubGetter, vendor ed25519.PublicKey) {
 	t.Helper()
 
 	pub, priv, err := ed25519.GenerateKey(nil)
@@ -78,12 +82,12 @@ func publishRoster(t *testing.T, subjects map[string]entitlement.SubjectValue, i
 	if err != nil {
 		t.Fatalf("generating vendor key: %v", err)
 	}
-	raw, err := json.Marshal(entitlement.RosterValue{IssuedAt: iat, ExpiresAt: exp, Subjects: subjects})
+	raw, err := json.Marshal(coreent.RosterValue{IssuedAt: iat, ExpiresAt: exp, Subjects: subjects})
 	//: A failure here is an environment problem, not a test outcome.
 	if err != nil {
 		t.Fatalf("marshalling roster: %v", err)
 	}
-	bundle, err := json.Marshal(entitlement.BundleValue{
+	bundle, err := json.Marshal(svcent.BundleValue{
 		Payload:   base64.StdEncoding.EncodeToString(raw),
 		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, raw)),
 	})
@@ -116,9 +120,9 @@ func TestDiscoverSubject(t *testing.T) {
 		wantErr error
 	}{
 		{name: "a uuid-named public key is the enrolment", files: []string{sampleUUID + ".pub"}, want: sampleUUID},
-		{name: "unrelated keys are ignored", files: []string{"id_ed25519.pub", "known_hosts"}, wantErr: entitlement.ErrNoLicense},
-		{name: "a private half alone is not an enrolment", files: []string{sampleUUID}, wantErr: entitlement.ErrNoLicense},
-		{name: "an empty directory is the never-enrolled case", files: nil, wantErr: entitlement.ErrNoLicense},
+		{name: "unrelated keys are ignored", files: []string{"id_ed25519.pub", "known_hosts"}, wantErr: coreent.ErrNoLicense},
+		{name: "a private half alone is not an enrolment", files: []string{sampleUUID}, wantErr: coreent.ErrNoLicense},
+		{name: "an empty directory is the never-enrolled case", files: nil, wantErr: coreent.ErrNoLicense},
 		{
 			//: A stray .pub used to be able to WIN the selection purely by
 			//: sorting first, silently deciding which licence got verified,
@@ -131,14 +135,14 @@ func TestDiscoverSubject(t *testing.T) {
 		{
 			name:    "two usable identities are refused rather than guessed",
 			files:   []string{sampleUUID, sampleUUID + ".pub", otherUUID, otherUUID + ".pub"},
-			wantErr: entitlement.ErrAmbiguousLicense,
+			wantErr: coreent.ErrAmbiguousLicense,
 		},
 		{
 			//: Neither candidate is usable, so there is nothing to prefer;
 			//: guessing here would be exactly the old behaviour.
 			name:    "several published halves with no private key are ambiguous",
 			files:   []string{sampleUUID + ".pub", otherUUID + ".pub"},
-			wantErr: entitlement.ErrAmbiguousLicense,
+			wantErr: coreent.ErrAmbiguousLicense,
 		},
 		{
 			//: A directory named <uuid>.pub stats without error. Counting it
@@ -198,15 +202,15 @@ func TestDiscoverSubject(t *testing.T) {
 			//: Error cases assert the sentinel, not the wording.
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Errorf("DiscoverSubject() error = %v, want %v", err, tt.wantErr)
+					t.Errorf("entitlement.DiscoverSubject() error = %v, want %v", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("DiscoverSubject() error = %v, want nil", err)
+				t.Fatalf("entitlement.DiscoverSubject() error = %v, want nil", err)
 			}
 			if got != tt.want {
-				t.Errorf("DiscoverSubject() = %q, want %q", got, tt.want)
+				t.Errorf("entitlement.DiscoverSubject() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -232,14 +236,14 @@ func TestService_Verify(t *testing.T) {
 		wantErr        error
 	}{
 		{name: "an enrolled and listed subject is granted", enrolled: true, listed: true},
-		{name: "an unenrolled machine has no identity", listed: true, wantErr: entitlement.ErrNoLicense},
-		{name: "a subject absent from the roster is revoked", enrolled: true, wantErr: entitlement.ErrRevoked},
-		{name: "a local key that does not match the roster is refused", enrolled: true, listed: true, wrongFP: true, wantErr: entitlement.ErrKeyMismatch},
-		{name: "an expired roster cannot authorize", enrolled: true, listed: true, expired: true, wantErr: entitlement.ErrRosterStale},
-		{name: "a subject past its own term is refused despite a fresh roster", enrolled: true, listed: true, subjectExpired: true, wantErr: entitlement.ErrLicenseExpired},
-		{name: "a roster signed by an impostor is refused", enrolled: true, listed: true, badSig: true, wantErr: entitlement.ErrRosterUnsigned},
-		{name: "an unreachable roster yields no decision", enrolled: true, listed: true, offline: true, wantErr: entitlement.ErrRosterUnreachable},
-		{name: "a non-200 answer yields no decision", enrolled: true, listed: true, status: http.StatusNotFound, wantErr: entitlement.ErrRosterUnreachable},
+		{name: "an unenrolled machine has no identity", listed: true, wantErr: coreent.ErrNoLicense},
+		{name: "a subject absent from the roster is revoked", enrolled: true, wantErr: coreent.ErrRevoked},
+		{name: "a local key that does not match the roster is refused", enrolled: true, listed: true, wrongFP: true, wantErr: coreent.ErrKeyMismatch},
+		{name: "an expired roster cannot authorize", enrolled: true, listed: true, expired: true, wantErr: coreent.ErrRosterStale},
+		{name: "a subject past its own term is refused despite a fresh roster", enrolled: true, listed: true, subjectExpired: true, wantErr: coreent.ErrLicenseExpired},
+		{name: "a roster signed by an impostor is refused", enrolled: true, listed: true, badSig: true, wantErr: coreent.ErrRosterUnsigned},
+		{name: "an unreachable roster yields no decision", enrolled: true, listed: true, offline: true, wantErr: coreent.ErrRosterUnreachable},
+		{name: "a non-200 answer yields no decision", enrolled: true, listed: true, status: http.StatusNotFound, wantErr: coreent.ErrRosterUnreachable},
 	}
 
 	for _, tt := range tests {
@@ -257,10 +261,10 @@ func TestService_Verify(t *testing.T) {
 				fingerprint = "SHA256:someone-else"
 			}
 
-			subjects := map[string]entitlement.SubjectValue{}
+			subjects := map[string]coreent.SubjectValue{}
 			//: An unlisted subject is exactly what revocation looks like.
 			if tt.listed {
-				sv := entitlement.SubjectValue{Fingerprint: fingerprint}
+				sv := coreent.SubjectValue{Fingerprint: fingerprint}
 				//: A term in the past models a subject that outlived its own
 				//: entitlement even though the roster itself stays fresh.
 				if tt.subjectExpired {
@@ -269,7 +273,7 @@ func TestService_Verify(t *testing.T) {
 				subjects[sampleUUID] = sv
 			}
 
-			iat, exp := now.Add(-time.Hour), now.Add(entitlement.RosterLifetime-time.Hour)
+			iat, exp := now.Add(-time.Hour), now.Add(coreent.RosterLifetime-time.Hour)
 			//: A closed window must refuse even a well-signed roster.
 			if tt.expired {
 				iat, exp = now.Add(-2*time.Hour), now.Add(-time.Hour)
@@ -287,7 +291,7 @@ func TestService_Verify(t *testing.T) {
 				vendor = other
 			}
 
-			svc := entitlement.NewServiceWithGetter(getter, dir, vendor, &testProduct)
+			svc := svcent.NewServiceWithGetter(getter, entitlement.NewSSHIdentity(dir), vendor, &testProduct)
 			grant, err := svc.Verify(now)
 			//: Error cases assert the sentinel, not the wording.
 			if tt.wantErr != nil {
@@ -324,7 +328,7 @@ func TestNewService(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if svc := entitlement.NewService(tt.sshDir, tt.vendor, &testProduct); svc == nil {
+			if svc := svcent.NewService(entitlement.NewSSHIdentity(tt.sshDir), tt.vendor, &testProduct); svc == nil {
 				t.Error("NewService() returned nil")
 			}
 		})
@@ -341,7 +345,7 @@ func TestNewServiceWithGetter(t *testing.T) {
 		offline bool
 		wantErr error
 	}{
-		{name: "the injected getter is the one consulted", offline: true, wantErr: entitlement.ErrRosterUnreachable},
+		{name: "the injected getter is the one consulted", offline: true, wantErr: coreent.ErrRosterUnreachable},
 	}
 
 	for _, tt := range tests {
@@ -350,7 +354,7 @@ func TestNewServiceWithGetter(t *testing.T) {
 
 			dir := t.TempDir()
 			enrol(t, dir, sampleUUID)
-			svc := entitlement.NewServiceWithGetter(&stubGetter{fail: tt.offline}, dir, make([]byte, ed25519.PublicKeySize), &testProduct)
+			svc := svcent.NewServiceWithGetter(&stubGetter{fail: tt.offline}, entitlement.NewSSHIdentity(dir), make([]byte, ed25519.PublicKeySize), &testProduct)
 			_, err := svc.Verify(time.Now())
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("Verify() error = %v, want %v", err, tt.wantErr)
@@ -375,7 +379,7 @@ func TestDefaultSSHDir(t *testing.T) {
 			t.Parallel()
 
 			if got := entitlement.DefaultSSHDir(); got == "" {
-				t.Error("DefaultSSHDir() = \"\", want a usable path")
+				t.Error("entitlement.DefaultSSHDir() = \"\", want a usable path")
 			}
 		})
 	}
@@ -399,7 +403,7 @@ func TestService_VerifyPossessionFailure(t *testing.T) {
 		removeKey bool
 		wantErr   error
 	}{
-		{name: "a deleted private half cannot answer the challenge", removeKey: true, wantErr: entitlement.ErrNoLicense},
+		{name: "a deleted private half cannot answer the challenge", removeKey: true, wantErr: coreent.ErrNoLicense},
 	}
 
 	for _, tt := range tests {
@@ -416,8 +420,8 @@ func TestService_VerifyPossessionFailure(t *testing.T) {
 				}
 			}
 
-			getter, vendor := publishRoster(t, map[string]entitlement.SubjectValue{sampleUUID: {Fingerprint: fingerprint}}, now.Add(-time.Hour), now.Add(entitlement.RosterLifetime-time.Hour))
-			_, err := entitlement.NewServiceWithGetter(getter, dir, vendor, &testProduct).Verify(now)
+			getter, vendor := publishRoster(t, map[string]coreent.SubjectValue{sampleUUID: {Fingerprint: fingerprint}}, now.Add(-time.Hour), now.Add(coreent.RosterLifetime-time.Hour))
+			_, err := svcent.NewServiceWithGetter(getter, entitlement.NewSSHIdentity(dir), vendor, &testProduct).Verify(now)
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("Verify() error = %v, want %v", err, tt.wantErr)
 			}
@@ -436,7 +440,7 @@ func TestService_VerifyOversizedArtefact(t *testing.T) {
 		size    int
 		wantErr error
 	}{
-		{name: "an oversized roster is refused rather than buffered", size: (4 << 20) + 1, wantErr: entitlement.ErrRosterUnreachable},
+		{name: "an oversized roster is refused rather than buffered", size: (4 << 20) + 1, wantErr: coreent.ErrRosterUnreachable},
 	}
 
 	for _, tt := range tests {
@@ -446,7 +450,7 @@ func TestService_VerifyOversizedArtefact(t *testing.T) {
 			dir := t.TempDir()
 			enrol(t, dir, sampleUUID)
 			flood := &stubGetter{bundle: make([]byte, tt.size)}
-			_, err := entitlement.NewServiceWithGetter(flood, dir, make([]byte, 32), &testProduct).Verify(time.Now())
+			_, err := svcent.NewServiceWithGetter(flood, entitlement.NewSSHIdentity(dir), make([]byte, 32), &testProduct).Verify(time.Now())
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("Verify() error = %v, want %v", err, tt.wantErr)
 			}
@@ -494,10 +498,10 @@ func Test_Service_WithVersion(t *testing.T) {
 			fingerprint := enrol(t, dir, sampleUUID)
 			now := time.Now()
 
-			pair := signPair(t, vendorPriv, entitlement.RosterValue{
+			pair := signPair(t, vendorPriv, coreent.RosterValue{
 				IssuedAt:        now.Add(-time.Hour),
 				ExpiresAt:       now.Add(time.Hour),
-				Subjects:        map[string]entitlement.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
+				Subjects:        map[string]coreent.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
 				RequiredVersion: tt.floor,
 			})
 			getter := &multiOriginGetter{
@@ -505,7 +509,7 @@ func Test_Service_WithVersion(t *testing.T) {
 				current: pair,
 			}
 
-			svc := entitlement.NewServiceWithOrigins(getter, dir, vendorPub, testOrigins("solo"))
+			svc := svcent.NewServiceWithOrigins(getter, entitlement.NewSSHIdentity(dir), vendorPub, testOrigins("solo"))
 			//: Only the declaring cases arm the floor.
 			if tt.declare {
 				svc = svc.WithVersion(tt.version)
@@ -518,8 +522,8 @@ func Test_Service_WithVersion(t *testing.T) {
 			}
 			//: When it refuses, it must be for the update — not because the
 			//: licence itself broke.
-			if tt.wantErr && !errors.Is(verifyErr, entitlement.ErrUpdateRequired) {
-				t.Errorf("Verify() error = %v, want ErrUpdateRequired (%s)", verifyErr, tt.reason)
+			if tt.wantErr && !errors.Is(verifyErr, coreent.ErrUpdateRequired) {
+				t.Errorf("Verify() error = %v, want coreent.ErrUpdateRequired (%s)", verifyErr, tt.reason)
 			}
 		})
 	}
@@ -528,7 +532,7 @@ func Test_Service_WithVersion(t *testing.T) {
 // seatFixture is a complete, signed world: a vendor key, a roster listing one
 // CI account, and GitHub's published key set with a matching private half.
 type seatFixture struct {
-	// vendor is the anchor a Service verifies the roster against.
+	// vendor is the anchor a svcent.Service verifies the roster against.
 	vendor ed25519.PublicKey
 	// bundle is the signed roster document the origin serves.
 	bundle []byte
@@ -545,11 +549,11 @@ type seatFixture struct {
 // genuine RS256 signature over the token. Stubbing either would leave the
 // wiring under test unexercised, which is the only thing this file is for.
 //
-// It takes the whole RosterValue rather than the CI block alone because the
+// It takes the whole coreent.RosterValue rather than the CI block alone because the
 // interesting cases are the ones where the OTHER fields matter too — a roster
 // that lists a subject AND covers no CI account is what proves a strict
 // refusal is refusing rather than merely finding nothing to fall back on.
-func newSeatFixture(t *testing.T, roster entitlement.RosterValue) *seatFixture {
+func newSeatFixture(t *testing.T, roster coreent.RosterValue) *seatFixture {
 	t.Helper()
 
 	vendorPub, vendorPriv, keyErr := ed25519.GenerateKey(nil)
@@ -560,7 +564,7 @@ func newSeatFixture(t *testing.T, roster entitlement.RosterValue) *seatFixture {
 	if marshalErr != nil {
 		t.Fatalf("marshalling roster: %v", marshalErr)
 	}
-	bundle, bundleErr := json.Marshal(entitlement.BundleValue{
+	bundle, bundleErr := json.Marshal(svcent.BundleValue{
 		Payload:   base64.StdEncoding.EncodeToString(raw),
 		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(vendorPriv, raw)),
 	})
@@ -572,7 +576,7 @@ func newSeatFixture(t *testing.T, roster entitlement.RosterValue) *seatFixture {
 	if signerErr != nil {
 		t.Fatalf("generating signing key: %v", signerErr)
 	}
-	jwks, jwksErr := json.Marshal(entitlement.JWKSValue{Keys: []entitlement.JWKValue{{
+	jwks, jwksErr := json.Marshal(svcent.JWKSValue{Keys: []svcent.JWKValue{{
 		KeyType:   "RSA",
 		KeyID:     "k1",
 		Use:       "sig",
@@ -598,7 +602,7 @@ func bigBytes(exponent int) []byte {
 }
 
 // get serves the roster bundle and the key set from the same fixture, so a
-// Service can be pointed at it without a network.
+// svcent.Service can be pointed at it without a network.
 func (f *seatFixture) get(url string) (*http.Response, error) {
 	body := f.bundle
 	if strings.Contains(url, "jwks") {
@@ -620,8 +624,8 @@ func (f *seatFixture) mintToken(t *testing.T, now time.Time, ownerID string) str
 	}
 	header := encode(map[string]any{"alg": "RS256", "kid": "k1", "typ": "JWT"})
 	claims := map[string]any{
-		"iss": entitlement.ActionsIssuer,
-		"aud": entitlement.DefaultActionsAudience,
+		"iss": svcent.ActionsIssuer,
+		"aud": svcent.DefaultActionsAudience,
 		"sub": "repo:kodflow/ktn-linter:ref:refs/heads/main",
 	}
 	maps.Copy(claims, map[string]any{
@@ -660,7 +664,7 @@ func TestServiceVerifyCISeat(t *testing.T) {
 	tests := []struct {
 		name string
 		// accounts is what the roster grants.
-		accounts map[string]entitlement.CIEntitlementValue
+		accounts map[string]coreent.CIEntitlementValue
 		// tokenOwner is the account the minted token names.
 		tokenOwner string
 		// inCI controls whether the runner variables are present.
@@ -672,7 +676,7 @@ func TestServiceVerifyCISeat(t *testing.T) {
 	}{
 		{
 			name:        "a covered CI run needs no device",
-			accounts:    map[string]entitlement.CIEntitlementValue{ciAccountID: {}},
+			accounts:    map[string]coreent.CIEntitlementValue{ciAccountID: {}},
 			tokenOwner:  ciAccountID,
 			inCI:        true,
 			wantSubject: "ci:kodflow/ktn-linter",
@@ -680,18 +684,18 @@ func TestServiceVerifyCISeat(t *testing.T) {
 		},
 		{
 			name:       "an uncovered account is refused, not fallen back from",
-			accounts:   map[string]entitlement.CIEntitlementValue{"999": {}},
+			accounts:   map[string]coreent.CIEntitlementValue{"999": {}},
 			tokenOwner: ciAccountID,
 			inCI:       true,
-			wantErr:    entitlement.ErrCINotEntitled,
+			wantErr:    coreent.ErrCINotEntitled,
 			reason:     "a genuine run belonging to nobody's licence gets nothing, and since the seat is required in Actions the CI cause is what gets reported",
 		},
 		{
 			name:       "an expired entitlement is refused",
-			accounts:   map[string]entitlement.CIEntitlementValue{ciAccountID: {ExpiresAt: now.Add(-time.Hour)}},
+			accounts:   map[string]coreent.CIEntitlementValue{ciAccountID: {ExpiresAt: now.Add(-time.Hour)}},
 			tokenOwner: ciAccountID,
 			inCI:       true,
-			wantErr:    entitlement.ErrCINotEntitled,
+			wantErr:    coreent.ErrCINotEntitled,
 			reason:     "CI stops when the licence does, and stopping now means refusing rather than looking for a device key on a runner",
 		},
 		{
@@ -699,25 +703,25 @@ func TestServiceVerifyCISeat(t *testing.T) {
 			accounts:   nil,
 			tokenOwner: ciAccountID,
 			inCI:       true,
-			wantErr:    entitlement.ErrCINotEntitled,
+			wantErr:    coreent.ErrCINotEntitled,
 			reason:     "publishing a `ci` block is the deployment step the strict default requires; its absence fails loudly instead of quietly reopening the hole",
 		},
 		{
 			name:       "outside CI the device path decides",
-			accounts:   map[string]entitlement.CIEntitlementValue{ciAccountID: {}},
+			accounts:   map[string]coreent.CIEntitlementValue{ciAccountID: {}},
 			tokenOwner: ciAccountID,
 			inCI:       false,
-			wantErr:    entitlement.ErrNoLicense,
+			wantErr:    coreent.ErrNoLicense,
 			reason:     "an entitled account does not authorise a laptop with no key",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fixture := newSeatFixture(t, entitlement.RosterValue{
+			fixture := newSeatFixture(t, coreent.RosterValue{
 				IssuedAt:   now.Add(-time.Minute),
-				ExpiresAt:  now.Add(entitlement.RosterLifetime - time.Minute),
-				Subjects:   map[string]entitlement.SubjectValue{},
+				ExpiresAt:  now.Add(coreent.RosterLifetime - time.Minute),
+				Subjects:   map[string]coreent.SubjectValue{},
 				CIAccounts: tt.accounts,
 			})
 			url, bearer := "", ""
@@ -735,9 +739,9 @@ func TestServiceVerifyCISeat(t *testing.T) {
 
 			//: An empty key directory, so any success can only have come from
 			//: the CI path — a device would have been found otherwise.
-			svc := entitlement.NewServiceWithOrigins(
-				getterFunc(fixture.get), t.TempDir(), fixture.vendor,
-				[]entitlement.OriginValue{{Name: "test", BundleURL: "https://example.test/roster.signed.json"}},
+			svc := svcent.NewServiceWithOrigins(
+				getterFunc(fixture.get), entitlement.NewSSHIdentity(t.TempDir()), fixture.vendor,
+				[]coreent.OriginValue{{Name: "test", BundleURL: "https://example.test/roster.signed.json"}},
 			).WithBearerFetch(mint)
 
 			grant, err := svc.Verify(now)
@@ -762,7 +766,7 @@ func TestServiceVerifyCISeat(t *testing.T) {
 	}
 }
 
-// getterFunc adapts a function to the Getter the Service fetches through.
+// getterFunc adapts a function to the svcent.Getter the svcent.Service fetches through.
 type getterFunc func(url string) (*http.Response, error)
 
 // Get retrieves a URL.
@@ -784,13 +788,13 @@ func TestService_WithBearerFetch(t *testing.T) {
 		name string
 		// accounts is what the roster grants; without a CI block the mint is
 		// never reached, which is itself worth pinning.
-		accounts map[string]entitlement.CIEntitlementValue
+		accounts map[string]coreent.CIEntitlementValue
 		want     bool
 		reason   string
 	}{
 		{
 			name:     "a replaced transport is used when the roster grants CI",
-			accounts: map[string]entitlement.CIEntitlementValue{ciAccountID: {}},
+			accounts: map[string]coreent.CIEntitlementValue{ciAccountID: {}},
 			want:     true,
 			reason:   "a test must be able to answer the mint request itself",
 		},
@@ -804,10 +808,10 @@ func TestService_WithBearerFetch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fixture := newSeatFixture(t, entitlement.RosterValue{
+			fixture := newSeatFixture(t, coreent.RosterValue{
 				IssuedAt:   now.Add(-time.Minute),
-				ExpiresAt:  now.Add(entitlement.RosterLifetime - time.Minute),
-				Subjects:   map[string]entitlement.SubjectValue{},
+				ExpiresAt:  now.Add(coreent.RosterLifetime - time.Minute),
+				Subjects:   map[string]coreent.SubjectValue{},
 				CIAccounts: tt.accounts,
 			})
 			t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "https://x.actions.githubusercontent.com/token")
@@ -815,9 +819,9 @@ func TestService_WithBearerFetch(t *testing.T) {
 
 			called := false
 			token := fixture.mintToken(t, now, ciAccountID)
-			svc := entitlement.NewServiceWithOrigins(
-				getterFunc(fixture.get), t.TempDir(), fixture.vendor,
-				[]entitlement.OriginValue{{Name: "test", BundleURL: "https://example.test/roster.signed.json"}},
+			svc := svcent.NewServiceWithOrigins(
+				getterFunc(fixture.get), entitlement.NewSSHIdentity(t.TempDir()), fixture.vendor,
+				[]coreent.OriginValue{{Name: "test", BundleURL: "https://example.test/roster.signed.json"}},
 			).WithBearerFetch(func(string, string) (resp *http.Response, err error) {
 				called = true
 				body := `{"value":"` + token + `"}`
@@ -862,36 +866,36 @@ func TestVerifyRequiresTheCISeatInsideActions(t *testing.T) {
 		// inCI controls whether the runner variables are present.
 		inCI bool
 		// accounts is what the roster grants CI.
-		accounts map[string]entitlement.CIEntitlementValue
+		accounts map[string]coreent.CIEntitlementValue
 		wantErr  error
 		reason   string
 	}{
 		{
 			name:     "an uncovered CI run is refused even holding a device key",
 			inCI:     true,
-			accounts: map[string]entitlement.CIEntitlementValue{"999": {}},
-			wantErr:  entitlement.ErrCINotEntitled,
+			accounts: map[string]coreent.CIEntitlementValue{"999": {}},
+			wantErr:  coreent.ErrCINotEntitled,
 			reason:   "this is the whole point: the device key must not silently stand in for the seat",
 		},
 		{
 			name:     "a roster with no CI block refuses every CI run",
 			inCI:     true,
 			accounts: nil,
-			wantErr:  entitlement.ErrCINotEntitled,
+			wantErr:  coreent.ErrCINotEntitled,
 			reason:   "publishing a `ci` block is the deployment step this inversion requires, and its absence fails loudly rather than quietly opening the hole",
 		},
 		{
 			name:     "a relaxed roster restores the fall-through",
 			relaxed:  true,
 			inCI:     true,
-			accounts: map[string]entitlement.CIEntitlementValue{"999": {}},
+			accounts: map[string]coreent.CIEntitlementValue{"999": {}},
 			wantErr:  nil,
 			reason:   "a self-hosted runner carrying a device key is a real deployment; only the vendor may bless it, and this row is what proves they still can",
 		},
 		{
 			name:     "a laptop is left alone",
 			inCI:     false,
-			accounts: map[string]entitlement.CIEntitlementValue{"999": {}},
+			accounts: map[string]coreent.CIEntitlementValue{"999": {}},
 			wantErr:  nil,
 			reason:   "InCI gates the strictness; without it the inversion would refuse every device in the field, none of which ever had a seat to prove",
 		},
@@ -915,10 +919,10 @@ func TestVerifyRequiresTheCISeatInsideActions(t *testing.T) {
 
 			//: A real key set and a real RS256 token, so the seat fails on
 			//: ENTITLEMENT rather than on a key set the stub could not serve.
-			fixture := newSeatFixture(t, entitlement.RosterValue{
+			fixture := newSeatFixture(t, coreent.RosterValue{
 				IssuedAt:   now.Add(-time.Minute),
 				ExpiresAt:  now.Add(time.Hour),
-				Subjects:   map[string]entitlement.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
+				Subjects:   map[string]coreent.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
 				CIAccounts: tt.accounts,
 				CIRelaxed:  tt.relaxed,
 			})
@@ -932,8 +936,8 @@ func TestVerifyRequiresTheCISeatInsideActions(t *testing.T) {
 				}, nil
 			}
 
-			svc := entitlement.NewServiceWithOrigins(
-				getterFunc(fixture.get), dir, fixture.vendor, testOrigins("solo"),
+			svc := svcent.NewServiceWithOrigins(
+				getterFunc(fixture.get), entitlement.NewSSHIdentity(dir), fixture.vendor, testOrigins("solo"),
 			).WithBearerFetch(mint)
 
 			_, err := svc.Verify(now)
@@ -951,8 +955,8 @@ func TestVerifyRequiresTheCISeatInsideActions(t *testing.T) {
 			//: The refusal must be the CI one and NOT a device one: reporting
 			//: "no licence key found" on a runner sends an operator to
 			//: `license create` on a machine that will never hold a key.
-			if errors.Is(err, entitlement.ErrNoLicense) {
-				t.Errorf("Verify() error = %v, want no ErrNoLicense in it (%s)", err, tt.reason)
+			if errors.Is(err, coreent.ErrNoLicense) {
+				t.Errorf("Verify() error = %v, want no coreent.ErrNoLicense in it (%s)", err, tt.reason)
 			}
 		})
 	}
@@ -969,7 +973,7 @@ func TestVerifyRequiresTheCISeatInsideActions(t *testing.T) {
 //
 // The chain is checked NEGATIVELY on purpose. ciContext folds the seat cause in
 // with %v, because the seat's chain is not CI-only: a JWKS outage carries
-// ErrRosterUnreachable, which both licenseExitCode and licenseAdvice match
+// coreent.ErrRosterUnreachable, which both licenseExitCode and licenseAdvice match
 // ahead of several device sentinels. Test_ciContext pins that hazard directly;
 // this test pins that Verify's own output has the same property end to end.
 //
@@ -1004,41 +1008,46 @@ func TestVerifyNamesTheCISeatFailureAlongsideTheDeviceOne(t *testing.T) {
 				t.Fatalf("generating vendor key: %v", keyErr)
 			}
 			//: An EMPTY key directory, so the device half refuses with
-			//: ErrNoLicense — which is exactly the misleading message.
+			//: coreent.ErrNoLicense — which is exactly the misleading message.
 			//:
 			//: RELAXED, because that is now the only shape on which a device
 			//: refusal is still what gets reported inside Actions: under the
 			//: strict default the CI refusal is final and there is no device
 			//: half to annotate. The annotation exists precisely for this
 			//: deployment, so this is where it has to be tested.
-			bundle := signPair(t, vendorPriv, entitlement.RosterValue{
+			bundle := signPair(t, vendorPriv, coreent.RosterValue{
 				IssuedAt:   now.Add(-time.Minute),
 				ExpiresAt:  now.Add(time.Hour),
-				Subjects:   map[string]entitlement.SubjectValue{},
-				CIAccounts: map[string]entitlement.CIEntitlementValue{"999": {}},
+				Subjects:   map[string]coreent.SubjectValue{},
+				CIAccounts: map[string]coreent.CIEntitlementValue{"999": {}},
 				CIRelaxed:  true,
 			})
 
-			svc := entitlement.NewServiceWithOrigins(
-				&stubGetter{bundle: bundle}, t.TempDir(), vendorPub, testOrigins("solo"),
+			//: An empty key directory used to produce this; the identity now
+			//: reports it directly, which says what the case is about instead
+			//: of arranging a filesystem that implies it.
+			svc := svcent.NewServiceWithOrigins(
+				&stubGetter{bundle: bundle},
+				stubIdentity{discoverErr: coreent.ErrNoLicense},
+				vendorPub, testOrigins("solo"),
 			).WithBearerFetch(refusingMint)
 
 			_, err := svc.Verify(now)
 			//: The device sentinel must survive the annotation, because the
 			//: exit-code dispatch and the advice table are both built on it.
-			if !errors.Is(err, entitlement.ErrNoLicense) {
-				t.Fatalf("Verify() error = %v, want it to still wrap ErrNoLicense (%s)", err, tt.reason)
+			if !errors.Is(err, coreent.ErrNoLicense) {
+				t.Fatalf("Verify() error = %v, want it to still wrap coreent.ErrNoLicense (%s)", err, tt.reason)
 			}
 			//: The seat cause reaches the TEXT...
 			if got := strings.Contains(err.Error(), "CI seat was refused too"); got != tt.wantCIText {
 				t.Errorf("message carries the seat cause = %v, want %v — err = %v (%s)", got, tt.wantCIText, err, tt.reason)
 			}
-			//: ...and never the chain. ErrCIUnverifiable reachable here would
+			//: ...and never the chain. coreent.ErrCIUnverifiable reachable here would
 			//: mean %w had been used, which is how a JWKS outage's
-			//: ErrRosterUnreachable would reach the exit-code switch and
+			//: coreent.ErrRosterUnreachable would reach the exit-code switch and
 			//: outrank the device refusal it is attached to.
-			if errors.Is(err, entitlement.ErrCIUnverifiable) {
-				t.Errorf("errors.Is(err, ErrCIUnverifiable) = true, want false — the seat's chain must not be spliced in (%s)", tt.reason)
+			if errors.Is(err, coreent.ErrCIUnverifiable) {
+				t.Errorf("errors.Is(err, coreent.ErrCIUnverifiable) = true, want false — the seat's chain must not be spliced in (%s)", tt.reason)
 			}
 		})
 	}
@@ -1060,7 +1069,7 @@ func refusingMint(_, _ string) (resp *http.Response, err error) {
 //
 // Committed source pins no Roughtime server — the client has never completed a
 // handshake with a live one — so the default has to be a list nobody consults.
-// A Service that reached the network for time without being told to would put a
+// A svcent.Service that reached the network for time without being told to would put a
 // UDP round trip on every cold start, on a port most locked-down networks drop.
 func Test_Service_WithTimeServers(t *testing.T) {
 	t.Parallel()
@@ -1068,13 +1077,13 @@ func Test_Service_WithTimeServers(t *testing.T) {
 	tests := []struct {
 		name string
 		// servers is what the caller configures.
-		servers []entitlement.RoughtimeServerValue
+		servers []svcent.RoughtimeServerValue
 		reason  string
 	}{
 		{name: "an empty list is the default and changes nothing", servers: nil, reason: "no server configured means no opinion about the clock"},
 		{
 			name:    "an unreachable server still authorises",
-			servers: []entitlement.RoughtimeServerValue{{Name: "stub", Address: "127.0.0.1:1", PublicKey: make([]byte, 32)}},
+			servers: []svcent.RoughtimeServerValue{{Name: "stub", Address: "127.0.0.1:1", PublicKey: make([]byte, 32)}},
 			reason:  "FAIL-OPEN is the whole safety of this feature: a firewall must never become a refused licence",
 		},
 	}
@@ -1092,14 +1101,14 @@ func Test_Service_WithTimeServers(t *testing.T) {
 			now := time.Now()
 			dir := t.TempDir()
 			fingerprint := enrol(t, dir, sampleUUID)
-			getter := &stubGetter{bundle: signPair(t, vendorPriv, entitlement.RosterValue{
+			getter := &stubGetter{bundle: signPair(t, vendorPriv, coreent.RosterValue{
 				IssuedAt:  now.Add(-time.Minute),
 				ExpiresAt: now.Add(time.Hour),
-				Subjects:  map[string]entitlement.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
+				Subjects:  map[string]coreent.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
 			})}
 
-			svc := entitlement.NewServiceWithOrigins(getter, dir, vendorPub, testOrigins("solo"))
-			//: Chainable: the return must be the same Service, or a
+			svc := svcent.NewServiceWithOrigins(getter, entitlement.NewSSHIdentity(dir), vendorPub, testOrigins("solo"))
+			//: Chainable: the return must be the same svcent.Service, or a
 			//: construction expression would silently drop the setting.
 			if got := svc.WithTimeServers(tt.servers); got != svc {
 				t.Fatalf("WithTimeServers() returned %p, want the receiver %p (%s)", got, svc, tt.reason)
@@ -1132,7 +1141,7 @@ func Test_Service_WithOrigins(t *testing.T) {
 		reason   string
 	}{
 		{name: "a redirected verifier accepts a genuine roster", reason: "authority travels in the signature, so an origin is only ever an availability choice"},
-		{name: "a redirected verifier refuses a forged one", impostor: true, wantErr: entitlement.ErrRosterUnsigned, reason: "pointing a binary somewhere hostile gains that endpoint nothing — it can serve whatever it likes and still cannot forge the anchor"},
+		{name: "a redirected verifier refuses a forged one", impostor: true, wantErr: coreent.ErrRosterUnsigned, reason: "pointing a binary somewhere hostile gains that endpoint nothing — it can serve whatever it likes and still cannot forge the anchor"},
 	}
 
 	for _, tt := range tests {
@@ -1157,16 +1166,16 @@ func Test_Service_WithOrigins(t *testing.T) {
 
 			dir := t.TempDir()
 			fingerprint := enrol(t, dir, sampleUUID)
-			getter := &stubGetter{bundle: signPair(t, signWith, entitlement.RosterValue{
+			getter := &stubGetter{bundle: signPair(t, signWith, coreent.RosterValue{
 				IssuedAt:  now.Add(-time.Minute),
 				ExpiresAt: now.Add(time.Hour),
-				Subjects:  map[string]entitlement.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
+				Subjects:  map[string]coreent.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
 			})}
 
 			//: Built with the PRODUCTION origin list, then redirected — which
 			//: is the shape the e2e binaries are in.
-			svc := entitlement.NewServiceWithGetter(getter, dir, vendorPub, &testProduct)
-			//: Chainable: the return must be the same Service, or a
+			svc := svcent.NewServiceWithGetter(getter, entitlement.NewSSHIdentity(dir), vendorPub, &testProduct)
+			//: Chainable: the return must be the same svcent.Service, or a
 			//: construction expression would silently drop the setting.
 			if got := svc.WithOrigins(testOrigins("redirected")); got != svc {
 				t.Fatalf("WithOrigins() returned %p, want the receiver %p (%s)", got, svc, tt.reason)

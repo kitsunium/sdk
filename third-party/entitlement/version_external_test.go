@@ -8,6 +8,10 @@ import (
 	"testing"
 	"time"
 
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+
+	svcent "github.com/kitsunium/sdk/internal/service/entitlement"
+
 	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
 )
 
@@ -51,7 +55,7 @@ func TestRequiresUpdate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := entitlement.RequiresUpdate(tt.current, tt.floor); got != tt.want {
+			if got := svcent.RequiresUpdate(tt.current, tt.floor); got != tt.want {
 				t.Errorf("RequiresUpdate(%q, %q) = %v, want %v (%s)", tt.current, tt.floor, got, tt.want, tt.reason)
 			}
 		})
@@ -96,10 +100,10 @@ func TestVerifyEnforcesRequiredVersion(t *testing.T) {
 			fingerprint := enrol(t, dir, sampleUUID)
 			now := time.Now()
 
-			pair := signPair(t, vendorPriv, entitlement.RosterValue{
+			pair := signPair(t, vendorPriv, coreent.RosterValue{
 				IssuedAt:        now.Add(-time.Hour),
 				ExpiresAt:       now.Add(time.Hour),
-				Subjects:        map[string]entitlement.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
+				Subjects:        map[string]coreent.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
 				RequiredVersion: tt.floor,
 			})
 
@@ -107,12 +111,12 @@ func TestVerifyEnforcesRequiredVersion(t *testing.T) {
 				states:  map[string]originState{"solo": originHealthy},
 				current: pair,
 			}
-			svc := entitlement.NewServiceWithOrigins(getter, dir, vendorPub, testOrigins("solo")).WithVersion(tt.binary)
+			svc := svcent.NewServiceWithOrigins(getter, entitlement.NewSSHIdentity(dir), vendorPub, testOrigins("solo")).WithVersion(tt.binary)
 
 			_, verifyErr := svc.Verify(now)
 
-			if errors.Is(verifyErr, entitlement.ErrUpdateRequired) != tt.wantUpdate {
-				t.Errorf("Verify() error = %v, want ErrUpdateRequired = %v (%s)", verifyErr, tt.wantUpdate, tt.reason)
+			if errors.Is(verifyErr, coreent.ErrUpdateRequired) != tt.wantUpdate {
+				t.Errorf("Verify() error = %v, want coreent.ErrUpdateRequired = %v (%s)", verifyErr, tt.wantUpdate, tt.reason)
 			}
 			//: A binary that meets the floor must be fully authorised, not
 			//: merely spared the update check.
@@ -140,12 +144,12 @@ func TestUpdateRefusal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := entitlement.UpdateRefusal(tt.current, tt.floor)
+			err := svcent.UpdateRefusal(tt.current, tt.floor)
 
 			//: The sentinel must survive wrapping, or the exit-code dispatch
 			//: would fall through to a generic licence failure.
-			if !errors.Is(err, entitlement.ErrUpdateRequired) {
-				t.Errorf("UpdateRefusal() = %v, want it to wrap ErrUpdateRequired", err)
+			if !errors.Is(err, coreent.ErrUpdateRequired) {
+				t.Errorf("UpdateRefusal() = %v, want it to wrap coreent.ErrUpdateRequired", err)
 			}
 			message := err.Error()
 			//: Both versions must be named for the message to be actionable.
@@ -177,7 +181,7 @@ func TestUpdateRequiredError_Error(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := &entitlement.UpdateRequiredError{Current: tt.current, Required: tt.required}
+			err := &svcent.UpdateRequiredError{Current: tt.current, Required: tt.required}
 			message := err.Error()
 
 			//: Both ends must be named for the message to be actionable.
@@ -193,7 +197,7 @@ func TestUpdateRequiredError_Error(t *testing.T) {
 // TestUpdateRequiredError_Unwrap pins the tie to the sentinel.
 //
 // Every exit-code and advice branch in the gate dispatches on errors.Is
-// against ErrUpdateRequired. If Unwrap ever stopped returning it, a
+// against coreent.ErrUpdateRequired. If Unwrap ever stopped returning it, a
 // mandatory update would silently fall through to the generic "licence
 // verification failed" path — telling the user their licence is broken when
 // it is perfectly valid.
@@ -211,14 +215,14 @@ func TestUpdateRequiredError_Unwrap(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := &entitlement.UpdateRequiredError{Current: "v1.0.0", Required: "v2.0.0"}
+			err := &svcent.UpdateRequiredError{Current: "v1.0.0", Required: "v2.0.0"}
 
-			if !errors.Is(err, entitlement.ErrUpdateRequired) {
-				t.Errorf("errors.Is(err, ErrUpdateRequired) = false, want true (%s)", tt.reason)
+			if !errors.Is(err, coreent.ErrUpdateRequired) {
+				t.Errorf("errors.Is(err, coreent.ErrUpdateRequired) = false, want true (%s)", tt.reason)
 			}
 			//: And it must stay matchable once wrapped, which is how it
 			//: reaches the gate through Verify.
-			if !errors.Is(fmt.Errorf("verifying: %w", err), entitlement.ErrUpdateRequired) {
+			if !errors.Is(fmt.Errorf("verifying: %w", err), coreent.ErrUpdateRequired) {
 				t.Errorf("a wrapped UpdateRequiredError stopped matching the sentinel (%s)", tt.reason)
 			}
 		})

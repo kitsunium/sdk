@@ -3,6 +3,8 @@ package entitlement
 import (
 	"strings"
 	"testing"
+
+	svcent "github.com/kitsunium/sdk/internal/service/entitlement"
 )
 
 // TestEnrolmentLabels pins the two labels the vendor workflows key off. A
@@ -67,8 +69,10 @@ func TestIssueBaseURL(t *testing.T) {
 			//: The assertion that this targets one vendor's tracker went with
 			//: the constant. What survives is that IssueURL builds ON the
 			//: product's URL rather than substituting one of its own.
-			product := ProductValue{Name: "widget", EnrolURL: tt.enrol}
-			got := product.IssueURL(tt.subject, "ssh-ed25519 AAAA", false)
+			product := new(svcent.ProductValue)
+			product.Name = "widget"
+			product.EnrolURL = tt.enrol
+			got := IssueURL(product, tt.subject, "ssh-ed25519 AAAA", false)
 			if !strings.HasPrefix(got, tt.want) {
 				t.Errorf("IssueURL() = %q, want it to start with %q (%s)", got, tt.want, tt.reason)
 			}

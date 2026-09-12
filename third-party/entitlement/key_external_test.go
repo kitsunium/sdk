@@ -11,6 +11,8 @@ import (
 
 	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
 	"golang.org/x/crypto/ssh"
+
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
 
 // ownerOnly is the permission a private key must carry; anything looser means
@@ -73,7 +75,7 @@ func TestPublicKeyPath(t *testing.T) {
 			t.Parallel()
 
 			if got := entitlement.PublicKeyPath(tt.dir, tt.uuid); got != filepath.Clean(tt.want) {
-				t.Errorf("PublicKeyPath(%q, %q) = %q, want %q", tt.dir, tt.uuid, got, tt.want)
+				t.Errorf("entitlement.PublicKeyPath(%q, %q) = %q, want %q", tt.dir, tt.uuid, got, tt.want)
 			}
 		})
 	}
@@ -100,7 +102,7 @@ func TestPrivateKeyPath(t *testing.T) {
 			t.Parallel()
 
 			if got := entitlement.PrivateKeyPath(tt.dir, tt.uuid); got != filepath.Clean(tt.want) {
-				t.Errorf("PrivateKeyPath(%q, %q) = %q, want %q", tt.dir, tt.uuid, got, tt.want)
+				t.Errorf("entitlement.PrivateKeyPath(%q, %q) = %q, want %q", tt.dir, tt.uuid, got, tt.want)
 			}
 		})
 	}
@@ -117,7 +119,7 @@ func TestProvePossession(t *testing.T) {
 		wantErr error
 	}{
 		{name: "the matching private half proves possession", foreign: false},
-		{name: "a different key cannot answer for this identity", foreign: true, wantErr: entitlement.ErrKeyMismatch},
+		{name: "a different key cannot answer for this identity", foreign: true, wantErr: coreent.ErrKeyMismatch},
 	}
 
 	for _, tt := range tests {
@@ -135,12 +137,12 @@ func TestProvePossession(t *testing.T) {
 			//: Error cases assert the sentinel, not the wording.
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Errorf("ProvePossession() error = %v, want %v", err, tt.wantErr)
+					t.Errorf("entitlement.ProvePossession() error = %v, want %v", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Errorf("ProvePossession() error = %v, want nil", err)
+				t.Errorf("entitlement.ProvePossession() error = %v, want nil", err)
 			}
 		})
 	}
@@ -164,8 +166,8 @@ func TestSignerFromFile(t *testing.T) {
 		wantErr error
 	}{
 		{name: "an owner-only key loads", mode: ownerOnly},
-		{name: "a missing key is the never-enrolled case", absent: true, wantErr: entitlement.ErrNoLicense},
-		{name: "a corrupt key is refused, not treated as absent", corrupt: true, wantErr: entitlement.ErrNoPossession},
+		{name: "a missing key is the never-enrolled case", absent: true, wantErr: coreent.ErrNoLicense},
+		{name: "a corrupt key is refused, not treated as absent", corrupt: true, wantErr: coreent.ErrNoPossession},
 	}
 
 	for _, tt := range tests {
@@ -190,12 +192,12 @@ func TestSignerFromFile(t *testing.T) {
 			//: Error cases assert the sentinel, not the wording.
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Errorf("SignerFromFile() error = %v, want %v", err, tt.wantErr)
+					t.Errorf("entitlement.SignerFromFile() error = %v, want %v", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Errorf("SignerFromFile() error = %v, want nil", err)
+				t.Errorf("entitlement.SignerFromFile() error = %v, want nil", err)
 			}
 		})
 	}
@@ -211,7 +213,7 @@ func TestLoadPublicKey(t *testing.T) {
 		wantErr error
 	}{
 		{name: "an enrolled key loads"},
-		{name: "a missing key is the never-enrolled case", absent: true, wantErr: entitlement.ErrNoLicense},
+		{name: "a missing key is the never-enrolled case", absent: true, wantErr: coreent.ErrNoLicense},
 	}
 
 	for _, tt := range tests {
@@ -230,15 +232,15 @@ func TestLoadPublicKey(t *testing.T) {
 			//: Error cases assert the sentinel, not the wording.
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Errorf("LoadPublicKey() error = %v, want %v", err, tt.wantErr)
+					t.Errorf("entitlement.LoadPublicKey() error = %v, want %v", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("LoadPublicKey() error = %v, want nil", err)
+				t.Fatalf("entitlement.LoadPublicKey() error = %v, want nil", err)
 			}
 			if loaded == nil {
-				t.Error("LoadPublicKey() returned no key on the success path")
+				t.Error("entitlement.LoadPublicKey() returned no key on the success path")
 			}
 		})
 	}
@@ -265,10 +267,10 @@ func TestFingerprint(t *testing.T) {
 			pub, _ := writeKeyPair(t, dir, tt.uuid, ownerOnly)
 			loaded, err := entitlement.LoadPublicKey(dir, tt.uuid)
 			if err != nil {
-				t.Fatalf("LoadPublicKey() error = %v, want nil", err)
+				t.Fatalf("entitlement.LoadPublicKey() error = %v, want nil", err)
 			}
 			if entitlement.Fingerprint(loaded) != entitlement.Fingerprint(pub) {
-				t.Errorf("Fingerprint() = %q, want %q", entitlement.Fingerprint(loaded), entitlement.Fingerprint(pub))
+				t.Errorf("entitlement.Fingerprint() = %q, want %q", entitlement.Fingerprint(loaded), entitlement.Fingerprint(pub))
 			}
 		})
 	}
@@ -286,12 +288,12 @@ func TestSubjectValidation(t *testing.T) {
 		uuid    string
 		wantErr error
 	}{
-		{name: "parent traversal is refused", uuid: "../../etc/passwd", wantErr: entitlement.ErrKeyMismatch},
-		{name: "a nested path is refused", uuid: "a/b", wantErr: entitlement.ErrKeyMismatch},
-		{name: "an absolute path is refused", uuid: "/etc/shadow", wantErr: entitlement.ErrKeyMismatch},
-		{name: "a plain word is not a subject", uuid: "id_ed25519", wantErr: entitlement.ErrKeyMismatch},
-		{name: "an empty identifier is refused", uuid: "", wantErr: entitlement.ErrKeyMismatch},
-		{name: "a canonical subject is accepted as far as the filesystem", uuid: sampleUUID, wantErr: entitlement.ErrNoLicense},
+		{name: "parent traversal is refused", uuid: "../../etc/passwd", wantErr: coreent.ErrKeyMismatch},
+		{name: "a nested path is refused", uuid: "a/b", wantErr: coreent.ErrKeyMismatch},
+		{name: "an absolute path is refused", uuid: "/etc/shadow", wantErr: coreent.ErrKeyMismatch},
+		{name: "a plain word is not a subject", uuid: "id_ed25519", wantErr: coreent.ErrKeyMismatch},
+		{name: "an empty identifier is refused", uuid: "", wantErr: coreent.ErrKeyMismatch},
+		{name: "a canonical subject is accepted as far as the filesystem", uuid: sampleUUID, wantErr: coreent.ErrNoLicense},
 	}
 
 	for _, tt := range tests {
@@ -302,10 +304,10 @@ func TestSubjectValidation(t *testing.T) {
 			//: Both entry points compose a path from the identifier, so both
 			//: must reject before touching the filesystem.
 			if _, err := entitlement.LoadPublicKey(dir, tt.uuid); !errors.Is(err, tt.wantErr) {
-				t.Errorf("LoadPublicKey(%q) error = %v, want %v", tt.uuid, err, tt.wantErr)
+				t.Errorf("entitlement.LoadPublicKey(%q) error = %v, want %v", tt.uuid, err, tt.wantErr)
 			}
 			if _, err := entitlement.SignerFromFile(dir, tt.uuid); !errors.Is(err, tt.wantErr) {
-				t.Errorf("SignerFromFile(%q) error = %v, want %v", tt.uuid, err, tt.wantErr)
+				t.Errorf("entitlement.SignerFromFile(%q) error = %v, want %v", tt.uuid, err, tt.wantErr)
 			}
 		})
 	}
@@ -315,7 +317,7 @@ func TestSubjectValidation(t *testing.T) {
 // and returns the syscall-level cause underneath its *fs.PathError.
 //
 // Naming the errno directly would bind the test to one platform. Probing binds
-// it to the property under test — that LoadPublicKey preserves whatever cause
+// it to the property under test — that entitlement.LoadPublicKey preserves whatever cause
 // the read produced — which is true everywhere and is what the fix restored.
 //
 // Parameters:
@@ -339,7 +341,7 @@ func probeReadCause(t *testing.T, path string) (cause error) {
 	if !errors.As(probeErr, &pathErr) {
 		t.Fatalf("probe error is not a *fs.PathError: %v", probeErr)
 	}
-	//: Return the syscall-level cause, which is what LoadPublicKey must carry.
+	//: Return the syscall-level cause, which is what entitlement.LoadPublicKey must carry.
 	return pathErr.Err
 }
 
@@ -385,7 +387,7 @@ func TestLoadPublicKeyPreservesTheUnderlyingCause(t *testing.T) {
 	_, err := entitlement.LoadPublicKey(sshDir, canonicalSubject)
 	//: A nil error would make every assertion below vacuous.
 	if err == nil {
-		t.Fatal("LoadPublicKey over a directory returned nil error")
+		t.Fatal("entitlement.LoadPublicKey over a directory returned nil error")
 	}
 
 	tests := []struct {
@@ -396,7 +398,7 @@ func TestLoadPublicKeyPreservesTheUnderlyingCause(t *testing.T) {
 	}{
 		{
 			name:   "sentinel still matches",
-			target: entitlement.ErrNoPossession,
+			target: coreent.ErrNoPossession,
 			want:   true,
 			why:    "callers branch on the sentinel; that contract must not change",
 		},
@@ -447,7 +449,7 @@ func TestErrorsAsReachesTheConcreteCause(t *testing.T) {
 	_, err := entitlement.LoadPublicKey(sshDir, canonicalSubject)
 	//: Without an error there is nothing to unwrap.
 	if err == nil {
-		t.Fatal("LoadPublicKey over a directory returned nil error")
+		t.Fatal("entitlement.LoadPublicKey over a directory returned nil error")
 	}
 
 	tests := []struct {

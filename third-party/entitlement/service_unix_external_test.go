@@ -9,11 +9,15 @@ import (
 	"time"
 
 	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
+
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+
+	svcent "github.com/kitsunium/sdk/internal/service/entitlement"
 )
 
 // TestService_VerifyRefusesALooseKey pins that the permission guard is reached
 // and enforced through the full Verify path, not merely unit-tested on
-// SignerFromFile in isolation.
+// entitlement.SignerFromFile in isolation.
 //
 // POSIX-only, in its own build-tagged file: os.Chmod cannot widen an ACL on
 // Windows and os.Stat reports a synthesised mode there, so the fixture could
@@ -45,14 +49,14 @@ func TestService_VerifyRefusesALooseKey(t *testing.T) {
 			}
 
 			getter, vendor := publishRoster(t,
-				map[string]entitlement.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
-				now.Add(-time.Hour), now.Add(entitlement.RosterLifetime-time.Hour))
+				map[string]coreent.SubjectValue{sampleUUID: {Fingerprint: fingerprint}},
+				now.Add(-time.Hour), now.Add(coreent.RosterLifetime-time.Hour))
 
-			_, err := entitlement.NewServiceWithGetter(getter, dir, vendor, &testProduct).Verify(now)
+			_, err := svcent.NewServiceWithGetter(getter, entitlement.NewSSHIdentity(dir), vendor, &testProduct).Verify(now)
 			//: The roster lists this subject and the fingerprint matches; only
 			//: the mode makes it unusable, which is the point.
-			if !errors.Is(err, entitlement.ErrNoPossession) {
-				t.Errorf("Verify() error = %v, want %v", err, entitlement.ErrNoPossession)
+			if !errors.Is(err, coreent.ErrNoPossession) {
+				t.Errorf("Verify() error = %v, want %v", err, coreent.ErrNoPossession)
 			}
 		})
 	}

@@ -1,0 +1,43 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "entitlement",
+    srcs = [
+        "codes.go",
+        "entitlement.go",
+        "errors.go",
+        "grant.go",
+        "origin.go",
+        "roster.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/entitlement",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":entitlement",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "entitlement_test",
+    srcs = ["grant_internal_test.go"],
+    embed = [":entitlement"],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
