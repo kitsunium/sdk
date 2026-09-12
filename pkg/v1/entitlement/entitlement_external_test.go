@@ -11,6 +11,7 @@ package entitlement_test
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -212,4 +213,78 @@ func TestTheVersionFloorRefusalNamesBothVersions(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestANilProductNeverPanicsAtConstruction pins, through the public surface
+// alone, the contract this package documents everywhere and broke in the one
+// place it mattered.
+//
+// Every ProductValue accessor tolerates a nil receiver, and Validate does too.
+// The CONSTRUCTORS did not: both read the Origins FIELD, which a method cannot
+// guard, so New(identity, vendor, nil) panicked before returning a verifier —
+// on the one path that runs when a consumer has configured nothing yet.
+//
+// A nil product publishes nowhere, so the right outcome is a verifier that
+// refuses with RosterUnreachable. That is a very different thing from a panic,
+// and it is what a caller can handle.
+func TestANilProductNeverPanicsAtConstruction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		build func() *entitlement.Service
+	}{
+		{
+			name:  "New",
+			build: func() *entitlement.Service { return entitlement.New(stubIdentity{}, nil, nil) },
+		},
+		{
+			name: "NewWithGetter",
+			build: func() *entitlement.Service {
+				return entitlement.NewWithGetter(refusingGetter{}, stubIdentity{}, nil, nil)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			//: Construction is the step that panicked; recover names it.
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s(…, nil) panicked on a nil product: %v", tt.name, r)
+				}
+			}()
+			service := tt.build()
+			//: A constructor that returns nothing is no better than one that
+			//: panics — the caller dereferences it one line later.
+			if service == nil {
+				t.Fatalf("%s(…, nil) = nil service, want a verifier that refuses", tt.name)
+			}
+			_, err := service.Verify(time.Now())
+			//: A product publishing nowhere cannot decide, which is the
+			//: documented fallback rather than a refusal.
+			if !errors.Is(err, entitlement.ErrRosterUnreachable) {
+				t.Errorf("Verify() = %v, want ErrRosterUnreachable — a product that "+
+					"names no origin has nowhere to fetch from", err)
+			}
+		})
+	}
+}
+
+// refusingGetter answers every fetch with a failure, so the nil-product cases
+// above exercise construction rather than the network.
+type refusingGetter struct{}
+
+// Get always fails, which is what a verifier with no origins would see anyway.
+//
+// Parameters:
+//   - url: ignored.
+//
+// Returns:
+//   - resp: always nil.
+//   - err: always non-nil.
+func (refusingGetter) Get(url string) (resp *http.Response, err error) {
+	//: Nothing to serve; the case is about construction.
+	return nil, errors.New("no network in this test")
 }
