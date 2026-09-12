@@ -18,35 +18,33 @@ on:
     # draft, so marking it ready is how you ask for another verdict. Without
     # this type that second attempt would never be judged.
     types: [opened, synchronize, reopened, ready_for_review]
-  # NO push trigger, and that is a decision with a cost. Read this before
-  # putting one back.
+  # NO push trigger. This is the one line where this repository departs from the
+  # central stub, and it is measured rather than preferred.
   #
-  # A push or manual run scans every branch AND every tag. Three release
-  # commits reachable only from tags — v0.1.23 through v0.1.25 — are authored
-  # as `kitsunium-bot <ci@kitsunium.com>`. The gate matches GitHub noreply
-  # addresses only, so no `authors` entry can ever accept a domain address,
-  # and those commits cannot be re-authored either: proxy.golang.org has
-  # cached the four module versions each one carries, and twelve published
-  # tags of a public module are not something to move. The verdict on `main`
-  # would therefore be red permanently, over commits nobody is able to fix.
+  # A push or manual run scans every branch AND every tag. Three commits
+  # reachable only from tags — pkg/v0.1.23 through pkg/v0.1.25 — are authored
+  # `kitsunium-bot <ci@kitsunium.com>`. The gate matches GitHub noreply
+  # addresses only, so no `authors` entry can ever accept a domain address, and
+  # those commits cannot be re-authored either: proxy.golang.org has cached the
+  # module versions each one carries, and published tags of a public module are
+  # not something to move. With a push trigger the verdict on `main` is red
+  # permanently, over commits nobody is able to fix — and a required status that
+  # is always red is a status everyone learns to ignore.
   #
-  # `history: range` is NOT the way out — it makes it worse. The action hands
-  # push and manual runs an empty range on purpose, and post-commit.sh exits 2
-  # on `range` with no range: still red, and now a usage error rather than a
-  # verdict.
+  # `history: range` is NOT the way out: the action hands push and manual runs
+  # an empty range on purpose, and post-commit.sh exits 2 on `range` with no
+  # range. Still red, and now a usage error rather than a verdict.
   #
-  # What is kept is the part that decides something. A pull request is judged
-  # on its own ancestry, which never walks tags, so this stays a real required
-  # status on every merge — that is where the ruleset reads it, and direct
+  # What is kept is the part that decides something. A pull request is judged on
+  # its own ancestry, which never walks tags, so this stays a real required
+  # status on every merge — that is where the ruleset reads it — and direct
   # pushes to `main` are refused by branch protection regardless. What is given
-  # up is the retroactive audit of tags. The SOURCE of new taint is closed in
-  # the same change: sdk-release.yml now commits under the owning account's
-  # noreply address, so no future release adds to that list.
+  # up is the retroactive audit of tags.
   #
   # On demand stays, because the gate reads rules that live elsewhere and its
   # verdict can change without this repository changing. Fire it knowing it
-  # reports those three commits and will keep reporting them; everything else
-  # it says is news.
+  # reports those three commits and will keep reporting them; everything else it
+  # says is news.
   workflow_dispatch:
 
 # One verdict at a time. Without this the ready_for_review retry path lets an
@@ -119,8 +117,8 @@ jobs:
   # Why a second job rather than a step inside the action: the write permission
   # has to live somewhere, and a workflow- or job-level grant on the job above
   # would hand a pull-request-write token to kodflow/post-commit@main — a
-  # mutable external reference — on every trigger, manual runs included. Here
-  # the token never reaches it. This job runs no action at all.
+  # mutable external reference — on every trigger, push and manual runs
+  # included. Here the token never reaches it. This job runs no action at all.
   block-merge:
     needs: post-commit
     # Two limits worth stating rather than discovering.
