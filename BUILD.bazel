@@ -27,6 +27,7 @@ filegroup(
         "//internal/core/crypto:audit_srcs",
         "//internal/core/entitlement:audit_srcs",
         "//internal/core/events:audit_srcs",
+        "//internal/core/gate:audit_srcs",
         "//internal/core/health:audit_srcs",
         "//internal/core/i18n:audit_srcs",
         "//internal/core/id:audit_srcs",

@@ -1074,6 +1074,10 @@ codes:
     const: CodeProductInvalid
     hex: "0x00_02_23_0F"
     package: internal/core/entitlement
+  - code: "0.2.36.1"
+    const: CodePolicyInvalid
+    hex: "0x00_02_24_01"
+    package: internal/core/gate
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"

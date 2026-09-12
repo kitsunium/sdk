@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "gate",
+    srcs = ["gate.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/gate",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/gate",
+        "//internal/kernel/errs",
+        "//internal/service/gate",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":gate",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "gate_test",
+    srcs = ["gate_external_test.go"],
+    deps = [
+        ":gate",
+        "//pkg/v1/entitlement",
+        "//pkg/v1/errs",
+    ],
+)

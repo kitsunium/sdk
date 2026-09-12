@@ -89,6 +89,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md` | A self-update is an order of operations, and a product name is not part of it | Accepted |
 | `adr/0078-entitlement-is-quarantined-because-ssh-brings-x-sys.md` | Entitlement ships under third-party/ because proving key possession brings x/sys with it | Accepted |
 | `adr/0079-the-entitlement-split-x-sys-was-never-in-the-mechanism.md` | The entitlement split: x/sys was never in the mechanism, only in the identity | Accepted |
+| `adr/0080-the-gate-decides-and-performs-nothing.md` | The gate decides, and performs nothing | Accepted |
 
 This table is one of THREE indexes of the same ADRs — the others are
 `docs/adr/CLAUDE.md`'s Contents table and the root `CLAUDE.md` Reference list —
