@@ -79,6 +79,31 @@ func (p *ProductValue) Label() string {
 	return p.Name
 }
 
+// PublishedOrigins returns the places this product's roster is published,
+// tolerating a nil receiver as every accessor here does.
+//
+// It exists because the FIELD cannot: reading p.Origins off a nil product
+// panics, and the two constructors did exactly that while the package
+// documented the opposite. A nil product publishes nowhere, which is a
+// verifier that will refuse with RosterUnreachable — the documented fallback,
+// and a very different outcome from a panic at construction.
+//
+// Parameters: none.
+//
+// Returns:
+//   - origins: the product's publication points, or nil when there is no
+//     product.
+func (p *ProductValue) PublishedOrigins() []coreent.OriginValue {
+	//: a nil product names no publication point.
+	if p == nil {
+		//: the documented fallback: nowhere to fetch from.
+		return nil
+	}
+
+	//: the product's own list.
+	return p.Origins
+}
+
 // cacheDir returns the directory name this product's cache is scoped under.
 //
 // A product with no name falls back to the package name rather than writing to

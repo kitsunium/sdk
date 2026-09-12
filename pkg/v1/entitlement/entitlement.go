@@ -116,6 +116,58 @@ const CodeUpdateRequired errs.Code = coreent.CodeUpdateRequired
 // the day it is needed — see Product.Validate.
 const CodeProductInvalid errs.Code = coreent.CodeProductInvalid
 
+// The fourteen sentinels, re-exported so errors.Is answers on them. They are
+// the SAME values core declares, not copies, so a caller may compare across the
+// facade boundary; each also carries the matching Code above, so errs.HasCode
+// and errors.Is are two ways of asking one question.
+//
+// A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
+// says "cannot decide", and treating it as "decided no" turns an outage into a
+// revocation.
+var (
+	// ErrNoLicense identifies a machine with no entitlement key at all.
+	ErrNoLicense error = coreent.ErrNoLicense
+
+	// ErrRosterUnsigned identifies a roster carrying no valid vendor signature.
+	ErrRosterUnsigned error = coreent.ErrRosterUnsigned
+
+	// ErrRosterStale identifies a roster that verified but whose window has closed.
+	ErrRosterStale error = coreent.ErrRosterStale
+
+	// ErrRevoked identifies a subject absent from a roster that was itself valid.
+	ErrRevoked error = coreent.ErrRevoked
+
+	// ErrLicenseExpired identifies a subject whose own term has closed.
+	ErrLicenseExpired error = coreent.ErrLicenseExpired
+
+	// ErrKeyMismatch identifies a local key that does not match the published fingerprint.
+	ErrKeyMismatch error = coreent.ErrKeyMismatch
+
+	// ErrRosterUnreachable identifies a check that could not decide either way.
+	ErrRosterUnreachable error = coreent.ErrRosterUnreachable
+
+	// ErrAmbiguousLicense identifies more than one identity on one machine.
+	ErrAmbiguousLicense error = coreent.ErrAmbiguousLicense
+
+	// ErrCIUnverifiable identifies a CI run whose provenance could not be proven.
+	ErrCIUnverifiable error = coreent.ErrCIUnverifiable
+
+	// ErrCIUnknownKey identifies a CI token signed by a key the issuer does not publish.
+	ErrCIUnknownKey error = coreent.ErrCIUnknownKey
+
+	// ErrCINotEntitled identifies a CI account the roster does not cover.
+	ErrCINotEntitled error = coreent.ErrCINotEntitled
+
+	// ErrNoPossession identifies a holder who could not prove possession.
+	ErrNoPossession error = coreent.ErrNoPossession
+
+	// ErrClockRegressed identifies a clock behind the last signed document this machine verified.
+	ErrClockRegressed error = coreent.ErrClockRegressed
+
+	// ErrUpdateRequired identifies a build below the floor the roster mandates.
+	ErrUpdateRequired error = coreent.ErrUpdateRequired
+)
+
 // Identity is the machine's half of the proof. It aliases the core port.
 type Identity = coreent.Identity
 
@@ -146,4 +198,62 @@ type Service = svcent.Service
 func New(identity Identity, vendor []byte, product *Product) *Service {
 	//: delegate verbatim to the service implementation.
 	return svcent.NewService(identity, vendor, product)
+}
+
+// Bundle is the one-document roster form: the raw roster and its detached
+// signature in a single object, because two documents cannot be fetched
+// atomically. It aliases the service type (ADR 0074) — a caller BUILDS one to
+// serve or to cache, which is why it is public at all.
+type Bundle = svcent.BundleValue
+
+// Getter performs the roster HTTP GETs. A consumer substitutes it to exercise
+// the admission logic without a network, which is the only way to test a
+// refusal path that depends on what an origin answered.
+type Getter = svcent.Getter
+
+// UpdateRequiredError carries the two versions a version-floor refusal is
+// about. It exists as a TYPE rather than a message because a caller that cannot
+// read the required version out of the refusal re-runs the upgrade, gets the
+// same refusal, and loops forever.
+type UpdateRequiredError = svcent.UpdateRequiredError
+
+// NewWithGetter returns a verifier whose roster fetches go through client.
+//
+// Parameters:
+//   - client: the HTTP surface the roster is fetched over.
+//   - identity: the machine's half of the proof.
+//   - vendor: the ed25519 public key the binary links in.
+//   - product: the vendor-specific facts; a nil product uses the fallbacks.
+//
+// Returns:
+//   - service: the verifier.
+func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Product) *Service {
+	//: delegate verbatim to the service implementation.
+	return svcent.NewServiceWithGetter(client, identity, vendor, product)
+}
+
+// RequiresUpdate reports whether current is below the floor a roster mandates.
+//
+// Parameters:
+//   - current: the running build's version.
+//   - floor: the minimum the roster requires; an empty floor requires nothing.
+//
+// Returns:
+//   - required: true when the running build is below the floor.
+func RequiresUpdate(current, floor string) bool {
+	//: delegate verbatim to the service implementation.
+	return svcent.RequiresUpdate(current, floor)
+}
+
+// UpdateRefusal builds the typed refusal for a build below the roster's floor.
+//
+// Parameters:
+//   - current: the running build's version.
+//   - floor: the minimum the roster requires.
+//
+// Returns:
+//   - err: an *UpdateRequiredError carrying both versions.
+func UpdateRefusal(current, floor string) error {
+	//: delegate verbatim to the service implementation.
+	return svcent.UpdateRefusal(current, floor)
 }

@@ -50,6 +50,14 @@ product (ADR 0078 §1).
   Everything here parses bytes fetched from the network or read from a cache an
   attacker may have written, before any signature has vouched for them.
 
+- **The nil-tolerance contract covers the CONSTRUCTORS too, and it did not.**
+  Every `ProductValue` accessor tolerates a nil receiver, and so does `Validate`
+  — but `NewService` and `NewServiceWithGetter` read the `Origins` FIELD, which
+  no method can guard, so `New(identity, vendor, nil)` panicked on exactly the
+  path that runs when a consumer has configured nothing yet. Both now go through
+  `PublishedOrigins()`. A product publishing nowhere yields a verifier that
+  refuses with `RosterUnreachable`, which a caller can handle.
+
 ## Known debt
 
 `fmt.Errorf` throughout, against SDK rule 2. The engine came across with the

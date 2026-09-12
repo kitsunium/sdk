@@ -158,7 +158,7 @@ func NewService(identity coreent.Identity, vendor []byte, product *ProductValue)
 		identity:    identity,
 		vendor:      vendor,
 		product:     product,
-		origins:     product.Origins,
+		origins:     product.PublishedOrigins(),
 		bearerFetch: DefaultBearerFetch,
 		cacheDir:    product.DefaultCacheDir(),
 		timeServers: RoughtimeServers,
@@ -168,7 +168,7 @@ func NewService(identity coreent.Identity, vendor []byte, product *ProductValue)
 // NewServiceWithGetter builds a verifier over an injected getter.
 func NewServiceWithGetter(client Getter, identity coreent.Identity, vendor []byte, product *ProductValue) *Service {
 	//: Callers get a verifier whose network layer they control.
-	return &Service{client: client, identity: identity, vendor: vendor, product: product, origins: product.Origins, bearerFetch: DefaultBearerFetch}
+	return &Service{client: client, identity: identity, vendor: vendor, product: product, origins: product.PublishedOrigins(), bearerFetch: DefaultBearerFetch}
 }
 
 // NewServiceWithOrigins builds a verifier over an injected getter and an
