@@ -128,3 +128,61 @@ func TestGenerateKeyPairRefusesAPathTraversal(t *testing.T) {
 		})
 	}
 }
+
+// TestANilProductDoesNotPanic pins the nil-receiver contract the package
+// documents for every ProductValue method.
+//
+// GenerateKeyPair dereferenced p.Name directly, so a nil product panicked on the
+// one call an operator makes when they have nothing else set up yet.
+func TestANilProductDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		call func(p *entitlement.ProductValue) any
+	}{
+		{name: "AutoUpgradeEnv-equivalent: the cache directory", call: func(p *entitlement.ProductValue) any { return p.DefaultCacheDir() }},
+		{name: "Validate", call: func(p *entitlement.ProductValue) any { return p.Validate() }},
+		{name: "IssueURL", call: func(p *entitlement.ProductValue) any { return p.IssueURL("s", "k", false) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			//: A nil product must reach the documented fallback, never a panic:
+			//: this is the one path that runs when nothing else is working.
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("panicked on a nil product: %v", r)
+				}
+			}()
+			tt.call(nil)
+		})
+	}
+}
+
+// TestGenerateKeyPairOnANilProduct pins the same contract on the call the
+// finding named, which is the only one that writes to disk.
+func TestGenerateKeyPairOnANilProduct(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ name string }{{name: "a valid subject, no product"}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("GenerateKeyPair panicked on a nil product: %v", r)
+				}
+			}()
+			var product *entitlement.ProductValue
+			//: A canonical v4 UUID, so the refusal cannot come from the subject.
+			//: The outcome is not what this asserts — only that the call
+			//: RETURNED rather than panicking — so the error is reported for
+			//: the record and never failed on.
+			_, genErr := product.GenerateKeyPair(t.TempDir(), "6ba7b810-9dad-41d1-80b4-00c04fd430c8")
+			t.Logf("GenerateKeyPair on a nil product returned: %v", genErr)
+		})
+	}
+}

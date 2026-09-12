@@ -70,6 +70,23 @@ func (p *ProductValue) cacheDir() string {
 	return p.Name
 }
 
+// keyComment is the comment written into a generated private key, naming the
+// product the identity belongs to.
+//
+// Like every method here it tolerates a nil receiver: the package documents that
+// contract, and GenerateKeyPair dereferenced p.Name directly — so a nil product
+// panicked on the one call an operator makes when they have nothing else.
+func (p *ProductValue) keyComment(subject string) string {
+	name := "entitlement"
+	//: a named product labels its own key material.
+	if p != nil && p.Name != "" {
+		name = p.Name
+	}
+
+	//: the comment ssh.MarshalPrivateKey writes into the PEM block.
+	return name + " entitlement " + subject
+}
+
 // audience returns the OIDC audience for this product's CI seats, falling back
 // to a package-scoped value that no other product would mint a token for.
 func (p *ProductValue) audience() string {

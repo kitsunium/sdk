@@ -81,7 +81,7 @@ func (p *ProductValue) GenerateKeyPair(sshDir, subject string) (publicKey string
 		return "", fmt.Errorf("generating key: %w", genErr)
 	}
 
-	block, marshalErr := ssh.MarshalPrivateKey(priv, p.Name+" entitlement "+subject)
+	block, marshalErr := ssh.MarshalPrivateKey(priv, p.keyComment(subject))
 	//: A private half we cannot serialise is unusable.
 	if marshalErr != nil {
 		//: Refuse rather than write half an identity.
@@ -115,6 +115,15 @@ func (p *ProductValue) GenerateKeyPair(sshDir, subject string) (publicKey string
 // GitHub token: it hands the user a link, and the account that opens the
 // issue is the identity the workflow binds the UUID to.
 func (p *ProductValue) IssueURL(subject, publicKey string, rotation bool) string {
+	//: Same nil-receiver contract as every other method here: read through a
+	//: local copy so a nil product yields the zero ProductValue, whose empty
+	//: EnrolURL is already the documented "no self-service path". No extra
+	//: return value — the empty base IS the answer, not a sentinel for one.
+	product := ProductValue{}
+	//: A real product supplies its own enrolment base.
+	if p != nil {
+		product = *p
+	}
 	label := requestLabel
 	//: A rotation must be distinguishable so the workflow can demand that
 	//: the author already owns the subject.
@@ -137,5 +146,5 @@ func (p *ProductValue) IssueURL(subject, publicKey string, rotation bool) string
 	query.Set("labels", label)
 	query.Set("body", body)
 	//: Return a link the user can open without any credential of ours.
-	return p.EnrolURL + "?" + query.Encode()
+	return product.EnrolURL + "?" + query.Encode()
 }

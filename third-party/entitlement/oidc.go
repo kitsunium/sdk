@@ -474,10 +474,10 @@ func VerifyActionsToken(raw string, keys map[string]*rsa.PublicKey, audience str
 		//: Refuse a token we hold no key for.
 		return nil, fmt.Errorf("%w: no published key for kid %q", ErrCIUnknownKey, kid)
 	}
-	//: A key too small to be GitHub's has been substituted somewhere.
-	if key.N.BitLen() < minRSAModulusBits {
-		//: Refuse an undersized key.
-		return nil, fmt.Errorf("%w: signing key is %d bits", ErrCIUnverifiable, key.N.BitLen())
+	//: Every way the selected key can be unusable, in one place.
+	if keyErr := usableRSAKey(key, kid); keyErr != nil {
+		//: Refuse rather than verify against something unusable.
+		return nil, keyErr
 	}
 
 	//: Authenticate BEFORE decoding the payload: a forged token must not
@@ -598,4 +598,27 @@ func rsaKeyFromJWK(entry *JWKValue) (key *rsa.PublicKey, err error) {
 	}
 	//: A usable RS256 verification key.
 	return built, nil
+}
+
+// usableRSAKey reports why the key selected by kid cannot verify a signature, or
+// nil when it can.
+//
+// The kid comes from the TOKEN, which is attacker text, so a map entry that is
+// nil or carries no modulus must refuse rather than be dereferenced — a
+// malformed key set a caller built would otherwise become a process panic
+// instead of an unverifiable token.
+func usableRSAKey(key *rsa.PublicKey, kid string) error {
+	//: Nothing to verify against.
+	if key == nil || key.N == nil {
+		//: Refuse as unverifiable.
+		return fmt.Errorf("%w: no usable key for kid %q", ErrCIUnknownKey, kid)
+	}
+	//: A key too small to be the issuer's has been substituted somewhere.
+	if key.N.BitLen() < minRSAModulusBits {
+		//: Refuse an undersized key.
+		return fmt.Errorf("%w: signing key is %d bits", ErrCIUnverifiable, key.N.BitLen())
+	}
+
+	//: The key can be used.
+	return nil
 }
