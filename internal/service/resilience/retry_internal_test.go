@@ -325,7 +325,9 @@ func Test_retryRunner_jittered(t *testing.T) {
 			reason: "no delay, no jitter",
 		},
 	}
+	//: one row per shape the function must survive.
 	for _, tt := range tests {
+		//: each shape is its own subtest, so a failure names the case.
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -333,8 +335,11 @@ func Test_retryRunner_jittered(t *testing.T) {
 			//: Many draws, because one draw from a uniform proves nothing about
 			//: its bounds — and because a panic is the failure mode being
 			//: guarded in two of these rows.
+			//: many draws, because one sample from a uniform proves nothing
+			//: about its bounds.
 			for range jitterDraws {
 				got := r.jittered(tt.delay)
+				//: outside the row's bounds is the defect this pins.
 				if got < tt.lo || got > tt.hi {
 					t.Fatalf("jittered(%v) with Jitter=%v = %v, want within [%v, %v] — %s",
 						tt.delay, tt.jitter, got, tt.lo, tt.hi, tt.reason)
@@ -375,13 +380,16 @@ func Test_retryRunner_jitterSpreadsCallers(t *testing.T) {
 			reason: "the deterministic backoff is deterministic",
 		},
 	}
+	//: two rows: jittered, and the deterministic control.
 	for _, tt := range tests {
+		//: each row is its own subtest, so a failure names the case.
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
 			r := &retryRunner{cfg: RetryConfig{Jitter: tt.jitter}}
 			seen := make(map[time.Duration]struct{}, jitterDraws)
 			//: One draw per notional caller failing at the same instant.
+			//: one draw per notional caller failing at the same instant.
 			for range jitterDraws {
 				seen[r.jittered(time.Second)] = struct{}{}
 			}
@@ -446,7 +454,9 @@ func Test_NewRetry_jitterEdges(t *testing.T) {
 			reason: "nothing to widen, and a random negative width would be worse",
 		},
 	}
+	//: one row per input that escapes an ordinary clamp.
 	for _, tt := range tests {
+		//: each input is its own subtest, so a failure names it.
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -465,6 +475,7 @@ func Test_NewRetry_jitterEdges(t *testing.T) {
 				t.Fatalf("NewRetry(Jitter: NaN) stored NaN — min/max propagate it, " +
 					"so the clamp alone does not normalise it")
 			}
+			//: many draws, because the randomness is what could escape.
 			for range jitterDraws {
 				got := runner.jittered(tt.delay)
 				//: A negative result is the failure this row exists for, and it

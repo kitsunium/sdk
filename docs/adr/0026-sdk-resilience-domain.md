@@ -89,10 +89,13 @@ Two contracts were tightened during review, both before any release:
     wait growing monotonically with the attempt. Full jitter — `U[0, delay)` —
     spreads harder but lets a late attempt wait less than an early one, which
     turns a backoff into a lottery.
-  - **Applied AFTER `MaxDelay`.** The cap bounds the growth; jitter spreads
-    callers *around* the bound rather than being squeezed flat against it. The
-    consequence is stated in the field's own doc: the effective ceiling on one
-    wait becomes `MaxDelay * (1 + Jitter)`.
+  - **Applied AFTER the `MaxDelay` cap.** The cap bounds the growth; jitter
+    spreads callers *around* the bound rather than being squeezed flat against
+    it. The consequence is stated in the field's own doc: *when a cap is
+    configured*, the effective ceiling on one wait becomes
+    `MaxDelay * (1 + Jitter)`. A zero `MaxDelay` is no cap, so there is no
+    ceiling to raise — the backoff grows geometrically and the jitter widens
+    whatever it reaches, bounded only by what a `time.Duration` represents.
   - **`backoff` stays a pure function of the attempt number**, and jitter is
     applied in `wait`. The deterministic growth and the randomisation are two
     different claims, and a suite that cannot assert the first without the

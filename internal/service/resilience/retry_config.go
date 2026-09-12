@@ -33,9 +33,12 @@ type RetryConfig struct {
 	// round lands as one burst on a dependency that is already struggling.
 	// Jitter is what turns those bursts back into a distribution.
 	//
-	// It applies AFTER MaxDelay, deliberately: the cap bounds the growth, and
-	// jitter spreads callers around the bound rather than being squeezed flat
-	// against it. The consequence is worth stating — the effective ceiling on
-	// one wait becomes MaxDelay * (1 + Jitter), not MaxDelay.
+	// It applies AFTER the MaxDelay cap, deliberately: the cap bounds the
+	// growth, and jitter spreads callers around the bound rather than being
+	// squeezed flat against it. The consequence is worth stating — WHEN a cap is
+	// configured, the effective ceiling on one wait becomes MaxDelay * (1 +
+	// Jitter), not MaxDelay. A zero MaxDelay is no cap at all, so there is no
+	// ceiling to raise: the backoff grows geometrically and the jitter widens
+	// whatever it reaches, bounded only by what a time.Duration can represent.
 	Jitter float64
 }
