@@ -7,6 +7,9 @@ go_library(
     srcs = [
         "bundle.go",
         "cache.go",
+        "cache_lock.go",
+        "cache_lock_unix.go",
+        "cache_lock_windows.go",
         "ci.go",
         "ciseat.go",
         "jwks.go",
@@ -26,7 +29,9 @@ go_library(
     ],
     deps = [
         "//internal/core/entitlement",
+        "//internal/core/lock",
         "//internal/kernel/errs",
+        "//internal/service/lock",
         "@org_golang_x_mod//semver",
     ],
 )
@@ -45,8 +50,10 @@ go_test(
     srcs = [
         "bundle_external_test.go",
         "bundle_internal_test.go",
+        "cache_concurrency_internal_test.go",
         "cache_internal_test.go",
         "cache_unix_internal_test.go",
+        "cache_windows_internal_test.go",
         "ci_external_test.go",
         "ci_internal_test.go",
         "ciseat_internal_test.go",

@@ -11,9 +11,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+	corelock "github.com/kitsunium/sdk/internal/core/lock"
 )
 
 // maxArtefactBytes caps each roster artefact. The endpoint is untrusted by
@@ -87,6 +89,17 @@ type Service struct {
 	// Service built around an injected getter must not reach a real
 	// filesystem unless a test says so.
 	cacheDir string
+	// cacheLockMu serialises the construction of cacheLock, which several
+	// goroutines can reach at once through the first verification.
+	cacheLockMu sync.Mutex
+	// cacheLockFor is the directory cacheLock was built for, so retargeting a
+	// Service with WithCache rebuilds the guard instead of keeping one scoped
+	// to a directory nobody is using. The empty string means "never built".
+	cacheLockFor string
+	// cacheLock serialises the cache directory against every other goroutine
+	// here and every other process on this machine, or is nil when no such
+	// lock is available. See cache_lock.go for what nil costs.
+	cacheLock corelock.Locker
 	// timeServers are the Roughtime servers consulted to corroborate the
 	// local clock. Empty disables the check, which is what committed source
 	// ships and what every test constructor gets: a Service must not reach

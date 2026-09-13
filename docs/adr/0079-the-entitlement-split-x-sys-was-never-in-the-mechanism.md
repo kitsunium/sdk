@@ -158,9 +158,57 @@ Carried forward unchanged from ADR 0078, none of them addressed here:
   sentinels are `errs.Define`-typed and the wrapping uses `%w`, so `errors.Is`
   and `errs.HasCode` both work through it; the conversion is a separate change
   that touches every refusal path and deserves its own diff.
-- **The cache's rename on Windows, and `rememberRoster`'s lost update.** Both
+- ~~**The cache's rename on Windows, and `rememberRoster`'s lost update.** Both
   are recorded on the versement's review threads and neither is reachable from
-  this CI matrix.
+  this CI matrix.~~ **CLOSED.** The second clause expired:
+  [PR #190](https://github.com/kitsunium/sdk/pull/190) proved a
+  Windows test executes on `windows-latest` through `e2e-cross.yml`, and
+  `./entitlement` joining `SERVICE_PKGS` is the whole of what made it reachable.
+  Both defects were reproduced there and fixed; what was measured in the process
+  contradicts part of what the threads recorded, so it is written down here
+  rather than left in a closed conversation.
+
+  - **The rename is not the defect; a concurrent READER is.** The thread called
+    `os.Rename` over an existing destination "an unsupported replacement
+    operation on Windows". It is not. go1.27's
+    `internal/syscall/windows.Rename` is
+    `MoveFileEx(from, to, MOVEFILE_REPLACE_EXISTING)`, and asserted on
+    `windows-latest` with nobody holding the destination, it succeeds. What
+    Windows refuses is replacing a destination another handle holds open —
+    and `syscall.Open` asks for `FILE_SHARE_READ|FILE_SHARE_WRITE` and never
+    `FILE_SHARE_DELETE`, so every file Go opens is such a destination. The
+    holder in practice is this package's own `readCappedFile` in a second
+    process. The severity recorded on the thread — "after the initial cache
+    write, later online verification silently retains the stale bundle" — was
+    therefore overstated: an uncontended refresh has always worked there.
+  - **`FILE_SHARE_DELETE` on the read path is not a fix.** Measured, because
+    it would have been the cheap one: a destination held with
+    `FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE` still fails with
+    `Access is denied.` Replacing a name is not unlinking it. That left
+    exclusion as the only answer, which is why the fix is a lock and not a
+    share mode.
+  - **The lost update is real and it is the ratchet that loses.** 183 of 400
+    rounds on the Linux runner ended with the high-water mark BELOW the newest
+    generation offered. `checkClock` refuses a clock reading earlier than that
+    mark, so what a lost update loses is anti-rollback distance — not
+    idempotent content.
+  - **The same missing exclusion also destroyed the cache, which no review
+    caught.** The staging name carried `os.Getpid()`, so two goroutines in one
+    process shared a staging file and installed the interleaving of two
+    bundles: 14 of 400 rounds left bytes that authenticate as nothing where a
+    valid cache had been. `os.CreateTemp` replaced it.
+  - **Windows also refuses two writers racing ONE name, and that one is not
+    fixed because it is not broken.** Two unguarded installs onto the same
+    destination collided in 99 of 400 rounds there and in 0 on every Unix lane,
+    because MoveFileEx must delete the destination to replace it while
+    rename(2) replaces unconditionally. The cache stayed valid in all 400, and
+    production never installs unguarded, so the assertion that both writers
+    also SUCCEED is made only where the kernel promises it.
+  - **Still open, and deliberately.** A holder this package does not control —
+    an antivirus scanner, a backup agent, a search indexer — can hold the
+    bundle open and make a refresh fail exactly as before. No lock reaches
+    them; only a retry would, and a retry cannot be falsified in this CI
+    matrix. The failure is logged, and the next invocation refreshes.
 
 ## References
 

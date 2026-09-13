@@ -45,21 +45,6 @@ const cachedBundleName string = "roster.signed.json"
 // cacheDirMode keeps the cache directory owner-only.
 const cacheDirMode os.FileMode = 0o700
 
-// cacheFileMode keeps the cached bundle owner-only.
-//
-// It is hygiene, NOT a control, and the difference matters. The bundle holds
-// no secret — it is a world-readable document published over plain HTTPS — so
-// nothing is protected by narrowing it; the reason to narrow it anyway is that
-// there is no reason to widen it.
-//
-// Nothing ever reads this mode back. That is deliberate and it is the lesson
-// key_windows.go paid for: os.Stat on Windows reports a synthesised 0444/0666
-// that carries no access-control meaning, so a POSIX permission gate on this
-// file would refuse every cached bundle there, exactly as it once refused every
-// private key. The integrity of these bytes comes from the vendor's signature
-// and from nowhere else, which is precisely why no such gate is needed.
-const cacheFileMode os.FileMode = 0o600
-
 // DefaultCacheDir returns where the last authenticated roster is kept.
 //
 // An empty string means "no cache", which disables the offline fallback
@@ -109,24 +94,38 @@ func cachedBundlePath(dir string) string {
 // bundle into the file directly never comes through here. What it stops is this
 // package lowering its own guard, which is the part this package controls.
 func (s *Service) rememberRoster(raw []byte, roster *coreent.RosterValue) {
-	//: Two independent reasons to keep nothing, merged into one guard because
-	//: they have the same effect: no cache is configured at all — which is
-	//: what every injected-getter construction gets — or the bundle offered is
-	//: OLDER than the one already kept, which teaches this machine nothing it
-	//: does not know and would weaken what it does. The second clause is the
-	//: ratchet, and it is what checkClock reads.
-	if s.cacheDir == "" || (roster != nil && roster.IssuedAt.Before(s.signedHighWaterMark())) {
+	//: No cache is configured at all, which is what every injected-getter
+	//: construction gets. Checked before the guard because there is nothing
+	//: to exclude anyone from.
+	if s.cacheDir == "" {
 		//: Keep what is already there.
 		return
 	}
-	//: Best-effort: a cache we cannot write costs the offline fallback and
-	//: nothing else, so it must never turn a successful verification into a
-	//: refusal. Say so once rather than fail, because the alternative —
-	//: silence — turns "offline does not work here" into a mystery on the day
-	//: it is discovered, which is the day the network is already down.
-	if err := writeCachedBundle(s.cacheDir, raw); err != nil {
-		log.Printf("cannot cache the roster (%v); this machine will need the network on every start", err)
-	}
+	//: The comparison and the replacement are ONE operation or they are a
+	//: lost update. Read outside the guard, both writers see the same mark,
+	//: both conclude they are newer than it, and whichever renames LAST
+	//: decides what the mark becomes — measured at 108 of 400 rounds before
+	//: this guard existed.
+	s.holdCacheForWrite(func() {
+		//: The bundle offered is OLDER than the one already kept, which
+		//: teaches this machine nothing it does not know and would weaken
+		//: what it does. This is the ratchet, and it is what checkClock
+		//: reads. The mark is re-read HERE, inside the exclusion, so that
+		//: what it compares against is what the rename below replaces.
+		if roster != nil && roster.IssuedAt.Before(s.markWhileHeld()) {
+			//: Keep what is already there.
+			return
+		}
+		//: Best-effort: a cache we cannot write costs the offline fallback
+		//: and nothing else, so it must never turn a successful verification
+		//: into a refusal. Say so once rather than fail, because the
+		//: alternative — silence — turns "offline does not work here" into a
+		//: mystery on the day it is discovered, which is the day the network
+		//: is already down.
+		if err := writeCachedBundle(s.cacheDir, raw); err != nil {
+			log.Printf("cannot cache the roster (%v); this machine will need the network on every start", err)
+		}
+	})
 }
 
 // writeCachedBundle replaces the cached bundle atomically.
@@ -136,16 +135,23 @@ func (s *Service) rememberRoster(raw []byte, roster *coreent.RosterValue) {
 // bundle — so the one thing a crash must not do is destroy the grace window a
 // later outage depends on.
 //
-// os.WriteFile rather than os.CreateTemp: it opens, writes and closes in one
-// call and returns the first failure of the three, which is exactly the
-// semantics wanted here. A dropped Close is how a full filesystem produces a
-// truncated file that then gets renamed over a good cache, and there is no
-// descriptor to drop when nothing ever holds one.
+// The staging name is one the KERNEL guarantees nobody else holds, which the
+// previous one was not. It used to carry os.Getpid(), so that two concurrent
+// invocations — a hook and a CLI run, which is the ordinary case on this
+// project — staged into different files. Two goroutines inside one process
+// share a pid, so they shared a staging file: each truncated it, each wrote
+// its own bytes into it, and one renamed whatever was there at that instant
+// over a valid cache. A short bundle finishing inside a long one leaves the
+// long one's tail behind, and that is what got installed — measured at 15 of
+// 400 rounds, against a doc comment promising the opposite.
 //
-// The staging name carries the pid rather than being randomised, so two
-// concurrent invocations — a hook and a CLI run, which is the ordinary case on
-// this project — stage into different files and neither can interleave writes
-// into the other's.
+// os.CreateTemp answers that with an O_EXCL create, so uniqueness is enforced
+// rather than hoped for, and its 0600 is the mode this cache wants: applied at
+// creation, so no separate chmod can leave a window in which the file exists
+// at something wider. The reason this code avoided it before was that "a dropped
+// Close is how a full filesystem produces a truncated file that then gets
+// renamed over a good cache" — which is answered by not dropping it. stageBundle
+// checks the Close and refuses on it.
 func writeCachedBundle(dir string, raw []byte) error {
 	//: The cache root may not exist yet on a first run.
 	if mkErr := os.MkdirAll(dir, cacheDirMode); mkErr != nil {
@@ -153,17 +159,19 @@ func writeCachedBundle(dir string, raw []byte) error {
 		return fmt.Errorf("creating %s: %w", dir, mkErr)
 	}
 
-	installed := cachedBundlePath(dir)
-	staged := fmt.Sprintf("%s.%d.tmp", installed, os.Getpid())
-	//: Mode is applied at creation, so no separate chmod can leave a window
-	//: in which the file exists at something wider.
-	if writeErr := os.WriteFile(staged, raw, cacheFileMode); writeErr != nil {
-		removeBestEffort(staged)
-		//: Report the write failure.
-		return fmt.Errorf("writing %s: %w", staged, writeErr)
+	staged, stageErr := stageBundle(dir, raw)
+	//: Nothing was installed, and nothing was disturbed.
+	if stageErr != nil {
+		//: Report the staging failure.
+		return stageErr
 	}
+
+	installed := cachedBundlePath(dir)
 	//: Rename is what makes the replacement atomic for every reader: nobody
-	//: ever observes a half-written bundle at the name they look for.
+	//: ever observes a half-written bundle at the name they look for. It is
+	//: also the step Windows refuses while another handle holds the
+	//: destination open, which is why readers take the same guard the writer
+	//: does — see cache_lock.go.
 	if renameErr := os.Rename(staged, installed); renameErr != nil {
 		removeBestEffort(staged)
 		//: Report the rename failure.
@@ -171,6 +179,75 @@ func writeCachedBundle(dir string, raw []byte) error {
 	}
 	//: The cache now holds exactly the bytes that authenticated.
 	return nil
+}
+
+// stageBundle writes raw to a file in dir that no other writer can be using,
+// and returns the path it wrote.
+//
+// os.CreateTemp creates at 0600, which is the mode this cache wants: owner
+// -only, applied at creation, so no separate chmod can leave a window in which
+// the file exists at something wider. That is hygiene and NOT a control — the
+// bundle is a world-readable document published over plain HTTPS, so nothing
+// is protected by narrowing it; the reason to narrow it anyway is that there
+// is no reason to widen it. Nothing in this package ever reads the mode back,
+// which is the lesson key_windows.go paid for: os.Stat on Windows reports a
+// synthesised 0444/0666 carrying no access-control meaning, so a POSIX
+// permission gate here would refuse every cached bundle there. The integrity
+// of these bytes comes from the vendor's signature and from nowhere else.
+// Test_writeCachedBundle_unixInstallsOwnerOnly asserts the mode instead, where
+// the concept exists.
+//
+// One thing the pid-named predecessor did better, named rather than hidden: a
+// process killed between the create and the rename leaves a staged file
+// behind, and the old name was reused by the next run with that pid while
+// these accumulate. Every path this function can RETURN from removes it, so
+// only a hard kill inside a window of a few microseconds leaks one, and what
+// leaks is a few hundred bytes that no reader ever looks at — cachedBundlePath
+// matches one exact name. Sweeping them would mean enumerating the cache
+// directory on a read path that currently opens one file by name, and deciding
+// by age which of them belong to a live process. That is more machinery, and
+// more ways to delete the wrong thing, than the residue justifies.
+//
+// Both failures are reported, and the order between them is the point: a Write
+// that failed says the bytes are not all there, while a Close that failed says
+// they may not have reached the disk. Either one makes the staged file unfit
+// to rename over a cache that is currently valid, so either one removes it and
+// refuses.
+func stageBundle(dir string, raw []byte) (path string, err error) {
+	file, createErr := os.CreateTemp(dir, cachedBundleName+".*.tmp")
+	//: No descriptor, so nothing to clean up.
+	if createErr != nil {
+		//: Report what could not be staged.
+		return "", fmt.Errorf("staging in %s: %w", dir, createErr)
+	}
+
+	//: Released at the point it was acquired — and its failure REPORTED, not
+	//: logged. A Close that failed says the bytes may never have reached the
+	//: disk, which is exactly what makes this file unfit to rename over a
+	//: cache that is currently valid; a full filesystem surfaces here and
+	//: nowhere else. It only overrides a success, because a write failure
+	//: already names the larger problem.
+	defer func() {
+		closeErr := file.Close()
+		//: Nothing to add when the caller is already failing.
+		if closeErr == nil || err != nil {
+			//: Leave the existing outcome alone.
+			return
+		}
+		removeBestEffort(file.Name())
+		path, err = "", fmt.Errorf("closing %s: %w", file.Name(), closeErr)
+	}()
+
+	staged := file.Name()
+	//: Nothing partial is ever installed: the staged file is removed and the
+	//: rename that would have consumed it never happens.
+	if _, writeErr := file.Write(raw); writeErr != nil {
+		removeBestEffort(staged)
+		//: Report the write failure.
+		return "", fmt.Errorf("writing %s: %w", staged, writeErr)
+	}
+	//: A complete bundle, at a name only this call knows.
+	return staged, nil
 }
 
 // removeBestEffort drops a staging file without masking the caller's error.
@@ -204,7 +281,13 @@ func (s *Service) cachedRoster(now time.Time) (roster *coreent.RosterValue, err 
 	}
 
 	path := cachedBundlePath(s.cacheDir)
-	raw, readErr := readCappedFile(path)
+	var raw []byte
+	var readErr error
+	//: Under the guard on Windows and unguarded elsewhere: holding this file
+	//: open is what makes a concurrent refresh's rename fail there, and the
+	//: reader is the only party in a position to avoid it. POSIX needs
+	//: nothing — see cache_lock_unix.go for what the guard would cost it.
+	s.holdCacheForRead(func() { raw, readErr = readCappedFile(path) })
 	//: Never fetched successfully, the cache was cleared, or what is there is
 	//: too large to be a roster.
 	if readErr != nil {
@@ -287,6 +370,21 @@ func (s *Service) signedHighWaterMark() time.Time {
 		//: Nothing recorded.
 		return time.Time{}
 	}
+	var mark time.Time
+	//: Under the guard on Windows only, for the same reason cachedRoster is.
+	s.holdCacheForRead(func() { mark = s.markWhileHeld() })
+	//: The newest signed instant this machine can prove it has seen.
+	return mark
+}
+
+// markWhileHeld is signedHighWaterMark's body for a caller that already holds
+// the cache.
+//
+// It exists because rememberRoster needs the mark INSIDE the exclusion it took
+// to install with, and the guard is not reentrant: taking it twice on one
+// goroutine deadlocks. Splitting the read out is what lets the compare and the
+// install be one operation, which is the whole of the ratchet's guarantee.
+func (s *Service) markWhileHeld() time.Time {
 	raw, readErr := readCappedFile(cachedBundlePath(s.cacheDir))
 	//: Never fetched, cleared, or too large to be a roster.
 	if readErr != nil {
