@@ -82,6 +82,15 @@ if [ -z "$RANGE" ]; then
   RANGE="${base:+${base}..}HEAD"
 fi
 
+# A range git cannot walk must never read as "no trailer": that silent empty
+# answer is the whole defect. release_base() hands back a verified commit, so
+# only an explicit --range can produce an unwalkable one — checked once here
+# rather than swallowed at every use.
+if ! git rev-list --count "$RANGE" >/dev/null 2>&1; then
+  echo "cut-tags: cannot walk the release range '$RANGE'" >&2
+  exit 64
+fi
+
 # rank_of <value> — order the trailer vocabulary so "largest wins" is decidable.
 # Anything unrecognised ranks with patch, which is what the bump already
 # defaulted to: an unreadable trailer must never *raise* a release.
@@ -96,12 +105,29 @@ rank_of() {
 # range_trailer <range> — echo the largest Release-bump value carried by a
 # commit in <range> that ALSO touched pkg/, or nothing.
 #
+# Why --first-parent, and why it is load-bearing rather than tidy: ADR 0007 §2
+# gates a minor on a trailer "an attacker cannot smuggle through a PR body" by
+# reading it from the merge commit — the one message a maintainer writes. Walk
+# the range without --first-parent and it descends into the commits a merge
+# brought IN, which are the contributor's own. That is not hypothetical here:
+# five commits on this repository carry `Release-bump: minor`, touch pkg/, and
+# are NOT on main's first-parent line. --first-parent keeps the authority where
+# ADR 0007 put it, on main's own commits, and merely widens it from one of them
+# to every one since the last release.
+#
 # Why the scoping stays per commit: the trailer is a maintainer's signature on
 # ONE merge, honoured only for the paths that merge actually touched (ADR 0007
 # §2). That is what stops a `Release-bump: minor` written in an unrelated docs
 # merge from sizing a pkg release, and it only survives if each commit is
 # matched against its OWN name-only list — scoping the whole range at once would
 # let any commit's paths vouch for any other commit's trailer.
+#
+# Why `-m --first-parent` on that path check: a true merge commit shows NO files
+# under a plain --name-only, so its trailer was scoped against an empty list and
+# counted for nothing — 14 of this repository's 33 trailer-bearing commits are
+# merges, and every one of them was silently worth a patch. `-m --first-parent`
+# asks for the diff against parent 1, i.e. what the merge brought in, and is
+# byte-identical on an ordinary single-parent commit.
 #
 # Why largest rather than newest: the trailer states what the release must be at
 # least, so a later commit that says nothing cannot shrink one that did. Two
@@ -114,7 +140,7 @@ range_trailer() {
   local best="" best_rank=0 best_sha="" sha="" raw="" value="" r=""
   while read -r sha raw; do
     [ -z "$raw" ] && continue
-    git log -1 --name-only --format= "$sha" | grep -qE '^pkg/' || continue
+    git log -1 --name-only --format= -m --first-parent "$sha" | grep -qE '^pkg/' || continue
     # `separator=,` joins a commit's repeated trailers into one field; split it
     # so a commit carrying two of them is ranked like two commits would be.
     # Default IFS on a single-variable read, so `Release-bump: minor ` written
@@ -127,7 +153,7 @@ range_trailer() {
         best_sha="$sha"
       fi
     done < <(tr ',' '\n' <<<"$raw")
-  done < <(git log --format='%H %(trailers:key=Release-bump,valueonly,separator=,)' "$1" 2>/dev/null || true)
+  done < <(git log --first-parent --format='%H %(trailers:key=Release-bump,valueonly,separator=,)' "$1")
 
   # Say where a winning trailer came from when it is not HEAD. That is the only
   # visible trace that a release was sized by a commit whose own CI run never

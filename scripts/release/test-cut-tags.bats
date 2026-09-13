@@ -104,6 +104,14 @@ commit_other() {
   git commit -q -F - <<<"$1"
 }
 
+# merge_branch <branch> <message> — land <branch> on main as a TRUE merge
+# commit. Squash merges are the common flow, but 75 of main's last 500 commits
+# are real merges, and they behave differently on both counts the trailer
+# depends on: what the walk reaches, and what --name-only reports.
+merge_branch() {
+  git merge --no-ff --no-edit -m "$2" "$1" >/dev/null
+}
+
 # The dry-run rewrites every chain go.mod, so it needs the Go + jq toolchain.
 need_toolchain() {
   if ! command -v go >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then skip "go/jq absent"; fi
@@ -222,6 +230,60 @@ need_toolchain() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"needs a real"* ]]
   [[ "$output" != *"would tag chain"* ]]
+}
+
+# ADR 0007 §2 gates a minor on a trailer "an attacker cannot smuggle through a
+# PR body" by reading it from the merge commit — the one message a maintainer
+# writes. A range walk that descends into the commits a merge brought IN would
+# honour the contributor's own trailer instead. Five commits on this repository
+# carry the trailer, touch pkg/, and are not on main's first-parent line.
+@test "a trailer on a commit a merge brought in does not count" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  git checkout -q -b side
+  commit_pkg $'feat(codec): contributor work\n\nRelease-bump: minor'
+  git checkout -q main
+  merge_branch side 'Merge the contributor branch'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.1.1"* ]]
+}
+
+# The other half of the same fact: a plain --name-only reports NO files for a
+# merge commit, so a maintainer's trailer on one was scoped against an empty
+# list and counted for nothing — 14 of main's 33 trailer-bearing commits are
+# merges. The path check asks for the diff against parent 1 instead.
+@test "a trailer on a merge commit is scoped by what the merge brought in" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  git checkout -q -b side
+  commit_pkg 'feat(codec): work, unsigned on the branch'
+  git checkout -q main
+  merge_branch side $'Merge the branch\n\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
+# …and that scoping still bites: a merge that brought in nothing under pkg/
+# cannot be sized by its own trailer either.
+@test "a trailer on a merge that brought in no pkg/ still does not count" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg 'fix(codec): a real pkg change on main, unsigned'
+  git checkout -q -b side
+  commit_other 'docs: branch work'
+  git checkout -q main
+  merge_branch side $'Merge the docs branch\n\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.1.1"* ]]
+}
+
+@test "an unwalkable --range is refused rather than read as no trailer" {
+  run bash -c "echo pkg | $SCRIPT --dry-run --range=nosuchrev..HEAD"
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"cannot walk the release range"* ]]
 }
 
 @test "lib: is_valid_tag accepts the bare pkg shape (major 0|1)" {

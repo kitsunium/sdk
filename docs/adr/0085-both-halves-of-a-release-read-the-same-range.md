@@ -20,6 +20,12 @@ Two facts make that more than a corner case.
 
 The same asymmetry had quietly disabled a refusal. `Release-bump: major` is rejected **by name** from a `v1` base (ADR 0009 — a breaking v2 needs a real `…/pkg/v2` module path). Sitting one commit behind `HEAD`, that trailer was not rejected; it was rounded down to a patch.
 
+Two more facts came out of reading the history rather than the scripts, and both change what "the same range" has to mean.
+
+**Not every commit in a range is main's.** 75 of main's last 500 commits are true merges, so a plain range walk descends into the commits a merge brought *in* — the contributor's own. Five commits on this repository carry `Release-bump: minor`, touch `pkg/`, and are **not** on main's first-parent line. ADR 0007 §2 gates a minor on a trailer "an attacker cannot smuggle through a PR body" precisely by reading it from the merge commit, the one message a maintainer writes; a naive range read would hand that authority to anyone who can open a PR.
+
+**A trailer on a merge commit was already worth nothing.** `git log -1 --name-only` reports **no files at all** for a merge, so the path scoping matched an empty list and the trailer was discarded. 14 of the 33 trailer-bearing commits on main are merges. Every one of them was silently a patch — the same defect as the one this ADR is about, reached by a different route.
+
 ## Decision
 
 1. **One baseline, one function.** `release_base()` moves into the shared `scripts/release/lib/tag-format.sh`: the latest stable `pkg` tag's **first parent** — the `main` commit that release was cut from, since the release commit itself is detached and unreachable from `HEAD` (ADR 0009) — falling back to the root commit, and to nothing at all on a repository of one commit. Both scripts call it. The asymmetry is removed structurally rather than by keeping two copies in step.
@@ -28,13 +34,19 @@ The same asymmetry had quietly disabled a refusal. `Release-bump: major` is reje
 
 3. **The scope stays per commit.** A `Release-bump` trailer counts only for a commit that itself touched `pkg/` — ADR 0007 §2's rule, unchanged in substance and now applied commit by commit rather than to `HEAD` alone. Scoping the range as a whole would let any commit's paths vouch for any other commit's trailer, which is exactly the smuggling the rule exists to prevent.
 
-4. **The largest bump in the range wins**: `major` > `minor` > anything else, and anything unrecognised ranks with patch. A trailer states what the release must be *at least*, so a later commit that says nothing cannot shrink one that did, and two commits both asking for minor coalesce into the one minor they both meant.
+4. **The walk is `--first-parent`.** Authority stays where ADR 0007 §2 put it — on main's own commits — and is merely widened from one of them to every one since the last release. Without it, a contributor's trailer inside a merged branch would size the release.
 
-5. **A commit's repeated trailers are split** on the separator `%(trailers:…,separator=,)` joins them with, and ranked as though they were separate commits. Previously `minor,major` matched neither arm of the `case` and fell to patch.
+5. **The path check is `-m --first-parent`**, i.e. the diff against parent 1. On an ordinary single-parent commit that is byte-identical to what it replaced; on a merge it reports what the merge brought in, so a maintainer's trailer on a merge commit is scoped against real paths instead of against nothing.
 
-6. **`Release-bump: major` keeps its ADR 0009 refusal** from a `v1` base — and now actually reaches it.
+6. **A range git cannot walk is refused** (exit 64), not read as "no trailer". `release_base()` returns a verified commit, so only the new `--range` override can produce one — but a silent empty answer is the exact shape of this defect and must not be reintroducible by a flag.
 
-7. **Provenance is stated, on stderr.** When the winning trailer did not come from `HEAD`, `cut-tags.sh` says which commit it came from. That is the visible trace that a release was sized by a commit whose own CI run produced none. It is stderr and never stdout: stdout is the tag list the workflow feeds to `gh release create`.
+7. **The largest bump in the range wins**: `major` > `minor` > anything else, and anything unrecognised ranks with patch. A trailer states what the release must be *at least*, so a later commit that says nothing cannot shrink one that did, and two commits both asking for minor coalesce into the one minor they both meant.
+
+8. **A commit's repeated trailers are split** on the separator `%(trailers:…,separator=,)` joins them with, and ranked as though they were separate commits. Previously `minor,major` matched neither arm of the `case` and fell to patch.
+
+9. **`Release-bump: major` keeps its ADR 0009 refusal** from a `v1` base — and now actually reaches it.
+
+10. **Provenance is stated, on stderr.** When the winning trailer did not come from `HEAD`, `cut-tags.sh` says which commit it came from. That is the visible trace that a release was sized by a commit whose own CI run produced none. It is stderr and never stdout: stdout is the tag list the workflow feeds to `gh release create`.
 
 ## Consequences / Semantics
 
@@ -47,6 +59,8 @@ The same asymmetry had quietly disabled a refusal. `Release-bump: major` is reje
 | `minor` and `major` both in range | **patch** | major |
 | `major` behind `HEAD`, `v1` base | **patch, silently** | refused (ADR 0009) |
 | Trailer already honoured by the last release | patch | patch (unchanged) |
+| Trailer on a commit a merge brought in | patch | patch (unchanged — `--first-parent`) |
+| Trailer on a true merge commit | **patch** | scoped by what the merge brought in |
 
 - **A cancelled CI run no longer costs anything but time.** Whatever commit finally carries a successful run, the range behind it still contains the cancelled commit *and its trailer*.
 - **A trailer is never honoured twice.** `release_base()..HEAD` opens strictly after the commit the previous release was cut from, so the trailer that sized `pkg/v0.2.0` is outside the range that sizes the next tag.
@@ -67,7 +81,11 @@ It fires on the ordinary case. A commit whose own release never ran is precisely
 
 And it cannot be answered from git. "Whose own release never ran" is a question about GitHub Actions runs, so the check needs the Actions API inside a script that today reads nothing but the commit graph — untestable offline, and a network dependency on the one path that must not acquire flaky failure modes.
 
-It also fixes nothing: a refusal still leaves the maintainer to re-run the cancelled CI by hand, which is what already happened. Reading the range *produces the right tag*. The half of the second direction worth keeping — making the hazard visible — is kept as the stderr provenance line (Decision 7), which costs nothing and blocks nothing.
+It also fixes nothing: a refusal still leaves the maintainer to re-run the cancelled CI by hand, which is what already happened. Reading the range *produces the right tag*. The half of the second direction worth keeping — making the hazard visible — is kept as the stderr provenance line (Decision 10), which costs nothing and blocks nothing.
+
+### Why not walk every commit in the range
+
+Because five commits on this repository would already have sized a release from inside a contributor's branch. The trailer is an authorisation, and ADR 0007 §2 sites that authorisation on the commits a maintainer writes. `--first-parent` is what keeps a wider *range* from also being a wider *franchise*.
 
 ### Why not leave the range computation duplicated in both scripts
 
