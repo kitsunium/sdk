@@ -16,6 +16,15 @@ headroom, and calls `runtime/debug.SetMemoryLimit`. It returns what it read
 (`Allowance`), what it installed (`Limit`), and what decided the outcome
 (`Source`).
 
+The candidate files come from `/proc/self/mountinfo` and `/proc/self/cgroup`
+together. mountinfo gives, for every attachment of a hierarchy, both where it is
+attached and which part of the cgroup filesystem it exposes — its path fields
+carry the kernel's octal escapes and are decoded — and the membership path from
+`/proc/self/cgroup`, which carries no escapes, is expressed relative to what each
+mount exposes before the ancestor walk starts. A mount that cannot name this
+process's cgroup contributes nothing. The 10% is held back by an expression that
+is exact for every `int64` and cannot overflow.
+
 ## Errors
 
 None. `Apply` cannot fail and cannot panic: not being in a container is the

@@ -112,7 +112,7 @@ func applyFrom(
 		return coreproc.MemoryLimitValue{Source: coreproc.MemorySourceUnconstrained}
 	}
 
-	derived := allowance / percentDivisor * headroomPercent
+	derived := deriveLimit(allowance)
 	//: Reject caps too small to host a real working set — capping the runtime
 	//: below this would thrash the collector without averting the kill.
 	if derived < minimumLimitBytes {
@@ -132,6 +132,29 @@ func applyFrom(
 		Limit:     derived,
 		Source:    coreproc.MemorySourceCgroup,
 	}
+}
+
+// deriveLimit returns the share of a cgroup allowance handed to the Go runtime.
+// It is exact for every allowance an int64 can hold, and it cannot overflow.
+//
+// Both naive spellings fail somewhere. Dividing first discards up to
+// percentDivisor-1 bytes of the allowance before the share is taken, and within
+// a few bytes of the floor that under-computation declines a cap the exact value
+// accepts: an allowance of 74,565,405 derives 67,108,860 that way and exactly
+// the 67,108,864 floor the other. Multiplying first is exact but wraps above
+// math.MaxInt64/headroomPercent — reachable, since parseV1Limit accepts up to
+// 1<<62 and parseV2Limit up to math.MaxInt64.
+//
+// Splitting the allowance into whole hundreds and a remainder is both. The
+// identity is exact because 100q*headroomPercent divides by percentDivisor with
+// no remainder of its own, so only the r term rounds — and neither term can
+// overflow, since q is at most math.MaxInt64/percentDivisor and r at most
+// percentDivisor-1.
+func deriveLimit(allowance int64) int64 {
+	hundreds, remainder := allowance/percentDivisor, allowance%percentDivisor
+
+	//: Deliver the exact share, in two terms neither of which can wrap.
+	return hundreds*headroomPercent + remainder*headroomPercent/percentDivisor
 }
 
 // readCgroupAllowance returns the most restrictive memory cap governing this

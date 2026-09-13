@@ -17,13 +17,14 @@ bounding *us*.
 | File | Role |
 |---|---|
 | `memlimit.go` | `Apply` + the injected-seam `applyFrom`, the limit-file parsers, and every threshold constant |
-| `cgroup.go` | which limit files to consult: mount discovery, `/proc/self/cgroup` membership, and the ancestor walk |
+| `cgroup.go` | which limit files to consult: mount discovery (point AND root, octal escapes decoded), `/proc/self/cgroup` membership, the translation between the two, and the ancestor walk |
 
 ## Why-this-shape
 
 - **Ancestors are consulted, not just the process's own cgroup.** A restrictive
-  parent bounds the process just as effectively. Reading only the mount root was
-  the original defect: under systemd, and under any runtime that does not use
+  parent bounds the process just as effectively. Reading only the hierarchy's ROOT
+  CGROUP was the original defect — a different sense of "root" from the mount
+  root below: under systemd, and under any runtime that does not use
   cgroup namespaces, the root reports `max` while the real cap sits several
   levels down — so the feature silently disabled itself exactly where it was
   needed. `TestApplyFrom_NestedCgroup` pins all four shapes.
@@ -34,6 +35,30 @@ bounding *us*.
   mount point; hard-coding `/sys/fs/cgroup` reads nothing on a host that mounts
   the hierarchy elsewhere. `/proc/self/mountinfo` answers it, with the
   conventional locations as the fallback when it is unreadable.
+- **A mount point is not a mount root, and both are read.** mountinfo field 3 is
+  the path WITHIN the cgroup filesystem that the mount exposes. A runtime that
+  bind-mounts a container's own subtree at `/sys/fs/cgroup` — `--cgroupns=host`
+  — reports that subtree there while `/proc/self/cgroup` still names the full
+  path, so joining them verbatim repeats the subtree and names a file no cgroup
+  answers to: five of six candidates absent, measured on a live 6.12 kernel.
+  `underMountRoot` translates. A root ABOVE the cgroup namespace root is
+  rendered by the kernel with `..` components and `path.Clean` folds those to
+  `/`, which is the identity. A mount exposing a subtree this process is not in
+  contributes NOTHING: the caller takes a minimum, so a joined path that happens
+  to exist would let a stranger's cap win.
+- **Every attachment of a hierarchy is kept, not the last one.** Two mounts at
+  DIFFERENT points do not shadow each other, and a bind exposing only this
+  process's own subtree cannot name the ancestors a whole-hierarchy mount still
+  can — discarding the latter hides a restrictive parent. Candidates come from
+  every mount that can name us and are deduplicated. A mount genuinely stacked on
+  another needs no rule: the covered mount's paths stop resolving and its
+  candidates read as absent.
+- **mountinfo is escaped and `/proc/<pid>/cgroup` is not.** `mangle_path` encodes
+  space, tab, newline and backslash in mountinfo's path fields as `\040`,
+  `\011`, `\012` and `\134`. `unmangleMountinfoPath` decodes them, and it runs
+  on mountinfo alone — a cgroup named `probe test.scope` reads back from
+  `/proc/<pid>/cgroup` with a literal `0x20`, so decoding both would corrupt a
+  name that legitimately contains a backslash.
 - **`memory` must match exactly.** A v1 controller list is comma-separated, so
   `memory+swap` must not match `memory` — `slices.Contains` over the split list,
   never `strings.Contains`.
@@ -45,6 +70,16 @@ bounding *us*.
   the cgroup but sits outside runtime accounting — binary image, mapped files, C
   allocations, kernel memory held on our behalf. Below the floor the derivation
   declines rather than thrashing the collector without averting the kill.
+- **The share is exact AND cannot overflow, in one expression.** Dividing first
+  discards up to 99 bytes of the allowance, which at the floor declines a cap the
+  exact value accepts — 74,565,405 bytes derives 67,108,860 that way and exactly
+  the 67,108,864 floor the other. Multiplying whole is exact but wraps above
+  `math.MaxInt64 / 90`, and that range is reachable: `parseV1Limit` accepts up to
+  `1<<62`, 45× the ceiling. `deriveLimit` splits the allowance into hundreds and
+  a remainder, `q*90 + r*90/100`: exact because `100q*90` divides by 100 cleanly,
+  overflow-free because `q ≤ MaxInt64/100` and `r ≤ 99`. `int64` is 64 bits on
+  every Go platform, `linux/386` included, so none of this is an architecture
+  question.
 - **Three seams, injected.** `applyFrom` takes `lookup`, `readFile` and
   `setLimit` so every branch is driven without a real cgroup filesystem and
   without mutating the process-wide runtime limit under `t.Parallel()`.
