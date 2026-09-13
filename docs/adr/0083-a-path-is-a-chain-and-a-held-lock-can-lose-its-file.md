@@ -269,6 +269,19 @@ gives the flock and the descriptor back on the way out.
   doc comment said it could not, and it was true for the world it described —
   nothing can take a held `flock` away. It was not true for the world where the
   file's NAME can be taken away instead.
+- **What this does NOT cover, in one place rather than scattered.** The chain
+  audit is an AUDIT: it runs once, at `NewFileLocker`, over the path as it
+  stands then. It does not guard the lock file's own name — `openLockFile`
+  does that, at every open, with `O_NOFOLLOW` and
+  `FILE_FLAG_OPEN_REPARSE_POINT`, because that is the component this package
+  DERIVES and an attacker can predict. It does not see a component replaced
+  after it returns (§Deferred). It refuses nothing on Windows, where the
+  "could anybody have planted this" question has no answer from a synthesised
+  mode (§D4). And it says nothing about what happens INSIDE the lock
+  directory, which is `checkDir`'s question and `LOCK_FILE_REPLACED`'s.
+  `O_NOFOLLOW` governing only the final component is exactly the shape of
+  partial guarantee that gets read as a whole one later, so the division of
+  labour is stated as a list and not inferred from three files.
 - **`checkDir`'s rule is unchanged**, mode table included. `checkChain` is a
   second, stricter rule about a different question, and the two are deliberately
   not merged: one is about unlinking an entry, the other about creating one.
