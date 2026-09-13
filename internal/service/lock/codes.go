@@ -5,8 +5,9 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // range: 0.3.51.0 - 0.3.51.255
 
-// CodeLockFenceCorrupt identifies a fence ledger whose contents are not a
-// decimal counter.
+// CodeLockFenceCorrupt identifies a fence ledger no further token can be
+// issued from: its contents are not a decimal counter (`condition=unparseable`)
+// or they are the one counter with no successor (`condition=exhausted`).
 //
 // It is refused rather than repaired. "Repairing" it means restarting the
 // counter, and a restarted fencing token is not a fencing token at all: the
@@ -14,6 +15,10 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // resource accepts a stale holder's write believing it to be current. A lock
 // that cannot prove monotonicity says so instead of issuing numbers that look
 // fine.
+//
+// The two conditions share a code because they share that remedy exactly: stop,
+// and have a human look at the ledger. Splitting them would ask every caller to
+// learn a second code for the same instruction.
 const CodeLockFenceCorrupt errs.Code = 0x00_03_33_01 // 0.3.51.1
 
 // CodeLockDirectoryUnsafe identifies a lock directory that is world-writable

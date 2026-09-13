@@ -84,7 +84,7 @@ process pass the gate and then block on a `flock` its own process holds.
 | `file.go` | `fileLocker`: gate → `flock` → fence, and the reverse on release |
 | `file_lease.go` | `fileLease`: no deadline, deliberately |
 | `gate.go` | `nameGate` — the in-process half, and the measurement that justifies it |
-| `fence.go` | the on-disk ledger: read, increment, `fsync`. Refuses a non-counter |
+| `fence.go` | the on-disk ledger: read, increment, `fsync`. Refuses a non-counter, and the one counter with no successor (ADR 0081 §D7) |
 | `flock_unix.go` / `flock_windows.go` / `flock_other.go` | ADR 0018 platform split — `flock(2)`, `LockFileEx`, and the typed refusal |
 | `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule, and the reason it cannot run on Windows |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
@@ -151,7 +151,7 @@ residual exposures are named there too.
 
 | Sentinel | Code | When |
 |---|---|---|
-| `LockFenceCorrupt` | `0.3.51.1` | the lock file is not a decimal counter. **Refused, never reset** — a restarted fence reissues numbers the resource already accepted |
+| `LockFenceCorrupt` | `0.3.51.1` | no next token can be issued: the lock file is not a decimal counter (`condition=unparseable`), or it holds `2^64-1` and `previous+1` would wrap to zero (`condition=exhausted`). **Refused, never reset** — a restarted fence, and a wrapped one, both reissue numbers the resource already accepted |
 | `LockDirectoryUnsafe` | `0.3.51.2` | world-writable, non-sticky lock directory: any account can unlink the lock file and give the next process a **different inode** to lock. **Unix only** — Windows has no mode bits to read and the unlink is refused by the open (ADR 0081 §D5) |
 | `LockKeepaliveLost` | `0.3.51.3` | a background renewal failed; carried as a context **cause**, never as a return value |
 

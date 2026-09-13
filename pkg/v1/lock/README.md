@@ -96,9 +96,11 @@ var (
     // LockNameRejected is returned for an empty or unusable lock name.
     LockNameRejected = corelock.LockNameRejected
 
-    // LockFenceCorrupt is returned by the file locker when the on-disk fencing
-    // ledger is not a decimal counter. Nothing is repaired: a restarted
-    // counter reissues numbers the protected resource has already accepted.
+    // LockFenceCorrupt is returned by the file locker when no further token
+    // can be issued from the on-disk fencing ledger — it is not a decimal
+    // counter, or it is the one counter with no successor. Nothing is
+    // repaired: a restarted counter, or a wrapped one, reissues numbers the
+    // protected resource has already accepted.
     LockFenceCorrupt = svclock.LockFenceCorrupt
 
     // LockDirectoryUnsafe is returned by [NewFileLocker] for a world-writable,
@@ -113,7 +115,7 @@ var (
 ```
 
 <a name="Keepalive"></a>
-## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L220>)
+## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L222>)
 
 ```go
 func Keepalive(ctx context.Context, lease Lease, cfg KeepaliveConfig) (guarded context.Context, stop context.CancelFunc, err error)
@@ -182,7 +184,7 @@ type Locker = corelock.Locker
 ```
 
 <a name="NewFileLocker"></a>
-### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L200>)
+### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L202>)
 
 ```go
 func NewFileLocker(cfg FileConfig) (locker Locker, err error)
@@ -193,7 +195,7 @@ NewFileLocker returns a [Locker](<#Locker>) that excludes every process using th
 It refuses at construction: a missing directory setting, a negative poll interval, a world\-writable non\-sticky directory \(Unix only — see the package comment\), and a platform with no file\-range lock at all, where it returns the SDK\-wide UnsupportedPlatform rather than a locker that would report success and exclude nothing \(ADR 0018\). Windows is no longer in that last set: it is served by LockFileEx \(ADR 0081\).
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L186>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L188>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (locker Locker, err error)

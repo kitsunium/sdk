@@ -263,6 +263,9 @@ func (l *fileLocker) mintLease(file *os.File, path, name string) (lease corelock
 		//: LockFenceCorrupt or LockBackendFailed.
 		return nil, readErr
 	}
+	//: previous+1 cannot wrap: [readFence] refuses the one uint64 with no
+	//: successor, so every value that reaches here has one. The guard lives
+	//: there because that is where the ledger's bytes are judged.
 	fence := previous + 1
 	//: durable BEFORE the caller is told it holds the lock: a token issued and
 	//: then lost to a crash would be reissued to the next holder.

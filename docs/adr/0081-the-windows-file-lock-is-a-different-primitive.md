@@ -211,18 +211,74 @@ proven.
 
 The backend was written **after** its tests had been seen failing on that lane.
 
+### D7 — The fence ledger refuses `2^64-1`, and this one is not about Windows
+
+Found by review of this change rather than by it, and fixed here rather than
+deferred, because it is nine lines and a test.
+
+`mintLease` computes `previous + 1` on a `uint64`. `readFence` accepted every
+value `strconv.ParseUint` accepts, `math.MaxUint64` included — so a ledger
+holding `18446744073709551615` minted **0**, wrote it back, and then counted up
+through every token the protected resource had already accepted. Measured on
+the shipped code before the fix:
+
+```
+PROBE: previous=18446744073709551615 -> Fence()=0
+PROBE: ledger on disk now = "0\n"
+PROBE: next acquisition Fence()=1
+```
+
+That is precisely the reset `LOCK_FENCE_CORRUPT` exists to refuse, reached by
+arithmetic instead of by wrecked bytes — and strictly worse than the wrecked
+file, because it is silent: no error, a plausible small fence, and a resource
+that accepts a stale holder's write.
+
+It is not reachable by counting; 2^64 acquisitions is not a scenario. It is
+reachable in **one write**, and that is the argument for the branch: `flock(2)`
+locks are advisory, so on Unix any non-holder able to open the lock file can put
+that value in it. Windows closes that particular door — the range lock is
+mandatory and covers offset 0 — but the ledger is an ordinary file whenever
+nobody holds the lock, on both kernels.
+
+The refusal reuses `LOCK_FENCE_CORRUPT` rather than adding a sentinel. The two
+conditions have the same remedy exactly — stop, and have a human read the
+ledger — and a second code would ask every caller to learn a second name for one
+instruction. A `condition` field (`unparseable` / `exhausted`) tells them apart
+in a log, which is the only place the difference is actionable. The guard sits in
+`readFence`, not at the increment, so "can these bytes be read as a counter" and
+"can this counter be advanced" are one question asked in one place;
+`mintLease` stays a plain `previous + 1` whose safety is its callee's contract.
+
+`memoryLocker` increments the same way and is **not** changed: its ledger is a
+`map[string]uint64` that starts at zero and no external actor can seed, so the
+only route to the value is 2^64 acquisitions. The asymmetry is the point — the
+file ledger is refused because it is *writable by someone else*, not because
+`uint64` is small.
+
 ## Consequences / Semantics
 
 - **The platform matrix gains a second native column.** `NewFileLocker` works
   on `windows` as it does on `linux`, `darwin` and the four BSDs.
   `UnsupportedPlatform` is now returned only where there is no file-range lock
   at all: `js`, `plan9`, `aix`, `solaris`, `ios`.
-- **The contract is unchanged.** Same `Locker`, same `Lease`, same sentinels,
-  no new error code, no new configuration field. A file lease still does not
-  implement `Deadliner`, for the same reason: the kernel releases the lock when
-  the holder's process dies, so there is no deadline to report.
+- **The API is unchanged.** Same `Locker`, same `Lease`, same sentinels, no new
+  error code, no new configuration field. A file lease still does not implement
+  `Deadliner`, for the same reason: the kernel releases the lock when the
+  holder's process dies, so there is no deadline to report. One **behaviour**
+  changes, on every platform: a ledger holding `2^64-1` is now refused with
+  `LOCK_FENCE_CORRUPT` instead of wrapping to zero (D7).
 - **A fence is still a fence across a reboot**, and on Windows it is harder to
   corrupt: a non-holder cannot write the ledger while a holder exists.
+- **Negative / accepted, and true on every platform.** A fence ledger is only as
+  durable as its file. Anyone who can delete the lock file while **nobody holds
+  it** resets the counter — the next acquisition finds an empty file, reads 0,
+  and mints 1 again — and no code here can tell that file from the empty one the
+  first acquisition legitimately creates. What bounds who may delete it is the
+  directory, which is exactly the rule Windows cannot run (D5.1). So this
+  exposure is wider on Windows than on Unix; it is narrower than it looks in
+  both places, because it needs the lock to be free, and a fence only matters
+  while someone holds one. It is named here because D5.2 answers the
+  *while-held* half and could be misread as answering all of it: it does not.
 - **A held lock file is not readable by a non-holder on Windows.** The one
   property the mandatory semantics cost, named here and in the package doc.
 - **The dependency graph is untouched**: no module added to any `go.mod`, no
@@ -240,18 +296,28 @@ The backend was written **after** its tests had been seen failing on that lane.
 
 ## Breaking changes
 
-**One, and it is deliberate.** `NewFileLocker` no longer returns
-`proc.UnsupportedPlatform` on Windows. A caller that branches on that sentinel
-to fall back to `NewMemory` will now receive a real, machine-scoped file locker
-— which is the point, but it is a behaviour change and not merely an addition.
+**Two, both deliberate.**
+
+`NewFileLocker` no longer returns `proc.UnsupportedPlatform` on Windows. A
+caller that branches on that sentinel to fall back to `NewMemory` will now
+receive a real, machine-scoped file locker — which is the point, but it is a
+behaviour change and not merely an addition.
 
 The direction is the safe one: the fallback narrowed from
 *"goroutines of one process"* to *"processes on one machine"*, so nothing that
 was excluded before stops being excluded. A caller who genuinely wants the
 in-process locker on Windows has always been able to ask for it by name.
 
+`Acquire` on a ledger holding `2^64-1` now returns `LOCK_FENCE_CORRUPT` where it
+previously returned a lease carrying fence `0` (D7). Every platform. A caller
+that somehow depended on the wrap depended on a reset fencing token, which is
+the failure the domain exists to prevent — but the refusal is new, and a
+deployment whose ledger has been seeded with that value stops acquiring instead
+of quietly starting over.
+
 No API changed. No type, function, field or sentinel was added, removed or
-renamed.
+renamed. `LOCK_FENCE_CORRUPT` gains one field, `condition`, valued
+`unparseable` or `exhausted`.
 
 ## Alternatives considered
 
@@ -320,10 +386,28 @@ around it is to write the same code with less evidence.
   `SeCreateSymbolicLinkPrivilege` is available to non-admins, a planted
   junction or symlink redirects a lock name to a file of the attacker's
   choosing — merging two locks into one, or splitting one into two. `os.Lstat`
-  sees it; nothing in this package looks. It is deliberately not refused here
-  because the Unix side has no counterpart check and adding one on a single
-  platform would make the same configuration succeed on Linux and fail on
-  Windows for a reason the error could not explain well.
+  sees it; nothing in this package looks.
+
+  It is deliberately not refused here, and the reason is measured rather than
+  asserted: **the shipped Unix backend does exactly the same thing, in a
+  directory shape the POSIX rule explicitly accepts.** Probed on linux/amd64
+  against `NewFileLocker` as it stands, with a symlink planted at the lock
+  path inside a `0777|sticky` directory — the `/tmp` row, accepted by the
+  table in D5:
+
+  ```
+  PROBE: the shipped UNIX backend followed the planted symlink;
+         the lock landed on <tmp>/elsewhere.lock
+  PROBE: redirected ledger content = "1\n"
+  ```
+
+  The sticky bit does not help: it governs *unlinking someone else's* entry,
+  not creating one at a name nobody has taken yet. So this is not a Windows
+  gap, it is a `lock` gap with the same reach on both kernels, and closing it
+  on one platform only would make the same deployment succeed on Linux and fail
+  on Windows for a reason the error could not explain. It closes with an
+  `O_NOFOLLOW`-equivalent open on **both** sides or not at all, and that is a
+  change to the domain's contract, not to this backend.
 - **A shared (read) lock mode.** `LockFileEx` without
   `LOCKFILE_EXCLUSIVE_LOCK` is a shared lock and `flock(2)` has `LOCK_SH`, so
   both kernels could support one. The `Locker` port is frozen at two methods

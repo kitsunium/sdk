@@ -162,9 +162,11 @@ var (
 	// LockNameRejected is returned for an empty or unusable lock name.
 	LockNameRejected = corelock.LockNameRejected
 
-	// LockFenceCorrupt is returned by the file locker when the on-disk fencing
-	// ledger is not a decimal counter. Nothing is repaired: a restarted
-	// counter reissues numbers the protected resource has already accepted.
+	// LockFenceCorrupt is returned by the file locker when no further token
+	// can be issued from the on-disk fencing ledger — it is not a decimal
+	// counter, or it is the one counter with no successor. Nothing is
+	// repaired: a restarted counter, or a wrapped one, reissues numbers the
+	// protected resource has already accepted.
 	LockFenceCorrupt = svclock.LockFenceCorrupt
 
 	// LockDirectoryUnsafe is returned by [NewFileLocker] for a world-writable,

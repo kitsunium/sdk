@@ -206,6 +206,57 @@ func TestACorruptFenceLedgerIsRefused(t *testing.T) {
 	}
 }
 
+// TestAnExhaustedFenceLedgerIsRefusedRatherThanWrapped covers the one ledger
+// value that parses perfectly and still cannot be advanced.
+//
+// The mint is previous+1 on a uint64. On 2^64-1 that is zero, and the counter
+// then walks back up through every token the protected resource has already
+// accepted — a reset, arrived at by arithmetic rather than by wrecked bytes,
+// and invisible in a way a wrecked file is not: no error, a plausible-looking
+// small fence, and a resource that accepts a stale holder's write.
+//
+// Not reachable by counting — 2^64 acquisitions is not a scenario. Reachable
+// in one write, which is what makes it worth a branch: flock(2) is ADVISORY,
+// so on Unix any non-holder that can open the lock file can put this value in
+// it. Windows closes that particular door (the range lock is mandatory and
+// covers offset 0) but the ledger is still an ordinary file whenever nobody
+// holds the lock.
+//
+// The refusal reuses LOCK_FENCE_CORRUPT because the remedy is identical: stop,
+// and have a human look at the ledger. The `condition` field tells the two
+// apart in a log.
+func TestAnExhaustedFenceLedgerIsRefusedRatherThanWrapped(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	locker := newFileLocker(t, dir)
+	//: 2^64-1 written out in the decimal the ledger actually uses, so this
+	//: test fails if the encoding ever changes under it.
+	if err := os.WriteFile(lockFilePath(dir, "job"), []byte("18446744073709551615\n"), 0o600); err != nil {
+		t.Fatalf("seeding the ledger = %v", err)
+	}
+	lease, err := locker.Acquire(t.Context(), "job")
+	if lease != nil {
+		t.Fatalf("a lease was granted with fence %d over an exhausted ledger — the counter wrapped and is now reissuing tokens the protected resource has already accepted", lease.Fence())
+	}
+	if !errs.HasCode(err, svclock.CodeLockFenceCorrupt) {
+		t.Fatalf("Acquire = %v, want LOCK_FENCE_CORRUPT", err)
+	}
+	//: and the ledger is left alone: refusing must not be a write, or the
+	//: refusal itself would be the reset it exists to prevent.
+	raw, readErr := os.ReadFile(lockFilePath(dir, "job"))
+	if readErr != nil {
+		t.Fatalf("reading the ledger back = %v", readErr)
+	}
+	if string(raw) != "18446744073709551615\n" {
+		t.Fatalf("the ledger after a refused acquisition = %q, want it untouched", raw)
+	}
+	//: and the name is not left held by an acquisition that failed.
+	_, held, tryErr := locker.TryAcquire(t.Context(), "job")
+	if tryErr == nil && held {
+		t.Fatal("the failed acquisition left the lock held")
+	}
+}
+
 func TestFileReleaseIsIdempotentAndExtendFollowsIt(t *testing.T) {
 	t.Parallel()
 	locker := newFileLocker(t, t.TempDir())
