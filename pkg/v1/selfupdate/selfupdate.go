@@ -200,6 +200,136 @@ const CodeElevationFailed errs.Code = svcupd.CodeElevationFailed
 // consumes it.
 const CandidateListSentinel string = svcupd.CandidateListSentinel
 
+// The sentinels a caller matches with errors.Is, one for each of the codes
+// above.
+//
+// A facade that publishes a code and withholds the value it identifies is half
+// a surface: a caller can ask errs.HasCode "is this that failure?" and cannot
+// write errors.Is(err, selfupdate.SignatureInvalid), which is the spelling Go
+// programs actually use and the only one that composes with errors.Join. PR
+// #184 fixed exactly this shape in the entitlement facade; lock, cache and
+// authz already publish theirs. This package was the outlier.
+//
+// They are values rather than type aliases because a sentinel IS a value —
+// there is nothing to alias. The declared type is left off so each keeps its
+// *errs.Error, which is what lock and cache do, and what lets a caller reach
+// Code(), Public() and ExitCode() without a second lookup. Matching works
+// either way: errs.Error.Is compares (Code, Reason), so a sentinel matches a
+// freshly wrapped error of the same identity and not merely the same pointer.
+var (
+	// NoVendorKey is returned when the running build carries no vendor key,
+	// so nothing could have authenticated the release. A REFUSAL, not a
+	// degradation: there is no weaker check to fall back to.
+	NoVendorKey = coreupd.NoVendorKey
+
+	// SignatureMissing is returned when the detached signature over the
+	// checksum manifest could not be fetched. An unsigned release is never
+	// installed and no environment variable reopens that.
+	SignatureMissing = coreupd.SignatureMissing
+
+	// SignatureInvalid is returned when the manifest's signature does not
+	// verify against the vendor key. With SignatureMissing it is the
+	// supply-chain pair: no retry helps and no manual install is safe.
+	SignatureInvalid = coreupd.SignatureInvalid
+
+	// ChecksumMissing is returned when the authenticated manifest has no entry
+	// for the archive being installed.
+	ChecksumMissing = coreupd.ChecksumMissing
+
+	// ChecksumMismatch is returned when the archive's digest does not match
+	// its authenticated manifest entry — a corrupted download, or a release
+	// whose assets changed after it was signed.
+	ChecksumMismatch = coreupd.ChecksumMismatch
+
+	// ArchiveTooLarge is returned when a release archive exceeds the size cap.
+	// The cap exists because the bytes are buffered before anything has
+	// vouched for them.
+	ArchiveTooLarge = coreupd.ArchiveTooLarge
+
+	// APIBodyTooLarge is returned when a release-metadata response exceeds its
+	// read cap.
+	APIBodyTooLarge = coreupd.APIBodyTooLarge
+
+	// InsecureRedirect is returned when a redirect leaves HTTPS or exceeds the
+	// hop bound. Following it would hand the archive fetch to a plaintext hop.
+	InsecureRedirect = coreupd.InsecureRedirect
+
+	// UnexpectedStatus is returned when the release host answers with a status
+	// the update path does not accept. Retryable.
+	UnexpectedStatus = coreupd.UnexpectedStatus
+
+	// DownloadFailed is returned when a download does not complete, including
+	// a transport failure with no HTTP status at all. It is the sentinel a
+	// retry policy keys on.
+	DownloadFailed = coreupd.DownloadFailed
+
+	// DevBuild is returned when a version check runs on a build with no
+	// release version to compare against. Rebuild from source rather than
+	// self-updating.
+	DevBuild = coreupd.DevBuild
+
+	// CandidateNotFound is returned when a requested release candidate does
+	// not exist.
+	CandidateNotFound = coreupd.CandidateNotFound
+
+	// NotPrerelease is returned when a tag requested as a candidate is
+	// reported as a stable release.
+	NotPrerelease = coreupd.NotPrerelease
+
+	// DraftRelease is returned for a draft release, which exposes no asset.
+	DraftRelease = coreupd.DraftRelease
+
+	// InvalidTag is returned for a tag that is not a valid semantic version.
+	InvalidTag = coreupd.InvalidTag
+
+	// BinaryNotInArchive is returned when a verified archive does not contain
+	// the expected binary. The archive is authentic; it is a packaging fault
+	// rather than an attack.
+	BinaryNotInArchive = coreupd.BinaryNotInArchive
+
+	// UnknownArchive is returned for an asset whose container format is not
+	// handled.
+	UnknownArchive = coreupd.UnknownArchive
+
+	// ElevationNotAuthorised is returned when replacing the binary needs
+	// privilege the operator did not opt into. Recoverable — but only through
+	// the opt-in, which ExplainUpgradeFailure names.
+	ElevationNotAuthorised = coreupd.ElevationNotAuthorised
+
+	// CandidateTagRequired is returned by DownloadCandidate for an empty tag.
+	// It wraps errors.ErrUnsupported, so a caller matching that instead still
+	// matches.
+	CandidateTagRequired = svcupd.CandidateTagRequired
+
+	// ReleaseMetadataUnreadable is returned when the release API answers
+	// within its cap and the body does not decode. The bytes arrived, so no
+	// transport retry applies.
+	ReleaseMetadataUnreadable = svcupd.ReleaseMetadataUnreadable
+
+	// ArchiveUnreadable is returned when a release archive will not unpack. It
+	// is raised only AFTER the signature and digest have both verified, so it
+	// is a packaging or transfer fault and never a supply-chain signal.
+	ArchiveUnreadable = svcupd.ArchiveUnreadable
+
+	// ExecutablePathUnresolved is returned when the process cannot work out
+	// which file on disk it runs from. Nothing is attempted after it.
+	ExecutablePathUnresolved = svcupd.ExecutablePathUnresolved
+
+	// StagingFailed is returned when the replacement failed BEFORE the rename,
+	// so the running binary is byte-for-byte as it was. That is the whole
+	// difference between this and ReplacementFailed.
+	StagingFailed = svcupd.StagingFailed
+
+	// ReplacementFailed is returned when the rename over the running
+	// executable did not land.
+	ReplacementFailed = svcupd.ReplacementFailed
+
+	// ElevationFailed is returned when an escalation the operator DID
+	// authorise was refused by the system. Unlike ElevationNotAuthorised, no
+	// environment variable repairs it.
+	ElevationFailed = svcupd.ElevationFailed
+)
+
 // Getter performs the HTTP GETs a self-update needs. It aliases the core port.
 type Getter = coreupd.Getter
 
