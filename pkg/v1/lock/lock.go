@@ -89,13 +89,18 @@
 // measured on a real Windows kernel; ADR 0081 lists them.
 //
 // One more is worth knowing before you rely on a directory's permissions. The
-// lock directory is checked for being one any account can put an entry into,
+// lock directory is checked for being one any account can REPLACE an entry in,
 // and the two platforms answer that in their own vocabulary: a
-// world-writable-and-not-sticky mode on Unix, and an access-allowed entry
-// granting Everyone or Authenticated Users a create-or-delete right on Windows
-// (ADR 0084). There is no sticky equivalent there, so the accepting sets
-// genuinely differ — no Windows ACL says "anyone may create but only the owner
-// may unlink".
+// world-writable-and-not-sticky mode on Unix, and on Windows a discretionary
+// entry letting Everyone, Authenticated Users or BUILTIN\Users unlink somebody
+// else's entry — or write the lock files created there, which is a question
+// Unix never has to ask, because a lock file there is created 0600 whatever
+// the directory's mode says (ADR 0084, ADR 0085).
+//
+// Windows does have the sticky directory's shape; it spells it in two bits
+// rather than one, as "may add an entry" without "may delete a child".
+// %ProgramData% is one, which is why a lock directory under it is accepted and
+// a junction planted beside it is not.
 //
 // # A lock path is a file, never a link to one
 //
@@ -120,7 +125,9 @@
 // indirection above the lock file is refused only when the directory holding
 // it is world-writable — when anybody could have planted it. On Windows the
 // same rule runs over the same question, answered by the directory's DACL
-// rather than by a synthesised mode (ADR 0083, ADR 0084).
+// rather than by a synthesised mode (ADR 0083, ADR 0084) — and it asks for a
+// different right from the lock directory's own rule, because a component is
+// a DIRECTORY, so what plants one is "may add a subdirectory" (ADR 0085).
 //
 // # A held lock can lose its file, and you are told
 //
@@ -260,13 +267,17 @@ func NewMemory(cfg MemoryConfig) (locker Locker, err error) {
 // served by LockFileEx (ADR 0081).
 //
 // The third refusal is one rule with two vocabularies, because the two
-// platforms answer "who can put an entry here" differently. On Unix it is a
-// mode: world-writable without the sticky bit. On Windows it is the
-// directory's DACL: an access-allowed entry granting Everyone (S-1-1-0) or
-// Authenticated Users (S-1-5-11) a right to create, or to delete, an entry
-// (ADR 0084). There is no sticky equivalent there, so the two accepting sets
-// genuinely differ — no Windows ACL says "anyone may create but only the owner
-// may unlink".
+// platforms answer "who can replace an entry here" differently. On Unix it is
+// a mode: world-writable without the sticky bit. On Windows it is the
+// directory's DACL: an entry letting Everyone (S-1-1-0), Authenticated Users
+// (S-1-5-11) or BUILTIN\Users (S-1-5-32-545) unlink somebody else's entry, or
+// write the lock files the directory will create (ADR 0084, ADR 0085).
+//
+// Creating an entry at a free name is NOT that right, on either platform: it
+// is what the sticky bit permits, and what Windows spells as "may add a file"
+// without "may delete a child". What it costs is a lock file planted before
+// any holder exists, which is a denial of service rather than a lost
+// exclusion.
 func NewFileLocker(cfg FileConfig) (locker Locker, err error) {
 	//: delegate to the service constructor, which validates and builds.
 	return svclock.NewFileLocker(cfg)
