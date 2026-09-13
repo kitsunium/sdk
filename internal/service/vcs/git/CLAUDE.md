@@ -10,13 +10,13 @@ Implements the `core/vcs` contract by shelling out to the **git binary** (ADR
 
 | File | Role |
 |---|---|
-| `exec.go` | the hardened runner — `runGitOutput`, `gitProbe`, `hardenedGitConfig`, `extDiffGuard` |
-| `resolve.go` | `Resolve` and the four diff sources it folds together |
+| `exec.go` | the hardened runner — `runGitOutput`, `runGitBlob`, `gitProbe`, `hardenedGitConfig`, `extDiffGuard` |
+| `resolve.go` | `Resolve`, the four diff sources it folds together, `shallowState`, `spelledTopLevel` |
 | `diff_parse.go` | unified-diff and `--name-status -z` parsing, and `IncludeFunc` |
-| `changed_set.go` | `ChangedSetValue`, the concrete `core/vcs.ChangedSet` |
+| `changed_set.go` | `ChangedSetValue`, the concrete `core/vcs.ChangedSet`, and its `key` rewrite |
 | `config.go` | `Config` — where the repository is, and the caller's file filter |
-| `gitdir.go` | `GitDir`, memoized per root |
-| `show.go` | `ShowFile` — a blob at a commit |
+| `gitdir.go` | `GitDir`, memoized per root and re-validated on every call |
+| `show.go` | `ShowFile` — a blob at a commit, or the two refusals |
 
 ## Why-this-shape
 
@@ -38,11 +38,72 @@ times before the guard and 0 after:
 - `core.hooksPath` — no subcommand here runs a hook, and it is set anyway so the
   guarantee does not depend on that list staying read-only.
 
+A third group executes nothing and was found later, by asking what a hostile
+`.git/config` could do to the PARSER rather than to the process. `diff.srcPrefix`
+/ `diff.dstPrefix`, `diff.mnemonicPrefix` and `diff.noprefix` choose the `a/`
+and `b/` prefixes of a unified-diff header. The `b/` strip then leaves the
+repository's own prefix in place, the line ranges are filed under
+`<root>/DST/x.go` or `<root>/w/x.go`, and the file answers false for every line
+it changed. Measured against a repository carrying each key:
+
+| key | `ContainsFile` | `ContainsLine` |
+|---|---|---|
+| `diff.srcPrefix=SRC/` + `diff.dstPrefix=DST/` | true | **false** |
+| `diff.mnemonicPrefix=true` (index / working tree) | true | **false** |
+| `diff.noprefix=true` | true | true |
+
+`ContainsFile` survives all three because the NUL-separated name-status pass
+carries no prefixes at all — the two-pass design doing exactly what it exists
+for, and also why nothing else looked wrong. `diff.noprefix` survives by
+coincidence (`x.go` passes the `b/` strip unchanged) and is pinned anyway,
+because it OVERRIDES the two explicit prefixes: neutralising them without it
+changes nothing. All four are set to git's documented defaults rather than
+disabled, since `a/` and `b/` are what the parser is written against.
+
 Deliberately NOT hardened, to avoid hardening against nothing: `core.pager`
 (tested — git detects the non-TTY and skips paging), `diff.<driver>.textconv`
 (did not fire on any invocation this package makes), and the network-only keys
 (`credential.helper`, `core.sshCommand`, `protocol.*`), since nothing here talks
 to a remote.
+
+### Two spellings of one root, and only two
+
+`git rev-parse --show-toplevel` canonicalises: point it at a symbolic link and
+it answers with the link's target. Every recorded path is built from that, and
+`Contains*` compares lexically, so a caller that reached the repository through
+a link — a CI checkout, a `/tmp` that is a link on macOS, a worktree behind a
+convenience symlink — got a resolution that was NOT degraded, was NOT empty, and
+answered false to every question it asked. That is the silent under-report this
+package exists to refuse, arriving through the one path a caller does not
+choose.
+
+`spelledTopLevel` derives the caller's own spelling of the top level once, with
+the single `EvalSymlinks` this package performs, and only when the hint is not
+already inside the canonical root — so the ordinary case pays nothing. Every
+entry is then recorded under BOTH spellings while the set is being built, by
+`ChangedSetValue.spelledAs`.
+
+Build time, not query time, and the asymmetry is the argument: the alias is
+known once, at construction, while a caller asks `ContainsLine` once per
+diagnostic. Mirroring on the way in leaves the read path byte-identical to what
+`BENCH.md` measured — one map lookup, no branch on the alias, zero allocations —
+where a per-query rewrite would have added a `filepath.Join` allocation to every
+query on an aliased set. An indirection anywhere else in a queried path is still
+lexical and still does not match; that is stated in the port comment rather than
+fixed, because a caller that builds its own paths chooses those spellings.
+
+| | aliased set | unaliased set |
+|---|---|---|
+| cost at build | one extra map entry per file, dir and range | none |
+| cost per query | none | none |
+
+### A probe that did not answer is not an answer
+
+`shallowState` returns two booleans, and the second is the point. `git rev-parse
+--is-shallow-repository` arrived in git 2.15; an older git fails the invocation,
+and any git could answer something we cannot read. Folding either into "not
+shallow" scopes a diff against history that was truncated — so `known=false`
+degrades, and the Reason names the probe.
 
 ### Never a silent empty diff
 
@@ -68,6 +129,35 @@ over Markdown is just as legitimate — so the caller states it. A nil filter
 admits everything, which is the safe direction per ADR 0031: including too much
 widens a scope, while a default that dropped files would under-report.
 
+### The memo is re-validated, not merely stored
+
+`GitDir` still pays one `git rev-parse --git-dir` per root, and still never
+caches a failure. What it also does is check, on every call, that the answer is
+still true: the `.git` entry at the root is the same file it was — or is still
+absent — and the resolved directory is still the same directory. Two `os.Lstat`
+calls, ~2.9 µs against the ~2.7 ms subprocess they stand in for, measured here.
+
+That pair catches a repository that MOVED, one deleted and re-created, and a
+root that becomes its own repository under a parent one. The last of those is
+why the check is two lstats and not one: the ADR's original claim — that a root
+becoming a repository later is picked up because failures are not cached — holds
+only when the first call FAILED, and a root inside a parent repository resolves
+successfully. What is still not caught is a repository created at a directory
+BETWEEN the root and the worktree top level; only rev-parse's own discovery walk
+sees that, and the doc comment says so.
+
+### `ShowFile` has two refusals and they mean different things
+
+`PathAbsent` says the commit is readable and holds no object at that path, which
+is what tells "deleted" from "emptied" — an empty file is a successful read of
+`""`. `CommandFailed` says anything else. The classification runs only on the
+failure path, and it is two `cat-file -e` probes rather than one, because
+`cat-file` answers "no such object" identically for a commit that does not
+resolve and for a path that is not in it: without the commit probe an
+unreachable SHA would be reported as a missing file, and a caller would retry
+with other paths forever. git's stderr is never parsed — its wording is
+localised and unversioned.
+
 ## Do NOT
 
 - Add a git invocation that bypasses `runGitOutput`. The hardening is applied
@@ -75,6 +165,14 @@ widens a scope, while a default that dropped files would under-report.
 - Return a partial `ChangedSetValue` from a failed collection. Degrade.
 - Reintroduce a suffix or generated-file test in this package. It belongs to the
   caller, and `Test_parseNameStatus` pins both directions.
+- Read a decision out of git's stderr. It is localised, and a refusal that
+  depends on the operator's language is a refusal that changes under `LC_ALL`.
+- Add `--find-copies-harder`. `-C` alone only offers a copy whose SOURCE was
+  modified in the same changeset, so the source always carries its own record
+  and the copy marking adds nothing — which is the whole of why ADR 0076
+  §Deferred's copy entry closes without a code change.
+  `TestACopysSourceIsAlreadyInTheSetForItsOwnReason` pins the record shapes that
+  reasoning rests on.
 
 ## Verification
 

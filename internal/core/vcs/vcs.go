@@ -17,10 +17,14 @@ package vcs
 // can ask about. It is FROZEN at four methods.
 //
 // Every path argument is absolute. Implementations normalise through
-// filepath.Clean before comparing, so a caller need not — but Clean is LEXICAL,
-// and that is the one thing a caller does have to know: a path that traverses a
-// symlink will not match one that does not, even when both name the same file.
-// Query with paths resolved the same way the resolution resolved its root.
+// filepath.Clean before comparing, so a caller need not — but Clean is LEXICAL
+// and resolves no symbolic link, so two spellings of one file do not match each
+// other. There is exactly one exception, and it exists because it is the one
+// spelling a caller cannot choose: THE ROOT IT NAMED. An implementation whose
+// backend canonicalises that root away still answers for paths spelled through
+// the caller's root, and for paths spelled the backend's way — the two roots a
+// caller actually has in hand. An indirection anywhere else in a queried path
+// is still lexical, and still does not match.
 //
 // The three Contains methods are not interchangeable and none implies another in
 // the direction a caller might assume: a pure rename or a deletion touches a

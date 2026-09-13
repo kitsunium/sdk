@@ -96,6 +96,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md` | The Windows lock directory's verdict becomes a DACL question rather than a mode question — two `advapi32` exports, not the 250 lines three ADRs deferred it on | Accepted |
 | `adr/0085-both-halves-of-a-release-read-the-same-range.md` | The two halves of a release stop reading different things — the `Release-bump` trailer is read over the range `compute-bumps.sh` diffs, largest wins, scoped per commit, walked `--first-parent` so a contributor's commit inside a merged branch cannot size a release | Accepted |
 | `adr/0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md` | The two lock rules stop sharing a mask, `BUILTIN\Users` becomes the third "anybody", all eight discretionary ACE shapes are decoded, and the SACL and the planted-lock-file deferrals are made permanent with their evidence | Accepted |
+| `adr/0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md` | Six of ADR 0076's seven deferred entries closed: the root a caller named answers alongside git's canonical one, a shallow probe that will not answer degrades, `origin/HEAD` is verified in the invocation that reads it, the diff-prefix config keys are pinned, `ShowFile` separates absent from failed, and the `GitDir` memo is re-validated | Accepted |
 
 This table is one of THREE indexes of the same ADRs — the others are
 `docs/adr/CLAUDE.md`'s Contents table and the root `CLAUDE.md` Reference list —

@@ -24,6 +24,22 @@ are meaningful to exactly one engine. `ChangedSet`, `LineRange` and `Resolution`
 alias **core**, because a second implementation of the port would have to speak
 them.
 
+## Both spellings of the root answer
+
+`Resolve` records every entry under the root you gave AND the one git
+canonicalised it into, and nothing else — at build time, so a query costs what
+it always did. Pointing `Config.Root` at a symbolic link used to record every
+path under the link's target, so a non-degraded, non-empty set answered false to
+every query — the silent under-report, reached through the one path a caller
+does not choose. An indirection elsewhere in a queried path is still lexical.
+
+## `ShowFile` has two refusals
+
+`CodePathAbsent` — the commit is readable and its tree holds nothing there.
+`CodeCommandFailed` — everything else. Match with `errs.HasCode`; the first is
+the one that lets a caller tell "deleted" from "emptied", and an empty file is a
+successful read of `""`.
+
 ## Check Degraded before reading Set
 
 `Resolve` returns no error. Everything that prevents a trustworthy answer

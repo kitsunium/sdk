@@ -1,76 +1,121 @@
-// Package git internal tests for the per-root git-dir memo: a cached root
-// must answer without re-running git, and only string entries are trusted.
+// Package git internal tests for the per-root git-dir memo: a cached root must
+// answer without re-running git, a foreign entry must be distrusted, and a memo
+// the filesystem no longer agrees with must not be served.
 package git
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
 
-// TestGitDir_cache verifies the memo contract from the inside: a
-// pre-seeded cache entry is served verbatim (no subprocess — the root is not
-// even a repository), while a foreign-typed entry is distrusted and falls
-// through to a real resolution, which fails outside a repo.
+// TestGitDir_cache verifies the memo contract from the inside. The roots here
+// are NOT repositories, so a real resolution fails: an answer that comes back
+// at all came from the memo, and an error means the memo was rejected.
 func TestGitDir_cache(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name string
-		//: seed stores a synthetic cache entry for the root; nil skips seeding.
-		seed    func(absRoot string)
-		want    string
+		//: seed stores a synthetic entry for the root and returns the git
+		//: directory the row expects back; "" means the memo must be refused.
+		seed    func(t *testing.T, absRoot string) string
 		wantErr bool
-	}{
+	}
+	tests := []tc{
 		{
-			name: "seeded string entry served without git",
-			seed: func(absRoot string) {
-				//: The fake git dir proves the answer came from the memo:
-				//: the root is NOT a repository, so a real resolution would fail.
-				gitDirCache.Store(absRoot, "/memo/fake-gitdir")
+			name: "a memo the filesystem still agrees with is served without git",
+			seed: func(t *testing.T, absRoot string) string {
+				t.Helper()
+				dir := filepath.Join(t.TempDir(), "memo-gitdir")
+				mkdirT(t, dir)
+				gitDirCache.Store(absRoot, gitDirMemo{
+					dir:      dir,
+					entry:    lstatOrNil(filepath.Join(absRoot, gitEntry)),
+					resolved: lstatOrNil(dir),
+				})
+				//: The root is not a repository, so this can only come from the memo.
+				return dir
 			},
-			want:    "/memo/fake-gitdir",
 			wantErr: false,
 		},
 		{
-			name: "foreign-typed entry falls through to a real resolution",
-			seed: func(absRoot string) {
-				//: A non-string entry must be distrusted, not type-panicked.
+			name: "a foreign-typed entry falls through to a real resolution",
+			seed: func(t *testing.T, absRoot string) string {
+				t.Helper()
+				//: A non-memo entry must be distrusted, not type-panicked.
 				gitDirCache.Store(absRoot, 42)
+				return ""
 			},
-			want:    "",
 			wantErr: true,
 		},
 		{
-			name:    "unseeded non-repo root errors",
-			seed:    nil,
-			want:    "",
+			name: "a memo whose git directory vanished is not served",
+			seed: func(t *testing.T, absRoot string) string {
+				t.Helper()
+				dir := filepath.Join(t.TempDir(), "memo-gitdir")
+				mkdirT(t, dir)
+				gitDirCache.Store(absRoot, gitDirMemo{
+					dir:      dir,
+					entry:    lstatOrNil(filepath.Join(absRoot, gitEntry)),
+					resolved: lstatOrNil(dir),
+				})
+				//: The repository moved away underneath the memo.
+				if err := os.Remove(dir); err != nil {
+					t.Fatalf("remove %s: %v", dir, err)
+				}
+				return ""
+			},
+			wantErr: true,
+		},
+		{
+			name: "a memo is not served once the root grows its own .git",
+			seed: func(t *testing.T, absRoot string) string {
+				t.Helper()
+				dir := filepath.Join(t.TempDir(), "memo-gitdir")
+				mkdirT(t, dir)
+				gitDirCache.Store(absRoot, gitDirMemo{
+					dir:      dir,
+					entry:    lstatOrNil(filepath.Join(absRoot, gitEntry)),
+					resolved: lstatOrNil(dir),
+				})
+				//: A nearer repository now governs the root; the memoized one
+				//: still exists, so only the root's own entry reveals it.
+				mkdirT(t, filepath.Join(absRoot, gitEntry))
+				return ""
+			},
+			wantErr: true,
+		},
+		{
+			name:    "an unseeded non-repo root errors",
+			seed:    func(t *testing.T, _ string) string { t.Helper(); return "" },
 			wantErr: true,
 		},
 	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		root := t.TempDir()
+		abs, absErr := filepath.Abs(root)
+		//: The cache key is the cleaned absolute root.
+		if absErr != nil {
+			t.Fatalf("abs(%s): %v", root, absErr)
+		}
+		abs = filepath.Clean(abs)
+		want := c.seed(t, abs)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		got, err := GitDir(t.Context(), root)
+		//: The error expectation must match the row.
+		if (err != nil) != c.wantErr {
+			t.Fatalf("GitDir(%s) error = %v, wantErr %v", root, err, c.wantErr)
+		}
+		//: The resolved value must match the seeded (or empty) expectation.
+		if got != want {
+			t.Errorf("GitDir(%s) = %q, want %q", root, got, want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			root := t.TempDir()
-			abs, absErr := filepath.Abs(root)
-			//: The cache key is the cleaned absolute root.
-			if absErr != nil {
-				t.Fatalf("abs(%s): %v", root, absErr)
-			}
-			abs = filepath.Clean(abs)
-			//: Seed the memo when the row asks for it.
-			if tt.seed != nil {
-				tt.seed(abs)
-			}
-
-			got, err := GitDir(t.Context(), root)
-			//: The error expectation must match the row.
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("GitDir(%s) error = %v, wantErr %v", root, err, tt.wantErr)
-			}
-			//: The resolved value must match the seeded (or empty) expectation.
-			if got != tt.want {
-				t.Errorf("GitDir(%s) = %q, want %q", root, got, tt.want)
-			}
+			runCase(t, c)
 		})
 	}
 }

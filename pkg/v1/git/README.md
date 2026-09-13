@@ -39,9 +39,15 @@ The set spans four sources, because a review that ignored uncommitted work would
 
 Config.Include is the caller's policy for which files belong. A nil Include admits everything; a Go tool passes a ".go" suffix test and a generated\-file probe. The source implementation hard\-coded exactly that pair, and this package deliberately does not: it is one caller's policy, not the domain's.
 
+### Which spelling of a path answers
+
+Queries are compared lexically, so two spellings of one file do not match each other — with one exception, and it is the spelling a caller does not choose. git canonicalises the repository root, so pointing Config.Root at a symbolic link records every path under the link's target. Resolve therefore records every entry under BOTH the root you gave and the one git reports, so either answers and a query costs exactly what it did before. An indirection anywhere else in a path you query is still lexical and still does not match.
+
 ### Running against a repository you do not control
 
-Every invocation is hardened against a hostile \`.git/config\`, which travels with a clone. \`core.fsmonitor\` and \`core.hooksPath\` are neutralised with \-c \(which beats every config file\), and \`\-\-no\-ext\-diff\` is injected into the subcommands that honour \`diff.external\` — setting that key empty does not disable it, it makes git try to execute "" and abort. Both were demonstrated executing an attacker\-chosen command on a read\-only query before the guard, and not after. See the service package's CLAUDE.md for what was deliberately NOT hardened, and why.
+Every invocation is hardened against a hostile \`.git/config\`, which travels with a clone. \`core.fsmonitor\` and \`core.hooksPath\` are neutralised with \-c \(which beats every config file\), and \`\-\-no\-ext\-diff\` is injected into the subcommands that honour \`diff.external\` — setting that key empty does not disable it, it makes git try to execute "" and abort. Both were demonstrated executing an attacker\-chosen command on a read\-only query before the guard, and not after.
+
+A second group executes nothing and is guarded for a different reason. \`diff.srcPrefix\`, \`diff.dstPrefix\`, \`diff.mnemonicPrefix\` and \`diff.noprefix\` rename the \`a/\` and \`b/\` prefixes of a diff header, which files the line ranges under a path nobody queries: measured, ContainsFile stayed true and ContainsLine went false for a line that had just changed. All four are pinned to git's defaults. See the service package's CLAUDE.md for what was deliberately NOT hardened, and why.
 
 ## Index
 
@@ -64,7 +70,7 @@ Every invocation is hardened against a hostile \`.git/config\`, which travels wi
 const CodeCommandFailed errs.Code = corevcs.CodeCommandFailed
 ```
 
-<a name="CodePathAbsent"></a>CodePathAbsent identifies a path that does not exist at the requested commit, which is deliberately distinct from a successful read of an empty file.
+<a name="CodePathAbsent"></a>CodePathAbsent identifies a path that does not exist at the requested commit, which is deliberately distinct from a successful read of an empty file. It is what ShowFile returns when the commit resolves and its tree holds no object at the path.
 
 ```go
 const CodePathAbsent errs.Code = corevcs.CodePathAbsent
@@ -77,7 +83,7 @@ const CodeRepositoryUnresolved errs.Code = corevcs.CodeRepositoryUnresolved
 ```
 
 <a name="GitDir"></a>
-## func [GitDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L119>)
+## func [GitDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L144>)
 
 ```go
 func GitDir(ctx context.Context, root string) (gitDir string, err error)
@@ -85,19 +91,23 @@ func GitDir(ctx context.Context, root string) (gitDir string, err error)
 
 GitDir resolves the git directory governing root — the one holding HEAD and the index — and memoizes it per root.
 
-It never assumes \`.git\` is a directory: in a linked worktree or a submodule it is a \`gitdir:\` pointer FILE, and this follows it. The result is absolute and cleaned. Failures are not memoized, so a later \`git init\` is picked up.
+It never assumes \`.git\` is a directory: in a linked worktree or a submodule it is a \`gitdir:\` pointer FILE, and this follows it. The result is absolute and cleaned, and failures are never memoized.
+
+The memo is re\-validated on every call against two lstats — roughly a thousandth of the subprocess they stand in for — so a repository that moved, one deleted and re\-created, and a root that becomes its own repository under a parent one each get a fresh answer. A repository created at a directory BETWEEN root and the worktree top level is not noticed.
 
 <a name="ShowFile"></a>
-## func [ShowFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L126>)
+## func [ShowFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L156>)
 
 ```go
 func ShowFile(ctx context.Context, repoRoot, sha, relPath string) (content string, err error)
 ```
 
-ShowFile returns the content of relPath at commit sha. A path absent at that commit is an error, which is what lets a caller tell "deleted" from "emptied".
+ShowFile returns the content of relPath at commit sha, verbatim.
+
+Its two refusals are different instructions. CodePathAbsent means the commit is readable and holds nothing at that path, which is what tells "deleted" from "emptied" — an empty file is a successful read of "". CodeCommandFailed means anything else: a commit that does not resolve, an unreadable object store, no git. Match with errs.HasCode.
 
 <a name="ChangedSet"></a>
-## type [ChangedSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L86>)
+## type [ChangedSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L105>)
 
 ChangedSet is what a branch changed, queryable by line, file or directory. It aliases the core vcs port.
 
@@ -106,7 +116,7 @@ type ChangedSet = corevcs.ChangedSet
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L99>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L118>)
 
 Config is where the repository is and which files the caller counts as changed. It aliases the service type: these are one implementation's construction parameters, which is what ADR 0074 says belongs with the engine.
 
@@ -115,7 +125,7 @@ type Config = svcgit.Config
 ```
 
 <a name="Include"></a>
-## type [Include](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L103>)
+## type [Include](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L122>)
 
 Include decides which files belong in the changed set. A nil Include admits every file.
 
@@ -124,7 +134,7 @@ type Include = svcgit.IncludeFunc
 ```
 
 <a name="LineRange"></a>
-## type [LineRange](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L90>)
+## type [LineRange](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L109>)
 
 LineRange is an inclusive, 1\-based run of changed lines. It aliases the core vcs value type.
 
@@ -133,7 +143,7 @@ type LineRange = corevcs.LineRangeValue
 ```
 
 <a name="Resolution"></a>
-## type [Resolution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L94>)
+## type [Resolution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L113>)
 
 Resolution is the outcome of resolving a changed set, including the degraded outcome where none could be trusted. It aliases the core vcs value type.
 
@@ -142,7 +152,7 @@ type Resolution = corevcs.ResolutionValue
 ```
 
 <a name="Resolve"></a>
-### func [Resolve](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L108>)
+### func [Resolve](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/git/git.go#L127>)
 
 ```go
 func Resolve(ctx context.Context, cfg Config) Resolution

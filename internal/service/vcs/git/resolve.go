@@ -11,6 +11,16 @@ import (
 	corevcs "github.com/kitsunium/sdk/internal/core/vcs"
 )
 
+// originHEAD is the remote-tracking symbolic ref that names the default branch.
+// It is spelled in full rather than as "origin/HEAD" so rev-parse resolves the
+// remote-tracking ref and cannot be steered onto a refs/origin/HEAD a
+// repository planted higher in its search order.
+const originHEAD string = "refs/remotes/origin/HEAD"
+
+// separator is the OS path separator as a string, for the prefix and suffix
+// tests that rewrite one spelling of the repository root into the other.
+const separator string = string(filepath.Separator)
+
 var (
 	// defaultBranchCandidates are the fallback refs tried, in order, when
 	// origin/HEAD does not resolve the default branch symbolically.
@@ -49,14 +59,20 @@ func fullFallback(reason string) corevcs.ResolutionValue {
 // returned an empty set for the second would make a review pass on a branch it
 // never looked at.
 func Resolve(ctx context.Context, cfg Config) corevcs.ResolutionValue {
-	root, ok := repoTopLevel(ctx, cfg.Root)
+	root, spelled, ok := repoTopLevel(ctx, cfg.Root)
 	//: No repository → everything in scope (the documented fallback).
 	if !ok {
 		//: Degrade loudly: everything is in scope.
 		return fullFallback("not a git repository — everything in scope")
 	}
+	shallow, known := shallowState(ctx, root)
+	//: A probe that did not answer is not a repository with full history.
+	if !known {
+		//: Degrade loudly rather than guess the answer git refused to give.
+		return fullFallback("shallow probe failed — everything in scope")
+	}
 	//: A shallow clone lacks the history needed for a trustworthy merge-base.
-	if isShallow(ctx, root) {
+	if shallow {
 		//: Degrade loudly rather than trust truncated history.
 		return fullFallback("shallow clone — everything in scope")
 	}
@@ -79,7 +95,7 @@ func Resolve(ctx context.Context, cfg Config) corevcs.ResolutionValue {
 		return fullFallback("HEAD unresolved — everything in scope")
 	}
 
-	set := NewChangedSetValue(root)
+	set := newChangedSetValue(root, spelled)
 	//: A git failure or timeout while collecting the diff yields a PARTIAL
 	//: changed-set; surfacing that would silently hide real issues. Degrade
 	//: loudly to a full scan instead (fail-safe: never a silent empty diff).
@@ -97,58 +113,139 @@ func Resolve(ctx context.Context, cfg Config) corevcs.ResolutionValue {
 	}
 }
 
-// repoTopLevel resolves the absolute repository root. A hint directory is used
-// to locate the repo; an empty hint resolves from the process working dir.
-func repoTopLevel(ctx context.Context, hint string) (string, bool) {
-	args := []string{"rev-parse", "--show-toplevel"}
-	//: When a hint is given, run git inside it so the right repo is found.
-	if hint != "" {
-		abs, err := filepath.Abs(hint)
-		//: An unresolvable hint cannot anchor a repo lookup.
-		if err != nil {
-			//: Signal "no repo" so the caller falls back.
-			return "", false
-		}
-		out, err := runGitOutput(ctx, abs, "rev-parse", "--show-toplevel")
-		//: A git failure means the hint is not inside a repo.
-		if err != nil {
-			//: Signal "no repo".
-			return "", false
-		}
-		//: Resolved top-level for the hinted repo.
-		return out, true
+// repoTopLevel resolves the repository root from a hint directory; an empty
+// hint resolves from the process working directory.
+//
+// It answers with TWO spellings of one directory. canonical is git's own
+// --show-toplevel, which every recorded path is built from. asSpelled is the
+// same directory named the way the caller named it, and is empty unless the
+// caller reached the repository through a symbolic link — git resolves those
+// away, so without it a caller whose paths traverse the link queries a set
+// keyed under a root it never spells.
+func repoTopLevel(ctx context.Context, hint string) (canonical, asSpelled string, ok bool) {
+	start := hint
+	//: An empty hint means "the repository around the working directory".
+	if start == "" {
+		start = "."
 	}
-	out, err := runGitOutput(ctx, ".", args...)
-	//: A git failure means the cwd is not inside a repo.
+	abs, err := filepath.Abs(start)
+	//: An unresolvable hint cannot anchor a repo lookup.
+	if err != nil {
+		//: Signal "no repo" so the caller falls back.
+		return "", "", false
+	}
+	out, err := runGitOutput(ctx, abs, "rev-parse", "--show-toplevel")
+	//: A git failure means the hint is not inside a repo.
 	if err != nil {
 		//: Signal "no repo".
-		return "", false
+		return "", "", false
 	}
-	//: Resolved top-level for the cwd repo.
-	return out, true
+	asSpelled, _ = spelledTopLevel(abs, out)
+	//: Resolved top-level, plus the caller's own spelling of it when it differs.
+	//: A hint that already reaches the root directly yields no second spelling,
+	//: and "" is exactly what the changed set reads as "there is none".
+	return out, asSpelled, true
 }
 
-// isShallow reports whether the repository is a shallow clone.
-func isShallow(ctx context.Context, root string) bool {
-	out, err := runGitOutput(ctx, root, "rev-parse", "--is-shallow-repository")
-	//: A failed probe is treated as "not shallow" — base resolution then
-	//: applies its own fallbacks.
-	if err != nil {
-		//: Cannot confirm shallow → assume full history.
-		return false
+// spelledTopLevel returns the repository top-level named the way the caller
+// named it, or "" when the caller's path already reaches it directly.
+//
+// The one EvalSymlinks this package performs happens here, on the hint alone,
+// and only when the hint is not already inside the canonical root — which is
+// the ordinary case, so the ordinary case pays nothing. What it buys is an
+// O(1) prefix rewrite on every later query instead of a syscall per query.
+func spelledTopLevel(absHint, canonical string) (alias string, ok bool) {
+	clean := filepath.Clean(absHint)
+	//: The caller is already speaking git's spelling — nothing to alias.
+	if clean == canonical || strings.HasPrefix(clean, canonical+separator) {
+		//: No alias.
+		return "", false
 	}
-	//: git prints "true"/"false".
-	return out == "true"
+	resolved, err := filepath.EvalSymlinks(clean)
+	//: A hint whose links do not resolve keeps the purely lexical behaviour.
+	if err != nil {
+		//: No alias.
+		return "", false
+	}
+	//: The alias is the hint with its in-repository tail stripped back off.
+	return trimRepoTail(clean, canonical, resolved)
+}
+
+// trimRepoTail removes from clean the path the resolved hint holds below
+// canonical, leaving the caller's spelling of the top level. It returns ""
+// when the resolved hint is not under canonical, or when the tail is not
+// literally present in the caller's spelling — which is the case where the
+// indirection sits inside the last components and no prefix can describe it.
+func trimRepoTail(clean, canonical, resolved string) (alias string, ok bool) {
+	rel, err := filepath.Rel(canonical, resolved)
+	//: A hint that does not sit under the canonical root cannot name it.
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+separator) {
+		//: No alias.
+		return "", false
+	}
+	//: The hint IS the top level, spelled the caller's way.
+	if rel == "." {
+		//: The whole hint is the alias.
+		return clean, true
+	}
+	trimmed, cut := strings.CutSuffix(clean, separator+rel)
+	//: Without a literal tail match the alias would be a guess, so there is none.
+	if !cut {
+		//: No alias.
+		return "", false
+	}
+	//: The caller's spelling of the top level.
+	return trimmed, true
+}
+
+// shallowState reports whether the repository is a shallow clone, and whether
+// the probe answered at all.
+//
+// Those are two facts and only one of them is safe to guess. A probe that
+// fails — a git too old for the flag, a git that is not there, a repository
+// that became unreadable between two invocations — has told us nothing, and
+// nothing is not "full history": reading it that way hands back a set scoped
+// against history that was truncated. known=false is what makes Resolve
+// degrade instead of computing a diff it cannot trust.
+func shallowState(ctx context.Context, root string) (shallow, known bool) {
+	out, err := runGitOutput(ctx, root, "rev-parse", "--is-shallow-repository")
+	//: The probe did not run — we know nothing, and nothing is not "false".
+	if err != nil {
+		//: Unknown: Resolve degrades.
+		return false, false
+	}
+	//: git answers with exactly two words, and anything else is a git whose
+	//: output this package was not written against.
+	switch out {
+	//: git's own word for a truncated history.
+	case "true":
+		//: Shallow, and we know it.
+		return true, true
+	//: git's own word for full history — stated by git, not assumed by us.
+	case "false":
+		//: Not shallow, and we know it.
+		return false, true
+	//: Anything else is a git whose answer we cannot read.
+	default:
+		//: Unknown: Resolve degrades.
+		return false, false
+	}
 }
 
 // resolveBaseRef resolves the default-branch ref, preferring the symbolic
 // origin/HEAD and falling back to a fixed candidate list.
 func resolveBaseRef(ctx context.Context, root string) (string, bool) {
-	out, err := runGitOutput(ctx, root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
-	//: origin/HEAD resolves the true default branch on most clones.
+	out, err := runGitOutput(ctx, root, "rev-parse", "--verify", "--quiet", "--abbrev-ref", originHEAD)
+	//: origin/HEAD names the true default branch on most clones — and
+	//: --verify answers only while that branch still EXISTS, which
+	//: symbolic-ref does not check: it reports a symref whose target was
+	//: pruned exactly as happily as a live one, and every clone taken before
+	//: an upstream renamed master to main is in that state until someone runs
+	//: `git remote set-head`. --abbrev-ref renders it as "origin/main",
+	//: the same shape the candidate list below uses.
 	if err == nil && out != "" {
-		//: Strip the refs/remotes/ prefix to get e.g. "origin/main".
-		return strings.TrimPrefix(out, "refs/remotes/"), true
+		//: A verified default-branch ref.
+		return out, true
 	}
 	//: Fall back to conventional default-branch refs.
 	for _, cand := range defaultBranchCandidates {
