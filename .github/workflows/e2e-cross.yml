@@ -47,6 +47,12 @@ env:
   # own reader does from a second process. The defect was deferred twice (ADR
   # 0078, then ADR 0079) on the stated grounds that it was "not reachable from
   # this CI matrix". Listing one more package here is what made that false.
+  #
+  # `pathchain` joins them because what it measures IS the platform: os.Root's
+  # component walk is openat(2) on Unix and O_NOFOLLOW_ANY on Windows, a
+  # junction and a symbolic link are one bit on one kernel and two mechanisms
+  # on the other, and a volume root is only a path on one of them (ADR 0083).
+  KERNEL_PKGS: "./pathchain"
   CORE_PKGS: "./proc"
   SERVICE_PKGS: "./entitlement ./lock ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
   # Unix file-security packages: their suites assert 0600 perms and inject
@@ -90,6 +96,9 @@ jobs:
         run: |
           set -uo pipefail
           fail=0
+          echo "::group::internal/kernel $KERNEL_PKGS"
+          (cd internal/kernel  && go test -count=1 -short $KERNEL_PKGS)  || fail=1
+          echo "::endgroup::"
           echo "::group::internal/core $CORE_PKGS"
           (cd internal/core    && go test -count=1 -short $CORE_PKGS)    || fail=1
           echo "::endgroup::"
@@ -155,6 +164,7 @@ jobs:
               fi
             done
           }
+          compile internal/kernel  $KERNEL_PKGS
           compile internal/core    $CORE_PKGS
           compile internal/service $SERVICE_PKGS
           # BSD is Unix, so the file-security suites apply here too.
