@@ -18,7 +18,7 @@ import (
 // that executes it is the `windows` job of .github/workflows/e2e-cross.yml;
 // the Linux Bazel gate compiles neither the backend nor this file.
 //
-// # One of these two rows may not run, and the test says which
+// # One of these two rows may not run, and the test refuses to be silent
 //
 // Creating a SYMBOLIC LINK on Windows needs SeCreateSymbolicLinkPrivilege,
 // which an unprivileged account does not hold unless Developer Mode is on.
@@ -35,6 +35,13 @@ import (
 // A row that cannot be planted says WHY through t.Skip rather than passing
 // quietly, and the parent test FAILS if both are lost — which is the
 // difference between a test that skipped and a test that is not there.
+//
+// What a green e2e-cross lane therefore proves is "at least one of the two
+// reached a kernel", and NOT which one. The lane runs `go test` without -v, and
+// go test buffers a passing package's output and discards it — measured, for
+// t.Log AND for a raw fmt.Println, so there is no spelling of the count that
+// survives. Reading which row ran means running this file with -v. That is
+// stated here rather than left as a plausible-sounding claim about the log.
 
 // TestTheFileLockerRefusesAnIndirectionAtTheLockPath is the Unix probe's
 // Windows twin.
@@ -158,6 +165,8 @@ func TestTheFileLockerRefusesAnIndirectionAtTheLockPath(t *testing.T) {
 	if planted == 0 {
 		t.Fatal("neither a symbolic link nor a junction could be planted on this host, so nothing verified that the lock refuses a reparse point — the Windows half of ADR 0081's closed Deferred item is UNPROVEN on this lane")
 	}
+	//: visible with -v and nowhere else; see this file's header for why there
+	//: is no version of this line that a non-verbose lane would print.
 	t.Logf("indirection rows that reached the kernel: %d of %d", planted, len(tests))
 }
 

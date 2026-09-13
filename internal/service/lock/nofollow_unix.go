@@ -24,8 +24,8 @@ import (
 // on linux/amd64 in the same probe. That is a different exposure and a much
 // weaker one — the parent components are [FileConfig.Dir], which the caller
 // chose, while the final component is a name this package derives and an
-// attacker can predict. It is named in ADR 0081 rather than silently implied
-// to be covered.
+// attacker can predict. It is named in ADR 0082 §Deferred rather than silently
+// implied to be covered.
 //
 // The errno is not consulted. See [pathRedirected] for the three different
 // errnos the six kernels here produce for the same condition; os.Lstat answers

@@ -194,6 +194,19 @@ halves separately:
 A row that cannot be planted reports why through `t.Skip`; the parent test
 **fails** if both are lost, naming this ADR's item as unproven on that lane.
 
+What a green lane proves is therefore "at least one of the two reached a
+kernel", and **not which one** — and that limit is measured rather than
+assumed: `e2e-cross` runs `go test` without `-v`, and `go test` buffers a
+passing package's output and discards it, for `t.Log` and for a raw
+`fmt.Println` alike. There is no spelling of the count that a non-verbose lane
+prints. Reading which row ran means running the file with `-v`.
+
+Measured on this change's first run: the `windows` job of `e2e-cross` reported
+`ok github.com/kitsunium/sdk/internal/service/lock 2.735s` on `windows-latest`,
+so the table ran and at least one indirection was planted and refused. Whether
+that included the symbolic-link row is exactly what the paragraph above says
+cannot be read from there.
+
 ## Consequences / Semantics
 
 - **A deployment that worked now fails, by design.** Any caller whose lock path

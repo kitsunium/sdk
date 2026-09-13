@@ -210,7 +210,7 @@ func TestTheFileLockerRefusesAnIndirectionAtTheLockPath(t *testing.T) {
 				if err := os.Link(target, lockPath); err != nil {
 					t.Skipf("this filesystem refuses hard links: %v", err)
 				}
-				//: accepted, and ADR 0081 says why it is not the same gap: a
+				//: accepted, and ADR 0082 says why it is not the same gap: a
 				//: hard link needs the attacker to already have the target,
 				//: which is most of what the redirection would have bought.
 				return func(*testing.T) {}
