@@ -18,6 +18,7 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
 | `grant.go` | `GrantValue` — what a successful verification hands back |
 | `origin.go` | `OriginValue` — one place a roster is published |
 | `codes.go` / `errors.go` | the range (fifteen codes) and its fourteen sentinels |
+| `grant_internal_test.go` | the three dates a grant is bounded by |
 | `roster_internal_test.go` | the public/private split of both roster lookups |
 
 ## Why-this-shape
