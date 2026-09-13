@@ -18,6 +18,8 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
 | `grant.go` | `GrantValue` — what a successful verification hands back |
 | `origin.go` | `OriginValue` — one place a roster is published |
 | `codes.go` / `errors.go` | the range (fifteen codes) and its fourteen sentinels |
+| `grant_internal_test.go` | the three dates a grant is bounded by |
+| `roster_internal_test.go` | the public/private split of both roster lookups |
 
 ## Why-this-shape
 
@@ -39,10 +41,27 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
 - **`SubjectFor` reports absence as revocation.** A subject that was never
   approved and one that was removed are indistinguishable from a roster, and the
   safe reading of both is the same. Its doc comment says so where a caller reads
-  it, rather than leaving the merge implicit.
+  it, rather than leaving the merge implicit. A roster that LISTS a subject with
+  an empty fingerprint joins them under the same sentinel and is separated only
+  by the `condition` field: it is a broken publisher, not a withdrawal.
+- **Both roster lookups are total on a nil receiver.** `Roster` is aliased into
+  `pkg/v1/entitlement`, so a consumer can hold a nil one; `CIEntitlementFor` has
+  refused it since it was written and `SubjectFor` used to dereference it. Both
+  now refuse, fail-closed, with `condition=no roster to check against`. Not
+  `RosterUnreachable`, which means "cannot decide, retry" — retrying a nil
+  pointer never terminates.
 - **`GrantValue` carries the deadline, not just the instant.** A daemon aging
   against `VerifiedAt` alone kept serving past the roster window that authorised
   it. The deadline is the roster's, so the grant cannot outlive its evidence.
+- **A refusal names no account, no uuid and no deadline.** `CIEntitlementFor`'s
+  four refusals render one byte-identical sentence, and `SubjectFor`'s renders
+  another; which account, which uuid, which term closed and when travel as
+  `errs` FIELDS. A refusal that quotes the identifier back confirms it to
+  whoever presented it, and a roster can be read one probe at a time that way.
+  The `condition` field is what keeps the four tellable apart for the operator
+  who is entitled to the difference — losing the particular and leaking it are
+  both defects, and `TestNoParticularReachesThePublicSentence` asserts both
+  directions.
 
 ## Do NOT
 
@@ -52,6 +71,11 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
 - Add a "verification disabled" value however it is spelled. The zero
   `RosterValue` entitles nobody, which is ADR 0031's requirement for this
   domain.
+- Call `fmt.Errorf` here, or interpolate a particular into a public sentence.
+  Refusals are `errs.Wrap(Sentinel, errs.WrapParams{}, errs.String(…))` — the
+  shape every other `internal/core/*` package uses — so origin-wins keeps the
+  sentinel's Code, Reason, Public, Private and exit status and the call site
+  adds only fields.
 
 ## Verification
 
