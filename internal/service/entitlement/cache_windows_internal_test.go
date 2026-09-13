@@ -9,6 +9,19 @@ import (
 	"testing"
 )
 
+// unguardedRenameIsCollisionFree says whether two processes renaming different
+// staged files onto the SAME destination, with nothing holding it open, can
+// both succeed.
+//
+// Windows: no. MoveFileEx must delete the destination to replace it, and while
+// one replacement is in flight the other finds the name briefly unavailable —
+// measured at 99 of 400 rounds on windows-latest, with the cache left valid in
+// all 400. It is a property of the UNGUARDED primitive and production never
+// calls it that way: every install goes through holdCacheForWrite, which is
+// why Test_rememberRoster_concurrentGenerationsNeverLowerTheMark — two guarded
+// writers racing — passes here.
+const unguardedRenameIsCollisionFree bool = false
+
 // openWithShareMode opens path for reading with an explicit Windows share
 // mode, which os.Open cannot express.
 //

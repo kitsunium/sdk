@@ -339,9 +339,21 @@ func Test_writeCachedBundle_concurrentWritersNeverDestroyTheCache(t *testing.T) 
 				}
 			}
 
-			if destroyed != 0 || reported != 0 {
-				t.Errorf("installed bytes failed to authenticate in %d of %d rounds and the write reported failure in %d, want 0 and 0 (%s)",
-					destroyed, concurrentRounds, reported, tt.reason)
+			//: The safety property, asserted everywhere: whatever ends up
+			//: installed is a bundle somebody signed. The staging collision
+			//: this test was written for destroyed the cache in 15 of 400
+			//: rounds, and a unique staged name is what removed it.
+			if destroyed != 0 {
+				t.Errorf("installed bytes failed to authenticate in %d of %d rounds, want 0 (%s)",
+					destroyed, concurrentRounds, tt.reason)
+			}
+			//: Whether both writers SUCCEED is a platform question, and only
+			//: about this unguarded primitive — production installs through
+			//: holdCacheForWrite, so the two never overlap there. See the two
+			//: build-tagged declarations of this constant.
+			if unguardedRenameIsCollisionFree && reported != 0 {
+				t.Errorf("the write reported failure in %d of %d rounds, want 0 — rename(2) replaces unconditionally, so two writers racing one name both succeed (%s)",
+					reported, concurrentRounds, tt.reason)
 			}
 		})
 	}

@@ -14,6 +14,16 @@ import (
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
 
+// unguardedRenameIsCollisionFree says whether two processes renaming different
+// staged files onto the SAME destination, with nothing holding it open, can
+// both succeed.
+//
+// POSIX: yes. rename(2) is atomic and unconditional — the destination is
+// replaced whatever state it is in, so two writers racing the same name both
+// return success and the last one wins. Windows answers differently, and
+// cache_windows_internal_test.go carries that answer.
+const unguardedRenameIsCollisionFree bool = true
+
 // Test_DefaultCacheDir_unixDisablesItselfWithoutAHome pins that a machine
 // whose cache root cannot be named gets NO fallback rather than a relative
 // path.
