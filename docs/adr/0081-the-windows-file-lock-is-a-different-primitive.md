@@ -261,12 +261,14 @@ file ledger is refused because it is *writable by someone else*, not because
   on `windows` as it does on `linux`, `darwin` and the four BSDs.
   `UnsupportedPlatform` is now returned only where there is no file-range lock
   at all: `js`, `plan9`, `aix`, `solaris`, `ios`.
-- **The API is unchanged.** Same `Locker`, same `Lease`, same sentinels, no new
-  error code, no new configuration field. A file lease still does not implement
-  `Deadliner`, for the same reason: the kernel releases the lock when the
-  holder's process dies, so there is no deadline to report. One **behaviour**
-  changes, on every platform: a ledger holding `2^64-1` is now refused with
-  `LOCK_FENCE_CORRUPT` instead of wrapping to zero (D7).
+- **The Go API is unchanged.** Same `Locker`, same `Lease`, same sentinels, no
+  new error code, no new configuration field. A file lease still does not
+  implement `Deadliner`, for the same reason: the kernel releases the lock when
+  the holder's process dies, so there is no deadline to report. Two things
+  outside the type signatures **do** change, both from D7 and both on every
+  platform: a ledger holding `2^64-1` is now refused with `LOCK_FENCE_CORRUPT`
+  instead of wrapping to zero, and that sentinel now carries an additive
+  `condition` field (`unparseable` / `exhausted`) — see §Breaking changes.
 - **A fence is still a fence across a reboot**, and on Windows it is harder to
   corrupt: a non-holder cannot write the ledger while a holder exists.
 - **Negative / accepted, and true on every platform.** A fence ledger is only as
@@ -315,9 +317,14 @@ the failure the domain exists to prevent — but the refusal is new, and a
 deployment whose ledger has been seeded with that value stops acquiring instead
 of quietly starting over.
 
-No API changed. No type, function, field or sentinel was added, removed or
-renamed. `LOCK_FENCE_CORRUPT` gains one field, `condition`, valued
-`unparseable` or `exhausted`.
+No Go API changed: no type, function, struct field or sentinel was added,
+removed or renamed. There is one **additive error-shape** change, and it is
+observable — `*errs.Error.Fields()` is public, and `pkg/v1/errs` aliases
+`Field` — so it is stated rather than filed under "no API changed":
+`LOCK_FENCE_CORRUPT` now carries a `condition` field valued `unparseable` or
+`exhausted`. Additive: a consumer reading fields by key sees a new key, never
+a changed or missing one, and nothing in the SDK dispatches on it. It exists
+for the log line, which is the only place the distinction is actionable.
 
 ## Alternatives considered
 

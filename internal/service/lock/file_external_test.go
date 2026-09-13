@@ -200,9 +200,16 @@ func TestACorruptFenceLedgerIsRefused(t *testing.T) {
 		t.Fatalf("Acquire = %v, want LOCK_FENCE_CORRUPT", err)
 	}
 	//: and the refusal must not leave the name held: the gate is given back.
+	//: `held` alone cannot say so — a LEAKED gate makes TryAcquire return
+	//: (nil, false, nil) from gate.tryEnter, which is indistinguishable from
+	//: a clean refusal. The CODE is what proves the second attempt got past
+	//: the gate and reached readFence at all.
 	_, held, tryErr := locker.TryAcquire(t.Context(), "job")
-	if tryErr == nil && held {
+	if held {
 		t.Fatal("the failed acquisition left the lock held")
+	}
+	if !errs.HasCode(tryErr, svclock.CodeLockFenceCorrupt) {
+		t.Fatalf("TryAcquire after a refused acquisition = %v, want LOCK_FENCE_CORRUPT — the refusal leaked its gate, so this attempt never reached the ledger", tryErr)
 	}
 }
 
@@ -250,10 +257,17 @@ func TestAnExhaustedFenceLedgerIsRefusedRatherThanWrapped(t *testing.T) {
 	if string(raw) != "18446744073709551615\n" {
 		t.Fatalf("the ledger after a refused acquisition = %q, want it untouched", raw)
 	}
-	//: and the name is not left held by an acquisition that failed.
+	//: and the name is not left held by an acquisition that failed. `held`
+	//: alone cannot say so — a LEAKED gate makes TryAcquire return
+	//: (nil, false, nil) from gate.tryEnter, which is indistinguishable from
+	//: a clean refusal. The CODE is what proves this attempt got past the
+	//: gate and reached the ledger.
 	_, held, tryErr := locker.TryAcquire(t.Context(), "job")
-	if tryErr == nil && held {
+	if held {
 		t.Fatal("the failed acquisition left the lock held")
+	}
+	if !errs.HasCode(tryErr, svclock.CodeLockFenceCorrupt) {
+		t.Fatalf("TryAcquire after a refused acquisition = %v, want LOCK_FENCE_CORRUPT — the refusal leaked its gate, so this attempt never reached the ledger", tryErr)
 	}
 }
 
