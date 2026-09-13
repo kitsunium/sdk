@@ -20,6 +20,8 @@ import (
 
 	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
 
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 
 	svcent "github.com/kitsunium/sdk/internal/service/entitlement"
@@ -963,8 +965,8 @@ func TestVerifyRequiresTheCISeatInsideActions(t *testing.T) {
 }
 
 // TestVerifyNamesTheCISeatFailureAlongsideTheDeviceOne pins that a refusal on
-// a runner says BOTH halves in its MESSAGE — and that the seat's error chain
-// does not come with it.
+// a runner carries BOTH halves — and that the seat's error chain does not come
+// with it.
 //
 // The seat is tried first and every failure there is swallowed, which is
 // correct right up to the moment the device path also refuses. An operator was
@@ -972,10 +974,14 @@ func TestVerifyRequiresTheCISeatInsideActions(t *testing.T) {
 // place entirely to send somebody whose runner is simply not covered.
 //
 // The chain is checked NEGATIVELY on purpose. ciContext folds the seat cause in
-// with %v, because the seat's chain is not CI-only: a JWKS outage carries
+// as a FIELD, because the seat's chain is not CI-only: a JWKS outage carries
 // coreent.ErrRosterUnreachable, which both licenseExitCode and licenseAdvice match
 // ahead of several device sentinels. Test_ciContext pins that hazard directly;
 // this test pins that Verify's own output has the same property end to end.
+//
+// The seat's sentence lives in the ci_refusal field and not in err.Error():
+// that half is wire-safe and says what the DEVICE refusal was, which is the
+// one an operator acts on.
 //
 // Not parallel: t.Setenv.
 func TestVerifyNamesTheCISeatFailureAlongsideTheDeviceOne(t *testing.T) {
@@ -984,7 +990,7 @@ func TestVerifyNamesTheCISeatFailureAlongsideTheDeviceOne(t *testing.T) {
 	tests := []struct {
 		name string
 		inCI bool
-		// wantCIText is whether the seat failure must appear in the message.
+		// wantCIText is whether the seat failure must be readable back.
 		wantCIText bool
 		reason     string
 	}{
@@ -1038,9 +1044,14 @@ func TestVerifyNamesTheCISeatFailureAlongsideTheDeviceOne(t *testing.T) {
 			if !errors.Is(err, coreent.ErrNoLicense) {
 				t.Fatalf("Verify() error = %v, want it to still wrap coreent.ErrNoLicense (%s)", err, tt.reason)
 			}
-			//: The seat cause reaches the TEXT...
-			if got := strings.Contains(err.Error(), "CI seat was refused too"); got != tt.wantCIText {
-				t.Errorf("message carries the seat cause = %v, want %v — err = %v (%s)", got, tt.wantCIText, err, tt.reason)
+			//: The seat cause reaches the FIELD...
+			if got := ciRefusalField(err) != ""; got != tt.wantCIText {
+				t.Errorf("ci_refusal field present = %v, want %v — err = %v (%s)", got, tt.wantCIText, err, tt.reason)
+			}
+			//: ...and never the wire-safe sentence, which says what the
+			//: DEVICE refusal was and nothing about a seat.
+			if strings.Contains(err.Error(), "CI") {
+				t.Errorf("Verify() = %q, want the seat OUT of the public sentence (%s)", err, tt.reason)
 			}
 			//: ...and never the chain. coreent.ErrCIUnverifiable reachable here would
 			//: mean %w had been used, which is how a JWKS outage's
@@ -1193,4 +1204,18 @@ func Test_Service_WithOrigins(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ciRefusalField reads the seat annotation back off a device refusal, or ""
+// when it carries none.
+func ciRefusalField(err error) string {
+	//: Scan the fields origin-wins concatenated onto the refusal.
+	for _, field := range errs.FieldsOf(err) {
+		//: One key, set by ciContext and by nothing else here.
+		if field.Key() == "ci_refusal" {
+			return field.StringValue()
+		}
+	}
+	//: Absent, which is the outside-Actions case.
+	return ""
 }

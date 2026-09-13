@@ -13,6 +13,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 	svcent "github.com/kitsunium/sdk/internal/service/entitlement"
 )
@@ -65,7 +67,10 @@ func GenerateKeyPair(product *svcent.ProductValue, sshDir, subject string) (publ
 	//: both halves of a key pair outside sshDir.
 	if !validSubject(subject) {
 		//: Refuse rather than write anywhere the caller did not name.
-		return "", fmt.Errorf("%w: subject %q is not a canonical v4 UUID", coreent.ErrNoLicense, subject)
+		return "", refuse(coreent.ErrNoLicense,
+			errs.String("stage", "validate_subject"),
+			errs.String("condition", "not a canonical v4 UUID, so no path is built from it"),
+			errs.String("subject", subject))
 	}
 
 	//: A fresh machine, a container or a CI runner has no ~/.ssh yet, and
@@ -74,41 +79,53 @@ func GenerateKeyPair(product *svcent.ProductValue, sshDir, subject string) (publ
 	//: an operator's stricter permissions are left untouched.
 	if dirErr := os.MkdirAll(sshDir, sshDirMode); dirErr != nil {
 		//: Without a key directory there is nowhere to enrol.
-		return "", fmt.Errorf("%w: creating key directory %s: %w", EnrolmentFailed, sshDir, dirErr)
+		return "", classify(EnrolmentFailed, dirErr,
+			errs.String("step", "mkdir"),
+			errs.String("dir", sshDir))
 	}
 
 	pub, priv, genErr := ed25519.GenerateKey(nil)
 	//: A key we cannot generate cannot be enrolled.
 	if genErr != nil {
 		//: Refuse rather than write half an identity.
-		return "", fmt.Errorf("%w: generating key: %w", EnrolmentFailed, genErr)
+		return "", classify(EnrolmentFailed, genErr,
+			errs.String("step", "generate"),
+			errs.String("subject", subject))
 	}
 
 	block, marshalErr := ssh.MarshalPrivateKey(priv, product.Label()+" entitlement "+subject)
 	//: A private half we cannot serialise is unusable.
 	if marshalErr != nil {
 		//: Refuse rather than write half an identity.
-		return "", fmt.Errorf("%w: marshalling private key: %w", EnrolmentFailed, marshalErr)
+		return "", classify(EnrolmentFailed, marshalErr,
+			errs.String("step", "marshal_private"),
+			errs.String("subject", subject))
 	}
 	//: Write the private half first and owner-only: a later failure leaves a
 	//: useless key rather than a published identity with no way to prove it.
 	if writeErr := os.WriteFile(PrivateKeyPath(sshDir, subject), pem.EncodeToMemory(block), keyFileMode); writeErr != nil {
 		//: Refuse rather than continue without a private half.
-		return "", fmt.Errorf("%w: writing private key: %w", EnrolmentFailed, writeErr)
+		return "", classify(EnrolmentFailed, writeErr,
+			errs.String("step", "write_private"),
+			errs.String("path", PrivateKeyPath(sshDir, subject)))
 	}
 
 	sshPub, convErr := ssh.NewPublicKey(pub)
 	//: A public half we cannot serialise cannot be published.
 	if convErr != nil {
 		//: Refuse rather than enrol an unverifiable identity.
-		return "", fmt.Errorf("%w: converting public key: %w", EnrolmentFailed, convErr)
+		return "", classify(EnrolmentFailed, convErr,
+			errs.String("step", "marshal_public"),
+			errs.String("subject", subject))
 	}
 	authorized := ssh.MarshalAuthorizedKey(sshPub)
 	//: The published half is world-readable by design; its secrecy was never
 	//: part of the scheme.
 	if writeErr := os.WriteFile(PublicKeyPath(sshDir, subject), authorized, publicKeyFileMode); writeErr != nil {
 		//: Refuse rather than leave the pair half-written.
-		return "", fmt.Errorf("%w: writing public key: %w", EnrolmentFailed, writeErr)
+		return "", classify(EnrolmentFailed, writeErr,
+			errs.String("step", "write_public"),
+			errs.String("path", PublicKeyPath(sshDir, subject)))
 	}
 	//: Return the authorized-keys line the issue will carry.
 	return string(authorized), nil
