@@ -9,8 +9,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/kernel/errs"
-
+	corelock "github.com/kitsunium/sdk/internal/core/lock"
 	svclock "github.com/kitsunium/sdk/internal/service/lock"
 )
 
@@ -43,6 +42,100 @@ import (
 // survives. Reading which row ran means running this file with -v. That is
 // stated here rather than left as a plausible-sounding claim about the log.
 
+// reparseLedger is what the symbolic-link row points at: content readFence
+// ACCEPTS as a counter, so the planter would be choosing the victim's fencing
+// token. The same worst case as the Unix table's decimal row.
+const reparseLedger string = "48213\n"
+
+// reparseCase is one reparse point planted at the lock path.
+type reparseCase struct {
+	// name says what was planted; it is also the subtest's name.
+	name string
+	// plant creates the indirection at lockPath and reports why it could not,
+	// if it could not. target is a directory that already exists, because a
+	// junction has no other kind of target.
+	plant func(t *testing.T, target, lockPath string) (why string, planted bool)
+}
+
+// plantSymbolicLink points the lock path at a FILE inside target, so the open
+// succeeds on the link and the handle check is what refuses it.
+func plantSymbolicLink(t *testing.T, target, lockPath string) (why string, planted bool) {
+	t.Helper()
+	file := filepath.Join(target, "elsewhere.lock")
+	if err := os.WriteFile(file, []byte(reparseLedger), 0o600); err != nil {
+		t.Fatalf("writing the redirect target = %v", err)
+	}
+	if err := os.Symlink(file, lockPath); err != nil {
+		//: ERROR_PRIVILEGE_NOT_HELD (1314) is the expected refusal on an
+		//: account without SeCreateSymbolicLinkPrivilege.
+		return err.Error(), false
+	}
+	return "", true
+}
+
+// plantJunction points the lock path at target itself, so the open fails and
+// classifyOpenFailure is what names it.
+//
+// mklink is a cmd builtin and /J needs no privilege at all, which is the whole
+// reason this row sits beside one that does.
+func plantJunction(t *testing.T, target, lockPath string) (why string, planted bool) {
+	t.Helper()
+	out, err := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/J", lockPath, target).CombinedOutput()
+	//: the command's own output is the diagnosis; an exit status says nothing
+	//: about why.
+	if err != nil {
+		return string(out), false
+	}
+	return "", true
+}
+
+// reparseCases is the Unix probe's Windows twin, reduced to a table.
+func reparseCases() []reparseCase {
+	return []reparseCase{
+		{"symbolic link", plantSymbolicLink},
+		{"junction", plantJunction},
+	}
+}
+
+// assertNothingReachedThrough pins that the refusal was a refusal: the
+// acquisition wrote nothing through the link.
+//
+// before is how many entries the PLANT itself left in target — one for the
+// symbolic-link row, none for the junction row — so the assertion is about
+// what the acquisition added and nothing else.
+func assertNothingReachedThrough(t *testing.T, what, target string, before int) {
+	t.Helper()
+	entries, readErr := os.ReadDir(target)
+	if readErr != nil {
+		t.Fatalf("reading the redirect target = %v", readErr)
+	}
+	if len(entries) > before {
+		t.Fatalf("the redirect target gained %d entries — the lock reached through the %s", len(entries)-before, what)
+	}
+}
+
+// newPlantedLocker builds a locker over a fresh lock directory and returns it
+// with the redirect target directory beside it.
+func newPlantedLocker(t *testing.T) (locker corelock.Locker, dir, target string) {
+	t.Helper()
+	base := t.TempDir()
+	target = filepath.Join(base, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatalf("creating the redirect target directory = %v", err)
+	}
+	dir = filepath.Join(base, "locks")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatalf("creating the lock directory = %v", err)
+	}
+	built, err := svclock.NewFileLocker(svclock.FileConfig{Dir: dir})
+	//: Windows accepts every directory by mode (ADR 0081 §D5), so this never
+	//: refuses — and if it ever did, every row would be asserting nothing.
+	if err != nil {
+		t.Fatalf("NewFileLocker = %v, want a locker", err)
+	}
+	return built, dir, target
+}
+
 // TestTheFileLockerRefusesAnIndirectionAtTheLockPath is the Unix probe's
 // Windows twin.
 //
@@ -54,101 +147,28 @@ import (
 // planted reparse point exactly as the Unix open followed a planted symlink,
 // and the lock landed on the planter's file.
 func TestTheFileLockerRefusesAnIndirectionAtTheLockPath(t *testing.T) {
-	type tc struct {
-		name string
-		// plant creates the indirection at lockPath and reports why it could
-		// not, if it could not. target is a directory that already exists,
-		// because a junction has no other kind of target.
-		plant func(t *testing.T, target, lockPath string) (why string, planted bool)
-	}
-	tests := []tc{
-		{
-			name: "symbolic link",
-			plant: func(t *testing.T, target, lockPath string) (why string, planted bool) {
-				t.Helper()
-				//: a FILE target, so this is a file reparse point and the open
-				//: is the one that succeeds and has to be refused afterwards.
-				//: Decimal content is the worst case: readFence accepts it, so
-				//: the planter would be choosing the victim's fencing token.
-				file := filepath.Join(target, "elsewhere.lock")
-				if err := os.WriteFile(file, []byte("48213\n"), 0o600); err != nil {
-					t.Fatalf("writing the redirect target = %v", err)
-				}
-				if err := os.Symlink(file, lockPath); err != nil {
-					//: ERROR_PRIVILEGE_NOT_HELD (1314) is the expected refusal
-					//: on an account without SeCreateSymbolicLinkPrivilege.
-					return err.Error(), false
-				}
-				return "", true
-			},
-		},
-		{
-			name: "junction",
-			plant: func(t *testing.T, target, lockPath string) (why string, planted bool) {
-				t.Helper()
-				//: mklink is a cmd builtin and /J needs no privilege at all,
-				//: which is the whole reason this row sits beside one that does.
-				out, err := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/J", lockPath, target).CombinedOutput()
-				//: the command's own output is the diagnosis; an exit status
-				//: says nothing about why.
-				if err != nil {
-					return string(out), false
-				}
-				return "", true
-			},
-		},
-	}
 	planted := 0
-	runCase := func(t *testing.T, c tc) {
+	runCase := func(t *testing.T, c reparseCase) {
 		t.Helper()
-		base := t.TempDir()
-		target := filepath.Join(base, "target")
-		if err := os.Mkdir(target, 0o700); err != nil {
-			t.Fatalf("creating the redirect target directory = %v", err)
-		}
-		dir := filepath.Join(base, "locks")
-		if err := os.Mkdir(dir, 0o700); err != nil {
-			t.Fatalf("creating the lock directory = %v", err)
-		}
-		locker, err := svclock.NewFileLocker(svclock.FileConfig{Dir: dir})
-		//: Windows accepts every directory by mode (ADR 0081 §D5), so this
-		//: never refuses — and if it ever did, the row below would be
-		//: asserting nothing.
-		if err != nil {
-			t.Fatalf("NewFileLocker = %v, want a locker", err)
-		}
+		locker, dir, target := newPlantedLocker(t)
 		//: the filename is the SHA-256 of the lock name: unforgeable, entirely
 		//: predictable, and predictable is all the attack needs.
-		lockPath := lockFilePath(dir, "victim")
-		why, ok := c.plant(t, target, lockPath)
+		why, ok := c.plant(t, target, lockFilePath(dir, victimName))
 		if !ok {
 			t.Skipf("this account cannot plant a %s, so the kernel half of this row did not run: %s", c.name, why)
 		}
 		planted++
-
-		lease, held, acquireErr := locker.TryAcquire(t.Context(), "victim")
-		//: held and lease are asserted apart from the code because they fail
-		//: apart, and held is what a caller actually branches on.
-		if held || lease != nil {
-			t.Fatalf("TryAcquire over a planted %s = (%v, %v), want no lease", c.name, lease, held)
-		}
-		//: LOCK_BACKEND_FAILED would tell an operator to retry, which is the
-		//: one wrong response to a deliberate substitution.
-		if !errs.HasCode(acquireErr, svclock.CodeLockPathRedirected) {
-			t.Fatalf("TryAcquire over a planted %s = %v, want LOCK_PATH_REDIRECTED", c.name, acquireErr)
-		}
-		//: and the refusal has to BE one: nothing written through the link.
-		entries, readErr := os.ReadDir(target)
+		//: counted AFTER the plant, because the plant may have put a redirect
+		//: target in place itself.
+		before, readErr := os.ReadDir(target)
 		if readErr != nil {
 			t.Fatalf("reading the redirect target = %v", readErr)
 		}
-		//: the symbolic-link row put one file there itself; the junction row
-		//: put none. Either way the acquisition added nothing.
-		if len(entries) > 1 {
-			t.Fatalf("the redirect target gained %d entries — the lock reached through the %s", len(entries), c.name)
-		}
+		lease, held, acquireErr := locker.TryAcquire(t.Context(), victimName)
+		assertRefused(t, c.name, lease, held, acquireErr)
+		assertNothingReachedThrough(t, c.name, target, len(before))
 	}
-	for _, c := range tests {
+	for _, c := range reparseCases() {
 		//: deliberately NOT parallel: `planted` is written here and read below,
 		//: and a non-parallel subtest has finished when t.Run returns.
 		t.Run(c.name, func(t *testing.T) {
@@ -167,7 +187,7 @@ func TestTheFileLockerRefusesAnIndirectionAtTheLockPath(t *testing.T) {
 	}
 	//: visible with -v and nowhere else; see this file's header for why there
 	//: is no version of this line that a non-verbose lane would print.
-	t.Logf("indirection rows that reached the kernel: %d of %d", planted, len(tests))
+	t.Logf("indirection rows that reached the kernel: %d of %d", planted, len(reparseCases()))
 }
 
 // TestTheReparseFlagIsAcceptedByTheToolchain is the canary for the one thing

@@ -321,6 +321,35 @@ a status, not a decision edit (`docs/adr/CLAUDE.md` §Do NOT).
   directory-handle API the SDK does not have and `x/sys` cannot supply it. The
   exposure is narrower than the closed one: the parents are the caller's own
   configuration, not a name this package derives.
+- **Unlink-and-replace inside a sticky world-writable directory.** Raised in
+  review against this change and **reproduced** — it is a real exposure, it is
+  older than this change, and no `O_NOFOLLOW` closes it because no symbolic
+  link is involved. In a `0777|sticky` lock directory the planter OWNS the
+  lock-file entry they created, so the sticky bit permits them to unlink it —
+  *while the victim holds it*:
+
+  ```
+  victime détient le verrou : fence=1 inode=50173
+  2e verrou AVANT l'échange : held=false (attendu false)
+  entrée désliée pendant que la victime la détient
+  2e verrou APRÈS l'échange : held=true err=<nil> inode=50174
+  SPLIT : deux détenteurs, fences 1 et 1, inodes 50173 et 50174
+  ```
+
+  Two holders, and the fence RESET rather than advanced — both report 1. That
+  is sharper than the ADR 0081 §Consequences paragraph admits, which bounds the
+  reset to "anyone who can delete the lock file **while nobody holds it**". It
+  does not need the lock to be free.
+
+  It is not closed here, and the obvious fix is the wrong one. Refusing a lock
+  file this process does not own would break the arrangement `checkDir`
+  deliberately accepts — "a lock shared between two service accounts through a
+  common group is a deliberate arrangement" (ADR 0081 §D5) — in which the entry
+  is owned by the *other* account by design. Refusing a `0777|sticky` directory
+  outright would refuse `/tmp`, which is the row that table accepts by name. A
+  real answer compares `(dev, ino)` of the descriptor against the path after
+  the lock is taken, and that is a change to `takeFlock`'s contract with its
+  own ledger rather than to how the file is opened.
 - **A hard link at the lock path.** Accepted, see §Consequences. Refusing it
   means comparing `Stat.Nlink` after the open, which is one `fstat` — but
   `Nlink > 1` is also what a legitimate backup or deduplicating filesystem

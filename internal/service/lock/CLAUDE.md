@@ -182,6 +182,13 @@ opposites in the same way `flock`/`LockFileEx` are:
 | What refuses | the kernel | `refuseReparseHandle`, on the handle's attributes |
 | Sentinel | `LockPathRedirected` | `LockPathRedirected` |
 
+What is still NOT closed, measured in review: inside a `0777|sticky`
+directory the planter OWNS the lock-file entry they created, so the sticky bit
+lets them unlink it **while the victim holds it** — and the next acquisition
+gets a fresh inode with the fence reset. Two holders, both reporting fence 1,
+with no symbolic link anywhere. It predates ADR 0082 and is recorded in its
+§Deferred with the measurement and with why an owner check is the wrong fix.
+
 The errno is never consulted: `O_NOFOLLOW` on a symlink is measured `ELOOP` on
 linux/amd64 and is documented `EMLINK` on FreeBSD/DragonFly, `EFTYPE` on
 NetBSD, `ELOOP` on OpenBSD/Darwin. `os.Lstat` after the refusal answers what
