@@ -148,6 +148,49 @@ const CodeUnknownArchive errs.Code = coreupd.CodeUnknownArchive
 // operator did not opt into. Recoverable, but only through the opt-in.
 const CodeElevationNotAuthorised errs.Code = coreupd.CodeElevationNotAuthorised
 
+// The seven codes below are the IMPLEMENTATION's, range 0.3.66.*, for failures
+// this domain's contract does not name because a different implementation of
+// the same port would fail in different places. They are re-exported for the
+// same reason the eighteen above are: a code a consumer can match on but cannot
+// NAME is only half a public surface, and matching a whole range with
+// errs.NewPrefixMatcher is routing rather than classification.
+//
+// None of them is a supply-chain signal. Every one is either a local fault or a
+// transfer that stopped, which is why the three classes in the package README
+// keep their membership unchanged.
+
+// CodeCandidateTagRequired identifies a candidate install asked for without
+// naming which candidate. It wraps errors.ErrUnsupported, so a caller matching
+// that instead still matches.
+const CodeCandidateTagRequired errs.Code = svcupd.CodeCandidateTagRequired
+
+// CodeReleaseMetadataUnreadable identifies a release-API answer that arrived
+// whole and did not decode. The bytes came, so no transport retry applies.
+const CodeReleaseMetadataUnreadable errs.Code = svcupd.CodeReleaseMetadataUnreadable
+
+// CodeArchiveUnreadable identifies a release archive that would not unpack. It
+// is raised only AFTER the signature and digest have both verified, so it is a
+// packaging or transfer fault and never a supply-chain signal.
+const CodeArchiveUnreadable errs.Code = svcupd.CodeArchiveUnreadable
+
+// CodeExecutablePathUnresolved identifies an update that cannot name the file
+// it would replace. Nothing is attempted after it.
+const CodeExecutablePathUnresolved errs.Code = svcupd.CodeExecutablePathUnresolved
+
+// CodeStagingFailed identifies a replacement that failed BEFORE the rename, so
+// the running binary is byte-for-byte as it was. That is the whole difference
+// between this and CodeReplacementFailed, and it is the fact an operator needs.
+const CodeStagingFailed errs.Code = svcupd.CodeStagingFailed
+
+// CodeReplacementFailed identifies a rename over the running executable that did
+// not land.
+const CodeReplacementFailed errs.Code = svcupd.CodeReplacementFailed
+
+// CodeElevationFailed identifies an escalation the operator DID authorise and
+// that the system refused anyway. Unlike CodeElevationNotAuthorised, no
+// environment variable repairs it.
+const CodeElevationFailed errs.Code = svcupd.CodeElevationFailed
+
 // CandidateListSentinel is the tag value meaning "list the candidates rather
 // than install one".
 //

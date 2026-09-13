@@ -96,6 +96,12 @@ const CodeAPIBodyTooLarge errs.Code = coreupd.CodeAPIBodyTooLarge
 const CodeArchiveTooLarge errs.Code = coreupd.CodeArchiveTooLarge
 ```
 
+<a name="CodeArchiveUnreadable"></a>CodeArchiveUnreadable identifies a release archive that would not unpack. It is raised only AFTER the signature and digest have both verified, so it is a packaging or transfer fault and never a supply\-chain signal.
+
+```go
+const CodeArchiveUnreadable errs.Code = svcupd.CodeArchiveUnreadable
+```
+
 <a name="CodeBinaryNotInArchive"></a>CodeBinaryNotInArchive identifies a verified archive missing the binary.
 
 ```go
@@ -106,6 +112,12 @@ const CodeBinaryNotInArchive errs.Code = coreupd.CodeBinaryNotInArchive
 
 ```go
 const CodeCandidateNotFound errs.Code = coreupd.CodeCandidateNotFound
+```
+
+<a name="CodeCandidateTagRequired"></a>CodeCandidateTagRequired identifies a candidate install asked for without naming which candidate. It wraps errors.ErrUnsupported, so a caller matching that instead still matches.
+
+```go
+const CodeCandidateTagRequired errs.Code = svcupd.CodeCandidateTagRequired
 ```
 
 <a name="CodeChecksumMismatch"></a>CodeChecksumMismatch identifies an archive whose digest did not match its authenticated manifest entry.
@@ -138,10 +150,22 @@ const CodeDownloadFailed errs.Code = coreupd.CodeDownloadFailed
 const CodeDraftRelease errs.Code = coreupd.CodeDraftRelease
 ```
 
+<a name="CodeElevationFailed"></a>CodeElevationFailed identifies an escalation the operator DID authorise and that the system refused anyway. Unlike CodeElevationNotAuthorised, no environment variable repairs it.
+
+```go
+const CodeElevationFailed errs.Code = svcupd.CodeElevationFailed
+```
+
 <a name="CodeElevationNotAuthorised"></a>CodeElevationNotAuthorised identifies a replacement needing privilege the operator did not opt into. Recoverable, but only through the opt\-in.
 
 ```go
 const CodeElevationNotAuthorised errs.Code = coreupd.CodeElevationNotAuthorised
+```
+
+<a name="CodeExecutablePathUnresolved"></a>CodeExecutablePathUnresolved identifies an update that cannot name the file it would replace. Nothing is attempted after it.
+
+```go
+const CodeExecutablePathUnresolved errs.Code = svcupd.CodeExecutablePathUnresolved
 ```
 
 <a name="CodeInsecureRedirect"></a>CodeInsecureRedirect identifies a redirect leaving HTTPS or over the hop bound.
@@ -168,6 +192,18 @@ const CodeNoVendorKey errs.Code = coreupd.CodeNoVendorKey
 const CodeNotPrerelease errs.Code = coreupd.CodeNotPrerelease
 ```
 
+<a name="CodeReleaseMetadataUnreadable"></a>CodeReleaseMetadataUnreadable identifies a release\-API answer that arrived whole and did not decode. The bytes came, so no transport retry applies.
+
+```go
+const CodeReleaseMetadataUnreadable errs.Code = svcupd.CodeReleaseMetadataUnreadable
+```
+
+<a name="CodeReplacementFailed"></a>CodeReplacementFailed identifies a rename over the running executable that did not land.
+
+```go
+const CodeReplacementFailed errs.Code = svcupd.CodeReplacementFailed
+```
+
 <a name="CodeSignatureInvalid"></a>CodeSignatureInvalid identifies a manifest signature that did not verify. With CodeSignatureMissing it is the supply\-chain pair: no retry helps, and no manual install is safe.
 
 ```go
@@ -178,6 +214,12 @@ const CodeSignatureInvalid errs.Code = coreupd.CodeSignatureInvalid
 
 ```go
 const CodeSignatureMissing errs.Code = coreupd.CodeSignatureMissing
+```
+
+<a name="CodeStagingFailed"></a>CodeStagingFailed identifies a replacement that failed BEFORE the rename, so the running binary is byte\-for\-byte as it was. That is the whole difference between this and CodeReplacementFailed, and it is the fact an operator needs.
+
+```go
+const CodeStagingFailed errs.Code = svcupd.CodeStagingFailed
 ```
 
 <a name="CodeUnexpectedStatus"></a>CodeUnexpectedStatus identifies an unusable status from the release host.
@@ -193,7 +235,7 @@ const CodeUnknownArchive errs.Code = coreupd.CodeUnknownArchive
 ```
 
 <a name="StdinIsTerminal"></a>
-## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L213>)
+## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L256>)
 
 ```go
 func StdinIsTerminal() bool
@@ -204,7 +246,7 @@ StdinIsTerminal reports whether a human could answer a prompt on this process's 
 It is a free function rather than something AuthoriseUnattendedUpgrade works out for itself, and that is the point: the consent decision stays testable without a pty, because the CALLER supplies the answer. Pass the result as the interactive argument.
 
 <a name="Candidate"></a>
-## type [Candidate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L176>)
+## type [Candidate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L219>)
 
 Candidate is one release candidate. It aliases the core value type.
 
@@ -213,7 +255,7 @@ type Candidate = svcupd.CandidateValue
 ```
 
 <a name="Copier"></a>
-## type [Copier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L169>)
+## type [Copier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L212>)
 
 Copier streams the verified archive to its destination. It aliases the core port.
 
@@ -222,7 +264,7 @@ type Copier = coreupd.Copier
 ```
 
 <a name="FileSystem"></a>
-## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L165>)
+## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L208>)
 
 FileSystem is the disk half of replacing a running binary. It aliases the core port.
 
@@ -231,7 +273,7 @@ type FileSystem = coreupd.FileSystem
 ```
 
 <a name="Getter"></a>
-## type [Getter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L161>)
+## type [Getter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L204>)
 
 Getter performs the HTTP GETs a self\-update needs. It aliases the core port.
 
@@ -240,7 +282,7 @@ type Getter = coreupd.Getter
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L185>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L228>)
 
 Service replaces the running binary with a newer signed release. It aliases the service type — the engine handle, per ADR 0074.
 
@@ -249,7 +291,7 @@ type Service = svcupd.Service
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L193>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L236>)
 
 ```go
 func New(version string, src Source) *Service
@@ -260,7 +302,7 @@ New returns a Service for the given running version and release source.
 The returned Service carries NO vendor key and therefore installs nothing: chain WithVendorKey with the build's linked\-in anchor. That is the safe direction — a Service that verified only when a key happened to be present would make the security property depend on a build flag.
 
 <a name="NewWithDeps"></a>
-### func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L201>)
+### func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L244>)
 
 ```go
 func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copier Copier) *Service
@@ -269,7 +311,7 @@ func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copie
 NewWithDeps returns a Service with its three ports injected, for a caller that supplies its own HTTP policy or a test that supplies doubles. A nil fs or copier is legal on paths that never reach the disk.
 
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L181>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L224>)
 
 Source says where releases come from and what they are called. It aliases the service type: these are one engine's construction parameters, which ADR 0074 places with the engine rather than in the contract layer.
 
@@ -278,7 +320,7 @@ type Source = svcupd.SourceValue
 ```
 
 <a name="Update"></a>
-## type [Update](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L173>)
+## type [Update](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L216>)
 
 Update is the outcome of a version check or an install. It aliases the core value type.
 
