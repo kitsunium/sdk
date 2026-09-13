@@ -11,6 +11,7 @@
 package rotfile
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -45,9 +46,9 @@ func symlinkOrSkip(t *testing.T, target, link string) bool {
 // reportFollowed turns a successful open into the evidence of what it opened:
 // it writes through the descriptor and reads the target back, so the failure
 // message names the file the log sink was never pointed at.
-func reportFollowed(t *testing.T, f *os.File, path, target string) {
+func reportFollowed(t *testing.T, f io.WriteCloser, path, target string) {
 	t.Helper()
-	_, werr := f.WriteString(followMarker)
+	_, werr := io.WriteString(f, followMarker)
 	cerr := f.Close()
 	landed, rerr := os.ReadFile(target)
 	t.Errorf("the open FOLLOWED the link planted at %s (write=%v close=%v): %s now holds %q (read=%v) — "+
