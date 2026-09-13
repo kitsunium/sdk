@@ -1,5 +1,7 @@
 //go:build !windows
 
+// Package entitlement - the read side of the cache guard where the kernel
+// already provides what the guard would buy.
 package entitlement
 
 // holdCacheForRead runs a cache READ with no exclusion at all.

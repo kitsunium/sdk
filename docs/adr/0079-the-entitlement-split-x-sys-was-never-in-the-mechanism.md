@@ -160,7 +160,8 @@ Carried forward unchanged from ADR 0078, none of them addressed here:
   that touches every refusal path and deserves its own diff.
 - ~~**The cache's rename on Windows, and `rememberRoster`'s lost update.** Both
   are recorded on the versement's review threads and neither is reachable from
-  this CI matrix.~~ **CLOSED.** The second clause expired: PR #190 proved a
+  this CI matrix.~~ **CLOSED.** The second clause expired:
+  [PR #190](https://github.com/kitsunium/sdk/pull/190) proved a
   Windows test executes on `windows-latest` through `e2e-cross.yml`, and
   `./entitlement` joining `SERVICE_PKGS` is the whole of what made it reachable.
   Both defects were reproduced there and fixed; what was measured in the process

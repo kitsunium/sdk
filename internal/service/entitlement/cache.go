@@ -45,21 +45,6 @@ const cachedBundleName string = "roster.signed.json"
 // cacheDirMode keeps the cache directory owner-only.
 const cacheDirMode os.FileMode = 0o700
 
-// cacheFileMode keeps the cached bundle owner-only.
-//
-// It is hygiene, NOT a control, and the difference matters. The bundle holds
-// no secret — it is a world-readable document published over plain HTTPS — so
-// nothing is protected by narrowing it; the reason to narrow it anyway is that
-// there is no reason to widen it.
-//
-// Nothing ever reads this mode back. That is deliberate and it is the lesson
-// key_windows.go paid for: os.Stat on Windows reports a synthesised 0444/0666
-// that carries no access-control meaning, so a POSIX permission gate on this
-// file would refuse every cached bundle there, exactly as it once refused every
-// private key. The integrity of these bytes comes from the vendor's signature
-// and from nowhere else, which is precisely why no such gate is needed.
-const cacheFileMode os.FileMode = 0o600
-
 // DefaultCacheDir returns where the last authenticated roster is kept.
 //
 // An empty string means "no cache", which disables the offline fallback
@@ -121,7 +106,7 @@ func (s *Service) rememberRoster(raw []byte, roster *coreent.RosterValue) {
 	//: both conclude they are newer than it, and whichever renames LAST
 	//: decides what the mark becomes — measured at 108 of 400 rounds before
 	//: this guard existed.
-	s.holdCache(func() {
+	s.holdCacheForWrite(func() {
 		//: The bundle offered is OLDER than the one already kept, which
 		//: teaches this machine nothing it does not know and would weaken
 		//: what it does. This is the ratchet, and it is what checkClock
@@ -161,9 +146,9 @@ func (s *Service) rememberRoster(raw []byte, roster *coreent.RosterValue) {
 // 400 rounds, against a doc comment promising the opposite.
 //
 // os.CreateTemp answers that with an O_EXCL create, so uniqueness is enforced
-// rather than hoped for, and its 0600 is cacheFileMode: applied at creation,
-// so no separate chmod can leave a window in which the file exists at
-// something wider. The reason this code avoided it before was that "a dropped
+// rather than hoped for, and its 0600 is the mode this cache wants: applied at
+// creation, so no separate chmod can leave a window in which the file exists
+// at something wider. The reason this code avoided it before was that "a dropped
 // Close is how a full filesystem produces a truncated file that then gets
 // renamed over a good cache" — which is answered by not dropping it. stageBundle
 // checks the Close and refuses on it.
@@ -199,6 +184,19 @@ func writeCachedBundle(dir string, raw []byte) error {
 // stageBundle writes raw to a file in dir that no other writer can be using,
 // and returns the path it wrote.
 //
+// os.CreateTemp creates at 0600, which is the mode this cache wants: owner
+// -only, applied at creation, so no separate chmod can leave a window in which
+// the file exists at something wider. That is hygiene and NOT a control — the
+// bundle is a world-readable document published over plain HTTPS, so nothing
+// is protected by narrowing it; the reason to narrow it anyway is that there
+// is no reason to widen it. Nothing in this package ever reads the mode back,
+// which is the lesson key_windows.go paid for: os.Stat on Windows reports a
+// synthesised 0444/0666 carrying no access-control meaning, so a POSIX
+// permission gate here would refuse every cached bundle there. The integrity
+// of these bytes comes from the vendor's signature and from nowhere else.
+// Test_writeCachedBundle_unixInstallsOwnerOnly asserts the mode instead, where
+// the concept exists.
+//
 // Both failures are reported, and the order between them is the point: a Write
 // that failed says the bytes are not all there, while a Close that failed says
 // they may not have reached the disk. Either one makes the staged file unfit
@@ -213,22 +211,29 @@ func stageBundle(dir string, raw []byte) (path string, err error) {
 	}
 
 	staged := file.Name()
-	_, writeErr := file.Write(raw)
-	//: Closed at the point it was opened, and its failure kept rather than
-	//: deferred into a path that could only log it.
-	closeErr := file.Close()
-	//: The write first: it is the failure that says the content is wrong,
-	//: and reporting a Close error over it would name the lesser problem.
-	if writeErr != nil {
+	//: Released at the point it was acquired — and its failure REPORTED, not
+	//: logged. A Close that failed says the bytes may never have reached the
+	//: disk, which is exactly what makes this file unfit to rename over a
+	//: cache that is currently valid; a full filesystem surfaces here and
+	//: nowhere else. It only overrides a success, because a write failure
+	//: already names the larger problem.
+	defer func() {
+		closeErr := file.Close()
+		//: Nothing to add when the caller is already failing.
+		if closeErr == nil || err != nil {
+			//: Leave the existing outcome alone.
+			return
+		}
+		removeBestEffort(staged)
+		path, err = "", fmt.Errorf("closing %s: %w", staged, closeErr)
+	}()
+
+	//: Nothing partial is ever installed: the staged file is removed and the
+	//: rename that would have consumed it never happens.
+	if _, writeErr := file.Write(raw); writeErr != nil {
 		removeBestEffort(staged)
 		//: Report the write failure.
 		return "", fmt.Errorf("writing %s: %w", staged, writeErr)
-	}
-	//: A full filesystem surfaces here and nowhere else.
-	if closeErr != nil {
-		removeBestEffort(staged)
-		//: Report the close failure.
-		return "", fmt.Errorf("closing %s: %w", staged, closeErr)
 	}
 	//: A complete bundle, at a name only this call knows.
 	return staged, nil

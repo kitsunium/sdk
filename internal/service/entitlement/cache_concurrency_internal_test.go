@@ -149,6 +149,30 @@ func Test_rememberRoster_concurrentGenerationsNeverLowerTheMark(t *testing.T) {
 	}
 }
 
+// refreshRacingAReader runs one round of the race and returns the mark left
+// behind: a read through the package's own read path, concurrent with one
+// install of raw.
+//
+// It is a function rather than a closure in the loop so that neither the
+// Service nor the barrier is captured by a closure created per iteration.
+func refreshRacingAReader(svc *Service, raw []byte, issued time.Time) time.Time {
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	//: Goroutine lifecycle: waits on the barrier, performs exactly one read
+	//: through the guarded path, and exits. Joined before this returns, so it
+	//: cannot outlive the round. The barrier is what makes it overlap the
+	//: install rather than queue behind it.
+	wg.Go(func() {
+		<-start
+		svc.signedHighWaterMark()
+	})
+	close(start)
+	svc.rememberRoster(raw, &coreent.RosterValue{IssuedAt: issued})
+	wg.Wait()
+	//: Whatever survived the race.
+	return svc.signedHighWaterMark()
+}
+
 // Test_rememberRoster_refreshesWhileTheCacheIsBeingRead pins that a refresh
 // lands even though another holder is reading the bundle at the same time.
 //
@@ -209,23 +233,8 @@ func Test_rememberRoster_refreshesWhileTheCacheIsBeingRead(t *testing.T) {
 					t.Fatalf("seeding cache: %v", seedErr)
 				}
 
-				raw := paddedBundle(t, vendorPriv, fresh, 1)
-				start := make(chan struct{})
-				var wg sync.WaitGroup
-				wg.Add(1)
-				//: Goroutine lifecycle: one read through the package's own
-				//: path, then exit. The barrier makes it overlap the install.
-				go func() {
-					defer wg.Done()
-					<-start
-					_ = svc.signedHighWaterMark()
-				}()
-				close(start)
-				svc.rememberRoster(raw, &coreent.RosterValue{IssuedAt: fresh})
-				wg.Wait()
-
 				//: The refresh either landed or was silently dropped.
-				if !svc.signedHighWaterMark().Equal(fresh) {
+				if !refreshRacingAReader(svc, paddedBundle(t, vendorPriv, fresh, 1), fresh).Equal(fresh) {
 					notRefreshed++
 				}
 			}

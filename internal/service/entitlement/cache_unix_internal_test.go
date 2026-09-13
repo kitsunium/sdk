@@ -4,6 +4,8 @@ package entitlement
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -103,6 +105,50 @@ func Test_readCappedFile_unixRefusesAFifoWithoutBlocking(t *testing.T) {
 				}
 			case <-time.After(2 * time.Second):
 				t.Errorf("readCappedFile() blocked on a fifo — every gated command would hang here (%s)", tt.reason)
+			}
+		})
+	}
+}
+
+// Test_writeCachedBundle_unixInstallsOwnerOnly pins the mode the installed
+// bundle ends up at.
+//
+// It replaces a constant. cacheFileMode used to name 0600 and was passed to
+// os.WriteFile; staging now goes through os.CreateTemp, which creates at 0600
+// itself, so the constant became a comment nothing enforced — its own doc
+// admitted "nothing ever reads this mode back". An assertion is strictly
+// better than a named-but-unchecked value: it fails if a future staging call
+// widens the file, which a constant nobody compares against cannot.
+//
+// Unix-only and build-tagged for the reason that doc comment gave: os.Stat on
+// Windows reports a synthesised 0444/0666 carrying no access-control meaning,
+// so there is nothing to assert there rather than a skip to write.
+func Test_writeCachedBundle_unixInstallsOwnerOnly(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		want   fs.FileMode
+		reason string
+	}{
+		{name: "owner-only", want: 0o600, reason: "hygiene, not a control — but there is no reason to widen it"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			if err := writeCachedBundle(dir, []byte(`{"payload":"x","sig":"y"}`)); err != nil {
+				t.Fatalf("writing bundle: %v", err)
+			}
+			info, statErr := os.Stat(cachedBundlePath(dir))
+			//: A failure here is an environment problem, not a test outcome.
+			if statErr != nil {
+				t.Fatalf("stat: %v", statErr)
+			}
+			if got := info.Mode().Perm(); got != tt.want {
+				t.Errorf("installed bundle mode = %04o, want %04o (%s)", got, tt.want, tt.reason)
 			}
 		})
 	}

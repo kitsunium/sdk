@@ -89,10 +89,13 @@ type Service struct {
 	// Service built around an injected getter must not reach a real
 	// filesystem unless a test says so.
 	cacheDir string
-	// cacheLockOnce builds cacheLock at most once. A locker that could not
-	// be built cannot be built by trying again on the next roster fetch, and
-	// retrying would repeat its log line on every one of them.
-	cacheLockOnce sync.Once
+	// cacheLockMu serialises the construction of cacheLock, which several
+	// goroutines can reach at once through the first verification.
+	cacheLockMu sync.Mutex
+	// cacheLockFor is the directory cacheLock was built for, so retargeting a
+	// Service with WithCache rebuilds the guard instead of keeping one scoped
+	// to a directory nobody is using. The empty string means "never built".
+	cacheLockFor string
 	// cacheLock serialises the cache directory against every other goroutine
 	// here and every other process on this machine, or is nil when no such
 	// lock is available. See cache_lock.go for what nil costs.
