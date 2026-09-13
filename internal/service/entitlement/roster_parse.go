@@ -79,8 +79,13 @@ func authenticateRoster(raw, sig []byte, vendor ed25519.PublicKey) (roster *core
 	var decoded coreent.RosterValue
 	//: Malformed JSON from an authenticated payload means a broken publisher.
 	if unmarshalErr := json.Unmarshal(raw, &decoded); unmarshalErr != nil {
-		//: Surface the decode failure rather than authorize on zero values.
-		return nil, fmt.Errorf("decoding roster: %w", unmarshalErr)
+		//: Report it exactly as decodeBundle reports the same class one level
+		//: up: the endpoint served something that is not a roster, which is a
+		//: publication fault and not a forgery claim. It carried NO sentinel
+		//: before, so a caller mapping refusals to exit codes and advice fell
+		//: through to its default on the one input a vendor can produce by
+		//: mistake.
+		return nil, fmt.Errorf("%w: undecodable roster payload: %w", coreent.ErrRosterUnreachable, unmarshalErr)
 	}
 	//: Authentic, decoded, and entirely unjudged as to when.
 	return &decoded, nil
