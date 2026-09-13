@@ -87,8 +87,10 @@ process pass the gate and then block on a `flock` its own process holds.
 | `fence.go` | the on-disk ledger: read, increment, `fsync`. Refuses a non-counter, and the one counter with no successor (ADR 0081 §D7) |
 | `flock_unix.go` / `flock_windows.go` / `flock_other.go` | ADR 0018 platform split — `flock(2)`, `LockFileEx`, and the typed refusal |
 | `nofollow.go` | the refusal the lock path's PREDICTABILITY makes necessary, and why it closes on both kernels (ADR 0082) |
+| `chain.go` | the components ABOVE the lock file, which `O_NOFOLLOW` cannot reach: the `pathchain` walk, and the rule that refuses an indirection only where anybody could have planted it (ADR 0083) |
+| `identity.go` | `sameEntry` — is the file this lease holds still the file its NAME leads to? The one exposure here that is DETECTED rather than prevented (ADR 0083) |
 | `nofollow_unix.go` / `nofollow_windows.go` / `nofollow_other.go` | the same split again — `O_NOFOLLOW`, `FILE_FLAG_OPEN_REPARSE_POINT` + the handle check, and the plain open |
-| `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule, and the reason it cannot run on Windows |
+| `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule, the reason it cannot run on Windows, and `plantable` — "could anybody create an entry here?", which is the same question asked of a different directory |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
 
 ## Platform matrix (ADR 0018)
@@ -183,12 +185,68 @@ opposites in the same way `flock`/`LockFileEx` are:
 | What refuses | the kernel | `refuseReparseHandle`, on the handle's attributes |
 | Sentinel | `LockPathRedirected` | `LockPathRedirected` |
 
-What is still NOT closed, measured in review: inside a `0777|sticky`
-directory the planter OWNS the lock-file entry they created, so the sticky bit
-lets them unlink it **while the victim holds it** — and the next acquisition
-gets a fresh inode with the fence reset. Two holders, both reporting fence 1,
-with no symbolic link anywhere. It predates ADR 0082 and is recorded in its
-§Deferred with the measurement and with why an owner check is the wrong fix.
+## The two things ADR 0082 left open, and which of them is PREVENTED
+
+ADR 0083 closes both. They are not closed the same way, and the difference is
+the most important sentence in this file.
+
+### A link at a PARENT component — prevented
+
+`O_NOFOLLOW` governs the FINAL component. A link planted at any parent of
+`FileConfig.Dir` moved the whole lock directory, and `checkDir` then took its
+verdict on the TARGET — so a planter redirecting into a tidy `0700` directory
+of their own passed the mode rule too:
+
+```
+Dir demandé  = …/pub/myapp/locks
+composant planté = …/pub/myapp -> …/elsewhere
+construction ACCEPTÉE
+acquisition sur parent planté : err=<nil>
+SUIVI : le verrou a atterri sur …/elsewhere/locks/a4d268….lock
+```
+
+`checkChain` (chain.go) now walks every component through
+`internal/kernel/pathchain` **before** `os.MkdirAll` — auditing afterwards
+means refusing the directory only after creating it inside the planter's tree.
+
+The rule is **not** "refuse a link". `/tmp` is a symbolic link on macOS,
+`/var/run` is one on most Linux distributions, `C:\Users\All Users` is a
+junction. An indirection is refused when the directory **holding** it is
+world-writable — when anybody could have planted it — and the sticky bit
+exempts nothing, because planting a component CREATES an entry rather than
+unlinking one. That is ADR 0082's own argument, one level up.
+
+On **Windows nothing new is refused**, and `dirsafety_windows.go` says why:
+`os.Stat` synthesises `0777` for every writable directory, so the rule would
+refuse every junction under one. `TestAnIndirectionAboveTheLockFileIsAccepted
+OnWindows` pins that gap on a real kernel rather than leaving it assumed.
+
+### Unlink-and-replace in a sticky directory — DETECTED, not prevented
+
+```
+victime détient le verrou : fence=1 inode=69831
+2e verrou AVANT l'échange : held=false (attendu false)
+entrée désliée pendant que la victime la détient
+2e verrou APRÈS l'échange : held=true err=<nil> inode=69832
+SPLIT : deux détenteurs, fences 1 et 1, inodes 69831 et 69832
+Extend de la victime : <nil>
+```
+
+No flag prevents this. The entry is unlinked AFTER the open, by an account the
+directory's permissions genuinely allow to unlink it, and the descriptor
+outlives the name on every kernel. Two remedies were evaluated and prevent
+nothing: an owner check breaks the shared-group arrangement `checkDir`
+deliberately accepts (ADR 0081 §D5), and `O_EXCL` answers who CREATED the file,
+which is not the question.
+
+So the last line changes and nothing else does. `Extend` compares the
+descriptor against the name (`identity.go`) and returns `LOCK_FILE_REPLACED`;
+a `Keepalive` turns that into a cancelled context for the work inside the
+section. `TestTheSplitIsDetectedAndNotPrevented` asserts that the second holder
+**still acquires**, deliberately, so no reader can come away believing the
+exclusion was restored. The only prevention is a lock directory no other
+account can write — which is what `NewFileLocker` creates (`0700`) when the
+directory is absent.
 
 The errno is never consulted: `O_NOFOLLOW` on a symlink is measured `ELOOP` on
 linux/amd64 and is documented `EMLINK` on FreeBSD/DragonFly, `EFTYPE` on
@@ -204,7 +262,8 @@ there is nothing to race.
 | `LockFenceCorrupt` | `0.3.51.1` | no next token can be issued: the lock file is not a decimal counter (`condition=unparseable`), or it holds `2^64-1` and `previous+1` would wrap to zero (`condition=exhausted`). **Refused, never reset** — a restarted fence, and a wrapped one, both reissue numbers the resource already accepted |
 | `LockDirectoryUnsafe` | `0.3.51.2` | world-writable, non-sticky lock directory: any account can unlink the lock file and give the next process a **different inode** to lock. **Unix only** — Windows has no mode bits to read and the unlink is refused by the open (ADR 0081 §D5) |
 | `LockKeepaliveLost` | `0.3.51.3` | a background renewal failed; carried as a context **cause**, never as a return value |
-| `LockPathRedirected` | `0.3.51.4` | the lock path is a symbolic link (Unix) or a reparse point (Windows), so the lock and its ledger would land on a file whoever planted it chose. **Not** `LOCK_BACKEND_FAILED`: nothing failed, and that code invites the one wrong response — a retry |
+| `LockPathRedirected` | `0.3.51.4` | the lock path is a symbolic link (Unix) or a reparse point (Windows), so the lock and its ledger would land on a file whoever planted it chose. **Not** `LOCK_BACKEND_FAILED`: nothing failed, and that code invites the one wrong response — a retry. Since ADR 0083 it also covers an indirection at a PARENT component planted where anybody could have planted it, with the component, the configured directory and the target in its fields |
+| `LockFileReplaced` | `0.3.51.5` | the file a lease holds is no longer the file its name leads to — unlinked, or replaced, while held. Reported at `Acquire` (the window between the open and the `flock`) and at `Extend` (the only call a holder makes during the section). **Detection, never prevention**: the split still happens and the holder is told |
 
 Plus the core sentinels `0.2.21.*`, restated through `errs.Wrap` and never
 re-`Define`d here.
@@ -243,6 +302,19 @@ re-`Define`d here.
 - **Open the lock file with a bare `os.OpenFile`.** That is the defect ADR 0082
   closed, and it is invisible: the acquisition succeeds. Go through
   `openLockFile`.
+- **Read `LOCK_FILE_REPLACED` as a lock that can be re-taken.** Re-acquiring
+  hands the caller a second lease over the new file while the old one is still
+  locked, which is the split-brain spelled deliberately. Stop the work.
+- **Make `sameEntry` refuse on an inconclusive answer.** A stat this process is
+  not allowed to take, or a medium that did not respond, must read as
+  unchanged: a lock that stops renewing on a stat hiccup fails its caller
+  harder than the attack it watches for, and there is no third verdict.
+- **Move `checkChain` after `prepareDir`.** `os.MkdirAll` follows a planted
+  parent, so the audit would refuse the directory only after having created it
+  inside the planter's tree.
+- **Refuse a link at a parent unconditionally.** It refuses `/tmp` on macOS and
+  `/var/run` on most Linux distributions — ADR 0018 §(a)'s failure mode with an
+  error that blames the operator for the operating system's own layout.
 - **Give the Unix `nofollow` file to Solaris** because it has `O_NOFOLLOW`.
   The tag sets of `flock_*.go` and `nofollow_*.go` are identical on purpose —
   a platform gains a lock and its hardening together or gains neither.

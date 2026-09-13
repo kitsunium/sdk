@@ -14,10 +14,11 @@ consumers depend only on `pkg/v1`.
 | `Locker` / `Lease` / `Deadliner` | aliases onto `internal/core/lock`. `Locker` FROZEN at two methods, `Lease` at three (ADR 0039) |
 | `MemoryConfig` / `FileConfig` / `KeepaliveConfig` | aliases onto `internal/service/lock` |
 | `NewMemory(cfg)` | in-process; leases **expire**; implements `Deadliner` |
-| `NewFileLocker(cfg)` | one machine, via `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081); leases **never expire**; does NOT implement `Deadliner`; a symbolic link or reparse point at the lock path is REFUSED, never followed (ADR 0082) |
+| `NewFileLocker(cfg)` | one machine, via `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081); leases **never expire**; does NOT implement `Deadliner`; a symbolic link or reparse point at the lock path is REFUSED, never followed (ADR 0082), and so is one at a PARENT component where anybody could have planted it (ADR 0083) |
 | `Keepalive(ctx, lease, cfg)` | background renewal → a context cancelled when the lease is lost |
 | `LockMisconfigured` / `LockNotHeld` / `LockBackendFailed` / `LockNameRejected` | core sentinels |
 | `LockFenceCorrupt` / `LockDirectoryUnsafe` / `LockKeepaliveLost` / `LockPathRedirected` | service sentinels |
+| `LockFileReplaced` | service sentinel, and the only one this domain DETECTS rather than prevents: the file a lease holds was unlinked or replaced while held, so the exclusion is gone and the holder is told (ADR 0083) |
 
 ## Conventions
 
@@ -41,6 +42,12 @@ consumers depend only on `pkg/v1`.
 - **Soften `LockPathRedirected` into a warning, or offer a flag to follow the
   link anyway.** It would be a flag to re-enable the defect, and the deployment
   that would reach for it is the one that most needs to know (ADR 0082).
+- **Describe `LockFileReplaced` as preventing a split.** It does not. A lock
+  file can be unlinked out from under its holder by an account the directory
+  permits, the second holder really does acquire, and what ships is that the
+  first one finds out at its next `Extend`. Saying otherwise is worse than
+  saying nothing, because a caller who believes the exclusion held behaves
+  differently from one who knows it did not (ADR 0083 §D5).
 - **Add a method to any aliased interface** — it breaks every downstream
   implementer at compile time with no deprecation window (ADR 0039).
 

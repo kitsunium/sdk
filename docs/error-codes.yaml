@@ -1810,6 +1810,10 @@ codes:
     const: CodeLockPathRedirected
     hex: "0x00_03_33_04"
     package: internal/service/lock
+  - code: "0.3.51.5"
+    const: CodeLockFileReplaced
+    hex: "0x00_03_33_05"
+    package: internal/service/lock
   - code: "0.3.52.1"
     const: CodeListenerFailed
     hex: "0x00_03_34_01"
