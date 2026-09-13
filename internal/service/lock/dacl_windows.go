@@ -458,9 +458,10 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 			continue
 		}
 		onDir, onFiles := reachOf(ace.AceFlags)
-		//: an entry reaching neither object decides nothing. No such flags
-		//: word exists today — inherit-only without object inheritance still
-		//: reaches subdirectories — but the walk does not depend on that.
+		//: an entry reaching neither object decides nothing. INHERIT_ONLY with
+		//: CONTAINER_INHERIT and no OBJECT_INHERIT is that entry: it describes
+		//: the SUBDIRECTORIES of this directory, which is neither the
+		//: directory this rule judges nor a lock file it will create.
 		if !onDir && !onFiles {
 			//: next entry.
 			continue
@@ -503,6 +504,10 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 // into both states — which is not the same as folding it into one shared
 // state, because an entry reaching only ONE of them must not constrain the
 // other.
+//
+// CONTAINER_INHERIT_ACE is deliberately not a third answer. It describes the
+// SUBDIRECTORIES of the lock directory, and this domain creates no
+// subdirectory there — only lock files.
 func reachOf(flags byte) (directory, files bool) {
 	//: an inherit-only entry describes children and grants nothing here.
 	directory = flags&inheritOnlyAce == 0
