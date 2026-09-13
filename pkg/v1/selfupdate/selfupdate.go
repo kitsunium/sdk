@@ -241,9 +241,11 @@ var (
 	// whose assets changed after it was signed.
 	ChecksumMismatch = coreupd.ChecksumMismatch
 
-	// ArchiveTooLarge is returned when a release archive exceeds the size cap.
-	// The cap exists because the bytes are buffered before anything has
-	// vouched for them.
+	// ArchiveTooLarge is returned when a release archive exceeds the size cap,
+	// which exists because the bytes are buffered before anything has vouched
+	// for them. It is also what an oversized checksums.txt raises, deliberately
+	// — a truncated manifest fails signature verification, and reporting a size
+	// problem as a supply-chain one is the worst advice this package can give.
 	ArchiveTooLarge = coreupd.ArchiveTooLarge
 
 	// APIBodyTooLarge is returned when a release-metadata response exceeds its
@@ -263,9 +265,11 @@ var (
 	// retry policy keys on.
 	DownloadFailed = coreupd.DownloadFailed
 
-	// DevBuild is returned when a version check runs on a build with no
-	// release version to compare against. Rebuild from source rather than
-	// self-updating.
+	// DevBuild is returned when a version check runs on a build carrying no
+	// release version, so there is nothing to compare a release against. It is
+	// an ANSWER rather than a fault — CheckForUpdate on a `go build` binary
+	// reaches it every time — which is why ExplainUpgradeFailure has no case
+	// for it: "rebuild from source" is NoVendorKey's advice, not this one's.
 	DevBuild = coreupd.DevBuild
 
 	// CandidateNotFound is returned when a requested release candidate does

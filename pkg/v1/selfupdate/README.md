@@ -269,9 +269,11 @@ var (
     // whose assets changed after it was signed.
     ChecksumMismatch = coreupd.ChecksumMismatch
 
-    // ArchiveTooLarge is returned when a release archive exceeds the size cap.
-    // The cap exists because the bytes are buffered before anything has
-    // vouched for them.
+    // ArchiveTooLarge is returned when a release archive exceeds the size cap,
+    // which exists because the bytes are buffered before anything has vouched
+    // for them. It is also what an oversized checksums.txt raises, deliberately
+    // — a truncated manifest fails signature verification, and reporting a size
+    // problem as a supply-chain one is the worst advice this package can give.
     ArchiveTooLarge = coreupd.ArchiveTooLarge
 
     // APIBodyTooLarge is returned when a release-metadata response exceeds its
@@ -291,9 +293,11 @@ var (
     // retry policy keys on.
     DownloadFailed = coreupd.DownloadFailed
 
-    // DevBuild is returned when a version check runs on a build with no
-    // release version to compare against. Rebuild from source rather than
-    // self-updating.
+    // DevBuild is returned when a version check runs on a build carrying no
+    // release version, so there is nothing to compare a release against. It is
+    // an ANSWER rather than a fault — CheckForUpdate on a `go build` binary
+    // reaches it every time — which is why ExplainUpgradeFailure has no case
+    // for it: "rebuild from source" is NoVendorKey's advice, not this one's.
     DevBuild = coreupd.DevBuild
 
     // CandidateNotFound is returned when a requested release candidate does
@@ -360,7 +364,7 @@ var (
 ```
 
 <a name="StdinIsTerminal"></a>
-## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L386>)
+## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L390>)
 
 ```go
 func StdinIsTerminal() bool
@@ -371,7 +375,7 @@ StdinIsTerminal reports whether a human could answer a prompt on this process's 
 It is a free function rather than something AuthoriseUnattendedUpgrade works out for itself, and that is the point: the consent decision stays testable without a pty, because the CALLER supplies the answer. Pass the result as the interactive argument.
 
 <a name="Candidate"></a>
-## type [Candidate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L349>)
+## type [Candidate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L353>)
 
 Candidate is one release candidate. It aliases the core value type.
 
@@ -380,7 +384,7 @@ type Candidate = svcupd.CandidateValue
 ```
 
 <a name="Copier"></a>
-## type [Copier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L342>)
+## type [Copier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L346>)
 
 Copier streams the verified archive to its destination. It aliases the core port.
 
@@ -389,7 +393,7 @@ type Copier = coreupd.Copier
 ```
 
 <a name="FileSystem"></a>
-## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L338>)
+## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L342>)
 
 FileSystem is the disk half of replacing a running binary. It aliases the core port.
 
@@ -398,7 +402,7 @@ type FileSystem = coreupd.FileSystem
 ```
 
 <a name="Getter"></a>
-## type [Getter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L334>)
+## type [Getter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L338>)
 
 Getter performs the HTTP GETs a self\-update needs. It aliases the core port.
 
@@ -407,7 +411,7 @@ type Getter = coreupd.Getter
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L358>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L362>)
 
 Service replaces the running binary with a newer signed release. It aliases the service type — the engine handle, per ADR 0074.
 
@@ -416,7 +420,7 @@ type Service = svcupd.Service
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L366>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L370>)
 
 ```go
 func New(version string, src Source) *Service
@@ -427,7 +431,7 @@ New returns a Service for the given running version and release source.
 The returned Service carries NO vendor key and therefore installs nothing: chain WithVendorKey with the build's linked\-in anchor. That is the safe direction — a Service that verified only when a key happened to be present would make the security property depend on a build flag.
 
 <a name="NewWithDeps"></a>
-### func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L374>)
+### func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L378>)
 
 ```go
 func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copier Copier) *Service
@@ -436,7 +440,7 @@ func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copie
 NewWithDeps returns a Service with its three ports injected, for a caller that supplies its own HTTP policy or a test that supplies doubles. A nil fs or copier is legal on paths that never reach the disk.
 
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L354>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L358>)
 
 Source says where releases come from and what they are called. It aliases the service type: these are one engine's construction parameters, which ADR 0074 places with the engine rather than in the contract layer.
 
@@ -445,7 +449,7 @@ type Source = svcupd.SourceValue
 ```
 
 <a name="Update"></a>
-## type [Update](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L346>)
+## type [Update](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L350>)
 
 Update is the outcome of a version check or an install. It aliases the core value type.
 
