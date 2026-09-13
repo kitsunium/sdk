@@ -33,7 +33,7 @@ has recorded for this package since ADR 0078.
 | `key.go` / `key_unix.go` / `key_windows.go` | load, fingerprint, prove possession, permission checks |
 | `enroll.go` | `NewSubjectID`, `GenerateKeyPair`, `IssueURL` |
 | `codes.go` / `errors.go` | `CodeEnrolmentFailed` and its sentinel |
-| `wrap.go` | `refuse` / `classify` / `annotate` |
+| `wrap.go` | `refuse` / `classify` / `classifyForeign` / `annotate` |
 
 ## What it is NOT
 
@@ -65,6 +65,12 @@ otherwise.
   `TestNoParticularReachesThePublicSentence` asserts both directions on four
   refusals, because leaking a particular and losing it are both defects and
   only one of them is the one everybody remembers.
+
+- **`ProvePossession` takes the CALLER's signer, so origin-wins is wrong
+  there.** An `ssh.Signer` or an `ssh.PublicKey` a caller supplies is free to
+  return an `*errs.Error` of its own, and `errs.Wrap` would make it the identity
+  of a possession failure. `classifyForeign` hides it from origin-wins and
+  leaves it matchable by `errors.Is`.
 
 - **`DiscoverSubject` drops the read error's CHAIN, not its text.** An
   unreadable key directory and a never-enrolled one are documented as ONE

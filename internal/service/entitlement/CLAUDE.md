@@ -27,7 +27,7 @@ product (ADR 0078 §1).
 | `version.go` | the version floor a roster can mandate |
 | `product.go` | `ProductValue`, `Label`, `DefaultCacheDir`, `Validate` |
 | `errors.go` | the one code this implementation owns, `0.3.67.*`, and its sentinel |
-| `wrap.go` | `refuse` / `classify` / `annotate`, plus `diagnose` and `particulars` |
+| `wrap.go` | `refuse` / `classify` / `classifyForeign` / `annotate`, plus `diagnose` |
 
 ## Why-this-shape
 
@@ -73,6 +73,14 @@ product (ADR 0078 §1).
   `TestNoParticularReachesThePublicSentence` asserts both directions on six
   refusals, because leaking a particular and losing it are both defects and
   only one of them is the one everybody remembers.
+
+- **Origin-wins is the wrong rule at a consumer seam.** A Getter, a BearerFetch
+  and a response Body are not a deeper layer of this SDK — they are somebody
+  else's package, free to return an `*errs.Error` from a code range nobody here
+  allocated, and `errs.Wrap` would make it the identity of a roster outage.
+  `classifyForeign` hides it from origin-wins and leaves it matchable by
+  `errors.Is`. Measured: plain `classify` gives
+  `errors.Is(err, ErrRosterUnreachable)=false` and `code=0.3.48.1`.
 
 - **`annotate` guards, and the guard is not defensive.** `errs.Wrap` has no
   spelling for "add a field, decide nothing": zero `WrapParams` over a cause

@@ -323,3 +323,109 @@ func Test_diagnose(t *testing.T) {
 		})
 	}
 }
+
+// consumerFailure is what a consumer's own Getter or BearerFetch can plausibly
+// return: an errs-typed error built through pkg/v1/errs.New, from a code range
+// this SDK does not own.
+var consumerFailure = errs.Wrap(nil, errs.WrapParams{
+	Code:    0x00_03_30_01,
+	Reason:  "CONSUMER_FAILURE",
+	Public:  "the consumer's own transport refused",
+	Private: "consumer: something of its own",
+})
+
+// Test_classifyForeign pins the seam where origin-wins is the WRONG rule.
+//
+// Inside this SDK a deeper *errs.Error is the more specific classification and
+// should win. A Getter, a BearerFetch and a response Body are not deeper — they
+// are the consumer's package, free to return an error from a code range this
+// SDK does not own. Plain classify let that error become the identity, so
+// errors.Is stopped finding this domain's sentinel and a caller's exit-code
+// table followed a number nobody here allocated.
+//
+// This was a regression introduced by the conversion, not a pre-existing hole:
+// the fmt.Errorf it replaced put the sentinel behind the FIRST %w, so it won
+// whatever the cause was. Every scenario in the behaviour probe injected a
+// plain errors.New, which is exactly why the probe did not catch it.
+func Test_classifyForeign(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// cause is what the consumer's code handed back.
+		cause error
+		// wantCauseMatch is whether errors.Is must still find that cause.
+		wantCauseMatch bool
+		reason         string
+	}{
+		{
+			name:           "an errs-typed cause does not take over the classification",
+			cause:          consumerFailure,
+			wantCauseMatch: true,
+			reason:         "a roster outage must stay a roster outage whoever's transport reported it",
+		},
+		{
+			name:           "a plain cause takes the ordinary path untouched",
+			cause:          fs.ErrNotExist,
+			wantCauseMatch: true,
+			reason:         "nothing can hijack an identity it does not have, so classify is left alone",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := classifyForeign(coreent.ErrRosterUnreachable, tt.cause,
+				errs.String("stage", "fetch"),
+				errs.String("url", "https://roster.example.test/bundle.json"))
+			//: OUR sentinel is the identity, which is the whole point.
+			if !errors.Is(got, coreent.ErrRosterUnreachable) {
+				t.Errorf("errors.Is(err, ErrRosterUnreachable) = false, want true (%s)", tt.reason)
+			}
+			code, ok := errs.CodeOf(got)
+			if !ok || code != coreent.CodeRosterUnreachable {
+				t.Errorf("CodeOf = %v/%v, want %v (%s)", code, ok, coreent.CodeRosterUnreachable, tt.reason)
+			}
+			//: ...and the consumer's error is not lost with it.
+			if errors.Is(got, tt.cause) != tt.wantCauseMatch {
+				t.Errorf("errors.Is(err, cause) = %v, want %v (%s)", !tt.wantCauseMatch, tt.wantCauseMatch, tt.reason)
+			}
+			//: The diagnosis still renders what the consumer said.
+			if detail := particulars(got); !strings.Contains(detail, tt.cause.Error()) {
+				t.Errorf("particulars(err) = %q, want it to carry %q (%s)", detail, tt.cause.Error(), tt.reason)
+			}
+			//: And the public sentence is still ours alone.
+			if strings.Contains(got.Error(), "roster.example.test") {
+				t.Errorf("err.Error() = %q, want the url OUT of it (%s)", got, tt.reason)
+			}
+		})
+	}
+}
+
+// Test_fetchKeepsItsSentinelAgainstAConsumersGetter is the same property at the
+// call site rather than at the helper, because the helper is only right if it
+// is the one the seam actually uses.
+func Test_fetchKeepsItsSentinelAgainstAConsumersGetter(t *testing.T) {
+	t.Parallel()
+
+	svc := NewServiceWithOrigins(stubGet(func(string) (*http.Response, error) {
+		//: A consumer returning an error of its own, which is legal and which
+		//: NewWithGetter's whole existence invites.
+		return nil, consumerFailure
+	}), stubIdentity{}, nil, nil)
+
+	_, err := svc.fetch("https://roster.example.test/bundle.json")
+	reason := "a caller's exit-code table keys on the entitlement sentinel, not on the transport's own"
+	if !errors.Is(err, coreent.ErrRosterUnreachable) {
+		t.Errorf("fetch() error = %v, want it to carry ErrRosterUnreachable (%s)", err, reason)
+	}
+	if code, _ := errs.CodeOf(err); code != coreent.CodeRosterUnreachable {
+		t.Errorf("CodeOf(fetch()) = %v, want %v (%s)", code, coreent.CodeRosterUnreachable, reason)
+	}
+	//: The consumer's error stays reachable, which is what a wrapper most
+	//: often destroys and what makes this different from dropping the chain.
+	if !errors.Is(err, consumerFailure) {
+		t.Errorf("fetch() error = %v, want the consumer's own error still matchable (%s)", err, reason)
+	}
+}

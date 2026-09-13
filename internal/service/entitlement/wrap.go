@@ -80,6 +80,67 @@ func classify(sentinel *errs.Error, cause error, fields ...errs.FieldValue) erro
 	}, fields...)
 }
 
+// foreignError hides a cause's SDK identity from errs.Wrap's origin-wins rule
+// while leaving the cause matchable by errors.Is.
+//
+// It has deliberately NO Unwrap and no As. errs.Wrap reaches an inner
+// *errs.Error with errors.AsType, which walks Unwrap and honours an As method,
+// so providing either would defeat the whole point. What survives is
+// errors.Is, because the stdlib consults an Is method before it unwraps.
+//
+// The cost is errors.As THROUGH this boundary: a caller cannot pull the
+// consumer's own concrete error type back out of a roster refusal. That is
+// accepted rather than overlooked — restoring it restores the hijack, and
+// errors.Is plus the rendered text carry everything a caller acts on.
+type foreignError struct {
+	// cause is the error a caller's own code produced.
+	cause error
+}
+
+// Error renders the consumer's message verbatim.
+func (f foreignError) Error() string {
+	//: The consumer's own account of what happened, unaltered.
+	return f.cause.Error()
+}
+
+// Is delegates every sentinel question to the cause.
+func (f foreignError) Is(target error) bool {
+	//: Whatever the consumer's error matched before it crossed this boundary,
+	//: it still matches.
+	return errors.Is(f.cause, target)
+}
+
+// classifyForeign reports a failure produced by code the CALLER supplied, under
+// the sentinel that says what it means here.
+//
+// It exists because origin-wins is the wrong rule at exactly these seams. Inside
+// this SDK a deeper *errs.Error is the more specific classification and should
+// win. A Getter, a BearerFetch, an ssh.Signer or a response Body is not deeper —
+// it is somebody else's package, free to return an error from its own code
+// range, and letting that win means errors.Is stops finding this domain's
+// sentinel and a caller's exit-code table follows a number this SDK does not
+// own.
+//
+// Measured, not reasoned: with a Getter returning an errs-typed error of its
+// own, plain classify gives
+// errors.Is(err, ErrRosterUnreachable)=false and code=0.3.48.1; this gives
+// true and 0.2.35.7, with errors.Is(err, theConsumerError) still true in both.
+//
+// A cause with no SDK identity cannot hijack anything, so it takes the ordinary
+// path untouched — which is why every stdlib cause behaves exactly as before.
+func classifyForeign(sentinel *errs.Error, cause error, fields ...errs.FieldValue) error {
+	inner, typed := errors.AsType[*errs.Error](cause)
+	//: Nothing to neutralise: a plain error already leaves our params as
+	//: origin, and a typed-nil takes Wrap's stdlib path for the same reason.
+	if !typed || inner == nil {
+		//: The ordinary path, byte for byte.
+		return classify(sentinel, cause, fields...)
+	}
+	//: An SDK-typed error from outside this SDK. Hidden from origin-wins, kept
+	//: matchable, and still rendered by foreignCause.
+	return classify(sentinel, foreignError{cause: cause}, fields...)
+}
+
 // annotate attaches fields to an error without changing what it says.
 //
 // Two call sites need it and both are the same situation: a refusal that has

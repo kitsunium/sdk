@@ -143,7 +143,10 @@ func tokenResponseBody(get BearerFetch, endpoint, bearer string) (body []byte, e
 	//: A transport failure means no proof is available.
 	if getErr != nil {
 		//: Report it as unprovable.
-		return nil, classify(coreent.ErrCIUnverifiable, getErr,
+		//: classifyForeign: BearerFetch is injected through WithBearerFetch,
+		//: so an errs-typed error of the consumer's own would otherwise
+		//: replace the CI classification a caller's dispatch keys on.
+		return nil, classifyForeign(coreent.ErrCIUnverifiable, getErr,
 			errs.String("stage", "mint_token"))
 	}
 	//: A nil response with no error breaks the http contract, but panicking
@@ -171,7 +174,8 @@ func tokenResponseBody(get BearerFetch, endpoint, bearer string) (body []byte, e
 	//: A truncated body cannot be parsed.
 	if readErr != nil {
 		//: Report the transport failure.
-		return nil, classify(coreent.ErrCIUnverifiable, readErr,
+		//: Same seam: the Body came back from the injected BearerFetch.
+		return nil, classifyForeign(coreent.ErrCIUnverifiable, readErr,
 			errs.String("stage", "read_token_response"))
 	}
 	//: A body at the cap is not a token response; an untrusted endpoint must

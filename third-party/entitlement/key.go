@@ -145,13 +145,18 @@ func ProvePossession(signer ssh.Signer, pub ssh.PublicKey) error {
 	//: An agent that refuses to sign (locked, key removed) proves nothing.
 	if err != nil {
 		//: A locked or emptied agent cannot establish possession.
-		return classify(coreent.ErrNoPossession, err,
+		//: classifyForeign: ProvePossession is exported and the signer is the
+		//: caller's — an agent, a hardware token, a custom implementation —
+		//: so an errs-typed error of its own would replace ErrNoPossession as
+		//: the identity of a possession failure.
+		return classifyForeign(coreent.ErrNoPossession, err,
 			errs.String("stage", "sign_challenge"))
 	}
 	//: The signature must verify against the published half, not the signer's.
 	if verifyErr := pub.Verify(nonce[:], sig); verifyErr != nil {
 		//: Signature does not match the identity being claimed.
-		return classify(coreent.ErrNoPossession, verifyErr,
+		//: Same seam: pub is the caller's ssh.PublicKey implementation.
+		return classifyForeign(coreent.ErrNoPossession, verifyErr,
 			errs.String("stage", "verify_challenge"))
 	}
 	//: Possession established for this call only.

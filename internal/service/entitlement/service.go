@@ -488,7 +488,10 @@ func (s *Service) fetch(url string) (body []byte, err error) {
 	//: A transport failure means no decision is possible.
 	if getErr != nil {
 		//: Report the unreachable roster.
-		return nil, classify(coreent.ErrRosterUnreachable, getErr,
+		//: classifyForeign: the Getter is the consumer's, and an errs-typed
+		//: error of its own would win origin-wins and take this refusal out
+		//: of the entitlement code range entirely.
+		return nil, classifyForeign(coreent.ErrRosterUnreachable, getErr,
 			errs.String("stage", "fetch"),
 			errs.String("url", url))
 	}
@@ -529,7 +532,9 @@ func readBounded(r io.Reader, what string) (body []byte, err error) {
 	//: A truncated read cannot be authenticated.
 	if readErr != nil {
 		//: Report the unusable artefact.
-		return nil, classify(coreent.ErrRosterUnreachable, readErr,
+		//: classifyForeign for the same reason as the GET: this reader is a
+		//: response Body the consumer's Getter handed back.
+		return nil, classifyForeign(coreent.ErrRosterUnreachable, readErr,
 			errs.String("stage", "read"),
 			errs.String("source", what))
 	}

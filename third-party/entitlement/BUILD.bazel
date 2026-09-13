@@ -51,6 +51,7 @@ go_test(
         "service_external_test.go",
         "service_unix_external_test.go",
         "version_external_test.go",
+        "wrap_internal_test.go",
     ],
     embed = [":entitlement"],
     deps = [

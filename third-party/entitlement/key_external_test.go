@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/pem"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -614,4 +615,71 @@ func splitDiagnosis(err error) string {
 	}
 	//: One rendered line, in the order the error was built.
 	return strings.Join(parts, " ")
+}
+
+// consumerSigner answers Sign with an errs-typed error of the CALLER's own,
+// which is what an agent, a hardware token or a custom ssh.Signer may return.
+type consumerSigner struct {
+	// pub is the published half this signer claims.
+	pub ssh.PublicKey
+}
+
+// PublicKey reports the half this signer answers for.
+func (c consumerSigner) PublicKey() ssh.PublicKey {
+	//: The same key, so the mismatch gate passes and signing is reached.
+	return c.pub
+}
+
+// Sign refuses with an error from a code range this SDK does not own.
+func (c consumerSigner) Sign(io.Reader, []byte) (*ssh.Signature, error) {
+	//: A locked agent's own vocabulary, typed.
+	return nil, consumerFailure
+}
+
+// consumerFailure is an errs-typed error from a range this SDK does not own.
+var consumerFailure = errs.Wrap(nil, errs.WrapParams{
+	Code:    0x00_03_30_01,
+	Reason:  "AGENT_LOCKED",
+	Public:  "the agent refused to sign",
+	Private: "consumer: the agent is locked",
+})
+
+// TestProvePossessionKeepsItsSentinelAgainstACallersSigner pins the seam where
+// origin-wins is the wrong rule.
+//
+// ProvePossession is exported and takes an ssh.Signer the CALLER supplies.
+// Plain classify let an errs-typed error from that signer become the identity
+// of the refusal, so errors.Is stopped finding ErrNoPossession and a caller's
+// exit-code table followed a number nobody here allocated. The fmt.Errorf this
+// replaced put the sentinel behind the first %w, so it won whatever the cause
+// was — this was a regression, not a pre-existing hole.
+func TestProvePossessionKeepsItsSentinelAgainstACallersSigner(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if _, err := entitlement.GenerateKeyPair(nil, dir, splitSubject); err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	pub, loadErr := entitlement.LoadPublicKey(dir, splitSubject)
+	if loadErr != nil {
+		t.Fatalf("LoadPublicKey: %v", loadErr)
+	}
+
+	err := entitlement.ProvePossession(consumerSigner{pub: pub}, pub)
+	reason := "a possession failure is a possession failure whoever's signer reported it"
+	if !errors.Is(err, coreent.ErrNoPossession) {
+		t.Errorf("ProvePossession() error = %v, want it to carry ErrNoPossession (%s)", err, reason)
+	}
+	if code, _ := errs.CodeOf(err); code != coreent.CodeNoPossession {
+		t.Errorf("CodeOf(ProvePossession()) = %v, want %v (%s)", code, coreent.CodeNoPossession, reason)
+	}
+	//: The caller's own error stays reachable, which is what separates this
+	//: from simply dropping the chain.
+	if !errors.Is(err, consumerFailure) {
+		t.Errorf("ProvePossession() error = %v, want the signer's own error still matchable (%s)", err, reason)
+	}
+	//: And its words still render, in the half that is not wire-safe.
+	if diagnosis := splitDiagnosis(err); !strings.Contains(diagnosis, "the agent refused to sign") {
+		t.Errorf("fields+cause = %q, want the signer's message in it (%s)", diagnosis, reason)
+	}
 }
