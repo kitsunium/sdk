@@ -389,7 +389,15 @@ around it is to write the same code with less evidence.
   security-descriptor reader for a second reason. Whoever writes it must make
   the *refusing* direction the tested one: an ACL walk that accepts everything
   is indistinguishable from today's no-op and would pass its own tests.
-- **Refusing a reparse point at the lock file's path.** On a host where
+- **CLOSED by [ADR 0082](0082-the-lock-path-is-a-file-never-a-link-to-one.md)
+  — refusing a reparse point at the lock file's path.** The condition this item
+  set for closing it has been met: the Unix half was probed and confirmed live,
+  so it closed on BOTH sides, in a record of its own because — as the last
+  sentence below says — it is a change to the domain's contract rather than to
+  this backend. The item is left standing rather than rewritten, because the
+  reasoning that deferred it is the reasoning that shaped how it closed.
+
+  On a host where
   `SeCreateSymbolicLinkPrivilege` is available to non-admins, a planted
   junction or symlink redirects a lock name to a file of the attacker's
   choosing — merging two locks into one, or splitting one into two. `os.Lstat`

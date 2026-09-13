@@ -91,6 +91,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0079-the-entitlement-split-x-sys-was-never-in-the-mechanism.md` | The entitlement split: x/sys was never in the mechanism, only in the identity | Accepted |
 | `adr/0080-the-gate-decides-and-performs-nothing.md` | The gate decides, and performs nothing | Accepted |
 | `adr/0081-the-windows-file-lock-is-a-different-primitive.md` | The Windows file lock: a different primitive, measured rather than recited, and the one rule it cannot run | Accepted |
+| `adr/0082-the-lock-path-is-a-file-never-a-link-to-one.md` | The lock path is a file, never a link to one: `O_NOFOLLOW` and `FILE_FLAG_OPEN_REPARSE_POINT`, and the `LOCK_PATH_REDIRECTED` refusal that replaces a silent redirection | Accepted |
 
 This table is one of THREE indexes of the same ADRs — the others are
 `docs/adr/CLAUDE.md`'s Contents table and the root `CLAUDE.md` Reference list —

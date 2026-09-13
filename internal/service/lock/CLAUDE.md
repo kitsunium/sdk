@@ -86,6 +86,8 @@ process pass the gate and then block on a `flock` its own process holds.
 | `gate.go` | `nameGate` — the in-process half, and the measurement that justifies it |
 | `fence.go` | the on-disk ledger: read, increment, `fsync`. Refuses a non-counter, and the one counter with no successor (ADR 0081 §D7) |
 | `flock_unix.go` / `flock_windows.go` / `flock_other.go` | ADR 0018 platform split — `flock(2)`, `LockFileEx`, and the typed refusal |
+| `nofollow.go` | the refusal the lock path's PREDICTABILITY makes necessary, and why it closes on both kernels (ADR 0082) |
+| `nofollow_unix.go` / `nofollow_windows.go` / `nofollow_other.go` | the same split again — `O_NOFOLLOW`, `FILE_FLAG_OPEN_REPARSE_POINT` + the handle check, and the plain open |
 | `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule, and the reason it cannot run on Windows |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
 
@@ -147,6 +149,54 @@ so a held lock file can be neither deleted nor renamed whatever the ACL says.
 A real DACL check is deferred with its cost in ADR 0081 §Alternatives; the two
 residual exposures are named there too.
 
+## The directory rule never reached the lock file's NAME
+
+`checkDir` refuses a directory whose entries any account can UNLINK. The attack
+it was written against has a twin it does not touch: **creating** an entry at a
+name nobody has taken yet. The lock filename is `hex(sha256(name)) + ".lock"` —
+derived from no caller string, and entirely PREDICTABLE — which is all a
+planter needs. The sticky
+bit does not help, because the planter owns the link they created, and
+`0777|sticky` — what `/tmp` is — is a row the table explicitly ACCEPTS.
+
+Probed against the shipped locker on linux/amd64, in exactly that directory:
+
+```
+répertoire 0777|sticky : ACCEPTÉ
+acquisition sur lien planté : held=true err=<nil>
+SUIVI : le verrou a atterri sur /tmp/sym.../elsewhere.lock
+```
+
+`held=true`, no error, and the `flock` and the fencing ledger outside the
+checked directory. Two processes each hold "the same" lock over different
+inodes, neither blocked, nothing logged. The fence goes with it: a link to a
+file containing `48213\n` — a pidfile is that shape — made `Acquire` return
+fence **48214** and rewrite the pidfile with it.
+
+`openLockFile` closes it on both kernels (ADR 0082), and the two mechanisms are
+opposites in the same way `flock`/`LockFileEx` are:
+
+| | Unix | Windows |
+|---|---|---|
+| Asks the kernel for | `O_NOFOLLOW` — do not traverse | `FILE_FLAG_OPEN_REPARSE_POINT` — open the LINK |
+| The open | **fails** | **succeeds**, on the link |
+| What refuses | the kernel | `refuseReparseHandle`, on the handle's attributes |
+| Sentinel | `LockPathRedirected` | `LockPathRedirected` |
+
+What is still NOT closed, measured in review: inside a `0777|sticky`
+directory the planter OWNS the lock-file entry they created, so the sticky bit
+lets them unlink it **while the victim holds it** — and the next acquisition
+gets a fresh inode with the fence reset. Two holders, both reporting fence 1,
+with no symbolic link anywhere. It predates ADR 0082 and is recorded in its
+§Deferred with the measurement and with why an owner check is the wrong fix.
+
+The errno is never consulted: `O_NOFOLLOW` on a symlink is measured `ELOOP` on
+linux/amd64 and is documented `EMLINK` on FreeBSD/DragonFly, `EFTYPE` on
+NetBSD, `ELOOP` on OpenBSD/Darwin. `os.Lstat` after the refusal answers what
+the errno was only evidence for, identically on all six, and it is **diagnosis
+rather than the decision** — the kernel already refused one line earlier, so
+there is nothing to race.
+
 ## Sentinels
 
 | Sentinel | Code | When |
@@ -154,6 +204,7 @@ residual exposures are named there too.
 | `LockFenceCorrupt` | `0.3.51.1` | no next token can be issued: the lock file is not a decimal counter (`condition=unparseable`), or it holds `2^64-1` and `previous+1` would wrap to zero (`condition=exhausted`). **Refused, never reset** — a restarted fence, and a wrapped one, both reissue numbers the resource already accepted |
 | `LockDirectoryUnsafe` | `0.3.51.2` | world-writable, non-sticky lock directory: any account can unlink the lock file and give the next process a **different inode** to lock. **Unix only** — Windows has no mode bits to read and the unlink is refused by the open (ADR 0081 §D5) |
 | `LockKeepaliveLost` | `0.3.51.3` | a background renewal failed; carried as a context **cause**, never as a return value |
+| `LockPathRedirected` | `0.3.51.4` | the lock path is a symbolic link (Unix) or a reparse point (Windows), so the lock and its ledger would land on a file whoever planted it chose. **Not** `LOCK_BACKEND_FAILED`: nothing failed, and that code invites the one wrong response — a retry |
 
 Plus the core sentinels `0.2.21.*`, restated through `errs.Wrap` and never
 re-`Define`d here.
@@ -189,6 +240,12 @@ re-`Define`d here.
   `prepareDir` only checks directories it did not create — so the symptom is a
   program that starts once on a fresh machine and never again.
 - **"Repair" a corrupt fence ledger.** Refusing is the decision.
+- **Open the lock file with a bare `os.OpenFile`.** That is the defect ADR 0082
+  closed, and it is invisible: the acquisition succeeds. Go through
+  `openLockFile`.
+- **Give the Unix `nofollow` file to Solaris** because it has `O_NOFOLLOW`.
+  The tag sets of `flock_*.go` and `nofollow_*.go` are identical on purpose —
+  a platform gains a lock and its hardening together or gains neither.
 - **Make `Keepalive` release the lease on stop.** The lifetime of a lock must
   not depend on the lifetime of a convenience.
 - **Add a distributed backend here.** Redis / etcd / Consul are connectors to
@@ -202,7 +259,8 @@ bazel test --config=race //internal/service/lock:lock_test
 ```
 
 `file_contention_unix_test.go`, `file_contention_windows_test.go`,
-`dirsafety_posix_test.go` and `dirsafety_windows_test.go` each carry the same
+`dirsafety_posix_test.go`, `dirsafety_windows_test.go`,
+`nofollow_unix_test.go` and `nofollow_windows_test.go` each carry the same
 build constraint as the file they cover, so each runs everywhere its subject is
 compiled and nowhere it is not. That is **not** a rule-12 exclusion of the kind
 that hides a test: there is no configuration in which the code under test is
