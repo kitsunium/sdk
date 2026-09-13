@@ -24,6 +24,8 @@ Two more facts came out of reading the history rather than the scripts, and both
 
 **Not every commit in a range is main's.** 75 of main's last 500 commits are true merges, so a plain range walk descends into the commits a merge brought *in* — the contributor's own. Five commits on this repository carry `Release-bump: minor`, touch `pkg/`, and are **not** on main's first-parent line. ADR 0007 §2 gates a minor on a trailer "an attacker cannot smuggle through a PR body" precisely by reading it from the merge commit, the one message a maintainer writes; a naive range read would hand that authority to anyone who can open a PR.
 
+**A repeated trailer was being concatenated, not separated.** The format string asked for `separator=,`, but git parses the trailer option list on commas too, so the comma was eaten as the list delimiter and the separator was empty. On git 2.47.3 that turns `Release-bump: mi` + `Release-bump: nor` into the single field `minor` — a release sized by two fragments that spell a bump — and `Release-bump: minor` twice into `minorminor`, which sizes nothing. The option has been wrong since it was written.
+
 **A trailer on a merge commit was already worth nothing.** `git log -1 --name-only` reports **no files at all** for a merge, so the path scoping matched an empty list and the trailer was discarded. 14 of the 33 trailer-bearing commits on main are merges. Every one of them was silently a patch — the same defect as the one this ADR is about, reached by a different route.
 
 ## Decision
@@ -42,7 +44,7 @@ Two more facts came out of reading the history rather than the scripts, and both
 
 7. **The largest bump in the range wins**: `major` > `minor` > anything else, and anything unrecognised ranks with patch. A trailer states what the release must be *at least*, so a later commit that says nothing cannot shrink one that did, and two commits both asking for minor coalesce into the one minor they both meant.
 
-8. **A commit's repeated trailers are split** on the separator `%(trailers:…,separator=,)` joins them with, and ranked as though they were separate commits. Previously `minor,major` matched neither arm of the `case` and fell to patch.
+8. **A commit's repeated trailers are split** and ranked as though they were separate commits — and the separator becomes `%x1F`. `separator=,` never worked: git parses the trailer option list itself on commas, so the comma is consumed as the list delimiter and the separator is left **empty**. Measured on git 2.47.3, a commit carrying `Release-bump: mi` and `Release-bump: nor` yields the single field `minor` and cuts a minor release, while one carrying `Release-bump: minor` twice yields `minorminor` and cuts a patch. Both are wrong in opposite directions; a unit separator cannot be typed into a commit message by accident.
 
 9. **`Release-bump: major` keeps its ADR 0009 refusal** from a `v1` base — and now actually reaches it.
 
@@ -61,6 +63,8 @@ Two more facts came out of reading the history rather than the scripts, and both
 | Trailer already honoured by the last release | patch | patch (unchanged) |
 | Trailer on a commit a merge brought in | patch | patch (unchanged — `--first-parent`) |
 | Trailer on a true merge commit | **patch** | scoped by what the merge brought in |
+| `Release-bump: mi` + `Release-bump: nor` | **minor** | patch |
+| `Release-bump: minor` twice | **patch** | minor |
 
 - **A cancelled CI run no longer costs anything but time.** Whatever commit finally carries a successful run, the range behind it still contains the cancelled commit *and its trailer*.
 - **A trailer is never honoured twice.** `release_base()..HEAD` opens strictly after the commit the previous release was cut from, so the trailer that sized `pkg/v0.2.0` is outside the range that sizes the next tag.

@@ -280,6 +280,28 @@ need_toolchain() {
   [[ "$output" == *"pkg/v0.1.1"* ]]
 }
 
+# git parses the trailer OPTION LIST on commas, so `separator=,` left the
+# separator empty and two repeated trailers were concatenated into one field:
+# `Release-bump: mi` + `Release-bump: nor` produced the single value `minor` and
+# cut a minor release. Measured on git 2.47.3; the separator is %x1F.
+@test "two repeated trailers do not concatenate into a third value" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'feat(codec): halves that spell a bump\n\nRelease-bump: mi\nRelease-bump: nor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.1.1"* ]]
+}
+
+@test "a commit repeating the same trailer still means that trailer" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'feat(codec): said twice\n\nRelease-bump: minor\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
 @test "an unwalkable --range is refused rather than read as no trailer" {
   run bash -c "echo pkg | $SCRIPT --dry-run --range=nosuchrev..HEAD"
   [ "$status" -eq 64 ]

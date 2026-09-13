@@ -133,6 +133,13 @@ rank_of() {
 # least, so a later commit that says nothing cannot shrink one that did. Two
 # commits each asking for minor coalesce into the single minor they both meant.
 #
+# Why the separator is %x1F and not the `,` this was written with: git parses
+# the option list itself on commas, so `separator=,` consumes the comma as the
+# list delimiter and leaves the separator EMPTY — measured on git 2.47.3, a
+# commit carrying `Release-bump: mi` and `Release-bump: nor` yields the single
+# field `minor` and cuts a minor release. A unit separator cannot be typed into
+# a commit message by accident, and no trailer value can contain one.
+#
 # Only trailer-bearing commits pay for the second git call — the first pass
 # reads every commit's trailer in one `git log`, and the path check then runs on
 # the handful that carry one (usually zero).
@@ -141,10 +148,10 @@ range_trailer() {
   while read -r sha raw; do
     [ -z "$raw" ] && continue
     git log -1 --name-only --format= -m --first-parent "$sha" | grep -qE '^pkg/' || continue
-    # `separator=,` joins a commit's repeated trailers into one field; split it
-    # so a commit carrying two of them is ranked like two commits would be.
-    # Default IFS on a single-variable read, so `Release-bump: minor ` written
-    # with a stray space still ranks as minor instead of silently as patch.
+    # Split the field back into one value per repeated trailer, so a commit
+    # carrying two of them is ranked like two commits would be. Default IFS on a
+    # single-variable read, so `Release-bump: minor ` written with a stray space
+    # still ranks as minor instead of silently as patch.
     while read -r value; do
       r="$(rank_of "$value")"
       if [ "$r" -gt "$best_rank" ]; then
@@ -152,8 +159,8 @@ range_trailer() {
         best="$value"
         best_sha="$sha"
       fi
-    done < <(tr ',' '\n' <<<"$raw")
-  done < <(git log --first-parent --format='%H %(trailers:key=Release-bump,valueonly,separator=,)' "$1")
+    done < <(tr '\037' '\n' <<<"$raw")
+  done < <(git log --first-parent --format="%H %(trailers:key=Release-bump,valueonly,separator=%x1F)" "$1")
 
   # Say where a winning trailer came from when it is not HEAD. That is the only
   # visible trace that a release was sized by a commit whose own CI run never
