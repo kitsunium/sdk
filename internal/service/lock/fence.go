@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math"
 	"strconv"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -26,6 +27,14 @@ const fenceBits int = 64
 // magnitude past that is not a ledger and is refused without being read whole.
 const maxFenceBytes int = 64
 
+// exhaustedFence is the one parseable value the ledger cannot be advanced from.
+// The mint is previous+1 on a uint64, so on this value it wraps to zero and the
+// counter starts again from the bottom — reissuing, in order, every token the
+// protected resource has already accepted. That is the same failure
+// [LockFenceCorrupt] refuses a wrecked file for, reached by arithmetic instead
+// of by bad bytes, so it carries the same verdict.
+const exhaustedFence uint64 = math.MaxUint64
+
 // fenceFile is the narrow view of the lock file the ledger needs: read it,
 // shorten it, overwrite it, force it to the medium.
 //
@@ -43,13 +52,21 @@ type fenceFile interface {
 	Sync() error
 }
 
-// readFence returns the highest fencing token recorded in file.
+// readFence returns the highest fencing token recorded in file, and guarantees
+// its caller that the value returned has a successor.
 //
 // An EMPTY file is 0, and that is the only lenient case: a lock file is
 // created empty by the first acquisition, so 0 is the honest reading of "no
 // acquisition has happened yet". Any other unparseable content is REFUSED,
 // never reset — see [LockFenceCorrupt] for why a restarted counter is worse
 // than no counter.
+//
+// [exhaustedFence] is refused for that same reason even though it parses
+// cleanly: it is the one value from which the next token is not larger but
+// zero. Judging it HERE rather than at the increment is what lets [mintLease]
+// stay a plain previous+1 — the ledger's validity is decided in one place, and
+// "can this be read as a counter" and "can this counter be advanced" are the
+// same question asked of the same bytes.
 func readFence(file fenceFile, path string) (fence uint64, err error) {
 	var buf [maxFenceBytes]byte
 	read, readErr := file.ReadAt(buf[:], 0)
@@ -74,9 +91,24 @@ func readFence(file fenceFile, path string) (fence uint64, err error) {
 		//: themselves are not echoed, because a lock name is caller data.
 		return 0, kerrs.Wrap(LockFenceCorrupt, kerrs.WrapParams{},
 			kerrs.String("path", path),
-			kerrs.Int("bytes", len(raw)))
+			kerrs.Int("bytes", len(raw)),
+			kerrs.String("condition", "unparseable"))
 	}
-	//: the recorded high-water mark.
+	//: a counter with no successor. Handing this back would make the next
+	//: acquisition mint zero and count up from there, which is a reset wearing
+	//: the shape of an increment — and a reset is the one repair this ledger
+	//: never performs. Unreachable by counting; reachable in one write, which
+	//: is what makes it worth a branch: flock(2) locks are ADVISORY, so any
+	//: non-holder that can open the lock file can put this value in it.
+	if parsed == exhaustedFence {
+		//: LOCK_FENCE_CORRUPT, with the field that tells the two refusals
+		//: apart for whoever reads the log.
+		return 0, kerrs.Wrap(LockFenceCorrupt, kerrs.WrapParams{},
+			kerrs.String("path", path),
+			kerrs.Int("bytes", len(raw)),
+			kerrs.String("condition", "exhausted"))
+	}
+	//: the recorded high-water mark, and it has a successor.
 	return parsed, nil
 }
 

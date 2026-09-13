@@ -14,16 +14,18 @@ const exitDataErr int = 65
 const exitConfig int = 78
 
 var (
-	// LockFenceCorrupt is returned when the on-disk fence ledger cannot be
-	// read as a decimal counter.
+	// LockFenceCorrupt is returned when the on-disk fence ledger cannot yield
+	// the next token: it does not read as a decimal counter, or it reads as
+	// the one counter that has no successor.
 	//
 	// Nothing is repaired and no lease is granted. Restarting the counter
 	// would hand out numbers the protected resource has already accepted,
 	// which turns the one mechanism that survives a stalled holder into a
-	// mechanism that endorses one.
+	// mechanism that endorses one. A counter allowed to wrap does the same
+	// thing, silently and in order.
 	LockFenceCorrupt = errs.Define(CodeLockFenceCorrupt, "LOCK_FENCE_CORRUPT",
 		"The lock's fencing ledger is not readable",
-		"service/lock: the lock file's contents are not a decimal fencing counter; the fields name the path and the offending bytes' length",
+		"service/lock: the lock file's contents are not a decimal fencing counter, or are the one counter that cannot be advanced without wrapping; the fields name the path, the offending bytes' length and which of the two conditions it is",
 		errs.WithExitCode(exitDataErr))
 
 	// LockDirectoryUnsafe is returned by NewFileLocker for a directory that is

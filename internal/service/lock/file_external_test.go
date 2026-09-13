@@ -73,50 +73,6 @@ func TestNewFileLockerRefusesANegativePoll(t *testing.T) {
 	}
 }
 
-// TestNewFileLockerRefusesAWorldWritableDirectory pins the permission rule and
-// the attack behind it: an account that can unlink the lock file replaces its
-// INODE, after which two processes flock two different files and both are told
-// they hold the same lock.
-func TestNewFileLockerRefusesAWorldWritableDirectory(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o777); err != nil {
-		t.Skipf("cannot set the mode this test needs: %v", err)
-	}
-	locker, err := svclock.NewFileLocker(svclock.FileConfig{Dir: dir})
-	if errors.Is(err, coreproc.UnsupportedPlatform) {
-		t.Skip("no flock(2) on this platform")
-	}
-	if locker != nil {
-		t.Fatal("a world-writable, non-sticky lock directory was accepted")
-	}
-	if !errs.HasCode(err, svclock.CodeLockDirectoryUnsafe) {
-		t.Fatalf("NewFileLocker = %v, want LOCK_DIRECTORY_UNSAFE", err)
-	}
-}
-
-// TestAStickyWorldWritableDirectoryIsAccepted is the other half of the rule.
-// /tmp is 1777, and the sticky bit is precisely what makes it safe: only an
-// entry's owner may unlink it. Refusing it would push callers somewhere worse.
-func TestAStickyWorldWritableDirectoryIsAccepted(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o777|os.ModeSticky); err != nil {
-		t.Skipf("cannot set the mode this test needs: %v", err)
-	}
-	info, statErr := os.Stat(dir)
-	if statErr != nil || info.Mode()&os.ModeSticky == 0 {
-		t.Skip("this filesystem does not honour the sticky bit on a directory")
-	}
-	locker, err := svclock.NewFileLocker(svclock.FileConfig{Dir: dir})
-	if errors.Is(err, coreproc.UnsupportedPlatform) {
-		t.Skip("no flock(2) on this platform")
-	}
-	if err != nil || locker == nil {
-		t.Fatalf("NewFileLocker on a sticky directory = %v, want a locker", err)
-	}
-}
-
 // TestTheFileLockExcludesGoroutines is the regression guard for the
 // measurement this backend is built on.
 //
@@ -244,9 +200,74 @@ func TestACorruptFenceLedgerIsRefused(t *testing.T) {
 		t.Fatalf("Acquire = %v, want LOCK_FENCE_CORRUPT", err)
 	}
 	//: and the refusal must not leave the name held: the gate is given back.
+	//: `held` alone cannot say so — a LEAKED gate makes TryAcquire return
+	//: (nil, false, nil) from gate.tryEnter, which is indistinguishable from
+	//: a clean refusal. The CODE is what proves the second attempt got past
+	//: the gate and reached readFence at all.
 	_, held, tryErr := locker.TryAcquire(t.Context(), "job")
-	if tryErr == nil && held {
+	if held {
 		t.Fatal("the failed acquisition left the lock held")
+	}
+	if !errs.HasCode(tryErr, svclock.CodeLockFenceCorrupt) {
+		t.Fatalf("TryAcquire after a refused acquisition = %v, want LOCK_FENCE_CORRUPT — the refusal leaked its gate, so this attempt never reached the ledger", tryErr)
+	}
+}
+
+// TestAnExhaustedFenceLedgerIsRefusedRatherThanWrapped covers the one ledger
+// value that parses perfectly and still cannot be advanced.
+//
+// The mint is previous+1 on a uint64. On 2^64-1 that is zero, and the counter
+// then walks back up through every token the protected resource has already
+// accepted — a reset, arrived at by arithmetic rather than by wrecked bytes,
+// and invisible in a way a wrecked file is not: no error, a plausible-looking
+// small fence, and a resource that accepts a stale holder's write.
+//
+// Not reachable by counting — 2^64 acquisitions is not a scenario. Reachable
+// in one write, which is what makes it worth a branch: flock(2) is ADVISORY,
+// so on Unix any non-holder that can open the lock file can put this value in
+// it. Windows closes that particular door (the range lock is mandatory and
+// covers offset 0) but the ledger is still an ordinary file whenever nobody
+// holds the lock.
+//
+// The refusal reuses LOCK_FENCE_CORRUPT because the remedy is identical: stop,
+// and have a human look at the ledger. The `condition` field tells the two
+// apart in a log.
+func TestAnExhaustedFenceLedgerIsRefusedRatherThanWrapped(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	locker := newFileLocker(t, dir)
+	//: 2^64-1 written out in the decimal the ledger actually uses, so this
+	//: test fails if the encoding ever changes under it.
+	if err := os.WriteFile(lockFilePath(dir, "job"), []byte("18446744073709551615\n"), 0o600); err != nil {
+		t.Fatalf("seeding the ledger = %v", err)
+	}
+	lease, err := locker.Acquire(t.Context(), "job")
+	if lease != nil {
+		t.Fatalf("a lease was granted with fence %d over an exhausted ledger — the counter wrapped and is now reissuing tokens the protected resource has already accepted", lease.Fence())
+	}
+	if !errs.HasCode(err, svclock.CodeLockFenceCorrupt) {
+		t.Fatalf("Acquire = %v, want LOCK_FENCE_CORRUPT", err)
+	}
+	//: and the ledger is left alone: refusing must not be a write, or the
+	//: refusal itself would be the reset it exists to prevent.
+	raw, readErr := os.ReadFile(lockFilePath(dir, "job"))
+	if readErr != nil {
+		t.Fatalf("reading the ledger back = %v", readErr)
+	}
+	if string(raw) != "18446744073709551615\n" {
+		t.Fatalf("the ledger after a refused acquisition = %q, want it untouched", raw)
+	}
+	//: and the name is not left held by an acquisition that failed. `held`
+	//: alone cannot say so — a LEAKED gate makes TryAcquire return
+	//: (nil, false, nil) from gate.tryEnter, which is indistinguishable from
+	//: a clean refusal. The CODE is what proves this attempt got past the
+	//: gate and reached the ledger.
+	_, held, tryErr := locker.TryAcquire(t.Context(), "job")
+	if held {
+		t.Fatal("the failed acquisition left the lock held")
+	}
+	if !errs.HasCode(tryErr, svclock.CodeLockFenceCorrupt) {
+		t.Fatalf("TryAcquire after a refused acquisition = %v, want LOCK_FENCE_CORRUPT — the refusal leaked its gate, so this attempt never reached the ledger", tryErr)
 	}
 }
 

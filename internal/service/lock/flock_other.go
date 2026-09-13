@@ -1,30 +1,25 @@
-//go:build !(linux || darwin || freebsd || openbsd || netbsd || dragonfly)
+//go:build !(linux || darwin || freebsd || openbsd || netbsd || dragonfly || windows)
 
-// Package lock — the honest refusal on platforms without flock(2) (ADR 0018
-// §(a): a uniform typed sentinel where a platform has no native mechanic,
-// never a silent drop and never a build break).
+// Package lock — the honest refusal on platforms with no file-range lock at
+// all (ADR 0018 §(a): a uniform typed sentinel where a platform has no native
+// mechanic, never a silent drop and never a build break).
 //
-// # Why Windows is refused rather than approximated
+// This file used to carry Windows, and the argument for keeping it here was
+// that LockFileEx is not flock(2): it locks a byte range rather than a file,
+// its locks are mandatory rather than advisory, and its rules for a second
+// open by the same process differ again. All three are true, and all three are
+// now measured on a real Windows kernel rather than recited. What was wrong
+// was the conclusion — that a backend behaving *almost* like flock is worth
+// less than none. A backend whose every difference is measured, written down,
+// and pinned by a test that fails when it changes is not an approximation; it
+// is a second implementation of the same contract. It landed in
+// flock_windows.go, and ADR 0081 records what each difference cost.
 //
-// Windows has LockFileEx, and it is tempting to call it the same thing. It is
-// not. LockFileEx locks a BYTE RANGE rather than a file, and its locks are
-// MANDATORY rather than advisory: the kernel enforces them against reads and
-// writes, so a range lock changes the behaviour of unrelated I/O on the same
-// file. A file-scope emulation would also have to decide what happens when the
-// same process opens the file twice, where LockFileEx's rules differ again.
-//
-// Every one of those differences is a place where the emulation would behave
-// almost like flock. "Almost" is the whole problem: a lock is the one
-// primitive whose failures are invisible at the moment they happen and
-// expensive at every later moment. A backend that excluded correctly in
-// testing and not under one particular interleaving is worth less than no
-// backend at all, because the caller would have stopped looking.
-//
-// So the constructor returns the typed proc.UnsupportedPlatform and the caller
-// picks the in-process locker, an external coordinator, or another host. The
-// gap is real, has a known closure — a LockFileEx backend with its own
-// semantics documented and its own tests — and is listed in this package's
-// CLAUDE.md §Platform matrix rather than left to be discovered.
+// What is left here is the set of GOOS values with no equivalent primitive at
+// all — js/wasm, plan9, aix, solaris, ios. For them the constructor returns
+// the typed proc.UnsupportedPlatform and the caller picks the in-process
+// locker, an external coordinator, or another host. The gap is listed in this
+// package's CLAUDE.md §Platform matrix rather than left to be discovered.
 package lock
 
 import (
@@ -33,9 +28,9 @@ import (
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 )
 
-// platformNative reports that this GOOS has no flock(2). NewFileLocker reads
-// it and refuses at CONSTRUCTION, so the refusal arrives where the program is
-// wired rather than at the first contended section.
+// platformNative reports that this GOOS has no file-range lock. NewFileLocker
+// reads it and refuses at CONSTRUCTION, so the refusal arrives where the
+// program is wired rather than at the first contended section.
 const platformNative bool = false
 
 // flockTry reports the shared UnsupportedPlatform sentinel. It is unreachable

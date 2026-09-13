@@ -21,11 +21,15 @@ renews; a failed `Extend` means another holder is already inside the section.
 lease is lost, because the caller who needs that news is already inside the
 section and the only channel that reaches it is its context.
 
-The file locker takes an in-process gate **before** its `flock`: `flock(2)` is
-per open file description, so re-locking a shared descriptor is a no-op and
+The file locker takes an in-process gate **before** its kernel lock: `flock(2)`
+is per open file description, so re-locking a shared descriptor is a no-op and
 gives zero exclusion between goroutines — measured at 8 of 8 goroutines inside
-one section. Where `flock(2)` does not exist the constructor returns
-`proc.UnsupportedPlatform` rather than pretending (ADR 0018).
+one section. On Windows the backend is `LockFileEx` (ADR 0081), whose answer to
+the same question is the opposite — a second lock inside one process is
+refused, not converted — so the gate is redundant there for exclusion and kept
+for three other reasons the package `CLAUDE.md` lists. Where neither primitive
+exists the constructor returns `proc.UnsupportedPlatform` rather than
+pretending (ADR 0018).
 
 Public facade: `pkg/v1/lock`. See `CLAUDE.md` for the measurements, the
 platform matrix, and what this domain does **not** guarantee.
