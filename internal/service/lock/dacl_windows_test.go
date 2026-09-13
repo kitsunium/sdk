@@ -212,9 +212,13 @@ func TestAnIndirectionAboveTheLockFileIsRefusedWhenAnybodyCanWriteItsContainer(t
 	}
 	planted := filepath.Join(container, "app")
 	out, linkErr := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/J", planted, target).CombinedOutput()
-	//: the command's own output is the diagnosis.
+	//: a FAILURE and not a skip. `mklink /J` needs no privilege at all —
+	//: unlike a symbolic link, which is why nofollow_windows_test.go pairs the
+	//: two and this row has no pair — so a failure here is a change in the
+	//: runner image, and skipping would leave the refusing half of the chain
+	//: rule silently absent behind the same green tick a pass wears.
 	if linkErr != nil {
-		t.Skipf("cannot create a junction on this runner: %s (%v)", out, linkErr)
+		t.Fatalf("mklink /J failed on this runner — this is the refusing half of the Windows chain rule, so it is a failure and not a skip: %s (%v)", out, linkErr)
 	}
 	//: the grant is applied AFTER the junction is planted, so the junction's
 	//: own creation does not depend on it — the planter in the real attack
@@ -288,9 +292,11 @@ func TestProgramDataIsAcceptedAsALockDirectoryAndRefusedAsAContainer(t *testing.
 	}
 	planted := filepath.Join(root, "app")
 	out, linkErr := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/J", planted, target).CombinedOutput()
-	//: the command's own output is the diagnosis.
+	//: a FAILURE and not a skip, for the reason above: `mklink /J` needs no
+	//: privilege, and this is the half that proves BUILTIN\Users is read as
+	//: "anybody" on a directory Windows configured.
 	if linkErr != nil {
-		t.Skipf("cannot create a junction on this runner: %s (%v)", out, linkErr)
+		t.Fatalf("mklink /J failed under ProgramData — this is the half that proves BUILTIN\\Users is in the table, so it is a failure and not a skip: %s (%v)", out, linkErr)
 	}
 	redirected, redirectErr := svclock.NewFileLocker(svclock.FileConfig{Dir: filepath.Join(planted, "locks")})
 	//: the refusing half, and it is the one that proves BUILTIN\Users is read
