@@ -9,8 +9,9 @@ package entitlement
 
 import (
 	"crypto/rsa"
-	"fmt"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -25,13 +26,17 @@ func (s *Service) ciSeat(roster *coreent.RosterValue, now time.Time) (grant core
 	//: Nothing to try outside Actions, and no reason to fetch a key set.
 	if !InCI() {
 		//: Report it as unprovable; the caller falls through.
-		return coreent.GrantValue{}, fmt.Errorf("%w: not running in GitHub Actions", coreent.ErrCIUnverifiable)
+		return coreent.GrantValue{}, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "ci_seat"),
+			errs.String("condition", "neither runner token variable is set"))
 	}
 	//: A roster with no CI block entitles nobody, so the round trips below
 	//: would be spent to reach a refusal that is already known.
 	if len(roster.CIAccounts) == 0 {
 		//: Report the refusal without touching the network.
-		return coreent.GrantValue{}, fmt.Errorf("%w: roster grants no CI entitlement", coreent.ErrCINotEntitled)
+		return coreent.GrantValue{}, refuse(coreent.ErrCINotEntitled,
+			errs.String("stage", "ci_seat"),
+			errs.String("condition", "the roster carries no CI block at all"))
 	}
 
 	keys, keysErr := s.publishedJWKS()
@@ -81,15 +86,24 @@ func (s *Service) ciSeat(roster *coreent.RosterValue, now time.Time) (grant core
 // licenseExitCode and licenseAdvice both match coreent.ErrRosterUnreachable ahead of
 // the CI sentinels, so a strict CI refusal during a GitHub outage exited
 // "cannot reach the licence roster" and sent its operator to check a network
-// path that was working. The cause is kept as TEXT and the chain stops here.
+// path that was working. The cause is kept as a FIELD and the chain stops here.
 func (s *Service) publishedJWKS() (keys map[string]*rsa.PublicKey, err error) {
 	raw, fetchErr := s.fetch(ActionsJWKSURL)
 	//: Unreachable keys mean the token cannot be checked at all.
 	if fetchErr != nil {
 		//: Report it as unverifiable rather than as a refusal, and as a CI
-		//: failure ONLY: %s and not %w, so the roster vocabulary this borrowed
-		//: does not travel out with it.
-		return nil, fmt.Errorf("%w: fetching the key set: %s", coreent.ErrCIUnverifiable, fetchErr.Error())
+		//: failure ONLY. refuse and not classify: classify would hand the
+		//: fetch error to errs.Wrap, whose origin-wins rule would then make
+		//: coreent.ErrRosterUnreachable the identity of what leaves here.
+		//:
+		//: particulars and not Error(): the fetch error's sentence is now the
+		//: wire-safe one and names neither the url nor what the transport
+		//: said, while its PRIVATE half is the roster vocabulary this whole
+		//: function exists to keep out. The fields and the foreign cause are
+		//: the only part that is both useful here and free of it.
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "fetch_jwks"),
+			errs.String("cause", particulars(fetchErr)))
 	}
 	//: Parse refuses a set with no usable key rather than returning an empty
 	//: map, which would report every token as an unknown kid.
@@ -140,29 +154,32 @@ func ciRefusalIsFinal(roster *coreent.RosterValue) bool {
 // another owner, the key set was unreachable — is the actionable half on a
 // runner, and it was the half being dropped entirely.
 //
-// The CI cause is folded in as TEXT — ciErr.Error(), behind %s — and never as
-// a wrapped error, and that is the whole safety of this function. Wrapping it would splice the seat's error CHAIN into the
-// device refusal, and that chain is not limited to CI sentinels: publishedJWKS
-// goes through the same bounded fetch the roster does, so a JWKS outage carries
-// coreent.ErrRosterUnreachable inside coreent.ErrCIUnverifiable. licenseExitCode matches
-// coreent.ErrRosterUnreachable BEFORE coreent.ErrLicenseExpired, and licenseAdvice does the
-// same — so an expired licence on a runner during a GitHub outage would have
-// been reported as "cannot reach the licence roster" and exited with the wrong
-// code. Taking the text and dropping the chain is exactly the split wanted:
-// the device sentinel stays the only one any dispatch can see.
+// The CI cause is folded in as TEXT — two fields, `ci_refusal` for the seat's
+// own sentence and `ci_detail` for the particulars behind it — and never as
+// a wrapped error, and that is the whole safety of this function. Wrapping it
+// would splice the seat's error CHAIN into the device refusal, and that chain
+// is not limited to CI sentinels: publishedJWKS goes through the same bounded
+// fetch the roster does, so a JWKS outage carries coreent.ErrRosterUnreachable
+// inside coreent.ErrCIUnverifiable. licenseExitCode matches
+// coreent.ErrRosterUnreachable BEFORE coreent.ErrLicenseExpired, and
+// licenseAdvice does the same — so an expired licence on a runner during a
+// GitHub outage would have been reported as "cannot reach the licence roster"
+// and exited with the wrong code. Taking the text and dropping the chain is
+// exactly the split wanted: the device sentinel stays the only one any dispatch
+// can see.
 //
-// It is spelled ciErr.Error() rather than %v on the error itself so that
-// dropping the cause is visible AT the call site, and so KTN-ERROR-WRAP — which
-// is right that an error reaching fmt.Errorf with no %w covering it is usually
-// a mistake — has nothing to guess at. The operand is a string because a string
-// is what is wanted.
+// annotate rather than a bare errs.Wrap, because the device refusal may not be
+// ours at all: coreent.Identity is a port, and Discover is free to return a
+// plain error. Zero WrapParams over one of those returns
+// CodeInvalidWrapParams, which would replace the consumer's own refusal with
+// "internal wrap failure" on the one path that reports it. annotate returns
+// such an error untouched and drops the annotation instead.
 //
 // Where the text actually lands, stated plainly because it is less than it
-// looks: reportLicenseRefusal prints licenseAdvice(err), which is a FIXED
-// string per sentinel, so this annotation does not reach the refusal line. It
-// reaches exit.Code's structured --debug log, and licenseAdvice's fallback for
-// refusals that have no table entry. Making the advice line itself CI-aware is
-// a change to that table, not to this function.
+// looks: a caller printing a FIXED advice string per sentinel never sees this
+// field. It reaches a structured debug log, errs.FieldsOf, and any fallback for
+// refusals that have no table entry. Making an advice table CI-aware is a
+// change to that table, not to this function.
 //
 // Outside Actions there is nothing to add: the seat was never attempted, and
 // "not running in GitHub Actions" is noise on a laptop.
@@ -172,7 +189,16 @@ func ciContext(deviceErr, ciErr error) error {
 		//: Report the device refusal unchanged.
 		return deviceErr
 	}
-	//: One %w and one plain string: the device sentinel stays reachable
-	//: through errors.Is, the seat's chain deliberately does not come with it.
-	return fmt.Errorf("%w (the CI seat was refused too: %s)", deviceErr, ciErr.Error())
+	seat := []errs.FieldValue{errs.String("ci_refusal", ciErr.Error())}
+	//: The seat's sentence is now the wire-safe one, so it names the sentinel
+	//: and not which of the three ways that sentinel was reached. Those live
+	//: in the seat error's OWN fields, and carrying them is the difference
+	//: between "the CI seat was refused" and "the roster carries no CI block
+	//: at all" — which is the whole reason this annotation exists.
+	if detail := particulars(ciErr); detail != "" {
+		seat = append(seat, errs.String("ci_detail", detail))
+	}
+	//: Origin wins on the device refusal, so its sentinel stays reachable
+	//: through errors.Is; the seat's chain deliberately does not come with it.
+	return annotate(deviceErr, seat...)
 }

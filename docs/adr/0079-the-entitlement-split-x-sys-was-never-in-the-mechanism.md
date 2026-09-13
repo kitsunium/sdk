@@ -153,11 +153,49 @@ Carried forward unchanged from ADR 0078, none of them addressed here:
 - **`RoughtimeServers` ships EMPTY.** The mechanism is implemented and tested;
   naming a server list would make every consumer depend on a host the SDK does
   not operate.
-- **`fmt.Errorf` in the service.** The engine came across with the source
+- ~~**`fmt.Errorf` in the service.** The engine came across with the source
   implementation's error construction, which predates SDK rule 2. The fifteen
   sentinels are `errs.Define`-typed and the wrapping uses `%w`, so `errors.Is`
   and `errs.HasCode` both work through it; the conversion is a separate change
-  that touches every refusal path and deserves its own diff.
+  that touches every refusal path and deserves its own diff.~~ **CLOSED.** The
+  separate change is [PR #200](https://github.com/kitsunium/sdk/pull/200):
+  **112 sites in `internal/service/entitlement` and 25 in
+  `third-party/entitlement`, both now zero.** Three things it established are
+  worth carrying here rather than leaving in a merged diff.
+
+  - **What was actually missing was the Public/Private split, not the call.**
+    The entry above is correct that `errors.Is` and `errs.HasCode` worked
+    through the old construction — and that was the reason it looked cheap to
+    defer. What did not work is the half those two say nothing about: every
+    refusal's `Error()` carried a publication url, a GitHub host, a JWKS key
+    id, a subject, a cache path and whatever the transport or the filesystem
+    said. The public half is the one documented safe for a response body, so
+    the debt was a leak and not a style violation. It is now a sentence and
+    nothing else, with the particulars in `Fields`, asserted in BOTH directions
+    by `TestNoParticularReachesThePublicSentence` in each package.
+
+  - **User-visible error text changed at every converted site**, and anything
+    parsing those strings breaks. Three tests in the tree were parsing them.
+
+  - **`errs.Wrap` has no spelling for "annotate without classifying".** Zero
+    `WrapParams` over a cause carrying no `*errs.Error` fails
+    `validateDefineArgs` and returns `CodeInvalidWrapParams` — "internal wrap
+    failure" — with the caller's own error demoted to a cause. `Identity` is a
+    PORT, so a consumer implementing it with a plain `errors.New` reaches that
+    path, and two call sites here add a field to a refusal somebody else owns.
+    Both packages carry an `annotate` helper that guards on
+    `errors.AsType[*errs.Error]` and returns such an error untouched. A kernel
+    affordance for this — a Wrap that adds fields and decides nothing — would
+    remove the guard from both copies and is NOT proposed here: it is a
+    `internal/kernel/errs` decision for the whole repository rather than for
+    one domain.
+
+  `internal/service/entitlement` re-enters `//:audit_sources` with a range of
+  its own, `0.3.67.*`, for the one failure the contract has no word for — a
+  cache that could not be written. `third-party/entitlement` finally declares a
+  code in the `0.3.65.*` range `codeRangeOwners` has recorded for it since
+  ADR 0078: `ENROLMENT_FAILED`, for the six ways minting a key pair can fail,
+  none of which the three-method port describes.
 - ~~**The cache's rename on Windows, and `rememberRoster`'s lost update.** Both
   are recorded on the versement's review threads and neither is reachable from
   this CI matrix.~~ **CLOSED.** The second clause expired:

@@ -6,8 +6,9 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -82,7 +83,8 @@ func decodeBundle(raw []byte) (payload, signature []byte, err error) {
 		//: Report it as unreachable-shaped: the endpoint answered with
 		//: something that is not a bundle at all, which is a publication or
 		//: transport problem, not a forgery claim.
-		return nil, nil, fmt.Errorf("%w: malformed bundle: %w", coreent.ErrRosterUnreachable, unmarshalErr)
+		return nil, nil, classify(coreent.ErrRosterUnreachable, unmarshalErr,
+			errs.String("stage", "decode_bundle"))
 	}
 
 	//: A document that decoded as JSON but carries neither half is not a
@@ -93,20 +95,24 @@ func decodeBundle(raw []byte) (payload, signature []byte, err error) {
 	//: thing to tell an operator than "this endpoint served junk".
 	if bundle.Payload == "" || bundle.Signature == "" {
 		//: Report a publication or transport problem, not an attack.
-		return nil, nil, fmt.Errorf("%w: response is not a bundle", coreent.ErrRosterUnreachable)
+		return nil, nil, refuse(coreent.ErrRosterUnreachable,
+			errs.String("stage", "decode_bundle"),
+			errs.String("condition", "neither half present"))
 	}
 
 	decodedPayload, payloadErr := base64.StdEncoding.DecodeString(bundle.Payload)
 	//: A payload that is not base64 cannot be the signed bytes.
 	if payloadErr != nil {
 		//: Same reasoning as above: this is a broken publisher, not a forger.
-		return nil, nil, fmt.Errorf("%w: undecodable payload: %w", coreent.ErrRosterUnreachable, payloadErr)
+		return nil, nil, classify(coreent.ErrRosterUnreachable, payloadErr,
+			errs.String("stage", "decode_payload"))
 	}
 	decodedSignature, signatureErr := base64.StdEncoding.DecodeString(bundle.Signature)
 	//: A signature that is not base64 cannot verify anything.
 	if signatureErr != nil {
 		//: Same reasoning as above.
-		return nil, nil, fmt.Errorf("%w: undecodable signature: %w", coreent.ErrRosterUnreachable, signatureErr)
+		return nil, nil, classify(coreent.ErrRosterUnreachable, signatureErr,
+			errs.String("stage", "decode_signature"))
 	}
 
 	//: Both halves, still entirely untrusted.

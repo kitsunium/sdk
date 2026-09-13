@@ -27,12 +27,13 @@ package entitlement
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -123,7 +124,12 @@ func (s *Service) rememberRoster(raw []byte, roster *coreent.RosterValue) {
 		//: mystery on the day it is discovered, which is the day the network
 		//: is already down.
 		if err := writeCachedBundle(s.cacheDir, raw); err != nil {
-			log.Printf("cannot cache the roster (%v); this machine will need the network on every start", err)
+			//: The public sentence names no path by design, and this line is
+			//: a log an operator owns rather than a wire — so diagnose puts
+			//: the step, the directory and what the filesystem said back
+			//: underneath it. Without that the line would say only that
+			//: something could not be written.
+			log.Printf("cannot cache the roster (%v: %s); this machine will need the network on every start", err, diagnose(err))
 		}
 	})
 }
@@ -156,7 +162,9 @@ func writeCachedBundle(dir string, raw []byte) error {
 	//: The cache root may not exist yet on a first run.
 	if mkErr := os.MkdirAll(dir, cacheDirMode); mkErr != nil {
 		//: Report what could not be created.
-		return fmt.Errorf("creating %s: %w", dir, mkErr)
+		return classify(CacheUnwritable, mkErr,
+			errs.String("step", "mkdir"),
+			errs.String("dir", dir))
 	}
 
 	staged, stageErr := stageBundle(dir, raw)
@@ -175,7 +183,9 @@ func writeCachedBundle(dir string, raw []byte) error {
 	if renameErr := os.Rename(staged, installed); renameErr != nil {
 		removeBestEffort(staged)
 		//: Report the rename failure.
-		return fmt.Errorf("installing %s: %w", installed, renameErr)
+		return classify(CacheUnwritable, renameErr,
+			errs.String("step", "rename"),
+			errs.String("path", installed))
 	}
 	//: The cache now holds exactly the bytes that authenticated.
 	return nil
@@ -218,7 +228,9 @@ func stageBundle(dir string, raw []byte) (path string, err error) {
 	//: No descriptor, so nothing to clean up.
 	if createErr != nil {
 		//: Report what could not be staged.
-		return "", fmt.Errorf("staging in %s: %w", dir, createErr)
+		return "", classify(CacheUnwritable, createErr,
+			errs.String("step", "create_temp"),
+			errs.String("dir", dir))
 	}
 
 	//: Released at the point it was acquired — and its failure REPORTED, not
@@ -235,7 +247,9 @@ func stageBundle(dir string, raw []byte) (path string, err error) {
 			return
 		}
 		removeBestEffort(file.Name())
-		path, err = "", fmt.Errorf("closing %s: %w", file.Name(), closeErr)
+		path, err = "", classify(CacheUnwritable, closeErr,
+			errs.String("step", "close"),
+			errs.String("path", file.Name()))
 	}()
 
 	staged := file.Name()
@@ -244,7 +258,9 @@ func stageBundle(dir string, raw []byte) (path string, err error) {
 	if _, writeErr := file.Write(raw); writeErr != nil {
 		removeBestEffort(staged)
 		//: Report the write failure.
-		return "", fmt.Errorf("writing %s: %w", staged, writeErr)
+		return "", classify(CacheUnwritable, writeErr,
+			errs.String("step", "write"),
+			errs.String("path", staged))
 	}
 	//: A complete bundle, at a name only this call knows.
 	return staged, nil
@@ -277,7 +293,9 @@ func (s *Service) cachedRoster(now time.Time) (roster *coreent.RosterValue, err 
 	//: .json" in the working directory.
 	if s.cacheDir == "" {
 		//: Nothing cached, and nowhere to look.
-		return nil, fmt.Errorf("%w: no roster cache configured", coreent.ErrRosterUnreachable)
+		return nil, refuse(coreent.ErrRosterUnreachable,
+			errs.String("stage", "read_cache"),
+			errs.String("condition", "no cache directory configured, so there is nowhere to look"))
 	}
 
 	path := cachedBundlePath(s.cacheDir)
@@ -326,14 +344,19 @@ func readCappedFile(path string) (raw []byte, err error) {
 	//: the same offline window and takes no race to win.
 	if !regularFile(path) {
 		//: Report the unusable cache without touching it.
-		return nil, fmt.Errorf("%w: cached roster at %s is not a regular file", coreent.ErrRosterUnreachable, path)
+		return nil, refuse(coreent.ErrRosterUnreachable,
+			errs.String("stage", "read_cache"),
+			errs.String("path", path),
+			errs.String("condition", "not a regular file, so opening it could block forever"))
 	}
 
 	file, openErr := os.Open(path)
 	//: Never fetched successfully, or the cache was cleared.
 	if openErr != nil {
 		//: Report the absent cache.
-		return nil, fmt.Errorf("%w: no cached roster at %s: %w", coreent.ErrRosterUnreachable, path, openErr)
+		return nil, classify(coreent.ErrRosterUnreachable, openErr,
+			errs.String("stage", "read_cache"),
+			errs.String("path", path))
 	}
 	//: The body of closeBestEffort, inlined. KTN-GOROUTINE-DEFER recognises
 	//: `x.Close()` and a func literal containing it, never `helper(x)`, so
@@ -437,10 +460,10 @@ func (s *Service) checkClock(now time.Time) error {
 		return nil
 	}
 	//: Name both instants: "set the clock" is only actionable with a target.
-	return fmt.Errorf("%w: clock reads %s, last signed roster was issued %s",
-		coreent.ErrClockRegressed,
-		now.UTC().Format(time.RFC3339),
-		mark.UTC().Format(time.RFC3339))
+	return refuse(coreent.ErrClockRegressed,
+		errs.String("condition", "the local clock reads earlier than the newest signed instant this machine has authenticated"),
+		errs.String("clock", now.UTC().Format(time.RFC3339)),
+		errs.String("mark", mark.UTC().Format(time.RFC3339)))
 }
 
 // checkClockAndTime runs the local ratchet and then, if any is configured, the

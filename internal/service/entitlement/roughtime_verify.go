@@ -12,8 +12,9 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha512"
-	"fmt"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -59,7 +60,7 @@ func verifyRoughtimeResponse(packet, nonce []byte, longTerm ed25519.PublicKey) (
 	//: The delegated key must have signed this exact response.
 	if sigErr := checkRoughtimeSignature(delegated.key, roughtimeResponseContext, srep, fields[roughtimeTag("SIG")]); sigErr != nil {
 		//: Propagate the refusal.
-		return time.Time{}, 0, fmt.Errorf("roughtime response: %w", sigErr)
+		return time.Time{}, 0, annotate(sigErr, errs.String("document", "roughtime response"))
 	}
 
 	stated, statedErr := readRoughtimeSrep(srep)
@@ -91,7 +92,9 @@ func checkRoughtimeBinding(stated roughtimeStatement, delegated roughtimeDelegat
 	//: what a stolen or expired delegated key produces.
 	if stated.midpoint < delegated.notBefore || stated.midpoint > delegated.notAfter {
 		//: Report the refusal.
-		return fmt.Errorf("%w: roughtime midpoint outside its delegation window", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_binding"),
+			errs.String("condition", "the midpoint falls outside the window its delegation covers"))
 	}
 	//: Last and indispensable: this is what makes the answer about us.
 	return verifyRoughtimeMerkle(fields, nonce, stated.root)
@@ -103,7 +106,9 @@ func unframeRoughtime(packet []byte) (message []byte, err error) {
 	//: Too short to carry a frame, let alone a message.
 	if len(packet) < header || string(packet[:len(roughtimeFrameMagic)]) != roughtimeFrameMagic {
 		//: Report the malformed answer.
-		return nil, fmt.Errorf("%w: roughtime packet is not framed", coreent.ErrCIUnverifiable)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_unframe"),
+			errs.String("condition", "too short to carry a frame, or the wrong magic"))
 	}
 	stated, statedErr := roughtimeUint32(packet[len(roughtimeFrameMagic):], "frame length")
 	//: A length we cannot read bounds nothing.
@@ -114,7 +119,11 @@ func unframeRoughtime(packet []byte) (message []byte, err error) {
 	//: A length longer than what arrived is the classic over-read.
 	if int(stated) > len(packet)-header {
 		//: Report the malformed answer.
-		return nil, fmt.Errorf("%w: roughtime frame claims %d bytes, got %d", coreent.ErrCIUnverifiable, stated, len(packet)-header)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_unframe"),
+			errs.String("condition", "the frame claims more bytes than arrived"),
+			errs.Int("claimed_bytes", int(stated)),
+			errs.Int("got_bytes", len(packet)-header))
 	}
 	//: The message, exactly as long as the frame says.
 	return packet[header : header+int(stated)], nil
@@ -141,27 +150,30 @@ func verifyRoughtimeCert(cert []byte, longTerm ed25519.PublicKey) (delegation ro
 	//: A certificate we cannot take apart delegates nothing.
 	if decodeErr != nil {
 		//: Propagate the malformed answer.
-		return roughtimeDelegation{}, fmt.Errorf("roughtime certificate: %w", decodeErr)
+		return roughtimeDelegation{}, annotate(decodeErr, errs.String("document", "roughtime certificate"))
 	}
 
 	dele := fields[roughtimeTag("DELE")]
 	//: The pinned key must have signed this exact delegation.
 	if sigErr := checkRoughtimeSignature(longTerm, roughtimeDelegationContext, dele, fields[roughtimeTag("SIG")]); sigErr != nil {
 		//: Propagate the refusal.
-		return roughtimeDelegation{}, fmt.Errorf("roughtime delegation: %w", sigErr)
+		return roughtimeDelegation{}, annotate(sigErr, errs.String("document", "roughtime delegation"))
 	}
 
 	inner, innerErr := decodeRoughtimeMessage(dele)
 	//: A delegation we cannot take apart carries no key.
 	if innerErr != nil {
 		//: Propagate the malformed answer.
-		return roughtimeDelegation{}, fmt.Errorf("roughtime delegation body: %w", innerErr)
+		return roughtimeDelegation{}, annotate(innerErr, errs.String("document", "roughtime delegation body"))
 	}
 	key := inner[roughtimeTag("PUBK")]
 	//: A delegated key of the wrong length would panic ed25519.Verify.
 	if len(key) != ed25519.PublicKeySize {
 		//: Report the malformed answer.
-		return roughtimeDelegation{}, fmt.Errorf("%w: roughtime delegated key is %d bytes", coreent.ErrCIUnverifiable, len(key))
+		return roughtimeDelegation{}, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_delegation"),
+			errs.String("condition", "the delegated key is not an ed25519 public key"),
+			errs.Int("got_bytes", len(key)))
 	}
 
 	notBefore, beforeErr := roughtimeUint64(inner[roughtimeTag("MINT")], "MINT")
@@ -169,7 +181,9 @@ func verifyRoughtimeCert(cert []byte, longTerm ed25519.PublicKey) (delegation ro
 	//: A window we cannot read bounds nothing, so it bounds everything.
 	if beforeErr != nil || afterErr != nil {
 		//: Report the malformed answer.
-		return roughtimeDelegation{}, fmt.Errorf("%w: roughtime delegation window is unreadable", coreent.ErrCIUnverifiable)
+		return roughtimeDelegation{}, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_delegation"),
+			errs.String("condition", "MINT or MAXT could not be read, so the window bounds nothing"))
 	}
 	//: A delegation good for everything and nothing.
 	return roughtimeDelegation{key: ed25519.PublicKey(key), notBefore: notBefore, notAfter: notAfter}, nil
@@ -184,13 +198,20 @@ func checkRoughtimeSignature(key ed25519.PublicKey, context string, signed, sign
 	//: ed25519.Verify, which is entitled to assume its own sizes.
 	if len(signature) != ed25519.SignatureSize {
 		//: Report the malformed answer.
-		return fmt.Errorf("%w: signature is %d bytes, want %d", coreent.ErrCIUnverifiable, len(signature), ed25519.SignatureSize)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_signature"),
+			errs.String("condition", "not an ed25519 signature"),
+			errs.Int("got_bytes", len(signature)),
+			errs.Int("want_bytes", ed25519.SignatureSize))
 	}
 	//: Context first, then the signed bytes: the domain separation IS part of
 	//: the message.
 	if !ed25519.Verify(key, append([]byte(context), signed...), signature) {
 		//: Report the refusal.
-		return fmt.Errorf("%w: signature does not verify", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_signature"),
+			errs.String("condition", "the context-prefixed signature does not verify"),
+			errs.String("context", context))
 	}
 	//: Authentic.
 	return nil
@@ -212,7 +233,7 @@ func readRoughtimeSrep(srep []byte) (stated roughtimeStatement, err error) {
 	//: A signed response we cannot take apart asserts nothing.
 	if decodeErr != nil {
 		//: Propagate the malformed answer.
-		return roughtimeStatement{}, fmt.Errorf("roughtime signed response: %w", decodeErr)
+		return roughtimeStatement{}, annotate(decodeErr, errs.String("document", "roughtime signed response"))
 	}
 
 	midpoint, midErr := roughtimeUint64(fields[roughtimeTag("MIDP")], "MIDP")
@@ -231,7 +252,11 @@ func readRoughtimeSrep(srep []byte) (stated roughtimeStatement, err error) {
 	//: A root of the wrong width commits to nothing this client can check.
 	if len(root) != roughtimeHashSize {
 		//: Report the malformed answer.
-		return roughtimeStatement{}, fmt.Errorf("%w: roughtime root is %d bytes, want %d", coreent.ErrCIUnverifiable, len(root), roughtimeHashSize)
+		return roughtimeStatement{}, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_srep"),
+			errs.String("condition", "a root of the wrong width commits to nothing checkable"),
+			errs.Int("got_bytes", len(root)),
+			errs.Int("want_bytes", roughtimeHashSize))
 	}
 	//: An assertion, still to be tied to this request.
 	return roughtimeStatement{midpoint: midpoint, radius: radius, root: root}, nil
@@ -256,7 +281,10 @@ func verifyRoughtimeMerkle(fields map[uint32][]byte, nonce, root []byte) error {
 	//: batch, is a shape nobody should walk.
 	if len(path)%roughtimeHashSize != 0 || len(path)/roughtimeHashSize > roughtimeMaxPathDepth {
 		//: Report the malformed answer.
-		return fmt.Errorf("%w: roughtime path is %d bytes", coreent.ErrCIUnverifiable, len(path))
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_merkle"),
+			errs.String("condition", "not a whole number of nodes, or deeper than any real batch"),
+			errs.Int("got_bytes", len(path)))
 	}
 
 	hash := hashRoughtimeLeaf(nonce)
@@ -275,7 +303,9 @@ func verifyRoughtimeMerkle(fields map[uint32][]byte, nonce, root []byte) error {
 	//: A root we did not reproduce is a tree our nonce is not in.
 	if !bytes.Equal(hash, root) {
 		//: Report the refusal.
-		return fmt.Errorf("%w: roughtime path does not reach the signed root", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_merkle"),
+			errs.String("condition", "this nonce is not in the tree the response committed to"))
 	}
 	//: This answer is about this request.
 	return nil

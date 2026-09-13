@@ -17,8 +17,11 @@ pulls `golang.org/x/term` and through it **introduces** `golang.org/x/sys` —
 `x/crypto/ssh` requires `x/sys v0.48.0` indirect. Quarantining here mirrors
 ADR 0022/0034 (the HCL codec) and ADR 0012 (the AWS writers).
 
-Its error codes are `internal/core/entitlement`'s, range `0.2.35.*`; this
-package mints none of its own.
+Everything it says about VERIFICATION is said in `internal/core/entitlement`'s
+vocabulary, range `0.2.35.*`. ENROLMENT is not in that contract — minting a pair
+is something this package does and the port does not describe — so it owns one
+code of its own, `0.3.65.1` `ENROLMENT_FAILED`, in the range `codeRangeOwners`
+has recorded for this package since ADR 0078.
 
 ## Contents
 
@@ -29,6 +32,8 @@ package mints none of its own.
 | `discover.go` | which subject this machine is enrolled as, and the refusal to guess |
 | `key.go` / `key_unix.go` / `key_windows.go` | load, fingerprint, prove possession, permission checks |
 | `enroll.go` | `NewSubjectID`, `GenerateKeyPair`, `IssueURL` |
+| `codes.go` / `errors.go` | `CodeEnrolmentFailed` and its sentinel |
+| `wrap.go` | `refuse` / `classify` / `classifyForeign` / `annotate` |
 
 ## What it is NOT
 
@@ -53,12 +58,34 @@ otherwise.
   the only entry point here that WRITES, and a subject like
   `../authorized_keys` wrote both halves outside the caller's directory until
   a review caught it. `TestGenerateKeyPairRefusesAPathTraversal` pins it.
+- **The public sentence names no particular, and that is the point.** Every
+  refusal is built with `refuse` or `classify`, so `err.Error()` is the
+  wire-safe half and nothing else: no key directory, no subject, no path, no
+  mode. Where it happened travels in `Fields`.
+  `TestNoParticularReachesThePublicSentence` asserts both directions on four
+  refusals, because leaking a particular and losing it are both defects and
+  only one of them is the one everybody remembers.
+
+- **`ProvePossession` takes the CALLER's signer, so origin-wins is wrong
+  there.** An `ssh.Signer` or an `ssh.PublicKey` a caller supplies is free to
+  return an `*errs.Error` of its own, and `errs.Wrap` would make it the identity
+  of a possession failure. `classifyForeign` hides it from origin-wins and
+  leaves it matchable by `errors.Is`.
+
+- **`DiscoverSubject` drops the read error's CHAIN, not its text.** An
+  unreadable key directory and a never-enrolled one are documented as ONE
+  answer; keeping `os.ReadDir`'s failure as a cause would make
+  `errors.Is(err, fs.ErrNotExist)` newly answer true there — a branch no caller
+  has today. The text travels as a field instead.
+
 - **The published half is world-readable on purpose.** The roster hands it to
   everyone, so protecting it locally would be theatre. The private half is
   `0600` and `SignerFromFile` refuses anything looser.
 
 ## Do NOT
 
+- Build an error with `fmt.Errorf`. There were 25 of them and there are none;
+  the three shapes in `wrap.go` are what a call site chooses between.
 - Reintroduce an origin, a cache directory, an audience or an enrolment URL as a
   package constant. That is `svcent.ProductValue`'s job, and the suite injects a
   product naming a vendor the implementation never mentioned so a reintroduced

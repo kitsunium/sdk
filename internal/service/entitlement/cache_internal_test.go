@@ -67,8 +67,15 @@ func Test_writeCachedBundle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if err := writeCachedBundle(tt.setup(t), []byte(`{"payload":"x","sig":"y"}`)); err == nil {
-				t.Errorf("writeCachedBundle() error = nil, want a failure (%s)", tt.reason)
+			err := writeCachedBundle(tt.setup(t), []byte(`{"payload":"x","sig":"y"}`))
+			if err == nil {
+				t.Fatalf("writeCachedBundle() error = nil, want a failure (%s)", tt.reason)
+			}
+			//: Every step of the write answers to ONE sentinel. rememberRoster
+			//: logs whatever comes back, and a log line that cannot name what
+			//: it is reporting is what this pins.
+			if !errors.Is(err, CacheUnwritable) {
+				t.Errorf("writeCachedBundle() error = %v, want it to carry CacheUnwritable (%s)", err, tt.reason)
 			}
 		})
 	}

@@ -8,8 +8,9 @@ package entitlement
 import (
 	"crypto/ed25519"
 	"encoding/json"
-	"fmt"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -33,13 +34,18 @@ func ParseRoster(raw, sig []byte, vendor ed25519.PublicKey, now time.Time) (rost
 	//: client enforces the bound itself.
 	if decoded.ExpiresAt.Sub(decoded.IssuedAt) > coreent.RosterLifetime {
 		//: Refuse an over-wide window whoever signed it.
-		return nil, fmt.Errorf("%w: window exceeds %s", coreent.ErrRosterStale, coreent.RosterLifetime)
+		return nil, refuse(coreent.ErrRosterStale,
+			errs.String("condition", "window wider than the agreed lifetime"),
+			errs.String("lifetime", coreent.RosterLifetime.String()),
+			errs.String("window", decoded.ExpiresAt.Sub(decoded.IssuedAt).String()))
 	}
 	//: A roster signed for the future is as suspect as an expired one: it
 	//: would extend the replay window past what the vendor intended.
 	if now.Before(decoded.IssuedAt) {
 		//: Refuse a window that has not opened yet.
-		return nil, fmt.Errorf("%w: issued in the future", coreent.ErrRosterStale)
+		return nil, refuse(coreent.ErrRosterStale,
+			errs.String("condition", "issued in the future"),
+			errs.String("issued_at", decoded.IssuedAt.UTC().Format(time.RFC3339)))
 	}
 	//: Past the window the signature no longer authorizes anything.
 	if now.After(decoded.ExpiresAt) {
@@ -67,7 +73,9 @@ func authenticateRoster(raw, sig []byte, vendor ed25519.PublicKey) (roster *core
 	//: rather than let ed25519.Verify panic on a short slice.
 	if len(vendor) != ed25519.PublicKeySize {
 		//: Refuse rather than risk a panic inside ed25519.Verify.
-		return nil, fmt.Errorf("%w: malformed vendor key", coreent.ErrRosterUnsigned)
+		return nil, refuse(coreent.ErrRosterUnsigned,
+			errs.String("condition", "the linked vendor key is not an ed25519 public key"),
+			errs.Int("key_bytes", len(vendor)))
 	}
 	//: Authenticate the bytes before decoding them: a forged roster must
 	//: never reach the JSON parser, let alone the authorization decision.
@@ -79,8 +87,14 @@ func authenticateRoster(raw, sig []byte, vendor ed25519.PublicKey) (roster *core
 	var decoded coreent.RosterValue
 	//: Malformed JSON from an authenticated payload means a broken publisher.
 	if unmarshalErr := json.Unmarshal(raw, &decoded); unmarshalErr != nil {
-		//: Surface the decode failure rather than authorize on zero values.
-		return nil, fmt.Errorf("decoding roster: %w", unmarshalErr)
+		//: Report it exactly as decodeBundle reports the same class one level
+		//: up: the endpoint served something that is not a roster, which is a
+		//: publication fault and not a forgery claim. It carried NO sentinel
+		//: before, so a caller mapping refusals to exit codes and advice fell
+		//: through to its default on the one input a vendor can produce by
+		//: mistake.
+		return nil, classify(coreent.ErrRosterUnreachable, unmarshalErr,
+			errs.String("stage", "decode_roster_payload"))
 	}
 	//: Authentic, decoded, and entirely unjudged as to when.
 	return &decoded, nil

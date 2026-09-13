@@ -4,20 +4,27 @@ import (
 	"crypto/ed25519"
 	"encoding/pem"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
 	"golang.org/x/crypto/ssh"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // ownerOnly is the permission a private key must carry; anything looser means
 // the secret is machine-wide and the possession proof is theatre.
 const ownerOnly os.FileMode = 0o600
+
+// splitSubject is a canonical v4 UUID the public/private split assertions mint
+// under.
+const splitSubject string = "22222222-3333-4444-8555-666666666666"
 
 // canonicalSubject is a syntactically valid UUID; validSubject refuses anything
 // else before the file is ever read, which would short-circuit these tests.
@@ -496,5 +503,183 @@ func TestErrorsAsReachesTheConcreteCause(t *testing.T) {
 	//: The recovered error must carry the real operand, not a copy of the text.
 	if pathErr.Path != keyPath {
 		t.Errorf("recovered *fs.PathError.Path = %q, want %q", pathErr.Path, keyPath)
+	}
+}
+
+// TestNoParticularReachesThePublicSentence is the assertion this package's
+// conversion to errs.Wrap exists for, and it runs in BOTH directions.
+//
+// The mechanical half of that conversion passes every other test here while
+// putting a key directory, a subject and a filesystem path straight back into
+// the half documented safe for a response body. What the split is about is
+// where each fact landed: the sentence says WHAT happened, the fields say
+// WHERE and WHY.
+//
+// Leaking a particular and losing it are both defects, and only one of them is
+// the one everybody remembers.
+func TestNoParticularReachesThePublicSentence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// build produces the refusal under test.
+		build func(t *testing.T) error
+		// particular is the fact that must be in the fields and out of the
+		// sentence.
+		particular string
+		reason     string
+	}{
+		{
+			name: "an absent published half names its path",
+			build: func(t *testing.T) error {
+				t.Helper()
+				_, err := entitlement.LoadPublicKey(t.TempDir(), splitSubject)
+				return err
+			},
+			particular: splitSubject + ".pub",
+			reason:     "a path on somebody's disk says where their key lives",
+		},
+		{
+			name: "an unusable subject names the subject",
+			build: func(t *testing.T) error {
+				_, err := entitlement.SignerFromFile("/nowhere", "../authorized_keys")
+				return err
+			},
+			particular: "../authorized_keys",
+			reason:     "the subject is the identifier the vendor's roster keys on, and here it is attacker-supplied",
+		},
+		{
+			name: "an empty key directory names the directory",
+			build: func(t *testing.T) error {
+				t.Helper()
+				_, err := entitlement.DiscoverSubject(t.TempDir())
+				return err
+			},
+			particular: os.TempDir(),
+			reason:     "a key directory is a location on somebody's disk",
+		},
+		{
+			name: "a failed enrolment names what the filesystem said",
+			build: func(t *testing.T) error {
+				t.Helper()
+				dir := t.TempDir()
+				if err := os.Mkdir(entitlement.PrivateKeyPath(dir, splitSubject), 0o700); err != nil {
+					t.Fatalf("creating blocker: %v", err)
+				}
+				_, err := entitlement.GenerateKeyPair(nil, dir, splitSubject)
+				return err
+			},
+			particular: "is a directory",
+			reason:     "the operator acts on the syscall's own words, and nothing else can restate them",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.build(t)
+			if err == nil {
+				t.Fatalf("build() error = nil, want a refusal (%s)", tt.reason)
+			}
+			//: The half documented safe for a response body must not carry it.
+			if strings.Contains(err.Error(), tt.particular) {
+				t.Errorf("err.Error() = %q, want %q OUT of it (%s)", err, tt.particular, tt.reason)
+			}
+			//: ...and the diagnostic half must, or the split lost it instead
+			//: of moving it, which is the other defect and the quieter one.
+			if diagnosis := splitDiagnosis(err); !strings.Contains(diagnosis, tt.particular) {
+				t.Errorf("fields+cause = %q, want %q IN it (%s)", diagnosis, tt.particular, tt.reason)
+			}
+		})
+	}
+}
+
+// splitDiagnosis renders the non-wire-safe half of an error: every field, then
+// the first cause this SDK did not build.
+func splitDiagnosis(err error) string {
+	parts := []string{"fields:"}
+	//: Every particular the public sentence deliberately left out.
+	for _, field := range errs.FieldsOf(err) {
+		parts = append(parts, field.Key()+"="+field.StringValue())
+	}
+	//: And what the world outside this package actually said.
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		//: One of ours — its Public is the sentence already checked above.
+		if _, ours := current.(*errs.Error); ours {
+			continue
+		}
+		parts = append(parts, "cause="+current.Error())
+
+		break
+	}
+	//: One rendered line, in the order the error was built.
+	return strings.Join(parts, " ")
+}
+
+// consumerSigner answers Sign with an errs-typed error of the CALLER's own,
+// which is what an agent, a hardware token or a custom ssh.Signer may return.
+type consumerSigner struct {
+	// pub is the published half this signer claims.
+	pub ssh.PublicKey
+}
+
+// PublicKey reports the half this signer answers for.
+func (c consumerSigner) PublicKey() ssh.PublicKey {
+	//: The same key, so the mismatch gate passes and signing is reached.
+	return c.pub
+}
+
+// Sign refuses with an error from a code range this SDK does not own.
+func (c consumerSigner) Sign(io.Reader, []byte) (*ssh.Signature, error) {
+	//: A locked agent's own vocabulary, typed.
+	return nil, consumerFailure
+}
+
+// consumerFailure is an errs-typed error from a range this SDK does not own.
+var consumerFailure = errs.Wrap(nil, errs.WrapParams{
+	Code:    0x00_03_30_01,
+	Reason:  "AGENT_LOCKED",
+	Public:  "the agent refused to sign",
+	Private: "consumer: the agent is locked",
+})
+
+// TestProvePossessionKeepsItsSentinelAgainstACallersSigner pins the seam where
+// origin-wins is the wrong rule.
+//
+// ProvePossession is exported and takes an ssh.Signer the CALLER supplies.
+// Plain classify let an errs-typed error from that signer become the identity
+// of the refusal, so errors.Is stopped finding ErrNoPossession and a caller's
+// exit-code table followed a number nobody here allocated. The fmt.Errorf this
+// replaced put the sentinel behind the first %w, so it won whatever the cause
+// was — this was a regression, not a pre-existing hole.
+func TestProvePossessionKeepsItsSentinelAgainstACallersSigner(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if _, err := entitlement.GenerateKeyPair(nil, dir, splitSubject); err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	pub, loadErr := entitlement.LoadPublicKey(dir, splitSubject)
+	if loadErr != nil {
+		t.Fatalf("LoadPublicKey: %v", loadErr)
+	}
+
+	err := entitlement.ProvePossession(consumerSigner{pub: pub}, pub)
+	reason := "a possession failure is a possession failure whoever's signer reported it"
+	if !errors.Is(err, coreent.ErrNoPossession) {
+		t.Errorf("ProvePossession() error = %v, want it to carry ErrNoPossession (%s)", err, reason)
+	}
+	if code, _ := errs.CodeOf(err); code != coreent.CodeNoPossession {
+		t.Errorf("CodeOf(ProvePossession()) = %v, want %v (%s)", code, coreent.CodeNoPossession, reason)
+	}
+	//: The caller's own error stays reachable, which is what separates this
+	//: from simply dropping the chain.
+	if !errors.Is(err, consumerFailure) {
+		t.Errorf("ProvePossession() error = %v, want the signer's own error still matchable (%s)", err, reason)
+	}
+	//: And its words still render, in the half that is not wire-safe.
+	if diagnosis := splitDiagnosis(err); !strings.Contains(diagnosis, "the agent refused to sign") {
+		t.Errorf("fields+cause = %q, want the signer's message in it (%s)", diagnosis, reason)
 	}
 }

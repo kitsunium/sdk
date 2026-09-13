@@ -9,7 +9,8 @@ package entitlement
 
 import (
 	"encoding/binary"
-	"fmt"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -77,14 +78,20 @@ func roughtimeHeaderSize(raw []byte) (count, header int, err error) {
 	//: Without the count there is no message at all.
 	if len(raw) < roughtimeTagSize {
 		//: Report the malformed message.
-		return 0, 0, fmt.Errorf("%w: roughtime message shorter than its own header", coreent.ErrCIUnverifiable)
+		return 0, 0, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_decode"),
+			errs.String("condition", "shorter than the tag count it must begin with"))
 	}
 	count = int(binary.LittleEndian.Uint32(raw[:roughtimeTagSize]))
 	//: Zero tags is not a message, and a large count is an allocation the
 	//: server would be choosing for us.
 	if count <= 0 || count > roughtimeMaxTags {
 		//: Report the malformed message.
-		return 0, 0, fmt.Errorf("%w: roughtime message declares %d tags", coreent.ErrCIUnverifiable, count)
+		return 0, 0, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_decode"),
+			errs.String("condition", "a tag count no real message carries"),
+			errs.Int("declared_tags", count),
+			errs.Int("limit_tags", roughtimeMaxTags))
 	}
 
 	//: count-1 offsets and count tags follow the count itself.
@@ -92,7 +99,11 @@ func roughtimeHeaderSize(raw []byte) (count, header int, err error) {
 	//: A header longer than the packet describes nothing.
 	if len(raw) < header {
 		//: Report the malformed message.
-		return 0, 0, fmt.Errorf("%w: roughtime header needs %d bytes, got %d", coreent.ErrCIUnverifiable, header, len(raw))
+		return 0, 0, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_decode"),
+			errs.String("condition", "the declared header does not fit in what arrived"),
+			errs.Int("want_bytes", header),
+			errs.Int("got_bytes", len(raw)))
 	}
 	//: A usable frame.
 	return count, header, nil
@@ -118,7 +129,12 @@ func roughtimeValueBounds(raw []byte, count, index, valuesLen int) (start, end i
 	//: Descending, negative or past-the-end offsets describe no value.
 	if start < 0 || end < start || end > valuesLen {
 		//: Report the malformed message.
-		return 0, 0, fmt.Errorf("%w: roughtime offsets [%d,%d) do not fit %d bytes", coreent.ErrCIUnverifiable, start, end, valuesLen)
+		return 0, 0, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_decode"),
+			errs.String("condition", "an offset pair that does not fit the value area"),
+			errs.Int("start", start),
+			errs.Int("end", end),
+			errs.Int("values_bytes", valuesLen))
 	}
 	//: A field that lies inside the buffer it came in.
 	return start, end, nil
@@ -166,7 +182,12 @@ func roughtimeUint64(value []byte, what string) (parsed uint64, err error) {
 	//: A field too short to hold the number it claims to be is not one.
 	if len(value) < 8 {
 		//: Report the malformed field.
-		return 0, fmt.Errorf("%w: roughtime %s is %d bytes, want 8", coreent.ErrCIUnverifiable, what, len(value))
+		return 0, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_decode"),
+			errs.String("condition", "a field too short to hold the number it claims to be"),
+			errs.String("field", what),
+			errs.Int("got_bytes", len(value)),
+			errs.Int("want_bytes", 8))
 	}
 	//: The value, still unjudged.
 	return binary.LittleEndian.Uint64(value[:8]), nil
@@ -177,7 +198,12 @@ func roughtimeUint32(value []byte, what string) (parsed uint32, err error) {
 	//: A field too short to hold the number it claims to be is not one.
 	if len(value) < roughtimeTagSize {
 		//: Report the malformed field.
-		return 0, fmt.Errorf("%w: roughtime %s is %d bytes, want 4", coreent.ErrCIUnverifiable, what, len(value))
+		return 0, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_decode"),
+			errs.String("condition", "a field too short to hold the number it claims to be"),
+			errs.String("field", what),
+			errs.Int("got_bytes", len(value)),
+			errs.Int("want_bytes", roughtimeTagSize))
 	}
 	//: The value, still unjudged.
 	return binary.LittleEndian.Uint32(value[:roughtimeTagSize]), nil

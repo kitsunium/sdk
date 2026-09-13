@@ -2,7 +2,7 @@
 package entitlement
 
 import (
-	"fmt"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // SSHIdentity proves a machine's identity from the ssh key material already in
@@ -75,7 +75,9 @@ func (s *SSHIdentity) ProvePossession(subject string) error {
 	if signerErr != nil {
 		//: Name the stage so an operator tells a missing key from a
 		//: mismatched one — the wrap the source implementation carried here.
-		return fmt.Errorf("loading private half for %s: %w", subject, signerErr)
+		return annotate(signerErr,
+			errs.String("stage", "load_private_half"),
+			errs.String("subject", subject))
 	}
 
 	//: The last gate, and the one that makes publication safe.

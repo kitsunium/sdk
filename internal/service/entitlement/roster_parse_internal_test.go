@@ -79,7 +79,7 @@ func Test_authenticateRoster(t *testing.T) {
 		{name: "a long-expired genuine roster authenticates", reason: "the window is the caller's business, not this function's"},
 		{name: "a vendor key of the wrong length is refused", shortKey: true, wantErr: coreent.ErrRosterUnsigned, reason: "ed25519.Verify panics on a short slice; a broken build must not take the process down"},
 		{name: "a payload signed by anyone else is refused", impostor: true, wantErr: coreent.ErrRosterUnsigned, reason: "the signature runs before the JSON parser, which is the whole ordering"},
-		{name: "an authenticated payload that is not a roster is refused", notARoster: true, reason: "a broken publisher, surfaced rather than authorised on zero values"},
+		{name: "an authenticated payload that is not a roster is refused", notARoster: true, wantErr: coreent.ErrRosterUnreachable, reason: "a broken publisher is the same class decodeBundle already reports: the endpoint served something that is not a roster, which is not a forgery claim and must still be classifiable"},
 	}
 
 	for _, tt := range tests {
@@ -120,14 +120,9 @@ func Test_authenticateRoster(t *testing.T) {
 			}
 
 			roster, err := authenticateRoster(raw, ed25519.Sign(signWith, raw), key)
-			//: The not-a-roster row carries no sentinel: a decode failure is
-			//: a broken publisher and reports itself.
-			if tt.wantErr == nil && tt.notARoster {
-				if err == nil {
-					t.Errorf("authenticateRoster() error = nil, want a decode failure (%s)", tt.reason)
-				}
-				return
-			}
+			//: Every refusal row names the sentinel it must carry, the
+			//: not-a-roster one included: an error a caller cannot classify
+			//: is one it cannot act on.
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Errorf("authenticateRoster() error = %v, want %v (%s)", err, tt.wantErr, tt.reason)

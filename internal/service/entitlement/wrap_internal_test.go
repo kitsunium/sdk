@@ -1,0 +1,431 @@
+package entitlement
+
+import (
+	"crypto/ed25519"
+	"errors"
+	"io/fs"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// TestNoParticularReachesThePublicSentence is the assertion the conversion to
+// errs.Wrap exists for, and it runs in BOTH directions.
+//
+// The mechanical half of that conversion — s/fmt.Errorf/classify/ — passes
+// every other test in this package while putting a url, a host, a key
+// identifier or a filesystem path straight back into the half documented safe
+// for a response body. What the split is about is where each fact landed: the
+// public sentence says WHAT happened, the fields say WHERE and WHY.
+//
+// Leaking a particular and losing it are both defects, and only one of them is
+// the one everybody remembers, so each row asserts the particular is absent
+// from err.Error() AND present in particulars(err).
+func TestNoParticularReachesThePublicSentence(t *testing.T) {
+	t.Parallel()
+
+	vendorPub, _, keyErr := ed25519.GenerateKey(nil)
+	//: A failure here is an environment problem, not a test outcome.
+	if keyErr != nil {
+		t.Fatalf("generating vendor key: %v", keyErr)
+	}
+
+	tests := []struct {
+		name string
+		// build produces the refusal under test.
+		build func(t *testing.T) error
+		// particular is the fact that must be in the fields and out of the
+		// sentence.
+		particular string
+		reason     string
+	}{
+		{
+			name: "the roster fetch names its url",
+			build: func(t *testing.T) error {
+				t.Helper()
+				svc := NewServiceWithOrigins(stubGet(func(string) (*http.Response, error) {
+					return nil, errors.New("dial refused")
+				}), stubIdentity{}, vendorPub, nil)
+				_, err := svc.fetch("https://roster.example.test/bundle.json")
+				return err
+			},
+			particular: "roster.example.test",
+			reason:     "a publication endpoint is infrastructure, and a response body is not where it belongs",
+		},
+		{
+			name: "the roster fetch names what the transport said",
+			build: func(t *testing.T) error {
+				t.Helper()
+				svc := NewServiceWithOrigins(stubGet(func(string) (*http.Response, error) {
+					return nil, errors.New("dial refused")
+				}), stubIdentity{}, vendorPub, nil)
+				_, err := svc.fetch("https://roster.example.test/bundle.json")
+				return err
+			},
+			particular: "dial refused",
+			reason:     "the operator acts on the syscall's own words, and nothing else can restate them",
+		},
+		{
+			name: "the cache read names its path",
+			build: func(t *testing.T) error {
+				t.Helper()
+				_, err := readCappedFile(t.TempDir() + "/absent.json")
+				return err
+			},
+			particular: "absent.json",
+			reason:     "a path on somebody's disk says where their cache lives",
+		},
+		{
+			name: "the key selection names the kid",
+			build: func(*testing.T) error {
+				return usableRSAKey(nil, "a-published-kid")
+			},
+			particular: "a-published-kid",
+			reason:     "a key identifier is the issuer's internal naming, not the caller's business",
+		},
+		{
+			name: "the subject match names the subject",
+			build: func(t *testing.T) error {
+				t.Helper()
+				now := time.Now()
+				roster := &coreent.RosterValue{
+					IssuedAt:  now.Add(-time.Hour),
+					ExpiresAt: now.Add(time.Hour),
+					Subjects: map[string]coreent.SubjectValue{
+						"a-licensed-subject": {Fingerprint: "SHA256:published"},
+					},
+				}
+				svc := NewServiceWithGetter(stubGet(func(string) (*http.Response, error) {
+					return nil, errors.New("unused")
+				}), stubIdentity{fingerprint: "SHA256:local"}, vendorPub, nil)
+				_, err := svc.matchSubject(roster, "a-licensed-subject", now)
+				return err
+			},
+			particular: "a-licensed-subject",
+			reason:     "the subject is the identifier the vendor's roster keys on",
+		},
+		{
+			name: "the token url check names the host it refused",
+			build: func(*testing.T) error {
+				_, err := checkTokenURL("https://not-github.example.test/token")
+				return err
+			},
+			particular: "not-github.example.test",
+			reason:     "the host the runner named is what an operator has to look at, and is not wire-safe",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.build(t)
+			if err == nil {
+				t.Fatalf("build() error = nil, want a refusal (%s)", tt.reason)
+			}
+			//: The half documented safe for a response body must not carry it.
+			if strings.Contains(err.Error(), tt.particular) {
+				t.Errorf("err.Error() = %q, want %q OUT of it (%s)", err, tt.particular, tt.reason)
+			}
+			//: ...and the diagnostic half must, or the split lost it instead
+			//: of moving it, which is the other defect and the quieter one.
+			if diagnosis := particulars(err); !strings.Contains(diagnosis, tt.particular) {
+				t.Errorf("particulars(err) = %q, want %q IN it (%s)", diagnosis, tt.particular, tt.reason)
+			}
+		})
+	}
+}
+
+// Test_annotate pins the guard, which is not defensive.
+//
+// coreent.Identity is a PORT. A consumer implementing it with a plain
+// errors.New — which nothing forbids and which is the obvious first
+// implementation — hands ciContext a device refusal carrying no *errs.Error.
+// errs.Wrap has no spelling for "attach a field, decide nothing": zero
+// WrapParams over such a cause fails validateDefineArgs and returns
+// CodeInvalidWrapParams, "internal wrap failure", with the consumer's own
+// refusal demoted to a cause nobody prints. So annotate returns it untouched
+// and drops the field instead.
+func Test_annotate(t *testing.T) {
+	t.Parallel()
+
+	plain := errors.New("a port implementation's own refusal")
+
+	tests := []struct {
+		name string
+		// err is what a caller hands in.
+		err error
+		// wantSame is whether the result must be the identical error value.
+		wantSame bool
+		// wantField is whether the annotation must be readable back.
+		wantField bool
+		reason    string
+	}{
+		{
+			name:      "an SDK error keeps its identity and gains the field",
+			err:       coreent.ErrNoLicense,
+			wantField: true,
+			reason:    "origin wins: code, reason and both messages stay the cause's",
+		},
+		{
+			name:     "a plain error is returned untouched",
+			err:      plain,
+			wantSame: true,
+			reason:   "the alternative is replacing a consumer's refusal with INVALID_WRAP_PARAMS",
+		},
+		{
+			name:     "a nil error stays nil",
+			err:      nil,
+			wantSame: true,
+			reason:   "annotating a success would invent a failure",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := annotate(tt.err, errs.String("ci_refusal", "the seat was refused too"))
+			//: Identity first: everything else is worthless if the caller's
+			//: own error was replaced.
+			if tt.wantSame && !errors.Is(got, tt.err) && got != tt.err {
+				t.Fatalf("annotate() = %v, want the input back unchanged (%s)", got, tt.reason)
+			}
+			//: A plain input must come back byte-identical, not merely
+			//: matchable: INVALID_WRAP_PARAMS keeps the cause and still
+			//: destroys what the caller prints.
+			if tt.wantSame && got != tt.err {
+				t.Errorf("annotate() = %v, want the identical value (%s)", got, tt.reason)
+			}
+			if !tt.wantField {
+				return
+			}
+			if !errors.Is(got, tt.err) {
+				t.Errorf("annotate() = %v, want errors.Is(%v) (%s)", got, tt.err, tt.reason)
+			}
+			if field := probeField(got, "ci_refusal"); field == "" {
+				t.Errorf("annotate() carries no ci_refusal field (%s)", tt.reason)
+			}
+		})
+	}
+}
+
+// Test_classify pins the two properties every converted call site rests on:
+// the cause survives errors.Is, and a nil sentinel does not take the process
+// down on the path that is already reporting a failure.
+func Test_classify(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// sentinel is what the call site names, possibly nothing.
+		sentinel *errs.Error
+		// wantCode is the code the result must carry.
+		wantCode errs.Code
+		reason   string
+	}{
+		{
+			name:     "the sentinel's identity is read off it, never restated",
+			sentinel: coreent.ErrRosterUnreachable,
+			wantCode: coreent.CodeRosterUnreachable,
+			reason:   "sixty call sites naming one sentinel must not be sixty copies of four strings",
+		},
+		{
+			name:     "a nil sentinel degrades rather than panics",
+			sentinel: nil,
+			wantCode: errs.CodeInvalidWrapParams,
+			reason:   "only a bug here produces one, and a panic on the reporting path is the worst outcome",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cause := fs.ErrNotExist
+			got := classify(tt.sentinel, cause, errs.String("stage", "read"))
+			//: The stdlib cause must remain matchable, whatever we said about
+			//: it: errors.Is(err, fs.ErrNotExist) is the thing a wrapper
+			//: destroys most often.
+			if !errors.Is(got, cause) {
+				t.Errorf("classify() = %v, want errors.Is(fs.ErrNotExist) (%s)", got, tt.reason)
+			}
+			code, ok := errs.CodeOf(got)
+			if !ok || code != tt.wantCode {
+				t.Errorf("classify() code = %v/%v, want %v (%s)", code, ok, tt.wantCode, tt.reason)
+			}
+		})
+	}
+}
+
+// Test_diagnose pins what the one LOG line in this package gets to say.
+//
+// rememberRoster reports a cache it could not replace, and after the
+// conversion err.Error() is the wire-safe sentence alone — no directory, no
+// syscall text. A log an operator owns is not a wire, so diagnose puts both
+// back underneath it. Without this the line would say only that something
+// could not be written.
+func Test_diagnose(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// err is what the log line is handed.
+		err error
+		// want are fragments the rendering must carry.
+		want   []string
+		reason string
+	}{
+		{
+			name:   "a nil error renders as nothing",
+			err:    nil,
+			reason: "a caller renders it unconditionally",
+		},
+		{
+			name:   "the private sentence, the fields and the cause, in that order",
+			err:    classify(CacheUnwritable, fs.ErrNotExist, errs.String("step", "mkdir"), errs.String("dir", "/var/cache/thing")),
+			want:   []string{"service/entitlement:", "step=mkdir", "dir=/var/cache/thing", "cause=file does not exist"},
+			reason: "the operator needs the step, the directory and what the filesystem said",
+		},
+		{
+			name:   "our own Public is never quoted back",
+			err:    refuse(coreent.ErrRosterUnreachable, errs.String("stage", "fetch")),
+			reason: "it is the sentence printed one line above, and it is not news",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := diagnose(tt.err)
+			//: A nil error renders empty so the call site needs no branch.
+			if tt.err == nil {
+				if got != "" {
+					t.Errorf("diagnose(nil) = %q, want %q (%s)", got, "", tt.reason)
+				}
+				return
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("diagnose() = %q, want it to carry %q (%s)", got, want, tt.reason)
+				}
+			}
+			//: Never the public half: foreignCause walks past our own errors
+			//: precisely so the line below is not the line above.
+			if strings.Contains(got, "cause="+errs.PublicOf(tt.err)) {
+				t.Errorf("diagnose() = %q, want our own Public OUT of the cause (%s)", got, tt.reason)
+			}
+		})
+	}
+}
+
+// consumerFailure is what a consumer's own Getter or BearerFetch can plausibly
+// return: an errs-typed error built through pkg/v1/errs.New, from a code range
+// this SDK does not own.
+var consumerFailure = errs.Wrap(nil, errs.WrapParams{
+	Code:    0x00_03_30_01,
+	Reason:  "CONSUMER_FAILURE",
+	Public:  "the consumer's own transport refused",
+	Private: "consumer: something of its own",
+})
+
+// Test_classifyForeign pins the seam where origin-wins is the WRONG rule.
+//
+// Inside this SDK a deeper *errs.Error is the more specific classification and
+// should win. A Getter, a BearerFetch and a response Body are not deeper — they
+// are the consumer's package, free to return an error from a code range this
+// SDK does not own. Plain classify let that error become the identity, so
+// errors.Is stopped finding this domain's sentinel and a caller's exit-code
+// table followed a number nobody here allocated.
+//
+// This was a regression introduced by the conversion, not a pre-existing hole:
+// the fmt.Errorf it replaced put the sentinel behind the FIRST %w, so it won
+// whatever the cause was. Every scenario in the behaviour probe injected a
+// plain errors.New, which is exactly why the probe did not catch it.
+func Test_classifyForeign(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// cause is what the consumer's code handed back.
+		cause error
+		// wantCauseMatch is whether errors.Is must still find that cause.
+		wantCauseMatch bool
+		reason         string
+	}{
+		{
+			name:           "an errs-typed cause does not take over the classification",
+			cause:          consumerFailure,
+			wantCauseMatch: true,
+			reason:         "a roster outage must stay a roster outage whoever's transport reported it",
+		},
+		{
+			name:           "a plain cause takes the ordinary path untouched",
+			cause:          fs.ErrNotExist,
+			wantCauseMatch: true,
+			reason:         "nothing can hijack an identity it does not have, so classify is left alone",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := classifyForeign(coreent.ErrRosterUnreachable, tt.cause,
+				errs.String("stage", "fetch"),
+				errs.String("url", "https://roster.example.test/bundle.json"))
+			//: OUR sentinel is the identity, which is the whole point.
+			if !errors.Is(got, coreent.ErrRosterUnreachable) {
+				t.Errorf("errors.Is(err, ErrRosterUnreachable) = false, want true (%s)", tt.reason)
+			}
+			code, ok := errs.CodeOf(got)
+			if !ok || code != coreent.CodeRosterUnreachable {
+				t.Errorf("CodeOf = %v/%v, want %v (%s)", code, ok, coreent.CodeRosterUnreachable, tt.reason)
+			}
+			//: ...and the consumer's error is not lost with it.
+			if errors.Is(got, tt.cause) != tt.wantCauseMatch {
+				t.Errorf("errors.Is(err, cause) = %v, want %v (%s)", !tt.wantCauseMatch, tt.wantCauseMatch, tt.reason)
+			}
+			//: The diagnosis still renders what the consumer said.
+			if detail := particulars(got); !strings.Contains(detail, tt.cause.Error()) {
+				t.Errorf("particulars(err) = %q, want it to carry %q (%s)", detail, tt.cause.Error(), tt.reason)
+			}
+			//: And the public sentence is still ours alone.
+			if strings.Contains(got.Error(), "roster.example.test") {
+				t.Errorf("err.Error() = %q, want the url OUT of it (%s)", got, tt.reason)
+			}
+		})
+	}
+}
+
+// Test_fetchKeepsItsSentinelAgainstAConsumersGetter is the same property at the
+// call site rather than at the helper, because the helper is only right if it
+// is the one the seam actually uses.
+func Test_fetchKeepsItsSentinelAgainstAConsumersGetter(t *testing.T) {
+	t.Parallel()
+
+	svc := NewServiceWithOrigins(stubGet(func(string) (*http.Response, error) {
+		//: A consumer returning an error of its own, which is legal and which
+		//: NewWithGetter's whole existence invites.
+		return nil, consumerFailure
+	}), stubIdentity{}, nil, nil)
+
+	_, err := svc.fetch("https://roster.example.test/bundle.json")
+	reason := "a caller's exit-code table keys on the entitlement sentinel, not on the transport's own"
+	if !errors.Is(err, coreent.ErrRosterUnreachable) {
+		t.Errorf("fetch() error = %v, want it to carry ErrRosterUnreachable (%s)", err, reason)
+	}
+	if code, _ := errs.CodeOf(err); code != coreent.CodeRosterUnreachable {
+		t.Errorf("CodeOf(fetch()) = %v, want %v (%s)", code, coreent.CodeRosterUnreachable, reason)
+	}
+	//: The consumer's error stays reachable, which is what a wrapper most
+	//: often destroys and what makes this different from dropping the chain.
+	if !errors.Is(err, consumerFailure) {
+		t.Errorf("fetch() error = %v, want the consumer's own error still matchable (%s)", err, reason)
+	}
+}

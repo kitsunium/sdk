@@ -7,12 +7,13 @@
 package entitlement
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -110,14 +111,26 @@ func DiscoverSubject(sshDir string) (uuid string, err error) {
 	//: An unreadable ssh directory is indistinguishable from never enrolling.
 	if readErr != nil {
 		//: Report the absent-licence case.
-		return "", fmt.Errorf("%w: %s", coreent.ErrNoLicense, sshDir)
+		//: The read failure travels as TEXT and not as a cause, which is
+		//: what the fmt.Errorf here did by discarding it outright. Keeping
+		//: it in the chain would make errors.Is(err, fs.ErrNotExist) newly
+		//: answer true for an absent key directory — a branch no caller has
+		//: today, on a path whose whole doc comment is that an unreadable
+		//: directory and a never-enrolled one are ONE answer.
+		return "", refuse(coreent.ErrNoLicense,
+			errs.String("stage", "scan_key_directory"),
+			errs.String("dir", sshDir),
+			errs.String("cause", readErr.Error()))
 	}
 
 	found := publishedHalves(sshDir, entries)
 	//: No UUID-named key means this machine was never enrolled.
 	if len(found) == 0 {
 		//: Report the absent-licence case.
-		return "", fmt.Errorf("%w: no uuid-named key in %s", coreent.ErrNoLicense, sshDir)
+		return "", refuse(coreent.ErrNoLicense,
+			errs.String("stage", "scan_key_directory"),
+			errs.String("condition", "no uuid-named published half in the directory"),
+			errs.String("dir", sshDir))
 	}
 	//: One candidate is the ordinary case, and it behaves exactly as before —
 	//: including a published half with no private key beside it, which must
@@ -143,8 +156,11 @@ func DiscoverSubject(sshDir string) (uuid string, err error) {
 		candidates = found
 	}
 	//: Report the ambiguity with the names, so the fix is obvious.
-	return "", fmt.Errorf("%w: %s holds %d licence identities (%s)",
-		coreent.ErrAmbiguousLicense, sshDir, len(candidates), strings.Join(candidates, ", "))
+	return "", refuse(coreent.ErrAmbiguousLicense,
+		errs.String("stage", "scan_key_directory"),
+		errs.String("dir", sshDir),
+		errs.Int("identities", len(candidates)),
+		errs.String("subjects", strings.Join(candidates, ", ")))
 }
 
 // DefaultSSHDir returns the conventional key location for the current user.

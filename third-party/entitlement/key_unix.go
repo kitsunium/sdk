@@ -5,8 +5,9 @@
 package entitlement
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -22,7 +23,11 @@ func checkPrivateKeyMode(info os.FileInfo, path string) error {
 	//: private half.
 	if info.Mode().Perm()&^keyFileMode != 0 {
 		//: Refuse loudly rather than authorize on a machine-wide secret.
-		return fmt.Errorf("%w: %s is readable beyond its owner", coreent.ErrNoPossession, path)
+		return refuse(coreent.ErrNoPossession,
+			errs.String("stage", "check_key_mode"),
+			errs.String("condition", "the private half is readable beyond its owner"),
+			errs.String("path", path),
+			errs.String("mode", info.Mode().Perm().String()))
 	}
 	//: Owner-only, as enrolment wrote it.
 	return nil
