@@ -64,6 +64,24 @@ func newChangedSetValue(repoRoot, aliasRoot string) *ChangedSetValue {
 	}
 }
 
+// childPrefix returns the prefix every path strictly below dir carries.
+//
+// It is dir plus a separator, EXCEPT where dir already ends in one — which is
+// what a filesystem root is, "/" on Unix and `C:\` on Windows. Appending there
+// produces "//", a prefix no cleaned path carries, so a repository rooted at
+// the filesystem root would mirror nothing at all. The separator cannot simply
+// be dropped either: "/repo" without it also prefixes "/repo-other/a.go", which
+// is a different tree.
+func childPrefix(dir string) string {
+	//: A directory that already ends in a separator is its own child prefix.
+	if strings.HasSuffix(dir, separator) {
+		//: Appending would make "//", which no cleaned path begins with.
+		return dir
+	}
+	//: One separator turns a directory into the prefix of what it contains.
+	return dir + separator
+}
+
 // spelledAs returns the path absPath carries under the caller's own spelling of
 // the repository root, and whether there is one.
 //
@@ -86,7 +104,7 @@ func (s *ChangedSetValue) spelledAs(absPath string) (aliased string, ok bool) {
 		//: Nothing to mirror.
 		return "", false
 	}
-	rest, under := strings.CutPrefix(absPath, s.repoRoot+separator)
+	rest, under := strings.CutPrefix(absPath, childPrefix(s.repoRoot))
 	//: A path outside the repository root has no spelling under the alias.
 	if !under {
 		//: Nothing to mirror.

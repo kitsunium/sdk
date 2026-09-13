@@ -73,7 +73,9 @@ func Test_spelledAs(t *testing.T) {
 	repo := filepath.FromSlash("/canonical/repo")
 	alias := filepath.FromSlash("/spelled/link")
 	type tc struct {
-		name   string
+		name string
+		//: root overrides the canonical repository root; empty uses repo.
+		root   string
 		alias  string
 		path   string
 		want   string
@@ -108,10 +110,34 @@ func Test_spelledAs(t *testing.T) {
 			want:   "",
 			wantOK: false,
 		},
+		{
+			//: A repository rooted at the filesystem root: repoRoot already
+			//: ends in a separator, so appending one makes "//" — a prefix no
+			//: cleaned path carries, and the whole tree mirrors nothing.
+			name:   "a root that already ends in a separator still mirrors",
+			root:   string(filepath.Separator),
+			alias:  alias,
+			path:   filepath.FromSlash("/a.go"),
+			want:   filepath.Join(alias, "a.go"),
+			wantOK: true,
+		},
+		{
+			name:   "a nested path under a separator-terminated root mirrors too",
+			root:   string(filepath.Separator),
+			alias:  alias,
+			path:   filepath.FromSlash("/sub/a.go"),
+			want:   filepath.Join(alias, "sub", "a.go"),
+			wantOK: true,
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		set := newChangedSetValue(repo, c.alias)
+		root := repo
+		//: Rows that exercise a separator-terminated root say so.
+		if c.root != "" {
+			root = c.root
+		}
+		set := newChangedSetValue(root, c.alias)
 		got, ok := set.spelledAs(c.path)
 		//: A wrong mirror would record a path nothing will ever query, and a
 		//: missing one leaves the caller's own spelling answering false.

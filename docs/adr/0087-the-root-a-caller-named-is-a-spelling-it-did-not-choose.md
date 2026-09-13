@@ -62,6 +62,14 @@ Reproduced before the change, on a repository behind a link with one edited
 file: `Degraded()==false`, `IsEmpty()==false`, and `ContainsFile`, `ContainsLine`
 and `ContainsDir` all false for that file.
 
+The prefix a child path carries is `dir + separator` EXCEPT at a filesystem
+root, which already ends in one. `"/" + "/"` is a prefix no cleaned path
+carries, so a repository rooted at `/` reached through a link would have
+mirrored nothing — the same silent under-report one level in. Dropping the
+separator instead is not the fix: `"/repo"` without it also prefixes
+`"/repo-other/a.go"`, a different tree. `childPrefix` is the two-line answer,
+and both directions have a row.
+
 ### 2. A probe that did not answer degrades
 
 `git rev-parse --is-shallow-repository` arrived in git 2.15. An older git fails

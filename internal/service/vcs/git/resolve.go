@@ -214,6 +214,8 @@ func shallowState(ctx context.Context, root string) (shallow, known bool) {
 		//: Unknown: Resolve degrades.
 		return false, false
 	}
+	//: git answers with exactly two words, and anything else is a git whose
+	//: output this package was not written against.
 	switch out {
 	//: git's own word for a truncated history.
 	case "true":
