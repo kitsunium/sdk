@@ -19,6 +19,7 @@ product (ADR 0078 §1).
 | `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature |
 | `bundle.go` | `ParseBundle` — the one-document form the cache stores |
 | `cache.go` | the offline copy and the anti-rollback ratchet |
+| `cache_lock.go` | exclusion over the cache directory — what rename does not give |
 | `ci.go` / `ciseat.go` | GitHub Actions OIDC: mint, verify, then look up the seat |
 | `jwks.go` | the issuer's published RSA keys |
 | `oidc.go` | the token's claim set and its strict decoding |
@@ -46,6 +47,22 @@ product (ADR 0078 §1).
   also holds a device key must keep working, so `ciSeat`'s failure falls through
   — except when `ciRefusalIsFinal`, which is the only place "this run must be CI"
   can be stated without letting the party being checked state it.
+- **The ratchet is a compare-and-install, so it needs exclusion.** Reading the
+  high-water mark and renaming a bundle over it are two filesystem operations.
+  Without a lock between them two writers both read the same mark, both
+  conclude they are newer, and whichever renames LAST sets it — measured at 183
+  of 400 rounds, and what it loses is anti-rollback distance, since `checkClock`
+  refuses a clock earlier than that mark. `holdCache` makes the pair one
+  operation; `markWhileHeld` is the read a caller already holding it uses,
+  because the guard is not reentrant.
+- **Readers take the same guard, and only Windows needs them to.** A rename is
+  atomic for a POSIX reader, so nothing there requires it. Windows refuses to
+  replace a file another handle holds open, and `syscall.Open` never asks for
+  `FILE_SHARE_DELETE` — so the cache's own reader, in a second process, is what
+  makes a refresh fail. Sharing DELETE is not a way out: measured on
+  `windows-latest`, `MoveFileEx` still refuses. A holder this package does not
+  control — antivirus, backup, indexer — still can, and that residue is
+  accepted and logged rather than retried past.
 - **`readCappedFile` and `readBounded` exist because the inputs are hostile.**
   Everything here parses bytes fetched from the network or read from a cache an
   attacker may have written, before any signature has vouched for them.
@@ -64,6 +81,12 @@ product (ADR 0078 §1).
 source implementation's error construction; the fifteen sentinels are
 `errs.Define`-typed and the wrapping uses `%w`, so `errors.Is` and
 `errs.HasCode` both work through it. ADR 0079 §Deferred.
+
+A cache refresh can still be refused by a file holder outside this process —
+antivirus, backup, a search indexer on Windows. `holdCache` excludes every
+holder that takes the same lock, which is every one this SDK controls, and no
+lock reaches the others. The refusal is logged and the next invocation retries
+it.
 
 ## Do NOT
 

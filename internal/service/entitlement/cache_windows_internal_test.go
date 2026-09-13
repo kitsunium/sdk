@@ -70,11 +70,13 @@ func openWithShareMode(t *testing.T, path string, share uint32) syscall.Handle {
 // this package's own readCappedFile, running in a second process, is what makes
 // a refresh fail.
 //
-// The third row is the one this test exists to settle. If a reader opening with
-// FILE_SHARE_DELETE lets the replacement through, then teaching the read path
-// that share mode is a candidate fix; if it does not, the only remaining
-// answer is to keep readers and writers off the file at the same time. Either
-// result is quotable; neither is assumed.
+// The third row is the one this test existed to settle, and windows-latest has
+// now settled it. A reader opening with FILE_SHARE_DELETE does NOT let the
+// replacement through: MoveFileEx still refuses with ERROR_ACCESS_DENIED,
+// because replacing a name is not the same operation as unlinking it and the
+// destination's directory entry stays occupied while any handle remains. That
+// removes the cheap fix — teaching readCappedFile a share mode — and leaves
+// exclusion as the only answer, which is what cache_lock.go implements.
 //
 // Not parallel: each row holds a handle whose lifetime must not overlap
 // another row's rename on a shared path — and each row uses its own directory
@@ -103,8 +105,8 @@ func Test_windowsRenameOverAnOpenDestination(t *testing.T) {
 		{
 			name:          "a holder with FILE_SHARE_DELETE",
 			share:         syscall.FILE_SHARE_READ | syscall.FILE_SHARE_WRITE | syscall.FILE_SHARE_DELETE,
-			wantInstalled: true,
-			reason:        "if this passes, a share mode on the read path is a candidate fix; if it fails, exclusion is the only one",
+			wantInstalled: false,
+			reason:        "measured on windows-latest: sharing DELETE is not enough, so a share mode on the read path is no fix and exclusion is the only one",
 		},
 	}
 
