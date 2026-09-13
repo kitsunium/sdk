@@ -154,7 +154,8 @@ func ciRefusalIsFinal(roster *coreent.RosterValue) bool {
 // another owner, the key set was unreachable — is the actionable half on a
 // runner, and it was the half being dropped entirely.
 //
-// The CI cause is folded in as TEXT — ciErr.Error(), as a field — and never as
+// The CI cause is folded in as TEXT — two fields, `ci_refusal` for the seat's
+// own sentence and `ci_detail` for the particulars behind it — and never as
 // a wrapped error, and that is the whole safety of this function. Wrapping it
 // would splice the seat's error CHAIN into the device refusal, and that chain
 // is not limited to CI sentinels: publishedJWKS goes through the same bounded
@@ -188,7 +189,16 @@ func ciContext(deviceErr, ciErr error) error {
 		//: Report the device refusal unchanged.
 		return deviceErr
 	}
+	seat := []errs.FieldValue{errs.String("ci_refusal", ciErr.Error())}
+	//: The seat's sentence is now the wire-safe one, so it names the sentinel
+	//: and not which of the three ways that sentinel was reached. Those live
+	//: in the seat error's OWN fields, and carrying them is the difference
+	//: between "the CI seat was refused" and "the roster carries no CI block
+	//: at all" — which is the whole reason this annotation exists.
+	if detail := particulars(ciErr); detail != "" {
+		seat = append(seat, errs.String("ci_detail", detail))
+	}
 	//: Origin wins on the device refusal, so its sentinel stays reachable
 	//: through errors.Is; the seat's chain deliberately does not come with it.
-	return annotate(deviceErr, errs.String("ci_refusal", ciErr.Error()))
+	return annotate(deviceErr, seat...)
 }

@@ -371,3 +371,56 @@ func probeField(err error, key string) string {
 	//: Absent, which every caller reports as a failed assertion.
 	return ""
 }
+
+// Test_ciContext_carriesTheSeatsOwnParticulars pins the half the conversion
+// nearly ate.
+//
+// ciErr.Error() is now the wire-safe sentence, so it names WHICH sentinel the
+// seat refused with and not which of the three ways that sentinel was reached
+// — the roster carries no CI block, the token was minted for another owner,
+// the key set was unreachable. Those live in the seat error's own fields, and
+// carrying them is the difference between "the CI seat was refused" and
+// something an operator on a runner can act on.
+func Test_ciContext_carriesTheSeatsOwnParticulars(t *testing.T) {
+	tests := []struct {
+		name string
+		// seat is the refusal the CI path produced.
+		seat error
+		// wantDetail is a fragment the ci_detail field must carry.
+		wantDetail string
+		reason     string
+	}{
+		{
+			name:       "a roster with no CI block at all",
+			seat:       refuse(coreent.ErrCINotEntitled, errs.String("stage", "ci_seat"), errs.String("condition", "the roster carries no CI block at all")),
+			wantDetail: "the roster carries no CI block at all",
+			reason:     "one re-signature undoes it, and nothing else says so",
+		},
+		{
+			name:       "a key set that could not be fetched",
+			seat:       refuse(coreent.ErrCIUnverifiable, errs.String("stage", "fetch_jwks"), errs.String("cause", "stage=fetch url=https://x/jwks cause=dial refused")),
+			wantDetail: "dial refused",
+			reason:     "a GitHub outage and an unentitled account are one sentence apart and two remedies apart",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(actionsTokenURLEnv, "https://x.actions.githubusercontent.com/token")
+			t.Setenv(actionsTokenBearerEnv, "runner-secret")
+
+			got := ciContext(coreent.ErrNoLicense, tt.seat)
+			//: The device sentinel is what every dispatch downstream matches on.
+			if !errors.Is(got, coreent.ErrNoLicense) {
+				t.Fatalf("ciContext() = %v, want it to wrap ErrNoLicense (%s)", got, tt.reason)
+			}
+			if detail := probeField(got, "ci_detail"); !strings.Contains(detail, tt.wantDetail) {
+				t.Errorf("ci_detail = %q, want it to carry %q (%s)", detail, tt.wantDetail, tt.reason)
+			}
+			//: And still not in the sentence, which is the device refusal's.
+			if strings.Contains(got.Error(), tt.wantDetail) {
+				t.Errorf("ciContext() = %q, want the seat's particulars OUT of the public sentence (%s)", got, tt.reason)
+			}
+		})
+	}
+}
