@@ -161,21 +161,24 @@ func TestTheChainAuditNamesTheComponentAndNotTheConfiguredDirectory(t *testing.T
 		fields[field.Key()] = field.StringValue()
 	}
 	//: the component that redirects — usually neither the first nor the last
-	//: thing an operator would have looked at. It is reported where it LIVES,
-	//: which on macOS is not where this test typed it: that kernel ships /var
-	//: as a symbolic link to /private/var, measured when the first run of this
-	//: file on e2e-cross's macos-arm64 job failed this very assertion with
-	//: "/private/var/folders/…" against "/var/folders/…".
-	//: the CONTAINER is resolved and the component rejoined — resolving the
-	//: planted component itself would follow the very link under test and
-	//: assert against its target.
-	base, evalErr := filepath.EvalSymlinks(container)
-	if evalErr != nil {
-		t.Fatalf("EvalSymlinks(%s) = %v", container, evalErr)
+	//: thing an operator would have looked at. It is compared by IDENTITY and
+	//: not by string, because it is reported where it LIVES and three
+	//: platforms spell that three ways: macOS reaches t.TempDir() through
+	//: /var -> /private/var, and Windows hands out TMP as an 8.3 short name.
+	//: Both were measured on e2e-cross rather than anticipated.
+	//:
+	//: os.Lstat on both sides, so the planted link compares as ITSELF rather
+	//: than being followed to the target it points at.
+	reported, reportedErr := os.Lstat(fields["path"])
+	if reportedErr != nil {
+		t.Fatalf("Lstat(%s) = %v", fields["path"], reportedErr)
 	}
-	real := filepath.Join(base, "app")
-	if fields["path"] != real {
-		t.Fatalf("field path = %q, want the planted component %q", fields["path"], real)
+	expected, expectedErr := os.Lstat(planted)
+	if expectedErr != nil {
+		t.Fatalf("Lstat(%s) = %v", planted, expectedErr)
+	}
+	if !os.SameFile(reported, expected) {
+		t.Fatalf("field path = %q, which is not the planted component %q", fields["path"], planted)
 	}
 	//: the directory the caller configured, which is what they will grep their
 	//: own configuration for.

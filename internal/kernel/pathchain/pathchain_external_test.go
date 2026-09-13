@@ -9,34 +9,47 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/pathchain"
 )
 
-// resolved renders path the way [pathchain.Resolve] will report it: with every
-// indirection ALREADY followed.
+// namesSameEntry reports whether two paths lead to the same filesystem entry.
 //
-// It exists because of a measurement rather than a theory. The first run of
-// this file on the `macos-arm64` job of e2e-cross failed four rows, all of them
-// this shape:
+// Every "did the walk land where it should" assertion in this file goes
+// through it rather than comparing strings, and both reasons were MEASURED on
+// e2e-cross rather than anticipated:
 //
-//	the last described step = "/private/var/folders/…/001"
-//	                    want "/var/folders/…/001"
+//	macos-arm64:  the last described step = "/private/var/folders/…/001"
+//	                                   want "/var/folders/…/001"
+//	windows:      the last described step = "C:\Users\RUNNER~1\…"
+//	                                   want "C:\Users\runneradmin\…"
 //
-// macOS ships /var as a symbolic link to /private/var, so every t.TempDir() on
-// that kernel sits under one. The code was right and the assertions were
-// Linux-only: StepValue.Path is documented to reflect the indirections already
-// followed, because a caller deciding who could have replaced a component has
-// to ask about the directory it actually lives in.
+// macOS ships /var as a symbolic link to /private/var, so every t.TempDir()
+// there sits under one and StepValue.Path reports where the component actually
+// lives — which is the documented contract, because a caller deciding who
+// could have replaced a component has to ask about the directory it is in.
+// Windows hands out `TMP` as an 8.3 short name, and the walk reports the
+// components it was GIVEN while filepath.EvalSymlinks expands them.
 //
-// That failure is also the best evidence this package has for the rule its
-// first consumer applies. A blanket "refuse any link above the lock file"
-// would refuse every lock directory on macOS — and the accepting rows of
-// internal/service/lock's chain table passed on that same run, because the
+// Three platforms spell the same directory three ways. The property under test
+// is "the walk landed on this entry", so the assertion asks the filesystem
+// that question instead of asking whether two strings match.
+//
+// os.Lstat, never os.Stat: a planted symbolic link must compare as ITSELF, or
+// the search for it would match its target instead.
+//
+// The macOS failure is also the best evidence this package has for the rule
+// its first consumer applies. A blanket "refuse any link above the lock file"
+// would refuse every lock directory on that kernel — and the accepting rows of
+// internal/service/lock's chain table passed on the very same run, because the
 // directory holding /var is / and nobody but root can write it.
-func resolved(t *testing.T, path string) string {
+func namesSameEntry(t *testing.T, got, want string) bool {
 	t.Helper()
-	real, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(%s) = %v", path, err)
+	gotInfo, gotErr := os.Lstat(got)
+	if gotErr != nil {
+		return false
 	}
-	return real
+	wantInfo, wantErr := os.Lstat(want)
+	if wantErr != nil {
+		t.Fatalf("Lstat(%s) = %v", want, wantErr)
+	}
+	return os.SameFile(gotInfo, wantInfo)
 }
 
 // plant creates a symbolic link at link pointing at target, or skips the test
@@ -65,20 +78,17 @@ func TestResolveDescribesEveryComponent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve(%s) = %v", deep, err)
 	}
-	//: the last three steps are the three components built above, and their
-	//: Paths are where those components actually live — which on macOS is not
-	//: where the test typed them, because /var is a symbolic link there.
-	real := resolved(t, base)
-	want := []string{filepath.Join(real, "a"), filepath.Join(real, "a", "b"), filepath.Join(real, "a", "b", "c")}
+	//: the last three steps are the three components built above.
+	want := []string{filepath.Join(base, "a"), filepath.Join(base, "a", "b"), deep}
 	if len(steps) < len(want) {
 		t.Fatalf("Resolve returned %d steps, want at least %d", len(steps), len(want))
 	}
 	tail := steps[len(steps)-len(want):]
 	for i, expected := range want {
-		//: a step describing the wrong path makes every verdict built on it
+		//: a step describing the wrong place makes every verdict built on it
 		//: meaningless, so this is asserted before anything else.
-		if tail[i].Path != expected {
-			t.Fatalf("step %d path = %q, want %q", i, tail[i].Path, expected)
+		if !namesSameEntry(t, tail[i].Path, expected) {
+			t.Fatalf("step %d path = %q, which is not the entry at %q", i, tail[i].Path, expected)
 		}
 		//: every component here is a plain directory.
 		if tail[i].Indirect {
@@ -112,19 +122,17 @@ func TestResolveReportsAnIndirectionAndWhereItWent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve = %v", err)
 	}
-	//: the component lives where the walk found it, which is not where the
-	//: test typed it on a kernel whose /var is a symbolic link.
-	real := filepath.Join(resolved(t, pub), "myapp")
 	var found *pathchain.StepValue
-	//: locate the planted component among the steps rather than assuming its
-	//: index, which depends on how deep t.TempDir() happens to be.
+	//: locate the planted component among the steps by IDENTITY rather than by
+	//: index, which depends on how deep t.TempDir() happens to be, or by
+	//: string, which three platforms spell three ways.
 	for i := range steps {
-		if steps[i].Path == real {
+		if namesSameEntry(t, steps[i].Path, link) {
 			found = &steps[i]
 		}
 	}
 	if found == nil {
-		t.Fatalf("no step described %s; got %d steps", real, len(steps))
+		t.Fatalf("no step described the entry at %s; got %d steps", link, len(steps))
 	}
 	//: the component is an indirection.
 	if !found.Indirect {
@@ -139,9 +147,9 @@ func TestResolveReportsAnIndirectionAndWhereItWent(t *testing.T) {
 	//: resolution CONTINUED at the target, so the step after the link lives
 	//: there and not under the link's own name.
 	last := steps[len(steps)-1]
-	wantLast := filepath.Join(resolved(t, target), "locks")
-	if last.Path != wantLast {
-		t.Fatalf("the last step = %q, want %q", last.Path, wantLast)
+	wantLast := filepath.Join(target, "locks")
+	if !namesSameEntry(t, last.Path, wantLast) {
+		t.Fatalf("the last step = %q, which is not the entry at %q", last.Path, wantLast)
 	}
 }
 
@@ -160,9 +168,8 @@ func TestResolveStopsWhereThePathStopsExisting(t *testing.T) {
 	if len(steps) == 0 {
 		t.Fatalf("Resolve of a missing tail returned no steps at all")
 	}
-	real := resolved(t, base)
-	if steps[len(steps)-1].Path != real {
-		t.Fatalf("the last described step = %q, want %q", steps[len(steps)-1].Path, real)
+	if last := steps[len(steps)-1].Path; !namesSameEntry(t, last, base) {
+		t.Fatalf("the last described step = %q, which is not the entry at %q", last, base)
 	}
 }
 
@@ -207,11 +214,11 @@ func TestResolveFollowsARelativeTargetFromTheLinksOwnDirectory(t *testing.T) {
 		t.Fatalf("Resolve = %v", err)
 	}
 	last := steps[len(steps)-1]
-	want := filepath.Join(resolved(t, base), "real")
+	want := filepath.Join(base, "real")
 	//: the walk ascended out of pub and came back down into real, which only
 	//: works if ".." is a movement through the handles the walk still holds.
-	if last.Path != want {
-		t.Fatalf("the last step = %q, want %q", last.Path, want)
+	if !namesSameEntry(t, last.Path, want) {
+		t.Fatalf("the last step = %q, which is not the entry at %q", last.Path, want)
 	}
 }
 
@@ -285,12 +292,12 @@ func TestResolveAppliesParentAfterTheLinkAndNotBefore(t *testing.T) {
 	}
 	last := steps[len(steps)-1].Path
 	//: the walk ended where the KERNEL ends, under the link's target.
-	if last != oracle {
-		t.Fatalf("the last step = %q, want the kernel's own answer %q", last, oracle)
+	if !namesSameEntry(t, last, oracle) {
+		t.Fatalf("the last step = %q, which is not the kernel's own answer %q", last, oracle)
 	}
 	//: and explicitly NOT where Clean would have sent it, so a future change
 	//: that reintroduces the lexical collapse names itself.
-	if last == filepath.Join(pub, "sibling") {
+	if namesSameEntry(t, last, filepath.Join(pub, "sibling")) {
 		t.Fatalf("the last step = %q: '..' was applied lexically, before the link", last)
 	}
 }
