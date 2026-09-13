@@ -37,7 +37,7 @@ If the protected resource cannot check a fence, do not rely on a TTL for correct
 
 - [NewMemory](<#NewMemory>) excludes the GOROUTINES of one process. Its leases expire, because nothing notices a goroutine that stopped, so without a TTL one leak deadlocks a name for the life of the process. Its leases implement [Deadliner](<#Deadliner>).
 
-- [NewFileLocker](<#NewFileLocker>) excludes the PROCESSES sharing one directory on one machine, through flock\(2\). Its leases do NOT expire: a lock is held until it is released or until the holder's process dies, at which point the kernel releases it. Nothing can take it from a live holder, so its leases do NOT implement [Deadliner](<#Deadliner>) — and that absence is how you find out, from the API rather than from this paragraph.
+- [NewFileLocker](<#NewFileLocker>) excludes the PROCESSES sharing one directory on one machine, through flock\(2\) on Unix and LockFileEx on Windows. Its leases do NOT expire: a lock is held until it is released or until the holder's process dies, at which point the kernel releases it. Nothing can take it from a live holder, so its leases do NOT implement [Deadliner](<#Deadliner>) — and that absence is how you find out, from the API rather than from this paragraph.
 
 Which world you are in is one type assertion away:
 
@@ -47,7 +47,13 @@ if d, ok := lease.(lock.Deadliner); ok {
 }
 ```
 
-The file locker takes an in\-process gate before its flock, because flock\(2\) is per open file description: re\-locking a description that already holds it is a no\-op, so a shared descriptor gives ZERO exclusion between goroutines while working perfectly between processes. That was measured, not assumed — see internal/service/lock's CLAUDE.md.
+The file locker takes an in\-process gate before its kernel lock, because flock\(2\) is per open file description: re\-locking a description that already holds it is a no\-op, so a shared descriptor gives ZERO exclusion between goroutines while working perfectly between processes. That was measured, not assumed — see internal/service/lock's CLAUDE.md.
+
+### What differs on Windows, and what does not
+
+The contract does not differ: same Locker, same Lease, same sentinels, and a file lease still does not implement [Deadliner](<#Deadliner>). The primitive underneath does. LockFileEx locks a byte RANGE rather than a file — this backend takes the whole file, because the fencing counter lives in it — and its locks are MANDATORY rather than advisory, so one thing a caller can observe changes: while a lock is HELD, a process that does not hold it cannot read the lock file. On Unix it can. Every other difference is absorbed below the port and measured on a real Windows kernel; ADR 0081 lists them.
+
+One more is worth knowing before you rely on a directory's permissions. The lock directory is checked for being world\-writable\-and\-not\-sticky on Unix and is NOT checked on Windows, which has no such bits — os.Stat synthesises 0777 for every writable directory there. What that check prevents is refused by the open instead: a held lock file can be neither deleted nor renamed.
 
 ### Scope
 
@@ -107,7 +113,7 @@ var (
 ```
 
 <a name="Keepalive"></a>
-## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L200>)
+## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L220>)
 
 ```go
 func Keepalive(ctx context.Context, lease Lease, cfg KeepaliveConfig) (guarded context.Context, stop context.CancelFunc, err error)
@@ -127,7 +133,7 @@ defer stop()
 stop does NOT release the lease: the lifetime of a lock must not depend on the lifetime of a convenience.
 
 <a name="Deadliner"></a>
-## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L115>)
+## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L133>)
 
 Deadliner is the sibling implemented by a [Lease](<#Lease>) that CAN expire — i.e. one that can be taken from you while you are still running.
 
@@ -138,7 +144,7 @@ type Deadliner = corelock.Deadliner
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L121>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L139>)
 
 FileConfig parameterises [NewFileLocker](<#NewFileLocker>). Dir must be set; Poll defaults.
 
@@ -147,7 +153,7 @@ type FileConfig = svclock.FileConfig
 ```
 
 <a name="KeepaliveConfig"></a>
-## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L126>)
+## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L144>)
 
 KeepaliveConfig parameterises [Keepalive](<#Keepalive>). Every must be positive and should be comfortably shorter than the lease TTL — a third of it leaves room for two consecutive failed renewals.
 
@@ -156,7 +162,7 @@ type KeepaliveConfig = svclock.KeepaliveConfig
 ```
 
 <a name="Lease"></a>
-## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L105>)
+## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L123>)
 
 Lease is a held lock: Fence, Extend, Release. FROZEN at three, for the same reason [Locker](<#Locker>) is frozen at two.
 
@@ -165,7 +171,7 @@ type Lease = corelock.Lease
 ```
 
 <a name="Locker"></a>
-## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L101>)
+## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L119>)
 
 Locker hands out named, exclusive leases: Acquire and TryAcquire.
 
@@ -176,7 +182,7 @@ type Locker = corelock.Locker
 ```
 
 <a name="NewFileLocker"></a>
-### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L180>)
+### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L200>)
 
 ```go
 func NewFileLocker(cfg FileConfig) (locker Locker, err error)
@@ -184,10 +190,10 @@ func NewFileLocker(cfg FileConfig) (locker Locker, err error)
 
 NewFileLocker returns a [Locker](<#Locker>) that excludes every process using the same directory on the same machine, and whose leases do NOT expire.
 
-It refuses at construction: a missing directory setting, a negative poll interval, a world\-writable non\-sticky directory, and a platform without flock\(2\) — where it returns the SDK\-wide UnsupportedPlatform rather than a locker that would report success and exclude nothing \(ADR 0018\).
+It refuses at construction: a missing directory setting, a negative poll interval, a world\-writable non\-sticky directory \(Unix only — see the package comment\), and a platform with no file\-range lock at all, where it returns the SDK\-wide UnsupportedPlatform rather than a locker that would report success and exclude nothing \(ADR 0018\). Windows is no longer in that last set: it is served by LockFileEx \(ADR 0081\).
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L168>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L186>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (locker Locker, err error)
@@ -198,7 +204,7 @@ NewMemory returns a [Locker](<#Locker>) whose leases live in this process and DO
 cfg.TTL must be positive; a zero or negative TTL is refused here rather than defaulted, because the two natural readings of zero are opposites and either choice would be silently wrong for half of its callers \(ADR 0031\).
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L118>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L136>)
 
 MemoryConfig parameterises [NewMemory](<#NewMemory>). TTL must be positive.
 

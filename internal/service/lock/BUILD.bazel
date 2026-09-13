@@ -7,6 +7,8 @@ go_library(
     srcs = [
         "codes.go",
         "config.go",
+        "dirsafety_posix.go",
+        "dirsafety_windows.go",
         "errors.go",
         "fence.go",
         "file.go",
@@ -14,6 +16,7 @@ go_library(
         "file_lease.go",
         "flock_other.go",
         "flock_unix.go",
+        "flock_windows.go",
         "gate.go",
         "holding.go",
         "keepalive.go",
@@ -47,7 +50,10 @@ go_test(
     name = "lock_test",
     size = "small",
     srcs = [
+        "dirsafety_posix_test.go",
+        "dirsafety_windows_test.go",
         "file_contention_unix_test.go",
+        "file_contention_windows_test.go",
         "file_external_test.go",
         "keepalive_external_test.go",
         "memory_external_test.go",

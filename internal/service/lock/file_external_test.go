@@ -73,50 +73,6 @@ func TestNewFileLockerRefusesANegativePoll(t *testing.T) {
 	}
 }
 
-// TestNewFileLockerRefusesAWorldWritableDirectory pins the permission rule and
-// the attack behind it: an account that can unlink the lock file replaces its
-// INODE, after which two processes flock two different files and both are told
-// they hold the same lock.
-func TestNewFileLockerRefusesAWorldWritableDirectory(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o777); err != nil {
-		t.Skipf("cannot set the mode this test needs: %v", err)
-	}
-	locker, err := svclock.NewFileLocker(svclock.FileConfig{Dir: dir})
-	if errors.Is(err, coreproc.UnsupportedPlatform) {
-		t.Skip("no flock(2) on this platform")
-	}
-	if locker != nil {
-		t.Fatal("a world-writable, non-sticky lock directory was accepted")
-	}
-	if !errs.HasCode(err, svclock.CodeLockDirectoryUnsafe) {
-		t.Fatalf("NewFileLocker = %v, want LOCK_DIRECTORY_UNSAFE", err)
-	}
-}
-
-// TestAStickyWorldWritableDirectoryIsAccepted is the other half of the rule.
-// /tmp is 1777, and the sticky bit is precisely what makes it safe: only an
-// entry's owner may unlink it. Refusing it would push callers somewhere worse.
-func TestAStickyWorldWritableDirectoryIsAccepted(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o777|os.ModeSticky); err != nil {
-		t.Skipf("cannot set the mode this test needs: %v", err)
-	}
-	info, statErr := os.Stat(dir)
-	if statErr != nil || info.Mode()&os.ModeSticky == 0 {
-		t.Skip("this filesystem does not honour the sticky bit on a directory")
-	}
-	locker, err := svclock.NewFileLocker(svclock.FileConfig{Dir: dir})
-	if errors.Is(err, coreproc.UnsupportedPlatform) {
-		t.Skip("no flock(2) on this platform")
-	}
-	if err != nil || locker == nil {
-		t.Fatalf("NewFileLocker on a sticky directory = %v, want a locker", err)
-	}
-}
-
 // TestTheFileLockExcludesGoroutines is the regression guard for the
 // measurement this backend is built on.
 //

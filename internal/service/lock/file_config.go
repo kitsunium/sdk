@@ -30,10 +30,6 @@ const lockDirMode fs.FileMode = 0o700
 // lockFileMode is the mode a lock file is created with.
 const lockFileMode fs.FileMode = 0o600
 
-// worldWritable is the permission bit that makes a directory's entries
-// replaceable by any account.
-const worldWritable fs.FileMode = 0o002
-
 // FileConfig parameterises [NewFileLocker].
 //
 // Its zero value is deliberately NOT a working locker: Dir must be stated,
@@ -132,31 +128,7 @@ func prepareDir(dir string) error {
 			kerrs.String("option", "Dir"),
 			kerrs.String("value", dir))
 	}
-	//: the permission check that has an attack behind it.
+	//: the safety check, whose rule and whose justification are BOTH
+	//: platform-specific — see dirsafety_posix.go and dirsafety_windows.go.
 	return checkDir(dir, info)
-}
-
-// checkDir refuses a directory whose entries any account can replace.
-//
-// Group-writable is ACCEPTED: a lock shared between two service accounts
-// through a common group is a deliberate arrangement, and refusing it would
-// push callers to a world-writable directory instead. World-writable WITH the
-// sticky bit is accepted for the same reason — that is exactly what /tmp is,
-// and the sticky bit is precisely the rule that only an entry's owner may
-// unlink it. World-writable WITHOUT it is refused: unlinking the lock file and
-// creating a new one gives the next process a different inode to flock, so two
-// processes hold "the same" lock and neither can observe the other.
-func checkDir(dir string, info fs.FileInfo) error {
-	mode := info.Mode()
-	//: two ways to be safe, and they carry the same verdict: either no account
-	//: outside the owner and group can replace an entry at all, or the sticky
-	//: bit says only an entry's owner may unlink it — which is exactly /tmp.
-	if mode&worldWritable == 0 || mode&os.ModeSticky != 0 {
-		//: nothing to refuse.
-		return nil
-	}
-	//: world-writable and not sticky: the lock file can be swapped underneath.
-	return kerrs.Wrap(LockDirectoryUnsafe, kerrs.WrapParams{},
-		kerrs.String("path", dir),
-		kerrs.String("mode", mode.Perm().String()))
 }
