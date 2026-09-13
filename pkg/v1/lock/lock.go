@@ -58,11 +58,12 @@
 //     [Deadliner].
 //
 //   - [NewFileLocker] excludes the PROCESSES sharing one directory on one
-//     machine, through flock(2). Its leases do NOT expire: a lock is held
-//     until it is released or until the holder's process dies, at which point
-//     the kernel releases it. Nothing can take it from a live holder, so its
-//     leases do NOT implement [Deadliner] — and that absence is how you find
-//     out, from the API rather than from this paragraph.
+//     machine, through flock(2) on Unix and LockFileEx on Windows. Its leases
+//     do NOT expire: a lock is held until it is released or until the holder's
+//     process dies, at which point the kernel releases it. Nothing can take it
+//     from a live holder, so its leases do NOT implement [Deadliner] — and
+//     that absence is how you find out, from the API rather than from this
+//     paragraph.
 //
 // Which world you are in is one type assertion away:
 //
@@ -70,11 +71,28 @@
 //	    // this lease CAN be taken from you; renew it or carry the fence
 //	}
 //
-// The file locker takes an in-process gate before its flock, because flock(2)
-// is per open file description: re-locking a description that already holds it
-// is a no-op, so a shared descriptor gives ZERO exclusion between goroutines
-// while working perfectly between processes. That was measured, not assumed —
-// see internal/service/lock's CLAUDE.md.
+// The file locker takes an in-process gate before its kernel lock, because
+// flock(2) is per open file description: re-locking a description that already
+// holds it is a no-op, so a shared descriptor gives ZERO exclusion between
+// goroutines while working perfectly between processes. That was measured, not
+// assumed — see internal/service/lock's CLAUDE.md.
+//
+// # What differs on Windows, and what does not
+//
+// The contract does not differ: same Locker, same Lease, same sentinels, and a
+// file lease still does not implement [Deadliner]. The primitive underneath
+// does. LockFileEx locks a byte RANGE rather than a file — this backend takes
+// the whole file, because the fencing counter lives in it — and its locks are
+// MANDATORY rather than advisory, so one thing a caller can observe changes:
+// while a lock is HELD, a process that does not hold it cannot read the lock
+// file. On Unix it can. Every other difference is absorbed below the port and
+// measured on a real Windows kernel; ADR 0081 lists them.
+//
+// One more is worth knowing before you rely on a directory's permissions. The
+// lock directory is checked for being world-writable-and-not-sticky on Unix
+// and is NOT checked on Windows, which has no such bits — os.Stat synthesises
+// 0777 for every writable directory there. What that check prevents is refused
+// by the open instead: a held lock file can be neither deleted nor renamed.
 //
 // # Scope
 //
@@ -174,9 +192,11 @@ func NewMemory(cfg MemoryConfig) (locker Locker, err error) {
 // directory on the same machine, and whose leases do NOT expire.
 //
 // It refuses at construction: a missing directory setting, a negative poll
-// interval, a world-writable non-sticky directory, and a platform without
-// flock(2) — where it returns the SDK-wide UnsupportedPlatform rather than a
-// locker that would report success and exclude nothing (ADR 0018).
+// interval, a world-writable non-sticky directory (Unix only — see the package
+// comment), and a platform with no file-range lock at all, where it returns
+// the SDK-wide UnsupportedPlatform rather than a locker that would report
+// success and exclude nothing (ADR 0018). Windows is no longer in that last
+// set: it is served by LockFileEx (ADR 0081).
 func NewFileLocker(cfg FileConfig) (locker Locker, err error) {
 	//: delegate to the service constructor, which validates and builds.
 	return svclock.NewFileLocker(cfg)

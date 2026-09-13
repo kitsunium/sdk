@@ -14,7 +14,7 @@ consumers depend only on `pkg/v1`.
 | `Locker` / `Lease` / `Deadliner` | aliases onto `internal/core/lock`. `Locker` FROZEN at two methods, `Lease` at three (ADR 0039) |
 | `MemoryConfig` / `FileConfig` / `KeepaliveConfig` | aliases onto `internal/service/lock` |
 | `NewMemory(cfg)` | in-process; leases **expire**; implements `Deadliner` |
-| `NewFileLocker(cfg)` | one machine, via `flock(2)`; leases **never expire**; does NOT implement `Deadliner` |
+| `NewFileLocker(cfg)` | one machine, via `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081); leases **never expire**; does NOT implement `Deadliner` |
 | `Keepalive(ctx, lease, cfg)` | background renewal → a context cancelled when the lease is lost |
 | `LockMisconfigured` / `LockNotHeld` / `LockBackendFailed` / `LockNameRejected` | core sentinels |
 | `LockFenceCorrupt` / `LockDirectoryUnsafe` / `LockKeepaliveLost` | service sentinels |
