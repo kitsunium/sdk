@@ -28,11 +28,11 @@ const CodeReleaseMetadataUnreadable errs.Code = 0x00_03_42_02 // 0.3.66.2
 // CodeArchiveUnreadable identifies a release archive that could not be
 // buffered or unpacked.
 //
-// It is deliberately NOT [github.com/kitsunium/sdk/internal/core/selfupdate.ChecksumMismatch]:
-// by the time anything here runs the archive has already been authenticated
-// and its digest matched, so a container that will not open is a packaging or
-// transfer fault and never a supply-chain signal. Reporting it as one would
-// tell an operator not to install a release that is provably the vendor's.
+// It is deliberately NOT the domain's ChecksumMismatch: by the time anything
+// here runs the archive has already been authenticated and its digest matched,
+// so a container that will not open is a packaging or transfer fault and never
+// a supply-chain signal. Reporting it as one would tell an operator not to
+// install a release that is provably the vendor's.
 const CodeArchiveUnreadable errs.Code = 0x00_03_42_03 // 0.3.66.3
 
 // CodeExecutablePathUnresolved identifies an update that cannot name the file
@@ -54,8 +54,7 @@ const CodeReplacementFailed errs.Code = 0x00_03_42_06 // 0.3.66.6
 // CodeElevationFailed identifies an escalation the operator DID authorise and
 // that the system refused anyway.
 //
-// It is not
-// [github.com/kitsunium/sdk/internal/core/selfupdate.ElevationNotAuthorised],
-// and the difference is the whole remedy: that one is fixed by setting one
-// environment variable, this one is not fixed by setting anything.
+// It is not the domain's ElevationNotAuthorised, and the difference is the
+// whole remedy: that one is fixed by setting one environment variable, this one
+// is not fixed by setting anything.
 const CodeElevationFailed errs.Code = 0x00_03_42_07 // 0.3.66.7

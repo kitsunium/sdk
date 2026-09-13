@@ -3,14 +3,17 @@
 //
 // Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
 //
-// Every Public here is written to be shown to whoever ran the command, so none
-// of them names a path, a URL, a host, a tag or an asset. That is not
-// squeamishness: `ExplainUpgradeFailure` prints the error verbatim to the
-// terminal, an update runs unattended from hooks and CI as often as from a
-// keyboard, and the one thing an operator has to take away is whether the
-// binary they are running was replaced. Where it happened and what the
-// filesystem said is Private and Fields, which reach the log and never the
-// terminal.
+// Every Public here is wire-safe, so none of them names a path, a URL, a host,
+// a tag or an asset. That is not squeamishness: the public half is the one
+// documented safe to put in a response body, and this package's inputs are a
+// release host and a filesystem — every particular it could name came from one
+// of the two. What it says instead is the one thing an operator has to take
+// away, which is whether the binary they are running was replaced.
+//
+// Where it happened and what the filesystem said live in Private and Fields.
+// They are not lost to the operator: diagnose renders them and
+// ExplainUpgradeFailure prints them under the sentence, because a terminal the
+// operator owns is not a wire.
 package selfupdate
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -34,7 +37,7 @@ var (
 	// running binary.
 	CandidateTagRequired = errs.Define(CodeCandidateTagRequired, "CANDIDATE_TAG_REQUIRED",
 		"a release candidate is installed by naming its tag, and no tag was named",
-		"service/selfupdate: DownloadCandidate received an empty tag; the caller's own sentinel is preserved as the cause",
+		"service/selfupdate: DownloadCandidate received an empty tag; errors.ErrUnsupported is kept as the cause, so anything that matched it before this sentinel existed still matches",
 		errs.WithExitCode(exitUsage))
 
 	// ReleaseMetadataUnreadable is returned when the release API answers
