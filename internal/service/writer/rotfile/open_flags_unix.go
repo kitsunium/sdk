@@ -13,7 +13,7 @@
 // on go1.27.0 — the toolchain this repo resolves — by compiling `const _ =
 // syscall.O_NOFOLLOW` as a LIBRARY package (never linked, so cgo and PIE link
 // rules cannot mask the only question being asked) for all 47 GOOS/GOARCH
-// pairs in `go tool dist list`. Every pair the `unix` tag selects has it:
+// pairs in `go tool dist list`. All 39 pairs the `unix` tag selects have it:
 //
 //	aix/ppc64, android/{386,amd64,arm,arm64}, darwin/{amd64,arm64},
 //	dragonfly/amd64, freebsd/{386,amd64,arm,arm64}, illumos/amd64,
@@ -21,10 +21,12 @@
 //	mips64le,mipsle,ppc64,ppc64le,riscv64,s390x}, netbsd/{386,amd64,arm,arm64},
 //	openbsd/{386,amd64,arm,arm64,ppc64,riscv64}, solaris/amd64
 //
-// The four that do not — js/wasm, plan9/{386,amd64,arm}, windows/{386,amd64,
-// arm64} — are exactly the complement, and they take open_flags_other.go.
-// Source read rather than assumed: $(go env GOROOT)/src/syscall/zerrors_*.go,
-// plus syscall_wasip1.go for the one platform outside both sets (see below).
+// The remaining 8 pairs are js/wasm, plan9/{386,amd64,arm},
+// windows/{386,amd64,arm64} and wasip1/wasm. Seven of them genuinely lack the
+// constant; wasip1 has it and is nevertheless excluded, for the reason at the
+// end of this comment. All eight take open_flags_other.go. Source read rather
+// than assumed: $(go env GOROOT)/src/syscall/zerrors_<goos>_<goarch>.go, plus
+// syscall_wasip1.go for the one platform outside both sets.
 //
 // A list of six GOOS would have been a second place to maintain the same fact,
 // and its failure mode is the wrong way round: a Unix port Go adds later would

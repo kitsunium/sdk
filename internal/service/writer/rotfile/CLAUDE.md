@@ -19,7 +19,7 @@ sink is reproduced here and, critically, **re-run on every reopen**.
 |---|---|
 | `rotfile.go` | `Writer` singleton, `rotFileFactory` (`Name` / `Open`) |
 | `rotating_sink_config.go` | `Config` — an **alias** of `core/writer.RotFileConfig` (moved there for issue #93 so `pkg/v1/logger` can re-export it); type identity unchanged |
-| `rotating_sink.go` | `rotatingSink` + `Write` / `Flush` / `Close` + `openHardened` / `refuseSymlink` / `newRotatingSink` (wires the interval daemon) |
+| `rotating_sink.go` | `rotatingSink` + `Write` / `Flush` / `Close` + `openHardened` / `refuseSymlink` / `explainOpenFailure` / `newRotatingSink` (wires the interval daemon) |
 | `rotate_interval.go` | `tickRotate` — the `worker.Every` daemon tick body |
 | `decode.go` | `rotFileFactory.Decode` (`core/writer.Decoder`) + key-coercion helpers |
 | `rotate.go` | `maybeRotate` / `rotate` / `shiftBackups` (threshold + cycle) |
@@ -60,15 +60,17 @@ Protection is **not uniform**, and this table says where it is not. `Lstat` is
 
 | Platform | `syscall.O_NOFOLLOW` in go1.27.0 | Protection at the open |
 |---|---|---|
-| every `//go:build unix` GOOS — `linux` (12 arches), `darwin`, `freebsd`, `openbsd`, `netbsd`, `dragonfly`, `android`, `ios`, `aix`, `solaris`, `illumos` | present, all 24 GOOS/GOARCH pairs | `Lstat` **+** `O_NOFOLLOW` — the TOCTOU window between them is closed |
+| every `//go:build unix` GOOS — `linux` (13 arches), `darwin`, `freebsd`, `openbsd`, `netbsd`, `dragonfly`, `android`, `ios`, `aix`, `solaris`, `illumos` | present on all **39** GOOS/GOARCH pairs the `unix` tag selects | `Lstat` **+** `O_NOFOLLOW` — the TOCTOU window between them is closed |
 | `windows`, `plan9`, `js/wasm` | absent | `Lstat` **only** — a link planted between the check and the open **is followed** |
 | `wasip1` | present (`0400`), but it is a `path_open` lookupflag, not a kernel flag | `Lstat` only, **by choice** — the refusal would belong to the WASI host and no lane here runs one |
 
 Measured, not assumed: compiling `const _ = syscall.O_NOFOLLOW` as a *library*
 package (never linked, so cgo/PIE link rules cannot mask the question) for all
-47 pairs of `go tool dist list` under the toolchain this repo resolves
-(`go1.27.0`, `$(go env GOROOT)/src/syscall/zerrors_<goos>_<goarch>.go`). The
-four GOOS without it are exactly the `!unix` set plus `wasip1`'s special case.
+**47** pairs of `go tool dist list` under the toolchain this repo resolves
+(`go1.27.0`, `$(go env GOROOT)/src/syscall/zerrors_<goos>_<goarch>.go`). 39 are
+selected by `unix` and every one of them compiles the constant; the remaining 8
+are `js/wasm`, `plan9/{386,amd64,arm}`, `windows/{386,amd64,arm64}` and
+`wasip1/wasm` — the three rows of the second and third lines above.
 
 Closing the gap on Windows needs a different primitive, not a different flag:
 `FILE_FLAG_OPEN_REPARSE_POINT` **opens** the link and the handle must then be
