@@ -37,6 +37,11 @@ func TestThePosixDirectoryRuleWouldRefuseEveryDirectory(t *testing.T) {
 	if err := os.Mkdir(owned, 0o700); err != nil {
 		t.Fatalf("creating the lock directory = %v", err)
 	}
+	//: three directories, not one, because the claim is about ALL of them and
+	//: a single sample could not distinguish "this mode is synthesised" from
+	//: "this one directory happens to be world-writable": one this test made
+	//: 0700, one the testing package made, and the system temp directory an
+	//: operator would actually name in a FileConfig.
 	for _, dir := range []string{owned, t.TempDir(), os.TempDir()} {
 		info, err := os.Stat(dir)
 		if err != nil {

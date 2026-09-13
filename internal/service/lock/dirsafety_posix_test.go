@@ -88,9 +88,15 @@ func TestTheDirectoryRuleIsOtherWriteAndNotSticky(t *testing.T) {
 		}
 		//: the refusing half of the rule.
 		if c.refuse {
+			//: both halves are asserted, because they fail apart: a
+			//: constructor that returns a usable locker AND an error is a
+			//: different bug from one that returns the wrong code.
 			if locker != nil {
 				t.Fatalf("mode %v was accepted — its lock files can be replaced by any account", c.mode)
 			}
+			//: and the code matters as much as the refusal: an operator acts
+			//: on LOCK_DIRECTORY_UNSAFE by changing a mode, and on anything
+			//: else by filing a bug against this package.
 			if !errs.HasCode(err, svclock.CodeLockDirectoryUnsafe) {
 				t.Fatalf("NewFileLocker on %v = %v, want LOCK_DIRECTORY_UNSAFE", c.mode, err)
 			}
@@ -102,6 +108,9 @@ func TestTheDirectoryRuleIsOtherWriteAndNotSticky(t *testing.T) {
 			t.Fatalf("NewFileLocker on %v = %v, want a locker", c.mode, err)
 		}
 	}
+	//: one subtest per row, each parallel: every case builds its own directory
+	//: under its own t.TempDir(), so nothing here shares state and a single
+	//: refused row names itself instead of failing the whole table.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
