@@ -109,6 +109,7 @@ filegroup(
         "//internal/service/queue:audit_srcs",
         "//internal/service/resilience:audit_srcs",
         "//internal/service/scheduler:audit_srcs",
+        "//internal/service/selfupdate:audit_srcs",
         "//internal/service/session:audit_srcs",
         "//internal/service/sql:audit_srcs",
         "//internal/service/token:audit_srcs",

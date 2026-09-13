@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	coreupd "github.com/kitsunium/sdk/internal/core/selfupdate"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Checksum verification constants.
@@ -47,13 +48,18 @@ func bufferArchive(body io.Reader, capBytes int64) (archive []byte, bufErr error
 	buf, err := io.ReadAll(io.LimitReader(body, capBytes+1))
 	//: Propagate stream read failures with phase context.
 	if err != nil {
-		//: Wrap to identify the buffering phase in operator logs.
-		return nil, fmt.Errorf("buffering release archive: %w", err)
+		//: DownloadFailed, not ArchiveUnreadable. This reads the HTTP response
+		//: body, so a failure here is a transfer that stopped — the same thing
+		//: the manifest, the signature and the API body all report that way,
+		//: and the thing a retry policy exists for. ArchiveUnreadable says in
+		//: its own doc that everything under it happens AFTER the signature
+		//: and the digest have been verified, and neither has run yet.
+		return nil, classify(coreupd.DownloadFailed, err, errs.String("stage", "buffer_archive"))
 	}
 	//: Refuse archives beyond the cap — release archives are ~10-30MB.
 	if int64(len(buf)) > capBytes {
 		//: Raise the sentinel so callers can errors.Is the size refusal.
-		return nil, fmt.Errorf("%w: exceeds %d bytes", coreupd.ArchiveTooLarge, capBytes)
+		return nil, refuse(coreupd.ArchiveTooLarge, errs.Int64("cap_bytes", capBytes))
 	}
 	//: Return the fully buffered archive for hashing then extraction.
 	return buf, nil
@@ -78,7 +84,11 @@ func (u *Service) matchArchiveDigest(tag, manifest string, archive []byte) error
 	//: A manifest without our asset entry is as bad as no manifest at all.
 	if !found {
 		//: Raise the missing sentinel naming both the asset and the tag.
-		return fmt.Errorf("%w: no entry for asset %s in %s (tag %s)", coreupd.ChecksumMissing, asset, checksumsAssetName, tag)
+		return refuse(coreupd.ChecksumMissing,
+			errs.String("condition", "asset_absent_from_manifest"),
+			errs.String("asset", asset),
+			errs.String("manifest", checksumsAssetName),
+			errs.String("tag", tag))
 	}
 	// Hash the buffered archive bytes before any extraction happens.
 	sum := sha256.Sum256(archive)
@@ -89,7 +99,11 @@ func (u *Service) matchArchiveDigest(tag, manifest string, archive []byte) error
 	//: no secret to leak and crypto/subtle adds nothing.
 	if !strings.EqualFold(gotHex, wantHex) {
 		//: Refuse the update: the archive does not match its published digest.
-		return fmt.Errorf("%w: asset %s (tag %s): manifest %s, downloaded %s", coreupd.ChecksumMismatch, asset, tag, wantHex, gotHex)
+		return refuse(coreupd.ChecksumMismatch,
+			errs.String("asset", asset),
+			errs.String("tag", tag),
+			errs.String("manifest_digest", wantHex),
+			errs.String("archive_digest", gotHex))
 	}
 	//: Digest verified — the archive may proceed to extraction.
 	return nil
@@ -107,7 +121,10 @@ func (u *Service) fetchChecksums(tag string) (manifest string, fetchErr error) {
 	//: Propagate network errors to caller.
 	if err != nil {
 		//: Wrap with asset+tag context so the failed download is identifiable.
-		return "", fmt.Errorf("%w: downloading %s for tag %s: %w", coreupd.DownloadFailed, checksumsAssetName, tag, err)
+		return "", classify(coreupd.DownloadFailed, err,
+			errs.String("stage", "get"),
+			errs.String("asset", checksumsAssetName),
+			errs.String("tag", tag))
 	}
 	defer func() {
 		//: Prevent resource leak from unclosed response.
@@ -119,13 +136,20 @@ func (u *Service) fetchChecksums(tag string) (manifest string, fetchErr error) {
 	//: A release without checksums.txt cannot be verified — refuse loudly.
 	if resp.StatusCode == http.StatusNotFound {
 		//: Raise the missing sentinel naming the manifest asset and the tag.
-		return "", fmt.Errorf("%w: %s not published for tag %s", coreupd.ChecksumMissing, checksumsAssetName, tag)
+		return "", refuse(coreupd.ChecksumMissing,
+			errs.String("condition", "manifest_not_published"),
+			errs.String("asset", checksumsAssetName),
+			errs.String("tag", tag))
 	}
 
 	//: Fail fast on any other HTTP error before reading the body.
 	if resp.StatusCode != http.StatusOK {
 		//: Reuse the download sentinel with status, asset and tag context.
-		return "", fmt.Errorf("%w: status %d fetching %s for tag %s", coreupd.DownloadFailed, resp.StatusCode, checksumsAssetName, tag)
+		return "", refuse(coreupd.DownloadFailed,
+			errs.String("stage", "get"),
+			errs.Int("status", resp.StatusCode),
+			errs.String("asset", checksumsAssetName),
+			errs.String("tag", tag))
 	}
 
 	// Read the manifest body (size-capped defence-in-depth). One byte PAST the
@@ -137,14 +161,19 @@ func (u *Service) fetchChecksums(tag string) (manifest string, fetchErr error) {
 	//: Propagate body read failures with asset+tag context.
 	if err != nil {
 		//: Wrap to identify the manifest read phase in operator logs.
-		return "", fmt.Errorf("%w: reading %s for tag %s: %w", coreupd.DownloadFailed, checksumsAssetName, tag, err)
+		return "", classify(coreupd.DownloadFailed, err,
+			errs.String("stage", "read"),
+			errs.String("asset", checksumsAssetName),
+			errs.String("tag", tag))
 	}
 	//: Refuse an oversized manifest AS oversized, before anything can mistake
 	//: its truncation for a forged signature.
 	if int64(len(raw)) > maxChecksumsBytes {
 		//: Raise the size sentinel, never the signature one.
-		return "", fmt.Errorf("%w: %s for tag %s exceeds %d bytes",
-			coreupd.ArchiveTooLarge, checksumsAssetName, tag, maxChecksumsBytes)
+		return "", refuse(coreupd.ArchiveTooLarge,
+			errs.String("asset", checksumsAssetName),
+			errs.String("tag", tag),
+			errs.Int64("cap_bytes", maxChecksumsBytes))
 	}
 
 	//: Return the raw manifest text for line-by-line parsing.

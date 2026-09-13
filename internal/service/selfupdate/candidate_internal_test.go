@@ -49,7 +49,7 @@ func Test_getReleases(t *testing.T) {
 			responseBody:   `not json`,
 			responseStatus: http.StatusOK,
 			wantErr:        true,
-			wantErrContain: "parsing releases",
+			wantErrContain: "query=releases",
 		},
 	}
 
@@ -84,8 +84,8 @@ func Test_getReleases(t *testing.T) {
 					t.Fatal("getReleases() expected error, got nil")
 				}
 				// Check error message
-				if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
-					t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErrContain)
+				if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
+					t.Errorf("error = %q, want to contain %q", whole(err), tt.wantErrContain)
 				}
 				// Return after error check
 				return
@@ -146,7 +146,7 @@ func Test_getReleaseByTag(t *testing.T) {
 			responseBody:   `not json`,
 			responseStatus: http.StatusOK,
 			wantErr:        true,
-			wantErrContain: "parsing release",
+			wantErrContain: "query=release_by_tag",
 		},
 	}
 
@@ -181,8 +181,8 @@ func Test_getReleaseByTag(t *testing.T) {
 					t.Fatal("getReleaseByTag() expected error, got nil")
 				}
 				// Check error message
-				if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
-					t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErrContain)
+				if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
+					t.Errorf("error = %q, want to contain %q", whole(err), tt.wantErrContain)
 				}
 				// Return after error check
 				return

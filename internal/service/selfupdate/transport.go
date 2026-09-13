@@ -11,11 +11,12 @@ package selfupdate
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
+	"slices"
 
 	coreupd "github.com/kitsunium/sdk/internal/core/selfupdate"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Transport bounds.
@@ -63,18 +64,25 @@ func checkReleaseRedirect(req *http.Request, via []*http.Request) error {
 	//: the process down inside a transport callback — refuse instead.
 	if req == nil || req.URL == nil {
 		//: Nothing to vouch for.
-		return fmt.Errorf("%w: redirect target is unreadable", coreupd.InsecureRedirect)
+		return refuse(coreupd.InsecureRedirect, errs.String("condition", "unreadable_target"))
 	}
 	//: A chain longer than the cap is a loop or a deliberate amplification.
 	if len(via) >= maxRedirects {
 		//: Stop following.
-		return fmt.Errorf("%w: more than %d redirects (last: %s)", coreupd.InsecureRedirect, maxRedirects, req.URL.Redacted())
+		return refuse(coreupd.InsecureRedirect,
+			errs.String("condition", "hop_bound"),
+			errs.Int("hops", len(via)),
+			errs.Int("limit", maxRedirects),
+			errs.String("url", req.URL.Redacted()))
 	}
 	//: A scheme downgrade puts the payload on a plaintext connection the
 	//: redirect target chose. Refuse it whatever the host is.
 	if req.URL.Scheme != "https" {
 		//: Stop following.
-		return fmt.Errorf("%w: redirect to %s (scheme %q)", coreupd.InsecureRedirect, req.URL.Redacted(), req.URL.Scheme)
+		return refuse(coreupd.InsecureRedirect,
+			errs.String("condition", "scheme_downgrade"),
+			errs.String("scheme", req.URL.Scheme),
+			errs.String("url", req.URL.Redacted()))
 	}
 	//: A hop worth following.
 	return nil
@@ -88,20 +96,36 @@ func checkReleaseRedirect(req *http.Request, via []*http.Request) error {
 // has no such bound: it streams until EOF. The cap is a parameter rather
 // than a constant read inside so the refusal branch is reachable in a test
 // without producing an 8MB fixture.
-func decodeJSONBody(body io.Reader, capBytes int64, into any) error {
+//
+// fields are what the CALLER knows and this function cannot: which query the
+// body answers, and the tag if the query named one. They are taken here
+// rather than wrapped on afterwards so each of the three failures is
+// classified exactly once, at the only frame that can tell a read failure
+// from an over-cap body from a body that simply is not release metadata.
+func decodeJSONBody(body io.Reader, capBytes int64, into any, fields ...errs.FieldValue) error {
 	//: Read one byte past the cap so an oversized stream is detectable
 	//: without unbounded allocation — same shape as bufferArchive.
 	raw, err := io.ReadAll(io.LimitReader(body, capBytes+1))
 	//: Propagate stream read failures to the caller's phase wrapper.
 	if err != nil {
 		//: Wrap to identify the read phase in operator logs.
-		return fmt.Errorf("%w: reading release API response: %w", coreupd.DownloadFailed, err)
+		//: slices.Concat, not append: `fields` is the caller's own array and
+		//: appending into its spare capacity would write through to it.
+		return classify(coreupd.DownloadFailed, err,
+			slices.Concat(fields, []errs.FieldValue{errs.String("stage", "read_api_response")})...)
 	}
 	//: Refuse a body beyond the cap instead of decoding a truncated prefix.
 	if int64(len(raw)) > capBytes {
 		//: Raise the sentinel so callers can errors.Is the size refusal.
-		return fmt.Errorf("%w: exceeds %d bytes", coreupd.APIBodyTooLarge, capBytes)
+		return refuse(coreupd.APIBodyTooLarge,
+			slices.Concat(fields, []errs.FieldValue{errs.Int64("cap_bytes", capBytes)})...)
 	}
-	//: Decode the bounded body; the caller wraps with its own context.
-	return json.Unmarshal(raw, into)
+	//: Decode the bounded body.
+	if unmarshalErr := json.Unmarshal(raw, into); unmarshalErr != nil {
+		//: Not a download failure — the bytes arrived whole, so no retry
+		//: policy keyed on the transport applies to this one.
+		return classify(ReleaseMetadataUnreadable, unmarshalErr, fields...)
+	}
+	//: Decoded.
+	return nil
 }

@@ -309,8 +309,10 @@ func Test_decodeJSONBody(t *testing.T) {
 				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
 					t.Errorf("decodeJSONBody() error = %v, want errors.Is %v", err, tc.wantErrIs)
 				}
-				if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
-					t.Errorf("decodeJSONBody() error = %q, want substring %q", err.Error(), tc.wantErrContains)
+				//: The decoder's own words are the CAUSE, which Error() never
+				//: renders and diagnose() always does.
+				if tc.wantErrContains != "" && !strings.Contains(diagnose(err), tc.wantErrContains) {
+					t.Errorf("diagnose(decodeJSONBody() error) = %q, want substring %q", diagnose(err), tc.wantErrContains)
 				}
 				//: A refused body must leave the destination untouched.
 				if release.TagName != "" {
@@ -368,8 +370,9 @@ func Test_decodeJSONBody_readError(t *testing.T) {
 			if err == nil {
 				t.Fatalf("decodeJSONBody() error = nil, want the read failure surfaced (%s)", tc.why)
 			}
-			if !strings.Contains(err.Error(), "reading release API response") {
-				t.Errorf("decodeJSONBody() error = %q, want the read phase named (%s)", err.Error(), tc.why)
+			//: The phase is a FIELD now, not a fragment of the sentence.
+			if !strings.Contains(diagnose(err), "stage=read_api_response") {
+				t.Errorf("diagnose(decodeJSONBody() error) = %q, want the read phase named (%s)", diagnose(err), tc.why)
 			}
 			//: A partial body must not have been decoded into the target.
 			if release.TagName != "" {

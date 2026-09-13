@@ -137,16 +137,59 @@ changes shape, and nothing else in the SDK imports it.
 
 ## Deferred
 
-- **75 `fmt.Errorf` call sites in `internal/service/selfupdate`.** SDK-wide rule
-  2 bans `fmt.Errorf` and `errors.New` in production code; this package is the
-  largest violation in the tree, against 3 in `internal/service/cache` and 1
-  each in `codec` and `logger`. The sentinels ARE typed and every site wraps one
-  with `%w`, so `errors.Is` and `errs.HasCode` work — what is missing is the
-  Public/Private split on the context each site adds. Converting 75 sites in the
-  change that MOVES them would have made the diff unreviewable against its
-  source, which is the one property a versement has to keep. It is the next
-  change this package should receive, and the package's CLAUDE.md says so where
-  a maintainer will read it.
+- ~~**75 `fmt.Errorf` call sites in `internal/service/selfupdate`.**~~ **CLOSED.**
+
+  **Read this first: both numbers in the original entry were wrong, and the
+  second one sends anyone planning this work to the wrong package.** Counted
+  over production files only — `*.go` minus `*_test.go`, which is the set rule 2
+  governs:
+
+  | package | `fmt.Errorf` in production | state |
+  |---|---|---|
+  | `internal/service/entitlement` | **110** | open |
+  | `internal/service/selfupdate` | **58** | closed by this entry |
+  | `third-party/entitlement` | **25** | open |
+  | `internal/core/entitlement` | 5 | open |
+  | `internal/service/cache` | **1** | open |
+
+  So `selfupdate` was never the largest violation in the tree; `entitlement` is,
+  across three packages and by a factor of two. And it was 58 rather than 75:
+  75 is approximately the count *including the suite* (73 at the versement),
+  which rule 2 does not govern. `internal/service/cache` has 1, not 3.
+
+  Reproduce with:
+
+  ```sh
+  grep -rn "fmt\.Errorf" --include="*.go" internal pkg third-party \
+    | grep -v "_test\.go" \
+    | cut -d: -f1 | xargs -n1 dirname | sort | uniq -c | sort -rn
+  ```
+
+  (`cut` then `dirname`, not a `sed` over the whole `path:line:text` line — the
+  matched source text contains slashes of its own and shortens the count.)
+
+  **The original reasoning stands and is left standing.** SDK-wide rule 2 bans
+  `fmt.Errorf` and `errors.New` in production code; the sentinels ARE typed and
+  every site wrapped one with `%w`, so `errors.Is` and `errs.HasCode` worked —
+  what was missing is the Public/Private split on the context each site added;
+  and converting them in the change that MOVED them would have made the diff
+  unreviewable against its source, which is the one property a versement has to
+  keep.
+
+  **What closing it did.** The conversion allocated `0.3.66.*` to the service
+  package for the seven failures an implementation has and a contract does not,
+  and the package is back inside `//:audit_sources`, so a reintroduced
+  `fmt.Errorf` now fails the build rather than being noticed. All seven are
+  re-exported by `pkg/v1/selfupdate` beside the eighteen contract codes: a code
+  a consumer can match on but cannot NAME is half a public surface, and matching
+  a whole range with a prefix matcher is routing rather than classification.
+
+  The deliverable was the split rather than the substitution: no public sentence
+  names a tag, an asset, a path, a URL, a status or anything the release host
+  said, and the detail reaches the operator through `ExplainUpgradeFailure`
+  instead of through the message. Public-facing error TEXT therefore changed at
+  every converted site — stated here because it is user-visible and no test
+  could have told a reviewer otherwise.
 
 - **A compromised host can serve an older signed release.** The signed manifest
   carries the version-independent asset name and no release tag, so answering a

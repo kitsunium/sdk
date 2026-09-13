@@ -116,9 +116,12 @@ func Test_guardedSudoMove(t *testing.T) {
 			if !errors.Is(err, coreupd.ElevationNotAuthorised) {
 				t.Fatalf("testSource.guardedSudoMove() error = %v, want errors.Is coreupd.ElevationNotAuthorised (%s)", err, tc.why)
 			}
-			//: And it must name the way forward.
-			if !strings.Contains(err.Error(), testSource.SudoOptInEnv()) {
-				t.Errorf("testSource.guardedSudoMove() error = %q, want it to name %s", err.Error(), testSource.SudoOptInEnv())
+			//: And it must name the way forward. Not in the sentence — that
+			//: is wire-safe and names no environment of ours — but in the
+			//: fields, which is where ExplainUpgradeFailure reads it from.
+			if !strings.Contains(diagnose(err), "opt_in_env="+testSource.SudoOptInEnv()) {
+				t.Errorf("diagnose(testSource.guardedSudoMove() error) = %q, want it to name %s",
+					diagnose(err), testSource.SudoOptInEnv())
 			}
 
 			//: Nothing moved: the staged file is still staged...

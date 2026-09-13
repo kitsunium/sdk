@@ -16,12 +16,12 @@
 package selfupdate
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
 	coreupd "github.com/kitsunium/sdk/internal/core/selfupdate"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // truthyEnv reports whether an environment variable's value means "yes".
@@ -54,10 +54,15 @@ func (s SourceValue) guardedSudoMove(tmpPath, execPath string) error {
 	//: No authorisation means no `sudo` process is created at all — this
 	//: returns before exec.Command, which is the property the test pins.
 	if !truthyEnv(os.Getenv(s.SudoOptInEnv())) {
-		//: Name both ways forward; a bare refusal here strands the user.
-		return fmt.Errorf(
-			"%w: replacing %s needs elevated rights — re-run as the owner of that path, or set %s=1 to allow `sudo -n mv`",
-			coreupd.ElevationNotAuthorised, execPath, s.SudoOptInEnv())
+		//: Name both ways forward in the FIELDS. The two ways forward used to
+		//: be spelled into the message, and they still reach the operator —
+		//: ExplainUpgradeFailure branches on this exact sentinel and prints
+		//: the opt-in variable and the re-run advice, which is where that
+		//: sentence belongs: it is guidance for a human at a terminal, not
+		//: something a caller should have to parse back out of an error.
+		return refuse(coreupd.ElevationNotAuthorised,
+			errs.String("path", execPath),
+			errs.String("opt_in_env", s.SudoOptInEnv()))
 	}
 
 	//: Authorised — perform the escalated move.
@@ -83,8 +88,9 @@ func sudoMove(tmpPath, execPath string) error {
 	//: Surface sudo's own stderr (e.g. "sudo: a password is required") — it
 	//: names the real blocker far better than the wrapping exec.ExitError.
 	if err != nil {
-		//: Wrap sudo's own message so the caller reports the real blocker.
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		//: Carry sudo's own message so the caller reports the real blocker.
+		return classify(ElevationFailed, err,
+			errs.String("sudo_output", strings.TrimSpace(string(out))))
 	}
 
 	//: The binary was replaced in place.

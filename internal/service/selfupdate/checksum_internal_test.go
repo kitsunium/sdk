@@ -187,10 +187,12 @@ func TestService_downloadAndReplace_checksumGate(t *testing.T) {
 				if !errors.Is(err, tc.wantErrIs) {
 					t.Errorf("downloadAndReplace() error = %v, want errors.Is %v", err, tc.wantErrIs)
 				}
-				//: The refusal message must name the asset and the tag.
+				//: The refusal must still NAME the asset and the tag — in its
+				//: fields now rather than in the sentence, which is the whole
+				//: point: the sentence is wire-safe and the fields are not.
 				for _, sub := range tc.wantErrContains {
-					if !strings.Contains(err.Error(), sub) {
-						t.Errorf("downloadAndReplace() error = %q, want substring %q", err.Error(), sub)
+					if !strings.Contains(diagnose(err), sub) {
+						t.Errorf("diagnose(downloadAndReplace() error) = %q, want substring %q", diagnose(err), sub)
 					}
 				}
 				//: The on-disk binary must be untouched after a refusal.
@@ -258,7 +260,7 @@ func TestService_fetchChecksums(t *testing.T) {
 		{
 			name:            "transport error wraps context",
 			status:          0,
-			wantErrContains: "downloading " + checksumsAssetName,
+			wantErrContains: "stage=get asset=" + checksumsAssetName,
 		},
 	}
 
@@ -297,8 +299,8 @@ func TestService_fetchChecksums(t *testing.T) {
 				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
 					t.Errorf("fetchChecksums() error = %v, want errors.Is %v", err, tc.wantErrIs)
 				}
-				if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
-					t.Errorf("fetchChecksums() error = %q, want substring %q", err.Error(), tc.wantErrContains)
+				if tc.wantErrContains != "" && !strings.Contains(diagnose(err), tc.wantErrContains) {
+					t.Errorf("diagnose(fetchChecksums() error) = %q, want substring %q", diagnose(err), tc.wantErrContains)
 				}
 				return
 			}
@@ -513,10 +515,14 @@ func Test_bufferArchive(t *testing.T) {
 			wantErrIs: coreupd.ArchiveTooLarge,
 		},
 		{
-			name:            "reader failure wrapped",
-			body:            func() io.Reader { return io.MultiReader(strings.NewReader("x"), failingReader{}) },
-			capBytes:        64,
-			wantErrContains: "buffering release archive",
+			name:     "reader failure is a download that stopped, not an unreadable archive",
+			body:     func() io.Reader { return io.MultiReader(strings.NewReader("x"), failingReader{}) },
+			capBytes: 64,
+			//: This reads the HTTP response body, before either half of the
+			//: verification has run — so it is the retryable sentinel, and
+			//: never the one whose own doc promises a verified archive.
+			wantErrIs:       coreupd.DownloadFailed,
+			wantErrContains: "stage=buffer_archive",
 		},
 	}
 
@@ -532,8 +538,8 @@ func Test_bufferArchive(t *testing.T) {
 				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
 					t.Errorf("bufferArchive() error = %v, want errors.Is %v", err, tc.wantErrIs)
 				}
-				if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
-					t.Errorf("bufferArchive() error = %q, want substring %q", err.Error(), tc.wantErrContains)
+				if tc.wantErrContains != "" && !strings.Contains(diagnose(err), tc.wantErrContains) {
+					t.Errorf("diagnose(bufferArchive() error) = %q, want substring %q", diagnose(err), tc.wantErrContains)
 				}
 				return
 			}

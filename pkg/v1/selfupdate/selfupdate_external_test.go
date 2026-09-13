@@ -2,6 +2,8 @@
 package selfupdate_test
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -167,4 +169,197 @@ func TestTheFacadeCarriesWhatACallerCannotReimplement(t *testing.T) {
 		t.Parallel()
 		selfupdate.StdinIsTerminal()
 	})
+}
+
+// TestEveryFailureThisPackageCanReturnHasAPublicName pins the completeness of
+// the code surface, and pins it by VALUE rather than by presence.
+//
+// PR #184 fixed the same shape in the entitlement facade, which shipped fifteen
+// codes and no way to name most of what it returned. A re-export is one line
+// and mistyping which constant it points at is one character, so "the symbol
+// exists" is not the property worth asserting — "it is the same code the engine
+// raises" is, and so is "no two of them collide", because two names for one
+// value is a caller routing to the wrong branch with no error anywhere.
+//
+// Twenty-five: eighteen from the domain contract (0.2.34.*) and seven from the
+// implementation (0.3.66.*).
+func TestEveryFailureThisPackageCanReturnHasAPublicName(t *testing.T) {
+	t.Parallel()
+
+	const wantCodes int = 25
+
+	// exported is every failure code this facade publishes, against the dotted
+	// quad it must resolve to. The literal is deliberate: reading it back from
+	// the same constant would assert nothing at all.
+	exported := []struct {
+		name string
+		got  errs.Code
+		want string
+	}{
+		{"CodeNoVendorKey", selfupdate.CodeNoVendorKey, "0.2.34.1"},
+		{"CodeSignatureMissing", selfupdate.CodeSignatureMissing, "0.2.34.2"},
+		{"CodeSignatureInvalid", selfupdate.CodeSignatureInvalid, "0.2.34.3"},
+		{"CodeChecksumMissing", selfupdate.CodeChecksumMissing, "0.2.34.4"},
+		{"CodeChecksumMismatch", selfupdate.CodeChecksumMismatch, "0.2.34.5"},
+		{"CodeArchiveTooLarge", selfupdate.CodeArchiveTooLarge, "0.2.34.6"},
+		{"CodeAPIBodyTooLarge", selfupdate.CodeAPIBodyTooLarge, "0.2.34.7"},
+		{"CodeInsecureRedirect", selfupdate.CodeInsecureRedirect, "0.2.34.8"},
+		{"CodeUnexpectedStatus", selfupdate.CodeUnexpectedStatus, "0.2.34.9"},
+		{"CodeDownloadFailed", selfupdate.CodeDownloadFailed, "0.2.34.10"},
+		{"CodeDevBuild", selfupdate.CodeDevBuild, "0.2.34.11"},
+		{"CodeCandidateNotFound", selfupdate.CodeCandidateNotFound, "0.2.34.12"},
+		{"CodeNotPrerelease", selfupdate.CodeNotPrerelease, "0.2.34.13"},
+		{"CodeDraftRelease", selfupdate.CodeDraftRelease, "0.2.34.14"},
+		{"CodeInvalidTag", selfupdate.CodeInvalidTag, "0.2.34.15"},
+		{"CodeBinaryNotInArchive", selfupdate.CodeBinaryNotInArchive, "0.2.34.16"},
+		{"CodeUnknownArchive", selfupdate.CodeUnknownArchive, "0.2.34.17"},
+		{"CodeElevationNotAuthorised", selfupdate.CodeElevationNotAuthorised, "0.2.34.18"},
+		{"CodeCandidateTagRequired", selfupdate.CodeCandidateTagRequired, "0.3.66.1"},
+		{"CodeReleaseMetadataUnreadable", selfupdate.CodeReleaseMetadataUnreadable, "0.3.66.2"},
+		{"CodeArchiveUnreadable", selfupdate.CodeArchiveUnreadable, "0.3.66.3"},
+		{"CodeExecutablePathUnresolved", selfupdate.CodeExecutablePathUnresolved, "0.3.66.4"},
+		{"CodeStagingFailed", selfupdate.CodeStagingFailed, "0.3.66.5"},
+		{"CodeReplacementFailed", selfupdate.CodeReplacementFailed, "0.3.66.6"},
+		{"CodeElevationFailed", selfupdate.CodeElevationFailed, "0.3.66.7"},
+	}
+
+	//: A short table is a re-export somebody forgot; a long one is a duplicate.
+	if len(exported) != wantCodes {
+		t.Fatalf("table lists %d codes, want %d", len(exported), wantCodes)
+	}
+
+	seen := make(map[string]string, len(exported))
+	for _, tt := range exported {
+		t.Run(tt.name, func(t *testing.T) {
+			//: The value, not the symbol's existence.
+			if got := tt.got.String(); got != tt.want {
+				t.Errorf("%s = %s, want %s", tt.name, got, tt.want)
+			}
+		})
+		//: Two names for one value is a caller routing to the wrong branch
+		//: with nothing anywhere reporting it.
+		if first, dup := seen[tt.got.String()]; dup {
+			t.Errorf("%s and %s are both %s", first, tt.name, tt.got)
+		}
+		seen[tt.got.String()] = tt.name
+	}
+}
+
+// TestEverySentinelIsTheOneTheEngineRaises is the companion to the code test,
+// and it exists for the same reason: a re-export is one line, and pointing it
+// at the neighbouring constant is one character.
+//
+// Presence proves nothing here. `SignatureInvalid = coreupd.SignatureMissing`
+// compiles, type-checks, exports a symbol of the right name and sends every
+// caller that branches on a forged release down the "not signed" path instead
+// — which is the same remedy, so nobody would notice until the day the two
+// remedies diverged. So each alias is matched against an error the ENGINE
+// produced, through errors.Is, and no two may match the same one.
+func TestEverySentinelIsTheOneTheEngineRaises(t *testing.T) {
+	t.Parallel()
+
+	const wantSentinels int = 25
+
+	// exported is every sentinel this facade publishes, beside the code it
+	// must carry. The code is the independent witness: it comes from the
+	// separately-asserted const surface, so a sentinel pointing at the wrong
+	// value disagrees with it.
+	exported := []struct {
+		name string
+		err  error
+		code errs.Code
+	}{
+		{"NoVendorKey", selfupdate.NoVendorKey, selfupdate.CodeNoVendorKey},
+		{"SignatureMissing", selfupdate.SignatureMissing, selfupdate.CodeSignatureMissing},
+		{"SignatureInvalid", selfupdate.SignatureInvalid, selfupdate.CodeSignatureInvalid},
+		{"ChecksumMissing", selfupdate.ChecksumMissing, selfupdate.CodeChecksumMissing},
+		{"ChecksumMismatch", selfupdate.ChecksumMismatch, selfupdate.CodeChecksumMismatch},
+		{"ArchiveTooLarge", selfupdate.ArchiveTooLarge, selfupdate.CodeArchiveTooLarge},
+		{"APIBodyTooLarge", selfupdate.APIBodyTooLarge, selfupdate.CodeAPIBodyTooLarge},
+		{"InsecureRedirect", selfupdate.InsecureRedirect, selfupdate.CodeInsecureRedirect},
+		{"UnexpectedStatus", selfupdate.UnexpectedStatus, selfupdate.CodeUnexpectedStatus},
+		{"DownloadFailed", selfupdate.DownloadFailed, selfupdate.CodeDownloadFailed},
+		{"DevBuild", selfupdate.DevBuild, selfupdate.CodeDevBuild},
+		{"CandidateNotFound", selfupdate.CandidateNotFound, selfupdate.CodeCandidateNotFound},
+		{"NotPrerelease", selfupdate.NotPrerelease, selfupdate.CodeNotPrerelease},
+		{"DraftRelease", selfupdate.DraftRelease, selfupdate.CodeDraftRelease},
+		{"InvalidTag", selfupdate.InvalidTag, selfupdate.CodeInvalidTag},
+		{"BinaryNotInArchive", selfupdate.BinaryNotInArchive, selfupdate.CodeBinaryNotInArchive},
+		{"UnknownArchive", selfupdate.UnknownArchive, selfupdate.CodeUnknownArchive},
+		{"ElevationNotAuthorised", selfupdate.ElevationNotAuthorised, selfupdate.CodeElevationNotAuthorised},
+		{"CandidateTagRequired", selfupdate.CandidateTagRequired, selfupdate.CodeCandidateTagRequired},
+		{"ReleaseMetadataUnreadable", selfupdate.ReleaseMetadataUnreadable, selfupdate.CodeReleaseMetadataUnreadable},
+		{"ArchiveUnreadable", selfupdate.ArchiveUnreadable, selfupdate.CodeArchiveUnreadable},
+		{"ExecutablePathUnresolved", selfupdate.ExecutablePathUnresolved, selfupdate.CodeExecutablePathUnresolved},
+		{"StagingFailed", selfupdate.StagingFailed, selfupdate.CodeStagingFailed},
+		{"ReplacementFailed", selfupdate.ReplacementFailed, selfupdate.CodeReplacementFailed},
+		{"ElevationFailed", selfupdate.ElevationFailed, selfupdate.CodeElevationFailed},
+	}
+
+	//: One sentinel per code, both ways round: a short table is one somebody
+	//: forgot, a long one is a duplicate.
+	if len(exported) != wantSentinels {
+		t.Fatalf("table lists %d sentinels, want %d", len(exported), wantSentinels)
+	}
+
+	seen := make(map[string]string, len(exported))
+	for _, tt := range exported {
+		t.Run(tt.name, func(t *testing.T) {
+			//: Not nil — a nil sentinel makes every errors.Is against it a
+			//: silent false, which is the failure mode with no symptom.
+			if tt.err == nil {
+				t.Fatalf("%s is nil", tt.name)
+			}
+			//: The sentinel and the code must agree. They are re-exported
+			//: from different declarations, so this is two independent
+			//: one-character mistakes having to make the same error.
+			if got, _ := errs.CodeOf(tt.err); got != tt.code {
+				t.Errorf("%s carries %s, want %s", tt.name, got, tt.code)
+			}
+			//: And it must match an error wrapped around it — the shape a
+			//: caller actually receives, never the bare sentinel.
+			wrapped := fmt.Errorf("installing: %w", tt.err)
+			if !errors.Is(wrapped, tt.err) {
+				t.Errorf("errors.Is(wrapped, %s) = false, want true", tt.name)
+			}
+		})
+		//: Two names for one sentinel routes a caller to the wrong remedy
+		//: with nothing anywhere reporting it.
+		if first, dup := seen[tt.code.String()]; dup {
+			t.Errorf("%s and %s are the same sentinel (%s)", first, tt.name, tt.code)
+		}
+		seen[tt.code.String()] = tt.name
+	}
+}
+
+// TestSentinelsDoNotMatchEachOther pins the discrimination the classes depend
+// on: the three remedies the package documents are only distinct if the
+// sentinels that select them are.
+//
+// The pair chosen is the one where confusing them costs most. A supply-chain
+// refusal must never be answered with a retry, and a retryable failure must
+// never be answered with "do not install this by any means".
+func TestSentinelsDoNotMatchEachOther(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		a    error
+		b    error
+	}{
+		{"a forged release is not a flaky network", selfupdate.SignatureInvalid, selfupdate.DownloadFailed},
+		{"an unsigned release is not a forged one", selfupdate.SignatureMissing, selfupdate.SignatureInvalid},
+		{"staging is not replacement", selfupdate.StagingFailed, selfupdate.ReplacementFailed},
+		{"a refused escalation is not a failed one", selfupdate.ElevationNotAuthorised, selfupdate.ElevationFailed},
+		{"an unreadable archive is not a bad checksum", selfupdate.ArchiveUnreadable, selfupdate.ChecksumMismatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			//: Neither direction may match, or one remedy answers both.
+			if errors.Is(tt.a, tt.b) || errors.Is(tt.b, tt.a) {
+				t.Errorf("%v and %v match each other", tt.a, tt.b)
+			}
+		})
+	}
 }

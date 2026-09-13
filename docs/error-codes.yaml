@@ -2050,6 +2050,34 @@ codes:
     const: CodeLimitMisconfigured
     hex: "0x00_03_3F_04"
     package: third-party/transform
+  - code: "0.3.66.1"
+    const: CodeCandidateTagRequired
+    hex: "0x00_03_42_01"
+    package: internal/service/selfupdate
+  - code: "0.3.66.2"
+    const: CodeReleaseMetadataUnreadable
+    hex: "0x00_03_42_02"
+    package: internal/service/selfupdate
+  - code: "0.3.66.3"
+    const: CodeArchiveUnreadable
+    hex: "0x00_03_42_03"
+    package: internal/service/selfupdate
+  - code: "0.3.66.4"
+    const: CodeExecutablePathUnresolved
+    hex: "0x00_03_42_04"
+    package: internal/service/selfupdate
+  - code: "0.3.66.5"
+    const: CodeStagingFailed
+    hex: "0x00_03_42_05"
+    package: internal/service/selfupdate
+  - code: "0.3.66.6"
+    const: CodeReplacementFailed
+    hex: "0x00_03_42_06"
+    package: internal/service/selfupdate
+  - code: "0.3.66.7"
+    const: CodeElevationFailed
+    hex: "0x00_03_42_07"
+    package: internal/service/selfupdate
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

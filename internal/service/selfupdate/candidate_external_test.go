@@ -125,7 +125,7 @@ func TestService_DownloadCandidate(t *testing.T) {
 		tag        string
 		wantSubstr string
 	}{
-		{name: "empty_tag_errors", tag: "", wantSubstr: "candidate tag is required"},
+		{name: "empty_tag_errors", tag: "", wantSubstr: "no tag was named"},
 		{name: "malformed_tag_errors", tag: "not-a-tag", wantSubstr: "that is not a valid version tag"},
 	}
 
