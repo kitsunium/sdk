@@ -8,6 +8,8 @@ go_library(
         "chain.go",
         "codes.go",
         "config.go",
+        "dacl_tokens_windows.go",
+        "dacl_windows.go",
         "dirsafety_posix.go",
         "dirsafety_windows.go",
         "errors.go",
@@ -59,6 +61,7 @@ go_test(
     srcs = [
         "chain_posix_test.go",
         "chain_windows_test.go",
+        "dacl_windows_test.go",
         "dirsafety_posix_test.go",
         "dirsafety_windows_test.go",
         "file_contention_unix_test.go",

@@ -42,6 +42,8 @@
 package lock
 
 import (
+	"path/filepath"
+
 	"github.com/kitsunium/sdk/internal/kernel/pathchain"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -81,14 +83,15 @@ func checkChain(dir string) error {
 			//: next component.
 			continue
 		}
+		yes, observed := plantable(step.Container, filepath.Dir(step.Path))
 		//: an indirection nobody outside the owner and group could have
 		//: created is the operating system's own arrangement.
-		if !plantable(step.Container) {
+		if !yes {
 			//: next component.
 			continue
 		}
 		//: LockPathRedirected, naming the component rather than the lock file.
-		return parentRedirected(dir, step)
+		return parentRedirected(dir, step, observed)
 	}
 	//: every component is either a real directory or an indirection only a
 	//: trusted account could have put there.
@@ -102,7 +105,7 @@ func checkChain(dir string) error {
 // operator typed and will search for; the component is where the redirection
 // actually is, and it is usually neither the first nor the last thing they
 // would have looked at.
-func parentRedirected(dir string, step pathchain.StepValue) error {
+func parentRedirected(dir string, step pathchain.StepValue, observed string) error {
 	//: the same sentinel the final component raises, because it is the same
 	//: condition and the same remedy: a human looks at the directory, and no
 	//: retry helps.
@@ -111,5 +114,5 @@ func parentRedirected(dir string, step pathchain.StepValue) error {
 		kerrs.String("dir", dir),
 		kerrs.String("kind", kindIndirection),
 		kerrs.String("target", step.Target),
-		kerrs.String("observed", "container="+step.Container.Perm().String()))
+		kerrs.String("observed", observed))
 }

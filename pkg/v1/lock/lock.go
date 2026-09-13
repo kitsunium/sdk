@@ -89,10 +89,13 @@
 // measured on a real Windows kernel; ADR 0081 lists them.
 //
 // One more is worth knowing before you rely on a directory's permissions. The
-// lock directory is checked for being world-writable-and-not-sticky on Unix
-// and is NOT checked on Windows, which has no such bits — os.Stat synthesises
-// 0777 for every writable directory there. What that check prevents is refused
-// by the open instead: a held lock file can be neither deleted nor renamed.
+// lock directory is checked for being one any account can put an entry into,
+// and the two platforms answer that in their own vocabulary: a
+// world-writable-and-not-sticky mode on Unix, and an access-allowed entry
+// granting Everyone or Authenticated Users a create-or-delete right on Windows
+// (ADR 0084). There is no sticky equivalent there, so the accepting sets
+// genuinely differ — no Windows ACL says "anyone may create but only the owner
+// may unlink".
 //
 // # A lock path is a file, never a link to one
 //
@@ -115,10 +118,9 @@
 // symbolic link at a parent is not evidence of anything on its own: /tmp is
 // one on macOS and /var/run is one on most Linux distributions. An
 // indirection above the lock file is refused only when the directory holding
-// it is world-writable — when anybody could have planted it. On Windows no
-// parent component is refused at all today, because the only thing that could
-// answer "could anybody have planted this" there is the directory's DACL and
-// the SDK does not read one yet (ADR 0083).
+// it is world-writable — when anybody could have planted it. On Windows the
+// same rule runs over the same question, answered by the directory's DACL
+// rather than by a synthesised mode (ADR 0083, ADR 0084).
 //
 // # A held lock can lose its file, and you are told
 //
