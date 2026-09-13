@@ -316,6 +316,16 @@ is what its own sentence said would cost a third account.
 - **`plantable` reads other-write and not other-execute on Unix.** Unchanged
   from ADR 0083 §Deferred; the Windows half has no equivalent ambiguity,
   because traversal and creation are separate bits there.
+- **An account that can remove the lock DIRECTORY and put back one it owns.**
+  Found while drawing D1's masks and deliberately left open, because closing
+  half of it would be worse than naming all of it. Two rights reach it: `DELETE`
+  on the lock directory itself, which `checkDir` reads and does not count, and
+  `FILE_DELETE_CHILD` on the directory's PARENT, which nothing reads at all —
+  `checkChain` consults a parent's list only where a component is an
+  indirection. Either one removes an EMPTY lock directory and recreates one
+  whose list the remover chooses. Counting only the first would refuse a
+  deployment while leaving the identical exposure one level up, so the whole of
+  it is a third rule with its own accepting set and its own record.
 - **A directory whose ACL is rewritten between the check and the acquisition.**
   Both rules run at construction and neither re-reads. Closing it needs a
   descriptor pinned at open time and a security query against a HANDLE rather
