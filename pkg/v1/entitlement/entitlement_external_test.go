@@ -316,6 +316,8 @@ func TestTheSentinelsKeepTheirConcreteType(t *testing.T) {
 		// got reads the three accessors off the package variable, with no
 		// assertion anywhere — the compile is half the assertion.
 		got func() (errs.Code, string, int)
+		// err is the same sentinel as a plain error, for the accessor half.
+		err error
 		// reason explains what a consumer does with them.
 		reason string
 	}{
@@ -326,6 +328,7 @@ func TestTheSentinelsKeepTheirConcreteType(t *testing.T) {
 			got: func() (errs.Code, string, int) {
 				return entitlement.ErrNoLicense.Code(), entitlement.ErrNoLicense.Public(), entitlement.ErrNoLicense.ExitCode()
 			},
+			err:    entitlement.ErrNoLicense,
 			reason: "a CLI renders Public to the operator and exits on ExitCode",
 		},
 		{
@@ -335,6 +338,7 @@ func TestTheSentinelsKeepTheirConcreteType(t *testing.T) {
 			got: func() (errs.Code, string, int) {
 				return entitlement.ErrRosterUnreachable.Code(), entitlement.ErrRosterUnreachable.Public(), entitlement.ErrRosterUnreachable.ExitCode()
 			},
+			err:    entitlement.ErrRosterUnreachable,
 			reason: "the one sentinel a consumer must tell apart from a refusal",
 		},
 		{
@@ -344,6 +348,7 @@ func TestTheSentinelsKeepTheirConcreteType(t *testing.T) {
 			got: func() (errs.Code, string, int) {
 				return entitlement.ErrUpdateRequired.Code(), entitlement.ErrUpdateRequired.Public(), entitlement.ErrUpdateRequired.ExitCode()
 			},
+			err:    entitlement.ErrUpdateRequired,
 			reason: "the refusal whose remedy is an upgrade rather than a licence",
 		},
 	}
@@ -372,6 +377,19 @@ func TestTheSentinelsKeepTheirConcreteType(t *testing.T) {
 			var asError error = entitlement.ErrNoLicense
 			if !errors.Is(asError, entitlement.ErrNoLicense) {
 				t.Errorf("errors.Is through the error interface = false, want true (%s)", tt.reason)
+			}
+			//: The two ways of asking must agree. A consumer is free to reach
+			//: these through the stable pkg/v1/errs accessors instead of the
+			//: methods, and nothing above would notice if the two diverged —
+			//: so this asserts they do not, on the same three values.
+			if viaAccessor, _ := errs.CodeOf(tt.err); viaAccessor != code {
+				t.Errorf("errs.CodeOf = %v, method Code() = %v; the two must agree (%s)", viaAccessor, code, tt.reason)
+			}
+			if viaAccessor := errs.PublicOf(tt.err); viaAccessor != public {
+				t.Errorf("errs.PublicOf = %q, method Public() = %q; the two must agree (%s)", viaAccessor, public, tt.reason)
+			}
+			if viaAccessor := errs.ExitCodeOf(tt.err); viaAccessor != exit {
+				t.Errorf("errs.ExitCodeOf = %d, method ExitCode() = %d; the two must agree (%s)", viaAccessor, exit, tt.reason)
 			}
 		})
 	}
