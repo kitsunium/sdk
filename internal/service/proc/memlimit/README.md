@@ -17,13 +17,13 @@ headroom, and calls `runtime/debug.SetMemoryLimit`. It returns what it read
 (`Source`).
 
 The candidate files come from `/proc/self/mountinfo` and `/proc/self/cgroup`
-together. mountinfo gives both where a hierarchy is attached and which part of
-the cgroup filesystem that mount exposes — its path fields carry the kernel's
-octal escapes and are decoded — and the membership path from
-`/proc/self/cgroup`, which carries no escapes, is expressed relative to what the
-mount exposes before the ancestor walk starts. The 10% is held back by
-multiplying before dividing, except above `math.MaxInt64 / 90` where the product
-would not fit in an `int64`.
+together. mountinfo gives, for every attachment of a hierarchy, both where it is
+attached and which part of the cgroup filesystem it exposes — its path fields
+carry the kernel's octal escapes and are decoded — and the membership path from
+`/proc/self/cgroup`, which carries no escapes, is expressed relative to what each
+mount exposes before the ancestor walk starts. A mount that cannot name this
+process's cgroup contributes nothing. The 10% is held back by an expression that
+is exact for every `int64` and cannot overflow.
 
 ## Errors
 

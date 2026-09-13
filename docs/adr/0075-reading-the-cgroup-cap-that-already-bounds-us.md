@@ -155,6 +155,17 @@ changes shape, and nothing in the SDK imports it.
   **nothing** rather than a joined path: every path it could build is either
   absent or another cgroup's cap, and since the caller takes a minimum, a
   stranger's cap would win.
+
+  Reading field 3 also made a pre-existing rule untenable. The derivation kept
+  the LAST cgroup mount of each hierarchy, which is only defensible if a later
+  mount shadows an earlier one — and two mounts at DIFFERENT points do not. A
+  bind exposing only this process's own subtree cannot name the ancestors a
+  whole-hierarchy mount still can, so discarding the latter hides a restrictive
+  parent, which is the same defect §Decision 1 already names one level up. Every
+  attachment is now kept and every one that can name us contributes candidates,
+  deduplicated. A mount genuinely stacked on another needs no rule at all: the
+  covered mount's paths stop resolving on their own and its candidates read as
+  absent.
 - ~~**Octal escapes in `/proc/self/mountinfo` are not decoded.** The kernel encodes
   space, tab, newline and backslash in the path fields as `\040`, `\011`, `\012`
   and `\134`. The parser keeps the token verbatim, so a cgroup filesystem mounted
@@ -181,21 +192,32 @@ changes shape, and nothing in the SDK imports it.
   source implementation's and is deliberate against int64 overflow on a very
   large allowance. Kept, so the versement stays faithful; the divergence is
   recorded here rather than silently corrected.~~
-  **CLOSED**, and the overflow the ordering defended against is real — so it is
-  now defended against by a bound rather than by a rounding error everybody
-  pays. `deriveLimit` multiplies first below `math.MaxInt64 / 90`
-  (102,481,911,520,608,620 bytes, ~91 PiB) and divides first above it.
+  **CLOSED**, and the overflow the ordering defended against is real — so the
+  share is now computed in a form that is exact *and* cannot overflow, rather
+  than trading one against the other. `deriveLimit` splits the allowance into
+  whole hundreds and a remainder:
 
-  The overflow is reachable, which is why the guard stays: `parseV1Limit`
-  accepts any value under `1<<62`, forty-five times the ceiling, and
-  `parseV2Limit` accepts up to `math.MaxInt64`. Unguarded, an allowance one byte
-  past the ceiling derives **−92,233,720,368,547,757**, the largest a v1 file
-  yields derives 92,233,720,368,547,757 — fifty times too small and applied
-  without a word — and `math.MaxInt64` derives **0**. It is **not** an
-  architecture question: `int64` is 64 bits on every Go platform, and the
-  `linux/386` build in this repo's matrix computes `math.MaxInt64 / 90` and the
-  wrapped product to the same values as `linux/amd64`, measured with a native
-  32-bit binary. Only `int` differs there, and this derivation uses none.
+  ```go
+  hundreds, remainder := allowance/100, allowance%100
+  return hundreds*90 + remainder*90/100
+  ```
+
+  It is exact for every `int64`, because `100q × 90` divides by 100 with no
+  remainder of its own, so only the `r` term rounds; and neither term can wrap,
+  since `q ≤ math.MaxInt64/100` and `r ≤ 99`. Verified against exact rational
+  arithmetic over the boundary values and 200,000 random allowances: zero
+  divergence.
+
+  The overflow it avoids is reachable: `parseV1Limit` accepts any value under
+  `1<<62`, forty-five times `math.MaxInt64 / 90`, and `parseV2Limit` accepts up
+  to `math.MaxInt64`. Multiplied whole, an allowance one byte past that ceiling
+  derives **−92,233,720,368,547,757**, the largest a v1 file yields derives
+  92,233,720,368,547,757 — fifty times too small and applied without a word —
+  and `math.MaxInt64` derives **0**. It is **not** an architecture question:
+  `int64` is 64 bits on every Go platform, and the `linux/386` build in this
+  repo's matrix computes `math.MaxInt64 / 90` and the wrapped product to the
+  same values as `linux/amd64`, measured with a native 32-bit binary. Only `int`
+  differs there, and this derivation uses none.
 
   The observable change is one cap-boundary decision and up to 89 bytes of
   limit: the ADR's own 74,565,405-byte allowance now applies a 67,108,864-byte

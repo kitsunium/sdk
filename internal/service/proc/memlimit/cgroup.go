@@ -113,7 +113,7 @@ const defaultCandidateCapacity int = 8
 func resolveCgroupPaths(readFile func(string) ([]byte, error)) []string {
 	//: Where each hierarchy is attached is discoverable; hard-coding
 	//: /sys/fs/cgroup silently misses any host that mounts it elsewhere.
-	v2Mount, v1Mount := resolveMounts(readFile)
+	v2Mounts, v1Mounts := resolveMounts(readFile)
 
 	content, err := readFile(procSelfCgroup)
 	//: No /proc means no cgroups: any non-Linux host. Fall back to the mount
@@ -121,20 +121,63 @@ func resolveCgroupPaths(readFile func(string) ([]byte, error)) []string {
 	//: unreadable but the filesystem is present.
 	if err != nil {
 		//: Deliver the resolved mount points.
-		return []string{
-			path.Join(v2Mount.point, cgroupV2LimitFile),
-			path.Join(v1Mount.point, cgroupV1LimitFile),
-		}
+		return mountPointFiles(v2Mounts, v1Mounts)
 	}
 
 	v2Path, v1Path := parseCgroupMembership(string(content))
 
 	candidates := make([]string, 0, defaultCandidateCapacity)
-	candidates = append(candidates, ancestorLimitFiles(v2Mount, v2Path, cgroupV2LimitFile)...)
-	candidates = append(candidates, ancestorLimitFiles(v1Mount, v1Path, cgroupV1LimitFile)...)
+	//: Every mount of a hierarchy is consulted, not just the last one: two
+	//: mounts at DIFFERENT points do not shadow each other, and one exposing a
+	//: subtree cannot name the ancestors the other still can.
+	for _, mount := range v2Mounts {
+		candidates = append(candidates, ancestorLimitFiles(mount, v2Path, cgroupV2LimitFile)...)
+	}
+	//: The legacy hierarchy answers the same way.
+	for _, mount := range v1Mounts {
+		candidates = append(candidates, ancestorLimitFiles(mount, v1Path, cgroupV1LimitFile)...)
+	}
 
 	//: Deliver the ordered candidates to the caller.
-	return candidates
+	return dedupe(candidates)
+}
+
+// mountPointFiles returns the limit file directly under each mount point, which
+// is the best guess available when the membership file cannot be read.
+func mountPointFiles(v2Mounts, v1Mounts []cgroupMount) []string {
+	files := make([]string, 0, len(v2Mounts)+len(v1Mounts))
+	//: The unified hierarchy first, matching the ordinary candidate order.
+	for _, mount := range v2Mounts {
+		files = append(files, path.Join(mount.point, cgroupV2LimitFile))
+	}
+	//: Then the legacy one.
+	for _, mount := range v1Mounts {
+		files = append(files, path.Join(mount.point, cgroupV1LimitFile))
+	}
+
+	//: Deliver the mount-point files to the caller.
+	return dedupe(files)
+}
+
+// dedupe returns paths with repeats removed, preserving first-seen order.
+//
+// Two mounts of one hierarchy can name the same file — a bind of a directory
+// onto itself is the simplest way — and every repeat costs a redundant open for
+// a value the caller would minimise against itself. The lists are a handful of
+// entries deep, so a linear scan beats a map.
+func dedupe(paths []string) []string {
+	unique := make([]string, 0, len(paths))
+	//: Keep the first occurrence and drop the rest.
+	for _, candidate := range paths {
+		//: A path already queued reads the same file twice.
+		if slices.Contains(unique, candidate) {
+			continue
+		}
+		unique = append(unique, candidate)
+	}
+
+	//: Deliver the deduplicated list.
+	return unique
 }
 
 // cgroupMount is one attached cgroup hierarchy: where it is mounted, and which
@@ -274,29 +317,45 @@ func underMountRoot(mountRoot, cgroupPath string) (relative string, ok bool) {
 	return "", false
 }
 
-// resolveMounts returns where the unified hierarchy and the v1 memory
-// controller are attached and what each exposes, falling back to the
-// conventional locations when /proc/self/mountinfo is unreadable or lists
-// neither.
+// resolveMounts returns EVERY attachment of the unified hierarchy and of the v1
+// memory controller, and what each exposes, falling back to the conventional
+// locations when /proc/self/mountinfo is unreadable or lists neither.
 //
 // Limits are read relative to the mount point, so assuming /sys/fs/cgroup
 // silently reads nothing on a host that mounts the hierarchy elsewhere.
 //
-// The LAST matching line wins, because a mount stacked on the same point
-// shadows the one under it and is what a path resolves through.
-func resolveMounts(readFile func(string) ([]byte, error)) (v2, v1 cgroupMount) {
-	v2 = cgroupMount{point: cgroupMountRoot, root: rootCgroupPath}
-	v1 = cgroupMount{point: cgroupV1MemoryRoot, root: rootCgroupPath}
-
+// Every attachment is kept rather than the last one, because two mounts of one
+// hierarchy at DIFFERENT points do not shadow each other: a bind exposing only
+// this process's own subtree cannot name the ancestors a whole-hierarchy mount
+// still can, and discarding the latter would hide a restrictive parent. A mount
+// genuinely stacked on another needs no rule — the covered mount's paths simply
+// stop resolving, so its candidates read as absent.
+func resolveMounts(readFile func(string) ([]byte, error)) (v2, v1 []cgroupMount) {
 	content, err := readFile(procSelfMountinfo)
-	//: Unreadable mountinfo leaves the conventional locations in place.
-	if err != nil {
-		//: Deliver the fallbacks to the caller.
-		return v2, v1
+	//: Unreadable mountinfo leaves only the conventional locations below.
+	if err == nil {
+		v2, v1 = scanCgroupMounts(string(content))
 	}
 
+	//: A host that lists no unified mount may still have one where convention
+	//: puts it, which is what a namespaced container relies on.
+	if len(v2) == 0 {
+		v2 = []cgroupMount{{point: cgroupMountRoot, root: rootCgroupPath}}
+	}
+	//: The legacy hierarchy gets the same treatment.
+	if len(v1) == 0 {
+		v1 = []cgroupMount{{point: cgroupV1MemoryRoot, root: rootCgroupPath}}
+	}
+
+	//: Deliver the resolved mounts to the caller.
+	return v2, v1
+}
+
+// scanCgroupMounts extracts every cgroup mount from /proc/self/mountinfo
+// content, split by hierarchy.
+func scanCgroupMounts(content string) (v2, v1 []cgroupMount) {
 	//: Scan every mount: a hybrid host attaches both hierarchies.
-	for line := range strings.SplitSeq(string(content), "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		mount, fstype, superOptions, ok := parseMountinfoLine(line)
 		//: Malformed or irrelevant lines carry no mount to record.
 		if !ok {
@@ -304,16 +363,16 @@ func resolveMounts(readFile func(string) ([]byte, error)) (v2, v1 cgroupMount) {
 		}
 		//: The unified hierarchy has its own filesystem type.
 		if fstype == fstypeCgroupV2 {
-			v2 = mount
+			v2 = append(v2, mount)
 			continue
 		}
 		//: A v1 mount is relevant only when it carries the memory controller.
 		if fstype == fstypeCgroupV1 && slices.Contains(strings.Split(superOptions, ","), v1MemoryController) {
-			v1 = mount
+			v1 = append(v1, mount)
 		}
 	}
 
-	//: Deliver the resolved mounts to the caller.
+	//: Deliver both hierarchies' mounts to the caller.
 	return v2, v1
 }
 

@@ -45,6 +45,13 @@ bounding *us*.
   `/`, which is the identity. A mount exposing a subtree this process is not in
   contributes NOTHING: the caller takes a minimum, so a joined path that happens
   to exist would let a stranger's cap win.
+- **Every attachment of a hierarchy is kept, not the last one.** Two mounts at
+  DIFFERENT points do not shadow each other, and a bind exposing only this
+  process's own subtree cannot name the ancestors a whole-hierarchy mount still
+  can — discarding the latter hides a restrictive parent. Candidates come from
+  every mount that can name us and are deduplicated. A mount genuinely stacked on
+  another needs no rule: the covered mount's paths stop resolving and its
+  candidates read as absent.
 - **mountinfo is escaped and `/proc/<pid>/cgroup` is not.** `mangle_path` encodes
   space, tab, newline and backslash in mountinfo's path fields as `\040`,
   `\011`, `\012` and `\134`. `unmangleMountinfoPath` decodes them, and it runs
@@ -62,14 +69,16 @@ bounding *us*.
   the cgroup but sits outside runtime accounting — binary image, mapped files, C
   allocations, kernel memory held on our behalf. Below the floor the derivation
   declines rather than thrashing the collector without averting the kill.
-- **The share multiplies before dividing, up to a measured bound.** Dividing
-  first discards up to 99 bytes of the allowance before taking the share, which
-  at the floor declines a cap the exact value accepts — 74,565,405 bytes derives
-  67,108,860 one way and exactly the 67,108,864 floor the other. Above
-  `math.MaxInt64 / 90` the product wraps, so `deriveLimit` reverses the order
-  there and only there. That branch is reachable: `parseV1Limit` accepts up to
-  `1<<62`, 45× the ceiling. `int64` is 64 bits on every Go platform, `linux/386`
-  included, so the bound is a value range and not an architecture.
+- **The share is exact AND cannot overflow, in one expression.** Dividing first
+  discards up to 99 bytes of the allowance, which at the floor declines a cap the
+  exact value accepts — 74,565,405 bytes derives 67,108,860 that way and exactly
+  the 67,108,864 floor the other. Multiplying whole is exact but wraps above
+  `math.MaxInt64 / 90`, and that range is reachable: `parseV1Limit` accepts up to
+  `1<<62`, 45× the ceiling. `deriveLimit` splits the allowance into hundreds and
+  a remainder, `q*90 + r*90/100`: exact because `100q*90` divides by 100 cleanly,
+  overflow-free because `q ≤ MaxInt64/100` and `r ≤ 99`. `int64` is 64 bits on
+  every Go platform, `linux/386` included, so none of this is an architecture
+  question.
 - **Three seams, injected.** `applyFrom` takes `lookup`, `readFile` and
   `setLimit` so every branch is driven without a real cgroup filesystem and
   without mutating the process-wide runtime limit under `t.Parallel()`.

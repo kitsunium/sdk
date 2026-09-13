@@ -3,6 +3,7 @@ package memlimit
 
 import (
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -50,13 +51,13 @@ func TestParseCgroupMembership(t *testing.T) {
 // and that the walk stops at what the mount actually exposes.
 func TestAncestorLimitFiles(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
+	type tc struct {
 		name string
 		root string
 		path string
 		want []string
-	}{
+	}
+	tests := []tc{
 		{
 			name: "nested path walks outward",
 			root: "/",
@@ -82,20 +83,27 @@ func TestAncestorLimitFiles(t *testing.T) {
 			path: "/a/b",
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := ancestorLimitFiles(cgroupMount{point: cgroupMountRoot, root: c.root}, c.path, cgroupV2LimitFile)
+		//: Order matters only for readability; membership and count carry
+		//: the contract, since the caller takes a minimum.
+		if len(got) != len(c.want) {
+			t.Fatalf("got %d files %v, want %d %v", len(got), got, len(c.want), c.want)
+		}
+		//: Each file is compared in place, so a shifted walk is visible.
+		for i := range got {
+			//: A wrong path names another cgroup's cap or none at all.
+			if got[i] != c.want[i] {
+				t.Errorf("file %d = %q, want %q", i, got[i], c.want[i])
+			}
+		}
+	}
+	//: Each case is its own subtest so a failure names the shape.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got := ancestorLimitFiles(cgroupMount{point: cgroupMountRoot, root: tt.root}, tt.path, cgroupV2LimitFile)
-			//: Order matters only for readability; membership and count carry
-			//: the contract, since the caller takes a minimum.
-			if len(got) != len(tt.want) {
-				t.Fatalf("got %d files %v, want %d %v", len(got), got, len(tt.want), tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("file %d = %q, want %q", i, got[i], tt.want[i])
-				}
-			}
+			runCase(t, c)
 		})
 	}
 }
@@ -125,7 +133,7 @@ func TestResolveCgroupPaths_FallsBackWithoutProc(t *testing.T) {
 func TestParseMountinfoLine(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
+	type tc struct {
 		name       string
 		line       string
 		wantMount  string
@@ -133,7 +141,8 @@ func TestParseMountinfoLine(t *testing.T) {
 		wantFstype string
 		wantOpts   string
 		wantOK     bool
-	}{
+	}
+	tests := []tc{
 		{
 			name:       "cgroup2 with optional fields",
 			line:       "36 35 0:31 / /sys/fs/cgroup ro,nosuid shared:9 - cgroup2 cgroup2 rw",
@@ -206,89 +215,122 @@ func TestParseMountinfoLine(t *testing.T) {
 		{name: "suffix too short", line: "36 35 0:31 / /sys/fs/cgroup rw - cgroup2"},
 		{name: "empty line", line: ""},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		mount, fstype, opts, ok := parseMountinfoLine(c.line)
+		//: Malformed lines must be skipped, never half-parsed.
+		if ok != c.wantOK {
+			t.Fatalf("ok = %t, want %t", ok, c.wantOK)
+		}
+		//: Point and root are read from different fields and both decide a path.
+		if mount.point != c.wantMount || mount.root != c.wantRoot {
+			t.Errorf("mount = (point %q, root %q), want (%q, %q)", mount.point, mount.root, c.wantMount, c.wantRoot)
+		}
+		//: The suffix fields decide which hierarchy the line belongs to.
+		if fstype != c.wantFstype || opts != c.wantOpts {
+			t.Errorf("got (%q, %q), want (%q, %q)", fstype, opts, c.wantFstype, c.wantOpts)
+		}
+	}
+	//: Each case is its own subtest so a failure names the line shape.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			mount, fstype, opts, ok := parseMountinfoLine(tt.line)
-			//: Malformed lines must be skipped, never half-parsed.
-			if ok != tt.wantOK {
-				t.Fatalf("ok = %t, want %t", ok, tt.wantOK)
-			}
-			if mount.point != tt.wantMount || mount.root != tt.wantRoot {
-				t.Errorf("mount = (point %q, root %q), want (%q, %q)", mount.point, mount.root, tt.wantMount, tt.wantRoot)
-			}
-			if fstype != tt.wantFstype || opts != tt.wantOpts {
-				t.Errorf("got (%q, %q), want (%q, %q)", fstype, opts, tt.wantFstype, tt.wantOpts)
-			}
+			runCase(t, c)
 		})
 	}
 }
 
 // TestResolveMounts verifies the hierarchies are located from mountinfo rather
-// than assumed, that the conventional paths remain the fallback, and that each
-// mount carries what it exposes alongside where it is attached.
+// than assumed, that the conventional paths remain the fallback, that each mount
+// carries what it exposes alongside where it is attached, and that EVERY
+// attachment is kept.
+//
+// Keeping only the last one is what a reviewer flagged and what the two
+// multi-mount cases pin: two mounts at different points do not shadow each
+// other, so discarding the earlier can hide a restrictive ancestor.
 func TestResolveMounts(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
+	type tc struct {
 		name      string
 		mountinfo string
 		hasFile   bool
-		wantV2    cgroupMount
-		wantV1    cgroupMount
-	}{
+		wantV2    []cgroupMount
+		wantV1    []cgroupMount
+	}
+	conventionalV2 := []cgroupMount{{point: cgroupMountRoot, root: rootCgroupPath}}
+	conventionalV1 := []cgroupMount{{point: cgroupV1MemoryRoot, root: rootCgroupPath}}
+	tests := []tc{
 		{
 			name:      "non-conventional mount points are honoured",
 			hasFile:   true,
 			mountinfo: "36 35 0:31 / /run/cg2 rw - cgroup2 cgroup2 rw\n40 35 0:35 / /run/cg1/mem rw - cgroup cgroup rw,memory\n",
-			wantV2:    cgroupMount{point: "/run/cg2", root: "/"},
-			wantV1:    cgroupMount{point: "/run/cg1/mem", root: "/"},
+			wantV2:    []cgroupMount{{point: "/run/cg2", root: "/"}},
+			wantV1:    []cgroupMount{{point: "/run/cg1/mem", root: "/"}},
 		},
 		{
 			name:      "v1 mount without the memory controller is ignored",
 			hasFile:   true,
 			mountinfo: "40 35 0:35 / /run/cpuonly rw - cgroup cgroup rw,cpu,cpuacct\n",
-			wantV2:    cgroupMount{point: cgroupMountRoot, root: rootCgroupPath},
-			wantV1:    cgroupMount{point: cgroupV1MemoryRoot, root: rootCgroupPath},
+			wantV2:    conventionalV2,
+			wantV1:    conventionalV1,
 		},
 		{
 			name:    "unreadable mountinfo falls back",
 			hasFile: false,
-			wantV2:  cgroupMount{point: cgroupMountRoot, root: rootCgroupPath},
-			wantV1:  cgroupMount{point: cgroupV1MemoryRoot, root: rootCgroupPath},
+			wantV2:  conventionalV2,
+			wantV1:  conventionalV1,
 		},
 		{
-			//: verbatim from a 6.12 kernel: the bind shadows the whole-hierarchy
-			//: mount at the same point, so the LAST line is what a path
-			//: resolves through.
-			name:      "a bind stacked on the same point shadows the one under it",
+			//: verbatim from a 6.12 kernel. Both are kept: the covered mount's
+			//: paths stop resolving on their own, so nothing has to decide
+			//: which one shadows which.
+			name:      "a bind stacked on the same point keeps both",
 			hasFile:   true,
 			mountinfo: "1713 1710 0:29 / /sys/fs/cgroup rw - cgroup2 cgroup2 rw\n1775 1713 0:29 /user.slice /sys/fs/cgroup rw - cgroup2 cgroup2 rw\n",
-			wantV2:    cgroupMount{point: cgroupMountRoot, root: "/user.slice"},
-			wantV1:    cgroupMount{point: cgroupV1MemoryRoot, root: rootCgroupPath},
+			wantV2: []cgroupMount{
+				{point: cgroupMountRoot, root: rootCgroupPath},
+				{point: cgroupMountRoot, root: "/user.slice"},
+			},
+			wantV1: conventionalV1,
+		},
+		{
+			name:      "two mounts at different points are both kept",
+			hasFile:   true,
+			mountinfo: "36 35 0:31 / /sys/fs/cgroup rw - cgroup2 cgroup2 rw\n99 35 0:31 /user.slice /run/x rw - cgroup2 cgroup2 rw\n",
+			wantV2: []cgroupMount{
+				{point: cgroupMountRoot, root: rootCgroupPath},
+				{point: "/run/x", root: "/user.slice"},
+			},
+			wantV1: conventionalV1,
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		readFile := func(target string) ([]byte, error) {
+			//: Only mountinfo matters to this resolver.
+			if target == procSelfMountinfo && c.hasFile {
+				return []byte(c.mountinfo), nil
+			}
+
+			//: Anything else is absent for this test.
+			return nil, errAbsent
+		}
+
+		gotV2, gotV1 := resolveMounts(readFile)
+		//: Each hierarchy resolves independently of the other.
+		if !slices.Equal(gotV2, c.wantV2) {
+			t.Errorf("v2 mounts = %+v, want %+v", gotV2, c.wantV2)
+		}
+		//: The legacy hierarchy is asserted on the same terms.
+		if !slices.Equal(gotV1, c.wantV1) {
+			t.Errorf("v1 mounts = %+v, want %+v", gotV1, c.wantV1)
+		}
+	}
+	//: Each case is its own subtest so a failure names the mount table.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			readFile := func(target string) ([]byte, error) {
-				//: Only mountinfo matters to this resolver.
-				if target == procSelfMountinfo && tt.hasFile {
-					return []byte(tt.mountinfo), nil
-				}
-
-				//: Anything else is absent for this test.
-				return nil, errAbsent
-			}
-
-			gotV2, gotV1 := resolveMounts(readFile)
-			//: Each hierarchy resolves independently of the other.
-			if gotV2 != tt.wantV2 {
-				t.Errorf("v2 mount = %+v, want %+v", gotV2, tt.wantV2)
-			}
-			if gotV1 != tt.wantV1 {
-				t.Errorf("v1 mount = %+v, want %+v", gotV1, tt.wantV1)
-			}
+			runCase(t, c)
 		})
 	}
 }
@@ -359,6 +401,7 @@ func TestUnmangleMountinfoPath(t *testing.T) {
 			t.Errorf("unmangleMountinfoPath(%q) = %q, want %q", c.field, got, c.want)
 		}
 	}
+	//: Each case is its own subtest so a failure names the escape.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -417,10 +460,12 @@ func TestUnderMountRoot(t *testing.T) {
 		if ok != c.wantOK {
 			t.Fatalf("underMountRoot(%q, %q) ok = %t, want %t", c.mountRoot, c.cgroupPath, ok, c.wantOK)
 		}
+		//: The translated path is what path.Join lands on under the mount.
 		if got != c.want {
 			t.Errorf("underMountRoot(%q, %q) = %q, want %q", c.mountRoot, c.cgroupPath, got, c.want)
 		}
 	}
+	//: Each case is its own subtest so a failure names the mount root.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -472,10 +517,36 @@ func TestResolveCgroupPaths_MountinfoShapes(t *testing.T) {
 			membership: "0::/user.slice/app.scope\n",
 			want:       []string{},
 		},
+		{
+			//: two mounts at DIFFERENT points do not shadow each other. Keeping
+			//: only the last would read our own cap through the bind and lose
+			//: every ancestor above what it exposes.
+			name:       "a later bind does not discard the whole-hierarchy mount",
+			mountinfo:  "36 35 0:31 / /sys/fs/cgroup rw - cgroup2 cgroup2 rw\n99 35 0:31 /user.slice /run/x rw - cgroup2 cgroup2 rw\n",
+			membership: "0::/user.slice/app.scope\n",
+			want: []string{
+				"/sys/fs/cgroup/user.slice/app.scope/memory.max",
+				"/sys/fs/cgroup/user.slice/memory.max",
+				"/sys/fs/cgroup/memory.max",
+				"/run/x/app.scope/memory.max",
+				"/run/x/memory.max",
+			},
+		},
+		{
+			//: the same file reached twice is opened once.
+			name:       "identical mounts contribute one candidate each",
+			mountinfo:  "36 35 0:31 / /sys/fs/cgroup rw - cgroup2 cgroup2 rw\n37 35 0:31 / /sys/fs/cgroup rw - cgroup2 cgroup2 rw\n",
+			membership: "0::/app.scope\n",
+			want: []string{
+				"/sys/fs/cgroup/app.scope/memory.max",
+				"/sys/fs/cgroup/memory.max",
+			},
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		readFile := func(target string) ([]byte, error) {
+			//: Only the two /proc files decide which paths are built.
 			switch target {
 			//: the mount table decides where and what is exposed.
 			case procSelfMountinfo:
@@ -490,9 +561,11 @@ func TestResolveCgroupPaths_MountinfoShapes(t *testing.T) {
 		}
 
 		got := resolveCgroupPaths(readFile)
+		//: A missing or extra candidate is a cap read or missed.
 		if len(got) != len(c.want) {
 			t.Fatalf("got %d candidates %v, want %d %v", len(got), got, len(c.want), c.want)
 		}
+		//: Each candidate is compared in place, so a shifted walk is visible.
 		for i := range got {
 			//: a candidate naming a path no cgroup answers to is the whole
 			//: defect: the cap is simply never read.
@@ -501,6 +574,7 @@ func TestResolveCgroupPaths_MountinfoShapes(t *testing.T) {
 			}
 		}
 	}
+	//: Each case is its own subtest so a failure names the shape.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

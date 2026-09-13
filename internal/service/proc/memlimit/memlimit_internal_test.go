@@ -400,14 +400,15 @@ func TestReadCgroupAllowance_PropagatesReadErrors(t *testing.T) {
 	}
 }
 
-// TestDeriveLimit pins the exact 90% share and the one place it cannot be
-// exact.
+// TestDeriveLimit pins the share as EXACT for every allowance an int64 can
+// hold, including the ones where either naive spelling fails.
 //
 // Dividing before multiplying discards up to percentDivisor-1 bytes of the
 // allowance, which within a few bytes of the floor declines a cap the exact
-// value accepts. Multiplying first is exact everywhere the product fits, and
-// above exactDerivationCeiling it wraps — so the reversed order is kept for
-// exactly that range and nowhere else.
+// value accepts. Multiplying first is exact but wraps above
+// math.MaxInt64/headroomPercent, and that range is reachable: parseV1Limit
+// accepts up to unlimitedV1Floor and parseV2Limit up to math.MaxInt64. The
+// wanted values are the exact floored share.
 func TestDeriveLimit(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -415,41 +416,44 @@ func TestDeriveLimit(t *testing.T) {
 		allowance int64
 		want      int64
 	}
+	//: the allowance above which allowance*headroomPercent no longer fits.
+	const productCeiling int64 = math.MaxInt64 / headroomPercent
 	tests := []tc{
 		{name: "one gibibyte", allowance: 1 << 30, want: 966367641},
 		{name: "an allowance divisible by the divisor", allowance: 1000, want: 900},
 		{
 			//: the allowance ADR 0075 names: the exact share IS the floor, and
 			//: dividing first lands four bytes under it.
-			name: "the floor boundary", allowance: 74565405, want: minimumLimitBytes,
+			name: "the floor boundary", allowance: floorBoundaryAllowance, want: minimumLimitBytes,
 		},
 		{
-			name: "the largest allowance the product still fits", allowance: exactDerivationCeiling,
+			name: "the largest allowance the product still fits", allowance: productCeiling,
 			want: 92233720368547758,
 		},
 		{
-			//: one byte further the product wraps NEGATIVE unguarded, which the
-			//: floor then reads as a cap too small to honour.
-			name: "one byte past the ceiling", allowance: exactDerivationCeiling + 1,
-			want: 92233720368547740,
+			//: one byte further, a whole multiplication wraps NEGATIVE and the
+			//: floor then reads it as a cap too small to honour.
+			name: "one byte past the product ceiling", allowance: productCeiling + 1,
+			want: 92233720368547758,
 		},
 		{
-			//: the largest value parseV1Limit accepts, 45 times the ceiling.
-			//: Unguarded it derives 92233720368547757 — fifty times too small,
-			//: and applied without a word.
+			//: the largest value parseV1Limit accepts, 45 times the ceiling. A
+			//: whole multiplication derives 92233720368547757 — fifty times too
+			//: small, and applied without a word; dividing first loses 2 bytes.
 			name: "the largest allowance a v1 file yields", allowance: unlimitedV1Floor - 1,
-			want: 4150517416584649110,
+			want: 4150517416584649112,
 		},
 		{
-			//: the largest value parseV2Limit accepts. Unguarded the product
-			//: wraps to exactly zero.
+			//: the largest value parseV2Limit accepts. A whole multiplication
+			//: wraps to exactly zero; dividing first loses 6 bytes.
 			name: "the largest allowance a v2 file yields", allowance: math.MaxInt64,
-			want: 8301034833169298220,
+			want: 8301034833169298226,
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		got := deriveLimit(c.allowance)
+		//: The share is exact, so an off-by-a-few here is a defect, not rounding.
 		if got != c.want {
 			t.Fatalf("deriveLimit(%d) = %d, want %d", c.allowance, got, c.want)
 		}
@@ -459,6 +463,7 @@ func TestDeriveLimit(t *testing.T) {
 			t.Errorf("deriveLimit(%d) = %d, want a positive share of the allowance", c.allowance, got)
 		}
 	}
+	//: Each case is its own subtest so a failure names the allowance.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -506,6 +511,7 @@ func TestApplyFrom_FloorBoundary(t *testing.T) {
 			t.Errorf("SetMemoryLimit got %d, want %d", applied, c.wantLimit)
 		}
 	}
+	//: Each case is its own subtest so a failure names the shape.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
