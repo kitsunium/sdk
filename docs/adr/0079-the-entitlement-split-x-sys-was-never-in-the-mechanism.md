@@ -197,6 +197,13 @@ Carried forward unchanged from ADR 0078, none of them addressed here:
     process shared a staging file and installed the interleaving of two
     bundles: 14 of 400 rounds left bytes that authenticate as nothing where a
     valid cache had been. `os.CreateTemp` replaced it.
+  - **Windows also refuses two writers racing ONE name, and that one is not
+    fixed because it is not broken.** Two unguarded installs onto the same
+    destination collided in 99 of 400 rounds there and in 0 on every Unix lane,
+    because MoveFileEx must delete the destination to replace it while
+    rename(2) replaces unconditionally. The cache stayed valid in all 400, and
+    production never installs unguarded, so the assertion that both writers
+    also SUCCEED is made only where the kernel promises it.
   - **Still open, and deliberately.** A holder this package does not control —
     an antivirus scanner, a backup agent, a search indexer — can hold the
     bundle open and make a refresh fail exactly as before. No lock reaches
