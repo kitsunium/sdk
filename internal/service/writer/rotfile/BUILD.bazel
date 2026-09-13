@@ -51,6 +51,7 @@ go_test(
         "decode_internal_test.go",
         "errors_external_test.go",
         "errors_internal_test.go",
+        "open_flags_unix_test.go",
         "prune_internal_test.go",
         "rotate_internal_test.go",
         "rotate_interval_bench_test.go",
