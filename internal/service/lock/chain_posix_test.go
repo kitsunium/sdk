@@ -24,10 +24,15 @@ import (
 //
 // The rule is: a component of the lock directory's path that is an indirection
 // is refused when the directory HOLDING it is world-writable, and accepted
-// otherwise. The accepting rows are not decoration — /tmp is a symbolic link
-// on macOS and /var/run is one on most Linux distributions, so a guard that
-// only ever refuses would make NewFileLocker refuse those deployments and
-// blame the operator for the operating system's own layout.
+// otherwise. The accepting rows are not decoration, and that is measured
+// rather than argued: every path in this file sits under t.TempDir(), which on
+// macOS is under /var — a symbolic link to /private/var that the operating
+// system ships. These rows passed on e2e-cross's macos-arm64 job on the run
+// that first exercised them, because the directory holding /var is / and
+// nobody but root can write it. A guard that only ever refused would have
+// refused every lock directory on that kernel and blamed the operator for
+// Apple's layout. /var/run -> /run on most Linux distributions is the same
+// shape.
 //
 // The sticky bit is deliberately NOT an exemption, which is the row that makes
 // this rule different from checkDir's: sticky governs UNLINKING an entry that
@@ -156,9 +161,21 @@ func TestTheChainAuditNamesTheComponentAndNotTheConfiguredDirectory(t *testing.T
 		fields[field.Key()] = field.StringValue()
 	}
 	//: the component that redirects — usually neither the first nor the last
-	//: thing an operator would have looked at.
-	if fields["path"] != planted {
-		t.Fatalf("field path = %q, want the planted component %q", fields["path"], planted)
+	//: thing an operator would have looked at. It is reported where it LIVES,
+	//: which on macOS is not where this test typed it: that kernel ships /var
+	//: as a symbolic link to /private/var, measured when the first run of this
+	//: file on e2e-cross's macos-arm64 job failed this very assertion with
+	//: "/private/var/folders/…" against "/var/folders/…".
+	//: the CONTAINER is resolved and the component rejoined — resolving the
+	//: planted component itself would follow the very link under test and
+	//: assert against its target.
+	base, evalErr := filepath.EvalSymlinks(container)
+	if evalErr != nil {
+		t.Fatalf("EvalSymlinks(%s) = %v", container, evalErr)
+	}
+	real := filepath.Join(base, "app")
+	if fields["path"] != real {
+		t.Fatalf("field path = %q, want the planted component %q", fields["path"], real)
 	}
 	//: the directory the caller configured, which is what they will grep their
 	//: own configuration for.

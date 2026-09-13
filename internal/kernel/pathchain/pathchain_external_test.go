@@ -9,6 +9,36 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/pathchain"
 )
 
+// resolved renders path the way [pathchain.Resolve] will report it: with every
+// indirection ALREADY followed.
+//
+// It exists because of a measurement rather than a theory. The first run of
+// this file on the `macos-arm64` job of e2e-cross failed four rows, all of them
+// this shape:
+//
+//	the last described step = "/private/var/folders/…/001"
+//	                    want "/var/folders/…/001"
+//
+// macOS ships /var as a symbolic link to /private/var, so every t.TempDir() on
+// that kernel sits under one. The code was right and the assertions were
+// Linux-only: StepValue.Path is documented to reflect the indirections already
+// followed, because a caller deciding who could have replaced a component has
+// to ask about the directory it actually lives in.
+//
+// That failure is also the best evidence this package has for the rule its
+// first consumer applies. A blanket "refuse any link above the lock file"
+// would refuse every lock directory on macOS — and the accepting rows of
+// internal/service/lock's chain table passed on that same run, because the
+// directory holding /var is / and nobody but root can write it.
+func resolved(t *testing.T, path string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s) = %v", path, err)
+	}
+	return real
+}
+
 // plant creates a symbolic link at link pointing at target, or skips the test
 // when this platform will not let an unprivileged account create one.
 //
@@ -36,8 +66,10 @@ func TestResolveDescribesEveryComponent(t *testing.T) {
 		t.Fatalf("Resolve(%s) = %v", deep, err)
 	}
 	//: the last three steps are the three components built above, and their
-	//: Paths are the paths they were built at.
-	want := []string{filepath.Join(base, "a"), filepath.Join(base, "a", "b"), deep}
+	//: Paths are where those components actually live — which on macOS is not
+	//: where the test typed them, because /var is a symbolic link there.
+	real := resolved(t, base)
+	want := []string{filepath.Join(real, "a"), filepath.Join(real, "a", "b"), filepath.Join(real, "a", "b", "c")}
 	if len(steps) < len(want) {
 		t.Fatalf("Resolve returned %d steps, want at least %d", len(steps), len(want))
 	}
@@ -80,31 +112,36 @@ func TestResolveReportsAnIndirectionAndWhereItWent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve = %v", err)
 	}
+	//: the component lives where the walk found it, which is not where the
+	//: test typed it on a kernel whose /var is a symbolic link.
+	real := filepath.Join(resolved(t, pub), "myapp")
 	var found *pathchain.StepValue
 	//: locate the planted component among the steps rather than assuming its
 	//: index, which depends on how deep t.TempDir() happens to be.
 	for i := range steps {
-		if steps[i].Path == link {
+		if steps[i].Path == real {
 			found = &steps[i]
 		}
 	}
 	if found == nil {
-		t.Fatalf("no step described %s; got %d steps", link, len(steps))
+		t.Fatalf("no step described %s; got %d steps", real, len(steps))
 	}
 	//: the component is an indirection.
 	if !found.Indirect {
 		t.Fatalf("step %s Indirect = false, want true", found.Path)
 	}
-	//: and it says where it goes, which is what a policy needs to explain a
-	//: refusal to an operator.
+	//: and it says where it goes — the target EXACTLY as the filesystem stores
+	//: it, unresolved, which is what os.Readlink returns and what an operator
+	//: reading a refusal needs to compare against the link they can see.
 	if found.Target != target {
 		t.Fatalf("step %s Target = %q, want %q", found.Path, found.Target, target)
 	}
 	//: resolution CONTINUED at the target, so the step after the link lives
 	//: there and not under the link's own name.
 	last := steps[len(steps)-1]
-	if last.Path != filepath.Join(target, "locks") {
-		t.Fatalf("the last step = %q, want %q", last.Path, filepath.Join(target, "locks"))
+	wantLast := filepath.Join(resolved(t, target), "locks")
+	if last.Path != wantLast {
+		t.Fatalf("the last step = %q, want %q", last.Path, wantLast)
 	}
 }
 
@@ -123,8 +160,9 @@ func TestResolveStopsWhereThePathStopsExisting(t *testing.T) {
 	if len(steps) == 0 {
 		t.Fatalf("Resolve of a missing tail returned no steps at all")
 	}
-	if steps[len(steps)-1].Path != base {
-		t.Fatalf("the last described step = %q, want %q", steps[len(steps)-1].Path, base)
+	real := resolved(t, base)
+	if steps[len(steps)-1].Path != real {
+		t.Fatalf("the last described step = %q, want %q", steps[len(steps)-1].Path, real)
 	}
 }
 
@@ -169,10 +207,11 @@ func TestResolveFollowsARelativeTargetFromTheLinksOwnDirectory(t *testing.T) {
 		t.Fatalf("Resolve = %v", err)
 	}
 	last := steps[len(steps)-1]
+	want := filepath.Join(resolved(t, base), "real")
 	//: the walk ascended out of pub and came back down into real, which only
 	//: works if ".." is a movement through the handles the walk still holds.
-	if last.Path != filepath.Join(base, "real") {
-		t.Fatalf("the last step = %q, want %q", last.Path, filepath.Join(base, "real"))
+	if last.Path != want {
+		t.Fatalf("the last step = %q, want %q", last.Path, want)
 	}
 }
 
