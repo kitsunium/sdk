@@ -108,10 +108,23 @@
 //
 // This is a REFUSAL WHERE THERE USED TO BE SUCCESS. If your deployment
 // deliberately symlinks a lock file — onto a tmpfs, say — it now fails at
-// Acquire. The directory itself may still be a symlink; only the final
-// component is governed. There is no flag to restore the old behaviour: it
-// would be a flag to restore a lock that lands somewhere the locker did not
-// report (ADR 0082).
+// Acquire. There is no flag to restore the old behaviour: it would be a flag
+// to restore a lock that lands somewhere the locker did not report (ADR 0082).
+//
+// The PARENT components are governed too, and by a different rule, because a
+// symbolic link at a parent is not evidence of anything on its own: /tmp is
+// one on macOS and /var/run is one on most Linux distributions. An
+// indirection above the lock file is refused only when the directory holding
+// it is world-writable — when anybody could have planted it. On Windows no
+// parent component is refused at all today, because the only thing that could
+// answer "could anybody have planted this" there is the directory's DACL and
+// the SDK does not read one yet (ADR 0083).
+//
+// # A held lock can lose its file, and you are told
+//
+// [LockFileReplaced] is the one exposure this package DETECTS rather than
+// prevents. See its own documentation; the short version is that Extend is
+// where you find out, and finding out is the whole of what is offered.
 //
 // # Scope
 //
@@ -203,6 +216,24 @@ var (
 	// chosen by whoever planted it, so two processes would hold "the same"
 	// lock over different inodes with nothing reported on either side.
 	LockPathRedirected = svclock.LockPathRedirected
+
+	// LockFileReplaced is returned by Acquire, and by a held lease's Extend,
+	// when the lock file is no longer the file its name leads to: the entry
+	// was unlinked, or replaced, while it was held.
+	//
+	// It is the one exposure here that is DETECTED rather than prevented. In
+	// a world-writable sticky directory — /tmp's mode, which the directory
+	// rule accepts by name — the account that created the lock file owns that
+	// entry and may unlink it, including while you hold the lock. Your
+	// descriptor keeps working, because a descriptor outlives its name, and
+	// the next process creates a different file and locks that instead.
+	//
+	// When Extend returns it, you are inside a section you no longer own.
+	// Stop the protected work; re-acquiring would give you a second lease
+	// over the new file while the old one is still locked. The prevention is
+	// a lock directory no other account can write, which is what
+	// [NewFileLocker] creates when the directory is absent.
+	LockFileReplaced = svclock.LockFileReplaced
 )
 
 // NewMemory returns a [Locker] whose leases live in this process and DO

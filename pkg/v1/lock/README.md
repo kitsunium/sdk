@@ -61,7 +61,13 @@ One more is worth knowing before you rely on a directory's permissions. The lock
 
 So a symbolic link \(Unix\) or a reparse point \(Windows\) at the lock path is REFUSED with [LockPathRedirected](<#LockMisconfigured>). It is not followed, and it is not read as a backend failure, because nothing failed: the substitution worked, and a retry is the one response that would make it worse.
 
-This is a REFUSAL WHERE THERE USED TO BE SUCCESS. If your deployment deliberately symlinks a lock file — onto a tmpfs, say — it now fails at Acquire. The directory itself may still be a symlink; only the final component is governed. There is no flag to restore the old behaviour: it would be a flag to restore a lock that lands somewhere the locker did not report \(ADR 0082\).
+This is a REFUSAL WHERE THERE USED TO BE SUCCESS. If your deployment deliberately symlinks a lock file — onto a tmpfs, say — it now fails at Acquire. There is no flag to restore the old behaviour: it would be a flag to restore a lock that lands somewhere the locker did not report \(ADR 0082\).
+
+The PARENT components are governed too, and by a different rule, because a symbolic link at a parent is not evidence of anything on its own: /tmp is one on macOS and /var/run is one on most Linux distributions. An indirection above the lock file is refused only when the directory holding it is world\-writable — when anybody could have planted it. On Windows no parent component is refused at all today, because the only thing that could answer "could anybody have planted this" there is the directory's DACL and the SDK does not read one yet \(ADR 0083\).
+
+### A held lock can lose its file, and you are told
+
+[LockFileReplaced](<#LockMisconfigured>) is the one exposure this package DETECTS rather than prevents. See its own documentation; the short version is that Extend is where you find out, and finding out is the whole of what is offered.
 
 ### Scope
 
@@ -126,11 +132,29 @@ var (
     // chosen by whoever planted it, so two processes would hold "the same"
     // lock over different inodes with nothing reported on either side.
     LockPathRedirected = svclock.LockPathRedirected
+
+    // LockFileReplaced is returned by Acquire, and by a held lease's Extend,
+    // when the lock file is no longer the file its name leads to: the entry
+    // was unlinked, or replaced, while it was held.
+    //
+    // It is the one exposure here that is DETECTED rather than prevented. In
+    // a world-writable sticky directory — /tmp's mode, which the directory
+    // rule accepts by name — the account that created the lock file owns that
+    // entry and may unlink it, including while you hold the lock. Your
+    // descriptor keeps working, because a descriptor outlives its name, and
+    // the next process creates a different file and locks that instead.
+    //
+    // When Extend returns it, you are inside a section you no longer own.
+    // Stop the protected work; re-acquiring would give you a second lease
+    // over the new file while the old one is still locked. The prevention is
+    // a lock directory no other account can write, which is what
+    // [NewFileLocker] creates when the directory is absent.
+    LockFileReplaced = svclock.LockFileReplaced
 )
 ```
 
 <a name="Keepalive"></a>
-## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L248>)
+## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L279>)
 
 ```go
 func Keepalive(ctx context.Context, lease Lease, cfg KeepaliveConfig) (guarded context.Context, stop context.CancelFunc, err error)
@@ -150,7 +174,7 @@ defer stop()
 stop does NOT release the lease: the lifetime of a lock must not depend on the lifetime of a convenience.
 
 <a name="Deadliner"></a>
-## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L152>)
+## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L165>)
 
 Deadliner is the sibling implemented by a [Lease](<#Lease>) that CAN expire — i.e. one that can be taken from you while you are still running.
 
@@ -161,7 +185,7 @@ type Deadliner = corelock.Deadliner
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L158>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L171>)
 
 FileConfig parameterises [NewFileLocker](<#NewFileLocker>). Dir must be set; Poll defaults.
 
@@ -170,7 +194,7 @@ type FileConfig = svclock.FileConfig
 ```
 
 <a name="KeepaliveConfig"></a>
-## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L163>)
+## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L176>)
 
 KeepaliveConfig parameterises [Keepalive](<#Keepalive>). Every must be positive and should be comfortably shorter than the lease TTL — a third of it leaves room for two consecutive failed renewals.
 
@@ -179,7 +203,7 @@ type KeepaliveConfig = svclock.KeepaliveConfig
 ```
 
 <a name="Lease"></a>
-## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L142>)
+## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L155>)
 
 Lease is a held lock: Fence, Extend, Release. FROZEN at three, for the same reason [Locker](<#Locker>) is frozen at two.
 
@@ -188,7 +212,7 @@ type Lease = corelock.Lease
 ```
 
 <a name="Locker"></a>
-## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L138>)
+## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L151>)
 
 Locker hands out named, exclusive leases: Acquire and TryAcquire.
 
@@ -199,7 +223,7 @@ type Locker = corelock.Locker
 ```
 
 <a name="NewFileLocker"></a>
-### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L228>)
+### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L259>)
 
 ```go
 func NewFileLocker(cfg FileConfig) (locker Locker, err error)
@@ -210,7 +234,7 @@ NewFileLocker returns a [Locker](<#Locker>) that excludes every process using th
 It refuses at construction: a missing directory setting, a negative poll interval, a world\-writable non\-sticky directory \(Unix only — see the package comment\), and a platform with no file\-range lock at all, where it returns the SDK\-wide UnsupportedPlatform rather than a locker that would report success and exclude nothing \(ADR 0018\). Windows is no longer in that last set: it is served by LockFileEx \(ADR 0081\).
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L214>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L245>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (locker Locker, err error)
@@ -221,7 +245,7 @@ NewMemory returns a [Locker](<#Locker>) whose leases live in this process and DO
 cfg.TTL must be positive; a zero or negative TTL is refused here rather than defaulted, because the two natural readings of zero are opposites and either choice would be silently wrong for half of its callers \(ADR 0031\).
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L155>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L168>)
 
 MemoryConfig parameterises [NewMemory](<#NewMemory>). TTL must be positive.
 

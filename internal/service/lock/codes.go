@@ -57,3 +57,25 @@ const CodeLockKeepaliveLost errs.Code = 0x00_03_33_03 // 0.3.51.3
 // response that is wrong here, a retry. It is its own code for the same reason
 // [CodeLockDirectoryUnsafe] is: the remedy is a human looking at the directory.
 const CodeLockPathRedirected errs.Code = 0x00_03_33_04 // 0.3.51.4
+
+// CodeLockFileReplaced identifies a held lock whose FILE is no longer the one
+// its name leads to: the entry was unlinked, or replaced by a different file,
+// while this holder still had it open and locked.
+//
+// The exclusion is gone at that moment, silently. The holder's flock still
+// covers an inode nothing names, so the next process to acquire creates a
+// fresh file, locks THAT, reads a fence ledger that starts again at zero, and
+// is told it holds the lock — while the first holder is still inside the
+// section believing the same thing. Measured: two holders, two inodes, both
+// reporting fence 1.
+//
+// It is separate from [CodeLockDirectoryUnsafe] because it is a different
+// question asked at a different time. That code refuses a directory at
+// construction on its mode; this one reports a lock that WAS taken and is no
+// longer exclusive, in a directory whose mode the rule accepts — 0777|sticky,
+// which is what /tmp is, lets the entry's own owner unlink it.
+//
+// It is reported and never repaired. Re-acquiring would hand the caller a
+// second lease over the new file while the old one is still locked, which is
+// the split-brain spelled deliberately.
+const CodeLockFileReplaced errs.Code = 0x00_03_33_05 // 0.3.51.5

@@ -203,6 +203,15 @@ func (l *fileLocker) takeFlock(ctx context.Context, name string, wait bool) (lea
 		//: the deferred abandon returns the caller's outcome unchanged.
 		return nil, err
 	}
+	//: the window between the open and the flock is small and real: an entry
+	//: unlinked and recreated in it leaves this descriptor locking an inode
+	//: nothing names, so the next process locks a different one. Two syscalls
+	//: close it — see identity.go.
+	if same, observed := sameEntry(file, path); !same {
+		//: LOCK_FILE_REPLACED with fence 0 — no token had been issued yet,
+		//: which is what tells this site apart from Extend's.
+		return nil, fileReplaced("Acquire", path, name, 0, observed)
+	}
 	minted, mintErr := l.mintLease(file, path, name)
 	//: the fence could not be advanced — the lock is useless without it.
 	if mintErr != nil {
@@ -279,7 +288,7 @@ func (l *fileLocker) mintLease(file *os.File, path, name string) (lease corelock
 		return nil, writeErr
 	}
 	//: the handle the caller releases through.
-	return newFileLease(l, file, name, fence), nil
+	return newFileLease(l, file, path, name, fence), nil
 }
 
 // pathFor maps a lock name to its file.

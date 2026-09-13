@@ -311,3 +311,21 @@ func TestFileTryAcquireReportsHeldWithoutAnError(t *testing.T) {
 		t.Fatal("TryAcquire granted a lock that was already held")
 	}
 }
+
+// releaseAtEnd gives lease back when the test ends, REPORTING a failure rather
+// than discarding it.
+//
+// A Release that fails is a descriptor this process kept and a flock the next
+// test in the same binary will contend with, so it is worth a failure even in
+// a cleanup. Release is idempotent, so a body that already released reaches
+// this with nothing to do and reports nil.
+func releaseAtEnd(t *testing.T, lease corelock.Lease) {
+	t.Helper()
+	t.Cleanup(func() {
+		//: detached from t.Context(), which is already cancelled by the time
+		//: cleanups run — and Release ignores its context anyway, deliberately.
+		if err := lease.Release(context.WithoutCancel(context.Background())); err != nil {
+			t.Errorf("Release at end of test = %v, want nil", err)
+		}
+	})
+}
