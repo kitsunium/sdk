@@ -26,8 +26,31 @@ core  ──┼──▶ service ──▶ (pkg/v1 re-exports / consumes)
 |---|---|
 | `internal/kernel/**` | stdlib only |
 | `internal/core/**`   | stdlib + `internal/kernel/*` |
-| `internal/service/**`| stdlib + kernel + core (+ vetted third-party encoders for codec/*) |
+| `internal/service/**`| stdlib + kernel + core + **sibling `internal/service/*`** (+ vetted third-party encoders for codec/*) |
 | `pkg/v1/**` (consumes) | stdlib + kernel + core + service |
+
+A service package may import another service package, and that is permitted
+rather than tolerated: the firewall asserts a DIRECTION, and a lateral import
+is not a direction. `check-layer-deps.sh`'s service query is
+`deps(//internal/service/...) intersect (//pkg/... + //third-party/...)` — it
+names what is above, and says nothing about siblings.
+
+The row said "stdlib + kernel + core" until it was measured against the tree
+and found to describe every lateral edge as a violation — 23 of them at the time
+of writing. A table that contradicts the gate teaches a reader to distrust
+whichever one they check second.
+
+The edges are deliberately NOT listed here. A list in a document drifts the
+moment someone adds an import, and a stale list is the same defect this
+paragraph exists to correct. Ask the tree instead:
+
+```sh
+git grep -l '"github.com/kitsunium/sdk/internal/service/' -- 'internal/service/**/*.go' \
+  ':!*_test.go' | while read -r f; do d=$(dirname "$f"); \
+  grep -oE '"github.com/kitsunium/sdk/internal/service/[a-z/]+"' "$f" | tr -d '"' | \
+  sed 's|github.com/kitsunium/sdk/||' | grep -v "^$d$" | sed "s|^|$d -> |"; \
+  done | sort -u
+```
 
 Any import going "upward" fails `make lint` and CI: `scripts/check-layer-deps.sh` asserts the direction on the build graph (ADR 0068). Visibility does not — Gazelle gives every package under `internal/` the visibility `//:__subpackages__`, which admits the whole repository, so an upward import builds. `.golangci.yml` ships a code-quality second-opinion ruleset only.
 
