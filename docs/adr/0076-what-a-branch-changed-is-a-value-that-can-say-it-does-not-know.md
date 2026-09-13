@@ -135,47 +135,88 @@ and nothing else in the SDK imports it.
 
 ## Deferred
 
-- **A path reached through a symlink does not match.** `Resolve` stores paths at
-  git's canonical top-level while the `Contains*` methods compare with
-  `filepath.Clean`, which is LEXICAL. A caller querying a path that traverses a
-  symlink gets false for a file that did change — the dangerous direction, since
-  it under-reports. Canonicalising on every query would cost an `EvalSymlinks`
-  syscall per call; canonicalising once at construction would still not fix a
-  caller whose own paths are lexical. Stated in the port comment instead: query
-  with paths resolved the same way `Resolve` resolved the root.
-- **A COPY marks its source touched.** `git diff -M -C` reports `C### old new`,
-  and both sides go through `markPath`, so the unchanged `old` enters the set.
-  It over-reports, which is the safe direction, and it is the source
-  implementation's behaviour. Splitting rename from copy is a one-line change
-  and a semantics change, so it is recorded rather than slipped into a
-  versement.
-- **A failed shallow probe reads as "not shallow".** `git rev-parse
-  --is-shallow-repository` failing makes `isShallow` answer false, so a shallow
-  checkout whose probe is unsupported gets a scoped set instead of the full
-  fallback. The code comment already said so; it is now recorded as a decision.
-- **A stale `origin/HEAD` is not re-checked against the candidate list.**
-  `resolveBaseRef` trusts a successful `symbolic-ref` without verifying the
-  commit still exists, so a stale symbolic ref degrades where `origin/main`
-  would have worked. Fail-safe (everything in scope), and rare.
+Six of the seven entries below are closed by ADR 0087, which keeps each
+original reasoning standing and records what measuring it showed. The one that
+remains open is marked as such and its reason is unchanged.
 
-- **Only `git`.** No second implementation, and therefore no way to know which
-  parts of the contract are git-shaped. `ChangedSet` is deliberately narrow so a
-  second one would have little to disagree with, but the claim is untested.
-- **`ShowFile` does not separate absent from failed.** `core/vcs.PathAbsent`
-  exists and is not yet returned: telling the two apart means parsing git's
-  stderr, which is locale-dependent, or a second `cat-file -e` probe per call.
-  The sentinel is declared so the distinction has a name when it is implemented.
-- **`GitDir`'s memo is never invalidated.** A root that becomes a repository
-  later is picked up, because failures are not cached; a repository that MOVES
-  within the life of a process is not. For a tool that resolves once at startup
-  this is the right trade, and the comment says so rather than implying the memo
-  is coherent.
+- **CLOSED (ADR 0087) — A path reached through a symlink does not match.**
+  `Resolve` stores paths at git's canonical top-level while the `Contains*`
+  methods compare with `filepath.Clean`, which is LEXICAL. A caller querying a
+  path that traverses a symlink gets false for a file that did change — the
+  dangerous direction, since it under-reports. Canonicalising on every query
+  would cost an `EvalSymlinks` syscall per call; canonicalising once at
+  construction would still not fix a caller whose own paths are lexical. Stated
+  in the port comment instead: query with paths resolved the same way `Resolve`
+  resolved the root. *What that reasoning missed: the caller does not choose the
+  spelling of the ROOT. One `EvalSymlinks` on the hint, only when the hint is
+  not already inside the canonical root, buys an O(1) prefix rewrite that makes
+  both roots answer. Reproduced: a non-degraded, non-empty set answering false
+  to ContainsFile, ContainsLine and ContainsDir for the file just edited.*
+- **CLOSED (ADR 0087), without a code change — A COPY marks its source
+  touched.** `git diff -M -C` reports `C### old new`, and both sides go through
+  `markPath`, so the unchanged `old` enters the set. It over-reports, which is
+  the safe direction, and it is the source implementation's behaviour. Splitting
+  rename from copy is a one-line change and a semantics change, so it is
+  recorded rather than slipped into a versement. *Measured: the over-report is
+  unreachable. Without `--find-copies-harder`, which this package does not pass
+  and no configuration key enables, git only offers a copy whose source was
+  modified in the same changeset, so the source always carries its own `M`, `D`
+  or rename-old record. The one-line change would remove nothing, and could only
+  under-report if the measurement were wrong.*
+- **CLOSED (ADR 0087) — A failed shallow probe reads as "not shallow".** `git
+  rev-parse --is-shallow-repository` failing makes `isShallow` answer false, so
+  a shallow checkout whose probe is unsupported gets a scoped set instead of the
+  full fallback. The code comment already said so; it is now recorded as a
+  decision. *`shallowState` now reports whether it knows, and an unknown
+  degrades. Reproduced with a git shim: both a non-zero exit and an unreadable
+  answer produced `Degraded()==false`.*
+- **CLOSED (ADR 0087) — A stale `origin/HEAD` is not re-checked against the
+  candidate list.** `resolveBaseRef` trusts a successful `symbolic-ref` without
+  verifying the commit still exists, so a stale symbolic ref degrades where
+  `origin/main` would have worked. Fail-safe (everything in scope), and rare.
+  *Not rare: it is the state of every clone taken before an upstream renamed
+  master to main, until someone runs `git remote set-head`. Reproduced, and
+  closed at no extra subprocess by `rev-parse --verify --quiet --abbrev-ref`,
+  which resolves the symref and verifies its target in one invocation.*
+
+- **OPEN — Only `git`.** No second implementation, and therefore no way to know
+  which parts of the contract are git-shaped. `ChangedSet` is deliberately
+  narrow so a second one would have little to disagree with, but the claim is
+  untested. *ADR 0087 answers the question by inspection rather than by writing
+  one: the port is four boolean queries carrying no VCS vocabulary at all, and
+  `Resolve`, `Config`, `GitDir` and `ShowFile` are service-level by design, so
+  the surface a second implementation would have to fit is the four methods.
+  The git vocabulary that did leak into core is three FIELD names on
+  `ResolutionValue` — `BaseRef`, `BaseSHA`, `HeadSHA` — and renaming them is an
+  ADR 0040 shape change with no consumer benefit. The entry stays open because
+  a second implementation is a feature, not a debt.*
+- **CLOSED (ADR 0087) — `ShowFile` does not separate absent from failed.**
+  `core/vcs.PathAbsent` exists and is not yet returned: telling the two apart
+  means parsing git's stderr, which is locale-dependent, or a second `cat-file
+  -e` probe per call. The sentinel is declared so the distinction has a name
+  when it is implemented. *The cost was counted in the wrong place: the probes
+  belong on the FAILURE path, which is already exceptional, so a successful read
+  still costs one subprocess. Two probes, not one — `cat-file` answers "no such
+  object" identically for an unresolvable commit and for an absent path.*
+- **CLOSED (ADR 0087) — `GitDir`'s memo is never invalidated.** A root that
+  becomes a repository later is picked up, because failures are not cached; a
+  repository that MOVES within the life of a process is not. For a tool that
+  resolves once at startup this is the right trade, and the comment says so
+  rather than implying the memo is coherent. *The first half is false where it
+  matters: a root inside a PARENT repository resolves successfully, so
+  `git init` there leaves the parent's git directory memoized — reproduced.
+  Two `os.Lstat` calls per call, ~2.9 µs against the ~2.7 ms subprocess,
+  re-validate the memo and catch that shape, a repository that moved, and one
+  re-created at the same path. A repository created BETWEEN the root and the
+  worktree top level is still not caught, and is now the deferred residue,
+  carried forward by ADR 0087.*
 
 ## References
 
 - [ADR 0031](0031-policy-zero-values-are-never-inert.md) — why the zero `ResolutionValue` is neither readable shape
 - [ADR 0052](0052-lock-domain.md) — the no-registry argument this reuses
 - [ADR 0074](0074-what-a-public-alias-may-point-at.md) — why `Config` aliases the service and `ChangedSet` aliases core
+- [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md) — closes six of the seven entries above
 - `gitrepository-layout(5)` — https://git-scm.com/docs/gitrepository-layout
 - `git-diff(1)` §`--name-status`, `-z` — https://git-scm.com/docs/git-diff
 - `proc(5)` §`/proc/[pid]/mountinfo` — https://man7.org/linux/man-pages/man5/proc.5.html

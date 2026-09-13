@@ -48,6 +48,16 @@
 // probe. The source implementation hard-coded exactly that pair, and this
 // package deliberately does not: it is one caller's policy, not the domain's.
 //
+// # Which spelling of a path answers
+//
+// Queries are compared lexically, so two spellings of one file do not match
+// each other — with one exception, and it is the spelling a caller does not
+// choose. git canonicalises the repository root, so pointing Config.Root at a
+// symbolic link records every path under the link's target. Resolve therefore
+// records every entry under BOTH the root you gave and the one git reports, so
+// either answers and a query costs exactly what it did before. An indirection
+// anywhere else in a path you query is still lexical and still does not match.
+//
 // # Running against a repository you do not control
 //
 // Every invocation is hardened against a hostile `.git/config`, which travels
@@ -56,8 +66,15 @@
 // subcommands that honour `diff.external` — setting that key empty does not
 // disable it, it makes git try to execute "" and abort. Both were demonstrated
 // executing an attacker-chosen command on a read-only query before the guard,
-// and not after. See the service package's CLAUDE.md for what was deliberately
-// NOT hardened, and why.
+// and not after.
+//
+// A second group executes nothing and is guarded for a different reason.
+// `diff.srcPrefix`, `diff.dstPrefix`, `diff.mnemonicPrefix` and `diff.noprefix`
+// rename the `a/` and `b/` prefixes of a diff header, which files the line
+// ranges under a path nobody queries: measured, ContainsFile stayed true and
+// ContainsLine went false for a line that had just changed. All four are pinned
+// to git's defaults. See the service package's CLAUDE.md for what was
+// deliberately NOT hardened, and why.
 package git
 
 import (
@@ -78,7 +95,9 @@ const CodeRepositoryUnresolved errs.Code = corevcs.CodeRepositoryUnresolved
 const CodeCommandFailed errs.Code = corevcs.CodeCommandFailed
 
 // CodePathAbsent identifies a path that does not exist at the requested commit,
-// which is deliberately distinct from a successful read of an empty file.
+// which is deliberately distinct from a successful read of an empty file. It is
+// what ShowFile returns when the commit resolves and its tree holds no object
+// at the path.
 const CodePathAbsent errs.Code = corevcs.CodePathAbsent
 
 // ChangedSet is what a branch changed, queryable by line, file or directory. It
@@ -115,14 +134,25 @@ func Resolve(ctx context.Context, cfg Config) Resolution {
 //
 // It never assumes `.git` is a directory: in a linked worktree or a submodule it
 // is a `gitdir:` pointer FILE, and this follows it. The result is absolute and
-// cleaned. Failures are not memoized, so a later `git init` is picked up.
+// cleaned, and failures are never memoized.
+//
+// The memo is re-validated on every call against two lstats — roughly a
+// thousandth of the subprocess they stand in for — so a repository that moved,
+// one deleted and re-created, and a root that becomes its own repository under
+// a parent one each get a fresh answer. A repository created at a directory
+// BETWEEN root and the worktree top level is not noticed.
 func GitDir(ctx context.Context, root string) (gitDir string, err error) {
 	//: delegate verbatim to the service implementation.
 	return svcgit.GitDir(ctx, root)
 }
 
-// ShowFile returns the content of relPath at commit sha. A path absent at that
-// commit is an error, which is what lets a caller tell "deleted" from "emptied".
+// ShowFile returns the content of relPath at commit sha, verbatim.
+//
+// Its two refusals are different instructions. CodePathAbsent means the commit
+// is readable and holds nothing at that path, which is what tells "deleted"
+// from "emptied" — an empty file is a successful read of "". CodeCommandFailed
+// means anything else: a commit that does not resolve, an unreadable object
+// store, no git. Match with errs.HasCode.
 func ShowFile(ctx context.Context, repoRoot, sha, relPath string) (content string, err error) {
 	//: delegate verbatim to the service implementation.
 	return svcgit.ShowFile(ctx, repoRoot, sha, relPath)

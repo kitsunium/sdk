@@ -44,6 +44,25 @@ import (
 //   - core.hooksPath: none of these subcommands run hooks.
 //   - credential.helper / core.sshCommand / protocol.*: network operations only,
 //     and this package performs none.
+//
+// A third group was added after the first two, and it executes nothing: the
+// four keys that choose the a//b/ prefixes of a unified-diff header. They do
+// not run code, they make the parser read a path that is not the file's, and
+// the symptom is the one this package exists to prevent — a changed line that
+// answers false. Measured against a repository carrying each key, on the diff
+// this package actually runs:
+//
+//	diff.srcPrefix=SRC/ + diff.dstPrefix=DST/  ContainsFile true, ContainsLine FALSE
+//	diff.mnemonicPrefix=true (index/worktree)  ContainsFile true, ContainsLine FALSE
+//	diff.noprefix=true                         both true — "a.txt" survives the
+//	                                           "b/" strip by coincidence, so it
+//	                                           is neutralised for the coincidence
+//	                                           rather than for the symptom
+//
+// ContainsFile survives all three because the NUL-separated name-status pass
+// carries no prefixes at all; only the line ranges are lost. diff.noprefix wins
+// over diff.srcPrefix/diff.dstPrefix, so pinning the two prefixes is not enough
+// on its own and all four are set.
 var (
 	hardenedGitConfig []string = []string{
 		//: core.quotepath=off makes git print non-ASCII path bytes verbatim
@@ -62,6 +81,18 @@ var (
 		//: to re-derive which ones execute hooks. internal/worktree, which does
 		//: commit, needs it for real.
 		"-c", "core.hooksPath=",
+		//: The four keys that choose a unified-diff header's path prefixes.
+		//: They execute nothing; they make "+++ b/x.go" arrive as "+++ w/x.go"
+		//: or "+++ DST/x.go", which the b/ strip leaves intact, so the line
+		//: ranges are filed under a path no caller will ever query. Pinned to
+		//: git's documented defaults rather than disabled, because "a/" and
+		//: "b/" are what the parser is written against. diff.noprefix is set
+		//: first in spirit and last in effect: it overrides the two explicit
+		//: prefixes, so neutralising them without it changes nothing.
+		"-c", "diff.noprefix=false",
+		"-c", "diff.mnemonicPrefix=false",
+		"-c", "diff.srcPrefix=a/",
+		"-c", "diff.dstPrefix=b/",
 	}
 
 	// extDiffSubcommands lists the git subcommands that honour diff.external
@@ -128,13 +159,20 @@ func runGitOutput(ctx context.Context, repo string, args ...string) (gitOutput s
 	return strings.TrimSpace(string(stdout)), nil
 }
 
-// runGitBlob is runGitOutput without the trim: it returns stdout verbatim.
+// runGitBlob is runGitOutput without the trim: it returns stdout verbatim, and
+// hands the failure back unwrapped so the caller can decide which refusal it is.
 //
 // The trim is right for every probe in this package — a SHA, a ref name, a
 // top-level path all arrive with a trailing newline nobody wants. It is wrong
 // for a file's contents, where leading and trailing whitespace is the file's,
 // and where a whitespace-only blob would otherwise come back empty.
-func runGitBlob(ctx context.Context, repo string, args ...string) (blob string, err error) {
+//
+// The error is NOT typed here, unlike everywhere else in this file. A blob read
+// fails for two reasons a caller has to tell apart — the commit is unreachable,
+// or the path is absent from it — and only the caller knows which probes
+// separate them. It returns the exec error and git's stderr tail, and
+// blobFailure below turns that pair into whichever sentinel applies.
+func runGitBlob(ctx context.Context, repo string, args ...string) (blob, stderrTail string, err error) {
 	//: Same hardening as every other invocation; only the trim differs.
 	full := append(append([]string{"-C", repo}, hardenedGitConfig...), extDiffGuard(args)...)
 	cmd := exec.CommandContext(ctx, "git", full...)
@@ -143,19 +181,27 @@ func runGitBlob(ctx context.Context, repo string, args ...string) (blob string, 
 	cmd.Stderr = &stderr
 
 	stdout, runErr := cmd.Output()
-	//: A non-zero exit here means the path is absent at that commit.
+	//: A non-zero exit is the caller's to classify, so pass it through whole.
 	if runErr != nil {
-		//: Same typed refusal as runGitOutput, with the stderr in Private.
-		return "", errs.Wrap(runErr, errs.WrapParams{
-			Code:    corevcs.CodeCommandFailed,
-			Reason:  "COMMAND_FAILED",
-			Public:  "the version-control command failed",
-			Private: "service/vcs/git: git " + strings.Join(args, " ") + ": " + strings.TrimSpace(stderr.String()),
-		})
+		//: Raw failure plus the stderr tail the caller will put in Private.
+		return "", strings.TrimSpace(stderr.String()), runErr
 	}
 
 	//: Verbatim — the bytes are the file's, not a field to be tidied.
-	return string(stdout), nil
+	return string(stdout), "", nil
+}
+
+// blobFailure types a failed blob read as CommandFailed, with the subcommand
+// and git's stderr in Private where a branch name or a path is not wire-visible.
+func blobFailure(cause error, stderrTail string, args ...string) error {
+	//: The same typed refusal runGitOutput produces, built where the caller
+	//: has already decided this is not an absent path.
+	return errs.Wrap(cause, errs.WrapParams{
+		Code:    corevcs.CodeCommandFailed,
+		Reason:  "COMMAND_FAILED",
+		Public:  "the version-control command failed",
+		Private: "service/vcs/git: git " + strings.Join(args, " ") + ": " + stderrTail,
+	})
 }
 
 // gitProbe runs a git subcommand purely for its success/failure signal,

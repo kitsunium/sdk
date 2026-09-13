@@ -10,9 +10,8 @@ implementation shells out to git and lives in `internal/service/vcs/git`.
 
 | File | Role |
 |---|---|
-| `vcs.go` | the `ChangedSet` port, FROZEN at four methods |
+| `vcs.go` | the `ChangedSet` port, FROZEN at four methods, and `ResolutionValue` + `Degraded` |
 | `line_range.go` | `LineRangeValue` + its inclusive `Contains` |
-| `resolution.go` | `ResolutionValue` + `Degraded` |
 | `codes.go` / `errors.go` | the `0.2.33.*` range and its three sentinels |
 
 Code range `0.2.33.*` (`0x00_02_21_*`), owned solely by this package.
@@ -41,6 +40,15 @@ Code range `0.2.33.*` (`0x00_02_21_*`), owned solely by this package.
 - **`ContainsDir` is not recursive.** The parent of a touched directory is not
   itself touched. The port comment says so, because the other reading is the
   one a caller assumes.
+- **Matching is lexical, with one exception, and the exception is the root.** A
+  path is compared after `filepath.Clean`, which resolves no symbolic link, so
+  two spellings of one file do not meet. That would be a footnote if a caller
+  chose every spelling it uses — but it does not choose the repository root: a
+  backend that canonicalises it hands back a set keyed under a path the caller
+  never writes, and then EVERY query answers false while `Degraded` says the
+  resolution succeeded. So the root the caller named is accepted alongside the
+  backend's own, and only the root. An indirection elsewhere in a queried path
+  still does not match, and the port comment says which is which.
 - **No registry.** Its key would be a VCS name, and resolving one from a config
   string would let a typo swap the implementation with every call still
   succeeding — the argument ADR 0052 makes for `lock`.
