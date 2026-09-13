@@ -7,10 +7,14 @@ package lock
 
 import (
 	"io/fs"
+	"log"
+
+	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// checkDir accepts every directory on Windows. The acceptance is a decision
-// with two measurements behind it, not a stub.
+// checkDir refuses a directory whose DACL lets any account create or replace
+// an entry in it — the Unix rule's INTENT, expressed in the only vocabulary
+// Windows has for it.
 //
 // # The POSIX rule cannot run here — it would refuse everything
 //
@@ -38,46 +42,87 @@ import (
 // TestTheLockFileCannotBeUnlinkedOrRenamedWhileItIsOpen pins both verbs, and
 // it fails loudly if a future Go release adds the share flag.
 //
-// # What is NOT checked, stated rather than implied
+// # So the DACL is read instead, and the reason it took three ADRs
 //
-// A DACL check — is there an ACE granting write or delete to Everyone
-// (S-1-1-0) or Authenticated Users (S-1-5-11)? — is the answer that would
-// match the Unix rule's intent rather than its mechanism, and it is not done
-// here. ADR 0081 §Alternatives carries the argument and the price. Two
-// exposures survive this decision and are named there: an attacker who can
+// The check ADR 0081 §Alternatives described — is there an ACE granting write
+// or delete to Everyone (S-1-1-0) or Authenticated Users (S-1-5-11)? — is the
+// one that matches the Unix rule's INTENT rather than its mechanism, and it is
+// now done. It was deferred there and again in ADR 0082 §Deferred on a cost
+// estimate of roughly 250 lines of ABI; re-checking that estimate against the
+// pinned toolchain rather than restating it is what changed the answer. See
+// dacl_windows.go.
+//
+// It fails OPEN: any failure on the way to a verdict accepts. A wrong refusal
+// costs a caller a locker that never builds on a directory that is perfectly
+// safe; a wrong acceptance leaves the platform where it already was.
+//
+// Failing open silently would be a different thing, and is not what happens.
+// An acceptance that rests on a verdict and an acceptance that rests on a
+// failed inspection are indistinguishable from the return value — there is
+// only one nil — so the second one LOGS. That is the same channel
+// internal/service/entitlement uses for the same shape of degradation ("cannot
+// guard the roster cache … concurrent refreshes on this machine are not
+// serialised"), and it fires only when the platform API refused to answer.
+//
+// # What is still NOT checked
+//
+// The audit list (SACL) is not read — it needs a privilege an ordinary account
+// does not hold, and it describes what is LOGGED rather than what is allowed.
+// BUILTIN\Users (S-1-5-32-545) is not read as "anybody"; see dacl_windows.go
+// for why that is a measurement this change does not have, and ADR 0083
+// §Deferred for what it would take.
+//
+// One exposure survives and is named rather than implied: an attacker who can
 // write the directory can plant a lock file BEFORE any holder opens one and
-// keep it held, which is a denial of service rather than a lost exclusion; and
-// on a host where SeCreateSymbolicLinkPrivilege is available to non-admins,
-// a reparse point planted at a lock file's path redirects it.
-func checkDir(_ string, _ fs.FileInfo) error {
-	//: accepted, and the doc comment above is the verdict rather than the
-	//: absence of one.
-	return nil
+// keep it held. That is a denial of service rather than a lost exclusion, and
+// this rule now refuses the directory it would happen in.
+func checkDir(dir string, _ fs.FileInfo) error {
+	writable, observed := dirWritableByAnyone(dir)
+	//: nobody meaning "anybody" can put an entry here — or the question could
+	//: not be asked, which accepts and SAYS SO rather than passing silently.
+	if !writable {
+		//: accepted, with or without a verdict behind it.
+		return acceptedDir(dir, observed)
+	}
+	//: LOCK_DIRECTORY_UNSAFE, naming the identifier and the rights rather than
+	//: a mode that would have meant nothing on this platform.
+	return kerrs.Wrap(LockDirectoryUnsafe, kerrs.WrapParams{},
+		kerrs.String("path", dir),
+		kerrs.String("mode", observed))
 }
 
-// plantable reports whether any account could create an entry in a directory
-// with this mode, and on Windows it always answers NO — because the mode it is
-// handed cannot answer at all.
+// plantable reports whether any account could create an entry in the directory
+// a component was found in.
 //
-// os.Stat synthesises the permission bits from one attribute,
-// FILE_ATTRIBUTE_READONLY, so every writable directory on the system reports
-// 0777 and every read-only one reports 0555. Reading other-write out of that
-// would make [checkChain] refuse a junction under any writable directory —
-// which includes C:\Users\All Users -> C:\ProgramData, an indirection Windows
-// itself installs — and refuse it as LOCK_PATH_REDIRECTED, blaming the
-// deployment for the operating system's own layout.
+// The mode is ignored, because on Windows there is nothing in it: os.Stat
+// synthesises the permission bits from FILE_ATTRIBUTE_READONLY, so every
+// writable directory reports 0777. The answer comes from the directory's DACL
+// instead — see dacl_windows.go, which also carries why the cost that deferred
+// this twice is no longer what it was.
+func plantable(_ fs.FileMode, containerPath string) (yes bool, observed string) {
+	//: the same question checkDir asks of the lock directory, asked of the
+	//: directory a component was found in.
+	return dirWritableByAnyone(containerPath)
+}
+
+// acceptedDir accepts a directory, and says so out loud when the acceptance
+// rests on an inspection that could not run rather than on a verdict.
 //
-// The question DOES have an answer here; it is just not a mode. It is the
-// directory's DACL: an ACE granting FILE_ADD_FILE or FILE_ADD_SUBDIRECTORY to
-// Everyone (S-1-1-0) or Authenticated Users (S-1-5-11). That check is what ADR
-// 0081 §Deferred and ADR 0082 §Deferred both name, it is not written yet, and
-// answering "no" until it is means [checkChain] refuses nothing on Windows.
-// That is a smaller gap than it sounds: the final component, the one this
-// package DERIVES and an attacker can predict, is refused by the open
-// (ADR 0082 §D2), and the components above it are the caller's own
-// configuration.
-func plantable(_ fs.FileMode) bool {
-	//: no verdict is available from a synthesised mode, and a wrong refusal
-	//: here costs more than a missing one — see the doc comment.
-	return false
+// [dirWritableByAnyone] answers "not writable by anybody" for both, because
+// there is no third verdict to return and refusing on a Win32 failure would
+// cost a caller a locker on a directory that is perfectly safe. The two are
+// still different facts, and an operator debugging why a lock directory was
+// accepted needs to be able to tell them apart. Nothing here fires on the
+// ordinary path: observed is empty whenever the DACL was actually read.
+func acceptedDir(dir, observed string) error {
+	//: a verdict was reached and it was "safe".
+	if observed == "" {
+		//: accepted.
+		return nil
+	}
+	//: the DACL could not be read at all. Accepting is the decision; being
+	//: quiet about it is not.
+	log.Printf("cannot read the lock directory's access control list at %s (%s); it is accepted unchecked, so a directory any account can write would not be refused", dir, observed)
+	//: accepted, and recorded.
+	return nil
 }

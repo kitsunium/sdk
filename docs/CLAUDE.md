@@ -93,6 +93,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0081-the-windows-file-lock-is-a-different-primitive.md` | The Windows file lock: a different primitive, measured rather than recited, and the one rule it cannot run | Accepted |
 | `adr/0082-the-lock-path-is-a-file-never-a-link-to-one.md` | The lock path is a file, never a link to one: `O_NOFOLLOW` and `FILE_FLAG_OPEN_REPARSE_POINT`, and the `LOCK_PATH_REDIRECTED` refusal that replaces a silent redirection | Accepted |
 | `adr/0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md` | A path is a chain: the `pathchain` kernel primitive, the parent-component rule it feeds, and `LOCK_FILE_REPLACED` — detection where prevention is impossible | Accepted |
+| `adr/0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md` | The Windows lock directory's verdict becomes a DACL question rather than a mode question — two `advapi32` exports, not the 250 lines three ADRs deferred it on | Accepted |
 
 This table is one of THREE indexes of the same ADRs — the others are
 `docs/adr/CLAUDE.md`'s Contents table and the root `CLAUDE.md` Reference list —

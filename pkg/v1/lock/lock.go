@@ -89,10 +89,13 @@
 // measured on a real Windows kernel; ADR 0081 lists them.
 //
 // One more is worth knowing before you rely on a directory's permissions. The
-// lock directory is checked for being world-writable-and-not-sticky on Unix
-// and is NOT checked on Windows, which has no such bits — os.Stat synthesises
-// 0777 for every writable directory there. What that check prevents is refused
-// by the open instead: a held lock file can be neither deleted nor renamed.
+// lock directory is checked for being one any account can put an entry into,
+// and the two platforms answer that in their own vocabulary: a
+// world-writable-and-not-sticky mode on Unix, and an access-allowed entry
+// granting Everyone or Authenticated Users a create-or-delete right on Windows
+// (ADR 0084). There is no sticky equivalent there, so the accepting sets
+// genuinely differ — no Windows ACL says "anyone may create but only the owner
+// may unlink".
 //
 // # A lock path is a file, never a link to one
 //
@@ -115,10 +118,9 @@
 // symbolic link at a parent is not evidence of anything on its own: /tmp is
 // one on macOS and /var/run is one on most Linux distributions. An
 // indirection above the lock file is refused only when the directory holding
-// it is world-writable — when anybody could have planted it. On Windows no
-// parent component is refused at all today, because the only thing that could
-// answer "could anybody have planted this" there is the directory's DACL and
-// the SDK does not read one yet (ADR 0083).
+// it is world-writable — when anybody could have planted it. On Windows the
+// same rule runs over the same question, answered by the directory's DACL
+// rather than by a synthesised mode (ADR 0083, ADR 0084).
 //
 // # A held lock can lose its file, and you are told
 //
@@ -251,11 +253,20 @@ func NewMemory(cfg MemoryConfig) (locker Locker, err error) {
 // directory on the same machine, and whose leases do NOT expire.
 //
 // It refuses at construction: a missing directory setting, a negative poll
-// interval, a world-writable non-sticky directory (Unix only — see the package
-// comment), and a platform with no file-range lock at all, where it returns
-// the SDK-wide UnsupportedPlatform rather than a locker that would report
-// success and exclude nothing (ADR 0018). Windows is no longer in that last
-// set: it is served by LockFileEx (ADR 0081).
+// interval, a lock directory any account could put an entry into, and a
+// platform with no file-range lock at all, where it returns the SDK-wide
+// UnsupportedPlatform rather than a locker that would report success and
+// exclude nothing (ADR 0018). Windows is no longer in that last set: it is
+// served by LockFileEx (ADR 0081).
+//
+// The third refusal is one rule with two vocabularies, because the two
+// platforms answer "who can put an entry here" differently. On Unix it is a
+// mode: world-writable without the sticky bit. On Windows it is the
+// directory's DACL: an access-allowed entry granting Everyone (S-1-1-0) or
+// Authenticated Users (S-1-5-11) a right to create, or to delete, an entry
+// (ADR 0084). There is no sticky equivalent there, so the two accepting sets
+// genuinely differ — no Windows ACL says "anyone may create but only the owner
+// may unlink".
 func NewFileLocker(cfg FileConfig) (locker Locker, err error) {
 	//: delegate to the service constructor, which validates and builds.
 	return svclock.NewFileLocker(cfg)
