@@ -79,10 +79,25 @@ one it does not judge.
 described the check it was deferring. The pair is kept exactly as named.
 
 `S-1-5-32-545` (BUILTIN\Users) is the obvious third candidate and is
-**excluded**, with the reason written down rather than the exclusion left
-implicit: Windows itself grants Users write on directories it ships, so adding
-it would refuse deployments this change has no measurement about. Widening the
-set is a decision that needs its own evidence; it is in §Deferred.
+**excluded**. The reason — Windows itself grants Users write on directories it
+ships, so adding it would refuse deployments — was an argument when it was
+first written and is now a MEASUREMENT:
+`TestWhetherBuiltinUsersCanPlantInDirectoriesWindowsShips` runs the shipped
+walk with the table widened by that one entry, over `%ProgramData%` and
+`%SystemRoot%\Temp`, and asserts that at least one of them grants the group a
+planting right.
+
+If that assertion ever fails, the premise is wrong on that kernel and Users
+belongs in `anyoneSids` — so a red lane there is not a flake, it is the
+decision being taken out of the ADR's hands. Either way the exclusion stops
+resting on a sentence.
+
+It remains an exclusion rather than a fix: every local interactive account is
+in that group, and on a domain-joined machine so is Domain Users, so a
+directory granting it a planting right IS one this rule's own sentence
+describes. What stops it being included today is that refusing
+`%ProgramData%`-shaped deployments is a breaking change of a different size,
+and it needs its own record. §Deferred.
 
 ### D3 — The MASK is read, not merely the identifier
 
@@ -176,9 +191,22 @@ iterated locally. A wrong **acceptance** costs the hardening this change adds
 and leaves the platform exactly where it was an hour ago. Those are not
 symmetric.
 
-The Win32 status travels in the refusal's `mode` field as
-`GetNamedSecurityInfoW=<n>`, so an operator can tell "the check ran and
-accepted" from "the check could not run" instead of guessing.
+That leaves one thing to get right, and the first version of this ADR
+overclaimed it. The Win32 status travels in the REFUSAL's `mode` field — but a
+failed inspection never produces a refusal, so on the accepting path there was
+nothing to read and "the check ran and found it safe" was indistinguishable
+from "the check could not run". Failing open is the decision; failing open
+SILENTLY is not.
+
+So the two are separated at the source: `dirWritableByAnyone` returns an empty
+`observed` whenever a verdict was reached, and a non-empty one carrying the
+Win32 status when it was not — and `checkDir` and `checkChain` log the second
+case before accepting. That is the same channel `internal/service/entitlement`
+uses for the same shape of degradation ("cannot guard the roster cache …
+concurrent refreshes on this machine are not serialised"), and it fires only
+when the platform API refused to answer. The Unix `plantable` follows the same
+contract, where the inconclusive case is simply unreachable because reading a
+mode cannot fail.
 
 ### D6 — The tests drive the real access-control model, on a real kernel
 
@@ -302,12 +330,18 @@ argument against a policy DSL applies unchanged.
 
 ## Deferred
 
-- **`BUILTIN\Users` (`S-1-5-32-545`) as a third "anybody".** It is the
-  identifier most Windows deployments actually grant, which is both why it
-  would catch more and why adding it blind would refuse directories the
-  operating system itself configures. It needs a measurement of what a
-  realistic `%ProgramData%`-shaped and `%TEMP%`-shaped directory grants before
-  it can be a refusal. See D2.
+- **`BUILTIN\Users` (`S-1-5-32-545`) as a third "anybody".** Still deferred,
+  but no longer for want of evidence: D2's test now measures, on a real kernel,
+  that a directory Windows ships grants that group a planting right. What
+  remains is a DECISION rather than a measurement — including it refuses
+  `%ProgramData%`-shaped lock directories, which is a breaking change of a
+  different size from this one and deserves its own record. The honest
+  statement of today's gap is therefore sharper than "not measured": a
+  directory whose only broad grant is to BUILTIN\Users is accepted, and every
+  local account can plant in it. A caller who cares should not put a lock
+  directory under `%ProgramData%` or `%SystemRoot%\Temp`.
+  The two-account model in D3b is a second cost: a third identifier needs a
+  third token.
 - **The audit list (SACL).** Not read. It needs `SE_SECURITY_NAME`, a privilege
   an ordinary account does not hold, and it describes what is LOGGED rather
   than what is allowed.

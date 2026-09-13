@@ -61,6 +61,7 @@ go_test(
     srcs = [
         "chain_posix_test.go",
         "chain_windows_test.go",
+        "dacl_internal_windows_test.go",
         "dacl_windows_test.go",
         "dirsafety_posix_test.go",
         "dirsafety_windows_test.go",
@@ -81,8 +82,8 @@ go_test(
     # the sources have to reach the test as runfiles — the same mechanism
     # //internal/kernel/errs uses for its AST audits.
     data = ["//:audit_sources"],
+    embed = [":lock"],
     deps = [
-        ":lock",
         "//internal/core/lock",
         "//internal/core/proc",
         "//internal/kernel/clock",

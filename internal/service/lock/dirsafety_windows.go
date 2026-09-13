@@ -7,6 +7,7 @@ package lock
 
 import (
 	"io/fs"
+	"log"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -55,6 +56,14 @@ import (
 // costs a caller a locker that never builds on a directory that is perfectly
 // safe; a wrong acceptance leaves the platform where it already was.
 //
+// Failing open silently would be a different thing, and is not what happens.
+// An acceptance that rests on a verdict and an acceptance that rests on a
+// failed inspection are indistinguishable from the return value — there is
+// only one nil — so the second one LOGS. That is the same channel
+// internal/service/entitlement uses for the same shape of degradation ("cannot
+// guard the roster cache … concurrent refreshes on this machine are not
+// serialised"), and it fires only when the platform API refused to answer.
+//
 // # What is still NOT checked
 //
 // The audit list (SACL) is not read — it needs a privilege an ordinary account
@@ -69,10 +78,11 @@ import (
 // this rule now refuses the directory it would happen in.
 func checkDir(dir string, _ fs.FileInfo) error {
 	writable, observed := dirWritableByAnyone(dir)
-	//: nobody meaning "anybody" can put an entry here.
+	//: nobody meaning "anybody" can put an entry here — or the question could
+	//: not be asked, which accepts and SAYS SO rather than passing silently.
 	if !writable {
-		//: nothing to refuse.
-		return nil
+		//: accepted, with or without a verdict behind it.
+		return acceptedDir(dir, observed)
 	}
 	//: LOCK_DIRECTORY_UNSAFE, naming the identifier and the rights rather than
 	//: a mode that would have meant nothing on this platform.
@@ -93,4 +103,26 @@ func plantable(_ fs.FileMode, containerPath string) (yes bool, observed string) 
 	//: the same question checkDir asks of the lock directory, asked of the
 	//: directory a component was found in.
 	return dirWritableByAnyone(containerPath)
+}
+
+// acceptedDir accepts a directory, and says so out loud when the acceptance
+// rests on an inspection that could not run rather than on a verdict.
+//
+// [dirWritableByAnyone] answers "not writable by anybody" for both, because
+// there is no third verdict to return and refusing on a Win32 failure would
+// cost a caller a locker on a directory that is perfectly safe. The two are
+// still different facts, and an operator debugging why a lock directory was
+// accepted needs to be able to tell them apart. Nothing here fires on the
+// ordinary path: observed is empty whenever the DACL was actually read.
+func acceptedDir(dir, observed string) error {
+	//: a verdict was reached and it was "safe".
+	if observed == "" {
+		//: accepted.
+		return nil
+	}
+	//: the DACL could not be read at all. Accepting is the decision; being
+	//: quiet about it is not.
+	log.Printf("cannot read the lock directory's access control list at %s (%s); it is accepted unchecked, so a directory any account can write would not be refused", dir, observed)
+	//: accepted, and recorded.
+	return nil
 }

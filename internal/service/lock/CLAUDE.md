@@ -162,9 +162,13 @@ There is **no sticky equivalent** here, so the two platforms' accepting sets
 genuinely differ: no Windows ACL says "anyone may create but only the owner may
 unlink". That is a property of the two access-control models, not a divergence.
 
-The check **fails open**: any failure on the way to a verdict accepts, and the
-Win32 status travels in the refusal's `mode` field so "the check ran and
-accepted" is distinguishable from "the check could not run".
+The check **fails open**: any failure on the way to a verdict accepts. Failing
+open *silently* would be a different thing and is not what happens —
+`dirWritableByAnyone` returns an empty `observed` when a verdict was reached
+and the Win32 status when it was not, and both `checkDir` and `checkChain`
+**log** the second case before accepting. Same channel
+`internal/service/entitlement` uses for the same shape of degradation, and it
+fires only when the platform API refused to answer.
 
 ## The directory rule never reached the lock file's NAME
 
@@ -326,6 +330,16 @@ re-`Define`d here.
   than none.
 - **Match on the SID alone.** A world-READABLE lock directory is not a
   world-writable one, exactly as `0755` is not `0777`. The mask is read.
+- **Return a non-empty `observed` from `plantable` when the verdict is
+  "safe".** An empty `observed` is what tells `checkChain` a verdict was
+  REACHED; filling it in on the safe path would make every component look
+  uninspected and log on the ordinary one.
+- **Read `anyoneSids` as covering everybody.** `BUILTIN\Users` is not in it,
+  so a directory whose only broad grant is to that group is ACCEPTED and every
+  local account can plant in it. That is measured, not assumed — see
+  `TestWhetherBuiltinUsersCanPlantInDirectoriesWindowsShips` — and deferred in
+  ADR 0084 §Deferred. Do not put a lock directory under `%ProgramData%` or
+  `%SystemRoot%\Temp`.
 - **"Repair" a corrupt fence ledger.** Refusing is the decision.
 - **Open the lock file with a bare `os.OpenFile`.** That is the defect ADR 0082
   closed, and it is invisible: the acquisition succeeds. Go through

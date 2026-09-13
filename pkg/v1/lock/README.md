@@ -154,7 +154,7 @@ var (
 ```
 
 <a name="Keepalive"></a>
-## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L281>)
+## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L290>)
 
 ```go
 func Keepalive(ctx context.Context, lease Lease, cfg KeepaliveConfig) (guarded context.Context, stop context.CancelFunc, err error)
@@ -223,7 +223,7 @@ type Locker = corelock.Locker
 ```
 
 <a name="NewFileLocker"></a>
-### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L261>)
+### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L270>)
 
 ```go
 func NewFileLocker(cfg FileConfig) (locker Locker, err error)
@@ -231,7 +231,9 @@ func NewFileLocker(cfg FileConfig) (locker Locker, err error)
 
 NewFileLocker returns a [Locker](<#Locker>) that excludes every process using the same directory on the same machine, and whose leases do NOT expire.
 
-It refuses at construction: a missing directory setting, a negative poll interval, a world\-writable non\-sticky directory \(Unix only — see the package comment\), and a platform with no file\-range lock at all, where it returns the SDK\-wide UnsupportedPlatform rather than a locker that would report success and exclude nothing \(ADR 0018\). Windows is no longer in that last set: it is served by LockFileEx \(ADR 0081\).
+It refuses at construction: a missing directory setting, a negative poll interval, a lock directory any account could put an entry into, and a platform with no file\-range lock at all, where it returns the SDK\-wide UnsupportedPlatform rather than a locker that would report success and exclude nothing \(ADR 0018\). Windows is no longer in that last set: it is served by LockFileEx \(ADR 0081\).
+
+The third refusal is one rule with two vocabularies, because the two platforms answer "who can put an entry here" differently. On Unix it is a mode: world\-writable without the sticky bit. On Windows it is the directory's DACL: an access\-allowed entry granting Everyone \(S\-1\-1\-0\) or Authenticated Users \(S\-1\-5\-11\) a right to create, or to delete, an entry \(ADR 0084\). There is no sticky equivalent there, so the two accepting sets genuinely differ — no Windows ACL says "anyone may create but only the owner may unlink".
 
 <a name="NewMemory"></a>
 ### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L247>)

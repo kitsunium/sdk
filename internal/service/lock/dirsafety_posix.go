@@ -63,5 +63,13 @@ func plantable(container fs.FileMode, _ string) (yes bool, observed string) {
 	//: not enough: a directory shared with a group is a deliberate
 	//: arrangement, the same one checkDir accepts, and the accounts in that
 	//: group are the ones the lock is being shared with.
-	return container&worldWritable != 0, "container=" + container.Perm().String()
+	if container&worldWritable == 0 {
+		//: a verdict, and it is "safe". observed stays EMPTY, which is what
+		//: tells the caller a verdict was reached at all — see chain.go's
+		//: noteUninspected. Reading a mode cannot fail, so the inconclusive
+		//: case this shape exists for is unreachable on this platform.
+		return false, ""
+	}
+	//: plantable, and the mode is what an operator has to change.
+	return true, "container=" + container.Perm().String()
 }

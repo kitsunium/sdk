@@ -253,11 +253,20 @@ func NewMemory(cfg MemoryConfig) (locker Locker, err error) {
 // directory on the same machine, and whose leases do NOT expire.
 //
 // It refuses at construction: a missing directory setting, a negative poll
-// interval, a world-writable non-sticky directory (Unix only — see the package
-// comment), and a platform with no file-range lock at all, where it returns
-// the SDK-wide UnsupportedPlatform rather than a locker that would report
-// success and exclude nothing (ADR 0018). Windows is no longer in that last
-// set: it is served by LockFileEx (ADR 0081).
+// interval, a lock directory any account could put an entry into, and a
+// platform with no file-range lock at all, where it returns the SDK-wide
+// UnsupportedPlatform rather than a locker that would report success and
+// exclude nothing (ADR 0018). Windows is no longer in that last set: it is
+// served by LockFileEx (ADR 0081).
+//
+// The third refusal is one rule with two vocabularies, because the two
+// platforms answer "who can put an entry here" differently. On Unix it is a
+// mode: world-writable without the sticky bit. On Windows it is the
+// directory's DACL: an access-allowed entry granting Everyone (S-1-1-0) or
+// Authenticated Users (S-1-5-11) a right to create, or to delete, an entry
+// (ADR 0084). There is no sticky equivalent there, so the two accepting sets
+// genuinely differ — no Windows ACL says "anyone may create but only the owner
+// may unlink".
 func NewFileLocker(cfg FileConfig) (locker Locker, err error) {
 	//: delegate to the service constructor, which validates and builds.
 	return svclock.NewFileLocker(cfg)
