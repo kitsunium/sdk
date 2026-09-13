@@ -26,8 +26,8 @@ product (ADR 0078 §1).
 | `roughtime*.go` | signed network time — advisory, fail-open, servers ship empty |
 | `version.go` | the version floor a roster can mandate |
 | `product.go` | `ProductValue`, `Label`, `DefaultCacheDir`, `Validate` |
-| `codes.go` / `errors.go` | the one code this implementation owns, `0.3.67.*` |
-| `wrap.go` | `refuse` / `classify` / `annotate`, and `diagnose` for the log line |
+| `errors.go` | the one code this implementation owns, `0.3.67.*`, and its sentinel |
+| `wrap.go` | `refuse` / `classify` / `annotate`, plus `diagnose` and `particulars` |
 
 ## Why-this-shape
 
