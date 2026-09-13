@@ -3,12 +3,19 @@ package memlimit
 
 import (
 	"errors"
+	"math"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 )
+
+// floorBoundaryAllowance is the allowance ADR 0075 §Deferred recorded: its exact
+// 90% share is minimumLimitBytes itself, while dividing first lands four bytes
+// under and declines a cap that is perfectly usable.
+const floorBoundaryAllowance int64 = 74565405
 
 // errNoFile stands in for a missing cgroup file, which is the normal state on
 // any non-Linux host.
@@ -69,7 +76,7 @@ func TestApplyFrom(t *testing.T) {
 			name:          "cgroup v2 cap yields 90 percent",
 			env:           noEnv,
 			files:         map[string]string{"/sys/fs/cgroup/memory.max": "1073741824\n"},
-			wantLimit:     oneGiB / 100 * 90,
+			wantLimit:     oneGiB * 90 / 100,
 			wantAllowance: oneGiB,
 			wantSource:    coreproc.MemorySourceCgroup,
 			wantApplied:   true,
@@ -84,7 +91,7 @@ func TestApplyFrom(t *testing.T) {
 			name:          "cgroup v1 cap yields 90 percent",
 			env:           noEnv,
 			files:         map[string]string{"/sys/fs/cgroup/memory/memory.limit_in_bytes": "1073741824\n"},
-			wantLimit:     oneGiB / 100 * 90,
+			wantLimit:     oneGiB * 90 / 100,
 			wantAllowance: oneGiB,
 			wantSource:    coreproc.MemorySourceCgroup,
 			wantApplied:   true,
@@ -187,7 +194,7 @@ func TestApplyFrom_NestedCgroup(t *testing.T) {
 				"/sys/fs/cgroup/docker/memory.max":        "max",
 				"/sys/fs/cgroup/memory.max":               "max",
 			},
-			wantLimit:   oneGiB / 100 * 90,
+			wantLimit:   oneGiB * 90 / 100,
 			wantApplied: true,
 		},
 		{
@@ -198,7 +205,7 @@ func TestApplyFrom_NestedCgroup(t *testing.T) {
 				"/sys/fs/cgroup/parent/memory.max":       "1073741824",
 				"/sys/fs/cgroup/memory.max":              "max",
 			},
-			wantLimit:   oneGiB / 100 * 90,
+			wantLimit:   oneGiB * 90 / 100,
 			wantApplied: true,
 		},
 		{
@@ -207,7 +214,7 @@ func TestApplyFrom_NestedCgroup(t *testing.T) {
 				procSelfCgroup: "9:memory:/kubepods/pod99\n",
 				"/sys/fs/cgroup/memory/kubepods/pod99/memory.limit_in_bytes": "1073741824",
 			},
-			wantLimit:   oneGiB / 100 * 90,
+			wantLimit:   oneGiB * 90 / 100,
 			wantApplied: true,
 		},
 		{
@@ -216,7 +223,7 @@ func TestApplyFrom_NestedCgroup(t *testing.T) {
 				procSelfCgroup:              "0::/\n",
 				"/sys/fs/cgroup/memory.max": "1073741824",
 			},
-			wantLimit:   oneGiB / 100 * 90,
+			wantLimit:   oneGiB * 90 / 100,
 			wantApplied: true,
 		},
 		{
@@ -309,7 +316,7 @@ func TestApplyFrom_HybridHierarchies(t *testing.T) {
 				"/sys/fs/cgroup/memory.max":                   "max",
 				"/sys/fs/cgroup/memory/memory.limit_in_bytes": "1073741824",
 			},
-			wantLimit:   oneGiB / 100 * 90,
+			wantLimit:   oneGiB * 90 / 100,
 			wantApplied: true,
 		},
 		{
@@ -389,6 +396,120 @@ func TestReadCgroupAllowance_PropagatesReadErrors(t *testing.T) {
 			if !ok || allowance != 2147483648 {
 				t.Errorf("readCgroupAllowance() = (%d, %t), want (2147483648, true)", allowance, ok)
 			}
+		})
+	}
+}
+
+// TestDeriveLimit pins the exact 90% share and the one place it cannot be
+// exact.
+//
+// Dividing before multiplying discards up to percentDivisor-1 bytes of the
+// allowance, which within a few bytes of the floor declines a cap the exact
+// value accepts. Multiplying first is exact everywhere the product fits, and
+// above exactDerivationCeiling it wraps — so the reversed order is kept for
+// exactly that range and nowhere else.
+func TestDeriveLimit(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		allowance int64
+		want      int64
+	}
+	tests := []tc{
+		{name: "one gibibyte", allowance: 1 << 30, want: 966367641},
+		{name: "an allowance divisible by the divisor", allowance: 1000, want: 900},
+		{
+			//: the allowance ADR 0075 names: the exact share IS the floor, and
+			//: dividing first lands four bytes under it.
+			name: "the floor boundary", allowance: 74565405, want: minimumLimitBytes,
+		},
+		{
+			name: "the largest allowance the product still fits", allowance: exactDerivationCeiling,
+			want: 92233720368547758,
+		},
+		{
+			//: one byte further the product wraps NEGATIVE unguarded, which the
+			//: floor then reads as a cap too small to honour.
+			name: "one byte past the ceiling", allowance: exactDerivationCeiling + 1,
+			want: 92233720368547740,
+		},
+		{
+			//: the largest value parseV1Limit accepts, 45 times the ceiling.
+			//: Unguarded it derives 92233720368547757 — fifty times too small,
+			//: and applied without a word.
+			name: "the largest allowance a v1 file yields", allowance: unlimitedV1Floor - 1,
+			want: 4150517416584649110,
+		},
+		{
+			//: the largest value parseV2Limit accepts. Unguarded the product
+			//: wraps to exactly zero.
+			name: "the largest allowance a v2 file yields", allowance: math.MaxInt64,
+			want: 8301034833169298220,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := deriveLimit(c.allowance)
+		if got != c.want {
+			t.Fatalf("deriveLimit(%d) = %d, want %d", c.allowance, got, c.want)
+		}
+		//: A wrapped product is negative or absurdly small, and both reach the
+		//: caller as "this cap is too tight to honour" — the opposite of true.
+		if got <= 0 || got > c.allowance {
+			t.Errorf("deriveLimit(%d) = %d, want a positive share of the allowance", c.allowance, got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestApplyFrom_FloorBoundary verifies the exact derivation decides the floor,
+// end to end, driven from floorBoundaryAllowance.
+//
+// One byte less is genuinely below the floor and must still decline, or the
+// test would pass with no floor at all.
+func TestApplyFrom_FloorBoundary(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name        string
+		allowance   int64
+		wantLimit   int64
+		wantApplied bool
+	}
+	tests := []tc{
+		{name: "the exact share lands on the floor", allowance: floorBoundaryAllowance, wantLimit: minimumLimitBytes, wantApplied: true},
+		{name: "one byte under the floor still declines", allowance: floorBoundaryAllowance - 1, wantApplied: false},
+		{name: "well above the floor", allowance: 1 << 27, wantLimit: 120795955, wantApplied: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var applied int64
+		record := func(limit int64) int64 {
+			applied = limit
+			return 0
+		}
+
+		content := strconv.FormatInt(c.allowance, decimalBase)
+		got := applyFrom(noEnv, fakeFS(map[string]string{"/sys/fs/cgroup/memory.max": content}), record)
+		if got.Applied() != c.wantApplied {
+			t.Fatalf("Applied() = %t (Source=%s, Limit=%d), want %t", got.Applied(), got.Source, got.Limit, c.wantApplied)
+		}
+		if got.Limit != c.wantLimit {
+			t.Errorf("Limit = %d, want %d", got.Limit, c.wantLimit)
+		}
+		//: The runtime must receive exactly what the value reports.
+		if applied != c.wantLimit {
+			t.Errorf("SetMemoryLimit got %d, want %d", applied, c.wantLimit)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
 		})
 	}
 }

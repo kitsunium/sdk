@@ -1,6 +1,6 @@
 # ADR 0075 — the SDK reads the cgroup cap that already bounds this process, not only the ones it writes for others
 
-- **Status**: Accepted
+- **Status**: Accepted. **All three §Deferred items are CLOSED** — the mount root, the octal escapes, and the order of the 90% derivation
 - **Date**: 2026-09-12
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0016](0016-sdk-process-supervision-domain.md) (the proc domain), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is never an inert policy), [ADR 0001](0001-sdk-go-multimodule-layout.md) (the four layers)
@@ -123,27 +123,84 @@ changes shape, and nothing in the SDK imports it.
 
 ## Deferred
 
-- **A cgroup mount whose root is not `/`.** `/proc/self/mountinfo` field 3 is the
+> **Status update (2026-09-13).** All three items below are **CLOSED**. They were
+> deferred together on the premise that they "could not be exercised here"; that
+> clause is what expired. Two of them reproduce against a live kernel in one
+> `unshare` command, and all three reproduce deterministically in the existing
+> unit harness, which is where the fixes are pinned. The reasoning below is left
+> exactly as it was written — a status, not a decision edit
+> (`docs/adr/CLAUDE.md` §Do NOT).
+
+- ~~**A cgroup mount whose root is not `/`.** `/proc/self/mountinfo` field 3 is the
   mount's root within its filesystem, and a bind mount with a non-`/` root means
   a membership path from `/proc/self/cgroup` has to be translated relative to it
   before it names a readable file. The derivation does not do that translation.
   The failure mode is fail-safe — the candidate file is simply absent, the
   derivation reports `MemorySourceUnconstrained` and the runtime default stands —
   and the shape is rare enough that it could not be exercised here. Left as it
-  came from the source implementation rather than changed untested.
-- **Octal escapes in `/proc/self/mountinfo` are not decoded.** The kernel encodes
+  came from the source implementation rather than changed untested.~~
+  **CLOSED.** The shape is not rare: it is what a container runtime produces with
+  `--cgroupns=host`, and
+  `unshare -Urm sh -c 'mount --bind /sys/fs/cgroup/user.slice /sys/fs/cgroup'`
+  builds it on a stock Linux 6.12 host. The kernel writes
+  `1775 1733 0:29 /user.slice /sys/fs/cgroup … - cgroup2 cgroup2 rw`, and under
+  it the shipped derivation named six candidate files of which **five were
+  absent**; the one that existed was an ancestor reached by accident. Every
+  candidate now exists. `underMountRoot` does the translation, and two
+  measurements shape it rather than guesses. First, a mount whose root sits
+  *above* the cgroup namespace root is rendered by the kernel with `..`
+  components — `/../../../../..` on 6.12 — and `path.Clean` folds those to `/`,
+  which is the identity translation and byte-for-byte the behaviour that shipped.
+  Second, a mount exposing a subtree this process is **not** in now contributes
+  **nothing** rather than a joined path: every path it could build is either
+  absent or another cgroup's cap, and since the caller takes a minimum, a
+  stranger's cap would win.
+- ~~**Octal escapes in `/proc/self/mountinfo` are not decoded.** The kernel encodes
   space, tab, newline and backslash in the path fields as `\040`, `\011`, `\012`
   and `\134`. The parser keeps the token verbatim, so a cgroup filesystem mounted
   at a path containing one of those characters yields a candidate path no file
   answers to. Fail-safe again — the cap reads as absent — and from the source
-  implementation. Recorded rather than fixed blind.
-- **The 90% derivation truncates before multiplying** (`allowance / 100 * 90`).
+  implementation. Recorded rather than fixed blind.~~
+  **CLOSED.** `mount --bind /sys/fs/cgroup "/tmp/cg dir"` is enough: the kernel
+  writes `/tmp/cg\040dir` and the shipped derivation named **six** candidates,
+  **all six absent**. `unmangleMountinfoPath` decodes any three-digit octal
+  triple rather than only the four the kernel emits — `mangle_path` escapes its
+  own backslash as `\134`, so a literal `\040` cannot reach the decoder — and a
+  marker the kernel did not write as an escape is carried through verbatim
+  instead of swallowing the three bytes behind it.
+
+  The decode runs on mountinfo and **nowhere else**, which was measured rather
+  than assumed: a cgroup created as `probe test.scope` with a real process moved
+  into it reads back from `/proc/<pid>/cgroup` with a literal `0x20` byte. The
+  two files do not agree on escaping, so decoding both would corrupt a cgroup
+  name that legitimately contains a backslash.
+- ~~**The 90% derivation truncates before multiplying** (`allowance / 100 * 90`).
   Within a few bytes of the 64 MiB floor this can decline a cap the exact
   computation would have accepted — an allowance of 74,565,405 bytes derives
   67,108,860 where the floored exact value is 67,108,864. The ordering is the
   source implementation's and is deliberate against int64 overflow on a very
   large allowance. Kept, so the versement stays faithful; the divergence is
-  recorded here rather than silently corrected.
+  recorded here rather than silently corrected.~~
+  **CLOSED**, and the overflow the ordering defended against is real — so it is
+  now defended against by a bound rather than by a rounding error everybody
+  pays. `deriveLimit` multiplies first below `math.MaxInt64 / 90`
+  (102,481,911,520,608,620 bytes, ~91 PiB) and divides first above it.
+
+  The overflow is reachable, which is why the guard stays: `parseV1Limit`
+  accepts any value under `1<<62`, forty-five times the ceiling, and
+  `parseV2Limit` accepts up to `math.MaxInt64`. Unguarded, an allowance one byte
+  past the ceiling derives **−92,233,720,368,547,757**, the largest a v1 file
+  yields derives 92,233,720,368,547,757 — fifty times too small and applied
+  without a word — and `math.MaxInt64` derives **0**. It is **not** an
+  architecture question: `int64` is 64 bits on every Go platform, and the
+  `linux/386` build in this repo's matrix computes `math.MaxInt64 / 90` and the
+  wrapped product to the same values as `linux/amd64`, measured with a native
+  32-bit binary. Only `int` differs there, and this derivation uses none.
+
+  The observable change is one cap-boundary decision and up to 89 bytes of
+  limit: the ADR's own 74,565,405-byte allowance now applies a 67,108,864-byte
+  limit instead of declining, and a 1 GiB allowance derives 966,367,641 instead
+  of 966,367,620.
 
 ## References
 

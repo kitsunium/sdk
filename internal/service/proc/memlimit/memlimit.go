@@ -19,6 +19,7 @@
 package memlimit
 
 import (
+	"math"
 	"os"
 	"runtime/debug"
 	"strconv"
@@ -58,6 +59,14 @@ const headroomPercent int64 = 90
 
 // percentDivisor converts headroomPercent into a fraction.
 const percentDivisor int64 = 100
+
+// exactDerivationCeiling is the largest allowance whose product with
+// headroomPercent still fits in an int64. Above it the multiplication wraps, so
+// the derivation divides first and accepts the rounding instead.
+//
+// int64 is 64 bits on every Go platform, linux/386 included, so this bound is
+// the same everywhere; it is a value range, not an architecture.
+const exactDerivationCeiling int64 = math.MaxInt64 / headroomPercent
 
 // decimalBase is the numeric base of every cgroup limit file.
 const decimalBase int = 10
@@ -112,7 +121,7 @@ func applyFrom(
 		return coreproc.MemoryLimitValue{Source: coreproc.MemorySourceUnconstrained}
 	}
 
-	derived := allowance / percentDivisor * headroomPercent
+	derived := deriveLimit(allowance)
 	//: Reject caps too small to host a real working set — capping the runtime
 	//: below this would thrash the collector without averting the kill.
 	if derived < minimumLimitBytes {
@@ -132,6 +141,29 @@ func applyFrom(
 		Limit:     derived,
 		Source:    coreproc.MemorySourceCgroup,
 	}
+}
+
+// deriveLimit returns the share of a cgroup allowance handed to the Go runtime.
+//
+// It multiplies before dividing, which is the exact computation. Dividing first
+// discards up to percentDivisor-1 bytes of the allowance before the share is
+// taken, and within a few bytes of the floor that under-computation declines a
+// cap the exact value accepts: an allowance of 74,565,405 derives 67,108,860
+// one way and exactly the 67,108,864 floor the other.
+//
+// Above exactDerivationCeiling the product would wrap, so the order is reversed
+// there. That branch is reachable — a v1 memory.limit_in_bytes is accepted up to
+// 1<<62, which is 45 times the ceiling — and at those sizes the bytes the
+// division discards are a rounding error on an allowance of 91 PiB.
+func deriveLimit(allowance int64) int64 {
+	//: The overwhelmingly common case, and the only one that is exact.
+	if allowance <= exactDerivationCeiling {
+		//: Deliver the exact share.
+		return allowance * headroomPercent / percentDivisor
+	}
+
+	//: Deliver the share the multiplication could not compute.
+	return allowance / percentDivisor * headroomPercent
 }
 
 // readCgroupAllowance returns the most restrictive memory cap governing this
