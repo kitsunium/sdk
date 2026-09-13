@@ -259,9 +259,18 @@ a root whose repository moved.
   absent and the memoized directory still exists. Only rev-parse's own discovery
   walk knows a nearer repository now wins, and reproducing that walk here is the
   thing this package refuses to do. The doc comment states the residue.
-- **An indirection elsewhere in a queried path.** Only the root is aliased. A
-  caller that builds a path through some other symbolic link chooses that
-  spelling, and the port comment says the comparison is lexical.
+- **An indirection elsewhere in a queried path, including inside the hint.**
+  Only the root is aliased. A caller that builds a path through some other
+  symbolic link chooses that spelling, and the port comment says the comparison
+  is lexical. The hint case is the same fact seen from the other end and it
+  needs TWO indirections to appear: `Config.Root = /link/nested`, where `/link`
+  reaches the repository AND `nested` is itself a link inside it. The literal
+  tail no longer matches, `trimRepoTail` yields no alias, and the behaviour
+  falls back to exactly what it was — never worse. Deriving the alias from the
+  longest hint prefix that resolves to the canonical root would cost up to one
+  `EvalSymlinks` per hint component and still answer false for
+  `/link/nested/x.go`, which is the spelling such a caller actually uses. Half
+  a close is worse than a named residue.
 - **`ResolutionValue`'s git-shaped field names.** `BaseRef`, `BaseSHA` and
   `HeadSHA` are git vocabulary in a package whose own CLAUDE.md forbids naming
   git. Renaming them is an ADR 0040 shape change; it waits for a second
