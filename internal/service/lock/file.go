@@ -171,7 +171,11 @@ func (l *fileLocker) takeFlock(ctx context.Context, name string, wait bool) (lea
 	//: Both flags are declared BEFORE the open so the defer can be armed on
 	//: the very next line.
 	kept, locked := false, false
-	file, openErr := os.OpenFile(path, os.O_CREATE|os.O_RDWR, lockFileMode)
+	//: openLockFile, not os.OpenFile: the lock filename is derived from the
+	//: lock name and is therefore PREDICTABLE, so an indirection planted at it
+	//: would send the flock and the ledger to a file of the planter's choosing
+	//: while every layer above reported success. See nofollow.go.
+	file, openErr := openLockFile(path)
 	defer func() {
 		//: an open that failed left no descriptor, and the success path keeps
 		//: the one it got — the lease owns it from then on.
@@ -186,10 +190,11 @@ func (l *fileLocker) takeFlock(ctx context.Context, name string, wait bool) (lea
 		closeErr := file.Close()
 		err = foldAbandon(err, path, unlockErr, closeErr)
 	}()
-	//: the medium refused before any lock was involved.
+	//: the path was refused before any lock was involved.
 	if openErr != nil {
-		//: LockBackendFailed.
-		return nil, backendFailed("open", path, openErr)
+		//: LockPathRedirected or LockBackendFailed, already built by the
+		//: platform half that knows which of the two it observed.
+		return nil, openErr
 	}
 	locked, err = l.contend(ctx, file, wait)
 	//: an error, or a non-blocking attempt that lost. Both leave the deferred

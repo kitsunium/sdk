@@ -14,10 +14,10 @@ consumers depend only on `pkg/v1`.
 | `Locker` / `Lease` / `Deadliner` | aliases onto `internal/core/lock`. `Locker` FROZEN at two methods, `Lease` at three (ADR 0039) |
 | `MemoryConfig` / `FileConfig` / `KeepaliveConfig` | aliases onto `internal/service/lock` |
 | `NewMemory(cfg)` | in-process; leases **expire**; implements `Deadliner` |
-| `NewFileLocker(cfg)` | one machine, via `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081); leases **never expire**; does NOT implement `Deadliner` |
+| `NewFileLocker(cfg)` | one machine, via `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081); leases **never expire**; does NOT implement `Deadliner`; a symbolic link or reparse point at the lock path is REFUSED, never followed (ADR 0082) |
 | `Keepalive(ctx, lease, cfg)` | background renewal → a context cancelled when the lease is lost |
 | `LockMisconfigured` / `LockNotHeld` / `LockBackendFailed` / `LockNameRejected` | core sentinels |
-| `LockFenceCorrupt` / `LockDirectoryUnsafe` / `LockKeepaliveLost` | service sentinels |
+| `LockFenceCorrupt` / `LockDirectoryUnsafe` / `LockKeepaliveLost` / `LockPathRedirected` | service sentinels |
 
 ## Conventions
 
@@ -38,6 +38,9 @@ consumers depend only on `pkg/v1`.
   is stated in four places on purpose.
 - **Add a distributed backend here.** Redis / etcd / ZooKeeper / Consul are
   connectors to third-party systems and belong under `third-party/`.
+- **Soften `LockPathRedirected` into a warning, or offer a flag to follow the
+  link anyway.** It would be a flag to re-enable the defect, and the deployment
+  that would reach for it is the one that most needs to know (ADR 0082).
 - **Add a method to any aliased interface** — it breaks every downstream
   implementer at compile time with no deprecation window (ADR 0039).
 

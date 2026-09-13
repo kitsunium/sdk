@@ -94,6 +94,25 @@
 // 0777 for every writable directory there. What that check prevents is refused
 // by the open instead: a held lock file can be neither deleted nor renamed.
 //
+// # A lock path is a file, never a link to one
+//
+// [NewFileLocker] names its lock files hex(sha256(lockName)) + ".lock" inside
+// the directory you gave it. That makes the name unforgeable and, in the same
+// stroke, PREDICTABLE — and an indirection planted at a predictable name is
+// enough to move your lock somewhere you did not choose.
+//
+// So a symbolic link (Unix) or a reparse point (Windows) at the lock path is
+// REFUSED with [LockPathRedirected]. It is not followed, and it is not read as
+// a backend failure, because nothing failed: the substitution worked, and a
+// retry is the one response that would make it worse.
+//
+// This is a REFUSAL WHERE THERE USED TO BE SUCCESS. If your deployment
+// deliberately symlinks a lock file — onto a tmpfs, say — it now fails at
+// Acquire. The directory itself may still be a symlink; only the final
+// component is governed. There is no flag to restore the old behaviour: it
+// would be a flag to restore a lock that lands somewhere the locker did not
+// report (ADR 0082).
+//
 // # Scope
 //
 // One process, or one machine. There is deliberately no distributed backend
@@ -177,6 +196,13 @@ var (
 	// LockKeepaliveLost is the context CAUSE published by [Keepalive] when a
 	// renewal fails.
 	LockKeepaliveLost = svclock.LockKeepaliveLost
+
+	// LockPathRedirected is returned by [NewFileLocker] when the lock path is
+	// an indirection rather than a file — a symbolic link on Unix, a reparse
+	// point on Windows. The lock and its fencing ledger would land on a file
+	// chosen by whoever planted it, so two processes would hold "the same"
+	// lock over different inodes with nothing reported on either side.
+	LockPathRedirected = svclock.LockPathRedirected
 )
 
 // NewMemory returns a [Locker] whose leases live in this process and DO

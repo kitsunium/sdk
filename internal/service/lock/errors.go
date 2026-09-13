@@ -51,4 +51,24 @@ var (
 	LockKeepaliveLost = errs.Define(CodeLockKeepaliveLost, "LOCK_KEEPALIVE_LOST",
 		"The lease could not be renewed and is no longer held",
 		"service/lock: a background Extend failed, so the derived context was cancelled with this cause; the fields name the lock and the fencing token that was lost")
+
+	// LockPathRedirected is returned by the file locker when the lock path is
+	// an indirection rather than a file: a symbolic link on Unix, a reparse
+	// point on Windows.
+	//
+	// The substitution merges two locks into one or splits one into two, with
+	// no error on any path: the victim's lock lands on the attacker's target,
+	// the attacker's own lock lands on the real name, and both processes are
+	// told they hold it. The fencing token goes with it — the ledger the
+	// victim increments is the attacker's file, so the number handed to the
+	// protected resource is a number the attacker chose.
+	//
+	// The directory rule does not reach this. [LockDirectoryUnsafe] refuses a
+	// directory in which an existing entry can be UNLINKED by anyone; this
+	// attack creates an entry at a name nobody has taken yet, which the sticky
+	// bit permits and 0777|sticky — what /tmp is — explicitly accepts.
+	LockPathRedirected = errs.Define(CodeLockPathRedirected, "LOCK_PATH_REDIRECTED",
+		"The lock path is a link rather than a file",
+		"service/lock: a symbolic link or reparse point occupies the lock file's path, so the lock and its fencing ledger would land on a file chosen by whoever planted it; the fields name the path, the kind of indirection and what the kernel reported",
+		errs.WithExitCode(exitConfig))
 )

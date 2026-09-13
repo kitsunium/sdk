@@ -31,5 +31,13 @@ for three other reasons the package `CLAUDE.md` lists. Where neither primitive
 exists the constructor returns `proc.UnsupportedPlatform` rather than
 pretending (ADR 0018).
 
+The lock filename is `hex(sha256(name)) + ".lock"`, which is unforgeable and —
+in the same stroke — **predictable**. A symbolic link or reparse point planted
+there is refused with `LOCK_PATH_REDIRECTED`, never followed: `O_NOFOLLOW` on
+Unix, where the kernel fails the open, and `FILE_FLAG_OPEN_REPARSE_POINT` on
+Windows, where the open succeeds on the link and the handle is rejected on its
+attributes (ADR 0082). The directory rule does not cover this — it governs
+*unlinking* an entry that exists, and this plants one at a free name.
+
 Public facade: `pkg/v1/lock`. See `CLAUDE.md` for the measurements, the
 platform matrix, and what this domain does **not** guarantee.

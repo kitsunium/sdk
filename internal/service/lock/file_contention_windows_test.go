@@ -101,9 +101,14 @@ func unlockRange(t *testing.T, file *os.File, offset uint64, low, high uintptr) 
 }
 
 // openLockFile opens path the way the backend does and closes it with the test.
+//
+// FILE_FLAG_OPEN_REPARSE_POINT is part of "the way the backend does" since the
+// lock path stopped following an indirection planted at it: without it here,
+// this helper would keep opening through a link the production path refuses,
+// and the two would drift apart silently.
 func openLockFile(t *testing.T, path string) *os.File {
 	t.Helper()
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.FILE_FLAG_OPEN_REPARSE_POINT, 0o600)
 	if err != nil {
 		t.Fatalf("opening the lock file = %v", err)
 	}
