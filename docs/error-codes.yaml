@@ -2078,6 +2078,10 @@ codes:
     const: CodeElevationFailed
     hex: "0x00_03_42_07"
     package: internal/service/selfupdate
+  - code: "0.3.67.1"
+    const: CodeCacheUnwritable
+    hex: "0x00_03_43_01"
+    package: internal/service/entitlement
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

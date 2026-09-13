@@ -81,6 +81,7 @@ filegroup(
         "//internal/service/codec/yaml:audit_srcs",
         "//internal/service/config:audit_srcs",
         "//internal/service/crypto/jwk:audit_srcs",
+        "//internal/service/entitlement:audit_srcs",
         "//internal/service/events:audit_srcs",
         "//internal/service/health:audit_srcs",
         "//internal/service/i18n:audit_srcs",

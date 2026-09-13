@@ -156,7 +156,7 @@ func writeCachedBundle(dir string, raw []byte) error {
 	//: The cache root may not exist yet on a first run.
 	if mkErr := os.MkdirAll(dir, cacheDirMode); mkErr != nil {
 		//: Report what could not be created.
-		return fmt.Errorf("creating %s: %w", dir, mkErr)
+		return fmt.Errorf("%w: creating %s: %w", CacheUnwritable, dir, mkErr)
 	}
 
 	staged, stageErr := stageBundle(dir, raw)
@@ -175,7 +175,7 @@ func writeCachedBundle(dir string, raw []byte) error {
 	if renameErr := os.Rename(staged, installed); renameErr != nil {
 		removeBestEffort(staged)
 		//: Report the rename failure.
-		return fmt.Errorf("installing %s: %w", installed, renameErr)
+		return fmt.Errorf("%w: installing %s: %w", CacheUnwritable, installed, renameErr)
 	}
 	//: The cache now holds exactly the bytes that authenticated.
 	return nil
@@ -218,7 +218,7 @@ func stageBundle(dir string, raw []byte) (path string, err error) {
 	//: No descriptor, so nothing to clean up.
 	if createErr != nil {
 		//: Report what could not be staged.
-		return "", fmt.Errorf("staging in %s: %w", dir, createErr)
+		return "", fmt.Errorf("%w: staging in %s: %w", CacheUnwritable, dir, createErr)
 	}
 
 	//: Released at the point it was acquired — and its failure REPORTED, not
@@ -235,7 +235,7 @@ func stageBundle(dir string, raw []byte) (path string, err error) {
 			return
 		}
 		removeBestEffort(file.Name())
-		path, err = "", fmt.Errorf("closing %s: %w", file.Name(), closeErr)
+		path, err = "", fmt.Errorf("%w: closing %s: %w", CacheUnwritable, file.Name(), closeErr)
 	}()
 
 	staged := file.Name()
@@ -244,7 +244,7 @@ func stageBundle(dir string, raw []byte) (path string, err error) {
 	if _, writeErr := file.Write(raw); writeErr != nil {
 		removeBestEffort(staged)
 		//: Report the write failure.
-		return "", fmt.Errorf("writing %s: %w", staged, writeErr)
+		return "", fmt.Errorf("%w: writing %s: %w", CacheUnwritable, staged, writeErr)
 	}
 	//: A complete bundle, at a name only this call knows.
 	return staged, nil
