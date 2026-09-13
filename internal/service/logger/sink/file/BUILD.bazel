@@ -8,8 +8,8 @@ go_library(
         "codes.go",
         "errors.go",
         "file.go",
-        "open_flags_linux.go",
         "open_flags_other.go",
+        "open_flags_unix.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/file",
     visibility = [

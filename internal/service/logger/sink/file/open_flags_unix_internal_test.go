@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package file — the proof that the OPEN refuses an indirection, and not only
-// the os.Lstat that ran three lines before it.
+// the os.Lstat that ran a moment before it.
 //
 // TestNew_RejectsSymlink plants the link and then calls New, so refuseSymlink
 // answers first and the flag word is never asked anything: that case passes
