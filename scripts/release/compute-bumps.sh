@@ -41,33 +41,21 @@ EOF
   esac
 done
 
-# Range to diff for "what changed since the last release".
-#
-# cut-tags.sh publishes each release on a DETACHED commit that is a *child* of
-# the main commit it was cut from (ADR 0009 — the dev branch is never touched).
-# That release commit is therefore NOT reachable from HEAD, so `git describe
-# --tags` cannot see the release tags and silently falls back to root..HEAD —
-# which makes compute-bumps emit `pkg` on EVERY main build and cut a spurious
-# patch each time. Instead, baseline on the latest pkg tag's FIRST PARENT (the
-# main commit that release was cut from): the range then captures only the
-# commits added to main since that release (empty ⇒ no bump). Falls back to the
-# root commit on a bootstrap repo that has no pkg tag yet.
+# Range to diff for "what changed since the last release". The baseline comes
+# from release_base() in the shared lib rather than from `git describe`, for the
+# reason spelled out there (the release commit is detached, so HEAD cannot
+# describe it) — and it is shared with cut-tags.sh so the half that decides
+# WHETHER to release and the half that decides HOW BIG read the same commits
+# (ADR 0085).
 if [ -z "$RANGE" ]; then
-  last_pkg="$(latest_pkg_tag 2>/dev/null || true)"
-  last_base=""
-  if [ -n "$last_pkg" ]; then
-    last_base="$(git rev-parse -q --verify "${last_pkg}^1^{commit}" 2>/dev/null || true)"
-  fi
-  if [ -n "$last_base" ]; then
-    RANGE="${last_base}..HEAD"
-  elif [ "$(git rev-list --count HEAD)" -eq 1 ]; then
-    # Single-commit repo: root == HEAD, so root..HEAD is empty and the
-    # initial commit's paths would be invisible. Diff against the empty
-    # tree so the first release sees every added path.
-    RANGE="$(git hash-object -t tree /dev/null)..HEAD"
+  base="$(release_base)"
+  if [ -n "$base" ]; then
+    RANGE="${base}..HEAD"
   else
-    root="$(git rev-list --max-parents=0 HEAD | head -n1)"
-    RANGE="${root}..HEAD"
+    # No baseline: root == HEAD, so root..HEAD is empty and the initial commit's
+    # paths would be invisible. Diff against the empty tree instead so the first
+    # release sees every added path.
+    RANGE="$(git hash-object -t tree /dev/null)..HEAD"
   fi
 fi
 

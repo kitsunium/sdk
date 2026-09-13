@@ -10,7 +10,7 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate) and `sdk-release.yml` 
 | File | Trigger | Description |
 |---|---|---|
 | `bazel-ci.yml` | push to `main`, PRs | Primary SDK CI — drift check + build + test + coverage via Bazel 9 |
-| `sdk-release.yml` | `workflow_run` after `SDK CI (Bazel)` success on `main`, plus manual `workflow_dispatch` | Impact-driven patch tags `pkg/<major>/vX.Y.Z` (see ADR 0007). Reads majors from `scripts/release/compute-bumps.sh` and pushes via `scripts/release/cut-tags.sh`. First release is held unless dispatched manually (`--allow-bootstrap`, ADR 0009). |
+| `sdk-release.yml` | `workflow_run` after `SDK CI (Bazel)` success on `main`, plus manual `workflow_dispatch` | Impact-driven patch tags `pkg/vX.Y.Z` (ADR 0007; the `pkg/<major>/` prefix went away with the bare module path — ADR 0017). Reads majors from `scripts/release/compute-bumps.sh` and pushes via `scripts/release/cut-tags.sh`. First release is held unless dispatched manually (`--allow-bootstrap`, ADR 0009). The `Release-bump` trailer that sizes a minor is read over the whole range since the last release, not from the checked-out HEAD — a cancelled CI run yields no release, so the trailer-bearing commit is often not HEAD by the time one fires (ADR 0085). |
 | `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). |
 | `docker-images.yml` | weekly + push to `.devcontainer/images/**` | Template-inherited; two-tier base+main image build |
 | `publish-features.yml` | push to `.devcontainer/features/**` | Template-inherited; publishes OCI feature artifacts |

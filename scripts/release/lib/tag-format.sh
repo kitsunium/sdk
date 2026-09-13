@@ -108,3 +108,45 @@ latest_pkg_tag() {
     version_sort |
     tail -n1
 }
+
+# The commit the last release was cut FROM — the baseline that BOTH halves of a
+# release measure against. Echoes nothing when there is no baseline at all (a
+# bootstrap repo whose only commit is HEAD); each caller renders that in its own
+# terms, because "everything" is an empty tree to `git diff` and the whole
+# history to `git log`.
+#
+# Why the tag's FIRST PARENT rather than the tag itself: cut-tags.sh publishes
+# every release on a DETACHED commit that is a child of the main commit it was
+# cut from (ADR 0009 — the dev branch is never touched). That release commit is
+# not reachable from HEAD, so `git describe --tags` cannot see it and baselining
+# on the tag would compare HEAD against something outside its own history.
+#
+# Why this lives in the shared lib and not in compute-bumps.sh, where it was
+# born: the two halves of a release have to agree on it. compute-bumps.sh
+# decides WHETHER to release by diffing this baseline against HEAD; cut-tags.sh
+# decides HOW BIG by reading the maintainer's Release-bump trailer. While
+# cut-tags.sh read HEAD alone the two could disagree — and when they did, the
+# bump fell silently to patch (ADR 0085). One function is what keeps them
+# symmetric; two copies would drift the same way again.
+#
+# No JS counterpart in docs/site/scripts/lib/tag-format.mjs: that file mirrors
+# the tag SHAPE, and the docs sync reads published GitHub releases, never the
+# commit graph.
+release_base() {
+  local last_pkg="" last_base=""
+  last_pkg="$(latest_pkg_tag 2>/dev/null || true)"
+  if [ -n "$last_pkg" ]; then
+    last_base="$(git rev-parse -q --verify "${last_pkg}^1^{commit}" 2>/dev/null || true)"
+    if [ -n "$last_base" ]; then
+      echo "$last_base"
+      return 0
+    fi
+  fi
+  # No usable release tag. A repo with 0 or 1 commits has no "before" to point
+  # at — root..HEAD would be empty and hide the initial commit entirely — so
+  # echo nothing and let the caller decide what covering everything means.
+  if [ "$(git rev-list --count HEAD 2>/dev/null || echo 0)" -le 1 ]; then
+    return 0
+  fi
+  git rev-list --max-parents=0 HEAD | head -n1
+}
