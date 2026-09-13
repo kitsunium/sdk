@@ -571,3 +571,85 @@ func Test_rotatingSink_Flush_syncFails(t *testing.T) {
 		})
 	}
 }
+
+// fieldValue returns the string value of err's first field named key, and
+// whether any field carried that key at all. The distinction matters: "the
+// field is absent" and "the field is empty" are different claims and the
+// ordinary-failure row asserts the first one.
+func fieldValue(t *testing.T, err error, key string) (value string, present bool) {
+	t.Helper()
+	var typed *errs.Error
+	//: every refusal in this package is an *errs.Error; anything else means
+	//: the wrap was lost and the fields with it.
+	if !errors.As(err, &typed) {
+		t.Fatalf("err %v is not an *errs.Error", err)
+	}
+	for _, f := range typed.Fields() {
+		//: first match wins; the package never sets a key twice.
+		if f.Key() == key {
+			return f.StringValue(), true
+		}
+	}
+	return "", false
+}
+
+// TestBothSymlinkRefusalsNameTheIndirection pins the field that makes a planted
+// link legible. One sentinel covers every open failure here, so without it a
+// full disk and someone redirecting the log path produce the same line in the
+// operator's log. The policy refusal (refuseSymlink, before the open) and the
+// kernel refusal (explainOpenFailure, after it) must agree on the spelling —
+// a consumer filtering on kind=symlink that saw only one of the two would miss
+// the common case or the attack case depending on which one it got.
+func TestBothSymlinkRefusalsNameTheIndirection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	link := filepath.Join(dir, "planted.log")
+	regular := filepath.Join(dir, "ordinary.log")
+	//: the two refusals need a real link and a real non-link to look at.
+	if lerr := os.Symlink(filepath.Join(dir, "elsewhere"), link); lerr != nil {
+		t.Fatalf("plant symlink: %v", lerr)
+	}
+	if werr := os.WriteFile(regular, []byte("x"), defaultFilePerm); werr != nil {
+		t.Fatalf("seed regular: %v", werr)
+	}
+	type tc struct {
+		name string
+		path string
+		// refuse is the refusal under test, already bound to its path.
+		refuse func(path string) error
+		// wantKind says whether kind=symlink must be present.
+		wantKind bool
+	}
+	//: explainOpenFailure's cause is a stdlib sentinel rather than a fresh
+	//: error so the row asserts the wrap, not an error value it invented.
+	fromKernel := func(path string) error { return explainOpenFailure(path, os.ErrPermission) }
+	tests := []tc{
+		{"the check before the open names it", link, refuseSymlink, true},
+		{"the kernel refusal after the open names it", link, fromKernel, true},
+		{"an ordinary open failure does not", regular, fromKernel, false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		err := c.refuse(c.path)
+		//: every arm is the same sentinel — only the fields separate them.
+		if !errs.HasCode(err, CodeRotFileOpenFailed) {
+			t.Fatalf("%s: err=%v want open-failed", c.name, err)
+		}
+		//: the path is always named, so an operator can find the file.
+		if got, ok := fieldValue(t, err, "path"); !ok || got != c.path {
+			t.Errorf("%s: path field = %q (present=%v), want %q", c.name, got, ok, c.path)
+		}
+		got, ok := fieldValue(t, err, "kind")
+		//: absent is the assertion on the ordinary arm, not empty-string.
+		if ok != c.wantKind || (c.wantKind && got != kindSymlink) {
+			t.Errorf("%s: kind field = %q (present=%v), want present=%v value=%q",
+				c.name, got, ok, c.wantKind, kindSymlink)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
