@@ -158,7 +158,7 @@ Carried forward unchanged from ADR 0078, none of them addressed here:
   sentinels are `errs.Define`-typed and the wrapping uses `%w`, so `errors.Is`
   and `errs.HasCode` both work through it; the conversion is a separate change
   that touches every refusal path and deserves its own diff.~~ **CLOSED.** The
-  separate change is [PR #195](https://github.com/kitsunium/sdk/pull/195):
+  separate change is [PR #200](https://github.com/kitsunium/sdk/pull/200):
   **112 sites in `internal/service/entitlement` and 25 in
   `third-party/entitlement`, both now zero.** Three things it established are
   worth carrying here rather than leaving in a merged diff.
