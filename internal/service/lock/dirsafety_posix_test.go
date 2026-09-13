@@ -50,8 +50,9 @@ func makeDir(t *testing.T, mode fs.FileMode) string {
 // where only an entry's owner may unlink it.
 //
 // The table exists because this rule is about to be split by build tag. A
-// split whose only guard is the 0777 case can preserve "refuses the obvious
-// one" while dropping "accepts the deliberate ones", and nothing would say so.
+// split guarded only by the world-writable case can preserve "refuses the
+// obvious one" while dropping "accepts the deliberate ones", and nothing would
+// say so.
 func TestTheDirectoryRuleIsOtherWriteAndNotSticky(t *testing.T) {
 	t.Parallel()
 	type tc struct {
