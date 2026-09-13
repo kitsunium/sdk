@@ -39,16 +39,14 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // instead of as prose.
 const CodeCacheUnwritable errs.Code = 0x00_03_43_01 // 0.3.67.1
 
-var (
-	// CacheUnwritable is returned when the offline bundle cannot be replaced.
-	//
-	// It is deliberately NOT a refusal, and nothing upstream treats it as
-	// one: the verification that produced these bytes has already succeeded,
-	// and a cache nobody can write costs the offline fallback and nothing
-	// else. rememberRoster logs it and carries on, which is the whole of its
-	// reachability — pinned by
-	// Test_rememberRoster_keepsWhatItCanAndSurvivesWhatItCannot.
-	CacheUnwritable = errs.Define(CodeCacheUnwritable, "CACHE_UNWRITABLE",
-		"the offline entitlement cache could not be written",
-		"service/entitlement: staging or installing the cached bundle failed; the fields name the step and the path")
-)
+// CacheUnwritable is returned when the offline bundle cannot be replaced.
+//
+// It is deliberately NOT a refusal, and nothing upstream treats it as
+// one: the verification that produced these bytes has already succeeded,
+// and a cache nobody can write costs the offline fallback and nothing
+// else. rememberRoster logs it and carries on, which is the whole of its
+// reachability — pinned by
+// Test_rememberRoster_keepsWhatItCanAndSurvivesWhatItCannot.
+var CacheUnwritable = errs.Define(CodeCacheUnwritable, "CACHE_UNWRITABLE",
+	"the offline entitlement cache could not be written",
+	"service/entitlement: staging or installing the cached bundle failed; the fields name the step and the path")
