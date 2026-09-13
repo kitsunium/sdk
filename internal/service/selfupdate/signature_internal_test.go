@@ -248,14 +248,15 @@ func TestService_verifyArchive(t *testing.T) {
 
 			err := svc.verifyArchive("v2.0.0", fixture.archive)
 
-			//: Refusal rows: the sentinel must classify, and the message must
-			//: name the tag so an operator knows which install was refused.
+			//: Refusal rows: the sentinel must classify, and the error must
+			//: still name the tag so an operator knows which install was
+			//: refused — as a field, since the sentence is wire-safe.
 			if tc.wantErrIs != nil {
 				if !errors.Is(err, tc.wantErrIs) {
 					t.Fatalf("verifyArchive() error = %v, want errors.Is %v", err, tc.wantErrIs)
 				}
-				if !strings.Contains(err.Error(), "v2.0.0") {
-					t.Errorf("verifyArchive() error = %q, want it to name the tag", err.Error())
+				if !strings.Contains(diagnose(err), "tag=v2.0.0") {
+					t.Errorf("diagnose(verifyArchive() error) = %q, want it to name the tag", diagnose(err))
 				}
 				return
 			}
@@ -493,12 +494,12 @@ func TestService_fetchSignature(t *testing.T) {
 			body:      []byte(strings.Repeat("A", int(maxSignatureBytes)+1)),
 			wantErrIs: coreupd.SignatureInvalid,
 			//: The refusal must be about the size, not a decode failure.
-			wantErrContains: "larger than",
+			wantErrContains: "condition=oversized_asset",
 		},
 		{
 			name:            "transport error wraps context",
 			status:          0,
-			wantErrContains: "downloading " + signatureAssetName,
+			wantErrContains: "stage=get asset=" + signatureAssetName,
 		},
 	}
 
@@ -535,8 +536,8 @@ func TestService_fetchSignature(t *testing.T) {
 				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
 					t.Errorf("fetchSignature() error = %v, want errors.Is %v", err, tc.wantErrIs)
 				}
-				if !strings.Contains(err.Error(), tc.wantErrContains) {
-					t.Errorf("fetchSignature() error = %q, want substring %q", err.Error(), tc.wantErrContains)
+				if !strings.Contains(diagnose(err), tc.wantErrContains) {
+					t.Errorf("diagnose(fetchSignature() error) = %q, want substring %q", diagnose(err), tc.wantErrContains)
 				}
 				return
 			}
@@ -750,9 +751,10 @@ func TestService_canAuthenticate(t *testing.T) {
 			if !errors.Is(err, coreupd.NoVendorKey) {
 				t.Errorf("canAuthenticate() error = %v, want errors.Is coreupd.NoVendorKey", err)
 			}
-			//: ...and must say WHICH install was refused.
-			if !strings.Contains(err.Error(), "v9.9.9-rc.1") {
-				t.Errorf("canAuthenticate() error = %q, want it to name the tag", err.Error())
+			//: ...and must say WHICH install was refused, in the half that is
+			//: allowed to name a particular.
+			if !strings.Contains(diagnose(err), "tag=v9.9.9-rc.1") {
+				t.Errorf("diagnose(canAuthenticate() error) = %q, want it to name the tag", diagnose(err))
 			}
 		})
 	}

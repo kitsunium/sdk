@@ -96,8 +96,23 @@ func (s SourceValue) ExplainUpgradeRefusal(out io.Writer) {
 // given. For a network blip that is merely poor; for an authenticity refusal
 // it hides the one signal that must not be missed, and invites the user to
 // go and install the bad release by hand.
+//
+// It prints THREE things, in descending order of how far they may travel: the
+// error's public sentence, which is wire-safe and says what happened; its
+// diagnostic half — fields and the cause's own words — which says where and
+// why and is for this terminal and the log, never for a response body; and the
+// advice, which is what to do about it.
 func (s SourceValue) ExplainUpgradeFailure(out io.Writer, action string, err error) {
 	fmt.Fprintf(out, "%s: %v\n", action, err)
+	//: The public sentence names no path, no asset, no tag and not one word
+	//: from the operating system — by design, because it is also what crosses
+	//: a wire. The person who typed the command is on the other side of no
+	//: wire at all, and "the update could not be staged" without "no space
+	//: left on device" is a sentence they can do nothing with. So the
+	//: diagnostic half is printed here and only here.
+	if detail := diagnose(err); detail != "" {
+		fmt.Fprintf(out, "  %s\n", detail)
+	}
 	//: Dispatch based on the variant to apply the correct logic.
 	switch {
 	//: A supply-chain signal. There is no retry that fixes this and no safe

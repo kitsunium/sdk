@@ -343,7 +343,7 @@ func TestUpdaterService_getLatestVersion(t *testing.T) {
 			responseStatus: http.StatusOK,
 			wantVersion:    "",
 			wantErr:        true,
-			wantErrContain: "parsing release info",
+			wantErrContain: "query=latest_release",
 		},
 		{
 			name:           "empty tag name",
@@ -399,7 +399,7 @@ func TestUpdaterService_getLatestVersion(t *testing.T) {
 				// Expect error
 				if err == nil {
 					t.Errorf("getLatestVersion() error = nil, wantErr %v", tt.wantErr)
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("getLatestVersion() error = %v, want error containing %q", err, tt.wantErrContain)
 				}
 			} else {
@@ -518,7 +518,7 @@ func TestUpdaterService_downloadAndReplace(t *testing.T) {
 			if err == nil {
 				t.Fatalf("downloadAndReplace() expected error for HTTP %d", tt.responseStatus)
 			}
-			if !strings.Contains(err.Error(), wantErrContain) {
+			if !strings.Contains(whole(err), wantErrContain) {
 				t.Errorf("downloadAndReplace() error = %v, want error containing %q", err, wantErrContain)
 			}
 		})
@@ -558,7 +558,7 @@ func TestUpdaterService_resolveExecutablePath(t *testing.T) {
 			},
 			wantPath:       "",
 			wantErr:        true,
-			wantErrContain: "getting executable path",
+			wantErrContain: "step=executable",
 		},
 		{
 			name: "symlink resolution error",
@@ -568,9 +568,12 @@ func TestUpdaterService_resolveExecutablePath(t *testing.T) {
 			evalFunc: func(path string) (string, error) {
 				return "", errors.New("broken symlink")
 			},
-			wantPath:       "",
-			wantErr:        true,
-			wantErrContain: "resolving symlinks",
+			wantPath: "",
+			wantErr:  true,
+			//: The path must be the one that FAILED to resolve. Reading it
+			//: back from the variable EvalSymlinks assigns into records the
+			//: "" it returns on failure instead — a field naming nothing.
+			wantErrContain: "step=eval_symlinks path=/usr/bin/ktn-linter",
 		},
 		{
 			name: "symlink resolved to different path",
@@ -604,7 +607,7 @@ func TestUpdaterService_resolveExecutablePath(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("resolveExecutablePath() error = nil, wantErr %v", tt.wantErr)
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("resolveExecutablePath() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 			} else {
@@ -651,7 +654,7 @@ func TestUpdaterService_writeAndReplaceBinary(t *testing.T) {
 			execPath:          "/usr/bin/ktn-linter",
 			createTempReturns: errors.New("permission denied"),
 			wantErr:           true,
-			wantErrContain:    "creating temp file",
+			wantErrContain:    "step=create_temp",
 		},
 		{
 			name:              "copy error",
@@ -662,7 +665,7 @@ func TestUpdaterService_writeAndReplaceBinary(t *testing.T) {
 				return 0, errors.New("copy failed")
 			},
 			wantErr:        true,
-			wantErrContain: "writing temp file",
+			wantErrContain: "step=write_temp",
 		},
 		{
 			name:              "chmod error",
@@ -673,7 +676,7 @@ func TestUpdaterService_writeAndReplaceBinary(t *testing.T) {
 				return errors.New("chmod failed")
 			},
 			wantErr:        true,
-			wantErrContain: "setting permissions",
+			wantErrContain: "step=chmod_temp",
 		},
 		{
 			name:              "rename error",
@@ -684,7 +687,7 @@ func TestUpdaterService_writeAndReplaceBinary(t *testing.T) {
 				return errors.New("rename failed")
 			},
 			wantErr:        true,
-			wantErrContain: "replacing binary",
+			wantErrContain: "step=rename",
 		},
 	}
 
@@ -734,7 +737,7 @@ func TestUpdaterService_writeAndReplaceBinary(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("writeAndReplaceBinary() error = nil, wantErr %v", tt.wantErr)
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("writeAndReplaceBinary() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 			} else {
@@ -744,7 +747,7 @@ func TestUpdaterService_writeAndReplaceBinary(t *testing.T) {
 			}
 
 			// For error cases (except temp creation), verify cleanup was called
-			if tt.wantErr && tt.useRealCreateTemp && !strings.Contains(tt.wantErrContain, "creating temp file") {
+			if tt.wantErr && tt.useRealCreateTemp && !strings.Contains(tt.wantErrContain, "step=create_temp") {
 				if !cleanedUp {
 					t.Error("expected cleanup to be called on error")
 				}
@@ -827,7 +830,7 @@ func TestUpdaterService_writeAndReplaceBinary_StagingFallback(t *testing.T) {
 				if err == nil {
 					t.Fatalf("writeAndReplaceBinary() error = nil, want error containing %q", tt.wantErrContain)
 				}
-				if !strings.Contains(err.Error(), tt.wantErrContain) {
+				if !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("writeAndReplaceBinary() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 			} else if err != nil {
@@ -864,7 +867,7 @@ func TestUpdaterService_writeTempFileContent(t *testing.T) {
 				return 0, errors.New("copy failed")
 			},
 			wantErr:        true,
-			wantErrContain: "writing temp file",
+			wantErrContain: "step=write_temp",
 		},
 		{
 			name:    "reader error",
@@ -873,7 +876,7 @@ func TestUpdaterService_writeTempFileContent(t *testing.T) {
 				return 0, errors.New("read error")
 			},
 			wantErr:        true,
-			wantErrContain: "writing temp file",
+			wantErrContain: "step=write_temp",
 		},
 	}
 
@@ -891,7 +894,7 @@ func TestUpdaterService_writeTempFileContent(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("writeTempFileContent() error = nil, wantErr %v", tt.wantErr)
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("writeTempFileContent() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 			} else {
@@ -931,7 +934,7 @@ func TestUpdaterService_finalizeReplacement(t *testing.T) {
 				return errors.New("chmod failed")
 			},
 			wantErr:        true,
-			wantErrContain: "setting permissions",
+			wantErrContain: "step=chmod_temp",
 		},
 		{
 			name:     "rename error",
@@ -941,7 +944,7 @@ func TestUpdaterService_finalizeReplacement(t *testing.T) {
 				return errors.New("rename failed")
 			},
 			wantErr:        true,
-			wantErrContain: "replacing binary",
+			wantErrContain: "step=rename",
 		},
 	}
 
@@ -972,7 +975,7 @@ func TestUpdaterService_finalizeReplacement(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("finalizeReplacement() error = nil, wantErr %v", tt.wantErr)
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("finalizeReplacement() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 				// Verify cleanup was called on error
@@ -1052,7 +1055,7 @@ func TestUpdaterService_finalizeReplacement_Elevate(t *testing.T) {
 				if err == nil {
 					t.Fatalf("finalizeReplacement() error = nil, want error containing %q", tt.wantErrContain)
 				}
-				if !strings.Contains(err.Error(), tt.wantErrContain) {
+				if !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("finalizeReplacement() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 			} else if err != nil {
@@ -1115,7 +1118,7 @@ func TestUpdaterService_CheckForUpdate_withMock(t *testing.T) {
 			responseStatus: 0, // Will cause connection error
 			wantAvailable:  false,
 			wantErr:        true,
-			wantErrContain: "fetching release info",
+			wantErrContain: "query=latest_release",
 		},
 	}
 
@@ -1163,7 +1166,7 @@ func TestUpdaterService_CheckForUpdate_withMock(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("CheckForUpdate() error = nil, wantErr %v", tt.wantErr)
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("CheckForUpdate() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 			} else {
@@ -1240,7 +1243,7 @@ func TestUpdaterService_Upgrade_withMock(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Upgrade() error = nil, wantErr %v", tt.wantErr)
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("Upgrade() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 			} else if err != nil {
@@ -1344,7 +1347,7 @@ func TestUpdaterService_downloadAndReplace_scenarios(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Error("downloadAndReplace() error = nil, want error")
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("downloadAndReplace() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 				return
@@ -1436,7 +1439,7 @@ func TestUpdaterService_downloadBinary(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("downloadBinary() error = nil, wantErr %v", tt.wantErr)
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("downloadBinary() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 			} else {
@@ -1463,7 +1466,7 @@ func TestUpdaterService_downloadBinary(t *testing.T) {
 func TestUpdaterService_downloadBinary_httpError(t *testing.T) {
 	t.Parallel()
 
-	const wantErrContain = "downloading binary"
+	const wantErrContain = "stage=get"
 
 	tests := []struct {
 		name      string
@@ -1493,7 +1496,7 @@ func TestUpdaterService_downloadBinary_httpError(t *testing.T) {
 			if err == nil {
 				t.Fatal("downloadBinary() error = nil, want error")
 			}
-			if !strings.Contains(err.Error(), wantErrContain) {
+			if !strings.Contains(whole(err), wantErrContain) {
 				t.Errorf("downloadBinary() error = %v, want containing %q", err, wantErrContain)
 			}
 		})
@@ -1816,7 +1819,7 @@ func TestUpdaterService_Upgrade_scenarios(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Upgrade() error = nil, want error")
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+				} else if tt.wantErrContain != "" && !strings.Contains(whole(err), tt.wantErrContain) {
 					t.Errorf("Upgrade() error = %v, want containing %q", err, tt.wantErrContain)
 				}
 				return
@@ -1874,7 +1877,7 @@ func TestUpdaterService_downloadAndReplace_executablePathError(t *testing.T) {
 					},
 				}
 			},
-			wantErrContain: "getting executable path",
+			wantErrContain: "step=executable",
 		},
 		{
 			name: "permission denied",
@@ -1885,7 +1888,7 @@ func TestUpdaterService_downloadAndReplace_executablePathError(t *testing.T) {
 					},
 				}
 			},
-			wantErrContain: "getting executable path",
+			wantErrContain: "step=executable",
 		},
 	}
 
@@ -1928,7 +1931,7 @@ func TestUpdaterService_downloadAndReplace_executablePathError(t *testing.T) {
 				t.Fatal("downloadAndReplace() error = nil, want error")
 			}
 			// Check error contains expected string
-			if !strings.Contains(err.Error(), tt.wantErrContain) {
+			if !strings.Contains(whole(err), tt.wantErrContain) {
 				t.Errorf("downloadAndReplace() error = %v, want containing %q", err, tt.wantErrContain)
 			}
 		})
@@ -2702,7 +2705,7 @@ func Test_openFromTarGz(t *testing.T) {
 			name:      "non-gzip body fails fast",
 			body:      func(t *testing.T) []byte { return []byte("not gzipped") },
 			wantErr:   true,
-			errString: "opening gzip",
+			errString: "stage=open_gzip",
 		},
 	}
 
@@ -2720,7 +2723,7 @@ func Test_openFromTarGz(t *testing.T) {
 				if tc.errMatch != nil && !errors.Is(err, tc.errMatch) {
 					t.Errorf("error = %v, want errors.Is %v", err, tc.errMatch)
 				}
-				if tc.errString != "" && !strings.Contains(err.Error(), tc.errString) {
+				if tc.errString != "" && !strings.Contains(whole(err), tc.errString) {
 					t.Errorf("error = %v, want containing %q", err, tc.errString)
 				}
 				return
@@ -2783,7 +2786,7 @@ func Test_openFromZip(t *testing.T) {
 			name:      "non-zip body fails fast",
 			body:      func(t *testing.T) []byte { return []byte("not a zip") },
 			wantErr:   true,
-			errString: "opening zip",
+			errString: "stage=open_zip",
 		},
 	}
 
@@ -2801,7 +2804,7 @@ func Test_openFromZip(t *testing.T) {
 				if tc.errMatch != nil && !errors.Is(err, tc.errMatch) {
 					t.Errorf("error = %v, want errors.Is %v", err, tc.errMatch)
 				}
-				if tc.errString != "" && !strings.Contains(err.Error(), tc.errString) {
+				if tc.errString != "" && !strings.Contains(whole(err), tc.errString) {
 					t.Errorf("error = %v, want containing %q", err, tc.errString)
 				}
 				return

@@ -22,6 +22,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	coreupd "github.com/kitsunium/sdk/internal/core/selfupdate"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Service constants for GitHub API, versioning, and file operations.
@@ -219,7 +220,7 @@ func (u *Service) getLatestVersion() (latest string, getErr error) {
 	if err != nil {
 		//: Carry the sentinel, like every other transport failure on this
 		//: path: a caller retries a reset connection and gives up on a 404.
-		return "", fmt.Errorf("%w: fetching release info: %w", coreupd.DownloadFailed, err)
+		return "", classify(coreupd.DownloadFailed, err, errs.String("query", "latest_release"))
 	}
 	defer func() {
 		//: Prevent resource leak from unclosed response.
@@ -231,16 +232,19 @@ func (u *Service) getLatestVersion() (latest string, getErr error) {
 	//: Fail fast on HTTP errors before parsing.
 	if resp.StatusCode != http.StatusOK {
 		//: Return error indicating API request failure.
-		return "", fmt.Errorf("%w: %d", coreupd.UnexpectedStatus, resp.StatusCode)
+		return "", refuse(coreupd.UnexpectedStatus,
+			errs.String("query", "latest_release"),
+			errs.Int("status", resp.StatusCode))
 	}
 
 	// Parse JSON response under a read cap (an unbounded json.Decoder let
 	// the endpoint choose how much memory this process spends).
 	var release releaseInfo
 	//: Decode response body into release structure.
-	if err := decodeJSONBody(resp.Body, maxAPIBodyBytes, &release); err != nil {
-		//: Wrap error to indicate parsing failure.
-		return "", fmt.Errorf("parsing release info: %w", err)
+	if err := decodeJSONBody(resp.Body, maxAPIBodyBytes, &release,
+		errs.String("query", "latest_release")); err != nil {
+		//: Bare bubble — decodeJSONBody classified it and carries the query.
+		return "", err
 	}
 
 	//: Return extracted version tag to caller.
@@ -336,8 +340,10 @@ func (u *Service) downloadAndReplace(version string) error {
 	binReader, cleanup, err := u.openInnerBinary(bytes.NewReader(archive))
 	//: Extract pipeline failure — wrap to identify the phase in operator logs.
 	if err != nil {
-		//: Wrap to identify the extraction phase in the operator log.
-		return fmt.Errorf("extracting binary: %w", err)
+		//: Origin wins — openInnerBinary already classified what went wrong,
+		//: and the sentinel named here is only the fallback that keeps this
+		//: total if a future opener ever returns an untyped error.
+		return classify(ArchiveUnreadable, err, errs.String("stage", "extract"))
 	}
 	defer cleanup()
 
@@ -364,7 +370,7 @@ func (u *Service) openInnerBinary(body io.Reader) (binary io.Reader, cleanup fun
 	//: Default — defence-in-depth for an unexpected suffix.
 	default:
 		//: Defence-in-depth — getArchiveSuffix only emits tar.gz / zip today.
-		return nil, func() {}, fmt.Errorf("%w: %s", coreupd.UnknownArchive, suffix)
+		return nil, func() {}, refuse(coreupd.UnknownArchive, errs.String("format", suffix))
 	}
 }
 
@@ -376,7 +382,9 @@ func openFromTarGz(body io.Reader, want string) (binary io.Reader, cleanup func(
 	//: Malformed gzip stream is a hard failure — no partial recovery.
 	if err != nil {
 		//: Return a no-op cleanup so the caller's `defer cleanup()` is safe.
-		return nil, func() {}, fmt.Errorf("opening gzip: %w", err)
+		return nil, func() {}, classify(ArchiveUnreadable, err,
+			errs.String("stage", "open_gzip"),
+			errs.String("format", "tar.gz"))
 	}
 	tarReader := tar.NewReader(gz)
 	//: Walk every entry until we find a regular file with the wanted basename.
@@ -387,14 +395,18 @@ func openFromTarGz(body io.Reader, want string) (binary io.Reader, cleanup func(
 			//: Walked the full archive without finding the inner binary.
 			closeBestEffort(gz, "gzip reader")
 			//: Raise the sentinel so callers can `errors.Is` for the missing-entry case.
-			return nil, func() {}, fmt.Errorf("%w: %s", coreupd.BinaryNotInArchive, want)
+			return nil, func() {}, refuse(coreupd.BinaryNotInArchive,
+				errs.String("want", want),
+				errs.String("format", "tar.gz"))
 		}
 		//: Any other error indicates a corrupt tar stream — abort.
 		if err != nil {
 			//: Corrupt tar stream — abort.
 			closeBestEffort(gz, "gzip reader")
-			//: Wrap with phase context (`reading tar`) so operators can identify the stage.
-			return nil, func() {}, fmt.Errorf("reading tar: %w", err)
+			//: Wrap with phase context so operators can identify the stage.
+			return nil, func() {}, classify(ArchiveUnreadable, err,
+				errs.String("stage", "read_tar"),
+				errs.String("format", "tar.gz"))
 		}
 		//: Match on basename so nested layouts (e.g. ./tool) still resolve.
 		if hdr.Typeflag != tar.TypeReg || filepath.Base(hdr.Name) != want {
@@ -414,13 +426,17 @@ func openFromZip(body io.Reader, want string) (binary io.Reader, cleanup func(),
 	//: Stream read failure — propagate verbatim.
 	if err != nil {
 		//: No-op cleanup keeps the caller's defer safe.
-		return nil, func() {}, fmt.Errorf("buffering zip body: %w", err)
+		return nil, func() {}, classify(ArchiveUnreadable, err,
+			errs.String("stage", "buffer_zip"),
+			errs.String("format", "zip"))
 	}
 	zr, err := zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
 	//: Malformed zip — abort.
 	if err != nil {
 		//: No-op cleanup keeps the caller's defer safe.
-		return nil, func() {}, fmt.Errorf("opening zip: %w", err)
+		return nil, func() {}, classify(ArchiveUnreadable, err,
+			errs.String("stage", "open_zip"),
+			errs.String("format", "zip"))
 	}
 	//: Walk every entry until we find one whose basename matches `want`.
 	for _, f := range zr.File {
@@ -440,15 +456,20 @@ func openFromZip(body io.Reader, want string) (binary io.Reader, cleanup func(),
 		rc, err := f.Open()
 		//: Opening the entry can fail on corrupt central directory.
 		if err != nil {
-			//: Wrap with entry name so the operator can identify the bad file.
-			return nil, func() {}, fmt.Errorf("opening zip entry %s: %w", f.Name, err)
+			//: Carry the entry name so the operator can identify the bad file.
+			return nil, func() {}, classify(ArchiveUnreadable, err,
+				errs.String("stage", "open_zip_entry"),
+				errs.String("format", "zip"),
+				errs.String("entry", f.Name))
 		}
 		//: Cleanup closes the entry reader; ignore the close error (best-effort
 		//: since we've already pumped its bytes to the binary temp file).
 		return rc, func() { closeBestEffort(rc, "zip entry") }, nil
 	}
 	//: Walked the whole archive — no matching entry, raise the sentinel.
-	return nil, func() {}, fmt.Errorf("%w: %s", coreupd.BinaryNotInArchive, want)
+	return nil, func() {}, refuse(coreupd.BinaryNotInArchive,
+		errs.String("want", want),
+		errs.String("format", "zip"))
 }
 
 // closeBestEffort releases an io.Closer without failing the caller, logging
@@ -474,7 +495,9 @@ func (u *Service) downloadBinary(version string) (resp *http.Response, downloadE
 	if err != nil {
 		//: Same sentinel the non-200 branch below raises — a transport
 		//: failure is a download that did not complete just as much as a 503.
-		return nil, fmt.Errorf("%w: downloading binary: %w", coreupd.DownloadFailed, err)
+		return nil, classify(coreupd.DownloadFailed, err,
+			errs.String("stage", "get"),
+			errs.String("asset", binaryName))
 	}
 
 	//: Fail fast on HTTP errors before streaming.
@@ -484,7 +507,10 @@ func (u *Service) downloadBinary(version string) (resp *http.Response, downloadE
 			log.Printf("close response body: %v", cerr)
 		}
 		//: Return error indicating download failure.
-		return nil, fmt.Errorf("%w: status %d", coreupd.DownloadFailed, resp.StatusCode)
+		return nil, refuse(coreupd.DownloadFailed,
+			errs.String("stage", "get"),
+			errs.String("asset", binaryName),
+			errs.Int("status", resp.StatusCode))
 	}
 
 	//: Return response to caller for streaming.
@@ -498,19 +524,26 @@ func (u *Service) resolveExecutablePath() (execPath string, resolveErr error) {
 	//: Propagate errors in path retrieval.
 	if err != nil {
 		//: Wrap error to indicate operation.
-		return "", fmt.Errorf("getting executable path: %w", err)
+		return "", classify(ExecutablePathUnresolved, err, errs.String("step", "executable"))
 	}
 
 	// Resolve any symlinks in path
-	execPath, err = u.fs.EvalSymlinks(execPath)
+	resolved, err := u.fs.EvalSymlinks(execPath)
 	//: Propagate errors in symlink resolution.
 	if err != nil {
-		//: Wrap error to indicate operation.
-		return "", fmt.Errorf("resolving symlinks: %w", err)
+		//: Wrap error to indicate operation. The unresolved path is a field:
+		//: it is the one thing that makes the failure actionable, and the one
+		//: thing that has no business in a message shown to a user. It is read
+		//: from a SEPARATE variable on purpose — assigning EvalSymlinks back
+		//: over execPath would have the field record the "" it returns on
+		//: failure, which is the path nobody asked about.
+		return "", classify(ExecutablePathUnresolved, err,
+			errs.String("step", "eval_symlinks"),
+			errs.String("path", execPath))
 	}
 
 	//: Return the real executable path for replacement.
-	return execPath, nil
+	return resolved, nil
 }
 
 // writeAndReplaceBinary writes content to temp file and replaces executable.
@@ -529,7 +562,9 @@ func (u *Service) writeAndReplaceBinary(content io.Reader, execPath string) (err
 	//: Propagate file creation errors.
 	if err != nil {
 		//: Wrap error to indicate operation.
-		return fmt.Errorf("creating temp file: %w", err)
+		return classify(StagingFailed, err,
+			errs.String("step", "create_temp"),
+			errs.String("dir", filepath.Dir(execPath)))
 	}
 	tmpPath := tmpFile.Name()
 	closed := false
@@ -564,7 +599,7 @@ func (u *Service) writeAndReplaceBinary(content io.Reader, execPath string) (err
 	if closeErr := tmpFile.Close(); closeErr != nil {
 		u.fs.Remove(tmpPath)
 		//: Report it as what it is: the write did not complete.
-		return fmt.Errorf("writing temp file: %w", closeErr)
+		return classify(StagingFailed, closeErr, errs.String("step", "close_temp"))
 	}
 
 	//: Proceed with atomic replacement of executable.
@@ -578,7 +613,7 @@ func (u *Service) writeTempFileContent(writer io.Writer, content io.Reader) erro
 	//: Propagate stream copy errors.
 	if err != nil {
 		//: Wrap error to indicate operation.
-		return fmt.Errorf("writing temp file: %w", err)
+		return classify(StagingFailed, err, errs.String("step", "write_temp"))
 	}
 
 	//: Return success indicator.
@@ -592,8 +627,9 @@ func (u *Service) finalizeReplacement(tmpPath, execPath string) error {
 	//: Propagate chmod errors and clean up on failure.
 	if err != nil {
 		u.fs.Remove(tmpPath)
-		//: Wrap error to indicate operation.
-		return fmt.Errorf("setting permissions: %w", err)
+		//: Wrap error to indicate operation. Still STAGING: the rename has
+		//: not run, so the installed binary is exactly as it was.
+		return classify(StagingFailed, err, errs.String("step", "chmod_temp"))
 	}
 
 	// Atomically replace old binary with new one
@@ -608,7 +644,9 @@ func (u *Service) finalizeReplacement(tmpPath, execPath string) error {
 	if !errors.Is(err, os.ErrPermission) {
 		u.fs.Remove(tmpPath)
 		//: Wrap error to indicate operation.
-		return fmt.Errorf("replacing binary: %w", err)
+		return classify(ReplacementFailed, err,
+			errs.String("step", "rename"),
+			errs.Bool("elevated", false))
 	}
 	//: The install directory needs elevated rights — retry once via
 	//: non-interactive sudo (see Service.elevate) before giving up, so an
@@ -616,11 +654,16 @@ func (u *Service) finalizeReplacement(tmpPath, execPath string) error {
 	if elevateErr := u.elevate(tmpPath, execPath); elevateErr != nil {
 		u.fs.Remove(tmpPath)
 		//: Name both failures: the original refusal and why the escalated
-		//: retry didn't save it. BOTH are wrapped with %w, not just the
-		//: first: the caller branches on coreupd.ElevationNotAuthorised to print the
-		//: one opt-in that would unblock the install, and a %v here would
-		//: make that sentinel invisible to errors.Is.
-		return fmt.Errorf("replacing binary: %w (retried with sudo -n: %w)", err, elevateErr)
+		//: retry didn't save it. errors.Join, not a discard of either: the
+		//: caller branches on coreupd.ElevationNotAuthorised to print the one
+		//: opt-in that would unblock the install, and dropping the second
+		//: error would make that sentinel invisible to errors.Is while
+		//: dropping the first would lose os.ErrPermission. Join keeps both,
+		//: and errs.Wrap walks Unwrap() []error to find the typed one — so
+		//: origin-wins names the escalation refusal rather than the rename.
+		return classify(ReplacementFailed, errors.Join(err, elevateErr),
+			errs.String("step", "rename"),
+			errs.Bool("elevated", true))
 	}
 
 	//: Return success indicator.

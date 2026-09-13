@@ -47,6 +47,25 @@ Eighteen typed sentinels in `core/selfupdate`, in three classes:
 | recoverable by opt-in | `ElevationNotAuthorised` |
 | supply chain — do not retry, do not install by hand | `SignatureMissing`, `SignatureInvalid`, `ChecksumMismatch`, `ChecksumMissing`, `NoVendorKey` |
 
+Seven more are this package's own, range `0.3.66.*`, for the failures an
+implementation has and a contract does not:
+
+| Sentinel | Raised when |
+|---|---|
+| `CandidateTagRequired` | `DownloadCandidate` was given no tag |
+| `ReleaseMetadataUnreadable` | the release API answered whole, and not as release metadata |
+| `ArchiveUnreadable` | the already-verified archive would not buffer or unpack |
+| `ExecutablePathUnresolved` | the process cannot name the file it runs from |
+| `StagingFailed` | the replacement failed BEFORE the rename — installed binary untouched |
+| `ReplacementFailed` | the rename over the running executable did not land |
+| `ElevationFailed` | an authorised `sudo -n mv` was refused by the system |
+
+Every public sentence is wire-safe: none names a tag, an asset, a path, a URL,
+a status code or anything the host said. Those live in `Fields` and in the
+cause, which `diagnose` renders and `ExplainUpgradeFailure` prints — so an
+operator still gets "no space left on device" while a response body does not.
+`TestNoParticularReachesThePublicSentence` is the guard.
+
 ## Configuration
 
 Everything product-specific lives in `SourceValue`: the release host, the two

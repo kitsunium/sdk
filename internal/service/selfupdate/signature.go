@@ -46,6 +46,7 @@ import (
 	"strings"
 
 	coreupd "github.com/kitsunium/sdk/internal/core/selfupdate"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Signature verification constants.
@@ -125,8 +126,10 @@ func (u *Service) verifyArchive(tag string, archive []byte) error {
 	//: signed payload and the parsed payload are provably the same sequence.
 	if !ed25519.Verify(u.vendorKey, []byte(manifest), signature) {
 		//: Refuse: whoever produced this manifest is not the vendor.
-		return fmt.Errorf("%w: %s for tag %s is not signed by the vendor key linked into this build",
-			coreupd.SignatureInvalid, checksumsAssetName, tag)
+		return refuse(coreupd.SignatureInvalid,
+			errs.String("condition", "verify_failed"),
+			errs.String("asset", checksumsAssetName),
+			errs.String("tag", tag))
 	}
 
 	//: STEP 2 — integrity, against a manifest that is now trusted.
@@ -145,7 +148,9 @@ func (u *Service) canAuthenticate(tag string) error {
 	//: usable anchor — never stamped, or stamped with something broken.
 	if len(u.vendorKey) != ed25519.PublicKeySize {
 		//: Name the tag so the operator knows which install was refused.
-		return fmt.Errorf("%w: cannot authenticate release %s", coreupd.NoVendorKey, tag)
+		return refuse(coreupd.NoVendorKey,
+			errs.String("tag", tag),
+			errs.Int("key_bytes", len(u.vendorKey)))
 	}
 	//: A key this build can verify a release with.
 	return nil
@@ -164,7 +169,10 @@ func (u *Service) fetchSignature(tag string) (signature []byte, fetchErr error) 
 	//: Propagate network errors to caller.
 	if err != nil {
 		//: Wrap with asset+tag context so the failed download is identifiable.
-		return nil, fmt.Errorf("%w: downloading %s for tag %s: %w", coreupd.DownloadFailed, signatureAssetName, tag, err)
+		return nil, classify(coreupd.DownloadFailed, err,
+			errs.String("stage", "get"),
+			errs.String("asset", signatureAssetName),
+			errs.String("tag", tag))
 	}
 	defer func() {
 		//: Prevent resource leak from unclosed response.
@@ -176,14 +184,19 @@ func (u *Service) fetchSignature(tag string) (signature []byte, fetchErr error) 
 	//: A release published without a signature cannot be authenticated.
 	if resp.StatusCode == http.StatusNotFound {
 		//: Raise the missing sentinel naming the asset and the tag.
-		return nil, fmt.Errorf("%w: %s not published for tag %s (an unsigned release is never installed)",
-			coreupd.SignatureMissing, signatureAssetName, tag)
+		return nil, refuse(coreupd.SignatureMissing,
+			errs.String("asset", signatureAssetName),
+			errs.String("tag", tag))
 	}
 
 	//: Fail fast on any other HTTP error before reading the body.
 	if resp.StatusCode != http.StatusOK {
 		//: Reuse the download sentinel with status, asset and tag context.
-		return nil, fmt.Errorf("%w: status %d fetching %s for tag %s", coreupd.DownloadFailed, resp.StatusCode, signatureAssetName, tag)
+		return nil, refuse(coreupd.DownloadFailed,
+			errs.String("stage", "get"),
+			errs.Int("status", resp.StatusCode),
+			errs.String("asset", signatureAssetName),
+			errs.String("tag", tag))
 	}
 
 	//: Read one byte past the cap so an oversized body is detectable.
@@ -191,21 +204,29 @@ func (u *Service) fetchSignature(tag string) (signature []byte, fetchErr error) 
 	//: Propagate body read failures with asset+tag context.
 	if err != nil {
 		//: Wrap to identify the signature read phase in operator logs.
-		return nil, fmt.Errorf("%w: reading %s for tag %s: %w", coreupd.DownloadFailed, signatureAssetName, tag, err)
+		return nil, classify(coreupd.DownloadFailed, err,
+			errs.String("stage", "read"),
+			errs.String("asset", signatureAssetName),
+			errs.String("tag", tag))
 	}
 	//: A body past the cap is not a signature; an untrusted endpoint must not
 	//: choose how much memory we spend.
 	if int64(len(raw)) > maxSignatureBytes {
 		//: Refuse the oversized asset.
-		return nil, fmt.Errorf("%w: %s for tag %s is larger than %d bytes", coreupd.SignatureInvalid, signatureAssetName, tag, maxSignatureBytes)
+		return nil, refuse(coreupd.SignatureInvalid,
+			errs.String("condition", "oversized_asset"),
+			errs.String("asset", signatureAssetName),
+			errs.String("tag", tag),
+			errs.Int64("cap_bytes", maxSignatureBytes))
 	}
 
 	signature, decodeErr := decodeSignature(raw)
 	//: A published-but-unparseable asset is a refusal like any other; name
 	//: the tag so the operator knows which release cannot be authenticated.
 	if decodeErr != nil {
-		//: Wrap, preserving coreupd.SignatureInvalid for errors.Is.
-		return nil, fmt.Errorf("decoding %s for tag %s: %w", signatureAssetName, tag, decodeErr)
+		//: Origin wins — decodeSignature already raised SignatureInvalid, and
+		//: this frame adds only the tag it could not know.
+		return nil, classify(coreupd.SignatureInvalid, decodeErr, errs.String("tag", tag))
 	}
 	//: A well-formed signature, still entirely unverified.
 	return signature, nil
@@ -242,6 +263,9 @@ func decodeSignature(raw []byte) (signature []byte, decodeErr error) {
 	}
 
 	//: Neither form parsed: the asset exists but is not a signature.
-	return nil, fmt.Errorf("%w: %s is neither %d raw bytes nor base64 of them (%d bytes read)",
-		coreupd.SignatureInvalid, signatureAssetName, ed25519.SignatureSize, len(raw))
+	return nil, refuse(coreupd.SignatureInvalid,
+		errs.String("condition", "undecodable_asset"),
+		errs.String("asset", signatureAssetName),
+		errs.Int("want_bytes", ed25519.SignatureSize),
+		errs.Int("got_bytes", len(raw)))
 }

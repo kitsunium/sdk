@@ -137,16 +137,31 @@ changes shape, and nothing else in the SDK imports it.
 
 ## Deferred
 
-- **75 `fmt.Errorf` call sites in `internal/service/selfupdate`.** SDK-wide rule
-  2 bans `fmt.Errorf` and `errors.New` in production code; this package is the
-  largest violation in the tree, against 3 in `internal/service/cache` and 1
-  each in `codec` and `logger`. The sentinels ARE typed and every site wraps one
-  with `%w`, so `errors.Is` and `errs.HasCode` work — what is missing is the
-  Public/Private split on the context each site adds. Converting 75 sites in the
-  change that MOVES them would have made the diff unreviewable against its
-  source, which is the one property a versement has to keep. It is the next
-  change this package should receive, and the package's CLAUDE.md says so where
-  a maintainer will read it.
+- ~~**75 `fmt.Errorf` call sites in `internal/service/selfupdate`.**~~ **CLOSED.**
+  The original reasoning stands and is left standing: SDK-wide rule 2 bans
+  `fmt.Errorf` and `errors.New` in production code; the sentinels ARE typed and
+  every site wrapped one with `%w`, so `errors.Is` and `errs.HasCode` worked —
+  what was missing is the Public/Private split on the context each site added;
+  and converting them in the change that MOVED them would have made the diff
+  unreviewable against its source, which is the one property a versement has to
+  keep.
+
+  Two of its claims were wrong, and correcting them is part of closing it. The
+  count was **58** in production code, not 75 — 75 was approximately the count
+  including the suite, which the rule does not govern. And this package was not
+  the largest violation in the tree: `internal/service/entitlement` carries 110
+  and `third-party/entitlement` 25, both measured on the same tree and both
+  still open; `internal/service/cache` has 1, not 3.
+
+  The conversion allocated `0.3.66.*` to the service package for the seven
+  failures an implementation has and a contract does not, and the package is
+  back inside `//:audit_sources`, so a reintroduced `fmt.Errorf` now fails the
+  build rather than being noticed. The deliverable was the split rather than the
+  substitution: no public sentence names a tag, an asset, a path, a URL, a
+  status or anything the release host said, and the detail reaches the operator
+  through `ExplainUpgradeFailure` instead of through the message. Public-facing
+  error TEXT therefore changed at every converted site — stated here because it
+  is user-visible and no test could have told a reviewer otherwise.
 
 - **A compromised host can serve an older signed release.** The signed manifest
   carries the version-independent asset name and no release tag, so answering a

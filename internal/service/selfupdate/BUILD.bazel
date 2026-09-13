@@ -7,8 +7,11 @@ go_library(
     srcs = [
         "candidate.go",
         "checksum.go",
+        "codes.go",
         "consent.go",
+        "diagnose.go",
         "elevation.go",
+        "errors.go",
         "interfaces.go",
         "osfilesystem.go",
         "osfilesystem_compliance.go",
@@ -20,6 +23,7 @@ go_library(
         "transport.go",
         "update_info.go",
         "updater.go",
+        "wrap.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/selfupdate",
     visibility = [
@@ -28,6 +32,7 @@ go_library(
     ],
     deps = [
         "//internal/core/selfupdate",
+        "//internal/kernel/errs",
         "@org_golang_x_mod//semver",
     ],
 )
@@ -60,6 +65,7 @@ go_test(
         "signature_internal_test.go",
         "source_external_test.go",
         "source_internal_test.go",
+        "split_internal_test.go",
         "stdiocopier_internal_test.go",
         "transport_external_test.go",
         "transport_internal_test.go",
@@ -67,5 +73,15 @@ go_test(
         "updater_internal_test.go",
     ],
     embed = [":selfupdate"],
-    deps = ["//internal/core/selfupdate"],
+    deps = [
+        "//internal/core/selfupdate",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
 )

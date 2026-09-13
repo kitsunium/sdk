@@ -9,6 +9,7 @@ import (
 	"regexp"
 
 	coreupd "github.com/kitsunium/sdk/internal/core/selfupdate"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // tagPattern validates that a tag contains only safe characters for URL construction.
@@ -52,14 +53,18 @@ func (u *Service) ListCandidates() (candidates []CandidateValue, listErr error) 
 func (u *Service) DownloadCandidate(tag string) (info UpdateValue, downloadErr error) {
 	//: Prevent empty tag from reaching API.
 	if tag == "" {
-		//: Return error to signal missing parameter.
-		return UpdateValue{CurrentVersion: u.version}, fmt.Errorf("%w: candidate tag is required", errors.ErrUnsupported)
+		//: errors.ErrUnsupported stays the CAUSE rather than being replaced:
+		//: it is what every caller of this method has been matching on since
+		//: before the sentinel existed, and errors.Is must keep saying yes.
+		return UpdateValue{CurrentVersion: u.version},
+			classify(CandidateTagRequired, errors.ErrUnsupported)
 	}
 
 	//: Validate tag format before constructing URLs to prevent injection attacks.
 	if !tagPattern.MatchString(tag) {
 		//: Reject malformed tags to prevent URL construction errors.
-		return UpdateValue{CurrentVersion: u.version}, fmt.Errorf("%w: %s", coreupd.InvalidTag, tag)
+		return UpdateValue{CurrentVersion: u.version},
+			refuse(coreupd.InvalidTag, errs.String("tag", tag))
 	}
 
 	// Verify the release exists and is a prerelease
@@ -73,13 +78,15 @@ func (u *Service) DownloadCandidate(tag string) (info UpdateValue, downloadErr e
 	//: Match ListCandidates filtering to prevent inconsistent behavior.
 	if release.Draft {
 		//: Reject draft to prevent unstable release installation.
-		return UpdateValue{CurrentVersion: u.version}, fmt.Errorf("%w: %s", coreupd.DraftRelease, tag)
+		return UpdateValue{CurrentVersion: u.version},
+			refuse(coreupd.DraftRelease, errs.String("tag", tag))
 	}
 
 	//: Confirm this is actually a prerelease, not stable.
 	if !release.Prerelease {
 		//: Reject stable release to prevent mixing with RC flow.
-		return UpdateValue{CurrentVersion: u.version}, fmt.Errorf("%w: %s", coreupd.NotPrerelease, tag)
+		return UpdateValue{CurrentVersion: u.version},
+			refuse(coreupd.NotPrerelease, errs.String("tag", tag))
 	}
 
 	// Download and replace binary with candidate version
@@ -107,7 +114,7 @@ func (u *Service) getReleases() (releases []releaseInfo, getErr error) {
 	//: Propagate network errors to caller.
 	if err != nil {
 		//: Wrap error to add context about the operation.
-		return nil, fmt.Errorf("%w: fetching releases: %w", coreupd.DownloadFailed, err)
+		return nil, classify(coreupd.DownloadFailed, err, errs.String("query", "releases"))
 	}
 	defer func() {
 		//: Prevent resource leaks from unclosed response body.
@@ -119,15 +126,18 @@ func (u *Service) getReleases() (releases []releaseInfo, getErr error) {
 	//: Fail fast on HTTP errors before attempting parse.
 	if resp.StatusCode != http.StatusOK {
 		//: Return error indicating API request failure.
-		return nil, fmt.Errorf("%w: %d", coreupd.UnexpectedStatus, resp.StatusCode)
+		return nil, refuse(coreupd.UnexpectedStatus,
+			errs.String("query", "releases"),
+			errs.Int("status", resp.StatusCode))
 	}
 
 	// Parse JSON response under a read cap — the /releases page is a few
 	// hundred kilobytes and an unbounded decoder let the endpoint choose.
 	//: Decode response body into release structures.
-	if err := decodeJSONBody(resp.Body, maxAPIBodyBytes, &releases); err != nil {
-		//: Wrap error to indicate parsing failure.
-		return nil, fmt.Errorf("parsing releases: %w", err)
+	if err := decodeJSONBody(resp.Body, maxAPIBodyBytes, &releases,
+		errs.String("query", "releases")); err != nil {
+		//: Bare bubble — decodeJSONBody classified it and carries the query.
+		return nil, err
 	}
 
 	//: Return API response to caller.
@@ -143,7 +153,9 @@ func (u *Service) getReleaseByTag(tag string) (release releaseInfo, getErr error
 	//: Propagate network errors to caller.
 	if err != nil {
 		//: Wrap error with context about which tag was requested.
-		return releaseInfo{}, fmt.Errorf("%w: fetching release %s: %w", coreupd.DownloadFailed, tag, err)
+		return releaseInfo{}, classify(coreupd.DownloadFailed, err,
+			errs.String("query", "release_by_tag"),
+			errs.String("tag", tag))
 	}
 	defer func() {
 		//: Prevent resource leak from unclosed body.
@@ -155,20 +167,24 @@ func (u *Service) getReleaseByTag(tag string) (release releaseInfo, getErr error
 	//: Distinguish 404 from other errors for clearer messaging.
 	if resp.StatusCode == http.StatusNotFound {
 		//: Return specific error when release does not exist.
-		return releaseInfo{}, fmt.Errorf("%w: %s", coreupd.CandidateNotFound, tag)
+		return releaseInfo{}, refuse(coreupd.CandidateNotFound, errs.String("tag", tag))
 	}
 
 	//: Fail fast on HTTP errors before parsing.
 	if resp.StatusCode != http.StatusOK {
 		//: Return error indicating API request failure.
-		return releaseInfo{}, fmt.Errorf("%w: %d", coreupd.UnexpectedStatus, resp.StatusCode)
+		return releaseInfo{}, refuse(coreupd.UnexpectedStatus,
+			errs.String("query", "release_by_tag"),
+			errs.String("tag", tag),
+			errs.Int("status", resp.StatusCode))
 	}
 
 	// Parse JSON response under a read cap (see getReleases).
 	//: Decode response body into release structure.
-	if err := decodeJSONBody(resp.Body, maxAPIBodyBytes, &release); err != nil {
-		//: Wrap error with context about which tag failed parsing.
-		return releaseInfo{}, fmt.Errorf("parsing release %s: %w", tag, err)
+	if err := decodeJSONBody(resp.Body, maxAPIBodyBytes, &release,
+		errs.String("query", "release_by_tag"), errs.String("tag", tag)); err != nil {
+		//: Bare bubble — decodeJSONBody classified it and carries both.
+		return releaseInfo{}, err
 	}
 
 	//: Return API response to caller.
