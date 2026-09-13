@@ -186,7 +186,7 @@ not a shrug:
    blames the deployment.
 2. **The attack it prevents is refused by the open, not by the directory.**
    What the POSIX rule protects is the INODE — unlink the lock file, the next
-   process locks the new one, both are told they hold the same lock. `os.Open⁠File`
+   process locks the new one, both are told they hold the same lock. `os.OpenFile`
    reaches `CreateFileW` with `FILE_SHARE_READ|FILE_SHARE_WRITE` and
    deliberately **without** `FILE_SHARE_DELETE` (Go 1.27,
    `src/syscall/syscall_windows.go`, `func Open`), so while any holder has the
