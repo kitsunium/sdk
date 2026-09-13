@@ -295,6 +295,49 @@ func TestSubjectForSeparatesAWithdrawalFromABrokenPublisher(t *testing.T) {
 	}
 }
 
+// TestSubjectForIsTotalOnANilRoster pins that the device lookup refuses a nil
+// roster instead of dereferencing it.
+//
+// CIEntitlementFor has guarded this since it was written, and says why in a
+// comment; SubjectFor panicked. Nothing inside this repository reaches it —
+// every internal caller checks the error that accompanies a nil roster — but
+// Roster is aliased into pkg/v1/entitlement, so a consumer holding a nil
+// roster got a panic from one method of the pair and a refusal from the other.
+//
+// Observed before the guard:
+//
+//	--- FAIL: TestSubjectForIsTotalOnANilRoster
+//	    panic: runtime error: invalid memory address or nil pointer dereference
+//	    [recovered]
+func TestSubjectForIsTotalOnANilRoster(t *testing.T) {
+	t.Parallel()
+
+	const uuid string = "6f1c8a2e-0000-4000-8000-000000000001"
+
+	var roster *RosterValue
+
+	got, err := roster.SubjectFor(uuid)
+
+	//: Fail closed: no roster vouches for nobody, never for everybody.
+	if !errors.Is(err, ErrRevoked) {
+		t.Fatalf("SubjectFor() error = %v, want ErrRevoked", err)
+	}
+	//: The empty record is what every caller compares a fingerprint against,
+	//: and a non-empty one here would match a key nobody published.
+	if got != (SubjectValue{}) {
+		t.Errorf("SubjectFor() = %+v, want the zero SubjectValue", got)
+	}
+	//: Distinguishable from a subject the roster simply omits — the remedy
+	//: for one is enrolment and for the other is a caller's own bug.
+	if cond := fieldOf(err, "condition"); cond != "no roster to check against" {
+		t.Errorf("condition = %q, want %q", cond, "no roster to check against")
+	}
+	//: And still no uuid in the sentence.
+	if strings.Contains(err.Error(), uuid) {
+		t.Errorf("err.Error() = %q, want the uuid OUT of it", err)
+	}
+}
+
 // TestRefusalsKeepTheirSentinelIdentity pins the half a caller's exit-code
 // table reads, across the wrappers this repository actually applies.
 //

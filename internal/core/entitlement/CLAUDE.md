@@ -40,7 +40,15 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
 - **`SubjectFor` reports absence as revocation.** A subject that was never
   approved and one that was removed are indistinguishable from a roster, and the
   safe reading of both is the same. Its doc comment says so where a caller reads
-  it, rather than leaving the merge implicit.
+  it, rather than leaving the merge implicit. A roster that LISTS a subject with
+  an empty fingerprint joins them under the same sentinel and is separated only
+  by the `condition` field: it is a broken publisher, not a withdrawal.
+- **Both roster lookups are total on a nil receiver.** `Roster` is aliased into
+  `pkg/v1/entitlement`, so a consumer can hold a nil one; `CIEntitlementFor` has
+  refused it since it was written and `SubjectFor` used to dereference it. Both
+  now refuse, fail-closed, with `condition=no roster to check against`. Not
+  `RosterUnreachable`, which means "cannot decide, retry" — retrying a nil
+  pointer never terminates.
 - **`GrantValue` carries the deadline, not just the instant.** A daemon aging
   against `VerifiedAt` alone kept serving past the roster window that authorised
   it. The deadline is the roster's, so the grant cannot outlive its evidence.

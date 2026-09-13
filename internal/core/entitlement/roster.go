@@ -182,7 +182,30 @@ type SubjectValue struct {
 // that quotes back the uuid it refused confirms that uuid to whoever presented
 // it, which is a thing a refusal has no business doing; errs.FieldsOf still
 // hands it to the operator's log.
+//
+// It is total on a nil receiver, which its sibling CIEntitlementFor has always
+// been. Reachable through the Roster alias in pkg/v1/entitlement, where a
+// consumer holding a nil roster got a panic from one method and a refusal from
+// the other.
 func (r *RosterValue) SubjectFor(uuid string) (subject SubjectValue, err error) {
+	//: A nil roster dereferences on the lookup below. CIEntitlementFor has
+	//: refused this since it was written; this one panicked, and the two
+	//: answers to the same input were never a decision anyone took. The
+	//: device path is the MORE important of the two to keep total: a licence
+	//: check that takes the process down has failed in the one way worse than
+	//: refusing, and the refusal is what a caller already handles.
+	if r == nil {
+		//: Same sentinel the absent-subject case reports, for the same
+		//: reason — a roster that does not vouch for this subject, whether
+		//: because it omits them or because there is no roster at all, is a
+		//: refusal and never a grant. ErrRosterUnreachable would have been
+		//: the wrong answer: it means "cannot decide, retry", and a caller
+		//: obeying it would retry a nil pointer forever.
+		return SubjectValue{}, errs.Wrap(ErrRevoked, errs.WrapParams{},
+			errs.String("stage", subjectLookupStage),
+			errs.String("condition", "no roster to check against"),
+			errs.String("subject", uuid))
+	}
 	sv, listed := r.Subjects[uuid]
 	//: Absent from a roster that itself verified is not broken, but it is
 	//: not unambiguously "revoked" either — see the doc comment above.
