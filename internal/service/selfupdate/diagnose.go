@@ -17,6 +17,13 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// maxForeignCauses bounds how many foreign messages one error may contribute.
+//
+// The tree is this package's own and is two deep, so the bound is not reached
+// in practice; it is here because diagnose runs on the failure path, where a
+// cycle somebody else introduced must not become an unbounded string.
+const maxForeignCauses int = 8
+
 // diagnose renders what err carries beyond its public sentence: every field,
 // then the words of the first cause this SDK did not write.
 //
@@ -40,13 +47,6 @@ func diagnose(err error) string {
 	//: single space between parts keeps it greppable and one line long.
 	return strings.Join(parts, " ")
 }
-
-// maxForeignCauses bounds how many foreign messages one error may contribute.
-//
-// The tree is this package's own and is two deep, so the bound is not reached
-// in practice; it is here because diagnose runs on the failure path, where a
-// cycle somebody else introduced must not become an unbounded string.
-const maxForeignCauses int = 8
 
 // foreignCauses returns the messages in err's tree that this SDK did not
 // write — the operating system's, the decoder's, the transport's — in the
