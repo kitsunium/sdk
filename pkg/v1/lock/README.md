@@ -53,7 +53,9 @@ The file locker takes an in\-process gate before its kernel lock, because flock\
 
 The contract does not differ: same Locker, same Lease, same sentinels, and a file lease still does not implement [Deadliner](<#Deadliner>). The primitive underneath does. LockFileEx locks a byte RANGE rather than a file — this backend takes the whole file, because the fencing counter lives in it — and its locks are MANDATORY rather than advisory, so one thing a caller can observe changes: while a lock is HELD, a process that does not hold it cannot read the lock file. On Unix it can. Every other difference is absorbed below the port and measured on a real Windows kernel; ADR 0081 lists them.
 
-One more is worth knowing before you rely on a directory's permissions. The lock directory is checked for being one any account can put an entry into, and the two platforms answer that in their own vocabulary: a world\-writable\-and\-not\-sticky mode on Unix, and an access\-allowed entry granting Everyone or Authenticated Users a create\-or\-delete right on Windows \(ADR 0084\). There is no sticky equivalent there, so the accepting sets genuinely differ — no Windows ACL says "anyone may create but only the owner may unlink".
+One more is worth knowing before you rely on a directory's permissions. The lock directory is checked for being one any account can REPLACE an entry in, and the two platforms answer that in their own vocabulary: a world\-writable\-and\-not\-sticky mode on Unix, and on Windows a discretionary entry letting Everyone, Authenticated Users or BUILTIN\\Users unlink somebody else's entry — or write the lock files created there, which is a question Unix never has to ask, because a lock file there is created 0600 whatever the directory's mode says \(ADR 0084, ADR 0086\).
+
+Windows does have the sticky directory's shape; it spells it in two bits rather than one, as "may add an entry" without "may delete a child". %ProgramData% is one, which is why a lock directory under it is accepted and a junction planted beside it is not.
 
 ### A lock path is a file, never a link to one
 
@@ -63,7 +65,7 @@ So a symbolic link \(Unix\) or a reparse point \(Windows\) at the lock path is R
 
 This is a REFUSAL WHERE THERE USED TO BE SUCCESS. If your deployment deliberately symlinks a lock file — onto a tmpfs, say — it now fails at Acquire. There is no flag to restore the old behaviour: it would be a flag to restore a lock that lands somewhere the locker did not report \(ADR 0082\).
 
-The PARENT components are governed too, and by a different rule, because a symbolic link at a parent is not evidence of anything on its own: /tmp is one on macOS and /var/run is one on most Linux distributions. An indirection above the lock file is refused only when the directory holding it is world\-writable — when anybody could have planted it. On Windows the same rule runs over the same question, answered by the directory's DACL rather than by a synthesised mode \(ADR 0083, ADR 0084\).
+The PARENT components are governed too, and by a different rule, because a symbolic link at a parent is not evidence of anything on its own: /tmp is one on macOS and /var/run is one on most Linux distributions. An indirection above the lock file is refused only when the directory holding it is world\-writable — when anybody could have planted it. On Windows the same rule runs over the same question, answered by the directory's DACL rather than by a synthesised mode \(ADR 0083, ADR 0084\) — and it asks for a different right from the lock directory's own rule, because a component is a DIRECTORY, so what plants one is "may add a subdirectory" \(ADR 0086\).
 
 ### A held lock can lose its file, and you are told
 
@@ -154,7 +156,7 @@ var (
 ```
 
 <a name="Keepalive"></a>
-## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L290>)
+## func [Keepalive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L301>)
 
 ```go
 func Keepalive(ctx context.Context, lease Lease, cfg KeepaliveConfig) (guarded context.Context, stop context.CancelFunc, err error)
@@ -174,7 +176,7 @@ defer stop()
 stop does NOT release the lease: the lifetime of a lock must not depend on the lifetime of a convenience.
 
 <a name="Deadliner"></a>
-## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L167>)
+## type [Deadliner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L174>)
 
 Deadliner is the sibling implemented by a [Lease](<#Lease>) that CAN expire — i.e. one that can be taken from you while you are still running.
 
@@ -185,7 +187,7 @@ type Deadliner = corelock.Deadliner
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L173>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L180>)
 
 FileConfig parameterises [NewFileLocker](<#NewFileLocker>). Dir must be set; Poll defaults.
 
@@ -194,7 +196,7 @@ type FileConfig = svclock.FileConfig
 ```
 
 <a name="KeepaliveConfig"></a>
-## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L178>)
+## type [KeepaliveConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L185>)
 
 KeepaliveConfig parameterises [Keepalive](<#Keepalive>). Every must be positive and should be comfortably shorter than the lease TTL — a third of it leaves room for two consecutive failed renewals.
 
@@ -203,7 +205,7 @@ type KeepaliveConfig = svclock.KeepaliveConfig
 ```
 
 <a name="Lease"></a>
-## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L157>)
+## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L164>)
 
 Lease is a held lock: Fence, Extend, Release. FROZEN at three, for the same reason [Locker](<#Locker>) is frozen at two.
 
@@ -212,7 +214,7 @@ type Lease = corelock.Lease
 ```
 
 <a name="Locker"></a>
-## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L153>)
+## type [Locker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L160>)
 
 Locker hands out named, exclusive leases: Acquire and TryAcquire.
 
@@ -223,7 +225,7 @@ type Locker = corelock.Locker
 ```
 
 <a name="NewFileLocker"></a>
-### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L270>)
+### func [NewFileLocker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L281>)
 
 ```go
 func NewFileLocker(cfg FileConfig) (locker Locker, err error)
@@ -233,10 +235,12 @@ NewFileLocker returns a [Locker](<#Locker>) that excludes every process using th
 
 It refuses at construction: a missing directory setting, a negative poll interval, a lock directory any account could put an entry into, and a platform with no file\-range lock at all, where it returns the SDK\-wide UnsupportedPlatform rather than a locker that would report success and exclude nothing \(ADR 0018\). Windows is no longer in that last set: it is served by LockFileEx \(ADR 0081\).
 
-The third refusal is one rule with two vocabularies, because the two platforms answer "who can put an entry here" differently. On Unix it is a mode: world\-writable without the sticky bit. On Windows it is the directory's DACL: an access\-allowed entry granting Everyone \(S\-1\-1\-0\) or Authenticated Users \(S\-1\-5\-11\) a right to create, or to delete, an entry \(ADR 0084\). There is no sticky equivalent there, so the two accepting sets genuinely differ — no Windows ACL says "anyone may create but only the owner may unlink".
+The third refusal is one rule with two vocabularies, because the two platforms answer "who can replace an entry here" differently. On Unix it is a mode: world\-writable without the sticky bit. On Windows it is the directory's DACL: an entry letting Everyone \(S\-1\-1\-0\), Authenticated Users \(S\-1\-5\-11\) or BUILTIN\\Users \(S\-1\-5\-32\-545\) unlink somebody else's entry, or write the lock files the directory will create \(ADR 0084, ADR 0086\).
+
+Creating an entry at a free name is NOT that right, on either platform: it is what the sticky bit permits, and what Windows spells as "may add a file" without "may delete a child". What it costs is a lock file planted before any holder exists, which is a denial of service rather than a lost exclusion.
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L247>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L254>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (locker Locker, err error)
@@ -247,7 +251,7 @@ NewMemory returns a [Locker](<#Locker>) whose leases live in this process and DO
 cfg.TTL must be positive; a zero or negative TTL is refused here rather than defaulted, because the two natural readings of zero are opposites and either choice would be silently wrong for half of its callers \(ADR 0031\).
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L170>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lock/lock.go#L177>)
 
 MemoryConfig parameterises [NewMemory](<#NewMemory>). TTL must be positive.
 

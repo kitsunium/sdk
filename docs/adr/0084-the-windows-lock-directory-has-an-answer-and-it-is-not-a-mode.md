@@ -267,10 +267,20 @@ ACL and got the verdict above.
   whose DACL grants Everyone or Authenticated Users a planting right is refused
   with `LOCK_DIRECTORY_UNSAFE` — the same code, the same remedy and the same
   exit status the Unix side has had since ADR 0052. `C:\Windows\Temp`-shaped
-  directories are the realistic case.
+  directories are the realistic case. **They were not in fact refused, and
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  is what makes this sentence true**: the entry that makes that directory
+  dangerous names `BUILTIN\Users`, which this record excluded from the table.
 - **The chain rule now refuses on Windows too.** ADR 0083 shipped with
   `plantable` answering "no" there; it now answers the question.
-- **The Unix rule is untouched**, mode table included. Windows has no sticky
+- **The Unix rule is untouched**, mode table included. **The sentence that
+  follows is wrong and is corrected by
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  §D2**: Windows spells "anyone may create but only the owner may unlink" as
+  `FILE_ADD_FILE` without `FILE_DELETE_CHILD`, and `%ProgramData%` is a
+  directory Windows itself ships in exactly that state. It is left standing
+  because it is the assumption that kept `BUILTIN\Users` out of the table.
+  Windows has no sticky
   bit and therefore no equivalent of the `0777|sticky` exemption — there is no
   Windows ACL that says "anyone may create but only the owner may unlink" — so
   the platforms' accepting sets genuinely differ, and that is a property of the
@@ -330,7 +340,18 @@ argument against a policy DSL applies unchanged.
 
 ## Deferred
 
-- **`BUILTIN\Users` (`S-1-5-32-545`) as a third "anybody".** Still deferred,
+- **`BUILTIN\Users` (`S-1-5-32-545`) as a third "anybody".** **CLOSED by
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  §D4.** The reasoning below is left standing because it named the decision
+  correctly and got one fact wrong. What it called a breaking change of a
+  different size was true only while both rules shared one mask: `%ProgramData%`
+  grants the group `FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY` and NOT
+  `FILE_DELETE_CHILD` — measured — which is create-but-not-replace, which is
+  what `0777|sticky` means, and which §Consequences below says Windows has no
+  ACL for. Once `checkDir` asks about replacing and `plantable` about creating,
+  the group goes in and `%ProgramData%` stays accepted. The third token its
+  last sentence asks for exists.
+  Still deferred,
   but no longer for want of evidence: D2's test now measures, on a real kernel,
   that a directory Windows ships grants that group a planting right. What
   remains is a DECISION rather than a measurement — including it refuses
@@ -342,15 +363,44 @@ argument against a policy DSL applies unchanged.
   directory under `%ProgramData%` or `%SystemRoot%\Temp`.
   The two-account model in D3b is a second cost: a third identifier needs a
   third token.
-- **The audit list (SACL).** Not read. It needs `SE_SECURITY_NAME`, a privilege
+- **The audit list (SACL).** **Still deferred, and made PERMANENT by
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  §D5** — on the second half of the sentence below rather than the first. The
+  privilege claim is wrong on the one machine that could have tested it:
+  `windows-latest` runs as the built-in Administrator, holds `SeSecurityPrivilege`
+  disabled, enables it on request, and reads the SACL successfully. The reason
+  that survives is that no ACE type a SACL may carry GRANTS anything — audit and
+  alarm entries describe logging, and the mandatory label, the scoped policy
+  identifier and the access filter only restrict — so reading it could move this
+  verdict towards accepting and never towards refusing.
+  Not read. It needs `SE_SECURITY_NAME`, a privilege
   an ordinary account does not hold, and it describes what is LOGGED rather
   than what is allowed.
-- **Object-type ACEs** (`ACCESS_ALLOWED_OBJECT_ACE` and its denied twin) are
+- **Object-type ACEs** (`ACCESS_ALLOWED_OBJECT_ACE` and its denied twin).
+  **CLOSED by
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  §D6**, which closed it because the premise below is false: an ordinary NTFS
+  directory DOES store one. `SetNamedSecurityInfoW` accepts it at ACL revision 4
+  — revision 2 is refused with `ERROR_INVALID_ACL` — and `GetNamedSecurityInfoW`
+  reads it straight back, so a grant of `FILE_DELETE_CHILD` to Everyone spelled
+  that way was walked past and accepted. All eight discretionary shapes are now
+  decoded, the callback pairs included. The reasoning is left standing because
+  its last sentence is the rule that made skipping defensible while the layouts
+  were genuinely unknown — and they are in `winnt.h`.
+  They are
   skipped rather than decoded. They carry a GUID between the mask and the SID,
   they are an Active Directory mechanism, and they do not appear on ordinary
   filesystem objects. An entry whose layout this file does not know is one it
   does not judge — which fails open, consistently with D5.
-- **A planted lock file kept held.** Unchanged from ADR 0081 §Deferred: an
+- **A planted lock file kept held.** **Still deferred, and made PERMANENT by
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  §D7**: it is not a gap in the check, it is the price of the row the check
+  deliberately accepts, on both kernels. A lock cannot tell a squatter from a
+  peer, because a peer holding it and an attacker holding it are the same bytes
+  and the same kernel state. ADR 0086 §D1 widens its reach — a directory whose
+  only broad grant is the right to create an entry is now accepted — and that is
+  the exposure `/tmp` has carried on Unix since ADR 0052 §D6.
+  Unchanged from ADR 0081 §Deferred: an
   attacker who can write the lock directory can create the lock file before any
   holder and hold it forever. That is a denial of service rather than a lost
   exclusion — and this change now refuses the directory it would happen in,
@@ -358,6 +408,7 @@ argument against a policy DSL applies unchanged.
 
 ## References
 
+- [ADR 0086 — creating an entry is not replacing one, and Windows says so in two bits](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md) — amends §D2, §D3, §D3c and §Consequences
 - [ADR 0081 — the Windows file lock is a different primitive](0081-the-windows-file-lock-is-a-different-primitive.md) §D5, §Deferred
 - [ADR 0083 — a path is a chain, and a held lock can lose its file](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) §D4, §Deferred
 - [ADR 0052 — the `lock` domain](0052-sdk-lock-domain.md) §D6
