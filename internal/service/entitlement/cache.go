@@ -221,7 +221,6 @@ func stageBundle(dir string, raw []byte) (path string, err error) {
 		return "", fmt.Errorf("staging in %s: %w", dir, createErr)
 	}
 
-	staged := file.Name()
 	//: Released at the point it was acquired — and its failure REPORTED, not
 	//: logged. A Close that failed says the bytes may never have reached the
 	//: disk, which is exactly what makes this file unfit to rename over a
@@ -235,10 +234,11 @@ func stageBundle(dir string, raw []byte) (path string, err error) {
 			//: Leave the existing outcome alone.
 			return
 		}
-		removeBestEffort(staged)
-		path, err = "", fmt.Errorf("closing %s: %w", staged, closeErr)
+		removeBestEffort(file.Name())
+		path, err = "", fmt.Errorf("closing %s: %w", file.Name(), closeErr)
 	}()
 
+	staged := file.Name()
 	//: Nothing partial is ever installed: the staged file is removed and the
 	//: rename that would have consumed it never happens.
 	if _, writeErr := file.Write(raw); writeErr != nil {

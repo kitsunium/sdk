@@ -132,7 +132,7 @@ func (s *Service) cacheGuard() corelock.Locker {
 }
 
 // underCacheLock runs fn with the cache directory held against every other
-// goroutine in this process and every other process on this machine, and
+// goroutine in this process and every other process on this machine. It
 // reports whether fn RAN.
 //
 // It returns false in exactly one situation: a guard exists and the lock could
@@ -145,7 +145,7 @@ func (s *Service) cacheGuard() corelock.Locker {
 // true, because "this platform has no file lock" is a standing fact about the
 // machine rather than a passing state of the cache, and treating it as
 // contention would disable caching on such a machine permanently.
-func (s *Service) underCacheLock(fn func()) (ran bool) {
+func (s *Service) underCacheLock(fn func()) bool {
 	locker := s.cacheGuard()
 	//: No exclusion to be had here at all: run unguarded, exactly as this
 	//: package did before the guard existed.
