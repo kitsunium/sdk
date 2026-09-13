@@ -94,14 +94,49 @@ const parent string = ".."
 // lives in /srv/app and a caller deciding who could have replaced it must ask
 // about that directory.
 func Resolve(path string) (steps []StepValue, err error) {
-	abs, absErr := filepath.Abs(path)
+	absolute, absErr := absoluteUncleaned(path)
 	//: the working directory could not be read; nothing can be resolved
 	//: against it.
 	if absErr != nil {
 		//: the filesystem's own error, unwrapped.
 		return nil, absErr
 	}
-	return resolveAbs(abs)
+	return resolveAbs(absolute)
+}
+
+// absoluteUncleaned makes path absolute WITHOUT normalising its components.
+//
+// filepath.Abs is the obvious call and it is the wrong one: it Cleans, and
+// Clean removes "link/.." LEXICALLY while the kernel applies the parent step
+// AFTER following the link. Those are different directories whenever `link`
+// does not point at its own parent's child — so a walk over the cleaned path
+// would audit somewhere other than where the caller's open will land, which is
+// the single failure this package exists to prevent.
+//
+// The one shape that cannot be kept verbatim is a Windows drive-relative path
+// ("C:foo"), which has no expansion but the lexical one. It is named here
+// rather than silently normalised with everything else.
+func absoluteUncleaned(path string) (absolute string, err error) {
+	//: already absolute: used exactly as written, "." and ".." included, both
+	//: of which the walk applies as movements through handles it holds.
+	if filepath.IsAbs(path) {
+		//: verbatim.
+		return path, nil
+	}
+	//: drive-relative on Windows — there is no descriptor-based expansion of
+	//: "C:foo", so the lexical one is the only one available.
+	if filepath.VolumeName(path) != "" {
+		//: lexical, and only here.
+		return filepath.Abs(path)
+	}
+	working, workingErr := os.Getwd()
+	//: the working directory could not be read.
+	if workingErr != nil {
+		//: the filesystem's own error.
+		return "", workingErr
+	}
+	//: concatenation rather than filepath.Join, which Cleans — see above.
+	return working + string(filepath.Separator) + path, nil
 }
 
 // resolveAbs is [Resolve] once the path is known to be absolute.
@@ -206,27 +241,35 @@ func (w *walkState) step(name, abs string) (done bool, err error) {
 		//: the target's components go to the front of the queue.
 		return false, w.follow(described.Target, abs)
 	}
-	return w.enter(name)
+	return w.enter(name, *described)
 }
 
 // enter descends into a component already known not to be an indirection.
-func (w *walkState) enter(name string) (done bool, err error) {
+//
+// described is the component as Lstat reported it a moment earlier, and it is
+// what decides whether a failed descent is an ANSWER or a FAILURE. Treating
+// every failure on the last component as a clean end reads two very different
+// things as one: a regular file, which is a legitimate terminal and what a
+// lock file is, and a directory that could not be opened — which is either a
+// permission fault worth reporting or, worse, an entry swapped for an
+// indirection between the Lstat and this call, where reporting success would
+// hand the caller a chain describing a component that no longer exists.
+func (w *walkState) enter(name string, described StepValue) (done bool, err error) {
 	enterErr := w.stack.push(name)
 	//: entered; the next component will be looked up in the right directory.
 	if enterErr == nil {
 		//: keep going.
 		return false, nil
 	}
-	//: a component that is not a directory ends the walk cleanly when nothing
-	//: follows it — a regular file as the last component is what a lock file
-	//: is, and describing it was the point.
-	if len(w.pending) == 0 {
+	//: a terminal that Lstat did not call a directory ends the walk cleanly.
+	//: Describing it was the point, and there is nothing below it to look up.
+	if !described.Mode.IsDir() && len(w.pending) == 0 {
 		//: the walk is over and nothing failed.
 		return true, nil
 	}
-	//: a non-directory with components still to resolve. Continuing would
-	//: describe them against the directory ABOVE, which is worse than
-	//: refusing.
+	//: everything else: a directory that would not open, or a non-directory
+	//: with components still to resolve. Continuing would describe them
+	//: against the directory ABOVE, which is worse than refusing.
 	return false, enterErr
 }
 
@@ -295,12 +338,16 @@ func describe(stack *rootStack, name string) (step *StepValue, err error) {
 		return &built, nil
 	}
 	target, linkErr := root.Readlink(name)
-	//: an indirection whose target cannot be read is still an indirection, and
-	//: reporting it without the target is better than reporting nothing.
-	if linkErr == nil {
-		//: the stored target, unresolved.
-		built.Target = target
+	//: an indirection whose target cannot be read cannot be FOLLOWED either,
+	//: and the caller does follow it. Continuing with an empty target would
+	//: resolve every remaining component against the link's own container and
+	//: return a chain describing a different path from the one asked about.
+	if linkErr != nil {
+		//: the filesystem's own error.
+		return nil, linkErr
 	}
+	//: the stored target, unresolved.
+	built.Target = target
 	//: described, and the caller must not descend into it.
 	return &built, nil
 }

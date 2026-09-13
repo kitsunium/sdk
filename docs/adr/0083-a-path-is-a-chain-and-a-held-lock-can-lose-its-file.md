@@ -11,8 +11,8 @@
 ADR 0082 closed the substitution an attacker reaches through the lock file's
 own NAME — a name this package derives and therefore makes predictable. Its
 §Deferred recorded two things it did not close. Both were reproduced again
-against `c41c9b3e`, the commit that carries 0082, before anything here was
-written.
+against [`c41c9b3e`](https://github.com/kitsunium/sdk/commit/c41c9b3e), the commit
+that carries 0082, before anything here was written.
 
 ### Exposure 1 — the entry can be unlinked while it is held
 
@@ -79,6 +79,27 @@ never in the link, so the primitive measures and the domain decides.
 
 A component that does not exist ends the walk with a **nil error**, because the
 caller audits a directory it is about to create.
+
+### D1b — The path is made absolute WITHOUT being cleaned
+
+`filepath.Abs` is the obvious call and it is the wrong one. It `Clean`s, and
+`Clean` removes `link/..` **lexically**, while the kernel follows the link and
+only then takes the parent step. Those are different directories whenever the
+link does not point at a child of its own container — so a walk over the
+cleaned path would audit somewhere other than where the caller's open lands,
+which is the single failure this package exists to prevent.
+
+So an absolute path is used verbatim and a relative one is concatenated with
+the working directory. `..` is not a problem to be normalised away: the walk
+applies it as a movement through the directory handles it already holds, which
+is exactly what the kernel does. The one shape that cannot be kept verbatim is
+a Windows drive-relative path (`C:foo`), which has no expansion but the lexical
+one, and it is named in the code rather than silently folded in.
+
+`TestResolveAppliesParentAfterTheLinkAndNotBefore` builds a tree where BOTH
+answers exist as real directories, so a regression is a wrong path rather than
+a missing component, and uses `filepath.EvalSymlinks` as the oracle because it
+implements the kernel's semantics and is not the code under test.
 
 ### D2 — It is built on `os.Root`, and that was READ rather than assumed
 
@@ -338,6 +359,14 @@ this was found rather than reasoned.
   `ACCESS_ALLOWED_ACE` layouts and an `EqualSid` comparison. That is the whole
   of it. It is deferred here for review size rather than for cost, and it is
   the next change on this package.
+- **`plantable` reads other-write and not other-execute.** Creating an entry in
+  a POSIX directory needs BOTH `w` and `x`, so a `0702` container is not in
+  fact plantable by a stranger and the rule refuses it anyway. That is
+  deliberate and it is the conservative direction, but the reason it is not
+  changed here is consistency rather than correctness: `checkDir`'s table
+  refuses `0702` on the identical reasoning and is pinned by ADR 0081 §D5, so
+  the two rules would disagree about the same mode. Changing both is a
+  different change with its own table.
 - **A component replaced AFTER `checkChain` returns.** The audit is taken once,
   at construction. Closing it needs the pinned directory handle §Alternatives
   declines, and that in turn needs a portable `openat` the standard library

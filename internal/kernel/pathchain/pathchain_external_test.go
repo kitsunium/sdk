@@ -235,3 +235,100 @@ func TestResolveReportsAFileInTheMiddleOfAPath(t *testing.T) {
 		t.Fatalf("Resolve through a file = nil, want a failure")
 	}
 }
+
+// TestResolveAppliesParentAfterTheLinkAndNotBefore pins the difference between
+// what the kernel does and what filepath.Clean does.
+//
+// Clean removes "link/.." LEXICALLY, so a cleaned path continues from the
+// link's own container. The kernel follows the link first and only then takes
+// the parent step, so it continues from the TARGET's container. Those are
+// different directories, and a walk that audited the cleaned one would be
+// auditing somewhere other than where the caller's open lands — the single
+// failure this package exists to prevent.
+//
+// The tree gives both answers somewhere to land, so the wrong one is a wrong
+// PATH rather than a missing component: `sibling` exists under the link's
+// container AND under the target's container.
+//
+// filepath.EvalSymlinks is the oracle, because it implements the kernel's
+// semantics and is not the code under test.
+func TestResolveAppliesParentAfterTheLinkAndNotBefore(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	pub := filepath.Join(base, "pub")
+	//: the decoy the lexical answer would find…
+	if err := os.MkdirAll(filepath.Join(pub, "sibling"), 0o700); err != nil {
+		t.Fatalf("building the lexical decoy = %v", err)
+	}
+	//: …and the one the kernel's answer finds.
+	if err := os.MkdirAll(filepath.Join(base, "real", "sibling"), 0o700); err != nil {
+		t.Fatalf("building the real target = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(base, "real", "inner"), 0o700); err != nil {
+		t.Fatalf("building the link target = %v", err)
+	}
+	link := filepath.Join(pub, "lnk")
+	plant(t, filepath.Join(base, "real", "inner"), link)
+
+	//: string concatenation, never filepath.Join — Join Cleans, so it would
+	//: hand Resolve the already-collapsed path and this test would assert
+	//: nothing. It is the same trap the code under test avoids.
+	separator := string(filepath.Separator)
+	above := link + separator + ".." + separator + "sibling"
+	steps, err := pathchain.Resolve(above)
+	if err != nil {
+		t.Fatalf("Resolve(%s) = %v", above, err)
+	}
+	oracle, evalErr := filepath.EvalSymlinks(above)
+	if evalErr != nil {
+		t.Fatalf("EvalSymlinks(%s) = %v", above, evalErr)
+	}
+	last := steps[len(steps)-1].Path
+	//: the walk ended where the KERNEL ends, under the link's target.
+	if last != oracle {
+		t.Fatalf("the last step = %q, want the kernel's own answer %q", last, oracle)
+	}
+	//: and explicitly NOT where Clean would have sent it, so a future change
+	//: that reintroduces the lexical collapse names itself.
+	if last == filepath.Join(pub, "sibling") {
+		t.Fatalf("the last step = %q: '..' was applied lexically, before the link", last)
+	}
+}
+
+// TestResolveReportsADirectoryItCannotEnter pins that a failed descent is only
+// a clean ending when the component was not a directory to begin with.
+//
+// A regular file as the LAST component is a legitimate terminal — it is what a
+// lock file is — and the walk ends on it with no error. A DIRECTORY that will
+// not open is a different thing entirely: either a permission fault worth
+// reporting, or an entry swapped for an indirection between the Lstat and the
+// open, where reporting success would hand the caller a chain describing a
+// component that no longer exists.
+func TestResolveReportsADirectoryItCannotEnter(t *testing.T) {
+	t.Parallel()
+	//: root ignores the permission bits, so the case cannot be built there and
+	//: a pass would mean nothing.
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a mode cannot make a directory unopenable")
+	}
+	base := t.TempDir()
+	closed := filepath.Join(base, "closed")
+	if err := os.Mkdir(closed, 0o700); err != nil {
+		t.Fatalf("building the directory = %v", err)
+	}
+	//: write and search but NOT read, so os.Lstat still describes it from the
+	//: parent while opening it for a directory read is refused.
+	if err := os.Chmod(closed, 0o300); err != nil {
+		t.Skipf("cannot set the mode this test needs: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(closed, 0o700) })
+	//: if this filesystem opens it anyway, the case was not built and a
+	//: verdict either way would be about the filesystem rather than the walk.
+	if probe, probeErr := os.Open(closed); probeErr == nil {
+		_ = probe.Close()
+		t.Skip("this filesystem opens a 0300 directory: the case cannot be built here")
+	}
+	if _, err := pathchain.Resolve(closed); err == nil {
+		t.Fatalf("Resolve of a directory it cannot enter = nil, want the filesystem's error")
+	}
+}
