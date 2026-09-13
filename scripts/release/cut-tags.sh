@@ -17,6 +17,9 @@
 # Race-protected (plan B3): re-reads the latest tag immediately before the push
 # and aborts on drift.
 #
+# The bump size comes from a `Release-bump` trailer read over the same range
+# compute-bumps.sh diffs, not from HEAD alone (ADR 0085).
+#
 # go.sum + clean-room proxy resolution are finalised at the FIRST real release
 # (ADR 0009): pushed-tag checksums cannot be computed before the tags exist, so
 # this script produces the correct go.mod FORM and tags the chain; the first
@@ -37,18 +40,21 @@ INTERNAL_MODULES=(internal/kernel internal/core internal/service)
 
 DRY_RUN=0
 ALLOW_BOOTSTRAP=0
+RANGE=""
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
     --allow-bootstrap) ALLOW_BOOTSTRAP=1 ;;
+    --range=*) RANGE="${arg#--range=}" ;;
     --help | -h)
       cat <<EOF
 cut-tags.sh — read the bump token 'pkg' on stdin, publish the next patch tag chain.
 
-Usage: $0 [--dry-run] [--allow-bootstrap] < bump.txt
+Usage: $0 [--dry-run] [--allow-bootstrap] [--range=<rev>..HEAD] < bump.txt
 
-Honors a 'Release-bump: minor' trailer on the latest merge commit, but
-only if that commit actually touches pkg/.
+Honors a 'Release-bump: minor' trailer on any merge commit since the last
+release, but only on commits that actually touch pkg/; the largest such
+trailer wins. Without --range, infers the same range compute-bumps.sh does.
 EOF
       exit 0
       ;;
@@ -59,18 +65,86 @@ EOF
   esac
 done
 
-# Inspect the *merge commit* (HEAD on main is the squash/merge commit in the
-# standard PR flow) and parse its Release-bump trailer once.
-trailer_raw="$(git log -1 --format='%(trailers:key=Release-bump,valueonly,separator=,)' HEAD 2>/dev/null || true)"
-# Files actually touched by that commit — used to scope the trailer so a
-# Release-bump trailer only counts when the commit really touched pkg/.
-merge_touched_paths="$(git log -1 --name-only --format= HEAD 2>/dev/null || true)"
+# The range over which the maintainer's Release-bump trailer is read — the SAME
+# range compute-bumps.sh diffs, via the same release_base() (ADR 0085).
+#
+# It used to be `git log -1 HEAD`, and that is the defect: a release only fires
+# on a SUCCESSFUL CI run, and a run cancelled by the next push (the concurrency
+# group) produces none at all. So the commit carrying the trailer is routinely
+# NOT the commit this script sees as HEAD — while compute-bumps.sh still saw its
+# pkg/ changes inside the range and asked for a release. Reading HEAD alone then
+# answered "patch" for a change the maintainer had signed as minor, silently.
+if [ -z "$RANGE" ]; then
+  base="$(release_base)"
+  # No baseline (bootstrap repo of one commit): every commit there is, i.e.
+  # HEAD. Bootstrap never consults the trailer — the first tag is seeded at
+  # v0.1.0 below — but the range stays well-defined rather than malformed.
+  RANGE="${base:+${base}..}HEAD"
+fi
+
+# rank_of <value> — order the trailer vocabulary so "largest wins" is decidable.
+# Anything unrecognised ranks with patch, which is what the bump already
+# defaulted to: an unreadable trailer must never *raise* a release.
+rank_of() {
+  case "$1" in
+    major) echo 2 ;;
+    minor) echo 1 ;;
+    *) echo 0 ;;
+  esac
+}
+
+# range_trailer <range> — echo the largest Release-bump value carried by a
+# commit in <range> that ALSO touched pkg/, or nothing.
+#
+# Why the scoping stays per commit: the trailer is a maintainer's signature on
+# ONE merge, honoured only for the paths that merge actually touched (ADR 0007
+# §2). That is what stops a `Release-bump: minor` written in an unrelated docs
+# merge from sizing a pkg release, and it only survives if each commit is
+# matched against its OWN name-only list — scoping the whole range at once would
+# let any commit's paths vouch for any other commit's trailer.
+#
+# Why largest rather than newest: the trailer states what the release must be at
+# least, so a later commit that says nothing cannot shrink one that did. Two
+# commits each asking for minor coalesce into the single minor they both meant.
+#
+# Only trailer-bearing commits pay for the second git call — the first pass
+# reads every commit's trailer in one `git log`, and the path check then runs on
+# the handful that carry one (usually zero).
+range_trailer() {
+  local best="" best_rank=0 best_sha="" sha="" raw="" value="" r=""
+  while read -r sha raw; do
+    [ -z "$raw" ] && continue
+    git log -1 --name-only --format= "$sha" | grep -qE '^pkg/' || continue
+    # `separator=,` joins a commit's repeated trailers into one field; split it
+    # so a commit carrying two of them is ranked like two commits would be.
+    # Default IFS on a single-variable read, so `Release-bump: minor ` written
+    # with a stray space still ranks as minor instead of silently as patch.
+    while read -r value; do
+      r="$(rank_of "$value")"
+      if [ "$r" -gt "$best_rank" ]; then
+        best_rank="$r"
+        best="$value"
+        best_sha="$sha"
+      fi
+    done < <(tr ',' '\n' <<<"$raw")
+  done < <(git log --format='%H %(trailers:key=Release-bump,valueonly,separator=,)' "$1" 2>/dev/null || true)
+
+  # Say where a winning trailer came from when it is not HEAD. That is the only
+  # visible trace that a release was sized by a commit whose own CI run never
+  # produced one, and it costs a log line. stderr, never stdout: stdout is the
+  # tag list the workflow feeds to `gh release create`.
+  if [ -n "$best" ] && [ "$best_sha" != "$(git rev-parse HEAD)" ]; then
+    echo "cut-tags: 'Release-bump: $best' taken from $(git rev-parse --short "$best_sha"), not HEAD — over $1" >&2
+  fi
+  echo "$best"
+}
+
+trailer="$(range_trailer "$RANGE")"
 
 # bump_for_pkg <last-tag> — echo the next full tag. Pre-release tags refuse to
 # bump (the shared lib rejects them in next_patch/minor).
 bump_for_pkg() {
-  local last="$1" trailer
-  trailer="$(grep -E '^pkg/' <<<"$merge_touched_paths" >/dev/null 2>&1 && echo "$trailer_raw" || echo)"
+  local last="$1"
   case "$trailer" in
     minor) next_minor "$last" ;;
     major)
