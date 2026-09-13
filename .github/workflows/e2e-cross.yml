@@ -40,8 +40,15 @@ env:
   # lock inside one process does. A green cross-compile proves neither. This is
   # the lane that executes internal/service/lock's Windows suite; the Linux
   # Bazel gate compiles neither that suite nor the backend it covers.
+  #
+  # `entitlement` joins for a narrower reason: its offline cache installs a
+  # refreshed roster with write-then-rename, and Windows refuses to replace a
+  # destination another handle holds open — which is exactly what that cache's
+  # own reader does from a second process. The defect was deferred twice (ADR
+  # 0078, then ADR 0079) on the stated grounds that it was "not reachable from
+  # this CI matrix". Listing one more package here is what made that false.
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./lock ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
+  SERVICE_PKGS: "./entitlement ./lock ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics with no
   # Windows equivalent (Windows uses ACLs; chmod 0555 doesn't block the owner).

@@ -45,8 +45,10 @@ go_test(
     srcs = [
         "bundle_external_test.go",
         "bundle_internal_test.go",
+        "cache_concurrency_internal_test.go",
         "cache_internal_test.go",
         "cache_unix_internal_test.go",
+        "cache_windows_internal_test.go",
         "ci_external_test.go",
         "ci_internal_test.go",
         "ciseat_internal_test.go",
