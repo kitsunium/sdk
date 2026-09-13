@@ -267,10 +267,11 @@ func (s *Service) cachedRoster(now time.Time) (roster *coreent.RosterValue, err 
 	path := cachedBundlePath(s.cacheDir)
 	var raw []byte
 	var readErr error
-	//: Under the guard, for Windows' sake rather than for POSIX's: holding
-	//: this file open is what makes a concurrent refresh's rename fail there,
-	//: and the reader is the only party in a position to avoid it.
-	s.holdCache(func() { raw, readErr = readCappedFile(path) })
+	//: Under the guard on Windows and unguarded elsewhere: holding this file
+	//: open is what makes a concurrent refresh's rename fail there, and the
+	//: reader is the only party in a position to avoid it. POSIX needs
+	//: nothing — see cache_lock_unix.go for what the guard would cost it.
+	s.holdCacheForRead(func() { raw, readErr = readCappedFile(path) })
 	//: Never fetched successfully, the cache was cleared, or what is there is
 	//: too large to be a roster.
 	if readErr != nil {
@@ -354,8 +355,8 @@ func (s *Service) signedHighWaterMark() time.Time {
 		return time.Time{}
 	}
 	var mark time.Time
-	//: Under the guard, for the same reason cachedRoster reads under it.
-	s.holdCache(func() { mark = s.markWhileHeld() })
+	//: Under the guard on Windows only, for the same reason cachedRoster is.
+	s.holdCacheForRead(func() { mark = s.markWhileHeld() })
 	//: The newest signed instant this machine can prove it has seen.
 	return mark
 }

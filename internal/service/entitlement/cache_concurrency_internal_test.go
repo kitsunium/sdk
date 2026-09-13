@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -150,29 +149,32 @@ func Test_rememberRoster_concurrentGenerationsNeverLowerTheMark(t *testing.T) {
 	}
 }
 
-// Test_writeCachedBundle_installsWhileAReaderHoldsTheCacheOpen pins that a
-// refresh lands even though another reader is inside the cached bundle.
+// Test_rememberRoster_refreshesWhileTheCacheIsBeingRead pins that a refresh
+// lands even though another holder is reading the bundle at the same time.
 //
 // This is the ordinary shape of this package under concurrency, and it is not
 // hypothetical: readCappedFile — which BOTH signedHighWaterMark and
 // cachedRoster go through — opens the installed file and holds the descriptor
 // until it has read it. Two invocations of an entitled binary at once, which
 // writeCachedBundle's own doc comment calls "the ordinary case on this
-// project", put one process inside that read while the other installs a
-// refreshed roster over it.
+// project", put one inside that read while the other installs a refreshed
+// roster over it.
 //
 // On POSIX the rename is atomic and the reader keeps reading the file it
-// opened, so this passes without anything being done about it. It is asserted
-// on every platform anyway, because the property is the SDK's, not the
-// kernel's — and because the only way to see where it does not hold is to
-// state it where it does.
+// opened, so this passes without anything being done about it. On Windows,
+// replacing a file another handle holds open is REFUSED, and the refusal is
+// silent to the caller — rememberRoster logs it and carries on — so the machine
+// stays on a bundle that will expire, and discovers it at the moment the
+// network is down. The property is asserted on every platform because it is
+// the SDK's, not the kernel's.
 //
-// The failure this rules out is silent by construction. rememberRoster treats
-// a write failure as best-effort and logs it, so a machine that can never
-// refresh its cache looks exactly like a machine that can, right up until the
-// network goes down and the stale bundle has expired — the one moment the
-// offline grant exists for.
-func Test_writeCachedBundle_installsWhileAReaderHoldsTheCacheOpen(t *testing.T) {
+// The reader here goes through the package's own read path rather than opening
+// the file itself, and the distinction is the whole point: that path is what
+// holdCacheForRead guards on Windows. A holder OUTSIDE this SDK — an antivirus
+// scanner, a backup agent — is not guarded and still breaks the rename; that
+// residue is pinned as a platform fact in
+// Test_windowsRenameOverAnOpenDestination's second row, not fixed here.
+func Test_rememberRoster_refreshesWhileTheCacheIsBeingRead(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -181,7 +183,7 @@ func Test_writeCachedBundle_installsWhileAReaderHoldsTheCacheOpen(t *testing.T) 
 	}{
 		{
 			name:   "a reader is inside the bundle when the refresh lands",
-			reason: "a refresh that cannot replace an open cache leaves the machine on a bundle that will expire",
+			reason: "a refresh that cannot replace a cache being read leaves the machine on a bundle that will expire",
 		},
 	}
 
@@ -195,51 +197,42 @@ func Test_writeCachedBundle_installsWhileAReaderHoldsTheCacheOpen(t *testing.T) 
 				t.Fatalf("generating vendor key: %v", keyErr)
 			}
 
-			dir := t.TempDir()
 			stale := time.Now().Add(-9 * time.Hour).Truncate(time.Second)
 			fresh := time.Now().Truncate(time.Second)
-			//: The bundle already on disk, which the reader will hold open.
-			if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, stale, 1)); seedErr != nil {
-				t.Fatalf("seeding cache: %v", seedErr)
-			}
-
-			//: Exactly how readCappedFile holds the file: an ordinary
-			//: os.Open, kept open across the refresh below.
-			reader, openErr := os.Open(cachedBundlePath(dir))
-			//: A failure here is an environment problem, not a test outcome.
-			if openErr != nil {
-				t.Fatalf("opening the cached bundle: %v", openErr)
-			}
-			//: Released at the point it was acquired; the refresh happens
-			//: while it is still held, which is the whole point.
-			defer func() {
-				//: Best-effort: the descriptor's release is not what is under
-				//: test, but a failure to release it would mask the result.
-				if closeErr := reader.Close(); closeErr != nil {
-					t.Errorf("closing the held reader: %v", closeErr)
+			notRefreshed := 0
+			//: Each round is its own cache directory and its own race.
+			for range concurrentRounds {
+				dir := t.TempDir()
+				svc := (&Service{vendor: vendorPub}).WithCache(dir)
+				//: The bundle already on disk, which the reader will be inside.
+				if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, stale, 1)); seedErr != nil {
+					t.Fatalf("seeding cache: %v", seedErr)
 				}
-			}()
 
-			writeErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, fresh, 1))
-			//: The refusal itself, named with the platform's own error, is
-			//: the evidence — not a narrative about what Windows does.
-			if writeErr != nil {
-				t.Fatalf("writeCachedBundle() while a reader holds the cache open = %v, want nil (%s)", writeErr, tt.reason)
+				raw := paddedBundle(t, vendorPriv, fresh, 1)
+				start := make(chan struct{})
+				var wg sync.WaitGroup
+				wg.Add(1)
+				//: Goroutine lifecycle: one read through the package's own
+				//: path, then exit. The barrier makes it overlap the install.
+				go func() {
+					defer wg.Done()
+					<-start
+					_ = svc.signedHighWaterMark()
+				}()
+				close(start)
+				svc.rememberRoster(raw, &coreent.RosterValue{IssuedAt: fresh})
+				wg.Wait()
+
+				//: The refresh either landed or was silently dropped.
+				if !svc.signedHighWaterMark().Equal(fresh) {
+					notRefreshed++
+				}
 			}
 
-			raw, readErr := readCappedFile(cachedBundlePath(dir))
-			//: A refresh that reported success must have installed something.
-			if readErr != nil {
-				t.Fatalf("reading the refreshed cache: %v", readErr)
-			}
-			installed, authErr := authenticateBundle(raw, vendorPub)
-			//: Whatever is installed must still be the vendor's.
-			if authErr != nil {
-				t.Fatalf("authenticating the refreshed cache: %v", authErr)
-			}
-			if !installed.IssuedAt.Equal(fresh) {
-				t.Errorf("installed bundle IssuedAt = %s, want %s — the refresh did not replace the stale copy (%s)",
-					installed.IssuedAt, fresh, tt.reason)
+			if notRefreshed != 0 {
+				t.Errorf("the refresh did not replace the stale bundle in %d of %d rounds, want 0 (%s)",
+					notRefreshed, concurrentRounds, tt.reason)
 			}
 		})
 	}

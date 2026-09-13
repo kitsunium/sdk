@@ -8,6 +8,8 @@ go_library(
         "bundle.go",
         "cache.go",
         "cache_lock.go",
+        "cache_lock_unix.go",
+        "cache_lock_windows.go",
         "ci.go",
         "ciseat.go",
         "jwks.go",

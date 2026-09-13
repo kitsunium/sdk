@@ -54,6 +54,14 @@ const cacheLockBudget time.Duration = 2 * time.Second
 // and a guard that only one of them installed would be a guard that production
 // or the tests silently went without.
 //
+// It CREATES the cache directory, which the first successful write used to do.
+// On Windows, where reads are guarded too, a machine that never manages to
+// fetch a roster therefore ends up with an empty 0700 directory holding one
+// `.lock` file, where before it had nothing. That is a visible change and it is
+// accepted: the alternative is to take the guard only once there is something
+// to guard, which is exactly the ordering that makes a first write race a
+// concurrent one.
+//
 // nil is a real answer, not a failure to report. A platform with no file-range
 // lock (NewFileLocker refuses with coreproc.UnsupportedPlatform) and a cache
 // directory whose lock files any account could replace both yield one, and in
