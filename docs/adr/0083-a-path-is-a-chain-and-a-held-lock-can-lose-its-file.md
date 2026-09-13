@@ -145,12 +145,20 @@ governs UNLINKING an entry that exists, and planting a component CREATES one at
 a name nobody has taken.
 
 The alternative — refuse a link anywhere in the path — is wrong, and it is
-wrong on platforms this repository tests on. `/tmp` is a symbolic link to
-`/private/tmp` on macOS; `/var/run` is one to `/run` on most Linux
-distributions; `C:\Users\All Users` is a junction to `C:\ProgramData`. A
-blanket refusal would turn every lock directory under any of them into
+wrong on a platform this repository tests on. That was written from
+documentation and is now **measured**: on the `macos-arm64` job of
+`e2e-cross`, every `t.TempDir()` resolves through `/var -> /private/var`, which
+Apple ships. `/private/tmp` is the same story one directory over; `/var/run` is
+one to `/run` on most Linux distributions; `C:\Users\All Users` is a junction
+to `C:\ProgramData`.
+
+A blanket refusal would turn every lock directory under any of them into
 `LOCK_PATH_REDIRECTED`, which is ADR 0018 §(a)'s failure mode wearing an error
-that blames the deployment for the operating system's own layout.
+that blames the deployment for the operating system's own layout. The rule as
+written accepts them, and that was measured on the same run: every path in
+`chain_posix_test.go` reaches `t.TempDir()` through Apple's `/var` link, and
+all four accepting rows passed, because the directory holding `/var` is `/` and
+nobody but root can write it.
 
 The four accepting rows of `TestAnIndirectionAboveTheLockFileIsRefusedOnly...`
 exist for the reason ADR 0081 §D5's table has its own: a guard that refuses the
@@ -270,6 +278,19 @@ gives the flock and the descriptor back on the way out.
 - **A hard link at the lock path is still accepted**, unchanged from ADR 0082
   §Deferred: it is not an indirection, and `Nlink > 1` is also what a
   deduplicating filer produces.
+- **A component's reported path is where it LIVES, not how the caller spelled
+  it**, and two platforms make that visible in opposite directions — both
+  measured on `e2e-cross` rather than anticipated. macOS resolves
+  `/var -> /private/var`, so a reported path is *longer* than the one passed
+  in. GitHub's Windows runner hands out `TMP` as an 8.3 SHORT name, so a
+  reported path *keeps* `RUNNER~1` where `filepath.EvalSymlinks` would expand
+  it — `pathchain` reports the components it was given, because a short name is
+  a second directory entry for one inode rather than an indirection, and
+  `os.Root` does not expand it either. Three platforms spell one directory
+  three ways, so every "did the walk land here" assertion in both suites
+  compares `os.SameFile` over `os.Lstat` and never strings. The first two
+  attempts at those assertions compared strings and were red on one platform
+  each; that history is in the test files, beside the assertions.
 - **Cost.** One path walk per `NewFileLocker` — a handful of `openat` and
   `fstatat` calls, once, at construction. Two extra syscalls per `Acquire` and
   per `Extend`. `Extend` is a keepalive's cadence, not a hot path.

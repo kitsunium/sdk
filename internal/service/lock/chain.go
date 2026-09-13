@@ -17,11 +17,14 @@
 // # A link at a parent is not evidence of anything on its own
 //
 // The obvious remedy — refuse a link anywhere in the path — is wrong, and it
-// is wrong on a platform this repository tests on. /tmp is a symbolic link to
-// /private/tmp on macOS; /var/run is one to /run on most Linux distributions;
-// C:\Users\All Users is a junction to C:\ProgramData. A blanket refusal would
-// turn every lock directory under any of them into LOCK_PATH_REDIRECTED, which
-// is ADR 0018 §(a)'s failure mode wearing an error that blames the deployment.
+// is wrong on a platform this repository tests on. That is measured rather
+// than recited: on the macos-arm64 job of e2e-cross every t.TempDir() resolves
+// through /var -> /private/var, which Apple ships. /var/run is one to /run on
+// most Linux distributions; C:\Users\All Users is a junction to
+// C:\ProgramData. A blanket refusal would turn every lock directory under any
+// of them into LOCK_PATH_REDIRECTED, which is ADR 0018 §(a)'s failure mode
+// wearing an error that blames the deployment for the operating system's own
+// layout.
 //
 // What separates those from an attack is not the link, it is the directory the
 // link LIVES IN. A link in a directory only root can write was put there by
