@@ -90,7 +90,8 @@ process pass the gate and then block on a `flock` its own process holds.
 | `chain.go` | the components ABOVE the lock file, which `O_NOFOLLOW` cannot reach: the `pathchain` walk, and the rule that refuses an indirection only where anybody could have planted it (ADR 0083) |
 | `identity.go` | `sameEntry` — is the file this lease holds still the file its NAME leads to? The one exposure here that is DETECTED rather than prevented (ADR 0083) |
 | `nofollow_unix.go` / `nofollow_windows.go` / `nofollow_other.go` | the same split again — `O_NOFOLLOW`, `FILE_FLAG_OPEN_REPARSE_POINT` + the handle check, and the plain open |
-| `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule, the reason it cannot run on Windows, and `plantable` — "could anybody create an entry here?", which is the same question asked of a different directory |
+| `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule on Unix, a DACL rule on Windows, and `plantable` — "could anybody create an entry here?", the same question asked of a different directory |
+| `dacl_windows.go` | Windows' answer to that question: `GetNamedSecurityInfoW` + `GetAce` from `advapi32`, and the cost estimate that deferred it three times, re-checked (ADR 0084) |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
 
 ## Platform matrix (ADR 0018)
@@ -137,19 +138,33 @@ Two consequences the code depends on:
 
 ## The lock directory's verdict is platform-specific, rule AND reason
 
+Same question on both — *can any account put an entry here?* — and two
+different vocabularies for it.
+
 On Unix: refuse world-writable-and-not-sticky. The whole table — not just the
 two extremes the suite used to cover — is pinned by
 `TestTheDirectoryRuleIsOtherWriteAndNotSticky`.
 
-On Windows: **accept, and say why.** `os.Stat` has no permission bits to read
-and synthesises a mode from `FILE_ATTRIBUTE_READONLY`, so every writable
-directory reports `0777` with no sticky bit and the POSIX rule would refuse
-**all** of them — ADR 0018 §(a)'s failure mode, wearing a typed error that
-blames the deployment. And the attack the rule prevents is already refused by
-the open: `os.OpenFile` reaches `CreateFileW` **without** `FILE_SHARE_DELETE`,
-so a held lock file can be neither deleted nor renamed whatever the ACL says.
-A real DACL check is deferred with its cost in ADR 0081 §Alternatives; the two
-residual exposures are named there too.
+On Windows: read the **DACL** (ADR 0084). `os.Stat` has no permission bits and
+synthesises a mode from `FILE_ATTRIBUTE_READONLY`, so every writable directory
+reports `0777` with no sticky bit and the POSIX rule would refuse **all** of
+them — ADR 0018 §(a)'s failure mode wearing a typed error that blames the
+deployment. So the rule asks instead whether an access-allowed entry grants a
+planting right to Everyone (`S-1-1-0`) or Authenticated Users (`S-1-5-11`).
+
+It was deferred three times on a cost estimate of ~250 lines of ABI that
+neither carrying record re-checked. It is two `advapi32` exports:
+`GetNamedSecurityInfoW` and `GetAce`. `syscall` already ships `StringToSid`,
+`(*SID).String` and `LocalFree`, so `EqualSid` is not bound at all — the
+comparison is byte equality on the rendered SID.
+
+There is **no sticky equivalent** here, so the two platforms' accepting sets
+genuinely differ: no Windows ACL says "anyone may create but only the owner may
+unlink". That is a property of the two access-control models, not a divergence.
+
+The check **fails open**: any failure on the way to a verdict accepts, and the
+Win32 status travels in the refusal's `mode` field so "the check ran and
+accepted" is distinguishable from "the check could not run".
 
 ## The directory rule never reached the lock file's NAME
 
@@ -216,10 +231,14 @@ world-writable — when anybody could have planted it — and the sticky bit
 exempts nothing, because planting a component CREATES an entry rather than
 unlinking one. That is ADR 0082's own argument, one level up.
 
-On **Windows nothing new is refused**, and `dirsafety_windows.go` says why:
-`os.Stat` synthesises `0777` for every writable directory, so the rule would
-refuse every junction under one. `TestAnIndirectionAboveTheLockFileIsAccepted
-OnWindows` pins that gap on a real kernel rather than leaving it assumed.
+On **Windows the same rule runs**, over a different answer to the same
+question. `os.Stat` synthesises `0777` for every writable directory there, so
+the mode says nothing — the verdict comes from the directory's DACL instead
+(`dacl_windows.go`, ADR 0084). A junction in a directory only its owner can
+write is ACCEPTED, because `C:\Users\All Users -> C:\ProgramData` is one
+Windows installs itself; a junction in a directory Everyone can write is
+refused. Both rows are tested on `windows-latest` with real ACLs applied
+through `icacls`.
 
 ### Unlink-and-replace in a sticky directory — DETECTED, not prevented
 
@@ -260,7 +279,7 @@ there is nothing to race.
 | Sentinel | Code | When |
 |---|---|---|
 | `LockFenceCorrupt` | `0.3.51.1` | no next token can be issued: the lock file is not a decimal counter (`condition=unparseable`), or it holds `2^64-1` and `previous+1` would wrap to zero (`condition=exhausted`). **Refused, never reset** — a restarted fence, and a wrapped one, both reissue numbers the resource already accepted |
-| `LockDirectoryUnsafe` | `0.3.51.2` | world-writable, non-sticky lock directory: any account can unlink the lock file and give the next process a **different inode** to lock. **Unix only** — Windows has no mode bits to read and the unlink is refused by the open (ADR 0081 §D5) |
+| `LockDirectoryUnsafe` | `0.3.51.2` | a lock directory any account can put an entry into: world-writable and non-sticky on Unix, or a DACL granting Everyone / Authenticated Users a planting right on Windows (ADR 0084). Either way the lock file can be replaced and the next process locks a **different inode** |
 | `LockKeepaliveLost` | `0.3.51.3` | a background renewal failed; carried as a context **cause**, never as a return value |
 | `LockPathRedirected` | `0.3.51.4` | the lock path is a symbolic link (Unix) or a reparse point (Windows), so the lock and its ledger would land on a file whoever planted it chose. **Not** `LOCK_BACKEND_FAILED`: nothing failed, and that code invites the one wrong response — a retry. Since ADR 0083 it also covers an indirection at a PARENT component planted where anybody could have planted it, with the component, the configured directory and the target in its fields |
 | `LockFileReplaced` | `0.3.51.5` | the file a lease holds is no longer the file its name leads to — unlinked, or replaced, while held. Reported at `Acquire` (the window between the open and the `flock`) and at `Extend` (the only call a holder makes during the section). **Detection, never prevention**: the split still happens and the holder is told |
@@ -298,6 +317,15 @@ re-`Define`d here.
 - **Run the POSIX directory rule on Windows.** It refuses every directory, and
   `prepareDir` only checks directories it did not create — so the symptom is a
   program that starts once on a fresh machine and never again.
+- **Make the DACL check refuse on an API failure.** It fails OPEN on purpose:
+  this code cannot be iterated locally, a wrong refusal costs a locker that
+  never builds on a safe directory, and a wrong acceptance leaves the platform
+  where it already was. Those are not symmetric (ADR 0084 §D5).
+- **Read a NULL DACL as "no entries, so no grants".** Windows reads it as
+  everyone, full control. That inversion is what makes a security check worse
+  than none.
+- **Match on the SID alone.** A world-READABLE lock directory is not a
+  world-writable one, exactly as `0755` is not `0777`. The mask is read.
 - **"Repair" a corrupt fence ledger.** Refusing is the decision.
 - **Open the lock file with a bare `os.OpenFile`.** That is the defect ADR 0082
   closed, and it is invisible: the acquisition succeeds. Go through

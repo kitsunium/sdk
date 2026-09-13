@@ -391,7 +391,11 @@ this was found rather than reasoned.
 
 ## Deferred
 
-- **A DACL check for `checkDir` and `plantable` on Windows.** Named in ADR 0081
+- **A DACL check for `checkDir` and `plantable` on Windows.** **CLOSED by
+  [ADR 0084](0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md)**,
+  which took the inventory below as its starting point and found it complete:
+  two `advapi32` exports and nothing else. The reasoning is left standing.
+  Named in ADR 0081
   §Deferred, again in ADR 0082 §Deferred, and not closed here either — but it
   is now load-bearing for two rules rather than one, so it is worth stating
   precisely what it needs. `syscall` in go1.27 exports `StringToSid`,

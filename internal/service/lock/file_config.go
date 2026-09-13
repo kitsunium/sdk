@@ -116,8 +116,12 @@ func prepareDir(dir string) error {
 		return redirected
 	}
 	info, err := os.Stat(dir)
-	//: absent — create it owner-only. A directory we created has the mode we
-	//: asked for, so the check below is about directories we did NOT create.
+	//: absent — create it owner-only, then check it like any other. On Unix a
+	//: directory we created has the mode we asked for and the check is a
+	//: formality; on WINDOWS it inherits its parent's ACL and lockDirMode
+	//: means nothing, so a fresh lock directory under an Everyone-writable
+	//: parent is exactly as unsafe as an existing one and used to be accepted
+	//: because this branch returned here.
 	if os.IsNotExist(err) {
 		//: MkdirAll rather than Mkdir: a lock directory nested under a fresh
 		//: state directory is the ordinary deployment shape.
@@ -125,8 +129,7 @@ func prepareDir(dir string) error {
 			//: the medium refused.
 			return backendFailed("mkdir", dir, mkErr)
 		}
-		//: freshly created, owner-only.
-		return nil
+		return checkCreated(dir)
 	}
 	//: some other stat failure.
 	if err != nil {
@@ -142,5 +145,24 @@ func prepareDir(dir string) error {
 	}
 	//: the safety check, whose rule and whose justification are BOTH
 	//: platform-specific — see dirsafety_posix.go and dirsafety_windows.go.
+	return checkDir(dir, info)
+}
+
+// checkCreated applies the safety rule to a directory this process has just
+// created.
+//
+// It is not a formality on every platform. A directory created on Windows
+// INHERITS its parent's access control list, and lockDirMode has no meaning
+// there at all, so "we made it, therefore it is safe" holds on Unix and is
+// false on Windows.
+func checkCreated(dir string) error {
+	info, err := os.Stat(dir)
+	//: the directory was created and cannot be described, which is a medium
+	//: fault rather than a verdict.
+	if err != nil {
+		//: LockBackendFailed.
+		return backendFailed("stat", dir, err)
+	}
+	//: the same rule an existing directory gets.
 	return checkDir(dir, info)
 }

@@ -45,8 +45,11 @@ func checkDir(dir string, info fs.FileInfo) error {
 		kerrs.String("mode", mode.Perm().String()))
 }
 
-// plantable reports whether any account could create an entry in a directory
-// with this mode.
+// plantable reports whether any account could create an entry in the directory
+// a component was found in, and renders what it read.
+//
+// The path is unused here and is the whole of the answer on Windows, where
+// there are no mode bits to read — see dirsafety_windows.go.
 //
 // The sticky bit is deliberately NOT consulted, and that is the whole
 // difference from [checkDir]. Sticky says only an entry's owner may UNLINK it;
@@ -55,10 +58,10 @@ func checkDir(dir string, info fs.FileInfo) error {
 // directory there. [checkChain] asks who could have planted a component of the
 // path, which is a creation, so sticky exempts nothing here — and 0777|sticky,
 // which is exactly what /tmp is, is plantable.
-func plantable(container fs.FileMode) bool {
+func plantable(container fs.FileMode, _ string) (yes bool, observed string) {
 	//: other-write is the one bit that answers the question. Group-write is
 	//: not enough: a directory shared with a group is a deliberate
 	//: arrangement, the same one checkDir accepts, and the accounts in that
 	//: group are the ones the lock is being shared with.
-	return container&worldWritable != 0
+	return container&worldWritable != 0, "container=" + container.Perm().String()
 }
