@@ -40,6 +40,7 @@ func refuse(sentinel *errs.Error, fields ...errs.FieldValue) error {
 // contributes only a trail entry. That is the right outcome, and it is why
 // every call here can name its most specific classification without first
 // checking whether the cause has one of its own.
+//
 // A nil sentinel is refused rather than dereferenced. Only a bug in this
 // package can produce one, and the worst place to take a process down is the
 // path that is already reporting a failure — so it degrades to what
