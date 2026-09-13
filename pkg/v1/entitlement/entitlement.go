@@ -121,51 +121,60 @@ const CodeProductInvalid errs.Code = coreent.CodeProductInvalid
 // facade boundary; each also carries the matching Code above, so errs.HasCode
 // and errors.Is are two ways of asking one question.
 //
+// None is annotated `error`, and that is deliberate. The annotation would erase
+// the concrete type, and with it Code, Reason, Public and ExitCode — every one
+// of which a consumer reads directly off the sentinel to render a message or
+// exit a process. Without it they are reachable only through a type assertion
+// to a type a consumer cannot name, since internal/kernel/errs is internal.
+// pkg/v1/lock, pkg/v1/cache and pkg/v1/authz all declare theirs this way;
+// this package shipped as the outlier. TestTheSentinelsKeepTheirConcreteType
+// fails the BUILD if the annotation comes back.
+//
 // A consumer that only needs ONE distinction needs this one: ErrRosterUnreachable
 // says "cannot decide", and treating it as "decided no" turns an outage into a
 // revocation.
 var (
 	// ErrNoLicense identifies a machine with no entitlement key at all.
-	ErrNoLicense error = coreent.ErrNoLicense
+	ErrNoLicense = coreent.ErrNoLicense
 
 	// ErrRosterUnsigned identifies a roster carrying no valid vendor signature.
-	ErrRosterUnsigned error = coreent.ErrRosterUnsigned
+	ErrRosterUnsigned = coreent.ErrRosterUnsigned
 
 	// ErrRosterStale identifies a roster that verified but whose window has closed.
-	ErrRosterStale error = coreent.ErrRosterStale
+	ErrRosterStale = coreent.ErrRosterStale
 
 	// ErrRevoked identifies a subject absent from a roster that was itself valid.
-	ErrRevoked error = coreent.ErrRevoked
+	ErrRevoked = coreent.ErrRevoked
 
 	// ErrLicenseExpired identifies a subject whose own term has closed.
-	ErrLicenseExpired error = coreent.ErrLicenseExpired
+	ErrLicenseExpired = coreent.ErrLicenseExpired
 
 	// ErrKeyMismatch identifies a local key that does not match the published fingerprint.
-	ErrKeyMismatch error = coreent.ErrKeyMismatch
+	ErrKeyMismatch = coreent.ErrKeyMismatch
 
 	// ErrRosterUnreachable identifies a check that could not decide either way.
-	ErrRosterUnreachable error = coreent.ErrRosterUnreachable
+	ErrRosterUnreachable = coreent.ErrRosterUnreachable
 
 	// ErrAmbiguousLicense identifies more than one identity on one machine.
-	ErrAmbiguousLicense error = coreent.ErrAmbiguousLicense
+	ErrAmbiguousLicense = coreent.ErrAmbiguousLicense
 
 	// ErrCIUnverifiable identifies a CI run whose provenance could not be proven.
-	ErrCIUnverifiable error = coreent.ErrCIUnverifiable
+	ErrCIUnverifiable = coreent.ErrCIUnverifiable
 
 	// ErrCIUnknownKey identifies a CI token signed by a key the issuer does not publish.
-	ErrCIUnknownKey error = coreent.ErrCIUnknownKey
+	ErrCIUnknownKey = coreent.ErrCIUnknownKey
 
 	// ErrCINotEntitled identifies a CI account the roster does not cover.
-	ErrCINotEntitled error = coreent.ErrCINotEntitled
+	ErrCINotEntitled = coreent.ErrCINotEntitled
 
 	// ErrNoPossession identifies a holder who could not prove possession.
-	ErrNoPossession error = coreent.ErrNoPossession
+	ErrNoPossession = coreent.ErrNoPossession
 
 	// ErrClockRegressed identifies a clock behind the last signed document this machine verified.
-	ErrClockRegressed error = coreent.ErrClockRegressed
+	ErrClockRegressed = coreent.ErrClockRegressed
 
 	// ErrUpdateRequired identifies a build below the floor the roster mandates.
-	ErrUpdateRequired error = coreent.ErrUpdateRequired
+	ErrUpdateRequired = coreent.ErrUpdateRequired
 )
 
 // Identity is the machine's half of the proof. It aliases the core port.

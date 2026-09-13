@@ -288,3 +288,91 @@ func (refusingGetter) Get(url string) (resp *http.Response, err error) {
 	//: Nothing to serve; the case is about construction.
 	return nil, errors.New("no network in this test")
 }
+
+// TestTheSentinelsKeepTheirConcreteType pins the shape of the fourteen
+// re-exported sentinels, which is a thing a review can only catch by reading.
+//
+// They shipped declared as `ErrNoLicense error = coreent.ErrNoLicense`. The
+// explicit `error` ERASES the concrete type: the underlying values are
+// *errs.Error, which carries Code, Reason, Public, Private and ExitCode, and a
+// consumer holding the package variable had to type-assert to reach any of
+// them — through a type they cannot name, since internal/kernel/errs is
+// internal. pkg/v1/lock, pkg/v1/cache and pkg/v1/authz all declare theirs
+// without the annotation; this package was the outlier.
+//
+// The assertions below ARE the pin, and they are not merely non-nil checks:
+// every accessor is called directly on the package variable, which only
+// compiles while the concrete type survives. Putting `error` back fails the
+// build here rather than quietly removing what a consumer can read.
+func TestTheSentinelsKeepTheirConcreteType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// code is what the sentinel's own accessor must report.
+		code errs.Code
+		// public is the wire-safe sentence it must carry.
+		public string
+		// got reads the three accessors off the package variable, with no
+		// assertion anywhere — the compile is half the assertion.
+		got func() (errs.Code, string, int)
+		// reason explains what a consumer does with them.
+		reason string
+	}{
+		{
+			name:   "ErrNoLicense",
+			code:   entitlement.CodeNoLicence,
+			public: "no entitlement key was found on this machine",
+			got: func() (errs.Code, string, int) {
+				return entitlement.ErrNoLicense.Code(), entitlement.ErrNoLicense.Public(), entitlement.ErrNoLicense.ExitCode()
+			},
+			reason: "a CLI renders Public to the operator and exits on ExitCode",
+		},
+		{
+			name:   "ErrRosterUnreachable",
+			code:   entitlement.CodeRosterUnreachable,
+			public: "the roster could not be reached",
+			got: func() (errs.Code, string, int) {
+				return entitlement.ErrRosterUnreachable.Code(), entitlement.ErrRosterUnreachable.Public(), entitlement.ErrRosterUnreachable.ExitCode()
+			},
+			reason: "the one sentinel a consumer must tell apart from a refusal",
+		},
+		{
+			name:   "ErrUpdateRequired",
+			code:   entitlement.CodeUpdateRequired,
+			public: "a newer version is required",
+			got: func() (errs.Code, string, int) {
+				return entitlement.ErrUpdateRequired.Code(), entitlement.ErrUpdateRequired.Public(), entitlement.ErrUpdateRequired.ExitCode()
+			},
+			reason: "the refusal whose remedy is an upgrade rather than a licence",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			code, public, exit := tt.got()
+			//: The code has to be the one the matching constant names, or the
+			//: two halves of the facade disagree about the same failure.
+			if code != tt.code {
+				t.Errorf("%s.Code() = %v, want %v (%s)", tt.name, code, tt.code, tt.reason)
+			}
+			//: The wire-safe sentence is what a consumer renders.
+			if public != tt.public {
+				t.Errorf("%s.Public() = %q, want %q (%s)", tt.name, public, tt.public, tt.reason)
+			}
+			//: And the exit status is what a CLI returns to its shell.
+			if exit == 0 {
+				t.Errorf("%s.ExitCode() = 0, want a POSIX status (%s)", tt.name, tt.reason)
+			}
+			//: The widening costs nothing an ordinary consumer had: the value
+			//: still satisfies error, so `var e error = sentinel` compiles and
+			//: errors.Is answers exactly as before.
+			var asError error = entitlement.ErrNoLicense
+			if !errors.Is(asError, entitlement.ErrNoLicense) {
+				t.Errorf("errors.Is through the error interface = false, want true (%s)", tt.reason)
+			}
+		})
+	}
+}
