@@ -197,6 +197,17 @@ func writeCachedBundle(dir string, raw []byte) error {
 // Test_writeCachedBundle_unixInstallsOwnerOnly asserts the mode instead, where
 // the concept exists.
 //
+// One thing the pid-named predecessor did better, named rather than hidden: a
+// process killed between the create and the rename leaves a staged file
+// behind, and the old name was reused by the next run with that pid while
+// these accumulate. Every path this function can RETURN from removes it, so
+// only a hard kill inside a window of a few microseconds leaks one, and what
+// leaks is a few hundred bytes that no reader ever looks at — cachedBundlePath
+// matches one exact name. Sweeping them would mean enumerating the cache
+// directory on a read path that currently opens one file by name, and deciding
+// by age which of them belong to a live process. That is more machinery, and
+// more ways to delete the wrong thing, than the residue justifies.
+//
 // Both failures are reported, and the order between them is the point: a Write
 // that failed says the bytes are not all there, while a Close that failed says
 // they may not have reached the disk. Either one makes the staged file unfit
