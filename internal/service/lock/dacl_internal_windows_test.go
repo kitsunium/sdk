@@ -295,6 +295,61 @@ func TestInheritanceDecidesWhichQuestionAnEntryAnswers(t *testing.T) {
 	}
 }
 
+// TestADenialOnOneObjectDoesNotExcuseAGrantOnTheOther pins the two questions
+// apart at the DENIAL as well as at the grant.
+//
+// checkDir asks two things of one list: what an entry grants on the DIRECTORY,
+// and what the FILES created there will inherit. Accumulating both against one
+// denial state lets a deny that reached only one object cancel an allow that
+// reaches only the other — and the direction that matters is a directory-only
+// deny of WRITE_DAC followed by an inherit-only allow of it, where every lock
+// file created there inherits the right to rewrite its own list and then its
+// fencing ledger, and the walk reports the directory as safe.
+//
+// WRITE_DAC is the probe because it is the one right in BOTH masks, so the two
+// entries differ in nothing but which object they reach.
+func TestADenialOnOneObjectDoesNotExcuseAGrantOnTheOther(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// denyFlags is the inheritance flags word of the leading deny.
+		denyFlags byte
+		// allowFlags is the inheritance flags word of the following allow.
+		allowFlags byte
+		// granted says whether the walk must still report the grant.
+		granted bool
+	}
+	//: objectInheritAce|inheritOnlyAce reaches the files created here and
+	//: nothing on the directory; a zero flags word is the exact opposite.
+	const filesOnly byte = objectInheritAce | inheritOnlyAce
+	const directoryOnly byte = 0
+	tests := []tc{
+		{"denied on the directory, allowed on its files", directoryOnly, filesOnly, true},
+		{"denied on the files, allowed on the directory", filesOnly, directoryOnly, true},
+		{"denied on both, allowed on the directory", objectInheritAce, directoryOnly, false},
+		{"denied on both, allowed on its files", objectInheritAce, filesOnly, false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		list := buildAcl(
+			buildAce(t, accessDeniedAceType, c.denyFlags, sidEveryone, writeDAC, 0),
+			buildAce(t, accessAllowedAceType, c.allowFlags, sidEveryone, writeDAC, 0))
+		granted, observed := walk(list, replaceRights, contentRights)
+		//: a deny reaches only the object its own flags describe, so only the
+		//: last two rows may cancel anything.
+		if granted != c.granted {
+			t.Fatalf("deny flags 0x%02x then allow flags 0x%02x = %v (observed=%q), want %v", c.denyFlags, c.allowFlags, granted, observed, c.granted)
+		}
+	}
+	//: one subtest per row.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // TestAnEntryWithNoRoomForItsIdentifierIsNotRead pins both bounds the variable
 // layouts make necessary.
 //
