@@ -99,6 +99,26 @@ ledger is protected by `LockFileEx`'s mandatory range only while somebody
 holds it (ADR 0081); between holds it is an ordinary file, and a stranger who
 can write it can roll the fencing counter backwards.
 
+### D3b — Two questions, two denial states, never one
+
+ADR 0084 §D3b accumulates denied rights per hypothetical ACCOUNT rather than
+per identifier, because the identifiers are nested in a token. D3 adds a second
+axis — the directory and the files it will create — and the same argument
+applies to it in reverse: those two are NOT nested, so one denial state
+covering both is wrong in the dangerous direction.
+
+A directory-only deny of `WRITE_DAC` followed by an `OBJECT_INHERIT |
+INHERIT_ONLY` allow of `WRITE_DAC` grants every lock file created there the
+right to rewrite its own list, and then its fencing ledger — and a shared state
+subtracts the first from the second and calls the directory safe. Written that
+way once and caught in review; the walk now carries one `tokenSet` per object
+and a deny reaches only the object its own flags describe.
+
+This is deliberately NOT covered by D5's fail-open asymmetry. That asymmetry is
+about a platform API that refused to answer, where the check learns nothing and
+refusing would cost every caller. Here the list is in hand and the answer is
+computable, so accepting is not caution — it is a wrong answer.
+
 ### D4 — `BUILTIN\Users` is the third "anybody" — ADR 0084 §Deferred item 1, CLOSED
 
 `S-1-5-32-545` joins `S-1-1-0` and `S-1-5-11` in `anyoneSids`.

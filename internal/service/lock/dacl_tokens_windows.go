@@ -75,11 +75,10 @@ func newTokens() *tokenSet {
 // skipping both — would make "add a condition" a way to put a grant where this
 // rule cannot see it.
 //
-// A denial is recorded WITHOUT the context it applied in — one mask per
-// account rather than one per question — so a deny that reached only the
-// directory also subtracts from a later grant that reaches only the files.
-// That can only subtract more than it should, which is the accepting
-// direction this whole check fails in.
+// A denial is recorded against this SET only, and [walkDacl] keeps one set per
+// OBJECT — the lock directory and the files created in it. A deny that reached
+// only one of them therefore constrains only that one, which is the whole
+// reason there are two sets rather than one.
 func (t *tokenSet) apply(sid string, shape aceShape, mask, wanted uint32) (granted uint32) {
 	//: one fold per modelled account; the verdict is the union, because one
 	//: account left holding the right is enough.

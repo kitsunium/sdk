@@ -437,7 +437,9 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 	//: Authenticated Users, so a deny addressed to Everyone constrains a later
 	//: allow addressed to Authenticated Users. Keying denials by the ACE's
 	//: literal SID misses that and refuses a directory nobody can write.
-	tokens := newTokens()
+	//: TWO sets, because this walk asks two questions of one list and a deny
+	//: reaches only the object its own flags describe — see [reachOf].
+	directoryTokens, fileTokens := newTokens(), newTokens()
 	//: one pass per entry, in list order.
 	for index := range uint32(dacl.AceCount) {
 		ace, ok := aceAt(dacl, index)
@@ -455,11 +457,11 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 			//: next entry.
 			continue
 		}
-		wanted := wantedFrom(ace.AceFlags, onDirectory, onFilesWithin)
-		//: an entry that reaches neither the directory nor the files created
-		//: in it decides nothing — an inherit-only entry with no object
-		//: inheritance is the shape that gets here.
-		if wanted == 0 {
+		onDir, onFiles := reachOf(ace.AceFlags)
+		//: an entry reaching neither object decides nothing. No such flags
+		//: word exists today — inherit-only without object inheritance still
+		//: reaches subdirectories — but the walk does not depend on that.
+		if !onDir && !onFiles {
 			//: next entry.
 			continue
 		}
@@ -470,9 +472,10 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 			//: next entry.
 			continue
 		}
-		left := tokens.apply(sid, shape, expandGeneric(ace.Mask), wanted)
-		//: a grant that survives every preceding denial for at least one of
-		//: the accounts is the verdict.
+		left := fold(sid, shape, expandGeneric(ace.Mask), reach{onDir, onFiles},
+			pair{directoryTokens, onDirectory}, pair{fileTokens, onFilesWithin})
+		//: a grant that survives every preceding denial for at least one
+		//: account on at least one object is the verdict.
 		if left != 0 {
 			//: refused, naming who and what.
 			return true, sid + "=0x" + strconv.FormatUint(uint64(left), 16)
@@ -482,26 +485,61 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 	return false, ""
 }
 
-// wantedFrom reduces an entry's inheritance flags to the rights it could
-// decide anything with.
+// reach says which objects one entry's inheritance flags reach.
+type reach struct {
+	// directory is the lock directory itself.
+	directory bool
+	// files is every file created in it, which inherits the entry.
+	files bool
+}
+
+// pair binds one object's accounts to the rights that object is asked about.
+type pair struct {
+	// tokens is that object's denial state, kept apart from the other's.
+	tokens *tokenSet
+	// rights is the mask the caller wants to know about for that object, and
+	// is zero for a caller not asking about it at all.
+	rights uint32
+}
+
+// reachOf reduces an entry's inheritance flags to the objects it governs.
 //
 // An entry applies to the directory itself unless it is inherit-only, and it
 // reaches the files created in the directory when it carries
-// OBJECT_INHERIT_ACE. Both can be true of one entry, and the two sets of
-// rights are then asked of it together.
-func wantedFrom(flags byte, onDirectory, onFilesWithin uint32) (wanted uint32) {
+// OBJECT_INHERIT_ACE. Both can be true of one entry, and then it is folded
+// into both states — which is not the same as folding it into one shared
+// state, because an entry reaching only ONE of them must not constrain the
+// other.
+func reachOf(flags byte) (directory, files bool) {
 	//: an inherit-only entry describes children and grants nothing here.
-	if flags&inheritOnlyAce == 0 {
-		wanted |= onDirectory
-	}
+	directory = flags&inheritOnlyAce == 0
 	//: OBJECT_INHERIT_ACE is what the lock files created in this directory
-	//: will carry — which is a different question with a different mask, and
-	//: zero for a caller that is not asking it.
-	if flags&objectInheritAce != 0 {
-		wanted |= onFilesWithin
+	//: will carry — a different question with a different mask.
+	files = flags&objectInheritAce != 0
+	//: the objects this entry decides anything about.
+	return directory, files
+}
+
+// fold applies one entry to each object it reaches, and reports what it leaves
+// granted on any of them.
+//
+// The two states never see each other's entries. A deny that applies to the
+// directory alone is not a deny on the files created in it, and treating it as
+// one accepted a directory whose every lock file inherited the right to
+// rewrite its own list.
+func fold(sid string, shape aceShape, mask uint32, reached reach, onDirectory, onFiles pair) (granted uint32) {
+	//: the directory's own state, if this entry applies to it.
+	if reached.directory {
+		granted |= onDirectory.tokens.apply(sid, shape, mask, onDirectory.rights)
 	}
-	//: what this entry could decide.
-	return wanted
+	//: the state of the files the directory will create, if this entry is
+	//: inherited by them. A caller not asking about them passes a zero mask,
+	//: which grants nothing whatever the list says.
+	if reached.files {
+		granted |= onFiles.tokens.apply(sid, shape, mask, onFiles.rights)
+	}
+	//: what at least one account holds on at least one object.
+	return granted
 }
 
 // aceAt fetches one entry of the list.

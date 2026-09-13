@@ -360,6 +360,11 @@ re-`Define`d here.
   "safe".** An empty `observed` is what tells `checkChain` a verdict was
   REACHED; filling it in on the safe path would make every component look
   uninspected and log on the ordinary one.
+- **Accumulate both of `checkDir`'s questions against one denial state.** The
+  directory and the files it will create are two objects, not two names for
+  one. A directory-only deny of `WRITE_DAC` followed by an inherit-only allow
+  of it hands every lock file the right to rewrite its own list, and a shared
+  state reports the directory safe (ADR 0086 §D3b).
 - **Give `checkDir` and `plantable` the same mask.** They ask different
   questions, on both kernels. Merging them is what kept `BUILTIN\Users` out of
   `anyoneSids` for a whole ADR, because one mask cannot accept `%ProgramData%`
