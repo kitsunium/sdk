@@ -310,6 +310,10 @@ func TestBothSymlinkRefusalsNameTheIndirection(t *testing.T) {
 	if lerr := os.Symlink(filepath.Join(dir, "elsewhere"), link); lerr != nil {
 		t.Fatalf("plant symlink: %v", lerr)
 	}
+	//: the third row needs a path that is a file and not a link; a seed that
+	//: failed would leave it absent, and "absent" is a state refuseSymlink
+	//: passes through — the row would then assert nothing about an ordinary
+	//: failure.
 	if werr := os.WriteFile(regular, []byte("x"), defaultFilePerm); werr != nil {
 		t.Fatalf("seed regular: %v", werr)
 	}
@@ -339,6 +343,9 @@ func TestBothSymlinkRefusalsNameTheIndirection(t *testing.T) {
 				c.name, got, ok, c.wantKind, kindSymlink)
 		}
 	}
+	//: parallel, unlike the O_NOFOLLOW table: these rows share no counter and
+	//: touch no state beyond the two fixtures seeded above, which are read and
+	//: never written by a row.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
