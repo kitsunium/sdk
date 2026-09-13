@@ -12,6 +12,7 @@ go_library(
         "cache_lock_windows.go",
         "ci.go",
         "ciseat.go",
+        "errors.go",
         "jwks.go",
         "oidc.go",
         "product.go",
@@ -21,6 +22,7 @@ go_library(
         "roughtime_wire.go",
         "service.go",
         "version.go",
+        "wrap.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/entitlement",
     visibility = [
@@ -72,9 +74,13 @@ go_test(
         "roughtime_wire_internal_test.go",
         "service_internal_test.go",
         "version_internal_test.go",
+        "wrap_internal_test.go",
     ],
     embed = [":entitlement"],
-    deps = ["//internal/core/entitlement"],
+    deps = [
+        "//internal/core/entitlement",
+        "//internal/kernel/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

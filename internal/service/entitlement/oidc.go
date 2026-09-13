@@ -27,12 +27,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -150,7 +151,9 @@ func (a *audienceClaim) UnmarshalJSON(data []byte) error {
 	//: match. Refuse it outright rather than invent a value.
 	if string(data) == "null" {
 		//: Refuse an absent audience.
-		return fmt.Errorf("%w: audience is null", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_audience"),
+			errs.String("condition", "the claim is null rather than absent or a string"))
 	}
 	var single string
 	//: The single-string form is what GitHub emits today.
@@ -165,7 +168,9 @@ func (a *audienceClaim) UnmarshalJSON(data []byte) error {
 		//: Neither shape: refuse rather than treat the audience as absent,
 		//: which would skip the check that keeps another service's token from
 		//: being replayed here.
-		return fmt.Errorf("%w: audience is neither a string nor an array", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_audience"),
+			errs.String("condition", "neither of the two shapes the JWT spec allows"))
 	}
 	*a = many
 	//: Decoded the array shape.
@@ -191,7 +196,11 @@ func jwtSegments(raw string) (signingInput string, header, payload, signature []
 	//: An oversized token is not one we should spend memory parsing.
 	if len(raw) > maxTokenBytes {
 		//: Refuse before decoding anything.
-		return "", nil, nil, nil, fmt.Errorf("%w: token larger than %d bytes", coreent.ErrCIUnverifiable, maxTokenBytes)
+		return "", nil, nil, nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "split_token"),
+			errs.String("condition", "token at or past the cap"),
+			errs.Int("limit_bytes", maxTokenBytes),
+			errs.Int("got_bytes", len(raw)))
 	}
 	parts := strings.Split(raw, ".")
 	//: Exactly three non-empty segments; a JWS with fewer is not one, and an
@@ -199,7 +208,9 @@ func jwtSegments(raw string) (signingInput string, header, payload, signature []
 	if len(parts) != jwtParts || parts[headerSegment] == "" ||
 		parts[payloadSegment] == "" || parts[signatureSegment] == "" {
 		//: Refuse a malformed token.
-		return "", nil, nil, nil, fmt.Errorf("%w: not a compact JWS", coreent.ErrCIUnverifiable)
+		return "", nil, nil, nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "split_token"),
+			errs.String("condition", "not three non-empty segments"))
 	}
 
 	decoded := make([][]byte, jwtParts)
@@ -211,7 +222,9 @@ func jwtSegments(raw string) (signingInput string, header, payload, signature []
 		//: A segment we cannot decode cannot be authenticated.
 		if decodeErr != nil {
 			//: Refuse rather than guess at the encoding.
-			return "", nil, nil, nil, fmt.Errorf("%w: segment %d is not base64url", coreent.ErrCIUnverifiable, i)
+			return "", nil, nil, nil, classify(coreent.ErrCIUnverifiable, decodeErr,
+				errs.String("stage", "split_token"),
+				errs.Int("segment", i))
 		}
 		decoded[i] = segment
 	}
@@ -251,7 +264,9 @@ func strictUnmarshal[T any](data []byte, what string) (decoded T, err error) {
 	//: other JSON scalar has the same problem.
 	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
 		//: Refuse anything that is not a JSON object.
-		return decoded, fmt.Errorf("%w: %s is not a JSON object", coreent.ErrCIUnverifiable, what)
+		return decoded, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_"+what),
+			errs.String("condition", "not a JSON object"))
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -259,14 +274,17 @@ func strictUnmarshal[T any](data []byte, what string) (decoded T, err error) {
 	//: one must not break verification. What is refused is a second document.
 	if decodeErr := decoder.Decode(&decoded); decodeErr != nil {
 		//: Refuse what we cannot decode.
-		return decoded, fmt.Errorf("%w: %s is not valid JSON: %w", coreent.ErrCIUnverifiable, what, decodeErr)
+		return decoded, classify(coreent.ErrCIUnverifiable, decodeErr,
+			errs.String("stage", "decode_"+what))
 	}
 	//: More() only reports whether another VALUE follows, so `{...}]junk`
 	//: slips past it. Requiring the next read to be EOF is what actually
 	//: says "this input was one document and nothing else".
 	if _, eofErr := decoder.Token(); !errors.Is(eofErr, io.EOF) {
 		//: Refuse rather than act on the first of several.
-		return decoded, fmt.Errorf("%w: %s carries trailing content", coreent.ErrCIUnverifiable, what)
+		return decoded, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_"+what),
+			errs.String("condition", "a second document follows the first"))
 	}
 	//: One well-formed document.
 	return decoded, nil
@@ -281,18 +299,27 @@ func checkHeaderShape(header *jwtHeader) error {
 	//: the classic algorithm-confusion attack, since that key is published.
 	if header.Algorithm != "RS256" {
 		//: Refuse any other algorithm outright.
-		return fmt.Errorf("%w: unsupported alg %q", coreent.ErrCIUnverifiable, header.Algorithm)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_header"),
+			errs.String("condition", "an algorithm this verifier will not accept"),
+			errs.String("alg", header.Algorithm))
 	}
 	//: A typ, when present, must say JWT.
 	if header.Type != "" && !strings.EqualFold(header.Type, "JWT") {
 		//: Refuse a token typed as something else.
-		return fmt.Errorf("%w: unexpected typ %q", coreent.ErrCIUnverifiable, header.Type)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_header"),
+			errs.String("condition", "typed as something other than a JWT"),
+			errs.String("typ", header.Type))
 	}
 	//: "crit" names extensions the verifier MUST understand. We implement
 	//: none, so the only correct answer to any of them is to refuse.
 	if len(header.Critical) != 0 {
 		//: Refuse rather than ignore something declared critical.
-		return fmt.Errorf("%w: unsupported critical extensions %v", coreent.ErrCIUnverifiable, header.Critical)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_header"),
+			errs.String("condition", "extensions declared critical that this verifier does not implement"),
+			errs.String("crit", strings.Join(header.Critical, ",")))
 	}
 	//: A well-formed header we know how to act on.
 	return nil
@@ -318,13 +345,17 @@ func checkHeader(raw []byte) (kid string, err error) {
 	//: whole trust decision handed to the thing being verified.
 	if header.JWKSetURL != "" || header.X509URL != "" {
 		//: Refuse a self-nominated trust anchor.
-		return "", fmt.Errorf("%w: token nominates its own key source", coreent.ErrCIUnverifiable)
+		return "", refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_header"),
+			errs.String("condition", "the token nominates its own key source"))
 	}
 	//: Without a kid there is nothing to select, and trying every key would
 	//: turn a rotation into an accepted forgery surface.
 	if header.KeyID == "" {
 		//: Refuse an unaddressed token.
-		return "", fmt.Errorf("%w: token carries no kid", coreent.ErrCIUnverifiable)
+		return "", refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_header"),
+			errs.String("condition", "no kid, so no key to select"))
 	}
 	//: Return the key this token names.
 	return header.KeyID, nil
@@ -337,13 +368,19 @@ func verifySignature(signingInput string, signature []byte, key *rsa.PublicKey) 
 	//: here names the reason instead.
 	if len(signature) != key.Size() {
 		//: Refuse a signature that cannot belong to this key.
-		return fmt.Errorf("%w: signature length %d does not match the key", coreent.ErrCIUnverifiable, len(signature))
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "verify_signature"),
+			errs.String("condition", "signature length does not match the key"),
+			errs.Int("got_bytes", len(signature)),
+			errs.Int("want_bytes", key.Size()))
 	}
 	digest := sha256.Sum256([]byte(signingInput))
 	//: This is the step everything else exists to make meaningful.
 	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature); err != nil {
 		//: Forged, tampered with, or signed by another key.
-		return fmt.Errorf("%w: signature does not verify", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "verify_signature"),
+			errs.String("condition", "forged, tampered with, or signed by another key"))
 	}
 	//: Authenticated.
 	return nil
@@ -359,13 +396,19 @@ func checkTokenWindow(issued, expires time.Time) error {
 	//: A token that expires before it was issued is not one.
 	if expires.Before(issued) {
 		//: Refuse an inverted window.
-		return fmt.Errorf("%w: token expires before it was issued", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_window"),
+			errs.String("condition", "expires before it was issued"))
 	}
 	//: A window wider than GitHub ever issues is either not from Actions or
 	//: is being replayed, whoever signed it.
 	if expires.Sub(issued) > maxTokenLifetime {
 		//: Refuse an over-wide window.
-		return fmt.Errorf("%w: token lifetime exceeds %s", coreent.ErrCIUnverifiable, maxTokenLifetime)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_window"),
+			errs.String("condition", "a window wider than Actions ever issues"),
+			errs.String("limit", maxTokenLifetime.String()),
+			errs.String("window", expires.Sub(issued).String()))
 	}
 	//: A window of a plausible width.
 	return nil
@@ -377,25 +420,36 @@ func checkTiming(claims *ActionsClaimsValue, now time.Time) error {
 	//: so its absence means this is not the document we think it is.
 	if claims.ExpiresAt == 0 || claims.IssuedAt == 0 {
 		//: Refuse a token that does not bound itself.
-		return fmt.Errorf("%w: token carries no exp/iat", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_timing"),
+			errs.String("condition", "the token does not bound itself"))
 	}
 	expires := time.Unix(claims.ExpiresAt, 0)
 	issued := time.Unix(claims.IssuedAt, 0)
 	//: Past its expiry, with a small allowance for clock disagreement.
 	if now.After(expires.Add(clockSkew)) {
 		//: Refuse an expired token.
-		return fmt.Errorf("%w: token expired at %s", coreent.ErrCIUnverifiable, expires.UTC().Format(time.RFC3339))
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_timing"),
+			errs.String("condition", "past its expiry, allowance included"),
+			errs.String("expires_at", expires.UTC().Format(time.RFC3339)))
 	}
 	//: Issued in the future beyond the skew: either a forgery or a clock too
 	//: wrong to reason about.
 	if issued.After(now.Add(clockSkew)) {
 		//: Refuse a token from the future.
-		return fmt.Errorf("%w: token issued in the future", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_timing"),
+			errs.String("condition", "issued in the future, allowance included"),
+			errs.String("issued_at", issued.UTC().Format(time.RFC3339)))
 	}
 	//: nbf is optional, but binding when present.
 	if claims.NotBefore != 0 && time.Unix(claims.NotBefore, 0).After(now.Add(clockSkew)) {
 		//: Refuse a token that is not usable yet.
-		return fmt.Errorf("%w: token is not valid yet", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_timing"),
+			errs.String("condition", "not-before is still ahead, allowance included"),
+			errs.String("not_before", time.Unix(claims.NotBefore, 0).UTC().Format(time.RFC3339)))
 	}
 	//: The window's own shape is checked last, and separately: it is a
 	//: property of the token rather than of the moment it is read at.
@@ -409,33 +463,46 @@ func checkClaims(claims *ActionsClaimsValue, audience string, now time.Time) err
 	//: would otherwise pass on signature alone if the JWKS ever widened.
 	if claims.Issuer != ActionsIssuer {
 		//: Refuse another issuer.
-		return fmt.Errorf("%w: issuer %q is not %s", coreent.ErrCIUnverifiable, claims.Issuer, ActionsIssuer)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_claims"),
+			errs.String("condition", "another identity provider entirely"),
+			errs.String("issuer", claims.Issuer),
+			errs.String("want_issuer", ActionsIssuer))
 	}
 	//: An empty expected audience would match a token carrying an empty one,
 	//: turning the check off exactly where it matters. A caller with nothing
 	//: to ask for is a programming error, not a permissive default.
 	if audience == "" {
 		//: Refuse rather than verify against nothing.
-		return fmt.Errorf("%w: no audience to verify against", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_claims"),
+			errs.String("condition", "the caller named no audience, which would match a token carrying none"))
 	}
 	//: A token minted for a cloud provider or a registry must not be
 	//: replayable here.
 	if !claims.Audience.contains(audience) {
 		//: Refuse a token minted for something else.
-		return fmt.Errorf("%w: token is not minted for %s", coreent.ErrCIUnverifiable, audience)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_claims"),
+			errs.String("condition", "minted for another service"),
+			errs.String("want_audience", audience))
 	}
 	//: The subject is not parsed for ownership, but its absence means the
 	//: token is not the shape Actions produces.
 	if claims.Subject == "" {
 		//: Refuse a subjectless token.
-		return fmt.Errorf("%w: token carries no subject", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_claims"),
+			errs.String("condition", "no subject, which is not the shape Actions produces"))
 	}
 	//: The owner id is the entitlement key. Without it there is nothing a
 	//: licence could be matched against, and falling back to the NAME would
 	//: make a freed handle a way in.
 	if claims.RepositoryOwnerID == "" {
 		//: Refuse a token with no immutable owner.
-		return fmt.Errorf("%w: token carries no repository_owner_id", coreent.ErrCIUnverifiable)
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_claims"),
+			errs.String("condition", "no immutable owner id to match an entitlement against"))
 	}
 	//: Timing last: the cheap structural checks run first.
 	return checkTiming(claims, now)
@@ -474,7 +541,10 @@ func VerifyActionsToken(raw string, keys map[string]*rsa.PublicKey, audience str
 	//: the forgery surface for no benefit.
 	if !known {
 		//: Refuse a token we hold no key for.
-		return nil, fmt.Errorf("%w: no published key for kid %q", coreent.ErrCIUnknownKey, kid)
+		return nil, refuse(coreent.ErrCIUnknownKey,
+			errs.String("stage", "select_key"),
+			errs.String("condition", "the key set publishes no entry with this kid"),
+			errs.String("kid", kid))
 	}
 	//: Every way the selected key can be unusable, in one place.
 	if keyErr := usableRSAKey(key, kid); keyErr != nil {
@@ -515,18 +585,27 @@ func jwkNumbers(entry *JWKValue) (modulus, exponent []byte, err error) {
 	//: A modulus we cannot decode is not a key.
 	if modErr != nil {
 		//: Refuse the malformed entry.
-		return nil, nil, fmt.Errorf("%w: key %q has an undecodable modulus", coreent.ErrCIUnverifiable, entry.KeyID)
+		return nil, nil, classify(coreent.ErrCIUnverifiable, modErr,
+			errs.String("stage", "decode_key"),
+			errs.String("part", "modulus"),
+			errs.String("kid", entry.KeyID))
 	}
 	exponent, expErr := base64.RawURLEncoding.DecodeString(entry.Exponent)
 	//: An exponent we cannot decode is not a key.
 	if expErr != nil {
 		//: Refuse the malformed entry.
-		return nil, nil, fmt.Errorf("%w: key %q has an undecodable exponent", coreent.ErrCIUnverifiable, entry.KeyID)
+		return nil, nil, classify(coreent.ErrCIUnverifiable, expErr,
+			errs.String("stage", "decode_key"),
+			errs.String("part", "exponent"),
+			errs.String("kid", entry.KeyID))
 	}
 	//: Empty or non-minimal encodings are refused rather than normalised.
 	if len(modulus) == 0 || modulus[0] == 0 || len(exponent) == 0 || exponent[0] == 0 {
 		//: Refuse a non-canonical encoding.
-		return nil, nil, fmt.Errorf("%w: key %q is not canonically encoded", coreent.ErrCIUnverifiable, entry.KeyID)
+		return nil, nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_key"),
+			errs.String("condition", "a value with a leading zero byte has two spellings"),
+			errs.String("kid", entry.KeyID))
 	}
 	//: Two values that can be read as one number each.
 	return modulus, exponent, nil
@@ -546,7 +625,10 @@ func jwkExponent(raw []byte, kid string) (exponent int, err error) {
 	if !value.IsInt64() || value.Int64() < minRSAExponent ||
 		value.Int64() > maxRSAExponent || value.Int64()%evenDivisor == 0 {
 		//: Refuse an unusable exponent.
-		return 0, fmt.Errorf("%w: key %q has an unusable exponent", coreent.ErrCIUnverifiable, kid)
+		return 0, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_key"),
+			errs.String("condition", "an exponent outside the range RSA allows"),
+			errs.String("kid", kid))
 	}
 	//: A small odd exponent.
 	return int(value.Int64()), nil
@@ -572,7 +654,10 @@ func rsaKeyFromJWK(entry *JWKValue) (key *rsa.PublicKey, err error) {
 	//: for it: an entry marked for encryption is being repurposed.
 	if !signsRS256(entry) {
 		//: Refuse a key that is not an RS256 signing key.
-		return nil, fmt.Errorf("%w: key %q is not an RS256 signing key", coreent.ErrCIUnverifiable, entry.KeyID)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "build_key"),
+			errs.String("condition", "not published as an RS256 signing key"),
+			errs.String("kid", entry.KeyID))
 	}
 
 	modulus, exponentBytes, numbersErr := jwkNumbers(entry)
@@ -596,7 +681,11 @@ func rsaKeyFromJWK(entry *JWKValue) (key *rsa.PublicKey, err error) {
 	//: authenticated yet.
 	if bits := built.N.BitLen(); bits < minRSAModulusBits || bits > maxRSAModulusBits {
 		//: Refuse a key outside the plausible range.
-		return nil, fmt.Errorf("%w: key %q is %d bits", coreent.ErrCIUnverifiable, entry.KeyID, bits)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "build_key"),
+			errs.String("condition", "a modulus outside the sizes a real signing key has"),
+			errs.String("kid", entry.KeyID),
+			errs.Int("bits", bits))
 	}
 	//: A usable RS256 verification key.
 	return built, nil
@@ -613,12 +702,19 @@ func usableRSAKey(key *rsa.PublicKey, kid string) error {
 	//: Nothing to verify against.
 	if key == nil || key.N == nil {
 		//: Refuse as unverifiable.
-		return fmt.Errorf("%w: no usable key for kid %q", coreent.ErrCIUnknownKey, kid)
+		return refuse(coreent.ErrCIUnknownKey,
+			errs.String("stage", "select_key"),
+			errs.String("condition", "the selected entry yielded no usable key"),
+			errs.String("kid", kid))
 	}
 	//: A key too small to be the issuer's has been substituted somewhere.
 	if key.N.BitLen() < minRSAModulusBits {
 		//: Refuse an undersized key.
-		return fmt.Errorf("%w: signing key is %d bits", coreent.ErrCIUnverifiable, key.N.BitLen())
+		return refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "select_key"),
+			errs.String("condition", "the selected key is outside the sizes a real signing key has"),
+			errs.String("kid", kid),
+			errs.Int("bits", key.N.BitLen()))
 	}
 
 	//: The key can be used.

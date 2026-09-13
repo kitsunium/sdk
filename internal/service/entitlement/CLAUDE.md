@@ -26,6 +26,8 @@ product (ADR 0078 §1).
 | `roughtime*.go` | signed network time — advisory, fail-open, servers ship empty |
 | `version.go` | the version floor a roster can mandate |
 | `product.go` | `ProductValue`, `Label`, `DefaultCacheDir`, `Validate` |
+| `codes.go` / `errors.go` | the one code this implementation owns, `0.3.67.*` |
+| `wrap.go` | `refuse` / `classify` / `annotate`, and `diagnose` for the log line |
 
 ## Why-this-shape
 
@@ -63,6 +65,21 @@ product (ADR 0078 §1).
   `windows-latest`, `MoveFileEx` still refuses. A holder this package does not
   control — antivirus, backup, indexer — still can, and that residue is
   accepted and logged rather than retried past.
+- **The public sentence names no particular, and that is the point.** Every
+  refusal here is built with `refuse` or `classify` over one of the fifteen
+  contract sentinels, so `err.Error()` is the wire-safe half and nothing else:
+  no url, no host, no path, no subject, no kid. Where it happened travels in
+  `Fields`, and `particulars` reads it back.
+  `TestNoParticularReachesThePublicSentence` asserts both directions on six
+  refusals, because leaking a particular and losing it are both defects and
+  only one of them is the one everybody remembers.
+
+- **`annotate` guards, and the guard is not defensive.** `errs.Wrap` has no
+  spelling for "add a field, decide nothing": zero `WrapParams` over a cause
+  carrying no `*errs.Error` returns `CodeInvalidWrapParams`. `Identity` is a
+  PORT, so a consumer's plain `errors.New` reaches `ciContext` — and would have
+  been replaced by "internal wrap failure" on the one path that reports it.
+
 - **`readCappedFile` and `readBounded` exist because the inputs are hostile.**
   Everything here parses bytes fetched from the network or read from a cache an
   attacker may have written, before any signature has vouched for them.
@@ -77,11 +94,6 @@ product (ADR 0078 §1).
 
 ## Known debt
 
-`fmt.Errorf` throughout, against SDK rule 2. The engine came across with the
-source implementation's error construction; the fifteen sentinels are
-`errs.Define`-typed and the wrapping uses `%w`, so `errors.Is` and
-`errs.HasCode` both work through it. ADR 0079 §Deferred.
-
 A cache refresh can still be refused by a file holder outside this process —
 antivirus, backup, a search indexer on Windows. `holdCache` excludes every
 holder that takes the same lock, which is every one this SDK controls, and no
@@ -90,6 +102,13 @@ it.
 
 ## Do NOT
 
+- Build an error with `fmt.Errorf`. There were 112 of them and there are none;
+  the three shapes in `wrap.go` are what a call site chooses between, and the
+  package is in `//:audit_sources` so a code that strays out of `0.3.67.*`
+  fails the build.
+- Spell a cause as `cause.Error()`. After the conversion that is the wire-safe
+  sentence and carries no url and no syscall text — `publishedJWKS` was one
+  edit away from swapping its diagnosis for a tautology. Use `particulars`.
 - Name a roughtime server here. The list is a deployment decision, and shipping
   one would make every consumer depend on a host the SDK does not operate.
 - Add an ssh import. The identity is a port; its ssh implementation lives in

@@ -6,13 +6,14 @@
 package entitlement
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 	corelock "github.com/kitsunium/sdk/internal/core/lock"
@@ -342,7 +343,8 @@ func (s *Service) currentRoster(now time.Time) (roster *coreent.RosterValue, off
 	//: so rather than reporting an unreachable roster nobody ever asked for.
 	if len(s.origins) == 0 {
 		//: Refuse with a cause an operator can act on.
-		return nil, false, fmt.Errorf("%w: no origin configured", coreent.ErrRosterUnreachable)
+		return nil, false, refuse(coreent.ErrRosterUnreachable,
+			errs.String("condition", "no publication point was configured, so nothing was ever fetched"))
 	}
 
 	var lastErr error
@@ -356,7 +358,7 @@ func (s *Service) currentRoster(now time.Time) (roster *coreent.RosterValue, off
 		}
 		//: Name the origin so a total failure says which endpoints were
 		//: tried and how each one failed.
-		lastErr = fmt.Errorf("%s: %w", origin.Name, originErr)
+		lastErr = annotate(originErr, errs.String("origin", origin.Name))
 	}
 
 	//: No origin answered. A bundle this machine already authenticated is
@@ -424,7 +426,9 @@ func (s *Service) matchSubject(roster *coreent.RosterValue, subject string, now 
 	//: no term was recorded, not an instantly-closed one.
 	if !want.ExpiresAt.IsZero() && now.After(want.ExpiresAt) {
 		//: Refuse a subject whose individual term has closed.
-		return coreent.SubjectValue{}, fmt.Errorf("%w: %s", coreent.ErrLicenseExpired, subject)
+		return coreent.SubjectValue{}, refuse(coreent.ErrLicenseExpired,
+			errs.String("subject", subject),
+			errs.String("expired_at", want.ExpiresAt.UTC().Format(time.RFC3339)))
 	}
 
 	got, printErr := s.identity.Fingerprint(subject)
@@ -438,7 +442,9 @@ func (s *Service) matchSubject(roster *coreent.RosterValue, subject string, now 
 	//: roster's spelling is the contract.
 	if got != want.Fingerprint {
 		//: Refuse an identity the roster does not recognise.
-		return coreent.SubjectValue{}, fmt.Errorf("%w: %s", coreent.ErrKeyMismatch, subject)
+		return coreent.SubjectValue{}, refuse(coreent.ErrKeyMismatch,
+			errs.String("subject", subject),
+			errs.String("condition", "the local fingerprint differs from the one the roster publishes"))
 	}
 
 	//: Possession is the last gate and the one that makes publication safe:
@@ -482,7 +488,9 @@ func (s *Service) fetch(url string) (body []byte, err error) {
 	//: A transport failure means no decision is possible.
 	if getErr != nil {
 		//: Report the unreachable roster.
-		return nil, fmt.Errorf("%w: %s: %w", coreent.ErrRosterUnreachable, url, getErr)
+		return nil, classify(coreent.ErrRosterUnreachable, getErr,
+			errs.String("stage", "fetch"),
+			errs.String("url", url))
 	}
 	//: Prevent a leaked connection on every path.
 	defer closeBestEffort(resp.Body, url)
@@ -491,7 +499,10 @@ func (s *Service) fetch(url string) (body []byte, err error) {
 	//: repository that no longer publishes the roster.
 	if resp.StatusCode != http.StatusOK {
 		//: Report the unreachable roster.
-		return nil, fmt.Errorf("%w: %s: status %d", coreent.ErrRosterUnreachable, url, resp.StatusCode)
+		return nil, refuse(coreent.ErrRosterUnreachable,
+			errs.String("stage", "fetch"),
+			errs.String("url", url),
+			errs.Int("status", resp.StatusCode))
 	}
 
 	//: The same bounded read the cache path uses, so "a bundle off the disk
@@ -518,13 +529,20 @@ func readBounded(r io.Reader, what string) (body []byte, err error) {
 	//: A truncated read cannot be authenticated.
 	if readErr != nil {
 		//: Report the unusable artefact.
-		return nil, fmt.Errorf("%w: %s: %w", coreent.ErrRosterUnreachable, what, readErr)
+		return nil, classify(coreent.ErrRosterUnreachable, readErr,
+			errs.String("stage", "read"),
+			errs.String("source", what))
 	}
 	//: An artefact past the cap is either corrupt or hostile; either way it
 	//: is not a roster we should try to authenticate.
 	if int64(len(data)) > maxArtefactBytes {
 		//: Report the unusable artefact.
-		return nil, fmt.Errorf("%w: %s: larger than %d bytes", coreent.ErrRosterUnreachable, what, maxArtefactBytes)
+		return nil, refuse(coreent.ErrRosterUnreachable,
+			errs.String("stage", "read"),
+			errs.String("source", what),
+			errs.String("condition", "artefact at or past the cap"),
+			errs.Int64("limit_bytes", maxArtefactBytes),
+			errs.Int("got_bytes", len(data)))
 	}
 	//: Return the raw artefact for signature verification.
 	return data, nil

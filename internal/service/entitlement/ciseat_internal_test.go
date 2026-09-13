@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
 
@@ -200,9 +202,16 @@ func Test_Service_publishedJWKS_keepsTheRosterVocabularyIn(t *testing.T) {
 			if errors.Is(err, coreent.ErrRosterUnreachable) {
 				t.Errorf("publishedJWKS() error = %v, want no coreent.ErrRosterUnreachable in its chain (%s)", err, tt.reason)
 			}
-			//: The cause still has to be readable, or the diagnosis is lost.
-			if !strings.Contains(err.Error(), "dial refused") {
-				t.Errorf("publishedJWKS() = %q, want it to name the transport failure (%s)", err, tt.reason)
+			//: The cause still has to be readable, or the diagnosis is
+			//: lost — but it belongs in a FIELD now, not in the sentence.
+			//: The sentence is the wire-safe half and names no host.
+			if got := probeField(err, "cause"); !strings.Contains(got, "dial refused") {
+				t.Errorf("publishedJWKS() cause field = %q, want it to name the transport failure (%s)", got, tt.reason)
+			}
+			//: Both directions: leaking it and losing it are both defects,
+			//: and only one of them is the one everybody remembers.
+			if strings.Contains(err.Error(), "dial refused") {
+				t.Errorf("publishedJWKS() = %q, want the transport detail OUT of the public sentence (%s)", err, tt.reason)
 			}
 		})
 	}
@@ -328,11 +337,37 @@ func Test_ciContext(t *testing.T) {
 			if tt.leaked != nil && errors.Is(got, tt.leaked) {
 				t.Errorf("errors.Is(ciContext(), %v) = true, want false — the seat's chain must not be spliced in (%s)", tt.leaked, tt.reason)
 			}
-			//: ...and the text must carry it, or the annotation would be
-			//: pointless rather than merely invisible.
-			if contains := tt.wantText != "" && strings.Contains(got.Error(), tt.wantText); tt.wantText != "" && !contains {
-				t.Errorf("ciContext() = %q, want it to mention %q (%s)", got, tt.wantText, tt.reason)
+			//: ...and the FIELD must carry it, or the annotation would be
+			//: pointless rather than merely invisible. It is deliberately
+			//: not in the sentence: that half is wire-safe and says only
+			//: what the device refusal was.
+			if tt.wantText == "" {
+				return
+			}
+			if field := probeField(got, "ci_refusal"); !strings.Contains(field, tt.wantText) {
+				t.Errorf("ciContext() ci_refusal field = %q, want it to mention %q (%s)", field, tt.wantText, tt.reason)
+			}
+			if strings.Contains(got.Error(), tt.wantText) {
+				t.Errorf("ciContext() = %q, want the seat's sentence OUT of the device refusal's (%s)", got, tt.reason)
 			}
 		})
 	}
+}
+
+// probeField reads one structured field back off an error, or "" when the
+// error does not carry it.
+//
+// Every assertion that used to read a particular out of err.Error() reads it
+// here instead: the public sentence is the wire-safe half and deliberately
+// names no host, no path and no sentence somebody else wrote.
+func probeField(err error, key string) string {
+	//: Scan the fields origin-wins concatenated onto this error.
+	for _, field := range errs.FieldsOf(err) {
+		//: The first match wins; keys are not repeated by any call site here.
+		if field.Key() == key {
+			return field.StringValue()
+		}
+	}
+	//: Absent, which every caller reports as a failed assertion.
+	return ""
 }

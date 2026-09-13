@@ -8,13 +8,14 @@ package entitlement
 
 import (
 	"crypto/rsa"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -60,12 +61,17 @@ func checkTokenURL(raw string) (parsed *url.URL, err error) {
 	//: A URL we cannot parse cannot be checked, so it cannot be used.
 	if parseErr != nil {
 		//: Refuse the malformed endpoint.
-		return nil, fmt.Errorf("%w: token request url is malformed", coreent.ErrCIUnverifiable)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_token_url"),
+			errs.String("condition", "the runner named a url that does not parse"))
 	}
 	//: Plaintext would put the bearer credential on the wire.
 	if parsed.Scheme != "https" {
 		//: Refuse anything but https.
-		return nil, fmt.Errorf("%w: token request url is not https", coreent.ErrCIUnverifiable)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_token_url"),
+			errs.String("condition", "the scheme would put the credential on the wire in clear"),
+			errs.String("scheme", parsed.Scheme))
 	}
 	host := parsed.Hostname()
 	//: Suffix match on a dotted prefix, never Contains: "evil-actions.
@@ -74,7 +80,10 @@ func checkTokenURL(raw string) (parsed *url.URL, err error) {
 	if host != strings.TrimPrefix(actionsTokenHostSuffix, ".") &&
 		!strings.HasSuffix(host, actionsTokenHostSuffix) {
 		//: Refuse to send the credential anywhere else.
-		return nil, fmt.Errorf("%w: token request url points at %q", coreent.ErrCIUnverifiable, host)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "check_token_url"),
+			errs.String("condition", "the host is not GitHub's token endpoint"),
+			errs.String("host", host))
 	}
 	//: An endpoint worth handing the runner's credential to.
 	return parsed, nil
@@ -91,7 +100,9 @@ func RequestActionsToken(get BearerFetch, audience string) (token string, err er
 	if rawURL == "" || bearer == "" {
 		//: Report it as unprovable, never as a refusal: the caller falls back
 		//: to the device path rather than treating this as a denial.
-		return "", fmt.Errorf("%w: not running in GitHub Actions", coreent.ErrCIUnverifiable)
+		return "", refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "mint_token"),
+			errs.String("condition", "neither runner token variable is set"))
 	}
 
 	endpoint, urlErr := checkTokenURL(rawURL)
@@ -123,21 +134,26 @@ func tokenResponseBody(get BearerFetch, endpoint, bearer string) (body []byte, e
 	//: an unauthenticated request would only ever return 401.
 	if get == nil {
 		//: Refuse rather than make a request that cannot succeed.
-		return nil, fmt.Errorf("%w: no way to send the request credential", coreent.ErrCIUnverifiable)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "mint_token"),
+			errs.String("condition", "no BearerFetch was supplied"))
 	}
 
 	resp, getErr := get(endpoint, bearer)
 	//: A transport failure means no proof is available.
 	if getErr != nil {
 		//: Report it as unprovable.
-		return nil, fmt.Errorf("%w: token request failed: %w", coreent.ErrCIUnverifiable, getErr)
+		return nil, classify(coreent.ErrCIUnverifiable, getErr,
+			errs.String("stage", "mint_token"))
 	}
 	//: A nil response with no error breaks the http contract, but panicking
 	//: on it would take the whole process down over a CI seat — and this path
 	//: must never do worse than fall back to a device.
 	if resp == nil || resp.Body == nil {
 		//: Report it as unprovable.
-		return nil, fmt.Errorf("%w: token request returned no response", coreent.ErrCIUnverifiable)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "mint_token"),
+			errs.String("condition", "the transport returned neither a response nor an error"))
 	}
 	defer closeBestEffort(resp.Body, endpoint)
 
@@ -145,20 +161,28 @@ func tokenResponseBody(get BearerFetch, endpoint, bearer string) (body []byte, e
 	//: without `id-token: write` gets.
 	if resp.StatusCode != http.StatusOK {
 		//: Report the refusal to mint.
-		return nil, fmt.Errorf("%w: token request returned %d", coreent.ErrCIUnverifiable, resp.StatusCode)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "mint_token"),
+			errs.String("condition", "the mint endpoint refused"),
+			errs.Int("status", resp.StatusCode))
 	}
 
 	read, readErr := io.ReadAll(io.LimitReader(resp.Body, maxTokenResponseBytes+1))
 	//: A truncated body cannot be parsed.
 	if readErr != nil {
 		//: Report the transport failure.
-		return nil, fmt.Errorf("%w: reading token response: %w", coreent.ErrCIUnverifiable, readErr)
+		return nil, classify(coreent.ErrCIUnverifiable, readErr,
+			errs.String("stage", "read_token_response"))
 	}
 	//: A body at the cap is not a token response; an untrusted endpoint must
 	//: not choose how much memory we spend.
 	if int64(len(read)) > maxTokenResponseBytes {
 		//: Refuse the oversized response.
-		return nil, fmt.Errorf("%w: token response larger than %d bytes", coreent.ErrCIUnverifiable, maxTokenResponseBytes)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "read_token_response"),
+			errs.String("condition", "body at or past the cap"),
+			errs.Int64("limit_bytes", maxTokenResponseBytes),
+			errs.Int("got_bytes", len(read)))
 	}
 	//: A body worth decoding, still entirely untrusted.
 	return read, nil
@@ -182,7 +206,9 @@ func fetchToken(get BearerFetch, endpoint, bearer string) (token string, err err
 	//: An empty value is a well-formed response carrying no token.
 	if minted.Value == "" {
 		//: Refuse rather than verify an empty string.
-		return "", fmt.Errorf("%w: token response carries no token", coreent.ErrCIUnverifiable)
+		return "", refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "mint_token"),
+			errs.String("condition", "a well-formed response carrying no token"))
 	}
 	//: Return the token, still entirely unverified.
 	return minted.Value, nil
@@ -201,7 +227,9 @@ func DefaultBearerFetch(url, bearer string) (resp *http.Response, err error) {
 		Timeout: fetchTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			//: Refuse rather than follow: the destination was never checked.
-			return fmt.Errorf("%w: token endpoint redirected", coreent.ErrCIUnverifiable)
+			return refuse(coreent.ErrCIUnverifiable,
+				errs.String("stage", "mint_token"),
+				errs.String("condition", "the token endpoint redirected and the destination was never checked"))
 		},
 	}
 
@@ -209,7 +237,8 @@ func DefaultBearerFetch(url, bearer string) (resp *http.Response, err error) {
 	//: A request we cannot build is one we cannot send.
 	if reqErr != nil {
 		//: Report it as unprovable.
-		return nil, fmt.Errorf("%w: building token request: %w", coreent.ErrCIUnverifiable, reqErr)
+		return nil, classify(coreent.ErrCIUnverifiable, reqErr,
+			errs.String("stage", "build_token_request"))
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	//: Return whatever the endpoint said; nothing here trusts it.
@@ -236,7 +265,9 @@ func VerifyCI(get BearerFetch, keys map[string]*rsa.PublicKey, roster *coreent.R
 	//: Nothing to prove outside Actions; the caller falls back to a device.
 	if !InCI() {
 		//: Report it as unprovable rather than refused.
-		return nil, fmt.Errorf("%w: not running in GitHub Actions", coreent.ErrCIUnverifiable)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "verify_ci"),
+			errs.String("condition", "neither runner token variable is set"))
 	}
 	//: The audience is ours, so a token minted for another service cannot be
 	//: replayed here.

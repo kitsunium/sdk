@@ -43,10 +43,11 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"log"
 	"net"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -141,14 +142,19 @@ func QueryRoughtime(server RoughtimeServerValue) (midpoint time.Time, radius tim
 	//: must never pass.
 	if len(server.PublicKey) != ed25519.PublicKeySize {
 		//: Report it as unverifiable; the caller carries on regardless.
-		return time.Time{}, 0, fmt.Errorf("%w: roughtime server %q has no usable key", coreent.ErrCIUnverifiable, server.Name)
+		return time.Time{}, 0, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "roughtime_query"),
+			errs.String("condition", "the pinned long-term key is not an ed25519 public key"),
+			errs.String("server", server.Name))
 	}
 
 	var nonce [roughtimeNonceSize]byte
 	//: Without entropy the challenge is predictable and proves nothing.
 	if _, randErr := rand.Read(nonce[:]); randErr != nil {
 		//: Report it as unverifiable.
-		return time.Time{}, 0, fmt.Errorf("%w: drawing roughtime nonce: %w", coreent.ErrCIUnverifiable, randErr)
+		return time.Time{}, 0, classify(coreent.ErrCIUnverifiable, randErr,
+			errs.String("stage", "roughtime_nonce"),
+			errs.String("server", server.Name))
 	}
 
 	raw, exchangeErr := roughtimeExchange(server.Address, buildRoughtimeRequest(nonce[:]))
@@ -201,7 +207,9 @@ func roughtimeExchange(address string, request []byte) (response []byte, err err
 	//: An address we cannot reach answers nothing.
 	if dialErr != nil {
 		//: Report it as unverifiable.
-		return nil, fmt.Errorf("%w: dialling roughtime %s: %w", coreent.ErrCIUnverifiable, address, dialErr)
+		return nil, classify(coreent.ErrCIUnverifiable, dialErr,
+			errs.String("stage", "roughtime_dial"),
+			errs.String("address", address))
 	}
 	//: The body of closeBestEffort, inlined: KTN-GOROUTINE-DEFER recognises
 	//: `x.Close()` and a func literal containing it, never `helper(x)`, and
@@ -218,12 +226,16 @@ func roughtimeExchange(address string, request []byte) (response []byte, err err
 	//: ordinary case on a filtered network and must not hang a start-up.
 	if deadlineErr := conn.SetDeadline(time.Now().Add(roughtimeTimeout)); deadlineErr != nil {
 		//: Report it as unverifiable.
-		return nil, fmt.Errorf("%w: roughtime deadline: %w", coreent.ErrCIUnverifiable, deadlineErr)
+		return nil, classify(coreent.ErrCIUnverifiable, deadlineErr,
+			errs.String("stage", "roughtime_deadline"),
+			errs.String("address", address))
 	}
 	//: A request we could not send earns no answer.
 	if _, writeErr := conn.Write(request); writeErr != nil {
 		//: Report it as unverifiable.
-		return nil, fmt.Errorf("%w: roughtime request: %w", coreent.ErrCIUnverifiable, writeErr)
+		return nil, classify(coreent.ErrCIUnverifiable, writeErr,
+			errs.String("stage", "roughtime_request"),
+			errs.String("address", address))
 	}
 
 	buffer := make([]byte, roughtimeMaxResponse)
@@ -231,7 +243,9 @@ func roughtimeExchange(address string, request []byte) (response []byte, err err
 	//: Silence is what a filtered port and a dropped request look like alike.
 	if readErr != nil {
 		//: Report it as unverifiable.
-		return nil, fmt.Errorf("%w: roughtime response: %w", coreent.ErrCIUnverifiable, readErr)
+		return nil, classify(coreent.ErrCIUnverifiable, readErr,
+			errs.String("stage", "roughtime_response"),
+			errs.String("address", address))
 	}
 	//: Whatever arrived, entirely untrusted.
 	return buffer[:read], nil
@@ -270,11 +284,13 @@ func (s *Service) checkNetworkTime(now time.Time) error {
 		//: about would be refusing on our own arithmetic.
 		if skew := now.Sub(midpoint).Abs(); skew > maxClockSkew+radius {
 			//: Name both readings; "set the clock" needs a target.
-			return fmt.Errorf("%w: clock reads %s, %s attests %s",
-				coreent.ErrClockRegressed,
-				now.UTC().Format(time.RFC3339),
-				server.Name,
-				midpoint.Format(time.RFC3339))
+			return refuse(coreent.ErrClockRegressed,
+				errs.String("condition", "the local clock disagrees with signed network time"),
+				errs.String("clock", now.UTC().Format(time.RFC3339)),
+				errs.String("attested", midpoint.UTC().Format(time.RFC3339)),
+				errs.String("server", server.Name),
+				errs.String("skew", skew.String()),
+				errs.String("tolerance", (maxClockSkew+radius).String()))
 		}
 		//: Corroborated.
 		return nil

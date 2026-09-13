@@ -11,7 +11,8 @@ package entitlement
 import (
 	"crypto/rsa"
 	"encoding/json"
-	"fmt"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 )
@@ -79,18 +80,27 @@ func decodeJWKS(raw []byte) (decoded JWKSValue, err error) {
 	//: what an untrusted endpoint chose to send.
 	if len(raw) > maxJWKSBytes {
 		//: Refuse the oversized document.
-		return decoded, fmt.Errorf("%w: key set larger than %d bytes", coreent.ErrCIUnverifiable, maxJWKSBytes)
+		return decoded, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_jwks"),
+			errs.String("condition", "document larger than the cap"),
+			errs.Int("limit_bytes", maxJWKSBytes),
+			errs.Int("got_bytes", len(raw)))
 	}
 	//: A key set we cannot decode tells us nothing.
 	if unmarshalErr := json.Unmarshal(raw, &decoded); unmarshalErr != nil {
 		//: Report it as unverifiable rather than proceed with no keys, which
 		//: would read as "unknown kid" and send the caller refreshing forever.
-		return decoded, fmt.Errorf("%w: malformed key set: %w", coreent.ErrCIUnverifiable, unmarshalErr)
+		return decoded, classify(coreent.ErrCIUnverifiable, unmarshalErr,
+			errs.String("stage", "decode_jwks"))
 	}
 	//: An oversized set is not one we should spend time selecting from.
 	if len(decoded.Keys) > maxJWKSKeys {
 		//: Refuse the oversized set.
-		return decoded, fmt.Errorf("%w: key set carries %d keys", coreent.ErrCIUnverifiable, len(decoded.Keys))
+		return decoded, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_jwks"),
+			errs.String("condition", "more entries than any real key set"),
+			errs.Int("limit_keys", maxJWKSKeys),
+			errs.Int("got_keys", len(decoded.Keys)))
 	}
 	//: A document shaped like a key set.
 	return decoded, nil
@@ -127,7 +137,10 @@ func ParseJWKS(raw []byte) (keys map[string]*rsa.PublicKey, err error) {
 		//: ambiguous trust anchor is not one.
 		if seen[entry.KeyID] {
 			//: Refuse a set that names a key twice.
-			return nil, fmt.Errorf("%w: key set repeats kid %q", coreent.ErrCIUnverifiable, entry.KeyID)
+			return nil, refuse(coreent.ErrCIUnverifiable,
+				errs.String("stage", "build_keys"),
+				errs.String("condition", "one kid declared twice"),
+				errs.String("kid", entry.KeyID))
 		}
 		seen[entry.KeyID] = true
 
@@ -142,7 +155,10 @@ func ParseJWKS(raw []byte) (keys map[string]*rsa.PublicKey, err error) {
 	//: returning an empty set would report every token as an unknown kid.
 	if len(built) == 0 {
 		//: Refuse an unusable set.
-		return nil, fmt.Errorf("%w: key set holds no usable RS256 key", coreent.ErrCIUnverifiable)
+		return nil, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "build_keys"),
+			errs.String("condition", "no usable RS256 key in the set"),
+			errs.Int("got_keys", len(decoded.Keys)))
 	}
 	//: The keys a token's kid can select from.
 	return built, nil
