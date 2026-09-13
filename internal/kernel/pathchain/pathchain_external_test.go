@@ -328,11 +328,22 @@ func TestResolveReportsADirectoryItCannotEnter(t *testing.T) {
 	if err := os.Chmod(closed, 0o300); err != nil {
 		t.Skipf("cannot set the mode this test needs: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(closed, 0o700) })
+	t.Cleanup(func() {
+		//: t.TempDir()'s own cleanup cannot remove a directory it may not
+		//: enter, so the mode is put back before it runs — and a failure to
+		//: put it back leaks a directory into the runner rather than being
+		//: something to discard.
+		if restoreErr := os.Chmod(closed, 0o700); restoreErr != nil {
+			t.Errorf("restoring the directory's mode = %v", restoreErr)
+		}
+	})
+	probe, probeErr := os.Open(closed)
 	//: if this filesystem opens it anyway, the case was not built and a
 	//: verdict either way would be about the filesystem rather than the walk.
-	if probe, probeErr := os.Open(closed); probeErr == nil {
-		_ = probe.Close()
+	if probeErr == nil {
+		if closeErr := probe.Close(); closeErr != nil {
+			t.Errorf("closing the probe handle = %v", closeErr)
+		}
 		t.Skip("this filesystem opens a 0300 directory: the case cannot be built here")
 	}
 	if _, err := pathchain.Resolve(closed); err == nil {
