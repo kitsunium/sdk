@@ -36,6 +36,7 @@ go_test(
     srcs = [
         "file_external_test.go",
         "file_internal_test.go",
+        "open_flags_unix_internal_test.go",
     ],
     embed = [":file"],
     deps = [
