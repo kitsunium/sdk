@@ -318,6 +318,42 @@ func TestDiagnoseSaysNothingTwice(t *testing.T) {
 	}
 }
 
+// TestElevationFailureKeepsTheProcessResult pins that the one composed error
+// this package builds still says what the escalation actually did.
+//
+// finalizeReplacement joins the rename's os.ErrPermission with the elevation's
+// own error, and diagnose used to stop at the join — rendering "permission
+// denied" followed by our own ELEVATION_FAILED sentence, the sentence the
+// reader had just been shown, and never the process result underneath it.
+// When `sudo -n mv` fails with no output, that result is the only thing there
+// is: sudo_output is empty and "exit status 1" is the whole diagnosis.
+func TestElevationFailureKeepsTheProcessResult(t *testing.T) {
+	t.Parallel()
+
+	//: sudo exiting non-zero while printing NOTHING is the hard case.
+	silent := classify(ElevationFailed, errors.New("exit status 1"),
+		errs.String("sudo_output", ""))
+	joined := classify(ReplacementFailed, errors.Join(os.ErrPermission, silent),
+		errs.String("step", "rename"), errs.Bool("elevated", true))
+
+	detail := diagnose(joined)
+	//: both halves of what happened, and in the order they happened.
+	for _, want := range []string{"permission denied", "exit status 1", "elevated=true"} {
+		//: each is a fact no other line carries.
+		if !strings.Contains(detail, want) {
+			t.Errorf("diagnose(joined) = %q, want %q", detail, want)
+		}
+	}
+	//: and NOT our own public sentence quoted back inside the cause.
+	if strings.Contains(detail, "the elevated replacement was authorised") {
+		t.Errorf("diagnose(joined) = %q, want it not to repeat the public sentence", detail)
+	}
+	//: neither classification is lost to a caller that routes on them.
+	if !errors.Is(joined, os.ErrPermission) || !errors.Is(joined, ElevationFailed) {
+		t.Errorf("joined = %v, want both os.ErrPermission and ElevationFailed", joined)
+	}
+}
+
 // TestExplainUpgradeFailurePrintsTheDiagnosticHalf pins the consequence of the
 // split for the one reader entitled to all of it.
 //

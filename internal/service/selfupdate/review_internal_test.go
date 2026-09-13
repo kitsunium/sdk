@@ -85,12 +85,19 @@ func TestOversizedManifestIsRefusedAsOversized(t *testing.T) {
 // happen, and the three a retry most reliably fixes — arrived as bare wrapped
 // errors that matched no exported code.
 //
-// The last two cases were added later, because the original fix reached the
-// two sites this test listed and left two more with the same shape. Both sit
+// The last three cases were added later, because the original fix reached the
+// two sites this test listed and left three more with the same shape. Two sit
 // beside a non-200 branch that DOES raise the sentinel, so one function
 // classified a 503 and not a reset: getLatestVersion is what CheckForUpdate
 // calls — the most-travelled path in the package — and downloadBinary is the
 // fetch of the archive itself.
+//
+// The third is the archive BODY rather than its request. bufferArchive reads
+// resp.Body, so a connection dropped mid-stream lands there, and it is the one
+// place where a read failure is a download that did not complete rather than an
+// archive that will not open — ArchiveUnreadable says in its own doc that
+// everything under it happens after the signature and digest have been
+// verified, and this runs before either.
 func TestTransportFailuresAreRetryable(t *testing.T) {
 	t.Parallel()
 
@@ -115,6 +122,13 @@ func TestTransportFailuresAreRetryable(t *testing.T) {
 		{
 			name: "the archive download",
 			call: func(svc *Service) error { _, err := svc.downloadBinary("v2.0.0"); return err },
+		},
+		{
+			name: "the archive body, mid-stream",
+			call: func(*Service) error {
+				_, err := bufferArchive(&errReader{err: transportErr}, maxArchiveBytes)
+				return err
+			},
 		},
 	}
 	for _, tt := range tests {

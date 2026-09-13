@@ -515,10 +515,14 @@ func Test_bufferArchive(t *testing.T) {
 			wantErrIs: coreupd.ArchiveTooLarge,
 		},
 		{
-			name:            "reader failure wrapped",
-			body:            func() io.Reader { return io.MultiReader(strings.NewReader("x"), failingReader{}) },
-			capBytes:        64,
-			wantErrContains: "stage=buffer",
+			name:     "reader failure is a download that stopped, not an unreadable archive",
+			body:     func() io.Reader { return io.MultiReader(strings.NewReader("x"), failingReader{}) },
+			capBytes: 64,
+			//: This reads the HTTP response body, before either half of the
+			//: verification has run — so it is the retryable sentinel, and
+			//: never the one whose own doc promises a verified archive.
+			wantErrIs:       coreupd.DownloadFailed,
+			wantErrContains: "stage=buffer_archive",
 		},
 	}
 

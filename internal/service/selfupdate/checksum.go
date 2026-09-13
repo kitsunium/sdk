@@ -48,8 +48,13 @@ func bufferArchive(body io.Reader, capBytes int64) (archive []byte, bufErr error
 	buf, err := io.ReadAll(io.LimitReader(body, capBytes+1))
 	//: Propagate stream read failures with phase context.
 	if err != nil {
-		//: Wrap to identify the buffering phase in operator logs.
-		return nil, classify(ArchiveUnreadable, err, errs.String("stage", "buffer"))
+		//: DownloadFailed, not ArchiveUnreadable. This reads the HTTP response
+		//: body, so a failure here is a transfer that stopped — the same thing
+		//: the manifest, the signature and the API body all report that way,
+		//: and the thing a retry policy exists for. ArchiveUnreadable says in
+		//: its own doc that everything under it happens AFTER the signature
+		//: and the digest have been verified, and neither has run yet.
+		return nil, classify(coreupd.DownloadFailed, err, errs.String("stage", "buffer_archive"))
 	}
 	//: Refuse archives beyond the cap — release archives are ~10-30MB.
 	if int64(len(buf)) > capBytes {
