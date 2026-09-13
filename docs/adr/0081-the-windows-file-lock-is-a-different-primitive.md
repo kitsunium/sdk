@@ -384,7 +384,16 @@ around it is to write the same code with less evidence.
 
 ## Deferred
 
-- **A DACL check for `checkDir` on Windows.** The argument above is about cost,
+- **A DACL check for `checkDir` on Windows.** **CLOSED by
+  [ADR 0084](0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md).**
+  The reasoning below is left standing because both of its predictions held:
+  the cost DID fall once a second rule needed the same answer (ADR 0083's
+  `plantable`), and the instruction in its last sentence is the one 0084's test
+  table is built around. What it got wrong was only the size — re-read against
+  the pinned toolchain the missing ABI is two `advapi32` exports, because
+  `syscall` already ships `StringToSid`, `(*SID).String` and `LocalFree`.
+
+  The argument above is about cost,
   not about correctness, and the cost falls if the SDK ever needs a Windows
   security-descriptor reader for a second reason. Whoever writes it must make
   the *refusing* direction the tested one: an ACL walk that accepts everything

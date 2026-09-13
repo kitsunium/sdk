@@ -19,21 +19,19 @@ import (
 // .github/workflows/e2e-cross.yml. The Linux Bazel gate compiles neither
 // dirsafety_windows.go nor this file.
 
-// TestAnIndirectionAboveTheLockFileIsAcceptedOnWindows pins the gap, so that
-// it is a measured decision rather than an untested assumption.
+// TestAnIndirectionAboveTheLockFileIsAcceptedOnWindows is the ACCEPTING half
+// of the Windows chain rule, and it is the half that is easy to lose.
 //
 // checkChain refuses an indirection at a parent component only when the
-// directory holding it is writable by anyone. On Unix that is one mode bit.
-// On Windows there is no such bit to read: os.Stat synthesises the permission
-// bits from FILE_ATTRIBUTE_READONLY, so every writable directory reports 0777
-// and the rule would refuse EVERY junction under one — including
+// directory holding it is writable by anyone — which on Windows is a DACL
+// question (dacl_windows.go), not a mode question, because os.Stat synthesises
+// 0777 for every writable directory here. A rule that read that synthesised
+// mode would refuse EVERY junction under a writable directory, including
 // C:\Users\All Users -> C:\ProgramData, which Windows installs itself.
 //
-// So `plantable` answers no here, checkChain refuses nothing, and this test
-// says so out loud. The question does have an answer on this platform — the
-// directory's DACL — and it is deferred with its price in ADR 0081
-// §Alternatives and ADR 0083 §Deferred. When that lands, this test is the one
-// that has to change, which is the point of writing it.
+// So a junction in a directory only its owner can write is ACCEPTED, and the
+// refusing half lives beside the rest of the DACL table in
+// dacl_windows_test.go.
 //
 // A junction is planted rather than a symbolic link because `mklink /J` needs
 // no privilege at all, so this row runs on an ordinary runner.
@@ -60,9 +58,9 @@ func TestAnIndirectionAboveTheLockFileIsAcceptedOnWindows(t *testing.T) {
 		t.Fatalf("mklink /J failed on this runner — this is the only assertion the Windows chain rule has, so it is a failure and not a skip: %s (%v)", out, linkErr)
 	}
 	locker, err := svclock.NewFileLocker(svclock.FileConfig{Dir: filepath.Join(planted, "locks")})
-	//: accepted, deliberately. A refusal here would mean `plantable` started
+	//: accepted, deliberately. A refusal here would mean the rule started
 	//: reading the synthesised mode, which refuses every writable directory.
 	if err != nil || locker == nil {
-		t.Fatalf("NewFileLocker under a junction = %v, want a locker until the DACL check lands (ADR 0083 §Deferred)", err)
+		t.Fatalf("NewFileLocker under a junction in an owner-only directory = %v, want a locker", err)
 	}
 }

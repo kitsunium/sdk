@@ -14,7 +14,7 @@ consumers depend only on `pkg/v1`.
 | `Locker` / `Lease` / `Deadliner` | aliases onto `internal/core/lock`. `Locker` FROZEN at two methods, `Lease` at three (ADR 0039) |
 | `MemoryConfig` / `FileConfig` / `KeepaliveConfig` | aliases onto `internal/service/lock` |
 | `NewMemory(cfg)` | in-process; leases **expire**; implements `Deadliner` |
-| `NewFileLocker(cfg)` | one machine, via `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081); leases **never expire**; does NOT implement `Deadliner`; a symbolic link or reparse point at the lock path is REFUSED, never followed (ADR 0082), and so is one at a PARENT component where anybody could have planted it (ADR 0083) |
+| `NewFileLocker(cfg)` | one machine, via `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081); leases **never expire**; does NOT implement `Deadliner`; a symbolic link or reparse point at the lock path is REFUSED, never followed (ADR 0082), and so is one at a PARENT component where anybody could have planted it (ADR 0083). "Anybody" is a mode bit on Unix and the directory's DACL on Windows (ADR 0084) |
 | `Keepalive(ctx, lease, cfg)` | background renewal → a context cancelled when the lease is lost |
 | `LockMisconfigured` / `LockNotHeld` / `LockBackendFailed` / `LockNameRejected` | core sentinels |
 | `LockFenceCorrupt` / `LockDirectoryUnsafe` / `LockKeepaliveLost` / `LockPathRedirected` | service sentinels |
