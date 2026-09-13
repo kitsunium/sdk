@@ -31,8 +31,12 @@ alias(
 
 go_test(
     name = "entitlement_test",
-    srcs = ["grant_internal_test.go"],
+    srcs = [
+        "grant_internal_test.go",
+        "roster_internal_test.go",
+    ],
     embed = [":entitlement"],
+    deps = ["//internal/kernel/errs"],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
