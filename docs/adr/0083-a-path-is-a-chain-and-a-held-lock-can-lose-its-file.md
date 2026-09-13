@@ -180,6 +180,15 @@ with what it would take. `TestAnIndirectionAboveTheLockFileIsAcceptedOnWindows`
 pins the gap on a real kernel so that it is a measured decision rather than an
 untested assumption, and so that the DACL change has a test to flip.
 
+That test plants its junction with `mklink /J` and **fails** rather than skips
+when it cannot, which is where it departs from ADR 0082 §D5's shape. That
+table pairs a symbolic link with a junction precisely because the link needs
+`SeCreateSymbolicLinkPrivilege` and may legitimately be unavailable, and it
+fails only if both are lost. This row has no pair — `mklink /J` needs no
+privilege at all — so a skip would leave the only assertion about this rule on
+this platform silently absent, which on a lane that runs `go test` without
+`-v` is indistinguishable from a pass.
+
 What remains uncovered on Windows is narrower than it sounds: the FINAL
 component, the one this package derives and an attacker can predict, is refused
 by the open (ADR 0082 §D2). The components above it are the caller's own

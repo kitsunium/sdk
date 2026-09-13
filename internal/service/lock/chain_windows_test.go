@@ -46,10 +46,18 @@ func TestAnIndirectionAboveTheLockFileIsAcceptedOnWindows(t *testing.T) {
 	}
 	planted := filepath.Join(base, "middle")
 	out, linkErr := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/J", planted, target).CombinedOutput()
-	//: the command's own output is the diagnosis; an exit status says nothing
-	//: about why.
+	//: a FAILURE and not a skip, which is where this row departs from
+	//: nofollow_windows_test.go's shape. That table pairs a symbolic link with
+	//: a junction precisely because the link needs
+	//: SeCreateSymbolicLinkPrivilege and may legitimately be unavailable, and
+	//: it fails only if BOTH are lost. This row has no pair: `mklink /J` needs
+	//: no privilege at all, so a failure here is a change in the runner image,
+	//: and skipping would leave the only assertion about this rule on this
+	//: platform silently absent — indistinguishable from a pass, because
+	//: e2e-cross runs `go test` without -v and discards a passing package's
+	//: output (ADR 0082 §D5).
 	if linkErr != nil {
-		t.Skipf("cannot create a junction on this runner: %s (%v)", out, linkErr)
+		t.Fatalf("mklink /J failed on this runner — this is the only assertion the Windows chain rule has, so it is a failure and not a skip: %s (%v)", out, linkErr)
 	}
 	locker, err := svclock.NewFileLocker(svclock.FileConfig{Dir: filepath.Join(planted, "locks")})
 	//: accepted, deliberately. A refusal here would mean `plantable` started
