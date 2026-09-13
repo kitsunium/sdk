@@ -20,6 +20,11 @@ import (
 // attack rests on.
 const victimName string = "victim"
 
+// verify asserts that the acquisition left the redirect target ALONE. It is
+// the half the sentinel does not cover, because a refusal that still wrote
+// through the link is a refusal in name only.
+type verify func(t *testing.T)
+
 // assertRefused pins a refusal: no lease, and the sentinel an operator acts on.
 func assertRefused(t *testing.T, what string, lease corelock.Lease, held bool, err error) {
 	t.Helper()

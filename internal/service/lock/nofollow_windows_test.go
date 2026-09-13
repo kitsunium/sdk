@@ -47,11 +47,6 @@ import (
 // token. The same worst case as the Unix table's decimal row.
 const reparseLedger string = "48213\n"
 
-// verify asserts that the acquisition left the redirect target ALONE. It is
-// the half the sentinel does not cover, because a refusal that still wrote
-// through the link is a refusal in name only.
-type verify func(t *testing.T)
-
 // reparseCase is one reparse point planted at the lock path.
 type reparseCase struct {
 	// name says what was planted; it is also the subtest's name.

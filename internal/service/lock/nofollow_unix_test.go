@@ -24,11 +24,6 @@ import (
 // exactly this shape.
 const decimalLedger string = "48213\n"
 
-// verify asserts that an acquisition left the redirect target ALONE. It is the
-// half the sentinel does not cover, because a refusal that still wrote through
-// the link is a refusal in name only.
-type verify func(t *testing.T)
-
 // indirectionCase is one shape planted at the lock path, and the verdict for it.
 type indirectionCase struct {
 	// name says what was planted; it is also the subtest's name.
