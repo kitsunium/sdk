@@ -217,8 +217,9 @@ func (u *Service) getLatestVersion() (latest string, getErr error) {
 	resp, err := u.client.Get(url)
 	//: Propagate network errors to caller.
 	if err != nil {
-		//: Wrap error to indicate where failure occurred.
-		return "", fmt.Errorf("fetching release info: %w", err)
+		//: Carry the sentinel, like every other transport failure on this
+		//: path: a caller retries a reset connection and gives up on a 404.
+		return "", fmt.Errorf("%w: fetching release info: %w", coreupd.DownloadFailed, err)
 	}
 	defer func() {
 		//: Prevent resource leak from unclosed response.
@@ -471,8 +472,9 @@ func (u *Service) downloadBinary(version string) (resp *http.Response, downloadE
 	resp, err := u.client.Get(url)
 	//: Propagate network errors to caller.
 	if err != nil {
-		//: Wrap error to indicate where failure occurred.
-		return nil, fmt.Errorf("downloading binary: %w", err)
+		//: Same sentinel the non-200 branch below raises — a transport
+		//: failure is a download that did not complete just as much as a 503.
+		return nil, fmt.Errorf("%w: downloading binary: %w", coreupd.DownloadFailed, err)
 	}
 
 	//: Fail fast on HTTP errors before streaming.

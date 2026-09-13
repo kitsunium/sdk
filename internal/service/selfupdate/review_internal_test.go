@@ -84,6 +84,13 @@ func TestOversizedManifestIsRefusedAsOversized(t *testing.T) {
 // DNS failure and a timeout — the three most common reasons an update does not
 // happen, and the three a retry most reliably fixes — arrived as bare wrapped
 // errors that matched no exported code.
+//
+// The last two cases were added later, because the original fix reached the
+// two sites this test listed and left two more with the same shape. Both sit
+// beside a non-200 branch that DOES raise the sentinel, so one function
+// classified a 503 and not a reset: getLatestVersion is what CheckForUpdate
+// calls — the most-travelled path in the package — and downloadBinary is the
+// fetch of the archive itself.
 func TestTransportFailuresAreRetryable(t *testing.T) {
 	t.Parallel()
 
@@ -100,6 +107,14 @@ func TestTransportFailuresAreRetryable(t *testing.T) {
 		{
 			name: "the candidate list",
 			call: func(svc *Service) error { _, err := svc.ListCandidates(); return err },
+		},
+		{
+			name: "the latest-release query",
+			call: func(svc *Service) error { _, err := svc.getLatestVersion(); return err },
+		},
+		{
+			name: "the archive download",
+			call: func(svc *Service) error { _, err := svc.downloadBinary("v2.0.0"); return err },
 		},
 	}
 	for _, tt := range tests {
