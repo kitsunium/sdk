@@ -238,6 +238,10 @@ const (
 	// byte, one sub-authority count and a six-byte authority. An entry with no
 	// room for even that is not one to read an identifier out of.
 	smallestSid uintptr = 8
+	// subAuthorityWidth is how much each sub-authority adds to that, and the
+	// COUNT of them is a byte inside the identifier — so the length of a SID
+	// is data read from the same entry whose size has to contain it.
+	subAuthorityWidth uintptr = 4
 )
 
 // anyoneSids are the string-form security identifiers this rule reads as
@@ -538,6 +542,15 @@ func sidOf(ace *aceEntry, shape aceShape) string {
 	//: is malformed, and reading it would run past the ACE into the next one.
 	if offset+smallestSid > uintptr(ace.AceSize) {
 		//: no identifier, and an empty string matches nothing in anyoneSids.
+		return ""
+	}
+	//: the identifier's own LENGTH is data as well — one byte of it says how
+	//: many sub-authorities follow — so the whole SID has to fit too, or
+	//: ConvertSidToStringSidW would render bytes belonging to the next entry
+	//: and could name an identifier this rule reads as "anybody".
+	subAuthorities := uintptr(*(*byte)(unsafe.Add(unsafe.Pointer(ace), offset+1)))
+	if offset+smallestSid+subAuthorityWidth*subAuthorities > uintptr(ace.AceSize) {
+		//: no identifier.
 		return ""
 	}
 	rendered, renderErr := (*syscall.SID)(unsafe.Add(unsafe.Pointer(ace), offset)).String()

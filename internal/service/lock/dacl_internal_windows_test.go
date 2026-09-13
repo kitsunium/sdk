@@ -295,23 +295,48 @@ func TestInheritanceDecidesWhichQuestionAnEntryAnswers(t *testing.T) {
 	}
 }
 
-// TestAnEntryWithNoRoomForItsIdentifierIsNotRead pins the bound the object
-// shapes make necessary.
+// TestAnEntryWithNoRoomForItsIdentifierIsNotRead pins both bounds the variable
+// layouts make necessary.
 //
-// The identifier's offset is computed from the entry's own flags word, so a
-// malformed entry can put it past the end of the entry — and reading there
-// would hand ConvertSidToStringSidW the bytes of whatever follows in the list.
-// The size is checked before the pointer is formed.
+// Where the identifier STARTS is computed from the entry's own flags word, and
+// how LONG it is comes from a byte inside the identifier. Both are data, so a
+// malformed entry can put either past the end of the entry — and reading there
+// would hand ConvertSidToStringSidW the bytes of whatever follows in the list,
+// which could render as an identifier this rule reads as "anybody". The size
+// is checked twice, before the pointer is formed and after the length is read.
 func TestAnEntryWithNoRoomForItsIdentifierIsNotRead(t *testing.T) {
 	t.Parallel()
-	entry := buildAce(t, accessAllowedObjectAceType, 0, sidEveryone, fileDeleteChild, 0)
-	//: the entry announces both GUIDs it does not carry, which pushes the
-	//: identifier thirty-two bytes past where its bytes actually are.
-	binary.LittleEndian.PutUint32(entry[8:12], aceObjectTypePresent|aceInheritedObjectTypePresent)
-	granted, observed := walk(buildAcl(entry), replaceRights, contentRights)
-	//: not granted, whichever way it is refused — the bound check declines to
-	//: read, or GetAce declines to hand the entry over at all.
-	if granted {
-		t.Fatalf("an entry announcing GUIDs it does not carry was read as a grant (observed=%q)", observed)
+	type tc struct {
+		name string
+		// corrupt rewrites the assembled entry in place.
+		corrupt func(entry []byte)
+	}
+	tests := []tc{
+		{"it announces both GUIDs it does not carry", func(entry []byte) {
+			binary.LittleEndian.PutUint32(entry[8:12], aceObjectTypePresent|aceInheritedObjectTypePresent)
+		}},
+		{"it claims more sub-authorities than it has room for", func(entry []byte) {
+			//: the sub-authority count is the SECOND byte of the identifier,
+			//: which an object entry with no GUID puts at offset 12.
+			entry[13] = 0xFF
+		}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		entry := buildAce(t, accessAllowedObjectAceType, 0, sidEveryone, fileDeleteChild, 0)
+		c.corrupt(entry)
+		granted, observed := walk(buildAcl(entry), replaceRights, contentRights)
+		//: not granted, whichever way it is refused — a bound check declines
+		//: to read, or GetAce declines to hand the entry over at all.
+		if granted {
+			t.Fatalf("an entry where %s was read as a grant (observed=%q)", c.name, observed)
+		}
+	}
+	//: one subtest per way of lying about the layout.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
