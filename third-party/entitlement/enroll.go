@@ -74,41 +74,41 @@ func GenerateKeyPair(product *svcent.ProductValue, sshDir, subject string) (publ
 	//: an operator's stricter permissions are left untouched.
 	if dirErr := os.MkdirAll(sshDir, sshDirMode); dirErr != nil {
 		//: Without a key directory there is nowhere to enrol.
-		return "", fmt.Errorf("creating key directory %s: %w", sshDir, dirErr)
+		return "", fmt.Errorf("%w: creating key directory %s: %w", EnrolmentFailed, sshDir, dirErr)
 	}
 
 	pub, priv, genErr := ed25519.GenerateKey(nil)
 	//: A key we cannot generate cannot be enrolled.
 	if genErr != nil {
 		//: Refuse rather than write half an identity.
-		return "", fmt.Errorf("generating key: %w", genErr)
+		return "", fmt.Errorf("%w: generating key: %w", EnrolmentFailed, genErr)
 	}
 
 	block, marshalErr := ssh.MarshalPrivateKey(priv, product.Label()+" entitlement "+subject)
 	//: A private half we cannot serialise is unusable.
 	if marshalErr != nil {
 		//: Refuse rather than write half an identity.
-		return "", fmt.Errorf("marshalling private key: %w", marshalErr)
+		return "", fmt.Errorf("%w: marshalling private key: %w", EnrolmentFailed, marshalErr)
 	}
 	//: Write the private half first and owner-only: a later failure leaves a
 	//: useless key rather than a published identity with no way to prove it.
 	if writeErr := os.WriteFile(PrivateKeyPath(sshDir, subject), pem.EncodeToMemory(block), keyFileMode); writeErr != nil {
 		//: Refuse rather than continue without a private half.
-		return "", fmt.Errorf("writing private key: %w", writeErr)
+		return "", fmt.Errorf("%w: writing private key: %w", EnrolmentFailed, writeErr)
 	}
 
 	sshPub, convErr := ssh.NewPublicKey(pub)
 	//: A public half we cannot serialise cannot be published.
 	if convErr != nil {
 		//: Refuse rather than enrol an unverifiable identity.
-		return "", fmt.Errorf("converting public key: %w", convErr)
+		return "", fmt.Errorf("%w: converting public key: %w", EnrolmentFailed, convErr)
 	}
 	authorized := ssh.MarshalAuthorizedKey(sshPub)
 	//: The published half is world-readable by design; its secrecy was never
 	//: part of the scheme.
 	if writeErr := os.WriteFile(PublicKeyPath(sshDir, subject), authorized, publicKeyFileMode); writeErr != nil {
 		//: Refuse rather than leave the pair half-written.
-		return "", fmt.Errorf("writing public key: %w", writeErr)
+		return "", fmt.Errorf("%w: writing public key: %w", EnrolmentFailed, writeErr)
 	}
 	//: Return the authorized-keys line the issue will carry.
 	return string(authorized), nil

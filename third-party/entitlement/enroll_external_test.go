@@ -1,14 +1,19 @@
 package entitlement_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
+	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
 	entitlement "github.com/kitsunium/sdk/third-party/entitlement"
 )
+
+// enrolSubject is a canonical v4 UUID the enrolment tests mint under.
+const enrolSubject string = "11111111-2222-4333-8444-555555555555"
 
 // uuidShape matches the canonical v4 form the key filename must carry.
 var uuidShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
@@ -193,6 +198,89 @@ func TestGenerateKeyPairCreatesDirectory(t *testing.T) {
 			//: reports 0777 for every directory whatever its ACL.
 			if !info.IsDir() {
 				t.Errorf("key directory %s is not a directory", sshDir)
+			}
+		})
+	}
+}
+
+// TestGenerateKeyPairFailuresAreNameable pins that every step of enrolment
+// after the subject check reports under one sentinel a caller can match.
+//
+// Each of these was a bare fmt.Errorf with no sentinel and no code, so
+// errs.CodeOf answered (0.0.0.0, false) and errors.Is matched nothing: a CLI
+// distinguishing "you are not enrolled" from "enrolling just failed" — which
+// are two different instructions to the same operator — had nothing to branch
+// on. ErrNoLicence would have been the wrong answer for the second, since its
+// remedy is to run the command that has already failed.
+func TestGenerateKeyPairFailuresAreNameable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// arrange returns the key directory, after putting something in the
+		// way of the step under test.
+		arrange func(t *testing.T) string
+		reason  string
+	}{
+		{
+			name: "the key directory cannot be created",
+			arrange: func(t *testing.T) string {
+				t.Helper()
+				//: A regular file where a directory component must be: every
+				//: platform refuses to create a child of it.
+				blocked := filepath.Join(t.TempDir(), "not-a-dir")
+				if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
+					t.Fatalf("writing blocker: %v", err)
+				}
+				return filepath.Join(blocked, ".ssh")
+			},
+			reason: "a fresh container has no key directory, so MkdirAll is the first step that can fail",
+		},
+		{
+			name: "the private half cannot be written",
+			arrange: func(t *testing.T) string {
+				t.Helper()
+				dir := t.TempDir()
+				//: A directory wearing the private key's name: the open
+				//: succeeds at neither truncating nor creating.
+				if err := os.Mkdir(entitlement.PrivateKeyPath(dir, enrolSubject), 0o700); err != nil {
+					t.Fatalf("creating blocker: %v", err)
+				}
+				return dir
+			},
+			reason: "the private half is written first, so its failure is the one that leaves nothing behind",
+		},
+		{
+			name: "the published half cannot be written",
+			arrange: func(t *testing.T) string {
+				t.Helper()
+				dir := t.TempDir()
+				//: Same blocker, one step later: the private half lands and
+				//: the published one does not.
+				if err := os.Mkdir(entitlement.PublicKeyPath(dir, enrolSubject), 0o700); err != nil {
+					t.Fatalf("creating blocker: %v", err)
+				}
+				return dir
+			},
+			reason: "a pair with no published half is what the next DiscoverSubject has to read as unusable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := entitlement.GenerateKeyPair(nil, tt.arrange(t), enrolSubject)
+			if err == nil {
+				t.Fatalf("GenerateKeyPair() error = nil, want a failure (%s)", tt.reason)
+			}
+			if !errors.Is(err, entitlement.EnrolmentFailed) {
+				t.Errorf("GenerateKeyPair() error = %v, want it to carry EnrolmentFailed (%s)", err, tt.reason)
+			}
+			//: The contract's "not enrolled" sentinel must NOT answer here.
+			//: Its remedy is to enrol, which is the command that just failed.
+			if errors.Is(err, coreent.ErrNoLicense) {
+				t.Errorf("GenerateKeyPair() error = %v, want it NOT to read as ErrNoLicense (%s)", err, tt.reason)
 			}
 		})
 	}

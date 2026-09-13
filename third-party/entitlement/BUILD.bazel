@@ -5,8 +5,10 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "entitlement",
     srcs = [
+        "codes.go",
         "discover.go",
         "enroll.go",
+        "errors.go",
         "key.go",
         "key_unix.go",
         "key_windows.go",
@@ -17,6 +19,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/entitlement",
+        "//internal/kernel/errs",
         "//internal/service/entitlement",
         "@org_golang_x_crypto//ssh",
     ],
