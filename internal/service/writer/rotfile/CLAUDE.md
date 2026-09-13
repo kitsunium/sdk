@@ -152,7 +152,7 @@ the reopened active file would be created and asserts `RotFileOpenFailed`.
 
 Every one of those cases goes through `openHardened`, so `refuseSymlink`
 answers first and the flag word is never asked anything — they pass identically
-with and without `O_NOFOLLOW`. `open_flags_unix_test.go` (`//go:build unix`) is
+with and without `O_NOFOLLOW`. `open_flags_unix_internal_test.go` (`//go:build unix`) is
 the one that is not blind to it: it opens with the same flag word and mode
 against a path that **is** a symlink, which is the state a planter leaves by
 winning the race against the check. Its dangling-link row is the sharper of the
