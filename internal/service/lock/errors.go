@@ -71,4 +71,24 @@ var (
 		"The lock path is a link rather than a file",
 		"service/lock: a symbolic link or reparse point occupies the lock file's path, so the lock and its fencing ledger would land on a file chosen by whoever planted it; the fields name the path, the kind of indirection and what the kernel reported",
 		errs.WithExitCode(exitConfig))
+
+	// LockFileReplaced is returned when the file a lease holds is no longer
+	// the file its name leads to.
+	//
+	// It is the one exposure in this package that is DETECTED rather than
+	// prevented, and the doc comment on identity.go says so at length. In a
+	// world-writable sticky directory the account that created the lock file
+	// owns that entry, so it may unlink it — including while another process
+	// holds the lock. No flag on the open stops that: the descriptor outlives
+	// the name by design, on every kernel.
+	//
+	// What ships instead is that the holder finds out. Acquire refuses a lock
+	// whose file was swapped between the open and the flock, and Extend
+	// refuses once the swap has happened — so a Keepalive cancels the
+	// protected work's context with this cause rather than letting it run on
+	// inside a section it no longer owns.
+	LockFileReplaced = errs.Define(CodeLockFileReplaced, "LOCK_FILE_REPLACED",
+		"The lock file is no longer the file its name leads to",
+		"service/lock: the lock file this lease holds was unlinked or replaced while it was held, so the next acquisition locks a different inode and a fresh fencing ledger; the fields name the path, the lock, the fencing token and which of the two conditions was observed",
+		errs.WithExitCode(exitConfig))
 )

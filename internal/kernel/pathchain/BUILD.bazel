@@ -1,0 +1,32 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "pathchain",
+    srcs = [
+        "pathchain.go",
+        "stack.go",
+        "step.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/pathchain",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":pathchain",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "pathchain_test",
+    srcs = ["pathchain_external_test.go"],
+    deps = [":pathchain"],
+)

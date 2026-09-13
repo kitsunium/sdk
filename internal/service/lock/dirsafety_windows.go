@@ -54,3 +54,30 @@ func checkDir(_ string, _ fs.FileInfo) error {
 	//: absence of one.
 	return nil
 }
+
+// plantable reports whether any account could create an entry in a directory
+// with this mode, and on Windows it always answers NO — because the mode it is
+// handed cannot answer at all.
+//
+// os.Stat synthesises the permission bits from one attribute,
+// FILE_ATTRIBUTE_READONLY, so every writable directory on the system reports
+// 0777 and every read-only one reports 0555. Reading other-write out of that
+// would make [checkChain] refuse a junction under any writable directory —
+// which includes C:\Users\All Users -> C:\ProgramData, an indirection Windows
+// itself installs — and refuse it as LOCK_PATH_REDIRECTED, blaming the
+// deployment for the operating system's own layout.
+//
+// The question DOES have an answer here; it is just not a mode. It is the
+// directory's DACL: an ACE granting FILE_ADD_FILE or FILE_ADD_SUBDIRECTORY to
+// Everyone (S-1-1-0) or Authenticated Users (S-1-5-11). That check is what ADR
+// 0081 §Deferred and ADR 0082 §Deferred both name, it is not written yet, and
+// answering "no" until it is means [checkChain] refuses nothing on Windows.
+// That is a smaller gap than it sounds: the final component, the one this
+// package DERIVES and an attacker can predict, is refused by the open
+// (ADR 0082 §D2), and the components above it are the caller's own
+// configuration.
+func plantable(_ fs.FileMode) bool {
+	//: no verdict is available from a synthesised mode, and a wrong refusal
+	//: here costs more than a missing one — see the doc comment.
+	return false
+}

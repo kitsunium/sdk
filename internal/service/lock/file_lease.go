@@ -23,6 +23,11 @@ type fileLease struct {
 	file *os.File
 	// name is the lock this lease was taken on, needed to release the gate.
 	name string
+	// path is the file the flock is held on. It is kept rather than recomputed
+	// from name because Extend consults it on a keepalive's cadence, and
+	// because it is the ONE string that has to keep meaning the same thing for
+	// the identity check to mean anything.
+	path string
 	// fence is the acquisition's fencing token, read from and written to the
 	// lock file under this very flock.
 	fence uint64
@@ -37,9 +42,10 @@ type fileLease struct {
 }
 
 // newFileLease binds a lease to a held flock.
-func newFileLease(locker *fileLocker, file *os.File, name string, fence uint64) *fileLease {
-	//: everything the lease needs to release is captured here.
-	return &fileLease{locker: locker, file: file, name: name, fence: fence}
+func newFileLease(locker *fileLocker, file *os.File, path, name string, fence uint64) *fileLease {
+	//: everything the lease needs to release, and to check that what it holds
+	//: is still what its name leads to, is captured here.
+	return &fileLease{locker: locker, file: file, path: path, name: name, fence: fence}
 }
 
 // Fence returns this acquisition's fencing token.
@@ -54,12 +60,19 @@ func (l *fileLease) Fence() uint64 {
 
 // Extend re-asserts ownership.
 //
-// It cannot fail for a lease this process still holds, and that is not a
-// weakness disguised as a guarantee — it follows from the lock having no
-// expiry at all. Nothing can take a held flock away: not a timer, not another
-// process, not another goroutine (the gate). So there is no state in which
-// this lease is lost while the holder is running, and reporting success is the
-// truth rather than a silent no-op.
+// Nothing can take a held flock away — not a timer, not another process, not
+// another goroutine (the gate) — so for as long as the lock file this lease
+// holds is still the file its NAME leads to, Extend reports success and that
+// is the truth rather than a silent no-op.
+//
+// The clause is the change. A lock file can be unlinked out from under a
+// holder, by an account the directory's own permissions allow to do it, and
+// the holder's descriptor keeps working afterwards because a descriptor
+// outlives its name. The next acquisition then creates a different file, locks
+// that, and both processes are inside the section. Extend is the only call a
+// holder makes DURING the section, so it is where that is noticed:
+// [LockFileReplaced], which a Keepalive publishes as the protected context's
+// cause. See identity.go for what this detects and what it does not prevent.
 //
 // It still returns [corelock.LockNotHeld] after Release, because at that point
 // the lease genuinely holds nothing.
@@ -78,7 +91,12 @@ func (l *fileLease) Extend(ctx context.Context) error {
 		//: LOCK_NOT_HELD, naming the operation.
 		return notHeld("Extend", l.name, l.fence)
 	}
-	//: still held, and nothing could have taken it.
+	//: the flock is intact; the question is whether it still excludes anyone.
+	if same, observed := sameEntry(l.file, l.path); !same {
+		//: LOCK_FILE_REPLACED: the exclusion is gone and the holder is told.
+		return fileReplaced("Extend", l.path, l.name, l.fence, observed)
+	}
+	//: still held, and still the only lock on this name.
 	return nil
 }
 

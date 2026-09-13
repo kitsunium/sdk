@@ -101,8 +101,20 @@ func (c FileConfig) clockOrSystem() clock.Timed {
 	return c.Clock
 }
 
-// prepareDir creates dir if it is absent and checks it if it is not.
+// prepareDir audits the path, then creates dir if it is absent and checks it
+// if it is not.
+//
+// The chain audit runs FIRST, before anything is created. os.MkdirAll follows
+// an indirection at a parent component, so auditing afterwards would mean
+// refusing the directory only after having created it inside whatever tree the
+// indirection pointed at.
 func prepareDir(dir string) error {
+	//: the components ABOVE the lock file, which O_NOFOLLOW cannot reach —
+	//: see chain.go.
+	if redirected := checkChain(dir); redirected != nil {
+		//: LockPathRedirected or LockBackendFailed.
+		return redirected
+	}
 	info, err := os.Stat(dir)
 	//: absent — create it owner-only. A directory we created has the mode we
 	//: asked for, so the check below is about directories we did NOT create.

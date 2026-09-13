@@ -313,6 +313,16 @@ a status, not a decision edit (`docs/adr/CLAUDE.md` §Do NOT).
 
 ## Deferred
 
+> **Status update (2026-09-13).** The first two items below are CLOSED by
+> [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) — the
+> parent-component one by prevention, through a new `internal/kernel/pathchain`
+> primitive and a rule that refuses an indirection only where anybody could
+> have planted it; the unlink-and-replace one by DETECTION, through
+> `LOCK_FILE_REPLACED` at `Acquire` and `Extend`, which is not the same thing
+> and 0083 says so at length. The reasoning below is left exactly as it was
+> written, including the sentence about a directory-handle API the SDK does not
+> have: 0083's answer is that it built one.
+
 - **A symlink at a PARENT component of the lock path.** `O_NOFOLLOW` governs
   the final component only, measured on linux/amd64. Closing it means either
   resolving `FileConfig.Dir` and refusing a link anywhere in it — which refuses

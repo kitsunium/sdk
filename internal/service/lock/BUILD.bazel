@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "lock",
     srcs = [
+        "chain.go",
         "codes.go",
         "config.go",
         "dirsafety_posix.go",
@@ -19,6 +20,7 @@ go_library(
         "flock_windows.go",
         "gate.go",
         "holding.go",
+        "identity.go",
         "keepalive.go",
         "lock_compliance.go",
         "memory.go",
@@ -38,6 +40,7 @@ go_library(
         "//internal/core/proc",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/kernel/pathchain",
     ],
 )
 
@@ -54,11 +57,15 @@ go_test(
     name = "lock_test",
     size = "small",
     srcs = [
+        "chain_posix_test.go",
+        "chain_windows_test.go",
         "dirsafety_posix_test.go",
         "dirsafety_windows_test.go",
         "file_contention_unix_test.go",
         "file_contention_windows_test.go",
         "file_external_test.go",
+        "identity_posix_test.go",
+        "identity_windows_test.go",
         "keepalive_external_test.go",
         "memory_external_test.go",
         "nofollow_test.go",
