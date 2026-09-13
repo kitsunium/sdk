@@ -47,7 +47,10 @@ go_test(
     name = "lock_test",
     size = "small",
     srcs = [
+        "dirsafety_posix_test.go",
+        "dirsafety_windows_test.go",
         "file_contention_unix_test.go",
+        "file_contention_windows_test.go",
         "file_external_test.go",
         "keepalive_external_test.go",
         "memory_external_test.go",

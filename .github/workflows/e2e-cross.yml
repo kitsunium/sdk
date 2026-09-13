@@ -33,8 +33,15 @@ env:
   # Platform-sensitive packages whose RUNTIME behaviour must be proven per kernel.
   # Pure-Go packages (codec/crypto/logger/errs) behave identically everywhere and
   # are covered by the Linux Bazel gate, so they stay off this lane.
+  #
+  # `lock` joins them for the same reason: its file backend is a build-tag
+  # split over a kernel primitive — flock(2) on Unix, LockFileEx on Windows
+  # (ADR 0081) — and the two kernels give OPPOSITE answers to what a second
+  # lock inside one process does. A green cross-compile proves neither. This is
+  # the lane that executes internal/service/lock's Windows suite; the Linux
+  # Bazel gate compiles neither that suite nor the backend it covers.
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
+  SERVICE_PKGS: "./lock ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics with no
   # Windows equivalent (Windows uses ACLs; chmod 0555 doesn't block the owner).
