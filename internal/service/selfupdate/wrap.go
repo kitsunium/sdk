@@ -40,16 +40,30 @@ func refuse(sentinel *errs.Error, fields ...errs.FieldValue) error {
 // contributes only a trail entry. That is the right outcome, and it is why
 // every call here can name its most specific classification without first
 // checking whether the cause has one of its own.
+// A nil sentinel is refused rather than dereferenced. Only a bug in this
+// package can produce one, and the worst place to take a process down is the
+// path that is already reporting a failure — so it degrades to what
+// refuse(nil) would do, a typed INVALID_WRAP_PARAMS still carrying the cause.
+// Neither sentinel.Code() nor errs.CodeOf(sentinel) is total here: a typed-nil
+// *errs.Error is a non-nil error interface, so the accessor finds it in the
+// chain and dereferences it exactly as the method would.
 func classify(sentinel *errs.Error, cause error, fields ...errs.FieldValue) error {
+	//: nothing to read the five values off.
+	if sentinel == nil {
+		//: Wrap answers a zero Code with INVALID_WRAP_PARAMS and keeps cause.
+		return errs.Wrap(cause, errs.WrapParams{}, fields...)
+	}
+	code, _ := errs.CodeOf(sentinel)
+	reason, _ := errs.ReasonOf(sentinel)
 	//: ExitCode is read back rather than left at zero: WrapParams has no
 	//: "inherit" spelling, and a zero there means the default 70 — which
 	//: would silently drop EX_CANTCREAT on the stdlib-cause path while
 	//: keeping it on the origin-wins one.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:     sentinel.Code(),
-		Reason:   sentinel.Reason(),
-		Public:   sentinel.Public(),
-		Private:  sentinel.Private(),
-		ExitCode: sentinel.ExitCode(),
+		Code:     code,
+		Reason:   reason,
+		Public:   errs.PublicOf(sentinel),
+		Private:  errs.PrivateOf(sentinel),
+		ExitCode: errs.ExitCodeOf(sentinel),
 	}, fields...)
 }

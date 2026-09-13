@@ -31,6 +31,17 @@ func whole(err error) string {
 	return err.Error() + " ||| " + diagnose(err)
 }
 
+// namedSentinel is one row of the two sentinel tables below: a sentinel and
+// the name a failure should report it by.
+//
+// A slice rather than a map[string]*errs.Error, so the subtests run in the
+// order they are written rather than in Go's randomised map order — which is
+// what makes a failure reproducible from the log alone.
+type namedSentinel struct {
+	name string
+	err  *errs.Error
+}
+
 // TestNoParticularReachesThePublicSentence is the guard on the split.
 //
 // Every error below is built with a real particular in it — a release tag, an
@@ -127,32 +138,32 @@ func TestEveryPublicSentenceIsWireSafe(t *testing.T) {
 
 	const maxPublic int = 120
 
-	sentinels := map[string]*errs.Error{
-		"CandidateTagRequired":      CandidateTagRequired,
-		"ReleaseMetadataUnreadable": ReleaseMetadataUnreadable,
-		"ArchiveUnreadable":         ArchiveUnreadable,
-		"ExecutablePathUnresolved":  ExecutablePathUnresolved,
-		"StagingFailed":             StagingFailed,
-		"ReplacementFailed":         ReplacementFailed,
-		"ElevationFailed":           ElevationFailed,
+	sentinels := []namedSentinel{
+		{"CandidateTagRequired", CandidateTagRequired},
+		{"ReleaseMetadataUnreadable", ReleaseMetadataUnreadable},
+		{"ArchiveUnreadable", ArchiveUnreadable},
+		{"ExecutablePathUnresolved", ExecutablePathUnresolved},
+		{"StagingFailed", StagingFailed},
+		{"ReplacementFailed", ReplacementFailed},
+		{"ElevationFailed", ElevationFailed},
 	}
-	for name, sentinel := range sentinels {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range sentinels {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			public := sentinel.Public()
+			public := tc.err.Public()
 			//: A newline breaks a single-line log format and any header.
 			if strings.ContainsAny(public, "\r\n") {
-				t.Errorf("%s public = %q, want no line break", name, public)
+				t.Errorf("%s public = %q, want no line break", tc.name, public)
 			}
 			//: The rune bound is the SDK's, and it is on runes not bytes.
 			if runes := len([]rune(public)); runes > maxPublic {
-				t.Errorf("%s public is %d runes, want <= %d", name, runes, maxPublic)
+				t.Errorf("%s public is %d runes, want <= %d", tc.name, runes, maxPublic)
 			}
 			//: A private half that says nothing leaves the error with no
 			//: diagnosis at all once the public half stops carrying one.
-			if strings.TrimSpace(sentinel.Private()) == "" {
-				t.Errorf("%s has an empty private half", name)
+			if strings.TrimSpace(tc.err.Private()) == "" {
+				t.Errorf("%s has an empty private half", tc.name)
 			}
 		})
 	}
@@ -172,52 +183,85 @@ func TestClassifyCarriesTheSentinelVerbatim(t *testing.T) {
 
 	cause := errors.New("the medium said no")
 
-	sentinels := map[string]*errs.Error{
-		"DownloadFailed":            coreupd.DownloadFailed,
-		"SignatureInvalid":          coreupd.SignatureInvalid,
-		"ArchiveUnreadable":         ArchiveUnreadable,
-		"StagingFailed":             StagingFailed,
-		"ReplacementFailed":         ReplacementFailed,
-		"ElevationFailed":           ElevationFailed,
-		"ExecutablePathUnresolved":  ExecutablePathUnresolved,
-		"ReleaseMetadataUnreadable": ReleaseMetadataUnreadable,
-		"CandidateTagRequired":      CandidateTagRequired,
+	sentinels := []namedSentinel{
+		{"DownloadFailed", coreupd.DownloadFailed},
+		{"SignatureInvalid", coreupd.SignatureInvalid},
+		{"ArchiveUnreadable", ArchiveUnreadable},
+		{"StagingFailed", StagingFailed},
+		{"ReplacementFailed", ReplacementFailed},
+		{"ElevationFailed", ElevationFailed},
+		{"ExecutablePathUnresolved", ExecutablePathUnresolved},
+		{"ReleaseMetadataUnreadable", ReleaseMetadataUnreadable},
+		{"CandidateTagRequired", CandidateTagRequired},
 	}
-	for name, sentinel := range sentinels {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range sentinels {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := classify(sentinel, cause)
+			got := classify(tc.err, cause)
 			//: Identity: a caller matching the sentinel must still match.
-			if !errors.Is(got, sentinel) {
-				t.Errorf("errors.Is(classify(%s, cause), %s) = false, want true", name, name)
+			if !errors.Is(got, tc.err) {
+				t.Errorf("errors.Is(classify(%s, cause), %s) = false, want true", tc.name, tc.name)
 			}
 			//: Code, which is what errs.HasCode and the prefix matcher read.
-			if code, _ := errs.CodeOf(got); code != sentinel.Code() {
-				t.Errorf("classify(%s).Code = %s, want %s", name, code, sentinel.Code())
+			if code, _ := errs.CodeOf(got); code != tc.err.Code() {
+				t.Errorf("classify(%s).Code = %s, want %s", tc.name, code, tc.err.Code())
 			}
 			//: Reason, which is half of what errors.Is compares.
-			if reason, _ := errs.ReasonOf(got); reason != sentinel.Reason() {
-				t.Errorf("classify(%s).Reason = %q, want %q", name, reason, sentinel.Reason())
+			if reason, _ := errs.ReasonOf(got); reason != tc.err.Reason() {
+				t.Errorf("classify(%s).Reason = %q, want %q", tc.name, reason, tc.err.Reason())
 			}
 			//: The two message halves, verbatim.
-			if errs.PublicOf(got) != sentinel.Public() {
-				t.Errorf("classify(%s).Public = %q, want %q", name, errs.PublicOf(got), sentinel.Public())
+			if errs.PublicOf(got) != tc.err.Public() {
+				t.Errorf("classify(%s).Public = %q, want %q", tc.name, errs.PublicOf(got), tc.err.Public())
 			}
-			if errs.PrivateOf(got) != sentinel.Private() {
-				t.Errorf("classify(%s).Private = %q, want %q", name, errs.PrivateOf(got), sentinel.Private())
+			if errs.PrivateOf(got) != tc.err.Private() {
+				t.Errorf("classify(%s).Private = %q, want %q", tc.name, errs.PrivateOf(got), tc.err.Private())
 			}
 			//: And the exit status, which WrapParams has no "inherit"
 			//: spelling for and would otherwise silently fall back to 70.
-			if errs.ExitCodeOf(got) != sentinel.ExitCode() {
-				t.Errorf("classify(%s).ExitCode = %d, want %d", name, errs.ExitCodeOf(got), sentinel.ExitCode())
+			if errs.ExitCodeOf(got) != tc.err.ExitCode() {
+				t.Errorf("classify(%s).ExitCode = %d, want %d", tc.name, errs.ExitCodeOf(got), tc.err.ExitCode())
 			}
 			//: The cause survives, or errors.Is against an os error stops
 			//: working and the operating system's words are gone.
 			if !errors.Is(got, cause) {
-				t.Errorf("classify(%s) lost its cause", name)
+				t.Errorf("classify(%s) lost its cause", tc.name)
 			}
 		})
+	}
+}
+
+// TestClassifyIsTotalOnANilSentinel pins the reason classify reads the five
+// values through errs' accessor FUNCTIONS rather than the methods of the same
+// name on its parameter.
+//
+// Only a bug in this package can hand it a nil sentinel, and the worst place to
+// take a process down is inside the path that is already reporting a failure.
+//
+// Written first against the accessor functions alone, on the assumption they
+// were total. They are not — a typed-nil *errs.Error is a non-nil error
+// interface, so errs.CodeOf finds it in the chain and dereferences it exactly
+// as sentinel.Code() would, and this test segfaulted at accessors.go:148. The
+// explicit guard is what makes the claim true; reverting it restores the
+// panic here.
+func TestClassifyIsTotalOnANilSentinel(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("the medium said no")
+	got := classify(nil, cause)
+
+	//: No panic, and something usable came back.
+	if got == nil {
+		t.Fatal("classify(nil, cause) = nil, want a typed error")
+	}
+	//: errs answers a zero Code with its own INVALID_WRAP_PARAMS sentinel.
+	if reason, _ := errs.ReasonOf(got); reason != "INVALID_WRAP_PARAMS" {
+		t.Errorf("classify(nil, cause) reason = %q, want INVALID_WRAP_PARAMS", reason)
+	}
+	//: And the failure it was actually told about is not thrown away.
+	if !errors.Is(got, cause) {
+		t.Errorf("classify(nil, cause) = %v, want it to keep the cause", got)
 	}
 }
 
