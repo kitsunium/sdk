@@ -22,8 +22,9 @@ bounding *us*.
 ## Why-this-shape
 
 - **Ancestors are consulted, not just the process's own cgroup.** A restrictive
-  parent bounds the process just as effectively. Reading only the mount root was
-  the original defect: under systemd, and under any runtime that does not use
+  parent bounds the process just as effectively. Reading only the hierarchy's ROOT
+  CGROUP was the original defect — a different sense of "root" from the mount
+  root below: under systemd, and under any runtime that does not use
   cgroup namespaces, the root reports `max` while the real cap sits several
   levels down — so the feature silently disabled itself exactly where it was
   needed. `TestApplyFrom_NestedCgroup` pins all four shapes.

@@ -102,10 +102,11 @@ const defaultCandidateCapacity int = 8
 // resolveCgroupPaths returns the memory-limit files to consult, ordered from
 // the process's own cgroup outward to the hierarchy root.
 //
-// Reading only the mount root was wrong: limits belong to cgroup directories,
-// not to the mount. A process in a child cgroup — the normal shape under
-// systemd, and under any runtime that does not use cgroup namespaces — would
-// see the root's unlimited value and conclude there was no cap, silently
+// Reading only the hierarchy's ROOT CGROUP was wrong — a different sense of
+// "root" from cgroupMount.root, which is what a mount exposes. Limits belong to
+// cgroup directories, not to the mount. A process in a child cgroup — the normal
+// shape under systemd, and under any runtime that does not use cgroup namespaces
+// — would see the root's unlimited value and conclude there was no cap, silently
 // disabling the feature exactly where it is needed.
 //
 // Ancestors are included because a restrictive parent bounds the process just
