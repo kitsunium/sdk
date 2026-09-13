@@ -141,7 +141,7 @@ Two consequences the code depends on:
 Two questions, not one — *can any account REPLACE an entry here?* for
 `checkDir`, *can any account CREATE one?* for `plantable` — and two
 vocabularies for them. The Unix pair differ over the sticky bit; the Windows
-pair differ over which access bits they read (ADR 0085).
+pair differ over which access bits they read (ADR 0086).
 
 On Unix: refuse world-writable-and-not-sticky. The whole table — not just the
 two extremes the suite used to cover — is pinned by
@@ -154,7 +154,7 @@ them — ADR 0018 §(a)'s failure mode wearing a typed error that blames the
 deployment. So the rule asks instead whether an access-allowed entry grants a
 right to Everyone (`S-1-1-0`), Authenticated Users (`S-1-5-11`) or
 BUILTIN\Users (`S-1-5-32-545`) — and WHICH right depends on which of the two
-rules is asking (ADR 0085 §D1):
+rules is asking (ADR 0086 §D1):
 
 | mask | rights | asked by |
 |---|---|---|
@@ -178,10 +178,10 @@ There **is** a sticky equivalent here, spelled in two bits instead of one:
 BUILTIN\Users exactly that, on itself and on every subdirectory — measured on
 `windows-latest` — which is why a lock directory under it is ACCEPTED and a
 junction planted beside it is REFUSED. ADR 0084 said the shape did not exist;
-ADR 0085 §D2 corrects it, and that correction is what let the third identifier
+ADR 0086 §D2 corrects it, and that correction is what let the third identifier
 into the table without refusing every machine-wide Windows deployment.
 
-All **eight** discretionary ACE shapes are decoded (ADR 0085 §D6): the plain
+All **eight** discretionary ACE shapes are decoded (ADR 0086 §D6): the plain
 pair, the object pair that puts 0-2 GUIDs between the mask and the SID, and
 the two callback pairs that trail a conditional expression. An NTFS directory
 does store an object-type entry — measured, against ADR 0084's premise — and
@@ -309,7 +309,7 @@ there is nothing to race.
 | Sentinel | Code | When |
 |---|---|---|
 | `LockFenceCorrupt` | `0.3.51.1` | no next token can be issued: the lock file is not a decimal counter (`condition=unparseable`), or it holds `2^64-1` and `previous+1` would wrap to zero (`condition=exhausted`). **Refused, never reset** — a restarted fence, and a wrapped one, both reissue numbers the resource already accepted |
-| `LockDirectoryUnsafe` | `0.3.51.2` | a lock directory whose entries any account can REPLACE: world-writable and non-sticky on Unix, or a DACL letting Everyone / Authenticated Users / BUILTIN\Users unlink somebody else's entry or write the files created there, on Windows (ADR 0084, ADR 0085). Either way the lock file can be replaced and the next process locks a **different inode** |
+| `LockDirectoryUnsafe` | `0.3.51.2` | a lock directory whose entries any account can REPLACE: world-writable and non-sticky on Unix, or a DACL letting Everyone / Authenticated Users / BUILTIN\Users unlink somebody else's entry or write the files created there, on Windows (ADR 0084, ADR 0086). Either way the lock file can be replaced and the next process locks a **different inode** |
 | `LockKeepaliveLost` | `0.3.51.3` | a background renewal failed; carried as a context **cause**, never as a return value |
 | `LockPathRedirected` | `0.3.51.4` | the lock path is a symbolic link (Unix) or a reparse point (Windows), so the lock and its ledger would land on a file whoever planted it chose. **Not** `LOCK_BACKEND_FAILED`: nothing failed, and that code invites the one wrong response — a retry. Since ADR 0083 it also covers an indirection at a PARENT component planted where anybody could have planted it, with the component, the configured directory and the target in its fields |
 | `LockFileReplaced` | `0.3.51.5` | the file a lease holds is no longer the file its name leads to — unlinked, or replaced, while held. Reported at `Acquire` (the window between the open and the `flock`) and at `Extend` (the only call a holder makes during the section). **Detection, never prevention**: the split still happens and the holder is told |
@@ -363,14 +363,14 @@ re-`Define`d here.
 - **Give `checkDir` and `plantable` the same mask.** They ask different
   questions, on both kernels. Merging them is what kept `BUILTIN\Users` out of
   `anyoneSids` for a whole ADR, because one mask cannot accept `%ProgramData%`
-  and refuse `%SystemRoot%\Temp` (ADR 0085 §D1).
+  and refuse `%SystemRoot%\Temp` (ADR 0086 §D1).
 - **Skip an ACE type because its layout is unfamiliar.** That failed open
   through six of the eight discretionary shapes. The layouts are in `winnt.h`;
   what is checked before the pointer is formed is the entry's SIZE.
 - **Read the SACL.** Nothing it can carry GRANTS anything — audit and alarm
   entries describe logging, the mandatory label and the access filter only
   restrict, and a central access policy intersects with the DACL. Reading it
-  could only move the verdict towards accepting (ADR 0085 §D5).
+  could only move the verdict towards accepting (ADR 0086 §D5).
 - **"Repair" a corrupt fence ledger.** Refusing is the decision.
 - **Open the lock file with a bare `os.OpenFile`.** That is the defect ADR 0082
   closed, and it is invisible: the acquisition succeeds. Go through

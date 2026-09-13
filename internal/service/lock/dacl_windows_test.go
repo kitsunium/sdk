@@ -42,7 +42,7 @@ const (
 // are therefore the same green tick, which makes a test that quietly stopped
 // running indistinguishable from one that never existed. That is ADR 0082
 // §D5's own argument, applied to a table whose refusing rows are the entire
-// claim of ADR 0084 and ADR 0085.
+// claim of ADR 0084 and ADR 0086.
 //
 // icacls ships with every supported Windows and needs no privilege to edit an
 // ACL on a directory the caller owns, so a failure here is a real change in
@@ -72,7 +72,7 @@ func grant(t *testing.T, dir, sid, permission string) {
 // a world-writable one, exactly as 0755 is not 0777.
 //
 // The two rows that separate CREATING an entry from REPLACING somebody else's
-// are ADR 0085's subject. Windows spells those as different bits, so it does
+// are ADR 0086's subject. Windows spells those as different bits, so it does
 // have the 0777|sticky shape ADR 0084 §Consequences said it lacked — and
 // %ProgramData% is a directory Windows itself ships in it.
 func TestTheWindowsDirectoryRuleIsTheRightToReplaceSomebodyElsesEntry(t *testing.T) {
@@ -274,7 +274,7 @@ func TestProgramDataIsAcceptedAsALockDirectoryAndRefusedAsAContainer(t *testing.
 	//: a FAILURE and not a skip: %ProgramData% is set on every supported
 	//: Windows, and this is the only row that measures the shipped shape.
 	if programData == "" {
-		t.Fatalf("ProgramData is unset on this runner — this test is the only measurement of the shape ADR 0085 rests on, so it is a failure and not a skip")
+		t.Fatalf("ProgramData is unset on this runner — this test is the only measurement of the shape ADR 0086 rests on, so it is a failure and not a skip")
 	}
 	root := filepath.Join(programData, "kitsunium-sdk-lock-"+t.Name())
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
@@ -285,7 +285,7 @@ func TestProgramDataIsAcceptedAsALockDirectoryAndRefusedAsAContainer(t *testing.
 		t.Fatalf("building a tree under ProgramData = %v", err)
 	}
 	locker, err := svclock.NewFileLocker(svclock.FileConfig{Dir: filepath.Join(target, "locks")})
-	//: the accepting half. A refusal here is the breaking change ADR 0085
+	//: the accepting half. A refusal here is the breaking change ADR 0086
 	//: exists to avoid, and it would name ProgramData in its message.
 	if err != nil || locker == nil {
 		t.Fatalf("NewFileLocker on a lock directory under ProgramData = %v, want a locker — every machine-wide Windows deployment puts one there", err)

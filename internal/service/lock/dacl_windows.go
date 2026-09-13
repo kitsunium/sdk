@@ -25,7 +25,7 @@
 // that exists while planting a component CREATES one at a free name.
 //
 // Windows draws that same line, and draws it finer, because create and delete
-// are separate bits rather than one sticky flag (ADR 0085):
+// are separate bits rather than one sticky flag (ADR 0086):
 //
 //   - [replaceRights] — what lets a stranger take away the entry a holder
 //     created. That is checkDir's question.
@@ -94,7 +94,7 @@ const seFileObject uintptr = 1
 // daclSecurityInformation is DACL_SECURITY_INFORMATION (winnt.h). Only the
 // discretionary list is asked for — the owner, the group and the audit list
 // are not part of this question, and the SACL cannot GRANT anything at all
-// (ADR 0085 §D5).
+// (ADR 0086 §D5).
 const daclSecurityInformation uintptr = 0x00000004
 
 // errorSuccess is ERROR_SUCCESS, the value GetNamedSecurityInfoW returns when
@@ -199,7 +199,7 @@ const fileAllAccess uint32 = fileGenericWrite | fileDeleteChild | deleteObject |
 // what the sticky bit permits and what ADR 0052's table has accepted since it
 // was written; what it costs is a lock file planted before any holder exists,
 // which is a denial of service and is recorded as such rather than smuggled in
-// here (ADR 0081 §Deferred, ADR 0085 §D6).
+// here (ADR 0081 §Deferred, ADR 0086 §D6).
 const replaceRights uint32 = fileDeleteChild | writeDAC | writeOwner
 
 // createRights is what lets its holder put a directory at a name nobody has
@@ -249,7 +249,7 @@ const (
 //
 // S-1-1-0 is Everyone and S-1-5-11 is Authenticated Users — the two ADR 0081
 // §D5 named. S-1-5-32-545 (BUILTIN\Users) is the third, and it was excluded
-// until ADR 0085: every local interactive account is in that group and on a
+// until ADR 0086: every local interactive account is in that group and on a
 // domain-joined machine so is Domain Users, so a directory granting it a right
 // IS one this rule's own sentence describes. What kept it out was that
 // including it refused %ProgramData%, which was true only while both rules

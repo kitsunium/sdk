@@ -268,14 +268,14 @@ ACL and got the verdict above.
   with `LOCK_DIRECTORY_UNSAFE` — the same code, the same remedy and the same
   exit status the Unix side has had since ADR 0052. `C:\Windows\Temp`-shaped
   directories are the realistic case. **They were not in fact refused, and
-  [ADR 0085](0085-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
   is what makes this sentence true**: the entry that makes that directory
   dangerous names `BUILTIN\Users`, which this record excluded from the table.
 - **The chain rule now refuses on Windows too.** ADR 0083 shipped with
   `plantable` answering "no" there; it now answers the question.
 - **The Unix rule is untouched**, mode table included. **The sentence that
   follows is wrong and is corrected by
-  [ADR 0085](0085-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
   §D2**: Windows spells "anyone may create but only the owner may unlink" as
   `FILE_ADD_FILE` without `FILE_DELETE_CHILD`, and `%ProgramData%` is a
   directory Windows itself ships in exactly that state. It is left standing
@@ -341,7 +341,7 @@ argument against a policy DSL applies unchanged.
 ## Deferred
 
 - **`BUILTIN\Users` (`S-1-5-32-545`) as a third "anybody".** **CLOSED by
-  [ADR 0085](0085-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
   §D4.** The reasoning below is left standing because it named the decision
   correctly and got one fact wrong. What it called a breaking change of a
   different size was true only while both rules shared one mask: `%ProgramData%`
@@ -364,7 +364,7 @@ argument against a policy DSL applies unchanged.
   The two-account model in D3b is a second cost: a third identifier needs a
   third token.
 - **The audit list (SACL).** **Still deferred, and made PERMANENT by
-  [ADR 0085](0085-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
   §D5** — on the second half of the sentence below rather than the first. The
   privilege claim is wrong on the one machine that could have tested it:
   `windows-latest` runs as the built-in Administrator, holds `SeSecurityPrivilege`
@@ -378,7 +378,7 @@ argument against a policy DSL applies unchanged.
   than what is allowed.
 - **Object-type ACEs** (`ACCESS_ALLOWED_OBJECT_ACE` and its denied twin).
   **CLOSED by
-  [ADR 0085](0085-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
   §D6**, which closed it because the premise below is false: an ordinary NTFS
   directory DOES store one. `SetNamedSecurityInfoW` accepts it at ACL revision 4
   — revision 2 is refused with `ERROR_INVALID_ACL` — and `GetNamedSecurityInfoW`
@@ -393,11 +393,11 @@ argument against a policy DSL applies unchanged.
   filesystem objects. An entry whose layout this file does not know is one it
   does not judge — which fails open, consistently with D5.
 - **A planted lock file kept held.** **Still deferred, and made PERMANENT by
-  [ADR 0085](0085-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
+  [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md)
   §D7**: it is not a gap in the check, it is the price of the row the check
   deliberately accepts, on both kernels. A lock cannot tell a squatter from a
   peer, because a peer holding it and an attacker holding it are the same bytes
-  and the same kernel state. ADR 0085 §D1 widens its reach — a directory whose
+  and the same kernel state. ADR 0086 §D1 widens its reach — a directory whose
   only broad grant is the right to create an entry is now accepted — and that is
   the exposure `/tmp` has carried on Unix since ADR 0052 §D6.
   Unchanged from ADR 0081 §Deferred: an
@@ -408,7 +408,7 @@ argument against a policy DSL applies unchanged.
 
 ## References
 
-- [ADR 0085 — creating an entry is not replacing one, and Windows says so in two bits](0085-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md) — amends §D2, §D3, §D3c and §Consequences
+- [ADR 0086 — creating an entry is not replacing one, and Windows says so in two bits](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md) — amends §D2, §D3, §D3c and §Consequences
 - [ADR 0081 — the Windows file lock is a different primitive](0081-the-windows-file-lock-is-a-different-primitive.md) §D5, §Deferred
 - [ADR 0083 — a path is a chain, and a held lock can lose its file](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) §D4, §Deferred
 - [ADR 0052 — the `lock` domain](0052-sdk-lock-domain.md) §D6

@@ -155,7 +155,7 @@ func TestTheWalkReadsEveryDiscretionaryAceShape(t *testing.T) {
 }
 
 // TestADenialReachesEveryAccountHoldingTheIdentifierItNames pins ADR 0084
-// §D3b's model against the third identifier ADR 0085 adds.
+// §D3b's model against the third identifier ADR 0086 adds.
 //
 // The identifiers are nested: every authenticated account holds Everyone AND
 // Authenticated Users, and every local interactive one holds BUILTIN\Users on
@@ -250,7 +250,7 @@ func TestAConditionalEntryIsResolvedTowardsTheVerdictItCannotWeaken(t *testing.T
 	}
 }
 
-// TestInheritanceDecidesWhichQuestionAnEntryAnswers is ADR 0085's second half,
+// TestInheritanceDecidesWhichQuestionAnEntryAnswers is ADR 0086's second half,
 // measured on the flags rather than on a filesystem.
 //
 // An entry applies to the directory itself unless it is INHERIT_ONLY, and it

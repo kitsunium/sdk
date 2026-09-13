@@ -1,4 +1,4 @@
-# ADR 0085 — creating an entry is not replacing one, and Windows says so in two bits
+# ADR 0086 — creating an entry is not replacing one, and Windows says so in two bits
 
 - **Status**: Accepted
 - **Date**: 2026-09-13

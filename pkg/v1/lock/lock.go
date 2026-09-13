@@ -95,7 +95,7 @@
 // entry letting Everyone, Authenticated Users or BUILTIN\Users unlink somebody
 // else's entry — or write the lock files created there, which is a question
 // Unix never has to ask, because a lock file there is created 0600 whatever
-// the directory's mode says (ADR 0084, ADR 0085).
+// the directory's mode says (ADR 0084, ADR 0086).
 //
 // Windows does have the sticky directory's shape; it spells it in two bits
 // rather than one, as "may add an entry" without "may delete a child".
@@ -127,7 +127,7 @@
 // same rule runs over the same question, answered by the directory's DACL
 // rather than by a synthesised mode (ADR 0083, ADR 0084) — and it asks for a
 // different right from the lock directory's own rule, because a component is
-// a DIRECTORY, so what plants one is "may add a subdirectory" (ADR 0085).
+// a DIRECTORY, so what plants one is "may add a subdirectory" (ADR 0086).
 //
 // # A held lock can lose its file, and you are told
 //
@@ -271,7 +271,7 @@ func NewMemory(cfg MemoryConfig) (locker Locker, err error) {
 // a mode: world-writable without the sticky bit. On Windows it is the
 // directory's DACL: an entry letting Everyone (S-1-1-0), Authenticated Users
 // (S-1-5-11) or BUILTIN\Users (S-1-5-32-545) unlink somebody else's entry, or
-// write the lock files the directory will create (ADR 0084, ADR 0085).
+// write the lock files the directory will create (ADR 0084, ADR 0086).
 //
 // Creating an entry at a free name is NOT that right, on either platform: it
 // is what the sticky bit permits, and what Windows spells as "may add a file"

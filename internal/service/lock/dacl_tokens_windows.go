@@ -23,7 +23,7 @@ package lock
 // deny reaches every account holding the SID it names, and an allow is
 // measured against what each of those accounts has already been denied.
 //
-// ADR 0084 §D3b said a third identifier would need a third account. ADR 0085
+// ADR 0084 §D3b said a third identifier would need a third account. ADR 0086
 // adds the identifier, and this is that third account.
 type tokenSet struct {
 	// accounts is one entry per caller this rule models, in no particular

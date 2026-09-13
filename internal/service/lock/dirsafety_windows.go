@@ -84,7 +84,7 @@ import (
 // carry GRANTS anything — audit and alarm entries describe logging, and the
 // mandatory label, the scoped policy identifier and the access filter only
 // RESTRICT. Reading it could move this verdict towards accepting and never
-// towards refusing (ADR 0085 §D5).
+// towards refusing (ADR 0086 §D5).
 //
 // One exposure survives and is named rather than implied: an attacker who can
 // create an entry in the directory can plant a lock file BEFORE any holder

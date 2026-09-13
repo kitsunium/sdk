@@ -1,12 +1,19 @@
 name: SDK Release
 # Auto-cut patch tags after the Bazel CI lane succeeds on main. The
 # bump policy (impact-driven via bazel rdeps, patch-only by default,
-# minor via a maintainer-authored 'Release-bump: minor' trailer on the
-# merge commit) is documented in docs/adr/0007-sdk-release-and-versioning.md.
+# minor via a maintainer-authored 'Release-bump: minor' trailer) is
+# documented in docs/adr/0007-sdk-release-and-versioning.md.
 #
 # Triggered AFTER bazel-ci.yml succeeds (no race, no double-build).
 # workflow_dispatch input force_bumps overrides the impact analysis when
 # the rdeps cache is stale or a maintainer wants to cut a tag manually.
+#
+# Firing on SUCCESS alone is what makes a run that the concurrency group
+# cancelled produce no release at all — so the commit carrying the trailer is
+# routinely not the HEAD this job checks out. That is handled inside the
+# scripts, which read the trailer over the whole range since the last release
+# rather than from HEAD (ADR 0085); nothing here needs to compensate, and
+# fetch-depth: 0 below is what lets them walk that range.
 
 on:
   workflow_run:
