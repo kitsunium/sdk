@@ -53,6 +53,11 @@ import (
 // high 12 bits of the flag word that syscall.Open forwards to CreateFileW.
 const openReparsePoint int = syscall.FILE_FLAG_OPEN_REPARSE_POINT
 
+// kindReparsePoint names this platform's indirection in the refusal's fields.
+// It covers a symbolic link and a junction alike: both are reparse points, and
+// both redirect the open.
+const kindReparsePoint string = "reparse_point"
+
 // attrBase is the radix the refusal renders the attribute word in. Hexadecimal
 // is what winnt.h spells FILE_ATTRIBUTE_* in, so a reader can compare the
 // reported value against the header without converting it first.

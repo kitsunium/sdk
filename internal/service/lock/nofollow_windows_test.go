@@ -47,19 +47,25 @@ import (
 // token. The same worst case as the Unix table's decimal row.
 const reparseLedger string = "48213\n"
 
+// verify asserts that the acquisition left the redirect target ALONE. It is
+// the half the sentinel does not cover, because a refusal that still wrote
+// through the link is a refusal in name only.
+type verify func(t *testing.T)
+
 // reparseCase is one reparse point planted at the lock path.
 type reparseCase struct {
 	// name says what was planted; it is also the subtest's name.
 	name string
 	// plant creates the indirection at lockPath and reports why it could not,
 	// if it could not. target is a directory that already exists, because a
-	// junction has no other kind of target.
-	plant func(t *testing.T, target, lockPath string) (why string, planted bool)
+	// junction has no other kind of target. On success it returns the check
+	// that the acquisition wrote nothing through the link.
+	plant func(t *testing.T, target, lockPath string) (check verify, why string, planted bool)
 }
 
 // plantSymbolicLink points the lock path at a FILE inside target, so the open
 // succeeds on the link and the handle check is what refuses it.
-func plantSymbolicLink(t *testing.T, target, lockPath string) (why string, planted bool) {
+func plantSymbolicLink(t *testing.T, target, lockPath string) (check verify, why string, planted bool) {
 	t.Helper()
 	file := filepath.Join(target, "elsewhere.lock")
 	if err := os.WriteFile(file, []byte(reparseLedger), 0o600); err != nil {
@@ -68,9 +74,19 @@ func plantSymbolicLink(t *testing.T, target, lockPath string) (why string, plant
 	if err := os.Symlink(file, lockPath); err != nil {
 		//: ERROR_PRIVILEGE_NOT_HELD (1314) is the expected refusal on an
 		//: account without SeCreateSymbolicLinkPrivilege.
-		return err.Error(), false
+		return nil, err.Error(), false
 	}
-	return "", true
+	return func(t *testing.T) {
+		t.Helper()
+		content, err := os.ReadFile(file)
+		//: the CONTENT, not the directory's cardinality: a followed link would
+		//: send writeFence through to this very file, truncating it and
+		//: leaving the entry count at exactly 1 — so counting entries would
+		//: pass on the defect this row exists to catch.
+		if err != nil || string(content) != reparseLedger {
+			t.Fatalf("the redirect target became %q (%v), want it untouched", content, err)
+		}
+	}, "", true
 }
 
 // plantJunction points the lock path at target itself, so the open fails and
@@ -78,15 +94,24 @@ func plantSymbolicLink(t *testing.T, target, lockPath string) (why string, plant
 //
 // mklink is a cmd builtin and /J needs no privilege at all, which is the whole
 // reason this row sits beside one that does.
-func plantJunction(t *testing.T, target, lockPath string) (why string, planted bool) {
+func plantJunction(t *testing.T, target, lockPath string) (check verify, why string, planted bool) {
 	t.Helper()
 	out, err := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/J", lockPath, target).CombinedOutput()
 	//: the command's own output is the diagnosis; an exit status says nothing
 	//: about why.
 	if err != nil {
-		return string(out), false
+		return nil, string(out), false
 	}
-	return "", true
+	return func(t *testing.T) {
+		t.Helper()
+		entries, readErr := os.ReadDir(target)
+		//: this row plants nothing INSIDE target, so the exact expectation is
+		//: zero. The open normally fails before mintLease, and asserting the
+		//: exact count is what keeps that an invariant rather than a habit.
+		if readErr != nil || len(entries) != 0 {
+			t.Fatalf("the redirect target holds %d entries (%v), want 0", len(entries), readErr)
+		}
+	}, "", true
 }
 
 // reparseCases is the Unix probe's Windows twin, reduced to a table.
@@ -94,23 +119,6 @@ func reparseCases() []reparseCase {
 	return []reparseCase{
 		{"symbolic link", plantSymbolicLink},
 		{"junction", plantJunction},
-	}
-}
-
-// assertNothingReachedThrough pins that the refusal was a refusal: the
-// acquisition wrote nothing through the link.
-//
-// before is how many entries the PLANT itself left in target — one for the
-// symbolic-link row, none for the junction row — so the assertion is about
-// what the acquisition added and nothing else.
-func assertNothingReachedThrough(t *testing.T, what, target string, before int) {
-	t.Helper()
-	entries, readErr := os.ReadDir(target)
-	if readErr != nil {
-		t.Fatalf("reading the redirect target = %v", readErr)
-	}
-	if len(entries) > before {
-		t.Fatalf("the redirect target gained %d entries — the lock reached through the %s", len(entries)-before, what)
 	}
 }
 
@@ -151,22 +159,17 @@ func TestTheFileLockerRefusesAnIndirectionAtTheLockPath(t *testing.T) {
 	runCase := func(t *testing.T, c reparseCase) {
 		t.Helper()
 		locker, dir, target := newPlantedLocker(t)
-		//: the filename is the SHA-256 of the lock name: unforgeable, entirely
-		//: predictable, and predictable is all the attack needs.
-		why, ok := c.plant(t, target, lockFilePath(dir, victimName))
+		//: the filename is the SHA-256 of the lock name: steered by no caller
+		//: string, and in the same stroke entirely predictable — which is all
+		//: the attack needs.
+		check, why, ok := c.plant(t, target, lockFilePath(dir, victimName))
 		if !ok {
 			t.Skipf("this account cannot plant a %s, so the kernel half of this row did not run: %s", c.name, why)
 		}
 		planted++
-		//: counted AFTER the plant, because the plant may have put a redirect
-		//: target in place itself.
-		before, readErr := os.ReadDir(target)
-		if readErr != nil {
-			t.Fatalf("reading the redirect target = %v", readErr)
-		}
 		lease, held, acquireErr := locker.TryAcquire(t.Context(), victimName)
 		assertRefused(t, c.name, lease, held, acquireErr)
-		assertNothingReachedThrough(t, c.name, target, len(before))
+		check(t)
 	}
 	for _, c := range reparseCases() {
 		//: deliberately NOT parallel: `planted` is written here and read below,

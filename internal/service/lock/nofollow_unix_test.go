@@ -72,8 +72,9 @@ func plantedDir(t *testing.T) string {
 // acquiring once, releasing, and reading the directory.
 //
 // This IS the attack's reconnaissance step, written out rather than described:
-// the filename is the SHA-256 of the lock name, which makes it unforgeable and
-// entirely predictable, and predictable is all that is needed. The path is
+// the filename is the SHA-256 of the lock name, so no caller string steers it —
+// and, in the same stroke, it is entirely predictable, which is all that is
+// needed. The path is
 // removed before it is returned, leaving the name free to be planted at.
 func discoverLockPath(t *testing.T, locker corelock.Locker, dir string) string {
 	t.Helper()
@@ -237,7 +238,7 @@ func assertAccepted(t *testing.T, what string, lease corelock.Lease, held bool, 
 // Two processes each holding "the same" lock over different inodes is the
 // exact failure this domain exists to prevent, and nothing reported anything.
 func TestTheFileLockerRefusesAnIndirectionAtTheLockPath(t *testing.T) {
-	t.Parallel()
+	refused := 0
 	runCase := func(t *testing.T, c indirectionCase) {
 		t.Helper()
 		base := t.TempDir()
@@ -254,6 +255,7 @@ func TestTheFileLockerRefusesAnIndirectionAtTheLockPath(t *testing.T) {
 		if c.refuse {
 			assertRefused(t, c.name, lease, held, acquireErr)
 			check(t)
+			refused++
 			//: verdict pinned.
 			return
 		}
@@ -262,11 +264,25 @@ func TestTheFileLockerRefusesAnIndirectionAtTheLockPath(t *testing.T) {
 		check(t)
 	}
 	for _, c := range indirectionCases() {
+		//: deliberately NOT parallel: `refused` is written here and read below,
+		//: and a non-parallel subtest has finished when t.Run returns. The whole
+		//: table costs milliseconds, so nothing is bought by running it
+		//: concurrently and the accounting below is what is bought by not.
 		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
 			runCase(t, c)
 		})
 	}
+	//: symlinkOrSkip skips a ROW, and a skipped row leaves the parent green:
+	//: on a filesystem with no symbolic links all three refusal rows vanish
+	//: and the two accepting ones still pass, so a regression in the
+	//: O_NOFOLLOW open would look exactly like a successful run. This is the
+	//: same guard the Windows half carries, for the same reason.
+	if refused == 0 {
+		t.Fatal("no refusal row could be planted on this filesystem, so nothing verified that the lock refuses an indirection — the O_NOFOLLOW open is UNPROVEN on this host")
+	}
+	//: visible with -v and nowhere else; `go test` discards a passing
+	//: package's output, measured for t.Log and for a raw write alike.
+	t.Logf("refusal rows that reached the kernel: %d of %d", refused, len(indirectionCases()))
 }
 
 // TestTheOrdinaryPathIsUnchangedByTheNoFollowOpen walks the whole lifecycle on

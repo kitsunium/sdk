@@ -31,8 +31,9 @@ for three other reasons the package `CLAUDE.md` lists. Where neither primitive
 exists the constructor returns `proc.UnsupportedPlatform` rather than
 pretending (ADR 0018).
 
-The lock filename is `hex(sha256(name)) + ".lock"`, which is unforgeable and —
-in the same stroke — **predictable**. A symbolic link or reparse point planted
+The lock filename is `hex(sha256(name)) + ".lock"`, which keeps every caller
+string off the filesystem and — in the same stroke — makes the name
+**predictable**. A symbolic link or reparse point planted
 there is refused with `LOCK_PATH_REDIRECTED`, never followed: `O_NOFOLLOW` on
 Unix, where the kernel fails the open, and `FILE_FLAG_OPEN_REPARSE_POINT` on
 Windows, where the open succeeds on the link and the handle is rejected on its

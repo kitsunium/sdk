@@ -154,7 +154,8 @@ residual exposures are named there too.
 `checkDir` refuses a directory whose entries any account can UNLINK. The attack
 it was written against has a twin it does not touch: **creating** an entry at a
 name nobody has taken yet. The lock filename is `hex(sha256(name)) + ".lock"` —
-unforgeable, and entirely PREDICTABLE, which is all a planter needs. The sticky
+derived from no caller string, and entirely PREDICTABLE — which is all a
+planter needs. The sticky
 bit does not help, because the planter owns the link they created, and
 `0777|sticky` — what `/tmp` is — is a row the table explicitly ACCEPTS.
 

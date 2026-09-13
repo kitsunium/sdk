@@ -10,6 +10,9 @@ import (
 	"syscall"
 )
 
+// kindSymlink names this platform's indirection in the refusal's fields.
+const kindSymlink string = "symlink"
+
 // openLockFile opens the lock file, refusing to traverse a symbolic link
 // planted at the final component of path.
 //

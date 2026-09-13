@@ -57,7 +57,7 @@ One more is worth knowing before you rely on a directory's permissions. The lock
 
 ### A lock path is a file, never a link to one
 
-[NewFileLocker](<#NewFileLocker>) names its lock files hex\(sha256\(lockName\)\) \+ ".lock" inside the directory you gave it. That makes the name unforgeable and, in the same stroke, PREDICTABLE — and an indirection planted at a predictable name is enough to move your lock somewhere you did not choose.
+[NewFileLocker](<#NewFileLocker>) names its lock files hex\(sha256\(lockName\)\) \+ ".lock" inside the directory you gave it. That keeps every caller\-supplied string off the filesystem and, in the same stroke, makes the name PREDICTABLE — and an indirection planted at a predictable name is enough to move your lock somewhere you did not choose.
 
 So a symbolic link \(Unix\) or a reparse point \(Windows\) at the lock path is REFUSED with [LockPathRedirected](<#LockMisconfigured>). It is not followed, and it is not read as a backend failure, because nothing failed: the substitution worked, and a retry is the one response that would make it worse.
 

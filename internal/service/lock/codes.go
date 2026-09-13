@@ -44,7 +44,8 @@ const CodeLockKeepaliveLost errs.Code = 0x00_03_33_03 // 0.3.51.3
 // indirection to one: a symbolic link on Unix, a reparse point on Windows.
 //
 // The lock filename is the SHA-256 of the lock name, which makes it
-// unforgeable but also PREDICTABLE — and predictable is what the attack needs.
+// derived from no caller-supplied string, and in the same stroke PREDICTABLE —
+// and predictable is what the attack needs.
 // An indirection planted there sends the flock and the fencing ledger to a
 // file the attacker chose, so the victim's lock and the attacker's own lock
 // cover different inodes while both report success: two processes inside one
