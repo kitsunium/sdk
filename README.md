@@ -4,14 +4,16 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **49 packages**. They are grouped below by the job they do; each
-links to its own generated `README.md`.
+`pkg/v1` ships **53 packages**: 49 at the top level, plus four nested ones
+(`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`). They
+are grouped below by the job they do, and each links to its own generated
+`README.md`.
 
 ### Observability
 
 | Package | What it does |
 |---|---|
-| [`logger`](./pkg/v1/logger) | Structured logger, one allocation per emit (see its BENCH.md). Multi-sink (console / file / syslog / memory), middleware chain, build-time version stamping. **Trace-correlated by default**: a record emitted inside a span carries `trace_id` / `span_id` as top-level fields; one emitted outside carries neither key rather than an invalid all-zero id. |
+| [`logger`](./pkg/v1/logger) + [`writer`](./pkg/v1/logger/writer), [`slogbridge`](./pkg/v1/logger/slogbridge) | Structured logger, one allocation per emit (see its BENCH.md). Multi-sink (console / file / syslog / memory), middleware chain, build-time version stamping; `writer` is the named, config-driven sink registry and `slogbridge` is the one package allowed to import `log/slog`, so a consumer facing a concrete `*slog.Logger` stops building a second pipeline. **Trace-correlated by default**: a record emitted inside a span carries `trace_id` / `span_id` as top-level fields; one emitted outside carries neither key rather than an invalid all-zero id. |
 | [`metrics`](./pkg/v1/metrics) | The OpenTelemetry metrics **data model**, implemented from the specification with **zero** `go.opentelemetry.io` imports. Typed attributes whose kind is part of the series identity, explicit delta/cumulative temporality, OTLP/JSON on the wire. The Prometheus exporter is a deliberately lossy connector and says which losses it takes. |
 | [`trace`](./pkg/v1/trace) | Distributed tracing on the OTel trace model + W3C Trace Context, both written from their documents. The sampling decision is taken once at the root and travels in the `sampled` bit, so a trace never has holes. A malformed `traceparent` starts a new trace and never fails a request. |
 | [`health`](./pkg/v1/health) | Liveness, readiness and startup are three questions, so they take three **types**: a readiness `Check` gets a context and may reach a dependency; a liveness `SelfCheck` has none to reach one with. The classic mis-wiring does not compile by accident. |
