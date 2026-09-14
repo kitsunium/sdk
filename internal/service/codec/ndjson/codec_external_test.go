@@ -207,27 +207,36 @@ func TestStdlibSliceParity(t *testing.T) {
 		//: reference: the stdlib's own encoding of the whole slice, split back
 		//: into its elements. RawMessage keeps each element's exact bytes.
 		whole, werr := stdjson.Marshal(tc.in)
+		//: a broken reference would make the comparison below vacuous.
 		if werr != nil {
 			t.Fatalf("%s: reference stdjson.Marshal: %v", tc.name, werr)
 		}
 		var want []stdjson.RawMessage
+		//: RawMessage keeps each element's exact bytes — no re-encoding.
 		if uerr := stdjson.Unmarshal(whole, &want); uerr != nil {
 			t.Fatalf("%s: reference split: %v", tc.name, uerr)
 		}
 		got, merr := ndjson.New().Marshal(tc.in)
+		//: the subject of the comparison; an error here is not a mismatch.
 		if merr != nil {
 			t.Fatalf("%s: ndjson Marshal: %v", tc.name, merr)
 		}
 		lines := strings.Split(strings.TrimSuffix(string(got), "\n"), "\n")
+		//: a count mismatch makes the per-element loop compare the wrong pairs,
+		//: so stop here rather than report a cascade of bogus differences.
 		if len(lines) != len(want) {
 			t.Fatalf("%s: %d lines, stdlib has %d elements", tc.name, len(lines), len(want))
 		}
+		//: compare element by element rather than the joined blob, so a
+		//: failure names the offending record.
 		for i := range want {
+			//: the contract: line i IS the stdlib's element i, byte for byte.
 			if lines[i] != string(want[i]) {
 				t.Errorf("%s: line %d = %s, stdlib element = %s", tc.name, i, lines[i], want[i])
 			}
 		}
 	}
+	//: one sub-test per record SHAPE — a divergence names its own shape.
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

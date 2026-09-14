@@ -186,6 +186,60 @@ func Test_asSlice(t *testing.T) {
 	}
 }
 
+// Test_elemForMarshal pins the THREE forms the per-record loop can hand to
+// encoding/json, by the reflect.Kind of what comes back:
+//
+//   - a slice element yields a POINTER — the form that skips json/v2's
+//     addressability copy and makes a *T marshaler reachable;
+//   - an interface element yields its dynamic value, deliberately NOT a
+//     *any, because the address form measures one allocation WORSE there;
+//   - a bare [N]T array value yields the element by value, because reflect
+//     offers nothing else for a non-addressable element.
+//
+// Kind is the right assertion: it is exactly what json/v2's marshalEncode
+// branches on (`v.Kind() != reflect.Pointer`).
+func Test_elemForMarshal(t *testing.T) {
+	t.Parallel()
+	//: an addressable array, reached through a pointer, is the fourth corner
+	//: of the table — same element type as the bare array, opposite verdict.
+	addressableArray := &[2]int{7, 8}
+	type tc struct {
+		name string
+		in   any
+		want reflect.Kind
+	}
+	tests := []tc{
+		{"slice element is addressable", []int{1, 2}, reflect.Pointer},
+		{"struct slice element is addressable", []struct{ A int }{{1}}, reflect.Pointer},
+		//: []any: Interface() already returns the dynamic value with no boxing,
+		//: so taking its address would only add an indirection json/v2 pays for.
+		{"interface element stays by value", []any{42}, reflect.Int},
+		//: a bare array value has no addressable elements at all.
+		{"array value element is not addressable", [2]int{1, 2}, reflect.Int},
+		{"array via pointer is addressable", addressableArray, reflect.Pointer},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		slice, ok := asSlice(tc.in)
+		//: every case must survive the shape guard, or it measures nothing.
+		if !ok {
+			t.Fatalf("%s: asSlice rejected the input", tc.name)
+		}
+		got := reflect.ValueOf(elemForMarshal(slice, 0)).Kind()
+		//: the Kind IS the contract — a Pointer skips the reflect.New copy.
+		if got != tc.want {
+			t.Errorf("%s: kind=%v want %v", tc.name, got, tc.want)
+		}
+	}
+	//: sub-tests so a single corner of the table names itself on failure.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // Test_asSlicePointer covers the target-shape check behind Unmarshal.
 func Test_asSlicePointer(t *testing.T) {
 	t.Parallel()
