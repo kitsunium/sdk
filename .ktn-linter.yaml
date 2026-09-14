@@ -252,9 +252,18 @@ rules:
   # scripts/pre-commit/check-readme-drift.sh fails the build when the result
   # stops matching. The layer below is where cohesion is a real question, and
   # the rule still runs there.
+  # The exclusion names the five facade FILES rather than recursing over
+  # `pkg/v1/**`: a recursive pattern would also silence packages that are more
+  # than aliases — `logger/slogbridge` carries a real `slog.Handler` — and a
+  # facade that grows past the threshold later should be flagged and added here
+  # deliberately rather than covered in advance.
   KTN-STRUCT-COHESION:
     exclude:
-      - "**/pkg/v1/**"
+      - "**/pkg/v1/authz/authz.go"
+      - "**/pkg/v1/i18n/i18n.go"
+      - "**/pkg/v1/server/server.go"
+      - "**/pkg/v1/server/websocket/websocket.go"
+      - "**/pkg/v1/trace/trace.go"
 
   # KTN-VAR-MINLEN (phase 4) — "a one or two letter name only reads while its
   # declaration is still on screen".

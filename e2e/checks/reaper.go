@@ -8,21 +8,15 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strconv"
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
-	"github.com/kitsunium/sdk/pkg/v1/cgroup"
 	"github.com/kitsunium/sdk/pkg/v1/process"
 	"github.com/kitsunium/sdk/pkg/v1/reaper"
 
 	"github.com/kitsunium/sdk/e2e/harness"
 	perrs "github.com/kitsunium/sdk/pkg/v1/errs"
 )
-
-// cgroupDomain / reaperDomain label every Result the two suites emit.
-// cgroupDomain labels every cgroup-suite Result.
-const cgroupDomain string = "cgroup"
 
 // reaperDomain labels every reaper-suite Result.
 const reaperDomain string = "reaper"
@@ -36,10 +30,6 @@ const reapWaitBudget time.Duration = 3 * time.Second
 // grandchild while inside reapWaitBudget.
 const reapPollInterval time.Duration = 20 * time.Millisecond
 
-// decimalBase is the radix used to render the limit values the kernel reports as
-// decimal text in its controller files (memory.max, pids.max).
-const decimalBase int = 10
-
 // reapSignalBuffer sizes the OnReap notification channel: a small buffer keeps
 // the callback non-blocking while a redundant extra sweep simply drops its send.
 const reapSignalBuffer int = 8
@@ -47,74 +37,6 @@ const reapSignalBuffer int = 8
 // orphanScript is the shell program that forks a backgrounded grandchild in a
 // subshell — which outlives the shell — then exits 0, orphaning the grandchild.
 const orphanScript string = "( sleep 1 & ) ; exit 0"
-
-// swallowStop terminates and reaps a placement-check child, ignoring faults: the
-// check's verdict is the membership read, not the teardown.
-func swallowStop(proc process.Process) {
-	//: SIGTERM the group with a short grace, then reap; a sleeping shell exits at once.
-	if err := proc.Stop(context.Background(), time.Second, process.SIGTERM); err != nil {
-		//: a stop fault is best-effort cleanup, not the check's verdict — but the
-		//: child still has to be reaped, or it lingers as a zombie for the run.
-		reapQuietly(proc)
-		//: nothing further to do; the membership read already decided the verdict.
-		return
-	}
-	//: reap the exited child so it does not linger as a zombie.
-	reapQuietly(proc)
-}
-
-// reapQuietly waits for a placement-check child and discards the outcome.
-//
-// The exit status is not the check's verdict — the membership read is — and by
-// the time this runs the verdict is already decided. Reaping still has to
-// happen, or the conformance binary accumulates a zombie per check.
-func reapQuietly(proc process.Process) {
-	//: the status is irrelevant; the call exists to release the process slot.
-	if _, err := proc.Wait(); err != nil {
-		//: a wait fault means the child was already reaped, which is fine.
-		return
-	}
-}
-
-// cgroupLimitReadback sets memory.max and pids.max, then reads each controller
-// file back from the kernel and asserts the recorded value equals what was
-// written — the only proof the kernel accepted the limit rather than the write
-// merely returning nil.
-func cgroupLimitReadback(group cgroup.Group, dir string) (harness.Result, bool) {
-	//: ask the kernel to cap memory at the chosen ceiling.
-	if err := group.SetMemoryMax(memoryLimitBytes); err != nil {
-		//: a write that the kernel refused is a real enforcement failure.
-		return harness.Failed(cgroupDomain, "lifecycle", fmt.Sprintf("SetMemoryMax: %v", err)), false
-	}
-	//: ask the kernel to cap the process count at the chosen ceiling.
-	if err := group.SetPidsMax(pidsLimit); err != nil {
-		//: a write that the kernel refused is a real enforcement failure.
-		return harness.Failed(cgroupDomain, "lifecycle", fmt.Sprintf("SetPidsMax: %v", err)), false
-	}
-	want := map[string]string{
-		//: memory.max holds the byte ceiling we wrote, in decimal.
-		"memory.max": strconv.FormatInt(memoryLimitBytes, decimalBase),
-		//: pids.max holds the process ceiling we wrote, in decimal.
-		"pids.max": strconv.FormatInt(pidsLimit, decimalBase),
-	}
-	//: compare each interface file's kernel-recorded content to what we set.
-	for file, expect := range want {
-		//: read the kernel's own view of this controller file.
-		got, rerr := readCgroupFile(dir, file)
-		//: an unreadable controller file means we cannot prove enforcement.
-		if rerr != nil {
-			//: surface the read fault so the missing proof is diagnosable.
-			return harness.Failed(cgroupDomain, "lifecycle", fmt.Sprintf("read %s: %v", file, rerr)), false
-		}
-		//: the kernel's value must match the value we asked it to enforce.
-		if got != expect {
-			//: a mismatch means the limit did not actually take — a real failure.
-			return harness.Failed(cgroupDomain, "lifecycle", fmt.Sprintf("%s = %q, want %q", file, got, expect)), false
-		}
-	}
-	//: both limits read back exactly as written — enforcement is proven.
-	return harness.Result{}, true
-}
 
 // Reaper returns the reaper-domain conformance checks: become a child-subreaper
 // and assert an orphaned grandchild reparents to us and is reaped — Linux +

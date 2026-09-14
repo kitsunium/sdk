@@ -69,10 +69,20 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
 ## Conventions
 
 - **Role-suffix types.** Exported structs take a role suffix (`AttrValue`, `RecordEvent`, `WrapParams`) per ktn-linter `KTN-STRUCT-ROLE`. Short, clean names are re-exported at `pkg/v1/*` via type aliases (`Attr = AttrValue`).
-- **One exported struct per file** (`KTN-STRUCT-ONEFILE`). Exceptions: DTOs with serialization tags.
+- **Types that belong to one another share a file** (`KTN-STRUCT-PARTITION`).
+  This reverses the former "one exported struct per file" rule: a value and
+  the port that carries it, or a request and its response, were split across
+  two small files that nothing else referenced, and the split had to be
+  re-learned at every call site. `RequestValue` now sits beside
+  `ResponseValue`, `AttrValue` beside `RecordEvent`. A file still holds ONE
+  group: unrelated declarations sharing a file is `KTN-STRUCT-COHESION`, and
+  it still fires.
 - **Doc comments follow Effective Go.** Lead with the identifier name and name the parameters and return values inline (`Foo returns the X computed from y and z.`). No Javadoc-style `Params:` / `Returns:` sections — they were removed project-wide in PR #26. Every control block still takes a `//:` intent comment; every `case` label has its own intent comment.
 - **Tests.** `*_internal_test.go` for white-box, `*_external_test.go` for black-box; table-driven with a `runCase` **closure declared inside the test function** — `runCase := func(t *testing.T, c tc) { … }` — so the linter's static analyser sees direct calls. NOT a shared helper: measured, **0 of 988** test files define one, while **446** declare the closure. This line said "helper" until three separate reviews in one day asked for a package-level function that has never existed here, and one rejection of that request cited `grep 'func runCase'` — a pattern the convention cannot produce.
-- **Dotted-quad code ranges.** Each emitter package owns a 256-slot `PP` octet (ADR 0005 + ADR 0006). Per-package `codes.go` declares the `Code` constants; `errors.go` calls `errs.Define`. The AST audit enforces uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (the namespaced style — ADR 0006/0020). Every emitter package must ship an `audit_srcs` filegroup and appear in `//:audit_sources`, else it is unaudited under Bazel.
+- **Dotted-quad code ranges.** Each emitter package owns a 256-slot `PP` octet (ADR 0005 + ADR 0006). The `Code` constants and the `errs.Define` sentinels that name them are one
+  group and may share a file — `failed.go`, `match.go`, `unknown.go` — or stay
+  split as `codes.go` / `errors.go` where the package is large enough for the
+  separation to earn itself. What is enforced is the CODE, not the filename. The AST audit enforces uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (the namespaced style — ADR 0006/0020). Every emitter package must ship an `audit_srcs` filegroup and appear in `//:audit_sources`, else it is unaudited under Bazel.
 
 ## Subtree
 
