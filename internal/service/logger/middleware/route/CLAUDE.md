@@ -18,7 +18,7 @@ Use case: send `Error+` records to a remote alerting drain while keeping
 |---|---|
 | `router_sink.go`        | `routerSink` + `New` + `Write` / `Flush` / `Close` |
 | `router_sink_params.go` | `Params{When, Sink}` + `Predicate` type + `LevelAtLeast` helper |
-| `codes.go`, `errors.go` | sentinels — range 0.3.18.\* |
+| `match.go` | sentinels — range 0.3.18.\* |
 
 ## Behaviour
 

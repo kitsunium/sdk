@@ -46,8 +46,7 @@ package needs them (ADR 0033). `slogbridge.New` itself carries a documented
 | `slogbridge.go` | package doc + `NewHandler` / `New` |
 | `handler.go` | the `slog.Handler` implementation (`Enabled` / `Handle` / `WithAttrs` / `WithGroup`) |
 | `convert.go` | `toLevel`, `qualify`, `appendAttr` / `appendGroup`, `convert` |
-| `codes.go` | `CodeLoggerRequired` (range `1.1.1.*`) |
-| `errors.go` | `LoggerRequired` sentinel |
+| `logger.go` | `CodeLoggerRequired` (range `1.1.1.*`) + the `LoggerRequired` sentinel |
 
 `README.md` is generated from the package doc comment via `make docs-readme`
 (ADR 0008).

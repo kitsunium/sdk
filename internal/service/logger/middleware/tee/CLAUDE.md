@@ -19,7 +19,7 @@ seam, not a retry queue. Compose retry behind the spill sink.
 |---|---|
 | `tee.go` | `TeeSink` + `New` + `Write` / `Flush` / `Close` + wrap helpers |
 | `config.go` | `Config` value type (`Primaries`, `Spill`) |
-| `codes.go`, `errors.go` | sentinels — range 0.3.29.\* |
+| `failed.go` | sentinels — range 0.3.29.\* |
 
 ## Spill semantics
 

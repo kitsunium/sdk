@@ -1,7 +1,10 @@
 // Package net — the accepted stream connection port.
 package net
 
-import stdnet "net"
+import (
+	"context"
+	stdnet "net"
+)
 
 // Conn is one accepted stream connection.
 //
@@ -27,4 +30,25 @@ type Conn interface {
 	// read-buffer limit. It is recycled with the connection, which is what lets
 	// a handler read without allocating per connection.
 	Buffer() []byte
+}
+
+// ConnHandler serves one accepted stream connection.
+//
+// Returning an error does not kill the server: the connection is closed and the
+// error is logged and metered. That is deliberate — one malformed peer must
+// never be able to take down the process.
+//
+// Implementations MUST be safe for concurrent use: the server runs one
+// goroutine per connection and they all share the handler.
+type ConnHandler interface {
+	ServeConn(ctx context.Context, c Conn) error
+}
+
+// ConnHandlerFunc adapts a plain function to ConnHandler.
+type ConnHandlerFunc func(ctx context.Context, c Conn) error
+
+// ServeConn implements ConnHandler by calling f.
+func (f ConnHandlerFunc) ServeConn(ctx context.Context, c Conn) error {
+	//: the function IS the handler — nothing else to consult.
+	return f(ctx, c)
 }

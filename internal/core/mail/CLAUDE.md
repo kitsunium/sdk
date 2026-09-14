@@ -17,8 +17,10 @@ Code range: `0.2.31.*` (ADR 0064).
 
 ## Contents
 
-One exported struct per file, named after it — the layer's convention, the same
-one `core/metrics` follows with `AttrValue` / `ScopeValue` / `SnapshotValue`.
+Values that belong to one another share a file, per `KTN-STRUCT-PARTITION`:
+`value.go` holds `DeliveryValue` beside `EnvelopeValue`, which are the two
+halves of one send. The names stay long, the layer's convention, the same one
+`core/metrics` follows with `AttrValue` / `ScopeValue` / `SnapshotValue`.
 `pkg/v1/mail` aliases them back to the short names a consumer writes
 (`mail.Message`, `mail.Address`), exactly as `pkg/v1/metrics.Attr` does.
 
@@ -29,8 +31,7 @@ one `core/metrics` follows with `AttrValue` / `ScopeValue` / `SnapshotValue`.
 | `address_value.go` | `AddressValue` and `IsZero` |
 | `attachment_value.go` | `AttachmentValue`, `Inline`, `DefaultAttachmentType` |
 | `header_field_value.go` | `HeaderFieldValue` |
-| `envelope_value.go` | `EnvelopeValue` |
-| `delivery_value.go` | `DeliveryValue` |
+| `value.go` | `DeliveryValue` and `EnvelopeValue` |
 | `transport_interface.go` | `Transport`, `BatchSender`, `Outbox`, `FullTransport` |
 | `header.go` | the field-name constants, the reserved set, and the INJECTION GATE |
 | `address.go` | `ValidateAddress`, `NeedsQuotedDisplayName`, the dot-atom grammar |

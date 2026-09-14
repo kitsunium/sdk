@@ -10,7 +10,6 @@ go_library(
         "lifecycle.go",
         "lifecycle_component.go",
         "lifecycle_phase.go",
-        "lifecycle_transition.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/lifecycle",
     visibility = [

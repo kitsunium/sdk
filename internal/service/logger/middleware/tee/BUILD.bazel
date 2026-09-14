@@ -11,10 +11,9 @@ filegroup(
 go_library(
     name = "tee",
     srcs = [
-        "codes.go",
         "config.go",
         "doc.go",
-        "errors.go",
+        "failed.go",
         "tee.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/logger/middleware/tee",

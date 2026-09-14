@@ -10,8 +10,6 @@ go_library(
         "attachment.go",
         "attachment_value.go",
         "codes.go",
-        "delivery_value.go",
-        "envelope_value.go",
         "errors.go",
         "header.go",
         "header_field_value.go",
@@ -19,6 +17,7 @@ go_library(
         "message_value.go",
         "transport_interface.go",
         "validate.go",
+        "value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/mail",
     visibility = [

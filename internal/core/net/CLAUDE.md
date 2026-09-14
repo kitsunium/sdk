@@ -36,9 +36,7 @@ name.
 | `duration.go` | `DurationValue` — config-friendly duration (`"30s"` or nanoseconds) |
 | `address.go` | `AddressValue` — one socket to bind |
 | `policy.go` | `Policy` / `PolicyFunc` — outbound authorisation port |
-| `request.go` | `RequestValue` — what a `Policy` is shown |
-| `call.go` | `CallValue` — one completed outbound call |
-| `hook.go` | `CallHook` — the observation function port |
+| `call.go` | `CallValue` — one completed outbound call — and `CallHook`, the observation function port |
 | `sse.go` | `SSEEventValue` — the Server-Sent Events frame, its validation and its wire form, plus `AppendSSEComment` |
 | `drain.go` | `WithDrainSignal` / `DrainSignal` — the shutdown signal a long-lived handler observes |
 | `websocket.go` | the RFC 6455 opening handshake: `WSGUID`, `WSVersion`, the header names, `WSAcceptKey`, `ValidateWSKey` |

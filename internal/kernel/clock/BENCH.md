@@ -94,7 +94,7 @@ ok  	github.com/kitsunium/sdk/internal/kernel/clock	15.817s
   no port in the way. 248 B/op, 3 allocs/op.
 - **`BenchmarkSystem_NewTimer`** — the same construction through
   `Waiter.NewTimer`. **248 B/op, 3 allocs/op — byte-for-byte identical to the
-  control.** That is the measurement behind the claim in `system_timer.go`:
+  control.** That is the measurement behind the claim in `system.go`:
   `systemTimer` holds exactly one pointer, so it is pointer-shaped and the
   runtime stores it directly in the interface word instead of heap-boxing it.
   Adapting the stdlib timer to the SDK's `Timer` interface is free.

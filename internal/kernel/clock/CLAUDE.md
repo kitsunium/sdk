@@ -47,16 +47,17 @@ func NewManualClock(start time.Time) *ManualClock
 
 ### File layout
 
-One type per file, per `KTN-STRUCT-ONEFILE`; at most two interfaces per file,
-per `KTN-INTERFACE-FILENAME`.
+Types that belong to one another share a file, per `KTN-STRUCT-PARTITION`;
+at most two interfaces per file, per `KTN-INTERFACE-FILENAME`. `system.go`
+holds `systemClock` with the `systemTimer` / `systemTicker` adapters it is the
+only producer of — splitting them left three files nothing else referenced.
 
 | File | Holds |
 |---|---|
 | `clock.go` | package doc + `Clock` + `Timed` |
 | `waiter.go` | `Waiter` + `requirePositivePeriod` (the shared refusal) |
 | `timer.go` / `ticker.go` | the `Timer` / `Ticker` contracts |
-| `system.go` | `systemClock` + the `System` singleton |
-| `system_timer.go` / `system_ticker.go` | the `*time.Timer` / `*time.Ticker` adapters |
+| `system.go` | `systemClock` + the `System` singleton, and the `*time.Timer` / `*time.Ticker` adapters |
 | `manual.go` | `ManualClock` and every method on it |
 | `manual_wait.go` | `manualWait` + `fireWait` / `drainWait` / `rearmWait`, and the `maxDuration` bound the rearm stays under |
 | `manual_timer.go` / `manual_ticker.go` | the handles `ManualClock` hands out |

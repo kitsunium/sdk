@@ -39,10 +39,10 @@ may hold.
 | `temporality.go` | `Temporality` (Unspecified/Delta/Cumulative) + `String` + `Resolved` |
 | `resource_value.go` | `ResourceValue` + `Normalized` + `ServiceNameKey`/`UnknownService` |
 | `scope_value.go` | `ScopeValue` + `Normalized` + `DefaultScopeName` |
-| `counter.go` / `updowncounter.go` / `gauge.go` / `histogram.go` | the four synchronous instrument interfaces (+ the package doc) |
+| `counter.go` / `down.go` / `gauge.go` / `histogram.go` | the four synchronous instrument interfaces (+ the package doc) |
 | `observable.go` | `ObserveInt64`/`ObserveFloat64` + `Int64Callback`/`Float64Callback` — FUNC ports |
-| `meter.go` | `Meter` — **frozen**: Counter/Gauge/Histogram + `Collect() SnapshotValue` |
-| `updown_meter.go` / `async_meter.go` / `full_meter.go` | the two INSTRUMENT sibling ports and their union |
+| `meter.go` | `Meter` — **frozen**: Counter/Gauge/Histogram + `Collect() SnapshotValue` — and `FullMeter`, the union |
+| `down.go` / `async_meter.go` | the `UpDownMeter` / `AsyncMeter` sibling ports (`down.go` also holds `UpDownCounter`) |
 | `describer.go` | `Describer` — the third sibling: `Describe(name, description string)`, deliberately NOT in `FullMeter` |
 | `sum_value.go` / `gauge_value.go` / `histogram_value.go` | the three per-series point types |
 | `snapshot_value.go` | `SumMetricValue`/`GaugeMetricValue`/`HistogramMetricValue` + `SnapshotValue` |

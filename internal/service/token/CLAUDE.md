@@ -57,7 +57,7 @@ exactly as trustworthy as the key itself.
 | `jws.go` / `jws_parts.go` | `headerValue`, the JOSE header parse, `checkHeader` (the algorithm gate), `jwsPartsValue` |
 | `jws_issuer.go` / `jws_verifier.go` | the JWS issuer and single-key verifier |
 | `jwt.go` | the six JWT constructors |
-| `keys.go` + `hs256_binding.go` / `es256_*.go` / `ed25519_*.go` | the algorithm-bound key contracts and their five implementations |
+| `keys.go` + `hs256_binding.go` / `es256.go` / `ed25519.go` | the algorithm-bound key contracts and their five implementations (each curve's signing and verifying halves share one file) |
 | `paseto.go` / `paseto_issuer.go` / `paseto_verifier.go` | PASETO v4.public |
 | `jwkbridge.go` | `NewVerifierFromJWK`, `NewSetVerifier`, `setVerifier`, `boundKeyValue` + `indexByKid` (the set is bound ONCE, at construction — see §Cost) + `selectable` (a set no token could verify against is refused `POLICY_MISCONFIGURED`) |
 | `token_compliance.go` | the compile-time contract assertions |

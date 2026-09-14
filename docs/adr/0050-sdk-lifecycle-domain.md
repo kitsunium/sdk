@@ -322,7 +322,7 @@ loud rather than left silent.
 
 ## References
 
-- Impl: `internal/core/lifecycle/{lifecycle.go,lifecycle_component.go,lifecycle_phase.go,lifecycle_transition.go,codes.go,errors.go}`,
+- Impl: `internal/core/lifecycle/{lifecycle.go,lifecycle_component.go,lifecycle_phase.go,codes.go,errors.go}`,
   `internal/service/lifecycle/{lifecycle.go,config.go,start.go,stop.go,run.go,codes.go,errors.go}`,
   `pkg/v1/lifecycle/lifecycle.go`
 - Guards: `internal/service/lifecycle/{start_external_test.go,stop_external_test.go,run_external_test.go,nosleep_external_test.go}`

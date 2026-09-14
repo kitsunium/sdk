@@ -15,9 +15,8 @@ Code range: `0.2.16.*` reserved (ADR 0006). No codes emitted today — service-l
 | `handler.go` | `Handler` — `Enabled(ctx, RecordEvent) bool`, `Handle(ctx, RecordEvent) error`, `WithAttrs([]AttrValue) Handler`, `WithGroup(name) Handler` |
 | `encoder.go` | `Encoder` (format-side port) — `Name() string`, `Append(dst, groups, RecordEvent) []byte` |
 | `sink.go` | `Sink` (transport-side port) — `Write(ctx, RecordEvent, []byte) (int, error)`, `Flush(ctx) error`, `Close() error` |
-| `record.go` | `RecordEvent` — `Time`, `Level`, `Message`, `PC uintptr`, `Attrs []AttrValue`, `TraceContext TraceContextValue` |
+| `record.go` | `RecordEvent` — `Time`, `Level`, `Message`, `PC uintptr`, `Attrs []AttrValue`, `TraceContext TraceContextValue` — and `AttrValue{Key string; Value Value}` |
 | `trace_context.go` | `TraceContextValue{TraceID [16]byte; SpanID [8]byte}` + `IsValid()` + `AppendTraceIDHex` / `AppendSpanIDHex`; the `TraceContextSource func(ctx) TraceContextValue` port; `TraceIDKey`/`SpanIDKey` (`"trace_id"`/`"span_id"`) and the four length constants (ADR 0062) |
-| `attr.go` | `AttrValue{Key string; Value Value}` |
 | `value.go` | `Value` discriminated union + typed constructors (`StringValue` / `Int64Value` / `Float64Value` / `BoolValue` / `DurationValue` / `TimeValue` / `GroupValue` / `AnyValue`) and accessors |
 | `kind.go` | `Kind int8` + `KindAny`/`KindBool`/`KindDuration`/`KindFloat64`/`KindInt64`/`KindString`/`KindTime`/`KindUint64`/`KindGroup` + `String()` |
 

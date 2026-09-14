@@ -18,7 +18,6 @@ go_library(
         "scope.go",
         "span_context.go",
         "span_kind.go",
-        "span_params.go",
         "span_value.go",
         "spans_value.go",
         "state_value.go",

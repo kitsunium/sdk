@@ -71,7 +71,8 @@ Logger ── Handler (genericHandler / TextHandler)
 
 ## Conventions
 
-- **One exported struct per file** (`KTN-STRUCT-ONEFILE`).
+- **Types that belong to one another share a file** (`KTN-STRUCT-PARTITION`);
+  unrelated ones still may not (`KTN-STRUCT-COHESION`).
 - **KTN-FUNC-MAXLOC ≤ 50.** `TextHandler.Handle` is intentionally split
   into `renderLine` + `writeLine` for that reason.
 - **IFACE-PLUGIN.** `Build` returns the `Builder` *interface*, never the

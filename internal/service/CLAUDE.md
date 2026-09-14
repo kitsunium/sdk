@@ -50,7 +50,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 ## Do NOT
 
 - Re-export a service type as the public-facing API. The public facade is `pkg/v1/*` — consumers should never see `svccodec.jsonCodec` or `svclogger.builder` types directly.
-- Call `fmt.Errorf` / `errors.New` in production. All errors flow through `errs.Define` (sentinels in `errors.go`) + `errs.Wrap` (call sites in `codec.go` / handler code).
+- Call `fmt.Errorf` / `errors.New` in production. All errors flow through `errs.Define` (the sentinels, in whichever file holds that package's code group — `errors.go`, `failed.go`, `match.go`) + `errs.Wrap` (call sites in `codec.go` / handler code).
 - Reach into `core/*` structs to mutate them. Domain values (`AttrValue`, `RecordEvent`) are immutable after construction.
 - Swallow a third-party encode/decode error silently. Wrap it via `errs.Wrap` so `errors.Is(err, originalCause)` keeps working and the dotted-quad code surfaces.
 - Add an `init()` function to register a codec — the package-level `var Codec = codec.Register(...)` initialiser is the convention.

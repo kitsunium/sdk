@@ -17,7 +17,7 @@ independent failure modes per branch.
 | File | Role |
 |---|---|
 | `multi.go` | `fanoutSink` + `New` + `Write` / `Flush` / `Close` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.16.\* |
+| `failed.go` | sentinels — range 0.3.16.\* |
 
 ## Behaviour
 
