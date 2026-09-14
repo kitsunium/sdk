@@ -71,6 +71,7 @@ go_test(
         "roughtime_external_test.go",
         "roughtime_internal_test.go",
         "roughtime_verify_internal_test.go",
+        "roughtime_wire_fuzz_internal_test.go",
         "roughtime_wire_internal_test.go",
         "service_internal_test.go",
         "version_internal_test.go",

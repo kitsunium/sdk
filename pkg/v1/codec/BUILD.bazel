@@ -59,6 +59,7 @@ go_test(
         "codec_external_test.go",
         "codec_internal_test.go",
         "compressed_external_test.go",
+        "compressed_fuzz_external_test.go",
         "compressed_internal_test.go",
         "fixtures_integration_test.go",
         "multipart_external_test.go",

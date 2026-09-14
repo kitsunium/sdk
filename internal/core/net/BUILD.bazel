@@ -78,6 +78,7 @@ go_test(
         "websocket_bench_test.go",
         "websocket_external_test.go",
         "websocket_frame_external_test.go",
+        "websocket_frame_fuzz_external_test.go",
         "wrap_internal_test.go",
     ],
     embed = [":net"],
