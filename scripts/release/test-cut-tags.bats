@@ -5,12 +5,35 @@
 # the Release-bump trailer is read across the release range (ADR 0085), and the
 # tag-format library (canonical + internal tag shapes, bumps, sort).
 
+# Every commit here is --no-verify. The fixtures are throwaway repositories, but
+# `core.hooksPath` is inherited from the developer's own git config, so without
+# it a host pre-commit hook runs inside them and its refusal fails the suite in
+# `setup` on code that is correct. Neither a repo-local `core.hooksPath` nor
+# GIT_CONFIG_GLOBAL=/dev/null is enough — a hooks path injected at `-c`
+# precedence outranks both; only the command-line flag does (ADR 0088).
+# `git commit-tree` is plumbing and runs no hooks, so it is left alone.
+# g — every fixture git command, with hooks disabled at the ONE precedence that
+# wins. `--no-verify` (kept below) only skips the VERIFICATION hooks: pre-commit
+# and commit-msg. It does nothing about post-commit, post-merge or
+# post-checkout, and an inherited core.hooksPath still runs those inside the
+# disposable repository, where they can mutate state the later assertions read.
+# Measured with a host post-commit that touches a marker file:
+#
+#   git commit --no-verify                       -> POST-COMMIT HOTE A TOURNE
+#   git -c core.hooksPath=<empty> commit --no-verify -> propre
+#
+# A command-line `-c` outranks the global file AND an injected GIT_CONFIG_KEY_*,
+# which a repo-local `git config` does not — all three were tried.
+g() { git -c core.hooksPath="$NOHOOKS" "$@"; }
+
 setup() {
+  NOHOOKS="$BATS_TEST_TMPDIR/nohooks"
+  mkdir -p "$NOHOOKS"
   REPO="$(mktemp -d)"
   cd "$REPO"
-  git init -q -b main
-  git config user.email "ci@example.invalid"
-  git config user.name "ci"
+  g init -q -b main
+  g config user.email "ci@example.invalid"
+  g config user.name "ci"
 
   # Full publish chain with the real kitsunium module paths — cut-tags pins
   # `github.com/kitsunium/sdk/internal/*` requires, so the fixture must use
@@ -69,8 +92,8 @@ replace (
 EOF
 
   : >pkg/v1/codec.go
-  git add -A
-  git commit -q -m "init"
+  g add -A
+  g commit -q --no-verify -m "init"
 
   SCRIPT="$BATS_TEST_DIRNAME/cut-tags.sh"
   LIB="$BATS_TEST_DIRNAME/lib/tag-format.sh"
@@ -84,15 +107,15 @@ teardown() { rm -rf "$REPO"; }
 # range that never occurs in production.
 tag_release() {
   local rel
-  rel="$(git commit-tree "HEAD^{tree}" -p "$(git rev-parse HEAD)" -m "release $1")"
-  git tag "$1" "$rel"
+  rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "release $1")"
+  g tag "$1" "$rel"
 }
 
 # commit_pkg <message> — a commit that touches pkg/, so a Release-bump trailer
 # in <message> is in scope for it.
 commit_pkg() {
   echo "// $RANDOM" >>pkg/v1/codec.go
-  git commit -aq -F - <<<"$1"
+  g commit -aq --no-verify -F - <<<"$1"
 }
 
 # commit_other <message> — a commit that touches nothing under pkg/. A trailer
@@ -100,8 +123,8 @@ commit_pkg() {
 commit_other() {
   mkdir -p docs
   echo "$RANDOM" >>docs/notes.md
-  git add -A
-  git commit -q -F - <<<"$1"
+  g add -A
+  g commit -q --no-verify -F - <<<"$1"
 }
 
 # merge_branch <branch> <message> — land <branch> on main as a TRUE merge
@@ -109,7 +132,7 @@ commit_other() {
 # are real merges, and they behave differently on both counts the trailer
 # depends on: what the walk reaches, and what --name-only reports.
 merge_branch() {
-  git merge --no-ff --no-edit -m "$2" "$1" >/dev/null
+  g merge --no-ff --no-edit --no-verify -m "$2" "$1" >/dev/null
 }
 
 # The dry-run rewrites every chain go.mod, so it needs the Go + jq toolchain.
@@ -240,9 +263,9 @@ need_toolchain() {
 @test "a trailer on a commit a merge brought in does not count" {
   need_toolchain
   tag_release pkg/v0.1.0
-  git checkout -q -b side
+  g checkout -q -b side
   commit_pkg $'feat(codec): contributor work\n\nRelease-bump: minor'
-  git checkout -q main
+  g checkout -q main
   merge_branch side 'Merge the contributor branch'
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
@@ -256,9 +279,9 @@ need_toolchain() {
 @test "a trailer on a merge commit is scoped by what the merge brought in" {
   need_toolchain
   tag_release pkg/v0.1.0
-  git checkout -q -b side
+  g checkout -q -b side
   commit_pkg 'feat(codec): work, unsigned on the branch'
-  git checkout -q main
+  g checkout -q main
   merge_branch side $'Merge the branch\n\nRelease-bump: minor'
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
@@ -271,9 +294,9 @@ need_toolchain() {
   need_toolchain
   tag_release pkg/v0.1.0
   commit_pkg 'fix(codec): a real pkg change on main, unsigned'
-  git checkout -q -b side
+  g checkout -q -b side
   commit_other 'docs: branch work'
-  git checkout -q main
+  g checkout -q main
   merge_branch side $'Merge the docs branch\n\nRelease-bump: minor'
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
@@ -293,6 +316,31 @@ need_toolchain() {
   [[ "$output" == *"pkg/v0.1.1"* ]]
 }
 
+# The per-commit path check was `git log --name-only … | grep -qE '^pkg/'` with
+# `|| continue` behind it. `grep -q` exits on its first match, git takes SIGPIPE,
+# `pipefail` reports 141, and `|| continue` SKIPS the commit — so a merge that
+# touched pkg/ AND enough other paths to fill the pipe buffer had its trailer
+# discarded and the release fell back to a patch. Measured on a commit touching
+# pkg/ plus ~300 KB of other names: rc=141, first `pkg/` line at position 1.
+#
+# The fixture uses long names rather than many files so it costs milliseconds:
+# 1600 paths of ~210 bytes is ~340 KB. Measured on this shape: 400 paths (85 KB)
+# fails the pipeline 9 times in 10 — flaky, so the fixture is sized to the
+# regime where it fails 10 in 10.
+@test "a trailer survives a commit whose file list exceeds the pipe buffer" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  mkdir -p tools
+  pad="$(printf 'y%.0s' $(seq 1 200))"
+  for i in $(seq 1 1600); do : >"tools/${pad}${i}.go"; done
+  echo "// touched" >>pkg/v1/codec.go
+  g add -A
+  g commit -q --no-verify -F - <<<$'feat(codec): wide merge\n\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
 @test "a commit repeating the same trailer still means that trailer" {
   need_toolchain
   tag_release pkg/v0.1.0
@@ -300,6 +348,89 @@ need_toolchain() {
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
   [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# The FORM of the message, not its values.
+#
+# Every one of the twenty cases above builds its message as
+# $'subject\n\nRelease-bump: minor' — the trailer always in the LAST paragraph.
+# Twenty scenarios, unanimous, and blind to the only disposition that has ever
+# cost a release: `git interpret-trailers` and `%(trailers:…)` parse the LAST
+# PARAGRAPH only, so a trailer followed by anything else is invisible.
+#
+# It already happened. Release v0.3.4, range 13a33b6b..e435af8c: e435af8c (#207)
+# carried `Release-bump: minor` at column 0 AND touched three files under pkg/,
+# but the trailer sat at line 106 of a 138-line message that GitHub composed
+# from the branch commits, followed by bullet sections and their prose bodies.
+# The parser returned empty, next_patch won, and pkg/v0.3.4 shipped. pkg/v0.4.0
+# has never existed. Nothing failed and nothing warned.
+#
+# Measured on git 2.47.3, three dispositions of the last paragraph:
+#
+#   Refs: #127  + Release-bump: patch   -> patch
+#   Refs #127   + Release-bump: patch   -> EMPTY   (no colon, block not a block)
+#   Release-bump: patch alone           -> patch
+#
+# The decision: refuse loudly rather than read the trailer wherever it appears.
+# Reading it anywhere would let a CONTRIBUTOR set the release size, because the
+# squash message GitHub composes embeds the branch commits' own bodies — that is
+# exactly the smuggling ADR 0007 §2 exists to prevent. A refusal cannot set a
+# size; it can only stop a release, visibly, with the commit named.
+
+@test "a Release-bump outside the trailer block is refused, not ignored" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'feat(codec): fifty public symbols\n\nRelease-bump: minor\n\n* fix(vcs): a branch commit GitHub folded in\n\nAnd the prose body that came with it.'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"OUTSIDE the trailer block"* ]]
+  [[ "$output" != *"would tag chain"* ]]
+}
+
+# The #207 shape, reproduced: trailer at column 0, then a bullet section with a
+# prose body under it. This is the message that shipped a minor as a patch.
+@test "the shape that shipped pkg/v0.3.4 instead of pkg/v0.4.0 is refused" {
+  need_toolchain
+  tag_release pkg/v0.3.3
+  commit_pkg $'fix(vcs): six of ADR 0076\'s seven deferred entries\n\nADR 0087 records all of it.\n\nRelease-bump: minor\n\n* fix(vcs): the child prefix of a filesystem root is not root plus a separator\n\nQodo found it on #207 and it is real: spelledAs built its prefix as\n`s.repoRoot + separator`.'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"OUTSIDE the trailer block"* ]]
+}
+
+# `Refs` WITHOUT a colon is not a trailer, so git stops treating the block as a
+# trailer block and takes the Release-bump down with it. Same paragraph, same
+# adjacency, one missing character.
+@test "a malformed neighbour in the trailer block is refused, not ignored" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'feat(codec): symbols\n\nRefs #127\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"OUTSIDE the trailer block"* ]]
+}
+
+# …and the well-formed neighbour still works, so the refusal is about the block
+# being broken and not about having neighbours at all.
+@test "a well-formed neighbour in the trailer block still sizes the release" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'feat(codec): symbols\n\nRefs: #127\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
+# A commit that never mentions a bump is not suspicious, at any shape. The
+# refusal must fire on a bump the parser MISSED, never on its absence.
+@test "a multi-paragraph message with no bump at all is still a patch" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'fix(codec): one\n\n* fix: a folded branch commit\n\nProse body.\n\n* fix: another'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.1.1"* ]]
 }
 
 @test "an unwalkable --range is refused rather than read as no trailer" {

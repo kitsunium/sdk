@@ -156,6 +156,61 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
+  # Shell gates — the checks that need neither Bazel nor Go. A sibling job, so
+  # a broken release script is reported in seconds instead of behind a 120-minute
+  # Bazel lane, and so the Bazel cache is irrelevant to it.
+  #
+  # These are the first `make` invocations in this workflow. Everything else here
+  # calls bazel or bash directly; ci-gates-check asserts the Makefile↔CI link for
+  # the targets it lists, which only works if CI goes through the target name.
+  shell-gates:
+    name: shell gates — release scripts + gate enforcement
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      # bats-core is not vendored and the test runner deliberately does not fetch
+      # it: a gate that clones a third-party repository on every run is a flake.
+      # The distro package is the one route CI takes, and it is one of the three
+      # the runner names when bats is absent.
+      - name: install bats-core
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bats
+
+      - name: CI gate enforcement
+        # A Makefile target CI never runs is documentation, not a gate. This
+        # fails when a gate is renamed out from under its CI step, or when the
+        # step is deleted and the target survives as advice. Its own target is in
+        # the manifest, which catches every gate but itself: nothing that has
+        # been deleted can report its own deletion. See ADR 0088 Deferred.
+        run: make ci-gates-check
+
+      - name: release script regression
+        # scripts/release/*.bats guards the two scripts that decide which tag
+        # every merge gets, and from the commit that added it (ADR 0085) until
+        # this lane existed, nothing executed it. Three of the defects it covers
+        # produce a plausible version rather than an error: `separator=,` in a
+        # %(trailers:…) format concatenates two repeated trailers, so
+        # `Release-bump: mi` + `Release-bump: nor` reads back as the single value
+        # `minor` and cuts a minor release — measured on git 2.47.3, invisible on
+        # review. See ADR 0088.
+        run: make release-scripts-check
+
+      - name: git hook regression
+        # .githooks/commit-msg is this repository's no-AI-attribution
+        # enforcement, and it shipped with the same `printf | grep -q` — but
+        # with a worse failure mode, because the pipeline is the condition of an
+        # `if`. grep exits on its first match, the writer takes SIGPIPE,
+        # pipefail reports 141, 141 is false, and the hook ALLOWS the
+        # attribution it exists to refuse. Measured before the fix with the
+        # pattern near the top and a 400 KB body: 40 bypasses out of 40 runs.
+        # After: 0 out of 40. See ADR 0088.
+        run: make hooks-check
+
   # Cross-platform build matrix — folded in from the former standalone
   # cross-platform.yml so the SDK has ONE per-PR CI workflow, not two. Enforces
   # the invariant that every package BUILDS on every supported GOOS (a
