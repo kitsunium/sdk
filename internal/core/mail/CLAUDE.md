@@ -29,8 +29,7 @@ one `core/metrics` follows with `AttrValue` / `ScopeValue` / `SnapshotValue`.
 | `address_value.go` | `AddressValue` and `IsZero` |
 | `attachment_value.go` | `AttachmentValue`, `Inline`, `DefaultAttachmentType` |
 | `header_field_value.go` | `HeaderFieldValue` |
-| `envelope_value.go` | `EnvelopeValue` |
-| `delivery_value.go` | `DeliveryValue` |
+| `value.go` | `DeliveryValue` and `EnvelopeValue` |
 | `transport_interface.go` | `Transport`, `BatchSender`, `Outbox`, `FullTransport` |
 | `header.go` | the field-name constants, the reserved set, and the INJECTION GATE |
 | `address.go` | `ValidateAddress`, `NeedsQuotedDisplayName`, the dot-atom grammar |

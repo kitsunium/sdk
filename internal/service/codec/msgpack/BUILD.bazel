@@ -6,10 +6,9 @@ go_library(
     name = "msgpack",
     srcs = [
         "codec.go",
-        "codes.go",
         "decoder.go",
         "encoder.go",
-        "errors.go",
+        "failed.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/codec/msgpack",
     visibility = ["//internal/service:service_consumers"],

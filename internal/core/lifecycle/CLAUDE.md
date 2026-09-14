@@ -18,8 +18,7 @@ Code range: `0.2.19.*` (ADR 0050).
 |---|---|
 | `lifecycle.go` | `Start func(ctx) error`, `Stop func(ctx) error`, `Lifecycle interface { Add(ComponentValue) error; Start(ctx) error; Stop(ctx) error }` |
 | `lifecycle_component.go` | `ComponentValue` — `Name` / `Start` / `Stop` |
-| `lifecycle_transition.go` | `TransitionValue` — `Name` / `Phase` / `Begun` / `Ended` / `TimedOut` / `Err` |
-| `lifecycle_phase.go` | `Phase` + `PhaseStart` / `PhaseStop` + `String()` |
+| `lifecycle_phase.go` | `Phase` + `PhaseStart` / `PhaseStop` + `String()`, and `TransitionValue` — `Name` / `Phase` / `Begun` / `Ended` / `TimedOut` / `Err` |
 | `codes.go` | `Code*` constants — range 0.2.19.* |
 | `errors.go` | `InvalidComponent` / `DuplicateComponent` / `LifecycleRunning` / `ComponentPanicked` (`errs.Define`) |
 

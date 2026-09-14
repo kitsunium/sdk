@@ -20,9 +20,11 @@ e2e/
 └── checks/            one file per domain group; each exports func <Domain>() harness.CheckGroup
     ├── codec.go        Marshal/Unmarshal round-trip per Format
     ├── crypto.go       AEAD seal/open, hash, sign, kdf, password, mac, agree
-    ├── observability.go logger (buffer capture + level filter) + errs (introspection)
+    ├── logger.go        logger (buffer capture + level filter)
+    ├── errs.go          errs (code/reason introspection, Public/Private, degradation)
     ├── proc_spawn.go   process (exit/stdio/group-stop) + rlimit (trampoline readback) + signal
-    ├── proc_resource.go cgroup (limit readback from /sys/fs/cgroup, freeze/thaw/kill) + reaper (orphan adoption)
+    ├── cgroup.go        cgroup (limit readback from /sys/fs/cgroup, freeze/thaw/kill)
+    ├── reaper.go        reaper (subreaper acquisition + orphan adoption)
     └── proc_systemd.go  sdnotify (readiness round-trip) + sdlisten (activation env)
 ```
 

@@ -14,9 +14,8 @@ only two places the AWS SDK enters a build — declared in the **root umbrella
 
 | File | Role |
 |---|---|
-| `cloudwatch.go`  | `Writer` singleton, `cwFactory` (`Name` / `Open`); composes the chain |
+| `cw.go`          | `Writer` singleton, `cwFactory` (`Name` / `Open`); composes the chain; `cwEvent` value type (timestamp + message) |
 | `cwsink.go`      | `cwSink` batching terminal sink + `deliverFunc` seam (AWS-free, unit-tested) |
-| `cw_event.go`    | `cwEvent` value type (timestamp + message) |
 | `client.go`      | `newDeliverFunc` — returns the AWS PutLogEvents closure (**only** AWS-importing file) |
 | `cred_adapter.go`| `credAdapter` — bridges `writer.CredentialProvider` → `aws.CredentialsProvider` |
 | `codes.go`, `errors.go` | sentinels — range 0.3.25.\* (`ClientInitFailed`, `PutFailed`, `EventRejected`) |

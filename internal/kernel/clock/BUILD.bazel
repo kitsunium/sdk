@@ -12,8 +12,6 @@ go_library(
         "manual_timer.go",
         "manual_wait.go",
         "system.go",
-        "system_ticker.go",
-        "system_timer.go",
         "ticker.go",
         "timer.go",
         "waiter.go",

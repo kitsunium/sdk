@@ -9,7 +9,6 @@ go_library(
         "main.go",
         "options.go",
         "render.go",
-        "symbol.go",
     ],
     importpath = "github.com/kitsunium/sdk/tools/genindex",
     visibility = ["//visibility:private"],

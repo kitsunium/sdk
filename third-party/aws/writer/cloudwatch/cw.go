@@ -9,6 +9,8 @@
 package cloudwatch
 
 import (
+	"time"
+
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -57,4 +59,12 @@ func (*cwFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error) {
 	nonblocking := async.New(base, async.Config{OnDrop: c.OnDrop})
 	//: outermost gate drops below-floor records before they reach the ring.
 	return levelgate.New(nonblocking, c.MinLevel), nil
+}
+
+// cwEvent is one buffered log event: its source timestamp + formatted message.
+type cwEvent struct {
+	// ts is the record's event time (falls back to now when zero).
+	ts time.Time
+	// msg is the encoded log line.
+	msg string
 }

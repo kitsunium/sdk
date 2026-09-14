@@ -34,3 +34,13 @@ type RecordEvent struct {
 	// which an attribute cannot be: WithGroup would prefix it. See ADR 0062.
 	TraceContext TraceContextValue
 }
+
+// AttrValue is an immutable key/value pair carried by a RecordEvent. Use the
+// typed Value constructors (StringValue, Int64Value, …) to build the Value
+// field — the zero Value is a valid KindAny carrying nil.
+type AttrValue struct {
+	// Key identifies the attribute in the output line.
+	Key string
+	// Value carries the typed payload; handlers dispatch on Value.Kind().
+	Value Value
+}

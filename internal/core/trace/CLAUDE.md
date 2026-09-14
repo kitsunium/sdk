@@ -22,7 +22,6 @@ Code range: `0.2.20.*` (ADR 0051).
 | File | Surface |
 |---|---|
 | `trace.go` | package doc + `Tracer` (1 method, FROZEN) + `Span` (5 methods, FROZEN) |
-| `span_params.go` | `SpanParams` — the facts a span is born with; the zero value is an INTERNAL span starting now |
 | `identifier.go` | `TraceID` / `SpanID` / `TraceFlags` + `ParseTraceID` / `ParseSpanID` + `FlagSampled` + `Sanitized` |
 | `span_context.go` | `SpanContextValue` — TraceID, SpanID, Flags, State, Remote; `IsValid` / `IsSampled` / `WithState` |
 | `traceparent.go` | `ParseTraceParent` / `FormatTraceParent` + `TraceParentHeader` / `TraceStateHeader` / `TraceParentLen` / `VersionSupported` |
@@ -32,7 +31,7 @@ Code range: `0.2.20.*` (ADR 0051).
 | `span_kind.go` | `SpanKind` + the five values + `Resolved` |
 | `status_value.go` | `StatusValue` + `StatusCode` (`Unset`/`OK`/`Error`) + `Resolved` / `IsUnset` |
 | `event_value.go` | `EventValue` + the `exception.*` convention constants |
-| `link_value.go` | `LinkValue` — a whole `SpanContextValue` plus attributes |
+| `link_value.go` | `LinkValue` — a whole `SpanContextValue` plus attributes — and `SpanParams`, the facts a span is born with (the zero value is an INTERNAL span starting now) |
 | `span_value.go` | `SpanValue` — one FINISHED span; `Duration` / `IsRoot` |
 | `spans_value.go` | `SpansValue` — Resource + Scope + spans, the exportable payload |
 | `sampler.go` | `Sampler` and `SpanSink` — FUNC ports (ADR 0041) |

@@ -54,3 +54,57 @@ func (systemClock) Sleep(d time.Duration) {
 	//: time.Sleep already returns at once for a non-positive d.
 	time.Sleep(d)
 }
+
+// systemTicker adapts *time.Ticker to the [Ticker] interface. Same one-pointer
+// shape as systemTimer, and the same allocation-free boxing.
+type systemTicker struct {
+	// tk is the wrapped stdlib ticker; never nil once constructed.
+	tk *time.Ticker
+}
+
+// C returns the stdlib ticker's delivery channel.
+func (t systemTicker) C() <-chan time.Time {
+	//: expose the stdlib field as the method the interface requires.
+	return t.tk.C
+}
+
+// Stop halts the ticker without closing its channel.
+func (t systemTicker) Stop() {
+	//: delegate; since Go 1.23 the runtime itself guarantees that a tick
+	//: nobody received before Stop is never received after it.
+	t.tk.Stop()
+}
+
+// Reset restarts the ticker with period d, panicking on a non-positive d.
+func (t systemTicker) Reset(d time.Duration) {
+	//: own the refusal so the message matches ManualClock's exactly.
+	requirePositivePeriod("Ticker.Reset", d)
+	//: delegate the re-arming to the stdlib ticker.
+	t.tk.Reset(d)
+}
+
+// systemTimer adapts *time.Timer to the [Timer] interface. It is a value type
+// holding exactly one pointer, so converting it to Timer is allocation-free
+// (the runtime stores a pointer-shaped value directly in the interface word).
+type systemTimer struct {
+	// tm is the wrapped stdlib timer; never nil once constructed.
+	tm *time.Timer
+}
+
+// C returns the stdlib timer's delivery channel.
+func (t systemTimer) C() <-chan time.Time {
+	//: expose the stdlib field as the method the interface requires.
+	return t.tm.C
+}
+
+// Stop halts the timer, reporting whether it was still armed.
+func (t systemTimer) Stop() bool {
+	//: since Go 1.23 the channel is unbuffered, so Stop leaves nothing stale.
+	return t.tm.Stop()
+}
+
+// Reset re-arms the timer for d, reporting whether it was still armed.
+func (t systemTimer) Reset(d time.Duration) bool {
+	//: delegate; the stdlib guarantees no stale value survives the reset.
+	return t.tm.Reset(d)
+}

@@ -195,7 +195,10 @@ type setVerifier struct {
 // because jwk.ParseSet refuses the whole document.) The per-token loop skips an unusable entry exactly
 // as it used to skip a bind failure.
 func indexByKid(set jwk.Set) map[string][]boundKeyValue {
-	index := make(map[string][]boundKeyValue)
+	//: one bucket per member at most — a kid repeats only when two keys share
+	//: it, which is the ambiguity this index exists to detect, so len is the
+	//: ceiling and never an under-estimate.
+	index := make(map[string][]boundKeyValue, len(set.Keys()))
 	//: document order is preserved, because the caller's ranking survives it.
 	for _, key := range set.Keys() {
 		kid := key.Kid()

@@ -26,7 +26,7 @@ Inlining `Level` into `internal/core/logger` was rejected because:
 - `leveler.go` — `Leveler` interface (`Level() Level`); lets a gate hold either a live `Var` or a constant `Level`.
 - `var.go` — `Var`, an atomic `Level` holder (`NewVar`/`Set`/`Level`) for runtime-adjustable thresholds.
 - `parse.go` — `ParseLevel(name) (Level, error)`, the canonical case-insensitive string→`Level` parser.
-- `codes.go` / `errors.go` — `CodeLevelUnknown` (`0.2.17.1`) + the `LevelUnknown` sentinel `ParseLevel` returns on an unknown name.
+- `unknown.go` — `CodeLevelUnknown` (`0.2.17.1`) + the `LevelUnknown` sentinel `ParseLevel` returns on an unknown name.
 - `level_compliance.go` — interface-assertion (`KTN-IFACE-ASSERT-PLACEMENT`).
 
 Tests: `level_external_test.go` (`String()` windows + `Debug < Info < Warn < Error` ordering), `parse_external_test.go` (parse + round-trip), `var_*_test.go` (concurrent `Var`), `leveler_*_test.go`.

@@ -6,13 +6,11 @@
 import "github.com/kitsunium/sdk/pkg/v1/logger/slogbridge"
 ```
 
-Package slogbridge — range 1.1.1.\* \(ADR 0005 pkg/v1/logger/slogbridge block\).
-
 Package slogbridge — converts slog levels and attributes to their SDK peers.
 
-Package slogbridge — declares the package's sentinels. Each var's name equals its errs.Define Reason in SCREAMING\_SNAKE form.
-
 Package slogbridge — the slog.Handler that forwards records to an SDK Logger.
+
+Package slogbridge — range 1.1.1.\* \(ADR 0005 pkg/v1/logger/slogbridge block\).
 
 Package slogbridge adapts an SDK \[logger.Logger\] to log/slog so a foreign API that accepts only a \*slog.Logger emits through the SDK pipeline.
 

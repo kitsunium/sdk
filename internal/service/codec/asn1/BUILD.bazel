@@ -6,8 +6,7 @@ go_library(
     name = "asn1",
     srcs = [
         "codec.go",
-        "codes.go",
-        "errors.go",
+        "failed.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/codec/asn1",
     visibility = ["//internal/service:service_consumers"],

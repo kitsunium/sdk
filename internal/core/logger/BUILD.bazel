@@ -5,7 +5,6 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "logger",
     srcs = [
-        "attr.go",
         "encoder.go",
         "handler.go",
         "kind.go",

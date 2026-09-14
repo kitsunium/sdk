@@ -235,6 +235,44 @@ rules:
   # are the accepted VOCABULARY, which is the opposite direction.
   #
   # Scoped to the one file that owns both tables.
+  # KTN-STRUCT-COHESION (phase 6) — "this file holds unrelated groups; split it".
+  #
+  # Scoped to the pkg/v1 facade layer, where the finding describes the design
+  # instead of a defect. A facade package is ONE file by convention — cache.go,
+  # scheduler.go, lifecycle.go, vfs.go, events.go, clock.go — holding the
+  # package doc comment plus every type alias the domain publishes. The
+  # declarations are "unrelated" to each other by construction: they are a
+  # domain's whole vocabulary re-exported side by side, and pkg/v1/trace.go is
+  # reported as 62 unrelated groups precisely because tracing has 62 public
+  # names.
+  #
+  # Splitting them would break a rule this repository enforces mechanically:
+  # ADR 0008 / CLAUDE.md rule 10 generate each README.md from the package doc
+  # comment, gomarkdoc reads it from the single facade file, and
+  # scripts/pre-commit/check-readme-drift.sh fails the build when the result
+  # stops matching. The layer below is where cohesion is a real question, and
+  # the rule still runs there.
+  KTN-STRUCT-COHESION:
+    exclude:
+      - "**/pkg/v1/**"
+
+  # KTN-VAR-MINLEN (phase 4) — "a one or two letter name only reads while its
+  # declaration is still on screen".
+  #
+  # The rule is right about abbreviations and wrong about proper nouns. `S2` is
+  # not a shortened word: it is the NAME of the compression format, exactly as
+  # `Zstd` is, and the registry key it is built from is the string "s2" (ADR
+  # 0066). Lengthening it would invent a name no specification, no
+  # `Content-Encoding` and no caller uses — and it is an EXPORTED symbol of the
+  # root module, documented in third-party/transform/CLAUDE.md, so the rename
+  # would be a breaking change to a published surface bought with nothing.
+  #
+  # Scoped to the one file that declares it; every other package-scope name in
+  # the SDK still has to earn its length.
+  KTN-VAR-MINLEN:
+    exclude:
+      - "**/third-party/transform/s2.go"
+
   KTN-VAR-STRMAP:
     exclude:
       - "**/internal/core/sql/sql_dialect.go"
