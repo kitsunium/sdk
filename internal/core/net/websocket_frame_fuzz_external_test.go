@@ -634,6 +634,24 @@ func FuzzParseWSClosePayload(f *testing.F) {
 		pristine := slices.Clone(b)
 		wantCode, wantReason, refusal := wsFuzzCloseOracle(b)
 		code, reason, err := corenet.ParseWSClosePayload(b)
+		//: PURITY FIRST, so it covers the REJECTION path as well as the
+		//: acceptance one. A parser that decoded half a payload into the
+		//: caller's buffer and only then refused it would otherwise slip
+		//: through: the refusal branch below returns early, and every
+		//: malformed input — which is most of the corpus — would never reach
+		//: a purity check placed after it.
+		againCode, againReason, againErr := corenet.ParseWSClosePayload(b)
+		//: the same bytes must yield the same verdict, refusal included.
+		if (againErr == nil) != (err == nil) || againCode != code || againReason != reason {
+			//: a parser whose answer depends on hidden state.
+			t.Fatalf("ParseWSClosePayload(% x) is not deterministic: (%d, %q, %v) then (%d, %q, %v)",
+				b, code, reason, err, againCode, againReason, againErr)
+		}
+		//: and neither call may have written into the input.
+		if !bytes.Equal(b, pristine) {
+			//: the parser mutated a buffer it does not own.
+			t.Fatalf("the parser wrote into its input: % x, was % x", b, pristine)
+		}
 		//: VERDICT — the refusal, and which refusal it is.
 		if refusal != 0 {
 			if err == nil {
@@ -660,15 +678,6 @@ func FuzzParseWSClosePayload(f *testing.F) {
 		//: VERBATIM — the reason is the bytes after the code, unaltered.
 		if len(b) >= corenet.WSCloseCodeLen && !bytes.Equal([]byte(reason), b[corenet.WSCloseCodeLen:]) {
 			t.Fatalf("ParseWSClosePayload(% x) reason = % x, want % x", b, reason, b[corenet.WSCloseCodeLen:])
-		}
-		//: PURITY — the same bytes twice, and the buffer untouched.
-		againCode, againReason, againErr := corenet.ParseWSClosePayload(b)
-		if againErr != nil || againCode != code || againReason != reason {
-			t.Fatalf("ParseWSClosePayload(% x) is not deterministic: (%d, %q) then (%d, %q, %v)",
-				b, code, reason, againCode, againReason, againErr)
-		}
-		if !bytes.Equal(b, pristine) {
-			t.Fatalf("the parser wrote into its input: % x, was % x", b, pristine)
 		}
 		//: ROUND TRIP — only the empty payload has no code to write back.
 		if len(b) != 0 {

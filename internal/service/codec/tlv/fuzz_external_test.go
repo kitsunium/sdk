@@ -252,24 +252,73 @@ type tlvPair struct {
 // artefact: tagFloat64 accepts any 8 bytes, so a peer can plant a map entry
 // that the receiving Go program can enumerate but never look up.
 func tlvEqualAnyMap(am, bm map[any]any) bool {
-	//: one slot per entry of b, with a used flag for the matching.
-	entries := make([]tlvPair, 0, len(bm))
-	//: snapshot b before matching so the scan order is stable.
+	//: leftovers holds only the entries a direct lookup cannot settle. In every
+	//: ordinary map that is EMPTY, so the comparison stays O(n) and the
+	//: pairwise fallback below is reached only by the NaN keys it exists for.
+	//: Building the candidate slice unconditionally would make a decoded map of
+	//: n pairs cost n² on EVERY execution, and a TLV buffer can declare a lot
+	//: of pairs — the fuzzer would spend its budget inside the comparator
+	//: instead of inside the parser under test.
+	var leftovers []tlvPair
+	//: first pass — settle every key an ordinary lookup can find.
+	for ak, av := range am {
+		//: a key equal to itself resolves here, in constant time.
+		bv, found := bm[ak]
+		//: a NaN key never finds itself; defer it to the scan.
+		if !found {
+			//: park the pair for the pairwise matching below.
+			leftovers = append(leftovers, tlvPair{key: ak, value: av})
+			//: nothing more to do for this key in this pass.
+			continue
+		}
+		//: the key matched, so the values must match too.
+		if !tlvEqual(av, bv) {
+			//: same key, different value.
+			return false
+		}
+	}
+	//: the common case — nothing was deferred.
+	if len(leftovers) == 0 {
+		//: equal cardinality plus total inclusion means equal multisets.
+		return true
+	}
+	//: second pass — the deferred keys must match b's own unlookupable entries.
+	return tlvMatchLeftovers(leftovers, bm)
+}
+
+// tlvMatchLeftovers pairs up the entries neither map can look up — in practice
+// the NaN-keyed ones — by scanning b's equally unlookupable entries and
+// claiming each at most once.
+func tlvMatchLeftovers(leftovers []tlvPair, bm map[any]any) bool {
+	//: collect b's own unlookupable entries. A key that finds itself was
+	//: already settled by the first pass and must not be claimed twice.
+	entries := make([]tlvPair, 0, len(leftovers))
+	//: walk b once.
 	for k, v := range bm {
-		//: record the association verbatim.
+		//: skip every key an ordinary lookup resolves.
+		if _, found := bm[k]; found {
+			//: already accounted for.
+			continue
+		}
+		//: an entry that cannot find itself is a candidate.
 		entries = append(entries, tlvPair{key: k, value: v})
 	}
-	//: tracks which of b's entries a key from a has already claimed.
+	//: both sides must have deferred the same number of entries.
+	if len(entries) != len(leftovers) {
+		//: one map carries an unlookupable entry the other does not.
+		return false
+	}
+	//: tracks which of b's entries a leftover has already claimed.
 	taken := make([]bool, len(entries))
-	//: every entry of a must claim exactly one unclaimed entry of b.
-	for ak, av := range am {
-		//: linear scan — NaN keys are why this cannot be a map lookup.
-		if !tlvClaimPair(entries, taken, ak, av) {
+	//: every leftover must claim exactly one unclaimed entry.
+	for _, pair := range leftovers {
+		//: pairwise scan — this is the path NaN keys need.
+		if !tlvClaimPair(entries, taken, pair.key, pair.value) {
 			//: no unclaimed entry of b matches this one.
 			return false
 		}
 	}
-	//: equal cardinality plus a total matching means equal multisets.
+	//: a total matching over equal cardinalities.
 	return true
 }
 

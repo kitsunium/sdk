@@ -130,11 +130,19 @@ func FuzzRoughtimeDecodeMessage(f *testing.F) {
 			//: the two halves of the parser disagree about the same bytes.
 			t.Fatalf("decode accepted %d bytes that roughtimeHeaderSize refuses: %v", len(raw), hdrErr)
 		}
-		//: duplicate tags collapse in the map, so the field count can only
-		//: SHRINK relative to the declared tag count, never grow.
-		if len(fields) > count {
-			//: more fields than the header declared were invented.
-			t.Fatalf("header declared %d tags but decode returned %d fields", count, len(fields))
+		//: duplicate tags collapse in the map, so the field count is pinned to
+		//: the number of DISTINCT tags in the header's tag table — not merely
+		//: bounded above by the declared count. Counting them here closes the
+		//: gap a "<= count" bound leaves open: a decoder that silently dropped
+		//: a field for any reason OTHER than a tag collision would still
+		//: satisfy the bound, and the exact-tiling check below would then be
+		//: skipped for the very input that broke it.
+		distinct := fuzzRoughtimeDistinctTags(raw, count)
+		//: the map must hold exactly one entry per distinct tag.
+		if len(fields) != distinct {
+			//: a field was dropped, or one was invented.
+			t.Fatalf("header carries %d distinct tags (of %d declared) but decode returned %d fields",
+				distinct, count, len(fields))
 		}
 		//: TILING — sum the decoded extents against the value area.
 		valuesLen := len(raw) - header
@@ -158,8 +166,10 @@ func FuzzRoughtimeDecodeMessage(f *testing.F) {
 		}
 		//: with every tag distinct, the partition must be EXACT: the format
 		//: leaves no room for a gap, because each field ends where the next
-		//: begins and the last runs to the end of the buffer.
-		if len(fields) == count && total != valuesLen {
+		//: begins and the last runs to the end of the buffer. When tags
+		//: collide the collapsed entries genuinely lose bytes, so only the
+		//: upper bound above applies.
+		if distinct == count && total != valuesLen {
 			//: a gap means some bytes belong to no field, which this framing
 			//: cannot express.
 			t.Fatalf("%d distinct fields cover %d bytes of a %d-byte value area (gap)",
@@ -261,4 +271,28 @@ func fuzzRoughtimeSplit(count int, blob []byte) []roughtimeField {
 	}
 	//: a legal field list for the encoder.
 	return fields
+}
+
+// fuzzRoughtimeDistinctTags counts the distinct tags in a message's tag table.
+//
+// The table is the contiguous block that follows the count and the count-1
+// offsets, so it spans raw[4*count : 8*count] — derived here from the format
+// rather than reused from the decoder, because a helper that asked the decoder
+// where its own tags were would agree with it by construction and could not
+// contradict it. The caller has already had roughtimeHeaderSize confirm that
+// the buffer is at least that long.
+func fuzzRoughtimeDistinctTags(raw []byte, count int) int {
+	//: one slot per declared tag; duplicates collapse on insert.
+	seen := make(map[uint32]struct{}, count)
+	//: the tag table starts where the offset table ends.
+	base := roughtimeTagSize * count
+	//: read one little-endian uint32 per declared tag.
+	for index := range count {
+		//: this tag's four bytes.
+		at := base + roughtimeTagSize*index
+		//: record it; a repeat leaves the set unchanged.
+		seen[binary.LittleEndian.Uint32(raw[at:])] = struct{}{}
+	}
+	//: the number the decoded map must match exactly.
+	return len(seen)
 }
