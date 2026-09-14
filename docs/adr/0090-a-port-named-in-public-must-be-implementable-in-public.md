@@ -184,6 +184,14 @@ public API.
 - No behaviour changed anywhere. `internal/kernel/clock` is untouched by this
   change, and every existing caller resolves to the identical type.
 
+## Breaking changes
+
+None. `pkg/v1/clock` is a new package, `internal/kernel/clock` is untouched,
+and every existing caller resolves to the identical type — an alias IS the
+type it names. The commitment this change does make is forward-looking and is
+decision 3: four interfaces that could not be implemented from outside become
+implementable, and therefore frozen.
+
 ## Why not
 
 - **Why not redeclare the interfaces in `pkg/v1` and adapt?** An adapter needs
@@ -241,6 +249,25 @@ for kind in ('Timed', 'Clock'):
     print(kind, ":", ", ".join(sorted(a for r in pub if r[1] == kind for a in r[2])))
 PY
 ```
+
+## Deferred
+
+- **An `AfterFunc` on `Waiter`.** Named in decision 3 and deferred with its
+  reason: no consumer anywhere in this tree calls for one. If one appears it
+  arrives as an ADR 0039 sibling, not as a fifth method.
+- **The other twelve kernel primitives.** `worker`, `batcher`, `singleflight`,
+  `ring`, `recycler`, `buffer`, `topic`, `snapshot`, `heap`, `group`, `plugin`
+  and `pathchain` stay internal (decision 6). Each is its own decision with its
+  own irreversible freeze; none has this one's property of already being named
+  in the public API.
+- **An in-repo consumer module for the acceptance test.** A1–A4 are verified
+  from a module outside `github.com/kitsunium/sdk`, which is the only way to
+  exercise the `internal/` firewall — but that module is built and thrown away
+  rather than committed, because a new `go.mod` in this repository needs a
+  `go.work` exclusion (Bazel's `go_deps` cannot process extra modules), a
+  gazelle exclusion, and a named CI lane under rule 12. The in-repo
+  `clock_external_test.go` covers the type-identity mechanism; the module
+  boundary is Go's own rule.
 
 ## References
 
