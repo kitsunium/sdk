@@ -350,6 +350,89 @@ need_toolchain() {
   [[ "$output" == *"pkg/v0.2.0"* ]]
 }
 
+# ---------------------------------------------------------------------------
+# The FORM of the message, not its values.
+#
+# Every one of the twenty cases above builds its message as
+# $'subject\n\nRelease-bump: minor' — the trailer always in the LAST paragraph.
+# Twenty scenarios, unanimous, and blind to the only disposition that has ever
+# cost a release: `git interpret-trailers` and `%(trailers:…)` parse the LAST
+# PARAGRAPH only, so a trailer followed by anything else is invisible.
+#
+# It already happened. Release v0.3.4, range 13a33b6b..e435af8c: e435af8c (#207)
+# carried `Release-bump: minor` at column 0 AND touched three files under pkg/,
+# but the trailer sat at line 106 of a 138-line message that GitHub composed
+# from the branch commits, followed by bullet sections and their prose bodies.
+# The parser returned empty, next_patch won, and pkg/v0.3.4 shipped. pkg/v0.4.0
+# has never existed. Nothing failed and nothing warned.
+#
+# Measured on git 2.47.3, three dispositions of the last paragraph:
+#
+#   Refs: #127  + Release-bump: patch   -> patch
+#   Refs #127   + Release-bump: patch   -> EMPTY   (no colon, block not a block)
+#   Release-bump: patch alone           -> patch
+#
+# The decision: refuse loudly rather than read the trailer wherever it appears.
+# Reading it anywhere would let a CONTRIBUTOR set the release size, because the
+# squash message GitHub composes embeds the branch commits' own bodies — that is
+# exactly the smuggling ADR 0007 §2 exists to prevent. A refusal cannot set a
+# size; it can only stop a release, visibly, with the commit named.
+
+@test "a Release-bump outside the trailer block is refused, not ignored" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'feat(codec): fifty public symbols\n\nRelease-bump: minor\n\n* fix(vcs): a branch commit GitHub folded in\n\nAnd the prose body that came with it.'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"OUTSIDE the trailer block"* ]]
+  [[ "$output" != *"would tag chain"* ]]
+}
+
+# The #207 shape, reproduced: trailer at column 0, then a bullet section with a
+# prose body under it. This is the message that shipped a minor as a patch.
+@test "the shape that shipped pkg/v0.3.4 instead of pkg/v0.4.0 is refused" {
+  need_toolchain
+  tag_release pkg/v0.3.3
+  commit_pkg $'fix(vcs): six of ADR 0076\'s seven deferred entries\n\nADR 0087 records all of it.\n\nRelease-bump: minor\n\n* fix(vcs): the child prefix of a filesystem root is not root plus a separator\n\nQodo found it on #207 and it is real: spelledAs built its prefix as\n`s.repoRoot + separator`.'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"OUTSIDE the trailer block"* ]]
+}
+
+# `Refs` WITHOUT a colon is not a trailer, so git stops treating the block as a
+# trailer block and takes the Release-bump down with it. Same paragraph, same
+# adjacency, one missing character.
+@test "a malformed neighbour in the trailer block is refused, not ignored" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'feat(codec): symbols\n\nRefs #127\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"OUTSIDE the trailer block"* ]]
+}
+
+# …and the well-formed neighbour still works, so the refusal is about the block
+# being broken and not about having neighbours at all.
+@test "a well-formed neighbour in the trailer block still sizes the release" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'feat(codec): symbols\n\nRefs: #127\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
+# A commit that never mentions a bump is not suspicious, at any shape. The
+# refusal must fire on a bump the parser MISSED, never on its absence.
+@test "a multi-paragraph message with no bump at all is still a patch" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'fix(codec): one\n\n* fix: a folded branch commit\n\nProse body.\n\n* fix: another'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.1.1"* ]]
+}
+
 @test "an unwalkable --range is refused rather than read as no trailer" {
   run bash -c "echo pkg | $SCRIPT --dry-run --range=nosuchrev..HEAD"
   [ "$status" -eq 64 ]

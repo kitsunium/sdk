@@ -163,6 +163,55 @@ was written to mirror and carries the identical inverted shape. Those files are
 template-inherited and `.github/CLAUDE.md` forbids editing them for SDK reasons,
 so they are reported and left — see §Deferred.
 
+### Defect 8 — twenty unanimous tests, blind to the only shape that cost a release
+
+The reason this one matters here is that the suite was the thing that should
+have caught it, and could not: all twenty cases in `test-cut-tags.bats` build
+their message as `$'subject\n\nRelease-bump: minor'`. The trailer is always in
+the LAST PARAGRAPH. Twenty scenarios, unanimous, and blind — because all twenty
+inject the same FORM of input and only vary its values.
+
+`git interpret-trailers` and `%(trailers:…)` parse the last paragraph only. A
+`Release-bump:` with anything after it is invisible, and so is one whose
+paragraph contains a malformed neighbour. Measured on git 2.47.3:
+
+| last paragraph | read |
+|---|---|
+| `Refs: #127` + `Release-bump: patch` | `patch` |
+| `Refs #127` + `Release-bump: patch` | **empty** |
+| `Release-bump: patch` alone | `patch` |
+| `Release-bump: minor` then a bullet section | **empty** |
+
+`Refs` without its colon stops the block being a trailer block and takes the
+`Release-bump` down with it. One missing character.
+
+It has already happened. Release v0.3.4, range `13a33b6b..e435af8c` — verified
+on this repository:
+
+```
+$ git log -1 --format=%B e435af8c | grep -n 'Release-bump'
+106:Release-bump: minor
+$ git log -1 --format="%(trailers:key=Release-bump,valueonly,separator=%x1F)" e435af8c
+                                        # empty
+$ git log -1 --name-only --format= -m --first-parent e435af8c | grep -c '^pkg/'
+3
+$ git tag -l 'pkg/v0.3.*' 'pkg/v0.4.*' | sort -V | tail -2
+pkg/v0.3.3
+pkg/v0.3.4
+```
+
+`Release-bump: minor` at column 0, line 106 of a 138-line message GitHub composed
+from the branch commits, with bullet sections and their prose bodies after it.
+Three files under `pkg/`. `next_patch` won. **`pkg/v0.4.0` has never existed.**
+Nothing failed and nothing warned.
+
+Note what this is NOT: the `separator=` defect is fixed and effective on `main`,
+re-verified here with the bytes made visible rather than printed raw —
+`Release-bump: mi` + `Release-bump: nor` yields `mi^_nor`, two fields, both rank
+0, a patch. Printing that without `cat -A` renders 0x1F invisibly and shows
+`minor`, which is how a probe can appear to reproduce a bug that is already
+fixed. The live defect is placement, not separation.
+
 ## Decision
 
 **1. `scripts/release/release-scripts-test.sh` runs the suites.** One entry
@@ -200,7 +249,27 @@ ever exercised below the pipe buffer.
 keeps `--no-verify` behind it. `git commit-tree` is plumbing and runs no hooks,
 so it is left alone.
 
-**7. The suite list is globbed, never enumerated.** The Makefile target and the
+**7. A `Release-bump:` the parser did not see is a REFUSAL, not a shrug.**
+`cut-tags.sh` counts the `Release-bump:` lines in the first-parent commit's
+message and compares that to the number of values git parsed. More in the
+message than in the block, on a commit that also touched `pkg/`, and the release
+refuses to be sized, naming the commit and both counts.
+
+Not "read the trailer wherever it appears", which was the other option and is
+worse: the squash message GitHub composes embeds the BRANCH COMMITS' own bodies,
+so reading anywhere would let a contributor set the release size — the exact
+smuggling ADR 0007 §2 exists to prevent. A refusal cannot set a size. It can
+only stop a release, visibly. The cost is real and accepted: a contributor who
+writes `Release-bump:` at column 0 in a branch commit body can make the release
+refuse. That is loud and one edit away from fixed, where the current behaviour is
+silent and a published tag away from fixed.
+
+The scoping stays per commit for the same reason the trailer's does: a stray
+`Release-bump:` on a commit that touched nothing under `pkg/` would not have
+counted even if it had parsed, so refusing on it would be an alarm about
+nothing.
+
+**8. The suite list is globbed, never enumerated.** The Makefile target and the
 CI step both describe the runner as covering `scripts/release/*.bats`; a
 hard-coded list makes that false the moment a third suite is added, which would
 then be committed, reviewed and executed by nothing — this change's own defect,
@@ -208,10 +277,10 @@ reintroduced by its own fix.
 
 ## Consequences
 
-- 42 tests run on every pull request: 34 over the release scripts (32 inherited
-  from ADR 0085, plus one each for defects 6 and 7) and 8 over the commit-msg
-  hook. All pass; one skips (the `bazel`-dependent rdeps path, skipped when
-  bazel is present).
+- 47 tests run on every pull request: 39 over the release scripts (32 inherited
+  from ADR 0085, plus one each for defects 6 and 7 and five that vary the SHAPE
+  of the message for defect 8) and 8 over the commit-msg hook. All pass; one
+  skips (the `bazel`-dependent rdeps path, skipped when bazel is present).
 - Every one of them was observed RED against the code it guards before being
   accepted. The three hook tests failed 3 of 8 before the fix, with the trailing-
   attribution control passing throughout — which is what identified the

@@ -145,7 +145,56 @@ rank_of() {
 # the handful that carry one (usually zero).
 range_trailer() {
   local best="" best_rank=0 best_sha="" sha="" raw="" value="" r=""
+  local line="" msg_count=0 parsed_count=0
   while read -r sha raw; do
+    # A trailer git did not parse is not a trailer git ignored — it is a bump
+    # the maintainer asked for and nobody applied. `git interpret-trailers` and
+    # `%(trailers:…)` read the LAST PARAGRAPH only, so a `Release-bump:` with
+    # anything after it is invisible, and so is one whose paragraph contains a
+    # malformed neighbour: `Refs #127` without the colon stops the block being a
+    # block and takes the Release-bump down with it (measured, git 2.47.3).
+    #
+    # This is not hypothetical. Release v0.3.4, range 13a33b6b..e435af8c:
+    # e435af8c (#207) carried `Release-bump: minor` at column 0 and touched three
+    # files under pkg/, but the trailer sat at line 106 of a 138-line message
+    # GitHub composed from the branch commits, with bullet sections after it. The
+    # parser returned empty, next_patch won, and pkg/v0.3.4 shipped.
+    # pkg/v0.4.0 has never existed. Nothing failed and nothing warned.
+    #
+    # Why refuse rather than read the trailer wherever it appears: the squash
+    # message GitHub composes embeds the BRANCH COMMITS' own bodies, so reading
+    # anywhere would let a contributor set the release size — the exact smuggling
+    # ADR 0007 §2 exists to prevent. A refusal cannot set a size. It can only
+    # stop a release, loudly, with the commit named.
+    #
+    # Counted rather than matched, so a message carrying two `Release-bump:`
+    # lines of which git parsed one is caught too. Pure `case` on a variable:
+    # no `grep -c` (which prints 0 and exits 1, a combination that has inverted
+    # verdicts here before) and no pipeline into `grep -q`.
+    msg_count=0
+    while IFS= read -r line; do
+      case "$line" in "Release-bump:"*) msg_count=$((msg_count + 1)) ;; esac
+    done < <(git log -1 --format=%B "$sha")
+
+    parsed_count=0
+    if [ -n "$raw" ]; then
+      while IFS= read -r value; do
+        [ -n "$value" ] && parsed_count=$((parsed_count + 1))
+      done < <(tr '\037' '\n' <<<"$raw")
+    fi
+
+    if [ "$msg_count" -gt "$parsed_count" ]; then
+      # Only when the commit ALSO touched pkg/. A trailer on a commit that
+      # touched nothing under pkg/ would not have counted even if it had parsed
+      # (ADR 0007 §2), so refusing on it would be an alarm about nothing.
+      if grep -qE '^pkg/' < <(git log -1 --name-only --format= -m --first-parent "$sha"); then
+        echo "cut-tags: $(git rev-parse --short "$sha") carries a 'Release-bump:' OUTSIDE the trailer block — refusing to size this release" >&2
+        echo "cut-tags:   the message has $msg_count, git parsed $parsed_count. Trailers are read from the LAST PARAGRAPH only." >&2
+        echo "cut-tags:   move it to the last paragraph, alone or beside well-formed 'Key: value' trailers, and re-run." >&2
+        return 1
+      fi
+    fi
+
     [ -z "$raw" ] && continue
     # Redirection, never `git log … | grep -qE`. `grep -q` exits on its first
     # match, git takes SIGPIPE, `pipefail` reports 141, and `|| continue` then
@@ -180,7 +229,9 @@ range_trailer() {
   echo "$best"
 }
 
-trailer="$(range_trailer "$RANGE")"
+# A refusal from range_trailer is fatal: continuing would cut the patch that the
+# silent-drop bug used to cut, which is the outcome the refusal exists to stop.
+trailer="$(range_trailer "$RANGE")" || exit 65
 
 # bump_for_pkg <last-tag> — echo the next full tag. Pre-release tags refuse to
 # bump (the shared lib rejects them in next_patch/minor).
