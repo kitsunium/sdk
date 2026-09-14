@@ -1,12 +1,32 @@
 package pbkdf2pw
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// cheapIters is the cost carried by the fixture hashes below. Verify and
+// NeedsRehash read the cost from the PHC string itself — `i=<n>` is part of the
+// stored format — so a fixture at two rounds walks exactly the same code as one
+// at 600000 and costs nothing. Only Hash is pinned to currentIters, and
+// Test_pbkdf2PW_Hash is the one place that policy is paid for and checked.
+const cheapIters int = 2
+
+// cheapSecret is `secret` hashed at cheapIters over fixtureSalt. It replaces a
+// live Hash call that bought three 600000-round derivations to test a
+// constant-time compare.
+const cheapSecret string = "$pbkdf2-sha256$i=2$c2l4dGVlbi1ieXRlLXNsdA" +
+	"$+bfTa2xubB9egirenRDuTGGhioaM8icqhTYlKTK/DZk"
+
+// fixtureSalt is the 16-byte salt the cheap fixtures were minted over.
+const fixtureSalt string = "sixteen-byte-slt"
+
+// fixtureDigest is a 32-byte stand-in digest for the rows that never compare it.
+const fixtureDigest string = "thirty-two-byte-digest-padding!!"
 
 func Test_pbkdf2PW_Algorithm(t *testing.T) {
 	t.Parallel()
@@ -29,11 +49,20 @@ func Test_pbkdf2PW_Algorithm(t *testing.T) {
 
 func Test_pbkdf2PW_Hash(t *testing.T) {
 	t.Parallel()
+	//: OWASP 2023 floor for PBKDF2-SHA256. Raising the policy is a legitimate
+	//: ratchet and must NOT fail here — the previous hard-coded `i=600000`
+	//: prefix punished exactly that move. Lowering it weakens every hash minted
+	//: from now on, and that is what this refuses.
+	if currentIters < 600_000 {
+		t.Fatalf("currentIters = %d, below the OWASP floor of 600000", currentIters)
+	}
 	tests := []struct {
 		name   string
 		prefix string
 	}{
-		{"emits a PHC string at the current policy", "$pbkdf2-sha256$i=600000$"},
+		//: derived from the constant, so the arm asserts that Hash actually
+		//: SPENDS the declared policy rather than some other number
+		{"emits a PHC string at the current policy", fmt.Sprintf("$%s$i=%d$", algorithm, currentIters)},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -53,10 +82,13 @@ func Test_pbkdf2PW_Hash(t *testing.T) {
 
 func Test_pbkdf2PW_Verify(t *testing.T) {
 	t.Parallel()
-	//: a real stored hash backs the match/mismatch rows.
-	good, herr := (pbkdf2PW{}).Hash([]byte("secret"))
-	if herr != nil {
-		t.Fatalf("Hash: %v", herr)
+	//: the stored hash backs the match/mismatch rows. Verify recomputes at the
+	//: cost the STRING carries, so a two-round fixture is the same code path.
+	good := cheapSecret
+	//: the fixture must really carry the cheap cost. Without this the file could
+	//: silently drift back to a 600000-round fixture and nothing would say so.
+	if gotIters, _, _, ok := decodePHC(good); !ok || gotIters != cheapIters {
+		t.Fatalf("fixture cost = %d (decoded=%v) want %d", gotIters, ok, cheapIters)
 	}
 	tests := []struct {
 		name     string
@@ -90,11 +122,9 @@ func Test_pbkdf2PW_Verify(t *testing.T) {
 
 func Test_pbkdf2PW_NeedsRehash(t *testing.T) {
 	t.Parallel()
-	//: a current-policy hash backs the fresh row.
-	fresh, herr := (pbkdf2PW{}).Hash([]byte("pw"))
-	if herr != nil {
-		t.Fatalf("Hash: %v", herr)
-	}
+	//: NeedsRehash only PARSES the cost field — it never derives — so the fresh
+	//: row needs a current-policy string, not a current-policy derivation.
+	fresh := encodePHC([]byte(fixtureSalt), []byte(fixtureDigest), currentIters)
 	tests := []struct {
 		name string
 		phc  string
@@ -127,8 +157,8 @@ func Test_encodePHC(t *testing.T) {
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			salt := []byte("sixteen-byte-slt")
-			digest := []byte("thirty-two-byte-digest-padding!!")
+			salt := []byte(fixtureSalt)
+			digest := []byte(fixtureDigest)
 			phc := encodePHC(salt, digest, c.iters)
 			gi, gs, gd, ok := decodePHC(phc)
 			//: encode then decode must reproduce every field exactly.
