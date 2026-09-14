@@ -130,50 +130,60 @@ func FuzzRoughtimeDecodeMessage(f *testing.F) {
 			//: the two halves of the parser disagree about the same bytes.
 			t.Fatalf("decode accepted %d bytes that roughtimeHeaderSize refuses: %v", len(raw), hdrErr)
 		}
-		//: duplicate tags collapse in the map, so the field count is pinned to
-		//: the number of DISTINCT tags in the header's tag table — not merely
-		//: bounded above by the declared count. Counting them here closes the
-		//: gap a "<= count" bound leaves open: a decoder that silently dropped
-		//: a field for any reason OTHER than a tag collision would still
-		//: satisfy the bound, and the exact-tiling check below would then be
-		//: skipped for the very input that broke it.
-		distinct := fuzzRoughtimeDistinctTags(raw, count)
-		//: the map must hold exactly one entry per distinct tag.
+		//: the value area is everything after the header the format describes.
+		values := raw[header:]
+		valuesLen := len(values)
+		//: Re-derive the WHOLE frame from the wire, independently of the
+		//: decoder: the ordered tag table and the ordered extent table. This
+		//: is what closes the duplicate-tag hole. Asserting on the decoded MAP
+		//: alone cannot see a mis-sliced field whose tag is later overwritten
+		//: by a duplicate — the bad extent is discarded before any assertion
+		//: reads it, so precisely the inputs most likely to break the slicing
+		//: were the ones escaping the strongest check.
+		tags, extents := fuzzRoughtimeTables(raw, count, valuesLen)
+		//: TILING over every DECLARED field, not just the surviving ones.
+		//: Each field ends where the next begins and the last runs to the end,
+		//: so the extents must partition the value area exactly — gaps and
+		//: overlaps are both unrepresentable in this framing.
+		if !fuzzRoughtimeTiles(t, extents, valuesLen) {
+			//: fuzzRoughtimeTiles already reported which pair broke it.
+			return
+		}
+		//: one pass yields both the distinct count and each tag's last index.
+		lastIndex := fuzzRoughtimeLastIndex(tags)
+		//: the map must hold exactly one entry per DISTINCT tag.
+		distinct := len(lastIndex)
+		//: a field dropped for any reason other than a tag collision.
 		if len(fields) != distinct {
-			//: a field was dropped, or one was invented.
+			//: name both counts so the gap is actionable.
 			t.Fatalf("header carries %d distinct tags (of %d declared) but decode returned %d fields",
 				distinct, count, len(fields))
 		}
-		//: TILING — sum the decoded extents against the value area.
-		valuesLen := len(raw) - header
-		total := 0
-		//: every value must lie inside the packet, individually.
-		for tag, value := range fields {
-			//: a single field wider than the value area cannot be a slice of it.
-			if len(value) > valuesLen {
-				//: the slice escaped the region it was cut from.
-				t.Fatalf("tag %#x yielded %d bytes from a %d-byte value area",
-					tag, len(value), valuesLen)
+		//: EXTENT AGREEMENT — every surviving entry must carry exactly the
+		//: bytes its tag's LAST occurrence spans, because a later duplicate
+		//: overwrites an earlier one in the map.
+		for index, tag := range tags {
+			//: only the last occurrence of a tag is observable in the map.
+			if lastIndex[tag] != index {
+				//: an earlier occurrence; the map no longer holds it.
+				continue
 			}
-			//: accumulate for the partition check.
-			total += len(value)
-		}
-		//: the fields may never cover MORE than the area they were cut from.
-		if total > valuesLen {
-			//: overlapping fields — the extents double-count the same bytes.
-			t.Fatalf("%d fields cover %d bytes of a %d-byte value area (overlap)",
-				len(fields), total, valuesLen)
-		}
-		//: with every tag distinct, the partition must be EXACT: the format
-		//: leaves no room for a gap, because each field ends where the next
-		//: begins and the last runs to the end of the buffer. When tags
-		//: collide the collapsed entries genuinely lose bytes, so only the
-		//: upper bound above applies.
-		if distinct == count && total != valuesLen {
-			//: a gap means some bytes belong to no field, which this framing
-			//: cannot express.
-			t.Fatalf("%d distinct fields cover %d bytes of a %d-byte value area (gap)",
-				count, total, valuesLen)
+			//: the decoded bytes for this tag.
+			got, found := fields[tag]
+			//: the distinct-count check above already guarantees presence.
+			if !found {
+				//: a tag the header declares but the map lost.
+				t.Fatalf("tag %#x is declared at index %d but missing from the decode", tag, index)
+			}
+			//: and they must be the independently derived extent, verbatim.
+			want := values[extents[index].start:extents[index].end]
+			//: a mismatch is the off-by-one the package doc warns about.
+			if !bytes.Equal(got, want) {
+				//: show both so the slip is visible.
+				t.Fatalf("tag %#x at index %d decoded %d bytes %x, want the [%d,%d) extent %x",
+					tag, index, len(got), got,
+					extents[index].start, extents[index].end, want)
+			}
 		}
 	})
 }
@@ -273,26 +283,100 @@ func fuzzRoughtimeSplit(count int, blob []byte) []roughtimeField {
 	return fields
 }
 
-// fuzzRoughtimeDistinctTags counts the distinct tags in a message's tag table.
+// fuzzRoughtimeExtent is one field's half-open span inside the value area.
+type fuzzRoughtimeExtent struct {
+	start int
+	end   int
+}
+
+// fuzzRoughtimeTables reads the ordered tag table and the ordered extent table
+// straight out of the wire.
 //
-// The table is the contiguous block that follows the count and the count-1
-// offsets, so it spans raw[4*count : 8*count] — derived here from the format
-// rather than reused from the decoder, because a helper that asked the decoder
-// where its own tags were would agree with it by construction and could not
-// contradict it. The caller has already had roughtimeHeaderSize confirm that
-// the buffer is at least that long.
-func fuzzRoughtimeDistinctTags(raw []byte, count int) int {
-	//: one slot per declared tag; duplicates collapse on insert.
-	seen := make(map[uint32]struct{}, count)
-	//: the tag table starts where the offset table ends.
+// Both are derived from the FORMAT, not borrowed from the decoder: a helper
+// that asked the decoder where its own tags and offsets were would agree with
+// it by construction and could never contradict it. The layout is fixed — the
+// count, then count-1 offsets, then count tags, then the values — so the tag
+// table is the contiguous block raw[4*count : 8*count] and offset i lives at
+// raw[4*i]. The caller has already had roughtimeHeaderSize confirm the buffer
+// spans all of it.
+func fuzzRoughtimeTables(raw []byte, count, valuesLen int) (tags []uint32, extents []fuzzRoughtimeExtent) {
+	//: one slot per declared field.
+	tags = make([]uint32, 0, count)
+	extents = make([]fuzzRoughtimeExtent, 0, count)
+	//: the tag table begins where the offset table ends.
 	base := roughtimeTagSize * count
-	//: read one little-endian uint32 per declared tag.
+	//: walk the declared fields in wire order.
 	for index := range count {
-		//: this tag's four bytes.
-		at := base + roughtimeTagSize*index
-		//: record it; a repeat leaves the set unchanged.
-		seen[binary.LittleEndian.Uint32(raw[at:])] = struct{}{}
+		//: this field's tag.
+		tags = append(tags, binary.LittleEndian.Uint32(raw[base+roughtimeTagSize*index:]))
+		//: the first value's offset is implicit at zero.
+		start := 0
+		//: every other start is read from the table entry before it.
+		if index > 0 {
+			//: offset i sits at raw[4*i].
+			start = int(binary.LittleEndian.Uint32(raw[roughtimeTagSize*index:]))
+		}
+		//: the last value runs to the end of the buffer.
+		end := valuesLen
+		//: every other ends where the next one begins.
+		if index+1 < count {
+			//: the following table entry.
+			end = int(binary.LittleEndian.Uint32(raw[roughtimeTagSize*(index+1):]))
+		}
+		//: record the span as the format describes it.
+		extents = append(extents, fuzzRoughtimeExtent{start: start, end: end})
 	}
-	//: the number the decoded map must match exactly.
-	return len(seen)
+	//: both tables, in declaration order.
+	return tags, extents
+}
+
+// fuzzRoughtimeTiles reports whether the extents partition [0, valuesLen)
+// exactly, failing the test with the offending pair when they do not.
+func fuzzRoughtimeTiles(t *testing.T, extents []fuzzRoughtimeExtent, valuesLen int) bool {
+	t.Helper()
+	//: an empty table describes an empty area.
+	if len(extents) == 0 {
+		//: nothing to partition.
+		return valuesLen == 0
+	}
+	//: the first field must start at the beginning of the value area.
+	if extents[0].start != 0 {
+		//: a leading gap the framing cannot express.
+		t.Fatalf("first extent starts at %d, not 0", extents[0].start)
+	}
+	//: each field must end exactly where the next begins.
+	for i := range len(extents) - 1 {
+		//: adjacency is what "the next offset" means.
+		if extents[i].end != extents[i+1].start {
+			//: a gap or an overlap between two declared fields.
+			t.Fatalf("extent %d ends at %d but extent %d starts at %d",
+				i, extents[i].end, i+1, extents[i+1].start)
+		}
+	}
+	//: and the last must run to the end of the buffer.
+	if extents[len(extents)-1].end != valuesLen {
+		//: a trailing gap.
+		t.Fatalf("last extent ends at %d, not %d", extents[len(extents)-1].end, valuesLen)
+	}
+	//: an exact partition.
+	return true
+}
+
+// fuzzRoughtimeLastIndex maps each tag to the index of its FINAL occurrence.
+//
+// Only the last occurrence is observable once the decoder has folded the
+// fields into a map keyed by tag, because a duplicate overwrites the entry the
+// earlier one wrote. Building this in one pass gives both facts the caller
+// needs — how many tags are distinct (the map's length) and which index each
+// surviving entry must be compared against — without a per-tag search.
+func fuzzRoughtimeLastIndex(tags []uint32) map[uint32]int {
+	//: one slot per distinct tag; a repeat overwrites, which is the point.
+	last := make(map[uint32]int, len(tags))
+	//: walk forward so the final write for a tag is its last occurrence.
+	for index, tag := range tags {
+		//: later index wins, mirroring what the decoder's map does.
+		last[tag] = index
+	}
+	//: tag to final index, for every distinct tag.
+	return last
 }
