@@ -300,6 +300,31 @@ need_toolchain() {
   [[ "$output" == *"pkg/v0.1.1"* ]]
 }
 
+# The per-commit path check was `git log --name-only … | grep -qE '^pkg/'` with
+# `|| continue` behind it. `grep -q` exits on its first match, git takes SIGPIPE,
+# `pipefail` reports 141, and `|| continue` SKIPS the commit — so a merge that
+# touched pkg/ AND enough other paths to fill the pipe buffer had its trailer
+# discarded and the release fell back to a patch. Measured on a commit touching
+# pkg/ plus ~300 KB of other names: rc=141, first `pkg/` line at position 1.
+#
+# The fixture uses long names rather than many files so it costs milliseconds:
+# 1600 paths of ~210 bytes is ~340 KB. Measured on this shape: 400 paths (85 KB)
+# fails the pipeline 9 times in 10 — flaky, so the fixture is sized to the
+# regime where it fails 10 in 10.
+@test "a trailer survives a commit whose file list exceeds the pipe buffer" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  mkdir -p tools
+  pad="$(printf 'y%.0s' $(seq 1 200))"
+  for i in $(seq 1 1600); do : >"tools/${pad}${i}.go"; done
+  echo "// touched" >>pkg/v1/codec.go
+  git add -A
+  git commit -q --no-verify -F - <<<$'feat(codec): wide merge\n\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
 @test "a commit repeating the same trailer still means that trailer" {
   need_toolchain
   tag_release pkg/v0.1.0

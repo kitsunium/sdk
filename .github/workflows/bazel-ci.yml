@@ -200,6 +200,17 @@ jobs:
         # review. See ADR 0088.
         run: make release-scripts-check
 
+      - name: git hook regression
+        # .githooks/commit-msg is this repository's no-AI-attribution
+        # enforcement, and it shipped with the same `printf | grep -q` — but
+        # with a worse failure mode, because the pipeline is the condition of an
+        # `if`. grep exits on its first match, the writer takes SIGPIPE,
+        # pipefail reports 141, 141 is false, and the hook ALLOWS the
+        # attribution it exists to refuse. Measured before the fix with the
+        # pattern near the top and a 400 KB body: 40 bypasses out of 40 runs.
+        # After: 0 out of 40. See ADR 0088.
+        run: make hooks-check
+
   # Cross-platform build matrix — folded in from the former standalone
   # cross-platform.yml so the SDK has ONE per-PR CI workflow, not two. Enforces
   # the invariant that every package BUILDS on every supported GOOS (a

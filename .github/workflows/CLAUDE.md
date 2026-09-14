@@ -60,11 +60,19 @@ behind the 120-minute Bazel lane.
    `scripts/release/release-scripts-test.sh`, which runs `scripts/release/*.bats`.
    That suite existed from ADR 0085 and NOTHING executed it until this job
    (ADR 0088).
+4. **Git hook regression** — `make hooks-check` → `scripts/hooks-test.sh`, which
+   runs `scripts/test-commit-msg-hook.bats` against `.githooks/commit-msg`. That
+   hook is the no-AI-attribution enforcement and its `printf | grep -q` failed
+   INVERTED — it allowed what it exists to refuse, 40 times out of 40 past a few
+   hundred KB (ADR 0088).
 
 These are the only `make` invocations in this workflow, and that is deliberate:
 `ci-gates-check` asserts the Makefile↔CI link by target NAME, which only works
 if CI goes through the target. Adding a gate means editing `GATES` **and** this
-file, plus the Makefile's `.PHONY` — all three, or the check fails.
+file, plus the Makefile's `.PHONY` — all three, or the check fails. That is not
+a claim: adding `hooks-check` to `GATES` before wiring its step produced
+`UNGATED: 'make hooks-check' exists but .github/workflows/bazel-ci.yml never
+runs it`.
 
 ### cross-build (the build bar) and test-386 (the runtime bar)
 

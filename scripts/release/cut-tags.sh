@@ -147,7 +147,15 @@ range_trailer() {
   local best="" best_rank=0 best_sha="" sha="" raw="" value="" r=""
   while read -r sha raw; do
     [ -z "$raw" ] && continue
-    git log -1 --name-only --format= -m --first-parent "$sha" | grep -qE '^pkg/' || continue
+    # Redirection, never `git log … | grep -qE`. `grep -q` exits on its first
+    # match, git takes SIGPIPE, `pipefail` reports 141, and `|| continue` then
+    # SKIPS the commit — so a merge touching pkg/ AND enough other paths to fill
+    # the pipe buffer had its trailer discarded and the release fell back to a
+    # patch. Which is ADR 0085's defect reopened by another route. Measured on
+    # this shape: 400 paths (85 KB) fails 9 times in 10, 1600 paths 10 in 10, and
+    # `pkg/` sorts early enough to be the FIRST match, which is the worst case.
+    # A process substitution keeps git's status out of the pipeline entirely.
+    grep -qE '^pkg/' < <(git log -1 --name-only --format= -m --first-parent "$sha") || continue
     # Split the field back into one value per repeated trailer, so a commit
     # carrying two of them is ranked like two commits would be. Default IFS on a
     # single-variable read, so `Release-bump: minor ` written with a stray space

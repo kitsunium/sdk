@@ -93,6 +93,30 @@ teardown() { rm -rf "$REPO"; }
   [ -z "$output" ]
 }
 
+# The rdeps step was `bazel query … | grep -q .` inside an `if`. `grep -q .`
+# matches the FIRST line and exits, bazel takes SIGPIPE, `pipefail` reports 141,
+# and the `if` is FALSE — so a query that DID reach //pkg/... left need_bump at 0
+# and cut no release at all. Measured with a stub emitting 608 KB: rc=141,
+# `if` false. The stub is what makes this testable without a Bazel workspace, and
+# a real rdeps over this repository is far larger than the pipe buffer.
+@test "a large rdeps answer still counts as reaching pkg" {
+  stub="$(mktemp -d)"
+  cat >"$stub/bazel" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  query) for i in $(seq 1 20000); do echo "//internal/kernel/pkg$i:lib"; done ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "$stub/bazel"
+  echo "// tweak" >> internal/kernel/errs/errs.go
+  git commit -aq --no-verify -m "fix(errs): wording"
+  PATH="$stub:$PATH" run "$SCRIPT"
+  rm -rf "$stub"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pkg" ]
+}
+
 # Regression: the release tag lives on a DETACHED child of main (how cut-tags.sh
 # publishes it), so `git describe` can't see it. compute-bumps must baseline on
 # the tag's first parent, not fall back to root..HEAD and emit a spurious bump.

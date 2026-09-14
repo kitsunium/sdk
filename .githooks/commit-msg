@@ -47,8 +47,33 @@ FORBIDDEN_PATTERNS=(
     "copilot"
 )
 
+# A here-string, never `printf … | grep -q`. That pipeline fails INVERTED here,
+# which is the worst shape a gate can take: `grep -q` exits on its first match,
+# the writer takes SIGPIPE, `set -o pipefail` turns the pipeline into 141, and
+# 141 is false — so the `if` does not fire and the hook ALLOWS the attribution
+# it exists to refuse. `set -e` does not rescue it: a failing command in an `if`
+# condition is exempt by design.
+#
+# Measured on this hook before the change, `Co-Authored-By: Claude` near the top
+# with filler after it, 40 runs per cell — "pass" means the commit went through:
+#
+#   body      pattern early   pattern late
+#   1 000     0/40            0/40
+#   64 000    0/40            0/40
+#   70 000    1/40            0/40
+#   96 000    27/40           0/40
+#   400 000   40/40           0/40
+#
+# Below the pipe buffer the gate works, which is why it was never noticed. Above
+# it the gate stops working, and past a few hundred KB it stops working every
+# time. The right-hand column is the control: with the pattern at the END grep
+# must read everything, there is no early exit and no SIGPIPE. A gate whose
+# correctness depends on where in the input the match happens to sit is not one.
+#
+# `<<<` writes the string to a temporary file, not a pipe, so there is no reader
+# to close it early and nothing to signal. Covered by scripts/test-commit-msg-hook.bats.
 for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-    if printf '%s' "$MSG" | grep -qiE "$pattern"; then
+    if grep -qiE "$pattern" <<<"$MSG"; then
         cat >&2 <<EOF
 ═══════════════════════════════════════════════
   ❌ COMMIT BLOCKED — AI reference detected

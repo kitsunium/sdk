@@ -47,6 +47,7 @@ MAKEFILE="Makefile"
 GATES=(
   ci-gates-check
   release-scripts-check
+  hooks-check
 )
 
 fail=0

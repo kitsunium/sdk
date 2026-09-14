@@ -86,7 +86,14 @@ if [ "$need_bump" -eq 0 ]; then
   if [ "${#changed_internal[@]}" -gt 0 ] && command -v bazel >/dev/null 2>&1; then
     for modpath in "${changed_internal[@]}"; do
       [ -z "$modpath" ] && continue
-      if bazel query "rdeps(//pkg/..., //${modpath}/...)" 2>/dev/null | grep -q .; then
+      # Redirection, never `bazel query … | grep -q .`. `grep -q .` matches the
+      # FIRST line and exits, bazel takes SIGPIPE, `pipefail` reports 141, and
+      # the `if` is FALSE — so a query that DID reach //pkg/... left need_bump at
+      # 0 and cut NO release at all. Measured with a stub emitting 608 KB: rc=141
+      # and the branch not taken. A real rdeps over this repository is far past
+      # the 64 KiB pipe buffer, and the match is always on line 1, so this is the
+      # worst case rather than a corner of it.
+      if grep -q . < <(bazel query "rdeps(//pkg/..., //${modpath}/...)" 2>/dev/null); then
         need_bump=1
         break
       fi

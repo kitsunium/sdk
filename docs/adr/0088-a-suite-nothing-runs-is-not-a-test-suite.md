@@ -82,6 +82,71 @@ Neither a repo-local `core.hooksPath` nor `GIT_CONFIG_GLOBAL=/dev/null` fixes
 this, because a hooks path injected at `-c` precedence outranks both — measured,
 all three shapes tried. Only the command-line flag wins.
 
+### Defects 5, 6 and 7 — the same pipeline, three more times, one of them inverted
+
+Found by sweeping the repository for the construct after defect 4, rather than
+by reading the diff. `printf … | grep -q` under `pipefail`: `grep -q` exits on
+its first match, the writer takes SIGPIPE, and the pipeline reports 141 — false
+— for input that DID match. It needs an input past the 64 KiB pipe buffer.
+
+**`.githooks/commit-msg`** is the worst of the three, because the pipeline is the
+condition of an `if`, so the failure is not "the gate breaks" but "the gate
+allows what it exists to refuse". `set -e` does not rescue it: a failing command
+in an `if` condition is exempt by design. Measured on the hook as it stood,
+`Co-Authored-By: Claude` placed near the top with filler after it, 40 runs per
+cell — "pass" means the commit went through:
+
+| body | pattern early | pattern late |
+|---|---|---|
+| 1 000 | 0/40 | 0/40 |
+| 64 000 | 0/40 | 0/40 |
+| 70 000 | 1/40 | 0/40 |
+| 96 000 | 27/40 | 0/40 |
+| 400 000 | 40/40 | 0/40 |
+
+The right-hand column is the control: with the pattern at the END, grep must
+read everything, there is no early exit and no signal, and the gate holds at
+every size. A gate whose correctness depends on where in the input the match
+happens to sit is not a gate. After the fix, 0/40 at 400 KB.
+
+The exit status, captured directly:
+
+```
+exit du pipeline quand le motif MATCHE = 141
+--- la condition if est-elle donc fausse ? ---
+if FAUX -> LAISSE PASSER
+```
+
+**`compute-bumps.sh`** asked `bazel query "rdeps(//pkg/…, //<mod>/…)" | grep -q .`
+inside an `if`. `grep -q .` matches line 1 and exits immediately, so this is the
+worst case rather than a corner of it. With a stub emitting 608 KB:
+
+```
+octets produits par le faux bazel : 608894
+if FAUX  -> need_bump=0 (AUCUNE RELEASE)
+exit du pipeline seul : rc=141
+```
+
+A change to `internal/` whose rdeps DO reach `//pkg/...` cut no release at all.
+
+**`cut-tags.sh`** scoped each commit with
+`git log -1 --name-only … | grep -qE '^pkg/' || continue`. On a commit touching
+`pkg/` plus enough other paths, the pipeline is 141, `|| continue` skips the
+commit, and its `Release-bump` trailer is never counted — the release falls back
+to a patch. Which is ADR 0085's own defect, reopened by a different route.
+Measured on this shape: the first `pkg/` line is at position 1 (worst case), 400
+paths (85 KB) fail the pipeline 9 times in 10, 1600 paths 10 in 10.
+
+All three take the same remedy: no pipeline. A here-string for the hook, a
+process substitution for the two release scripts — in both the writer's status
+stays out of the pipeline, so `pipefail` has nothing to propagate.
+
+The sweep also found the construct in `.devcontainer/images/.claude/scripts/`,
+including `permission-request.sh`, which is the Claude Code-side guard this hook
+was written to mirror and carries the identical inverted shape. Those files are
+template-inherited and `.github/CLAUDE.md` forbids editing them for SDK reasons,
+so they are reported and left — see §Deferred.
+
 ## Decision
 
 **1. `scripts/release/release-scripts-test.sh` runs the suites.** One entry
@@ -110,14 +175,24 @@ protection, and is currently unowned — see §Deferred.
 so neither belongs behind the 120-minute Bazel job or inside a matrix that would
 run it eleven times.
 
-**5. The fixtures pass `--no-verify`.** On every `git commit` and on the merge.
+**5. `hooks-check` is a third gate**, with its own BATS suite over
+`.githooks/`. The commit-msg hook is policy enforcement, not convenience, and it
+had been wrong since it was written without anyone noticing, because it was only
+ever exercised below the pipe buffer.
+
+**6. The fixtures pass `--no-verify`.** On every `git commit` and on the merge.
 `git commit-tree` is plumbing and runs no hooks, so it is left alone.
 
 ## Consequences
 
-- The 32 tests run on every pull request. Measured before this change: 32 pass,
-  0 fail, 1 skip (the `bazel`-dependent rdeps path, skipped when bazel is
-  present and exercised by the Bazel lane instead).
+- 42 tests run on every pull request: 34 over the release scripts (32 inherited
+  from ADR 0085, plus one each for defects 6 and 7) and 8 over the commit-msg
+  hook. All pass; one skips (the `bazel`-dependent rdeps path, skipped when
+  bazel is present).
+- Every one of them was observed RED against the code it guards before being
+  accepted. The three hook tests failed 3 of 8 before the fix, with the trailing-
+  attribution control passing throughout — which is what identified the
+  mechanism rather than merely the symptom.
 - Each of the three ADR 0085 defects was confirmed to make its own test go RED
   when reintroduced into `cut-tags.sh`, and GREEN when reverted. The suite had
   never been red, because it was written alongside the fix; this is the first
@@ -192,6 +267,18 @@ would add most.
   developer without jq should still get the assertions that do not need it. The
   assertion is a backstop for a runner-image change: measured on the first run of
   this lane, `ubuntu-latest` carries both.
+- **The same pipeline survives in `.devcontainer/images/`**, including
+  `permission-request.sh`, the Claude Code-side guard `.githooks/commit-msg`
+  mirrors — same `if <writer> | grep -qE "$pattern"`, same inverted failure.
+  Those files are template-inherited and `.github/CLAUDE.md` forbids editing
+  them for SDK reasons, so the finding belongs upstream in the devcontainer
+  template rather than here.
+- **`scripts/pre-commit/check-ktn-phases-1-7.sh` and
+  `scripts/pre-commit/check-audit-coverage.sh` carry a pipe into `grep -q`
+  too.** Neither was measured: both are outside the release/hooks perimeter this
+  ADR owns, and the audit-coverage one is a `grep | grep -qv` whose direction
+  has to be worked out before it can be called a defect. Named so the sweep is
+  on record as incomplete rather than reported as clean.
 - **The distro `bats` floats.** CI takes whatever `ubuntu-latest` ships. Pinning
   it would mean vendoring, which decision 2 rejects for this gate; the runner
   prints the version it used so a version-dependent failure is at least

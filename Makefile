@@ -1,4 +1,4 @@
-.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check
+.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -140,6 +140,13 @@ ci-gates-check:
 
 release-scripts-check:
 	bash scripts/release/release-scripts-test.sh
+
+# `hooks-check` runs scripts/test-commit-msg-hook.bats against .githooks/. The
+# commit-msg hook is the no-AI-attribution enforcement, and it shipped with a
+# `printf | grep -q` whose failure mode is INVERTED — it allowed what it exists
+# to refuse, 40 times out of 40 past a few hundred KB (ADR 0088).
+hooks-check:
+	bash scripts/hooks-test.sh
 
 # `bench` regenerates pkg/v1/codec/BENCH.md by running the full bench
 # matrix programmatically (testing.Benchmark per row, no text-format
