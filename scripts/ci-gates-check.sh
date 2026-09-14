@@ -48,6 +48,12 @@ fail=0
 
 note() { printf '  %s\n' "$1"; }
 
+# Every .PHONY declaration in the Makefile, backslash continuations folded in,
+# flattened to a single space-separated list. Compared whole-word afterwards, so
+# `release-scripts-check` can never be satisfied by a `release-scripts-check-v2`
+# that happens to contain it.
+phony_targets=""
+
 if [ ! -f "$WORKFLOW" ]; then
   echo "ci-gates-check: $WORKFLOW not found"
   exit 1
@@ -55,6 +61,24 @@ fi
 
 if [ ! -f "$MAKEFILE" ]; then
   echo "ci-gates-check: $MAKEFILE not found"
+  exit 1
+fi
+
+phony_targets="$(
+  awk '
+    /^\.PHONY:/ { collecting = 1; sub(/^\.PHONY:/, ""); }
+    collecting {
+      line = $0
+      cont = (line ~ /\\$/)
+      sub(/\\$/, "", line)
+      printf "%s ", line
+      if (!cont) { collecting = 0 }
+    }
+  ' "$MAKEFILE" | tr -s '[:space:]' ' '
+)"
+
+if [ -z "${phony_targets// /}" ]; then
+  echo "ci-gates-check: $MAKEFILE declares no .PHONY targets — has the layout changed?"
   exit 1
 fi
 
@@ -69,7 +93,13 @@ for gate in "${GATES[@]}"; do
   # A target that is not .PHONY is one `touch ci-gates-check` away from being
   # skipped as up to date. These gates produce no file, so the declaration is
   # the only thing that keeps them runnable.
-  if ! grep -qE "^\.PHONY:.*[[:space:]]${gate}([[:space:]]|$)" "$MAKEFILE"; then
+  #
+  # Matched against the JOINED declaration, not the raw line: .PHONY is one long
+  # line today, and the obvious tidy-up is to wrap it with backslashes the way
+  # ktn-linter's is wrapped. A line-anchored grep would then report every gate as
+  # NOT PHONY — a false red on a reformat, which is how a gate loses its
+  # credibility. `phony_targets` is computed once, above the loop.
+  if ! printf '%s' " $phony_targets " | grep -qF " $gate "; then
     echo "NOT PHONY: '${gate}' is a CI gate but is not declared in .PHONY in $MAKEFILE"
     note "a file of that name in the worktree would make make skip it"
     fail=1
