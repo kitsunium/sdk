@@ -101,6 +101,15 @@ type Service struct {
 	// here and every other process on this machine, or is nil when no such
 	// lock is available. See cache_lock.go for what nil costs.
 	cacheLock corelock.Locker
+	// markFloorMu guards markFloor. Separate from cacheLockMu because the two
+	// are held for different reasons and one of them wraps a constructor.
+	markFloorMu sync.Mutex
+	// markFloor is the newest vendor-signed instant THIS PROCESS has
+	// authenticated, whether or not it managed to install it. The cached
+	// bundle is still the durable mark; this bounds it from below for as long
+	// as the process lives, because an install that stood down or failed does
+	// not un-authenticate the bytes that got it here. See raiseMarkFloor.
+	markFloor time.Time
 	// timeServers are the Roughtime servers consulted to corroborate the
 	// local clock. Empty disables the check, which is what committed source
 	// ships and what every test constructor gets: a Service must not reach

@@ -102,6 +102,15 @@ func (s *Service) rememberRoster(raw []byte, roster *coreent.RosterValue) {
 		//: Keep what is already there.
 		return
 	}
+	//: Record the instant BEFORE reaching for the guard, because every way
+	//: this function can fail to install is a way it would otherwise forget
+	//: what it just authenticated: the guard held elsewhere, no guard to be had
+	//: on this platform, a cache directory that cannot be written. None of them
+	//: un-signs the bytes. See raiseMarkFloor for what this buys and what it
+	//: deliberately does not.
+	if roster != nil {
+		s.raiseMarkFloor(roster.IssuedAt)
+	}
 	//: The comparison and the replacement are ONE operation or they are a
 	//: lost update. Read outside the guard, both writers see the same mark,
 	//: both conclude they are newer than it, and whichever renames LAST
@@ -396,8 +405,97 @@ func (s *Service) signedHighWaterMark() time.Time {
 	var mark time.Time
 	//: Under the guard on Windows only, for the same reason cachedRoster is.
 	s.holdCacheForRead(func() { mark = s.markWhileHeld() })
+	//: What is on disk can be BEHIND what this process authenticated — an
+	//: install that stood down, or one the filesystem refused — and the disk is
+	//: not the evidence: the signature is. Take the later of the two.
+	if floor := s.markFloorNow(); mark.Before(floor) {
+		//: The instant this process authenticated but could not install.
+		return floor
+	}
 	//: The newest signed instant this machine can prove it has seen.
 	return mark
+}
+
+// raiseMarkFloor moves the in-process floor under the mark forward, and never
+// backward.
+//
+// # What it is for
+//
+// holdCacheForWrite SKIPS the install when the guard is held elsewhere, and its
+// own comment justifies that with "Nothing is lost by standing down: the holder
+// is installing, and the next verification caches whatever it fetches". That is
+// true of the CACHE and false of the MARK. The holder is installing A roster,
+// not THIS one — rememberRoster exists for "an origin lagging behind another",
+// which is two DIFFERENT generations in flight — so what the skip drops is the
+// distance between them, out of the one number checkClock refuses a rolled-back
+// clock against. Measured on windows-latest, run 34782571674: one stand-down,
+// logged one line above "the mark ended below the newest generation in 1 of 400
+// rounds".
+//
+// The same hole opens on three other paths that never needed a race to reach
+// it: a platform with no file lock at all, where cacheGuard returns nil and two
+// goroutines run the compare-and-install unguarded; a cache directory that
+// cannot be written; and a write that fails halfway. All four end with this
+// process having authenticated an instant it cannot read back.
+//
+// # Why it cannot refuse a clock it should not
+//
+// checkClock refuses a clock reading earlier than the mark, so a floor that
+// ran ahead of reality would refuse a machine whose clock is correct. It cannot:
+// rememberRoster is reached from exactly one place, one line after ParseBundle
+// returned, and ParseRoster refuses a roster with `now.Before(IssuedAt)`. So
+// every instant that reaches this function was already NOT in the future of the
+// clock that admitted it.
+//
+// # What it deliberately does not do
+//
+// It does not persist, and it is not consulted by the ratchet's own comparison
+// inside rememberRoster. The cached bundle stays the durable mark and stays the
+// thing the comparison guards, for two reasons: a floor written to disk would
+// be a plain number a local holder could set, which is exactly the forgery
+// signedHighWaterMark's doc comment says the scheme avoids by making the mark
+// the vendor's own signature; and comparing an offered bundle against the floor
+// rather than the disk would REFUSE to install a generation newer than what is
+// cached but older than what was authenticated, leaving the offline fallback on
+// a staler bundle to protect a number that is already protected here.
+//
+// It is also per SERVICE and not per cache directory, which is the same residue
+// seen from inside one process: a second Service built over the same directory
+// reads the disk and nothing else. A package-level map keyed by directory would
+// close that and was refused on three counts. It is process-wide mutable state
+// in a package that deliberately holds `origins` on the Service "so a test can
+// point it at a stub server without touching process-wide state". It grows
+// without bound, one entry per directory ever used, and this package's own tests
+// use a fresh t.TempDir() per round. And a directory is the wrong key: two
+// Services trusting DIFFERENT vendor roots may share a cache directory, so one
+// could raise a floor the other never authenticated and make it refuse a clock
+// on evidence it does not hold — a refusal manufactured out of the fix for a
+// dropped one. Keying on the vendor key as well makes the map worse, not safer.
+//
+// The residue is therefore one Service instance wide, and one process restart
+// wide: after a stand-down, a fresh reader gets the older generation back until
+// the next successful refresh. Both halves are asserted in
+// Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown rather than described
+// here and nowhere else.
+func (s *Service) raiseMarkFloor(issued time.Time) {
+	s.markFloorMu.Lock()
+	//: Released at the point it was acquired.
+	defer s.markFloorMu.Unlock()
+	//: Compared and assigned under ONE hold. Reading the floor, releasing, and
+	//: assigning would be the same lost update this function exists to close,
+	//: reintroduced inside the fix for it.
+	if s.markFloor.Before(issued) {
+		s.markFloor = issued
+	}
+}
+
+// markFloorNow reads the in-process floor.
+func (s *Service) markFloorNow() time.Time {
+	s.markFloorMu.Lock()
+	//: Released at the point it was acquired.
+	defer s.markFloorMu.Unlock()
+	//: The newest instant this process authenticated, installed or not.
+	return s.markFloor
 }
 
 // markWhileHeld is signedHighWaterMark's body for a caller that already holds

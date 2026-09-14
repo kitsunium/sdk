@@ -4,12 +4,16 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	svclock "github.com/kitsunium/sdk/internal/service/lock"
 )
 
 // concurrentRounds is how many times each probe replays its race.
@@ -354,6 +358,143 @@ func Test_writeCachedBundle_concurrentWritersNeverDestroyTheCache(t *testing.T) 
 			if unguardedRenameIsCollisionFree && reported != 0 {
 				t.Errorf("the write reported failure in %d of %d rounds, want 0 — rename(2) replaces unconditionally, so two writers racing one name both succeed (%s)",
 					reported, concurrentRounds, tt.reason)
+			}
+		})
+	}
+}
+
+// Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown reproduces, without
+// any race at all, the ONE round in 400 that failed on windows-latest.
+//
+// Its witness is in run 34782571674's windows job, one line above the failure
+// and in the directory the failing round used:
+//
+//	roster cache at ...\Test_rememberRoster_concurrentGenerationsNeverLowerTheMarktwo_o1362201637\018
+//	is held elsewhere; leaving this refresh to the holder
+//	cache_concurrency_internal_test.go:145: the mark ended below the newest
+//	generation in 1 of 400 rounds, want 0
+//
+// That line is holdCacheForWrite standing down: the runner stalled past
+// cacheLockBudget, the goroutine carrying the NEWER generation could not take
+// the guard, and the one carrying the older generation decided the mark. The
+// probe above cannot say so, because it can only produce that stall by luck;
+// this one produces it by holding the lock, so the same defect is red on every
+// platform and in a fixed two seconds.
+//
+// Standing down was reasoned about and the reasoning is written down in
+// holdCacheForWrite: "Nothing is lost by standing down: the holder is
+// installing, and the next verification caches whatever it fetches." That is
+// true of the CACHE and false of the MARK. The holder is installing A roster,
+// not THIS one — rememberRoster's own doc comment exists for "an origin lagging
+// behind another" — so what is lost is the distance between the two
+// generations, out of the one number checkClock refuses a rolled-back clock
+// against.
+//
+// The assertion is therefore signedHighWaterMark's own contract, verbatim from
+// its doc comment: "the newest vendor-signed instant this machine has ever
+// authenticated". rememberRoster is only ever reached from rosterFrom, one line
+// after ParseBundle returned, so by the time this runs the machine HAS
+// authenticated the newer generation.
+func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// gap separates the generation on disk from the one offered.
+		gap    time.Duration
+		reason string
+	}{
+		{
+			name:   "the guard is held while the newer generation arrives",
+			gap:    time.Hour,
+			reason: "an install this machine skipped is still an instant it authenticated, and checkClock is what reads it",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			vendorPub, vendorPriv, keyErr := ed25519.GenerateKey(nil)
+			//: A failure here is an environment problem, not a test outcome.
+			if keyErr != nil {
+				t.Fatalf("generating vendor key: %v", keyErr)
+			}
+
+			base := time.Now().Truncate(time.Second)
+			older, newer := base.Add(tt.gap), base.Add(2*tt.gap)
+
+			dir := t.TempDir()
+			svc := (&Service{vendor: vendorPub}).WithCache(dir)
+			//: The generation already installed, which the stand-down leaves in
+			//: place.
+			if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, older, 1)); seedErr != nil {
+				t.Fatalf("seeding cache: %v", seedErr)
+			}
+
+			//: A SECOND locker on the same directory, which is what another
+			//: process is: takeFlock opens the lock file per acquisition, so its
+			//: flock excludes this one exactly as a separate process's would.
+			//: Built through the same constructor cacheGuard uses, so a platform
+			//: that has no guard refuses here too rather than pretending.
+			holder, lockErr := svclock.NewFileLocker(svclock.FileConfig{Dir: dir, Poll: cacheLockPoll})
+			//: UnsupportedPlatform is the ONLY refusal worth skipping on: it is
+			//: a standing fact about the GOOS, and there is then no stand-down
+			//: to provoke because cacheGuard returns nil too. Every other
+			//: refusal — LockDirectoryUnsafe, LockBackendFailed — says this
+			//: directory is not what the test assumed, and skipping on those
+			//: would be a probe that cannot fail. Unreachable on every lane that
+			//: RUNS this test: platformNative is true for linux, darwin, the
+			//: three BSDs and windows alike.
+			if errors.Is(lockErr, coreproc.UnsupportedPlatform) {
+				t.Skipf("no file lock on %s, so cacheGuard returns nil here and there is no stand-down to reproduce", runtime.GOOS)
+			}
+			//: A failure here is an environment problem, not a test outcome.
+			if lockErr != nil {
+				t.Fatalf("building the holder's locker: %v", lockErr)
+			}
+			lease, acquireErr := holder.Acquire(t.Context(), cacheLockName)
+			//: A failure here is an environment problem, not a test outcome.
+			if acquireErr != nil {
+				t.Fatalf("holding the cache guard: %v", acquireErr)
+			}
+
+			//: The newer generation arrives while the guard is held elsewhere.
+			//: This blocks for cacheLockBudget and then stands down.
+			svc.rememberRoster(paddedBundle(t, vendorPriv, newer, 1), &coreent.RosterValue{IssuedAt: newer})
+
+			//: Give the guard back BEFORE reading, so the read below measures
+			//: the mark rather than the contention.
+			if releaseErr := lease.Release(t.Context()); releaseErr != nil {
+				t.Fatalf("releasing the cache guard: %v", releaseErr)
+			}
+
+			//: The control, and it is not decoration: if the install had somehow
+			//: LANDED, the assertion below would pass without the stand-down ever
+			//: happening, and this test would be a shape that guarantees its own
+			//: result. The cache must still hold the older generation.
+			if installed := svc.markWhileHeld(); !installed.Equal(older) {
+				t.Fatalf("the install was not blocked: the cache holds %s, want the seeded %s — this test measured nothing",
+					installed.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339))
+			}
+
+			//: The property, which the stand-down broke.
+			if mark := svc.signedHighWaterMark(); !mark.Equal(newer) {
+				t.Errorf("the mark reads %s after authenticating %s, want %s (%s)",
+					mark.UTC().Format(time.RFC3339), newer.UTC().Format(time.RFC3339),
+					newer.UTC().Format(time.RFC3339), tt.reason)
+			}
+
+			//: The BOUNDARY of that property, pinned rather than described. The
+			//: floor is per-Service by construction, so a second verifier built
+			//: over the same directory reads the disk and nothing else — which
+			//: is exactly what a process restart does. Asserting it here is what
+			//: keeps "the residue is one Service instance wide" from being a
+			//: sentence nobody can check; raiseMarkFloor says why the shared
+			//: alternative was refused. Change this line only with that comment.
+			if fresh := (&Service{vendor: vendorPub}).WithCache(dir).signedHighWaterMark(); !fresh.Equal(older) {
+				t.Errorf("a second Service over the same cache reads %s, want the installed %s — the documented boundary of the in-process floor moved (%s)",
+					fresh.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339), tt.reason)
 			}
 		})
 	}

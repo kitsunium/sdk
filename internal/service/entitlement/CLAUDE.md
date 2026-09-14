@@ -57,6 +57,18 @@ product (ADR 0078 §1).
   refuses a clock earlier than that mark. `holdCache` makes the pair one
   operation; `markWhileHeld` is the read a caller already holding it uses,
   because the guard is not reentrant.
+- **Exclusion is not the whole ratchet, because a write can be SKIPPED.**
+  `holdCacheForWrite` stands down when the guard is held elsewhere, and standing
+  down costs nothing to the CACHE and everything to the MARK: the holder is
+  installing a roster, not this one. Measured on `windows-latest`, run
+  34782571674 — one stand-down, one round in 400 ending below the newest
+  generation. `rememberRoster` therefore raises an in-process floor under the
+  mark BEFORE it reaches the guard, and `signedHighWaterMark` returns the later
+  of the floor and the disk. The same floor covers the three non-racy ways this
+  package can authenticate an instant it cannot install: no lock on the
+  platform, an unwritable cache directory, a failed write. It does not persist,
+  and the ratchet's own comparison still reads the disk — see `raiseMarkFloor`
+  for both reasons.
 - **Readers take the same guard, and only Windows needs them to.** A rename is
   atomic for a POSIX reader, so nothing there requires it. Windows refuses to
   replace a file another handle holds open, and `syscall.Open` never asks for

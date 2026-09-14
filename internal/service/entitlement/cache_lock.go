@@ -133,26 +133,33 @@ func (s *Service) cacheGuard() corelock.Locker {
 
 // underCacheLock runs fn with the cache directory held against every other
 // goroutine in this process and every other process on this machine. It
-// reports whether fn RAN.
+// reports whether fn RAN, and when it did not, WHY.
 //
 // It returns false in exactly one situation: a guard exists and the lock could
-// not be taken within the budget. It does NOT decide what that means, because
-// the two callers want opposite things from it — a write must not proceed
-// unguarded, a read must not be abandoned — and a helper that chose for both
-// would have to be wrong for one of them.
+// not be taken. It does NOT decide what that means, because the two callers
+// want opposite things from it — a write must not proceed unguarded, a read
+// must not be abandoned — and a helper that chose for both would have to be
+// wrong for one of them.
+//
+// The error is returned rather than dropped because the two callers' log lines
+// used to ASSERT a cause they had no way to know. "Held elsewhere" is only one
+// of the answers Acquire can give: LockBackendFailed, LockFileReplaced and
+// LockFenceCorrupt are the others, and they say something entirely different
+// about the machine. On windows-latest, run 34782571674, that line was the only
+// evidence a dropped refresh left behind and it named a cause by assumption.
 //
 // A nil guard is NOT that situation. There, fn runs unguarded and this reports
 // true, because "this platform has no file lock" is a standing fact about the
 // machine rather than a passing state of the cache, and treating it as
 // contention would disable caching on such a machine permanently.
-func (s *Service) underCacheLock(fn func()) bool {
+func (s *Service) underCacheLock(fn func()) (ran bool, why error) {
 	locker := s.cacheGuard()
 	//: No exclusion to be had here at all: run unguarded, exactly as this
 	//: package did before the guard existed.
 	if locker == nil {
 		fn()
 		//: Ran, without exclusion.
-		return true
+		return true, nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cacheLockBudget)
@@ -162,10 +169,10 @@ func (s *Service) underCacheLock(fn func()) bool {
 	lease, acquireErr := locker.Acquire(ctx, cacheLockName)
 	//: Somebody else is inside the section right now, or the backend cannot
 	//: answer at all. Either way fn has not run, and the caller decides what
-	//: that is worth.
+	//: that is worth — with the distinction between the two in hand.
 	if acquireErr != nil {
-		//: Did not run.
-		return false
+		//: Did not run, and here is which of them it was.
+		return false, acquireErr
 	}
 	//: Released at the point it was acquired, on every path out of fn —
 	//: including a panic, because a lock file left held by a process that
@@ -180,27 +187,44 @@ func (s *Service) underCacheLock(fn func()) bool {
 
 	fn()
 	//: Ran, under exclusion.
-	return true
+	return true, nil
 }
 
 // holdCacheForWrite runs a cache WRITE under exclusion, and SKIPS it when
 // exclusion is available but cannot be taken.
 //
 // Skipping is the point, and it is the half a first version of this file got
-// wrong by falling through. This lock is taken by exactly one thing, so failing
-// to get it means another holder is inside the compare-and-install at this
-// instant — doing the same work, with the same roster, from the same origins.
-// Proceeding without it would be the lost update this file exists to remove,
-// reintroduced on the one path allowed to lower the mark. Nothing is lost by
-// standing down: the holder is installing, and the next verification caches
-// whatever it fetches.
+// wrong by falling through. Proceeding without the lock would be the lost
+// update this file exists to remove, reintroduced on the one path allowed to
+// lower the mark.
+//
+// What skipping costs was overstated as nothing. An earlier version of this
+// comment read "Nothing is lost by standing down: the holder is installing, and
+// the next verification caches whatever it fetches", on the premise that the
+// holder is "doing the same work, with the same roster, from the same origins".
+// The premise is exactly the one rememberRoster's own doc comment denies: the
+// ratchet exists for "an origin lagging behind another", which is two DIFFERENT
+// generations in flight. The holder is installing A roster, not THIS one, so
+// the skip drops the distance between them out of the mark — measured once on
+// windows-latest, run 34782571674. What is lost is now bounded elsewhere:
+// rememberRoster raises an in-process floor under the mark BEFORE it reaches
+// this function, so the instant survives the skip even though the install does
+// not. See raiseMarkFloor for what that does and does not cover. The CACHE is
+// genuinely not lost: the holder is installing, and the next verification
+// caches whatever it fetches.
 func (s *Service) holdCacheForWrite(fn func()) {
+	ran, why := s.underCacheLock(fn)
 	//: Ran — guarded, or unguarded on a machine with no guard to be had.
-	if s.underCacheLock(fn) {
+	if ran {
 		//: Installed, or deliberately not, by fn's own judgement.
 		return
 	}
 	//: Name which of the two silences this is: "the cache did not change"
-	//: means something quite different here and in cacheGuard's log line.
-	log.Printf("roster cache at %s is held elsewhere; leaving this refresh to the holder", s.cacheDir)
+	//: means something quite different here and in cacheGuard's log line. And
+	//: say what the guard actually answered rather than naming a holder, which
+	//: this site cannot observe: LockBackendFailed, LockFileReplaced and
+	//: LockFenceCorrupt reach it too, and each sends an operator somewhere
+	//: else. The previous wording asserted contention unconditionally, which
+	//: is the same defect one layer up — a sentence shaped like a measurement.
+	log.Printf("roster cache at %s: the guard could not be taken (%v); this refresh was skipped and the next verification caches whatever it fetches", s.cacheDir, why)
 }

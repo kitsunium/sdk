@@ -242,6 +242,28 @@ Carried forward unchanged from ADR 0078, none of them addressed here:
     rename(2) replaces unconditionally. The cache stayed valid in all 400, and
     production never installs unguarded, so the assertion that both writers
     also SUCCEED is made only where the kernel promises it.
+  - **Exclusion closed the lost update and opened a DROPPED one, caught by the
+    same probe.** `holdCacheForWrite` skips the install when the guard cannot
+    be taken within `cacheLockBudget`, and its comment justified that with
+    "Nothing is lost by standing down: the holder is installing, and the next
+    verification caches whatever it fetches" — on the premise that the holder
+    is "doing the same work, with the same roster, from the same origins". That
+    premise is the one `rememberRoster`'s own doc comment denies: the ratchet
+    exists for "an origin lagging behind another", which is two DIFFERENT
+    generations in flight. Measured on `windows-latest`,
+    [run 34782571674](https://github.com/kitsunium/sdk/actions/runs/34782571674):
+    one stand-down, logged one line above `the mark ended below the newest
+    generation in 1 of 400 rounds`. 20 000 rounds under `-race` on linux/amd64
+    produced neither the failure nor a data race, which is what says it is the
+    lock and not the memory. The mark is now bounded from below by an
+    in-process floor raised BEFORE the guard is reached, so the instant
+    survives the skip — and with it three paths that never needed a race: a
+    platform with no file lock, an unwritable cache directory, and a write that
+    fails. The floor does not persist and is not consulted by the ratchet's own
+    comparison: a mark written as a plain number is exactly the forgery the
+    vendor signature exists to prevent, and comparing against the floor would
+    refuse to install a generation newer than the cache to protect a number
+    already protected in memory. The residue is one restart wide.
   - **Still open, and deliberately.** A holder this package does not control —
     an antivirus scanner, a backup agent, a search indexer — can hold the
     bundle open and make a refresh fail exactly as before. No lock reaches
