@@ -46,6 +46,7 @@ go_test(
         "field_internal_test.go",
         "parse_bench_test.go",
         "parse_external_test.go",
+        "parse_fuzz_external_test.go",
         "parse_internal_test.go",
         "prefix_matcher_bench_test.go",
         "prefix_matcher_external_test.go",
