@@ -221,7 +221,10 @@ func (s *Service) holdCacheForWrite(fn func()) {
 	}
 	//: Name which of the two silences this is: "the cache did not change"
 	//: means something quite different here and in cacheGuard's log line. And
-	//: name what the guard actually said, rather than asserting contention —
-	//: a backend that has stopped answering reaches this line too.
-	log.Printf("roster cache at %s could not be taken (%v); leaving this refresh to the holder", s.cacheDir, why)
+	//: say what the guard actually answered rather than naming a holder, which
+	//: this site cannot observe: LockBackendFailed, LockFileReplaced and
+	//: LockFenceCorrupt reach it too, and each sends an operator somewhere
+	//: else. The previous wording asserted contention unconditionally, which
+	//: is the same defect one layer up — a sentence shaped like a measurement.
+	log.Printf("roster cache at %s: the guard could not be taken (%v); this refresh was skipped and the next verification caches whatever it fetches", s.cacheDir, why)
 }

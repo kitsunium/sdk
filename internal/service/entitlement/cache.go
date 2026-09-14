@@ -457,9 +457,26 @@ func (s *Service) signedHighWaterMark() time.Time {
 // the vendor's own signature; and comparing an offered bundle against the floor
 // rather than the disk would REFUSE to install a generation newer than what is
 // cached but older than what was authenticated, leaving the offline fallback on
-// a staler bundle to protect a number that is already protected here. The
-// residue is therefore one process restart wide: after a stand-down, a fresh
-// process reads the older generation back until the next successful refresh.
+// a staler bundle to protect a number that is already protected here.
+//
+// It is also per SERVICE and not per cache directory, which is the same residue
+// seen from inside one process: a second Service built over the same directory
+// reads the disk and nothing else. A package-level map keyed by directory would
+// close that and was refused on three counts. It is process-wide mutable state
+// in a package that deliberately holds `origins` on the Service "so a test can
+// point it at a stub server without touching process-wide state". It grows
+// without bound, one entry per directory ever used, and this package's own tests
+// use a fresh t.TempDir() per round. And a directory is the wrong key: two
+// Services trusting DIFFERENT vendor roots may share a cache directory, so one
+// could raise a floor the other never authenticated and make it refuse a clock
+// on evidence it does not hold — a refusal manufactured out of the fix for a
+// dropped one. Keying on the vendor key as well makes the map worse, not safer.
+//
+// The residue is therefore one Service instance wide, and one process restart
+// wide: after a stand-down, a fresh reader gets the older generation back until
+// the next successful refresh. Both halves are asserted in
+// Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown rather than described
+// here and nowhere else.
 func (s *Service) raiseMarkFloor(issued time.Time) {
 	s.markFloorMu.Lock()
 	//: Released at the point it was acquired.

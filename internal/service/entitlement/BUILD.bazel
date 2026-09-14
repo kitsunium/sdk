@@ -80,6 +80,7 @@ go_test(
     embed = [":entitlement"],
     deps = [
         "//internal/core/entitlement",
+        "//internal/core/proc",
         "//internal/kernel/errs",
         "//internal/service/lock",
     ],

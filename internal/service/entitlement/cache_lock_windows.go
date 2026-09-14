@@ -37,6 +37,6 @@ func (s *Service) holdCacheForRead(fn func()) {
 	//: The guard refused. Read anyway rather than report an empty cache, and
 	//: say what it refused with: contention and a broken backend both land
 	//: here and want different answers from whoever reads the line.
-	log.Printf("roster cache at %s could not be taken (%v); reading it without exclusion", s.cacheDir, why)
+	log.Printf("roster cache at %s: the guard could not be taken (%v); reading it without exclusion", s.cacheDir, why)
 	fn()
 }

@@ -4,12 +4,15 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	coreent "github.com/kitsunium/sdk/internal/core/entitlement"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	svclock "github.com/kitsunium/sdk/internal/service/lock"
 )
 
@@ -435,10 +438,20 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 			//: Built through the same constructor cacheGuard uses, so a platform
 			//: that has no guard refuses here too rather than pretending.
 			holder, lockErr := svclock.NewFileLocker(svclock.FileConfig{Dir: dir, Poll: cacheLockPoll})
-			//: No guard to be had on this platform, so there is no stand-down to
-			//: provoke and nothing this test can measure.
+			//: UnsupportedPlatform is the ONLY refusal worth skipping on: it is
+			//: a standing fact about the GOOS, and there is then no stand-down
+			//: to provoke because cacheGuard returns nil too. Every other
+			//: refusal — LockDirectoryUnsafe, LockBackendFailed — says this
+			//: directory is not what the test assumed, and skipping on those
+			//: would be a probe that cannot fail. Unreachable on every lane that
+			//: RUNS this test: platformNative is true for linux, darwin, the
+			//: three BSDs and windows alike.
+			if errors.Is(lockErr, coreproc.UnsupportedPlatform) {
+				t.Skipf("no file lock on %s, so cacheGuard returns nil here and there is no stand-down to reproduce", runtime.GOOS)
+			}
+			//: A failure here is an environment problem, not a test outcome.
 			if lockErr != nil {
-				t.Skipf("no cache guard on this platform, so no stand-down to reproduce: %v", lockErr)
+				t.Fatalf("building the holder's locker: %v", lockErr)
 			}
 			lease, acquireErr := holder.Acquire(t.Context(), cacheLockName)
 			//: A failure here is an environment problem, not a test outcome.
@@ -470,6 +483,18 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 				t.Errorf("the mark reads %s after authenticating %s, want %s (%s)",
 					mark.UTC().Format(time.RFC3339), newer.UTC().Format(time.RFC3339),
 					newer.UTC().Format(time.RFC3339), tt.reason)
+			}
+
+			//: The BOUNDARY of that property, pinned rather than described. The
+			//: floor is per-Service by construction, so a second verifier built
+			//: over the same directory reads the disk and nothing else — which
+			//: is exactly what a process restart does. Asserting it here is what
+			//: keeps "the residue is one Service instance wide" from being a
+			//: sentence nobody can check; raiseMarkFloor says why the shared
+			//: alternative was refused. Change this line only with that comment.
+			if fresh := (&Service{vendor: vendorPub}).WithCache(dir).signedHighWaterMark(); !fresh.Equal(older) {
+				t.Errorf("a second Service over the same cache reads %s, want the installed %s — the documented boundary of the in-process floor moved (%s)",
+					fresh.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339), tt.reason)
 			}
 		})
 	}
