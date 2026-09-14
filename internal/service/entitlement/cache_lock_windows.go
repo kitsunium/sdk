@@ -28,12 +28,15 @@ import "log"
 // because rename(2) over an open file is POSIX-guaranteed and the guard would
 // buy a reader there precisely nothing.
 func (s *Service) holdCacheForRead(fn func()) {
+	ran, why := s.underCacheLock(fn)
 	//: Ran — guarded, or unguarded on a machine with no guard to be had.
-	if s.underCacheLock(fn) {
+	if ran {
 		//: Read.
 		return
 	}
-	//: Held elsewhere. Read anyway rather than report an empty cache.
-	log.Printf("roster cache at %s is held elsewhere; reading it without exclusion", s.cacheDir)
+	//: The guard refused. Read anyway rather than report an empty cache, and
+	//: say what it refused with: contention and a broken backend both land
+	//: here and want different answers from whoever reads the line.
+	log.Printf("roster cache at %s could not be taken (%v); reading it without exclusion", s.cacheDir, why)
 	fn()
 }
