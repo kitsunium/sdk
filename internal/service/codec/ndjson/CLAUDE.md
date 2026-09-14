@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-14T16:00:00Z -->
 # internal/service/codec/ndjson/
 
 ## Purpose
@@ -30,6 +30,9 @@ Newline-delimited JSON: one JSON value per line, `\n`-separated. `Marshal` emits
 - **Line-length cap**: max single-line length 10 MiB (`scannerMaxCapacity`) enforced by the hand-rolled splitter — bigger records likely indicate a consumer bug or corrupt stream.
 - **Append rollback**: on per-record failure `Append` returns `dst[:origLen]` so callers never see a torn buffer (Appender contract).
 - Empty / whitespace-only lines are skipped silently to match the de-facto NDJSON dialect.
+- **Per-record encoding passes the element's ADDRESS**, not a copy (`elemForMarshal`), whenever the element is addressable — i.e. always for a `[]T`, never for a bare `[N]T` array value, and deliberately never for an interface element. Two measured reasons:
+  - *Parity.* `reflect.Value.Interface()` strips addressability, so a `MarshalJSON` / `MarshalText` declared on `*T` used to be skipped: ndjson emitted `{"v":1}` where `encoding/json.Marshal` of the whole `[]T` emits `"PTR-JSON"`. Pinned by `TestStdlibSliceParity`, which asserts line *i* equals element *i* of the stdlib's whole-slice encoding.
+  - *Allocation.* Since Go 1.27 `encoding/json` is the json/v2 implementation (`GOEXPERIMENT=jsonv2` joined the baseline in `internal/buildcfg/exp.go`), and json/v2's `marshalEncode` shallow-copies every non-pointer argument through `reflect.New` (`encoding/json/v2/arshal.go`). Passing the address skips it. Per record: **3 → 1** allocation for `[]T`, `[]*T` was already at 1, `[]any` stays at 2 (an interface's dynamic value is not addressable, so that copy is irreducible). Pinned by `TestAllocPerRecord`.
 
 ## Verification
 

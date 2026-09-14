@@ -93,7 +93,7 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 	//: closure pulls one element at a time — keeps the helper unaware
 	//: of reflect.Value's concrete type so the linter's API-MINIF rule
 	//: doesn't fire on a domain-specific exported helper.
-	if merr := encodeSliceInto(buf, n, func(i int) any { return slice.Index(i).Interface() }); merr != nil {
+	if merr := encodeSliceInto(buf, n, func(i int) any { return elemForMarshal(slice, i) }); merr != nil {
 		//: error path: pool the buffer back with cap-discard semantics.
 		scratch.ReleaseBuffer(buf)
 		//: wrap the stdlib error for reason-based matching.
@@ -380,7 +380,7 @@ func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: encode record-by-record; one '\n' per element appended in place.
 	for i := range slice.Len() {
 		//: delegate per-record JSON encoding to the stdlib.
-		line, merr := stdjson.Marshal(slice.Index(i).Interface())
+		line, merr := stdjson.Marshal(elemForMarshal(slice, i))
 		//: surface any per-record failure with dst restored to its prior length.
 		if merr != nil {
 			//: wrap the stdlib error for reason-based matching; slice off any
@@ -398,6 +398,55 @@ func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	}
 	//: hand back the (possibly re-allocated) buffer.
 	return dst, nil
+}
+
+// elemForMarshal hands element i of slice to encoding/json in the form that
+// costs the fewest allocations AND matches what the stdlib itself emits for
+// that element inside a JSON array.
+//
+// It returns a POINTER to the element whenever the element is addressable
+// (always true for a slice; true for an array only when the array value is
+// itself addressable, i.e. reached through a pointer). Two independent reasons,
+// both measured:
+//
+//   - Allocation. Since Go 1.27 `encoding/json` is the json/v2 implementation
+//     (GOEXPERIMENT=jsonv2 joined the baseline in internal/buildcfg/exp.go), and
+//     json/v2's marshalEncode shallow-copies any NON-pointer argument through
+//     reflect.New to obtain an addressable value — "It is beneficial to
+//     performance to always pass pointers to avoid this", says the stdlib
+//     comment at encoding/json/v2/arshal.go. Handing it a pointer skips that
+//     copy. Boxing a pointer into `any` is also free, where boxing a multi-word
+//     struct is not. Measured over the 3-record budget batch: 12 -> 6 allocs on
+//     go1.27.0, 9 -> 6 on go1.26.8 — i.e. the figure stops depending on the
+//     toolchain at all.
+//
+//   - Correctness. reflect.Value.Interface() strips addressability, so a
+//     MarshalJSON/MarshalText declared on *T was silently NOT called for a
+//     []T record, even though stdjson.Marshal of the whole []T does call it.
+//     ndjson emitted {"v":1} where the stdlib emits "PTR-JSON". Passing the
+//     address restores parity. Pinned by TestStdlibSliceParity, and measured
+//     identical on go1.26.8 and go1.27.0 — this divergence was ndjson's own,
+//     not a toolchain behaviour change.
+//
+// The non-addressable fallback (a bare [N]T array value) keeps the old
+// by-value form, which is the only thing reflect permits there.
+func elemForMarshal(slice reflect.Value, i int) any {
+	//: element view; addressability is a flag on the Value, so the check
+	//: below is a bit test, not a reflect walk.
+	elem := slice.Index(i)
+	//: two by-value cases, both measured on the 3-element batch:
+	//:   - interface element ([]any): Interface() hands back the dynamic value
+	//:     with no boxing allocation at all, so the address form buys nothing
+	//:     and costs json/v2 one extra indirection — 8 -> 9 allocs if taken.
+	//:   - bare array value ([N]T passed by value): its elements are not
+	//:     addressable, so there is nothing to take the address of.
+	if elem.Kind() == reflect.Interface || !elem.CanAddr() {
+		//: by-value form, as before the fix.
+		return elem.Interface()
+	}
+	//: pointer form: no reflect.New inside json/v2, no boxing allocation,
+	//: and pointer-receiver marshalers become reachable.
+	return elem.Addr().Interface()
 }
 
 // asSlice reports whether v resolves to a slice or array reflect.Value.
