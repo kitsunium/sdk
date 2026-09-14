@@ -48,6 +48,34 @@ func (gzipCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
 	return buf.Bytes(), nil
 }
 
+// DecompressBounded implements core/transform.BoundedDecompressor: it decodes
+// src under the CALLER's ceiling instead of this layer's backstop, so a caller
+// enforcing a tighter limit stops the work at its own bound rather than
+// materialising the full backstop and judging the result afterwards.
+func (c gzipCompressor) DecompressBounded(dst, src []byte, max int64) (decoded []byte, err error) {
+	//: a non-positive ceiling would admit everything through LimitReader's
+	//: max+1; fall back to this layer's own backstop rather than silently
+	//: disabling the bound the caller asked for.
+	if max <= 0 {
+		//: the documented layer-local ceiling.
+		return c.Decompress(dst, src)
+	}
+	//: the shared core, so the ceiling bounds the WORK and not just the verdict.
+	out, tooLarge, derr := gzipDecompressCore(dst, src, max)
+	//: a malformed stream is the scheme's business, surfaced verbatim.
+	if derr != nil {
+		//: already wrapped by the core.
+		return out, derr
+	}
+	//: a well-formed stream larger than the caller agreed to hold.
+	if tooLarge {
+		//: distinct from GzipFailed: nothing was malformed.
+		return dst, coretransform.DecompressedTooLarge
+	}
+	//: within the caller's ceiling.
+	return out, nil
+}
+
 // Decompress gzip-decodes src and appends the result to dst, bounded by the
 // production ceiling (maxDecompressedBytes, see bounded.go) so a bomb cannot
 // drive an OOM here. It delegates to gzipDecompress, the cap-parameterised core
@@ -63,13 +91,34 @@ func (gzipCompressor) Decompress(dst, src []byte) (decoded []byte, err error) {
 // wrapped gzip error. max is an explicit parameter so the overflow backstop is
 // testable without mutating shared state.
 func gzipDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
+	//: the layer backstop collapses "too big" into the scheme sentinel, which
+	//: is the contract this layer has always had and its tests still assert.
+	out, tooLarge, derr := gzipDecompressCore(dst, src, max)
+	//: a malformed stream surfaces verbatim.
+	if derr != nil {
+		//: already wrapped by the core.
+		return out, derr
+	}
+	//: over the layer's own ceiling — the scheme's failure sentinel.
+	if tooLarge {
+		//: GzipFailed is the sentinel for any gzip-direction failure.
+		return dst, GzipFailed
+	}
+	//: within bounds.
+	return out, nil
+}
+
+// gzipDecompressCore is the shared body behind both the layer backstop and the
+// caller-supplied ceiling. It reports an over-cap stream as tooLarge rather
+// than choosing a sentinel, so each caller can name the fact in its own terms.
+func gzipDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge bool, err error) {
 	//: a recycled gzip reader validates the header up-front, exactly as a fresh
 	//: one does; a bad header fails here either way.
 	box, rerr := takeGzipReader(bytes.NewReader(src))
 	//: malformed header — surface the failure via the gzip sentinel.
 	if rerr != nil {
 		//: wrap the header error under the gzip sentinel.
-		return dst, errs.Wrap(rerr, gzipWrap)
+		return dst, false, errs.Wrap(rerr, gzipWrap)
 	}
 	//: return the decoder on every exit below.
 	defer releaseGzipReader(box)
@@ -83,13 +132,15 @@ func gzipDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
 	//: a read/close fault (corrupt body / truncated stream) is a failure.
 	if derr != nil {
 		//: wrap the body error under the gzip sentinel.
-		return dst, errs.Wrap(derr, gzipWrap)
+		return dst, false, errs.Wrap(derr, gzipWrap)
 	}
-	//: an over-cap stream is treated as a failure, never an OOM.
+	//: an over-cap stream is reported as such; the CALLER picks the sentinel,
+	//: because "too big" means different things to the layer that owns the
+	//: backstop and to one that supplied a tighter ceiling of its own.
 	if overflow {
-		//: GzipFailed is the sentinel for any gzip-direction failure.
-		return dst, GzipFailed
+		//: no plaintext escapes an over-cap stream.
+		return dst, true, nil
 	}
 	//: append the bounded plaintext onto the caller's dst.
-	return append(dst, plain...), nil
+	return append(dst, plain...), false, nil
 }

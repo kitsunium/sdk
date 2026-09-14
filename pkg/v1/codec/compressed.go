@@ -8,6 +8,7 @@ package codec
 
 import (
 	"encoding/binary"
+	"errors"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/transform"
 	_ "github.com/kitsunium/sdk/internal/service/transform" // self-registers gzip + flate + zlib
@@ -191,8 +192,22 @@ func decompressBounded(algo CompressAlgorithm, payload []byte) (plain []byte, er
 		//: surface the documented sentinel.
 		return nil, coretransform.UnknownCompressor
 	}
-	//: decompress; the service layer bounds output at its 256 MiB backstop.
-	out, dErr := c.Decompress(nil, payload)
+	//: decompress under THIS layer's ceiling when the scheme can be told one.
+	//: Calling plain Decompress would let the service layer's 256 MiB backstop
+	//: govern the work while this layer's 64 MiB limit governs only the
+	//: verdict — so a few hundred kilobytes of crafted input drove the whole
+	//: backstop before isBomb ever ran. Measured before this changed: a
+	//: 260 169-byte frame allocated 828 MiB, 3 338x its wire size.
+	out, dErr := decompressUnderCeiling(c, payload)
+	//: a payload over THIS layer's ceiling is precisely what isBomb calls a
+	//: bomb, so the ceiling rejection carries the frame verdict rather than the
+	//: scheme's. Without this the fix would move the sentinel for every bomb
+	//: between 64 and 256 MiB from COMPRESSED_FRAME_INVALID to GZIP_FAILED —
+	//: bounding the work at the cost of the contract.
+	if errors.Is(dErr, coretransform.DecompressedTooLarge) {
+		//: typed, non-oracle bomb rejection, same as the ratio guard below.
+		return nil, coretransform.CompressedFrameInvalid
+	}
 	//: forward a stdlib decode fault (corrupt body / truncation) untouched.
 	if dErr != nil {
 		//: pass the compressor error through.
@@ -205,6 +220,25 @@ func decompressBounded(algo CompressAlgorithm, payload []byte) (plain []byte, er
 	}
 	//: within bounds — hand back the plaintext.
 	return out, nil
+}
+
+// decompressUnderCeiling decodes payload under the frame layer's own ceiling
+// when the scheme implements BoundedDecompressor, and falls back to the
+// scheme's layer-local backstop when it does not.
+//
+// The fallback is not a formality: a scheme registered by a consumer need not
+// implement the optional interface, and such a scheme is still correct — it
+// simply costs what it always cost. The ceiling is an upper bound on work, so
+// declining to tighten it can never change a verdict, only the bytes touched
+// reaching one.
+func decompressUnderCeiling(c coretransform.Compressor, payload []byte) (plain []byte, err error) {
+	//: schemes that accept a ceiling get this layer's, not their own.
+	if bounded, ok := c.(coretransform.BoundedDecompressor); ok {
+		//: stop the work at the same number isBomb judges against.
+		return bounded.DecompressBounded(nil, payload, int64(maxDecompressedFrameBytes))
+	}
+	//: no ceiling to pass — the scheme's own backstop still applies.
+	return c.Decompress(nil, payload)
 }
 
 // isBomb reports whether an output of outLen bytes from a payload of inLen bytes
@@ -223,7 +257,15 @@ func isBomb(inLen, outLen int) bool {
 		return false
 	}
 	//: above the floor, bound the expansion ratio against the compressed size.
-	return outLen > inLen*maxExpansionRatio
+	//: The product is taken in int64, NOT in int. On a 32-bit build (this
+	//: repository ships and tests linux/386) `inLen*maxExpansionRatio` leaves
+	//: the int32 range once inLen passes math.MaxInt32/1000 — about 2.1 MB of
+	//: compressed payload, an ordinary size. It then wraps NEGATIVE, every
+	//: output compares greater, and the guard refuses legitimate traffic as a
+	//: bomb. Measured on GOARCH=386 before this changed: isBomb(2200000,
+	//: 5000000) reported a bomb for a 2.3x expansion, the product having
+	//: become -2094967296.
+	return int64(outLen) > int64(inLen)*int64(maxExpansionRatio)
 }
 
 // frameAlgID maps a CompressAlgorithm to its frozen 1-byte frame id, reporting

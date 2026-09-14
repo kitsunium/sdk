@@ -55,3 +55,25 @@ type Compressor interface {
 	Compress(dst, src []byte) (out []byte, err error)
 	Decompress(dst, src []byte) (out []byte, err error)
 }
+
+// BoundedDecompressor is the optional extension for schemes that can be told
+// how much plaintext they are allowed to materialise. Consumers detect support
+// with a type assertion, exactly as they do for the codec layer's Appender.
+//
+// It exists because a caller that enforces a TIGHTER ceiling than the scheme's
+// own backstop otherwise has no way to say so, and must instead let the scheme
+// materialise everything and then judge the result. Judging afterwards is a
+// correct verdict reached by doing the attacker's work first: a frame layer
+// capping output at 64 MiB but calling plain Decompress still lets a few
+// hundred kilobytes of crafted input drive the scheme's full 256 MiB backstop
+// before the answer is known.
+//
+// max is a ceiling, never a promise: a scheme MAY refuse a stream below it for
+// its own reasons, and MUST NOT return more than max bytes. A stream that would
+// exceed max fails with the scheme's ordinary failure sentinel rather than
+// being silently truncated — a short read that looked like success would turn a
+// bomb into a parsing bug further up.
+type BoundedDecompressor interface {
+	Compressor
+	DecompressBounded(dst, src []byte, max int64) (out []byte, err error)
+}
