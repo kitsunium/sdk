@@ -15,9 +15,14 @@
 # no make target, no CI lane and no hook, from the commit that introduced it.
 # ADR 0085 §Deferred records the gap; nothing enforced closing it.
 #
-# The manifest below includes this script's own target. A commit that drops
-# ci-gates-check from CI fails ci-gates-check, for as long as it is still
-# running — which is the last commit where anyone can see it.
+# The manifest below includes this script's own target, but be precise about what
+# that buys. Deleting ANOTHER gate's step is caught: this script still runs and
+# reports it UNGATED. Renaming or deleting a gate's TARGET is caught: the step
+# still runs and make fails on it. Deleting THIS script's own step is NOT caught
+# by this script — nothing that has been removed can report its own removal.
+# That last case is branch protection's job, and as measured when this was
+# written `main` requires only the `bazel` check, so it is currently nobody's.
+# Recorded under ADR 0088 Deferred rather than overstated here.
 #
 # Scope, deliberately: this asserts the Makefile↔CI link for the targets in
 # GATES. It does NOT audit the shell checks bazel-ci.yml invokes directly as
@@ -82,6 +87,46 @@ if [ -z "${phony_targets// /}" ]; then
   exit 1
 fi
 
+# Every command the workflow actually EXECUTES: the value of each `run:` key,
+# plus the body of each `run: |` block scalar, with comment-only lines dropped.
+# Anything outside a run: — step names, `name:` prose, the long justification
+# comments this repository writes above each gate — is not a command and must
+# not be able to satisfy enforcement.
+ci_run_commands="$(
+  awk '
+    {
+      line = $0
+      indent = match(line, /[^ ]/) - 1
+      if (indent < 0) { indent = 0 }
+
+      if (in_run) {
+        if (line ~ /^[[:space:]]*$/) { next }
+        if (indent > run_indent) {
+          body = line
+          sub(/^[[:space:]]+/, "", body)
+          if (body !~ /^#/) { print body }
+          next
+        }
+        in_run = 0
+      }
+
+      if (line ~ /^[[:space:]]*(- )?run:/) {
+        value = line
+        sub(/^[[:space:]]*(- )?run:[[:space:]]*/, "", value)
+        run_indent = indent
+        in_run = 1
+        # `run: |` and `run: >` carry the command in the block below, not here.
+        if (value != "" && value !~ /^[|>]/) { print value }
+      }
+    }
+  ' "$WORKFLOW"
+)"
+
+if [ -z "${ci_run_commands//[[:space:]]/}" ]; then
+  echo "ci-gates-check: $WORKFLOW declares no run: commands — has the layout changed?"
+  exit 1
+fi
+
 for gate in "${GATES[@]}"; do
   if ! grep -qE "^${gate}:" "$MAKEFILE"; then
     echo "MISSING TARGET: '${gate}' is listed as a CI gate but no such target exists in $MAKEFILE"
@@ -115,13 +160,20 @@ for gate in "${GATES[@]}"; do
       ;;
   esac
 
-  # `\b` after the target name is not enough on its own: `make test-race`
-  # satisfies a search for `make test`, because `-` is a word boundary. The
-  # gates here have no such prefix relationship, and the assertion is written
-  # to reject one anyway — end of line, or a space that is not a dash.
-  if ! grep -qE "make ${gate}([[:space:]]|$)" "$WORKFLOW"; then
+  # Matched against the EXECUTABLE `run:` commands only, never the raw file.
+  # Grepping the whole YAML accepts a gate that exists solely in a comment: the
+  # step gets deleted, the explanatory comment above it survives naming the
+  # command, and the check stays green over a gate that no longer runs. That is
+  # the exact failure this script exists to catch, so it must not be the way the
+  # script itself fails.
+  #
+  # It must also be at a COMMAND position — start of the command, or after a
+  # `;`/`&&`/`||`/`|`/`(`. Otherwise `run: echo "we used to run make <gate>"`
+  # satisfies enforcement with an echo.
+  if ! grep -qE "(^|[;&|(][[:space:]]*)make ${gate}([[:space:]]|$)" <<<"$ci_run_commands"; then
     echo "UNGATED: 'make ${gate}' exists but $WORKFLOW never runs it"
     note "a gate CI does not run is not a gate — add the step, or remove it from GATES in $0"
+    note "comments and echoed text do not count; it must be a run: command"
     fail=1
   fi
 done

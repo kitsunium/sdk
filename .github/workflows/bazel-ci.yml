@@ -185,7 +185,8 @@ jobs:
         # A Makefile target CI never runs is documentation, not a gate. This
         # fails when a gate is renamed out from under its CI step, or when the
         # step is deleted and the target survives as advice. Its own target is in
-        # the manifest, so removing this check fails this check.
+        # the manifest, which catches every gate but itself: nothing that has
+        # been deleted can report its own deletion. See ADR 0088 Deferred.
         run: make ci-gates-check
 
       - name: release script regression

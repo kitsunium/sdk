@@ -51,8 +51,11 @@ behind the 120-minute Bazel lane.
    refuses to depend on network egress.
 2. **CI gate enforcement** — `make ci-gates-check` → `scripts/ci-gates-check.sh`.
    Fails when a target in its `GATES` manifest does not exist, is not `.PHONY`,
-   or is not invoked by this file. `ci-gates-check` is in its own manifest, so
-   the commit that deletes this step fails this step.
+   or is not invoked by this file — matched against the executable `run:`
+   commands, never the raw YAML, so a gate named only in a surviving comment
+   cannot satisfy enforcement. `ci-gates-check` is in its own manifest, which
+   catches every gate but itself: nothing deleted can report its own deletion,
+   and `main` currently requires only the `bazel` check (ADR 0088 §Deferred).
 3. **Release script regression** — `make release-scripts-check` →
    `scripts/release/release-scripts-test.sh`, which runs `scripts/release/*.bats`.
    That suite existed from ADR 0085 and NOTHING executed it until this job

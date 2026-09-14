@@ -97,9 +97,14 @@ in the same job that runs the suite.
 
 **3. `scripts/ci-gates-check.sh` holds the gate manifest.** A `make` target CI
 never runs is documentation. The script fails when a listed gate has no target,
-is not `.PHONY`, or is not invoked by `bazel-ci.yml`. Its own target is in the
-manifest, so a commit that removes this check from CI fails this check — on the
-last commit where anyone can still see it.
+is not `.PHONY`, or is not invoked by `bazel-ci.yml` — matched against the
+workflow's executable `run:` commands, never its raw text, because a gate named
+only in a surviving comment would otherwise satisfy enforcement after its step
+was deleted. Measured on exactly that edit: the raw-text form reports green.
+
+Its own target is in the manifest, which catches every gate but itself. Nothing
+that has been deleted can report its own deletion; that case belongs to branch
+protection, and is currently unowned — see §Deferred.
 
 **4. The lane is a sibling job, `shell-gates`.** Neither gate needs Bazel or Go,
 so neither belongs behind the 120-minute Bazel job or inside a matrix that would
@@ -122,6 +127,13 @@ run it eleven times.
 - `bazel-ci.yml` gains the first `make` invocations in its history. Everything
   else in it calls `bazel` or `bash` directly, which is precisely why the
   Makefile↔CI link needed asserting: it did not exist.
+
+## Breaking changes
+
+None. The change adds a CI job, two `make` targets and two scripts. No public
+API, no module path, no tag shape and no release behaviour is altered — the
+release scripts themselves are unchanged except for the test fixtures'
+`--no-verify`, which affects no production path.
 
 ## Alternatives considered
 
@@ -168,6 +180,18 @@ would add most.
   The plan says 32; 31 execute. Making it run means scrubbing `bazel` from
   `PATH` for that one test, which changes what the test asserts, so it is named
   here rather than changed quietly.
+- **`shell gates` is not a required status check, so it does not block a
+  merge.** Measured on `main`'s protection at the time of writing:
+  `required_checks: ["bazel"]`. Both gates run and report on every PR, but a red
+  one is advisory until somebody adds the job to the required set — a repository
+  setting, not a file in this change. It is the single largest remaining gap
+  between "the gate runs" and "the gate gates".
+- **The suites `skip` rather than fail when `go` or `jq` is absent**, which in CI
+  would be a green gate that tested nothing. The runner now asserts both when
+  `CI` is set and refuses to start otherwise; the local skip is kept, because a
+  developer without jq should still get the assertions that do not need it. The
+  assertion is a backstop for a runner-image change: measured on the first run of
+  this lane, `ubuntu-latest` carries both.
 - **The distro `bats` floats.** CI takes whatever `ubuntu-latest` ships. Pinning
   it would mean vendoring, which decision 2 rejects for this gate; the runner
   prints the version it used so a version-dependent failure is at least

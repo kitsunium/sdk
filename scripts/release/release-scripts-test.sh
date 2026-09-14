@@ -75,6 +75,29 @@ EOF
   exit 127
 fi
 
+# The suites call `skip` when `go` or `jq` is missing, because a developer
+# without them should still get the assertions that do not need them. In CI that
+# rule inverts: a run where the central cases SKIPPED is a green gate that tested
+# nothing, which is the exact shape this lane exists to abolish. So under CI the
+# prerequisites are asserted, loudly, before a single test runs.
+#
+# Measured on the first run of this lane: ubuntu-latest carries both, and the
+# suite reported 32 ok / 0 not ok / 1 skip — the one skip being the bazel rdeps
+# path, which is a different axis. This check is what keeps that true if the
+# runner image changes.
+if [ -n "${CI:-}" ]; then
+  missing=""
+  for tool in go jq; do
+    command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+  done
+  if [ -n "$missing" ]; then
+    printf 'release-scripts-test: missing under CI:%s\n' "$missing" >&2
+    printf '  the suites would SKIP their trailer, range-walk and merge-scoping\n' >&2
+    printf '  cases and report success. A gate that skips is not a gate.\n' >&2
+    exit 1
+  fi
+fi
+
 # Name the interpreter that produced the result. A suite that passes tells you
 # nothing about WHICH bats ran it, and the distro package lags upstream by
 # whole minor versions.
