@@ -12,12 +12,28 @@
 # GIT_CONFIG_GLOBAL=/dev/null is enough — a hooks path injected at `-c`
 # precedence outranks both; only the command-line flag does (ADR 0088).
 # `git commit-tree` is plumbing and runs no hooks, so it is left alone.
+# g — every fixture git command, with hooks disabled at the ONE precedence that
+# wins. `--no-verify` (kept below) only skips the VERIFICATION hooks: pre-commit
+# and commit-msg. It does nothing about post-commit, post-merge or
+# post-checkout, and an inherited core.hooksPath still runs those inside the
+# disposable repository, where they can mutate state the later assertions read.
+# Measured with a host post-commit that touches a marker file:
+#
+#   git commit --no-verify                       -> POST-COMMIT HOTE A TOURNE
+#   git -c core.hooksPath=<empty> commit --no-verify -> propre
+#
+# A command-line `-c` outranks the global file AND an injected GIT_CONFIG_KEY_*,
+# which a repo-local `git config` does not — all three were tried.
+g() { git -c core.hooksPath="$NOHOOKS" "$@"; }
+
 setup() {
+  NOHOOKS="$BATS_TEST_TMPDIR/nohooks"
+  mkdir -p "$NOHOOKS"
   REPO="$(mktemp -d)"
   cd "$REPO"
-  git init -q -b main
-  git config user.email "ci@example.invalid"
-  git config user.name "ci"
+  g init -q -b main
+  g config user.email "ci@example.invalid"
+  g config user.name "ci"
 
   # Full publish chain with the real kitsunium module paths — cut-tags pins
   # `github.com/kitsunium/sdk/internal/*` requires, so the fixture must use
@@ -76,8 +92,8 @@ replace (
 EOF
 
   : >pkg/v1/codec.go
-  git add -A
-  git commit -q --no-verify -m "init"
+  g add -A
+  g commit -q --no-verify -m "init"
 
   SCRIPT="$BATS_TEST_DIRNAME/cut-tags.sh"
   LIB="$BATS_TEST_DIRNAME/lib/tag-format.sh"
@@ -91,15 +107,15 @@ teardown() { rm -rf "$REPO"; }
 # range that never occurs in production.
 tag_release() {
   local rel
-  rel="$(git commit-tree "HEAD^{tree}" -p "$(git rev-parse HEAD)" -m "release $1")"
-  git tag "$1" "$rel"
+  rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "release $1")"
+  g tag "$1" "$rel"
 }
 
 # commit_pkg <message> — a commit that touches pkg/, so a Release-bump trailer
 # in <message> is in scope for it.
 commit_pkg() {
   echo "// $RANDOM" >>pkg/v1/codec.go
-  git commit -aq --no-verify -F - <<<"$1"
+  g commit -aq --no-verify -F - <<<"$1"
 }
 
 # commit_other <message> — a commit that touches nothing under pkg/. A trailer
@@ -107,8 +123,8 @@ commit_pkg() {
 commit_other() {
   mkdir -p docs
   echo "$RANDOM" >>docs/notes.md
-  git add -A
-  git commit -q --no-verify -F - <<<"$1"
+  g add -A
+  g commit -q --no-verify -F - <<<"$1"
 }
 
 # merge_branch <branch> <message> — land <branch> on main as a TRUE merge
@@ -116,7 +132,7 @@ commit_other() {
 # are real merges, and they behave differently on both counts the trailer
 # depends on: what the walk reaches, and what --name-only reports.
 merge_branch() {
-  git merge --no-ff --no-edit --no-verify -m "$2" "$1" >/dev/null
+  g merge --no-ff --no-edit --no-verify -m "$2" "$1" >/dev/null
 }
 
 # The dry-run rewrites every chain go.mod, so it needs the Go + jq toolchain.
@@ -247,9 +263,9 @@ need_toolchain() {
 @test "a trailer on a commit a merge brought in does not count" {
   need_toolchain
   tag_release pkg/v0.1.0
-  git checkout -q -b side
+  g checkout -q -b side
   commit_pkg $'feat(codec): contributor work\n\nRelease-bump: minor'
-  git checkout -q main
+  g checkout -q main
   merge_branch side 'Merge the contributor branch'
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
@@ -263,9 +279,9 @@ need_toolchain() {
 @test "a trailer on a merge commit is scoped by what the merge brought in" {
   need_toolchain
   tag_release pkg/v0.1.0
-  git checkout -q -b side
+  g checkout -q -b side
   commit_pkg 'feat(codec): work, unsigned on the branch'
-  git checkout -q main
+  g checkout -q main
   merge_branch side $'Merge the branch\n\nRelease-bump: minor'
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
@@ -278,9 +294,9 @@ need_toolchain() {
   need_toolchain
   tag_release pkg/v0.1.0
   commit_pkg 'fix(codec): a real pkg change on main, unsigned'
-  git checkout -q -b side
+  g checkout -q -b side
   commit_other 'docs: branch work'
-  git checkout -q main
+  g checkout -q main
   merge_branch side $'Merge the docs branch\n\nRelease-bump: minor'
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
@@ -318,8 +334,8 @@ need_toolchain() {
   pad="$(printf 'y%.0s' $(seq 1 200))"
   for i in $(seq 1 1600); do : >"tools/${pad}${i}.go"; done
   echo "// touched" >>pkg/v1/codec.go
-  git add -A
-  git commit -q --no-verify -F - <<<$'feat(codec): wide merge\n\nRelease-bump: minor'
+  g add -A
+  g commit -q --no-verify -F - <<<$'feat(codec): wide merge\n\nRelease-bump: minor'
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
   [[ "$output" == *"pkg/v0.2.0"* ]]

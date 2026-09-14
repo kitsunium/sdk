@@ -49,7 +49,7 @@ unrecognised and silently degrades a minor to a patch. Both shapes are covered.
 
 ### Defect 2 — a walk without `--first-parent` reads the contributor's trailer
 
-ADR 0007 §2 gates a minor on a trailer "an attacker cannot smuggle through a PR
+[ADR 0007](0007-sdk-release-and-versioning.md) §2 gates a minor on a trailer "an attacker cannot smuggle through a PR
 body" by reading it from the merge commit — the one message a maintainer writes.
 A range walk without `--first-parent` descends into the commits the merge
 brought IN, which are the contributor's own. Five commits on this repository
@@ -80,7 +80,23 @@ not ok 1 the largest trailer in the range wins
 
 Neither a repo-local `core.hooksPath` nor `GIT_CONFIG_GLOBAL=/dev/null` fixes
 this, because a hooks path injected at `-c` precedence outranks both — measured,
-all three shapes tried. Only the command-line flag wins.
+all three shapes tried. Only a command-line argument wins.
+
+`--no-verify` alone is not that argument, which review caught and measurement
+confirmed: it skips the VERIFICATION hooks — `pre-commit` and `commit-msg` — and
+leaves `post-commit`, `post-merge` and `post-checkout` running inside the
+disposable repository, free to mutate state the later assertions read. With a
+host `post-commit` that appends to the fixture's own source file:
+
+```
+git commit --no-verify                            -> POST-COMMIT HOTE A TOURNE
+git -c core.hooksPath=<empty> commit --no-verify   -> propre
+```
+
+So every fixture git command goes through one helper that carries
+`-c core.hooksPath` to an empty directory, and keeps `--no-verify` behind it.
+Verified with hostile `post-commit` AND `post-merge` hooks installed: 34 of 34
+pass and no host hook runs.
 
 ### Defects 5, 6 and 7 — the same pipeline, three more times, one of them inverted
 
@@ -180,8 +196,15 @@ run it eleven times.
 had been wrong since it was written without anyone noticing, because it was only
 ever exercised below the pipe buffer.
 
-**6. The fixtures pass `--no-verify`.** On every `git commit` and on the merge.
-`git commit-tree` is plumbing and runs no hooks, so it is left alone.
+**6. Every fixture git command disables hooks at command-line precedence**, and
+keeps `--no-verify` behind it. `git commit-tree` is plumbing and runs no hooks,
+so it is left alone.
+
+**7. The suite list is globbed, never enumerated.** The Makefile target and the
+CI step both describe the runner as covering `scripts/release/*.bats`; a
+hard-coded list makes that false the moment a third suite is added, which would
+then be committed, reviewed and executed by nothing — this change's own defect,
+reintroduced by its own fix.
 
 ## Consequences
 

@@ -54,10 +54,23 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
-SUITES=(
-  "$HERE/test-compute-bumps.bats"
-  "$HERE/test-cut-tags.bats"
-)
+# Globbed, never enumerated. The Makefile target and the CI step both describe
+# this as the runner for `scripts/release/*.bats`, and a hard-coded list makes
+# that description false the moment somebody adds a third suite: it would be
+# committed, reviewed, and executed by nothing — which is the exact defect this
+# whole change exists to close. `nullglob` is off deliberately, so an empty
+# directory yields the literal pattern and is caught by the existence check
+# below rather than silently running zero tests.
+SUITES=()
+for suite in "$HERE"/*.bats; do
+  SUITES+=("$suite")
+done
+
+if [ "${#SUITES[@]}" -eq 0 ] || [ ! -e "${SUITES[0]}" ]; then
+  printf 'release-scripts-test: no *.bats suite found in %s\n' "$HERE" >&2
+  printf '  the runner is wired but there is nothing for it to run\n' >&2
+  exit 1
+fi
 
 if ! command -v bats >/dev/null 2>&1; then
   cat >&2 <<'EOF'
@@ -102,14 +115,6 @@ fi
 # nothing about WHICH bats ran it, and the distro package lags upstream by
 # whole minor versions.
 printf 'release-scripts-test: %s (%s)\n' "$(bats --version)" "$(command -v bats)"
-
-for suite in "${SUITES[@]}"; do
-  if [ ! -f "$suite" ]; then
-    printf 'release-scripts-test: missing suite %s\n' "$suite" >&2
-    printf '  either restore it or drop it from SUITES in %s\n' "$0" >&2
-    exit 1
-  fi
-done
 
 # One bats invocation over every suite, so the TAP plan covers the whole set and
 # a suite that fails to even parse is a failure rather than a silently skipped
