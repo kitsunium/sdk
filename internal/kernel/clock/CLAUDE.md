@@ -47,8 +47,10 @@ func NewManualClock(start time.Time) *ManualClock
 
 ### File layout
 
-One type per file, per `KTN-STRUCT-ONEFILE`; at most two interfaces per file,
-per `KTN-INTERFACE-FILENAME`.
+Types that belong to one another share a file, per `KTN-STRUCT-PARTITION`;
+at most two interfaces per file, per `KTN-INTERFACE-FILENAME`. `system.go`
+holds `systemClock` with the `systemTimer` / `systemTicker` adapters it is the
+only producer of — splitting them left three files nothing else referenced.
 
 | File | Holds |
 |---|---|

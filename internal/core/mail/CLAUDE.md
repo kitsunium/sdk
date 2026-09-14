@@ -17,8 +17,10 @@ Code range: `0.2.31.*` (ADR 0064).
 
 ## Contents
 
-One exported struct per file, named after it — the layer's convention, the same
-one `core/metrics` follows with `AttrValue` / `ScopeValue` / `SnapshotValue`.
+Values that belong to one another share a file, per `KTN-STRUCT-PARTITION`:
+`value.go` holds `DeliveryValue` beside `EnvelopeValue`, which are the two
+halves of one send. The names stay long, the layer's convention, the same one
+`core/metrics` follows with `AttrValue` / `ScopeValue` / `SnapshotValue`.
 `pkg/v1/mail` aliases them back to the short names a consumer writes
 (`mail.Message`, `mail.Address`), exactly as `pkg/v1/metrics.Attr` does.
 

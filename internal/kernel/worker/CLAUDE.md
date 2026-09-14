@@ -57,8 +57,8 @@ lifecycle in:
   (ADR 0011), `worker` ships a concrete struct by deliberate choice — a
   single-impl interface would be over-abstraction. The `Daemon` role suffix on
   `LoopDaemon` passes `KTN-STRUCT-ROLE`; no IFACE-PLUGIN marker is needed.
-- **One exported struct per file.** `LoopDaemon` lives in `worker.go`; `Every` is
-  a func and shares `every.go` (KTN-STRUCT-ONEFILE governs structs, not funcs).
+- **Types that belong to one another share a file** (`KTN-STRUCT-PARTITION`).
+  `LoopDaemon` lives in `worker.go`; `Every` is a func and shares `every.go`.
 - **Emits NO codes.** Pure goroutine control, like `recycler` / `snapshot`. No
   `codes.go` / `errors.go`, no `audit_srcs` filegroup.
 
