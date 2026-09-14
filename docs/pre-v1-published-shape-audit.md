@@ -160,7 +160,7 @@ This is the expensive third.
 | `Violation` | `ViolationValue` | `corevalidation` | `pkg/v1/validation/validation.go` |
 | `Message` | `WSMessageValue` | `corenet` | `pkg/v1/server/websocket/websocket.go` |
 
-## C. Everything else — 22
+## C. Everything else — 23
 
 Engine handles, registries and a few plain shapes. Read each one: a handle
 whose fields are all unexported is effectively opaque and costs nothing to
@@ -172,6 +172,7 @@ change; a plain shape is as exposed as group B.
 | `Client` | `Client` | `svcclient` | `pkg/v1/client/client.go` |
 | `Conn` | `Conn` | `corenet` | `pkg/v1/server/server.go` |
 | `Conn` | `Conn` | `svcws` | `pkg/v1/server/websocket/websocket.go` |
+| `ManualClock` | `ManualClock` | `kclock` | `pkg/v1/clock/clock.go` |
 | `DigestWriter` | `DigestWriter` | `stdhash` | `pkg/v1/hash/hash.go` |
 | `Group` | `Group` | `coreproc` | `pkg/v1/cgroup/cgroup.go` |
 | `Handler` | `Handler` | `svcev` | `pkg/v1/events/events.go` |
@@ -219,6 +220,6 @@ repeat them:
 
 - **The aliases are written `type X = pkg.Y` on one line**, not inside a
   `type ( … )` block. A pattern anchored on the block form reports **5** structs
-  instead of 124 — and 5 looks plausible enough to be believed.
+  instead of 125 — and 5 looks plausible enough to be believed.
 - **A count is never deduced, only measured.** The first run of this audit was
   wrong by a factor of 25 and looked fine.
