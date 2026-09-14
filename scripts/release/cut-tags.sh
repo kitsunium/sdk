@@ -344,9 +344,35 @@ publish_chain() {
       done
       echo "DRY-RUN: would tag chain: ${tags[*]}"
     else
-      git commit --quiet -am "release $sem — publishable module graph (no replace)"
+      # `core.hooksPath=` (empty) rather than the project's hooks: this commit
+      # is the ONE tree in the repository that the pre-commit gates cannot pass,
+      # by construction. They run `make build` / `make test`, and the rewrite
+      # above has just dropped every intra-repo `replace` — so Go and Bazel can
+      # no longer resolve the sibling modules from disk, and the build fails on
+      # a tree that is CORRECT for publication. Measured: the hook reports
+      # "Couldn't start the build. Unable to run tests", make exits 48, and the
+      # commit never happens.
+      #
+      # This never fired in CI, which checks out without `core.hooksPath` and so
+      # runs no project hook at all — the defect only exists for a maintainer who
+      # ran `scripts/install-hooks.sh`, which the root CLAUDE.md tells every
+      # clone to do. What the gates would have checked is already checked: this
+      # commit changes nothing but four go.mod files, and `assert_publishable`
+      # verifies each of them above.
+      local before
+      before="$(git rev-parse HEAD)"
+      git -c core.hooksPath= commit --quiet -am "release $sem — publishable module graph (no replace)"
       local relc
       relc="$(git rev-parse HEAD)"
+      # A commit that did not happen must never be tagged. Without this the
+      # chain is tagged at the UNREWRITTEN tree: `pkg/go.mod` keeps its local
+      # `replace` lines and pins the previous release's internals, which is the
+      # exact `go get`-resolvability ADR 0009 exists to guarantee — published,
+      # and wrong. Observed on a real run before this guard existed.
+      if [ "$relc" = "$before" ]; then
+        echo "cut-tags: the release commit did not happen — refusing to tag $sem at the unrewritten tree" >&2
+        return 1
+      fi
       for t in "${tags[@]}"; do git tag -a "$t" -m "release $t" "$relc"; done
       git push --atomic origin "${tags[@]}"
     fi
