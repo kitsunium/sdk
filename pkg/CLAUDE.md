@@ -19,6 +19,33 @@ The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at f
 - Security fixes in `internal/*` propagate via minor bumps on the module concerned — no `pkg/v1` changes required because it only re-exports.
 - Adding a `…/pkg/v2` module is a dedicated ADR.
 
+### Sizing a release — the `Release-bump` trailer
+
+A change to `pkg/` cuts a **patch** by default. Anything that adds an exported
+symbol needs `Release-bump: minor`, and ADR 0007 §2 counts it only on a commit
+that itself touches `pkg/`.
+
+Three rules, each of which has already been broken here:
+
+- **It must be a real git trailer**, i.e. in the message's LAST paragraph with
+  nothing after it. `git interpret-trailers` reads that paragraph only, so a
+  `Release-bump:` with prose below it is invisible to the tooling and the
+  release silently degrades to a patch. That is how `pkg/v0.4.0` failed to
+  exist the first time (ADR 0085), and `cut-tags.sh` now refuses rather than
+  degrading.
+- **Exactly once across the whole squashed message.** GitHub's squash
+  concatenates every branch commit's body, so a trailer on two commits of one
+  PR arrives as two occurrences of which git parses one — and `cut-tags.sh`
+  refuses that too, deliberately: reading a trailer from anywhere in the body
+  would let a contributor set the release size from a branch commit, which is
+  the smuggling ADR 0007 §2 exists to prevent. **Put it on the last commit of
+  the branch, and only there.**
+- **A refusal is not a hiccup, it is a deadlock.** `release_base()` only
+  advances when a release cuts, so a commit the guard refuses stays inside
+  every future range and every later release fails until a tag moves past it.
+  Check before merging: `git log -1 --format='%(trailers:key=Release-bump,valueonly)'`
+  must print the value. If it prints nothing, the trailer is not one.
+
 ## Conventions
 
 - Public types are **type aliases** (clean short names, zero runtime cost). Example: `Attr = AttrValue`. What a name aliases is decided by which layer OWNS the type, and the question that decides it is: *would a second implementation of this domain's port have to accept this type?* (ADR 0074 — measured: 233 aliases onto core, 69 onto service, 3 onto kernel.)
