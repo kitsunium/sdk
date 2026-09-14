@@ -99,11 +99,21 @@ for gate in "${GATES[@]}"; do
   # ktn-linter's is wrapped. A line-anchored grep would then report every gate as
   # NOT PHONY — a false red on a reformat, which is how a gate loses its
   # credibility. `phony_targets` is computed once, above the loop.
-  if ! printf '%s' " $phony_targets " | grep -qF " $gate "; then
-    echo "NOT PHONY: '${gate}' is a CI gate but is not declared in .PHONY in $MAKEFILE"
-    note "a file of that name in the worktree would make make skip it"
-    fail=1
-  fi
+  #
+  # A `case` rather than `printf … | grep -qF`: that pipeline is the construct
+  # that classified 19 `feat:` commits as patches in the sibling repository —
+  # `grep -q` closes the pipe on its first match, the writer takes EPIPE, and
+  # `pipefail` reports 141 for input that DID match. It needs an input past the
+  # pipe buffer to bite, which a .PHONY line is not; writing it anyway would be
+  # betting on a size. `case` is a shell builtin: no pipe, no subprocess, no bet.
+  case " $phony_targets " in
+    *" $gate "*) ;;
+    *)
+      echo "NOT PHONY: '${gate}' is a CI gate but is not declared in .PHONY in $MAKEFILE"
+      note "a file of that name in the worktree would make make skip it"
+      fail=1
+      ;;
+  esac
 
   # `\b` after the target name is not enough on its own: `make test-race`
   # satisfies a search for `make test`, because `-` is a word boundary. The

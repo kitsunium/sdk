@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-14
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) (whose §Deferred this closes), [ADR 0007](0007-sdk-release-and-versioning.md) (bump semantics and the unsmugglable trailer), [ADR 0009](0009-publishable-module-path-and-bootstrap.md) (the detached release commit, the `major` refusal), [ADR 0004](0004-single-build-system.md) (`bazel-ci.yml` is the gating lane)
+- **Related**: [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) (whose §Deferred this closes), [ADR 0007](0007-sdk-release-and-versioning.md) (bump semantics and the unsmugglable trailer), [ADR 0009](0009-pkg-public-module-resolvability.md) (the detached release commit, the `major` refusal), [ADR 0004](0004-sdk-bazel-build-system.md) (`bazel-ci.yml` is the gating lane)
 
 ## Context
 
@@ -161,6 +161,13 @@ would add most.
   runs `check-readme-drift.sh` and `check-readme-determinism.sh`, which need
   `gomarkdoc` installed. The asymmetry is defensible; it is not recorded
   anywhere, and nothing would notice it widening.
+- **One of the 32 tests runs in no environment we have.** `internal-only change
+  without bazel emits nothing (graceful)` skips when `bazel` is on `PATH` — and
+  it is, both on `ubuntu-latest` and on the development box. Measured from the
+  first CI run of this lane: `ok 6 … # skip bazel present, rdeps path active`.
+  The plan says 32; 31 execute. Making it run means scrubbing `bazel` from
+  `PATH` for that one test, which changes what the test asserts, so it is named
+  here rather than changed quietly.
 - **The distro `bats` floats.** CI takes whatever `ubuntu-latest` ships. Pinning
   it would mean vendoring, which decision 2 rejects for this gate; the runner
   prints the version it used so a version-dependent failure is at least
