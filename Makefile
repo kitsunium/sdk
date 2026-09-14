@@ -1,4 +1,4 @@
-.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare
+.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -126,6 +126,20 @@ lint:
 guard:
 	cd tools/sdkguard && GOWORK=off go run . -level=invariant -version-check=off \
 	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/tools/...
+
+# The two gates below are shell-only: no Bazel, no Go, seconds to run. They are
+# invoked by name from bazel-ci.yml, which is what makes them gates rather than
+# advice — and ci-gates-check is the thing that asserts that.
+#
+# `release-scripts-check` runs scripts/release/*.bats. That suite guards the two
+# scripts that decide which tag every merge gets, and from the commit that
+# introduced it until this one, NOTHING executed it — no make target, no CI
+# lane, no hook (ADR 0085 Deferred, ADR 0086).
+ci-gates-check:
+	bash scripts/ci-gates-check.sh
+
+release-scripts-check:
+	bash scripts/release/release-scripts-test.sh
 
 # `bench` regenerates pkg/v1/codec/BENCH.md by running the full bench
 # matrix programmatically (testing.Benchmark per row, no text-format

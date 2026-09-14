@@ -5,6 +5,13 @@
 # the Release-bump trailer is read across the release range (ADR 0085), and the
 # tag-format library (canonical + internal tag shapes, bumps, sort).
 
+# Every commit here is --no-verify. The fixtures are throwaway repositories, but
+# `core.hooksPath` is inherited from the developer's own git config, so without
+# it a host pre-commit hook runs inside them and its refusal fails the suite in
+# `setup` on code that is correct. Neither a repo-local `core.hooksPath` nor
+# GIT_CONFIG_GLOBAL=/dev/null is enough — a hooks path injected at `-c`
+# precedence outranks both; only the command-line flag does (ADR 0088).
+# `git commit-tree` is plumbing and runs no hooks, so it is left alone.
 setup() {
   REPO="$(mktemp -d)"
   cd "$REPO"
@@ -70,7 +77,7 @@ EOF
 
   : >pkg/v1/codec.go
   git add -A
-  git commit -q -m "init"
+  git commit -q --no-verify -m "init"
 
   SCRIPT="$BATS_TEST_DIRNAME/cut-tags.sh"
   LIB="$BATS_TEST_DIRNAME/lib/tag-format.sh"
@@ -92,7 +99,7 @@ tag_release() {
 # in <message> is in scope for it.
 commit_pkg() {
   echo "// $RANDOM" >>pkg/v1/codec.go
-  git commit -aq -F - <<<"$1"
+  git commit -aq --no-verify -F - <<<"$1"
 }
 
 # commit_other <message> — a commit that touches nothing under pkg/. A trailer
@@ -101,7 +108,7 @@ commit_other() {
   mkdir -p docs
   echo "$RANDOM" >>docs/notes.md
   git add -A
-  git commit -q -F - <<<"$1"
+  git commit -q --no-verify -F - <<<"$1"
 }
 
 # merge_branch <branch> <message> — land <branch> on main as a TRUE merge
@@ -109,7 +116,7 @@ commit_other() {
 # are real merges, and they behave differently on both counts the trailer
 # depends on: what the walk reaches, and what --name-only reports.
 merge_branch() {
-  git merge --no-ff --no-edit -m "$2" "$1" >/dev/null
+  git merge --no-ff --no-edit --no-verify -m "$2" "$1" >/dev/null
 }
 
 # The dry-run rewrites every chain go.mod, so it needs the Go + jq toolchain.

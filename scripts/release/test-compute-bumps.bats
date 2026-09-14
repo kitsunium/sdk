@@ -5,6 +5,13 @@
 # skips the rdeps step). The public module is the bare `pkg`, so the script
 # emits the single token "pkg" (never per-major "vN").
 
+# Every commit here is --no-verify. The fixtures are throwaway repositories, but
+# `core.hooksPath` is inherited from the developer's own git config, so without
+# it a host pre-commit hook runs inside them and its refusal fails the suite in
+# `setup` on code that is correct. Neither a repo-local `core.hooksPath` nor
+# GIT_CONFIG_GLOBAL=/dev/null is enough — a hooks path injected at `-c`
+# precedence outranks both; only the command-line flag does (ADR 0088).
+# `git commit-tree` is plumbing and runs no hooks, so it is left alone.
 setup() {
   REPO="$(mktemp -d)"
   cd "$REPO"
@@ -20,7 +27,7 @@ EOF
   : > pkg/v1/codec.go
   : > internal/kernel/errs/errs.go
   git add -A
-  git commit -q -m "init"
+  git commit -q --no-verify -m "init"
   git tag pkg/v0.1.0
 
   SCRIPT="$BATS_TEST_DIRNAME/compute-bumps.sh"
@@ -36,7 +43,7 @@ teardown() { rm -rf "$REPO"; }
 
 @test "change under pkg/v1 emits pkg" {
   echo "// patch" >> pkg/v1/codec.go
-  git commit -aq -m "feat(v1): tweak"
+  git commit -aq --no-verify -m "feat(v1): tweak"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$output" = "pkg" ]
@@ -44,7 +51,7 @@ teardown() { rm -rf "$REPO"; }
 
 @test "change to pkg/go.mod emits pkg" {
   printf '\n// bump\n' >> pkg/go.mod
-  git commit -aq -m "chore: module tweak"
+  git commit -aq --no-verify -m "chore: module tweak"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$output" = "pkg" ]
@@ -58,7 +65,7 @@ teardown() { rm -rf "$REPO"; }
   mkdir -p pkg/v1
   : > pkg/v1/x.go
   git add -A
-  git commit -q -m "first"
+  git commit -q --no-verify -m "first"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$output" = "pkg" ]
@@ -71,7 +78,7 @@ teardown() { rm -rf "$REPO"; }
   git config user.name  "ci"
   : > README.md
   git add -A
-  git commit -q -m "first"
+  git commit -q --no-verify -m "first"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -80,7 +87,7 @@ teardown() { rm -rf "$REPO"; }
 @test "internal-only change without bazel emits nothing (graceful)" {
   if command -v bazel >/dev/null 2>&1; then skip "bazel present, rdeps path active"; fi
   echo "// tweak" >> internal/kernel/errs/errs.go
-  git commit -aq -m "fix(errs): wording"
+  git commit -aq --no-verify -m "fix(errs): wording"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -96,7 +103,7 @@ teardown() { rm -rf "$REPO"; }
   mkdir -p pkg/v1
   printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
   : > pkg/v1/codec.go
-  git add -A; git commit -q -m "init"
+  git add -A; git commit -q --no-verify -m "init"
   base="$(git rev-parse HEAD)"
   # cut-tags-style: a detached commit whose parent is main HEAD, tagged, not on a branch.
   rel="$(git commit-tree "HEAD^{tree}" -p "$base" -m "release v0.1.0")"
@@ -113,12 +120,12 @@ teardown() { rm -rf "$REPO"; }
   mkdir -p pkg/v1
   printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
   : > pkg/v1/codec.go
-  git add -A; git commit -q -m "init"
+  git add -A; git commit -q --no-verify -m "init"
   base="$(git rev-parse HEAD)"
   rel="$(git commit-tree "HEAD^{tree}" -p "$base" -m "release v0.1.0")"
   git tag pkg/v0.1.0 "$rel"
   echo "// new" >> pkg/v1/codec.go
-  git commit -aq -m "feat(v1): real change after release"
+  git commit -aq --no-verify -m "feat(v1): real change after release"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$output" = "pkg" ]

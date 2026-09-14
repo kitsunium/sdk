@@ -18,11 +18,12 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate) and `sdk-release.yml` 
 
 ## bazel-ci.yml (the SDK lane)
 
-Three jobs: `bazel` (the gate), `cross-build` (every module COMPILES on every
-supported GOOS/GOARCH) and `test-386` (the 32-bit RUNTIME). The last two run raw
-`go` rather than Bazel, for the reason stated under Do NOT below: Bazel here
-builds for the host only, so a platform it cannot reach is covered by the
-toolchain that can, or by nothing.
+Four jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
+nor Go), `cross-build` (every module COMPILES on every supported GOOS/GOARCH)
+and `test-386` (the 32-bit RUNTIME). The last two run raw `go` rather than
+Bazel, for the reason stated under Do NOT below: Bazel here builds for the host
+only, so a platform it cannot reach is covered by the toolchain that can, or by
+nothing.
 
 Job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
 
@@ -37,6 +38,30 @@ Job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
 7. `bazel coverage --combined_report=lcov //...` → uploaded as `coverage-${{ github.run_number }}` artifact (per-run unique name so concurrent runs don't dedupe, post-audit finding #28). Note coverage runs under the default (race-on) config, so it does **not** reflect the step-5 tests.
 
 Concurrency: `${{ github.workflow }}-${{ github.ref }}` with cancel-in-progress.
+
+### shell-gates (the gates that need no toolchain)
+
+`ubuntu-latest`, timeout 10 min, `checkout` only — no Bazel, no Go. A sibling
+job so a broken release script is reported in the first minute rather than
+behind the 120-minute Bazel lane.
+
+1. **install bats-core** — `apt-get install -y bats`. bats is NOT vendored and
+   `release-scripts-test.sh` deliberately does not fetch it: a gate that clones
+   a third-party repository on every run is a flake, and `make lint` already
+   refuses to depend on network egress.
+2. **CI gate enforcement** — `make ci-gates-check` → `scripts/ci-gates-check.sh`.
+   Fails when a target in its `GATES` manifest does not exist, is not `.PHONY`,
+   or is not invoked by this file. `ci-gates-check` is in its own manifest, so
+   the commit that deletes this step fails this step.
+3. **Release script regression** — `make release-scripts-check` →
+   `scripts/release/release-scripts-test.sh`, which runs `scripts/release/*.bats`.
+   That suite existed from ADR 0085 and NOTHING executed it until this job
+   (ADR 0088).
+
+These are the only `make` invocations in this workflow, and that is deliberate:
+`ci-gates-check` asserts the Makefile↔CI link by target NAME, which only works
+if CI goes through the target. Adding a gate means editing `GATES` **and** this
+file, plus the Makefile's `.PHONY` — all three, or the check fails.
 
 ### cross-build (the build bar) and test-386 (the runtime bar)
 
