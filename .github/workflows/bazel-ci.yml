@@ -211,6 +211,21 @@ jobs:
         # After: 0 out of 40. See ADR 0088.
         run: make hooks-check
 
+      - name: pre-commit guard regression
+        # scripts/pre-commit/ holds the commit gates themselves, and ADR 0088
+        # recorded its own sweep as INCOMPLETE: two of them pipe into an
+        # early-exiting reader exactly as .githooks/commit-msg did. They fail in
+        # OPPOSITE directions, which is why reading did not catch either.
+        # check-ktn-phases-1-7.sh:69 fails CLOSED — a clean linter run is
+        # reported as "the linter did not complete" (measured, marker first:
+        # 64 KB 4/40, 96 KB 24/40, 400 KB 40/40). check-audit-coverage.sh:89
+        # fails OPEN — a package that declares error codes and is absent from
+        # //:audit_sources passes the guard that exists to catch it (measured:
+        # 200 declaring lines 40/40). Both suites carry a negative control at
+        # the same shape below the threshold, green in both passes, which is
+        # what identifies grep's early exit rather than the volume.
+        run: make pre-commit-check
+
   # Cross-platform build matrix — folded in from the former standalone
   # cross-platform.yml so the SDK has ONE per-PR CI workflow, not two. Enforces
   # the invariant that every package BUILDS on every supported GOOS (a

@@ -48,6 +48,7 @@ GATES=(
   ci-gates-check
   release-scripts-check
   hooks-check
+  pre-commit-check
 )
 
 fail=0

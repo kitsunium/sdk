@@ -86,10 +86,28 @@ declaringFiles() {
 			continue
 		fi
 		status=0
-		grep -E "$typed|$converted" "$file" | grep -qvE "$reexport" || status=$?
-		# The pipeline's status is the last grep's; a read failure in the
-		# first shows up as a missing match, so the file is re-checked for
-		# readability before "no codes here" is believed.
+		# Redirection, never `grep -E … | grep -qvE …`. Under `pipefail`
+		# (line 27) the pipeline's status is NOT "the last grep's": `grep -qv`
+		# exits on its FIRST non-matching line, the producing grep takes
+		# EPIPE, and 141 wins. `status` is then non-zero for a file that DOES
+		# declare codes, the file is not printed, and a package whose only
+		# declaring file is that one drops out of the scan — the gate passes
+		# on the exact coverage gap it exists to close. Fails OPEN, silently.
+		# Measured on this shape, 40 trials per cell, the non-re-export line
+		# placed FIRST:
+		#
+		#     100 declaring lines (3.8 KB) →  0/40
+		#     200 declaring lines (7.6 KB) → 40/40
+		#    3200 declaring lines (122 KB) → 40/40
+		#
+		# and with that line placed LAST instead, 0/40 at every size — the
+		# negative control that pins the cause to the early exit. The largest
+		# declaring file in the tree today is 33 lines, so this is latent
+		# rather than firing; the threshold is one generated codes.go away.
+		# A process substitution keeps the inner grep out of the pipeline.
+		grep -qvE "$reexport" < <(grep -E "$typed|$converted" "$file") || status=$?
+		# A read failure in the inner grep shows up as a missing match, so the
+		# file is re-checked for readability before "no codes here" is believed.
 		[ -r "$file" ] || return 2
 		[ "$status" -eq 0 ] && echo "$file"
 	done

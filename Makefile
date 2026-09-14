@@ -1,4 +1,4 @@
-.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check
+.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -147,6 +147,15 @@ release-scripts-check:
 # to refuse, 40 times out of 40 past a few hundred KB (ADR 0088).
 hooks-check:
 	bash scripts/hooks-test.sh
+
+# `pre-commit-check` runs scripts/pre-commit/*.bats against the commit gates in
+# scripts/pre-commit/. ADR 0088 recorded its own sweep as INCOMPLETE: two of
+# those gates pipe into an early-exiting reader the same way .githooks/commit-msg
+# did, and they fail in opposite directions — check-ktn-phases-1-7.sh reports a
+# clean linter run as a failed one, and check-audit-coverage.sh lets an
+# uncovered package through, which is the gap that guard exists to close.
+pre-commit-check:
+	bash scripts/pre-commit-test.sh
 
 # `bench` regenerates pkg/v1/codec/BENCH.md by running the full bench
 # matrix programmatically (testing.Benchmark per row, no text-format
