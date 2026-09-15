@@ -1,10 +1,10 @@
 # ADR 0089 — A file that cannot cut a release cannot size one
 
-**Status**: Accepted; implemented in `scripts/release/cut-tags.sh`.
-**Date**: 2026-09-14
-**Deciders**: kitsunium maintainers
-**Amends**: ADR 0007 §2 (row 4 — the `Release-bump` trailer is scoped to the paths that can *cut* a release, not to `pkg/` alone)
-**Related**: ADR 0085 (both halves read the same range), ADR 0009 (detached release commit)
+- **Status**: Accepted; implemented in `scripts/release/cut-tags.sh`.
+- **Date**: 2026-09-14
+- **Deciders**: kitsunium maintainers
+- **Amends**: [ADR 0007](0007-sdk-release-and-versioning.md) §2 (row 4 — the `Release-bump` trailer is scoped to the paths that can *cut* a release, not to `pkg/` alone)
+- **Related**: [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) (both halves read the same range), [ADR 0009](0009-pkg-public-module-resolvability.md) (detached release commit)
 
 ## Context
 
@@ -88,7 +88,7 @@ This amends ADR 0007 §2 row 4 to read: *`Release-bump: minor` trailer on a firs
 
 After both, sizing a release requires touching code that actually cuts one. Today, a single documentation line suffices. The capability to *cause* a publication is unchanged — `compute-bumps.sh` already grants it to `internal/`-only changes — so widening grants nothing new; it only lets the size be stated honestly for something that ships either way.
 
-**The two changes are correct only together, and the history shows it.** Commit `3f681412` (`feat(resilience)`, #185) touched `pkg/v1/resilience/CLAUDE.md` *and* three `.go` files under `internal/service/resilience/`, and carried `Release-bump: minor`. Under the exclusion alone its only `pkg/` path would have been dropped and the trailer lost; under the widening it counts through `internal/`. Shipping one without the other would have moved the defect rather than removed it.
+**The two changes are correct only together, and the history shows it.** Commit `3f681412` (`feat(resilience)`, #185) touched `pkg/v1/resilience/CLAUDE.md` *and* three `.go` files under `internal/service/resilience/`, and carries the text `Release-bump: minor` — at **line 99 of a 126-line message**, so `%(trailers:key=Release-bump,valueonly,separator=%x1F)` returns **empty** and git parses nothing. What the two changes rescue together is therefore not the value but the **misplaced-trailer refusal**. Measured on the three configurations, against this commit: `^pkg/` alone → counts → refusal raised; the exclusion **alone** → its only `pkg/` path is a `CLAUDE.md`, so nothing counts → **refusal silenced, silent fall back to patch**; widening + exclusion → counts through `internal/` → refusal raised. Shipping the exclusion without the widening would have re-created issue #217 — a lost bump, silently — inside the fix for #218. Shipping one without the other would have moved the defect rather than removed it.
 
 **Doc-only releases lose the ability to size themselves.** A range whose only `pkg/` content is `CLAUDE.md`/`BUILD.bazel` churn cannot request a minor. This is intended and not a loss: such a range does not cut a release at all under `compute-bumps.sh:66-73`, so there is no release for it to size.
 
@@ -119,11 +119,25 @@ The real anti-smuggling control is that the trailer is read from main's **first-
 - **`squash_merge_commit_message: COMMIT_MESSAGES` lets contributor text reach the trailer parser.** Setting it to `BLANK` or `PR_TITLE` would force a maintainer to compose the release-sizing message. Not changed here: it alters every merge in the repository, not just release sizing, and deserves its own decision.
 - **Per-commit rdeps verification for `internal/` paths**, if a case ever shows a trailer sized a release through an `internal/` package that does not reach `//pkg/...`.
 
+- **This ADR does NOT close issue #220, and the shared notion is the reason.** "One notion of a file that counts" is shared by both halves, but that notion still **counts test files**. `counts_for_release` excludes `*/CLAUDE.md` and `*/BUILD.bazel` and nothing else, so a 100 % `_test.go` diff counts. Measured against the real commit that cut `pkg/v0.4.1` — `8addc948` (#222), two files, both `_test.go`, both under `internal/service/crypto/pbkdf2pw/`, zero files outside `internal/`, zero non-test files:
+
+  | rule | verdict on `8addc948` |
+  |---|---|
+  | `^pkg/` (before this ADR) | does not count |
+  | `counts_for_release` (this ADR) | **counts** |
+
+  So this ADR *widens* what may size that release rather than stopping it. That is consistent with its own reasoning — `compute-bumps.sh` cut the release either way, and only the size was at stake — but it must not be read as a fix. The trigger is untouched: `compute-bumps.sh` is **byte-identical** to `main` in this change set. Reproduced end to end on the exact release range `02f436e8..8addc948` (baseline `pkg/v0.4.0^1`, one commit): `compute-bumps.sh --dry-run` prints `pkg`. Negative control on `8addc948..91f80a6` (`.github/workflows/` only): prints nothing, exit 0.
+
+- **The reduction to the module root is what loses the answer, and Bazel already has it.** `awk -F/ '/^internal\//{print $1"/"$2}'` maps both changed files to `internal/service`, then `rdeps(//pkg/..., //internal/service/...)` returns **230 targets**. At the granularity of the change itself the same query returns **`INFO: Empty results`** — `rdeps(//pkg/..., //internal/service/crypto/pbkdf2pw:pbkdf2pw_test)` → 0 lines, and each of the two changed source-file targets → 0 lines. The build graph distinguishes a test target from a library target; the script discards that distinction one line before asking. This is a route to #220 that needs **no hand-maintained category list**, which is what makes it worth recording here rather than only in the issue. Not taken in this change set, and it carries a trap that must be measured before it is built: a source file not yet declared in a `BUILD.bazel` makes the query **exit 7** with `ERROR: no such target`, and under the script's existing `2>/dev/null` + `grep -q .` mask that is **indistinguishable from an empty result** — measured, the branch is not taken. A per-file query grafted onto the current masking would cut no release at all for any newly added file, which is a worse failure than the one it fixes.
+
+- **Two git parsers disagree about the same message, and only one is on the release path.** A body line consisting of `---` makes `git interpret-trailers --parse` treat everything after it as a patch and return an **empty** trailer list. `cut-tags.sh` does not use that route: it reads `%(trailers:key=Release-bump,valueonly,separator=%x1F)` through `git log --format`, which does **not** apply the patch-separator rule, and its misplaced-trailer guard counts `^Release-bump:` in `%B` without calling `interpret-trailers` at all. Measured on git 2.47.3 with a message whose last paragraph is `Release-bump: minor` preceded by a `---` line: `interpret-trailers --parse` → empty, `%(trailers:…)` → `minor`, `grep -cE '^Release-bump:'` on `%B` → `1`. The two routes the script uses **agree**, so no false refusal and no lost value: the release chain is immune. Recorded as a divergence and not as a defect, because an ADR whose subject is one shared notion should say where two notions still exist even when neither is currently wrong. It becomes live the day anything on this path is rewritten in terms of `interpret-trailers`.
+
 ## References
 
-- ADR 0007 §2 — bump semantics (amended by this ADR, row 4)
-- ADR 0085 — both halves of a release read the same range
+- [ADR 0007](0007-sdk-release-and-versioning.md) §2 — bump semantics (amended by this ADR, row 4)
+- [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) — both halves of a release read the same range
 - `scripts/release/compute-bumps.sh:66-102` — the notion of a file that counts, and the rdeps rule
 - `scripts/release/cut-tags.sh` — `counts_for_release`, and its two call sites
 - Issue #218 — the reproduction this ADR closes
 - Issue #217 — the same visible failure reached through trailer placement
+- Issue #220 — a test-only diff cuts a release: NOT closed by this ADR, and §Deferred says why with the measurement
