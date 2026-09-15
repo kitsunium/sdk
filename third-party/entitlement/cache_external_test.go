@@ -551,12 +551,23 @@ func TestVerifyRefusesARegressedClock(t *testing.T) {
 }
 
 // TestTheRatchetSurvivesAnOlderGenuineRoster pins that the mark only ever moves
-// forward THROUGH this package.
+// forward THROUGH this package, and that the lagging roster does not reach the
+// decision either.
 //
 // An origin lagging behind another serves a genuine roster hours older than the
 // cached one. Taking it would lower the newest signed instant this machine can
 // prove it has seen — which is exactly the guard a rolled-back clock needs
 // lowered.
+//
+// The second assertion is why this test was revised rather than left alone. It
+// used to require only that the lagging fetch SUCCEED, on the reading that the
+// ratchet is about storage: the older roster was refused a place in the cache
+// and handed to the decision anyway. That reading was the defect. The ratchet
+// now bears on ACCEPTANCE, so rosterFrom refuses the lagging document, the
+// origin loop runs out, and the CACHE is what authorises — which is observable,
+// because grant.Offline says so. Asserting it is what keeps this test passing
+// for its own reason: without the flag it would still be green while the
+// superseded roster was the one being acted on.
 func TestTheRatchetSurvivesAnOlderGenuineRoster(t *testing.T) {
 	t.Parallel()
 
@@ -601,8 +612,19 @@ func TestTheRatchetSurvivesAnOlderGenuineRoster(t *testing.T) {
 				ExpiresAt: now.Add(10 * time.Hour),
 				Subjects:  subjects,
 			})
-			if _, err := svc.Verify(now); err != nil {
+			lagging, err := svc.Verify(now)
+			//: A lagging mirror must not cost this machine its licence: the
+			//: document is refused, the origin loop moves on, and the cache is
+			//: still there.
+			if err != nil {
 				t.Fatalf("Verify() with a lagging origin error = %v, want nil (%s)", err, tt.reason)
+			}
+			//: And the decision rested on the CACHE, not on the superseded
+			//: document the origin served. This is the half that distinguishes a
+			//: ratchet over storage from a ratchet over acceptance; before the
+			//: latter existed this flag was false.
+			if !lagging.Offline {
+				t.Errorf("Verify() with a lagging origin granted with Offline = false, want true — the superseded roster reached the decision (%s)", tt.reason)
 			}
 
 			//: The mark must still be the RECENT one, so a clock rolled back

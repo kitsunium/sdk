@@ -52,7 +52,30 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
   pointer never terminates.
 - **`GrantValue` carries the deadline, not just the instant.** A daemon aging
   against `VerifiedAt` alone kept serving past the roster window that authorised
-  it. The deadline is the roster's, so the grant cannot outlive its evidence.
+  it. The deadline is the tightest bound in play, so the grant cannot outlive its
+  evidence.
+
+- **`GrantDeadline`'s bounds are VARIADIC because the rule is about documents,
+  not about two of them.** It took the roster's window and the subject's term —
+  exactly the two a DEVICE grant rests on — and a CI seat rests on a third, the
+  Actions token that proved the run is real. So `ciseat.go` bounded a seat by the
+  roster and lived for up to a day on a thirty-minute proof, contradicting the
+  invariant `NotAfter`'s own comment states one file away. Variadic rather than a
+  fourth parameter so the device call sites read unchanged; a caller with nothing
+  extra to name passes nothing extra. Zero still means "not recorded" and is
+  skipped, never minimised over, or every grant would be born dead.
+
+- **`ErrRosterStale` covers two conditions, and the second is not a new
+  situation.** A window that has CLOSED is the absolute bound. A roster
+  SUPERSEDED by a newer signed decision the client already accepted is the
+  relative one — its own window may be wide open and it is still the replay of a
+  statement the vendor has replaced, which is the other half of the replay bound
+  this sentinel has always advertised. Only the `condition` field separates them,
+  because the resolving action does not differ: publish, or fetch, a current
+  roster. A sixteenth code was considered and refused: a caller mapping sentinels
+  to exit codes and advice lives downstream of this module, and a new one falls
+  through to its default — the defect `authenticateRoster`'s unsentinelled decode
+  failure already paid for once.
 - **A refusal names no account, no uuid and no deadline.** `CIEntitlementFor`'s
   four refusals render one byte-identical sentence, and `SubjectFor`'s renders
   another; which account, which uuid, which term closed and when travel as

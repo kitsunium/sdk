@@ -341,6 +341,36 @@ func (s *Service) authorise(roster *coreent.RosterValue, subject string, discove
 // stale or forged answer is treated exactly like an unreachable one — move
 // on — and only the last failure is reported if every origin fails.
 //
+// A SUPERSEDED answer joins that list, and the reason it has to is the same one:
+// a mirror running behind serves a genuine roster older than one this machine has
+// already accepted, and rosterFrom refuses it so it cannot undo that decision.
+// Failing outright there would turn one lagging mirror into a refused licence.
+//
+// # The limit of the fallback, stated rather than discovered
+//
+// The loop moves on when an origin fails to produce a USABLE DOCUMENT, and never
+// when the document it produced fails to produce a GRANT. So the first origin
+// that serves a roster which verifies, is in window and is not a replay ENDS the
+// search — including when that roster entitles nobody at all. A publisher that
+// ships an empty `subjects` map to one mirror therefore revokes every machine
+// reading that mirror, and a second mirror still holding the correct roster is
+// never consulted. Test_Service_currentRoster_stopsAtTheFirstUsableRoster pins
+// exactly that, so the limit cannot move without somebody meaning it to.
+//
+// This is deliberate and it is NOT a claim that the behaviour is ideal. The
+// alternative — continue until an origin authorises — is the mirror-image defect
+// and a far worse one: it would let any configured endpoint veto a revocation by
+// serving an older roster that still lists the machine, which defeats the one
+// thing the scheme exists to do. The narrower variant, "continue when the roster
+// entitles nobody", is not the client's to assume either: an authentic empty
+// roster IS a vendor statement that nobody is entitled — a pulled release, a
+// discontinued product — and reading it as a publication fault instead is a
+// statement only the vendor is entitled to make. The same argument CIRelaxed
+// settled: it would have to travel in the signed roster, as a field that says
+// "an empty roster means I broke", and adding one is a product decision rather
+// than a repair. Until that field exists the first usable roster decides, and
+// re-signing is what corrects a publisher's mistake.
+//
 // The second result says which of the two answered. It is not a permission
 // level: an offline roster passed the identical checks, and everything
 // downstream — the update floor, the CI seat, the subject match, the grant
@@ -413,8 +443,20 @@ func (s *Service) rosterFrom(origin coreent.OriginValue, now time.Time) (roster 
 	//: vendor's and known to be in-window — and keep them whether or not the
 	//: subject match that follows succeeds, because a roster that revoked
 	//: this machine is exactly the roster the next offline start should read.
-	s.rememberRoster(raw, parsed)
-	//: Authenticated, fresh, and remembered.
+	//:
+	//: This is ALSO where the document is judged against what this machine
+	//: already knows, and the two are one call because they are one decision:
+	//: the mark is the cached bundle, so comparing against it and replacing it
+	//: cannot be separated without a window in between. The refusal comes back
+	//: BEFORE the version floor and before the subject match, so a replayed
+	//: roster cannot talk either of them out of a conclusion already reached —
+	//: and it comes back as an ordinary origin failure, so currentRoster moves
+	//: to the next publication point instead of giving up.
+	if markErr := s.rememberRoster(raw); markErr != nil {
+		//: Propagate the replay refusal; the origin loop continues past it.
+		return nil, markErr
+	}
+	//: Authenticated, fresh, not superseded, and remembered.
 	return parsed, nil
 }
 

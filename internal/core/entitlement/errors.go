@@ -24,8 +24,8 @@ var (
 	ErrRosterUnsigned = errs.Define(CodeRosterUnsigned, "ROSTER_UNSIGNED",
 		"the roster is not signed by the expected vendor",
 		"core/entitlement: the roster signature did not verify against the vendor key")
-	// ErrRosterStale reports that the roster verified but its validity
-	// window has closed. It bounds how long a revoked client keeps working
+	// ErrRosterStale reports that the roster verified but no longer
+	// authorises anything. It bounds how long a revoked client keeps working
 	// offline, and how long a hostile endpoint can replay a genuine roster.
 	//
 	// Those are the same bound, and cache.go is what finally made the first
@@ -33,9 +33,18 @@ var (
 	// the last bundle it authenticated and is refused HERE the moment that
 	// bundle's window closes — at most RosterLifetime after it was signed,
 	// whoever is replaying it and from wherever.
+	//
+	// TWO conditions reach it, and the second is the other half of that
+	// replay bound rather than a separate situation. A window that has
+	// CLOSED is the absolute one. A roster SUPERSEDED by a newer signed
+	// decision this machine has already accepted is the relative one: its
+	// own window may be wide open, and it is still the replay of a statement
+	// the vendor has since replaced. Only the `condition` field says which,
+	// because the resolving action does not differ — publish, or fetch, a
+	// current roster.
 	ErrRosterStale = errs.Define(CodeRosterStale, "ROSTER_STALE",
 		"the roster has expired",
-		"core/entitlement: the roster verified but its validity window has closed")
+		"core/entitlement: the roster verified but no longer authorises — its own window has closed, or a newer signed decision has superseded it")
 	// ErrRevoked reports that the licence UUID is absent from a roster that
 	// was itself valid — the subject was removed upstream.
 	ErrRevoked = errs.Define(CodeRevoked, "REVOKED",

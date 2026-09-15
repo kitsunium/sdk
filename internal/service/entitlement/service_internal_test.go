@@ -577,3 +577,93 @@ func (zeroReader) Read(p []byte) (n int, err error) {
 	//: A full buffer every time; io.LimitReader is what stops it.
 	return len(p), nil
 }
+
+// Test_Service_currentRoster_stopsAtTheFirstUsableRoster pins the LIMIT of the
+// origin fallback, so it cannot move without somebody meaning it to.
+//
+// It is a characterisation test and says so: nothing here was broken and then
+// fixed, and it would have passed before this audit exactly as it passes now.
+// What it buys is that the limit stops being a thing an operator discovers during
+// an outage. The audit asked for one of two things — continue the loop when the
+// roster produces no grant, or write the limit down — and this is the second,
+// because the first is the mirror-image defect: an endpoint that could veto a
+// revocation by serving an older roster still listing the machine would defeat
+// the one thing the scheme exists to do.
+//
+// The narrower reading, "continue when the roster entitles NOBODY", is not the
+// client's to assume either. An authentic empty roster is a statement the vendor
+// signed, and "an empty roster means I made a mistake" is a statement only the
+// vendor can make — it would have to travel in the signed document, the way
+// CIRelaxed does, and adding that field is a product decision. See
+// currentRoster's doc comment.
+//
+// The healthy mirror is asserted NEVER FETCHED rather than merely unused: "the
+// second origin was not consulted" is the whole of the limit, and a test that only
+// checked the sentinel would pass just as well against a loop that did consult it
+// and then discarded the answer.
+func Test_Service_currentRoster_stopsAtTheFirstUsableRoster(t *testing.T) {
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name   string
+		reason string
+	}{
+		{
+			name:   "an authentic empty roster refuses without consulting the next mirror",
+			reason: "the loop moves on from a document it cannot use, never from a document it can use and does not like",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			//: Outside Actions on every platform, so the CI seat refuses before
+			//: it reads a product and the device path is what answers.
+			t.Setenv(actionsTokenURLEnv, "")
+			t.Setenv(actionsTokenBearerEnv, "")
+
+			vendorPub, vendorPriv, keyErr := ed25519.GenerateKey(nil)
+			//: A failure here is an environment problem, not a test outcome.
+			if keyErr != nil {
+				t.Fatalf("generating vendor key: %v", keyErr)
+			}
+
+			//: The stalled mirror's document: perfectly signed, perfectly in
+			//: window, and entitling nobody.
+			stalled := signedBundle(t, vendorPriv, coreent.RosterValue{
+				IssuedAt:  now.Add(-time.Minute),
+				ExpiresAt: now.Add(time.Hour),
+			})
+			//: The healthy mirror's document, which still lists this machine.
+			healthy := signedBundle(t, vendorPriv, coreent.RosterValue{
+				IssuedAt:  now.Add(-time.Minute),
+				ExpiresAt: now.Add(time.Hour),
+				Subjects:  map[string]coreent.SubjectValue{sampleSubject: {Fingerprint: "SHA256:healthy"}},
+			})
+
+			healthyFetched := false
+			origins := []coreent.OriginValue{
+				{Name: "stalled", BundleURL: "https://example.invalid/stalled.json"},
+				{Name: "healthy", BundleURL: "https://example.invalid/healthy.json"},
+			}
+			svc := NewServiceWithOrigins(stubGet(func(url string) (*http.Response, error) {
+				body := stalled
+				//: Only the second origin's URL yields the good document, and
+				//: reaching for it is itself the observation.
+				if strings.Contains(url, "healthy") {
+					healthyFetched, body = true, healthy
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+			}), stubIdentity{subject: sampleSubject, fingerprint: "SHA256:healthy"}, vendorPub, origins)
+
+			_, err := svc.Verify(now)
+			//: Absence from a roster that itself verified reports as revoked,
+			//: and an empty roster is absence for everybody.
+			if !errors.Is(err, coreent.ErrRevoked) {
+				t.Fatalf("Verify() error = %v, want coreent.ErrRevoked (%s)", err, tt.reason)
+			}
+			if healthyFetched {
+				t.Errorf("the second origin was fetched; the documented limit is that the first USABLE roster ends the search (%s)", tt.reason)
+			}
+		})
+	}
+}

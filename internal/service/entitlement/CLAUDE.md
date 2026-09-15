@@ -18,7 +18,7 @@ product (ADR 0078 §1).
 | `service.go` | the `Service` handle, `Verify`, the origin fallback, `matchSubject` |
 | `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature |
 | `bundle.go` | `ParseBundle` — the one-document form the cache stores |
-| `cache.go` | the offline copy and the anti-rollback ratchet |
+| `cache.go` | the offline copy and the anti-rollback ratchet, over storage AND acceptance |
 | `cache_lock.go` | exclusion over the cache directory — what rename does not give |
 | `ci.go` / `ciseat.go` | GitHub Actions OIDC: mint, verify, then look up the seat |
 | `jwks.go` | the issuer's published RSA keys |
@@ -40,11 +40,89 @@ product (ADR 0078 §1).
   window checks. What it cannot re-run is the clock, which is why the ratchet
   exists — and why the frozen-clock hole is documented as open rather than
   claimed closed.
+
+- **The ratchet guards ACCEPTANCE, and it used to guard only storage.**
+  `rememberRoster` refused to CACHE a roster older than the mark, and
+  `rosterFrom` handed that same roster to the decision anyway — `Verify` never
+  compared the roster in its hand against the mark. So a genuine roster signed
+  before a revocation, replayed by any origin, was denied a place in the cache and
+  granted a seat at the table: it restored a revoked subject, a rotated-out
+  fingerprint, a lower version floor, a withdrawn CI account, and `CIRelaxed`
+  itself — the policy was replayable, which is the half no signature can defend.
+  `rememberRoster` now RETURNS the verdict, `judgeMark` reaches it, and the
+  comparison and the install happen under one hold because a comparison whose
+  result outlives the state it was taken against has decided nothing. The refusal
+  travels as an ordinary origin failure so the loop moves to the next publication
+  point: one lagging mirror must not cost a licence.
+
+- **Equality of `IssuedAt` is accepted, and only because of the digest.** Every
+  re-verification inside one publication interval offers the roster already
+  cached, so refusing an equal instant outright would refuse most verifications.
+  `markRecord` therefore carries a SHA-256 of the signed PAYLOAD — not of the
+  bundle, because two bundles differing only in their outer JSON are one statement
+  — and two payloads that differ at one instant are two statements, where the one
+  already accepted wins.
+
+- **The CACHE path is exempt from the comparison, by choice.** `cachedRoster`
+  reads the same file `markWhileHeld` reads, so comparing what comes back against
+  the mark derived from it can only ever say "equal, same payload". The one way it
+  could say otherwise is a concurrent refresh between the two reads — and refusing
+  there would turn lock contention into a refused licence. The guarantee is about
+  what an ORIGIN can undo.
+
+- **And the guarantee is CONDITIONAL, stated as such everywhere it appears.** The
+  mark is the cached bundle's `IssuedAt` and nothing else, so anti-replay lapses
+  when there is no cache (`cacheDir == ""`, which is every injected-getter
+  construction), when the install failed, and when the guard stood down. The last
+  two log; none of the three refuses instead. Do not restate it as unconditional
+  in a README or a doc comment — that was the class of defect this audit closed.
+
+- **A document that is not a roster proves nothing about time.** `authenticateBundle`
+  authenticated and returned, so the mark advanced on anything the vendor had
+  signed that carried an `iat` — including a document `ParseRoster` refuses to
+  AUTHORISE on its own shape, such as one whose window is wider than
+  `RosterLifetime`. `rosterMark` applies the clock-FREE half of ParseRoster's
+  judgement before accepting a mark: a non-zero `iat`, a window that is not
+  inverted, a width within `RosterLifetime`. No clock, because the ratchet's input
+  is normally expired.
+
+- **`markCeiling` refuses in BOTH directions, and that is the whole of it.** A
+  vendor-signed bundle dated far in the future, written straight into the cache
+  directory, sets the mark and gets the machine refused on a clock that is
+  correct — where "set your clock" is the wrong advice. The repair is a SECOND
+  `condition` under the SAME `ErrClockRegressed`, never a discarded mark: ignoring
+  an implausible mark would hand over the ratchet's own bypass, since rolling the
+  clock back past `markCeiling` puts the LEGITIMATE mark outside the ceiling too.
+  `Test_Service_checkClock_refusesBothDirectionsOfAnImplausibleMark` fails on both
+  mistakes.
 - **`VerifyCI` takes the roster as a signed document, not as an interface.**
   GitHub's word is that the run is real, not that it is paid for. Entitlement is
   a property of the vendor's roster, and the party being checked must not be able
   to supply the type that answers it. See `.ktn-linter.yaml`'s KTN-API-MINIF
   entry for why the narrowing the linter suggests is refused here.
+- **The origin loop moves on from a document it cannot USE, never from one it
+  can use and does not like.** So the first origin serving a roster that verifies,
+  is in window and is not a replay ends the search — including a roster that
+  entitles nobody, which is how one mirror shipping an empty `subjects` map
+  revokes every machine reading it while a healthy mirror goes unconsulted.
+  Continuing until an origin AUTHORISES is the mirror-image defect and far worse:
+  any configured endpoint could then veto a revocation. The narrower reading — "an
+  empty roster means the publisher broke" — is not the client's to assume either:
+  an authentic empty roster IS a vendor statement, and re-reading it as a fault
+  would have to travel in the signed document, the way `CIRelaxed` does. That is a
+  product decision; until it is taken,
+  `Test_Service_currentRoster_stopsAtTheFirstUsableRoster` pins the limit so it
+  cannot move by accident.
+
+- **A CI seat is bounded by its own token.** `ciseat.go` passed
+  `GrantDeadline` the roster's window and the account's term — the two bounds a
+  DEVICE grant rests on — and never `claims.ExpiresAt`, so a seat established by a
+  thirty-minute proof outlived it by up to a day, against `core/grant.go`'s own
+  stated invariant that "a grant may not outlive the document that authorised it".
+  `GrantDeadline` is variadic now so a third document can be named. No `clockSkew`
+  is added: `checkTiming` allows it to ADMIT a token, which is the permissive
+  direction, and applying it to a BOUND would extend the grant past the proof.
+
 - **A CI failure is not a refusal unless the roster says so.** A runner that
   also holds a device key must keep working, so `ciSeat`'s failure falls through
   — except when `ciRefusalIsFinal`, which is the only place "this run must be CI"
@@ -135,6 +213,16 @@ it.
   `third-party/entitlement` for the reason ADR 0079 measures.
 - Collapse `RosterUnreachable` into a refusal. It says "cannot decide", and
   reporting an outage as a revocation is the one wrong answer.
+- Make `markCeiling` discard a mark instead of refusing on it, or move the
+  ceiling into `rosterMark` where there is no clock. Both are the same bypass.
+- Apply the anti-replay comparison to `cachedRoster`, or describe the guarantee
+  as unconditional. Two different mistakes, both of them a sentence that outruns
+  the code.
+- Write a doc comment describing a POLICY for a claim nothing reads.
+  `event_name` and `runner_environment` carried one for months, four lines under
+  a type comment promising the opposite;
+  `Test_VerifyActionsToken_ignoresTheClaimsNothingReads` is what keeps the
+  silence mechanical now.
 
 ## Verification
 

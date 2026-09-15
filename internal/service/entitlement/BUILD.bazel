@@ -55,6 +55,7 @@ go_test(
         "bundle_internal_test.go",
         "cache_concurrency_internal_test.go",
         "cache_internal_test.go",
+        "cache_replay_internal_test.go",
         "cache_unix_internal_test.go",
         "cache_windows_internal_test.go",
         "ci_external_test.go",

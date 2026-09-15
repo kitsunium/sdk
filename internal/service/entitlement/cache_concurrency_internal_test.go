@@ -2,8 +2,6 @@ package entitlement
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"runtime"
 	"strings"
@@ -36,28 +34,15 @@ const concurrentRounds int = 400
 func paddedBundle(t *testing.T, priv ed25519.PrivateKey, issued time.Time, pad int) []byte {
 	t.Helper()
 
-	roster := coreent.RosterValue{
+	//: One subject whose UUID is the padding, so the serialised length varies
+	//: with pad while the document stays a well-formed roster.
+	return signedBundle(t, priv, coreent.RosterValue{
 		IssuedAt:  issued,
 		ExpiresAt: issued.Add(9 * time.Hour),
 		Subjects: map[string]coreent.SubjectValue{
 			strings.Repeat("a", pad): {Fingerprint: "SHA256:padding"},
 		},
-	}
-	raw, marshalErr := json.Marshal(roster)
-	//: A failure here is an environment problem, not a test outcome.
-	if marshalErr != nil {
-		t.Fatalf("marshalling roster: %v", marshalErr)
-	}
-	bundle, bundleErr := json.Marshal(BundleValue{
-		Payload:   base64.StdEncoding.EncodeToString(raw),
-		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, raw)),
 	})
-	//: A failure here is an environment problem, not a test outcome.
-	if bundleErr != nil {
-		t.Fatalf("marshalling bundle: %v", bundleErr)
-	}
-	//: Return the one document the fallback reads.
-	return bundle
 }
 
 // Test_rememberRoster_concurrentGenerationsNeverLowerTheMark pins the ratchet
@@ -111,7 +96,7 @@ func Test_rememberRoster_concurrentGenerationsNeverLowerTheMark(t *testing.T) {
 			}
 
 			older, newer := base.Add(tt.gap), base.Add(2*tt.gap)
-			lowered := 0
+			lowered, refusedNewest, wrongRefusal := 0, 0, 0
 			//: Each round is its own cache directory and its own race, so one
 			//: round's outcome cannot seed the next.
 			for range concurrentRounds {
@@ -125,20 +110,38 @@ func Test_rememberRoster_concurrentGenerationsNeverLowerTheMark(t *testing.T) {
 
 				start := make(chan struct{})
 				var wg sync.WaitGroup
-				//: Goroutine lifecycle: each remembers one generation and
-				//: exits; the barrier makes them contend rather than queue.
-				remember := func(issued time.Time) {
+				var newestVerdict, oldestVerdict error
+				//: Goroutine lifecycle: each remembers one generation into its
+				//: own verdict slot and exits; the barrier makes them contend
+				//: rather than queue, and the slots are read only after Wait so
+				//: neither is a shared write.
+				remember := func(issued time.Time, verdict *error) {
 					defer wg.Done()
 					raw := paddedBundle(t, vendorPriv, issued, 1)
 					<-start
-					svc.rememberRoster(raw, &coreent.RosterValue{IssuedAt: issued})
+					*verdict = svc.rememberRoster(raw)
 				}
 				wg.Add(2)
-				go remember(newer)
-				go remember(older)
+				go remember(newer, &newestVerdict)
+				go remember(older, &oldestVerdict)
 				close(start)
 				wg.Wait()
 
+				//: The NEWEST generation is newer than the seed and newer than
+				//: its rival, so nothing can supersede it whichever order the
+				//: two took the guard in — and a stand-down refuses nothing.
+				//: This is an invariant of the race rather than an outcome of
+				//: it, which is why it counts rather than being tolerated.
+				if newestVerdict != nil {
+					refusedNewest++
+				}
+				//: The oldest may or may not be refused: that IS what the race
+				//: decides. What is not optional is WHICH refusal, so a future
+				//: change refusing it for some other reason cannot pass as this
+				//: one.
+				if oldestVerdict != nil && !errors.Is(oldestVerdict, coreent.ErrRosterStale) {
+					wrongRefusal++
+				}
 				//: The mark after the race, whoever renamed last.
 				if !svc.signedHighWaterMark().Equal(newer) {
 					lowered++
@@ -149,17 +152,25 @@ func Test_rememberRoster_concurrentGenerationsNeverLowerTheMark(t *testing.T) {
 				t.Errorf("the mark ended below the newest generation in %d of %d rounds, want 0 (%s)",
 					lowered, concurrentRounds, tt.reason)
 			}
+			if refusedNewest != 0 {
+				t.Errorf("the newest generation was REFUSED in %d of %d rounds, want 0 — nothing supersedes the newest document (%s)",
+					refusedNewest, concurrentRounds, tt.reason)
+			}
+			if wrongRefusal != 0 {
+				t.Errorf("the older generation was refused with something other than coreent.ErrRosterStale in %d of %d rounds, want 0 (%s)",
+					wrongRefusal, concurrentRounds, tt.reason)
+			}
 		})
 	}
 }
 
 // refreshRacingAReader runs one round of the race and returns the mark left
-// behind: a read through the package's own read path, concurrent with one
-// install of raw.
+// behind — a read through the package's own read path, concurrent with one
+// install of raw — together with what the install itself had to say.
 //
 // It is a function rather than a closure in the loop so that neither the
 // Service nor the barrier is captured by a closure created per iteration.
-func refreshRacingAReader(svc *Service, raw []byte, issued time.Time) time.Time {
+func refreshRacingAReader(svc *Service, raw []byte) (mark time.Time, verdict error) {
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	//: Goroutine lifecycle: waits on the barrier, performs exactly one read
@@ -171,10 +182,15 @@ func refreshRacingAReader(svc *Service, raw []byte, issued time.Time) time.Time 
 		svc.signedHighWaterMark()
 	})
 	close(start)
-	svc.rememberRoster(raw, &coreent.RosterValue{IssuedAt: issued})
+	//: The install may lose to the reader's guard, which is what this round
+	//: measures. Its VERDICT is not in doubt either way: raw is a newer
+	//: generation than the seeded one, nothing supersedes a newer document, and
+	//: a stand-down refuses nothing. It is returned so the caller asserts that
+	//: rather than the round quietly tolerating a refusal nobody expected.
+	verdict = svc.rememberRoster(raw)
 	wg.Wait()
-	//: Whatever survived the race.
-	return svc.signedHighWaterMark()
+	//: Whatever survived the race, and what the install said about it.
+	return svc.signedHighWaterMark(), verdict
 }
 
 // Test_rememberRoster_refreshesWhileTheCacheIsBeingRead pins that a refresh
@@ -238,7 +254,13 @@ func Test_rememberRoster_refreshesWhileTheCacheIsBeingRead(t *testing.T) {
 				}
 
 				//: The refresh either landed or was silently dropped.
-				if !refreshRacingAReader(svc, paddedBundle(t, vendorPriv, fresh, 1), fresh).Equal(fresh) {
+				mark, verdict := refreshRacingAReader(svc, paddedBundle(t, vendorPriv, fresh, 1))
+				//: A newer generation is never REFUSED, whatever the guard does
+				//: with the install itself.
+				if verdict != nil {
+					t.Fatalf("rememberRoster() refused a newer generation: %v (%s)", verdict, tt.reason)
+				}
+				if !mark.Equal(fresh) {
 					notRefreshed++
 				}
 			}
@@ -338,7 +360,7 @@ func Test_writeCachedBundle_concurrentWritersNeverDestroyTheCache(t *testing.T) 
 					continue
 				}
 				//: Signature only: freshness is not what this round is about.
-				if _, authErr := authenticateBundle(raw, vendorPub); authErr != nil {
+				if _, _, authErr := authenticateBundle(raw, vendorPub); authErr != nil {
 					destroyed++
 				}
 			}
@@ -461,7 +483,11 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 
 			//: The newer generation arrives while the guard is held elsewhere.
 			//: This blocks for cacheLockBudget and then stands down.
-			svc.rememberRoster(paddedBundle(t, vendorPriv, newer, 1), &coreent.RosterValue{IssuedAt: newer})
+			//: The install stands down here by construction, and a stand-down
+			//: refuses nothing — see rememberRoster's third lapse.
+			if err := svc.rememberRoster(paddedBundle(t, vendorPriv, newer, 1)); err != nil {
+				t.Fatalf("rememberRoster() error = %v, want nil — a stand-down is not a refusal (%s)", err, tt.reason)
+			}
 
 			//: Give the guard back BEFORE reading, so the read below measures
 			//: the mark rather than the contention.
@@ -473,9 +499,9 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 			//: LANDED, the assertion below would pass without the stand-down ever
 			//: happening, and this test would be a shape that guarantees its own
 			//: result. The cache must still hold the older generation.
-			if installed := svc.markWhileHeld(); !installed.Equal(older) {
+			if installed := svc.markWhileHeld(); !installed.issued.Equal(older) {
 				t.Fatalf("the install was not blocked: the cache holds %s, want the seeded %s — this test measured nothing",
-					installed.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339))
+					installed.issued.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339))
 			}
 
 			//: The property, which the stand-down broke.

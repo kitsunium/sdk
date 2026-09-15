@@ -53,25 +53,39 @@ func ParseBundle(raw []byte, vendor ed25519.PublicKey, now time.Time) (roster *c
 }
 
 // authenticateBundle decodes and AUTHENTICATES a bundle without applying the
-// freshness window.
+// freshness window, and hands back the SIGNED BYTES alongside the roster they
+// decoded to.
 //
 // It exists for one caller: the clock ratchet, which has to read the signing
 // instant of a bundle that may well have expired — that is the ordinary state
 // of a cached one — in order to compare it against the local clock. Every other
 // path goes through ParseBundle and gets the window with it.
 //
+// The payload is returned because the ratchet has to tell two documents apart
+// at the SAME signed instant, and the thing that identifies a document is the
+// bytes the signature covers — never the bundle around them. Two bundles
+// differing only in their outer JSON (member order, whitespace, a re-encoded
+// base64) carry one statement by the vendor, and a digest taken over the
+// envelope would read them as two. See markRecord.
+//
 // The SIGNATURE is still required. A ratchet that advanced on unauthenticated
 // bytes would let anyone who can write the cache file pin this machine's clock
 // wherever they liked, which is a denial of service handed over for free.
-func authenticateBundle(raw []byte, vendor ed25519.PublicKey) (roster *coreent.RosterValue, err error) {
-	payload, signature, decodeErr := decodeBundle(raw)
+func authenticateBundle(raw []byte, vendor ed25519.PublicKey) (roster *coreent.RosterValue, payload []byte, err error) {
+	decodedPayload, signature, decodeErr := decodeBundle(raw)
 	//: A document we cannot take apart carries nothing to authenticate.
 	if decodeErr != nil {
 		//: Propagate the publication or transport problem.
-		return nil, decodeErr
+		return nil, nil, decodeErr
 	}
-	//: Signature only; the window is the caller's business here.
-	return authenticateRoster(payload, signature, vendor)
+	authenticated, authErr := authenticateRoster(decodedPayload, signature, vendor)
+	//: Unsigned, forged, or not a roster at all.
+	if authErr != nil {
+		//: Propagate the refusal, naming no bytes the caller must not trust.
+		return nil, nil, authErr
+	}
+	//: The roster and the exact bytes the vendor signed over.
+	return authenticated, decodedPayload, nil
 }
 
 // decodeBundle splits a published bundle into the signed bytes and the
