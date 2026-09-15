@@ -433,6 +433,75 @@ need_toolchain() {
   [[ "$output" == *"pkg/v0.1.1"* ]]
 }
 
+# ── ADR 0089: one notion of "a file that counts", shared with compute-bumps ───
+#
+# These run together on purpose. Each one alone passes under a rule that is
+# wrong in the other direction, so a suite carrying only one of them would
+# certify the defect it does not test.
+
+# commit_internal <message> — touches internal/ and NOTHING under pkg/. Before
+# ADR 0089 a `^pkg/` scope skipped its trailer, so a behavioural change that
+# ADR 0007 §2 row 3 REQUIRES to be a minor could only ship as a patch — while
+# compute-bumps.sh cut the release for it anyway, through rdeps.
+commit_internal() {
+  echo "// $RANDOM" >>internal/service/svc.go
+  g add -A
+  g commit -q --no-verify -F - <<<"$1"
+}
+
+# commit_pkg_doc <message> — touches ONLY a CLAUDE.md under pkg/.
+# compute-bumps.sh:70 refuses to cut a release for that churn; before ADR 0089
+# cut-tags.sh still let it SIZE one, which was the cheapest way past the scope.
+commit_pkg_doc() {
+  mkdir -p pkg/v1/foo
+  echo "# $RANDOM" >>pkg/v1/foo/CLAUDE.md
+  g add -A
+  g commit -q --no-verify -F - <<<"$1"
+}
+
+@test "a trailer on an internal/-only commit sizes the release (ADR 0089)" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_internal $'feat(service): behaviour observable through pkg\n\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
+@test "a trailer on a pkg/ CLAUDE.md alone does NOT size the release (ADR 0089)" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg_doc $'docs: one line under pkg/\n\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [[ "$output" != *"pkg/v0.2.0"* ]]
+}
+
+# The control. A rule answering "no" to everything would pass both tests above;
+# this is what stops that.
+@test "a trailer on pkg/ code still sizes the release (ADR 0089 control)" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg $'feat(codec): public symbols\n\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
+# The refusal inherits the same scope. A buried trailer on a commit that cannot
+# cut a release is still an alarm about nothing; one on an internal/-only commit
+# is not, because that commit can now size a release — so a trailer missed there
+# is exactly the silent patch the refusal exists to stop.
+@test "a buried trailer on an internal/-only commit is refused (ADR 0089)" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_internal $'feat(service): behaviour\n\nRelease-bump: minor\n\nProse after the trailer hides it.'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"OUTSIDE the trailer block"* ]]
+}
+
 @test "an unwalkable --range is refused rather than read as no trailer" {
   run bash -c "echo pkg | $SCRIPT --dry-run --range=nosuchrev..HEAD"
   [ "$status" -eq 64 ]

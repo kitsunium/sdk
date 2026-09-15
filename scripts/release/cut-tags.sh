@@ -102,8 +102,45 @@ rank_of() {
   esac
 }
 
+# counts_for_release <sha> — 0 when <sha> touches at least one path that could
+# CUT a release, which is exactly when its Release-bump trailer is in scope
+# (ADR 0089). One notion of "a file that counts", shared with compute-bumps.sh.
+#
+# Why `internal/` and not `pkg/` alone: ADR 0007 §2 requires a behavioural
+# change in internal/** observable through pkg to be a MINOR, while its own next
+# row gated the only way to ask for one on touching pkg/. There was no way to
+# say what the table demanded. compute-bumps.sh already cuts a release for an
+# internal/-only change whose rdeps reach //pkg/..., and that release tags the
+# whole graph, so the change ships either way — this only lets its size be
+# stated.
+#
+# Why CLAUDE.md and BUILD.bazel are excluded: compute-bumps.sh:70 already drops
+# them when deciding WHETHER to release ("its churn alone must not cut a
+# release"). Without the same exclusion here, a file that cannot trigger a
+# release could still SIZE one — measured: a commit touching only
+# pkg/v1/foo/CLAUDE.md with `Release-bump: minor` cut v0.2.0. That was the
+# cheapest way past the pkg/ scope, so the two changes together are a
+# hardening, not a relaxation.
+#
+# awk, not `grep -q`: grep exits on its first match, git takes SIGPIPE, and this
+# repository has already lost a release to a 141 from that shape. awk consumes
+# the whole stream and reports through its exit status, so git always finishes
+# writing. No `grep -c` either — it prints 0 AND exits 1.
+#
+# `-m --first-parent`: a true merge shows NO files under a plain --name-only, so
+# its trailer used to be scoped against an empty list and counted for nothing.
+counts_for_release() {
+  awk '
+    /\/CLAUDE\.md$/   { next }
+    /\/BUILD\.bazel$/ { next }
+    /^pkg\//          { f = 1 }
+    /^internal\//     { f = 1 }
+    END               { exit !f }
+  ' < <(git log -1 --name-only --format= -m --first-parent "$1")
+}
+
 # range_trailer <range> — echo the largest Release-bump value carried by a
-# commit in <range> that ALSO touched pkg/, or nothing.
+# commit in <range> that could ALSO cut a release, or nothing.
 #
 # Why --first-parent, and why it is load-bearing rather than tidy: ADR 0007 §2
 # gates a minor on a trailer "an attacker cannot smuggle through a PR body" by
@@ -184,10 +221,10 @@ range_trailer() {
     fi
 
     if [ "$msg_count" -gt "$parsed_count" ]; then
-      # Only when the commit ALSO touched pkg/. A trailer on a commit that
-      # touched nothing under pkg/ would not have counted even if it had parsed
-      # (ADR 0007 §2), so refusing on it would be an alarm about nothing.
-      if grep -qE '^pkg/' < <(git log -1 --name-only --format= -m --first-parent "$sha"); then
+      # Only when the commit could ALSO cut a release. A trailer on a commit
+      # that touches nothing releasable would not have counted even if it had
+      # parsed (ADR 0089), so refusing on it would be an alarm about nothing.
+      if counts_for_release "$sha"; then
         echo "cut-tags: $(git rev-parse --short "$sha") carries a 'Release-bump:' OUTSIDE the trailer block — refusing to size this release" >&2
         echo "cut-tags:   the message has $msg_count, git parsed $parsed_count. Trailers are read from the LAST PARAGRAPH only." >&2
         echo "cut-tags:   move it to the last paragraph, alone or beside well-formed 'Key: value' trailers, and re-run." >&2
@@ -196,15 +233,14 @@ range_trailer() {
     fi
 
     [ -z "$raw" ] && continue
-    # Redirection, never `git log … | grep -qE`. `grep -q` exits on its first
-    # match, git takes SIGPIPE, `pipefail` reports 141, and `|| continue` then
-    # SKIPS the commit — so a merge touching pkg/ AND enough other paths to fill
-    # the pipe buffer had its trailer discarded and the release fell back to a
+    # See counts_for_release: the path test is a redirection into awk, never
+    # `git log … | grep -qE`. `grep -q` exits on its first match, git takes
+    # SIGPIPE, `pipefail` reports 141, and `|| continue` then SKIPS the commit —
+    # so a merge touching a releasable path AND enough other paths to fill the
+    # pipe buffer had its trailer discarded and the release fell back to a
     # patch. Which is ADR 0085's defect reopened by another route. Measured on
-    # this shape: 400 paths (85 KB) fails 9 times in 10, 1600 paths 10 in 10, and
-    # `pkg/` sorts early enough to be the FIRST match, which is the worst case.
-    # A process substitution keeps git's status out of the pipeline entirely.
-    grep -qE '^pkg/' < <(git log -1 --name-only --format= -m --first-parent "$sha") || continue
+    # this shape: 400 paths (85 KB) fails 9 times in 10, 1600 paths 10 in 10.
+    counts_for_release "$sha" || continue
     # Split the field back into one value per repeated trailer, so a commit
     # carrying two of them is ranked like two commits would be. Default IFS on a
     # single-variable read, so `Release-bump: minor ` written with a stray space
