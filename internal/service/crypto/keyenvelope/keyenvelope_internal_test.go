@@ -189,13 +189,29 @@ func Test_parseEnvelope(t *testing.T) {
 	}
 }
 
+// openAt returns an opener bound to iters, so a table arm can name a
+// non-production work factor without any production wrapper offering one.
+func openAt(iters int) func(passphrase []byte, envelope string) (corecrypto.Key, error) {
+	//: bind the cheap factor at construction so the arm reads as a policy, not a call
+	return func(passphrase []byte, envelope string) (corecrypto.Key, error) {
+		return unwrapKey(passphrase, envelope, iters)
+	}
+}
+
 // Test_iterations pins the production KDF policy. It is the guard the suite
 // did not have: with every other case deriving AND verifying at the same
 // factor, setting iterations to 1 — destroying the whole work factor — left
-// the package green and merely three times faster. The golden vector is
-// verified with the policy the code declares, so it fails the moment the two
-// diverge, and a cheaper factor must be refused by the AEAD rather than
-// silently accepted.
+// the package green and merely three times faster.
+//
+// The successful arm opens the golden vector through the EXPORTED UnwrapKey,
+// never through unwrapKey with an explicit count. That distinction is the
+// whole guard: supplying iterations here would re-assert the constant the
+// test already checks on line one and leave the wrapper free to pick another
+// factor. Measured on this file — moving BOTH exported wrappers to 1000 while
+// iterations stayed at 600000 kept the package green
+// ("ok ... 0.078s", every case PASS); moving only one of them was already red
+// through the Test_WrapKey round trip. Routing this arm through UnwrapKey
+// closes the one cell that escaped, and costs the same single derivation.
 func Test_iterations(t *testing.T) {
 	t.Parallel()
 	//: the declared policy IS the wire contract — the envelope has no cost field,
@@ -204,18 +220,20 @@ func Test_iterations(t *testing.T) {
 		t.Fatalf("iterations = %d want 600000", iterations)
 	}
 	want := goldenDEK(t)
-	//: table-driven cases keep arms isolated; wantOK is the single discriminator
+	//: table-driven cases keep arms isolated; wantOK is the single discriminator.
+	//: open is what each arm is ABOUT: the accepted arm is the exported wrapper
+	//: itself, the refused arm is the unexported seam fed a non-production count.
 	cases := []struct {
 		name   string
-		iters  int
+		open   func(passphrase []byte, envelope string) (corecrypto.Key, error)
 		wantOK bool
 	}{
-		{name: "pinned-policy-opens-the-vector", iters: iterations, wantOK: true},
-		{name: "cheaper-policy-is-refused", iters: testIterations, wantOK: false},
+		{name: "exported-path-opens-the-vector", open: UnwrapKey, wantOK: true},
+		{name: "cheaper-policy-is-refused", open: openAt(testIterations), wantOK: false},
 	}
-	check := func(t *testing.T, iters int, wantOK bool) {
+	check := func(t *testing.T, open func([]byte, string) (corecrypto.Key, error), wantOK bool) {
 		t.Helper()
-		got, err := unwrapKey([]byte(goldenPassphrase), goldenEnvelope, iters)
+		got, err := open([]byte(goldenPassphrase), goldenEnvelope)
 		//: any factor but the minted one derives a different KEK, so the open fails
 		if !wantOK {
 			//: the failure must be the non-oracle decryption sentinel
@@ -237,7 +255,7 @@ func Test_iterations(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			check(t, tc.iters, tc.wantOK)
+			check(t, tc.open, tc.wantOK)
 		})
 	}
 }
