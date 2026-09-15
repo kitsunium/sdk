@@ -191,12 +191,18 @@ jobs:
         if: steps.ktncred.outputs.present == 'true'
         env:
           KTN_LINTER_VERSION: v1.11.2
-          # gh, never curl: kodflow/ktn-linter is private, and GitHub's signed
-          # redirect drops the Authorization header, so a curl on the release
-          # URL answers 404 whether or not the asset is there. Only
-          # `gh release download` separates "asset absent" from "not
-          # authorised" — which is how the asset name in
-          # scripts/pre-commit/check-ktn-phases-1-7.sh was found to be wrong.
+          # The archive's digest, pinned HERE and not read from the
+          # checksums.txt published beside it. Whoever can replace the archive
+          # can replace the manifest next to it, so a checksum fetched from the
+          # same release verifies nothing — ADR 0077 records that argument in
+          # this repository already. Pinned in the workflow, it is the same
+          # trust model as the SHA-pinned actions above: the artefact this
+          # commit was reviewed against is the artefact CI runs.
+          #
+          # Measured: two independent downloads of v1.11.2 produced this digest,
+          # and it matches the release manifest — which is a cross-check, not
+          # the proof.
+          KTN_LINTER_SHA256: 7a05c0558a897c27c1ac98eed8f16713f87bf22e75106d09ec254c8a7c597898
           GH_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
         run: |
           mkdir -p "$RUNNER_TEMP/ktn"
@@ -204,13 +210,26 @@ jobs:
             --repo kodflow/ktn-linter \
             --pattern 'ktn-linter_linux_amd64.tar.gz' \
             --dir "$RUNNER_TEMP/ktn"
+          printf '%s  %s\n' "$KTN_LINTER_SHA256" \
+            "$RUNNER_TEMP/ktn/ktn-linter_linux_amd64.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/ktn/ktn-linter_linux_amd64.tar.gz" -C "$RUNNER_TEMP/ktn"
           install -m 0755 "$RUNNER_TEMP/ktn/ktn-linter" "$(go env GOPATH)/bin/ktn-linter"
-          # Assert the binary actually on PATH is the pinned one. Measured on
-          # this tree, same package and same flags, zero commits apart:
-          # 1.9.11 exits 0 printing "No issues found! Code is compliant." while
-          # 1.11.2 exits 1 on a real finding. An unasserted version therefore
-          # buys a green that means nothing.
+
+      # A separate step so the downloaded binary's FIRST execution happens with
+      # no GH_TOKEN in the environment. Raised by Qodo on this PR and correct: a
+      # step that both holds a private-release credential and runs the artefact
+      # it has just fetched hands that credential to the artefact.
+      #
+      # The assertion itself is a compatibility check, not an integrity one —
+      # integrity is the digest above. It exists because 1.9.11 exits 0 with
+      # "No issues found! Code is compliant." on a tree 1.11.2 rejects, measured
+      # on this tree with zero commits between the two runs, so a binary that is
+      # merely present proves nothing about what was analysed.
+      - name: assert ktn-linter is the pinned build
+        if: steps.ktncred.outputs.present == 'true'
+        env:
+          KTN_LINTER_VERSION: v1.11.2
+        run: |
           got="$(ktn-linter --version)"
           case "$got" in
             *"${KTN_LINTER_VERSION#v}"*) printf 'ktn-linter pinned: %s\n' "$got" ;;
