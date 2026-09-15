@@ -143,17 +143,28 @@ PrefixMatcher_Error-12                    313.8     6.2%   301.2 – 320.8      
 
 ## How to read this
 
-- **Accessors at ~1 ns / 0 allocs** (`Error_Code`, `Error_Reason`, `Pack`,
-  `Field*`, `Error_Is_*`, `PrefixMatcher_Prefix`/`Mask`) — pure field reads / bit
-  ops on an already-built value. The 0 allocs/op figure is the contract; any
-  regression to > 0 allocs is a bug.
-- **Typed-accessor helpers at ~14 ns / 0 allocs** (`CodeOf`, `ReasonOf`,
-  `HasCode`, …) — one `errors.As`/type-assertion walk plus the field read; the
-  `_Parallel` variants show the small contention overhead of concurrent walks.
-- **Construction at ~240–255 ns / 1+ allocs** (`Define`, `NewError`,
-  `NewRuntime`, `Wrap_*`) — the heap `*Error` is the unavoidable allocation;
-  `Wrap` with an SDK cause or fields adds the trail/field slices. This is the
-  floor a call site pays to *create* an error, not to inspect one.
+- **Accessors at ~1–11 ns / 0 allocs** (`Error_Code`, `Error_Reason`,
+  `Error_Public`/`Private`, `Pack`, `FieldValue_Key`, the scalar `Field*`
+  builders, `Error_Is_*`, `PrefixMatcher_Prefix`/`Mask`) — pure field reads /
+  bit ops on an already-built value. `Pack` is the floor at ~0.94 ns and
+  `FieldString` the ceiling at ~11 ns. The 0 allocs/op figure is the contract;
+  any regression to > 0 allocs is a bug. The `Field*` rows that DO allocate
+  (`FieldValue_StringValue_Int`/`Float`, `FieldsOf`) belong to the fourth tier
+  below, not here.
+- **Typed-accessor helpers at ~4–18 ns / 0 allocs** (`CodeOf`, `ReasonOf`,
+  `PublicOf`, `PrivateOf`, `HasCode`, `HasCode_Trail`, `HTTPStatusOf`,
+  `ExitCodeOf`) — one `errors.As`/type-assertion walk plus the field read;
+  `HasCode_Trail` is the floor at ~3.7 ns and `ExitCodeOf` the ceiling at
+  ~17.8 ns. `TrailOf` is NOT in this tier: it clones, costs ~52 ns and 1 alloc,
+  and is listed in the fourth tier below. The `_Parallel` variants show the
+  small contention overhead of concurrent walks.
+- **Construction at ~230–376 ns / 1+ allocs** (`Define`, `Define_WithOptions`,
+  `NewError`, `NewRuntime`, `Wrap_*`) — the heap `*Error` is the unavoidable
+  allocation; `Wrap` with an SDK cause or fields adds the trail/field slices,
+  which is the whole spread of this tier: `Wrap_SDKCause` is the floor at
+  ~231 ns / 2 allocs and `Wrap_WithFields` the ceiling at ~376 ns / 3 allocs,
+  with the four plain constructors clustered at ~243–257 ns / 1 alloc. This is
+  the floor a call site pays to *create* an error, not to inspect one.
 - **Rendering / defensive-copy paths allocate** (`Code_String`, `Code_Padded`,
   `Error_Error_*`, `PrefixMatcher_String`/`Error`, `ParseCode_Invalid`,
   `FieldValue_StringValue_*`, `TrailOf`, `FieldsOf`, `Error_Fields`) — they build

@@ -67,7 +67,10 @@ PrefixMatcher-12              23.79    21.3%   21.12 – 26.19      0           
 ## Methodology
 
 - `cd pkg/v1 && GOWORK=off go test -run '^$' -bench=. -benchmem -benchtime=2s -count=5 ./errs`
-- Bench output captured verbatim into this file (commas added for readability).
+- The table is an AGGREGATION of the five runs, not verbatim `go test` output:
+  per benchmark, the median ns/op, the min and max across the repeats, and the
+  median B/op and allocs/op. Iteration counts are dropped because they are a
+  function of `-benchtime` rather than of the code.
 - Median of 5 repeats (`-count=5`); the per-row `spread` column is the
   within-run min-max. Between-run variance on this box is larger than that
   spread — see the envelope note above before citing any ns/op.
