@@ -254,8 +254,32 @@ jobs:
 
       # Boots a real ${{ matrix.os }} kernel VM and syncs the workspace (incl.
       # bins/) into it. pin to a SHA before promoting this lane to a PR gate.
+      #
+      # v1.2.0 -> v1.6.0 because v1.2.0 waits for the guest by COUNTING SSH
+      # attempts, with no clock on the loop. That is the shape of every overrun
+      # above: step 5 retries `kex_exchange_identification: read: Connection
+      # reset by peer` at ~75s a go, never prints `VM is ready`, and only
+      # `timeout-minutes` ends it. Upstream bounded it, and removed three
+      # reasons the guest never comes up in the first place:
+      #
+      #   v1.4.0  waiting for readiness is bounded by a wall clock instead of an
+      #           attempt count, and one SSH attempt by `ConnectTimeout`; AMX is
+      #           no longer exposed to x86-64 guests, which is what made NetBSD
+      #           9.4/10.1 fault as userland started on the runners that have it
+      #   v1.5.0  LA57 (5-level paging) and always-on STIBP likewise withheld;
+      #           NetBSD guests log in without a credential, so no key pair and
+      #           no resources disk are built for them
+      #   v1.6.0  DragonFly networking (not a platform this lane runs)
+      #
+      # Input schema across v1.2.0..v1.6.0 diffs by exactly one ADDITIVE key,
+      # `variant` (default `default`, boots as before). Nothing used here was
+      # renamed. `microvm` is NetBSD 11 only, so 10.1 cannot opt in; not taken.
+      #
+      # This pin is a cause-shaped fix, not a measured one: the failure runs at
+      # ~9% on netbsd, so no single green run can confirm it. What the next
+      # weeks measure is whether overruns stop, not whether one run passed.
       - name: Run on real ${{ matrix.os }} kernel
-        uses: cross-platform-actions/action@be3d7e9ff5c8770b9c51b1a8c8c5446e1cad7cf9 # v1.2.0
+        uses: cross-platform-actions/action@e0b9770014ba65d5e0815f15b74031c3a635f641 # v1.6.0
         with:
           operating_system: ${{ matrix.os }}
           version: ${{ matrix.version }}
