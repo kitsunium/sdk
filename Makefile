@@ -239,8 +239,21 @@ docs-dev:
 # each. Explicit /bin/bash because the SDK shell is zsh and the
 # release scripts use bash-only patterns (associative arrays,
 # `< <(...)` process substitution). See ADR 0007 §Bump semantics.
+#
+# The exit code is captured and propagated. It used to be dropped by the `;`
+# after the redirection, and make runs recipes under /bin/sh with no `-e`
+# (this Makefile sets neither SHELL nor .SHELLFLAGS), so a compute-bumps that
+# REFUSED to answer printed "no majors need bumping" and exited 0 — the same
+# two lines as a genuine no-op. Measured against a compute-bumps stub exiting 1:
+# its two stderr lines were shown and then contradicted by the verdict below
+# them. That would have re-swallowed, on the path a maintainer actually runs
+# before a release, the voice #227 gave the script.
 release-dry-run:
-	@/bin/bash scripts/release/compute-bumps.sh --dry-run > /tmp/sdk-release-majors.txt; \
+	@rc=0; /bin/bash scripts/release/compute-bumps.sh --dry-run > /tmp/sdk-release-majors.txt || rc=$$?; \
+	if [ "$$rc" -ne 0 ]; then \
+		echo "release-dry-run: compute-bumps.sh exited $$rc; refusing to print a verdict for a computation that did not run" >&2; \
+		exit "$$rc"; \
+	fi; \
 	if [ ! -s /tmp/sdk-release-majors.txt ]; then \
 		echo "no majors need bumping"; \
 	else \
