@@ -144,14 +144,14 @@ func lastPathSegment(rel string) (segment string, ok bool) {
 		//: no segment to take.
 		return "", false
 	}
-	idx := strings.LastIndex(rel, "/")
+	_, after, found := strings.CutLast(rel, "/")
 	//: a single-segment path is its own last segment.
-	if idx < 0 {
+	if !found {
 		//: the whole path is the segment.
 		return rel, true
 	}
 	//: everything after the final separator.
-	return rel[idx+1:], true
+	return after, true
 }
 
 // sourceURL builds the forge deep-link for a declaration.

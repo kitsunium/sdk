@@ -140,6 +140,106 @@ jobs:
       - name: layer invariant — no layer depends on one above it
         run: bash scripts/check-layer-deps.sh
 
+      # The three checks of `make lint` that no lane ran (#236): `gofumpt -l`,
+      # sdkguard and ktn-linter. The other five are the steps above — gazelle
+      # drift, alloc-lane, audit-coverage, domain-docs, layer-deps — so this
+      # adds a class of analysis, it does not repeat one.
+      #
+      # These sit INSIDE the `bazel` job deliberately. `bazel` and `post-commit`
+      # are the only required checks on main (the legacy branch protection and
+      # the ruleset each name one, and they are additive); a sibling job would
+      # run and report but block nothing. Making a new job required is a
+      # merge-policy change, which is not this workflow's to decide.
+      - name: install gofumpt (pinned)
+        env:
+          # Pinned, never `latest`. A lane that follows `latest` changes its
+          # verdict with no commit of this repository moving. Moving the pin is
+          # then a reviewable diff.
+          GOFUMPT_VERSION: v0.12.0
+        run: go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
+
+      - name: lint gate — gofumpt + sdkguard
+        run: make lint-check
+
+      # The ktn-linter half needs a credential this repository does not have,
+      # so it is asked for rather than assumed. Measured on this lane, not
+      # argued: `gh release download v1.11.2 --repo kodflow/ktn-linter` answered
+      #
+      #     release not found
+      #
+      # under `secrets.GITHUB_TOKEN`, while the same command run by a
+      # credentialed account downloads ktn-linter_linux_amd64.tar.gz (10.7 MB).
+      # The release exists; a workflow token is scoped to the repository that
+      # issued it and cannot read another owner's private releases.
+      #
+      # The secret is read in its own step so it is not exposed to the rest of
+      # the job, and the `secrets` context is not available in a step-level
+      # `if:` — only `env` and `steps` are, hence the output.
+      - name: is the ktn-linter credential configured
+        id: ktncred
+        env:
+          KTN_LINTER_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
+        run: |
+          if [ -n "${KTN_LINTER_TOKEN:-}" ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo "::warning title=ktn-linter gate did not run::KTN_LINTER_TOKEN is unset, so the ktn-linter half of the lint gate was skipped. It is NOT in scripts/ci-gates-check.sh's GATES for that reason — a step a missing secret can skip is not a gate. Set the secret to a token with Contents:read on kodflow/ktn-linter and add lint-ktn-check to GATES (#236)."
+          fi
+
+      - name: install ktn-linter (pinned)
+        if: steps.ktncred.outputs.present == 'true'
+        env:
+          KTN_LINTER_VERSION: v1.11.2
+          # The archive's digest, pinned HERE and not read from the
+          # checksums.txt published beside it. Whoever can replace the archive
+          # can replace the manifest next to it, so a checksum fetched from the
+          # same release verifies nothing — ADR 0077 records that argument in
+          # this repository already. Pinned in the workflow, it is the same
+          # trust model as the SHA-pinned actions above: the artefact this
+          # commit was reviewed against is the artefact CI runs.
+          #
+          # Measured: two independent downloads of v1.11.2 produced this digest,
+          # and it matches the release manifest — which is a cross-check, not
+          # the proof.
+          KTN_LINTER_SHA256: 7a05c0558a897c27c1ac98eed8f16713f87bf22e75106d09ec254c8a7c597898
+          GH_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ktn"
+          gh release download "$KTN_LINTER_VERSION" \
+            --repo kodflow/ktn-linter \
+            --pattern 'ktn-linter_linux_amd64.tar.gz' \
+            --dir "$RUNNER_TEMP/ktn"
+          printf '%s  %s\n' "$KTN_LINTER_SHA256" \
+            "$RUNNER_TEMP/ktn/ktn-linter_linux_amd64.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/ktn/ktn-linter_linux_amd64.tar.gz" -C "$RUNNER_TEMP/ktn"
+          install -m 0755 "$RUNNER_TEMP/ktn/ktn-linter" "$(go env GOPATH)/bin/ktn-linter"
+
+      # A separate step so the downloaded binary's FIRST execution happens with
+      # no GH_TOKEN in the environment. Raised by Qodo on this PR and correct: a
+      # step that both holds a private-release credential and runs the artefact
+      # it has just fetched hands that credential to the artefact.
+      #
+      # The assertion itself is a compatibility check, not an integrity one —
+      # integrity is the digest above. It exists because 1.9.11 exits 0 with
+      # "No issues found! Code is compliant." on a tree 1.11.2 rejects, measured
+      # on this tree with zero commits between the two runs, so a binary that is
+      # merely present proves nothing about what was analysed.
+      - name: assert ktn-linter is the pinned build
+        if: steps.ktncred.outputs.present == 'true'
+        env:
+          KTN_LINTER_VERSION: v1.11.2
+        run: |
+          got="$(ktn-linter --version)"
+          case "$got" in
+            *"${KTN_LINTER_VERSION#v}"*) printf 'ktn-linter pinned: %s\n' "$got" ;;
+            *) printf '::error::expected %s, got %s\n' "$KTN_LINTER_VERSION" "$got"; exit 1 ;;
+          esac
+
+      - name: lint gate — ktn-linter
+        if: steps.ktncred.outputs.present == 'true'
+        run: make lint-ktn-check
+
       - name: coverage
         run: |
           bazel coverage --combined_report=lcov //...
