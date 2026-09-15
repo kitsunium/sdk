@@ -49,10 +49,18 @@ GATES=(
   release-scripts-check
   hooks-check
   pre-commit-check
-  # The three checks of `make lint` that no lane ran until #236: ktn-linter,
-  # `gofumpt -l` and sdkguard. The other five `make lint` performs are invoked
-  # by the workflow as direct `bash …` steps, so they are outside this list by
-  # construction — this entry is the ktn-linter one specifically.
+  # `gofumpt -l` + sdkguard: two of the three checks of `make lint` that no
+  # lane ran until #236. The other five are invoked by the workflow as direct
+  # `bash …` steps, so they are outside this list by construction.
+  #
+  # `lint-ktn-check` is the third, and it is deliberately NOT listed. Its step
+  # is conditional on a KTN_LINTER_TOKEN secret, because the ktn-linter release
+  # lives in a private repository that a workflow token cannot read — measured
+  # on this lane: `gh release download v1.11.2 --repo kodflow/ktn-linter`
+  # answers `release not found` under `secrets.GITHUB_TOKEN`, and downloads the
+  # asset under a credentialed account. A step a missing secret can skip is not
+  # a gate, and this file must not certify one as if it were. Add it here on
+  # the same commit that makes the step unconditional (#236).
   lint-check
 )
 

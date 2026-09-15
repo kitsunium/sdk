@@ -140,38 +140,65 @@ jobs:
       - name: layer invariant — no layer depends on one above it
         run: bash scripts/check-layer-deps.sh
 
-      # The three checks of `make lint` that no lane ran (#236): ktn-linter,
-      # `gofumpt -l` and sdkguard. The other five are the steps above — gazelle
+      # The three checks of `make lint` that no lane ran (#236): `gofumpt -l`,
+      # sdkguard and ktn-linter. The other five are the steps above — gazelle
       # drift, alloc-lane, audit-coverage, domain-docs, layer-deps — so this
       # adds a class of analysis, it does not repeat one.
       #
-      # It sits INSIDE the `bazel` job deliberately. `bazel` and `post-commit`
+      # These sit INSIDE the `bazel` job deliberately. `bazel` and `post-commit`
       # are the only required checks on main (the legacy branch protection and
       # the ruleset each name one, and they are additive); a sibling job would
       # run and report but block nothing. Making a new job required is a
       # merge-policy change, which is not this workflow's to decide.
-      - name: install the lint toolchain (pinned)
+      - name: install gofumpt (pinned)
         env:
           # Pinned, never `latest`. A lane that follows `latest` changes its
-          # verdict with no commit of this repository moving: a rule added
-          # upstream turns main red on a Tuesday, which is the failure mode
-          # recorded in #223. Moving the pin is then a reviewable diff.
-          KTN_LINTER_VERSION: v1.11.2
+          # verdict with no commit of this repository moving. Moving the pin is
+          # then a reviewable diff.
           GOFUMPT_VERSION: v0.12.0
-          # kodflow/ktn-linter is a PRIVATE repository, and `curl` on the
-          # release URL answers 404 whether or not the asset exists — the
-          # signed redirect GitHub issues drops the Authorization header. Only
-          # `gh release download` tells "asset absent" from "not authorised",
-          # which is why the install goes through gh and not curl.
-          #
-          # secrets.GITHUB_TOKEN is scoped to THIS repository and cannot read
-          # another owner's private releases. KTN_LINTER_TOKEN is the secret
-          # that grants that read; until it exists this step fails closed,
-          # which is the intended direction — a lint lane that cannot install
-          # its linter must not report success.
-          GH_TOKEN: ${{ secrets.KTN_LINTER_TOKEN || secrets.GITHUB_TOKEN }}
+        run: go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
+
+      - name: lint gate — gofumpt + sdkguard
+        run: make lint-check
+
+      # The ktn-linter half needs a credential this repository does not have,
+      # so it is asked for rather than assumed. Measured on this lane, not
+      # argued: `gh release download v1.11.2 --repo kodflow/ktn-linter` answered
+      #
+      #     release not found
+      #
+      # under `secrets.GITHUB_TOKEN`, while the same command run by a
+      # credentialed account downloads ktn-linter_linux_amd64.tar.gz (10.7 MB).
+      # The release exists; a workflow token is scoped to the repository that
+      # issued it and cannot read another owner's private releases.
+      #
+      # The secret is read in its own step so it is not exposed to the rest of
+      # the job, and the `secrets` context is not available in a step-level
+      # `if:` — only `env` and `steps` are, hence the output.
+      - name: is the ktn-linter credential configured
+        id: ktncred
+        env:
+          KTN_LINTER_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
         run: |
-          go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
+          if [ -n "${KTN_LINTER_TOKEN:-}" ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo "::warning title=ktn-linter gate did not run::KTN_LINTER_TOKEN is unset, so the ktn-linter half of the lint gate was skipped. It is NOT in scripts/ci-gates-check.sh's GATES for that reason — a step a missing secret can skip is not a gate. Set the secret to a token with Contents:read on kodflow/ktn-linter and add lint-ktn-check to GATES (#236)."
+          fi
+
+      - name: install ktn-linter (pinned)
+        if: steps.ktncred.outputs.present == 'true'
+        env:
+          KTN_LINTER_VERSION: v1.11.2
+          # gh, never curl: kodflow/ktn-linter is private, and GitHub's signed
+          # redirect drops the Authorization header, so a curl on the release
+          # URL answers 404 whether or not the asset is there. Only
+          # `gh release download` separates "asset absent" from "not
+          # authorised" — which is how the asset name in
+          # scripts/pre-commit/check-ktn-phases-1-7.sh was found to be wrong.
+          GH_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
+        run: |
           mkdir -p "$RUNNER_TEMP/ktn"
           gh release download "$KTN_LINTER_VERSION" \
             --repo kodflow/ktn-linter \
@@ -189,10 +216,10 @@ jobs:
             *"${KTN_LINTER_VERSION#v}"*) printf 'ktn-linter pinned: %s\n' "$got" ;;
             *) printf '::error::expected %s, got %s\n' "$KTN_LINTER_VERSION" "$got"; exit 1 ;;
           esac
-          gofumpt --version
 
-      - name: lint gate — ktn-linter + gofumpt + sdkguard
-        run: make lint-check
+      - name: lint gate — ktn-linter
+        if: steps.ktncred.outputs.present == 'true'
+        run: make lint-ktn-check
 
       - name: coverage
         run: |
