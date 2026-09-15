@@ -130,7 +130,7 @@ func plantable(_ fs.FileMode, containerPath string) (yes bool, observed string) 
 // acceptedDir accepts a directory, and says so out loud when the acceptance
 // rests on an inspection that could not run rather than on a verdict.
 //
-// [dirWritableByAnyone] answers "not writable by anybody" for both, because
+// [dirGrantsAnyone] answers "not writable by anybody" for both, because
 // there is no third verdict to return and refusing on a Win32 failure would
 // cost a caller a locker on a directory that is perfectly safe. The two are
 // still different facts, and an operator debugging why a lock directory was

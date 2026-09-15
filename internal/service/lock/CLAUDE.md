@@ -190,7 +190,7 @@ allow is read as granting, a conditional deny as denying nothing.
 
 The check **fails open**: any failure on the way to a verdict accepts. Failing
 open *silently* would be a different thing and is not what happens —
-`dirWritableByAnyone` returns an empty `observed` when a verdict was reached
+`dirGrantsAnyone` returns an empty `observed` when a verdict was reached
 and the Win32 status when it was not, and both `checkDir` and `checkChain`
 **log** the second case before accepting. Same channel
 `internal/service/entitlement` uses for the same shape of degradation, and it
