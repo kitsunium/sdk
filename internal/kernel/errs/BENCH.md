@@ -27,114 +27,144 @@ into two performance tiers these benchmarks lock in:
 
 | Dimension | Value |
 |---|---|
-| CPU cores          | 8 |
-| RAM                | 11 GiB |
-| OS / kernel        | Linux 6.12.72-linuxkit |
-| Architecture       | arm64 |
-| Go toolchain       | go1.26.4 linux/arm64 |
-| Git branch         | feat/issue-17-kernel-errs-bench |
-| Git commit         | 9c61f89 |
-| Generated (UTC)    | 2026-06-19 |
-| Bench wall-clock   | `-test.benchtime=1s`, single run |
+| CPU cores          | 12 (12th Gen Intel(R) Core(TM) i7-1255U) |
+| RAM                | 15.3 GiB |
+| OS / kernel        | Linux 6.12.107+deb13-amd64 (Debian 13 trixie) |
+| Architecture       | amd64 |
+| Go toolchain       | go1.27.1 linux/amd64 |
+| Git branch         | fix/bench-127 |
+| Git commit         | c08d730 |
+| Generated (UTC)    | 2026-09-15 |
+| Bench wall-clock   | `-benchtime=1s -count=5`, median of 5 runs |
+
+> **What these numbers support.** `allocs/op` is exact: all 5 repeats agreed on
+> every cell, in every package. `B/op` is exact too **except where a cell
+> carries `*`**, which marks five values that were not identical and a median
+> reported in their place. Both columns are **unchanged** from a go1.26.4 run
+> of this same code on this same box (124 benchmarks compared SDK-wide, 44 of
+> them allocating, zero counter moved). `ns/op` are medians and carry the
+> `spread` shown, which is a **within-run** figure that understates run-to-run
+> variance: re-running the identical binary on this box moved individual cells
+> by up to 94 %. Read ns/op as an order of magnitude on this box, never as a
+> cross-edition or cross-machine delta.
+
+> **This edition changes the reference platform.** The previous edition was
+> measured on **arm64** (8-core, Linux 6.12.72-linuxkit) under **go1.26.4**; this
+> one is **amd64** on the box stamped above. The two editions are NOT
+> comparable — a reader drawing a delta across them would be measuring the
+> architecture, not the code. The whole table was re-measured here rather
+> than half-updated, so the cells stay comparable with each other.
 
 ## Results
 
 ```
 goos: linux
-goarch: arm64
+goarch: amd64
 pkg: github.com/kitsunium/sdk/internal/kernel/errs
-BenchmarkCodeOf-8                          	174567852	         6.866 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCodeOf_Parallel-8                 	23230489	        43.76 ns/op	       0 B/op	       0 allocs/op
-BenchmarkReasonOf-8                        	140477662	         8.213 ns/op	       0 B/op	       0 allocs/op
-BenchmarkReasonOf_Parallel-8               	21424585	        56.73 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPublicOf-8                        	166904718	         7.209 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPublicOf_Parallel-8               	65529159	        20.79 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPrivateOf-8                       	158231680	         7.523 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPrivateOf_Parallel-8              	62388438	        22.50 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldsOf-8                        	23323880	        51.47 ns/op	      64 B/op	       1 allocs/op
-BenchmarkFieldsOf_Parallel-8               	14983602	        73.96 ns/op	      64 B/op	       1 allocs/op
-BenchmarkHTTPStatusOf-8                    	159004490	         7.510 ns/op	       0 B/op	       0 allocs/op
-BenchmarkHTTPStatusOf_Parallel-8           	59106262	        17.68 ns/op	       0 B/op	       0 allocs/op
-BenchmarkExitCodeOf-8                      	158743946	         7.525 ns/op	       0 B/op	       0 allocs/op
-BenchmarkExitCodeOf_Parallel-8             	64908135	        19.00 ns/op	       0 B/op	       0 allocs/op
-BenchmarkHasReason-8                       	154173368	         7.780 ns/op	       0 B/op	       0 allocs/op
-BenchmarkHasReason_Parallel-8              	74313372	        18.60 ns/op	       0 B/op	       0 allocs/op
-BenchmarkTrailOf-8                         	50013284	        21.16 ns/op	       8 B/op	       1 allocs/op
-BenchmarkTrailOf_Parallel-8                	19326951	        55.13 ns/op	       8 B/op	       1 allocs/op
-BenchmarkPack-8                            	518663886	         2.338 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPack_Parallel-8                   	1000000000	         1.376 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCode_Major-8                      	540277904	         2.213 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCode_Layer-8                      	550679638	         2.190 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCode_Package-8                    	546111429	         2.212 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCode_Serial-8                     	507824284	         2.244 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCode_String-8                     	22027071	        53.00 ns/op	       8 B/op	       1 allocs/op
-BenchmarkCode_String_Parallel-8            	29577624	        38.12 ns/op	       8 B/op	       1 allocs/op
-BenchmarkCode_Padded-8                     	 8201974	       158.8 ns/op	      28 B/op	       5 allocs/op
-BenchmarkCode_Padded_Parallel-8            	16390616	        74.89 ns/op	      28 B/op	       5 allocs/op
-BenchmarkDefine-8                          	 8857024	       113.2 ns/op	     144 B/op	       1 allocs/op
-BenchmarkDefine_WithOptions-8              	11215411	       111.2 ns/op	     144 B/op	       1 allocs/op
-BenchmarkNewError-8                        	10392980	       121.4 ns/op	     144 B/op	       1 allocs/op
-BenchmarkNewRuntime-8                      	10304482	       114.6 ns/op	     144 B/op	       1 allocs/op
-BenchmarkWrap_Stdlib-8                     	 9171638	       138.4 ns/op	     144 B/op	       1 allocs/op
-BenchmarkWrap_SDKCause-8                   	 9150237	       111.3 ns/op	     152 B/op	       2 allocs/op
-BenchmarkWrap_WithFields-8                 	 6300505	       196.3 ns/op	     280 B/op	       3 allocs/op
-BenchmarkError_Code-8                      	545592698	         2.218 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Code_Parallel-8             	1000000000	         1.219 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Reason-8                    	540086719	         2.222 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Public-8                    	540286315	         2.238 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Private-8                   	543496207	         2.253 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Fields-8                    	26955766	        47.82 ns/op	      64 B/op	       1 allocs/op
-BenchmarkError_HTTPStatus-8                	530666732	         2.246 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_ExitCode-8                  	536808571	         2.220 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Error_NoTrail-8             	11092494	       106.8 ns/op	      56 B/op	       2 allocs/op
-BenchmarkError_Error_NoTrail_Parallel-8    	17929916	        71.87 ns/op	      56 B/op	       2 allocs/op
-BenchmarkError_Error_Trail-8               	 7877096	       149.7 ns/op	      96 B/op	       3 allocs/op
-BenchmarkError_Source-8                    	542012050	         2.221 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Unwrap-8                    	536430822	         2.221 ns/op	       0 B/op	       0 allocs/op
-BenchmarkHasCode-8                         	168121873	         7.135 ns/op	       0 B/op	       0 allocs/op
-BenchmarkHasCode_Parallel-8                	85382919	        14.83 ns/op	       0 B/op	       0 allocs/op
-BenchmarkHasCode_Trail-8                   	411581562	         2.704 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Is_Prefix-8                 	540866095	         2.220 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Is_Sentinel-8               	307404969	         3.919 ns/op	       0 B/op	       0 allocs/op
-BenchmarkError_Is_Pointer-8                	506563603	         2.392 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldString-8                     	390521659	         2.996 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldInt-8                        	566064661	         2.132 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldInt64-8                      	564327782	         2.111 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldBool-8                       	566224362	         2.308 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldFloat-8                      	527047993	         2.224 ns/op	       0 B/op	       0 allocs/op
-BenchmarkNewFieldValue-8                   	397469444	         3.065 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldValue_Key-8                  	559232965	         2.165 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldValue_StringValue_String-8   	495368304	         2.411 ns/op	       0 B/op	       0 allocs/op
-BenchmarkFieldValue_StringValue_Int-8      	43326969	        23.96 ns/op	       8 B/op	       1 allocs/op
-BenchmarkFieldValue_StringValue_Float-8    	19372426	        62.36 ns/op	       8 B/op	       1 allocs/op
-BenchmarkParseCode-8                       	48863665	        24.92 ns/op	       0 B/op	       0 allocs/op
-BenchmarkParseCode_Parallel-8              	40028853	        32.07 ns/op	       0 B/op	       0 allocs/op
-BenchmarkParseCode_Invalid-8               	 6121486	       174.3 ns/op	     192 B/op	       2 allocs/op
-BenchmarkNewPrefixMatcher-8                	100000000	        10.80 ns/op	       8 B/op	       1 allocs/op
-BenchmarkPrefixMatcher_Prefix-8            	541062511	         2.220 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPrefixMatcher_Prefix_Parallel-8   	1000000000	         1.190 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPrefixMatcher_Mask-8              	539237482	         2.216 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPrefixMatcher_Mask_Parallel-8     	1000000000	         1.202 ns/op	       0 B/op	       0 allocs/op
-BenchmarkPrefixMatcher_String-8            	 6944713	       175.0 ns/op	      72 B/op	       4 allocs/op
-BenchmarkPrefixMatcher_String_Parallel-8   	12915000	        93.47 ns/op	      72 B/op	       4 allocs/op
-BenchmarkPrefixMatcher_Error-8             	 7394191	       164.1 ns/op	      72 B/op	       4 allocs/op
-PASS
-ok  	github.com/kitsunium/sdk/internal/kernel/errs	92.161s
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+
+benchmark                          median ns/op   spread   min–max           B/op   allocs/op
+CodeOf-12                                 13.71     3.6%   13.49 – 13.98        0           0
+CodeOf_Parallel-12                        48.07     6.5%   47.72 – 50.84        0           0
+ReasonOf-12                               14.35     4.5%   14.16 – 14.80        0           0
+ReasonOf_Parallel-12                      47.59     9.2%   45.03 – 49.42        0           0
+PublicOf-12                               14.44     6.2%   13.72 – 14.61        0           0
+PublicOf_Parallel-12                      21.46     0.8%   21.40 – 21.57        0           0
+PrivateOf-12                              14.98     7.1%   14.91 – 15.97        0           0
+PrivateOf_Parallel-12                     21.43     0.2%   21.39 – 21.44        0           0
+FieldsOf-12                               104.8     4.9%   102.1 – 107.2       64           1
+FieldsOf_Parallel-12                      67.94     0.9%   67.57 – 68.19       64           1
+HTTPStatusOf-12                           15.79    15.5%   13.98 – 16.43        0           0
+HTTPStatusOf_Parallel-12                  23.11     2.3%   22.94 – 23.46        0           0
+ExitCodeOf-12                             17.80    24.2%   14.64 – 18.95        0           0
+ExitCodeOf_Parallel-12                    23.27     1.8%   23.01 – 23.42        0           0
+HasReason-12                              14.62    11.4%   13.63 – 15.30        0           0
+HasReason_Parallel-12                     19.56     2.6%   19.19 – 19.69        0           0
+TrailOf-12                                51.54     8.8%   49.27 – 53.81        8           1
+TrailOf_Parallel-12                       44.73     5.7%   43.24 – 45.81        8           1
+Pack-12                                  0.9415    10.2%   0.9195 – 1.016       0           0
+Pack_Parallel-12                          4.898     0.7%   4.88 – 4.914         0           0
+Code_Major-12                            0.9669     4.3%   0.9445 – 0.986       0           0
+Code_Layer-12                             0.947     5.6%   0.9287 – 0.9817      0           0
+Code_Package-12                          0.9523     4.9%   0.9195 – 0.9664      0           0
+Code_Serial-12                           0.9838     9.7%   0.9578 – 1.053       0           0
+Code_String-12                            90.40     6.5%   86.49 – 92.35        8           1
+Code_String_Parallel-12                   49.10     6.1%   47.17 – 50.18        8           1
+Code_Padded-12                            284.9     6.2%   275.5 – 293.3       28           5
+Code_Padded_Parallel-12                   62.69     4.3%   62.33 – 65.01       28           5
+Define-12                                 243.3     4.0%   239.8 – 249.5      144           1
+Define_WithOptions-12                     257.2     5.2%   247.6 – 261.1      144           1
+NewError-12                               244.7     9.2%   241.4 – 264.0      144           1
+NewRuntime-12                             254.1     7.0%   240.8 – 258.6      144           1
+Wrap_Stdlib-12                            270.2    19.5%   232.4 – 285.2      144           1
+Wrap_SDKCause-12                          230.7     2.3%   228.5 – 233.9      152           2
+Wrap_WithFields-12                        376.3     5.2%   372.4 – 391.9      280           3
+Error_Code-12                            0.9563    12.0%   0.9395 – 1.054       0           0
+Error_Code_Parallel-12                    4.922     1.7%   4.865 – 4.948        0           0
+Error_Reason-12                           1.366    23.6%   1.288 – 1.61         0           0
+Error_Public-12                           1.313     4.4%   1.285 – 1.343        0           0
+Error_Private-12                          1.304     3.5%   1.279 – 1.325        0           0
+Error_Fields-12                           80.38     3.3%   79.51 – 82.19       64           1
+Error_HTTPStatus-12                       1.017    20.8%   0.9431 – 1.155       0           0
+Error_ExitCode-12                        0.9988    22.5%   0.927 – 1.152        0           0
+Error_Error_NoTrail-12                    232.5     6.7%   222.8 – 238.3       56           2
+Error_Error_NoTrail_Parallel-12           68.84     3.3%   67.57 – 69.84       56           2
+Error_Error_Trail-12                      363.8     6.1%   351.6 – 373.7       96           3
+Error_Source-12                           1.404    19.4%   1.344 – 1.616        0           0
+Error_Unwrap-12                            1.64    31.1%   1.592 – 2.102        0           0
+HasCode-12                                15.97    14.0%   14.35 – 16.59        0           0
+HasCode_Parallel-12                       18.18     1.5%   18.03 – 18.30        0           0
+HasCode_Trail-12                          3.741    38.6%   3.699 – 5.142        0           0
+Error_Is_Prefix-12                        2.798     6.9%   2.77 – 2.964         0           0
+Error_Is_Sentinel-12                      5.406    22.4%   5.148 – 6.36         0           0
+Error_Is_Pointer-12                       2.634     5.0%   2.528 – 2.659        0           0
+FieldString-12                            11.12     4.9%   11.04 – 11.59        0           0
+FieldInt-12                               2.809     4.1%   2.75 – 2.866         0           0
+FieldInt64-12                              2.94    31.0%   2.779 – 3.689        0           0
+FieldBool-12                              2.994    25.4%   2.844 – 3.604        0           0
+FieldFloat-12                             2.755     1.1%   2.747 – 2.776        0           0
+NewFieldValue-12                          11.52     4.3%   11.26 – 11.76        0           0
+FieldValue_Key-12                         1.237     9.5%   1.213 – 1.33         0           0
+FieldValue_StringValue_String-12          3.682     6.2%   3.568 – 3.798        0           0
+FieldValue_StringValue_Int-12             44.51    24.8%   38.64 – 49.68        8           1
+FieldValue_StringValue_Float-12           104.6     9.8%   96.42 – 106.7        8           1
+ParseCode-12                              44.76    10.1%   44.12 – 48.63        0           0
+ParseCode_Parallel-12                     46.21     6.7%   44.87 – 47.96        0           0
+ParseCode_Invalid-12                      308.9     8.9%   295.7 – 323.2      192           2
+NewPrefixMatcher-12                       18.98     3.1%   18.76 – 19.35        8           1
+PrefixMatcher_Prefix-12                  0.9459     6.3%   0.9392 – 0.9989      0           0
+PrefixMatcher_Prefix_Parallel-12          4.903     2.0%   4.819 – 4.915        0           0
+PrefixMatcher_Mask-12                    0.9927     7.1%   0.9467 – 1.017       0           0
+PrefixMatcher_Mask_Parallel-12            4.921     1.4%   4.881 – 4.95         0           0
+PrefixMatcher_String-12                   310.9    12.3%   303.3 – 341.4       72           4
+PrefixMatcher_String_Parallel-12          87.20     1.5%   86.31 – 87.64       72           4
+PrefixMatcher_Error-12                    313.8     6.2%   301.2 – 320.8       72           4
 ```
 
 ## How to read this
 
-- **Accessors at ~2 ns / 0 allocs** (`Error_Code`, `Error_Reason`, `Pack`,
-  `Field*`, `Error_Is_*`, `PrefixMatcher_Prefix`/`Mask`) — pure field reads / bit
-  ops on an already-built value. The 0 allocs/op figure is the contract; any
-  regression to > 0 allocs is a bug.
-- **Typed-accessor helpers at ~7 ns / 0 allocs** (`CodeOf`, `ReasonOf`,
-  `HasCode`, …) — one `errors.As`/type-assertion walk plus the field read; the
-  `_Parallel` variants show the small contention overhead of concurrent walks.
-- **Construction at ~110–200 ns / 1+ allocs** (`Define`, `NewError`,
-  `NewRuntime`, `Wrap_*`) — the heap `*Error` is the unavoidable allocation;
-  `Wrap` with an SDK cause or fields adds the trail/field slices. This is the
-  floor a call site pays to *create* an error, not to inspect one.
+- **Accessors at ~1–11 ns / 0 allocs** (`Error_Code`, `Error_Reason`,
+  `Error_Public`/`Private`, `Pack`, `FieldValue_Key`, the scalar `Field*`
+  builders, `Error_Is_*`, `PrefixMatcher_Prefix`/`Mask`) — pure field reads /
+  bit ops on an already-built value. `Pack` is the floor at ~0.94 ns and
+  `FieldString` the ceiling at ~11 ns. The 0 allocs/op figure is the contract;
+  any regression to > 0 allocs is a bug. The `Field*` rows that DO allocate
+  (`FieldValue_StringValue_Int`/`Float`, `FieldsOf`) belong to the fourth tier
+  below, not here.
+- **Typed-accessor helpers at ~4–18 ns / 0 allocs** (`CodeOf`, `ReasonOf`,
+  `PublicOf`, `PrivateOf`, `HasCode`, `HasCode_Trail`, `HTTPStatusOf`,
+  `ExitCodeOf`) — one `errors.As`/type-assertion walk plus the field read;
+  `HasCode_Trail` is the floor at ~3.7 ns and `ExitCodeOf` the ceiling at
+  ~17.8 ns. `TrailOf` is NOT in this tier: it clones, costs ~52 ns and 1 alloc,
+  and is listed in the fourth tier below. The `_Parallel` variants show the
+  small contention overhead of concurrent walks.
+- **Construction at ~230–376 ns / 1+ allocs** (`Define`, `Define_WithOptions`,
+  `NewError`, `NewRuntime`, `Wrap_*`) — the heap `*Error` is the unavoidable
+  allocation; `Wrap` with an SDK cause or fields adds the trail/field slices,
+  which is the whole spread of this tier: `Wrap_SDKCause` is the floor at
+  ~231 ns / 2 allocs and `Wrap_WithFields` the ceiling at ~376 ns / 3 allocs,
+  with the four plain constructors clustered at ~243–257 ns / 1 alloc. This is
+  the floor a call site pays to *create* an error, not to inspect one.
 - **Rendering / defensive-copy paths allocate** (`Code_String`, `Code_Padded`,
   `Error_Error_*`, `PrefixMatcher_String`/`Error`, `ParseCode_Invalid`,
   `FieldValue_StringValue_*`, `TrailOf`, `FieldsOf`, `Error_Fields`) — they build

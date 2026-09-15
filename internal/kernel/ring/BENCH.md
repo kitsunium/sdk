@@ -26,35 +26,54 @@ producers + N consumers and violate the SPSC invariant) across ring sizes 4, 64,
 
 | Dimension | Value |
 |---|---|
-| CPU cores          | 8 |
-| RAM                | 11 GiB |
-| OS / kernel        | Linux 6.12.72-linuxkit |
-| Architecture       | arm64 |
-| Go toolchain       | go1.26.4 linux/arm64 |
-| Git branch         | feat/issue-20-kernel-ring-bench |
-| Git commit         | 9c61f89 |
-| Generated (UTC)    | 2026-06-19 |
-| Bench wall-clock   | `-test.benchtime=1s`, single run |
+| CPU cores          | 12 (12th Gen Intel(R) Core(TM) i7-1255U) |
+| RAM                | 15.3 GiB |
+| OS / kernel        | Linux 6.12.107+deb13-amd64 (Debian 13 trixie) |
+| Architecture       | amd64 |
+| Go toolchain       | go1.27.1 linux/amd64 |
+| Git branch         | fix/bench-127 |
+| Git commit         | c08d730 |
+| Generated (UTC)    | 2026-09-15 |
+| Bench wall-clock   | `-benchtime=1s -count=5`, median of 5 runs |
+
+> **What these numbers support.** `allocs/op` is exact: all 5 repeats agreed on
+> every cell, in every package. `B/op` is exact too **except where a cell
+> carries `*`**, which marks five values that were not identical and a median
+> reported in their place. Both columns are **unchanged** from a go1.26.4 run
+> of this same code on this same box (124 benchmarks compared SDK-wide, 44 of
+> them allocating, zero counter moved). `ns/op` are medians and carry the
+> `spread` shown, which is a **within-run** figure that understates run-to-run
+> variance: re-running the identical binary on this box moved individual cells
+> by up to 94 %. Read ns/op as an order of magnitude on this box, never as a
+> cross-edition or cross-machine delta.
+
+> **This edition changes the reference platform.** The previous edition was
+> measured on **arm64** (8-core, Linux 6.12.72-linuxkit) under **go1.26.4**; this
+> one is **amd64** on the box stamped above. The two editions are NOT
+> comparable — a reader drawing a delta across them would be measuring the
+> architecture, not the code. The whole table was re-measured here rather
+> than half-updated, so the cells stay comparable with each other.
 
 ## Results
 
 ```
 goos: linux
-goarch: arm64
+goarch: amd64
 pkg: github.com/kitsunium/sdk/internal/kernel/ring
-BenchmarkNew-8                     	  459751	      2590 ns/op	    9472 B/op	       1 allocs/op
-BenchmarkTryWrite_Happy-8          	100000000	        15.38 ns/op	       0 B/op	       0 allocs/op
-BenchmarkTryRead_Happy-8           	100000000	        13.16 ns/op	       0 B/op	       0 allocs/op
-BenchmarkTryWrite_Full-8           	183599595	         6.430 ns/op	       0 B/op	       0 allocs/op
-BenchmarkTryRead_Empty-8           	194103002	         6.348 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCapacity-8                	530012316	         2.304 ns/op	       0 B/op	       0 allocs/op
-BenchmarkLen-8                     	493288366	         2.425 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSPSC_ProducerConsumer/size4-8         	15381303	       107.8 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSPSC_ProducerConsumer/size64-8        	18557430	        75.48 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSPSC_ProducerConsumer/size1024-8      	20364985	       122.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSPSC_ProducerConsumer/size65536-8     	24867996	        52.38 ns/op	       0 B/op	       0 allocs/op
-PASS
-ok  	github.com/kitsunium/sdk/internal/kernel/ring	16.075s
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+
+benchmark                            median ns/op   spread   min–max          B/op   allocs/op
+New-12                                      1 646    46.0%   1 638 – 2 395   9 472           1
+TryWrite_Happy-12                           30.83     4.2%   30.79 – 32.10       0           0
+TryRead_Happy-12                            30.86     3.4%   30.77 – 31.83       0           0
+TryWrite_Full-12                            8.771     3.6%   8.742 – 9.062       0           0
+TryRead_Empty-12                            8.302    10.1%   7.858 – 8.695       0           0
+Capacity-12                                 3.337     2.6%   3.312 – 3.399       0           0
+Len-12                                      4.709     3.7%   4.622 – 4.797       0           0
+SPSC_ProducerConsumer/size4-12              306.5    10.5%   291.0 – 323.3       0           0
+SPSC_ProducerConsumer/size64-12             244.3    19.9%   226.1 – 274.7       0           0
+SPSC_ProducerConsumer/size1024-12           192.5    53.2%   188.2 – 290.6       0           0
+SPSC_ProducerConsumer/size65536-12          186.5     5.6%   177.0 – 187.4       0           0
 ```
 
 ## How to read this

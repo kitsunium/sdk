@@ -8,15 +8,33 @@
 
 | Dimension | Value |
 |---|---|
-| CPU cores          | 8 |
-| RAM                | 11.7 GiB |
-| OS / kernel        | Linux 6.12.72-linuxkit (Ubuntu 24.04) |
-| Architecture       | arm64 |
-| Go toolchain       | go1.26.3 linux/arm64 |
-| Git branch         | feat/docs-versioning-and-release |
-| Git commit         | (current HEAD) |
-| Generated (UTC)    | 2026-05-23 |
-| Bench wall-clock   | `-test.benchtime=10s`, single run |
+| CPU cores          | 12 (12th Gen Intel(R) Core(TM) i7-1255U) |
+| RAM                | 15.3 GiB |
+| OS / kernel        | Linux 6.12.107+deb13-amd64 (Debian 13 trixie) |
+| Architecture       | amd64 |
+| Go toolchain       | go1.27.1 linux/amd64 |
+| Git branch         | fix/bench-127 |
+| Git commit         | c08d730 |
+| Generated (UTC)    | 2026-09-15 |
+| Bench wall-clock   | `-benchtime=10s -count=5`, median of 5 runs |
+
+> **What these numbers support.** `allocs/op` is exact: all 5 repeats agreed on
+> every cell, in every package. `B/op` is exact too **except where a cell
+> carries `*`**, which marks five values that were not identical and a median
+> reported in their place. Both columns are **unchanged** from a go1.26.4 run
+> of this same code on this same box (124 benchmarks compared SDK-wide, 44 of
+> them allocating, zero counter moved). `ns/op` are medians and carry the
+> `spread` shown, which is a **within-run** figure that understates run-to-run
+> variance: re-running the identical binary on this box moved individual cells
+> by up to 94 %. Read ns/op as an order of magnitude on this box, never as a
+> cross-edition or cross-machine delta.
+
+> **This edition changes the reference platform.** The previous edition was
+> measured on **arm64** (8-core, Linux 6.12.72-linuxkit) under **go1.26.3**; this
+> one is **amd64** on the box stamped above. The two editions are NOT
+> comparable — a reader drawing a delta across them would be measuring the
+> architecture, not the code. The whole table was re-measured here rather
+> than half-updated, so the cells stay comparable with each other.
 
 ## Results
 
@@ -25,24 +43,32 @@ The logger writes to a `discardSink` so the I/O is out of the measurement —
 what's being benched is the encoder + dispatch path.
 
 ```
-BenchmarkLoggerStaticString-8   	28,589,284	  426.1 ns/op	  64 B/op	1 allocs/op
-BenchmarkLogger10Fields-8       	13,755,102	  857.2 ns/op	 768 B/op	1 allocs/op
+goos: linux
+goarch: amd64
+pkg: github.com/kitsunium/sdk/pkg/v1/logger
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+
+benchmark                        median ns/op   spread   min–max         B/op   allocs/op
+LoggerStaticString-12                   663.5    33.5%   656.4 – 878.5     64           1
+Logger10Fields-12                       1 418     7.3%   1 386 – 1 490    768           1
 ```
 
 ## How to read this
 
-- **Latency.** Static message lands in ~426 ns; structured record with 10 attrs in ~857 ns. The per-attr cost is ~43 ns when you add fields.
+- **Latency.** Static message lands in ~664 ns; structured record with 10 attrs in ~1 418 ns. The per-attr cost is ~75 ns when you add fields.
 - **Allocations.** The variadic `logger.Info(ctx, lg, "msg", attrs...)` path costs **1 alloc/op** (the variadic slice itself). The chainable **`Build(lg, lv).Str(...).Send(...)`** path also costs **1 alloc/op** — the `sync.Pool`-backed builder recycles the `*chainBuilder` and its attrs scratchpad, but the handler clones that scratchpad (`mergeAttrs` / `slices.Clone` of the accumulated attrs) on every `Send`, so one heap slice escapes per emit. `Build` is not allocation-free; it trades the variadic-slice alloc for the handler's clone. Prefer it for ergonomics, not for a zero-alloc guarantee.
 - **Bytes per op.** The 768 B on the 10-field scenario is the variadic slice (10 `AttrValue`s × ~76 B each). Switching to `Build` does NOT drop this to zero: the handler's per-`Send` attrs clone keeps the byte cost at roughly `len(attrs) × sizeof(AttrValue)` (e.g. 10 attrs ≈ a 760 B clone). The pool reuses the builder, not the cloned slice the handler retains.
 
 ## Caveats
 
-- Single run, no `benchstat -count=5` variance indicator. Treat numbers as ±3%.
+- Median of 5 repeats (`-count=5`); the per-row `spread` column is the
+  within-run min-max. Between-run variance on this box is larger than that
+  spread — see the envelope note above before citing any ns/op.
 - The discard sink is synchronous; multi-sink / async middleware would shift the picture (those are tested separately under `internal/service/logger/middleware/`).
 
 ## Methodology
 
-- `cd pkg/v1 && go test -run '^$' -bench=. -benchmem -benchtime=10s ./logger`
+- `cd pkg/v1 && GOWORK=off go test -run '^$' -bench=. -benchmem -benchtime=10s -count=5 ./logger`
 - Logger initialised once outside the bench loop; the loop is `b.Loop()` calls to `logger.Info(...)`.
 
 ---

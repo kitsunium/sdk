@@ -23,25 +23,46 @@ cost of a real `Put`. The round trip is the only honest measurement of the
 
 | Dimension | Value |
 |---|---|
-| CPU cores          | 8 |
-| RAM                | 11 GiB |
-| OS / kernel        | Linux 6.12.72-linuxkit |
-| Architecture       | arm64 |
-| Go toolchain       | go1.26.4 linux/arm64 |
-| Git branch         | feat/issue-18-kernel-buffer-bench |
-| Git commit         | 9c61f89 |
-| Generated (UTC)    | 2026-06-19 |
-| Bench wall-clock   | `-test.benchtime=1s`, single run |
+| CPU cores          | 12 (12th Gen Intel(R) Core(TM) i7-1255U) |
+| RAM                | 15.3 GiB |
+| OS / kernel        | Linux 6.12.107+deb13-amd64 (Debian 13 trixie) |
+| Architecture       | amd64 |
+| Go toolchain       | go1.27.1 linux/amd64 |
+| Git branch         | fix/bench-127 |
+| Git commit         | c08d730 |
+| Generated (UTC)    | 2026-09-15 |
+| Bench wall-clock   | `-benchtime=1s -count=5`, median of 5 runs |
+
+> **What these numbers support.** `allocs/op` is exact: all 5 repeats agreed on
+> every cell, in every package. `B/op` is exact too **except where a cell
+> carries `*`**, which marks five values that were not identical and a median
+> reported in their place. Both columns are **unchanged** from a go1.26.4 run
+> of this same code on this same box (124 benchmarks compared SDK-wide, 44 of
+> them allocating, zero counter moved). `ns/op` are medians and carry the
+> `spread` shown, which is a **within-run** figure that understates run-to-run
+> variance: re-running the identical binary on this box moved individual cells
+> by up to 94 %. Read ns/op as an order of magnitude on this box, never as a
+> cross-edition or cross-machine delta.
+
+> **This edition changes the reference platform.** The previous edition was
+> measured on **arm64** (8-core, Linux 6.12.72-linuxkit) under **go1.26.4**; this
+> one is **amd64** on the box stamped above. The two editions are NOT
+> comparable — a reader drawing a delta across them would be measuring the
+> architecture, not the code. The whole table was re-measured here rather
+> than half-updated, so the cells stay comparable with each other.
 
 ## Results
 
 ```
 goos: linux
-goarch: arm64
+goarch: amd64
 pkg: github.com/kitsunium/sdk/internal/kernel/buffer
-BenchmarkGet_Steadystate-8    	91908540	        13.03 ns/op	       0 B/op	       0 allocs/op
-BenchmarkGetPut_RoundTrip-8   	88810491	        13.34 ns/op	       0 B/op	       0 allocs/op
-BenchmarkGetPut_Parallel-8    	292483033	         3.782 ns/op	       0 B/op	       0 allocs/op
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+
+benchmark             median ns/op   spread   min–max         B/op   allocs/op
+Get_Steadystate-12           23.86     6.7%   23.57 – 25.17      0           0
+GetPut_RoundTrip-12          24.19     4.6%   23.92 – 25.04      0           0
+GetPut_Parallel-12           6.518    47.9%   3.972 – 7.096      0           0
 ```
 
 ## How to read this

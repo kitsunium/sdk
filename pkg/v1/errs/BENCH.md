@@ -8,15 +8,33 @@
 
 | Dimension | Value |
 |---|---|
-| CPU cores          | 8 |
-| RAM                | 11.7 GiB |
-| OS / kernel        | Linux 6.12.72-linuxkit (Ubuntu 24.04) |
-| Architecture       | arm64 |
-| Go toolchain       | go1.26.3 linux/arm64 |
-| Git branch         | feat/docs-versioning-and-release |
-| Git commit         | (current HEAD) |
-| Generated (UTC)    | 2026-05-23 |
-| Bench wall-clock   | `-test.benchtime=10s`, single run |
+| CPU cores          | 12 (12th Gen Intel(R) Core(TM) i7-1255U) |
+| RAM                | 15.3 GiB |
+| OS / kernel        | Linux 6.12.107+deb13-amd64 (Debian 13 trixie) |
+| Architecture       | amd64 |
+| Go toolchain       | go1.27.1 linux/amd64 |
+| Git branch         | fix/bench-127 |
+| Git commit         | c08d730 |
+| Generated (UTC)    | 2026-09-15 |
+| Bench wall-clock   | `-benchtime=2s -count=5`, median of 5 runs |
+
+> **What these numbers support.** `allocs/op` is exact: all 5 repeats agreed on
+> every cell, in every package. `B/op` is exact too **except where a cell
+> carries `*`**, which marks five values that were not identical and a median
+> reported in their place. Both columns are **unchanged** from a go1.26.4 run
+> of this same code on this same box (124 benchmarks compared SDK-wide, 44 of
+> them allocating, zero counter moved). `ns/op` are medians and carry the
+> `spread` shown, which is a **within-run** figure that understates run-to-run
+> variance: re-running the identical binary on this box moved individual cells
+> by up to 94 %. Read ns/op as an order of magnitude on this box, never as a
+> cross-edition or cross-machine delta.
+
+> **This edition changes the reference platform.** The previous edition was
+> measured on **arm64** (8-core, Linux 6.12.72-linuxkit) under **go1.26.3**; this
+> one is **amd64** on the box stamped above. The two editions are NOT
+> comparable — a reader drawing a delta across them would be measuring the
+> architecture, not the code. The whole table was re-measured here rather
+> than half-updated, so the cells stay comparable with each other.
 
 ## Results
 
@@ -25,23 +43,34 @@ hot path. Stdlib baselines (`errors.New`, `fmt.Errorf`) are included so the
 typed-error overhead is visible directly — not hidden behind absolute numbers.
 
 ```
-BenchmarkErrorsNewBaseline-8   	   654,647,385	  18.71 ns/op	   16 B/op	1 allocs/op
-BenchmarkFmtErrorfBaseline-8   	   100,000,000	 110.20 ns/op	   80 B/op	2 allocs/op
-BenchmarkFmtErrorfRender-8     	 1,000,000,000	   2.28 ns/op	    0 B/op	0 allocs/op
-BenchmarkCodeOf-8              	   882,034,608	  12.88 ns/op	    0 B/op	0 allocs/op
-BenchmarkHasCode_NoMatch-8     	   724,077,114	  16.70 ns/op	    0 B/op	0 allocs/op
-BenchmarkPrefixMatcher-8       	 1,000,000,000	  11.71 ns/op	    0 B/op	0 allocs/op
+goos: linux
+goarch: amd64
+pkg: github.com/kitsunium/sdk/pkg/v1/errs
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+
+benchmark              median ns/op   spread   min–max         B/op   allocs/op
+ErrorsNewBaseline-12          27.10     8.2%   25.82 – 28.05     16           1
+FmtErrorfBaseline-12          251.5    21.5%   219.9 – 273.9     80           2
+FmtErrorfRender-12            2.814    15.5%   2.751 – 3.187      0           0
+CodeOf-12                     27.02    11.0%   24.30 – 27.28      0           0
+HasCode_NoMatch-12            33.91    17.6%   33.34 – 39.32      0           0
+PrefixMatcher-12              23.79    21.3%   21.12 – 26.19      0           0
 ```
 
 ## How to read this
 
-- **`errors.New` baseline** allocates 16 B / 1 alloc and runs in ~19 ns. That's the floor for "build an error in Go" — the package-level sink var prevents the compiler from optimising the call away, so this is the honest cost.
-- **`fmt.Errorf` baseline** is the more relevant comparison: 110 ns + 80 B + 2 allocs for a "wrap + format" round-trip.
-- **`CodeOf` / `HasCode` / `PrefixMatcher`** are the introspection paths consumers hit on the hot side (routers, sinks, retry deciders). **Zero allocations** and ~12-17 ns/op — these stay cheap even at high error rates.
-- **`FmtErrorfRender`** is included to show that rendering a wrapped error is essentially free (2 ns); construction cost dominates.
+- **`errors.New` baseline** allocates 16 B / 1 alloc and runs in ~27 ns. That's the floor for "build an error in Go" — the package-level sink var prevents the compiler from optimising the call away, so this is the honest cost.
+- **`fmt.Errorf` baseline** is the more relevant comparison: ~250 ns + 80 B + 2 allocs for a "wrap + format" round-trip.
+- **`CodeOf` / `HasCode` / `PrefixMatcher`** are the introspection paths consumers hit on the hot side (routers, sinks, retry deciders). **Zero allocations** and ~24-34 ns/op — these stay cheap even at high error rates.
+- **`FmtErrorfRender`** is included to show that rendering a wrapped error is essentially free (~3 ns); construction cost dominates.
 
 ## Methodology
 
-- `cd pkg/v1 && go test -run '^$' -bench=. -benchmem -benchtime=10s ./errs`
-- Bench output captured verbatim into this file (commas added for readability).
-- Single run, no `benchstat -count=5` variance indicator yet — numbers should be treated as ±3%.
+- `cd pkg/v1 && GOWORK=off go test -run '^$' -bench=. -benchmem -benchtime=2s -count=5 ./errs`
+- The table is an AGGREGATION of the five runs, not verbatim `go test` output:
+  per benchmark, the median ns/op, the min and max across the repeats, and the
+  median B/op and allocs/op. Iteration counts are dropped because they are a
+  function of `-benchtime` rather than of the code.
+- Median of 5 repeats (`-count=5`); the per-row `spread` column is the
+  within-run min-max. Between-run variance on this box is larger than that
+  spread — see the envelope note above before citing any ns/op.
