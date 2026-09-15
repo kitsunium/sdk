@@ -13,10 +13,25 @@
 //
 // What this does NOT prove is that the process holding the token is the job it
 // was minted for. A token exfiltrated from a legitimate run stays usable off-CI
-// until it expires, minutes later. Closing that needs a server-side nonce,
-// which the offline verification model rules out; the window is bounded and
-// the exposure is one free seat, so it is accepted and stated rather than
-// papered over.
+// until it expires. Closing that needs a server-side nonce, which the offline
+// verification model rules out, so the residue is accepted and stated.
+//
+// Stated as what it IS, which is not what this comment used to claim. "The
+// exposure is one free seat" was never demonstrated and is not true. A short
+// token bounds the DURATION a stolen proof keeps working; it says nothing about
+// the NUMBER of processes that can present it at once. Nothing ties a token to a
+// consumer: VerifyActionsToken is pure and offline, it keeps no record of what it
+// has already admitted, and two verifiers could not share one if it did. So one
+// leaked token satisfies every verifier it reaches, all of them at the same time,
+// for as long as it is valid.
+//
+// The honest bound is ONE FREE SEAT PER VERIFIER FOR UP TO 32 MINUTES:
+// maxTokenLifetime (30 min) is the widest window a token may claim, clockSkew
+// (2 min) is what checkTiming allows on top when admitting one, and their sum is
+// how long after minting a stolen token still verifies. What makes that a bound
+// rather than a sentence is ciseat.go handing the token's own expiry to
+// coreent.GrantDeadline — without it the GRANT outlived the proof by up to a day,
+// and the duration this paragraph names described nothing at all.
 package entitlement
 
 import (
@@ -125,13 +140,22 @@ type ActionsClaimsValue struct {
 	RepositoryOwner string `json:"repository_owner"`
 	// Repository is "owner/name", for diagnostics and optional narrowing.
 	Repository string `json:"repository"`
-	// EventName is the workflow trigger. pull_request_target runs with the
-	// base repository's identity while potentially executing code from a
-	// fork, so a policy may want to refuse it.
+	// EventName is the workflow trigger, DECODED AND READ BY NOTHING. It is
+	// carried so a diagnostic can print it and so a future policy would not
+	// have to change the wire shape to see it.
+	//
+	// It used to say pull_request_target "runs with the base repository's
+	// identity while potentially executing code from a fork, so a policy may
+	// want to refuse it" — which is true of Actions and describes no
+	// behaviour of this package. Four lines above, this type's own doc
+	// comment says a field that is not read cannot be relied on by accident;
+	// a field whose comment describes a policy is exactly how that gets
+	// relied on. Test_VerifyActionsToken_ignoresTheClaimsNothingReads makes
+	// the silence mechanical.
 	EventName string `json:"event_name"`
-	// RunnerEnvironment distinguishes "github-hosted" from "self-hosted". A
-	// self-hosted runner's token is cryptographically identical but says
-	// nothing about the isolation of the machine that holds it.
+	// RunnerEnvironment distinguishes "github-hosted" from "self-hosted",
+	// DECODED AND READ BY NOTHING, for the same reason and with the same
+	// warning as EventName above.
 	RunnerEnvironment string `json:"runner_environment"`
 	// ExpiresAt, IssuedAt and NotBefore are NumericDate seconds.
 	ExpiresAt int64 `json:"exp"`

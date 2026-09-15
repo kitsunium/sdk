@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// TestGrantDeadline pins that a grant is bounded by the EARLIEST of the three
-// dates in play, and that a zero date means "not recorded" rather than
+// TestGrantDeadline pins that a grant is bounded by the EARLIEST date in play,
+// however many there are, and that a zero date means "not recorded" rather than
 // "already expired".
 //
 // Before NotAfter existed a grant aged against VerifiedAt+RosterLifetime and
@@ -14,6 +14,11 @@ import (
 // serving for a further 24 hours after that window shut — up to 47 hours
 // after the vendor last signed anything, in a scheme whose only dial is a
 // 24-hour bound. The subject's own term was ignored the same way.
+//
+// The bounds became variadic for the same reason, one document further along: a
+// CI seat rests on an Actions token as well as on the roster, and two fixed
+// parameters could not carry it. The last two rows are that case, and they are
+// the ones a fixed-arity signature could not even express.
 func TestGrantDeadline(t *testing.T) {
 	t.Parallel()
 
@@ -23,7 +28,10 @@ func TestGrantDeadline(t *testing.T) {
 		name          string
 		rosterExpiry  time.Time
 		subjectExpiry time.Time
-		want          time.Time
+		// extra is a further bound the caller can name — the Actions token's
+		// own expiry, for a CI seat. Absent on every device row.
+		extra []time.Time
+		want  time.Time
 	}{
 		{
 			name: "no other bound recorded leaves the verification lifetime",
@@ -64,13 +72,32 @@ func TestGrantDeadline(t *testing.T) {
 			subjectExpiry: time.Time{},
 			want:          verified.Add(6 * time.Hour),
 		},
+		{
+			//: The CI seat. The Actions token that PROVED the run is a document
+			//: the grant rests on, so a thirty-minute proof cannot authorise for
+			//: ten hours — which is what ciseat.go did while NotAfter's own
+			//: comment said the opposite.
+			name:         "a third bound closing soonest wins",
+			rosterExpiry: verified.Add(10 * time.Hour),
+			extra:        []time.Time{verified.Add(4 * time.Minute)},
+			want:         verified.Add(4 * time.Minute),
+		},
+		{
+			//: And it is a BOUND, not the answer: a roster closing before the
+			//: token still decides. The tightest wins whichever document it is.
+			name:         "a third bound does not beat a nearer roster",
+			rosterExpiry: verified.Add(time.Minute),
+			extra:        []time.Time{verified.Add(4 * time.Minute)},
+			want:         verified.Add(time.Minute),
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := GrantDeadline(verified, tt.rosterExpiry, tt.subjectExpiry); !got.Equal(tt.want) {
+			bounds := append([]time.Time{tt.rosterExpiry, tt.subjectExpiry}, tt.extra...)
+			if got := GrantDeadline(verified, bounds...); !got.Equal(tt.want) {
 				t.Errorf("GrantDeadline() = %v, want %v", got, tt.want)
 			}
 		})

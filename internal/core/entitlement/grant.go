@@ -22,10 +22,11 @@ type GrantValue struct {
 	// VerifiedAt is when the roster was last successfully authenticated.
 	VerifiedAt time.Time
 	// NotAfter is the instant this grant stops authorising anything: the
-	// EARLIEST of the verification's own lifetime, the roster's expiry and
-	// the subject's term. Each bounds something different, so the tightest
-	// is the only correct answer — a grant may not outlive the document
-	// that authorised it.
+	// EARLIEST of the verification's own lifetime and every document the
+	// verification rested on — the roster's expiry, the subject's term, and
+	// for a CI seat the expiry of the Actions token that proved the run.
+	// Each bounds something different, so the tightest is the only correct
+	// answer — a grant may not outlive the document that authorised it.
 	//
 	// The zero value means "no deadline was computed", which is how a grant
 	// seeded from a bare timestamp behaves: serve.go does exactly that at
@@ -46,25 +47,52 @@ type GrantValue struct {
 	Offline bool
 }
 
-// GrantDeadline computes NotAfter from the three bounds in play.
+// GrantDeadline computes NotAfter from the verification's own lifetime and
+// however many further bounds the caller can name.
 //
 // A zero expiry means "not recorded" throughout this package — an absent
 // subject term, or a roster field a predecessor never wrote — and must never
 // be read as "already expired". Zero values are therefore skipped rather than
 // minimised over: otherwise the earliest bound would always be the zero time
 // and every grant would be born dead.
-func GrantDeadline(verifiedAt, rosterExpiry, subjectExpiry time.Time) time.Time {
+//
+// # Why the bounds are variadic
+//
+// Because "a grant may not outlive the document that authorised it" is a rule
+// about however many documents there were, and the CI path has three. It was
+// written as two fixed parameters — the roster's window and the subject's term —
+// which are exactly the two a DEVICE grant rests on. A CI seat rests on a third:
+// the Actions token that proved the run is real, whose own expiry GitHub sets
+// minutes out. ciseat.go therefore bounded the seat by the roster and the
+// account's term and by nothing else, so a grant established by a 30-minute proof
+// survived it by up to a day — the invariant NotAfter's own comment states,
+// contradicted by the one caller that had a document the signature said the least
+// about.
+//
+// Variadic rather than a fourth parameter so the two existing call sites compile
+// unchanged and read unchanged; a caller with nothing extra to name passes
+// nothing extra.
+//
+// # No skew here, deliberately
+//
+// checkTiming allows clockSkew when ADMITTING an Actions token, which is the
+// permissive direction and the right one there: refusing a genuine token over two
+// minutes of drift would break a working runner. Adding the same allowance to a
+// BOUND would run the opposite way — it would extend the grant past the proof —
+// so the bound is the claim as written.
+func GrantDeadline(verifiedAt time.Time, bounds ...time.Time) time.Time {
 	deadline := verifiedAt.Add(RosterLifetime)
-	//: The roster cannot authorise past its own window, so a grant resting
-	//: on it cannot either.
-	if !rosterExpiry.IsZero() && rosterExpiry.Before(deadline) {
-		deadline = rosterExpiry
+	//: Each bound closes something the grant rests on — the roster's window, a
+	//: subject's term, the proof a CI run was real — so the tightest of them is
+	//: the only answer that keeps the grant inside all of them.
+	for _, bound := range bounds {
+		//: Zero is "not recorded" and never "already expired", which is what
+		//: makes a roster predating a field harmless.
+		if !bound.IsZero() && bound.Before(deadline) {
+			deadline = bound
+		}
 	}
-	//: A subject's term closes its entitlement whatever the roster says.
-	if !subjectExpiry.IsZero() && subjectExpiry.Before(deadline) {
-		deadline = subjectExpiry
-	}
-	//: The tightest of the three bounds.
+	//: The tightest bound in play.
 	return deadline
 }
 

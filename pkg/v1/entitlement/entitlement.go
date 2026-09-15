@@ -48,6 +48,38 @@
 // What is NOT answered, and cannot be locally, is a frozen CLOCK: every source
 // of time an offline process can read belongs to the party being checked. The
 // ratchet raises the cost; it does not close the hole.
+//
+// # An older genuine roster cannot undo a newer decision
+//
+// The ratchet also bears on ACCEPTANCE, not only on what gets cached. A roster
+// the vendor signed but has since replaced is refused before it reaches the
+// decision, so a lagging mirror or a substituted origin cannot restore a revoked
+// subject, a rotated-out fingerprint, a lower mandatory-update floor, a withdrawn
+// CI account or a relaxed CI policy. Equal signing instants are accepted when the
+// signed payload is identical — which is every ordinary re-verification — and
+// refused when it is not.
+//
+// It is CONDITIONAL on the cached bundle persisting, because that bundle IS the
+// mark: the guarantee lapses for a Service built with no cache, for an install
+// the filesystem refused, and for one that stood down on a contended lock. None
+// of the three refuses instead; a contended lock turned into a refused licence
+// would be worse than the replay it would prevent.
+//
+// # A CI seat cannot outlive its token
+//
+// BEHAVIOUR CHANGE. A grant issued for a proven GitHub Actions run is now bounded
+// by the Actions token's own expiry as well as by the roster's window and the
+// account's term. The effective bound on a CI seat therefore drops from up to 24 h
+// to at most 30 minutes — maxTokenLifetime, and in practice the few minutes a real
+// token carries. A long-running process on a runner that aged against a CI grant
+// for hours must now re-verify inside that window.
+//
+// No clock skew is added to the bound. The two-minute allowance exists to ADMIT a
+// token whose clock disagrees slightly, which is permissive and correct; applying
+// it to a bound would extend the grant past the proof. Together they are what makes
+// the exposure of a leaked token statable at all: one free seat PER VERIFIER for up
+// to 32 minutes. A short token bounds the DURATION a stolen proof keeps working,
+// never the NUMBER of verifiers that will accept it at once.
 package entitlement
 
 import (
@@ -140,7 +172,8 @@ var (
 	// ErrRosterUnsigned identifies a roster carrying no valid vendor signature.
 	ErrRosterUnsigned = coreent.ErrRosterUnsigned
 
-	// ErrRosterStale identifies a roster that verified but whose window has closed.
+	// ErrRosterStale identifies a roster that verified but no longer authorises:
+	// its own window has closed, or a newer signed decision has superseded it.
 	ErrRosterStale = coreent.ErrRosterStale
 
 	// ErrRevoked identifies a subject absent from a roster that was itself valid.

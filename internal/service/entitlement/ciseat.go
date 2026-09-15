@@ -66,10 +66,20 @@ func (s *Service) ciSeat(roster *coreent.RosterValue, now time.Time) (grant core
 	}
 	//: The subject names the run rather than a device, so `license status`
 	//: and any log say which repository was authorised.
+	//:
+	//: THREE bounds and not two. The roster's window and the account's term are
+	//: the two a device grant rests on; a CI seat rests on a third document, the
+	//: Actions token, and core/grant.go's invariant is that "a grant may not
+	//: outlive the document that authorised it". It did: the token is minted for
+	//: at most maxTokenLifetime and the seat outlived it by up to a day, so an
+	//: exfiltrated token bought a grant lasting far longer than the token. The
+	//: claim is taken as written, with no clockSkew added — checkTiming allows
+	//: skew to ADMIT a token, which is permissive and correct there, while the
+	//: same allowance on a BOUND would extend the grant past the proof.
 	return coreent.GrantValue{
 		Subject:    "ci:" + claims.Repository,
 		VerifiedAt: now,
-		NotAfter:   coreent.GrantDeadline(now, roster.ExpiresAt, entitlement.ExpiresAt),
+		NotAfter:   coreent.GrantDeadline(now, roster.ExpiresAt, entitlement.ExpiresAt, time.Unix(claims.ExpiresAt, 0)),
 	}, nil
 }
 

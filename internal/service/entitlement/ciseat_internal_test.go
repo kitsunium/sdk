@@ -1,6 +1,9 @@
 package entitlement
 
 import (
+	"crypto/rsa"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -420,6 +423,168 @@ func Test_ciContext_carriesTheSeatsOwnParticulars(t *testing.T) {
 			//: And still not in the sentence, which is the device refusal's.
 			if strings.Contains(got.Error(), tt.wantDetail) {
 				t.Errorf("ciContext() = %q, want the seat's particulars OUT of the public sentence (%s)", got, tt.reason)
+			}
+		})
+	}
+}
+
+// seatWorld is a complete signed world for one CI verification: GitHub's
+// published key set and the private half that signs the token it publishes.
+//
+// Everything is real — a genuine RS256 signature over a genuine compact JWS —
+// because the thing under test is a value carried OUT of the verified claims,
+// and a stubbed verification would hand it back whatever the stub was told to
+// say.
+type seatWorld struct {
+	// jwks is the key set the JWKS endpoint serves.
+	jwks []byte
+	// signer is the private half of the one key in that set.
+	signer *rsa.PrivateKey
+}
+
+// newSeatWorld publishes one RSA key and keeps its private half.
+func newSeatWorld(t *testing.T) *seatWorld {
+	t.Helper()
+
+	signer, signerErr := rsa.GenerateKey(nil, internalKeyBits)
+	//: A failure here is an environment problem, not a test outcome.
+	if signerErr != nil {
+		t.Fatalf("generating signing key: %v", signerErr)
+	}
+	jwks, jwksErr := json.Marshal(JWKSValue{Keys: []JWKValue{{
+		KeyType:   "RSA",
+		KeyID:     "k1",
+		Use:       "sig",
+		Algorithm: "RS256",
+		Modulus:   base64.RawURLEncoding.EncodeToString(signer.N.Bytes()),
+		Exponent:  base64.RawURLEncoding.EncodeToString(minimalBigEndian(signer.E)),
+	}}})
+	//: A failure here is an environment problem, not a test outcome.
+	if jwksErr != nil {
+		t.Fatalf("marshalling key set: %v", jwksErr)
+	}
+	//: A key set, and the half that can sign against it.
+	return &seatWorld{jwks: jwks, signer: signer}
+}
+
+// minimalBigEndian renders an RSA exponent the way a JWK carries one.
+func minimalBigEndian(exponent int) []byte {
+	var out []byte
+	//: Strip leading zero bytes by construction: a JWK's `e` is minimal.
+	for exponent > 0 {
+		out = append([]byte{byte(exponent & 0xff)}, out...)
+		exponent >>= 8
+	}
+	//: The minimal big-endian encoding.
+	return out
+}
+
+// mint signs a token the way Actions does, with the window the caller names.
+//
+// It goes through mintFixtureToken rather than building its own segments, so the
+// token this fixture publishes and the one oidc_internal_test.go verifies are the
+// same document by construction.
+func (w *seatWorld) mint(t *testing.T, issued, expires time.Time, ownerID, audience string) string {
+	t.Helper()
+
+	//: A compact JWS indistinguishable from the runner's.
+	return mintFixtureToken(t, w.signer, actionsClaimsFixture{
+		Issuer:            ActionsIssuer,
+		Audience:          audience,
+		Subject:           "repo:kodflow/widget:ref:refs/heads/main",
+		Repository:        "kodflow/widget",
+		RepositoryOwner:   "kodflow",
+		RepositoryOwnerID: ownerID,
+		IssuedAt:          issued.Unix(),
+		ExpiresAt:         expires.Unix(),
+	})
+}
+
+// Test_Service_ciSeat_boundsTheGrantByItsOwnToken pins that a CI grant dies with
+// the proof that established it.
+//
+// core/grant.go states the invariant in so many words — "a grant may not outlive
+// the document that authorised it" — and this was the one call site that broke it.
+// GrantDeadline took exactly the two bounds a DEVICE grant rests on, the roster's
+// window and the subject's term, and a CI seat rests on a third: the Actions
+// token, which GitHub mints for at most maxTokenLifetime. So a seat established by
+// a four-minute proof was bounded by the roster instead and lived for hours. An
+// exfiltrated token — the exposure oidc.go's package comment accepts and
+// states — bought far more than the token's own window.
+//
+// Both rows are discriminating, and each one catches a different wrong answer.
+// The first would read 10 h before the fix, which is the defect. The second is
+// what stops the repair from being "always bound by the token": a roster closing
+// BEFORE the token still wins, because the tightest bound is the rule and the
+// token is a bound rather than the answer.
+//
+// No clock skew is asserted anywhere, and its absence is the point.
+// checkTiming allows clockSkew when ADMITTING a token, which is permissive and
+// right; the same allowance on this bound would extend the grant past the proof.
+func Test_Service_ciSeat_boundsTheGrantByItsOwnToken(t *testing.T) {
+	tests := []struct {
+		name string
+		// tokenWindow is how far ahead of now the token's own exp sits.
+		tokenWindow time.Duration
+		// rosterWindow is how far ahead of now the roster's exp sits.
+		rosterWindow time.Duration
+		// wantBound is which of the two the grant's NotAfter must equal.
+		wantBound time.Duration
+		reason    string
+	}{
+		{
+			name:         "a token closing before the roster bounds the grant",
+			tokenWindow:  4 * time.Minute,
+			rosterWindow: 10 * time.Hour,
+			wantBound:    4 * time.Minute,
+			reason:       "the proof is a document the grant rests on, and a grant may not outlive one",
+		},
+		{
+			name:         "a roster closing before the token still wins",
+			tokenWindow:  20 * time.Minute,
+			rosterWindow: 5 * time.Minute,
+			wantBound:    5 * time.Minute,
+			reason:       "the tightest bound is the rule; the token is one of them, never the answer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			//: Both variables, so InCI reports true whatever the ambient
+			//: environment says. The URL must satisfy checkTokenURL.
+			t.Setenv(actionsTokenURLEnv, "https://pipelines.actions.githubusercontent.com/token")
+			t.Setenv(actionsTokenBearerEnv, "runner-secret")
+
+			now := time.Now().Truncate(time.Second)
+			world := newSeatWorld(t)
+			token := world.mint(t, now.Add(-time.Minute), now.Add(tt.tokenWindow), "42", testProduct.CIAudience)
+
+			//: The roster is handed in as a value: ciSeat takes an
+			//: already-authenticated document, so nothing here needs a vendor key.
+			roster := &coreent.RosterValue{
+				IssuedAt:   now.Add(-time.Minute),
+				ExpiresAt:  now.Add(tt.rosterWindow),
+				CIAccounts: map[string]coreent.CIEntitlementValue{"42": {}},
+			}
+
+			svc := NewServiceWithGetter(stubGet(func(string) (*http.Response, error) {
+				//: Only the key set is fetched through the Getter; the token
+				//: comes through the bearer transport below.
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(world.jwks)))}, nil
+			}), stubIdentity{}, nil, &testProduct).
+				WithBearerFetch(func(string, string) (*http.Response, error) {
+					//: The mint endpoint's shape, with a real signed token in it.
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"value":"` + token + `"}`))}, nil
+				})
+
+			grant, err := svc.ciSeat(roster, now)
+			if err != nil {
+				t.Fatalf("ciSeat() error = %v, want a grant (%s)", err, tt.reason)
+			}
+			want := now.Add(tt.wantBound)
+			if !grant.NotAfter.Equal(want) {
+				t.Errorf("ciSeat() grant.NotAfter = %s, want %s (%s)",
+					grant.NotAfter.UTC().Format(time.RFC3339), want.UTC().Format(time.RFC3339), tt.reason)
 			}
 		})
 	}
