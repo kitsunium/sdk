@@ -14,6 +14,24 @@ name: SDK Release
 # scripts, which read the trailer over the whole range since the last release
 # rather than from HEAD (ADR 0085); nothing here needs to compensate, and
 # fetch-depth: 0 below is what lets them walk that range.
+#
+# WHAT A GREEN RUN MEANS HERE (#227 defect 2). It used to mean nothing: run
+# 34861207918 reported completed/success with step 6 green, step 7 SKIPPED and
+# no tag cut, and pkg/v0.3.7 has never existed. "There was nothing to publish"
+# and "the computation failed silently" looked identical from the run list.
+# Three things now keep them apart, and none of them is a comment:
+#
+#   1. compute-bumps.sh --explain writes its verdict and the reason to stderr,
+#      so this job's log says WHICH of the two happened (#226).
+#   2. every run — including a no-op — writes a job summary and uploads it, so
+#      "nothing was published, because X" is a recorded fact rather than an
+#      absence of one.
+#   3. once a bump HAS been computed, a run that pushes no tag FAILS. A release
+#      that publishes nothing is never a success.
+#
+# And rule 2 is load-bearing here: a release lane where `bazel` is missing
+# silently skips the rdeps half and reports "no release". --require-bazel below
+# turns that into a refusal.
 
 on:
   workflow_run:
@@ -62,7 +80,48 @@ jobs:
           go-version-file: go.mod
 
       - name: Setup Bazel
-        uses: bazel-contrib/setup-bazel@e403ad507104847c3539436f64a9e9eecc73eeec # v0.15.0
+        # Same pinned action as bazel-ci.yml, and — unlike before — with its
+        # caches. This lane ran setup-bazel with NO cache of any kind, so every
+        # release resolved the whole module graph and every external repository
+        # from cold before it could answer one `rdeps` question. #226 measured
+        # step 6 at 31 s on a lane where a cold rdeps over this repository
+        # cannot plausibly finish that fast, and got an empty answer; a cold,
+        # network-bound fetch is the most likely thing that 31 s was. The caches
+        # do not prove the query will succeed — nothing here can — but they
+        # remove the failure surface that had no reason to be in this lane.
+        #
+        # Its own disk-cache namespace (the key starts with github.workflow, as
+        # in bazel-ci.yml). Sharing the CI lane's warm cache would need both
+        # files to agree on a literal key prefix, which changes bazel-ci.yml and
+        # invalidates that lane's cache once — deliberately not bundled here.
+        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}-${{ hashFiles('.bazelrc', '.bazelversion', 'MODULE.bazel', '**/go.mod', '**/go.sum') }}
+          repository-cache: true
+
+      - name: Report whether Bazel answers
+        # Its own name in the step list, because rule 2 of compute-bumps.sh is a
+        # `bazel query` and a Bazel that cannot start produces the same empty
+        # answer as a module that reaches nothing. #227's d625975 row — step 6
+        # in 0 s, green — is what that looks like from the outside.
+        #
+        # A WARNING and not a failure, deliberately. Failing here would block a
+        # pkg/-only release, which needs no query at all, on an unrelated
+        # toolchain problem — and the point of this file is that publication
+        # stops being blocked silently, not that it starts being blocked loudly.
+        # The refusal lives where the answer is load-bearing instead:
+        # compute-bumps.sh --require-bazel refuses only when rule 1 did not fire
+        # AND internal/ module dirs changed, i.e. exactly when a missing bazel
+        # would change the verdict.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          if ! command -v bazel >/dev/null 2>&1; then
+            echo "::warning::bazel is not on PATH after Setup Bazel — an internal/-only change cannot be sized and will refuse (--require-bazel)"
+            exit 0
+          fi
+          bazel --version || echo "::warning::bazel is on PATH but could not report its version"
 
       - name: Configure git identity
         # The owning account's GitHub noreply address, not a domain one.
@@ -90,23 +149,55 @@ jobs:
           FORCE_BUMPS: ${{ inputs.force_bumps }}
         run: |
           set -euo pipefail
+          # Computed into a FILE, then copied into GITHUB_OUTPUT. The previous
+          # shape opened the `majors<<EOF` block, ran the producer, then closed
+          # it — so a producer that failed mid-write left a half-written
+          # heredoc in the file GitHub parses, on top of failing the step.
+          majors=/tmp/sdk-release-majors.txt
+          : > "$majors"
+
           if [ -n "$FORCE_BUMPS" ]; then
-            echo "majors<<EOF" >> "$GITHUB_OUTPUT"
-            echo "$FORCE_BUMPS" | tr ' ' '\n' | grep -E '^(pkg|v[0-9]+)$' >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+            # No `|| true` on the filter either: a force input that matches
+            # nothing is a typo, and publishing nothing because of a typo is
+            # the outcome this whole file now refuses to call a success.
+            printf '%s\n' "$FORCE_BUMPS" | tr ' ' '\n' | grep -E '^(pkg|v[0-9]+)$' > "$majors"
+            reason="forced by workflow_dispatch: $(tr '\n' ' ' < "$majors")"
           else
-            echo "majors<<EOF" >> "$GITHUB_OUTPUT"
             # No `|| true`: compute-bumps.sh exits 0 on a legitimate no-op
             # (empty output), so a non-zero exit is a real failure that must
             # fail the job — not be masked into a silent no-op release.
-            bash scripts/release/compute-bumps.sh >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+            #
+            # --explain puts the verdict and its reason on stderr, which is this
+            # step's log; --require-bazel refuses rather than skipping the rdeps
+            # half when bazel is missing. Both exist because "nothing to
+            # publish" and "nothing was measured" used to print the same zero
+            # bytes (#226, #227).
+            bash scripts/release/compute-bumps.sh --explain --require-bazel \
+              > "$majors" 2> /tmp/compute.err
+            cat /tmp/compute.err >&2
+            # awk, not `grep | tail`: awk reads to EOF and exits 0 whether or
+            # not it matched, so a missing verdict line cannot fail the step
+            # under pipefail nor be read as an empty one.
+            reason="$(awk '/verdict:/ { sub(/^.*verdict: */, ""); v = $0 } END { print v }' /tmp/compute.err)"
+            [ -n "$reason" ] || reason="compute-bumps.sh printed no verdict line"
           fi
 
+          {
+            echo "majors<<SDK_RELEASE_MAJORS_EOF"
+            cat "$majors"
+            echo "SDK_RELEASE_MAJORS_EOF"
+            echo "reason=$reason"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Cut and push tags
+        id: cut
         if: steps.compute.outputs.majors != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Through the environment, not `${{ }}` inside the shell string. The
+          # value is our own script's stdout today, but it is multi-line by
+          # contract and the file already argues this case for force_bumps.
+          MAJORS: ${{ steps.compute.outputs.majors }}
         run: |
           set -uo pipefail
           # GitHub invokes this step as `bash -e`, which re-enables errexit even
@@ -124,13 +215,52 @@ jobs:
             flags="--allow-bootstrap"
           fi
           # shellcheck disable=SC2086
-          echo "${{ steps.compute.outputs.majors }}" | bash scripts/release/cut-tags.sh $flags | tee /tmp/cut.log
+          printf '%s\n' "$MAJORS" | bash scripts/release/cut-tags.sh $flags | tee /tmp/cut.log
           rc=${PIPESTATUS[1]}
           if [ "$rc" -eq 3 ]; then
+            # A HELD bootstrap publishes nothing ON PURPOSE, so it is the one
+            # case the publication assertion below must not fire on. Recorded as
+            # an output rather than inferred from an empty cut.log, which is
+            # also what a silent failure looks like.
+            echo "held=true" >> "$GITHUB_OUTPUT"
             echo "::notice::First release held for manual validation (ADR 0009). Dispatch this workflow manually once go.sum + a clean-room 'go get' are verified."
             exit 0
           fi
+          echo "held=false" >> "$GITHUB_OUTPUT"
           exit "$rc"
+
+      - name: Verify the computed release was actually published
+        # #227 defect 2. A bump was computed, so a release IS happening — a run
+        # that then pushes no tag is a failure, not a quiet success. This is the
+        # assertion whose absence made run 34861207918 green.
+        #
+        # Reads the tag list cut-tags.sh wrote rather than re-deriving it: the
+        # question is "did the publication happen", and only its own output can
+        # answer that. Missing file, empty file and a file with no pkg/ tag are
+        # all failures; none of them is a release.
+        if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true'
+        env:
+          MAJORS: ${{ steps.compute.outputs.majors }}
+        run: |
+          set -euo pipefail
+          if [ ! -f /tmp/cut.log ]; then
+            echo "::error::cut-tags.sh produced no output file for bump '$MAJORS' — nothing was published"
+            exit 1
+          fi
+          published=0
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            case "$tag" in
+              pkg/v[01].*) published=$((published + 1)) ;;
+            esac
+          done < /tmp/cut.log
+          if [ "$published" -eq 0 ]; then
+            echo "::error::bump '$MAJORS' was computed but no pkg/ tag was published"
+            echo "cut-tags.sh output was:" >&2
+            cat /tmp/cut.log >&2
+            exit 1
+          fi
+          echo "::notice::published $published pkg tag(s)"
 
       - name: Create GitHub releases
         if: steps.compute.outputs.majors != ''
@@ -144,22 +274,57 @@ jobs:
           done < /tmp/cut.log
 
       - name: Emit release summary artifact
-        if: always() && steps.compute.outputs.majors != ''
+        # No longer gated on a bump having been computed. A run that published
+        # nothing is exactly the run nobody could account for afterwards
+        # (#226/#227): the summary is where it now says so, in the run page and
+        # in a retained artifact, naming the reason compute-bumps.sh gave.
+        if: always()
+        env:
+          MAJORS: ${{ steps.compute.outputs.majors }}
+          REASON: ${{ steps.compute.outputs.reason }}
+          HELD: ${{ steps.cut.outputs.held }}
         run: |
+          set -uo pipefail
           {
             echo "## SDK release summary"
-            echo "Commit: $TARGET_SHA"
-            echo "Date: $(date -u +%FT%TZ)"
             echo
-            echo "### Majors bumped"
-            echo "${{ steps.compute.outputs.majors }}"
+            echo "- Commit: \`$TARGET_SHA\`"
+            echo "- Date: $(date -u +%FT%TZ)"
+            echo "- Verdict: ${REASON:-(the compute step did not reach a verdict)}"
             echo
-            echo "### Tags pushed"
-            cat /tmp/cut.log 2>/dev/null || echo "(none)"
+            if [ -z "${MAJORS:-}" ]; then
+              echo "### Nothing was published"
+              echo
+              echo "No bump token was computed for this range, so no tag was cut."
+              echo "This is a legitimate outcome for a change that carries nothing"
+              echo "consumer-visible. The reason above is the calculator's own; the"
+              echo "full reasoning is in the \`Compute majors to bump\` step log."
+            elif [ "${HELD:-}" = "true" ]; then
+              echo "### Held (bootstrap)"
+              echo
+              echo "Bump \`${MAJORS}\` computed; the FIRST release is held for manual"
+              echo "validation (ADR 0009). Nothing was published, on purpose."
+            else
+              echo "### Majors bumped"
+              echo
+              echo "\`\`\`"
+              echo "${MAJORS}"
+              echo "\`\`\`"
+              echo
+              echo "### Tags pushed"
+              echo
+              echo "\`\`\`"
+              cat /tmp/cut.log 2>/dev/null || echo "(none)"
+              echo "\`\`\`"
+            fi
           } > /tmp/release-summary.md
+          # Both destinations. The artifact survives 30 days for an audit; the
+          # step summary is what a maintainer sees without downloading anything,
+          # and not being able to see it was the whole of #227 defect 2.
+          cat /tmp/release-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release summary
-        if: always() && steps.compute.outputs.majors != ''
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-summary-${{ github.run_number }}

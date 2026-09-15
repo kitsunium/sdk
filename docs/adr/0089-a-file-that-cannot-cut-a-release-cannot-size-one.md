@@ -1,6 +1,6 @@
 # ADR 0089 — A file that cannot cut a release cannot size one
 
-- **Status**: Accepted; implemented in `scripts/release/cut-tags.sh`.
+- **Status**: Accepted; implemented in `scripts/release/cut-tags.sh`. **Amended 2026-09-15** (§Amendment) — the shared notion moved to `scripts/release/lib/release-scope.sh`, became a category rather than a list of two names, and is now read by **both** rules of `compute-bumps.sh` as well.
 - **Date**: 2026-09-14
 - **Deciders**: kitsunium maintainers
 - **Amends**: [ADR 0007](0007-sdk-release-and-versioning.md) §2 (row 4 — the `Release-bump` trailer is scoped to the paths that can *cut* a release, not to `pkg/` alone)
@@ -114,12 +114,106 @@ That is today's behaviour, and it is exactly the defect: a change that ships and
 
 The real anti-smuggling control is that the trailer is read from main's **first-parent** line only (ADR 0085), not from the commits a merge brought in. What remains is that a squash message is composed from contributor text. Narrowing that is a change to the merge configuration, not to the path scope, and it is out of scope for this ADR — recorded below.
 
+## Amendment — 2026-09-15: the notion becomes a category, and both rules read it
+
+This ADR put the notion in one *function* and spelled it as two *names*,
+`*/CLAUDE.md` and `*/BUILD.bazel`, under a comment that described a category:
+*"maintainer-only metadata that ships in the module zip but carries no
+consumer-visible change — its churn alone must not cut a release."* §Deferred
+below records that this was not enough for `_test.go`. It was not enough for
+`BENCH.md` either, and that one was not deferred — it was unnoticed, and it
+shipped.
+
+`ac9fb6dc` (#237) cut **`pkg/v0.4.4`** from a diff of ten files, every one a
+`BENCH.md`, zero lines of Go. The exported surface between `pkg/v0.4.3` and
+`pkg/v0.4.4` is identical byte for byte: a consumer who upgrades receives
+re-measured tables of `ns/op` (issue #238). 78 `BENCH.md` are in the tree, 20 of
+them under `pkg/`, and each one was a trigger.
+
+### What was actually broken: three things, of which the list was only one
+
+Measured with the unmodified script against fixture repositories, one file per
+commit, and — for rule 2 — a `bazel` stub that appends a line per invocation, so
+"the query ran" is a counted fact and not an inference:
+
+| commit touches, and nothing else | before | after |
+|---|---|---|
+| `pkg/v1/errs/BENCH.md` | `pkg` — **cuts a release** | nothing |
+| `pkg/v1/errs/USES.md` | `pkg` — **cuts a release** | nothing |
+| `pkg/v1/errs/README.md` | `pkg` | `pkg` — *unchanged, deliberately* |
+| `pkg/v1/errs/thing.go` | `pkg` | `pkg` — *control* |
+| `internal/kernel/ring/BENCH.md` | `pkg`, **1 bazel call** | nothing, **0 calls** |
+| `internal/kernel/ring/CLAUDE.md` | `pkg`, **1 bazel call** | nothing, **0 calls** |
+| `internal/kernel/ring/ring2.go` | `pkg`, 1 bazel call | `pkg`, 1 call — *control* |
+
+The `internal/**/CLAUDE.md` row is the finding that changes the shape of the
+fix. `CLAUDE.md` has been excluded by rule 1 since before this ADR, and a
+`CLAUDE.md`-only commit under `internal/` **cut a release anyway**, because
+rule 2 never applied any exclusion at all. Nor could it usefully have carried
+one of its own: it reduces a changed path to `internal/<mod>` *before* asking
+anything, and after that reduction a `BENCH.md` and a `.go` file are the same
+module dir. Issue #220 predicted this mechanism from the source; the table
+measures it. So there were three defects, not one:
+
+1. the list was two names where the comment described a category (#238);
+2. the list existed **twice**, here and in `compute-bumps.sh`, so extending the
+   notion meant editing it in two places and the two could disagree;
+3. one of the two rules that needs it never consulted it (#220's mechanism).
+
+A third copy of the enumeration would have fixed (1) for one more filename and
+left (2) and (3) exactly as they were.
+
+### The rule
+
+`scripts/release/lib/release-scope.sh` holds it once, as an awk prelude that
+both scripts source. A path in a module zip is **maintainer-only** when:
+
+- its basename is `BUILD.bazel` — build metadata for a build system the consumer
+  does not run; `go build` never reads it. Unchanged from this ADR;
+- **or** its basename ends in `.md` and is not `README.md`, compared
+  case-insensitively on both halves.
+
+`README.md` is the exception and it is load-bearing, not timidity: pkg.go.dev
+renders a package's README and nothing else in the zip, and the docs portal
+copies `pkg/<major>/**/README.md` out of the **release tag** (ADR 0007 §5). An
+excluded README would mean a README fix could never reach either surface until
+unrelated code cut a release. Compared case-insensitively in *both* directions
+because the two errors are not symmetric: misjudging `COVERAGE.MD` as
+consumer-visible cuts a release nobody needs, while misjudging `Readme.md` as
+maintainer-only *withholds* one, and a release that never happens is the worse
+failure — it is the whole of #226 and #227.
+
+`compute-bumps.sh` now filters the changed-path list **once, up front**, and
+both rules read the filtered list. That is what makes the two agree, and it is
+also what removes rule 2's bazel calls for a documentary diff: a path that
+cannot carry a consumer-visible change is no longer a path the release lane
+asks Bazel about.
+
+### What the docs portal loses, stated rather than discovered later
+
+`**/BENCH.md` is copied out of the release tag too (ADR 0007 §5). A benchmark
+re-measurement therefore now waits for the next release that a non-documentary
+change cuts. That is a *latency*, not a loss — #227's reading applies: the next
+release's range still contains the commit — and with `compute-bumps.sh
+--explain` naming the reason on every run, it is no longer silent. The two
+changes are correct together and would be a regression apart.
+
+### Still not #220
+
+`*_test.go` and `testdata/**` are **not** excluded. The argument is the same (a
+consumer does not run its dependencies' tests) but the scope call is a
+maintainer's, and §Deferred below measures that widening it changes how real
+past releases were *sized*. What changes is the cost of making that call: it is
+now **one line** in `rs_maintainer_only()`, and it reaches both halves and both
+rules at once. That was the point of moving the notion, and it is the reason to
+prefer a category over a fourth name.
+
 ## Deferred
 
 - **`squash_merge_commit_message: COMMIT_MESSAGES` lets contributor text reach the trailer parser.** Setting it to `BLANK` or `PR_TITLE` would force a maintainer to compose the release-sizing message. Not changed here: it alters every merge in the repository, not just release sizing, and deserves its own decision.
 - **Per-commit rdeps verification for `internal/` paths**, if a case ever shows a trailer sized a release through an `internal/` package that does not reach `//pkg/...`.
 
-- **This ADR does NOT close issue #220, and the shared notion is the reason.** "One notion of a file that counts" is shared by both halves, but that notion still **counts test files**. `counts_for_release` excludes `*/CLAUDE.md` and `*/BUILD.bazel` and nothing else, so a 100 % `_test.go` diff counts. Measured against the real commit that cut `pkg/v0.4.1` — `8addc948` (#222), two files, both `_test.go`, both under `internal/service/crypto/pbkdf2pw/`, zero files outside `internal/`, zero non-test files:
+- **This ADR does NOT close issue #220, and the shared notion is the reason.** "One notion of a file that counts" is shared by both halves, but that notion still **counts test files** — as amended above it excludes maintainer Markdown and `BUILD.bazel`, and nothing else, so a 100 % `_test.go` diff counts. Measured against the real commit that cut `pkg/v0.4.1` — `8addc948` (#222), two files, both `_test.go`, both under `internal/service/crypto/pbkdf2pw/`, zero files outside `internal/`, zero non-test files:
 
   | rule | verdict on `8addc948` |
   |---|---|
@@ -136,8 +230,11 @@ The real anti-smuggling control is that the trailer is read from main's **first-
 
 - [ADR 0007](0007-sdk-release-and-versioning.md) §2 — bump semantics (amended by this ADR, row 4)
 - [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) — both halves of a release read the same range
-- `scripts/release/compute-bumps.sh:66-102` — the notion of a file that counts, and the rdeps rule
+- `scripts/release/lib/release-scope.sh` — the notion itself, once, as a category (§Amendment)
+- `scripts/release/compute-bumps.sh` — the filtered path list, read by rule 1 AND the rdeps rule
 - `scripts/release/cut-tags.sh` — `counts_for_release`, and its two call sites
+- Issue #238 — a `BENCH.md` alone cuts a release; `pkg/v0.4.4` is the witness (closed by §Amendment)
+- Issue #226 / #227 — a release that publishes nothing, and a log that cannot say why
 - Issue #218 — the reproduction this ADR closes
 - Issue #217 — the same visible failure reached through trailer placement
 - Issue #220 — a test-only diff cuts a release: NOT closed by this ADR, and §Deferred says why with the measurement

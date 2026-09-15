@@ -263,3 +263,199 @@ STUB
   [ "$status" -eq 0 ]
   [ "$output" = "pkg" ]
 }
+
+# --- #238: the exclusion was a two-name list under a comment describing a ------
+# --- category, and it lived in two places that could disagree -----------------
+#
+# `pkg/v0.4.4` was cut from the merge of #237: ten files, every one a BENCH.md,
+# zero lines of Go, an exported surface identical byte for byte to pkg/v0.4.3.
+# A BENCH.md is maintainer-only metadata by the definition rule 1's own comment
+# gives — it ships in the module zip and carries nothing a consumer can observe
+# — and it simply was not among the two names the code listed, so
+# `pkg/v1/errs/BENCH.md` fell through to `pkg/v*/*` and cut a release.
+#
+# These run together. The BENCH.md and USES.md rows fail against the pre-fix
+# script; the README.md and .go rows pass against BOTH, and they are what stops
+# a rule that answers "no" to everything from passing this section.
+
+@test "a BENCH.md under pkg/ cuts no release — pkg/v0.4.4's witness (#238)" {
+  mkdir -p pkg/v1/errs
+  printf 'BenchmarkParse-8  12 ns/op\n' > pkg/v1/errs/BENCH.md
+  g add -A
+  g commit -q --no-verify -m "docs(bench): re-measure"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a USES.md under pkg/ cuts no release — same category, another name" {
+  mkdir -p pkg/v1/errs
+  printf '# who uses this\n' > pkg/v1/errs/USES.md
+  g add -A
+  g commit -q --no-verify -m "docs(uses): note a consumer"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# The exception, and it is load-bearing rather than timid: pkg.go.dev renders a
+# package's README and nothing else in the zip, and the docs portal copies
+# pkg/<major>/**/README.md out of the RELEASE TAG (ADR 0007 §5). Excluding it
+# would mean a README fix could never reach either surface until unrelated code
+# cut a release.
+@test "a README.md under pkg/ still cuts a release — the exception (control)" {
+  mkdir -p pkg/v1/errs
+  printf '# errs\n' > pkg/v1/errs/README.md
+  g add -A
+  g commit -q --no-verify -m "docs(errs): regenerate README"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pkg" ]
+}
+
+@test "a .go file under pkg/ still cuts a release (control)" {
+  echo "// real change" >> pkg/v1/codec.go
+  g commit -aq --no-verify -m "feat(v1): a public symbol"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pkg" ]
+}
+
+# --- the half no list could have fixed: rule 2 -------------------------------
+#
+# Rule 1 had an exclusion and rule 2 had none, and rule 2 could not usefully
+# have had one of its own: it reduces a changed path to `internal/<mod>` before
+# asking anything, and after that reduction a BENCH.md and a .go file are the
+# same module dir (#220 predicted this; it is measured here). So a CLAUDE.md
+# under internal/ — a name rule 1 HAS excluded since before ADR 0089 — cut a
+# release anyway, through the other rule.
+#
+# The stub records every invocation, so "the query did not run" is a counted
+# fact rather than an absence of red: a missing bazel produces the same silence.
+
+# bazel_subtree_fixture — a fresh repo whose INIT tree already contains a
+# BUILD.bazel under internal/kernel, so the structural "is this a Bazel subtree"
+# skip cannot mask the result, and a detached release tag as in production.
+bazel_subtree_fixture() {
+  cd "$(mktemp -d)"
+  g init -q -b main
+  g config user.email "ci@example.invalid"; g config user.name "ci"
+  mkdir -p pkg/v1 internal/kernel/errs
+  printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
+  : > pkg/v1/codec.go
+  : > internal/kernel/errs/errs.go
+  printf 'go_library(name = "errs")\n' > internal/kernel/errs/BUILD.bazel
+  g add -A; g commit -q --no-verify -m "init"
+  local base rel
+  base="$(g rev-parse HEAD)"
+  rel="$(g commit-tree "HEAD^{tree}" -p "$base" -m "release v0.1.0")"
+  g tag pkg/v0.1.0 "$rel"
+}
+
+# counting_bazel_stub <dir> <callfile> — answers every query with one row, and
+# appends a line per invocation to <callfile>.
+counting_bazel_stub() {
+  cat >"$1/bazel" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >> "$2"
+case "\$1" in
+  query) echo "//internal/kernel/errs:errs" ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "$1/bazel"
+}
+
+@test "a maintainer .md under internal/ is skipped before the query (#238/#220)" {
+  bazel_subtree_fixture
+  stub="$(mktemp -d)"; calls="$(mktemp)"
+  counting_bazel_stub "$stub" "$calls"
+  printf 'BenchmarkX-8  1 ns/op\n' > internal/kernel/errs/BENCH.md
+  g add -A
+  g commit -q --no-verify -m "docs(bench): re-measure internal"
+  PATH="$stub:$PATH" run "$SCRIPT"
+  ncalls="$(awk 'END { print NR + 0 }' "$calls")"
+  rm -rf "$stub" "$calls"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # The positive witness. Before, this was 1 call and the token "pkg".
+  [ "$ncalls" -eq 0 ]
+}
+
+@test "an internal/ .go change is still queried and still cuts (rule 2 control)" {
+  bazel_subtree_fixture
+  stub="$(mktemp -d)"; calls="$(mktemp)"
+  counting_bazel_stub "$stub" "$calls"
+  echo "// real change" >> internal/kernel/errs/errs.go
+  g commit -aq --no-verify -m "fix(errs): behaviour"
+  PATH="$stub:$PATH" run "$SCRIPT"
+  ncalls="$(awk 'END { print NR + 0 }' "$calls")"
+  rm -rf "$stub" "$calls"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pkg" ]
+  [ "$ncalls" -eq 1 ]
+}
+
+# --- #226: the log could not say why ------------------------------------------
+#
+# An internal/-only change published nothing and the reason was not recoverable
+# from the run. stdout stays the contract ("pkg" or nothing) and the reason goes
+# to stderr, so these tests read the two streams apart — `2>&1 >/dev/null`
+# keeps stderr and discards stdout.
+
+@test "--explain names the reason when nothing is published (#226)" {
+  mkdir -p pkg/v1/errs
+  printf 'BenchmarkParse-8  12 ns/op\n' > pkg/v1/errs/BENCH.md
+  g add -A
+  g commit -q --no-verify -m "docs(bench): re-measure"
+  run bash -c "'$SCRIPT' --explain 2>&1 >/dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"changed paths: 1 (0 could carry a consumer-visible change)"* ]]
+  [[ "$output" == *"every changed path is maintainer-only metadata"* ]]
+  [[ "$output" == *"verdict: NO RELEASE"* ]]
+}
+
+@test "--explain names the rule that fired when something is published" {
+  echo "// real change" >> pkg/v1/codec.go
+  g commit -aq --no-verify -m "feat(v1): a public symbol"
+  run bash -c "'$SCRIPT' --explain 2>&1 >/dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rule 1: pkg/v1/codec.go is a public-module change -> bump"* ]]
+  [[ "$output" == *"verdict: RELEASE"* ]]
+}
+
+# Rule 1 read its paths from `git diff --name-only … || true`, so a git that
+# FAILED produced an empty path list and the verdict "no release" — the same
+# shape #227 was opened for, one rule above it. cut-tags.sh already refuses an
+# unwalkable range; this is the symmetric half.
+@test "a range git cannot walk is refused, not read as 'no release'" {
+  run "$SCRIPT" --range="nosuchrev..HEAD"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"failed"* ]]
+  [[ "$output" == *"refusing to report 'no release' for a range that could not be read"* ]]
+}
+
+# The `command -v bazel` guard is #227 defect 1 in different clothes: a missing
+# bazel and an rdeps set reaching nothing produce the same empty stdout and the
+# same verdict. A developer without bazel should still get rule 1, so the
+# default stays a skip; the release lane, for which rule 2 is load-bearing,
+# passes --require-bazel. PATH is narrowed to the system directories, which is
+# where every tool the script needs lives and where bazel does not.
+@test "--require-bazel refuses when bazel is absent and internal/ changed" {
+  echo "// tweak" >> internal/kernel/errs/errs.go
+  g commit -aq --no-verify -m "fix(errs): wording"
+  PATH="/usr/bin:/bin" run "$SCRIPT" --require-bazel
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--require-bazel"* ]]
+  [[ "$output" == *"would go unmeasured"* ]]
+}
+
+# The negative witness for the row above: --require-bazel must not fail a run
+# that had no internal/ question to ask, or every docs merge would go red.
+@test "--require-bazel is silent when no internal/ path changed" {
+  echo "// real change" >> pkg/v1/codec.go
+  g commit -aq --no-verify -m "feat(v1): a public symbol"
+  PATH="/usr/bin:/bin" run "$SCRIPT" --require-bazel
+  [ "$status" -eq 0 ]
+  [ "$output" = "pkg" ]
+}

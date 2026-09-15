@@ -295,8 +295,12 @@ docs-dev:
 # its two stderr lines were shown and then contradicted by the verdict below
 # them. That would have re-swallowed, on the path a maintainer actually runs
 # before a release, the voice #227 gave the script.
+# `--explain` sends the verdict and the reason for it to stderr, which is this
+# terminal. Without it the recipe printed "no majors need bumping" and nothing
+# about WHY — the local twin of #226, where a release run that published nothing
+# left no recoverable reason either.
 release-dry-run:
-	@rc=0; /bin/bash scripts/release/compute-bumps.sh --dry-run > /tmp/sdk-release-majors.txt || rc=$$?; \
+	@rc=0; /bin/bash scripts/release/compute-bumps.sh --dry-run --explain > /tmp/sdk-release-majors.txt || rc=$$?; \
 	if [ "$$rc" -ne 0 ]; then \
 		echo "release-dry-run: compute-bumps.sh exited $$rc; refusing to print a verdict for a computation that did not run" >&2; \
 		exit "$$rc"; \
