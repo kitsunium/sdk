@@ -125,23 +125,52 @@ jobs:
   bsd:
     name: ${{ matrix.os }}
     runs-on: ubuntu-latest
-    # 8 minutes is calibrated on the WORST successful run of the three BSDs, not
-    # on a guess. Measured over 45 consecutive runs (97 successful BSD jobs):
+    # Why 8 — and why neither 12 nor 5. Measured job-level over 57 consecutive
+    # runs, 129 successful BSD jobs (issue #127 carries the witnesses):
     #
-    #   freebsd  37 successes  1m39s .. 2m11s
-    #   openbsd  32 successes  2m05s .. 2m46s   <- worst of the three
-    #   netbsd   28 successes  1m55s .. 2m22s
+    #   freebsd  48 successes  1m39s .. 2m11s
+    #   openbsd  43 successes  2m05s .. 2m46s   <- worst of the three
+    #   netbsd   38 successes  1m55s .. 2m26s
     #
-    # 8 min leaves a x2.89 margin over that 2m46s worst case. The previous 30 min
-    # was a x10.84 margin: when the netbsd VM fails to come up (issue #127, ~6.7%
-    # of runs that are allowed to finish), the job burned half an hour of runner
-    # to produce no verdict. It now fails in 8. This caps the COST of that hang;
-    # it does not fix it, and the leg still needs a re-run when it happens.
+    # 8 min leaves a x2.89 margin over that 2m46s worst case.
     #
-    # Raising this back is a decision, not a precaution: re-measure the three
-    # ranges above first. A BSD leg that legitimately needs more than 8 minutes
-    # is a 3x regression against this baseline and should be investigated, not
-    # accommodated.
+    # The distribution is BIMODAL, and that is the whole argument. Not one BSD
+    # job has ever succeeded above 2m46s, and the 3..8 minute band is EMPTY —
+    # no successes, no cancellations, nothing. Either the guest comes up and
+    # the leg finishes in ~2 min, or it never comes up and the job runs to
+    # whatever ceiling is in place. A job at 8m49s is not a slow success that
+    # a bigger sample would have caught; it is a hang that met the cap.
+    #
+    # So do NOT raise this "to be safe". Four hangs observed, ZERO recovered,
+    # and two of them had the full 30 minutes of the old cap to do it in:
+    #
+    #   run 34785397486  netbsd  30m04s  cap 30  no verdict
+    #   run 34781660291  netbsd  30m03s  cap 30  no verdict
+    #   run 34781015219  netbsd   8m56s  cap 30  still hung when a push cut it
+    #   run 34853381050  netbsd   8m49s  cap  8  no verdict
+    #
+    # Raising the cap does not convert a hang into a verdict — it buys burned
+    # runner minutes at an unchanged hang rate (4 of 43 runs allowed to finish,
+    # ~9%, i.e. ~1 re-run in 11). Two of those four landed after this cap went
+    # in; that is NOT enough to say the rate moved — 2 of 13 against 2 of 30 sits
+    # inside one interval far too wide to read either way — but it is one more
+    # confirmation of the SHAPE. Raise only if the three ranges above actually
+    # move, and re-measure before you do.
+    #
+    # Do NOT lower it either. Because the 3..8 band is empty, a 5-minute cap
+    # would cut a hang ~3 min earlier — considered, and rejected: it saves ~3
+    # min on ~1 run in 14, against a margin falling from x2.89 to x1.81 on a
+    # day when the hosted runner is slow. The trade does not pay.
+    #
+    # Budget the real cost: a timeout costs cap + 49s, measured twice at exactly
+    # that value (8m49s against an 8m00s cap, runs 34853381050 and 34857766102),
+    # because the cancel waits for the QEMU guest to tear down. The overshoot was
+    # only 3-4s at 30 min, when the guest had long since died.
+    #
+    # Both of those are genuine step-5 hangs, not the cross-platform-actions 504
+    # that fails other BSD legs inside `Setting up VM`: both ran at
+    # `run_attempt=1`, both completed steps 1-4 in under 45s, and neither log
+    # carries a 504 or a download error. A 504 fails fast; these ran to the cap.
     timeout-minutes: 8
     strategy:
       fail-fast: false
