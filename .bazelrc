@@ -25,6 +25,14 @@ test --test_output=errors
 test --test_summary=terse
 # Cap default test timeout at 60 s (matches the `small` size contract).
 # The whole suite runs in <3 s per target — anything longer is a red flag.
+#
+# READ THIS BEFORE "FIXING" A TIMEOUT BY BUMPING A TARGET'S `size`. This flag
+# overrides the timeout of EVERY size category, so no `size` or `timeout` value
+# on a target can raise its budget above this line. Measured, not assumed
+# (#126): under `--test_timeout=3`, keyenvelope_test with no `size` attribute
+# and the SAME target at `size = "enormous"` — the 3600 s "eternal" category —
+# both reported `TIMEOUT in 3.1s`. A target that does not fit in 60 s has to
+# get cheaper; the alternative is changing this line for all 200 of them.
 test --test_timeout=60
 
 # ── Coverage ──────────────────────────────────────────────────────────

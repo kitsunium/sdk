@@ -40,7 +40,11 @@ const version string = "v=1"
 // magic is the leading envelope tag.
 const magic string = "kenv"
 
-// iterations is the fixed PBKDF2 work factor pinned to kdfID.
+// iterations is the fixed PBKDF2 work factor pinned to kdfID. The envelope
+// carries no iterations field, so this constant IS the wire contract: an
+// envelope written at any other cost is not a `pbkdf2-sha256` envelope even
+// though it frames identically. Test_iterations pins it against a golden
+// vector produced at this value.
 const iterations int = 600000
 
 // saltLen is the salt length in bytes generated per envelope.
@@ -65,6 +69,14 @@ const (
 // envelope string and an err that is non-nil on entropy or seal failure. The
 // caller-owned dek is never zeroized; the transient KEK is wiped on every path.
 func WrapKey(passphrase []byte, dek corecrypto.Key) (envelope string, err error) {
+	//: production always seals at the pinned policy — the kdf id carries no cost field
+	return wrapKey(passphrase, dek, iterations)
+}
+
+// wrapKey is WrapKey with the KDF work factor supplied explicitly. Only
+// WrapKey calls it in production, always with iterations; the suite calls it
+// with a cheap factor for the cases that do not depend on the cost.
+func wrapKey(passphrase []byte, dek corecrypto.Key, iters int) (envelope string, err error) {
 	var salt [saltLen]byte
 	//: a crypto/rand failure is an entropy fault, not an envelope fault
 	if _, rerr := rand.Read(salt[:]); rerr != nil {
@@ -76,7 +88,7 @@ func WrapKey(passphrase []byte, dek corecrypto.Key) (envelope string, err error)
 			Private: "service/crypto/keyenvelope.WrapKey: crypto/rand.Read failed while generating a salt",
 		})
 	}
-	kek, err := deriveKEK(passphrase, salt[:])
+	kek, err := deriveKEK(passphrase, salt[:], iters)
 	//: a KEK derivation fault forwards the core sentinel verbatim
 	if err != nil {
 		//: surface the derivation fault to the caller
@@ -100,13 +112,21 @@ func WrapKey(passphrase []byte, dek corecrypto.Key) (envelope string, err error)
 // envelope yields InvalidKeyEnvelope in err; a wrong passphrase forwards the
 // core DecryptionFailed sentinel.
 func UnwrapKey(passphrase []byte, envelope string) (dek corecrypto.Key, err error) {
+	//: production always opens at the pinned policy — the kdf id carries no cost field
+	return unwrapKey(passphrase, envelope, iterations)
+}
+
+// unwrapKey is UnwrapKey with the KDF work factor supplied explicitly. Only
+// UnwrapKey calls it in production, always with iterations; the suite calls it
+// with a cheap factor for the cases that do not depend on the cost.
+func unwrapKey(passphrase []byte, envelope string, iters int) (dek corecrypto.Key, err error) {
 	salt, box, err := parseEnvelope(envelope)
 	//: a structurally corrupt envelope cannot be unwrapped
 	if err != nil {
 		//: surface the structural fault to the caller
 		return corecrypto.Key{}, err
 	}
-	kek, err := deriveKEK(passphrase, salt)
+	kek, err := deriveKEK(passphrase, salt, iters)
 	//: a KEK derivation fault forwards the core sentinel verbatim
 	if err != nil {
 		//: surface the derivation fault to the caller
@@ -127,11 +147,12 @@ func UnwrapKey(passphrase []byte, envelope string) (dek corecrypto.Key, err erro
 	return corecrypto.NewKey(raw)
 }
 
-// deriveKEK derives the KEK from passphrase and salt via stdlib PBKDF2-SHA256,
-// returning the wrapped Key and any derivation error (unreachable with our
-// pinned, valid parameters). The intermediate plaintext is wiped before return.
-func deriveKEK(passphrase, salt []byte) (kek corecrypto.Key, err error) {
-	raw, kerr := pbkdf2.Key(sha256.New, string(passphrase), salt, iterations, corecrypto.KeyLen)
+// deriveKEK derives the KEK from passphrase and salt over iters rounds of
+// stdlib PBKDF2-SHA256, returning the wrapped Key and any derivation error
+// (unreachable with our pinned, valid parameters). The intermediate plaintext
+// is wiped before return.
+func deriveKEK(passphrase, salt []byte, iters int) (kek corecrypto.Key, err error) {
+	raw, kerr := pbkdf2.Key(sha256.New, string(passphrase), salt, iters, corecrypto.KeyLen)
 	//: PBKDF2 only errors on invalid params (unreachable with our constants)
 	if kerr != nil {
 		//: surface a typed sentinel rather than a raw error
