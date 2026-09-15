@@ -42,6 +42,11 @@ go 1.26
 EOF
   : > pkg/v1/codec.go
   : > internal/kernel/errs/errs.go
+  # A real module directory carries Bazel targets, and compute-bumps now uses
+  # their PRESENCE to tell "this path has nothing to ask Bazel about" apart from
+  # "the query failed". A fixture without one is not a module, it is the
+  # CLAUDE.md case — which has its own test below.
+  : > internal/kernel/errs/BUILD.bazel
   g add -A
   g commit -q --no-verify -m "init"
   g tag pkg/v0.1.0
@@ -131,6 +136,94 @@ STUB
   rm -rf "$stub"
   [ "$status" -eq 0 ]
   [ "$output" = "pkg" ]
+}
+
+# --- #227: a failed query and an unreachable target used to be one silence ---
+#
+# The rdeps step read `grep -q . < <(bazel query … 2>/dev/null)`. stderr was
+# discarded and the query's EXIT CODE was never consulted, so a query that
+# FAILED and a query that did not reach //pkg/... both produced "no release".
+# That is how c707de5 (#214) reached main with SDK Release green and no tag cut:
+# step 6 ran bazel for 31s and emitted nothing, step 7 was skipped on
+# `majors != ''`, and the workflow reported success.
+#
+# The three cases below are the three outcomes that must now be distinguishable.
+
+# Case 1 of 3 — THE NEW DISTINCTION. A query that fails must fail the script,
+# not quietly answer "no release". Without it this test is green against the old
+# code for the wrong reason: the old code also emitted nothing here.
+@test "a FAILED bazel query is refused loudly, not read as 'no release'" {
+  stub="$(mktemp -d)"
+  cat >"$stub/bazel" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  query)
+    echo "ERROR: Skipping '//internal/kernel/...': error loading package" >&2
+    exit 7
+    ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "$stub/bazel"
+  echo "// tweak" >> internal/kernel/errs/errs.go
+  g commit -aq --no-verify -m "fix(errs): wording"
+  PATH="$stub:$PATH" run "$SCRIPT"
+  rm -rf "$stub"
+  # Loud: non-zero status, nothing on stdout that a caller could read as a
+  # verdict, and the reason plus bazel's own stderr surfaced.
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"bazel query failed (exit 7)"* ]]
+  [[ "$output" == *"refusing to report 'no release'"* ]]
+  [[ "$output" == *"error loading package"* ]]
+}
+
+# Case 2 of 3 — the over-correction guard. `awk -F/ '{print $1"/"$2}'` reduces a
+# changed file to its module dir, which is right for internal/<mod>/go.mod but
+# leaves a file ALREADY at depth two intact: internal/CLAUDE.md survives as the
+# bogus label //internal/CLAUDE.md/... . Measured against the real repository
+# that label is `exit 7, no targets found beneath` — the same exit code as case 1
+# and the opposite meaning. Turning every non-zero exit red would fail a release
+# on any commit that edits internal/CLAUDE.md, and that file is in the file list
+# of ordinary commits on main.
+#
+# The stub fails on EVERY query, so this test passes only if the script never
+# asks about a path with no Bazel targets beneath it.
+@test "a path with no Bazel targets is skipped, never queried, never red" {
+  stub="$(mktemp -d)"
+  cat >"$stub/bazel" <<'STUB'
+#!/usr/bin/env bash
+echo "ERROR: no targets found beneath 'internal/CLAUDE.md'" >&2
+exit 7
+STUB
+  chmod +x "$stub/bazel"
+  printf '# module notes\n' > internal/CLAUDE.md
+  g add -A
+  g commit -q --no-verify -m "docs(internal): module notes"
+  PATH="$stub:$PATH" run "$SCRIPT"
+  rm -rf "$stub"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Case 3 of 3 — a query that RAN and found nothing. Same stdout as case 1 and the
+# same stdout as case 2, and it must keep meaning "no release". Without this row
+# the fix could satisfy cases 1 and 2 by never emitting nothing at all.
+@test "a query that succeeds and reaches nothing still means no release" {
+  stub="$(mktemp -d)"
+  cat >"$stub/bazel" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  query) exit 0 ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "$stub/bazel"
+  echo "// tweak" >> internal/kernel/errs/errs.go
+  g commit -aq --no-verify -m "fix(errs): wording"
+  PATH="$stub:$PATH" run "$SCRIPT"
+  rm -rf "$stub"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # Regression: the release tag lives on a DETACHED child of main (how cut-tags.sh

@@ -84,19 +84,71 @@ if [ "$need_bump" -eq 0 ]; then
       | sort -u
   )
   if [ "${#changed_internal[@]}" -gt 0 ] && command -v bazel >/dev/null 2>&1; then
+    # stderr of the query, kept out of the caller's stream until we know whether
+    # it describes a failure. One file for the whole loop; the trap covers the
+    # loud-exit path below, which does not fall through to the cleanup.
+    rdeps_err="$(mktemp)"
+    trap 'rm -f "$rdeps_err"' EXIT
     for modpath in "${changed_internal[@]}"; do
       [ -z "$modpath" ] && continue
-      # Redirection, never `bazel query … | grep -q .`. `grep -q .` matches the
-      # FIRST line and exits, bazel takes SIGPIPE, `pipefail` reports 141, and
-      # the `if` is FALSE — so a query that DID reach //pkg/... left need_bump at
-      # 0 and cut NO release at all. Measured with a stub emitting 608 KB: rc=141
-      # and the branch not taken. A real rdeps over this repository is far past
-      # the 64 KiB pipe buffer, and the match is always on line 1, so this is the
-      # worst case rather than a corner of it.
-      if grep -q . < <(bazel query "rdeps(//pkg/..., //${modpath}/...)" 2>/dev/null); then
-        need_bump=1
-        break
+      # A path that is not a Bazel subtree is not a failed query — it is a path
+      # with nothing to ask about, and it must not turn into a red release.
+      #
+      # This case is REAL, not defensive: the awk above reduces a changed file to
+      # `internal/<second-component>`, which is the right reduction for
+      # `internal/<mod>/go.mod` but leaves a file that is ALREADY at depth two
+      # intact. `internal/CLAUDE.md` is such a file and appears in ordinary
+      # commits, so the bogus label `//internal/CLAUDE.md/...` reaches the query.
+      # Measured on this repository:
+      #
+      #   rdeps(//pkg/..., //internal/service/...)    exit 0, 229 lines
+      #   rdeps(//pkg/..., //internal/CLAUDE.md/...)  exit 7, 0 lines,
+      #       stderr: ERROR: no targets found beneath 'internal/CLAUDE.md'
+      #
+      # The filter is structural — does any BUILD.bazel exist beneath the path —
+      # rather than a match on that error sentence, because the sentence is
+      # Bazel's to reword and a version that rephrases it would silently turn
+      # every CLAUDE.md commit into a failed release.
+      if [ -z "$(find "$modpath" -name BUILD.bazel -print -quit 2>/dev/null)" ]; then
+        continue
       fi
+      # Capture the ANSWER and the EXIT CODE separately. Both halves matter, and
+      # the previous shape had neither: `2>/dev/null` threw the error away and
+      # the exit status was never consulted, so a query that FAILED and a query
+      # that did not reach //pkg/... produced the same silence and the same
+      # verdict — "no release". That is how c707de5 (#214) landed on main with
+      # SDK Release reporting success and no tag cut (#227). The comment this
+      # replaces records the SAME verdict being inverted once before, by
+      # `bazel query … | grep -q .` under `pipefail`; that FORM was fixed and the
+      # blindness above it was not.
+      #
+      # Command substitution rather than a pipe or a process substitution: it
+      # reads to EOF, so the 64 KiB pipe buffer that made `grep -q .` deadly here
+      # is not in the picture, and no SIGPIPE can reach bazel to manufacture an
+      # exit code it never chose.
+      rdeps_out=""
+      rdeps_rc=0
+      rdeps_out="$(bazel query "rdeps(//pkg/..., //${modpath}/...)" 2>"$rdeps_err")" || rdeps_rc=$?
+      # LOUD. A release that cannot be computed must not be rendered as a release
+      # that is not needed. The workflow step runs this with no `|| true`
+      # precisely so a non-zero exit fails the job instead of becoming a silent
+      # no-op, and defect 2 of #227 is that a skipped tag step still reports
+      # success — so this refusal is the only thing that makes the failure
+      # visible at all.
+      if [ "$rdeps_rc" -ne 0 ]; then
+        echo "compute-bumps.sh: bazel query failed (exit ${rdeps_rc}) for //${modpath}/..." >&2
+        echo "compute-bumps.sh: refusing to report 'no release' for a computation that did not run" >&2
+        cat "$rdeps_err" >&2
+        exit 1
+      fi
+      # Query ran. Empty means this module genuinely does not reach //pkg/... —
+      # a measured absence, which is a different thing from the two above.
+      # `case` on the variable, never `grep -c` (which prints 0 AND exits 1, a
+      # combination that has inverted verdicts in this repository before).
+      case "$rdeps_out" in
+        "") continue ;;
+        *) need_bump=1; break ;;
+      esac
     done
   fi
 fi
