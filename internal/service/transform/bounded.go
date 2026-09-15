@@ -7,7 +7,10 @@
 // layer-local backstop ADR 0014 D1 asks for.
 package transform
 
-import "io"
+import (
+	"io"
+	"math"
+)
 
 // maxDecompressedBytes caps how many plaintext bytes a single Decompress call
 // at this layer will materialise. 256 MiB is generous for log/record payloads
@@ -26,7 +29,23 @@ const maxDecompressedBytes int64 = 256 << 20 // 256 MiB
 func readAllBounded(r io.Reader, max int64) (plain []byte, overflow bool, err error) {
 	//: LimitReader stops the underlying read at max+1 so we can tell a
 	//: legitimately-cap-sized payload from one that wanted to exceed the cap.
-	limited := io.LimitReader(r, max+1)
+	//: That +1 is the whole detector, and it is also the one arithmetic in this
+	//: file that can wrap: at math.MaxInt64 it goes NEGATIVE, io.LimitReader
+	//: reports EOF on its first Read, and a perfectly valid stream decodes to
+	//: an empty buffer with a nil error — a silent data loss, not a refusal.
+	//: Measured before this changed: gzip DecompressBounded(src, math.MaxInt64)
+	//: returned 0 bytes and err=<nil> for a 4096-byte payload. Saturating is
+	//: sound rather than merely safe: no stream can exceed MaxInt64 bytes, so
+	//: at that ceiling there is no overflow left to detect and reading exactly
+	//: max cannot hide one.
+	limit := max
+	//: only widen when the increment still fits.
+	if limit < math.MaxInt64 {
+		//: the ordinary detector width.
+		limit++
+	}
+	//: drain through the bounded reader at the saturated limit.
+	limited := io.LimitReader(r, limit)
 	//: ReadAll over the bounded reader is the single allocation point.
 	buf, readErr := io.ReadAll(limited)
 	//: a read fault (corrupt stream) is surfaced verbatim for the caller to wrap.

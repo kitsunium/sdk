@@ -54,6 +54,12 @@ vocabulary:
     # is a single-method interface named <Noun>Handler, and "Handler" names the
     # role the type plays rather than its method. The -er forms the rule would
     # impose here ("ServeConner", "ServePacketter") are not words.
+    # BoundedDecompressor is the optional widening of core/transform.Compressor,
+    # which it embeds; "Decompressor" names the role exactly as "Compressor"
+    # does two lines above it in the same file, and the two read as the pair
+    # they are. The -er form the rule would impose is "DecompressBoundedder",
+    # which is not a word in any reading. Same argument as core/mail.Transport.
+    - github.com/kitsunium/sdk/internal/core/transform.BoundedDecompressor
     - github.com/kitsunium/sdk/internal/core/net.ConnHandler
     - github.com/kitsunium/sdk/internal/core/net.PacketHandler
     # EntryFetcher and Tagger are ADR 0039 siblings of the frozen core/cache.Store

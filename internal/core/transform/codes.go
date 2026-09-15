@@ -31,3 +31,12 @@ const CodeCompressedFrameInvalid errs.Code = 0x00_02_05_04 // 0.2.5.4
 // (code,reason) pairing per ADR 0005 §Semantics — mirroring the codec registry's
 // CodeDuplicateRegistration (0.2.2.1).
 const CodeDuplicateRegistration errs.Code = 0x00_02_05_05 // 0.2.5.5
+
+// CodeDecompressedTooLarge identifies a stream whose plaintext exceeded the
+// ceiling the CALLER supplied to BoundedDecompressor.DecompressBounded. It is
+// distinct from the scheme sentinels (GZIP_FAILED and friends) on purpose: a
+// corrupt body and a body that is merely too big are different facts, and a
+// caller that imposed the ceiling is the only one able to say which of the two
+// its own limit produced. Collapsing them would force that caller to report a
+// malformed stream for one whose only established fault is its size.
+const CodeDecompressedTooLarge errs.Code = 0x00_02_05_06 // 0.2.5.6

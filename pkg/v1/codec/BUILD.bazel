@@ -58,6 +58,8 @@ go_test(
     srcs = [
         "codec_external_test.go",
         "codec_internal_test.go",
+        "compressed_bomb_alloc_internal_test.go",
+        "compressed_bomb_internal_test.go",
         "compressed_external_test.go",
         "compressed_fuzz_external_test.go",
         "compressed_internal_test.go",

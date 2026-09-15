@@ -39,6 +39,18 @@ var (
 		"core/transform: compressed-frame header is malformed or the decompression-bomb guard tripped",
 		errs.WithExitCode(exitDataErr))
 
+	// DecompressedTooLarge reports that a stream's plaintext exceeded the
+	// ceiling its caller passed to DecompressBounded. It establishes exactly
+	// that and nothing more: more than max plaintext bytes were produced. It
+	// does NOT report a well-formed stream — the decode stops at the ceiling,
+	// so the trailer is never reached and the bytes past it are never read.
+	// Claiming well-formedness here would be claiming the result of work this
+	// error exists to avoid doing.
+	DecompressedTooLarge = errs.Define(CodeDecompressedTooLarge, "DECOMPRESSED_TOO_LARGE",
+		"Decompressed payload exceeds the caller's ceiling",
+		"core/transform.DecompressBounded: plaintext exceeded the caller-supplied max",
+		errs.WithExitCode(exitDataErr))
+
 	// DuplicateRegistration is the boot-time panic sentinel for the Compressor
 	// registry: a nil scheme or a distinct scheme claiming a taken Algorithm. Its
 	// reason matches the bracket-header word so code 0.2.5.5 resolves to

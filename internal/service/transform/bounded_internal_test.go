@@ -12,8 +12,11 @@ import (
 	"compress/zlib"
 	"errors"
 	"io"
+	"math"
 	"strings"
 	"testing"
+
+	coretransform "github.com/kitsunium/sdk/internal/core/transform"
 )
 
 // overflowPayloadBytes is the inflated size of the test bomb: 4 MiB of zeros
@@ -23,6 +26,11 @@ const overflowPayloadBytes int = 4 << 20
 // loweredCapBytes is the temporary ceiling used by the overflow tests; a few-KiB
 // inflated stream trips the guard without materialising the production 256 MiB.
 const loweredCapBytes int64 = 1 << 10 // 1 KiB
+
+// ceilingBodyBytes is the plaintext used by the ceiling-edge cases. It only has
+// to be non-empty and cheap; the cases turn on the value of max, not the size
+// of the payload.
+const ceilingBodyBytes int = 4 << 10 // 4 KiB
 
 // errBoundedRead is the sentinel errReader returns; readAllBounded must forward
 // it untouched (overflow=false, plain=nil).
@@ -225,6 +233,73 @@ func Test_zlibDecompress(t *testing.T) {
 			//: the decode must match the expected sentinel (nil = success).
 			if _, err := zlibDecompress(nil, bomb, tc.max); err != tc.wantErr {
 				t.Fatalf("zlibDecompress(max=%d) err=%v want %v", tc.max, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// boundedScheme pairs a scheme name (the key compressBomb switches on) with the
+// bounded decompressor under test, so the three implementations are driven
+// through one table rather than three near-identical tests.
+type boundedScheme struct {
+	name string
+	impl coretransform.BoundedDecompressor
+}
+
+// Test_DecompressBoundedHonoursEveryCeiling pins the three values of max the
+// bounded contract used to get wrong, for all three schemes at once.
+//
+// Both defects were found by review and CONFIRMED by measurement against the
+// code this test now guards, not argued from the source:
+//
+//	DecompressBounded(src, math.MaxInt64) -> len(out)=0 err=<nil>   [4096-byte payload]
+//	DecompressBounded(src, 0)             -> len(out)=4096 err=<nil>
+//
+// The first is the +1 in readAllBounded wrapping int64 and turning the limit
+// negative, so io.LimitReader reports EOF before the first byte: a valid stream
+// decoded to nothing, successfully. The second is the old max <= 0 fallback to
+// Decompress, which replaced the caller's 0-byte ceiling with this layer's
+// 256 MiB backstop — the one direction a ceiling must never move.
+//
+// Neither is reachable from pkg/v1/codec, whose only call site passes a fixed
+// 64 MiB: they are contract defects in an exported-within-the-module interface,
+// which is why a contract test is where they belong.
+func Test_DecompressBoundedHonoursEveryCeiling(t *testing.T) {
+	t.Parallel()
+	//: every scheme that implements the optional bounded interface.
+	schemes := []boundedScheme{
+		{"gzip", gzipCompressor{}},
+		{"flate", flateCompressor{}},
+		{"zlib", zlibCompressor{level: zlib.DefaultCompression}},
+	}
+	//: drive each scheme through the same four ceilings.
+	for _, sc := range schemes {
+		//: each sub-test owns its fixtures and is parallel-safe.
+		t.Run(sc.name, func(t *testing.T) {
+			t.Parallel()
+			//: a small non-empty payload; these cases turn on max, not size.
+			body := compressBomb(t, sc.name, ceilingBodyBytes)
+			//: MaxInt64 is effectively unbounded and must return everything.
+			out, err := sc.impl.DecompressBounded(nil, body, math.MaxInt64)
+			//: a wrapped limit shows up here as a successful empty decode.
+			if err != nil || len(out) != ceilingBodyBytes {
+				t.Fatalf("DecompressBounded(max=MaxInt64) len=%d err=%v, want len=%d and no error", len(out), err, ceilingBodyBytes)
+			}
+			//: a zero ceiling holds nothing, so a non-empty stream is over cap.
+			if _, zerr := sc.impl.DecompressBounded(nil, body, 0); !errors.Is(zerr, coretransform.DecompressedTooLarge) {
+				t.Fatalf("DecompressBounded(max=0) err=%v, want DecompressedTooLarge", zerr)
+			}
+			//: a negative ceiling is clamped to zero, never widened.
+			if _, nerr := sc.impl.DecompressBounded(nil, body, -1); !errors.Is(nerr, coretransform.DecompressedTooLarge) {
+				t.Fatalf("DecompressBounded(max=-1) err=%v, want DecompressedTooLarge", nerr)
+			}
+			//: an EMPTY stream fits a zero ceiling — the bound is on bytes
+			//: produced, not on the call. Without this case, "refuse
+			//: everything at 0" would pass just as well as the contract.
+			empty := compressBomb(t, sc.name, 0)
+			//: it must succeed and produce no plaintext.
+			if eout, eerr := sc.impl.DecompressBounded(nil, empty, 0); eerr != nil || len(eout) != 0 {
+				t.Fatalf("DecompressBounded(empty, max=0) len=%d err=%v, want len=0 and no error", len(eout), eerr)
 			}
 		})
 	}
