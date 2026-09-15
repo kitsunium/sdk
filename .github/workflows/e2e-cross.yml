@@ -125,52 +125,85 @@ jobs:
   bsd:
     name: ${{ matrix.os }}
     runs-on: ubuntu-latest
-    # Why 8 — and why neither 12 nor 5. Measured job-level over 57 consecutive
-    # runs, 129 successful BSD jobs (issue #127 carries the witnesses):
+    # Why 8 — and why neither 12 nor 5. Re-measured job-level over 100
+    # consecutive runs / 300 BSD jobs, 2026-09-13T18:53Z .. 2026-09-15T07:51Z,
+    # none of them re-triggered for the measurement (issue #127 carries the
+    # earlier witnesses; this supersedes the 57-run figures it quotes):
     #
-    #   freebsd  48 successes  1m39s .. 2m11s
-    #   openbsd  43 successes  2m05s .. 2m46s   <- worst of the three
-    #   netbsd   38 successes  1m55s .. 2m26s
+    #   freebsd  94 successes  1m39s .. 2m11s   p50 1m50s
+    #   openbsd  89 successes  2m03s .. 3m58s   p50 2m25s   <- worst of the three
+    #   netbsd   79 successes  1m55s .. 2m36s   p50 2m13s
     #
-    # 8 min leaves a x2.89 margin over that 2m46s worst case.
+    # 8 min leaves a x2.02 margin over that 3m58s worst case.
     #
-    # The distribution is BIMODAL, and that is the whole argument. Not one BSD
-    # job has ever succeeded above 2m46s, and the 3..8 minute band is EMPTY —
-    # no successes, no cancellations, nothing. Either the guest comes up and
-    # the leg finishes in ~2 min, or it never comes up and the job runs to
-    # whatever ceiling is in place. A job at 8m49s is not a slow success that
-    # a bigger sample would have caught; it is a hang that met the cap.
+    # The earlier pass put the worst success at 2m46s and the margin at x2.89.
+    # Both are stale: openbsd has since succeeded three times above 3m40s
+    # (3m58s / 3m47s / 3m44s) at three unrelated moments, on three branches,
+    # every one at `run_attempt=1`. The slowest is run 34878358811, all steps
+    # `success`, step 5 alone 194s — a genuine slow success, not an artifact.
     #
-    # So do NOT raise this "to be safe". Four hangs observed, ZERO recovered,
+    # The distribution is BIMODAL, and that is still the whole argument. The
+    # empty band is 4..8 min, not 3..8: of 300 jobs, 3 landed in 3..4 min (the
+    # three openbsd above), and 4..5 and 5..8 hold ZERO — no successes, no
+    # cancellations, nothing. Either the guest comes up and the leg finishes in
+    # ~2 min, or it never comes up and the job runs to whatever ceiling is in
+    # place. A job at 8m49s is not a slow success a bigger sample would have
+    # caught; it is a hang that met the cap. Doubling the sample moved the
+    # worst success by 72s and left the 4..8 band exactly as empty.
+    #
+    # And the overruns are not slow work: the guest NEVER BOOTS. Witness from
+    # run 34940900311, step 5, verbatim — `VM is ready` appears 0 times:
+    #
+    #   Waiting for VM to be ready...
+    #   kex_exchange_identification: read: Connection reset by peer   (x5, ~75s apart)
+    #   ##[error]The operation was canceled.
+    #
+    # Negative control, the slowest netbsd SUCCESS in the same window (run
+    # 34860751100): `VM is ready` after 23.8s, ONE wait, ZERO kex. Nothing in
+    # between has ever been observed.
+    #
+    # So do NOT raise this "to be safe". Nine hangs observed, ZERO recovered,
     # and two of them had the full 30 minutes of the old cap to do it in:
     #
     #   run 34785397486  netbsd  30m04s  cap 30  no verdict
     #   run 34781660291  netbsd  30m03s  cap 30  no verdict
     #   run 34781015219  netbsd   8m56s  cap 30  still hung when a push cut it
     #   run 34853381050  netbsd   8m49s  cap  8  no verdict
+    #   run 34857766102  netbsd   8m49s  cap  8  no verdict
+    #   run 34897461740  netbsd   8m49s  cap  8  no verdict
+    #   run 34895986195  netbsd   8m16s  cap  8  no verdict
+    #   run 34940900311  netbsd   8m03s  cap  8  no verdict
+    #   run 34941622606  netbsd   8m03s  cap  8  no verdict
+    #
+    # In all nine the two sibling BSD jobs are green, which is what separates a
+    # hang from a `cancel-in-progress` sweep. Denominator: 90 runs reached a
+    # verdict or hung (10 were cut wholesale by a newer push), so 9/90 = 10%.
+    # Do NOT quote that as a stable rate — it rests on NINE events. What the 160
+    # successes settle is the MECHANISM, not the frequency.
     #
     # Raising the cap does not convert a hang into a verdict — it buys burned
-    # runner minutes at an unchanged hang rate (4 of 43 runs allowed to finish,
-    # ~9%, i.e. ~1 re-run in 11). Two of those four landed after this cap went
-    # in; that is NOT enough to say the rate moved — 2 of 13 against 2 of 30 sits
-    # inside one interval far too wide to read either way — but it is one more
-    # confirmation of the SHAPE. Raise only if the three ranges above actually
-    # move, and re-measure before you do.
+    # runner minutes. Raise only if the three ranges above actually move, and
+    # re-measure before you do.
     #
-    # Do NOT lower it either. Because the 3..8 band is empty, a 5-minute cap
-    # would cut a hang ~3 min earlier — considered, and rejected: it saves ~3
-    # min on ~1 run in 14, against a margin falling from x2.89 to x1.81 on a
-    # day when the hosted runner is slow. The trade does not pay.
+    # Do NOT lower it either. A 5-minute cap would cut a hang ~3 min earlier —
+    # considered, and rejected: it leaves 62s of headroom over the worst real
+    # success, LESS than the 72s that worst case already moved when the sample
+    # doubled, for a margin of x1.26. The trade does not pay.
     #
-    # Budget the real cost: a timeout costs cap + 49s, measured twice at exactly
-    # that value (8m49s against an 8m00s cap, runs 34853381050 and 34857766102),
-    # because the cancel waits for the QEMU guest to tear down. The overshoot was
-    # only 3-4s at 30 min, when the guest had long since died.
+    # Budget the real cost: a timeout costs cap + 3s .. cap + 49s, over the six
+    # that met the 8m00s cap (483s, 483s, 496s, 529s, 529s, 529s), because the
+    # cancel waits for the QEMU guest to tear down. The overshoot was only 3-4s
+    # at 30 min, when the guest had long since died.
     #
-    # Both of those are genuine step-5 hangs, not the cross-platform-actions 504
-    # that fails other BSD legs inside `Setting up VM`: both ran at
-    # `run_attempt=1`, both completed steps 1-4 in under 45s, and neither log
-    # carries a 504 or a download error. A 504 fails fast; these ran to the cap.
+    # These are genuine step-5 hangs, not the cross-platform-actions 504 that
+    # fails other BSD legs inside `Setting up VM`: they completed steps 1-4 in
+    # under 45s, and no log carries a 504 or a download error. A 504 fails fast;
+    # these ran to the cap.
+    #
+    # All of the above is the PRE-BUMP baseline: it was measured against
+    # cross-platform-actions v1.2.0. The pin below is now v1.6.0, whose changelog
+    # bounds exactly the loop these logs show. Re-measure before reusing these
+    # numbers as current.
     timeout-minutes: 8
     strategy:
       fail-fast: false
@@ -221,8 +254,32 @@ jobs:
 
       # Boots a real ${{ matrix.os }} kernel VM and syncs the workspace (incl.
       # bins/) into it. pin to a SHA before promoting this lane to a PR gate.
+      #
+      # v1.2.0 -> v1.6.0 because v1.2.0 waits for the guest by COUNTING SSH
+      # attempts, with no clock on the loop. That is the shape of every overrun
+      # above: step 5 retries `kex_exchange_identification: read: Connection
+      # reset by peer` at ~75s a go, never prints `VM is ready`, and only
+      # `timeout-minutes` ends it. Upstream bounded it, and removed three
+      # reasons the guest never comes up in the first place:
+      #
+      #   v1.4.0  waiting for readiness is bounded by a wall clock instead of an
+      #           attempt count, and one SSH attempt by `ConnectTimeout`; AMX is
+      #           no longer exposed to x86-64 guests, which is what made NetBSD
+      #           9.4/10.1 fault as userland started on the runners that have it
+      #   v1.5.0  LA57 (5-level paging) and always-on STIBP likewise withheld;
+      #           NetBSD guests log in without a credential, so no key pair and
+      #           no resources disk are built for them
+      #   v1.6.0  DragonFly networking (not a platform this lane runs)
+      #
+      # Input schema across v1.2.0..v1.6.0 diffs by exactly one ADDITIVE key,
+      # `variant` (default `default`, boots as before). Nothing used here was
+      # renamed. `microvm` is NetBSD 11 only, so 10.1 cannot opt in; not taken.
+      #
+      # This pin is a cause-shaped fix, not a measured one: the failure runs at
+      # ~9% on netbsd, so no single green run can confirm it. What the next
+      # weeks measure is whether overruns stop, not whether one run passed.
       - name: Run on real ${{ matrix.os }} kernel
-        uses: cross-platform-actions/action@be3d7e9ff5c8770b9c51b1a8c8c5446e1cad7cf9 # v1.2.0
+        uses: cross-platform-actions/action@e0b9770014ba65d5e0815f15b74031c3a635f641 # v1.6.0
         with:
           operating_system: ${{ matrix.os }}
           version: ${{ matrix.version }}
