@@ -64,9 +64,27 @@ issue_count="$(printf '%s\n' "$linter_output" | grep -oE 'Total:[[:space:]]+[0-9
 # it and then fail during a later phase, and the message alone would let that
 # partial run stand as a clean verdict — the same failure mode this guard exists
 # to close, one step further along.
+# A `case` rather than `printf … | grep -q 'No issues found'`. `grep -q` exits
+# on its FIRST match, the writing printf takes EPIPE, and `set -o pipefail`
+# (line 19) reports 141 for input that DID contain the string — so the elif
+# below evaluated FALSE on a clean run and the gate dropped into the `else`,
+# failing closed on a linter that had just reported success. Measured on this
+# exact shape, 40 trials per cell, marker placed FIRST in the output:
+#
+#       8 000 B →  0/40        96 000 B → 24/40
+#      64 000 B →  4/40       400 000 B → 40/40
+#
+# and with the same marker placed LAST instead, 0/40 at every size — the
+# negative control that pins the cause to grep's early exit rather than to the
+# volume. `case` is a shell builtin: no pipe, no subprocess, no bet on a size.
+clean_report=0
+case "$linter_output" in
+    *'No issues found'*) clean_report=1 ;;
+esac
+
 if [ -n "$issue_count" ]; then
     : # a count was reported: the run completed and the verdict is known
-elif printf '%s\n' "$linter_output" | grep -q 'No issues found' && [ "$linter_status" -eq 0 ]; then
+elif [ "$clean_report" -eq 1 ] && [ "$linter_status" -eq 0 ]; then
     exit 0
 else
     cat >&2 <<EOF

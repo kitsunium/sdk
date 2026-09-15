@@ -86,10 +86,42 @@ declaringFiles() {
 			continue
 		fi
 		status=0
-		grep -E "$typed|$converted" "$file" | grep -qvE "$reexport" || status=$?
-		# The pipeline's status is the last grep's; a read failure in the
-		# first shows up as a missing match, so the file is re-checked for
-		# readability before "no codes here" is believed.
+		# Redirection, never `grep -E … | grep -qvE …`. Under `pipefail`
+		# (line 27) the pipeline's status is NOT "the last grep's": `grep -qv`
+		# exits on its FIRST non-matching line, the producing grep takes
+		# EPIPE, and 141 wins. `status` is then non-zero for a file that DOES
+		# declare codes, the file is not printed, and a package whose only
+		# declaring file is that one drops out of the scan — the gate passes
+		# on the exact coverage gap it exists to close. Fails OPEN, silently.
+		# Measured on this shape, 40 trials per cell, the non-re-export line
+		# placed FIRST:
+		#
+		#     100 declaring lines (3.8 KB) →  0/40
+		#     200 declaring lines (7.6 KB) → 40/40
+		#    3200 declaring lines (122 KB) → 40/40
+		#
+		# and with that line placed LAST instead, 0/40 at every size — the
+		# negative control that pins the cause to the early exit. The largest
+		# declaring file in the tree today is 33 lines, so this is latent
+		# rather than firing; the threshold is one generated codes.go away.
+		# A process substitution keeps the inner grep out of the pipeline.
+		grep -qvE "$reexport" < <(grep -E "$typed|$converted" "$file") || status=$?
+		# The inner grep's status does NOT reach this line — a process
+		# substitution drops it — and a grep that cannot read prints nothing,
+		# which the outer `grep -qv` reports as 1: the same status as "every
+		# match is a re-export". Measured on a file access(2) calls readable
+		# and read(2) fails on (/proc/self/mem):
+		#
+		#     grep -qE … "$file"                 -> 2   the read error
+		#     grep -qvE … < <(grep -E … "$file") -> 1   indistinguishable
+		#     [ -r "$file" ]                     -> 0   TRUE, and proves nothing
+		#
+		# so `[ -r ]` is not what makes this safe and must not be read as such:
+		# it is access(2) on the permission bits and never reads a byte. The
+		# `$define` grep above is: reaching this line requires it to have exited
+		# 1, and grep exits 1 only after reading to EOF with no error — a read
+		# failure is 2 there and has already returned 2. `[ -r ]` covers the
+		# narrower race of the file going away between the two greps.
 		[ -r "$file" ] || return 2
 		[ "$status" -eq 0 ] && echo "$file"
 	done
