@@ -22,8 +22,10 @@ or opens a 1 MiB payload through the fixed 64 KiB chunked frame.
 | Generated (UTC)    | 2026-09-15 |
 | Bench wall-clock   | `-benchtime=1s -count=5`, median of 5 runs |
 
-> **What these numbers support.** `B/op` and `allocs/op` are exact — all 5
-> repeats agreed on every cell — and they are **unchanged** from a go1.26.4 run
+> **What these numbers support.** `allocs/op` is exact: all 5 repeats agreed on
+> every cell, in every package. `B/op` is exact too **except where a cell
+> carries `*`**, which marks five values that were not identical and a median
+> reported in their place. Both columns are **unchanged** from a go1.26.4 run
 > of this same code on this same box (124 benchmarks compared SDK-wide, 44 of
 > them allocating, zero counter moved). `ns/op` are medians and carry the
 > `spread` shown, which is a **within-run** figure that understates run-to-run
