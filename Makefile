@@ -1,4 +1,4 @@
-.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check
+.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check lint-check
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -82,14 +82,10 @@ lint:
 	bazel mod tidy
 	bazel run //:gazelle -- -mode=diff
 	@git diff --exit-code MODULE.bazel '**/BUILD.bazel'
-	@drift=$$(gofumpt -l internal pkg third-party); if [ -n "$$drift" ]; then \
-		echo "gofumpt drift in the following files (run 'make build' to fix):"; \
-		echo "$$drift"; exit 1; \
-	fi
-	# Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
-	# the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
-	# style-only test rules (TEST-TABLE/TEST-CONTEXT) that block no CI lane.
-	ktn-linter lint --skip-phases=tests ./...
+	# gofumpt + ktn-linter + sdkguard, shared verbatim with the CI lane. See the
+	# comment on `lint-check` for why they are a target and the five checks below
+	# are not.
+	$(MAKE) --no-print-directory lint-check
 	# Exemption invariant: a `//go:build !race` test is invisible to the race
 	# suite, so the alloc lane is its only gate. Fail if one runs in no lane.
 	bash scripts/pre-commit/check-alloc-lane-coverage.sh
@@ -106,6 +102,31 @@ lint:
 	# admits the whole repository, so the layer direction is asserted on the
 	# build graph instead of assumed from visibility (ADR 0068).
 	bash scripts/check-layer-deps.sh
+
+# `lint-check` is the subset of `lint` that a CI runner can execute on its own:
+# a Go toolchain plus two pinned binaries, no Bazel and no gazelle.
+#
+# It exists as a named target because of #236. Five of the eight checks `lint`
+# performs were already invoked by bazel-ci.yml as direct `bash …` steps
+# (gazelle drift, alloc-lane, audit-coverage, domain-docs, layer-deps); the
+# three below — gofumpt, ktn-linter and sdkguard — had no server-side control
+# point at all, and `ktn-linter` in particular ran nowhere except a developer's
+# pre-commit hook. Running the whole of `lint` in CI would have repeated the
+# five that were already there and added a second gazelle pass; running these
+# three under a name is what `scripts/ci-gates-check.sh` can assert, because it
+# only sees the Makefile↔CI link through a target name.
+#
+# `lint` delegates here instead of repeating the recipe, so the set CI enforces
+# and the set the pre-commit hook enforces cannot drift apart by editing one.
+lint-check:
+	@drift=$$(gofumpt -l internal pkg third-party); if [ -n "$$drift" ]; then \
+		echo "gofumpt drift in the following files (run 'make build' to fix):"; \
+		echo "$$drift"; exit 1; \
+	fi
+	# Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
+	# the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
+	# style-only test rules (TEST-TABLE/TEST-CONTEXT) that block no CI lane.
+	ktn-linter lint --skip-phases=tests ./...
 	# The SDK is bound by the invariants it imposes on consumers. Running the
 	# guard here is what keeps ADR 0033 from being a tool nobody executes.
 	$(MAKE) --no-print-directory guard

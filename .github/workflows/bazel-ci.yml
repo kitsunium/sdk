@@ -140,6 +140,60 @@ jobs:
       - name: layer invariant — no layer depends on one above it
         run: bash scripts/check-layer-deps.sh
 
+      # The three checks of `make lint` that no lane ran (#236): ktn-linter,
+      # `gofumpt -l` and sdkguard. The other five are the steps above — gazelle
+      # drift, alloc-lane, audit-coverage, domain-docs, layer-deps — so this
+      # adds a class of analysis, it does not repeat one.
+      #
+      # It sits INSIDE the `bazel` job deliberately. `bazel` and `post-commit`
+      # are the only required checks on main (the legacy branch protection and
+      # the ruleset each name one, and they are additive); a sibling job would
+      # run and report but block nothing. Making a new job required is a
+      # merge-policy change, which is not this workflow's to decide.
+      - name: install the lint toolchain (pinned)
+        env:
+          # Pinned, never `latest`. A lane that follows `latest` changes its
+          # verdict with no commit of this repository moving: a rule added
+          # upstream turns main red on a Tuesday, which is the failure mode
+          # recorded in #223. Moving the pin is then a reviewable diff.
+          KTN_LINTER_VERSION: v1.11.2
+          GOFUMPT_VERSION: v0.12.0
+          # kodflow/ktn-linter is a PRIVATE repository, and `curl` on the
+          # release URL answers 404 whether or not the asset exists — the
+          # signed redirect GitHub issues drops the Authorization header. Only
+          # `gh release download` tells "asset absent" from "not authorised",
+          # which is why the install goes through gh and not curl.
+          #
+          # secrets.GITHUB_TOKEN is scoped to THIS repository and cannot read
+          # another owner's private releases. KTN_LINTER_TOKEN is the secret
+          # that grants that read; until it exists this step fails closed,
+          # which is the intended direction — a lint lane that cannot install
+          # its linter must not report success.
+          GH_TOKEN: ${{ secrets.KTN_LINTER_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
+          mkdir -p "$RUNNER_TEMP/ktn"
+          gh release download "$KTN_LINTER_VERSION" \
+            --repo kodflow/ktn-linter \
+            --pattern 'ktn-linter_linux_amd64.tar.gz' \
+            --dir "$RUNNER_TEMP/ktn"
+          tar -xzf "$RUNNER_TEMP/ktn/ktn-linter_linux_amd64.tar.gz" -C "$RUNNER_TEMP/ktn"
+          install -m 0755 "$RUNNER_TEMP/ktn/ktn-linter" "$(go env GOPATH)/bin/ktn-linter"
+          # Assert the binary actually on PATH is the pinned one. Measured on
+          # this tree, same package and same flags, zero commits apart:
+          # 1.9.11 exits 0 printing "No issues found! Code is compliant." while
+          # 1.11.2 exits 1 on a real finding. An unasserted version therefore
+          # buys a green that means nothing.
+          got="$(ktn-linter --version)"
+          case "$got" in
+            *"${KTN_LINTER_VERSION#v}"*) printf 'ktn-linter pinned: %s\n' "$got" ;;
+            *) printf '::error::expected %s, got %s\n' "$KTN_LINTER_VERSION" "$got"; exit 1 ;;
+          esac
+          gofumpt --version
+
+      - name: lint gate — ktn-linter + gofumpt + sdkguard
+        run: make lint-check
+
       - name: coverage
         run: |
           bazel coverage --combined_report=lcov //...

@@ -49,6 +49,11 @@ GATES=(
   release-scripts-check
   hooks-check
   pre-commit-check
+  # The three checks of `make lint` that no lane ran until #236: ktn-linter,
+  # `gofumpt -l` and sdkguard. The other five `make lint` performs are invoked
+  # by the workflow as direct `bash …` steps, so they are outside this list by
+  # construction — this entry is the ktn-linter one specifically.
+  lint-check
 )
 
 fail=0

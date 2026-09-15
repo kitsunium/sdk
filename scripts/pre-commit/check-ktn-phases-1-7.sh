@@ -33,9 +33,22 @@ installing the tool. Install it before committing:
 
   /ktn
 
-  # or manually:
-  curl -fsSL "https://github.com/kodflow/ktn-linter/releases/latest/download/ktn-linter-\$(go env GOOS)-\$(go env GOARCH)" \\
-      -o /usr/local/bin/ktn-linter && chmod +x /usr/local/bin/ktn-linter
+  # or manually. Two corrections on the command that used to be printed
+  # here, both measured: the release ships ktn-linter_<os>_<arch>.tar.gz
+  # (underscores, and an archive — not a bare ktn-linter-<os>-<arch>, which
+  # has never existed), and kodflow/ktn-linter is PRIVATE, so curl on a
+  # release URL answers 404 whether or not the asset is there — GitHub's
+  # signed redirect drops the Authorization header. \`gh release download\` is
+  # the only probe that tells "no such asset" from "not authorised".
+  #
+  # The version is pinned to the one .github/workflows/bazel-ci.yml installs,
+  # so a local verdict and the CI verdict are the same verdict. linux/darwin;
+  # the windows asset is a .zip.
+  asset="ktn-linter_\$(go env GOOS)_\$(go env GOARCH).tar.gz"
+  gh release download v1.11.2 --repo kodflow/ktn-linter \\
+      --pattern "\$asset" --dir /tmp \\
+    && tar -xzf "/tmp/\$asset" -C /tmp ktn-linter \\
+    && install -m 0755 /tmp/ktn-linter "\$(go env GOPATH)/bin/ktn-linter"
 
 ═══════════════════════════════════════════════════════════════
 EOF
