@@ -15,15 +15,24 @@ Sink-serialization fix: the deliver closure now runs under a dedicated
 
 | Dimension | Value |
 |---|---|
-| CPU cores          | 12 |
-| RAM                | 15 GiB |
-| OS / kernel        | Linux 6.12.90+deb13-amd64 |
+| CPU cores          | 12 (12th Gen Intel(R) Core(TM) i7-1255U) |
+| RAM                | 15.3 GiB |
+| OS / kernel        | Linux 6.12.107+deb13-amd64 (Debian 13 trixie) |
 | Architecture       | amd64 |
-| Go toolchain       | go1.26.3 linux/amd64 |
-| Git branch         | feat/logger-perfection |
-| Git commit         | 636c793 (pre-commit, PR-F V6) |
-| Generated (UTC)    | 2026-06-03 |
-| Bench wall-clock   | `-test.benchtime=1s`, single run |
+| Go toolchain       | go1.27.1 linux/amd64 |
+| Git branch         | fix/bench-127 |
+| Git commit         | c08d730 |
+| Generated (UTC)    | 2026-09-15 |
+| Bench wall-clock   | `-benchtime=1s -count=5`, median of 5 runs |
+
+> **What these numbers support.** `B/op` and `allocs/op` are exact — all 5
+> repeats agreed on every cell — and they are **unchanged** from a go1.26.4 run
+> of this same code on this same box (124 benchmarks compared SDK-wide, 44 of
+> them allocating, zero counter moved). `ns/op` are medians and carry the
+> `spread` shown, which is a **within-run** figure that understates run-to-run
+> variance: re-running the identical binary on this box moved individual cells
+> by up to 94 %. Read ns/op as an order of magnitude on this box, never as a
+> cross-edition or cross-machine delta.
 
 ## V6 before/after — Sink serialization cost
 
@@ -48,9 +57,15 @@ implicit concurrent contract was the footgun the finding flagged.
 ## Results (current, serialized)
 
 ```
-BenchmarkAdd_CapFlush-12      	48556053	        25.63 ns/op	      15 B/op	       0 allocs/op
-BenchmarkAdd_Contended-12     	11948658	       108.1 ns/op	      16 B/op	       0 allocs/op
-BenchmarkFlush_Empty-12       	47267929	        25.04 ns/op	       0 B/op	       0 allocs/op
+goos: linux
+goarch: amd64
+pkg: github.com/kitsunium/sdk/internal/kernel/batcher
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+
+benchmark          median ns/op   spread   min–max         B/op   allocs/op
+Add_CapFlush-12           52.13     9.2%   50.73 – 55.51     15           0
+Add_Contended-12          320.1     2.2%   314.5 – 321.7     17           0
+Flush_Empty-12            41.70     5.4%   41.32 – 43.57      0           0
 ```
 
 ## How to read this
@@ -63,5 +78,5 @@ BenchmarkFlush_Empty-12       	47267929	        25.04 ns/op	       0 B/op	      
   is contended across all P goroutines. This is the worst case for the V6 fix and
   the number the before/after comparison is read against.
 - **`BenchmarkFlush_Empty`** — an empty `Flush` short-circuits under `mu` before
-  reaching the deliver mutex, so it is the serialization-free floor (~25 ns/op, 0
+  reaching the deliver mutex, so it is the serialization-free floor (~42 ns/op, 0
   B/op) the cap-flush benches are measured against.

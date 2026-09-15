@@ -17,19 +17,34 @@ the size-threshold check, and the `*os.File.Write` syscall.
 |---|---|
 | CPU                | 12th Gen Intel(R) Core(TM) i7-1255U |
 | CPU cores          | 12 |
-| RAM                | 15 GiB |
-| OS / kernel        | Linux 6.12.90+deb13-amd64 |
+| RAM                | 15.3 GiB |
+| OS / kernel        | Linux 6.12.107+deb13-amd64 (Debian 13 trixie) |
 | Architecture       | amd64 |
-| Go toolchain       | go1.26.3 linux/amd64 |
-| Git branch         | feat/logger-perfection |
-| Git commit         | (current HEAD, pre-commit) |
-| Generated (UTC)    | 2026-06-02 |
-| Bench wall-clock   | `-test.benchtime=1s`, single run |
+| Go toolchain       | go1.27.1 linux/amd64 |
+| Git branch         | fix/bench-127 |
+| Git commit         | c08d730 |
+| Generated (UTC)    | 2026-09-15 |
+| Bench wall-clock   | `-benchtime=1s -count=5`, median of 5 runs |
+
+> **What these numbers support.** `B/op` and `allocs/op` are exact — all 5
+> repeats agreed on every cell — and they are **unchanged** from a go1.26.4 run
+> of this same code on this same box (124 benchmarks compared SDK-wide, 44 of
+> them allocating, zero counter moved). `ns/op` are medians and carry the
+> `spread` shown, which is a **within-run** figure that understates run-to-run
+> variance: re-running the identical binary on this box moved individual cells
+> by up to 94 %. Read ns/op as an order of magnitude on this box, never as a
+> cross-edition or cross-machine delta.
 
 ## Results
 
 ```
-BenchmarkWrite-12    	 2301624	       524.2 ns/op	       0 B/op	       0 allocs/op
+goos: linux
+goarch: amd64
+pkg: github.com/kitsunium/sdk/internal/service/writer/rotfile
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+
+benchmark   median ns/op   spread   min–max         B/op   allocs/op
+Write-12           674.5    11.1%   644.0 – 718.7      0           0
 ```
 
 ## How to read this
@@ -41,7 +56,7 @@ BenchmarkWrite-12    	 2301624	       524.2 ns/op	       0 B/op	       0 allocs/
   record, even with the interval daemon running. This is the on-disk terminal
   of the zero-alloc logger hot path (ADR 0014), so it preserves the invariant
   rather than introducing a deferring cost (contrast `dbsink`, which batches).
-- **~524 ns/op is dominated by the `write(2)` syscall**, not by SDK overhead —
+- **~675 ns/op is dominated by the `write(2)` syscall**, not by SDK overhead —
   the same cost the plain `service/writer/file` sink pays. Interval rotation
   adds a *background* ticker that costs nothing on the Write path until it
   fires; rotation itself (close/rename/gzip/prune) is amortised across
