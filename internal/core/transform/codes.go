@@ -38,5 +38,5 @@ const CodeDuplicateRegistration errs.Code = 0x00_02_05_05 // 0.2.5.5
 // corrupt body and a body that is merely too big are different facts, and a
 // caller that imposed the ceiling is the only one able to say which of the two
 // its own limit produced. Collapsing them would force that caller to report a
-// malformed stream for a well-formed one it simply refused to hold.
+// malformed stream for one whose only established fault is its size.
 const CodeDecompressedTooLarge errs.Code = 0x00_02_05_06 // 0.2.5.6

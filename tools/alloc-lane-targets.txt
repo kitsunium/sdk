@@ -129,3 +129,19 @@
 # Each is mutation-checked in its own doc comment, and the first records a
 # mutation that was DISCARDED for not modelling a defect.
 //internal/service/trace:trace_test
+# The decompression-bomb guard of ADR 0014 D1's frame layer, measured by the
+# bytes it allocates rather than by the verdict it returns (#215). The verdict
+# was never wrong — a bomb was rejected before this PR and after — so no
+# functional assertion can see the defect: a 260 169-byte frame drove 828.1 MiB
+# of allocation, 3 338x its wire size, reaching the correct answer by doing the
+# attacker's work first. Only a malloc total distinguishes the two.
+#
+# It is here, and not in the race suite, because the race detector doubles the
+# figure for reasons outside this package: the same call allocates 157.7 MiB
+# race off and 315.4 MiB race on, and a stdlib-only probe whose entire body is
+# io.ReadAll(io.LimitReader(r, 64<<20+1)) reproduces both numbers to within
+# 0.03 %. Pinning a security budget under -race would pin io.ReadAll's price
+# under instrumentation. Mutation-checked in the file's doc comment: the guard
+# as it stood before the fix allocates 12.9x the frame ceiling against a budget
+# of 4x.
+//pkg/v1/codec:codec_test

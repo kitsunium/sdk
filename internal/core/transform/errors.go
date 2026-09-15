@@ -40,9 +40,12 @@ var (
 		errs.WithExitCode(exitDataErr))
 
 	// DecompressedTooLarge reports that a stream's plaintext exceeded the
-	// ceiling its caller passed to DecompressBounded. The stream was
-	// well-formed; it was simply larger than the caller agreed to materialise,
-	// which is why this is not one of the scheme failure sentinels.
+	// ceiling its caller passed to DecompressBounded. It establishes exactly
+	// that and nothing more: more than max plaintext bytes were produced. It
+	// does NOT report a well-formed stream — the decode stops at the ceiling,
+	// so the trailer is never reached and the bytes past it are never read.
+	// Claiming well-formedness here would be claiming the result of work this
+	// error exists to avoid doing.
 	DecompressedTooLarge = errs.Define(CodeDecompressedTooLarge, "DECOMPRESSED_TOO_LARGE",
 		"Decompressed payload exceeds the caller's ceiling",
 		"core/transform.DecompressBounded: plaintext exceeded the caller-supplied max",

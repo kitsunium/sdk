@@ -104,24 +104,41 @@ func (c zlibCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
 // src under the CALLER's ceiling instead of this layer's backstop, so a caller
 // enforcing a tighter limit stops the work at its own bound rather than
 // materialising the full backstop and judging the result afterwards.
+//
+// max is honoured at every value: zero admits an empty stream and refuses every
+// other, and a negative ceiling is clamped to zero. An over-cap stream returns
+// coretransform.DecompressedTooLarge, which states only that more than max
+// bytes were produced.
 func (c zlibCompressor) DecompressBounded(dst, src []byte, max int64) (decoded []byte, err error) {
-	//: a non-positive ceiling would admit everything through LimitReader's
-	//: max+1; fall back to this layer's own backstop rather than silently
-	//: disabling the bound the caller asked for.
-	if max <= 0 {
-		//: the documented layer-local ceiling.
-		return c.Decompress(dst, src)
+	//: a ceiling of zero is a legitimate one — it admits an empty stream and
+	//: nothing else — so it flows through the core like any other. This used to
+	//: fall back to Decompress on max <= 0, justified by "a non-positive
+	//: ceiling would admit everything through LimitReader's max+1". That
+	//: rationale is measurably false: zlibDecompressCore(src, 0) reports
+	//: tooLarge for a 4096-byte payload and NOT tooLarge for an empty stream.
+	//: What the fallback actually did was LOOSEN the caller's 0-byte ceiling to
+	//: this layer's 256 MiB backstop and hand back 4096 bytes of plaintext.
+	//: A negative ceiling holds nothing either, so it is clamped rather than
+	//: given a third behaviour; the bound then stays monotone in max.
+	ceiling := max
+	//: below zero there is no buffer a caller could be asking for.
+	if ceiling < 0 {
+		//: the smallest ceiling that means anything.
+		ceiling = 0
 	}
 	//: the shared core, so the ceiling bounds the WORK and not just the verdict.
-	out, tooLarge, derr := zlibDecompressCore(dst, src, max)
+	out, tooLarge, derr := zlibDecompressCore(dst, src, ceiling)
 	//: a malformed stream is the scheme's business, surfaced verbatim.
 	if derr != nil {
 		//: already wrapped by the core.
 		return out, derr
 	}
-	//: a well-formed stream larger than the caller agreed to hold.
+	//: a stream that produced more plaintext than the caller agreed to hold.
 	if tooLarge {
-		//: distinct from ZlibFailed: nothing was malformed.
+		//: distinct from ZlibFailed: nothing was found malformed. Nothing was
+		//: found well-formed either — the decode stopped at the ceiling, short
+		//: of the trailer — which is precisely why this is a size fact and not
+		//: a verdict on the stream.
 		return dst, coretransform.DecompressedTooLarge
 	}
 	//: within the caller's ceiling.

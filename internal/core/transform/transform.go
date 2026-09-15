@@ -69,10 +69,17 @@ type Compressor interface {
 // before the answer is known.
 //
 // max is a ceiling, never a promise: a scheme MAY refuse a stream below it for
-// its own reasons, and MUST NOT return more than max bytes. A stream that would
-// exceed max fails with the scheme's ordinary failure sentinel rather than
-// being silently truncated — a short read that looked like success would turn a
-// bomb into a parsing bug further up.
+// its own reasons, and MUST NOT return more than max bytes. A ceiling of zero
+// is a real ceiling — it admits an empty stream and nothing else — and a
+// negative one is clamped to zero rather than given a third meaning, so the
+// bound is monotone in max. A stream that would exceed max fails with
+// DecompressedTooLarge rather than being silently truncated: a short read that
+// looked like success would turn a bomb into a parsing bug further up.
+//
+// DecompressedTooLarge and NOT the scheme's own sentinel, because the two
+// answer different questions, and because the implementation cannot honestly
+// give the scheme's: it stops reading at the ceiling, short of the trailer the
+// scheme would need to pronounce on the stream at all.
 type BoundedDecompressor interface {
 	Compressor
 	DecompressBounded(dst, src []byte, max int64) (out []byte, err error)
