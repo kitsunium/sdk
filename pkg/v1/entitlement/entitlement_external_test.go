@@ -526,7 +526,8 @@ func TestNewWithAnchorsAcceptsEitherAnchorDuringARotation(t *testing.T) {
 	const subject string = "6ba7b810-9dad-41d1-80b4-00c04fd430c8"
 	const fingerprint string = "SHA256:rotation"
 
-	tests := []struct {
+	//: Named, so the runCase closure below can take one.
+	type testCase struct {
 		name string
 		// signer selects the private half that signs: 0 and 1 are linked in, 2
 		// is on no list.
@@ -534,60 +535,69 @@ func TestNewWithAnchorsAcceptsEitherAnchorDuringARotation(t *testing.T) {
 		// wantErr is the refusal, or nil when the machine must be entitled.
 		wantErr error
 		reason  string
-	}{
+	}
+
+	tests := []testCase{
 		{name: "the outgoing anchor still authorises", signer: 0, reason: "a second anchor must not break the installations that only had the first"},
 		{name: "the incoming anchor authorises", signer: 1, reason: "without this there is no way to move an installation to a new key in band"},
 		{name: "a key on neither list authorises nothing", signer: 2, wantErr: entitlement.ErrRosterUnsigned, reason: "several accepted anchors must not become any anchor"},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+	//: The case body lives in a local closure, which is this repository's
+	//: table shape (461 files, against 73 with a bare loop): the loop stays
+	//: responsible only for iteration, so later per-case setup cannot drift
+	//: back into it.
+	runCase := func(t *testing.T, tt testCase) {
+		t.Helper()
+		t.Parallel()
 
-			pubs := make([][]byte, 3)
-			privs := make([]ed25519.PrivateKey, 3)
-			//: Three pairs: two linked in, one that is nobody's anchor.
-			for i := range privs {
-				pub, priv, keyErr := ed25519.GenerateKey(nil)
-				//: A failure here is an environment problem.
-				if keyErr != nil {
-					t.Fatalf("generating key %d: %v", i, keyErr)
-				}
-				pubs[i], privs[i] = pub, priv
+		pubs := make([][]byte, 3)
+		privs := make([]ed25519.PrivateKey, 3)
+		//: Three pairs: two linked in, one that is nobody's anchor.
+		for i := range privs {
+			pub, priv, keyErr := ed25519.GenerateKey(nil)
+			//: A failure here is an environment problem.
+			if keyErr != nil {
+				t.Fatalf("generating key %d: %v", i, keyErr)
 			}
+			pubs[i], privs[i] = pub, priv
+		}
 
-			now := time.Now().Truncate(time.Second)
-			bundle := signRoster(t, privs[tt.signer], entitlement.Roster{
-				IssuedAt:  now.Add(-time.Hour),
-				ExpiresAt: now.Add(time.Hour),
-				Subjects:  map[string]entitlement.Subject{subject: {Fingerprint: fingerprint}},
-			})
-
-			//: Built through the facade alone: the getter stands in for the
-			//: origin, WithAnchors carries the list a mid-rotation build links
-			//: in, and Service is an alias so the setter is reachable here
-			//: without the facade re-declaring it.
-			grant, err := entitlement.NewWithGetter(bundleGetter{bundle: bundle},
-				provingIdentity{subject: subject, fingerprint: fingerprint},
-				nil, new(entitlement.Product)).
-				WithAnchors([][]byte{pubs[0], pubs[1]}).
-				WithOrigins([]entitlement.Origin{{Name: "primary", BundleURL: "https://example.invalid/roster.signed.json"}}).
-				Verify(now)
-
-			if tt.wantErr != nil {
-				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("Verify() error = %v, want %v (%s)", err, tt.wantErr, tt.reason)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Verify() error = %v, want nil (%s)", err, tt.reason)
-			}
-			//: Entitled, and for the subject the roster listed.
-			if grant.Subject != subject {
-				t.Errorf("Verify() grant.Subject = %q, want %q (%s)", grant.Subject, subject, tt.reason)
-			}
+		now := time.Now().Truncate(time.Second)
+		bundle := signRoster(t, privs[tt.signer], entitlement.Roster{
+			IssuedAt:  now.Add(-time.Hour),
+			ExpiresAt: now.Add(time.Hour),
+			Subjects:  map[string]entitlement.Subject{subject: {Fingerprint: fingerprint}},
 		})
+
+		//: Built through the facade alone: the getter stands in for the
+		//: origin, WithAnchors carries the list a mid-rotation build links
+		//: in, and Service is an alias so the setter is reachable here
+		//: without the facade re-declaring it.
+		grant, err := entitlement.NewWithGetter(bundleGetter{bundle: bundle},
+			provingIdentity{subject: subject, fingerprint: fingerprint},
+			nil, new(entitlement.Product)).
+			WithAnchors([][]byte{pubs[0], pubs[1]}).
+			WithOrigins([]entitlement.Origin{{Name: "primary", BundleURL: "https://example.invalid/roster.signed.json"}}).
+			Verify(now)
+
+		if tt.wantErr != nil {
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Verify() error = %v, want %v (%s)", err, tt.wantErr, tt.reason)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("Verify() error = %v, want nil (%s)", err, tt.reason)
+		}
+		//: Entitled, and for the subject the roster listed.
+		if grant.Subject != subject {
+			t.Errorf("Verify() grant.Subject = %q, want %q (%s)", grant.Subject, subject, tt.reason)
+		}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }
 
@@ -613,12 +623,15 @@ func TestAConsumerCanScheduleOnAGrantsDeadlineWithoutPolling(t *testing.T) {
 
 	verified := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 
-	tests := []struct {
+	//: Named, so the runCase closure below can take one.
+	type testCase struct {
 		name     string
 		notAfter time.Time
 		want     time.Time
 		reason   string
-	}{
+	}
+
+	tests := []testCase{
 		{
 			name:     "a grant that recorded its deadline",
 			notAfter: verified.Add(90 * time.Minute),
@@ -632,28 +645,35 @@ func TestAConsumerCanScheduleOnAGrantsDeadlineWithoutPolling(t *testing.T) {
 		},
 	}
 
+	//: The case body lives in a local closure, which is this repository's
+	//: table shape (461 files, against 73 with a bare loop): the loop stays
+	//: responsible only for iteration, so later per-case setup cannot drift
+	//: back into it.
+	runCase := func(t *testing.T, tt testCase) {
+		t.Helper()
+		t.Parallel()
+
+		//: Addressable on purpose: Expired and Deadline both take a pointer
+		//: receiver, which is a documented property of the type.
+		grant := entitlement.Grant{VerifiedAt: verified, NotAfter: tt.notAfter}
+
+		deadline := grant.Deadline()
+		if !deadline.Equal(tt.want) {
+			t.Fatalf("Grant.Deadline() = %s, want %s (%s)",
+				deadline.UTC().Format(time.RFC3339), tt.want.UTC().Format(time.RFC3339), tt.reason)
+		}
+		//: The instant a consumer would arm its timer on still authorises,
+		//: and the instant after it does not. Anything else and scheduling
+		//: on the deadline is not a substitute for polling.
+		if grant.Expired(deadline) {
+			t.Errorf("Grant.Expired(Deadline()) = true, want false (%s)", tt.reason)
+		}
+		if !grant.Expired(deadline.Add(time.Nanosecond)) {
+			t.Errorf("Grant.Expired(Deadline()+1ns) = false, want true (%s)", tt.reason)
+		}
+	}
+
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			//: Addressable on purpose: Expired and Deadline both take a pointer
-			//: receiver, which is a documented property of the type.
-			grant := entitlement.Grant{VerifiedAt: verified, NotAfter: tt.notAfter}
-
-			deadline := grant.Deadline()
-			if !deadline.Equal(tt.want) {
-				t.Fatalf("Grant.Deadline() = %s, want %s (%s)",
-					deadline.UTC().Format(time.RFC3339), tt.want.UTC().Format(time.RFC3339), tt.reason)
-			}
-			//: The instant a consumer would arm its timer on still authorises,
-			//: and the instant after it does not. Anything else and scheduling
-			//: on the deadline is not a substitute for polling.
-			if grant.Expired(deadline) {
-				t.Errorf("Grant.Expired(Deadline()) = true, want false (%s)", tt.reason)
-			}
-			if !grant.Expired(deadline.Add(time.Nanosecond)) {
-				t.Errorf("Grant.Expired(Deadline()+1ns) = false, want true (%s)", tt.reason)
-			}
-		})
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }

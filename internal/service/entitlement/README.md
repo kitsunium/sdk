@@ -52,8 +52,9 @@ runs *before anything reads a date* after three that read dates.
    clock the holder owns, so this cannot run after them.
 3. Fetch the roster from each origin in turn. Per origin: **authenticate before
    reading** — the detached ed25519 signature over the raw bytes, against the
-   vendor key pinned at build time, so a roster that does not verify is never
-   decoded — then check its own window (`RosterLifetime`, 24 h), then check it is
+   ORDERED LIST of vendor keys pinned at build time — the first that verifies
+   wins, see anchors.go — so a roster that verifies against none of them is
+   never decoded — then check its own window (`RosterLifetime`, 24 h), then check it is
    not a replay of something already superseded. The first origin to clear all
    three wins; any that fails is treated like an unreachable one and the loop
    moves on. When none clears them, the last authenticated bundle is replayed

@@ -155,6 +155,18 @@ always free.
   the failing path only — the matching anchor short-circuits, and the *common*
   case (the current key first) is byte-for-byte the old work.
 
+## Breaking changes
+
+None for a consumer. `NewWithAnchors` and `WithAnchors` are additions; the
+single-key constructors keep their signatures and resolve to a one-element
+list, so a build that passes one key behaves exactly as it did.
+
+Breaking for a PUBLISHER that stamps only one anchor and expects the release
+channel to be a recovery path for it: it never was, and this change makes the
+product refuse that configuration rather than appear to have two roots of
+trust while holding one. That refusal is the point of the ADR, so it is stated
+here rather than left to be discovered at the first rotation.
+
 ## Why not
 
 - **A second `vendorNext` field beside `vendor`.** Rejected: two fields is a
@@ -179,6 +191,21 @@ always free.
   its default. The `condition` field carries the distinction.
 - **Require a quorum of anchors.** Rejected: there is one signer. A quorum would
   also make every rotation a flag day, which is the problem being solved.
+
+## Deferred
+
+- **Rotation without a release.** An anchor list is a BUILD decision, so
+  adding a key still requires shipping a binary. A roster-carried list would
+  let the document name the keys that authenticate it, which is circular; a
+  separate signed anchor document would need its own anchor. Deferred because
+  every shape considered moves the problem rather than solving it.
+- **Reading the ACL / key usage.** Nothing checks that a declared anchor is an
+  ed25519 public key of the right length before it reaches verification; a
+  malformed entry is simply one that never verifies. Cheap to add and not
+  added here, because it changes no outcome an attacker can reach.
+- **A bound above 4.** `maxAnchors` is 4 because a rotation needs two and an
+  overlapping rotation needs three. Raising it is a one-constant change if a
+  deployment ever needs it; lowering it is not, so the slack is deliberate.
 
 ## References
 

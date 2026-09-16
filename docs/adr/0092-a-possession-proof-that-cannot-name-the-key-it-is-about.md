@@ -78,6 +78,51 @@ one parameter, no new method, refusal taxonomy unchanged.
    `TestAThreeMethodDoubleIsNotABoundProver` asserts the sibling is a separate
    contract. Folding the method into the port fails the first to COMPILE.
 
+## What this does NOT close
+
+**An `Identity` that does not implement `BoundProver` keeps the window.** The
+engine cannot bind a proof for an implementation that has not offered to be
+bound, and nothing here can change that. Stated in the port's own doc comment, in
+`prove`'s, and here — not as a caveat in one place and a guarantee in another.
+
+**Binding is not freshness.** `ProvePossessionFor` proves that the material
+present at the moment of the call is the authorised material and that its private
+half answers a challenge. It says nothing about the instant after it returns, and
+a proof is a statement about a moment by construction.
+
+**The engine's own comparison stays.** `matchSubject` still compares
+`Fingerprint`'s answer against the roster, and deliberately: the cheap comparison
+runs before the signing round trip, it is what produces `ErrKeyMismatch` for a
+three-method identity, and removing it would move a refusal every implementation
+currently produces into one that only some do.
+
+## Consequences
+
+- One new interface in `internal/core/entitlement`, aliased in `pkg/v1/entitlement` beside `Identity`: the
+  facade publishes `Identity` because consumers implement it; `BoundProver` is
+  reached through the same alias file only when a consumer wants to implement it,
+  and so is exported from core and aliased in `pkg/v1/entitlement` beside it.
+- `(*Service).prove` is the only dispatch point. `matchSubject` is one line
+  different.
+- `SSHIdentity` gains `ProvePossessionFor` and an unexported `answer` shared with
+  `ProvePossession`, so the challenge cannot drift between the two — the bound
+  method adds a comparison *before* the proof and changes nothing about the proof.
+- `sshidentity_compliance.go` asserts both contracts at compile time. The engine
+  reaches the sibling by type assertion, which cannot fail a build, so an
+  implementation that silently stopped satisfying it would fall back to the
+  unbound proof and nothing would say so. That line is what makes it a compile
+  error instead.
+- No new error code, no `codeRangeOwners` entry, no dependency, no behaviour
+  change for any identity that does not implement the sibling.
+
+## Breaking changes
+
+None. `BoundProver` is a new interface beside `Identity`, not a change to it —
+`port_internal_test.go` freezes `Identity` at three methods, so folding the
+method in would fail to COMPILE rather than break a consumer quietly. An
+existing implementation that does not satisfy `BoundProver` keeps working
+through the unbound path, with the window this ADR describes.
+
 ## Why widening was refused, and it is not only the ADR
 
 The ADRs settle it, but the decisive argument is that widening does not buy what
@@ -103,42 +148,6 @@ method is additive; changing a signature is a migration. The consumer keeps its
 memoisation as the fallback for the day it is talking to an older SDK, and drops
 it when it no longer is.
 
-## What this does NOT close
-
-**An `Identity` that does not implement `BoundProver` keeps the window.** The
-engine cannot bind a proof for an implementation that has not offered to be
-bound, and nothing here can change that. Stated in the port's own doc comment, in
-`prove`'s, and here — not as a caveat in one place and a guarantee in another.
-
-**Binding is not freshness.** `ProvePossessionFor` proves that the material
-present at the moment of the call is the authorised material and that its private
-half answers a challenge. It says nothing about the instant after it returns, and
-a proof is a statement about a moment by construction.
-
-**The engine's own comparison stays.** `matchSubject` still compares
-`Fingerprint`'s answer against the roster, and deliberately: the cheap comparison
-runs before the signing round trip, it is what produces `ErrKeyMismatch` for a
-three-method identity, and removing it would move a refusal every implementation
-currently produces into one that only some do.
-
-## Consequences
-
-- One new interface in `internal/core/entitlement`, re-exported by nothing: the
-  facade publishes `Identity` because consumers implement it; `BoundProver` is
-  reached through the same alias file only when a consumer wants to implement it,
-  and so is exported from core and aliased in `pkg/v1/entitlement` beside it.
-- `(*Service).prove` is the only dispatch point. `matchSubject` is one line
-  different.
-- `SSHIdentity` gains `ProvePossessionFor` and an unexported `answer` shared with
-  `ProvePossession`, so the challenge cannot drift between the two — the bound
-  method adds a comparison *before* the proof and changes nothing about the proof.
-- `sshidentity_compliance.go` asserts both contracts at compile time. The engine
-  reaches the sibling by type assertion, which cannot fail a build, so an
-  implementation that silently stopped satisfying it would fall back to the
-  unbound proof and nothing would say so. That line is what makes it a compile
-  error instead.
-- No new error code, no `codeRangeOwners` entry, no dependency, no behaviour
-  change for any identity that does not implement the sibling.
 
 ## Migration
 
@@ -156,6 +165,25 @@ For an implementation that wants the binding:
 5. assert both contracts with `var _ coreent.BoundProver = …`, because the engine
    reaches the sibling by assertion and a silent loss of it is a silent
    downgrade.
+
+## Deferred
+
+- **A verifier that ASKS for the bound path.** `matchSubject` still calls
+  `Fingerprint` then `ProvePossession`, because the three-method port it holds
+  cannot pass the authorised value. Making the verifier prefer `BoundProver`
+  when the identity satisfies it is the change that turns this interface into
+  a closed window rather than an available one, and it is a behaviour change
+  to the verification path — its own review.
+- **The compliance assertion in consumers.** `var _ entitlement.BoundProver`
+  cannot be written by a consumer until this interface is in a PUBLISHED
+  release. Interface satisfaction is structural, so an implementation pairs
+  with it the moment it ships; the assertion follows that release rather than
+  preceding it.
+- **Collapsing the two calls entirely.** A `Present(subject) (fingerprint
+  string, prove func() error, err error)` shape would remove the window
+  without a second interface. Refused rather than deferred, for the reason in
+  the section above: a closure in a port is harder to implement correctly than
+  a string parameter. Recorded here so the option is not re-proposed as new.
 
 ## References
 
