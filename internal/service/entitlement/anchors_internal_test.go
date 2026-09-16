@@ -3,6 +3,7 @@
 package entitlement
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"errors"
 	"testing"
@@ -349,6 +350,70 @@ func Test_anchorList_isNotExtensibleByItsCaller(t *testing.T) {
 	//: And the entry it does hold is still the one that was declared.
 	if string(held[0]) != "current" {
 		t.Errorf("anchorList() slot 0 = %q, want %q", held[0], "current")
+	}
+}
+
+// Test_anchorList_keysAreNotWritableByItsCaller is the sibling of the test
+// above, and it is the half that was missing.
+//
+// slices.Clone copies the OUTER slice, which is what stops an append from
+// writing into the array this verifier reads — and it is shallow, so every
+// accepted public key stayed backed by memory the caller still owns. Reusing
+// or mutating one of those buffers after the constructor returned would
+// silently change what a RUNNING verifier trusts: it could reject rosters the
+// vendor genuinely signed, or accept one signed by a key nobody configured.
+//
+// A trust anchor a caller can still write to is not an anchor. Both directions
+// are asserted because they are different failures: the first is an outage,
+// the second is the whole scheme.
+func Test_anchorList_keysAreNotWritableByItsCaller(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// mutate rewrites the caller's buffer after anchorList returned.
+		mutate func(key []byte)
+		reason string
+	}{
+		{
+			name:   "overwriting the key in place",
+			mutate: func(key []byte) { copy(key, []byte("replaced-by-the-caller-after-the-fact")) },
+			reason: "this is the substitution: the verifier would authenticate against a key nobody configured",
+		},
+		{
+			name:   "zeroing the key",
+			mutate: func(key []byte) { clear(key) },
+			reason: "a wiped buffer makes every genuine roster unverifiable, which is an outage with no diagnosis",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			//: Long enough that an in-place overwrite really changes it, and
+			//: planted so the assertion reads the value it was given.
+			original := []byte("the-vendor-key-as-configured-at-build")
+			declared := [][]byte{original}
+
+			held := anchorList(declared)
+			//: A copy taken BEFORE the mutation, so the comparison is against
+			//: what was declared rather than against whatever the buffer says
+			//: afterwards.
+			want := bytes.Clone(original)
+
+			tt.mutate(original)
+			//: Confirm the mutation really landed, or the assertion below is
+			//: about a fixture that did nothing.
+			if bytes.Equal(original, want) {
+				t.Fatalf("the fixture mutated nothing: the caller's buffer still reads %q", original)
+			}
+
+			if !bytes.Equal(held[0], want) {
+				t.Errorf("anchorList() slot 0 = %q, want %q — the caller still owns the key bytes this verifier trusts (%s)",
+					held[0], want, tt.reason)
+			}
+		})
 	}
 }
 

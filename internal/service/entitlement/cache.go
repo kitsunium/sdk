@@ -274,8 +274,12 @@ func (s *Service) rememberRoster(raw []byte) error {
 	//: on this platform, a cache directory that cannot be written. None of them
 	//: un-signs the bytes. See raiseMarkFloor for what this buys and what it
 	//: deliberately does not.
+	//: Captured BEFORE the raise, so the offer is judged against what this
+	//: process knew WITHOUT it. Raising first and reading after would compare
+	//: every document with itself and refuse nothing.
+	var floor markRecord
 	if offered.present {
-		s.raiseMarkFloor(offered.issued)
+		floor = s.raiseMarkFloor(offered)
 	}
 
 	var verdict markDecision
@@ -311,9 +315,16 @@ func (s *Service) rememberRoster(raw []byte) error {
 			log.Printf("cannot cache the roster (%v: %s); this machine will need the network on every start", err, diagnose(err))
 		}
 	})
-	//: Either nil, or the reason this document must not reach the decision. A
-	//: stand-down leaves the zero value here, which is the accepting answer —
-	//: see the guarantee above for why that is the deliberate direction.
+	//: The floor decides whether this document may be ACTED ON, independently
+	//: of what the cache did with it. A stand-down leaves verdict at its zero
+	//: value — the accepting answer, deliberately, for the cache — and that is
+	//: exactly the path on which an older roster used to reach authorization.
+	//: Only set when the disk comparison found nothing to say, so the more
+	//: specific refusal is never overwritten by this one.
+	if verdict.refusal == nil {
+		verdict.refusal = judgeAgainstFloor(offered, floor)
+	}
+	//: Either nil, or the reason this document must not reach the decision.
 	return verdict.refusal
 }
 
@@ -596,9 +607,9 @@ func (s *Service) signedHighWaterMark() time.Time {
 	//: not the evidence: the signature is. Take the later of the two. An absent
 	//: record carries the zero instant, so the comparison covers "nothing
 	//: cached" without a second branch for it.
-	if floor := s.markFloorNow(); mark.issued.Before(floor) {
+	if floor := s.markFloorNow(); floor.present && mark.issued.Before(floor.issued) {
 		//: The instant this process authenticated but could not install.
-		return floor
+		return floor.issued
 	}
 	//: The newest signed instant this machine can prove it has seen.
 	return mark.issued
@@ -665,25 +676,80 @@ func (s *Service) signedHighWaterMark() time.Time {
 // the next successful refresh. Both halves are asserted in
 // Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown rather than described
 // here and nowhere else.
-func (s *Service) raiseMarkFloor(issued time.Time) {
+func (s *Service) raiseMarkFloor(offered markRecord) markRecord {
 	s.markFloorMu.Lock()
 	//: Released at the point it was acquired.
 	defer s.markFloorMu.Unlock()
-	//: Compared and assigned under ONE hold. Reading the floor, releasing, and
-	//: assigning would be the same lost update this function exists to close,
-	//: reintroduced inside the fix for it.
-	if s.markFloor.Before(issued) {
-		s.markFloor = issued
+	//: The floor as it stood BEFORE this offer, returned so the caller can
+	//: judge the offer against what the process knew without this offer in it.
+	//: Read and raised under ONE hold: doing it in two would be the same lost
+	//: update this function exists to close, reintroduced inside the fix.
+	previous := s.markFloor
+	//: Compared and assigned under that same hold.
+	if !s.markFloor.present || s.markFloor.issued.Before(offered.issued) {
+		s.markFloor = offered
 	}
+
+	return previous
 }
 
 // markFloorNow reads the in-process floor.
-func (s *Service) markFloorNow() time.Time {
+func (s *Service) markFloorNow() markRecord {
 	s.markFloorMu.Lock()
 	//: Released at the point it was acquired.
 	defer s.markFloorMu.Unlock()
-	//: The newest instant this process authenticated, installed or not.
+	//: The newest document this process authenticated, installed or not.
 	return s.markFloor
+}
+
+// judgeAgainstFloor refuses a document older than one THIS PROCESS has already
+// authenticated, and decides nothing about the cache.
+//
+// It is separate from judgeMark on purpose, because the two questions have
+// different right answers and used to share one. judgeMark compares the offer
+// to the DISK, and raiseMarkFloor's doc comment explains at length why the
+// install must keep doing exactly that: refusing to install a generation newer
+// than what is cached but older than what was authenticated would leave the
+// offline fallback on a staler bundle to protect a number already protected in
+// memory. That reasoning is sound and is untouched here.
+//
+// What it does not cover is ACTING on the document. The same verdict carried
+// both, so when an install stood down — the guard held elsewhere, no guard on
+// the platform, an unwritable directory, a write that failed halfway — a later
+// roster older than the one just authenticated was newer than the stale disk
+// copy, and was therefore installed AND returned to authorization. If the
+// newer one carried a withdrawal and the older one did not, the withdrawal
+// was undone for the rest of the process, and through the offline fallback
+// after it.
+//
+// So: install against the disk, refuse against the floor. Both decisions keep
+// the reasoning that was written for them.
+func judgeAgainstFloor(offered, floor markRecord) error {
+	//: Nothing authenticated yet in this process, so nothing to be older than.
+	if !floor.present || !offered.present {
+		//: Refuse nothing.
+		return nil
+	}
+	//: Strictly older than a document this process has already authenticated.
+	if offered.issued.Before(floor.issued) {
+		//: The replay, reached without a disk write ever having succeeded.
+		return refuse(coreent.ErrRosterStale,
+			errs.String("stage", markCompareStage),
+			errs.String("condition", "superseded by a newer signed decision this process has already authenticated"),
+			errs.String("issued_at", offered.issued.UTC().Format(time.RFC3339)),
+			errs.String("mark", floor.issued.UTC().Format(time.RFC3339)))
+	}
+	//: Same instant, different statement. The digest is the only thing that
+	//: separates them, which is why the floor carries one.
+	if offered.issued.Equal(floor.issued) && offered.payload != floor.payload {
+		//: A second reading of one moment is not grounds to revisit it.
+		return refuse(coreent.ErrRosterStale,
+			errs.String("stage", markCompareStage),
+			errs.String("condition", "a different document signed at the same instant as one this process has already authenticated"),
+			errs.String("mark", floor.issued.UTC().Format(time.RFC3339)))
+	}
+	//: Newer, or the same statement again.
+	return nil
 }
 
 // markRecord is what one authenticated document proves about time, and about

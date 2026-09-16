@@ -76,10 +76,35 @@ func (s *Service) ciSeat(roster *coreent.RosterValue, now time.Time) (grant core
 	//: claim is taken as written, with no clockSkew added — checkTiming allows
 	//: skew to ADMIT a token, which is permissive and correct there, while the
 	//: same allowance on a BOUND would extend the grant past the proof.
+	tokenExpiry := time.Unix(claims.ExpiresAt, 0)
+	//: A grant that is expired the instant it is returned is not an answer.
+	//:
+	//: checkTiming admits a token until exp + clockSkew, which is permissive
+	//: and correct THERE: a local clock two minutes fast must not reject a
+	//: token GitHub still considers live. But the bound above is the raw exp,
+	//: so inside that allowance Verify succeeded and the grant it returned was
+	//: already past its deadline — a successful verification handing back
+	//: authorization every consumer must immediately reject.
+	//:
+	//: Refused rather than extended. Widening the deadline to exp + clockSkew
+	//: would put the grant past the document that authorised it, which is the
+	//: invariant the third bound was added for in the first place; and a CI
+	//: seat built on a token that has actually expired buys a run nothing it
+	//: could use. The skew allowance keeps doing its job for a token whose exp
+	//: is still ahead, which is every ordinary run.
+	if now.After(tokenExpiry) {
+		//: Named as the token's problem, not the roster's or the account's.
+		return coreent.GrantValue{}, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "ci_seat"),
+			errs.String("condition", "the Actions token expired before this verification, so any grant built on it would be expired the instant it was returned"),
+			errs.String("token_exp", tokenExpiry.UTC().Format(time.RFC3339)),
+			errs.String("now", now.UTC().Format(time.RFC3339)))
+	}
+
 	return coreent.GrantValue{
 		Subject:    "ci:" + claims.Repository,
 		VerifiedAt: now,
-		NotAfter:   coreent.GrantDeadline(now, roster.ExpiresAt, entitlement.ExpiresAt, time.Unix(claims.ExpiresAt, 0)),
+		NotAfter:   coreent.GrantDeadline(now, roster.ExpiresAt, entitlement.ExpiresAt, tokenExpiry),
 	}, nil
 }
 

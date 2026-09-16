@@ -109,12 +109,17 @@ type Service struct {
 	// markFloorMu guards markFloor. Separate from cacheLockMu because the two
 	// are held for different reasons and one of them wraps a constructor.
 	markFloorMu sync.Mutex
-	// markFloor is the newest vendor-signed instant THIS PROCESS has
-	// authenticated, whether or not it managed to install it. The cached
-	// bundle is still the durable mark; this bounds it from below for as long
-	// as the process lives, because an install that stood down or failed does
-	// not un-authenticate the bytes that got it here. See raiseMarkFloor.
-	markFloor time.Time
+	// markFloor is the newest document THIS PROCESS has authenticated, whether
+	// or not it managed to install it. The cached bundle is still the durable
+	// mark; this bounds it from below for as long as the process lives,
+	// because an install that stood down or failed does not un-authenticate
+	// the bytes that got it here. See raiseMarkFloor.
+	//
+	// A full markRecord and not an instant: the digest is what separates two
+	// statements signed at the same moment, and without it the floor could
+	// only refuse a document that is strictly older — leaving the case the
+	// disk comparison already refuses unrefused here.
+	markFloor markRecord
 	// timeServers are the Roughtime servers consulted to corroborate the
 	// local clock. Empty disables the check, which is what committed source
 	// ships and what every test constructor gets: a Service must not reach

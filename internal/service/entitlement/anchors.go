@@ -29,9 +29,9 @@
 package entitlement
 
 import (
+	"bytes"
 	"errors"
 	"log"
-	"slices"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -72,10 +72,24 @@ func anchorList(anchors [][]byte) [][]byte {
 		log.Printf("entitlement: %d trust anchors declared, keeping the first %d", len(kept), maxAnchors)
 		kept = kept[:maxAnchors]
 	}
-	//: The list this verifier will try, in order. Cloned rather than held by
-	//: reference: an append that fits the caller's spare capacity would
-	//: otherwise write into the array this verifier reads.
-	return slices.Clone(kept)
+	//: The list this verifier will try, in order. DEEP-copied, outer slice and
+	//: every key: slices.Clone copies the outer slice only, which stops an
+	//: append that fits the caller's spare capacity from writing into the
+	//: array this verifier reads — but leaves every accepted public key backed
+	//: by memory the caller still owns. Reusing or mutating one of those
+	//: buffers after the constructor returned would silently change what a
+	//: RUNNING verifier trusts: it could reject valid rosters, or accept one
+	//: signed by a key nobody configured.
+	//:
+	//: A trust anchor that a caller can still write to is not an anchor.
+	owned := make([][]byte, 0, len(kept))
+	for _, anchor := range kept {
+		//: bytes.Clone returns nil for a nil input, so an empty entry stays
+		//: empty and parseBundleAnyAnchor goes on skipping it.
+		owned = append(owned, bytes.Clone(anchor))
+	}
+
+	return owned
 }
 
 // parseBundleAnyAnchor authenticates a bundle against the first accepted anchor

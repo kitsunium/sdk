@@ -589,3 +589,97 @@ func Test_Service_ciSeat_boundsTheGrantByItsOwnToken(t *testing.T) {
 		})
 	}
 }
+
+// Test_Service_ciSeat_refusesATokenAlreadyPastItsExpiry closes the gap the
+// third bound opened.
+//
+// checkTiming admits a token until exp + clockSkew, which is permissive and
+// correct THERE: a local clock two minutes fast must not reject a token GitHub
+// still considers live. But the grant's deadline is bounded by the RAW exp, so
+// inside that allowance Verify succeeded and returned a grant whose
+// Expired(now) was already true — a successful verification handing back
+// authorization every consumer must immediately reject.
+//
+// Refused rather than extended. Widening the deadline to exp + clockSkew would
+// put the grant past the document that authorised it, which is the invariant
+// the third bound exists for; and a seat built on a token that has actually
+// expired buys a run nothing it could use.
+//
+// The last row is the control: the skew allowance must keep doing its job for
+// a token whose exp is still ahead, which is every ordinary run. Without it
+// this test would pass against a change that refused every CI seat.
+func Test_Service_ciSeat_refusesATokenAlreadyPastItsExpiry(t *testing.T) {
+	tests := []struct {
+		name string
+		// tokenWindow is how far the token's exp sits from now; negative is
+		// past.
+		tokenWindow time.Duration
+		wantErr     error
+		reason      string
+	}{
+		{
+			name:        "expired, but inside the skew allowance",
+			tokenWindow: -time.Minute,
+			wantErr:     coreent.ErrCIUnverifiable,
+			reason:      "checkTiming admits it and the raw exp bounds the grant, so the grant came back already expired",
+		},
+		{
+			name:        "expired at this very instant",
+			tokenWindow: -time.Second,
+			wantErr:     coreent.ErrCIUnverifiable,
+			reason:      "the boundary belongs to the refusal: a deadline equal to now leaves a run no time to use it",
+		},
+		{
+			name:        "still live",
+			tokenWindow: 4 * time.Minute,
+			wantErr:     nil,
+			reason:      "the control: every ordinary run is this row, and refusing it would be an outage",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			//: Both variables, so InCI reports true whatever the ambient
+			//: environment says. The URL must satisfy checkTokenURL.
+			t.Setenv(actionsTokenURLEnv, "https://pipelines.actions.githubusercontent.com/token")
+			t.Setenv(actionsTokenBearerEnv, "runner-secret")
+
+			now := time.Now().Truncate(time.Second)
+			world := newSeatWorld(t)
+			//: iat well behind exp, so the only thing under test is where exp
+			//: sits relative to now.
+			token := world.mint(t, now.Add(-10*time.Minute), now.Add(tt.tokenWindow), "42", testProduct.CIAudience)
+
+			roster := &coreent.RosterValue{
+				IssuedAt:   now.Add(-time.Minute),
+				ExpiresAt:  now.Add(10 * time.Hour),
+				CIAccounts: map[string]coreent.CIEntitlementValue{"42": {}},
+			}
+
+			svc := NewServiceWithGetter(stubGet(func(string) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(world.jwks)))}, nil
+			}), stubIdentity{}, nil, &testProduct).
+				WithBearerFetch(func(string, string) (*http.Response, error) {
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"value":"` + token + `"}`))}, nil
+				})
+
+			grant, err := svc.ciSeat(roster, now)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("ciSeat() error = %v, want %v (%s)", err, tt.wantErr, tt.reason)
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("ciSeat() error = %v, want a grant (%s)", err, tt.reason)
+			}
+			//: And the grant it does return must be USABLE at now, which is
+			//: the property the refused rows above were violating.
+			if grant.Expired(now) {
+				t.Errorf("ciSeat() returned a grant already expired at %s (NotAfter %s) — a successful verification must not hand back authorization a consumer has to reject (%s)",
+					now.UTC().Format(time.RFC3339), grant.NotAfter.UTC().Format(time.RFC3339), tt.reason)
+			}
+		})
+	}
+}

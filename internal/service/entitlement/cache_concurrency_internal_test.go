@@ -3,6 +3,7 @@ package entitlement
 import (
 	"crypto/ed25519"
 	"errors"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -523,5 +524,99 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 					fresh.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339), tt.reason)
 			}
 		})
+	}
+}
+
+// Test_rememberRoster_refusesAnOlderRosterAfterAStandDown is the exploitation
+// the split between the two decisions closes.
+//
+// The acceptance verdict compared the offer to the DISK only. So after an
+// install stood down — the guard held elsewhere, no guard on the platform, an
+// unwritable directory, a write that failed halfway — a roster OLDER than the
+// one this process had just authenticated was still newer than the stale disk
+// copy, and was therefore installed AND returned to authorization. If the newer
+// one carried a withdrawal and the older one did not, the withdrawal was undone
+// for the rest of the process, and through the offline fallback after it.
+//
+// The second assertion is as load-bearing as the first. raiseMarkFloor's doc
+// comment argues at length that the INSTALL must keep comparing against the
+// disk: refusing to install a generation newer than what is cached but older
+// than what was authenticated would leave the offline fallback on a staler
+// bundle to protect a number already protected in memory. That reasoning is
+// sound, so the fix must refuse to ACT on the document while still caching it.
+// A test that only checked the refusal would pass against a change that
+// refused both, which would be the documented mistake.
+func Test_rememberRoster_refusesAnOlderRosterAfterAStandDown(t *testing.T) {
+	t.Parallel()
+
+	vendorPub, vendorPriv, keyErr := ed25519.GenerateKey(nil)
+	//: A failure here is an environment problem, not a test outcome.
+	if keyErr != nil {
+		t.Fatalf("generating vendor key: %v", keyErr)
+	}
+
+	base := time.Now().Truncate(time.Second)
+	//: Three generations, so "older than the floor" and "newer than the disk"
+	//: can both be true of the middle one — which is the whole scenario.
+	onDisk, middle, newest := base, base.Add(time.Hour), base.Add(2*time.Hour)
+
+	dir := t.TempDir()
+	svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
+	if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, onDisk, 1)); seedErr != nil {
+		t.Fatalf("seeding cache: %v", seedErr)
+	}
+
+	//: A second locker on the same directory is what another process is; see
+	//: the stand-down test above for why UnsupportedPlatform is the only
+	//: refusal worth skipping on.
+	holder, lockErr := svclock.NewFileLocker(svclock.FileConfig{Dir: dir, Poll: cacheLockPoll})
+	if errors.Is(lockErr, coreproc.UnsupportedPlatform) {
+		t.Skipf("no file lock on %s, so cacheGuard returns nil and there is no stand-down to reproduce", runtime.GOOS)
+	}
+	//: A failure here is an environment problem, not a test outcome.
+	if lockErr != nil {
+		t.Fatalf("building the holder's locker: %v", lockErr)
+	}
+	lease, acquireErr := holder.Acquire(t.Context(), cacheLockName)
+	//: A failure here is an environment problem, not a test outcome.
+	if acquireErr != nil {
+		t.Fatalf("holding the cache guard: %v", acquireErr)
+	}
+
+	//: The NEWEST generation is authenticated and its install stands down. A
+	//: stand-down is not a refusal, which is the deliberate direction.
+	if err := svc.rememberRoster(paddedBundle(t, vendorPriv, newest, 1)); err != nil {
+		t.Fatalf("rememberRoster(newest) error = %v, want nil — a stand-down is not a refusal", err)
+	}
+	//: Released, so the next offer can reach the cache. The floor now holds
+	//: `newest` and the disk still holds `onDisk`.
+	if releaseErr := lease.Release(t.Context()); releaseErr != nil {
+		t.Fatalf("releasing the cache guard: %v", releaseErr)
+	}
+
+	//: THE REPLAY. Newer than the disk, older than what this process has
+	//: already authenticated.
+	err := svc.rememberRoster(paddedBundle(t, vendorPriv, middle, 1))
+	if !errors.Is(err, coreent.ErrRosterStale) {
+		t.Fatalf("rememberRoster(middle) error = %v, want %v — an older roster reached authorization because the verdict only ever compared against the disk",
+			err, coreent.ErrRosterStale)
+	}
+
+	//: And it was still CACHED, because fresher-than-disk beats staler for the
+	//: offline fallback. Refusing the install too would be the mistake
+	//: raiseMarkFloor's doc comment argues against.
+	mark := svc.signedHighWaterMark()
+	if !mark.Equal(newest) {
+		t.Errorf("signedHighWaterMark() = %v, want %v — the floor must still bound the mark from below", mark, newest)
+	}
+	cached, readErr := os.ReadFile(cachedBundlePath(dir))
+	//: A cache that cannot be read back says nothing about the install.
+	if readErr != nil {
+		t.Fatalf("reading the cache back: %v", readErr)
+	}
+	installed := bundleMarkAnyAnchor(cached, [][]byte{vendorPub})
+	if !installed.present || !installed.issued.Equal(middle) {
+		t.Errorf("the cache holds %v, want %v — the install must still follow the DISK comparison, or the offline fallback is left staler to protect a number already protected in memory",
+			installed.issued, middle)
 	}
 }
