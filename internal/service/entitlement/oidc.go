@@ -269,6 +269,21 @@ func strictUnmarshal[T any](data []byte, what string) (decoded T, err error) {
 			errs.String("condition", "not a JSON object"))
 	}
 
+	//: A third check, and neither of the two above was it: refusing a non-object
+	//: and refusing a trailing document say nothing about a member named twice.
+	//: json.Decoder keeps the LAST, so {"alg":"none","alg":"RS256"} verifies as
+	//: RS256 here while a reader keeping the first sees "none" — the algorithm
+	//: confusion checkHeaderShape exists to refuse, reintroduced by the parser.
+	//: One branch covers the token header, the claim set and the mint response.
+	//: RFC 8725 §2.6.
+	if member, duplicate := checkNoDuplicateNames(data); duplicate {
+		//: Unverifiable: two readers of this token disagree on its claims.
+		return decoded, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_"+what),
+			errs.String("condition", "one member name declared twice, which two readers can read differently"),
+			errs.String("member", member))
+	}
+
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	//: Unknown fields are tolerated: GitHub adds claims over time and a new
 	//: one must not break verification. What is refused is a second document.

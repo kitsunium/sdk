@@ -84,6 +84,21 @@ func authenticateRoster(raw, sig []byte, vendor ed25519.PublicKey) (roster *core
 		return nil, coreent.ErrRosterUnsigned
 	}
 
+	//: After the signature and before the decode, so the order "authenticate
+	//: before you read" is preserved word for word. The signature proves the
+	//: vendor issued these bytes; it does not make two readers agree on what
+	//: they SAY. A payload naming "subjects" twice is signed exactly once and
+	//: read two ways — the second block silently replacing the first, which at
+	//: a subject uuid is the difference between authorised and revoked.
+	if member, duplicate := checkNoDuplicateNames(raw); duplicate {
+		//: A publication fault, reported as such: only the vendor can produce
+		//: this, so it is never a forgery claim.
+		return nil, refuse(coreent.ErrRosterUnreachable,
+			errs.String("stage", "decode_roster_payload"),
+			errs.String("condition", "one member name declared twice, which two readers can read differently"),
+			errs.String("member", member))
+	}
+
 	var decoded coreent.RosterValue
 	//: Malformed JSON from an authenticated payload means a broken publisher.
 	if unmarshalErr := json.Unmarshal(raw, &decoded); unmarshalErr != nil {

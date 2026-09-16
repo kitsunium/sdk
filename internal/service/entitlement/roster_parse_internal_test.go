@@ -139,3 +139,77 @@ func Test_authenticateRoster(t *testing.T) {
 		})
 	}
 }
+
+// Test_authenticateRoster_refusesADuplicateSubjectsBlock is the one of the four
+// duplicate-name tests that has to carry a REAL signature.
+//
+// The payload is signed with the vendor key, so it passes ed25519.Verify: the
+// refusal can only come from the name scan. A test on an unsigned payload would
+// pass with or without the fix, for the wrong reason.
+//
+// The two blocks are the point. json.Unmarshal keeps the LAST, so the vendor
+// signed one document and every reader that prefers the first sees the subject
+// authorised while this one sees it gone. Both can prove the vendor signed what
+// they hold, and they hold different rosters.
+func Test_authenticateRoster_refusesADuplicateSubjectsBlock(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		payload string
+		wantErr bool
+		reason  string
+	}{
+		{
+			name:    "one subjects block",
+			payload: `{"iat":"2026-09-15T08:00:00Z","exp":"2026-09-16T08:00:00Z","subjects":{"u1":{"fp":"SHA256:x"}}}`,
+			wantErr: false,
+			reason:  "the ordinary shape must still authenticate",
+		},
+		{
+			name:    "two subjects blocks, the second withdrawing the subject",
+			payload: `{"iat":"2026-09-15T08:00:00Z","exp":"2026-09-16T08:00:00Z","subjects":{"u1":{"fp":"SHA256:x"}},"subjects":{}}`,
+			wantErr: true,
+			reason:  "authorised or revoked, decided by which member a parser keeps",
+		},
+		{
+			name:    "a duplicated subject uuid",
+			payload: `{"iat":"2026-09-15T08:00:00Z","exp":"2026-09-16T08:00:00Z","subjects":{"u1":{"fp":"SHA256:x"},"u1":{"fp":"SHA256:y"}}}`,
+			wantErr: true,
+			reason:  "two levels down, where a top-level scan would see nothing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			vendorPub, vendorPriv, keyErr := ed25519.GenerateKey(nil)
+			//: Without a key there is no signature to get past.
+			if keyErr != nil {
+				t.Fatalf("GenerateKey() error = %v", keyErr)
+			}
+			raw := []byte(tt.payload)
+			//: Signed by the vendor, so ed25519.Verify passes and the refusal
+			//: below can only be the name scan.
+			roster, err := authenticateRoster(raw, ed25519.Sign(vendorPriv, raw), vendorPub)
+
+			if tt.wantErr {
+				//: Refused, and not by the signature.
+				if err == nil {
+					t.Fatalf("authenticateRoster() error = nil, want a refusal (%s)", tt.reason)
+				}
+				//: A refusal must not also hand back a roster to act on.
+				if roster != nil {
+					t.Errorf("authenticateRoster() returned a roster alongside its refusal (%s)", tt.reason)
+				}
+				return
+			}
+			//: The control row: a clean payload still authenticates, or this
+			//: test would pass by refusing everything.
+			if err != nil {
+				t.Fatalf("authenticateRoster() error = %v, want nil (%s)", err, tt.reason)
+			}
+		})
+	}
+}

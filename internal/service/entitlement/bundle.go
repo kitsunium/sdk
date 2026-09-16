@@ -77,6 +77,21 @@ func authenticateBundle(raw []byte, vendor ed25519.PublicKey) (roster *coreent.R
 // decodeBundle splits a published bundle into the signed bytes and the
 // signature over them, without judging either.
 func decodeBundle(raw []byte) (payload, signature []byte, err error) {
+	//: Before decoding, not after: json.Unmarshal keeps the LAST of two
+	//: members named alike, so a bundle carrying two "payload" halves would
+	//: reach the signature check as whichever half this decoder happened to
+	//: prefer. The envelope is not signed, so this is the one of the four
+	//: scans where a third party can inject the duplicate.
+	if member, duplicate := checkNoDuplicateNames(raw); duplicate {
+		//: Same class as an undecodable bundle: the endpoint served something
+		//: no two readers would read alike, which is a publication or
+		//: transport fault and not a forgery claim.
+		return nil, nil, refuse(coreent.ErrRosterUnreachable,
+			errs.String("stage", "decode_bundle"),
+			errs.String("condition", "one member name declared twice, which two readers can read differently"),
+			errs.String("member", member))
+	}
+
 	var bundle BundleValue
 	//: A bundle we cannot decode tells us nothing; refuse rather than guess.
 	if unmarshalErr := json.Unmarshal(raw, &bundle); unmarshalErr != nil {

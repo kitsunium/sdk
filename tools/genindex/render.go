@@ -144,14 +144,15 @@ func lastPathSegment(rel string) (segment string, ok bool) {
 		//: no segment to take.
 		return "", false
 	}
-	_, after, found := strings.CutLast(rel, "/")
-	//: a single-segment path is its own last segment.
-	if !found {
-		//: the whole path is the segment.
-		return rel, true
+	//: CutLast reports whether the separator appeared at all, so the
+	//: single-segment case needs no index comparison and no slice arithmetic —
+	//: which is where an off-by-one on the separator would have lived.
+	if _, after, found := strings.CutLast(rel, "/"); found {
+		//: everything after the final separator.
+		return after, true
 	}
-	//: everything after the final separator.
-	return after, true
+	//: a single-segment path is its own last segment.
+	return rel, true
 }
 
 // sourceURL builds the forge deep-link for a declaration.

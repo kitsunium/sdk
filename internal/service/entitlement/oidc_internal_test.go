@@ -712,3 +712,56 @@ func Test_rsaKeyFromJWK(t *testing.T) {
 		})
 	}
 }
+
+// Test_strictUnmarshal_refusesADuplicateMember pins the third check, because
+// neither of the two that were already there was it: refusing a non-object and
+// refusing a trailing document say nothing about a member named twice.
+//
+// The algorithm row is why this matters. json.Decoder keeps the LAST, so
+// {"alg":"none","alg":"RS256"} reaches checkHeaderShape as RS256 and is
+// accepted, while a reader keeping the first sees "none" — the algorithm
+// confusion that check exists to refuse, reintroduced by the parser underneath
+// it.
+func Test_strictUnmarshal_refusesADuplicateMember(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+		reason  string
+	}{
+		{
+			name:    "a clean header",
+			input:   `{"alg":"RS256","kid":"k1"}`,
+			wantErr: false,
+			reason:  "the ordinary shape must still decode",
+		},
+		{
+			name:    "two algorithms",
+			input:   `{"alg":"none","alg":"RS256","kid":"k1"}`,
+			wantErr: true,
+			reason:  "two readers disagree on whether this token is signed at all",
+		},
+		{
+			name:    "two key ids",
+			input:   `{"alg":"RS256","kid":"k1","kid":"k2"}`,
+			wantErr: true,
+			reason:  "kid selects the key the signature is checked against",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := strictUnmarshal[jwtHeader]([]byte(tt.input), "token header")
+			if tt.wantErr && err == nil {
+				t.Fatalf("strictUnmarshal(%s) error = nil, want a refusal (%s)", tt.input, tt.reason)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("strictUnmarshal(%s) error = %v, want nil (%s)", tt.input, err, tt.reason)
+			}
+		})
+	}
+}
