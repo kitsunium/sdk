@@ -39,6 +39,22 @@ vocabulary:
   # describes the method rather than the role the type plays.
   adapter_role_interfaces:
     - github.com/kitsunium/sdk/internal/core/net.Policy
+    # core/entitlement.BoundProver is ALREADY a verb-er interface — "a prover,
+    # bound" — and the rule's mechanical <Method>+er derivation asks for
+    # "ProvePossessionForrer", which is not a word in any language. The
+    # method's name is fixed by the port it extends: coreent.Identity declares
+    # ProvePossession, so the sibling's method has to say what it adds to that
+    # verb rather than rename it (ADR 0092). Renaming the interface to match
+    # the derivation would lose the word the whole feature is discussed in —
+    # "the bound proof" — which is the same argument net.Policy is exempt on.
+    #
+    # This package has already paid for the rule once, in the other direction:
+    # svcent.BearerFetch is a FUNC TYPE and its doc comment says so — "naming
+    # it as a single-method interface would also force the -er form of
+    # GetWithBearer, which is not a word". A func type is not available here,
+    # because the engine reaches this contract by type assertion on a value it
+    # holds as an Identity.
+    - github.com/kitsunium/sdk/internal/core/entitlement.BoundProver
     # core/mail.Transport and core/mail.BatchSender (ADR 0064). "Transport" is a
     # NOMINAL role, the word this domain is discussed in — "the SMTP transport",
     # "the in-memory transport" — and the -er form the rule would impose,

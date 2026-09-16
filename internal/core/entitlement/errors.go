@@ -98,9 +98,20 @@ var (
 		"this run could not be proven to be a CI run",
 		"core/entitlement: the CI provenance token was absent or unverifiable")
 	// ErrCIUnknownKey reports that the token names a signing key the fetched
-	// key set does not publish. Distinct because it is the one CI failure
-	// with a remedy the client can apply itself: refresh the key set once,
-	// since GitHub rotates keys, then refuse if it still does not appear.
+	// key set does not publish — a key rotated out from under a token still in
+	// flight, or a forgery. Distinct from ErrCIUnverifiable because the two
+	// send an operator to different places: this one says the issuer's key set
+	// and the token disagree, which is the issuer's side of the exchange.
+	//
+	// It used to promise a remedy the client applies itself — "refresh the key
+	// set once, since GitHub rotates keys, then refuse if it still does not
+	// appear". No implementation does that and none is expected to: the
+	// verifier holds no key-set cache, so it already fetches the published set
+	// fresh on every verification and a rotation is picked up by the next one.
+	// A second fetch inside one verification would re-read a URL it read
+	// seconds earlier, which cannot make an endpoint publish a kid it does not
+	// publish. See the service's publishedJWKS for the argument in full; a
+	// sentinel must not advertise a mechanism nobody implements.
 	ErrCIUnknownKey = errs.Define(CodeCIUnknownKey, "CI_UNKNOWN_KEY",
 		"the CI token is signed by a key the issuer does not publish",
 		"core/entitlement: no JWKS entry matched the token's kid")

@@ -66,8 +66,13 @@ type Service struct {
 	// implementation that reads ssh key material needs a vendor dependency
 	// this module bans — see core/entitlement's package comment.
 	identity coreent.Identity
-	// vendor is the only trust anchor, linked into the binary.
-	vendor []byte
+	// anchors are the vendor keys this verifier accepts, in the order the
+	// build declared them. A roster is authentic when it verifies against ANY
+	// of them, which is what gives a key rotation a path in band; the list is
+	// bounded and nothing at runtime can extend it, which is what keeps the
+	// surface it costs a decision rather than a default. anchors.go carries
+	// the argument, next to the code that applies it.
+	anchors [][]byte
 	// origins is where the roster is looked for, in order. Held on the
 	// Service rather than read from the package global so a test can point
 	// it at a stub server without touching process-wide state.
@@ -170,8 +175,49 @@ func (s *Service) WithVersion(version string) *Service {
 	return s
 }
 
+// WithAnchors replaces the vendor keys this verifier accepts.
+//
+// It takes the full ORDERED list and does not add to what the constructor
+// recorded: an additive setter would make the order depend on the call sequence,
+// and the order is the build's statement of which anchor is current. The list
+// the caller passes is the list, and the constructor's key is not implicitly
+// first in it.
+//
+// A separate call rather than a parameter on every constructor because the
+// single-key form is the common one and must keep reading as it does; this is
+// what a test, or a build assembling its anchors from somewhere other than a
+// constant, reaches for. NewServiceWithAnchors is the production spelling.
+//
+// An empty list is not a way to disable authentication: parseBundleAnyAnchor
+// refuses every document with coreent.ErrRosterUnsigned, because with no anchor
+// no signature can be valid.
+func (s *Service) WithAnchors(anchors [][]byte) *Service {
+	s.anchors = anchorList(anchors)
+	//: Return the receiver so construction reads as one expression.
+	return s
+}
+
 // NewService builds a verifier over the caller's ssh directory.
+//
+// One anchor, which is the single-key form every caller had before rotation was
+// possible: it is the one-element list and not a second representation, so no
+// path in this package can disagree with the multi-anchor one about what a
+// single key means.
 func NewService(identity coreent.Identity, vendor []byte, product *ProductValue) *Service {
+	//: One key is one list. A nil vendor stays a one-element list holding a
+	//: malformed key — NOT an empty list — so it keeps drawing the refusal it
+	//: always drew, naming key_bytes rather than an absent anchor.
+	return NewServiceWithAnchors(identity, [][]byte{vendor}, product)
+}
+
+// NewServiceWithAnchors builds a verifier that accepts several vendor keys, in
+// the order given.
+//
+// This is what a build in the middle of a key rotation links in: the key being
+// retired and the key replacing it, so rosters signed by either are authentic
+// here while installations carrying only one of them keep working. See anchors.go
+// for the rotation this opens and for the surface it costs.
+func NewServiceWithAnchors(identity coreent.Identity, anchors [][]byte, product *ProductValue) *Service {
 	//: Callers get a ready verifier with a bounded HTTP client and the
 	//: offline fallback armed. Defaulting it HERE rather than at each call
 	//: site is what keeps the gate, the daemon watchdog and `license status`
@@ -179,7 +225,7 @@ func NewService(identity coreent.Identity, vendor []byte, product *ProductValue)
 	return &Service{
 		client:      &http.Client{Timeout: fetchTimeout},
 		identity:    identity,
-		vendor:      vendor,
+		anchors:     anchorList(anchors),
 		product:     product,
 		origins:     product.PublishedOrigins(),
 		bearerFetch: DefaultBearerFetch,
@@ -191,7 +237,7 @@ func NewService(identity coreent.Identity, vendor []byte, product *ProductValue)
 // NewServiceWithGetter builds a verifier over an injected getter.
 func NewServiceWithGetter(client Getter, identity coreent.Identity, vendor []byte, product *ProductValue) *Service {
 	//: Callers get a verifier whose network layer they control.
-	return &Service{client: client, identity: identity, vendor: vendor, product: product, origins: product.PublishedOrigins(), bearerFetch: DefaultBearerFetch}
+	return &Service{client: client, identity: identity, anchors: anchorList([][]byte{vendor}), product: product, origins: product.PublishedOrigins(), bearerFetch: DefaultBearerFetch}
 }
 
 // NewServiceWithOrigins builds a verifier over an injected getter and an
@@ -201,7 +247,7 @@ func NewServiceWithGetter(client Getter, identity coreent.Identity, vendor []byt
 func NewServiceWithOrigins(client Getter, identity coreent.Identity, vendor []byte, origins []coreent.OriginValue) *Service {
 	//: Callers get a verifier whose network layer AND publication points
 	//: they control.
-	return &Service{client: client, identity: identity, vendor: vendor, origins: origins, bearerFetch: DefaultBearerFetch}
+	return &Service{client: client, identity: identity, anchors: anchorList([][]byte{vendor}), origins: origins, bearerFetch: DefaultBearerFetch}
 }
 
 // Verify performs a full cold verification: fetch, authenticate, match, and
@@ -432,7 +478,7 @@ func (s *Service) rosterFrom(origin coreent.OriginValue, now time.Time) (roster 
 	}
 	//: Decoding, authentication and freshness all happen before any field is
 	//: trusted.
-	parsed, parseErr := ParseBundle(raw, s.vendor, now)
+	parsed, parseErr := parseBundleAnyAnchor(raw, s.anchors, now)
 	//: Nothing worth keeping: forged, stale, or not a bundle at all.
 	if parseErr != nil {
 		//: Propagate the refusal.
@@ -500,13 +546,58 @@ func (s *Service) matchSubject(roster *coreent.RosterValue, subject string, now 
 
 	//: Possession is the last gate and the one that makes publication safe:
 	//: without it a caller holds only material the roster hands to everyone.
-	if proveErr := s.identity.ProvePossession(subject); proveErr != nil {
+	//: The fingerprint the roster AUTHORISED is handed over with the request,
+	//: so an implementation that can bind the proof to it does not have to
+	//: infer it from the call above.
+	if proveErr := s.prove(subject, want.Fingerprint); proveErr != nil {
 		//: Holding the published half proves nothing; refuse.
 		return coreent.SubjectValue{}, proveErr
 	}
 	//: Hand back the roster's record so the caller can bound the grant by
 	//: this subject's own term as well as by the roster's window.
 	return want, nil
+}
+
+// prove demands a possession proof, bound to the authorised fingerprint when the
+// identity can accept one.
+//
+// # What the two calls claim, and why they are different claims
+//
+// coreent.Identity's three methods cannot express "prove possession of the key
+// the roster authorised". The engine asks Fingerprint what this machine
+// presents, compares that answer itself, and then asks ProvePossession for a
+// proof — so the authorised value never traverses the port and the
+// implementation signs with whatever it finds on the SECOND call. Anything that
+// replaced the material in between (a rotation, a remounted volume, a deliberate
+// swap) is signed for, and the implementation had no way to notice: the strongest
+// thing it can do unaided is remember the key object across the two calls and
+// refuse a proof with nothing remembered, which detects a change without ever
+// learning what the key was supposed to be.
+//
+// coreent.BoundProver carries the missing half, and is a SIBLING rather than a
+// fourth parameter on ProvePossession because Identity is reachable through a
+// pkg/v1 alias — ADR 0039, with ADR 0040 §4 removing the v0 licence from
+// interfaces. See BoundProver's own comment for why widening would not even buy
+// the guarantee that tempts it.
+//
+// # Why the fallback is not a weakening
+//
+// An identity that does not implement the sibling gets exactly the behaviour it
+// had: the same call, the same refusal, the same window between the two. This
+// function cannot close that window for an implementation that has not asked to
+// have it closed, and a type assertion is how the absence is discovered — the
+// same shape ADR 0052 uses for Deadliner and ADR 0049 for EntryFetcher.
+func (s *Service) prove(subject, authorised string) error {
+	//: Prefer the bound proof when the identity can make it: the roster's own
+	//: value, in the roster's own spelling, so the implementation binds rather
+	//: than infers.
+	if bound, ok := s.identity.(coreent.BoundProver); ok {
+		//: Possession of the key the roster authorised.
+		return bound.ProvePossessionFor(subject, authorised)
+	}
+	//: Possession of whatever this machine holds, which is all the three-method
+	//: port can ask for.
+	return s.identity.ProvePossession(subject)
 }
 
 // regularFile reports whether path is a regular file, following symlinks.

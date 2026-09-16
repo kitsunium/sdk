@@ -16,6 +16,7 @@ product (ADR 0078 §1).
 | File | Role |
 |---|---|
 | `service.go` | the `Service` handle, `Verify`, the origin fallback, `matchSubject` |
+| `anchors.go` | the ORDERED list of vendor keys this verifier accepts, its bound, and the two readers |
 | `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature |
 | `bundle.go` | `ParseBundle` — the one-document form the cache stores |
 | `cache.go` | the offline copy and the anti-rollback ratchet, over storage AND acceptance |
@@ -30,6 +31,47 @@ product (ADR 0078 §1).
 | `wrap.go` | `refuse` / `classify` / `classifyForeign` / `annotate`, plus `diagnose` |
 
 ## Why-this-shape
+
+- **The anchor is a LIST, and one key had no way out.** `Service.vendor []byte`
+  was one key and every path read it, so an installation whose anchor had to
+  change was blocked from both sides: a roster signed by a new key B came back
+  `ErrRosterUnsigned` — the SPOOFING sentinel, from a document the vendor
+  genuinely signed — and it came back in `rosterFrom`, which `Verify` reaches
+  BEFORE `RequiresUpdate`, so the update floor that exists to say "upgrade this
+  binary" was never read; while a release signed by B was refused by the anchor A
+  the running binary still held. `anchors` is now an ordered list and a roster is
+  authentic against ANY entry, which is the whole of rotation. Several keys are
+  still ONE signer — no quorum is taken, because authentication establishes only
+  that the vendor issued these bytes. The cost is real and is stated rather than
+  mitigated: an anchor on the list is a key whose compromise is ACCEPTED while it
+  is listed, and what bounds it is that the list is ordered, capped at
+  `maxAnchors` and a BUILD decision no runtime path can extend. ADR 0091.
+
+- **The anchor loop obeys the ORIGIN loop's rule, and for the same reason.**
+  `parseBundleAnyAnchor` moves on from a document an anchor cannot AUTHENTICATE
+  and never from one it authenticated and the rules then refused. Only
+  `ErrRosterUnsigned` is a question about the key; an undecodable bundle, a
+  duplicated member name and a window that is over-wide, unopened or closed are
+  properties of the DOCUMENT and identical under every anchor. Continuing past
+  one of those would report an expired roster as a forgery, sending an operator
+  whose publisher had merely fallen behind to look for an impersonator. The
+  ratchet reads its mark through the same list, because dropping the mark at a
+  rotation hands back the whole rollback distance at the one moment an
+  installation cannot re-establish it.
+
+- **The possession proof is bound to the fingerprint the roster AUTHORISED,
+  when the port can accept it.** `matchSubject` used to ask `Fingerprint` what
+  the machine presents, compare the answer itself, and then ask
+  `ProvePossession` — so the authorised value never crossed the port and an
+  implementation signed with whatever the second call found. A rotation landing
+  mid-verification, a remounted volume or a swapped `<uuid>.pub` was signed for.
+  `(*Service).prove` prefers `coreent.BoundProver` by type assertion and falls
+  back to the three-method call, which is ADR 0052's `Deadliner` mechanism: the
+  absence is how a caller discovers which world it is in. The fallback is not a
+  weakening and not optional — every implementation written against the frozen
+  port lands there. The engine's own comparison STAYS: it is the cheap gate
+  before the signing round trip, and it is what produces `ErrKeyMismatch` for an
+  identity that cannot bind. ADR 0092.
 
 - **The order in `Verify` is the security property.** Authenticate the roster
   against the vendor key, then check its window, then match the subject, then
@@ -123,6 +165,38 @@ product (ADR 0078 §1).
   is added: `checkTiming` allows it to ADMIT a token, which is the permissive
   direction, and applying it to a BOUND would extend the grant past the proof.
 
+- **There is no key-set cache, and therefore no refresh to implement.** Two
+  comments promised one: `selectKey` said "the caller refreshes the JWKS once and
+  retries" and `coreent.ErrCIUnknownKey` said "refresh the key set once, since
+  GitHub rotates keys, then refuse if it still does not appear". **No caller did
+  either** — `ciSeat` fetches once, calls `VerifyCI`, propagates. Both claims are
+  gone, and what replaced them is the true statement: `publishedJWKS` reads the
+  published set on EVERY verification, so a rotation is picked up by the next
+  verification with no cache to invalidate and no process to restart. Building
+  the promised refresh would be worse than the gap it appears to close — a second
+  GET of the same URL seconds later returns the same bytes and cannot make an
+  endpoint publish a kid it does not publish; it would let a TOKEN cause a
+  request, which nothing can do today because the fetch precedes any token
+  (measured at 2× in the mutation that added it); and it is the repair for a
+  stale CACHE, so it would have to introduce the staleness it then fixes.
+  `Test_Service_ciSeat_fetchesTheKeySetOncePerVerification`,
+  `Test_Service_ciSeat_doesNotAmplifyARepeatedUnknownKid` and
+  `Test_Service_ciSeat_picksUpARotationOnTheNextVerification` are what keep those
+  paragraphs answerable to the code — the last one turns red the day the cache
+  arrives.
+
+- **Three smaller claims corrected in the same sweep, each overstated in the
+  same direction.** `jku`/`x5u` are refused on a NON-EMPTY value: absent, `""`
+  and `null` all decode to the empty string and are indistinguishable, and the
+  comment said "their presence can be refused". Harmless — neither field chooses
+  a key source here — and still not what the code does. `RepositoryOwnerID` is
+  called numeric because that is what GitHub SENDS; nothing validates it, the only
+  check is non-empty and the comparison against the roster's keys is exact, so a
+  decimal check would be a second syntax for a comparison that already is one.
+  (Checked and found already correct: a JWT header with an empty `kid` is
+  refused, a JWKS entry without one is skipped, and each site says so where it
+  happens.)
+
 - **A CI failure is not a refusal unless the roster says so.** A runner that
   also holds a device key must keep working, so `ciSeat`'s failure falls through
   — except when `ciRefusalIsFinal`, which is the only place "this run must be CI"
@@ -213,11 +287,24 @@ it.
   `third-party/entitlement` for the reason ADR 0079 measures.
 - Collapse `RosterUnreachable` into a refusal. It says "cannot decide", and
   reporting an outage as a revocation is the one wrong answer.
+- Read the anchor list anywhere but `parseBundleAnyAnchor` / `bundleMarkAnyAnchor`,
+  or let a roster field, an environment variable or the cache add to it. The list
+  being a BUILD decision is the whole of what bounds the surface it costs, and a
+  document signed by one listed key cannot be what decides which keys are listed.
+- Give the empty list a code of its own. It refuses under `ErrRosterUnsigned`
+  with its own `condition`, for the reason the sixteenth code was refused.
 - Make `markCeiling` discard a mark instead of refusing on it, or move the
   ceiling into `rosterMark` where there is no clock. Both are the same bypass.
 - Apply the anti-replay comparison to `cachedRoster`, or describe the guarantee
   as unconditional. Two different mistakes, both of them a sentence that outruns
   the code.
+- Add a JWKS cache, or a refresh keyed on an unknown `kid`, without reading the
+  three tests named above first. The absence is the mechanism: it is what makes a
+  rotation a non-event, and the refresh is the repair for the staleness only a
+  cache introduces.
+- Restore either retired claim about refreshing the key set. A sentinel or a
+  comment that advertises a remedy nobody implements is the defect this sweep
+  closed, not a wording preference.
 - Write a doc comment describing a POLICY for a claim nothing reads.
   `event_name` and `runner_environment` carried one for months, four lines under
   a type comment promising the opposite;

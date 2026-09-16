@@ -158,3 +158,121 @@ func TestGrantValueExpiredHonoursNotAfter(t *testing.T) {
 		})
 	}
 }
+
+// TestGrantValueDeadlineResolvesTheFallbackTheFieldCannot pins what a consumer
+// needs in order to honour NotAfter WITHOUT polling.
+//
+// # What was missing
+//
+// NotAfter's zero value means "no deadline was computed", and the fallback to
+// VerifiedAt+RosterLifetime lived inside Expired and nowhere else. A consumer
+// reading the FIELD to schedule its next check therefore read the zero instant
+// on exactly the grants serve.go produces at start-up, and had no way to derive
+// the deadline the SDK would actually apply. Polling was its only option, which
+// is how a grant expiring a second after a check keeps authorising until the
+// next tick.
+//
+// The second row is the discriminating one: it is the case a caller could not
+// compute for itself, and it fails against any Deadline that merely returns the
+// field.
+func TestGrantValueDeadlineResolvesTheFallbackTheFieldCannot(t *testing.T) {
+	t.Parallel()
+
+	verified := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name string
+		// notAfter is what the verification recorded, or the zero instant for
+		// a grant seeded from a bare timestamp.
+		notAfter time.Time
+		want     time.Time
+		reason   string
+	}{
+		{
+			name:     "a recorded deadline is the deadline",
+			notAfter: verified.Add(2 * time.Hour),
+			want:     verified.Add(2 * time.Hour),
+			reason:   "the tightest bound the verification found is the answer whenever there is one",
+		},
+		{
+			name:   "an unrecorded deadline resolves to the verification's own lifetime",
+			want:   verified.Add(RosterLifetime),
+			reason: "this is the value a caller reading the field could not derive, and the reason the method exists",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			grant := GrantValue{VerifiedAt: verified, NotAfter: tt.notAfter}
+			if got := grant.Deadline(); !got.Equal(tt.want) {
+				t.Errorf("Deadline() = %s, want %s (%s)",
+					got.UTC().Format(time.RFC3339), tt.want.UTC().Format(time.RFC3339), tt.reason)
+			}
+		})
+	}
+}
+
+// TestGrantValueExpiredAndDeadlineCannotDisagree is a conservation test over
+// the two ways of asking one question.
+//
+// A consumer schedules on Deadline and the SDK judges with Expired, so the two
+// must describe the same instant for every shape of grant. They did not have to:
+// the zero-NotAfter fallback was written twice, once in each, which is how a
+// field and a method come to disagree about when a grant died. Expired is now
+// defined in terms of Deadline, and this is what keeps it that way — a future
+// Expired that grew its own copy of the rule fails here rather than in a
+// consumer's watchdog.
+//
+// The probes are one nanosecond either side of the deadline, not an hour: a
+// boundary asserted loosely is a boundary that can move by a second and still
+// pass.
+func TestGrantValueExpiredAndDeadlineCannotDisagree(t *testing.T) {
+	t.Parallel()
+
+	verified := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		notAfter time.Time
+		reason   string
+	}{
+		{
+			name:     "a grant with a recorded deadline",
+			notAfter: verified.Add(2 * time.Hour),
+			reason:   "the ordinary shape, produced by every full verification",
+		},
+		{
+			name:   "a grant seeded from a bare timestamp",
+			reason: "the shape whose deadline is implied rather than recorded, which is where two copies of the rule would drift",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			grant := GrantValue{VerifiedAt: verified, NotAfter: tt.notAfter}
+			deadline := grant.Deadline()
+
+			//: AT the deadline the grant still authorises: Expired is strictly
+			//: after, and a consumer waking exactly on its timer must not find
+			//: the grant already dead.
+			if grant.Expired(deadline) {
+				t.Errorf("Expired(Deadline()) = true, want false — a consumer waking on its own "+
+					"timer would find the grant already gone (%s)", tt.reason)
+			}
+			//: One nanosecond later it does not.
+			if !grant.Expired(deadline.Add(time.Nanosecond)) {
+				t.Errorf("Expired(Deadline()+1ns) = false, want true — Expired is judging a "+
+					"different instant from the one Deadline reports (%s)", tt.reason)
+			}
+			//: One nanosecond earlier it still does authorise, which is the
+			//: other side of the same boundary.
+			if grant.Expired(deadline.Add(-time.Nanosecond)) {
+				t.Errorf("Expired(Deadline()-1ns) = true, want false (%s)", tt.reason)
+			}
+		})
+	}
+}

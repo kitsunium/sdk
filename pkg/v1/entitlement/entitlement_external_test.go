@@ -10,7 +10,12 @@
 package entitlement_test
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -244,6 +249,21 @@ func TestANilProductNeverPanicsAtConstruction(t *testing.T) {
 				return entitlement.NewWithGetter(refusingGetter{}, stubIdentity{}, nil, nil)
 			},
 		},
+		{
+			name: "NewWithAnchors",
+			build: func() *entitlement.Service {
+				return entitlement.NewWithAnchors(stubIdentity{}, [][]byte{nil}, nil)
+			},
+		},
+		{
+			//: An EMPTY anchor list must construct too, and then refuse — a
+			//: constructor that panicked on it would turn a build mistake into
+			//: a crash in the consumer's own start-up path.
+			name: "NewWithAnchors with no anchor at all",
+			build: func() *entitlement.Service {
+				return entitlement.NewWithAnchors(stubIdentity{}, nil, nil)
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -390,6 +410,249 @@ func TestTheSentinelsKeepTheirConcreteType(t *testing.T) {
 			}
 			if viaAccessor := errs.ExitCodeOf(tt.err); viaAccessor != exit {
 				t.Errorf("errs.ExitCodeOf = %d, method ExitCode() = %d; the two must agree (%s)", viaAccessor, exit, tt.reason)
+			}
+		})
+	}
+}
+
+// provingIdentity answers all three port methods so the rotation cases reach a
+// grant rather than stopping at the machine's own half of the proof.
+//
+// stubIdentity above deliberately cannot: its Fingerprint returns "", which is
+// what the refusal cases want and what an authorisation case cannot use.
+type provingIdentity struct {
+	// subject is who this machine claims to be.
+	subject string
+	// fingerprint is what it presents, matched against the roster's entry.
+	fingerprint string
+}
+
+// Discover reports the subject this stub claims to be.
+//
+// Returns:
+//   - subject: the configured identifier.
+//   - err: always nil.
+func (p provingIdentity) Discover() (subject string, err error) {
+	//: The case decides who this machine is.
+	return p.subject, nil
+}
+
+// Fingerprint reports what this stub presents for subject.
+//
+// Parameters:
+//   - subject: ignored; one identity per stub.
+//
+// Returns:
+//   - fingerprint: the configured fingerprint.
+//   - err: always nil.
+func (p provingIdentity) Fingerprint(subject string) (fingerprint string, err error) {
+	//: The case decides what this machine presents.
+	return p.fingerprint, nil
+}
+
+// ProvePossession accepts, so the rotation cases turn on the ANCHOR and on
+// nothing about the machine.
+//
+// Parameters:
+//   - subject: ignored.
+//
+// Returns:
+//   - err: always nil, which IS the proof.
+func (p provingIdentity) ProvePossession(subject string) error {
+	//: A nil error is the proof; these cases are about the vendor's key.
+	return nil
+}
+
+// bundleGetter serves one signed bundle for every request.
+type bundleGetter struct {
+	// bundle is the document every origin answers with.
+	bundle []byte
+}
+
+// Get answers with the canned bundle.
+//
+// Parameters:
+//   - url: ignored; one document per getter.
+//
+// Returns:
+//   - resp: a 200 carrying the bundle.
+//   - err: always nil.
+func (b bundleGetter) Get(url string) (resp *http.Response, err error) {
+	//: Serve the whole signed document, as a publication point would.
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(b.bundle))}, nil
+}
+
+// signRoster builds the one-document bundle form through the PUBLIC surface.
+//
+// It uses entitlement.Bundle and entitlement.Roster and nothing internal, which
+// is what makes it a statement about what a consumer can do: a vendor publishing
+// a roster and a test serving one build the same object.
+func signRoster(t *testing.T, priv ed25519.PrivateKey, roster entitlement.Roster) []byte {
+	t.Helper()
+
+	payload, marshalErr := json.Marshal(roster)
+	//: A failure here is an environment problem, not a test outcome.
+	if marshalErr != nil {
+		t.Fatalf("marshalling roster: %v", marshalErr)
+	}
+	raw, bundleErr := json.Marshal(entitlement.Bundle{
+		Payload:   base64.StdEncoding.EncodeToString(payload),
+		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload)),
+	})
+	//: A failure here is an environment problem, not a test outcome.
+	if bundleErr != nil {
+		t.Fatalf("marshalling bundle: %v", bundleErr)
+	}
+	//: The document a publication point serves.
+	return raw
+}
+
+// TestNewWithAnchorsAcceptsEitherAnchorDuringARotation pins the rotation at the
+// surface a consumer actually holds.
+//
+// A verifier built with ONE anchor has no path off it: a roster signed by the
+// replacement key comes back ErrRosterUnsigned — the spoofing sentinel, from a
+// document the vendor genuinely signed — and that refusal lands BEFORE the
+// version floor that would have told the binary to upgrade, so the release
+// carrying the new anchor is refused by the installation that needs it.
+//
+// Every row here goes through the public package alone. A row signed by a key on
+// NEITHER list is what keeps this a test about rotation rather than about
+// accepting anything: widening who may sign is the mistake this shape could
+// plausibly have made.
+func TestNewWithAnchorsAcceptsEitherAnchorDuringARotation(t *testing.T) {
+	t.Parallel()
+
+	const subject string = "6ba7b810-9dad-41d1-80b4-00c04fd430c8"
+	const fingerprint string = "SHA256:rotation"
+
+	tests := []struct {
+		name string
+		// signer selects the private half that signs: 0 and 1 are linked in, 2
+		// is on no list.
+		signer int
+		// wantErr is the refusal, or nil when the machine must be entitled.
+		wantErr error
+		reason  string
+	}{
+		{name: "the outgoing anchor still authorises", signer: 0, reason: "a second anchor must not break the installations that only had the first"},
+		{name: "the incoming anchor authorises", signer: 1, reason: "without this there is no way to move an installation to a new key in band"},
+		{name: "a key on neither list authorises nothing", signer: 2, wantErr: entitlement.ErrRosterUnsigned, reason: "several accepted anchors must not become any anchor"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			pubs := make([][]byte, 3)
+			privs := make([]ed25519.PrivateKey, 3)
+			//: Three pairs: two linked in, one that is nobody's anchor.
+			for i := range privs {
+				pub, priv, keyErr := ed25519.GenerateKey(nil)
+				//: A failure here is an environment problem.
+				if keyErr != nil {
+					t.Fatalf("generating key %d: %v", i, keyErr)
+				}
+				pubs[i], privs[i] = pub, priv
+			}
+
+			now := time.Now().Truncate(time.Second)
+			bundle := signRoster(t, privs[tt.signer], entitlement.Roster{
+				IssuedAt:  now.Add(-time.Hour),
+				ExpiresAt: now.Add(time.Hour),
+				Subjects:  map[string]entitlement.Subject{subject: {Fingerprint: fingerprint}},
+			})
+
+			//: Built through the facade alone: the getter stands in for the
+			//: origin, WithAnchors carries the list a mid-rotation build links
+			//: in, and Service is an alias so the setter is reachable here
+			//: without the facade re-declaring it.
+			grant, err := entitlement.NewWithGetter(bundleGetter{bundle: bundle},
+				provingIdentity{subject: subject, fingerprint: fingerprint},
+				nil, new(entitlement.Product)).
+				WithAnchors([][]byte{pubs[0], pubs[1]}).
+				WithOrigins([]entitlement.Origin{{Name: "primary", BundleURL: "https://example.invalid/roster.signed.json"}}).
+				Verify(now)
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Verify() error = %v, want %v (%s)", err, tt.wantErr, tt.reason)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Verify() error = %v, want nil (%s)", err, tt.reason)
+			}
+			//: Entitled, and for the subject the roster listed.
+			if grant.Subject != subject {
+				t.Errorf("Verify() grant.Subject = %q, want %q (%s)", grant.Subject, subject, tt.reason)
+			}
+		})
+	}
+}
+
+// TestAConsumerCanScheduleOnAGrantsDeadlineWithoutPolling pins the half of the
+// expiry problem that belongs to this SDK, through the public surface alone.
+//
+// Nothing here revokes a grant when its deadline passes — no goroutine, no
+// timer, no callback — so a grant expiring a second after a check keeps
+// authorising until the consumer looks again. That is the consumer's tick, and
+// the only thing that makes it avoidable is being able to read the effective
+// deadline and schedule on it.
+//
+// The field alone could not answer that. `NotAfter` is genuinely the zero instant
+// on a grant seeded from a bare timestamp, and the fallback the SDK applies lived
+// inside `Expired` where no caller could reach it. A consumer holding such a
+// grant had to poll.
+//
+// Both rows assert the two spellings agree AT the deadline, because a consumer
+// waking exactly on its own timer must not find the grant already gone — that
+// off-by-one is what would send it back to polling with a safety margin.
+func TestAConsumerCanScheduleOnAGrantsDeadlineWithoutPolling(t *testing.T) {
+	t.Parallel()
+
+	verified := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		notAfter time.Time
+		want     time.Time
+		reason   string
+	}{
+		{
+			name:     "a grant that recorded its deadline",
+			notAfter: verified.Add(90 * time.Minute),
+			want:     verified.Add(90 * time.Minute),
+			reason:   "the ordinary shape, from a full verification",
+		},
+		{
+			name:   "a grant seeded from a bare timestamp",
+			want:   verified.Add(entitlement.RosterLifetime),
+			reason: "the shape whose deadline a consumer could not compute, and the reason the method is public at all",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			//: Addressable on purpose: Expired and Deadline both take a pointer
+			//: receiver, which is a documented property of the type.
+			grant := entitlement.Grant{VerifiedAt: verified, NotAfter: tt.notAfter}
+
+			deadline := grant.Deadline()
+			if !deadline.Equal(tt.want) {
+				t.Fatalf("Grant.Deadline() = %s, want %s (%s)",
+					deadline.UTC().Format(time.RFC3339), tt.want.UTC().Format(time.RFC3339), tt.reason)
+			}
+			//: The instant a consumer would arm its timer on still authorises,
+			//: and the instant after it does not. Anything else and scheduling
+			//: on the deadline is not a substitute for polling.
+			if grant.Expired(deadline) {
+				t.Errorf("Grant.Expired(Deadline()) = true, want false (%s)", tt.reason)
+			}
+			if !grant.Expired(deadline.Add(time.Nanosecond)) {
+				t.Errorf("Grant.Expired(Deadline()+1ns) = false, want true (%s)", tt.reason)
 			}
 		})
 	}

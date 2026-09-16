@@ -267,7 +267,7 @@ func (s *Service) rememberRoster(raw []byte) error {
 		//: Keep what is already there, and refuse nothing.
 		return nil
 	}
-	offered := bundleMark(raw, s.vendor)
+	offered := bundleMarkAnyAnchor(raw, s.anchors)
 	//: Record the instant BEFORE reaching for the guard, because every way
 	//: this function can fail to install is a way it would otherwise forget
 	//: what it just authenticated: the guard held elsewhere, no guard to be had
@@ -463,10 +463,12 @@ func removeBestEffort(path string) {
 //
 // The bytes come off a disk the holder controls, so they are exactly as
 // untrusted as the ones an origin serves — and they go through exactly the same
-// door. ParseBundle checks the vendor signature before decoding anything, then
-// coreent.ParseRoster refuses an over-wide window, one issued in the future and one
-// already closed. A tampered copy is a forgery here just as it would be there;
-// an expired one is stale here just as it would be there.
+// door. parseBundleAnyAnchor checks the signature against every accepted anchor
+// before decoding anything, then coreent.ParseRoster refuses an over-wide window,
+// one issued in the future and one already closed. A tampered copy is a forgery
+// here just as it would be there; an expired one is stale here just as it would be
+// there. A copy signed under an anchor the build no longer accepts is a forgery
+// here too, which is the one thing retiring a key is FOR.
 //
 // Nothing about this path is more permissive than the network path. It is the
 // same document, read from somewhere else.
@@ -507,7 +509,7 @@ func (s *Service) cachedRoster(now time.Time) (roster *coreent.RosterValue, err 
 	}
 	//: Signature first, then the window — the same order, in the same
 	//: function, as the bytes that arrive over HTTPS.
-	return ParseBundle(raw, s.vendor, now)
+	return parseBundleAnyAnchor(raw, s.anchors, now)
 }
 
 // readCappedFile reads a file under the SAME artefact cap the network fetch
@@ -797,7 +799,7 @@ func (s *Service) markWhileHeld() markRecord {
 	}
 	//: The newest signed instant this machine can prove it has seen, or
 	//: nothing when what is cached is not a roster.
-	return bundleMark(raw, s.vendor)
+	return bundleMarkAnyAnchor(raw, s.anchors)
 }
 
 // checkClock refuses a clock that disagrees with the newest signed instant this

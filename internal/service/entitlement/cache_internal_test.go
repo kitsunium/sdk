@@ -349,7 +349,7 @@ func Test_Service_cachedRoster(t *testing.T) {
 				}
 			}
 
-			roster, err := (&Service{vendor: vendorPub, cacheDir: dir}).cachedRoster(now)
+			roster, err := (&Service{anchors: [][]byte{vendorPub}, cacheDir: dir}).cachedRoster(now)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Errorf("cachedRoster() error = %v, want %v (%s)", err, tt.wantErr, tt.reason)
@@ -543,7 +543,7 @@ func Test_Service_checkClock(t *testing.T) {
 				}
 			}
 
-			svc := &Service{vendor: vendorPub, cacheDir: dir}
+			svc := &Service{anchors: [][]byte{vendorPub}, cacheDir: dir}
 			err := svc.checkClock(mark.Add(tt.offset))
 			if tt.wantErr {
 				if !errors.Is(err, coreent.ErrClockRegressed) {
@@ -612,7 +612,7 @@ func Test_Service_signedHighWaterMark(t *testing.T) {
 				}
 			}
 
-			got := (&Service{vendor: vendorPub, cacheDir: dir}).signedHighWaterMark()
+			got := (&Service{anchors: [][]byte{vendorPub}, cacheDir: dir}).signedHighWaterMark()
 			//: Zero means "nothing recorded", which is a complete answer.
 			if !tt.wantMark {
 				if !got.IsZero() {
@@ -665,7 +665,7 @@ func Test_Service_rememberRoster(t *testing.T) {
 			}
 
 			dir := t.TempDir()
-			svc := &Service{vendor: vendorPub, cacheDir: dir}
+			svc := &Service{anchors: [][]byte{vendorPub}, cacheDir: dir}
 
 			first := internalBundle(t, vendorPriv, newer, newer.Add(time.Hour))
 			//: The first install has nothing to supersede, so it is always
@@ -780,7 +780,7 @@ func Test_Service_markWhileHeld_believesOnlyARoster(t *testing.T) {
 				t.Fatalf("planting bundle: %v", err)
 			}
 
-			got := (&Service{vendor: vendorPub, cacheDir: dir}).markWhileHeld()
+			got := (&Service{anchors: [][]byte{vendorPub}, cacheDir: dir}).markWhileHeld()
 			if got.present != tt.wantPresent {
 				t.Fatalf("markWhileHeld().present = %t, want %t (%s)", got.present, tt.wantPresent, tt.reason)
 			}
@@ -873,7 +873,7 @@ func Test_Service_checkClock_refusesBothDirectionsOfAnImplausibleMark(t *testing
 				t.Fatalf("planting bundle: %v", err)
 			}
 
-			err := (&Service{vendor: vendorPub, cacheDir: dir}).checkClock(now)
+			err := (&Service{anchors: [][]byte{vendorPub}, cacheDir: dir}).checkClock(now)
 			//: The anti-simplification guard: a ceiling that DISCARDED the mark
 			//: would return nil here, which is what the rollback wants.
 			if !errors.Is(err, coreent.ErrClockRegressed) {

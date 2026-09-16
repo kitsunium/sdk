@@ -33,6 +33,7 @@ go_test(
     name = "entitlement_test",
     srcs = [
         "grant_internal_test.go",
+        "port_internal_test.go",
         "roster_internal_test.go",
     ],
     embed = [":entitlement"],

@@ -559,6 +559,21 @@ func TestNoParticularReachesThePublicSentence(t *testing.T) {
 			reason:     "a key directory is a location on somebody's disk",
 		},
 		{
+			name: "a bound proof over the wrong key names the subject",
+			build: func(t *testing.T) error {
+				t.Helper()
+				dir := t.TempDir()
+				writeKeyPair(t, dir, splitSubject, ownerOnly)
+				//: A value no key in this directory renders to, so the bind
+				//: refuses — and the value itself must not come back either,
+				//: since it is what the roster published.
+				return entitlement.NewSSHIdentity(dir).
+					ProvePossessionFor(splitSubject, "SHA256:a-value-the-roster-published")
+			},
+			particular: splitSubject,
+			reason:     "the bound refusal is reachable by anyone who can write the key directory, which is the worst place to echo a subject back",
+		},
+		{
 			name: "a failed enrolment names what the filesystem said",
 			build: func(t *testing.T) error {
 				t.Helper()

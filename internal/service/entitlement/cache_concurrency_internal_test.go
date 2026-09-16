@@ -101,7 +101,7 @@ func Test_rememberRoster_concurrentGenerationsNeverLowerTheMark(t *testing.T) {
 			//: round's outcome cannot seed the next.
 			for range concurrentRounds {
 				dir := t.TempDir()
-				svc := (&Service{vendor: vendorPub}).WithCache(dir)
+				svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
 				//: Seed a mark BELOW both generations, so both writers pass
 				//: the comparison and the interleaving is what decides.
 				if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, base, 1)); seedErr != nil {
@@ -247,7 +247,7 @@ func Test_rememberRoster_refreshesWhileTheCacheIsBeingRead(t *testing.T) {
 			//: Each round is its own cache directory and its own race.
 			for range concurrentRounds {
 				dir := t.TempDir()
-				svc := (&Service{vendor: vendorPub}).WithCache(dir)
+				svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
 				//: The bundle already on disk, which the reader will be inside.
 				if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, stale, 1)); seedErr != nil {
 					t.Fatalf("seeding cache: %v", seedErr)
@@ -447,7 +447,7 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 			older, newer := base.Add(tt.gap), base.Add(2*tt.gap)
 
 			dir := t.TempDir()
-			svc := (&Service{vendor: vendorPub}).WithCache(dir)
+			svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
 			//: The generation already installed, which the stand-down leaves in
 			//: place.
 			if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, older, 1)); seedErr != nil {
@@ -518,7 +518,7 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 			//: keeps "the residue is one Service instance wide" from being a
 			//: sentence nobody can check; raiseMarkFloor says why the shared
 			//: alternative was refused. Change this line only with that comment.
-			if fresh := (&Service{vendor: vendorPub}).WithCache(dir).signedHighWaterMark(); !fresh.Equal(older) {
+			if fresh := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir).signedHighWaterMark(); !fresh.Equal(older) {
 				t.Errorf("a second Service over the same cache reads %s, want the installed %s — the documented boundary of the in-process floor moved (%s)",
 					fresh.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339), tt.reason)
 			}

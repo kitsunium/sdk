@@ -8,15 +8,35 @@
 //
 // # The trust model, and its ceiling
 //
-// One anchor: the vendor's ed25519 public key, linked into the consuming
-// binary. Everything else — the roster, the per-subject keys, the host serving
-// them — is untrusted input. A hostile endpoint can serve what it likes; it
-// cannot forge a signature made with the vendor's private half.
+// One signer: the vendor. What the consuming binary links in is that signer's
+// ed25519 public key, or — while a key is being rotated — an ordered list of the
+// keys it accepts. Everything else — the roster, the per-subject keys, the host
+// serving them — is untrusted input. A hostile endpoint can serve what it likes;
+// it cannot forge a signature made with the vendor's private half.
 //
 // What that cannot survive is a patched binary. A check running on someone
 // else's machine is removable by definition. This stops casual sharing and
 // makes revocation real for cooperative installs, and it is deliberately not
 // built as if it were more.
+//
+// # The anchor is a list, because one key has no way out
+//
+// A binary linking in exactly one anchor cannot be moved to another: rosters
+// signed by a new key are refused against the anchor it holds — before anything
+// reads the version floor that would have told it to upgrade — and the release
+// carrying the new anchor is refused by the installation that needs it. Blocked
+// from both sides, with no path left in band.
+//
+// NewWithAnchors takes an ORDERED list and a roster is authentic when it verifies
+// against any entry, which is all rotation needs: publish under B, installations
+// carrying {A, B} take it, installations carrying only {A} keep reading A until
+// they are updated. A bundle already cached under either key is still a valid
+// proof of time, so the anti-rollback ratchet is not reset by a rotation.
+//
+// The cost is real and is not hidden: an anchor on the list is a key whose
+// compromise is accepted while it is listed. The list is therefore capped and is
+// a BUILD decision — nothing at runtime can extend it — and an empty one refuses
+// every document rather than accepting every document.
 //
 // # Identity is yours to supply
 //
@@ -36,6 +56,18 @@
 // key material — which is the common case for a product that enrols its users —
 // implements three methods instead and keeps its graph at nineteen modules
 // rather than a hundred and one. ADR 0078 has the measurement.
+//
+// # A proof can be bound to the key the roster authorised
+//
+// Identity's three methods cannot express "prove possession of the key the roster
+// approved": the engine asks what you present, compares that answer itself, and
+// then asks for a proof, so the authorised value never reaches your code. Anything
+// that replaced the material in between is signed for.
+//
+// BoundProver is the sibling that carries it. Implement
+// ProvePossessionFor(subject, authorised) and the verifier prefers it; do not, and
+// nothing changes — the three-method port is frozen and stays supported. The SDK's
+// own ssh implementation implements both.
 //
 // # Cannot decide is never no
 //
@@ -64,6 +96,21 @@
 // the filesystem refused, and for one that stood down on a contended lock. None
 // of the three refuses instead; a contended lock turned into a refused licence
 // would be worse than the replay it would prevent.
+//
+// # Honouring the deadline is the consumer's job
+//
+// Verify computes a Grant, hands it back and keeps no reference to it. There is
+// no goroutine, no timer and no callback in this SDK that revokes anything when
+// a grant's deadline passes, and a process holding an expired grant is not
+// interrupted. Whatever gates work on a grant has to ask.
+//
+// So a grant expiring a second after a check keeps authorising until you look
+// again, and how long that is, is your tick rather than a property of this
+// package. What the package owes you is a deadline you can act on WITHOUT
+// polling, and that is Grant.Deadline(): the EFFECTIVE instant, with the
+// zero-NotAfter fallback already resolved. Schedule on it — a timer, a context
+// deadline — and the question gets asked when the answer changes instead of on a
+// cadence. Grant.Expired(now) is the same rule asked the other way round.
 //
 // # A CI seat cannot outlive its token
 //
@@ -213,6 +260,29 @@ var (
 // Identity is the machine's half of the proof. It aliases the core port.
 type Identity = coreent.Identity
 
+// BoundProver is Identity's sibling for the one claim the three methods cannot
+// make: possession of the key the ROSTER authorised, rather than of whatever
+// this machine holds when it is asked.
+//
+// Implement it when your key custody can bind, and the verifier will prefer it:
+//
+//	func (k *MyKeys) ProvePossessionFor(subject, authorised string) error
+//
+// Without it the engine asks Fingerprint what you present, compares that answer
+// itself, and then asks ProvePossession — so material replaced between the two
+// calls is signed for, and the strongest thing an implementation can do unaided
+// is notice that something changed without learning what it should have been.
+//
+// It is a SIBLING rather than a parameter on ProvePossession because Identity is
+// published through this alias and Go satisfies interfaces structurally: widening
+// it would break every implementation at compile time with no deprecation window,
+// and would not even guarantee the binding — an implementation can accept the
+// parameter and ignore it. ADR 0039, ADR 0040 §4, ADR 0092.
+//
+// An Identity that does not implement this is fully supported and unchanged. The
+// window stays open for it, which is said here rather than left to be found.
+type BoundProver = coreent.BoundProver
+
 // Roster is a published, vendor-signed entitlement roster.
 type Roster = coreent.RosterValue
 
@@ -224,6 +294,14 @@ type CIEntitlement = coreent.CIEntitlementValue
 
 // Grant is a verified entitlement, with the deadline past which it must be
 // re-verified and whether it was decided offline.
+//
+// Read Deadline() rather than the NotAfter field when you intend to ACT on the
+// deadline: NotAfter's zero value means "no deadline was computed" — the shape a
+// grant seeded from a bare timestamp carries — and the method resolves the
+// fallback the field cannot express. Expired(now) is the same question asked the
+// other way round, and the two are one rule by construction.
+//
+// Honouring it is YOURS. See the package comment.
 type Grant = coreent.GrantValue
 
 // Origin is one place a roster is published.
@@ -237,9 +315,44 @@ type Product = svcent.ProductValue
 type Service = svcent.Service
 
 // New returns a verifier for the given identity, vendor key and product.
+//
+// One anchor, which is the one-element list NewWithAnchors takes — not a second
+// representation of the same thing, so no path can disagree with the multi-anchor
+// one about what a single key means.
 func New(identity Identity, vendor []byte, product *Product) *Service {
 	//: delegate verbatim to the service implementation.
 	return svcent.NewService(identity, vendor, product)
+}
+
+// NewWithAnchors returns a verifier that accepts SEVERAL vendor keys, in the
+// order given, so a signing key can be rotated in band.
+//
+// It takes identity, the machine's half of the proof; anchors, the ed25519 public
+// keys the binary links in, most-current first; and product, the vendor-specific
+// facts. A roster is authentic when it verifies against ANY of the anchors, which
+// is what lets a vendor publish under a new key while installations carrying only
+// the old one keep working — neither side has to be updated first.
+//
+// # What it costs, said here rather than only in the ADR
+//
+// Every anchor on the list is a key whose compromise is ACCEPTED while it is
+// listed, so this is strictly more surface than New's single key. What bounds it
+// is that the list is ordered, capped, and a BUILD decision: nothing at runtime
+// can extend it — not a roster field, not an environment variable, not the cache
+// — and a key leaves the list the way it entered, by shipping a build without it.
+// Past the cap the tail is dropped and a line is logged, because a build mistake
+// answered by refusing every verification would take a product down over a
+// misconfiguration.
+//
+// An EMPTY list is not a way to disable the signature check: every document is
+// then refused with ErrRosterUnsigned, since with no anchor no signature can be
+// valid.
+//
+// Service.WithAnchors sets the same list on a verifier already built, which is
+// what a test or a build assembling its anchors from elsewhere reaches for.
+func NewWithAnchors(identity Identity, anchors [][]byte, product *Product) *Service {
+	//: delegate verbatim to the service implementation.
+	return svcent.NewServiceWithAnchors(identity, anchors, product)
 }
 
 // Bundle is the one-document roster form: the raw roster and its detached

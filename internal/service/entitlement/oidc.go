@@ -131,10 +131,18 @@ type ActionsClaimsValue struct {
 	// Audience is who the token was minted for. GitHub emits a single string;
 	// the JWT spec allows an array, so both are accepted on decode.
 	Audience audienceClaim `json:"aud"`
-	// RepositoryOwnerID is the entitlement key: a numeric account id that
-	// survives renames and cannot be reused. RepositoryOwner is the display
-	// name for the same account and must never be what a licence matches on —
-	// a freed handle can be claimed by someone else.
+	// RepositoryOwnerID is the entitlement key: the account id, which survives
+	// renames and cannot be reused. RepositoryOwner is the display name for
+	// the same account and must never be what a licence matches on — a freed
+	// handle can be claimed by someone else.
+	//
+	// GitHub sends a decimal string and nothing here VALIDATES that: the only
+	// check is that it is non-empty, and the value is compared to the roster's
+	// keys by string equality. "Numeric" therefore describes what the issuer
+	// emits, not a property this package enforces — and it does not need to,
+	// because a value that is not one of the roster's keys is not entitled
+	// whatever its shape. A decimal check would be a second syntax for a
+	// comparison that is already exact.
 	RepositoryOwnerID string `json:"repository_owner_id"`
 	// RepositoryOwner is the account's current login, for diagnostics only.
 	RepositoryOwner string `json:"repository_owner"`
@@ -269,10 +277,18 @@ type jwtHeader struct {
 	// none, so any value here is a refusal.
 	Critical []string `json:"crit"`
 	// JWKSetURL and X509URL are places a hostile token can point a naive
-	// verifier at. They are decoded ONLY so their presence can be refused —
+	// verifier at. They are decoded ONLY so a NON-EMPTY value can be refused —
 	// honouring either would let the token nominate its own trust anchor.
+	//
+	// Non-empty, and the precision matters: absent, `""` and `null` all decode
+	// to the empty string and are therefore indistinguishable here, so none of
+	// the three is refused. That is harmless rather than overlooked — neither
+	// field CHOOSES a key source in this implementation, so an empty one
+	// nominates nothing — but "their presence is refused" is what this comment
+	// used to say, and it was not true of `"jku": ""`.
 	JWKSetURL string `json:"jku"`
-	// X509URL is refused for the same reason as JWKSetURL.
+	// X509URL is refused for the same reason as JWKSetURL, on the same
+	// non-empty condition.
 	X509URL string `json:"x5u"`
 }
 
@@ -575,9 +591,12 @@ func VerifyActionsToken(raw string, keys map[string]*rsa.PublicKey, audience str
 	}
 
 	key, known := keys[kid]
-	//: An unknown kid is a rotated or forged key. The caller refreshes the
-	//: JWKS once and retries; trying every key we hold instead would widen
-	//: the forgery surface for no benefit.
+	//: An unknown kid is a rotated-out or a forged key, and this refuses
+	//: either way. There is deliberately NO retry here and no caller that
+	//: performs one — an earlier comment claimed one did, which was the
+	//: promise-without-mechanism this audit is about. Trying every key we hold
+	//: instead would widen the forgery surface for no benefit, and a second
+	//: fetch is argued against where the fetch lives, in publishedJWKS.
 	if !known {
 		//: Refuse a token we hold no key for.
 		return nil, refuse(coreent.ErrCIUnknownKey,
