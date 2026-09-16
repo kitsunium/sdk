@@ -624,10 +624,16 @@ func Test_Service_ciSeat_refusesATokenAlreadyPastItsExpiry(t *testing.T) {
 			reason:      "checkTiming admits it and the raw exp bounds the grant, so the grant came back already expired",
 		},
 		{
-			name:        "expired at this very instant",
+			name:        "one second past expiry",
 			tokenWindow: -time.Second,
 			wantErr:     coreent.ErrCIUnverifiable,
-			reason:      "the boundary belongs to the refusal: a deadline equal to now leaves a run no time to use it",
+			reason:      "inside the allowance and unusable, like the row above",
+		},
+		{
+			name:        "expiring at this very instant",
+			tokenWindow: 0,
+			wantErr:     coreent.ErrCIUnverifiable,
+			reason:      "THE boundary. now == exp gives NotAfter == now, and Expired compares strictly — so the grant reports unexpired while having zero usable lifetime, and every consumer would try to use it",
 		},
 		{
 			name:        "still live",

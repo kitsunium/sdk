@@ -206,6 +206,23 @@ here rather than left to be discovered at the first rotation.
 - **A bound above 4.** `maxAnchors` is 4 because a rotation needs two and an
   overlapping rotation needs three. Raising it is a one-constant change if a
   deployment ever needs it; lowering it is not, so the slack is deliberate.
+- **A sentinel for "what I reached is not a usable document".** A roster that
+  authenticates and then cannot be read — a duplicate member name, or JSON the
+  decoder refuses — is refused under `ErrRosterUnreachable`, whose own doc says
+  it "names the NETWORK even when the cache is what failed last". So a
+  PUBLISHER fault carries the transport signal, and an operator following the
+  advice goes to look at their network for a defect in a document only the
+  vendor can produce.
+  It is not an accident: carrying no sentinel at all had callers mapping
+  refusals to exit codes fall through to their default on the one input a
+  vendor can produce by mistake, so a misleading sentinel was chosen over
+  none. None of the fourteen existing sentinels says "unusable document",
+  and adding one is an addition to the SDK's PUBLIC error taxonomy — a code,
+  its audit coverage, and an advice mapping in every consumer. That belongs in
+  its own ADR and its own review, not smuggled into a licence remediation, so
+  it is recorded here rather than done here. The origin loop's behaviour is
+  already right: it moves to the next origin, which is what a broken
+  publication warrants.
 
 ## References
 

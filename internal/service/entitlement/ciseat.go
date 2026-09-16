@@ -92,7 +92,13 @@ func (s *Service) ciSeat(roster *coreent.RosterValue, now time.Time) (grant core
 	//: seat built on a token that has actually expired buys a run nothing it
 	//: could use. The skew allowance keeps doing its job for a token whose exp
 	//: is still ahead, which is every ordinary run.
-	if now.After(tokenExpiry) {
+	//: `!After` and not `After`: the boundary belongs to the refusal. At
+	//: now == exp the grant's NotAfter is now, and Expired compares strictly,
+	//: so it reports that grant UNEXPIRED — a grant with zero usable lifetime
+	//: that every consumer would then try to use. My own row for this read
+	//: "expired at this very instant" and planted -1s, which is not the
+	//: instant; the tokenWindow: 0 row below is.
+	if !tokenExpiry.After(now) {
 		//: Named as the token's problem, not the roster's or the account's.
 		return coreent.GrantValue{}, refuse(coreent.ErrCIUnverifiable,
 			errs.String("stage", "ci_seat"),

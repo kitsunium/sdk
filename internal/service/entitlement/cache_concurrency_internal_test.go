@@ -549,74 +549,103 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 func Test_rememberRoster_refusesAnOlderRosterAfterAStandDown(t *testing.T) {
 	t.Parallel()
 
-	vendorPub, vendorPriv, keyErr := ed25519.GenerateKey(nil)
-	//: A failure here is an environment problem, not a test outcome.
-	if keyErr != nil {
-		t.Fatalf("generating vendor key: %v", keyErr)
+	//: Named, so the runCase closure can take one. One row today: the
+	//: scenario needs three generations and a held guard, and a second
+	//: arrangement of those would be a different test rather than another
+	//: row. The table shape is still what this repository requires, so
+	//: ktn-linter can credit the branches, and a second row costs one line.
+	type testCase struct {
+		name string
+		// gap separates the three generations from each other.
+		gap    time.Duration
+		reason string
 	}
 
-	base := time.Now().Truncate(time.Second)
-	//: Three generations, so "older than the floor" and "newer than the disk"
-	//: can both be true of the middle one — which is the whole scenario.
-	onDisk, middle, newest := base, base.Add(time.Hour), base.Add(2*time.Hour)
-
-	dir := t.TempDir()
-	svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
-	if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, onDisk, 1)); seedErr != nil {
-		t.Fatalf("seeding cache: %v", seedErr)
+	tests := []testCase{
+		{
+			name:   "the guard is held while the newest generation arrives",
+			gap:    time.Hour,
+			reason: "an install that stood down is still an instant this process authenticated, and the acceptance verdict never read it",
+		},
 	}
 
-	//: A second locker on the same directory is what another process is; see
-	//: the stand-down test above for why UnsupportedPlatform is the only
-	//: refusal worth skipping on.
-	holder, lockErr := svclock.NewFileLocker(svclock.FileConfig{Dir: dir, Poll: cacheLockPoll})
-	if errors.Is(lockErr, coreproc.UnsupportedPlatform) {
-		t.Skipf("no file lock on %s, so cacheGuard returns nil and there is no stand-down to reproduce", runtime.GOOS)
-	}
-	//: A failure here is an environment problem, not a test outcome.
-	if lockErr != nil {
-		t.Fatalf("building the holder's locker: %v", lockErr)
-	}
-	lease, acquireErr := holder.Acquire(t.Context(), cacheLockName)
-	//: A failure here is an environment problem, not a test outcome.
-	if acquireErr != nil {
-		t.Fatalf("holding the cache guard: %v", acquireErr)
+	runCase := func(t *testing.T, tt testCase) {
+		t.Helper()
+		t.Parallel()
+
+		vendorPub, vendorPriv, keyErr := ed25519.GenerateKey(nil)
+		//: A failure here is an environment problem, not a test outcome.
+		if keyErr != nil {
+			t.Fatalf("generating vendor key: %v", keyErr)
+		}
+
+		base := time.Now().Truncate(time.Second)
+		//: Three generations, so "older than the floor" and "newer than the
+		//: disk" can both be true of the middle one — the whole scenario.
+		onDisk, middle, newest := base, base.Add(tt.gap), base.Add(2*tt.gap)
+
+		dir := t.TempDir()
+		svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
+		if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, onDisk, 1)); seedErr != nil {
+			t.Fatalf("seeding cache: %v", seedErr)
+		}
+
+		//: A second locker on the same directory is what another process is; see
+		//: the stand-down test above for why UnsupportedPlatform is the only
+		//: refusal worth skipping on.
+		holder, lockErr := svclock.NewFileLocker(svclock.FileConfig{Dir: dir, Poll: cacheLockPoll})
+		if errors.Is(lockErr, coreproc.UnsupportedPlatform) {
+			t.Skipf("no file lock on %s, so cacheGuard returns nil and there is no stand-down to reproduce", runtime.GOOS)
+		}
+		//: A failure here is an environment problem, not a test outcome.
+		if lockErr != nil {
+			t.Fatalf("building the holder's locker: %v", lockErr)
+		}
+		lease, acquireErr := holder.Acquire(t.Context(), cacheLockName)
+		//: A failure here is an environment problem, not a test outcome.
+		if acquireErr != nil {
+			t.Fatalf("holding the cache guard: %v", acquireErr)
+		}
+
+		//: The NEWEST generation is authenticated and its install stands down. A
+		//: stand-down is not a refusal, which is the deliberate direction.
+		if err := svc.rememberRoster(paddedBundle(t, vendorPriv, newest, 1)); err != nil {
+			t.Fatalf("rememberRoster(newest) error = %v, want nil — a stand-down is not a refusal", err)
+		}
+		//: Released, so the next offer can reach the cache. The floor now holds
+		//: `newest` and the disk still holds `onDisk`.
+		if releaseErr := lease.Release(t.Context()); releaseErr != nil {
+			t.Fatalf("releasing the cache guard: %v", releaseErr)
+		}
+
+		//: THE REPLAY. Newer than the disk, older than what this process has
+		//: already authenticated.
+		err := svc.rememberRoster(paddedBundle(t, vendorPriv, middle, 1))
+		if !errors.Is(err, coreent.ErrRosterStale) {
+			t.Fatalf("rememberRoster(middle) error = %v, want %v — an older roster reached authorization because the verdict only ever compared against the disk",
+				err, coreent.ErrRosterStale)
+		}
+
+		//: And it was still CACHED, because fresher-than-disk beats staler for the
+		//: offline fallback. Refusing the install too would be the mistake
+		//: raiseMarkFloor's doc comment argues against.
+		mark := svc.signedHighWaterMark()
+		if !mark.Equal(newest) {
+			t.Errorf("signedHighWaterMark() = %v, want %v — the floor must still bound the mark from below", mark, newest)
+		}
+		cached, readErr := os.ReadFile(cachedBundlePath(dir))
+		//: A cache that cannot be read back says nothing about the install.
+		if readErr != nil {
+			t.Fatalf("reading the cache back: %v", readErr)
+		}
+		installed := bundleMarkAnyAnchor(cached, [][]byte{vendorPub})
+		if !installed.present || !installed.issued.Equal(middle) {
+			t.Errorf("the cache holds %v, want %v — the install must still follow the DISK comparison, or the offline fallback is left staler to protect a number already protected in memory",
+				installed.issued, middle)
+		}
 	}
 
-	//: The NEWEST generation is authenticated and its install stands down. A
-	//: stand-down is not a refusal, which is the deliberate direction.
-	if err := svc.rememberRoster(paddedBundle(t, vendorPriv, newest, 1)); err != nil {
-		t.Fatalf("rememberRoster(newest) error = %v, want nil — a stand-down is not a refusal", err)
-	}
-	//: Released, so the next offer can reach the cache. The floor now holds
-	//: `newest` and the disk still holds `onDisk`.
-	if releaseErr := lease.Release(t.Context()); releaseErr != nil {
-		t.Fatalf("releasing the cache guard: %v", releaseErr)
-	}
-
-	//: THE REPLAY. Newer than the disk, older than what this process has
-	//: already authenticated.
-	err := svc.rememberRoster(paddedBundle(t, vendorPriv, middle, 1))
-	if !errors.Is(err, coreent.ErrRosterStale) {
-		t.Fatalf("rememberRoster(middle) error = %v, want %v — an older roster reached authorization because the verdict only ever compared against the disk",
-			err, coreent.ErrRosterStale)
-	}
-
-	//: And it was still CACHED, because fresher-than-disk beats staler for the
-	//: offline fallback. Refusing the install too would be the mistake
-	//: raiseMarkFloor's doc comment argues against.
-	mark := svc.signedHighWaterMark()
-	if !mark.Equal(newest) {
-		t.Errorf("signedHighWaterMark() = %v, want %v — the floor must still bound the mark from below", mark, newest)
-	}
-	cached, readErr := os.ReadFile(cachedBundlePath(dir))
-	//: A cache that cannot be read back says nothing about the install.
-	if readErr != nil {
-		t.Fatalf("reading the cache back: %v", readErr)
-	}
-	installed := bundleMarkAnyAnchor(cached, [][]byte{vendorPub})
-	if !installed.present || !installed.issued.Equal(middle) {
-		t.Errorf("the cache holds %v, want %v — the install must still follow the DISK comparison, or the offline fallback is left staler to protect a number already protected in memory",
-			installed.issued, middle)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }
