@@ -1,6 +1,6 @@
 # ADR 0089 — A file that cannot cut a release cannot size one
 
-- **Status**: Accepted; implemented in `scripts/release/cut-tags.sh`.
+- **Status**: Accepted; implemented in `scripts/release/cut-tags.sh`. **Amended 2026-09-15** (§Amendment) — the shared notion moved to `scripts/release/lib/release-scope.sh`, became a category rather than a list of two names, and is now read by **both** rules of `compute-bumps.sh` as well.
 - **Date**: 2026-09-14
 - **Deciders**: kitsunium maintainers
 - **Amends**: [ADR 0007](0007-sdk-release-and-versioning.md) §2 (row 4 — the `Release-bump` trailer is scoped to the paths that can *cut* a release, not to `pkg/` alone)
@@ -12,7 +12,7 @@ Two scripts decide a release. `compute-bumps.sh` answers **whether** to cut one;
 
 ### The rule cannot express what the same table requires
 
-ADR 0007 §2 states, in one table:
+[ADR 0007](0007-sdk-release-and-versioning.md) §2 states, in one table:
 
 | Trigger | Bump |
 |---|---|
@@ -35,11 +35,11 @@ Git reads the trailer. The release is cut — all four modules are tagged. The s
 
 This is not theoretical. A release tags the whole module graph at one version — observed on `main`: `internal/{core,kernel,service}/v0.3.5` alongside `pkg/v0.3.5` — and a release range routinely spans several merges: ADR 0085 measured 23 of this repository's 44 ranges covering more than one commit, the largest 213. So an `internal/` change is published whenever it shares a range with anything that cuts one, which is the ordinary case rather than the exception. It ships; only its size could not be stated.
 
-`compute-bumps.sh:80-102` also cuts a release for an `internal/`-only change on its own, when `bazel query rdeps(//pkg/..., //internal/<X>/...)` is non-empty — and that path demonstrably works: #213 (`732cdb2`) touched **zero** `pkg/v*/` paths and seven under `internal/service/entitlement/`, and `pkg/v0.3.6` was cut for it. So an `internal/`-only change reaches consumers, at a size its author could not state.
+`compute-bumps.sh:80-102` also cuts a release for an `internal/`-only change on its own, when `bazel query rdeps(//pkg/..., //internal/<X>/...)` is non-empty — and that path demonstrably works: [#213](https://github.com/kitsunium/sdk/issues/213) (`732cdb2`) touched **zero** `pkg/v*/` paths and seven under `internal/service/entitlement/`, and `pkg/v0.3.6` was cut for it. So an `internal/`-only change reaches consumers, at a size its author could not state.
 
-It is, however, **intermittent**, and this ADR deliberately does not lean on it. Fifteen minutes after #213, #214 (`c707de5`) changed four non-documentation files under `internal/service/codec/ndjson/` — the same module root, so literally the same query — and cut **no tag at all**; `pkg/v0.3.7` does not exist. Which of the two answers was the real one cannot be recovered, because the script discards the query's stderr (`bazel query … 2>/dev/null` feeding `grep -q .`) and never reads its exit code, so a failed query and an empty result are the same value. That was a separate defect, of the same family as the ones above and worse in degree — not a wrong size but no release at all — and it is **fixed on `main`** by #233 (`9a87c5b`), which captures the exit code and refuses loudly instead of reporting "no release". Measured against a `bazel` stub exiting 7, same range, same directory: the pre-#233 script → **exit 0, silent**; the post-#233 script → **exit 1**, `refusing to report 'no release' for a computation that did not run`. Nothing in this ADR changes because of it: the argument never leaned on the rdeps path. Nothing here depends on it: range-sharing alone makes `internal/` changes publishable, and that is measured.
+It is, however, **intermittent**, and this ADR deliberately does not lean on it. Fifteen minutes after [#213](https://github.com/kitsunium/sdk/issues/213), [#214](https://github.com/kitsunium/sdk/issues/214) (`c707de5`) changed four non-documentation files under `internal/service/codec/ndjson/` — the same module root, so literally the same query — and cut **no tag at all**; `pkg/v0.3.7` does not exist. Which of the two answers was the real one cannot be recovered, because the script discards the query's stderr (`bazel query … 2>/dev/null` feeding `grep -q .`) and never reads its exit code, so a failed query and an empty result are the same value. That was a separate defect, of the same family as the ones above and worse in degree — not a wrong size but no release at all — and it is **fixed on `main`** by [#233](https://github.com/kitsunium/sdk/issues/233) (`9a87c5b`), which captures the exit code and refuses loudly instead of reporting "no release". Measured against a `bazel` stub exiting 7, same range, same directory: the pre-[#233](https://github.com/kitsunium/sdk/issues/233) script → **exit 0, silent**; the post-[#233](https://github.com/kitsunium/sdk/issues/233) script → **exit 1**, `refusing to report 'no release' for a computation that did not run`. Nothing in this ADR changes because of it: the argument never leaned on the rdeps path. Nothing here depends on it: range-sharing alone makes `internal/` changes publishable, and that is measured.
 
-**The trailer is a modifier, not a trigger** — observed in production, on `main`, by a second path that did not go through the reproduction above. The merge commit of #213 carries **no** `Release-bump:` trailer at all: its last paragraph is `Refs: #192`, and `%(trailers:key=Release-bump,valueonly,separator=%x1F)` returns empty. `pkg/v0.3.6` was cut regardless, by the `next_patch` default. So whatever the path scope does, it does not decide *whether* something is published — only how large the number is on something that ships either way. That is what makes the `pkg/` restriction a limit on honesty rather than on capability.
+**The trailer is a modifier, not a trigger** — observed in production, on `main`, by a second path that did not go through the reproduction above. The merge commit of [#213](https://github.com/kitsunium/sdk/issues/213) carries **no** `Release-bump:` trailer at all: its last paragraph is `Refs: [#192](https://github.com/kitsunium/sdk/issues/192)`, and `%(trailers:key=Release-bump,valueonly,separator=%x1F)` returns empty. `pkg/v0.3.6` was cut regardless, by the `next_patch` default. So whatever the path scope does, it does not decide *whether* something is published — only how large the number is on something that ships either way. That is what makes the `pkg/` restriction a limit on honesty rather than on capability.
 
 ### And the scope it does enforce protects nobody
 
@@ -77,7 +77,7 @@ A commit's `Release-bump` trailer is in scope when that commit touches at least 
 
 Concretely, in `cut-tags.sh`, both the trailer-counting test and the misplaced-trailer refusal move from `^pkg/` to that predicate.
 
-This amends ADR 0007 §2 row 4 to read: *`Release-bump: minor` trailer on a first-parent commit in the range AND that commit touches a path that can cut a release* → minor.
+This amends [ADR 0007](0007-sdk-release-and-versioning.md) §2 row 4 to read: *`Release-bump: minor` trailer on a first-parent commit in the range AND that commit touches a path that can cut a release* → minor.
 
 ## Consequences / Semantics
 
@@ -88,7 +88,7 @@ This amends ADR 0007 §2 row 4 to read: *`Release-bump: minor` trailer on a firs
 
 After both, sizing a release requires touching code that actually cuts one. Today, a single documentation line suffices. The capability to *cause* a publication is unchanged — `compute-bumps.sh` already grants it to `internal/`-only changes — so widening grants nothing new; it only lets the size be stated honestly for something that ships either way.
 
-**The two changes are correct only together, and the history shows it.** Commit `3f681412` (`feat(resilience)`, #185) touched `pkg/v1/resilience/CLAUDE.md` *and* three `.go` files under `internal/service/resilience/`, and carries the text `Release-bump: minor` — at **line 99 of a 126-line message**, so `%(trailers:key=Release-bump,valueonly,separator=%x1F)` returns **empty** and git parses nothing. What the two changes rescue together is therefore not the value but the **misplaced-trailer refusal**. Measured on the three configurations, against this commit: `^pkg/` alone → counts → refusal raised; the exclusion **alone** → its only `pkg/` path is a `CLAUDE.md`, so nothing counts → **refusal silenced, silent fall back to patch**; widening + exclusion → counts through `internal/` → refusal raised. Shipping the exclusion without the widening would have re-created issue #217 — a lost bump, silently — inside the fix for #218. Shipping one without the other would have moved the defect rather than removed it.
+**The two changes are correct only together, and the history shows it.** Commit [`3f681412`](https://github.com/kitsunium/sdk/commit/3f681412) (`feat(resilience)`, [#185](https://github.com/kitsunium/sdk/issues/185)) touched `pkg/v1/resilience/CLAUDE.md` *and* three `.go` files under `internal/service/resilience/`, and carries the text `Release-bump: minor` — at **line 99 of a 126-line message**, so `%(trailers:key=Release-bump,valueonly,separator=%x1F)` returns **empty** and git parses nothing. What the two changes rescue together is therefore not the value but the **misplaced-trailer refusal**. Measured on the three configurations, against this commit: `^pkg/` alone → counts → refusal raised; the exclusion **alone** → its only `pkg/` path is a `CLAUDE.md`, so nothing counts → **refusal silenced, silent fall back to patch**; widening + exclusion → counts through `internal/` → refusal raised. Shipping the exclusion without the widening would have re-created issue [#217](https://github.com/kitsunium/sdk/issues/217) — a lost bump, silently — inside the fix for [#218](https://github.com/kitsunium/sdk/issues/218). Shipping one without the other would have moved the defect rather than removed it.
 
 **Doc-only releases lose the ability to size themselves.** A range whose only `pkg/` content is `CLAUDE.md`/`BUILD.bazel` churn cannot request a minor. This is intended and not a loss: such a range does not cut a release at all under `compute-bumps.sh:66-73`, so there is no release for it to size.
 
@@ -104,7 +104,7 @@ Row 3 invokes semver §6. Deleting it would record that this SDK does not do cor
 
 ### Why not keep `^pkg/` and accept that `internal/` cannot be sized
 
-That is today's behaviour, and it is exactly the defect: a change that ships and alters observable behaviour is published at a size its author could not choose. The failure is silent — the same shape as the two `Release-bump` trailers lost to placement (issue #217), reached by a different route.
+That is today's behaviour, and it is exactly the defect: a change that ships and alters observable behaviour is published at a size its author could not choose. The failure is silent — the same shape as the two `Release-bump` trailers lost to placement (issue [#217](https://github.com/kitsunium/sdk/issues/217)), reached by a different route.
 
 ### Why not run `bazel query rdeps(//pkg/..., //internal/<X>/...)` per commit
 
@@ -114,21 +114,115 @@ That is today's behaviour, and it is exactly the defect: a change that ships and
 
 The real anti-smuggling control is that the trailer is read from main's **first-parent** line only (ADR 0085), not from the commits a merge brought in. What remains is that a squash message is composed from contributor text. Narrowing that is a change to the merge configuration, not to the path scope, and it is out of scope for this ADR — recorded below.
 
+## Amendment — 2026-09-15: the notion becomes a category, and both rules read it
+
+This ADR put the notion in one *function* and spelled it as two *names*,
+`*/CLAUDE.md` and `*/BUILD.bazel`, under a comment that described a category:
+*"maintainer-only metadata that ships in the module zip but carries no
+consumer-visible change — its churn alone must not cut a release."* §Deferred
+below records that this was not enough for `_test.go`. It was not enough for
+`BENCH.md` either, and that one was not deferred — it was unnoticed, and it
+shipped.
+
+[`ac9fb6dc`](https://github.com/kitsunium/sdk/commit/ac9fb6dc) ([#237](https://github.com/kitsunium/sdk/issues/237)) cut **`pkg/v0.4.4`** from a diff of ten files, every one a
+`BENCH.md`, zero lines of Go. The exported surface between `pkg/v0.4.3` and
+`pkg/v0.4.4` is identical byte for byte: a consumer who upgrades receives
+re-measured tables of `ns/op` (issue [#238](https://github.com/kitsunium/sdk/issues/238)). 78 `BENCH.md` are in the tree, 20 of
+them under `pkg/`, and each one was a trigger.
+
+### What was actually broken: three things, of which the list was only one
+
+Measured with the unmodified script against fixture repositories, one file per
+commit, and — for rule 2 — a `bazel` stub that appends a line per invocation, so
+"the query ran" is a counted fact and not an inference:
+
+| commit touches, and nothing else | before | after |
+|---|---|---|
+| `pkg/v1/errs/BENCH.md` | `pkg` — **cuts a release** | nothing |
+| `pkg/v1/errs/USES.md` | `pkg` — **cuts a release** | nothing |
+| `pkg/v1/errs/README.md` | `pkg` | `pkg` — *unchanged, deliberately* |
+| `pkg/v1/errs/thing.go` | `pkg` | `pkg` — *control* |
+| `internal/kernel/ring/BENCH.md` | `pkg`, **1 bazel call** | nothing, **0 calls** |
+| `internal/kernel/ring/CLAUDE.md` | `pkg`, **1 bazel call** | nothing, **0 calls** |
+| `internal/kernel/ring/ring2.go` | `pkg`, 1 bazel call | `pkg`, 1 call — *control* |
+
+The `internal/**/CLAUDE.md` row is the finding that changes the shape of the
+fix. `CLAUDE.md` has been excluded by rule 1 since before this ADR, and a
+`CLAUDE.md`-only commit under `internal/` **cut a release anyway**, because
+rule 2 never applied any exclusion at all. Nor could it usefully have carried
+one of its own: it reduces a changed path to `internal/<mod>` *before* asking
+anything, and after that reduction a `BENCH.md` and a `.go` file are the same
+module dir. Issue [#220](https://github.com/kitsunium/sdk/issues/220) predicted this mechanism from the source; the table
+measures it. So there were three defects, not one:
+
+1. the list was two names where the comment described a category ([#238](https://github.com/kitsunium/sdk/issues/238));
+2. the list existed **twice**, here and in `compute-bumps.sh`, so extending the
+   notion meant editing it in two places and the two could disagree;
+3. one of the two rules that needs it never consulted it ([#220](https://github.com/kitsunium/sdk/issues/220)'s mechanism).
+
+A third copy of the enumeration would have fixed (1) for one more filename and
+left (2) and (3) exactly as they were.
+
+### The rule
+
+`scripts/release/lib/release-scope.sh` holds it once, as an awk prelude that
+both scripts source. A path in a module zip is **maintainer-only** when:
+
+- its basename is `BUILD.bazel` — build metadata for a build system the consumer
+  does not run; `go build` never reads it. Unchanged from this ADR;
+- **or** its basename ends in `.md` and is not `README.md`, compared
+  case-insensitively on both halves.
+
+`README.md` is the exception and it is load-bearing, not timidity: pkg.go.dev
+renders a package's README and nothing else in the zip, and the docs portal
+copies `pkg/<major>/**/README.md` out of the **release tag** ([ADR 0007](0007-sdk-release-and-versioning.md) §5). An
+excluded README would mean a README fix could never reach either surface until
+unrelated code cut a release. Compared case-insensitively in *both* directions
+because the two errors are not symmetric: misjudging `COVERAGE.MD` as
+consumer-visible cuts a release nobody needs, while misjudging `Readme.md` as
+maintainer-only *withholds* one, and a release that never happens is the worse
+failure — it is the whole of [#226](https://github.com/kitsunium/sdk/issues/226) and [#227](https://github.com/kitsunium/sdk/issues/227).
+
+`compute-bumps.sh` now filters the changed-path list **once, up front**, and
+both rules read the filtered list. That is what makes the two agree, and it is
+also what removes rule 2's bazel calls for a documentary diff: a path that
+cannot carry a consumer-visible change is no longer a path the release lane
+asks Bazel about.
+
+### What the docs portal loses, stated rather than discovered later
+
+`**/BENCH.md` is copied out of the release tag too ([ADR 0007](0007-sdk-release-and-versioning.md) §5). A benchmark
+re-measurement therefore now waits for the next release that a non-documentary
+change cuts. That is a *latency*, not a loss — [#227](https://github.com/kitsunium/sdk/issues/227)'s reading applies: the next
+release's range still contains the commit — and with `compute-bumps.sh
+--explain` naming the reason on every run, it is no longer silent. The two
+changes are correct together and would be a regression apart.
+
+### Still not [#220](https://github.com/kitsunium/sdk/issues/220)
+
+`*_test.go` and `testdata/**` are **not** excluded. The argument is the same (a
+consumer does not run its dependencies' tests) but the scope call is a
+maintainer's, and §Deferred below measures that widening it changes how real
+past releases were *sized*. What changes is the cost of making that call: it is
+now **one line** in `rs_maintainer_only()`, and it reaches both halves and both
+rules at once. That was the point of moving the notion, and it is the reason to
+prefer a category over a fourth name.
+
 ## Deferred
 
 - **`squash_merge_commit_message: COMMIT_MESSAGES` lets contributor text reach the trailer parser.** Setting it to `BLANK` or `PR_TITLE` would force a maintainer to compose the release-sizing message. Not changed here: it alters every merge in the repository, not just release sizing, and deserves its own decision.
 - **Per-commit rdeps verification for `internal/` paths**, if a case ever shows a trailer sized a release through an `internal/` package that does not reach `//pkg/...`.
 
-- **This ADR does NOT close issue #220, and the shared notion is the reason.** "One notion of a file that counts" is shared by both halves, but that notion still **counts test files**. `counts_for_release` excludes `*/CLAUDE.md` and `*/BUILD.bazel` and nothing else, so a 100 % `_test.go` diff counts. Measured against the real commit that cut `pkg/v0.4.1` — `8addc948` (#222), two files, both `_test.go`, both under `internal/service/crypto/pbkdf2pw/`, zero files outside `internal/`, zero non-test files:
+- **This ADR does NOT close issue [#220](https://github.com/kitsunium/sdk/issues/220), and the shared notion is the reason.** "One notion of a file that counts" is shared by both halves, but that notion still **counts test files** — as amended above it excludes maintainer Markdown and `BUILD.bazel`, and nothing else, so a 100 % `_test.go` diff counts. Measured against the real commit that cut `pkg/v0.4.1` — [`8addc948`](https://github.com/kitsunium/sdk/commit/8addc948) ([#222](https://github.com/kitsunium/sdk/issues/222)), two files, both `_test.go`, both under `internal/service/crypto/pbkdf2pw/`, zero files outside `internal/`, zero non-test files:
 
-  | rule | verdict on `8addc948` |
+  | rule | verdict on [`8addc948`](https://github.com/kitsunium/sdk/commit/8addc948) |
   |---|---|
   | `^pkg/` (before this ADR) | does not count |
   | `counts_for_release` (this ADR) | **counts** |
 
   So this ADR *widens* what may size that release rather than stopping it. That is consistent with its own reasoning — `compute-bumps.sh` cut the release either way, and only the size was at stake — but it must not be read as a fix. The trigger is untouched: `compute-bumps.sh` is **byte-identical** to `main` in this change set. Reproduced end to end on the exact release range `02f436e8..8addc948` (baseline `pkg/v0.4.0^1`, one commit): `compute-bumps.sh --dry-run` prints `pkg`. Negative control on `8addc948..91f80a6` (`.github/workflows/` only): prints nothing, exit 0.
 
-- **The reduction to the module root is what loses the answer, and Bazel already has it.** `awk -F/ '/^internal\//{print $1"/"$2}'` maps both changed files to `internal/service`, then `rdeps(//pkg/..., //internal/service/...)` returns **230 targets**. At the granularity of the change itself the same query returns **`INFO: Empty results`** — `rdeps(//pkg/..., //internal/service/crypto/pbkdf2pw:pbkdf2pw_test)` → 0 lines, and each of the two changed source-file targets → 0 lines. The build graph distinguishes a test target from a library target; the script discards that distinction one line before asking. This is a route to #220 that needs **no hand-maintained category list**, which is what makes it worth recording here rather than only in the issue. Not taken in this change set, and the trap it carries **changed shape while this PR was in flight** — which is why it is written here with its date rather than as a standing fact. A source file not yet declared in a `BUILD.bazel` makes the query **exit 7** with `ERROR: no such target`. Before #233 that was indistinguishable from an empty result under `2>/dev/null` + `grep -q .`, so a per-file route would have cut **no release at all** for any newly added file — silently. Since #233 (`9a87c5b`) the same exit code is **loud**: measured with a `bazel` stub exiting 7 on the range `02f436e8..8addc948`, the pre-#233 script gives **exit 0 and no output**, the post-#233 script gives **exit 1** and `refusing to report 'no release' for a computation that did not run`. So the remaining obligation is not to avoid a silent miss but to carry a structural guard of its own, the per-file analogue of #233's `find "$modpath" -name BUILD.bazel -print -quit` — otherwise every commit adding a file before `make gazelle` fails the release job instead of releasing nothing.
+- **The reduction to the module root is what loses the answer, and Bazel already has it.** `awk -F/ '/^internal\//{print $1"/"$2}'` maps both changed files to `internal/service`, then `rdeps(//pkg/..., //internal/service/...)` returns **230 targets**. At the granularity of the change itself the same query returns **`INFO: Empty results`** — `rdeps(//pkg/..., //internal/service/crypto/pbkdf2pw:pbkdf2pw_test)` → 0 lines, and each of the two changed source-file targets → 0 lines. The build graph distinguishes a test target from a library target; the script discards that distinction one line before asking. This is a route to [#220](https://github.com/kitsunium/sdk/issues/220) that needs **no hand-maintained category list**, which is what makes it worth recording here rather than only in the issue. Not taken in this change set, and the trap it carries **changed shape while this PR was in flight** — which is why it is written here with its date rather than as a standing fact. A source file not yet declared in a `BUILD.bazel` makes the query **exit 7** with `ERROR: no such target`. Before [#233](https://github.com/kitsunium/sdk/issues/233) that was indistinguishable from an empty result under `2>/dev/null` + `grep -q .`, so a per-file route would have cut **no release at all** for any newly added file — silently. Since [#233](https://github.com/kitsunium/sdk/issues/233) (`9a87c5b`) the same exit code is **loud**: measured with a `bazel` stub exiting 7 on the range `02f436e8..8addc948`, the pre-[#233](https://github.com/kitsunium/sdk/issues/233) script gives **exit 0 and no output**, the post-[#233](https://github.com/kitsunium/sdk/issues/233) script gives **exit 1** and `refusing to report 'no release' for a computation that did not run`. So the remaining obligation is not to avoid a silent miss but to carry a structural guard of its own, the per-file analogue of [#233](https://github.com/kitsunium/sdk/issues/233)'s `find "$modpath" -name BUILD.bazel -print -quit` — otherwise every commit adding a file before `make gazelle` fails the release job instead of releasing nothing.
 
 - **Two git parsers disagree about the same message, and only one is on the release path.** A body line consisting of `---` makes `git interpret-trailers --parse` treat everything after it as a patch and return an **empty** trailer list. `cut-tags.sh` does not use that route: it reads `%(trailers:key=Release-bump,valueonly,separator=%x1F)` through `git log --format`, which does **not** apply the patch-separator rule, and its misplaced-trailer guard counts `^Release-bump:` in `%B` without calling `interpret-trailers` at all. Measured on git 2.47.3 with a message whose last paragraph is `Release-bump: minor` preceded by a `---` line: `interpret-trailers --parse` → empty, `%(trailers:…)` → `minor`, `grep -cE '^Release-bump:'` on `%B` → `1`. The two routes the script uses **agree**, so no false refusal and no lost value: the release chain is immune. Recorded as a divergence and not as a defect, because an ADR whose subject is one shared notion should say where two notions still exist even when neither is currently wrong. It becomes live the day anything on this path is rewritten in terms of `interpret-trailers`.
 
@@ -136,8 +230,11 @@ The real anti-smuggling control is that the trailer is read from main's **first-
 
 - [ADR 0007](0007-sdk-release-and-versioning.md) §2 — bump semantics (amended by this ADR, row 4)
 - [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) — both halves of a release read the same range
-- `scripts/release/compute-bumps.sh:66-102` — the notion of a file that counts, and the rdeps rule
+- `scripts/release/lib/release-scope.sh` — the notion itself, once, as a category (§Amendment)
+- `scripts/release/compute-bumps.sh` — the filtered path list, read by rule 1 AND the rdeps rule
 - `scripts/release/cut-tags.sh` — `counts_for_release`, and its two call sites
-- Issue #218 — the reproduction this ADR closes
-- Issue #217 — the same visible failure reached through trailer placement
-- Issue #220 — a test-only diff cuts a release: NOT closed by this ADR, and §Deferred says why with the measurement
+- Issue [#238](https://github.com/kitsunium/sdk/issues/238) — a `BENCH.md` alone cuts a release; `pkg/v0.4.4` is the witness (closed by §Amendment)
+- Issue [#226](https://github.com/kitsunium/sdk/issues/226) / [#227](https://github.com/kitsunium/sdk/issues/227) — a release that publishes nothing, and a log that cannot say why
+- Issue [#218](https://github.com/kitsunium/sdk/issues/218) — the reproduction this ADR closes
+- Issue [#217](https://github.com/kitsunium/sdk/issues/217) — the same visible failure reached through trailer placement
+- Issue [#220](https://github.com/kitsunium/sdk/issues/220) — a test-only diff cuts a release: NOT closed by this ADR, and §Deferred says why with the measurement

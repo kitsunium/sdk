@@ -24,8 +24,8 @@ var (
 	ErrRosterUnsigned = errs.Define(CodeRosterUnsigned, "ROSTER_UNSIGNED",
 		"the roster is not signed by the expected vendor",
 		"core/entitlement: the roster signature did not verify against the vendor key")
-	// ErrRosterStale reports that the roster verified but its validity
-	// window has closed. It bounds how long a revoked client keeps working
+	// ErrRosterStale reports that the roster verified but no longer
+	// authorises anything. It bounds how long a revoked client keeps working
 	// offline, and how long a hostile endpoint can replay a genuine roster.
 	//
 	// Those are the same bound, and cache.go is what finally made the first
@@ -33,9 +33,18 @@ var (
 	// the last bundle it authenticated and is refused HERE the moment that
 	// bundle's window closes — at most RosterLifetime after it was signed,
 	// whoever is replaying it and from wherever.
+	//
+	// TWO conditions reach it, and the second is the other half of that
+	// replay bound rather than a separate situation. A window that has
+	// CLOSED is the absolute one. A roster SUPERSEDED by a newer signed
+	// decision this machine has already accepted is the relative one: its
+	// own window may be wide open, and it is still the replay of a statement
+	// the vendor has since replaced. Only the `condition` field says which,
+	// because the resolving action does not differ — publish, or fetch, a
+	// current roster.
 	ErrRosterStale = errs.Define(CodeRosterStale, "ROSTER_STALE",
 		"the roster has expired",
-		"core/entitlement: the roster verified but its validity window has closed")
+		"core/entitlement: the roster verified but no longer authorises — its own window has closed, or a newer signed decision has superseded it")
 	// ErrRevoked reports that the licence UUID is absent from a roster that
 	// was itself valid — the subject was removed upstream.
 	ErrRevoked = errs.Define(CodeRevoked, "REVOKED",
@@ -89,9 +98,20 @@ var (
 		"this run could not be proven to be a CI run",
 		"core/entitlement: the CI provenance token was absent or unverifiable")
 	// ErrCIUnknownKey reports that the token names a signing key the fetched
-	// key set does not publish. Distinct because it is the one CI failure
-	// with a remedy the client can apply itself: refresh the key set once,
-	// since GitHub rotates keys, then refuse if it still does not appear.
+	// key set does not publish — a key rotated out from under a token still in
+	// flight, or a forgery. Distinct from ErrCIUnverifiable because the two
+	// send an operator to different places: this one says the issuer's key set
+	// and the token disagree, which is the issuer's side of the exchange.
+	//
+	// It used to promise a remedy the client applies itself — "refresh the key
+	// set once, since GitHub rotates keys, then refuse if it still does not
+	// appear". No implementation does that and none is expected to: the
+	// verifier holds no key-set cache, so it already fetches the published set
+	// fresh on every verification and a rotation is picked up by the next one.
+	// A second fetch inside one verification would re-read a URL it read
+	// seconds earlier, which cannot make an endpoint publish a kid it does not
+	// publish. See the service's publishedJWKS for the argument in full; a
+	// sentinel must not advertise a mechanism nobody implements.
 	ErrCIUnknownKey = errs.Define(CodeCIUnknownKey, "CI_UNKNOWN_KEY",
 		"the CI token is signed by a key the issuer does not publish",
 		"core/entitlement: no JWKS entry matched the token's kid")

@@ -50,6 +50,7 @@ go_test(
         "roster_parse_external_test.go",
         "service_external_test.go",
         "service_unix_external_test.go",
+        "sshidentity_external_test.go",
         "version_external_test.go",
         "wrap_internal_test.go",
     ],

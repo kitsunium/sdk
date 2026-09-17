@@ -13,10 +13,25 @@
 //
 // What this does NOT prove is that the process holding the token is the job it
 // was minted for. A token exfiltrated from a legitimate run stays usable off-CI
-// until it expires, minutes later. Closing that needs a server-side nonce,
-// which the offline verification model rules out; the window is bounded and
-// the exposure is one free seat, so it is accepted and stated rather than
-// papered over.
+// until it expires. Closing that needs a server-side nonce, which the offline
+// verification model rules out, so the residue is accepted and stated.
+//
+// Stated as what it IS, which is not what this comment used to claim. "The
+// exposure is one free seat" was never demonstrated and is not true. A short
+// token bounds the DURATION a stolen proof keeps working; it says nothing about
+// the NUMBER of processes that can present it at once. Nothing ties a token to a
+// consumer: VerifyActionsToken is pure and offline, it keeps no record of what it
+// has already admitted, and two verifiers could not share one if it did. So one
+// leaked token satisfies every verifier it reaches, all of them at the same time,
+// for as long as it is valid.
+//
+// The honest bound is ONE FREE SEAT PER VERIFIER FOR UP TO 32 MINUTES:
+// maxTokenLifetime (30 min) is the widest window a token may claim, clockSkew
+// (2 min) is what checkTiming allows on top when admitting one, and their sum is
+// how long after minting a stolen token still verifies. What makes that a bound
+// rather than a sentence is ciseat.go handing the token's own expiry to
+// coreent.GrantDeadline — without it the GRANT outlived the proof by up to a day,
+// and the duration this paragraph names described nothing at all.
 package entitlement
 
 import (
@@ -116,22 +131,39 @@ type ActionsClaimsValue struct {
 	// Audience is who the token was minted for. GitHub emits a single string;
 	// the JWT spec allows an array, so both are accepted on decode.
 	Audience audienceClaim `json:"aud"`
-	// RepositoryOwnerID is the entitlement key: a numeric account id that
-	// survives renames and cannot be reused. RepositoryOwner is the display
-	// name for the same account and must never be what a licence matches on —
-	// a freed handle can be claimed by someone else.
+	// RepositoryOwnerID is the entitlement key: the account id, which survives
+	// renames and cannot be reused. RepositoryOwner is the display name for
+	// the same account and must never be what a licence matches on — a freed
+	// handle can be claimed by someone else.
+	//
+	// GitHub sends a decimal string and nothing here VALIDATES that: the only
+	// check is that it is non-empty, and the value is compared to the roster's
+	// keys by string equality. "Numeric" therefore describes what the issuer
+	// emits, not a property this package enforces — and it does not need to,
+	// because a value that is not one of the roster's keys is not entitled
+	// whatever its shape. A decimal check would be a second syntax for a
+	// comparison that is already exact.
 	RepositoryOwnerID string `json:"repository_owner_id"`
 	// RepositoryOwner is the account's current login, for diagnostics only.
 	RepositoryOwner string `json:"repository_owner"`
 	// Repository is "owner/name", for diagnostics and optional narrowing.
 	Repository string `json:"repository"`
-	// EventName is the workflow trigger. pull_request_target runs with the
-	// base repository's identity while potentially executing code from a
-	// fork, so a policy may want to refuse it.
+	// EventName is the workflow trigger, DECODED AND READ BY NOTHING. It is
+	// carried so a diagnostic can print it and so a future policy would not
+	// have to change the wire shape to see it.
+	//
+	// It used to say pull_request_target "runs with the base repository's
+	// identity while potentially executing code from a fork, so a policy may
+	// want to refuse it" — which is true of Actions and describes no
+	// behaviour of this package. Four lines above, this type's own doc
+	// comment says a field that is not read cannot be relied on by accident;
+	// a field whose comment describes a policy is exactly how that gets
+	// relied on. Test_VerifyActionsToken_ignoresTheClaimsNothingReads makes
+	// the silence mechanical.
 	EventName string `json:"event_name"`
-	// RunnerEnvironment distinguishes "github-hosted" from "self-hosted". A
-	// self-hosted runner's token is cryptographically identical but says
-	// nothing about the isolation of the machine that holds it.
+	// RunnerEnvironment distinguishes "github-hosted" from "self-hosted",
+	// DECODED AND READ BY NOTHING, for the same reason and with the same
+	// warning as EventName above.
 	RunnerEnvironment string `json:"runner_environment"`
 	// ExpiresAt, IssuedAt and NotBefore are NumericDate seconds.
 	ExpiresAt int64 `json:"exp"`
@@ -245,10 +277,18 @@ type jwtHeader struct {
 	// none, so any value here is a refusal.
 	Critical []string `json:"crit"`
 	// JWKSetURL and X509URL are places a hostile token can point a naive
-	// verifier at. They are decoded ONLY so their presence can be refused —
+	// verifier at. They are decoded ONLY so a NON-EMPTY value can be refused —
 	// honouring either would let the token nominate its own trust anchor.
+	//
+	// Non-empty, and the precision matters: absent, `""` and `null` all decode
+	// to the empty string and are therefore indistinguishable here, so none of
+	// the three is refused. That is harmless rather than overlooked — neither
+	// field CHOOSES a key source in this implementation, so an empty one
+	// nominates nothing — but "their presence is refused" is what this comment
+	// used to say, and it was not true of `"jku": ""`.
 	JWKSetURL string `json:"jku"`
-	// X509URL is refused for the same reason as JWKSetURL.
+	// X509URL is refused for the same reason as JWKSetURL, on the same
+	// non-empty condition.
 	X509URL string `json:"x5u"`
 }
 
@@ -267,6 +307,21 @@ func strictUnmarshal[T any](data []byte, what string) (decoded T, err error) {
 		return decoded, refuse(coreent.ErrCIUnverifiable,
 			errs.String("stage", "decode_"+what),
 			errs.String("condition", "not a JSON object"))
+	}
+
+	//: A third check, and neither of the two above was it: refusing a non-object
+	//: and refusing a trailing document say nothing about a member named twice.
+	//: json.Decoder keeps the LAST, so {"alg":"none","alg":"RS256"} verifies as
+	//: RS256 here while a reader keeping the first sees "none" — the algorithm
+	//: confusion checkHeaderShape exists to refuse, reintroduced by the parser.
+	//: One branch covers the token header, the claim set and the mint response.
+	//: RFC 8725 §2.6.
+	if member, duplicate := checkNoDuplicateNames(data); duplicate {
+		//: Unverifiable: two readers of this token disagree on its claims.
+		return decoded, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_"+what),
+			errs.String("condition", "one member name declared twice, which two readers can read differently"),
+			errs.String("member", member))
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -536,9 +591,12 @@ func VerifyActionsToken(raw string, keys map[string]*rsa.PublicKey, audience str
 	}
 
 	key, known := keys[kid]
-	//: An unknown kid is a rotated or forged key. The caller refreshes the
-	//: JWKS once and retries; trying every key we hold instead would widen
-	//: the forgery surface for no benefit.
+	//: An unknown kid is a rotated-out or a forged key, and this refuses
+	//: either way. There is deliberately NO retry here and no caller that
+	//: performs one — an earlier comment claimed one did, which was the
+	//: promise-without-mechanism this audit is about. Trying every key we hold
+	//: instead would widen the forgery surface for no benefit, and a second
+	//: fetch is argued against where the fetch lives, in publishedJWKS.
 	if !known {
 		//: Refuse a token we hold no key for.
 		return nil, refuse(coreent.ErrCIUnknownKey,

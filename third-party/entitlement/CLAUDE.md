@@ -27,7 +27,7 @@ has recorded for this package since ADR 0078.
 
 | File | Role |
 |---|---|
-| `sshidentity.go` | `SSHIdentity` — the three port methods over a key directory |
+| `sshidentity.go` | `SSHIdentity` — the three port methods over a key directory, plus the `BoundProver` sibling |
 | `sshidentity_compliance.go` | the compile-time proof that it still satisfies the port |
 | `discover.go` | which subject this machine is enrolled as, and the refusal to guess |
 | `key.go` / `key_unix.go` / `key_windows.go` | load, fingerprint, prove possession, permission checks |
@@ -66,6 +66,20 @@ otherwise.
   refusals, because leaking a particular and losing it are both defects and
   only one of them is the one everybody remembers.
 
+- **`ProvePossessionFor` re-reads the directory, and that is the whole of what
+  it adds.** The engine's comparison happens between its `Fingerprint` call and
+  its proof call, so material replaced in that window was signed for and nothing
+  noticed. Comparing the published half against the value the roster authorised
+  HERE closes it, because the comparison and the signature then happen against
+  one read. It is not a second fingerprint POLICY: the same rendering, compared
+  by byte equality to the roster's own spelling, exactly as `Fingerprint`'s
+  contract already requires. The refusal is `coreent.ErrKeyMismatch` — the
+  taxonomy does not grow — and it names the subject in FIELDS and neither the
+  subject nor the authorised value in the wire-safe sentence, because this
+  refusal is reachable by anyone who can write the key directory. `answer` is
+  shared with `ProvePossession` so the challenge cannot drift between the two.
+  ADR 0092.
+
 - **`ProvePossession` takes the CALLER's signer, so origin-wins is wrong
   there.** An `ssh.Signer` or an `ssh.PublicKey` a caller supplies is free to
   return an `*errs.Error` of its own, and `errs.Wrap` would make it the identity
@@ -93,6 +107,11 @@ otherwise.
 - Add the verification mechanism back here. It is `internal/service/entitlement`
   now, and the whole point of ADR 0079 is that a consumer can reach it without
   this module's dependency graph.
+- Drop the `var _ coreent.BoundProver = (*SSHIdentity)(nil)` assertion. The
+  engine reaches the sibling by TYPE ASSERTION, which cannot fail a build, so an
+  implementation that silently stopped satisfying it would fall back to the
+  unbound proof and nothing would say so. That line is what makes it a compile
+  error instead.
 - Move this to `internal/service`. The measurement above is why, and it is
   reproducible in one `go mod tidy`.
 

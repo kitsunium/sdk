@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "entitlement",
     srcs = [
+        "anchors.go",
         "bundle.go",
         "cache.go",
         "cache_lock.go",
@@ -13,6 +14,7 @@ go_library(
         "ci.go",
         "ciseat.go",
         "errors.go",
+        "jsonnames.go",
         "jwks.go",
         "oidc.go",
         "product.go",
@@ -50,10 +52,12 @@ alias(
 go_test(
     name = "entitlement_test",
     srcs = [
+        "anchors_internal_test.go",
         "bundle_external_test.go",
         "bundle_internal_test.go",
         "cache_concurrency_internal_test.go",
         "cache_internal_test.go",
+        "cache_replay_internal_test.go",
         "cache_unix_internal_test.go",
         "cache_windows_internal_test.go",
         "ci_external_test.go",
@@ -62,10 +66,13 @@ go_test(
         "fixtures_external_test.go",
         "identity_external_test.go",
         "identity_internal_test.go",
+        "jsonnames_internal_test.go",
         "jwks_external_test.go",
         "jwks_internal_test.go",
+        "jwks_rotation_internal_test.go",
         "oidc_external_test.go",
         "oidc_internal_test.go",
+        "possession_internal_test.go",
         "product_internal_test.go",
         "roster_parse_internal_test.go",
         "roughtime_external_test.go",

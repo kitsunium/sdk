@@ -195,7 +195,7 @@ func Test_Service_checkClockAndTime(t *testing.T) {
 
 			//: An unroutable server, so a network round trip would visibly
 			//: cost the test its deadline rather than pass unnoticed.
-			svc := (&Service{vendor: vendorPub, cacheDir: dir}).
+			svc := (&Service{anchors: [][]byte{vendorPub}, cacheDir: dir}).
 				WithTimeServers([]RoughtimeServerValue{{Name: "stub", Address: "192.0.2.1:2002", PublicKey: make([]byte, ed25519.PublicKeySize)}})
 
 			err := svc.checkClockAndTime(mark.Add(tt.offset))

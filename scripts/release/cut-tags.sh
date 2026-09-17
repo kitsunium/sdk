@@ -31,6 +31,8 @@ shopt -s nullglob
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/tag-format.sh
 . "$here/lib/tag-format.sh"
+# shellcheck source=lib/release-scope.sh
+. "$here/lib/release-scope.sh"
 
 # Internal modules in pkg's publish chain (ADR 0001 fixes this set). They are
 # tagged + cross-pinned at release so pkg resolves without `replace`; Go's
@@ -114,29 +116,32 @@ rank_of() {
 # whole graph, so the change ships either way — this only lets its size be
 # stated.
 #
-# Why CLAUDE.md and BUILD.bazel are excluded: compute-bumps.sh:70 already drops
-# them when deciding WHETHER to release ("its churn alone must not cut a
-# release"). Without the same exclusion here, a file that cannot trigger a
-# release could still SIZE one — measured: a commit touching only
-# pkg/v1/foo/CLAUDE.md with `Release-bump: minor` cut v0.2.0. That was the
-# cheapest way past the pkg/ scope, so the two changes together are a
-# hardening, not a relaxation.
+# Why maintainer-only metadata is excluded: compute-bumps.sh already drops it
+# when deciding WHETHER to release ("its churn alone must not cut a release").
+# Without the same exclusion here, a file that cannot trigger a release could
+# still SIZE one — measured: a commit touching only pkg/v1/foo/CLAUDE.md with
+# `Release-bump: minor` cut v0.2.0. That was the cheapest way past the pkg/
+# scope, so the two changes together are a hardening, not a relaxation.
+#
+# WHICH files those are is no longer decided here. This function used to carry
+# its own copy of the answer, two names spelled out in awk, and compute-bumps.sh
+# carried a second copy in `case` — so extending the notion meant editing it
+# twice and the two could disagree. They did: a `BENCH.md` is maintainer-only by
+# the comment's own definition in both places and was in neither list, so
+# pkg/v0.4.4 was cut from a wholly documentary diff and a pkg/ BENCH.md could
+# size a release it had no business sizing (#238). The predicate now lives once,
+# in lib/release-scope.sh, and this function only supplies the sha's path list.
 #
 # awk, not `grep -q`: grep exits on its first match, git takes SIGPIPE, and this
 # repository has already lost a release to a 141 from that shape. awk consumes
 # the whole stream and reports through its exit status, so git always finishes
-# writing. No `grep -c` either — it prints 0 AND exits 1.
+# writing. No `grep -c` either — it prints 0 AND exits 1. That property is why
+# the shared predicate is an awk program and not a bash loop.
 #
 # `-m --first-parent`: a true merge shows NO files under a plain --name-only, so
 # its trailer used to be scoped against an empty list and counted for nothing.
 counts_for_release() {
-  awk '
-    /\/CLAUDE\.md$/   { next }
-    /\/BUILD\.bazel$/ { next }
-    /^pkg\//          { f = 1 }
-    /^internal\//     { f = 1 }
-    END               { exit !f }
-  ' < <(git log -1 --name-only --format= -m --first-parent "$1")
+  release_scope_any < <(git log -1 --name-only --format= -m --first-parent "$1")
 }
 
 # range_trailer <range> — echo the largest Release-bump value carried by a

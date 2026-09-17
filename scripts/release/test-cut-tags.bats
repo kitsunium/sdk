@@ -502,6 +502,42 @@ commit_pkg_doc() {
   [[ "$output" == *"OUTSIDE the trailer block"* ]]
 }
 
+# commit_pkg_bench <message> — touches ONLY a BENCH.md under pkg/. ADR 0089
+# settled that a file which cannot CUT a release must not SIZE one, and then
+# spelled "which files" as two names in two places. A BENCH.md is maintainer-only
+# by that ADR's own definition and was in neither list, so it could both cut a
+# release (it cut pkg/v0.4.4 — #238) and size one. It can now do neither, and
+# the two halves read the one predicate in lib/release-scope.sh.
+commit_pkg_bench() {
+  mkdir -p pkg/v1/foo
+  printf 'BenchmarkFoo-8  %s ns/op\n' "$RANDOM" >>pkg/v1/foo/BENCH.md
+  g add -A
+  g commit -q --no-verify -F - <<<"$1"
+}
+
+@test "a trailer on a pkg/ BENCH.md alone does NOT size the release (#238)" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg_bench $'docs(bench): re-measure\n\nRelease-bump: minor'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [[ "$output" != *"pkg/v0.2.0"* ]]
+}
+
+# And the refusal follows the same scope, for the same reason the CLAUDE.md row
+# above does: a buried trailer on a commit that cannot size a release is an
+# alarm about nothing. Without this the widened category would have turned every
+# BENCH.md merge carrying a long squash message into a red release.
+@test "a buried trailer on a pkg/ BENCH.md alone is not an alarm (#238)" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_pkg_bench $'docs(bench): re-measure\n\nRelease-bump: minor\n\nProse after the trailer hides it.'
+  run bash -c "echo pkg | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"OUTSIDE the trailer block"* ]]
+}
+
 @test "an unwalkable --range is refused rather than read as no trailer" {
   run bash -c "echo pkg | $SCRIPT --dry-run --range=nosuchrev..HEAD"
   [ "$status" -eq 64 ]

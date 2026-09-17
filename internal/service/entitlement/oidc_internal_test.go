@@ -5,8 +5,10 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"math/big"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,47 @@ import (
 // internalKeyBits matches the smallest modulus the verifier accepts, so these
 // tests exercise the signature path rather than the size guard.
 const internalKeyBits int = 2048
+
+// actionsClaimsFixture is the claim set a minted token carries.
+//
+// A struct and not a map[string]any, for two reasons that point the same way.
+// These are JSON MEMBER NAMES rather than keys anybody looks up, which is what
+// KTN-VAR-STRMAP is about; and a struct makes a fixture that omits a claim a
+// compile-time choice rather than a missing line nobody notices. The two token
+// builders in this package share it so a claim added for one test exists for
+// both.
+type actionsClaimsFixture struct {
+	// Issuer is `iss`, which checkClaims requires to be ActionsIssuer.
+	Issuer string `json:"iss"`
+	// Audience is `aud`, the single-string form GitHub emits.
+	Audience string `json:"aud"`
+	// Subject is `sub`, required to be non-empty and never parsed.
+	Subject string `json:"sub"`
+	// Repository is `repository`, carried into the grant's subject.
+	Repository string `json:"repository"`
+	// RepositoryOwner is `repository_owner`, the mutable login.
+	RepositoryOwner string `json:"repository_owner"`
+	// RepositoryOwnerID is `repository_owner_id`, the entitlement key.
+	RepositoryOwnerID string `json:"repository_owner_id"`
+	// IssuedAt is `iat` in NumericDate seconds.
+	IssuedAt int64 `json:"iat"`
+	// ExpiresAt is `exp` in NumericDate seconds.
+	ExpiresAt int64 `json:"exp"`
+	// EventName is `event_name`, which nothing in this package reads.
+	EventName string `json:"event_name,omitempty"`
+	// RunnerEnvironment is `runner_environment`, likewise unread.
+	RunnerEnvironment string `json:"runner_environment,omitempty"`
+}
+
+// jwtHeaderFixture is the JOSE header a minted token carries.
+type jwtHeaderFixture struct {
+	// Algorithm is `alg`, which checkHeader requires to be RS256.
+	Algorithm string `json:"alg"`
+	// KeyID is `kid`, which selects the published key.
+	KeyID string `json:"kid"`
+	// Type is `typ`, which must be JWT when present.
+	Type string `json:"typ"`
+}
 
 // signFixture signs a signing input the way GitHub does, so a test exercises
 // the real verification path rather than a stub of it.
@@ -708,6 +751,192 @@ func Test_rsaKeyFromJWK(t *testing.T) {
 			}
 			if key.N.Cmp(priv.N) != 0 || key.E != priv.E {
 				t.Error("rsaKeyFromJWK() rebuilt a different key")
+			}
+		})
+	}
+}
+
+// Test_strictUnmarshal_refusesADuplicateMember pins the third check, because
+// neither of the two that were already there was it: refusing a non-object and
+// refusing a trailing document say nothing about a member named twice.
+//
+// The algorithm row is why this matters. json.Decoder keeps the LAST, so
+// {"alg":"none","alg":"RS256"} reaches checkHeaderShape as RS256 and is
+// accepted, while a reader keeping the first sees "none" — the algorithm
+// confusion that check exists to refuse, reintroduced by the parser underneath
+// it.
+func Test_strictUnmarshal_refusesADuplicateMember(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+		reason  string
+	}{
+		{
+			name:    "a clean header",
+			input:   `{"alg":"RS256","kid":"k1"}`,
+			wantErr: false,
+			reason:  "the ordinary shape must still decode",
+		},
+		{
+			name:    "two algorithms",
+			input:   `{"alg":"none","alg":"RS256","kid":"k1"}`,
+			wantErr: true,
+			reason:  "two readers disagree on whether this token is signed at all",
+		},
+		{
+			name:    "two key ids",
+			input:   `{"alg":"RS256","kid":"k1","kid":"k2"}`,
+			wantErr: true,
+			reason:  "kid selects the key the signature is checked against",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := strictUnmarshal[jwtHeader]([]byte(tt.input), "token header")
+			if tt.wantErr && err == nil {
+				t.Fatalf("strictUnmarshal(%s) error = nil, want a refusal (%s)", tt.input, tt.reason)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("strictUnmarshal(%s) error = %v, want nil (%s)", tt.input, err, tt.reason)
+			}
+		})
+	}
+}
+
+// mintFixtureToken signs a compact JWS over exactly the claims given, so a case
+// can vary one of them and change nothing else.
+//
+// Shared by every test in this package that needs a token. The signature is a
+// real RS256 one over the real signing input: the thing under test is which
+// claims the verifier acts on, and a stubbed verification would hand back
+// whatever the stub was told to say.
+func mintFixtureToken(t *testing.T, priv *rsa.PrivateKey, claims actionsClaimsFixture) string {
+	t.Helper()
+
+	encode := func(v any) string {
+		raw, marshalErr := json.Marshal(v)
+		//: A failure here is an environment problem, not a test outcome.
+		if marshalErr != nil {
+			t.Fatalf("marshalling segment: %v", marshalErr)
+		}
+		return base64.RawURLEncoding.EncodeToString(raw)
+	}
+	header := encode(jwtHeaderFixture{Algorithm: "RS256", KeyID: "k1", Type: "JWT"})
+	payload := encode(claims)
+	//: A real RS256 signature over the real signing input, so the verification
+	//: under test is the production one.
+	signature := signFixture(t, priv, header+"."+payload)
+	//: The token as a runner would hand it over.
+	return header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+// Test_VerifyActionsToken_ignoresTheClaimsNothingReads makes an ABSENCE
+// mechanical.
+//
+// ActionsClaimsValue's doc comment says only the claims this package acts on are
+// decoded, "a field that is not read cannot be relied on by accident" — and four
+// lines below it, event_name and runner_environment carried comments describing a
+// policy: pull_request_target "runs with the base repository's identity while
+// potentially executing code from a fork, so a policy may want to refuse it", and
+// a self-hosted runner's token "says nothing about the isolation of the machine
+// that holds it". Both sentences are true of Actions and describe no behaviour
+// here. A reader auditing the CI path would take them for a control that exists.
+//
+// The two tokens below differ in exactly those two claims and in nothing else,
+// and they carry the values a policy would refuse if there were one. Verification
+// must reach the identical outcome for both, field for field, so the day somebody
+// adds the refusal those comments implied, this test is what says the claim stopped
+// being unread.
+//
+// It is a characterisation test and would have passed before this audit: nothing
+// was reading these claims then either. What changed is that the comments no
+// longer say otherwise, and that this test is now what keeps them honest.
+func Test_VerifyActionsToken_ignoresTheClaimsNothingReads(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().Truncate(time.Second)
+
+	tests := []struct {
+		name string
+		// eventName and runnerEnvironment are the only two claims that differ
+		// between the pair; the first row is what GitHub sends for an ordinary
+		// push, the second the two values a policy would single out.
+		eventName         string
+		runnerEnvironment string
+		reason            string
+	}{
+		{
+			name:              "the benign pair",
+			eventName:         "push",
+			runnerEnvironment: "github-hosted",
+			reason:            "the baseline every other row is compared against",
+		},
+		{
+			name:              "the pair a policy would refuse",
+			eventName:         "pull_request_target",
+			runnerEnvironment: "self-hosted",
+			reason:            "the exact two values the removed comments described refusing, accepted identically because nothing reads them",
+		},
+	}
+
+	priv, keyErr := rsa.GenerateKey(nil, internalKeyBits)
+	//: A failure here is an environment problem, not a test outcome.
+	if keyErr != nil {
+		t.Fatalf("generating signing key: %v", keyErr)
+	}
+	keys := map[string]*rsa.PublicKey{"k1": &priv.PublicKey}
+
+	// baseline is what the first row decodes to, and what every later row must
+	// match once the two unread claims are set aside.
+	var baseline ActionsClaimsValue
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token := mintFixtureToken(t, priv, actionsClaimsFixture{
+				Issuer:            ActionsIssuer,
+				Audience:          DefaultActionsAudience,
+				Subject:           "repo:kodflow/widget:ref:refs/heads/main",
+				Repository:        "kodflow/widget",
+				RepositoryOwner:   "kodflow",
+				RepositoryOwnerID: "42",
+				IssuedAt:          now.Add(-time.Minute).Unix(),
+				ExpiresAt:         now.Add(4 * time.Minute).Unix(),
+				EventName:         tt.eventName,
+				RunnerEnvironment: tt.runnerEnvironment,
+			})
+
+			claims, err := VerifyActionsToken(token, keys, DefaultActionsAudience, now)
+			//: Accepted is half the assertion: a refusal on either row would be
+			//: one of these claims being read.
+			if err != nil {
+				t.Fatalf("VerifyActionsToken() error = %v, want nil (%s)", err, tt.reason)
+			}
+			//: The claims ARE decoded — the fields exist so a diagnostic can
+			//: print them — which is what makes "decoded and read by nothing"
+			//: the precise statement rather than "absent".
+			if claims.EventName != tt.eventName || claims.RunnerEnvironment != tt.runnerEnvironment {
+				t.Errorf("VerifyActionsToken() decoded event_name=%q runner_environment=%q, want %q and %q (%s)",
+					claims.EventName, claims.RunnerEnvironment, tt.eventName, tt.runnerEnvironment, tt.reason)
+			}
+			//: Set the two aside and everything the package acts on must be
+			//: identical across the pair. Comparing the whole struct rather than
+			//: a hand-listed set is what makes this mechanical: a field that
+			//: starts varying with these two fails here without being named.
+			claims.EventName, claims.RunnerEnvironment = "", ""
+			//: The first row records the baseline; every later row matches it.
+			if baseline.Issuer == "" {
+				baseline = *claims
+				return
+			}
+			if !reflect.DeepEqual(*claims, baseline) {
+				t.Errorf("VerifyActionsToken() decided %+v, want the baseline %+v — these two claims changed something (%s)",
+					*claims, baseline, tt.reason)
 			}
 		})
 	}

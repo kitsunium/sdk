@@ -66,14 +66,87 @@ func (s *Service) ciSeat(roster *coreent.RosterValue, now time.Time) (grant core
 	}
 	//: The subject names the run rather than a device, so `license status`
 	//: and any log say which repository was authorised.
+	//:
+	//: THREE bounds and not two. The roster's window and the account's term are
+	//: the two a device grant rests on; a CI seat rests on a third document, the
+	//: Actions token, and core/grant.go's invariant is that "a grant may not
+	//: outlive the document that authorised it". It did: the token is minted for
+	//: at most maxTokenLifetime and the seat outlived it by up to a day, so an
+	//: exfiltrated token bought a grant lasting far longer than the token. The
+	//: claim is taken as written, with no clockSkew added — checkTiming allows
+	//: skew to ADMIT a token, which is permissive and correct there, while the
+	//: same allowance on a BOUND would extend the grant past the proof.
+	tokenExpiry := time.Unix(claims.ExpiresAt, 0)
+	//: A grant that is expired the instant it is returned is not an answer.
+	//:
+	//: checkTiming admits a token until exp + clockSkew, which is permissive
+	//: and correct THERE: a local clock two minutes fast must not reject a
+	//: token GitHub still considers live. But the bound above is the raw exp,
+	//: so inside that allowance Verify succeeded and the grant it returned was
+	//: already past its deadline — a successful verification handing back
+	//: authorization every consumer must immediately reject.
+	//:
+	//: Refused rather than extended. Widening the deadline to exp + clockSkew
+	//: would put the grant past the document that authorised it, which is the
+	//: invariant the third bound was added for in the first place; and a CI
+	//: seat built on a token that has actually expired buys a run nothing it
+	//: could use. The skew allowance keeps doing its job for a token whose exp
+	//: is still ahead, which is every ordinary run.
+	//: `!After` and not `After`: the boundary belongs to the refusal. At
+	//: now == exp the grant's NotAfter is now, and Expired compares strictly,
+	//: so it reports that grant UNEXPIRED — a grant with zero usable lifetime
+	//: that every consumer would then try to use. My own row for this read
+	//: "expired at this very instant" and planted -1s, which is not the
+	//: instant; the tokenWindow: 0 row below is.
+	if !tokenExpiry.After(now) {
+		//: Named as the token's problem, not the roster's or the account's.
+		return coreent.GrantValue{}, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "ci_seat"),
+			errs.String("condition", "the Actions token expired before this verification, so any grant built on it would be expired the instant it was returned"),
+			errs.String("token_exp", tokenExpiry.UTC().Format(time.RFC3339)),
+			errs.String("now", now.UTC().Format(time.RFC3339)))
+	}
+
 	return coreent.GrantValue{
 		Subject:    "ci:" + claims.Repository,
 		VerifiedAt: now,
-		NotAfter:   coreent.GrantDeadline(now, roster.ExpiresAt, entitlement.ExpiresAt),
+		NotAfter:   coreent.GrantDeadline(now, roster.ExpiresAt, entitlement.ExpiresAt, tokenExpiry),
 	}, nil
 }
 
 // publishedJWKS fetches GitHub's signing keys.
+//
+// # Fetched every time, cached never, retried never
+//
+// There is no key-set cache anywhere in this package, and that is the design
+// rather than an omission — it is what makes a GitHub key rotation a non-event:
+// every verification reads the currently published set, so the next verification
+// after a rotation sees the new key with no cache to invalidate and no process
+// to restart. The cost is one round trip per CI verification, which is already
+// being paid for the roster.
+//
+// What there is also no mechanism for is a SECOND fetch when the token names a
+// kid the set does not publish, and selectKey's own comment used to claim its
+// caller performed one. It never did, and building one would be worse than the
+// gap it appears to close:
+//
+//   - it cannot help. A second GET of the same URL, seconds after the first,
+//     from the same process and the same network path, returns the same bytes.
+//     An endpoint that does not publish a kid does not publish it twice.
+//   - it would be an amplification lever. The fetch happens BEFORE any token is
+//     examined and exactly once per verification, so no token can currently
+//     cause a request. A refresh keyed on an unknown kid reverses that: a
+//     random kid per invocation would buy a request per invocation, aimed at
+//     somebody else's host, and would then need rate limiting to be safe —
+//     new state, a timer, and a bound, to restore a property the absence of the
+//     feature already has.
+//   - the cache it presupposes does not exist. "Refresh on unknown kid" is the
+//     repair for a STALE cached set. Adding the cache to make the refresh
+//     meaningful would introduce the staleness the refresh then fixes.
+//
+// So an unknown kid refuses, and Test_Service_ciSeat_fetchesTheKeySetOncePerVerification
+// and Test_Service_ciSeat_picksUpARotationOnTheNextVerification are what keep
+// these two paragraphs answerable to the code.
 //
 // Bounded by the same reader the roster fetch uses: the endpoint is untrusted
 // by construction, and an unbounded read hands it a memory-exhaustion lever.

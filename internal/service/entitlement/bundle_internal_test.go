@@ -1,6 +1,7 @@
 package entitlement
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -220,7 +221,7 @@ func Test_authenticateBundle(t *testing.T) {
 				t.Fatalf("marshalling bundle: %v", bundleErr)
 			}
 
-			roster, err := authenticateBundle(bundle, vendorPub)
+			roster, payload, err := authenticateBundle(bundle, vendorPub)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Errorf("authenticateBundle() error = %v, want %v (%s)", err, tt.wantErr, tt.reason)
@@ -234,6 +235,13 @@ func Test_authenticateBundle(t *testing.T) {
 			//: reason to forget when the vendor signed it.
 			if !roster.IssuedAt.Equal(issued) {
 				t.Errorf("authenticateBundle() IssuedAt = %s, want %s (%s)", roster.IssuedAt, issued, tt.reason)
+			}
+			//: The signed bytes come back too, and they are the ones the
+			//: signature covered rather than the envelope around them: the
+			//: ratchet identifies a statement by this digest, so a payload
+			//: returned re-encoded would make one document read as two.
+			if !bytes.Equal(payload, raw) {
+				t.Errorf("authenticateBundle() payload = %q, want the signed bytes %q (%s)", payload, raw, tt.reason)
 			}
 		})
 	}

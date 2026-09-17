@@ -86,6 +86,18 @@ func decodeJWKS(raw []byte) (decoded JWKSValue, err error) {
 			errs.Int("limit_bytes", maxJWKSBytes),
 			errs.Int("got_bytes", len(raw)))
 	}
+	//: Nothing signs a key set — TLS is the whole of its authentication — so
+	//: a duplicate here is injectable by anyone who can answer for the issuer's
+	//: host. Two "keys" arrays mean the second one's keys are the ones tokens
+	//: get verified against, and ParseJWKS's duplicate-kid check looks BETWEEN
+	//: entries of one array, never at a replaced array.
+	if member, duplicate := checkNoDuplicateNames(raw); duplicate {
+		//: Unverifiable rather than proceed with a key set somebody else chose.
+		return decoded, refuse(coreent.ErrCIUnverifiable,
+			errs.String("stage", "decode_jwks"),
+			errs.String("condition", "one member name declared twice, which two readers can read differently"),
+			errs.String("member", member))
+	}
 	//: A key set we cannot decode tells us nothing.
 	if unmarshalErr := json.Unmarshal(raw, &decoded); unmarshalErr != nil {
 		//: Report it as unverifiable rather than proceed with no keys, which

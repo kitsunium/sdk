@@ -2,9 +2,8 @@ package entitlement
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -36,28 +35,15 @@ const concurrentRounds int = 400
 func paddedBundle(t *testing.T, priv ed25519.PrivateKey, issued time.Time, pad int) []byte {
 	t.Helper()
 
-	roster := coreent.RosterValue{
+	//: One subject whose UUID is the padding, so the serialised length varies
+	//: with pad while the document stays a well-formed roster.
+	return signedBundle(t, priv, coreent.RosterValue{
 		IssuedAt:  issued,
 		ExpiresAt: issued.Add(9 * time.Hour),
 		Subjects: map[string]coreent.SubjectValue{
 			strings.Repeat("a", pad): {Fingerprint: "SHA256:padding"},
 		},
-	}
-	raw, marshalErr := json.Marshal(roster)
-	//: A failure here is an environment problem, not a test outcome.
-	if marshalErr != nil {
-		t.Fatalf("marshalling roster: %v", marshalErr)
-	}
-	bundle, bundleErr := json.Marshal(BundleValue{
-		Payload:   base64.StdEncoding.EncodeToString(raw),
-		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, raw)),
 	})
-	//: A failure here is an environment problem, not a test outcome.
-	if bundleErr != nil {
-		t.Fatalf("marshalling bundle: %v", bundleErr)
-	}
-	//: Return the one document the fallback reads.
-	return bundle
 }
 
 // Test_rememberRoster_concurrentGenerationsNeverLowerTheMark pins the ratchet
@@ -111,12 +97,12 @@ func Test_rememberRoster_concurrentGenerationsNeverLowerTheMark(t *testing.T) {
 			}
 
 			older, newer := base.Add(tt.gap), base.Add(2*tt.gap)
-			lowered := 0
+			lowered, refusedNewest, wrongRefusal := 0, 0, 0
 			//: Each round is its own cache directory and its own race, so one
 			//: round's outcome cannot seed the next.
 			for range concurrentRounds {
 				dir := t.TempDir()
-				svc := (&Service{vendor: vendorPub}).WithCache(dir)
+				svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
 				//: Seed a mark BELOW both generations, so both writers pass
 				//: the comparison and the interleaving is what decides.
 				if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, base, 1)); seedErr != nil {
@@ -125,20 +111,38 @@ func Test_rememberRoster_concurrentGenerationsNeverLowerTheMark(t *testing.T) {
 
 				start := make(chan struct{})
 				var wg sync.WaitGroup
-				//: Goroutine lifecycle: each remembers one generation and
-				//: exits; the barrier makes them contend rather than queue.
-				remember := func(issued time.Time) {
+				var newestVerdict, oldestVerdict error
+				//: Goroutine lifecycle: each remembers one generation into its
+				//: own verdict slot and exits; the barrier makes them contend
+				//: rather than queue, and the slots are read only after Wait so
+				//: neither is a shared write.
+				remember := func(issued time.Time, verdict *error) {
 					defer wg.Done()
 					raw := paddedBundle(t, vendorPriv, issued, 1)
 					<-start
-					svc.rememberRoster(raw, &coreent.RosterValue{IssuedAt: issued})
+					*verdict = svc.rememberRoster(raw)
 				}
 				wg.Add(2)
-				go remember(newer)
-				go remember(older)
+				go remember(newer, &newestVerdict)
+				go remember(older, &oldestVerdict)
 				close(start)
 				wg.Wait()
 
+				//: The NEWEST generation is newer than the seed and newer than
+				//: its rival, so nothing can supersede it whichever order the
+				//: two took the guard in — and a stand-down refuses nothing.
+				//: This is an invariant of the race rather than an outcome of
+				//: it, which is why it counts rather than being tolerated.
+				if newestVerdict != nil {
+					refusedNewest++
+				}
+				//: The oldest may or may not be refused: that IS what the race
+				//: decides. What is not optional is WHICH refusal, so a future
+				//: change refusing it for some other reason cannot pass as this
+				//: one.
+				if oldestVerdict != nil && !errors.Is(oldestVerdict, coreent.ErrRosterStale) {
+					wrongRefusal++
+				}
 				//: The mark after the race, whoever renamed last.
 				if !svc.signedHighWaterMark().Equal(newer) {
 					lowered++
@@ -149,17 +153,25 @@ func Test_rememberRoster_concurrentGenerationsNeverLowerTheMark(t *testing.T) {
 				t.Errorf("the mark ended below the newest generation in %d of %d rounds, want 0 (%s)",
 					lowered, concurrentRounds, tt.reason)
 			}
+			if refusedNewest != 0 {
+				t.Errorf("the newest generation was REFUSED in %d of %d rounds, want 0 — nothing supersedes the newest document (%s)",
+					refusedNewest, concurrentRounds, tt.reason)
+			}
+			if wrongRefusal != 0 {
+				t.Errorf("the older generation was refused with something other than coreent.ErrRosterStale in %d of %d rounds, want 0 (%s)",
+					wrongRefusal, concurrentRounds, tt.reason)
+			}
 		})
 	}
 }
 
 // refreshRacingAReader runs one round of the race and returns the mark left
-// behind: a read through the package's own read path, concurrent with one
-// install of raw.
+// behind — a read through the package's own read path, concurrent with one
+// install of raw — together with what the install itself had to say.
 //
 // It is a function rather than a closure in the loop so that neither the
 // Service nor the barrier is captured by a closure created per iteration.
-func refreshRacingAReader(svc *Service, raw []byte, issued time.Time) time.Time {
+func refreshRacingAReader(svc *Service, raw []byte) (mark time.Time, verdict error) {
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	//: Goroutine lifecycle: waits on the barrier, performs exactly one read
@@ -171,10 +183,15 @@ func refreshRacingAReader(svc *Service, raw []byte, issued time.Time) time.Time 
 		svc.signedHighWaterMark()
 	})
 	close(start)
-	svc.rememberRoster(raw, &coreent.RosterValue{IssuedAt: issued})
+	//: The install may lose to the reader's guard, which is what this round
+	//: measures. Its VERDICT is not in doubt either way: raw is a newer
+	//: generation than the seeded one, nothing supersedes a newer document, and
+	//: a stand-down refuses nothing. It is returned so the caller asserts that
+	//: rather than the round quietly tolerating a refusal nobody expected.
+	verdict = svc.rememberRoster(raw)
 	wg.Wait()
-	//: Whatever survived the race.
-	return svc.signedHighWaterMark()
+	//: Whatever survived the race, and what the install said about it.
+	return svc.signedHighWaterMark(), verdict
 }
 
 // Test_rememberRoster_refreshesWhileTheCacheIsBeingRead pins that a refresh
@@ -231,14 +248,20 @@ func Test_rememberRoster_refreshesWhileTheCacheIsBeingRead(t *testing.T) {
 			//: Each round is its own cache directory and its own race.
 			for range concurrentRounds {
 				dir := t.TempDir()
-				svc := (&Service{vendor: vendorPub}).WithCache(dir)
+				svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
 				//: The bundle already on disk, which the reader will be inside.
 				if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, stale, 1)); seedErr != nil {
 					t.Fatalf("seeding cache: %v", seedErr)
 				}
 
 				//: The refresh either landed or was silently dropped.
-				if !refreshRacingAReader(svc, paddedBundle(t, vendorPriv, fresh, 1), fresh).Equal(fresh) {
+				mark, verdict := refreshRacingAReader(svc, paddedBundle(t, vendorPriv, fresh, 1))
+				//: A newer generation is never REFUSED, whatever the guard does
+				//: with the install itself.
+				if verdict != nil {
+					t.Fatalf("rememberRoster() refused a newer generation: %v (%s)", verdict, tt.reason)
+				}
+				if !mark.Equal(fresh) {
 					notRefreshed++
 				}
 			}
@@ -338,7 +361,7 @@ func Test_writeCachedBundle_concurrentWritersNeverDestroyTheCache(t *testing.T) 
 					continue
 				}
 				//: Signature only: freshness is not what this round is about.
-				if _, authErr := authenticateBundle(raw, vendorPub); authErr != nil {
+				if _, _, authErr := authenticateBundle(raw, vendorPub); authErr != nil {
 					destroyed++
 				}
 			}
@@ -425,7 +448,7 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 			older, newer := base.Add(tt.gap), base.Add(2*tt.gap)
 
 			dir := t.TempDir()
-			svc := (&Service{vendor: vendorPub}).WithCache(dir)
+			svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
 			//: The generation already installed, which the stand-down leaves in
 			//: place.
 			if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, older, 1)); seedErr != nil {
@@ -461,7 +484,11 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 
 			//: The newer generation arrives while the guard is held elsewhere.
 			//: This blocks for cacheLockBudget and then stands down.
-			svc.rememberRoster(paddedBundle(t, vendorPriv, newer, 1), &coreent.RosterValue{IssuedAt: newer})
+			//: The install stands down here by construction, and a stand-down
+			//: refuses nothing — see rememberRoster's third lapse.
+			if err := svc.rememberRoster(paddedBundle(t, vendorPriv, newer, 1)); err != nil {
+				t.Fatalf("rememberRoster() error = %v, want nil — a stand-down is not a refusal (%s)", err, tt.reason)
+			}
 
 			//: Give the guard back BEFORE reading, so the read below measures
 			//: the mark rather than the contention.
@@ -473,9 +500,9 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 			//: LANDED, the assertion below would pass without the stand-down ever
 			//: happening, and this test would be a shape that guarantees its own
 			//: result. The cache must still hold the older generation.
-			if installed := svc.markWhileHeld(); !installed.Equal(older) {
+			if installed := svc.markWhileHeld(); !installed.issued.Equal(older) {
 				t.Fatalf("the install was not blocked: the cache holds %s, want the seeded %s — this test measured nothing",
-					installed.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339))
+					installed.issued.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339))
 			}
 
 			//: The property, which the stand-down broke.
@@ -492,10 +519,133 @@ func Test_rememberRoster_keepsTheMarkWhenTheInstallStandsDown(t *testing.T) {
 			//: keeps "the residue is one Service instance wide" from being a
 			//: sentence nobody can check; raiseMarkFloor says why the shared
 			//: alternative was refused. Change this line only with that comment.
-			if fresh := (&Service{vendor: vendorPub}).WithCache(dir).signedHighWaterMark(); !fresh.Equal(older) {
+			if fresh := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir).signedHighWaterMark(); !fresh.Equal(older) {
 				t.Errorf("a second Service over the same cache reads %s, want the installed %s — the documented boundary of the in-process floor moved (%s)",
 					fresh.UTC().Format(time.RFC3339), older.UTC().Format(time.RFC3339), tt.reason)
 			}
 		})
+	}
+}
+
+// Test_rememberRoster_refusesAnOlderRosterAfterAStandDown is the exploitation
+// the split between the two decisions closes.
+//
+// The acceptance verdict compared the offer to the DISK only. So after an
+// install stood down — the guard held elsewhere, no guard on the platform, an
+// unwritable directory, a write that failed halfway — a roster OLDER than the
+// one this process had just authenticated was still newer than the stale disk
+// copy, and was therefore installed AND returned to authorization. If the newer
+// one carried a withdrawal and the older one did not, the withdrawal was undone
+// for the rest of the process, and through the offline fallback after it.
+//
+// The second assertion is as load-bearing as the first. raiseMarkFloor's doc
+// comment argues at length that the INSTALL must keep comparing against the
+// disk: refusing to install a generation newer than what is cached but older
+// than what was authenticated would leave the offline fallback on a staler
+// bundle to protect a number already protected in memory. That reasoning is
+// sound, so the fix must refuse to ACT on the document while still caching it.
+// A test that only checked the refusal would pass against a change that
+// refused both, which would be the documented mistake.
+func Test_rememberRoster_refusesAnOlderRosterAfterAStandDown(t *testing.T) {
+	t.Parallel()
+
+	//: Named, so the runCase closure can take one. One row today: the
+	//: scenario needs three generations and a held guard, and a second
+	//: arrangement of those would be a different test rather than another
+	//: row. The table shape is still what this repository requires, so
+	//: ktn-linter can credit the branches, and a second row costs one line.
+	type testCase struct {
+		name string
+		// gap separates the three generations from each other.
+		gap    time.Duration
+		reason string
+	}
+
+	tests := []testCase{
+		{
+			name:   "the guard is held while the newest generation arrives",
+			gap:    time.Hour,
+			reason: "an install that stood down is still an instant this process authenticated, and the acceptance verdict never read it",
+		},
+	}
+
+	runCase := func(t *testing.T, tt testCase) {
+		t.Helper()
+		t.Parallel()
+
+		vendorPub, vendorPriv, keyErr := ed25519.GenerateKey(nil)
+		//: A failure here is an environment problem, not a test outcome.
+		if keyErr != nil {
+			t.Fatalf("generating vendor key: %v", keyErr)
+		}
+
+		base := time.Now().Truncate(time.Second)
+		//: Three generations, so "older than the floor" and "newer than the
+		//: disk" can both be true of the middle one — the whole scenario.
+		onDisk, middle, newest := base, base.Add(tt.gap), base.Add(2*tt.gap)
+
+		dir := t.TempDir()
+		svc := (&Service{anchors: [][]byte{vendorPub}}).WithCache(dir)
+		if seedErr := writeCachedBundle(dir, paddedBundle(t, vendorPriv, onDisk, 1)); seedErr != nil {
+			t.Fatalf("seeding cache: %v", seedErr)
+		}
+
+		//: A second locker on the same directory is what another process is; see
+		//: the stand-down test above for why UnsupportedPlatform is the only
+		//: refusal worth skipping on.
+		holder, lockErr := svclock.NewFileLocker(svclock.FileConfig{Dir: dir, Poll: cacheLockPoll})
+		if errors.Is(lockErr, coreproc.UnsupportedPlatform) {
+			t.Skipf("no file lock on %s, so cacheGuard returns nil and there is no stand-down to reproduce", runtime.GOOS)
+		}
+		//: A failure here is an environment problem, not a test outcome.
+		if lockErr != nil {
+			t.Fatalf("building the holder's locker: %v", lockErr)
+		}
+		lease, acquireErr := holder.Acquire(t.Context(), cacheLockName)
+		//: A failure here is an environment problem, not a test outcome.
+		if acquireErr != nil {
+			t.Fatalf("holding the cache guard: %v", acquireErr)
+		}
+
+		//: The NEWEST generation is authenticated and its install stands down. A
+		//: stand-down is not a refusal, which is the deliberate direction.
+		if err := svc.rememberRoster(paddedBundle(t, vendorPriv, newest, 1)); err != nil {
+			t.Fatalf("rememberRoster(newest) error = %v, want nil — a stand-down is not a refusal", err)
+		}
+		//: Released, so the next offer can reach the cache. The floor now holds
+		//: `newest` and the disk still holds `onDisk`.
+		if releaseErr := lease.Release(t.Context()); releaseErr != nil {
+			t.Fatalf("releasing the cache guard: %v", releaseErr)
+		}
+
+		//: THE REPLAY. Newer than the disk, older than what this process has
+		//: already authenticated.
+		err := svc.rememberRoster(paddedBundle(t, vendorPriv, middle, 1))
+		if !errors.Is(err, coreent.ErrRosterStale) {
+			t.Fatalf("rememberRoster(middle) error = %v, want %v — an older roster reached authorization because the verdict only ever compared against the disk",
+				err, coreent.ErrRosterStale)
+		}
+
+		//: And it was still CACHED, because fresher-than-disk beats staler for the
+		//: offline fallback. Refusing the install too would be the mistake
+		//: raiseMarkFloor's doc comment argues against.
+		mark := svc.signedHighWaterMark()
+		if !mark.Equal(newest) {
+			t.Errorf("signedHighWaterMark() = %v, want %v — the floor must still bound the mark from below", mark, newest)
+		}
+		cached, readErr := os.ReadFile(cachedBundlePath(dir))
+		//: A cache that cannot be read back says nothing about the install.
+		if readErr != nil {
+			t.Fatalf("reading the cache back: %v", readErr)
+		}
+		installed := bundleMarkAnyAnchor(cached, [][]byte{vendorPub})
+		if !installed.present || !installed.issued.Equal(middle) {
+			t.Errorf("the cache holds %v, want %v — the install must still follow the DISK comparison, or the offline fallback is left staler to protect a number already protected in memory",
+				installed.issued, middle)
+		}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }
