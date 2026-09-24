@@ -10,7 +10,9 @@ supervisor that armed `SetChildSubreaper`) must reap children that reparent to
 it, or they pile up as zombies and exhaust the pid space. This package wraps the
 kernel mechanics:
 
-- a SIGCHLD handler driving a non-blocking `Wait4(-1, …, WNOHANG, …)` drain loop;
+- a SIGCHLD handler driving a non-blocking `Wait4(-1, …, WNOHANG, …)` drain loop,
+  through `childwait.ReapAny` so that a child spawned by `pkg/v1/process` has
+  its exit status handed to its own `Wait` rather than lost (ADR 0093);
 - `prctl(PR_SET_CHILD_SUBREAPER, 1)` to opt a non-init supervisor into receiving
   orphaned grandchildren (Linux only);
 - `IsPID1()` to detect the init role.
@@ -50,3 +52,9 @@ No codes are minted here. Returned errors are the central `core/proc` sentinels:
 goroutine-leak check, idempotency, concurrent `ReapOnce` (race), and the
 issue-#63 subreaper reparent-and-reap acceptance test (skipped with a typed
 contract assertion when `PR_SET_CHILD_SUBREAPER` is unavailable).
+
+`handoff_unix_external_test.go`: the reaper running while children that exit 0
+are spawned through `service/proc/exec` and waited — at once (one and eight
+concurrent spawners) and after the reaper has already collected them. Every
+`Wait` must report code 0. `SDK_REAPER_HANDOFF_RUNS` raises the default 200
+children per case for a measurement.

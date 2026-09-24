@@ -475,15 +475,15 @@ func Test_spawn(t *testing.T) {
 			t.Fatalf("buildStdio = %v, want nil", err)
 		}
 
-		started, serr := spawn(c.spec, sio)
+		started, claim, serr := spawn(c.spec, sio)
 		if c.wantErr {
 			if !errs.HasCode(serr, coreproc.CodeSpawnFailed) {
 				sio.closeAll()
 				t.Fatalf("spawn(%s) = %v, want SPAWN_FAILED", c.name, serr)
 			}
-			//: a failed spawn must hand back no process at all.
-			if started != nil {
-				t.Errorf("spawn(%s) returned a process beside the error", c.name)
+			//: a failed spawn must hand back no process and no claim at all.
+			if started != nil || claim != nil {
+				t.Errorf("spawn(%s) returned a process or a claim beside the error", c.name)
 			}
 			return
 		}
@@ -498,8 +498,12 @@ func Test_spawn(t *testing.T) {
 		if started.Pid <= 0 {
 			t.Errorf("the spawned pid is %d, want a positive one", started.Pid)
 		}
-		//: reap it so the test leaves no zombie behind.
-		if _, werr := started.Wait(); werr != nil {
+		//: a live child comes back claimed, so its status has an owner.
+		if claim == nil {
+			t.Fatal("spawn returned a process without a claim on its exit status")
+		}
+		//: reap it through the claim so the test leaves no zombie behind.
+		if _, werr := collectExit(started, claim); werr != nil {
 			t.Logf("reaping the child: %v", werr)
 		}
 	}
@@ -531,11 +535,11 @@ func Test_teardown(t *testing.T) {
 			t.Fatalf("buildStdio = %v, want nil", err)
 		}
 		defer sio.closeAll()
-		started, serr := spawn(spec, sio)
+		started, claim, serr := spawn(spec, sio)
 		if serr != nil {
 			t.Fatalf("spawn = %v, want nil", serr)
 		}
-		live := newHandle(started, c.setpgid, sio)
+		live := newHandle(started, claim, c.setpgid, sio)
 
 		teardown(live)
 

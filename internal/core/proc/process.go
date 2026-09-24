@@ -13,7 +13,8 @@ import (
 type Process interface {
 	// PID reports the process identifier of the leader.
 	PID() int
-	// Wait blocks until the process exits and returns its ExitValue. It is safe
+	// Wait blocks until the process exits and returns its ExitValue — the real
+	// one even when a running Reaper collected the child first. It is safe
 	// to call once; concurrent or repeated calls observe the same outcome. Under
 	// StdioCapture it returns only after every captured byte has reached the
 	// caller's writers; if a writer itself failed, the ExitValue still reports the

@@ -14,6 +14,7 @@ import (
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/proc/childwait"
 )
 
 // Start spawns the process described by spec and returns a live coreproc.Process
@@ -51,14 +52,14 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		return nil, ioErr
 	}
 
-	started, sErr := spawn(spec, sio)
+	started, claim, sErr := spawn(spec, sio)
 	//: a resolve/attr/fork-exec failure already released the stdio fds.
 	if sErr != nil {
 		//: propagate the typed RLIMIT_FAILED / UNKNOWN_USER / SPAWN_FAILED verbatim.
 		return nil, sErr
 	}
 
-	live := newHandle(started, spec.Setpgid, sio)
+	live := newHandle(started, claim, spec.Setpgid, sio)
 	//: best-effort scheduling attributes run post-start on the live pid. They run
 	//: BEFORE the capture copiers launch, so a teardown here never blocks on a
 	//: caller's sink: with no copiers started, Wait's copier-join is a no-op.
@@ -98,15 +99,16 @@ func teardown(live *handle) {
 // spawn resolves the spawn target (direct or via the limits trampoline),
 // assembles the os.ProcAttr, and forks/execs. On any failure it releases the
 // stdio fds (so the aborted spawn leaks nothing) and returns the typed error; on
-// success it returns the live OS process, still awaiting post-start attributes.
-func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, err error) {
+// success it returns the live OS process, still awaiting post-start attributes,
+// and the claim on its exit status (ADR 0093).
+func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, claim *childwait.Claim, err error) {
 	path, argv, envAddon, rErr := resolveSpawn(spec)
 	//: a trampoline-setup failure (no self-path for the limits) aborts the spawn.
 	if rErr != nil {
 		//: release the stdio fds so the aborted spawn leaks nothing.
 		sio.closeAll()
 		//: propagate the typed RLIMIT_FAILED from the trampoline resolution.
-		return nil, rErr
+		return nil, nil, rErr
 	}
 
 	files, hs, hErr := spawnFiles(spec, sio)
@@ -115,7 +117,7 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, err error)
 		//: release the stdio fds so the aborted spawn leaks nothing.
 		sio.closeAll()
 		//: propagate the typed RLIMIT_FAILED wrapping the pipe cause.
-		return nil, hErr
+		return nil, nil, hErr
 	}
 
 	//: assemble stdio + ExtraFiles + handshake (last) and the handshake-fd env so
@@ -128,33 +130,45 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, err error)
 		closeHandshake(hs)
 		sio.closeAll()
 		//: propagate the typed UNKNOWN_USER / UNKNOWN_GROUP verbatim.
-		return nil, aErr
+		return nil, nil, aErr
 	}
-	proc, sErr := os.StartProcess(path, argv, attr)
+	proc, claim, sErr := forkClaimed(path, argv, attr)
 	//: a fork/exec failure is a typed SPAWN_FAILED wrapping the OS cause.
 	if sErr != nil {
 		//: release the handshake pipe and stdio fds before surfacing the failure.
 		closeHandshake(hs)
 		sio.closeAll()
 		//: wrap the StartProcess cause under the central SPAWN_FAILED fields.
-		return nil, wrapSpawn(sErr, errs.String("path", spec.Path))
+		return nil, nil, wrapSpawn(sErr, errs.String("path", spec.Path))
 	}
 	//: a trampolined spawn blocks on the handshake until the child execs the
 	//: target (EOF) or reports a pre-exec failure (typed RLIMIT_FAILED/SPAWN_FAILED).
 	if hs != nil {
 		//: surface a trampoline pre-exec failure as the typed sentinel.
 		if awaitErr := hs.await(); awaitErr != nil {
-			//: reap the exited trampoline child so it leaves no zombie.
-			_, wErr := proc.Wait()
+			//: reap the exited trampoline child so it leaves no zombie — through
+			//: the claim, since a running reaper may already have collected it.
+			_, wErr := collectExit(proc, claim)
 			swallowErr(wErr)
 			//: release the stdio fds so the aborted spawn leaks nothing.
 			sio.closeAll()
 			//: surface the trampoline's typed RLIMIT_FAILED / SPAWN_FAILED.
-			return nil, awaitErr
+			return nil, nil, awaitErr
 		}
 	}
 	//: the forked, live OS process, still awaiting post-start attributes.
-	return proc, nil
+	return proc, claim, nil
+}
+
+// forkClaimed forks/execs through the child ledger, so the child's exit status
+// is claimed before a running reaper can collect it as an orphan's: the child
+// may exit — and the reaper sweep — before os.StartProcess has even returned.
+func forkClaimed(path string, argv []string, attr *os.ProcAttr) (started *os.Process, claim *childwait.Claim, err error) {
+	//: the ledger runs the fork under its spawn gate and claims the pid.
+	return childwait.Spawn(func() (*os.Process, error) {
+		//: the one fork/exec of the Unix spawn.
+		return os.StartProcess(path, argv, attr)
+	})
 }
 
 // spawnFiles returns the stdio file table and, for a trampolined spawn, the

@@ -27,8 +27,19 @@
 // idempotent. [Reaper.Stop] performs one final drain and waits for the loop's
 // goroutine to exit, so a Start/Stop cycle leaks neither zombies nor goroutines
 // and may be repeated. [Reaper.ReapOnce] runs a single non-blocking sweep and is
-// safe to call concurrently with the loop — Wait4 is kernel-serialised, so each
-// child's exit is observed exactly once across whoever sweeps.
+// safe to call concurrently with the loop — each child's exit is observed
+// exactly once across whoever sweeps.
+//
+// # Children spawned through pkg/v1/process
+//
+// A sweep collects EVERY exited child, including one a
+// [github.com/kitsunium/sdk/pkg/v1/process.Process] is waiting for. Its exit
+// status is not lost: the sweep hands it to that Process, whose Wait reports
+// the child's own exit code whichever of the two collected it. A child spawned
+// any other way — os/exec, syscall.ForkExec, a C library — has no such claim, so
+// a running reaper still takes its status and its own wait fails with ECHILD.
+// Spawn what you wait for through pkg/v1/process in a process that runs the
+// reaper.
 //
 // ECHILD ("no children") is treated as a clean end of a sweep, not an error; any
 // other wait error surfaces as the typed sentinel [ReapFailed].

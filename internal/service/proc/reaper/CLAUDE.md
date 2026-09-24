@@ -4,17 +4,20 @@
 
 The OS implementation of the `core/proc.Reaper` port (ADR 0016): a PID1 /
 subreaper zombie collector. On Unix it installs an `os/signal` SIGCHLD handler
-and drains every reapable child with a non-blocking `syscall.Wait4(-1, …,
-WNOHANG, …)` loop until `ECHILD`. Off Unix it degrades to a no-op so the package
-links and runs everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`,
-`syscall`) + `internal/kernel/errs` — no `golang.org/x/sys`.
+and drains every reapable child with a non-blocking `childwait.ReapAny()` loop
+until `ECHILD`. `ReapAny` is the SDK's only `wait4(-1, …, WNOHANG, …)`, and it
+hands the status of a child a `Process` spawned to that `Process` instead of
+discarding it (ADR 0093). Off Unix it degrades to a no-op so the package links
+and runs everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`, `syscall`) +
+`internal/kernel/errs` + `internal/service/proc/childwait` — no
+`golang.org/x/sys`.
 
 ## Contents
 
 | File | Build tag | Role |
 |---|---|---|
 | `reaper.go` | (all) | `Option`/`config` surface; `WithOnReap`; `resolve` |
-| `reaper_unix.go` | `unix` | `unixReaper`, `New`, `Start`/`Stop`/`loop`, `ReapOnce`, `drain`/`drainResult`/`classifyWaitErr`, `LastError`, `IsPID1` |
+| `reaper_unix.go` | `unix` | `unixReaper`, `New`, `Start`/`Stop`/`loop`, `ReapOnce`, `drain`/`drainResult` (over `childwait.ReapAny`)/`classifyWaitErr`, `LastError`, `IsPID1` |
 | `subreaper_linux.go` | `linux` | `SetChildSubreaper` via `prctl(PR_SET_CHILD_SUBREAPER, 1)` |
 | `subreaper_other.go` | `unix && !linux` | `SetChildSubreaper` → `UnsupportedPlatform` (no prctl on darwin/bsd) |
 | `reaper_other.go` | `!unix` | no-op `noopReaper`, `New`, `Start`/`Stop`/`ReapOnce`, `SetChildSubreaper` → `UnsupportedPlatform`, `IsPID1` → false |
@@ -42,9 +45,16 @@ exactly one definition of each exported symbol compiles per GOOS.
   `stopped` so no goroutine and no zombie outlives it. Safe without a prior
   Start and idempotent.
 - **ReapOnce** — one non-blocking sweep returning the count; safe to call
-  concurrently with the loop (Wait4 is kernel-serialised).
+  concurrently with the loop (each collection is serialised by `childwait`).
 - **Drain semantics** — `pid>0` counted; `pid==0`/`ECHILD` end the sweep
   cleanly; `EINTR` retries; any other errno → wrapped `ReapFailed`.
+- **Hand-off** — the sweep collects EVERY exited child, including one a
+  `Process` handle spawned and is about to wait for. `childwait.ReapAny` stores
+  that child's status on the handle's claim before returning, and the handle
+  reads it from there; the count still includes it, since the sweep did reap
+  it. Before ADR 0093 the status was discarded here and the handle reported a
+  clean exit as `WAIT_FAILED` — `handoff_unix_external_test.go` measures that
+  race and requires 0 losses.
 - **LastError** — exposes the most recent background-sweep error (RWMutex
   guarded) since the loop cannot return one to a caller.
 
@@ -53,7 +63,9 @@ exactly one definition of each exported symbol compiles per GOOS.
 `ReapOnce` on an idle supervisor is **283 ns and ZERO allocations** — one
 `wait4(-1, WNOHANG)` returning `ECHILD`. There is no polling frequency at which
 this package's own code becomes the cost; `WithOnReap` adds 5 ns and can be wired
-unconditionally.
+unconditionally. The `childwait` sweep lock around each collection (ADR 0093) is
+one uncontended mutex: measured at +4 ns (166 → 170 ns, median of six, Apple
+M-series, `go1.27.1`), still zero allocations.
 
 A `Start`/`Stop` cycle is **86 µs — 300× a sweep** — and a CPU profile puts 57 %
 of it in `runtime.futex` under the scheduler and 9 % in `runtime.ensureSigM`. That
@@ -66,6 +78,8 @@ uncached — hoist it, do not loop on it.
 ## Do NOT
 
 - Treat `ECHILD` as an error — it is the normal "drained" terminus.
+- Call `syscall.Wait4(-1, …)` directly. The status of a child a `Process`
+  spawned would be discarded again; collect through `childwait.ReapAny`.
 - Add codes here — all 22 proc codes are central in `internal/core/proc`.
 - Call `prctl` outside `subreaper_linux.go`; it does not exist elsewhere.
 

@@ -29,12 +29,12 @@ func startChild(t *testing.T, setpgid bool, program string) *handle {
 	if err != nil {
 		t.Fatalf("buildStdio = %v, want nil", err)
 	}
-	started, serr := spawn(spec, sio)
+	started, claim, serr := spawn(spec, sio)
 	if serr != nil {
 		sio.closeAll()
 		t.Fatalf("spawn = %v, want nil", serr)
 	}
-	h := newHandle(started, setpgid, sio)
+	h := newHandle(started, claim, setpgid, sio)
 	t.Cleanup(func() {
 		//: whatever the test did, leave nothing running or unreaped. Both
 		//: calls routinely fail on an already-reaped child, which is the

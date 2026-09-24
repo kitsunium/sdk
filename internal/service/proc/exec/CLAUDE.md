@@ -9,8 +9,9 @@ process that already exists.
 ## Layering & deps
 
 - Imports: stdlib (`os`, `os/user`, `syscall`, `context`, `sync`, `time`,
-  `strconv`, `errors`) + `internal/core/proc` + `internal/kernel/errs`. No
-  `golang.org/x/sys`, no `pkg/*`.
+  `strconv`, `errors`) + `internal/core/proc` + `internal/kernel/errs` +
+  `internal/service/proc/childwait` (Unix files only). No `golang.org/x/sys`,
+  no `pkg/*`.
 - Returns `coreproc.Process` (the port interface); the concrete `handle` type is
   unexported.
 - Every error is a central `coreproc` sentinel — wrapped via the local
@@ -21,9 +22,9 @@ process that already exists.
 | File | Build tag | Role |
 |---|---|---|
 | `exec.go` | all | package doc + `validateSpec` (empty Path ⇒ `InvalidSpec`) |
-| `exec_unix.go` | `unix` | `Start`: validate → check limits → resolve creds → `SysProcAttr` → `os.StartProcess` → post-start attrs; `teardown` on attr failure |
+| `exec_unix.go` | `unix` | `Start`: validate → check limits → resolve creds → `SysProcAttr` → `os.StartProcess` through `childwait.Spawn` (`forkClaimed`) → post-start attrs; `teardown` on attr failure |
 | `exec_other.go` | `!unix` | `Start` ⇒ `UnsupportedPlatform` (compiles everywhere) |
-| `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, once-only reap, exit translation, stdio-copier join |
+| `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, once-only reap through `collectExit` (claim first, own wait, `Reclaim` on ECHILD), exit translation (`exitValue`), stdio-copier join |
 | `stdio_unix.go` | `unix` | `buildStdio`: wires `Spec.Stdio` (inherit/null/capture) to `ProcAttr.Files`; capture pipes + copier goroutines joined by `Wait` (100% delivery, no leak) |
 | `creds_unix.go` | `unix` | `Spec.User/Group/Groups` → `syscall.Credential` via `os/user` |
 | `attrs_unix.go` | `unix` | best-effort `Nice` (setpriority) + `OOMScoreAdj` (procfs); ESRCH detection |
@@ -58,9 +59,31 @@ A group that vanished (`ESRCH`) at any phase is treated as success. The reap run
 under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
 `close(done)`.
 
+## Exit status ownership (ADR 0093)
+
+A running reaper (`service/proc/reaper`, on when the supervisor is pid 1 or a
+subreaper) collects ANY exited child with `wait4(-1)` — this package's children
+included. So the Unix spawn forks through `childwait.Spawn`, which claims the
+child's exit status before any sweep can treat it as an orphan's, and
+`collectExit` reads the status from whichever waiter took it:
+
+1. a sweep already collected it → the status on the claim, and NO wait by pid
+   (the pid may belong to another process by now);
+2. otherwise the handle's own `os.Process.Wait` — always the case when no
+   reaper runs, which keeps that path exactly as before;
+3. that wait fails with ECHILD → `Claim.Reclaim` waits for the sweep's hand-off
+   and returns the status it stored.
+
+Only a status nothing in the SDK collected — a child reaped by code outside it —
+is still `WAIT_FAILED`. `Signal` reports a leader a sweep collected as finished
+(`os.ErrProcessDone`, as after `Wait`) instead of signalling its pid. The
+trampoline's aborted-spawn reap goes through `collectExit` too.
+
 ## Exit translation
 
-`Wait` returns `coreproc.ExitValue` built from `*os.ProcessState`:
+`Wait` returns `coreproc.ExitValue` built by `exitValue` from the wait4 status
+word and rusage — read from `*os.ProcessState` after the handle's own wait, or
+from the claim when a sweep collected the child:
 `WaitStatus.Exited()/ExitStatus()` → `Code` (−1 when signalled),
 `WaitStatus.Signaled()/Signal()` → `Signal`/`Signaled`, and the wait4
 `*syscall.Rusage` → `UserTime`/`SystemTime` (from `Utime`/`Stime`) and `MaxRSS`

@@ -12,6 +12,7 @@ import (
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/proc/childwait"
 )
 
 // exitOSErr is sysexits.h EX_OSERR (71): the exit status the proc domain assigns
@@ -27,8 +28,8 @@ type unixReaper struct {
 	onReap func(int)
 	// mu guards running/sigCh/done/closeDone/lastErr across Start/Stop and the
 	// concurrent LastError read so repeated Start/Stop cycles neither
-	// double-install a handler nor leak a goroutine. Wait4 itself is
-	// kernel-serialised and needs no extra lock.
+	// double-install a handler nor leak a goroutine. The collection itself is
+	// serialised by childwait's own sweep lock and needs nothing from mu.
 	mu sync.RWMutex
 	// running reports whether the background loop goroutine is live; it makes
 	// Start idempotent and Stop safe without a prior Start. It stays true until
@@ -192,8 +193,9 @@ func (r *unixReaper) markStopped() {
 
 // ReapOnce performs a single non-blocking drain sweep and reports how many
 // children were collected. It is safe to call concurrently with the background
-// loop: Wait4 is kernel-serialised, so the count is simply split across whoever
-// observes each exit.
+// loop: each collection is serialised by the child ledger, so the count is
+// simply split across whoever observes each exit — and a child a Process handle
+// spawned has its status handed to that handle whichever sweep takes it.
 func (r *unixReaper) ReapOnce() (reaped int, err error) {
 	//: delegate to the shared drain, which also fires the onReap observer.
 	return r.drainResult()
@@ -225,17 +227,22 @@ func (r *unixReaper) LastError() error {
 	return err
 }
 
-// drainResult repeatedly calls Wait4 with WNOHANG until no further child is
-// reapable, returning the count and (on a non-ECHILD failure) a ReapFailed
-// error. ECHILD ("no children") and 0 ("children exist, none exited") both end
-// the sweep without error.
+// drainResult repeatedly collects any exited child until none is left,
+// returning the count and (on a non-ECHILD failure) a ReapFailed error.
+// ECHILD ("no children") and 0 ("children exist, none exited") both end the
+// sweep without error.
+//
+// Each collection is childwait.ReapAny, never a bare wait4(-1): the sweep
+// takes ANY child, including one a Process handle spawned and is waiting for,
+// and ReapAny hands such a child's status to the handle before it returns. A
+// bare wait4 here discarded it, and the handle then reported a clean exit as
+// WAIT_FAILED (ADR 0093).
 func (r *unixReaper) drainResult() (reaped int, err error) {
-	//: drain until Wait4 reports nothing more to collect.
+	//: drain until nothing more is ready to collect.
 	for {
-		var ws syscall.WaitStatus
-		var ru syscall.Rusage
-		//: non-blocking reap of any child (-1) that has changed state.
-		pid, waitErr := syscall.Wait4(-1, &ws, syscall.WNOHANG, &ru)
+		//: non-blocking collection of any exited child, its status handed to
+		//: the Process that spawned it when there is one.
+		pid, waitErr := childwait.ReapAny()
 		//: a non-nil error needs classification: transient, benign, or fatal.
 		if waitErr != nil {
 			//: classify the errno; benign ECHILD ends the sweep cleanly.

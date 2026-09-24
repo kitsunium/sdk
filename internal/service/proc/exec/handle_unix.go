@@ -9,6 +9,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/proc/childwait"
 )
 
 // signalledCode is the ExitValue.Code reported for a signalled (non-normal)
@@ -29,11 +31,13 @@ const signalledCode int = -1
 // path widens to int64.
 
 // handle is the live supervision handle for one spawned process. It owns the
-// *os.Process, remembers the leader pid and process-group id, and memoises the
-// single Wait outcome so PID/Wait/Signal/SignalGroup/Stop satisfy the
-// coreproc.Process port. It is safe for concurrent use.
+// *os.Process and the claim on its exit status, remembers the leader pid and
+// process-group id, and memoises the single Wait outcome so
+// PID/Wait/Signal/SignalGroup/Stop satisfy the coreproc.Process port. It is
+// safe for concurrent use.
 type handle struct {
 	proc    *os.Process
+	claim   *childwait.Claim
 	pid     int
 	pgid    int
 	setpgid bool
@@ -45,14 +49,15 @@ type handle struct {
 	done     chan struct{}
 }
 
-// newHandle wraps a freshly started *os.Process as a handle. setpgid records
-// whether the child leads its own process group (Spec.Setpgid): only then is the
-// leader pid a valid pgid for group-directed kills. stdio owns the capture
-// copiers that Wait joins so no output is lost and no goroutine leaks.
-func newHandle(p *os.Process, setpgid bool, stdio *stdioState) *handle {
+// newHandle wraps a freshly started *os.Process and the claim on its exit
+// status as a handle. setpgid records whether the child leads its own process
+// group (Spec.Setpgid): only then is the leader pid a valid pgid for
+// group-directed kills. stdio owns the capture copiers that Wait joins so no
+// output is lost and no goroutine leaks.
+func newHandle(p *os.Process, claim *childwait.Claim, setpgid bool, stdio *stdioState) *handle {
 	//: with Setpgid the leader pid IS the group id; without it there is no private
 	//: group and group operations degrade to the leader (see groupTarget).
-	return &handle{proc: p, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, stdio: stdio, done: make(chan struct{})}
+	return &handle{proc: p, claim: claim, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, stdio: stdio, done: make(chan struct{})}
 }
 
 // groupTarget returns the kill(2) target for group-directed operations: the
@@ -77,29 +82,30 @@ func (h *handle) PID() int {
 }
 
 // Wait blocks until the process exits and returns its ExitValue. It is
-// idempotent: the first call performs the wait4 reap and every caller observes
-// the same memoised outcome.
+// idempotent: the first call collects the exit status and every caller observes
+// the same memoised outcome. The status is the child's own even when a running
+// reaper collected the child first (ADR 0093).
 func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 	//: the reap runs exactly once under sync.Once; concurrent callers share it.
 	//: the close(h.done) below is therefore executed at most once — the Once is
 	//: the guard against a double-close panic.
 	h.waitOnce.Do(func() {
-		state, wErr := h.proc.Wait()
+		ev, wErr := collectExit(h.proc, h.claim)
 		//: signal late Stop goroutines that the process has been reaped.
 		close(h.done)
 		//: join the capture copiers so every byte the child wrote has reached the
 		//: caller's writers before Wait returns, and no copier goroutine leaks.
 		//: the child's exit closed its write ends, so the copiers drain to EOF.
 		h.stdio.wait()
-		//: a wait4 host fault (not a non-zero exit) is a typed WAIT_FAILED.
+		//: a status nobody could observe (not a non-zero exit) is a typed WAIT_FAILED.
 		if wErr != nil {
-			//: wrap the os.Process.Wait cause under the central WAIT_FAILED fields.
+			//: wrap the cause under the central WAIT_FAILED fields.
 			h.waitErr = wrapWait(wErr, errs.Int("pid", h.pid))
 			//: leave waitVal at its zero value on a reap fault.
 			return
 		}
-		//: a clean reap yields the translated exit outcome.
-		h.waitVal = exitValueFrom(state)
+		//: a collected status yields the translated exit outcome.
+		h.waitVal = ev
 		//: a clean exit whose capture writer failed surfaces the typed capture
 		//: error (os/exec semantics) — the exit status still stands in waitVal.
 		if cErr := h.stdio.copyError(); cErr != nil {
@@ -111,8 +117,53 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 	return h.waitVal, h.waitErr
 }
 
-// Signal delivers sig to the leader process only (kill(pid, sig)).
+// collectExit obtains proc's exit status from whichever waiter took it, and
+// ends the claim. Without a running reaper that is always proc's own wait, and
+// nothing changes from a plain os.Process.Wait. With one, a sweep may collect
+// the child first; its status is then on the claim — before the wait, when the
+// sweep came first, or after the wait failed with ECHILD, once the sweep's
+// hand-off has landed. err is the wait's own error only when the status is
+// truly unobservable: something outside the SDK reaped the child, or wait4
+// failed for another reason.
+func collectExit(proc *os.Process, claim *childwait.Claim) (exit coreproc.ExitValue, err error) {
+	//: a sweep already took the child: do not wait by pid for a process that is
+	//: gone, whose pid may by now be another process's.
+	if status, ok := claim.Collected(); ok {
+		//: the status the sweep collected is the child's own.
+		return exitValue(status.WaitStatus, &status.Rusage), nil
+	}
+	state, wErr := proc.Wait()
+	//: our own wait took it — the only outcome when no reaper runs.
+	if wErr == nil {
+		//: the claim can no longer be filled; drop it from the ledger.
+		claim.Release()
+		//: translate the status our wait collected.
+		return exitValueFrom(state), nil
+	}
+	//: ECHILD: somebody else collected the child. If it was the reaper, the
+	//: status is on the claim once the sweep's hand-off is done.
+	if errors.Is(wErr, syscall.ECHILD) {
+		//: a status the sweep handed over is the child's own.
+		if status, ok := claim.Reclaim(); ok {
+			//: translate the status the sweep collected.
+			return exitValue(status.WaitStatus, &status.Rusage), nil
+		}
+	}
+	//: the status is lost or the wait faulted; either way the claim is done.
+	claim.Release()
+	//: hand back the wait's own error for the caller to type.
+	return coreproc.ExitValue{}, wErr
+}
+
+// Signal delivers sig to the leader process only (kill(pid, sig)). A leader a
+// reaper sweep has already collected is reported finished, exactly as after
+// Wait, and never signalled by pid: that pid may by now be another process's.
 func (h *handle) Signal(sig coreproc.Signal) error {
+	//: a collected child is gone even though its os.Process was never waited.
+	if _, gone := h.claim.Collected(); gone {
+		//: the same outcome os.Process gives a signal after its own Wait.
+		return wrapSignal(os.ErrProcessDone, errs.Int("pid", h.pid), errs.Int("signal", sig.Int()))
+	}
 	//: a leader-only signal targets the single pid via the os.Process bridge.
 	if err := h.proc.Signal(sig.OS()); err != nil {
 		//: wrap the kill(2) cause under the central SIGNAL_FAILED fields.
@@ -240,22 +291,39 @@ func (h *handle) reapInBackground() {
 // reading exit status / terminating signal from WaitStatus and CPU/RSS from the
 // wait4 rusage.
 func exitValueFrom(state *os.ProcessState) coreproc.ExitValue {
-	out := coreproc.ExitValue{Code: signalledCode}
-	//: the exit-vs-signal distinction lives in the Unix WaitStatus; read it inline
-	//: so no helper takes the concrete kernel type as a parameter.
+	ru, _ := state.SysUsage().(*syscall.Rusage)
+	//: the exit-vs-signal distinction lives in the Unix WaitStatus.
 	if ws, ok := state.Sys().(syscall.WaitStatus); ok {
-		//: a normal exit reports a 0–255 status code.
-		if ws.Exited() {
-			out.Code = ws.ExitStatus()
-		}
-		//: a signalled death records the terminating signal, code stays -1.
-		if ws.Signaled() {
-			out.Signaled = true
-			out.Signal = coreproc.Signal(ws.Signal())
-		}
+		//: translate the status word and the usage together.
+		return exitValue(ws, ru)
+	}
+	//: no status word: only the usage can be reported, the code stays -1.
+	out := coreproc.ExitValue{Code: signalledCode}
+	//: CPU time and peak RSS live in the wait4 rusage when the platform supplies it.
+	if ru != nil {
+		//: translate the rusage accounting into the ExitValue.
+		readRusage(ru, &out)
+	}
+	//: the exit outcome that could be read.
+	return out
+}
+
+// exitValue converts a wait4 status word and its rusage into the port's
+// ExitValue — the one translation for a status collected by the handle's own
+// wait and for one a reaper sweep handed over. ru may be nil.
+func exitValue(ws syscall.WaitStatus, ru *syscall.Rusage) coreproc.ExitValue {
+	out := coreproc.ExitValue{Code: signalledCode}
+	//: a normal exit reports a 0–255 status code.
+	if ws.Exited() {
+		out.Code = ws.ExitStatus()
+	}
+	//: a signalled death records the terminating signal, code stays -1.
+	if ws.Signaled() {
+		out.Signaled = true
+		out.Signal = coreproc.Signal(ws.Signal())
 	}
 	//: CPU time and peak RSS live in the wait4 rusage when the platform supplies it.
-	if ru, ok := state.SysUsage().(*syscall.Rusage); ok && ru != nil {
+	if ru != nil {
 		//: translate the rusage accounting into the ExitValue.
 		readRusage(ru, &out)
 	}
