@@ -48,13 +48,18 @@ env:
   # 0078, then ADR 0079) on the stated grounds that it was "not reachable from
   # this CI matrix". Listing one more package here is what made that false.
   #
+  # `proc/childwait` joins them because the one wait4(-1) in the SDK lives
+  # there, and which waiter a kernel hands a zombie to is exactly the per-kernel
+  # behaviour this lane exists to prove (ADR 0093); `proc/reaper`'s hand-off
+  # suite drives it end to end beside `exec`.
+  #
   # `pathchain` joins them because what it measures IS the platform: os.Root's
   # component walk is openat(2) on Unix and O_NOFOLLOW_ANY on Windows, a
   # junction and a symbolic link are one bit on one kernel and two mechanisms
   # on the other, and a volume root is only a path on one of them (ADR 0083).
   KERNEL_PKGS: "./pathchain"
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./entitlement ./lock ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
+  SERVICE_PKGS: "./entitlement ./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics with no
   # Windows equivalent (Windows uses ACLs; chmod 0555 doesn't block the owner).

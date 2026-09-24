@@ -25,7 +25,11 @@ if !reaper.IsPID1() {
 
 ### Semantics
 
-\[Reaper.Start\] installs an [os/signal](<https://pkg.go.dev/os/signal/>) SIGCHLD handler and, on each signal, loops syscall.Wait4 with WNOHANG until it drains every reapable child. Start is idempotent. \[Reaper.Stop\] performs one final drain and waits for the loop's goroutine to exit, so a Start/Stop cycle leaks neither zombies nor goroutines and may be repeated. \[Reaper.ReapOnce\] runs a single non\-blocking sweep and is safe to call concurrently with the loop — Wait4 is kernel\-serialised, so each child's exit is observed exactly once across whoever sweeps.
+\[Reaper.Start\] installs an [os/signal](<https://pkg.go.dev/os/signal/>) SIGCHLD handler and, on each signal, loops syscall.Wait4 with WNOHANG until it drains every reapable child. Start is idempotent. \[Reaper.Stop\] performs one final drain and waits for the loop's goroutine to exit, so a Start/Stop cycle leaks neither zombies nor goroutines and may be repeated. \[Reaper.ReapOnce\] runs a single non\-blocking sweep and is safe to call concurrently with the loop — each child's exit is observed exactly once across whoever sweeps.
+
+### Children spawned through pkg/v1/process
+
+A sweep collects EVERY exited child, including one a [github.com/kitsunium/sdk/pkg/v1/process.Process](<https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/process/#Process>) is waiting for. Its exit status is not lost: the sweep hands it to that Process, whose Wait reports the child's own exit code whichever of the two collected it. A child spawned any other way — os/exec, syscall.ForkExec, a C library — has no such claim, so a running reaper still takes its status and its own wait fails with ECHILD. Spawn what you wait for through pkg/v1/process in a process that runs the reaper.
 
 ECHILD \("no children"\) is treated as a clean end of a sweep, not an error; any other wait error surfaces as the typed sentinel [ReapFailed](<#ReapFailed>).
 
@@ -63,7 +67,7 @@ var (
 ```
 
 <a name="IsPID1"></a>
-## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L100>)
+## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L111>)
 
 ```go
 func IsPID1() bool
@@ -72,7 +76,7 @@ func IsPID1() bool
 IsPID1 reports whether the current process is the init process \(pid 1\). It is false on platforms where the convention does not apply.
 
 <a name="SetChildSubreaper"></a>
-## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L93>)
+## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L104>)
 
 ```go
 func SetChildSubreaper() error
@@ -81,7 +85,7 @@ func SetChildSubreaper() error
 SetChildSubreaper marks the calling process as a child subreaper so orphaned descendants reparent to it rather than to PID1. It returns [SubreaperFailed](<#ReapFailed>) on a prctl error and [UnsupportedPlatform](<#ReapFailed>) off Unix.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L59>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L70>)
 
 Option configures a [Reaper](<#Reaper>) returned by [New](<#New>). It is an alias of the service option type so callers compose options without importing internal packages.
 
@@ -90,7 +94,7 @@ type Option = svc.Option
 ```
 
 <a name="WithOnReap"></a>
-### func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L78>)
+### func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L89>)
 
 ```go
 func WithOnReap(fn func(int)) Option
@@ -99,7 +103,7 @@ func WithOnReap(fn func(int)) Option
 WithOnReap registers fn as a post\-sweep observer receiving the number of children reaped in each sweep \(including zero\). fn must not block.
 
 <a name="Reaper"></a>
-## type [Reaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L55>)
+## type [Reaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L66>)
 
 Reaper collects terminated child processes so they do not linger as zombies — the core duty of any PID1 or subreaper. It is an alias of the core port; the concrete value is platform\-selected by [New](<#New>).
 
@@ -108,7 +112,7 @@ type Reaper = coreproc.Reaper
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L85>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L96>)
 
 ```go
 func New(opts ...Option) Reaper

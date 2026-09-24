@@ -39,7 +39,42 @@ go_library(
     deps = [
         "//internal/core/proc",
         "//internal/kernel/errs",
-    ],
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:android": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//internal/service/proc/childwait",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//internal/service/proc/childwait",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 alias(

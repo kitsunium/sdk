@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "childwait",
+    srcs = [
+        "childwait.go",
+        "childwait_other.go",
+        "childwait_unix.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/childwait",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":childwait",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "childwait_test",
+    srcs = [
+        "childwait_internal_test.go",
+        "childwait_unix_internal_test.go",
+    ],
+    embed = [":childwait"],
+)

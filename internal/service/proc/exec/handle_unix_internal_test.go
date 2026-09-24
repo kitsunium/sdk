@@ -29,12 +29,12 @@ func startChild(t *testing.T, setpgid bool, program string) *handle {
 	if err != nil {
 		t.Fatalf("buildStdio = %v, want nil", err)
 	}
-	started, serr := spawn(spec, sio)
+	started, claim, serr := spawn(spec, sio)
 	if serr != nil {
 		sio.closeAll()
 		t.Fatalf("spawn = %v, want nil", serr)
 	}
-	h := newHandle(started, setpgid, sio)
+	h := newHandle(started, claim, setpgid, sio)
 	t.Cleanup(func() {
 		//: whatever the test did, leave nothing running or unreaped. Both
 		//: calls routinely fail on an already-reaped child, which is the
@@ -303,6 +303,49 @@ func Test_handle_SignalGroup(t *testing.T) {
 			t.Errorf("the leader exited with code %d, want a signalled death", exit.Code)
 		}
 	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_handle_signalAfterReap pins that a reaped leader is never signalled by
+// pid: once its status is collected the pid may belong to another process. The
+// leader-only Signal reports it finished; SignalGroup without a private group
+// reports ESRCH, which Stop already reads as "gone". A private group is still
+// addressed, since it can outlive its leader.
+func Test_handle_signalAfterReap(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		setpgid bool
+		// groupGone is whether SignalGroup must report the target gone.
+		groupGone bool
+	}
+	tests := []tc{
+		{"no private group: the leader's pid is off limits", false, true},
+		{"a private group: the group is still addressed", true, true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		h := startChild(t, c.setpgid, "exit 0")
+		//: reap the leader through Wait.
+		if _, err := h.Wait(); err != nil {
+			t.Fatalf("Wait = %v, want nil", err)
+		}
+		//: the leader-only signal must not reach the pid.
+		if err := h.Signal(coreproc.Signal(syscall.Signal(0))); !errors.Is(err, os.ErrProcessDone) {
+			t.Errorf("%s: Signal after reap = %v, want os.ErrProcessDone", c.name, err)
+		}
+		err := h.SignalGroup(coreproc.Signal(syscall.Signal(0)))
+		//: an emptied group and an off-limits pid both read as gone to Stop.
+		if got := processGone(err); got != c.groupGone {
+			t.Errorf("%s: SignalGroup after reap = %v, processGone = %t, want %t", c.name, err, got, c.groupGone)
+		}
+	}
+	//: run every case as its own parallel subtest.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
