@@ -6,10 +6,10 @@ package childwait
 
 import "syscall"
 
-// Status is what wait4 collected for one child: the termination status word
-// and the resource usage reported with it — exactly what the owner's own wait
-// would have returned.
-type Status struct {
+// StatusValue is what wait4 collected for one child: the termination status
+// word and the resource usage reported with it — exactly what the owner's own
+// wait would have returned.
+type StatusValue struct {
 	// WaitStatus is the child's termination status (exit code or signal).
 	WaitStatus syscall.WaitStatus
 	// Rusage is the resource usage wait4 reported for the child.
@@ -34,7 +34,7 @@ func (l *ledger) reapAny() (pid int, err error) {
 	l.sweeping.Lock()
 	//: release once the hand-off (if any) is done.
 	defer l.sweeping.Unlock()
-	var status Status
+	var status StatusValue
 	pid, err = syscall.Wait4(-1, &status.WaitStatus, syscall.WNOHANG, &status.Rusage)
 	//: an errno, or nothing ready: nothing was collected, nothing to hand over.
 	if err != nil || pid <= 0 {

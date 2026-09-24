@@ -101,6 +101,7 @@ func TestWaitGetsTheExitWhileTheReaperRuns(t *testing.T) {
 				len(failures), runs, failures[0])
 		}
 	}
+	//: run every case as its own subtest; the reap lock serialises them.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -124,6 +125,7 @@ func spawnAndWait(t *testing.T, runs, workers int, late bool) []string {
 		failures = append(failures, msg)
 		mu.Unlock()
 	}
+	//: start the spawners, each draining the shared job queue.
 	for range workers {
 		wg.Go(func() {
 			//: each worker drains the shared job queue.
@@ -135,6 +137,7 @@ func spawnAndWait(t *testing.T, runs, workers int, late bool) []string {
 			}
 		})
 	}
+	//: hand out one job per child, then close the queue.
 	for i := range runs {
 		jobs <- i
 	}
@@ -157,6 +160,7 @@ func spawnOne(ctx context.Context, i int, late bool) string {
 	}
 	//: the late order waits for a sweep to take the zombie before Wait runs.
 	if late {
+		//: a reaper that never collects the child fails the run, not the suite.
 		if gone := awaitCollected(p.PID()); gone != nil {
 			return fmt.Sprintf("run %d (pid %d): %v", i, p.PID(), gone)
 		}
@@ -178,6 +182,7 @@ func spawnOne(ctx context.Context, i int, late bool) string {
 // waiter in the process: the reaper. It gives up after handoffDeadline.
 func awaitCollected(pid int) error {
 	deadline := time.Now().Add(handoffDeadline)
+	//: poll until the zombie is gone, or out of patience.
 	for time.Now().Before(deadline) {
 		//: signal 0 checks existence without delivering anything.
 		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
@@ -209,11 +214,14 @@ func handoffRuns(t *testing.T) int {
 	return n
 }
 
-// requireShell fails the test when the POSIX shell is missing — every child
-// runs it, and a host without /bin/sh cannot say anything about the hand-off.
+// requireShell skips the test where no executable /bin/sh exists — every child
+// runs it, and a host without one cannot say anything about the hand-off. The
+// exec package gates its spawn tests the same way.
 func requireShell(t *testing.T) {
 	t.Helper()
-	if _, err := os.Stat(handoffShell); err != nil {
-		t.Fatalf("%s: %v", handoffShell, err)
+	info, err := os.Stat(handoffShell)
+	//: a missing or non-executable shell is the host's gap, not the reaper's.
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Skipf("%s is not an executable file here (%v): no child can be spawned", handoffShell, err)
 	}
 }

@@ -20,8 +20,8 @@ The ledger makes the status reach its owner whoever collects it. **Stdlib-only**
 | File | Build tag | Role |
 |---|---|---|
 | `childwait.go` | (all) | package doc; `Claim`; the process-wide `ledger`; `Spawn`; `Claim.Collected` / `Reclaim` / `Release`; `deliver` / `handOver` / `forget` |
-| `childwait_unix.go` | `unix` | `Status` (`syscall.WaitStatus` + `syscall.Rusage`); `ReapAny` — the only `wait4(-1)` in the SDK |
-| `childwait_other.go` | `!unix` | `Status` as an empty struct: no wait4, no sweep, a claim is never filled |
+| `childwait_unix.go` | `unix` | `StatusValue` (`syscall.WaitStatus` + `syscall.Rusage`); `ReapAny` — the only `wait4(-1)` in the SDK |
+| `childwait_other.go` | `!unix` | `StatusValue` as an empty struct: no wait4, no sweep, a claim is never filled |
 
 ## Surface
 
@@ -35,11 +35,15 @@ The ledger makes the status reach its owner whoever collects it. **Stdlib-only**
 ## The protocol — three races, each closed by one lock
 
 1. **A child can exit before it is claimed.** `Spawn` holds `spawning` SHARED
-   from before the fork until the pid is in the map. A sweep that collects a pid
-   nobody claims takes `spawning` EXCLUSIVELY before looking again, which waits
-   out every spawn that may have forked it. Only then is the pid an orphan and
-   its status dropped. Nothing unclaimed is ever stored "in case": a stored
-   orphan status would be handed to the next child that recycles the pid.
+   from before the fork until the pid is in the map. Every hand-off takes
+   `spawning` EXCLUSIVELY before its lookup, which waits out every spawn that
+   may have forked the pid — so the claim it finds is the NEWEST child's, and a
+   claim a recycled pid outlived (its child reaped by something outside the SDK
+   before its owner waited) has already been replaced. Looking up first and
+   gating only on a miss would hand a new child's exit to that stale claim.
+   A pid still unclaimed then is an orphan's, and its status is dropped.
+   Nothing unclaimed is ever stored "in case": a stored orphan status would be
+   handed to the next child that recycles the pid.
 2. **The owner's ECHILD arrives before the hand-off.** The kernel hands the
    zombie over INSIDE the sweep's `wait4`, before that sweep has returned to
    store it. `ReapAny` holds `sweeping` from before its `wait4` until after the

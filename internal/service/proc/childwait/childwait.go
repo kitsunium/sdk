@@ -17,10 +17,10 @@
 //     sweep can decide a child is nobody's while its spawn is in flight.
 //   - ReapAny is the only wait4(-1) in the SDK. A child it collects that is
 //     claimed has its status stored on the claim, under a lock held from before
-//     the wait4 until after the hand-off. A child nobody claims is an orphan —
-//     unless a spawn is still between fork and claim, which is why an
-//     unclaimed pid is looked up again only after every such spawn has
-//     finished.
+//     the wait4 until after the hand-off. The claim is looked up only once no
+//     spawn is between fork and claim, so a child that exited before its spawn
+//     registered it is found, and a claim left on a recycled pid has already
+//     been replaced by the newer child's. A child nobody claims is an orphan.
 //   - The owner still waits for its own child itself, so a process without a
 //     reaper behaves exactly as before. When that wait fails with ECHILD, the
 //     owner takes the sweep lock — any hand-off still in progress lands first —
@@ -49,7 +49,7 @@ type Claim struct {
 	// and status are guarded by the ledger's mu.
 	collected bool
 	// status is the exit status the sweep collected, valid once collected.
-	status Status
+	status StatusValue
 }
 
 // ledger is the process-wide record of claimed children. There is exactly one,
@@ -117,26 +117,23 @@ func (l *ledger) track(pid int) *Claim {
 }
 
 // deliver hands the status a sweep collected for pid to the claim on pid, if
-// any. A pid nobody claims is looked up once more after every in-flight spawn
-// has claimed its child; if still nobody claims it, it was an orphan and its
-// status has no owner.
-func (l *ledger) deliver(pid int, status Status) {
-	//: the common case: the pid was claimed long ago.
-	if l.handOver(pid, status) {
-		//: stored on its claim; nothing more to do.
-		return
-	}
+// any. The lookup happens only once every in-flight spawn has claimed its
+// child: the zombie just collected is the NEWEST process to hold pid, and if a
+// spawn forked it, that spawn's claim must be in place — replacing any older
+// claim on a recycled pid — before the lookup can say whose status this is.
+// A pid still unclaimed then was an orphan's, and its status has no owner.
+func (l *ledger) deliver(pid int, status StatusValue) {
 	//: wait out every spawn that may have forked pid without claiming it yet.
 	l.spawning.Lock()
 	//: reopen the gate once the lookup below is conclusive.
 	defer l.spawning.Unlock()
-	//: with no spawn in flight, an unclaimed pid is an orphan.
+	//: with no spawn in flight, the claim on pid is the collected child's.
 	l.handOver(pid, status)
 }
 
 // handOver stores status on the claim for pid and retires the claim from the
 // ledger, reporting whether a claim existed.
-func (l *ledger) handOver(pid int, status Status) bool {
+func (l *ledger) handOver(pid int, status StatusValue) bool {
 	//: the claim and its fields are guarded by mu.
 	l.mu.Lock()
 	//: release mu on both paths.
@@ -158,11 +155,11 @@ func (l *ledger) handOver(pid int, status Status) bool {
 // Collected reports the status a sweep handed over, if one has. An owner asks
 // before waiting itself: a child already collected must not be waited for by
 // pid, because the pid may by now belong to another process.
-func (c *Claim) Collected() (status Status, ok bool) {
+func (c *Claim) Collected() (status StatusValue, ok bool) {
 	//: a nil claim was never filled.
 	if c == nil {
 		//: nothing collected.
-		return Status{}, false
+		return StatusValue{}, false
 	}
 	//: the claim's fields are guarded by the ledger's mu.
 	c.book.mu.Lock()
@@ -177,11 +174,11 @@ func (c *Claim) Collected() (status Status, ok bool) {
 // hand-off, then reports the status the ledger collected. ok false means
 // nothing in the SDK took the child: something outside it reaped the child and
 // the status is lost. Either way the claim is ended.
-func (c *Claim) Reclaim() (status Status, ok bool) {
+func (c *Claim) Reclaim() (status StatusValue, ok bool) {
 	//: a nil claim was never in the ledger, so no sweep could fill it.
 	if c == nil {
 		//: nothing to reclaim: the status is lost.
-		return Status{}, false
+		return StatusValue{}, false
 	}
 	//: a sweep that collected our child holds sweeping until the hand-off is
 	//: done; our ECHILD came after that collection, so taking the lock orders

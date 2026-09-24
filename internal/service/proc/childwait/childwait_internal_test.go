@@ -36,6 +36,55 @@ func pending(l *ledger) int {
 	return len(l.claims)
 }
 
+// spawnInFlight starts a spawn of pid on l whose fork has happened but whose
+// claim has not been registered yet. It returns once the fork is in, with a
+// function that lets the spawn finish and returns the claim it registered.
+func spawnInFlight(l *ledger, pid int) (finish func() *Claim) {
+	forked := make(chan struct{})
+	release := make(chan struct{})
+	claimed := make(chan *Claim, 1)
+	go func() {
+		//: the fork has happened and the pid exists, but it is not claimed.
+		_, claim, _ := l.spawn(func() (*os.Process, error) {
+			close(forked)
+			<-release
+			return fakeProcess(pid), nil
+		})
+		claimed <- claim
+	}()
+	<-forked
+	//: releasing the spawn lets it claim the pid and return.
+	return func() *Claim {
+		close(release)
+		return <-claimed
+	}
+}
+
+// deliverAsync runs a sweep's hand-off of pid on its own goroutine and returns
+// a channel closed once it has returned.
+func deliverAsync(l *ledger, pid int) <-chan struct{} {
+	delivered := make(chan struct{})
+	go func() {
+		l.deliver(pid, StatusValue{})
+		close(delivered)
+	}()
+	//: the caller watches the channel to learn when the hand-off returned.
+	return delivered
+}
+
+// requireBlocked fails the test if done closes within settle.
+func requireBlocked(t *testing.T, done <-chan struct{}, why string) {
+	t.Helper()
+	//: a hand-off that returns here decided before it could know the answer.
+	select {
+	//: returned too early — the defect under test.
+	case <-done:
+		t.Fatal(why)
+	//: still waiting, as it must.
+	case <-time.After(settle):
+	}
+}
+
 // TestDeliverWaitsForASpawnInFlight pins the first race: a child can exit, and
 // a sweep collect it, before the spawn that forked it has claimed it. A sweep
 // that concluded "orphan" at that moment would give the status to nobody, and
@@ -49,41 +98,66 @@ func TestDeliverWaitsForASpawnInFlight(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		l := newLedger()
-		forked := make(chan struct{})
-		release := make(chan struct{})
-		claimed := make(chan *Claim, 1)
-		go func() {
-			//: the fork has happened and the pid exists, but it is not claimed.
-			_, claim, _ := l.spawn(func() (*os.Process, error) {
-				close(forked)
-				<-release
-				return fakeProcess(fakePid), nil
-			})
-			claimed <- claim
-		}()
-		<-forked
-		delivered := make(chan struct{})
-		go func() {
-			l.deliver(fakePid, Status{})
-			close(delivered)
-		}()
-		//: while the spawn is in flight the sweep must not conclude anything.
-		select {
-		case <-delivered:
-			t.Fatalf("%s: deliver returned while the spawn that forked pid %d had not claimed it — the status went to nobody", c.name, fakePid)
-		case <-time.After(settle):
-		}
-		close(release)
+		finish := spawnInFlight(l, fakePid)
+		delivered := deliverAsync(l, fakePid)
+		requireBlocked(t, delivered, c.name+": deliver returned while the spawn that forked the pid had not claimed it — the status went to nobody")
+		claim := finish()
 		<-delivered
-		claim := <-claimed
 		//: once the spawn claimed the pid, the waiting sweep handed it over.
 		if _, ok := claim.Collected(); !ok {
 			t.Errorf("%s: the status a sweep collected never reached the claim", c.name)
 		}
+		//: a collected claim is retired from the ledger.
 		if n := pending(l); n != 0 {
 			t.Errorf("%s: %d claims left in the ledger, want 0 — a collected claim is retired", c.name, n)
 		}
 	}
+	//: run every case as its own parallel subtest.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestDeliverSkipsAClaimTheRecycledPidOutlived pins the same gate from the
+// other side. A claim can outlive its child when something outside the SDK
+// reaps the child before its owner waits; once the pid is recycled for a new
+// SDK child that exits before its spawn has claimed it, a hand-off that looked
+// the pid up at once would give the NEW child's status to the OLD claim —
+// one Process reporting another's exit, and the new one's lost.
+func TestDeliverSkipsAClaimTheRecycledPidOutlived(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+	}
+	tests := []tc{{"a stale claim on a pid a spawn in flight has just forked"}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		l := newLedger()
+		//: the old child's claim, never reclaimed: an outsider reaped it.
+		stale := l.track(fakePid)
+		finish := spawnInFlight(l, fakePid)
+		delivered := deliverAsync(l, fakePid)
+		requireBlocked(t, delivered, c.name+": deliver answered while the spawn of the recycled pid was in flight — it could only have used the stale claim")
+		fresh := finish()
+		<-delivered
+		//: the status is the new child's and must land on the new claim.
+		if _, ok := fresh.Collected(); !ok {
+			t.Errorf("%s: the new child's claim did not receive its status", c.name)
+		}
+		//: the stale claim must not have been handed a stranger's exit.
+		if _, ok := stale.Collected(); ok {
+			t.Errorf("%s: the stale claim received the status of the process that recycled its pid", c.name)
+		}
+		stale.Release()
+		//: nothing is left behind once both owners are done.
+		if n := pending(l); n != 0 {
+			t.Errorf("%s: %d claims left in the ledger, want 0", c.name, n)
+		}
+	}
+	//: run every case as its own parallel subtest.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -110,22 +184,21 @@ func TestReclaimWaitsForTheHandOver(t *testing.T) {
 		//: the status over.
 		l.sweeping.Lock()
 		reclaimed := make(chan bool, 1)
+		done := make(chan struct{})
 		go func() {
 			_, ok := claim.Reclaim()
 			reclaimed <- ok
+			close(done)
 		}()
-		select {
-		case <-reclaimed:
-			t.Fatalf("%s: Reclaim answered while the sweep that took the child was still handing it over", c.name)
-		case <-time.After(settle):
-		}
-		l.handOver(fakePid, Status{})
+		requireBlocked(t, done, c.name+": Reclaim answered while the sweep that took the child was still handing it over")
+		l.handOver(fakePid, StatusValue{})
 		l.sweeping.Unlock()
 		//: the owner now finds the status the sweep collected.
 		if ok := <-reclaimed; !ok {
 			t.Errorf("%s: Reclaim reported the status lost although the sweep handed it over", c.name)
 		}
 	}
+	//: run every case as its own parallel subtest.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -155,7 +228,7 @@ func TestTheLedgerEndsEveryClaim(t *testing.T) {
 		}, false},
 		{"a sweep collected the child", func(l *ledger) *Claim {
 			c := l.track(fakePid)
-			l.deliver(fakePid, Status{})
+			l.deliver(fakePid, StatusValue{})
 			return c
 		}, true},
 		{"something outside the SDK collected the child", func(l *ledger) *Claim {
@@ -167,7 +240,7 @@ func TestTheLedgerEndsEveryClaim(t *testing.T) {
 			return c
 		}, false},
 		{"an orphan nobody claimed", func(l *ledger) *Claim {
-			l.deliver(fakePid, Status{})
+			l.deliver(fakePid, StatusValue{})
 			//: a child spawned later with the recycled pid starts clean.
 			return l.track(fakePid)
 		}, false},
@@ -176,7 +249,8 @@ func TestTheLedgerEndsEveryClaim(t *testing.T) {
 			fresh := l.track(fakePid)
 			stale.Release()
 			//: the release must not have dropped the newer child's claim.
-			l.deliver(fakePid, Status{})
+			l.deliver(fakePid, StatusValue{})
+			//: the stale claim must not be the one that was filled.
 			if _, ok := stale.Collected(); ok {
 				return nil
 			}
@@ -187,18 +261,22 @@ func TestTheLedgerEndsEveryClaim(t *testing.T) {
 		t.Helper()
 		l := newLedger()
 		claim := c.run(l)
+		//: a nil claim means a status reached a claim it did not belong to.
 		if claim == nil {
 			t.Fatalf("%s: a status reached a claim it did not belong to", c.name)
 		}
+		//: the claim holds a status exactly when a sweep delivered one to it.
 		if _, ok := claim.Collected(); ok != c.collected {
 			t.Errorf("%s: Collected() = %t, want %t", c.name, ok, c.collected)
 		}
 		//: the orphan case re-claims the pid on purpose; end that claim first.
 		claim.Release()
+		//: every path leaves the ledger empty.
 		if n := pending(l); n != 0 {
 			t.Errorf("%s: %d claims left in the ledger, want 0", c.name, n)
 		}
 	}
+	//: run every case as its own parallel subtest.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -225,13 +303,16 @@ func TestSpawnReturnsTheForkError(t *testing.T) {
 		if !errors.Is(err, errFork) {
 			t.Errorf("%s: spawn error = %v, want %v", c.name, err, errFork)
 		}
+		//: no process and no claim beside an error.
 		if proc != nil || claim != nil {
 			t.Errorf("%s: spawn returned a process or a claim beside its error", c.name)
 		}
+		//: nothing was claimed.
 		if n := pending(l); n != 0 {
 			t.Errorf("%s: %d claims left in the ledger, want 0", c.name, n)
 		}
 	}
+	//: run every case as its own parallel subtest.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -252,15 +333,18 @@ func TestANilClaimHoldsNothing(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		var claim *Claim
+		//: a nil claim was never filled.
 		if _, ok := claim.Collected(); ok {
 			t.Errorf("%s: Collected() reported a status", c.name)
 		}
+		//: and nothing can be reclaimed from it.
 		if _, ok := claim.Reclaim(); ok {
 			t.Errorf("%s: Reclaim() reported a status", c.name)
 		}
 		//: releasing nothing must be a no-op, not a panic.
 		claim.Release()
 	}
+	//: run every case as its own parallel subtest.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

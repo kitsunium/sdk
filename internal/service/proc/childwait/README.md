@@ -27,13 +27,14 @@ means.
 
 ## Platforms
 
-`ReapAny` and the populated `Status` are Unix-only. Off Unix there is no
+`ReapAny` and the populated `StatusValue` are Unix-only. Off Unix there is no
 `wait4` and no reaper, so a claim is never filled and the owner's own wait is
 the only waiter; the package still compiles everywhere.
 
 ## Tests
 
 `childwait_internal_test.go` forces each race on a private ledger (spawn in
-flight, hand-off in flight, pid reuse, lost status, nil claim);
+flight, a stale claim on a recycled pid, hand-off in flight, pid reuse, lost
+status, nil claim);
 `childwait_unix_internal_test.go` collects real children with known exit codes
 through `ReapAny`. Coverage 100 %.

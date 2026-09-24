@@ -66,11 +66,14 @@ it collects is still counted, because it did reap it.
 
 A child can exit — and a sweep collect it — before `os.StartProcess` has even
 returned to the spawner. `childwait.Spawn` runs the fork under a gate held
-SHARED until the pid is claimed. A sweep that collects a pid nobody claims takes
-the gate EXCLUSIVELY before looking again, which waits out every spawn that may
-have forked that pid. Only then is it an orphan, and its status is dropped —
-never kept "in case", because a stored orphan status would be handed to the next
-child that recycles the pid.
+SHARED until the pid is claimed. Every hand-off takes the gate EXCLUSIVELY
+before it looks the pid up, which waits out every spawn that may have forked
+that pid: the zombie just collected is the newest process to have held it, so
+the claim then found is that child's, and a claim a recycled pid outlived has
+already been replaced by it. Looking up first and gating only on a miss would
+give a new child's exit to such a stale claim. A pid still unclaimed is an
+orphan's, and its status is dropped — never kept "in case", because a stored
+orphan status would be handed to the next child that recycles the pid.
 
 ### 3. The owner keeps waiting for its own child
 
@@ -117,6 +120,12 @@ guarantee and its boundary (§Consequences).
   waits for through `pkg/v1/process`, or keep pid 1 out of its own process (an
   init shim that only reaps and forwards signals). Stated in `pkg/v1/reaper`'s
   doc, in `childwait/CLAUDE.md`, and here.
+- **A claim can outlive its child** only when something outside the SDK reaps
+  the child before its owner waits (an owner already blocked in `Wait` gets
+  `ECHILD` at once and ends it). A newer SDK child that recycles the pid
+  replaces that claim before any hand-off (§2); what remains is a stale claim
+  receiving the exit of a NON-SDK process that recycled the pid — which needs
+  an outside reaper, a pid wrap, and an owner that still has not waited.
 - **PID reuse.** The owner reads its claim before waiting by pid, so a child a
   sweep already collected is never waited for by number. A residual window
   remains between that read and the wait itself, on platforms where Go has no
