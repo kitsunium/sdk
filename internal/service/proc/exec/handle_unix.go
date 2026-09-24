@@ -43,6 +43,11 @@ type handle struct {
 	setpgid bool
 	stdio   *stdioState
 
+	// procMu serialises the leader-only Signal against the release of proc
+	// after a reaper sweep took its status: os.Process.Release writes the Pid
+	// field that a pid-mode os.Process.Signal reads.
+	procMu sync.RWMutex
+
 	waitOnce sync.Once
 	waitVal  coreproc.ExitValue
 	waitErr  error
@@ -90,7 +95,11 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 	//: the close(h.done) below is therefore executed at most once — the Once is
 	//: the guard against a double-close panic.
 	h.waitOnce.Do(func() {
-		ev, wErr := collectExit(h.proc, h.claim)
+		ev, swept, wErr := collectExit(h.proc, h.claim)
+		//: a swept status leaves proc unwaited: free its handle now.
+		if swept {
+			h.releaseProc()
+		}
 		//: signal late Stop goroutines that the process has been reaped.
 		close(h.done)
 		//: join the capture copiers so every byte the child wrote has reached the
@@ -122,15 +131,16 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 // nothing changes from a plain os.Process.Wait. With one, a sweep may collect
 // the child first; its status is then on the claim — before the wait, when the
 // sweep came first, or after the wait failed with ECHILD, once the sweep's
-// hand-off has landed. err is the wait's own error only when the status is
-// truly unobservable: something outside the SDK reaped the child, or wait4
-// failed for another reason.
-func collectExit(proc *os.Process, claim *childwait.Claim) (exit coreproc.ExitValue, err error) {
+// hand-off has landed. swept reports that case: proc's own Wait never
+// completed, so the caller must Release proc. err is the wait's own error only
+// when the status is truly unobservable: something outside the SDK reaped the
+// child, or wait4 failed for another reason.
+func collectExit(proc *os.Process, claim *childwait.Claim) (exit coreproc.ExitValue, swept bool, err error) {
 	//: a sweep already took the child: do not wait by pid for a process that is
 	//: gone, whose pid may by now be another process's.
 	if status, ok := claim.Collected(); ok {
 		//: the status the sweep collected is the child's own.
-		return exitValue(status.WaitStatus, &status.Rusage), nil
+		return exitValue(status.WaitStatus, &status.Rusage), true, nil
 	}
 	state, wErr := proc.Wait()
 	//: our own wait took it — the only outcome when no reaper runs.
@@ -138,7 +148,7 @@ func collectExit(proc *os.Process, claim *childwait.Claim) (exit coreproc.ExitVa
 		//: the claim can no longer be filled; drop it from the ledger.
 		claim.Release()
 		//: translate the status our wait collected.
-		return exitValueFrom(state), nil
+		return exitValueFrom(state), false, nil
 	}
 	//: ECHILD: somebody else collected the child. If it was the reaper, the
 	//: status is on the claim once the sweep's hand-off is done.
@@ -146,21 +156,56 @@ func collectExit(proc *os.Process, claim *childwait.Claim) (exit coreproc.ExitVa
 		//: a status the sweep handed over is the child's own.
 		if status, ok := claim.Reclaim(); ok {
 			//: translate the status the sweep collected.
-			return exitValue(status.WaitStatus, &status.Rusage), nil
+			return exitValue(status.WaitStatus, &status.Rusage), true, nil
 		}
 	}
 	//: the status is lost or the wait faulted; either way the claim is done.
 	claim.Release()
 	//: hand back the wait's own error for the caller to type.
-	return coreproc.ExitValue{}, wErr
+	return coreproc.ExitValue{}, false, wErr
 }
 
-// Signal delivers sig to the leader process only (kill(pid, sig)). A leader a
-// reaper sweep has already collected is reported finished, exactly as after
-// Wait, and never signalled by pid: that pid may by now be another process's.
+// releaseProc frees the handle the runtime keeps for proc (a pidfd on Linux)
+// once a reaper sweep took its status: proc's own Wait never completed, so
+// nothing else would release it before a garbage collection. It excludes a
+// concurrent leader-only Signal, which reads what Release writes.
+func (h *handle) releaseProc() {
+	//: no Signal may be inside os.Process while it is released.
+	h.procMu.Lock()
+	//: reopen Signal once the handle is released.
+	defer h.procMu.Unlock()
+	//: Release cannot fail on Unix; nothing waits on or signals proc again.
+	swallowErr(h.proc.Release())
+}
+
+// leaderReaped reports whether the leader's exit status has been collected —
+// by Wait, or by a reaper sweep that handed it over. Its pid may by then belong
+// to another process, so nothing may be sent to it by number.
+func (h *handle) leaderReaped() bool {
+	//: Wait has run to completion.
+	select {
+	//: done is closed once the status is in hand.
+	case <-h.done:
+		//: reaped.
+		return true
+	//: Wait has not completed; a sweep may still have taken the child.
+	default:
+	}
+	_, collected := h.claim.Collected()
+	//: a status on the claim means a sweep reaped the leader.
+	return collected
+}
+
+// Signal delivers sig to the leader process only (kill(pid, sig)). A leader
+// already reaped — by Wait or by a reaper sweep — is reported finished and
+// never signalled by pid: that pid may by now be another process's.
 func (h *handle) Signal(sig coreproc.Signal) error {
-	//: a collected child is gone even though its os.Process was never waited.
-	if _, gone := h.claim.Collected(); gone {
+	//: hold off releaseProc for the whole check-then-signal.
+	h.procMu.RLock()
+	//: let a release proceed once this signal is delivered or refused.
+	defer h.procMu.RUnlock()
+	//: a reaped leader is gone, whoever collected its status.
+	if h.leaderReaped() {
 		//: the same outcome os.Process gives a signal after its own Wait.
 		return wrapSignal(os.ErrProcessDone, errs.Int("pid", h.pid), errs.Int("signal", sig.Int()))
 	}
@@ -177,10 +222,18 @@ func (h *handle) Signal(sig coreproc.Signal) error {
 // kill(-pgid, sig) when the child leads its own group (Spec.Setpgid), reaching
 // forked grandchildren (the control-group analogue). Without a private group it
 // degrades to the leader process alone, so it never signals the supervisor's
-// inherited group.
+// inherited group — and once that leader is reaped it reports ESRCH rather
+// than signal a pid another process may now hold.
 func (h *handle) SignalGroup(sig coreproc.Signal) error {
 	//: resolve the group target (-pgid with Setpgid, else the leader pid).
 	target := h.groupTarget()
+	//: without a private group the target is the leader's pid, which may belong
+	//: to another process once the leader is reaped: report it gone instead. A
+	//: private group is still addressed — it can outlive its leader.
+	if !h.setpgid && h.leaderReaped() {
+		//: the same verdict kill(2) gives a pid that no longer exists.
+		return wrapSignal(syscall.ESRCH, errs.Int("target", target), errs.Int("signal", sig.Int()))
+	}
 	//: one kill(2) reaches the whole group (negative) or the leader (positive).
 	if err := syscall.Kill(target, syscall.Signal(sig.Int())); err != nil {
 		//: wrap the group kill(2) cause under the central SIGNAL_FAILED fields.

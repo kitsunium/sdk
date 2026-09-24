@@ -75,9 +75,15 @@ child's exit status before any sweep can treat it as an orphan's, and
    and returns the status it stored.
 
 Only a status nothing in the SDK collected — a child reaped by code outside it —
-is still `WAIT_FAILED`. `Signal` reports a leader a sweep collected as finished
-(`os.ErrProcessDone`, as after `Wait`) instead of signalling its pid. The
-trampoline's aborted-spawn reap goes through `collectExit` too.
+is still `WAIT_FAILED`. A status taken from the claim also releases the
+`os.Process` (`releaseProc`, under a lock `Signal` shares, since `Release` writes
+the `Pid` field a pid-mode `Signal` reads): its own `Wait` never completed, so
+nothing else would free its pidfd before a garbage collection. Once the leader is reaped — by `Wait` or
+by a sweep — nothing is sent to its pid: `Signal` reports it finished
+(`os.ErrProcessDone`, as after `Wait`), and `SignalGroup` without a private
+group reports `ESRCH` (which `Stop` reads as gone); a private group is still
+addressed, since it can outlive its leader. The trampoline's aborted-spawn reap
+goes through `collectExit` too.
 
 ## Exit translation
 

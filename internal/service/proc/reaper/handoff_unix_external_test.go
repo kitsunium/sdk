@@ -67,6 +67,10 @@ const (
 //     have. The handle is then left with no zombie of its own to wait for, so
 //     the only way it can learn the exit status is from whoever took it. This
 //     case does not depend on the scheduler at all.
+//
+// A third case signals the leader in a loop while it exits and is waited for,
+// so the race detector watches Signal against the release of a process whose
+// status a sweep took.
 func TestWaitGetsTheExitWhileTheReaperRuns(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -76,11 +80,14 @@ func TestWaitGetsTheExitWhileTheReaperRuns(t *testing.T) {
 		// workers is how many goroutines spawn and wait concurrently. Several at
 		// once also makes SIGCHLDs arrive together and merge into one sweep.
 		workers int
+		// signal hammers the leader with signal 0 until Wait has returned.
+		signal bool
 	}
 	tests := []tc{
-		{"Wait called at once, one spawner", false, 1},
-		{"Wait called at once, eight concurrent spawners", false, 8},
-		{"Wait called after the reaper collected the child", true, 4},
+		{"Wait called at once, one spawner", false, 1, false},
+		{"Wait called at once, eight concurrent spawners", false, 8, false},
+		{"Wait called after the reaper collected the child", true, 4, false},
+		{"Wait called at once while the leader is being signalled", false, 4, true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -94,7 +101,7 @@ func TestWaitGetsTheExitWhileTheReaperRuns(t *testing.T) {
 		defer r.Stop()
 
 		runs := handoffRuns(t)
-		failures := spawnAndWait(t, runs, c.workers, c.late)
+		failures := spawnAndWait(t, runs, c.workers, c.late, c.signal)
 		//: every single Wait must have seen the exit; one loss is the bug.
 		if len(failures) > 0 {
 			t.Errorf("%d of %d children that exited 0 were not reported as such; first: %s",
@@ -112,7 +119,7 @@ func TestWaitGetsTheExitWhileTheReaperRuns(t *testing.T) {
 
 // spawnAndWait runs `runs` children across `workers` goroutines and returns a
 // description of every Wait that did not report a clean exit 0.
-func spawnAndWait(t *testing.T, runs, workers int, late bool) []string {
+func spawnAndWait(t *testing.T, runs, workers int, late, signal bool) []string {
 	t.Helper()
 	var (
 		mu       sync.Mutex
@@ -131,7 +138,7 @@ func spawnAndWait(t *testing.T, runs, workers int, late bool) []string {
 			//: each worker drains the shared job queue.
 			for i := range jobs {
 				//: a spawn failure is the host's problem, not the hand-off's.
-				if msg := spawnOne(t.Context(), i, late); msg != "" {
+				if msg := spawnOne(t.Context(), i, late, signal); msg != "" {
 					record(msg)
 				}
 			}
@@ -147,9 +154,10 @@ func spawnAndWait(t *testing.T, runs, workers int, late bool) []string {
 }
 
 // spawnOne starts one child that exits 0, optionally waits until the reaper has
-// collected it, then Waits. It returns "" when Wait reported exactly exit 0, and
-// a description of what it reported otherwise.
-func spawnOne(ctx context.Context, i int, late bool) string {
+// collected it (late) or keeps signalling it until Wait returns (signal), then
+// Waits. It returns "" when Wait reported exactly exit 0, and a description of
+// what it reported otherwise.
+func spawnOne(ctx context.Context, i int, late, signal bool) string {
 	p, err := svcexec.Start(ctx, coreproc.Spec{
 		Path: handoffShell,
 		Args: []string{"sh", "-c", "exit 0"},
@@ -157,6 +165,12 @@ func spawnOne(ctx context.Context, i int, late bool) string {
 	//: a spawn failure is reported, but as itself, not as a lost status.
 	if err != nil {
 		return fmt.Sprintf("run %d: Start: %v", i, err)
+	}
+	//: keep signal 0 flowing at the leader until Wait has returned.
+	if signal {
+		stop := make(chan struct{})
+		defer close(stop)
+		go hammer(p, stop)
 	}
 	//: the late order waits for a sweep to take the zombie before Wait runs.
 	if late {
@@ -175,6 +189,23 @@ func spawnOne(ctx context.Context, i int, late bool) string {
 		return fmt.Sprintf("run %d (pid %d): Wait = code %d signaled=%t, want code 0", i, p.PID(), ev.Code, ev.Signaled)
 	}
 	return ""
+}
+
+// hammer sends signal 0 to p's leader until stop closes. Every outcome is
+// accepted — the leader may already be gone — since what is under test is that
+// Signal and the release of a swept process never race.
+func hammer(p coreproc.Process, stop <-chan struct{}) {
+	//: signal until told to stop.
+	for {
+		select {
+		//: Wait has returned; the test is over for this child.
+		case <-stop:
+			return
+		//: keep the signal path busy.
+		default:
+			_ = p.Signal(coreproc.Signal(0))
+		}
+	}
 }
 
 // awaitCollected blocks until pid can no longer be signalled — a zombie still

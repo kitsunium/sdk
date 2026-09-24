@@ -311,6 +311,49 @@ func Test_handle_SignalGroup(t *testing.T) {
 	}
 }
 
+// Test_handle_signalAfterReap pins that a reaped leader is never signalled by
+// pid: once its status is collected the pid may belong to another process. The
+// leader-only Signal reports it finished; SignalGroup without a private group
+// reports ESRCH, which Stop already reads as "gone". A private group is still
+// addressed, since it can outlive its leader.
+func Test_handle_signalAfterReap(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		setpgid bool
+		// groupGone is whether SignalGroup must report the target gone.
+		groupGone bool
+	}
+	tests := []tc{
+		{"no private group: the leader's pid is off limits", false, true},
+		{"a private group: the group is still addressed", true, true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		h := startChild(t, c.setpgid, "exit 0")
+		//: reap the leader through Wait.
+		if _, err := h.Wait(); err != nil {
+			t.Fatalf("Wait = %v, want nil", err)
+		}
+		//: the leader-only signal must not reach the pid.
+		if err := h.Signal(coreproc.Signal(syscall.Signal(0))); !errors.Is(err, os.ErrProcessDone) {
+			t.Errorf("%s: Signal after reap = %v, want os.ErrProcessDone", c.name, err)
+		}
+		err := h.SignalGroup(coreproc.Signal(syscall.Signal(0)))
+		//: an emptied group and an off-limits pid both read as gone to Stop.
+		if got := processGone(err); got != c.groupGone {
+			t.Errorf("%s: SignalGroup after reap = %v, processGone = %t, want %t", c.name, err, got, c.groupGone)
+		}
+	}
+	//: run every case as its own parallel subtest.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // Test_handle_signalGroupAllowGone pins the race this wrapper exists for: a
 // child that exits between the decision to signal it and the kill(2) is not a
 // failure, it is the outcome the caller wanted. Reporting ESRCH there would make

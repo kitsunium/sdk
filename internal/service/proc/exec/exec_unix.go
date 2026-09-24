@@ -148,8 +148,12 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, claim *chi
 		if awaitErr := hs.await(); awaitErr != nil {
 			//: reap the exited trampoline child so it leaves no zombie — through
 			//: the claim, since a running reaper may already have collected it.
-			_, wErr := collectExit(proc, claim)
+			_, swept, wErr := collectExit(proc, claim)
 			swallowErr(wErr)
+			//: a swept status left proc unwaited; no handle exists yet to race it.
+			if swept {
+				swallowErr(proc.Release())
+			}
 			//: release the stdio fds so the aborted spawn leaks nothing.
 			sio.closeAll()
 			//: surface the trampoline's typed RLIMIT_FAILED / SPAWN_FAILED.

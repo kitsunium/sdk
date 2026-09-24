@@ -503,7 +503,7 @@ func Test_spawn(t *testing.T) {
 			t.Fatal("spawn returned a process without a claim on its exit status")
 		}
 		//: reap it through the claim so the test leaves no zombie behind.
-		if _, werr := collectExit(started, claim); werr != nil {
+		if _, _, werr := collectExit(started, claim); werr != nil {
 			t.Logf("reaping the child: %v", werr)
 		}
 	}

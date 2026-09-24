@@ -90,8 +90,13 @@ orphan status would be handed to the next child that recycles the pid.
 
 A status nothing in the SDK collected — the child was reaped by code outside it
 — is still `WAIT_FAILED`, and now that is the only thing `WAIT_FAILED` means
-here. `handle.Signal` reports a leader a sweep collected as finished
-(`os.ErrProcessDone`, exactly as after `Wait`) instead of signalling its pid.
+here. A status taken from the claim also releases the `os.Process`, whose own
+`Wait` never ran and whose pidfd would otherwise stay open until a garbage
+collection. Once the leader is reaped — by `Wait` or by a sweep — nothing is
+sent to its pid: `handle.Signal` reports it finished (`os.ErrProcessDone`,
+exactly as after `Wait`), and `SignalGroup` without a private group reports
+`ESRCH`, which `Stop` already reads as gone. A private group is still addressed:
+it can outlive its leader.
 
 Lock order is `sweeping` → `spawning` → `mu` everywhere; nothing waits for a
 process while holding any of them.
@@ -195,3 +200,11 @@ pid 1 — exactly as it was.
 - `internal/service/proc/childwait/childwait_unix_internal_test.go` — real
   children with exit codes 0, 1, 7 and 42 plus an unclaimed one, drained through
   `ReapAny`: every claim holds its own child's code, the orphan leaves nothing.
+
+## References
+
+- [ADR 0016](0016-sdk-process-supervision-domain.md) — the `Process` and `Reaper` ports this reconciles.
+- [ADR 0018](0018-sdk-cross-platform-portability.md) — the eight platforms, and why the mechanism is stdlib `syscall`.
+- [wait4(2)](https://man7.org/linux/man-pages/man2/wait4.2.html), [waitid(2)](https://man7.org/linux/man-pages/man2/waitid.2.html) — a zombie's status is consumed by exactly one wait; `WNOWAIT` leaves it waitable and reports the same child again.
+- [`os.Process`](https://pkg.go.dev/os#Process) — on Linux Go waits through a pidfd (`waitid(P_PIDFD)`, Go 1.23+), which cannot reach another process that recycled the pid; `Release` frees that handle.
+- `$(go env GOROOT)/src/syscall/syscall_openbsd_libc.go` in go1.27.1 — `syscall.Syscall` returns `ENOSYS` for every trap but `SYS_IOCTL` on OpenBSD 7.5+.
