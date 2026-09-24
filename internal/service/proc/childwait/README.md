@@ -7,9 +7,8 @@ consumers never see it; they get its guarantee through `pkg/v1/process` and
 ## The guarantee
 
 A child spawned through `pkg/v1/process` reports its own exit status from
-`Wait`, even when a running `pkg/v1/reaper` collected it first. Before this
-package the reaper's `wait4(-1)` could take the status, and `Wait` then returned
-`WAIT_FAILED` for a child that had exited 0.
+`Wait`, even when a running `pkg/v1/reaper` collected it first: the reaper's
+`wait4(-1)` takes the zombie, and the status goes to the `Process` that owns it.
 
 ## How
 

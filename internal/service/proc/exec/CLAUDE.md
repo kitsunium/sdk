@@ -61,29 +61,36 @@ under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
 
 ## Exit status ownership (ADR 0093)
 
-A running reaper (`service/proc/reaper`, on when the supervisor is pid 1 or a
-subreaper) collects ANY exited child with `wait4(-1)` — this package's children
-included. So the Unix spawn forks through `childwait.Spawn`, which claims the
-child's exit status before any sweep can treat it as an orphan's, and
-`collectExit` reads the status from whichever waiter took it:
+Two things in the SDK call `wait4` on this package's children: the handle's own
+`os.Process.Wait` (`waitid(P_PIDFD)` on Linux ≥ 5.4, `wait4(pid)` elsewhere),
+and a running reaper's `childwait.ReapAny` (`wait4(-1)`), which collects ANY
+exited child. The reaper runs only when a consumer starts it (pid 1 or a
+subreaper); without it the handle's own wait always collects its child. So the
+Unix spawn forks through `childwait.Spawn`, which claims the child's exit status
+before any sweep can treat it as an orphan's — even a child that exits before
+`os.StartProcess` returns — and `collectExit` reads the status from whichever
+waiter took it:
 
 1. a sweep already collected it → the status on the claim, and NO wait by pid
    (the pid may belong to another process by now);
-2. otherwise the handle's own `os.Process.Wait` — always the case when no
-   reaper runs, which keeps that path exactly as before;
+2. otherwise the handle's own `os.Process.Wait` — the only path when no reaper
+   runs;
 3. that wait fails with ECHILD → `Claim.Reclaim` waits for the sweep's hand-off
    and returns the status it stored.
 
-Only a status nothing in the SDK collected — a child reaped by code outside it —
-is still `WAIT_FAILED`. A status taken from the claim also releases the
-`os.Process` (`releaseProc`, under a lock `Signal` shares, since `Release` writes
-the `Pid` field a pid-mode `Signal` reads): its own `Wait` never completed, so
-nothing else would free its pidfd before a garbage collection. Once the leader is reaped — by `Wait` or
-by a sweep — nothing is sent to its pid: `Signal` reports it finished
+`WAIT_FAILED` therefore means a status nothing in the SDK collected — a child
+reaped by code outside it — or a `wait4` fault; never a status a sweep took.
+
+A status taken from the claim also releases the `os.Process` (`releaseProc`,
+under a lock `Signal` shares, since `Release` writes the `Pid` field a pid-mode
+`Signal` reads): its own `Wait` never completed, so nothing else would free its
+pidfd before a garbage collection. Once the leader is reaped — by `Wait` or by a
+sweep — nothing is sent to its pid: `Signal` reports it finished
 (`os.ErrProcessDone`, as after `Wait`), and `SignalGroup` without a private
 group reports `ESRCH` (which `Stop` reads as gone); a private group is still
 addressed, since it can outlive its leader. The trampoline's aborted-spawn reap
-goes through `collectExit` too.
+goes through `collectExit` too. The ledger itself is
+`service/proc/childwait/CLAUDE.md`.
 
 ## Exit translation
 

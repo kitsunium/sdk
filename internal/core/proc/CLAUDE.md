@@ -30,7 +30,7 @@ Code range: `0.2.6.*` (ADR 0016).
 | `limit.go` | `LimitValue` — soft/hard rlimit pair + `LimitInfinity` |
 | `notification.go` | `NotificationValue` — parsed sd_notify datagram; `Ready`/`Reloading`/`Stopping`/`Watchdog` read `State` |
 | `process.go` | `Process` interface — `PID` / `Wait` / `Signal` / `SignalGroup` / `Stop` |
-| `reaper.go` | `Reaper` interface — `Start` / `Stop` / `ReapOnce` |
+| `reaper.go` | `Reaper` interface — `Start` / `Stop` / `ReapOnce`; an implementation hands the status of a child a `Process` spawned to that `Process` instead of discarding it (ADR 0093) |
 | `group.go` | `Group` interface — cgroup v2 `SetMemoryMax` / `SetCPUMax` / `SetPidsMax` / `SetIOMax` / `Add` / `Kill` / `Freeze` / `Thaw` / `Delete` |
 | `listener.go` | `Listener` interface — sd_notify supervisor side `Recv` / `Close` |
 | `codes.go` | `Code*` constants — range `0.2.6.*` |

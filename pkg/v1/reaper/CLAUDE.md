@@ -38,6 +38,10 @@ Public types are **aliases** of the core/service types — never new types.
   zombie, no goroutine leak); `ReapOnce` is a single concurrency-safe sweep.
 - `ECHILD` is a clean sweep terminus, not an error; other wait errors →
   `ReapFailed`.
+- A sweep collects every exited child, but the status of one spawned through
+  `pkg/v1/process` is handed to that `Process` (`internal/service/proc/childwait`,
+  ADR 0093): its `Wait` still reports the real exit. A child spawned any other
+  way (`os/exec`, `syscall.ForkExec`) has no such hand-off.
 - Off Unix everything degrades: `New` is a no-op reaper, `SetChildSubreaper`
   returns `UnsupportedPlatform`. On non-Linux Unix the loop works but
   `SetChildSubreaper` is `UnsupportedPlatform`.
