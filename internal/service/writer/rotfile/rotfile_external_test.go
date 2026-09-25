@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
@@ -196,9 +197,16 @@ func TestRotFileCompressProduces0600Gz(t *testing.T) {
 		if serr != nil {
 			t.Fatalf("expected %s.1.gz: %v", path, serr)
 		}
+		want := os.FileMode(0o600)
+		//: Windows has no permission bits: 0600 reaches the file as "not
+		//: read-only", which os reports as 0666 — the ACL the file inherits
+		//: decides who reads it there (see CLAUDE.md).
+		if runtime.GOOS == "windows" {
+			want = 0o666
+		}
 		//: the gzip sibling must be 0600, never gzip's default perms.
-		if perm := fi.Mode().Perm(); perm != 0o600 {
-			t.Errorf("gz perm=%o want 600", perm)
+		if perm := fi.Mode().Perm(); perm != want {
+			t.Errorf("gz perm=%o want %o", perm, want)
 		}
 		//: the uncompressed .1 must not linger alongside the .gz.
 		if _, perr := os.Stat(path + ".1"); !os.IsNotExist(perr) {

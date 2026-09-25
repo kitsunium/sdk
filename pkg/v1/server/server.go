@@ -213,6 +213,10 @@ func Chain(h Handler, middlewares ...Middleware) Handler {
 
 // Listen adds an address to a group. Repeat it to bind several addresses to one
 // handler — a TCP port and a Unix socket, for instance.
+//
+// On Windows, whose AF_UNIX sockets are stream-only, a "unixgram" or
+// "unixpacket" address fails Start with the SDK's UNSUPPORTED_PLATFORM, before
+// any socket is opened; "unix" is served there as everywhere else.
 func Listen(network, addr string) GroupOption {
 	//: forwarded unchanged.
 	return svcserver.Listen(network, addr)
@@ -338,8 +342,11 @@ func MaxConns(n int) GroupOption {
 
 // Shards sets how many listeners to open on each of the group's addresses.
 //
-// Zero selects one per core; one disables sharding. Where the platform or the
-// socket family cannot shard, the count collapses to one and State reports why.
+// Zero selects one per core; one disables sharding. Where the platform (Windows
+// has no SO_REUSEPORT) or the socket family (a Unix socket) cannot shard, the
+// count collapses to one. An explicit count that collapses is reported in State
+// with the reason; zero collapsing is not, since it asked for nothing a single
+// listener fails to give.
 func Shards(n int) GroupOption {
 	//: forwarded unchanged.
 	return svcserver.Shards(n)
@@ -354,7 +361,9 @@ func Shards(n int) GroupOption {
 //
 // A named socket the supervisor did not pass is SocketAdoptFailed, never a
 // silent fallback to binding: a service that quietly binds its own port has
-// lost exactly the property activation exists to provide.
+// lost exactly the property activation exists to provide. The same holds on
+// Windows, which has no socket activation at all: Start fails there with
+// SocketAdoptFailed, whose cause field names UNSUPPORTED_PLATFORM.
 func Adopt(names ...string) GroupOption {
 	//: forwarded unchanged.
 	return svcserver.Adopt(names...)

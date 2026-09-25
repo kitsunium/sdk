@@ -26,7 +26,10 @@ go_test(
         "describer_external_test.go",
         "metrics_external_test.go",
     ],
-    deps = [":metrics"],
+    deps = [
+        ":metrics",
+        "//pkg/v1/clock",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

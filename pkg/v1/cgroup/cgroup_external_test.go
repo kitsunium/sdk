@@ -81,6 +81,21 @@ func TestWithRootOption(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		g, err := cgroup.Create("g", cgroup.WithRoot(c.root))
+		//: a root names a directory of the cgroup v2 hierarchy, so only Linux
+		//: can be told a bad one. The Job Object backend (Windows) and the
+		//: rctl one (FreeBSD) have no hierarchy: the option is accepted and
+		//: ignored there — documented, and asserted rather than skipped.
+		if runtime.GOOS != "linux" && cgroup.Available() {
+			//: the root is accepted and ignored,
+			if err != nil || g == nil {
+				t.Fatalf("Create with root %q on %s = (%v, %v), want a group: there is no hierarchy for a root to name", c.root, runtime.GOOS, g, err)
+			}
+			//: and the group releases cleanly.
+			if derr := g.Delete(); derr != nil {
+				t.Errorf("Delete = %v, want nil", derr)
+			}
+			return
+		}
 		if g != nil {
 			t.Fatalf("Create with root %q returned a handle", c.root)
 		}

@@ -78,8 +78,17 @@
 // OOMScoreAdj are applied post-start on the live pid and surface a typed error if
 // the host refuses.
 //
-// On non-Unix platforms Start returns UnsupportedPlatform; the package compiles
-// everywhere but only supervises on Unix.
+// # Platform notes
+//
+// On Windows, Start spawns through CreateProcess and supervises the child the
+// same way: exit codes, stdio capture, Setpgid as a new console process group,
+// a group-aware Stop, and the Rlimits that have a Job Object analogue (address
+// space and data as the memory cap, NProc as the process count). The Spec fields
+// that are Unix concepts — credentials (User, Group, Groups), Umask, Nice,
+// OOMScoreAdj, ExtraFiles — are refused there with UnsupportedPlatform rather
+// than dropped, and an Rlimit with no analogue with UnknownResource. On the
+// remaining non-Unix targets (plan9, js, wasip1) Start returns
+// UnsupportedPlatform; the package compiles everywhere.
 package process
 
 import (
@@ -116,7 +125,8 @@ type Limit = coreproc.LimitValue
 
 // Start spawns the process described by spec and returns a live Process handle.
 // It delegates to internal/service/proc/exec; ctx is honoured up to the
-// fork/exec boundary. On non-Unix platforms it returns UnsupportedPlatform.
+// fork/exec boundary. On a platform with no spawn backend (neither Unix nor
+// Windows) it returns UnsupportedPlatform.
 func Start(ctx context.Context, spec Spec) (proc Process, err error) {
 	//: the facade adds no behaviour — delegate straight to the service spawn.
 	return svcexec.Start(ctx, spec)

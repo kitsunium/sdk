@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -33,7 +34,9 @@ func Test_listenPacket(t *testing.T) {
 	tests := []tc{
 		{name: "a udp address", network: "udp", addr: "127.0.0.1:0"},
 		{name: "an IPv4-only datagram address", network: "udp4", addr: "127.0.0.1:0"},
-		{name: "a unix datagram socket", network: "unixgram", target: addrTempSocket},
+		//: a served family — except on Windows, whose AF_UNIX is stream-only
+		//: and where it is refused by name before the OS is asked.
+		{name: "a unix datagram socket", network: "unixgram", target: addrTempSocket, wantCode: onWindows(coreproc.CodeUnsupportedPlatform)},
 		{
 			//: the stream engine's family, refused before the OS is touched.
 			name: "a stream family on the datagram engine", network: "tcp", addr: "127.0.0.1:0",

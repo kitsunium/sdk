@@ -62,6 +62,7 @@ Logger ── Handler (genericHandler / TextHandler)
 | File              | Role |
 |---|---|
 | `logger.go`       | `loggerImpl` + `New` / `NewWithTraceContext` + `Build`/`LogAttrs` package entries |
+| `owning.go`       | `Owning` + `loggerImpl.Close` — a Logger that owns the writers a constructor opened for it, and releases them once |
 | `builder.go`      | `Builder` interface + `chainBuilder` impl (recycled via `recordPool`) |
 | `handler.go`      | `genericHandler` (Encoder × Sink composition) + `NewHandler` |
 | `text_handler.go` | `TextHandler` legacy fused handler (`NewTextHandler`) |
@@ -97,6 +98,19 @@ Logger ── Handler (genericHandler / TextHandler)
   record dropped by the level threshold pays no `context` walk. It is read
   before `Handle`, so every Handler, Sink and middleware sees the identity on
   the record.
+- **A Logger can own its writers, and then it can release them** (ADR 0095).
+  `Owning(lg, closer)` returns a copy of `lg` that holds `closer`, and
+  `loggerImpl.Close` releases it once (`onceCloser` repeats the first answer).
+  It is for a constructor that opens writers the caller never holds —
+  `pkg/v1/logger.NewMulti` — whose Logger used to be the only thing referring to
+  them, so they lived until a collection ran their finalizers: a descriptor leak
+  for a program that rebuilds its logger, and on Windows a log file nothing
+  could delete or rotate while the process ran. The owner stays a `*loggerImpl`,
+  so `Build`/`LogAttrs` keep their fast path; `With`/`WithGroup` build fresh
+  values that own nothing, so closing a child never pulls the writers out from
+  under its parent. That includes `WithGroup("")`, whose no-op hands the
+  receiver back — except from an owner, which answers with a non-owning twin
+  rather than itself. `TestAnOwningLoggerReleasesWhatItOwnsOnce`.
 - **A `!race` alloc guard covers this.** `TestT34TraceCorrelationAddsNoAllocation`
   in `pkg/v1/logger` asserts **exactly 1** alloc/op on all three emission paths,
   in and out of a span — stricter than `TestV116BuildSendAllocatesOnePerEmit`,

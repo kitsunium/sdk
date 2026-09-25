@@ -27,6 +27,11 @@ type loggerImpl struct {
 	// state a Logger built by New is in, since this layer deliberately does
 	// not know which propagation the application uses (ADR 0062).
 	trace corelogger.TraceContextSource
+	// owned is what this Logger releases on Close: the writers a constructor
+	// opened FOR it, which nobody else holds (see Owning). Nil for every
+	// Logger over a sink its caller owns, and for every Logger derived with
+	// With or WithGroup — they share the writers and own none of them.
+	owned *onceCloser
 }
 
 // New wraps a core.Handler inside a core.Logger with no trace correlation.
@@ -183,10 +188,18 @@ func (l *loggerImpl) LogAttrs(ctx context.Context, lv level.Level, msg string, a
 }
 
 // WithGroup returns a derived Logger whose subsequent attributes are
-// namespaced under the given group name.
+// namespaced under the given group name. An empty name adds no group: the
+// receiver comes back unchanged, unless it owns writers (see Owning) — then
+// it is an equivalent Logger that owns none, as every derived Logger is.
 func (l *loggerImpl) WithGroup(name string) corelogger.Logger {
 	//: empty group is a documented no-op so callers can pass user input.
 	if name == "" {
+		//: an owner is not handed back as its own child: closing what
+		//: WithGroup returned must never close the writers under it.
+		if l.owned != nil {
+			//: the same handler and trace binding, owning nothing.
+			return &loggerImpl{h: l.h, trace: l.trace}
+		}
 		//: return the receiver unchanged — no extra wrapping.
 		return l
 	}

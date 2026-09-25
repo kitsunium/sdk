@@ -254,7 +254,10 @@ var (
 //
 // It refuses at construction — never at first use — a policy it cannot
 // honour, a directory it cannot use safely, and a platform with no atomic
-// replace or no flushable directory handle.
+// replace or no flushable directory handle. Windows is such a platform: after
+// the directory checks — which read its access control lists there — NewFile
+// returns the SDK's UNSUPPORTED_PLATFORM, matched with
+// errors.Is(err, proc.UnsupportedPlatform).
 //
 // The broker holds two directory descriptors and additionally implements
 // io.Closer, which releases them — reached by type assertion, as the session

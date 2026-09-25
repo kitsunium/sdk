@@ -73,8 +73,10 @@ func makeZipWithBinary(t *testing.T, payload []byte) []byte {
 	return buf.Bytes()
 }
 
-// hostAssetName returns the release archive asset name resolved for the host
-// platform — the same name downloadAndReplace requests and verifies.
+// hostAssetName returns the release archive asset name for the platform every
+// Service in this suite is built for (fixtureGOOS, pinned by TestMain) — the
+// same name downloadAndReplace requests and verifies. It no longer follows the
+// host: the archive fixtures are tar.gz, which is the asset of a Unix target.
 func hostAssetName() string {
 	//: Service literal mirrors NewUpdaterWithDeps platform capture.
 	svc := &Service{goos: runtimeGOOS(), goarch: runtimeGOARCH(), src: testSource}
@@ -82,7 +84,7 @@ func hostAssetName() string {
 }
 
 // checksumsManifestFor returns sha256sum-format manifest bytes covering the
-// given archive under the host platform's release asset name, matching the
+// given archive under the fixture platform's release asset name, matching the
 // checksums.txt asset published by the release workflow.
 func checksumsManifestFor(t *testing.T, archive []byte) []byte {
 	t.Helper()
@@ -766,6 +768,12 @@ func TestUpdaterService_writeAndReplaceBinary(t *testing.T) {
 // trigger the same retry, since a different user can't fix that either.
 func TestUpdaterService_writeAndReplaceBinary_StagingFallback(t *testing.T) {
 	t.Parallel()
+	//: the install directory as THIS host's filepath spells it: the code
+	//: stages in filepath.Dir(execPath), which is `\usr\local\bin` on
+	//: Windows, and a literal "/usr/local/bin" compared the separator rather
+	//: than the fallback.
+	const execPath = "/usr/local/bin/ktn-linter"
+	installDir := filepath.Dir(execPath)
 
 	tests := []struct {
 		name           string
@@ -779,7 +787,7 @@ func TestUpdaterService_writeAndReplaceBinary_StagingFallback(t *testing.T) {
 			name:     "permission denied on install dir falls back to OS temp dir",
 			dirErr:   fmt.Errorf("wrap: %w", os.ErrPermission),
 			wantErr:  false,
-			wantDirs: []string{"/usr/local/bin", ""},
+			wantDirs: []string{installDir, ""},
 		},
 		{
 			name:           "fallback also denied surfaces the fallback error",
@@ -787,14 +795,14 @@ func TestUpdaterService_writeAndReplaceBinary_StagingFallback(t *testing.T) {
 			fallbackErr:    errors.New("still denied"),
 			wantErr:        true,
 			wantErrContain: "still denied",
-			wantDirs:       []string{"/usr/local/bin", ""},
+			wantDirs:       []string{installDir, ""},
 		},
 		{
 			name:           "non-permission error on install dir never retries",
 			dirErr:         errors.New("disk full"),
 			wantErr:        true,
 			wantErrContain: "disk full",
-			wantDirs:       []string{"/usr/local/bin"},
+			wantDirs:       []string{installDir},
 		},
 	}
 
@@ -824,7 +832,7 @@ func TestUpdaterService_writeAndReplaceBinary_StagingFallback(t *testing.T) {
 
 			updater := NewUpdaterWithDeps("v1.0.0", testSource, &mockHTTPClient{}, fs, &mockCopier{})
 
-			err := updater.writeAndReplaceBinary(bytes.NewReader([]byte("content")), "/usr/local/bin/ktn-linter")
+			err := updater.writeAndReplaceBinary(bytes.NewReader([]byte("content")), execPath)
 
 			if tt.wantErr {
 				if err == nil {

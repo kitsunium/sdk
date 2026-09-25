@@ -33,9 +33,17 @@ package doc comment.
 
 ## Platform
 
-`Parse`, `String`, and `Notify` are portable. `Relay` requires kill(2); off Unix
-it returns the typed `UNSUPPORTED_PLATFORM` sentinel rather than acting, so
-downstream code compiles and degrades on every GOOS.
+`Parse`, `String`, and `Notify` are portable. `Relay` delivers through kill(2)
+on Unix and, on Windows, through TerminateProcess (a pid) or a console control
+event (a process group) — `internal/service/proc/signal/relay_windows.go`.
+Elsewhere it returns the typed `UNSUPPORTED_PLATFORM` sentinel rather than
+acting, so downstream code compiles and degrades on every GOOS.
+
+The facade suite follows the split: `signal_other_test.go`
+(`!unix && !windows`) asserts the refusal, `signal_windows_test.go` the Windows
+backend through the facade. The facade test used to carry `!unix` and assert
+the refusal on Windows too, long after Windows gained its backend; the first
+Windows run of the suite found it (ADR 0095).
 
 ## Do not
 

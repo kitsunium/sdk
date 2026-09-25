@@ -92,6 +92,7 @@ process pass the gate and then block on a `flock` its own process holds.
 | `nofollow_unix.go` / `nofollow_windows.go` / `nofollow_other.go` | the same split again — `O_NOFOLLOW`, `FILE_FLAG_OPEN_REPARSE_POINT` + the handle check, and the plain open |
 | `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule on Unix, a DACL rule on Windows, and `plantable` — "could anybody create an entry here?", the same question asked of a different directory |
 | `dacl_windows.go` | Windows' answer to that question: `GetNamedSecurityInfoW` + `GetAce` from `advapi32`, and the cost estimate that deferred it three times, re-checked (ADR 0084) |
+| `dacl_shared_windows.go` | the same reader EXPORTED — `GrantsAnyone` and the rights it takes (`ReplaceRights`, `ContentRights`, `RightAddFile`, …) — because `internal/service/queue` asks the same question of its own directories, and a second reader would be a second place to get eight ACE shapes wrong (ADR 0095) |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
 
 ## Platform matrix (ADR 0018)
@@ -191,8 +192,14 @@ allow is read as granting, a conditional deny as denying nothing.
 The check **fails open**: any failure on the way to a verdict accepts. Failing
 open *silently* would be a different thing and is not what happens —
 `dirGrantsAnyone` returns an empty `observed` when a verdict was reached
-and the Win32 status when it was not, and both `checkDir` and `checkChain`
-**log** the second case before accepting. Same channel
+and names what stopped it when it was not — the Win32 status
+(`GetNamedSecurityInfoW=5`), a path that is not one (`UTF16PtrFromString=…`),
+the entry the walk could not fetch (`GetAce#3`) — and both `checkDir` and
+`checkChain` **log** the second case before accepting. The last two used to
+come back empty, indistinguishable from a verdict; ADR 0095 named them so the
+queue, which asks the same reader, can refuse where the lock accepts.
+`TestEveryAnswerWithoutAVerdictIsNamed` drives the two a test can cause (a NUL
+in the path, a directory that is not there) against a list read to the end. Same channel
 `internal/service/entitlement` uses for the same shape of degradation, and it
 fires only when the platform API refused to answer.
 
@@ -347,10 +354,17 @@ re-`Define`d here.
 - **Run the POSIX directory rule on Windows.** It refuses every directory, and
   `prepareDir` only checks directories it did not create — so the symptom is a
   program that starts once on a fresh machine and never again.
+- **Fork the DACL reader for another package.** `GrantsAnyone` exists so
+  there is one: `internal/service/queue` calls it with masks of its own. A new
+  question is a new pair of masks, not a new walk.
 - **Make the DACL check refuse on an API failure.** It fails OPEN on purpose:
   this code cannot be iterated locally, a wrong refusal costs a locker that
   never builds on a safe directory, and a wrong acceptance leaves the platform
-  where it already was. Those are not symmetric (ADR 0084 §D5).
+  where it already was. Those are not symmetric (ADR 0084 §D5). The QUEUE,
+  asking the same reader, refuses on the same failure, because its asymmetry
+  runs the other way (ADR 0095) — which is the caller's call, not the
+  reader's. So the reader decides nothing and must keep naming every
+  no-verdict answer: an empty `observed` means "read to the end", only that.
 - **Read a NULL DACL as "no entries, so no grants".** Windows reads it as
   everyone, full control. That inversion is what makes a security check worse
   than none.

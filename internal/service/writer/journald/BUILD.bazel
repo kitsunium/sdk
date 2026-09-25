@@ -11,6 +11,8 @@ go_library(
         "journald.go",
         "journald_config.go",
         "journald_sink.go",
+        "socket_other.go",
+        "socket_windows.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/writer/journald",
     visibility = [
@@ -20,6 +22,7 @@ go_library(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
+        "//internal/core/proc",
         "//internal/core/writer",
         "//internal/kernel/errs",
         "//internal/service/logger/middleware/async",
@@ -51,6 +54,7 @@ go_test(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
+        "//internal/core/proc",
         "//internal/core/writer",
         "//internal/kernel/errs",
     ],

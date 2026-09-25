@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/writer"
@@ -38,7 +39,14 @@ func newCancelled(t *testing.T) (context.Context, context.CancelFunc) {
 	return context.WithCancel(t.Context())
 }
 
-// assertPerm0600 fails the test unless path exists with exactly 0600 perms.
+// assertPerm0600 fails the test unless path exists with exactly 0600 perms —
+// or, on Windows, with the one bit a mode reaches there.
+//
+// Windows has no permission bits: os maps a mode to FILE_ATTRIBUTE_READONLY
+// alone and synthesises the mode back from it, so 0600 arrives as "writable"
+// and reads back 0666. Who may read the file is the ACL it inherits from its
+// directory, the gap CLAUDE.md names; what is asserted there is that the
+// sink did not create it read-only, which is all the mode can say.
 func assertPerm0600(t *testing.T, name, path string) {
 	t.Helper()
 	fi, serr := os.Stat(path)
@@ -46,9 +54,14 @@ func assertPerm0600(t *testing.T, name, path string) {
 	if serr != nil {
 		t.Fatalf("%s: stat %s: %v", name, path, serr)
 	}
+	want := os.FileMode(0o600)
+	//: the mode Windows synthesises for a file that is not read-only.
+	if runtime.GOOS == "windows" {
+		want = 0o666
+	}
 	//: hardened files must be owner-only readable/writable.
-	if perm := fi.Mode().Perm(); perm != 0o600 {
-		t.Errorf("%s: perm=%o want 600", name, perm)
+	if perm := fi.Mode().Perm(); perm != want {
+		t.Errorf("%s: perm=%o want %o", name, perm, want)
 	}
 }
 
@@ -65,8 +78,18 @@ func rootBypassesPerms() bool {
 // entry inside it fails with EACCES, then restores 0700 in cleanup so t.TempDir
 // teardown can delete the tree. It is the single injection seam for the rotate /
 // prune failure branches that need a non-removable on-disk slot.
+//
+// On Windows the injection cannot be made, so the calling case skips: os.Chmod
+// there only toggles FILE_ATTRIBUTE_READONLY, which Windows does not enforce on
+// a directory's entries, so nothing fails and the failure branch under test is
+// never reached. The branches themselves are the same code on every platform
+// and run on every Unix lane.
 func freezeDirReadOnly(t *testing.T, dir string) {
 	t.Helper()
+	//: no chmod freezes a directory on Windows; the fixture cannot exist.
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod cannot freeze a directory on Windows (it only sets FILE_ATTRIBUTE_READONLY, which directories ignore), so this failure cannot be injected there; the branch runs on every Unix lane")
+	}
 	//: drop write permission so the kernel refuses mutations of dir's entries.
 	if cerr := os.Chmod(dir, 0o555); cerr != nil {
 		t.Fatalf("chmod 0555 %s: %v", dir, cerr)

@@ -389,8 +389,9 @@ func dirGrantsAnyone(dir string, onDirectory, onFilesWithin uint32) (granted boo
 	//: a path with a NUL in it is not a path. Fail open: see the package
 	//: comment on why a wrong refusal costs more than a wrong acceptance.
 	if convErr != nil {
-		//: no verdict.
-		return false, ""
+		//: no verdict — NAMED, as every no-verdict answer is, so a caller can
+		//: tell it from "read, and nobody may write" (ADR 0084 §D5).
+		return false, "UTF16PtrFromString=" + convErr.Error()
 	}
 	var dacl *aclHeader
 	var descriptor syscall.Handle
@@ -446,8 +447,9 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 		//: an entry that cannot be fetched ends the walk. Fail open rather
 		//: than judge a list half-read.
 		if !ok {
-			//: no verdict.
-			return false, ""
+			//: no verdict, naming the entry the walk stopped at: a list read
+			//: in part is not a list read and found safe.
+			return false, "GetAce#" + strconv.FormatUint(uint64(index), 10)
 		}
 		shape, known := shapeOf(ace.AceType)
 		//: an entry this file does not know the LAYOUT of is skipped before

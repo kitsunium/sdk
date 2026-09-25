@@ -1,10 +1,11 @@
-//go:build !unix
+//go:build !unix && !windows
 
-// Package process_test — non-Unix facade contract: the keystone spawn primitive
-// has no portable equivalent off Unix, so the facade Start must forward the
-// central UnsupportedPlatform sentinel unchanged on every non-Unix target. Gated
-// on the same `!unix` tag as the service stub so the e2e-vm CI binary validates
-// the off-platform path on a real non-Unix kernel, not via a runtime.GOOS guess.
+// Package process_test — the facade contract where there is no spawn backend:
+// neither Unix nor Windows (plan9, js, wasip1), the facade Start must forward
+// the central UnsupportedPlatform sentinel unchanged. Gated on the same
+// `!unix && !windows` tag as the service stub — Windows has a CreateProcess
+// backend of its own, asserted by process_windows_test.go — so the build tag,
+// not a runtime.GOOS guess, decides which contract a binary checks.
 package process_test
 
 import (

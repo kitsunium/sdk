@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-11T00:00:00Z -->
+<!-- updated: 2026-09-25T00:00:00Z -->
 # internal/service/codec/multipart/
 
 ## Purpose
@@ -154,6 +154,29 @@ success. Quotes and backslashes are still escaped inside the quoted parameters
 (`quoteEscaper`), and UTF-8 is written raw (RFC 7578 §4.2). Pinned by
 `TestEncoderRefusesHeaderInjection` and `TestEncodedHeadersReparseWithTheStdlib`,
 which requires the stdlib reader to read back exactly the header block asked for.
+
+## A filename is reduced by one rule, on every OS
+
+The decoder reads the `Content-Disposition` itself (`disposition.go`) instead of
+calling `(*mime/multipart.Part).FileName`, because that method passes the
+parameter through `filepath.Base` — and `filepath.Base` is the HOST's: it splits
+on `\` on Windows and not on Unix. The same body decoded `q"uo\te.txt` to
+`te.txt` on Windows and kept it whole on Linux, and a full path an old browser
+sent (`C:\Users\ada\cv.pdf`) came back stripped on one platform and verbatim on
+the other. Found by the first Windows run of the whole suite (ADR 0095).
+
+`lastElement` is the rule, and it does not depend on where it runs: trailing
+separators are dropped (`dir/` names `dir`, as `filepath.Base` has it), then
+everything after the last `/` OR `\` is kept. RFC 7578 §4.2 has the receiver
+drop the directory information a sender may include, and the sender writes it
+with ITS separator — so both separate, everywhere. Nothing else is removed: a
+colon is an ordinary filename octet on Unix, and `.` / `..` come back as sent,
+so a caller turning `FileName` into a path still validates it. A value made of
+separators alone yields `""`, what a part with no usable filename already
+carries. Pinned by `TestAFileNameKeepsOnlyItsLastPathElementOnEveryOS`,
+mutation-checked against the stdlib call; `TestEncodedHeadersReparseWithTheStdlib`
+reads the raw parameter for the same reason, since it is about what the ENCODER
+wrote.
 
 ## Error codes (range `0.3.41.*`)
 

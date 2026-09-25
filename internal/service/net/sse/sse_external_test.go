@@ -779,6 +779,12 @@ func TestWriteDeadlineIsRefreshedOnEveryFrame(t *testing.T) {
 		if serr := stream.Send(corenet.SSEEventValue{Data: "tick"}); serr != nil {
 			t.Fatalf("Send(%d) = %v, want nil", i, serr)
 		}
+		//: the next frame reads the clock strictly LATER than this one did,
+		//: whatever this platform's clock resolution. Back to back, three frames
+		//: shared one reading on Windows — its clock moves in ticks — so their
+		//: deadlines were equal and "each is later than the one before it"
+		//: failed on a stream that had refreshed every one of them.
+		untilTheClockPasses(w.deadlines[len(w.deadlines)-1].Add(-sse.DefaultWriteTimeout))
 	}
 	//: one probe at construction plus one per frame.
 	if got, want := len(w.deadlines), deadlineFrames+1; got != want {
@@ -907,4 +913,19 @@ func (w *deadlineWriter) body() string {
 	defer w.mu.Unlock()
 	//: a copy, so the caller cannot race the stream's own writes.
 	return w.buf.String()
+}
+
+// untilTheClockPasses returns once the system clock reads strictly later than
+// instant.
+//
+// Two readings taken microseconds apart are NOT guaranteed to differ: Windows
+// moves its clock in ticks of 0.5 to 15.6 ms, so consecutive frames there can
+// carry the same instant. A test that needs two operations to observe two
+// different times waits for the clock to move between them, instead of
+// assuming it did — which works at any resolution and costs at most one tick.
+func untilTheClockPasses(instant time.Time) {
+	//: a short sleep rather than a spin: the tick is what is being waited for.
+	for !time.Now().After(instant) {
+		time.Sleep(time.Millisecond)
+	}
 }

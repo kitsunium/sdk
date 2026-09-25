@@ -117,11 +117,12 @@ func Resolve(ctx context.Context, cfg Config) corevcs.ResolutionValue {
 // hint resolves from the process working directory.
 //
 // It answers with TWO spellings of one directory. canonical is git's own
-// --show-toplevel, which every recorded path is built from. asSpelled is the
-// same directory named the way the caller named it, and is empty unless the
-// caller reached the repository through a symbolic link — git resolves those
-// away, so without it a caller whose paths traverse the link queries a set
-// keyed under a root it never spells.
+// --show-toplevel, in the operating system's path form, which every recorded
+// path is built from. asSpelled is the same directory named the way the caller
+// named it, and is empty unless the caller's spelling differs from git's — a
+// symbolic link git resolved away, or on Windows an 8.3 short name git
+// expanded — so without it a caller whose paths use that spelling queries a
+// set keyed under a root it never spells.
 func repoTopLevel(ctx context.Context, hint string) (canonical, asSpelled string, ok bool) {
 	start := hint
 	//: An empty hint means "the repository around the working directory".
@@ -140,20 +141,34 @@ func repoTopLevel(ctx context.Context, hint string) (canonical, asSpelled string
 		//: Signal "no repo".
 		return "", "", false
 	}
-	asSpelled, _ = spelledTopLevel(abs, out)
+	//: git prints '/'-separated paths on every platform, Windows included,
+	//: while every recorded path is built by filepath.Join in the OS's own
+	//: form. Keyed raw, the root was `C:/…` against entries under `C:\…` on
+	//: Windows, so the alias rewrite — a prefix match on the root — never
+	//: matched, and every query through the caller's spelling answered false.
+	canonical = filepath.Clean(out)
+	asSpelled, _ = spelledTopLevel(abs, canonical)
 	//: Resolved top-level, plus the caller's own spelling of it when it differs.
 	//: A hint that already reaches the root directly yields no second spelling,
 	//: and "" is exactly what the changed set reads as "there is none".
-	return out, asSpelled, true
+	return canonical, asSpelled, true
 }
 
 // spelledTopLevel returns the repository top-level named the way the caller
 // named it, or "" when the caller's path already reaches it directly.
 //
-// The one EvalSymlinks this package performs happens here, on the hint alone,
-// and only when the hint is not already inside the canonical root — which is
-// the ordinary case, so the ordinary case pays nothing. What it buys is an
-// O(1) prefix rewrite on every later query instead of a syscall per query.
+// The only EvalSymlinks this package performs happen here, and only when the
+// hint is not already inside the canonical root — which is the ordinary case,
+// so the ordinary case pays nothing. What they buy is an O(1) prefix rewrite
+// on every later query instead of a syscall per query.
+//
+// Both sides are resolved before they are compared. The hint, because that is
+// where the caller's indirection lives. The canonical root, because what git
+// resolves is git's business and differs by platform: on Windows it expands an
+// 8.3 short name (`RUNNER~1`, which is how %TEMP% is spelled on a CI runner)
+// and EvalSymlinks does too, but whether it follows a link is the git build's
+// choice. Comparing git's answer to a fully resolved hint would name no alias
+// whenever the two stopped at different places.
 func spelledTopLevel(absHint, canonical string) (alias string, ok bool) {
 	clean := filepath.Clean(absHint)
 	//: The caller is already speaking git's spelling — nothing to alias.
@@ -167,8 +182,13 @@ func spelledTopLevel(absHint, canonical string) (alias string, ok bool) {
 		//: No alias.
 		return "", false
 	}
+	root, rootErr := filepath.EvalSymlinks(canonical)
+	//: A root that no longer resolves is compared as git spelled it.
+	if rootErr != nil {
+		root = canonical
+	}
 	//: The alias is the hint with its in-repository tail stripped back off.
-	return trimRepoTail(clean, canonical, resolved)
+	return trimRepoTail(clean, root, resolved)
 }
 
 // trimRepoTail removes from clean the path the resolved hint holds below

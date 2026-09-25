@@ -23,6 +23,17 @@ type portableReader struct {
 // which is precisely what recvmmsg reports and ReadFrom cannot.
 func (r *portableReader) readBatch(slots []datagram) (n int, err error) {
 	read, addr, rerr := r.pc.ReadFrom(slots[0].buf)
+	//: Windows FAILS a read whose datagram outgrew the buffer where every
+	//: Unix truncates it in silence. It is the same event — a datagram past
+	//: the ceiling — so it is reported the same way: as a slot filled to the
+	//: probe byte, which dispatch drops and counts. Handed up as an error it
+	//: was skipped by the loop and never counted at all.
+	if rerr != nil && datagramTruncated(rerr) {
+		slots[0].n = len(slots[0].buf)
+		slots[0].addr = addr
+		//: one oversized datagram, for dispatch to drop and count.
+		return 1, nil
+	}
 	//: a read failure ends the batch; the loop above decides whether to stop.
 	if rerr != nil {
 		//: hand the failure up so the loop can classify it.

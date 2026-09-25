@@ -8,7 +8,7 @@ import "github.com/kitsunium/sdk/pkg/v1/cgroup"
 
 Package cgroup creates and manages cgroup v2 control groups to confine a process tree's memory, CPU, pids, and IO.
 
-It is the thin public facade over internal/service/proc/cgroup: Group is an alias of the core proc.Group port and the functions delegate straight to the service implementation. The kernel\-enforced control\-group backend is the unified cgroup v2 hierarchy on Linux and a Job Object on Windows; the facade degrades gracefully — on a platform with no such backend \(darwin, the BSDs\), a cgroup v1 host, or an unprivileged/non\-delegated Linux host it returns the typed UnsupportedPlatform or CgroupUnavailable error rather than panicking.
+It is the thin public facade over internal/service/proc/cgroup: Group is an alias of the core proc.Group port and the functions delegate straight to the service implementation. The kernel\-enforced control\-group backend is the unified cgroup v2 hierarchy on Linux, a Job Object on Windows and rctl\(8\) on FreeBSD; the facade degrades gracefully — on a platform with no such backend \(darwin, OpenBSD, NetBSD, DragonFly, a FreeBSD kernel without RACCT\), a cgroup v1 host, or an unprivileged/non\-delegated Linux host it returns the typed UnsupportedPlatform or CgroupUnavailable error rather than panicking.
 
 ### Usage
 
@@ -43,7 +43,7 @@ Available is honest about delegation: it confirms the cgroup.controllers marker 
 
 ### Platform notes
 
-The backend is cgroup v2 on Linux and a Job Object on Windows. On those two, Available reports true \(Linux additionally requires the hierarchy delegated\) and Create returns a usable Group. On every other platform \(darwin, the BSDs\) Available returns false and Create returns UnsupportedPlatform. The Group surface is uniform; SetIOMax / Freeze / Thaw degrade to UnsupportedPlatform on the Job Object backend, which has no equivalent for them.
+The backend is cgroup v2 on Linux, a Job Object on Windows and rctl\(8\) on FreeBSD. On those, Available reports true \(Linux additionally requires the hierarchy delegated, FreeBSD a kernel with RACCT\) and Create returns a usable Group. On every other platform \(darwin, OpenBSD, NetBSD, DragonFly\) Available returns false and Create returns UnsupportedPlatform. The Group surface is uniform; SetIOMax / Freeze / Thaw degrade to UnsupportedPlatform on the Job Object backend, which has no equivalent for them. WithRoot names a directory of the cgroup v2 hierarchy, so it takes effect on Linux only: the Job Object and rctl backends have no hierarchy, and accept the option and ignore it.
 
 ## Index
 
@@ -56,16 +56,16 @@ The backend is cgroup v2 on Linux and a Job Object on Windows. On those two, Ava
 
 
 <a name="Available"></a>
-## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L86>)
+## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L93>)
 
 ```go
 func Available() bool
 ```
 
-Available reports whether a kernel\-enforced control\-group backend is usable: on Linux, that the unified cgroup v2 hierarchy is mounted AND a sub\-group can be created under it by the caller; on Windows, that Job Objects are available \(always true\). It returns false on platforms with no backend \(darwin, the BSDs\), on cgroup v1, and on a Linux host where the hierarchy is read\-only.
+Available reports whether a kernel\-enforced control\-group backend is usable: on Linux, that the unified cgroup v2 hierarchy is mounted AND a sub\-group can be created under it by the caller; on Windows, that Job Objects are available \(always true\); on FreeBSD, that the kernel carries RACCT. It returns false on platforms with no backend \(darwin, OpenBSD, NetBSD, DragonFly\), on cgroup v1, and on a Linux host where the hierarchy is read\-only.
 
 <a name="Group"></a>
-## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L68>)
+## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L72>)
 
 Group is a handle to a cgroup v2 control group: set controller ceilings, attach processes, and remove the group. It aliases the core proc.Group port.
 
@@ -74,25 +74,25 @@ type Group = coreproc.Group
 ```
 
 <a name="Create"></a>
-### func [Create](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L96>)
+### func [Create](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L104>)
 
 ```go
 func Create(name string, opts ...Option) (g Group, err error)
 ```
 
-Create makes a new control group named name and returns a Group bound to it — a cgroup v2 sub\-group under the delegated root on Linux, a Job Object on Windows. It returns CgroupUnavailable when the Linux hierarchy is absent or not delegated, CgroupCreateFailed when creation fails, and UnsupportedPlatform on a platform with no control\-group backend \(darwin, the BSDs\).
+Create makes a new control group named name and returns a Group bound to it — a cgroup v2 sub\-group under the delegated root on Linux, a Job Object on Windows, a tracked rctl group on FreeBSD. It returns CgroupUnavailable when the Linux hierarchy is absent or not delegated, CgroupCreateFailed when creation fails, and UnsupportedPlatform on a platform with no control\-group backend \(darwin, OpenBSD, NetBSD, DragonFly\).
 
 <a name="MustCreate"></a>
-### func [MustCreate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L109>)
+### func [MustCreate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L117>)
 
 ```go
 func MustCreate(name string, opts ...Option) Group
 ```
 
-MustCreate is like [Create](<#Create>) but panics with the typed error when creation fails — UnsupportedPlatform on a platform with no control\-group backend \(darwin, the BSDs\), or CgroupUnavailable when the Linux hierarchy is not delegated. It is the idiomatic Go MustX opt\-in \(like [regexp.MustCompile](<https://pkg.go.dev/regexp/#MustCompile>)\) for a consumer that chooses crash\-on\-unsupported at its own startup; the SDK itself never panics, and [Create](<#Create>) is the non\-panicking form for normal use. The panic value is the typed error, so a top\-level recover\(\) can classify it via errs.CodeOf / HasCode.
+MustCreate is like [Create](<#Create>) but panics with the typed error when creation fails — UnsupportedPlatform on a platform with no control\-group backend \(darwin, OpenBSD, NetBSD, DragonFly\), or CgroupUnavailable when the Linux hierarchy is not delegated. It is the idiomatic Go MustX opt\-in \(like [regexp.MustCompile](<https://pkg.go.dev/regexp/#MustCompile>)\) for a consumer that chooses crash\-on\-unsupported at its own startup; the SDK itself never panics, and [Create](<#Create>) is the non\-panicking form for normal use. The panic value is the typed error, so a top\-level recover\(\) can classify it via errs.CodeOf / HasCode.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L72>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L76>)
 
 Option customises a Create call \(functional\-option pattern\). It aliases the service Option type; construct options with WithRoot.
 
@@ -101,12 +101,12 @@ type Option = svccgroup.Option
 ```
 
 <a name="WithRoot"></a>
-### func [WithRoot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L76>)
+### func [WithRoot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cgroup/cgroup.go#L82>)
 
 ```go
 func WithRoot(root string) Option
 ```
 
-WithRoot overrides the parent directory under which Create makes the new control group, targeting a delegated sub\-tree instead of the top\-level mount.
+WithRoot overrides the parent directory under which Create makes the new control group, targeting a delegated sub\-tree instead of the top\-level mount. It is a cgroup v2 path: on Windows and FreeBSD, whose backends have no hierarchy, it is accepted and ignored.
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

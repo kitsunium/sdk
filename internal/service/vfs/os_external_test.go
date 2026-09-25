@@ -280,6 +280,10 @@ func TestTheDiskFilesystemPublishesAtomicallyUnderConcurrentReaders(t *testing.T
 func TestTheOSFilesystemClosesItsRoot(t *testing.T) {
 	t.Parallel()
 	filesystem, err := svcvfs.NewOS(t.TempDir())
+	//: where vfs refuses the platform, that refusal is the case.
+	if !nativePlatforms[runtime.GOOS] {
+		refusedByDesign(t, filesystem, err)
+	}
 	if err != nil {
 		t.Fatalf("NewOS: %v", err)
 	}

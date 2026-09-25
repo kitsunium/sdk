@@ -943,9 +943,22 @@ func TestEncodedHeadersReparseWithTheStdlib(t *testing.T) {
 			if !maps.EqualFunc(part.Header, want.header, slices.Equal) {
 				t.Errorf("%s: part %d: header block %q, want exactly %q", tc.name, i, part.Header, want.header)
 			}
-			if part.FormName() != want.formName || part.FileName() != want.fileName || string(body) != want.body {
+			//: the filename= parameter exactly as the stdlib parses it, and NOT
+			//: part.FileName(): that passes it through filepath.Base, which
+			//: splits on '\' on Windows and not on Unix, so `q"uo\te.txt` read
+			//: back as `te.txt` there and this test — which is about what the
+			//: ENCODER wrote — failed on one platform only. What the codec's own
+			//: decoder makes of a path is TestAFileNameKeepsOnlyItsLastPathElementOnEveryOS.
+			_, disposition, derr := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+			//: the stdlib parses the disposition the encoder wrote.
+			if derr != nil {
+				t.Errorf("%s: part %d: the stdlib cannot parse the disposition: %v", tc.name, i, derr)
+			}
+			fileName := disposition["filename"]
+			//: and every field comes back as sent, the filename verbatim.
+			if part.FormName() != want.formName || fileName != want.fileName || string(body) != want.body {
 				t.Errorf("%s: part %d: read back (%q, %q, %q), want (%q, %q, %q)", tc.name, i,
-					part.FormName(), part.FileName(), body, want.formName, want.fileName, want.body)
+					part.FormName(), fileName, body, want.formName, want.fileName, want.body)
 			}
 		}
 		if _, nerr := reader.NextPart(); !errors.Is(nerr, io.EOF) {
@@ -956,6 +969,73 @@ func TestEncodedHeadersReparseWithTheStdlib(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
+		})
+	}
+}
+
+// TestAFileNameKeepsOnlyItsLastPathElementOnEveryOS pins the rule the decoder
+// reduces a filename= parameter by, and that the rule is the SAME on every
+// operating system.
+//
+// It used to be mime/multipart's, which is filepath.Base's, which is the
+// host's: the same body decoded `dir\a.txt` to `a.txt` on Windows and kept it
+// whole on Linux, so a server's answer to one upload depended on where it ran.
+// RFC 7578 §4.2 has the receiver drop the directory information a sender may
+// include, and the sender writes it with ITS separator — so both '/' and '\'
+// separate, everywhere, and the rows with a backslash are the ones that used
+// to decode differently per OS.
+//
+// MUTATION-CHECKED: decoding through src.FileName() again fails every row that
+// carries a backslash on macOS (measured) and Linux, where filepath.Base does
+// not split on it — the defect, reproduced. On Windows the same mutation fails
+// the colon row instead, because filepath.Base strips a volume name there.
+func TestAFileNameKeepsOnlyItsLastPathElementOnEveryOS(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		sent string
+		want string
+	}
+	tests := []tc{
+		{"a bare name", "a.txt", "a.txt"},
+		{"a slash path", "dir/a.txt", "a.txt"},
+		{"a backslash path", `dir\a.txt`, "a.txt"},
+		{"a full Windows path an old browser sent", `C:\Users\ada\report.pdf`, "report.pdf"},
+		{"a climbing slash path", "../../etc/passwd", "passwd"},
+		{"a climbing backslash path", `..\..\boot.ini`, "boot.ini"},
+		{"both separators in one path", `a/b\c.txt`, "c.txt"},
+		{"quotes and a backslash", `q"uo\te.txt`, "te.txt"},
+		{"a trailing separator names the directory", "dir/", "dir"},
+		{"nothing but separators", `/\/`, ""},
+		{"a colon is not a separator", "C:a.txt", "C:a.txt"},
+		{"UTF-8 is kept as sent", "dossier/résumé-日本語.pdf", "résumé-日本語.pdf"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		data, err := multipart.New().Marshal(multipart.PartValue{Name: "upload", FileName: c.sent, Data: []byte("x")})
+		//: the encoder accepts the name as given.
+		if err != nil {
+			t.Fatalf("Marshal(FileName %q) err=%v", c.sent, err)
+		}
+		var got multipart.FormValue
+		//: the codec's own decoder reads the body back.
+		if uerr := multipart.New().Unmarshal(data, &got); uerr != nil {
+			t.Fatalf("Unmarshal err=%v", uerr)
+		}
+		//: one part in, one part out.
+		if len(got.Parts) != 1 {
+			t.Fatalf("decoded %d parts, want 1", len(got.Parts))
+		}
+		//: the last path element survives, whichever separator the sender used.
+		if got.Parts[0].FileName != c.want {
+			t.Errorf("FileName sent as %q decoded as %q, want %q", c.sent, got.Parts[0].FileName, c.want)
+		}
+	}
+	//: one subtest per spelling of the name.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
 		})
 	}
 }

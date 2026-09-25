@@ -78,8 +78,9 @@ package exists to refuse, arriving through the one path a caller does not
 choose.
 
 `spelledTopLevel` derives the caller's own spelling of the top level once, with
-the single `EvalSymlinks` this package performs, and only when the hint is not
-already inside the canonical root — so the ordinary case pays nothing. Every
+the only `EvalSymlinks` calls this package performs (one on the hint, one on the
+canonical root), and only when the hint is not already inside the canonical
+root — so the ordinary case pays nothing. Every
 entry is then recorded under BOTH spellings while the set is being built, by
 `ChangedSetValue.spelledAs`.
 
@@ -96,6 +97,23 @@ fixed, because a caller that builds its own paths chooses those spellings.
 |---|---|---|
 | cost at build | one extra map entry per file, dir and range | none |
 | cost per query | none | none |
+
+On **Windows** the root is a spelling the caller did not choose even without a
+link, and the first run of the suite there found it (ADR 0095). git prints
+`--show-toplevel` `/`-separated and with 8.3 short names expanded
+(`C:/Users/runneradmin/…`), while a CI runner's `%TEMP%` — and so `t.TempDir()`
+— is spelled short (`C:\Users\RUNNER~1\…`). The root was kept in git's form and
+every entry went through `filepath.Join`, so `spelledAs`'s prefix match compared
+`C:/…` with `C:\…`, never matched, and every query through the caller's own
+spelling answered false on a set that was neither degraded nor empty — the
+under-report this section exists to refuse. `repoTopLevel` now puts git's answer
+in the OS's form (`filepath.Clean`) before anything is keyed on it, and
+`spelledTopLevel` resolves the canonical root as well as the hint before
+comparing them, because what git resolves (a short name, a link) is the git
+build's business and the two must meet at the same place.
+`TestResolveAnswersUnderTheTemporaryDirectorysOwnSpelling` queries through the
+temporary directory's own spelling and its resolved one on every lane: the 8.3
+case on Windows, the `/var` link on macOS.
 
 ### A probe that did not answer is not an answer
 

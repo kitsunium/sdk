@@ -11,6 +11,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 	svcqueue "github.com/kitsunium/sdk/internal/service/queue"
 )
@@ -79,6 +80,12 @@ func TestAStrayFileInTheDeadLetterStoreIsNeverReturned(t *testing.T) {
 // any account may silently drain or inject into, and neither leaves a trace.
 func TestTheDurableBrokerRefusesADirectoryAnyAccountCouldDrain(t *testing.T) {
 	t.Parallel()
+	//: the fixture is a MODE, and Windows has none — os.Chmod there toggles
+	//: the read-only attribute and nothing else. The same rule in the DACL's
+	//: vocabulary is TestTheWindowsQueueDirectoryRuleIsTheDACL.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows has no permission bits to make a directory world-writable with; the rule's windows form is TestTheWindowsQueueDirectoryRuleIsTheDACL")
+	}
 	dir := filepath.Join(t.TempDir(), "queue")
 	if err := os.MkdirAll(dir, 0o777); err != nil {
 		t.Fatalf("MkdirAll() = %v, want nil", err)
@@ -134,17 +141,21 @@ func TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust(t *testing.T) {
 		state string
 		why   string
 		plant func(t *testing.T, statePath string)
+		// modeBits marks a fixture that is a MODE, which Windows does not have;
+		// the DACL rows of TestAWindowsStateDirectoryIsCheckedWhoeverMadeIt are
+		// its form there.
+		modeBits bool
 	}{
 		{"a world-writable ready/", "ready", "world-writable", func(t *testing.T, statePath string) {
 			t.Helper()
 			mkdirMode(t, statePath, 0o777)
-		}},
+		}, true},
 		// the root accepts this mode, and a state must not: the sticky bit stops
 		// an unlink, not a planted message.
 		{"a sticky world-writable ready/", "ready", "sticky-world-writable", func(t *testing.T, statePath string) {
 			t.Helper()
 			mkdirMode(t, statePath, 0o777|os.ModeSticky)
-		}},
+		}, true},
 		{
 			"an inflight/ that is a symlink to a private directory", "inflight", "symlink",
 			func(t *testing.T, statePath string) {
@@ -154,18 +165,22 @@ func TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust(t *testing.T) {
 				if err := os.Symlink(elsewhere, statePath); err != nil {
 					t.Fatalf("Symlink() = %v, want nil", err)
 				}
-			},
+			}, false,
 		},
 		{"a dead/ that is a regular file", "dead", "not-a-directory", func(t *testing.T, statePath string) {
 			t.Helper()
 			if err := os.WriteFile(statePath, nil, 0o600); err != nil {
 				t.Fatalf("WriteFile() = %v, want nil", err)
 			}
-		}},
+		}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: a row planted with mode bits has no fixture on Windows.
+			if tc.modeBits && runtime.GOOS == "windows" {
+				t.Skip("windows has no permission bits to plant this state with; TestAWindowsStateDirectoryIsCheckedWhoeverMadeIt plants it through the DACL")
+			}
 			root := filepath.Join(t.TempDir(), "queue")
 			mkdirMode(t, root, 0o700)
 			tc.plant(t, filepath.Join(root, tc.state))
@@ -193,7 +208,20 @@ func TestTheDurableBrokerCreatesItsStatesOwnerOnlyAndReopensThem(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "queue")
 	for attempt := range 2 {
-		if _, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()}); err != nil {
+		_, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()})
+		//: on Windows the states are created and CHECKED — the second time over
+		//: directories that already exist, the path every restart takes — and
+		//: then vfs refuses the platform: that refusal, not a verdict on the
+		//: directories the broker made, is what must come back.
+		if runtime.GOOS == "windows" {
+			//: the platform's refusal, by its typed code.
+			if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+				t.Fatalf("NewFile() on construction %d on windows = %v, want UNSUPPORTED_PLATFORM", attempt+1, err)
+			}
+			continue
+		}
+		//: elsewhere the broker builds, the second time over its own states.
+		if err != nil {
 			t.Fatalf("NewFile() on construction %d = %v, want nil", attempt+1, err)
 		}
 	}
@@ -205,7 +233,9 @@ func TestTheDurableBrokerCreatesItsStatesOwnerOnlyAndReopensThem(t *testing.T) {
 		if !info.IsDir() {
 			t.Fatalf("%s is %v, want a real directory", state, info.Mode())
 		}
-		if got := info.Mode().Perm(); got != 0o700 {
+		//: a mode is what "owner-only" means on Unix; on Windows the state
+		//: inherits its parent's list, which the DACL rule has just judged.
+		if got := info.Mode().Perm(); got != 0o700 && runtime.GOOS != "windows" {
 			t.Errorf("%s created with %v, want -rwx------", state, got)
 		}
 	}
@@ -216,6 +246,11 @@ func TestTheDurableBrokerCreatesItsStatesOwnerOnlyAndReopensThem(t *testing.T) {
 // through a common group — working once the states are checked too.
 func TestTheDurableBrokerAcceptsStatesSharedThroughAGroup(t *testing.T) {
 	t.Parallel()
+	//: a group share is a MODE here; on Windows it is an entry naming the
+	//: group, which is the group-share row of TestTheWindowsQueueDirectoryRuleIsTheDACL.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows has no group permission bits; its group share is an ACE, pinned by TestTheWindowsQueueDirectoryRuleIsTheDACL")
+	}
 	root := filepath.Join(t.TempDir(), "queue")
 	mkdirMode(t, root, 0o770)
 	for _, state := range []string{"ready", "inflight", "dead"} {
@@ -300,26 +335,14 @@ func writeStray(t *testing.T, dir, name string) {
 // newFileBroker builds a durable broker on a ManualClock at the epoch.
 func newFileBroker(t *testing.T, dir string, policy corequeue.PolicyValue) corequeue.Broker {
 	t.Helper()
-	broker, err := svcqueue.NewFile(svcqueue.FileConfig{
-		Dir: dir, Policy: policy, Clock: clock.NewManualClock(epoch),
-	})
-	if err != nil {
-		t.Fatalf("NewFile() = %v, want nil", err)
-	}
-	return broker
+	return requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: policy, Clock: clock.NewManualClock(epoch)})
 }
 
 // newFileBrokerWithClock builds a durable broker sharing a caller's clock, so
 // two of them can be advanced together.
 func newFileBrokerWithClock(t *testing.T, dir string, clk clock.Clock) corequeue.Broker {
 	t.Helper()
-	broker, err := svcqueue.NewFile(svcqueue.FileConfig{
-		Dir: dir, Policy: defaultPolicy(), Clock: clk,
-	})
-	if err != nil {
-		t.Fatalf("NewFile() = %v, want nil", err)
-	}
-	return broker
+	return requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy(), Clock: clk})
 }
 
 // TestClosingTheDurableBrokerReleasesBothDescriptors pins that Close gives back

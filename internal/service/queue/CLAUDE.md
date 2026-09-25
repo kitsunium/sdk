@@ -15,7 +15,8 @@ pull loop that runs handlers on goroutines it owns).
 | `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion |
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |
-| `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory |
+| `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory — the shape half (a link, a reparse point, a non-directory), shared by every platform |
+| `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through `internal/service/lock`'s reader |
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
 | `file_dead.go` | `Nack`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
@@ -73,6 +74,58 @@ Two consequences of "the state is a name" are enforced rather than assumed:
   double, and a double more permissive than the durable broker is a test that
   passes where production strands the message.
   `TestBothBrokersRefuseAnExtensionANameCannotCarry` runs on both.
+
+## On Windows: the directory rules read the DACL, and the broker is then refused
+
+The permission half of the refusals used to read mode bits on every platform.
+Windows has none — `os.Stat` synthesises `0777` with no sticky bit for every
+writable directory — so the rule refused EVERY queue directory there as
+`QUEUE_DIRECTORY_UNUSABLE`, a verdict that blames the deployment for the
+platform (ADR 0018 §(a)); the first Windows run of the whole suite found it on
+every `/file` case (ADR 0095). The two questions stayed; the vocabulary moved to
+the DACL, read by the one reader this repository has — `lock.GrantsAnyone`
+(ADR 0084/0086), exported for exactly this rather than copied:
+
+| | Unix (mode) | Windows (DACL, an identifier meaning anybody) |
+|---|---|---|
+| root refused when anybody can | unlink an entry: other-write without sticky | `lock.ReplaceRights` — delete a child, rewrite the list, take ownership |
+| state refused when anybody can | write at all: other-write, sticky or not | add a file (a planted message) or a directory/junction, or `ReplaceRights`; or write a FILE created there (`lock.ContentRights`, through what it inherits — on Unix a message is 0600 whatever the directory allows) |
+| an indirection | `ModeSymlink` | `ModeSymlink`, or any reparse point — a junction reads as a plain directory through `os.Lstat` |
+
+A permission refusal names what it was read from in an `observed` field — the
+mode on Unix, the entry on Windows (`S-1-1-0=0x40`), where there is no mode to
+look at. A list the reader could not read, or read only in part, is refused as
+`why=unverifiable` with the reader's status in `observed`
+(`GetNamedSecurityInfoW=5`, `GetAce#3`). That is the one place the queue parts
+from the lock, which accepts the same case and logs it (ADR 0084 §D5): a lock
+directory wrongly accepted costs the hardening, a queue directory wrongly
+accepted is a planted message a consumer acts on — and the queue refused every
+Windows directory before this rule, so the refusal takes away nothing that
+worked (ADR 0095). `TestAWindowsDirectoryNobodyCouldInspectIsRefused` pins the
+verdict on every answer; `TestAWindowsDirectoryWhoseListCannotBeReadIsRefused`
+drives both rules over a REAL reader failure — `GetNamedSecurityInfoW` on a
+directory that is not there. A list made unreadable with `icacls` (READ_CONTROL
+denied to Everyone and to OWNER RIGHTS) was still read on the windows-latest
+runner, measured, so that fixture is not one a test can rely on.
+
+Two consequences, stated rather than discovered:
+
+- **Windows has no "created owner-only".** A state the broker makes INHERITS
+  its parent's list, so a root that lets anybody ADD entries — accepted at the
+  root, as sticky is on Unix — hands that grant to `ready/`, which is then
+  refused as a planted-message risk. On Unix the state would have been made
+  `0700` whatever the parent allowed. Closing that needs a security descriptor
+  at creation; it is not done.
+- **The broker still does not run on Windows.** `internal/service/vfs` refuses
+  the platform by design (no flushable directory handle, a mode that is not an
+  ACL), so once the directory rules accept, `NewFile` returns
+  `UNSUPPORTED_PLATFORM` — the platform's refusal, where it used to be a false
+  verdict on the caller's directory. The rules run first anyway, so they are
+  right on the day vfs gains a Windows backend. The suite asserts that refusal
+  and then skips every case that needs a broker (`requireFileBroker`), and
+  `TestTheWindowsQueueDirectoryRuleIsTheDACL` /
+  `TestAWindowsStateDirectoryIsCheckedWhoeverMadeIt` pin both rules through
+  real ACLs (`icacls`) and a real junction (`mklink /J`).
 
 ## Where `internal/service/vfs` is used, and where it stops
 

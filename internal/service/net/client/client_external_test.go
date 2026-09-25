@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -492,6 +493,12 @@ func TestClient_Get(t *testing.T) {
 func TestClient_Get_IsObserved(t *testing.T) {
 	t.Parallel()
 	const payload string = "0123456789"
+	//: how long the upstream takes before it answers. The record's duration is
+	//: measured up to the response headers, so it can be no shorter than this —
+	//: an assertion that holds at any clock resolution. "Positive" did not: a
+	//: loopback call on Windows completed within one clock tick, measured 0,
+	//: and a duration that WAS the call's read as one never taken.
+	const latency time.Duration = 20 * time.Millisecond
 	type tc struct {
 		// name describes the case.
 		name string
@@ -530,6 +537,7 @@ func TestClient_Get_IsObserved(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		srv, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			time.Sleep(latency)
 			writeOrFail(t, w, payload)
 		})
 		client, observed := newObservedClient(t, srv, corenet.ClientConfig{MaxResponseSize: c.ceiling})
@@ -559,8 +567,9 @@ func TestClient_Get_IsObserved(t *testing.T) {
 			if record.Path != c.path {
 				t.Errorf("the record carries path %q, want %q", record.Path, c.path)
 			}
-			if record.Duration <= 0 {
-				t.Error("the record carries a non-positive duration")
+			//: at least the latency the upstream imposed — a coarse clock cannot make it zero.
+			if record.Duration < latency {
+				t.Errorf("the record carries %v, less than the %v the upstream took to answer", record.Duration, latency)
 			}
 			return
 		}

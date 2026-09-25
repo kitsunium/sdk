@@ -287,13 +287,20 @@ func normalizeVersion(v string) string {
 // The update is refused — with nothing extracted and nothing written — when
 // authenticity cannot be proven (coreupd.NoVendorKey / coreupd.SignatureMissing /
 // coreupd.SignatureInvalid) or integrity cannot (coreupd.ChecksumMissing /
-// coreupd.ChecksumMismatch).
+// coreupd.ChecksumMismatch), and — with nothing downloaded either — on a
+// Windows target, whose running executable cannot be renamed over
+// (proc.UnsupportedPlatform, see canReplace).
 func (u *Service) downloadAndReplace(version string) error {
 	//: Refuse before spending a download the result can never be used for.
 	//: An unanchored build cannot authenticate anything, and finding that
 	//: out after 30MB is a poor way to say so.
 	if err := u.canAuthenticate(version); err != nil {
 		//: Bare bubble — canAuthenticate names the tag.
+		return err
+	}
+	//: The same rule for a platform that could never complete the step.
+	if err := u.canReplace(version); err != nil {
+		//: Bare bubble — canReplace names the platform and the tag.
 		return err
 	}
 

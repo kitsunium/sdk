@@ -23,9 +23,6 @@ const queueDirMode fs.FileMode = 0o700
 // whether it is a cache warm-up or a password reset.
 const messageMode fs.FileMode = 0o600
 
-// worldWritable is the other-write bit.
-const worldWritable fs.FileMode = 0o002
-
 // FileConfig configures [NewFile]: which directory holds the queue, which
 // clock reads its deadlines, and what delivery discipline it enforces.
 //
@@ -51,6 +48,9 @@ type FileConfig struct {
 	// could replace its entries. Its three state directories are held to the
 	// same rule — created owner-only, checked when somebody else made them —
 	// and refused besides when one is a symlink or not a directory at all.
+	// On Windows "owner-only" is not something a mode can say: a directory
+	// inherits its parent's access control list, and the rule reads that list
+	// instead (dirtrust_windows.go).
 	//
 	// Two brokers over one Dir — in one process or in two — are ONE queue.
 	// That is the domain's inter-process claim, and it is the whole reason
@@ -101,9 +101,11 @@ func prepareQueueDir(dir string) error {
 // /tmp is, and the sticky bit is precisely the rule that only an entry's
 // owner may unlink it. World-writable WITHOUT it is refused: any account
 // could then unlink a queued message, which is a silent, undetectable drain,
-// or plant one, which is a silent, undetectable injection.
+// or plant one, which is a silent, undetectable injection. On Windows, which
+// has no mode bits, the same question is asked of the directory's DACL
+// (dirtrust_windows.go).
 func checkQueueDir(dir string, info fs.FileInfo) error {
-	why, unusable := unusableBecause(info)
+	why, observed, unusable := unusableBecause(dir, info)
 	//: acceptable.
 	if !unusable {
 		//: nothing to refuse.
@@ -111,42 +113,44 @@ func checkQueueDir(dir string, info fs.FileInfo) error {
 	}
 	//: QueueDirectoryUnusable, naming the value.
 	return kerrs.Wrap(QueueDirectoryUnusable, kerrs.WrapParams{},
-		kerrs.String("field", "Dir"), kerrs.String("value", dir), kerrs.String("why", why))
+		withObserved(observed, kerrs.String("field", "Dir"), kerrs.String("value", dir), kerrs.String("why", why))...)
+}
+
+// withObserved appends what a permission verdict was read from — the mode on
+// Unix, the access-control entry on Windows, where "world-writable" alone would
+// send an operator looking for a mode that does not exist — when there is one.
+// A refusal by shape (a link, a file) has nothing to add.
+func withObserved(observed string, fields ...kerrs.FieldValue) []kerrs.FieldValue {
+	//: a verdict by shape.
+	if observed == "" {
+		//: the fields as given.
+		return fields
+	}
+	//: the mode, or which identifier holds which rights.
+	return append(fields, kerrs.String("observed", observed))
 }
 
 // unusableBecause reports whether a directory is unusable for this queue, and
-// names why. It is [checkQueueDir]'s rule, and the base of the stricter one the
-// state directories get ([stateUnusableBecause]), so the two levels cannot
+// names why — plus, for a permission verdict, what it was read from. It is
+// [checkQueueDir]'s rule, and it shares its first half with the stricter one
+// the state directories get ([stateUnusableBecause]), so the two levels cannot
 // drift apart.
 //
 // A symlink is only ever seen here through os.Lstat, which is what the state
 // check uses; the queue directory itself is read through os.Stat, so a link
 // the caller configured as Dir is followed exactly as before.
-func unusableBecause(info fs.FileInfo) (why string, unusable bool) {
-	mode := info.Mode()
-	//: a link keeps the messages wherever its author chose, whatever it
-	//: points at — and its own permission bits mean nothing.
-	if mode&fs.ModeSymlink != 0 {
-		//: refused before any mode is read.
-		return "symlink", true
+func unusableBecause(dir string, info fs.FileInfo) (why, observed string, unusable bool) {
+	//: a link, or anything that is not a directory, before any permission.
+	if why, unusable = indirectionOrFile(info); unusable {
+		//: refused by shape.
+		return why, "", true
 	}
-	//: a regular file where a directory belongs is a configuration fault.
-	if !info.IsDir() {
-		//: nothing could be renamed into it.
-		return "not-a-directory", true
-	}
-	//: two ways to be safe, and they carry the same verdict: either no
-	//: account outside the owner and group can replace an entry at all, or
-	//: the sticky bit says only an entry's owner may unlink it.
-	if mode&worldWritable == 0 || mode&os.ModeSticky != 0 {
-		//: acceptable.
-		return "", false
-	}
-	//: world-writable without the sticky bit.
-	return "world-writable", true
+	//: can an account outside the owner and group REPLACE an entry here?
+	//: A mode-bit rule on Unix, a DACL rule on Windows (dirtrust_*.go).
+	return rootWritableByAnyone(dir, info)
 }
 
-// stateUnusableBecause is [unusableBecause] with one refusal added, for a
+// stateUnusableBecause is [unusableBecause] one notch stricter, for a
 // directory that holds messages.
 //
 // The sticky bit is enough at the root, where nothing lives but the three
@@ -157,18 +161,35 @@ func unusableBecause(info fs.FileInfo) (why string, unusable bool) {
 // owner and group can write to it, sticky or not. That also closes the owner
 // gap the root keeps: a state another account made world-writable no longer
 // passes, and one it made private is one this broker cannot use at all.
-func stateUnusableBecause(info fs.FileInfo) (why string, unusable bool) {
-	//: a link, a non-directory, or world-writable without the sticky bit.
-	if why, unusable = unusableBecause(info); unusable {
-		//: the root's verdict stands.
-		return why, true
+func stateUnusableBecause(dir string, info fs.FileInfo) (why, observed string, unusable bool) {
+	//: a link, or anything that is not a directory, before any permission.
+	if why, unusable = indirectionOrFile(info); unusable {
+		//: refused by shape.
+		return why, "", true
 	}
-	//: what the root accepts and a state must not: world-writable, sticky.
-	if info.Mode()&worldWritable != 0 {
-		//: any account can plant a message here.
-		return "sticky-world-writable", true
+	//: can an account outside the owner and group put an entry here at all?
+	return stateWritableByAnyone(dir, info)
+}
+
+// indirectionOrFile refuses the two shapes no permission can make usable: an
+// indirection, and a directory that is not one.
+//
+// An indirection is a symbolic link on every platform, and on Windows any
+// reparse point — a junction reads as a plain directory through os.Lstat, and
+// keeps the messages wherever its author pointed it exactly as a link does.
+func indirectionOrFile(info fs.FileInfo) (why string, unusable bool) {
+	//: a link keeps the messages wherever its author chose, whatever it
+	//: points at — and its own permission bits mean nothing.
+	if info.Mode()&fs.ModeSymlink != 0 || reparsePoint(info) {
+		//: refused before any permission is read.
+		return "symlink", true
 	}
-	//: owner and group only.
+	//: a regular file where a directory belongs is a configuration fault.
+	if !info.IsDir() {
+		//: nothing could be renamed into it.
+		return "not-a-directory", true
+	}
+	//: a real directory; its permissions decide.
 	return "", false
 }
 
@@ -219,7 +240,7 @@ func prepareState(dir, state string) error {
 		//: the medium could not answer.
 		return backendFailed("lstat", state, statErr)
 	}
-	why, unusable := stateUnusableBecause(info)
+	why, observed, unusable := stateUnusableBecause(statePath, info)
 	//: a real directory, and one no account outside the owner and group can
 	//: write an entry into at all.
 	if !unusable {
@@ -228,6 +249,6 @@ func prepareState(dir, state string) error {
 	}
 	//: QueueDirectoryUnusable, naming the state as well as its path.
 	return kerrs.Wrap(QueueDirectoryUnusable, kerrs.WrapParams{},
-		kerrs.String("field", "Dir"), kerrs.String("state", state),
-		kerrs.String("value", statePath), kerrs.String("why", why))
+		withObserved(observed, kerrs.String("field", "Dir"), kerrs.String("state", state),
+			kerrs.String("value", statePath), kerrs.String("why", why))...)
 }

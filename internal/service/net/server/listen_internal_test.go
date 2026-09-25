@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	stdnet "net"
 	"runtime"
@@ -154,6 +155,13 @@ func Test_shardable(t *testing.T) {
 // The mirror rule matters just as much: auto-sizing disappoints no expectation,
 // so collapsing it to one listener is not a degradation. Reporting it as one
 // would make every Unix listener in the fleet look broken.
+//
+// Every case runs twice, once as a platform WITH SO_REUSEPORT and once as one
+// without, whatever this machine is. The second arm is what Windows takes in
+// production, and it is where the report contradicted itself: auto-sizing
+// returned degraded=false AND a reason, so State told an operator that a
+// listener had both fallen back and not. The first run of the suite on Windows
+// found it; running both arms here means every lane checks it.
 func Test_resolveShards(t *testing.T) {
 	t.Parallel()
 	cores := runtime.GOMAXPROCS(0)
@@ -186,18 +194,19 @@ func Test_resolveShards(t *testing.T) {
 			requested: 0, network: "unix", want: 1,
 		},
 	}
-	runCase := func(t *testing.T, c tc) {
+	runCase := func(t *testing.T, c tc, reusePort bool) {
 		t.Helper()
-		count, degraded, reason := resolveShards(c.requested, c.network)
+		count, degraded, reason := shardsFor(c.requested, c.network, reusePort)
 
 		//: on a platform without the option every multi-shard request degrades,
 		//: so the expectation is conditional rather than absolute.
 		wantCount, wantDegraded := c.want, c.degraded
-		if !reusePortSupported() && shardable(c.network) {
+		//: without SO_REUSEPORT a shardable network gets one listener.
+		if !reusePort && shardable(c.network) {
 			wantCount, wantDegraded = 1, c.requested > 1
 		}
 		if count != wantCount {
-			t.Fatalf("resolveShards(%d, %q) = %d shards, want %d", c.requested, c.network, count, wantCount)
+			t.Fatalf("shardsFor(%d, %q, reuseport=%v) = %d shards, want %d", c.requested, c.network, reusePort, count, wantCount)
 		}
 		if degraded != wantDegraded {
 			t.Fatalf("degraded = %v, want %v (reason %q)", degraded, wantDegraded, reason)
@@ -207,11 +216,25 @@ func Test_resolveShards(t *testing.T) {
 			t.Fatalf("degraded=%v but reason=%q — the report contradicts itself", degraded, reason)
 		}
 	}
+	//: both answers to the platform question, on every host,
+	for _, reusePort := range []bool{true, false} {
+		//: for every row.
+		for _, c := range tests {
+			t.Run(fmt.Sprintf("%s/reuseport=%v", c.name, reusePort), func(t *testing.T) {
+				t.Parallel()
+				runCase(t, c, reusePort)
+			})
+		}
+	}
+	//: and the production entry point is exactly the platform's arm.
 	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
+		gotCount, gotDegraded, gotReason := resolveShards(c.requested, c.network)
+		wantCount, wantDegraded, wantReason := shardsFor(c.requested, c.network, reusePortSupported())
+		//: the platform's answer, exactly.
+		if gotCount != wantCount || gotDegraded != wantDegraded || gotReason != wantReason {
+			t.Errorf("resolveShards(%d, %q) = (%d, %v, %q), want the platform's (%d, %v, %q)",
+				c.requested, c.network, gotCount, gotDegraded, gotReason, wantCount, wantDegraded, wantReason)
+		}
 	}
 }
 

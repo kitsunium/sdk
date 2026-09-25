@@ -115,6 +115,14 @@ returns `ERROR_ACCESS_DENIED`), and an `fs.FileMode` is not an ACL, so `0600`
 excludes nobody. `osguard_other.go` carries the full argument. `NewMem` works
 everywhere.
 
+The suite holds the refusal to the same standard as the filesystem. Every case
+that needs a disk filesystem — the conformance table's `disk` row, the sabotaged
+publications in `publish_internal_test.go`, `TestTheOSFilesystemClosesItsRoot` —
+first ASSERTS that `NewOS` refused with `UnsupportedPlatform` and handed back
+nothing, and only then skips, naming why (`refusedByDesign`, `newDiskFS`). A
+platform that refused with anything else, or not at all, fails; the Windows
+lane runs all of it (ADR 0095).
+
 ## Conventions
 
 - **The operating system's cause stays in the chain.** `failRead` / `failWrite`

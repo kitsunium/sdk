@@ -26,6 +26,7 @@ go_test(
     deps = [
         ":queue",
         "//pkg/v1/errs",
+        "//pkg/v1/proc",
     ],
 )
 

@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-25T00:00:00Z -->
 # .github/workflows/
 
 ## Purpose
@@ -11,7 +11,7 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate) and `sdk-release.yml` 
 |---|---|---|
 | `bazel-ci.yml` | push to `main`, PRs | Primary SDK CI — drift check + build + test + coverage via Bazel 9 |
 | `sdk-release.yml` | `workflow_run` after `SDK CI (Bazel)` success on `main`, plus manual `workflow_dispatch` | Impact-driven patch tags `pkg/vX.Y.Z` (ADR 0007; the `pkg/<major>/` prefix went away with the bare module path — ADR 0017). Reads majors from `scripts/release/compute-bumps.sh` and pushes via `scripts/release/cut-tags.sh`. First release is held unless dispatched manually (`--allow-bootstrap`, ADR 0009). The `Release-bump` trailer that sizes a minor is read over the whole range since the last release, not from the checked-out HEAD — a cancelled CI run yields no release, so the trailer-bearing commit is often not HEAD by the time one fires (ADR 0085). |
-| `e2e-cross.yml` | push to any branch, manual `workflow_dispatch` | The runtime bar on real kernels (ADR 0018): the platform-sensitive packages on Linux, macOS, Windows and the three BSDs, then — on macOS and Windows — every package (`go test -short ./...` per module, ADR 0094). The macOS run gates; the Windows run is an inventory (`continue-on-error`) until it is clean. |
+| `e2e-cross.yml` | push to any branch, manual `workflow_dispatch` | The runtime bar on real kernels (ADR 0018): the platform-sensitive packages on Linux, macOS, Windows and the three BSDs, then — on macOS and Windows — every package (`go test -short ./...` per module, ADR 0094). Both runs gate: Windows was an inventory (`continue-on-error`) under ADR 0094 until its first clean run, and ADR 0095 records how its 19 failing packages were resolved and made it a gate. |
 | `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). |
 | `docker-images.yml` | weekly + push to `.devcontainer/images/**` | Template-inherited; two-tier base+main image build |
 | `publish-features.yml` | push to `.devcontainer/features/**` | Template-inherited; publishes OCI feature artifacts |

@@ -32,16 +32,20 @@
 // # Relay semantics
 //
 // [Relay] reads from the source channel and delivers each signal to the
-// [Target] via kill(2). A positive [Target] is a pid; a [Target] below -1
-// addresses the process group whose id is its absolute value. Relay returns when
-// the source channel closes (nil) or when a delivery fails (a typed
-// RELAY_FAILED error).
+// [Target] — via kill(2) on Unix. A positive [Target] is a pid; a [Target] below
+// -1 addresses the process group whose id is its absolute value. Relay returns
+// when the source channel closes (nil) or when a delivery fails (a typed
+// RELAY_FAILED error). The reserved targets 0 and -1 are refused on every
+// platform before anything is delivered.
 //
 // # Platform notes
 //
-// Parse, String, and Notify are portable. Relay requires kill(2): on non-Unix
-// platforms it returns the typed UNSUPPORTED_PLATFORM sentinel rather than
-// acting, so code compiles and degrades gracefully everywhere.
+// Parse, String, and Notify are portable. Relay has a native backend on Unix
+// (kill(2)) and on Windows, which has no kill(2): a pid target is terminated
+// with TerminateProcess, and a process-group target receives a console control
+// event (CTRL_C for SIGINT, CTRL_BREAK otherwise). On the remaining platforms it
+// returns the typed UNSUPPORTED_PLATFORM sentinel rather than acting, so code
+// compiles and degrades gracefully everywhere.
 package signal
 
 import (
@@ -74,11 +78,12 @@ func Notify(sigs ...Signal) (ch <-chan Signal, stop func()) {
 	return svcsignal.Notify(sigs...)
 }
 
-// Relay reads signals from src and forwards each to target via kill(2) until src
-// closes. A positive target is a pid; a target below -1 addresses the process
+// Relay reads signals from src and forwards each to target until src closes —
+// via kill(2) on Unix, via TerminateProcess or a console control event on
+// Windows. A positive target is a pid; a target below -1 addresses the process
 // group whose id is -target. It returns nil on a clean drain and a typed
-// RELAY_FAILED error on the first delivery failure (UNSUPPORTED_PLATFORM off
-// Unix).
+// RELAY_FAILED error on the first delivery failure (UNSUPPORTED_PLATFORM on a
+// platform that is neither Unix nor Windows).
 func Relay(src <-chan Signal, target Target) error {
 	//: delegate to the platform-split service Relay (kill(2) on Unix, stub else).
 	return svcsignal.Relay(src, target)

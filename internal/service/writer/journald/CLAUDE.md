@@ -8,7 +8,10 @@ self-registers the factory (no `init()`), so `writer.Open("journald",
 journald.Config{…})` and YAML `FromConfig` topologies resolve. Linux-only in
 practice (the socket is systemd's), but the code is plain stdlib `net` and builds
 everywhere; on a host without journald the `Open` simply fails with
-`JournaldOpenFailed`.
+`JournaldOpenFailed`. On **Windows**, whose AF_UNIX sockets are stream-only, the
+default dialer could never connect a datagram socket, so `Open` refuses it
+with the SDK's `UNSUPPORTED_PLATFORM` (ADR 0018) before trying — naming the
+family, never the path. A caller-supplied `Dialer` is used as given there too.
 
 ## Contents
 
@@ -18,6 +21,7 @@ everywhere; on a host without journald the `Open` simply fails with
 | `journald_config.go` | `Config` value type (socket path, dialer seam, level, ring) |
 | `journald_sink.go` | `journaldSink` (`Write`/`Flush`/`Close`) — the datagram framing terminal |
 | `decode.go` | `journaldFactory.Decode` (`core/writer.Decoder`) + key coercion helpers |
+| `socket_windows.go` / `socket_other.go` | `unixDatagrams` — whether the default dialer's socket family exists here (not on Windows) |
 | `codes.go`, `errors.go` | sentinels — range 0.3.31.\* (service slot 0x1f) |
 
 ## Behaviour
@@ -137,3 +141,7 @@ bazel test --config=race //internal/service/writer/journald:journald_test
 # Fallback
 cd internal/service && GOWORK=off go test -race -cover ./writer/journald/...
 ```
+
+The two tests that bind a real `unixgram` server cannot build their fixture on
+Windows; there they assert the refusal instead (`UNSUPPORTED_PLATFORM`, no
+sink), on the Windows lane of `e2e-cross`, which gates since ADR 0095.

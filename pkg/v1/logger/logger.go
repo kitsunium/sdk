@@ -324,6 +324,9 @@ func Default() (lg Logger, err error) {
 //
 // Without that import the file/console Names do not resolve and DefaultMulti
 // returns the registry's WriterUnknownName, surfaced through NewMulti.
+//
+// Like every Logger NewMulti returns, it owns the writers it opened and
+// implements io.Closer: Close releases the console writer and the file.
 func DefaultMulti(path string) (lg Logger, err error) {
 	//: defer entirely to NewMulti so the rollback-on-failure + framework_version
 	//: stamping pipeline applies identically; this is a named-default convenience.

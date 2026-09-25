@@ -1,10 +1,12 @@
-//go:build !linux
+//go:build !linux && !windows && !freebsd
 
-// Package cgroup_test — non-Linux facade contract: cgroup v2 is Linux-only, so
-// the facade Create forwards the central UnsupportedPlatform sentinel (and no
-// handle) and Available reports false off Linux. Gated on the same `!linux` tag
-// as the service stub so the e2e-vm CI binary validates the off-platform path on
-// a real non-Linux kernel, not via a runtime.GOOS guess.
+// Package cgroup_test — the facade contract where there is no control-group
+// backend at all (darwin, OpenBSD, NetBSD, DragonFly): Create forwards the
+// central UnsupportedPlatform sentinel (and no handle) and Available reports
+// false. Gated on the same `!linux && !windows && !freebsd` tag as the service
+// stub: Windows has a Job Object backend (asserted by cgroup_windows_test.go)
+// and FreeBSD an rctl one, and this file carried a bare `!linux` — asserting the
+// refusal on both — until the first Windows run of the whole suite found it.
 package cgroup_test
 
 import (

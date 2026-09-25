@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -95,6 +96,13 @@ func TestNew_RejectsSymlink(t *testing.T) {
 // files must be owner-read/write only. World-readable logs (0644) would
 // leak diagnostic content including attr values and wrapped Private
 // fields that consumers may include in their own log lines.
+//
+// On Windows the mode is asserted for what it can express there, and nothing
+// more: os maps a permission to FILE_ATTRIBUTE_READONLY alone and synthesises
+// the mode back from it, so 0600 arrives as "writable" and reads back 0666.
+// Who may read the file is the ACL it inherits from its directory — the gap
+// CLAUDE.md names under "Which platform gets which protection", measured here
+// rather than assumed.
 func TestNew_DefaultFilePermIs0600(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -120,9 +128,15 @@ func TestNew_DefaultFilePermIs0600(t *testing.T) {
 			if serr != nil {
 				t.Fatalf("Stat err = %v", serr)
 			}
+			want := tc.wantPerm
+			//: Windows has no permission bits: 0600 reaches the file as "not
+			//: read-only", and os reports that as 0666.
+			if runtime.GOOS == "windows" {
+				want = 0o666
+			}
 			//: 0600 = owner rw only; any group/other bit is a regression.
-			if got := fi.Mode().Perm(); got != tc.wantPerm {
-				t.Errorf("file perm = %o, want %o", got, tc.wantPerm)
+			if got := fi.Mode().Perm(); got != want {
+				t.Errorf("file perm = %o, want %o", got, want)
 			}
 		})
 	}
@@ -165,6 +179,12 @@ func TestFileSink_WriteFlushClose(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New err = %v", err)
 			}
+			//: the cancelled case returns before its explicit Close, and a sink
+			//: left open keeps its file: harmless where an open file can be
+			//: unlinked, and on Windows t.TempDir's cleanup failed with "the
+			//: process cannot access the file". A second Close after the
+			//: explicit one is the kernel's "already closed", which is ignored.
+			t.Cleanup(func() { closeIgnore(t, s) })
 			ctx := t.Context()
 			if tc.ctxCancel {
 				cancelled, cancel := context.WithCancel(ctx)

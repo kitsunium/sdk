@@ -15,6 +15,8 @@ go_library(
         "conn_waiter.go",
         "datagram_source_linux.go",
         "datagram_source_other.go",
+        "family_other.go",
+        "family_windows.go",
         "handshake.go",
         "http_adapter.go",
         "http_listener.go",
@@ -40,6 +42,8 @@ go_library(
         "stream_group.go",
         "stream_group_limiter.go",
         "swallow.go",
+        "truncation_other.go",
+        "truncation_windows.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/net/server",
     visibility = [
@@ -48,6 +52,7 @@ go_library(
     ],
     deps = [
         "//internal/core/net",
+        "//internal/core/proc",
         "//internal/kernel/buffer",
         "//internal/kernel/errs",
         "//internal/kernel/recycler",
@@ -75,6 +80,7 @@ go_test(
         "conn_internal_test.go",
         "conn_tracked_internal_test.go",
         "datagram_source_linux_internal_test.go",
+        "family_windows_internal_test.go",
         "handshake_internal_test.go",
         "hijack_external_test.go",
         "http_adapter_internal_test.go",
@@ -105,6 +111,7 @@ go_test(
         "testsockets_internal_test.go",
         "testsockets_other_internal_test.go",
         "testsockets_unix_internal_test.go",
+        "truncation_windows_internal_test.go",
     ],
     embed = [":server"],
     # keep: these tests bind a loopback socket. Bazel's linux-sandbox gives the
@@ -114,6 +121,7 @@ go_test(
     local = True,
     deps = [
         "//internal/core/net",
+        "//internal/core/proc",
         "//internal/kernel/errs",
         "//internal/kernel/worker",
     ],

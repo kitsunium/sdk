@@ -11,6 +11,21 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
+// untilTheClockPasses returns once the system clock reads strictly later than
+// instant.
+//
+// Two readings taken microseconds apart are NOT guaranteed to differ: Windows
+// moves its clock in ticks of 0.5 to 15.6 ms. A test that needs two operations
+// to observe two different times waits for the clock to move between them
+// instead of assuming it did, which works at any resolution and costs at most
+// one tick.
+func untilTheClockPasses(instant time.Time) {
+	//: a short sleep rather than a spin: the tick is what is being waited for.
+	for !time.Now().After(instant) {
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // fakeSocket is a net.Conn that records the deadlines installed on it.
 //
 // Recording them is the only way to tell a per-OPERATION bound from a
@@ -235,6 +250,12 @@ func Test_conn_boundRead(t *testing.T) {
 			t.Fatalf("the deadline is %v away, want about %v", got, c.wantBudget)
 		}
 		//: a second read gets its own budget rather than inheriting the first's.
+		//: It has to START at a later clock reading for the two deadlines to
+		//: differ at all, and two readings microseconds apart need not: on
+		//: Windows they shared one clock tick, the second deadline equalled
+		//: the first, and a conn that had refreshed it read as one that reused
+		//: it. So the clock is waited past the first read's instant first.
+		untilTheClockPasses(socket.readDeadlines[0].Add(-c.wantBudget))
 		wrapper.boundRead()
 		if socket.reads() != 2 {
 			t.Fatalf("the second read installed %d deadlines in total, want 2 — "+
