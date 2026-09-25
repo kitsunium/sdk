@@ -259,7 +259,7 @@ out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
 ```
 
 <a name="MultipartContentType"></a>
-## func [MultipartContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L42>)
+## func [MultipartContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L50>)
 
 ```go
 func MultipartContentType(body []byte) (value string, err error)
@@ -460,20 +460,22 @@ func FromMIME(mime string) (f Format, ok bool)
 FromMIME resolves a MIME string to its registered Format.
 
 <a name="MultipartForm"></a>
-## type [MultipartForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L18>)
+## type [MultipartForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L19>)
 
-MultipartForm is the native Go shape of the [Multipart](<#JSON>) format: a whole multipart/form\-data body — its RFC 2046 boundary and its parts, in wire order. Marshal one to build an upload; Unmarshal into a \*MultipartForm to read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal always fills it with the one it recovered, so a decode → encode round trip keeps the original delimiter — and reproduces the whole body byte for byte only for a body this codec encoded, since a part header other than the name, filename and media type is not carried through.
+MultipartForm is the native Go shape of the [Multipart](<#JSON>) format: a whole multipart/form\-data body — its RFC 2046 boundary and its parts, in wire order. Marshal one to build an upload; Unmarshal into a \*MultipartForm to read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal always fills it with the one it recovered, so a decode → encode round trip keeps the original delimiter — and reproduces the whole body byte for byte only for a body this codec encoded, since a part header other than the name, filename and media type is not carried through, and a filename is decoded to its last path element.
 
 ```go
 type MultipartForm = svcmultipart.FormValue
 ```
 
 <a name="MultipartPart"></a>
-## type [MultipartPart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L29>)
+## type [MultipartPart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/multipart.go#L37>)
 
 MultipartPart is one section of a [MultipartForm](<#MultipartForm>): a named field, optionally a filename and a media type, and the bytes themselves — a file upload is a part with FileName and ContentType set. Marshal also accepts a single MultipartPart or a \[\]MultipartPart.
 
 Name is required. Name, FileName and ContentType are written into the part's header block, so a CR, an LF or a NUL in any of them is refused — never escaped — with the codec's VALUE\_INVALID naming the field. A UTF\-8 filename is written as\-is \(RFC 7578 §4.2\).
+
+Decoding keeps only a filename's last path element, reading both '/' and '\\' as separators on every operating system — RFC 7578 §4.2 has the receiver drop the directory information a sender may include, and the sender writes it with its own separator. \`C:\\Users\\ada\\cv.pdf\` decodes to \`cv.pdf\` on Linux exactly as on Windows. Nothing else is removed, so a caller turning FileName into a path still validates it first.
 
 ```go
 type MultipartPart = svcmultipart.PartValue

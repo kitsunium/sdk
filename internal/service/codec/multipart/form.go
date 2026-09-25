@@ -10,10 +10,12 @@ package multipart
 // contract, which carries no Content-Type. Empty on Marshal means "generate
 // one"; Unmarshal always fills it with the delimiter it recovered, so a decode
 // → encode round trip keeps the original delimiter. It reproduces the whole
-// body byte for byte only for a body this package encoded: a PartValue models
-// a part's name, filename, media type and bytes, so any other part header — a
+// body byte for byte only for a body this package encoded, and whose
+// filenames carry no path separator: a PartValue models a part's name,
+// filename, media type and bytes, so any other part header — a
 // Content-Transfer-Encoding, a custom one — and another producer's header
-// order or casing are not carried through.
+// order or casing are not carried through, and a filename is decoded to its
+// last path element (see PartValue.FileName).
 type FormValue struct {
 	// Boundary is the RFC 2046 delimiter framing the parts.
 	Boundary string
@@ -41,6 +43,14 @@ type PartValue struct {
 	Name string
 	// FileName is the optional filename= parameter; empty for a plain field.
 	// UTF-8 is written as-is (RFC 7578 §4.2); only CR, LF and NUL are refused.
+	//
+	// Decoding keeps only its LAST PATH ELEMENT, and reads both '/' and '\' as
+	// separators on every operating system: RFC 7578 §4.2 has the receiver drop
+	// the directory information a sender may include, and the sender writes it
+	// with its own separator. `C:\Users\ada\cv.pdf` and `dir/cv.pdf` both
+	// decode to `cv.pdf`, wherever the decoder runs. Nothing else is removed —
+	// "." and ".." come back as sent — so a caller turning it into a path still
+	// validates it first.
 	FileName string
 	// ContentType is the optional per-part media type; empty omits the header.
 	ContentType string

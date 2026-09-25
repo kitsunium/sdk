@@ -122,12 +122,15 @@ func (d *multipartDecoder) fetch() {
 // readInto drains one *mime/multipart.Part into the look-ahead slot, refusing
 // an over-budget body rather than materialising it.
 func (d *multipartDecoder) readInto(src *stdmp.Part) {
+	//: one parse of the disposition for both, and a filename reduced by the
+	//: same rule on every OS rather than by the host's filepath.Base.
+	name, fileName := dispositionOf(src)
 	//: RFC 7578 §4.2: every part MUST carry a form-data name, and PartValue
 	//: declares Name required — the encoder refuses to write a part without
 	//: one, so a decode that produced one would hand back a value this codec
 	//: cannot re-encode. Refused before the body is read, since it is not
 	//: going to be kept.
-	if src.FormName() == "" {
+	if name == "" {
 		//: a malformed body, not a caller mistake.
 		d.pendErr = unmarshalFailed(nil, "Decoder: a part carries no form-data name (RFC 7578 §4.2)")
 		//: nothing buffered.
@@ -144,8 +147,8 @@ func (d *multipartDecoder) readInto(src *stdmp.Part) {
 	}
 	//: publish the part into the look-ahead slot.
 	d.pending = &PartValue{
-		Name:        src.FormName(),
-		FileName:    src.FileName(),
+		Name:        name,
+		FileName:    fileName,
 		ContentType: src.Header.Get("Content-Type"),
 		Data:        body,
 	}

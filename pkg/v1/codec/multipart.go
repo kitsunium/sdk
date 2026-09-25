@@ -14,7 +14,8 @@ import svcmultipart "github.com/kitsunium/sdk/internal/service/codec/multipart"
 // always fills it with the one it recovered, so a decode → encode round trip
 // keeps the original delimiter — and reproduces the whole body byte for byte
 // only for a body this codec encoded, since a part header other than the name,
-// filename and media type is not carried through.
+// filename and media type is not carried through, and a filename is decoded to
+// its last path element.
 type MultipartForm = svcmultipart.FormValue
 
 // MultipartPart is one section of a [MultipartForm]: a named field, optionally
@@ -26,6 +27,13 @@ type MultipartForm = svcmultipart.FormValue
 // header block, so a CR, an LF or a NUL in any of them is refused — never
 // escaped — with the codec's VALUE_INVALID naming the field. A UTF-8 filename
 // is written as-is (RFC 7578 §4.2).
+//
+// Decoding keeps only a filename's last path element, reading both '/' and '\'
+// as separators on every operating system — RFC 7578 §4.2 has the receiver
+// drop the directory information a sender may include, and the sender writes
+// it with its own separator. `C:\Users\ada\cv.pdf` decodes to `cv.pdf` on
+// Linux exactly as on Windows. Nothing else is removed, so a caller turning
+// FileName into a path still validates it first.
 type MultipartPart = svcmultipart.PartValue
 
 // MultipartContentType returns the Content-Type header value —
