@@ -1,10 +1,11 @@
-//go:build !unix
+//go:build !unix && !windows
 
-// Package signal_test — non-Unix facade contract: Relay needs kill(2), which has
-// no portable equivalent off Unix, so the facade Relay forwards the central
-// UnsupportedPlatform sentinel off Unix (Parse/String/Notify stay portable).
-// Gated on the same `!unix` tag as the service stub so the e2e-vm CI binary
-// validates the off-platform path on a real non-Unix kernel.
+// Package signal_test — the facade contract where Relay has no backend: neither
+// Unix (kill(2)) nor Windows (TerminateProcess, console control events), the
+// facade Relay forwards the central UnsupportedPlatform sentinel
+// (Parse/String/Notify stay portable). Gated on the same `!unix && !windows`
+// tag as the service stub; the Windows backend is asserted by
+// signal_windows_test.go.
 package signal_test
 
 import (

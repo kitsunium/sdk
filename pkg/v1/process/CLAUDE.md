@@ -39,10 +39,22 @@ Every error is a central `internal/core/proc` sentinel; match with
 `errs.HasCode(err, coreproc.CodeX)` (or, downstream, the read-only
 `pkg/v1/errs` introspection helpers). `Start` surfaces `InvalidSpec`,
 `UnknownUser`, `UnknownGroup`, `UnknownResource`, `RlimitFailed`, `SpawnFailed`,
-or `UnsupportedPlatform` (non-Unix); the handle surfaces `WaitFailed`,
+or `UnsupportedPlatform` (a Unix-only Spec field on Windows, or a platform
+with no spawn backend); the handle surfaces `WaitFailed`,
 `SignalFailed`, `StopFailed`.
 
 ## Platform
 
-Unix only for actual supervision. On non-Unix targets `Start` returns
-`UnsupportedPlatform`; the package compiles on every GOOS.
+Unix and Windows supervise. Windows spawns through CreateProcess
+(`internal/service/proc/exec/exec_windows.go`) and refuses the Unix-only Spec
+fields — credentials, `Umask`, `Nice`, `OOMScoreAdj`, `ExtraFiles` — with
+`UnsupportedPlatform` rather than dropping them; an `Rlimit` with no Job Object
+analogue is `UnknownResource`. On the remaining targets (plan9, js, wasip1)
+`Start` returns `UnsupportedPlatform`; the package compiles on every GOOS.
+
+The facade suite follows the same split: `process_other_test.go`
+(`!unix && !windows`) asserts the refusal where there is no backend,
+`process_windows_test.go` asserts the Windows backend through the facade. The
+facade test used to carry `!unix` and assert the refusal on Windows too, a year
+after Windows gained its backend; the first Windows run of the suite found it
+(ADR 0095).

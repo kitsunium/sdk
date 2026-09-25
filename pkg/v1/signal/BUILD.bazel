@@ -24,6 +24,7 @@ go_test(
     srcs = [
         "signal_external_test.go",
         "signal_other_test.go",
+        "signal_windows_test.go",
     ],
     deps = [
         ":signal",

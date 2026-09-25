@@ -29,9 +29,19 @@ one-line delegations — no logic lives here.
 
 `Set*Max` writes the matching cgroup v2 interface file; a negative numeric value
 means "no limit" (`"max"`). `Create` returns `CgroupUnavailable` on a
-non-delegated host and `UnsupportedPlatform` off Linux — always check
-`Available()` first, and prefer `WithRoot` to a delegated sub-tree over the
-top-level mount.
+non-delegated Linux host and `UnsupportedPlatform` where there is no backend at
+all (darwin, OpenBSD, NetBSD, DragonFly) — always check `Available()` first, and
+prefer `WithRoot` to a delegated sub-tree over the top-level mount.
+
+Windows (Job Objects) and FreeBSD (rctl) have backends of their own, mirrored
+from `internal/service/proc/cgroup`: `Available()` is true there and `Create`
+returns a working `Group`. `WithRoot` is a cgroup v2 path, so both accept it and
+ignore it. The facade suite follows the service's split —
+`cgroup_other_test.go` is `!linux && !windows && !freebsd`,
+`cgroup_windows_test.go` asserts the Job Object backend through the public
+names, and `TestWithRootOption` asserts the ignored root where a backend has no
+hierarchy. It carried a bare `!linux` and asserted the refusal on Windows until
+the first Windows run of the whole suite (ADR 0095).
 
 ## Verification
 

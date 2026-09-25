@@ -30,11 +30,11 @@ go signal.Relay(src, signal.Target(-childPGID)) // negative ⇒ process group
 
 ### Relay semantics
 
-[Relay](<#Relay>) reads from the source channel and delivers each signal to the [Target](<#Target>) via kill\(2\). A positive [Target](<#Target>) is a pid; a [Target](<#Target>) below \-1 addresses the process group whose id is its absolute value. Relay returns when the source channel closes \(nil\) or when a delivery fails \(a typed RELAY\_FAILED error\).
+[Relay](<#Relay>) reads from the source channel and delivers each signal to the [Target](<#Target>) — via kill\(2\) on Unix. A positive [Target](<#Target>) is a pid; a [Target](<#Target>) below \-1 addresses the process group whose id is its absolute value. Relay returns when the source channel closes \(nil\) or when a delivery fails \(a typed RELAY\_FAILED error\). The reserved targets 0 and \-1 are refused on every platform before anything is delivered.
 
 ### Platform notes
 
-Parse, String, and Notify are portable. Relay requires kill\(2\): on non\-Unix platforms it returns the typed UNSUPPORTED\_PLATFORM sentinel rather than acting, so code compiles and degrades gracefully everywhere.
+Parse, String, and Notify are portable. Relay has a native backend on Unix \(kill\(2\)\) and on Windows, which has no kill\(2\): a pid target is terminated with TerminateProcess, and a process\-group target receives a console control event \(CTRL\_C for SIGINT, CTRL\_BREAK otherwise\). On the remaining platforms it returns the typed UNSUPPORTED\_PLATFORM sentinel rather than acting, so code compiles and degrades gracefully everywhere.
 
 ## Index
 
@@ -46,7 +46,7 @@ Parse, String, and Notify are portable. Relay requires kill\(2\): on non\-Unix p
 
 
 <a name="Notify"></a>
-## func [Notify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L72>)
+## func [Notify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L76>)
 
 ```go
 func Notify(sigs ...Signal) (ch <-chan Signal, stop func())
@@ -55,16 +55,16 @@ func Notify(sigs ...Signal) (ch <-chan Signal, stop func())
 Notify subscribes to sigs and returns a receive\-only channel of typed Signals plus an idempotent, leak\-free stop function. Each delivery is translated to a typed Signal; the channel is buffered so a burst is not dropped, and stop detaches the subscription and closes the channel.
 
 <a name="Relay"></a>
-## func [Relay](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L82>)
+## func [Relay](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L87>)
 
 ```go
 func Relay(src <-chan Signal, target Target) error
 ```
 
-Relay reads signals from src and forwards each to target via kill\(2\) until src closes. A positive target is a pid; a target below \-1 addresses the process group whose id is \-target. It returns nil on a clean drain and a typed RELAY\_FAILED error on the first delivery failure \(UNSUPPORTED\_PLATFORM off Unix\).
+Relay reads signals from src and forwards each to target until src closes — via kill\(2\) on Unix, via TerminateProcess or a console control event on Windows. A positive target is a pid; a target below \-1 addresses the process group whose id is \-target. It returns nil on a clean drain and a typed RELAY\_FAILED error on the first delivery failure \(UNSUPPORTED\_PLATFORM on a platform that is neither Unix nor Windows\).
 
 <a name="Signal"></a>
-## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L54>)
+## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L58>)
 
 Signal is a typed, platform\-portable OS signal. It aliases the domain type, so a value parsed here interoperates with the rest of the SDK process domain.
 
@@ -73,7 +73,7 @@ type Signal = coreproc.Signal
 ```
 
 <a name="Parse"></a>
-### func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L63>)
+### func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L67>)
 
 ```go
 func Parse(name string) (sig Signal, err error)
@@ -82,7 +82,7 @@ func Parse(name string) (sig Signal, err error)
 Parse resolves a signal from its name or number — the canonical "SIGTERM", the bare "TERM", or the numeric "15", all case\-insensitive — returning a typed UNKNOWN\_SIGNAL error for anything the platform table does not define.
 
 <a name="Target"></a>
-## type [Target](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L58>)
+## type [Target](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/signal/signal.go#L62>)
 
 Target names the recipient of a relayed signal: a positive value is a pid; a value below \-1 addresses the process group whose id is its absolute value.
 
