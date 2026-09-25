@@ -137,6 +137,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_42_00: "internal/service/selfupdate",
 	0x00_03_43_00: "internal/service/entitlement",
 	0x00_03_44_00: "internal/service/secret",
+	0x00_03_48_00: "internal/service/codec/strictjson",
 	0x00_03_49_00: "internal/service/redact",
 	0x01_01_00_00: "pkg/v1/logger",
 	0x01_01_01_00: "pkg/v1/logger/slogbridge",

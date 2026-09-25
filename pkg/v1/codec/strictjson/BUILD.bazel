@@ -1,0 +1,29 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "strictjson",
+    srcs = ["strictjson.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/codec/strictjson",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/kernel/errs",
+        "//internal/service/codec/strictjson",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":strictjson",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "strictjson_test",
+    srcs = ["strictjson_external_test.go"],
+    deps = [
+        ":strictjson",
+        "//pkg/v1/errs",
+    ],
+)

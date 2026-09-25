@@ -76,6 +76,7 @@ filegroup(
         "//internal/service/codec/multipart:audit_srcs",
         "//internal/service/codec/ndjson:audit_srcs",
         "//internal/service/codec/pem:audit_srcs",
+        "//internal/service/codec/strictjson:audit_srcs",
         "//internal/service/codec/tlv:audit_srcs",
         "//internal/service/codec/toml:audit_srcs",
         "//internal/service/codec/xml:audit_srcs",

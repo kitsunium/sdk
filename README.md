@@ -4,10 +4,10 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **54 packages**: 50 at the top level, plus four nested ones
-(`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`). They
-are grouped below by the job they do, and each links to its own generated
-`README.md`.
+`pkg/v1` ships **55 packages**: 50 at the top level, plus five nested ones
+(`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`,
+`codec/strictjson`). They are grouped below by the job they do, and each links
+to its own generated `README.md`.
 
 ### Observability
 
@@ -49,7 +49,7 @@ are grouped below by the job they do, and each links to its own generated
 
 | Package | What it does |
 |---|---|
-| [`codec`](./pkg/v1/codec) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. |
+| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. |
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
 | [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/hash), [`sign`](./pkg/v1/sign), [`mac`](./pkg/v1/mac), [`kdf`](./pkg/v1/kdf), [`agree`](./pkg/v1/agree), [`password`](./pkg/v1/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |
