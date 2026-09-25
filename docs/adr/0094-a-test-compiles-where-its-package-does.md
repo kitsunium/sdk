@@ -19,8 +19,9 @@ every cell of the matrix while its package's tests could compile nowhere else:
   `releaseOnCleanup` and `udpPair`, defined in `//go:build linux` files.
   `go vet ./...` failed on darwin and windows.
 - `internal/service/writer/file/file_linux_bench_test.go` said its `_linux`
-  suffix was load-bearing. It was not: Go reads a GOOS only as the last element
-  before `_test.go`, and `_bench` follows it. The file compiled on every GOOS,
+  suffix was load-bearing. It was not: a file name constrains the build only
+  when, `.go` and `_test` stripped, it ends in `_GOOS`, `_GOARCH` or
+  `_GOOS_GOARCH` — and this one ends in `_bench`. The file compiled on every GOOS,
   and on windows, which has no `syscall.O_NOFOLLOW`, it broke the package's
   tests.
 - The root module's `go.sum` lacked the `go.mod` hash of
@@ -75,10 +76,31 @@ assuming Linux:
 - A test that binds a Unix socket, or treats a temporary directory as canonical,
   now runs on macOS on every PR; the Linux lane alone could not see either.
 
+## Breaking changes
+
+None. Only tests, CI and a local script change; no package's API or behaviour
+moves.
+
+## Alternatives considered
+
+- **`go test -c` per package per cell** instead of `go vet`. It proves the same
+  thing and links one binary per package, about 200 across the modules, in each
+  of ten cells; `go vet` type-checks the test files without linking.
+- **Running the whole suite on Windows as a gate at once.** Its first run
+  (below) fails in 19 packages; a gate that is red on day one for reasons nobody
+  has worked through blocks every PR instead of guarding anything.
+- **Giving each test that binds a Unix socket its own shorter name.** It moves
+  the limit instead of removing it: the next long test name, or a longer
+  `$TMPDIR`, fails again. A directory the test does not name cannot grow.
+
 ## Deferred
 
-- **Windows at runtime.** The inventory step's first runs are the list to work
-  through; the step becomes a gate once they are clean.
+- **Windows at runtime.** The inventory's first run (`e2e-cross`, 9d5356b): 184
+  packages pass, 19 fail — `internal/service/{codec/multipart,
+  logger/sink/file, metrics, net/server, net/sse, queue, selfupdate, vcs/git,
+  vfs, writer/journald, writer/rotfile}` and `pkg/v1/{cgroup, git, logger,
+  metrics, process, queue, server, signal}`. That is the list to work through;
+  the step becomes a gate once it is clean.
 - **`scripts/cross-platform-audit.sh` needs bash 4** (`mapfile`, associative
   arrays) and macOS ships bash 3.2. It runs in the devcontainer and in CI; on a
   Mac, with Homebrew's `bash`.
@@ -92,3 +114,12 @@ assuming Linux:
   same six modules: all green, about 100 seconds in total.
 - `go test -race` for `net/server`, `pkg/v1/server`, `vcs/git` and `writer/file`
   on darwin/arm64: green.
+
+## References
+
+- [ADR 0018](0018-sdk-cross-platform-portability.md) — the build bar and the runtime bar
+- [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md) — a gate is what CI runs and says
+- Go build constraints — a file name implies one only when, `.go` and `_test`
+  stripped, it ends in `_GOOS`, `_GOARCH` or `_GOOS_GOARCH`:
+  <https://pkg.go.dev/cmd/go#hdr-Build_constraints>
+- `sun_path` holds 104 bytes on Darwin and the BSDs (`<sys/un.h>`), 108 on Linux (`unix(7)`)
