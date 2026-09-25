@@ -66,6 +66,26 @@ The Go runtime exposes no hook to run setrlimit\(2\) or umask\(2\) in the child 
 
 Unix gets everything above. Windows spawns too, through CreateProcess: stdio wiring, Setpgid \(a new console process group\), Spec.Rlimits \(enforced by a Job Object\) and the PATH search \(with PATHEXT\) all work, while the fields with no Windows meaning at this layer — User/Group/Groups, Umask, Nice, OOMScoreAdj, ExtraFiles, CgroupPath — are refused with UnsupportedPlatform rather than dropped. There, SignalGroup reaches the leader only and Stop's escalation is TerminateProcess. Every other platform returns UnsupportedPlatform from Start; the package compiles everywhere.
 
+### The process itself
+
+Everything above acts on a child. [Self](<#Self>) and [Build](<#Build>) read the process they run in, on every platform, and never fail:
+
+```
+stats := process.Self()
+stats.Goroutines, stats.HeapBytes, stats.GCPauses.Quantile(0.99), stats.CPUTime
+
+build, ok := process.Build()
+sdk, found := build.Module("github.com/kitsunium/sdk/pkg")
+// sdk.Version is a release ("v0.4.6"), or "" with sdk.Revision/sdk.Time
+// for a pseudo-version, or "" with sdk.Local for a directory.
+```
+
+CPUTime is the kernel's count \(getrusage\) where the platform has one and the Go runtime's estimate elsewhere — refreshed only at a garbage collection; Stats.CPUEstimated says which. The distributions and every counter are cumulative since the process started — subtract two snapshots for a window.
+
+A module's recorded version conflates three things, and [Module](<#Module>) keeps them apart: a RELEASE in Version, a COMMIT in Revision and Time \(a pseudo\-version names one, and so does the main module's version\-control stamp\), and a DIRECTORY in Local and Dir \(a replace, a workspace module\). What is in a local directory NOW is a question for pkg/v1/git's Head.
+
+Package process — the running process itself: what it was built from and what it is doing.
+
 Package process — ergonomic re\-exports: the handful of signal constants and resource sentinels callers need to drive Stop/SignalGroup and read typed errors without importing internal/core/proc directly.
 
 Package process — StdioMode re\-exports for wiring a child's standard streams.
@@ -73,14 +93,21 @@ Package process — StdioMode re\-exports for wiring a child's standard streams.
 ## Index
 
 - [Constants](<#constants>)
+- [type BuildInfo](<#BuildInfo>)
+  - [func Build\(\) \(info BuildInfo, ok bool\)](<#Build>)
+  - [func ParseBuild\(info \*debug.BuildInfo\) BuildInfo](<#ParseBuild>)
+- [type Distribution](<#Distribution>)
 - [type ExitResult](<#ExitResult>)
 - [type Limit](<#Limit>)
+- [type Module](<#Module>)
 - [type Process](<#Process>)
   - [func MustStart\(ctx context.Context, spec Spec\) Process](<#MustStart>)
   - [func Start\(ctx context.Context, spec Spec\) \(proc Process, err error\)](<#Start>)
 - [type Resource](<#Resource>)
 - [type Signal](<#Signal>)
 - [type Spec](<#Spec>)
+- [type Stats](<#Stats>)
+  - [func Self\(\) Stats](<#Self>)
 - [type StdioMode](<#StdioMode>)
 
 
@@ -103,8 +130,44 @@ const (
 )
 ```
 
+<a name="BuildInfo"></a>
+## type [BuildInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/self.go#L26>)
+
+BuildInfo is what the running binary was built from: the toolchain, the main package, the main module with its version\-control stamp, and every dependency followed through its replacement. It is an alias of the service value.
+
+```go
+type BuildInfo = svcself.BuildValue
+```
+
+<a name="Build"></a>
+### func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/self.go#L42>)
+
+```go
+func Build() (info BuildInfo, ok bool)
+```
+
+Build describes what the running binary was built from, and reports false when the binary carries no build information.
+
+<a name="ParseBuild"></a>
+### func [ParseBuild](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/self.go#L50>)
+
+```go
+func ParseBuild(info *debug.BuildInfo) BuildInfo
+```
+
+ParseBuild describes a BuildInfo from elsewhere — one a test builds by hand, or debug.ParseBuildInfo's reading of another binary — exactly as Build describes the running one.
+
+<a name="Distribution"></a>
+## type [Distribution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/self.go#L20>)
+
+Distribution is one of the Go runtime's cumulative histograms, read as durations: Count, and Quantile\(q\) as the upper bound of the bucket that reaches q. It is an alias of the service value.
+
+```go
+type Distribution = svcself.DistributionValue
+```
+
 <a name="ExitResult"></a>
-## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L119>)
+## type [ExitResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L144>)
 
 ExitResult is the outcome of a finished process — exit code, terminating signal, and resource usage. It is an alias of the core port's ExitValue.
 
@@ -113,7 +176,7 @@ type ExitResult = coreproc.ExitValue
 ```
 
 <a name="Limit"></a>
-## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L131>)
+## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L156>)
 
 Limit is a soft/hard resource\-limit pair for setrlimit\(2\). It is an alias of the core port's LimitValue.
 
@@ -121,8 +184,17 @@ Limit is a soft/hard resource\-limit pair for setrlimit\(2\). It is an alias of 
 type Limit = coreproc.LimitValue
 ```
 
+<a name="Module"></a>
+## type [Module](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/self.go#L30>)
+
+Module is one module of the running binary, with its release, its commit and its local directory told apart. It is an alias of the service value.
+
+```go
+type Module = svcself.ModuleValue
+```
+
 <a name="Process"></a>
-## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L115>)
+## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L140>)
 
 Process is the handle to a spawned process: PID, Wait, Signal, SignalGroup, and a group\-aware Stop. It is an alias of the core port interface.
 
@@ -131,7 +203,7 @@ type Process = coreproc.Process
 ```
 
 <a name="MustStart"></a>
-### func [MustStart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L150>)
+### func [MustStart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L175>)
 
 ```go
 func MustStart(ctx context.Context, spec Spec) Process
@@ -140,7 +212,7 @@ func MustStart(ctx context.Context, spec Spec) Process
 MustStart is like [Start](<#Start>) but panics with the typed error when the spawn fails — UnsupportedPlatform off Unix/Windows, InvalidSpec, RlimitFailed, … It is the idiomatic Go MustX opt\-in \(like [regexp.MustCompile](<https://pkg.go.dev/regexp/#MustCompile>)\) for a consumer that chooses crash\-on\-failure at its own startup; the SDK itself never panics, and [Start](<#Start>) is the non\-panicking form for normal use. The panic value is the typed error, so a top\-level recover\(\) can classify it via errs.CodeOf / HasCode.
 
 <a name="Start"></a>
-### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L139>)
+### func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L164>)
 
 ```go
 func Start(ctx context.Context, spec Spec) (proc Process, err error)
@@ -149,7 +221,7 @@ func Start(ctx context.Context, spec Spec) (proc Process, err error)
 Start spawns the process described by spec and returns a live Process handle. It delegates to internal/service/proc/exec; ctx is honoured up to the fork/exec boundary. A bare Spec.Path is searched in the child's PATH \(see the package documentation\). On Windows the Unix\-only Spec fields are refused with UnsupportedPlatform; on platforms that are neither Unix nor Windows, Start itself returns UnsupportedPlatform.
 
 <a name="Resource"></a>
-## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L127>)
+## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L152>)
 
 Resource identifies a per\-process resource governed by setrlimit\(2\). It is an alias of the core port type.
 
@@ -173,7 +245,7 @@ const (
 ```
 
 <a name="Signal"></a>
-## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L123>)
+## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L148>)
 
 Signal is a typed, platform\-portable OS signal. It is an alias of the core port type, so process.SIGTERM and a signal parsed elsewhere compare equal.
 
@@ -182,13 +254,31 @@ type Signal = coreproc.Signal
 ```
 
 <a name="Spec"></a>
-## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L111>)
+## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/process.go#L136>)
 
 Spec is the immutable description of a process to spawn — executable, environment, credentials, isolation topology, and scheduling attributes. It is an alias of the core port type.
 
 ```go
 type Spec = coreproc.Spec
 ```
+
+<a name="Stats"></a>
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/self.go#L15>)
+
+Stats is the running process at one instant: identity, scheduler settings, goroutines, heap, collections with their pause distribution, scheduling latency, and CPU time. Every count is cumulative since the process started. It is an alias of the service value.
+
+```go
+type Stats = svcself.StatsValue
+```
+
+<a name="Self"></a>
+### func [Self](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/self.go#L35>)
+
+```go
+func Self() Stats
+```
+
+Self takes a snapshot of the running process. It never fails: a figure the platform cannot give is zero, and Stats.CPUEstimated says when CPUTime is the runtime's estimate rather than the kernel's count.
 
 <a name="StdioMode"></a>
 ## type [StdioMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/process/stdio.go#L22>)

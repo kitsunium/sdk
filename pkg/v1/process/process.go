@@ -96,6 +96,31 @@
 // rather than dropped. There, SignalGroup reaches the leader only and Stop's
 // escalation is TerminateProcess. Every other platform returns
 // UnsupportedPlatform from Start; the package compiles everywhere.
+//
+// # The process itself
+//
+// Everything above acts on a child. [Self] and [Build] read the process they
+// run in, on every platform, and never fail:
+//
+//	stats := process.Self()
+//	stats.Goroutines, stats.HeapBytes, stats.GCPauses.Quantile(0.99), stats.CPUTime
+//
+//	build, ok := process.Build()
+//	sdk, found := build.Module("github.com/kitsunium/sdk/pkg")
+//	// sdk.Version is a release ("v0.4.6"), or "" with sdk.Revision/sdk.Time
+//	// for a pseudo-version, or "" with sdk.Local for a directory.
+//
+// CPUTime is the kernel's count (getrusage) where the platform has one and the
+// Go runtime's estimate elsewhere — refreshed only at a garbage collection;
+// Stats.CPUEstimated says which. The
+// distributions and every counter are cumulative since the process started —
+// subtract two snapshots for a window.
+//
+// A module's recorded version conflates three things, and [Module] keeps them
+// apart: a RELEASE in Version, a COMMIT in Revision and Time (a pseudo-version
+// names one, and so does the main module's version-control stamp), and a
+// DIRECTORY in Local and Dir (a replace, a workspace module). What is in a
+// local directory NOW is a question for pkg/v1/git's Head.
 package process
 
 import (

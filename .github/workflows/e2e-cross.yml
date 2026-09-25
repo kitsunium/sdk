@@ -57,9 +57,13 @@ env:
   # component walk is openat(2) on Unix and O_NOFOLLOW_ANY on Windows, a
   # junction and a symbolic link are one bit on one kernel and two mechanisms
   # on the other, and a volume root is only a path on one of them (ADR 0083).
+  #
+  # `proc/self` joins them because its CPU time IS a kernel question:
+  # getrusage(2) where a Unix has it, the Go runtime's GC-refreshed estimate
+  # where it does not, and a flag saying which (ADR 0100).
   KERNEL_PKGS: "./pathchain"
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./entitlement ./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
+  SERVICE_PKGS: "./entitlement ./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/self ./proc/signal"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics. They run
   # here on the Unix lanes (the BSDs compile them below as well); on Windows
