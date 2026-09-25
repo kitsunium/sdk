@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -125,6 +126,16 @@ func Test_journaldFactory_Open_defaultDialer(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: where there is no AF_UNIX datagram socket (Windows) the default
+			//: dialer is refused before any connect, and no server could be bound
+			//: to prove otherwise: the refusal IS the contract there.
+			if !unixDatagrams {
+				sink, err := (&journaldFactory{}).Open(Config{SocketPath: filepath.Join(t.TempDir(), "j.sock")})
+				if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) || sink != nil {
+					t.Fatalf("%s: Open with the default dialer = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", tc.name, sink, err)
+				}
+				return
+			}
 			//: bind a real datagram socket so net.Dial has a peer to connect.
 			path := shortSocketPath(t)
 			srv, lerr := net.ListenUnixgram(socketNetwork, &net.UnixAddr{Name: path, Net: socketNetwork})

@@ -4,14 +4,18 @@
 // writer.Open("journald", journald.Config{…}) and YAML FromConfig
 // topologies resolve. Linux-only in practice (the socket is systemd's), but the
 // code is plain stdlib net and builds everywhere; on a host without journald the
-// Open simply fails with JournaldOpenFailed.
+// Open simply fails with JournaldOpenFailed. On Windows, whose AF_UNIX sockets
+// are stream-only, the default dialer cannot connect a datagram socket at all
+// and Open refuses it with UNSUPPORTED_PLATFORM before trying (ADR 0018).
 package journald
 
 import (
 	"net"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/service/writer/levelgate"
 )
@@ -39,7 +43,9 @@ func (*journaldFactory) Name() writer.Name {
 
 // Open connects the journal socket and composes the level-gated, non-blocking
 // chain over the datagram sink. A wrong config type yields the shared
-// WriterConfigInvalid; a connect failure surfaces JournaldOpenFailed.
+// WriterConfigInvalid; a connect failure surfaces JournaldOpenFailed; the
+// default dialer on a platform with no AF_UNIX datagram socket (Windows) is
+// UNSUPPORTED_PLATFORM. A caller-supplied Dialer is used as given everywhere.
 func (*journaldFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error) {
 	//: reject a mismatched config type with the shared sentinel.
 	c, ok := cfg.(Config)
@@ -59,6 +65,13 @@ func (*journaldFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error
 	dial := c.Dialer
 	//: the fallback is a one-time construction branch, not a hot path.
 	if dial == nil {
+		//: the default dialer needs a socket family this platform may lack;
+		//: refused by name, never the path (secret gate), before any connect.
+		if !unixDatagrams {
+			//: the SDK's uniform answer for a missing mechanic (ADR 0018).
+			return nil, errs.Wrap(coreproc.UnsupportedPlatform, errs.WrapParams{},
+				errs.String("network", socketNetwork))
+		}
 		//: default dialer preserves zero-config usage.
 		dial = net.Dial
 	}

@@ -4,12 +4,15 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/writer/journald"
 )
 
@@ -96,6 +99,16 @@ func Test_journaldSink_UnixgramRoundtrip(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: Windows' AF_UNIX is stream-only, so there is no datagram server
+			//: to bind and no journal to reach: the registered writer refuses
+			//: the default dialer there by name, and that is what is asserted.
+			if runtime.GOOS == "windows" {
+				sink, oerr := writer.Open("journald", journald.Config{SocketPath: filepath.Join(t.TempDir(), "j.sock")})
+				if !errs.HasCode(oerr, coreproc.CodeUnsupportedPlatform) || sink != nil {
+					t.Fatalf("%s: writer.Open on windows = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", tc.name, sink, oerr)
+				}
+				return
+			}
 			//: bind a real datagram socket so the default dialer has a live peer.
 			path := shortSocketPath(t)
 			srv, lerr := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"})
