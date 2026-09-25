@@ -2046,6 +2046,10 @@ codes:
     const: CodeSendRefused
     hex: "0x00_03_3D_09"
     package: internal/service/mail
+  - code: "0.3.61.10"
+    const: CodeInvalidURL
+    hex: "0x00_03_3D_0A"
+    package: internal/service/mail
   - code: "0.3.62.1"
     const: CodeUnknownCommand
     hex: "0x00_03_3E_01"

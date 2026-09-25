@@ -19,6 +19,8 @@ go_library(
         "smtp.go",
         "smtp_compliance.go",
         "smtpconfig.go",
+        "smtpconfig_render.go",
+        "smtpurl.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/mail",
     visibility = [
@@ -28,6 +30,7 @@ go_library(
     deps = [
         "//internal/core/mail",
         "//internal/core/net",
+        "//internal/core/secret",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
@@ -52,6 +55,8 @@ go_test(
         "header_external_test.go",
         "memory_external_test.go",
         "smtp_external_test.go",
+        "smtpconfig_render_external_test.go",
+        "smtpurl_external_test.go",
     ],
     deps = [
         ":mail",
