@@ -17,7 +17,7 @@ import (
 )
 
 // TestStartUnsupportedOffUnix asserts the facade Start returns the typed
-// UnsupportedPlatform sentinel off Unix. A non-empty Path proves the degrade is
+// UnsupportedPlatform sentinel where no spawn backend exists. A non-empty Path proves the degrade is
 // the platform decision, not the InvalidSpec guard.
 func TestStartUnsupportedOffUnix(t *testing.T) {
 	t.Parallel()

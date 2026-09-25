@@ -7,6 +7,11 @@
 package process_test
 
 import (
+	"bytes"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -71,4 +76,77 @@ func TestStartAndStop(t *testing.T) {
 			runCase(t, c)
 		})
 	}
+}
+
+// TestCaptureAndBareNamesThroughTheFacade is what a consumer outside the SDK
+// module writes, with the public names alone: a child's stdout captured into a
+// buffer through process.StdioCapture, started by a BARE name. It pins where
+// the name is searched — the parent's PATH when Spec.Env carries none, the
+// child's own when it does — by running a program that exists only in a
+// directory named in Spec.Env, and failing to find it without that PATH.
+func TestCaptureAndBareNamesThroughTheFacade(t *testing.T) {
+	t.Parallel()
+	probeDir := t.TempDir()
+	probe := filepath.Join(probeDir, "kprobe-facade")
+	if err := os.WriteFile(probe, []byte("#!/bin/sh\nprintf from-spec-env\n"), 0o755); err != nil {
+		t.Fatalf("write probe: %v", err)
+	}
+	type tc struct {
+		name    string
+		spec    process.Spec
+		want    string
+		wantErr error
+	}
+	tests := []tc{
+		{
+			"sh by name, found in the parent's PATH (Spec.Env is nil)",
+			process.Spec{Path: "sh", Args: []string{"sh", "-c", "printf captured"}},
+			"captured", nil,
+		},
+		{
+			"a name found only through Spec.Env's PATH",
+			process.Spec{Path: "kprobe-facade", Env: []string{"PATH=" + probeDir}},
+			"from-spec-env", nil,
+		},
+		{
+			"the same name without that PATH is not found",
+			process.Spec{Path: "kprobe-facade"},
+			"", exec.ErrNotFound,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var stdout bytes.Buffer
+		p, err := process.Start(t.Context(), withStdio(c.spec, process.StdioCapture, &stdout))
+		if c.wantErr != nil {
+			if !errors.Is(err, c.wantErr) {
+				t.Fatalf("%s: Start = %v, want %v", c.name, err, c.wantErr)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s: Start: %v", c.name, err)
+		}
+		exit, err := p.Wait()
+		if err != nil || exit.Code != 0 {
+			t.Fatalf("%s: Wait = (%+v, %v)", c.name, exit, err)
+		}
+		//: Wait returns only after every captured byte reached the writer.
+		if stdout.String() != c.want {
+			t.Errorf("%s: captured %q, want %q", c.name, stdout.String(), c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// withStdio returns spec wired to capture its standard output into out under
+// mode — spelled with the public StdioMode type, which is the point.
+func withStdio(spec process.Spec, mode process.StdioMode, out *bytes.Buffer) process.Spec {
+	spec.Stdio, spec.Stdout = mode, out
+	return spec
 }

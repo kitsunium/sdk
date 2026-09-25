@@ -15,10 +15,17 @@ import (
 // default" (nil) from "set explicitly to zero". Maps and slices are read by the
 // service layer and never mutated.
 type Spec struct {
-	// Path is the absolute or PATH-resolvable executable to run. Required.
+	// Path is the executable to run. Required. A value containing a path
+	// separator is a file path, taken as written (a relative one is resolved
+	// against Dir). A bare name — "go", "sh" — is searched in the PATH the
+	// CHILD will see: the PATH entry of Env when it carries one, the parent's
+	// otherwise (including when Env is nil). os/exec's rules apply: the first
+	// executable in PATH order wins, and a match found only through a relative
+	// entry ("." or an empty one) is refused with exec.ErrDot.
 	Path string
 	// Args is the full argv including argv[0]; when empty the service uses
-	// [Path] as the sole argument.
+	// [Path] — the name as written, not the resolved file — as the sole
+	// argument.
 	Args []string
 	// Dir is the working directory; empty means inherit the parent's.
 	Dir string
