@@ -160,7 +160,7 @@ func TestPacketGroup_HandleFunc(t *testing.T) {
 		t.Helper()
 		addr := "127.0.0.1:0"
 		if c.unixSocket {
-			addr = t.TempDir() + "/dgram.sock"
+			addr = socketDir(t) + "/dgram.sock"
 		}
 		srv := server.New()
 		t.Cleanup(func() { closeOrFail(t, srv) })
@@ -184,7 +184,7 @@ func TestPacketGroup_HandleFunc(t *testing.T) {
 		bound := srv.State().Listeners[0].Address
 		//: a unixgram reply needs a bound return path, so the peer binds one.
 		if c.unixSocket {
-			local := t.TempDir() + "/peer.sock"
+			local := socketDir(t) + "/peer.sock"
 			conn, err := stdnet.DialUnix("unixgram",
 				&stdnet.UnixAddr{Name: local, Net: "unixgram"},
 				&stdnet.UnixAddr{Name: bound, Net: "unixgram"})

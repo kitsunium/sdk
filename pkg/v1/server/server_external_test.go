@@ -18,6 +18,7 @@ import (
 	"math/big"
 	stdnet "net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestTheShortestUsefulServer(t *testing.T) {
 		addr := c.addr
 		//: a Unix socket needs a path, and it must be this case's own.
 		if c.network == "unix" {
-			addr = t.TempDir() + "/api.sock"
+			addr = socketDir(t) + "/api.sock"
 		}
 		ctx := t.Context()
 
@@ -235,7 +236,7 @@ func TestOneGroupServesTwoFamilies(t *testing.T) {
 		}
 		want := c.tcpListeners
 		if c.unixListener {
-			opts = append(opts, server.Listen("unix", t.TempDir()+"/dual.sock"))
+			opts = append(opts, server.Listen("unix", socketDir(t)+"/dual.sock"))
 			want++
 		}
 
@@ -1136,4 +1137,22 @@ func closeOrFail(t *testing.T, c io.Closer) {
 	if err := c.Close(); err != nil {
 		t.Errorf("close: %v", err)
 	}
+}
+
+// socketDir returns a directory for the Unix sockets a test binds, removed when
+// the test ends. Not t.TempDir(): that path carries the test's name, and on
+// macOS $TMPDIR is already long — a socket path past the 104 bytes its sun_path
+// holds (108 on Linux) fails to bind with EINVAL.
+func socketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "sock")
+	if err != nil {
+		t.Fatalf("socket directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if rerr := os.RemoveAll(dir); rerr != nil {
+			t.Errorf("remove socket directory: %v", rerr)
+		}
+	})
+	return dir
 }

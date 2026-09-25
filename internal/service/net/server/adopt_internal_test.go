@@ -78,63 +78,16 @@ func assertReleased(t *testing.T, socket string) {
 // socket identity a later look uses to prove it was released.
 func adoptableListenerFile(t *testing.T) (file *os.File, socket string) {
 	t.Helper()
-	ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer func() {
-		//: File dups the descriptor, so this listener is no longer needed.
-		if cerr := ln.Close(); cerr != nil {
-			t.Errorf("close listener: %v", cerr)
-		}
-	}()
-	tcp, ok := ln.(*stdnet.TCPListener)
-	if !ok {
-		t.Fatalf("Listen returned a %T, want *net.TCPListener", ln)
-	}
-	dup, ferr := tcp.File()
-	if ferr != nil {
-		t.Fatalf("listener file: %v", ferr)
-	}
-	return dup, socketOf(t, dup.Fd())
+	file = listenerFile(t)
+	return file, socketOf(t, file.Fd())
 }
 
 // adoptablePacketFile returns a descriptor a datagram adoption accepts, with the
 // socket identity a later look uses to prove it was released.
 func adoptablePacketFile(t *testing.T) (file *os.File, socket string) {
 	t.Helper()
-	pc, err := stdnet.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen packet: %v", err)
-	}
-	defer func() {
-		//: File dups the descriptor, so this socket is no longer needed.
-		if cerr := pc.Close(); cerr != nil {
-			t.Errorf("close socket: %v", cerr)
-		}
-	}()
-	udp, ok := pc.(*stdnet.UDPConn)
-	if !ok {
-		t.Fatalf("ListenPacket returned a %T, want *net.UDPConn", pc)
-	}
-	dup, ferr := udp.File()
-	if ferr != nil {
-		t.Fatalf("socket file: %v", ferr)
-	}
-	return dup, socketOf(t, dup.Fd())
-}
-
-// releaseOnCleanup gives a descriptor back when the test ends.
-//
-// The file is a PARAMETER rather than a captured loop variable: capturing would
-// heap-escape it on every iteration, and the case under test may or may not
-// consume the descriptor, so the close is best-effort either way.
-func releaseOnCleanup(t *testing.T, file *os.File) {
-	t.Helper()
-	t.Cleanup(func() {
-		//: a descriptor the adoption already consumed is the expected case.
-		swallowErr(file.Close())
-	})
+	file = packetFile(t)
+	return file, socketOf(t, file.Fd())
 }
 
 // unadoptableFile returns a descriptor no socket adoption can accept.

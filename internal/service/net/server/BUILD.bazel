@@ -101,6 +101,10 @@ go_test(
         "stream_group_internal_test.go",
         "stream_group_limiter_internal_test.go",
         "swallow_internal_test.go",
+        "testsockets_external_test.go",
+        "testsockets_internal_test.go",
+        "testsockets_other_internal_test.go",
+        "testsockets_unix_internal_test.go",
     ],
     embed = [":server"],
     # keep: these tests bind a loopback socket. Bazel's linux-sandbox gives the

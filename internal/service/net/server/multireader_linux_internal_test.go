@@ -12,38 +12,6 @@ import (
 	"time"
 )
 
-// udpPair opens a bound receiver and a sender that can reach it.
-func udpPair(t *testing.T) (receiver *stdnet.UDPConn, sender *stdnet.UDPConn) {
-	t.Helper()
-	raw, err := stdnet.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	receiver, ok := raw.(*stdnet.UDPConn)
-	if !ok {
-		t.Fatalf("ListenPacket returned a %T, want *net.UDPConn", raw)
-	}
-	t.Cleanup(func() {
-		if cerr := receiver.Close(); cerr != nil && !errors.Is(cerr, stdnet.ErrClosed) {
-			t.Errorf("close receiver: %v", cerr)
-		}
-	})
-	addr, ok := receiver.LocalAddr().(*stdnet.UDPAddr)
-	if !ok {
-		t.Fatalf("LocalAddr is a %T, want *net.UDPAddr", receiver.LocalAddr())
-	}
-	sender, derr := stdnet.DialUDP("udp", nil, addr)
-	if derr != nil {
-		t.Fatalf("dial: %v", derr)
-	}
-	t.Cleanup(func() {
-		if cerr := sender.Close(); cerr != nil {
-			t.Errorf("close sender: %v", cerr)
-		}
-	})
-	return receiver, sender
-}
-
 // Test_newMultiReader pins that the descriptor is taken at CONSTRUCTION.
 //
 // A reader built over a socket whose descriptor cannot be reached would fail on

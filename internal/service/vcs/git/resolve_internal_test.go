@@ -131,7 +131,13 @@ func Test_spelledTopLevel(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		base := t.TempDir()
+		//: canonical stands for what git reports, a path with no link in it —
+		//: and a temporary directory may sit under one (macOS: /var is a link
+		//: to /private/var), so the tree is laid out under the resolved base.
+		base, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatalf("resolving the temporary directory: %v", err)
+		}
 		hint, canonical := c.build(t, base)
 		got, ok := spelledTopLevel(hint, canonical)
 		want := c.want(base)

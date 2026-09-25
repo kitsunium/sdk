@@ -288,7 +288,7 @@ func TestListen(t *testing.T) {
 		for range c.tcpAddrs {
 			opts = append(opts, server.Listen("tcp", "127.0.0.1:0"))
 		}
-		dir := t.TempDir()
+		dir := socketDir(t)
 		for i := range c.unixSockets {
 			opts = append(opts, server.Listen("unix", dir+"/sock"+string(rune('a'+i))))
 		}
@@ -984,7 +984,7 @@ func TestShards(t *testing.T) {
 		t.Helper()
 		network, addr := "tcp", "127.0.0.1:0"
 		if c.unixSocket {
-			network, addr = "unix", t.TempDir()+"/sharded.sock"
+			network, addr = "unix", socketDir(t)+"/sharded.sock"
 		}
 		srv := server.New()
 		t.Cleanup(func() { closeOrFail(t, srv) })

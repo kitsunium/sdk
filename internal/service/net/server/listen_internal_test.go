@@ -43,10 +43,10 @@ const (
 func targetAddr(t *testing.T, target addrTarget, literal string) string {
 	t.Helper()
 	switch target {
-	//: a socket path inside the test's own directory, cleaned up with it.
+	//: a socket path inside a directory of the test's own, removed with it.
 	case addrTempSocket:
 		//: unique per test, so parallel cases cannot collide.
-		return t.TempDir() + "/listen.sock"
+		return socketDir(t) + "/listen.sock"
 	//: a port held open for the whole case.
 	case addrAlreadyBound:
 		held, err := stdnet.Listen("tcp", "127.0.0.1:0")
