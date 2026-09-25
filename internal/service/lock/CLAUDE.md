@@ -197,7 +197,9 @@ and names what stopped it when it was not — the Win32 status
 the entry the walk could not fetch (`GetAce#3`) — and both `checkDir` and
 `checkChain` **log** the second case before accepting. The last two used to
 come back empty, indistinguishable from a verdict; ADR 0095 named them so the
-queue, which asks the same reader, can refuse where the lock accepts. Same channel
+queue, which asks the same reader, can refuse where the lock accepts.
+`TestEveryAnswerWithoutAVerdictIsNamed` drives the two a test can cause (a NUL
+in the path, a directory that is not there) against a list read to the end. Same channel
 `internal/service/entitlement` uses for the same shape of degradation, and it
 fires only when the platform API refused to answer.
 

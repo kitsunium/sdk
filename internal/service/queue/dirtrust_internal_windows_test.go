@@ -5,7 +5,11 @@
 // on demand.
 package queue
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // TestAWindowsDirectoryNobodyCouldInspectIsRefused pins dirVerdict's answers.
 //
@@ -42,6 +46,43 @@ func TestAWindowsDirectoryNobodyCouldInspectIsRefused(t *testing.T) {
 		}
 	}
 	//: one subtest per answer.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestAWindowsDirectoryWhoseListCannotBeReadIsRefused drives both rules over a
+// REAL failure of the reader: GetNamedSecurityInfoW on a directory that is not
+// there. It is the one failure a test can cause on demand. A list made
+// unreadable with icacls — READ_CONTROL denied to Everyone and to OWNER
+// RIGHTS — was still read on the windows-latest runner (measured, ADR 0095),
+// so that fixture cannot be relied on to exist.
+func TestAWindowsDirectoryWhoseListCannotBeReadIsRefused(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		rule func(dir string) (why, observed string, unusable bool)
+	}
+	tests := []tc{
+		{"the queue directory's rule", func(dir string) (string, string, bool) { return rootWritableByAnyone(dir, nil) }},
+		{"a state directory's rule", func(dir string) (string, string, bool) { return stateWritableByAnyone(dir, nil) }},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		why, observed, unusable := c.rule(filepath.Join(t.TempDir(), "absent"))
+		//: refused, and for the reason that no verdict was reached.
+		if !unusable || why != "unverifiable" {
+			t.Fatalf("%s over an unreadable list = (%q, %q, %v), want refused as unverifiable", c.name, why, observed, unusable)
+		}
+		//: carrying the Win32 status the reader could not get past.
+		if !strings.HasPrefix(observed, "GetNamedSecurityInfoW=") {
+			t.Errorf("observed = %q, want the reader's GetNamedSecurityInfoW status", observed)
+		}
+	}
+	//: one subtest per rule.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

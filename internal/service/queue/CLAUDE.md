@@ -102,8 +102,11 @@ directory wrongly accepted costs the hardening, a queue directory wrongly
 accepted is a planted message a consumer acts on — and the queue refused every
 Windows directory before this rule, so the refusal takes away nothing that
 worked (ADR 0095). `TestAWindowsDirectoryNobodyCouldInspectIsRefused` pins the
-verdict, `TestAWindowsQueueDirectoryWhoseListCannotBeReadIsRefused` a real list
-nobody may read (READ_CONTROL denied to Everyone and to OWNER RIGHTS).
+verdict on every answer; `TestAWindowsDirectoryWhoseListCannotBeReadIsRefused`
+drives both rules over a REAL reader failure — `GetNamedSecurityInfoW` on a
+directory that is not there. A list made unreadable with `icacls` (READ_CONTROL
+denied to Everyone and to OWNER RIGHTS) was still read on the windows-latest
+runner, measured, so that fixture is not one a test can rely on.
 
 Two consequences, stated rather than discovered:
 

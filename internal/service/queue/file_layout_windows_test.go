@@ -31,9 +31,6 @@ import (
 const (
 	sidEveryone       string = "*S-1-1-0"
 	sidAdministrators string = "*S-1-5-32-544"
-	// sidOwnerRights is OWNER RIGHTS: an entry naming it replaces the rights
-	// an object's owner otherwise holds whatever its list says.
-	sidOwnerRights string = "*S-1-3-4"
 )
 
 // icaclsGrant applies an icacls permission string to path for one identifier,
@@ -167,33 +164,6 @@ func TestAWindowsStateDirectoryIsCheckedWhoeverMadeIt(t *testing.T) {
 	}
 }
 
-// TestAWindowsQueueDirectoryWhoseListCannotBeReadIsRefused pins the rule's
-// answer when the question cannot be asked: a directory whose DACL this
-// process may not read is refused as "unverifiable", carrying the Win32 status
-// — never accepted as though it had been read and found safe. The lock accepts
-// the same case (ADR 0084 §D5); what a wrong acceptance costs here is a
-// planted message (ADR 0095).
-//
-// Reading a DACL needs READ_CONTROL. The row denies it to Everyone, which a
-// token always carries, and to OWNER RIGHTS, without which the owner would
-// hold it implicitly whatever the list says.
-func TestAWindowsQueueDirectoryWhoseListCannotBeReadIsRefused(t *testing.T) {
-	t.Parallel()
-	root := filepath.Join(t.TempDir(), "queue")
-	mkdir(t, root)
-	out, err := exec.CommandContext(t.Context(), "icacls", root, "/deny", sidEveryone+":(RC)", sidOwnerRights+":(RC)").CombinedOutput()
-	//: a row that cannot be planted is a failure, not a skip.
-	if err != nil {
-		t.Fatalf("icacls could not deny READ_CONTROL on %s: %s (%v)", root, out, err)
-	}
-	broker, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()})
-	//: no broker, whatever the answer.
-	if broker != nil {
-		t.Fatal("NewFile returned a broker on windows")
-	}
-	assertWindowsVerdict(t, err, "root", "unverifiable")
-}
-
 // assertWindowsVerdict pins what NewFile answered on Windows: the platform
 // refusal for a directory the rules accepted, or QUEUE_DIRECTORY_UNUSABLE
 // naming the state (none, for the root), the reason and — since there is no
@@ -228,10 +198,6 @@ func assertWindowsVerdict(t *testing.T, err error, refusedAt, why string) {
 	//: a DACL verdict names who holds what; a shape verdict has nothing to name.
 	if why == "world-writable" && !strings.HasPrefix(fieldValue(err, "observed"), "S-1-1-0=") {
 		t.Errorf("observed field = %q, want the Everyone entry the refusal rests on", fieldValue(err, "observed"))
-	}
-	//: no verdict names the Win32 status that kept the list from being read.
-	if why == "unverifiable" && !strings.HasPrefix(fieldValue(err, "observed"), "GetNamedSecurityInfoW=") {
-		t.Errorf("observed field = %q, want the Win32 status the reader could not get past", fieldValue(err, "observed"))
 	}
 }
 

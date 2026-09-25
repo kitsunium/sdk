@@ -67,7 +67,12 @@ skip that hides a bug. Each failure below was classified before it was touched.
      this rule, so the refusal takes away nothing that worked. The reader now
      names every no-verdict answer — a path that is not one and an entry the
      walk cannot fetch used to come back empty, indistinguishable from a
-     verdict — so a caller can make that choice at all.
+     verdict — so a caller can make that choice at all. The refusal is driven
+     over a real reader failure (`GetNamedSecurityInfoW` on a directory that
+     is not there): a list made unreadable with `icacls`, READ_CONTROL denied
+     to Everyone and to OWNER RIGHTS, was still read on the windows-latest
+     runner — measured, cause not established — so no test relies on that
+     fixture.
    - **`selfupdate`** documented Windows as unsupported for the replacement
      step (ADR 0077) and enforced nothing: it downloaded and authenticated the
      archive, failed to rename over the running executable, fell back to

@@ -63,6 +63,7 @@ go_test(
         "chain_posix_test.go",
         "chain_windows_test.go",
         "dacl_internal_windows_test.go",
+        "dacl_noverdict_internal_windows_test.go",
         "dacl_objectace_windows_test.go",
         "dacl_windows_test.go",
         "dirsafety_posix_test.go",
