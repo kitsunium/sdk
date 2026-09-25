@@ -242,3 +242,47 @@ func TestTextScrubsBeforeItCuts(t *testing.T) {
 		})
 	}
 }
+
+// dominated is a struct whose field "code" is written by encoding/json from the
+// SHALLOW, secret field — while an embedded struct also has a "code", deeper,
+// whose type carries a plan of its own. The deeper plan must not replace the
+// shallow one, whatever the declaration order.
+type (
+	codeDetail struct {
+		Kind string `json:"kind"`
+		Note string `json:"note" redact:"secret"`
+	}
+	deeper struct {
+		Code codeDetail `json:"code"`
+	}
+	dominatedFirst struct {
+		deeper
+		Code string `json:"code" redact:"secret"`
+	}
+	dominatedLast struct {
+		Code string `json:"code" redact:"secret"`
+		deeper
+	}
+)
+
+// TestTheShallowestFieldDecides pins encoding/json's dominance rule in the
+// plan: the member written is the shallowest field of its name, so its plan —
+// secret here — is the one applied, before or after the embedded struct.
+func TestTheShallowestFieldDecides(t *testing.T) {
+	t.Parallel()
+	r := redact.NewRedactor(redact.Config{})
+	for name, value := range map[string]any{
+		"embedded first": dominatedFirst{Code: "k3y-in-code"},
+		"embedded last":  dominatedLast{Code: "k3y-in-code"},
+	} {
+		got, err := r.Value(value, 256)
+		//: encodable.
+		if err != nil {
+			t.Fatalf("%s: Value() = %v", name, err)
+		}
+		//: the shallow secret is replaced, whatever the deeper field declares.
+		if strings.Contains(string(got.JSON), "k3y-in-code") {
+			t.Errorf("%s: %s shows the secret", name, got.JSON)
+		}
+	}
+}

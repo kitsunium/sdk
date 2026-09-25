@@ -3,6 +3,7 @@ package strictjson_test
 import (
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -259,6 +260,47 @@ func TestRefusalsCarryTheirStatus(t *testing.T) {
 	for sentinel, want := range statuses {
 		if got := errs.HTTPStatusOf(sentinel); got != want {
 			t.Errorf("%s answers %d, want %d", errs.PublicOf(sentinel), got, want)
+		}
+	}
+}
+
+// TestTheLargestBoundDecodes pins that a bound of math.MaxInt64 — every
+// document fits — reads the document rather than overflowing the one byte it
+// reads past the bound into a budget of nothing.
+func TestTheLargestBoundDecodes(t *testing.T) {
+	t.Parallel()
+	var got item
+	//: a document, not an empty one.
+	if err := strictjson.Decode(strings.NewReader(`{"name":"pen","price":2}`), &got, math.MaxInt64); err != nil || got.Name != "pen" {
+		t.Fatalf("Decode(MaxInt64) = %+v, %v", got, err)
+	}
+}
+
+// quotingReader fails the way a careless reader does: its error quotes the
+// bytes it was reading.
+type quotingReader struct{}
+
+func (quotingReader) Read([]byte) (int, error) {
+	//: an error built from the input.
+	return 0, errors.New(`read "{\"token\":\"` + secret + `\"}": connection reset`)
+}
+
+// TestAReadFailureCarriesItsTypeNotItsText pins that a failed read is
+// reported by the reader's error type: fields are public, and a reader's
+// message may quote the document.
+func TestAReadFailureCarriesItsTypeNotItsText(t *testing.T) {
+	t.Parallel()
+	var got item
+	err := strictjson.Decode(quotingReader{}, &got, 1024)
+	//: refused as unreadable.
+	if !errs.HasCode(err, strictjson.CodeDocumentUnreadable) {
+		t.Fatalf("Decode(failing reader) = %v, want DocumentUnreadable", err)
+	}
+	//: no field repeats what the reader held.
+	for _, field := range errs.FieldsOf(err) {
+		//: the reader's error quoted the secret; the refusal must not.
+		if strings.Contains(field.StringValue(), secret) {
+			t.Fatalf("field %s = %q repeats the reader's input", field.Key(), field.StringValue())
 		}
 	}
 }

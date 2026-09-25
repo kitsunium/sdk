@@ -134,3 +134,20 @@ func TestAttrsBoundsEachText(t *testing.T) {
 		t.Errorf("a cut text does not say so: %q", got["text"])
 	}
 }
+
+// TestAttrsBoundEveryKind pins that the bound holds for the texts Attrs
+// formats itself — a timestamp, a duration, a number — not only for strings.
+func TestAttrsBoundEveryKind(t *testing.T) {
+	t.Parallel()
+	got := collect(redact.NewRedactor(redact.Config{}), []corelogger.AttrValue{
+		attr("at", corelogger.TimeValue(time.Date(2026, 9, 25, 21, 0, 0, 123456789, time.UTC))),
+		attr("took", corelogger.DurationValue(1234567*time.Hour+time.Nanosecond)),
+		attr("n", corelogger.Int64Value(-1234567890123456789)),
+	}, redact.MinBytes)
+	for key, text := range got {
+		//: every text, whatever its kind.
+		if len(text) > redact.MinBytes {
+			t.Errorf("%s = %q is %d bytes over a bound of %d", key, text, len(text), redact.MinBytes)
+		}
+	}
+}

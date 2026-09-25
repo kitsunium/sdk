@@ -2,9 +2,12 @@
 package git_test
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -153,5 +156,72 @@ func TestHeadRefusals(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// TestHeadRunsNoFilterTheRepositoryConfigures pins that asking a working tree
+// whether it is modified never runs a command its .git/config names: git
+// status passes a tracked file whose stat changed through the file's clean
+// filter, and Head empties every configured driver before asking.
+func TestHeadRunsNoFilterTheRepositoryConfigures(t *testing.T) {
+	t.Parallel()
+	//: the planted filter is a shell command; Windows' git runs it through its
+	//: own sh, which this fixture does not depend on.
+	if runtime.GOOS == "windows" {
+		t.Skip("the planted filter is a POSIX shell command")
+	}
+	root := headRepo(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
+		//: a broken fixture must fail loudly rather than test nothing.
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	git("config", "filter.planted.clean", "touch '"+marker+"'; cat")
+	writeRepoFile(t, root, ".gitattributes", "*.go filter=planted\n")
+	git("add", ".gitattributes")
+	git("commit", "-q", "-m", "attributes")
+	//: the commit itself ran the filter; only Head's own runs matter.
+	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove marker: %v", err)
+	}
+	//: same content, new stat: git must look at the content to answer.
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "tracked.go"), later, later); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	head, err := gitpkg.Head(t.Context(), root)
+	if err != nil {
+		t.Fatalf("Head() = %v", err)
+	}
+	//: the filter did not run.
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("Head ran the clean filter the repository's configuration names")
+	}
+	//: an unchanged content is not a modification.
+	if head.Modified {
+		t.Error("Modified = true for a file whose content did not change")
+	}
+}
+
+// TestHeadCancelledIsNotUnresolved pins that a stopped question is not "no
+// repository": the probe that tells the two apart would fail on the same
+// cancelled context.
+func TestHeadCancelledIsNotUnresolved(t *testing.T) {
+	t.Parallel()
+	root := headRepo(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := gitpkg.Head(ctx, root)
+	//: a failure, and not the unresolved one.
+	if err == nil || errs.HasCode(err, corevcs.CodeRepositoryUnresolved) {
+		t.Fatalf("Head(cancelled) = %v, want a failure that is not RepositoryUnresolved", err)
+	}
+	//: the context's own error is in the chain.
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Head(cancelled) = %v, want context.Canceled in its chain", err)
 	}
 }

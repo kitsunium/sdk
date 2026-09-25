@@ -4,6 +4,7 @@ package strictjson
 
 import (
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -60,9 +61,10 @@ func (b *boundedReader) verdict(maxBytes int64, oversize func(error) bool) error
 	//: the source failed before the document ended.
 	if b.failure != nil {
 		//: the sentinel is the origin, so the refusal keeps its code and its
-		//: 400; the source's message — the transport's, never the document's —
-		//: travels as a field, the way service/resilience carries a cause.
-		return errs.Wrap(DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, b.failure.Error()))
+		//: 400. The source's message is NOT carried: an arbitrary reader's
+		//: error may quote what it read, and fields are public — the failure's
+		//: type says which kind of reader failed, and nothing it held.
+		return errs.Wrap(DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(b.failure)))
 	}
 	//: not one byte.
 	if b.delivered == 0 {
@@ -71,4 +73,12 @@ func (b *boundedReader) verdict(maxBytes int64, oversize func(error) bool) error
 	}
 	//: the reading was fine; the decoder decides.
 	return nil
+}
+
+// causeOf names a read failure by its type — *net.OpError, *errors.errorString
+// — never by its message, which a reader may have built from the bytes it
+// read.
+func causeOf(failure error) string {
+	//: the dynamic type, which holds no input.
+	return fmt.Sprintf("%T", failure)
 }

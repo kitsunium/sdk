@@ -72,6 +72,12 @@ type HeadValue struct {
 // CommandFailed, with the subcommand and git's stderr in Private.
 func Head(ctx context.Context, dir string) (head HeadValue, err error) {
 	revision, revErr := runGitOutput(ctx, dir, "rev-parse", "--verify", "HEAD^{commit}")
+	//: a cancelled or expired context failed the command: a probe on the same
+	//: context would fail too, and call a stopped question "no repository".
+	if revErr != nil && ctx.Err() != nil {
+		//: CommandFailed, the context's error in its chain.
+		return HeadValue{}, revErr
+	}
 	//: the one failure worth telling apart: no repository at all.
 	if revErr != nil {
 		//: RepositoryUnresolved or CommandFailed, decided by a probe.
@@ -90,8 +96,15 @@ func Head(ctx context.Context, dir string) (head HeadValue, err error) {
 		return HeadValue{}, errs.Wrap(corevcs.CommandFailed, errs.WrapParams{},
 			errs.String("revision", revision), errs.String("problem", "no readable committer line"))
 	}
-	status, statusErr := runGitOutput(ctx, dir,
-		"--no-optional-locks", "status", "--porcelain", "--untracked-files=no")
+	guard, guardErr := filterGuard(ctx, dir)
+	//: a configuration that names a filter this runner cannot neutralise is
+	//: not read around: the status is not asked for.
+	if guardErr != nil {
+		//: CommandFailed.
+		return HeadValue{}, guardErr
+	}
+	status, statusErr := runGitOutput(ctx, dir, append(guard,
+		"--no-optional-locks", "status", "--porcelain", "--untracked-files=no")...)
 	//: a tree whose status cannot be read is not reported clean — that would
 	//: be a claim git refused to make.
 	if statusErr != nil {
@@ -198,4 +211,48 @@ func parseOffset(zone string) (seconds int, ok bool) {
 	}
 	//: east of UTC.
 	return seconds, true
+}
+
+// filterGuard returns the -c overrides that make every filter driver the
+// repository's configuration defines no filter at all, for the one command
+// Head runs that reads worktree content.
+//
+// git status converts a tracked file whose stat changed through its clean
+// filter — or its long-running process filter — to compare it with the index,
+// and a filter is a command a .git/config names. The hardened runner already
+// empties core.fsmonitor for the same reason; a filter cannot be emptied the
+// same way without its name, so the names are read first (reading the
+// configuration runs nothing) and each driver's clean and process commands
+// are set to "", which git treats as no filter. -c beats every config file.
+//
+// A driver whose name holds '=' cannot be written as a -c key: that
+// configuration is refused with CommandFailed rather than read around.
+func filterGuard(ctx context.Context, dir string) (guard []string, err error) {
+	keys, listErr := runGitOutput(ctx, dir, "config", "--list", "--name-only")
+	//: a configuration git cannot list is not one to run status under.
+	if listErr != nil {
+		//: CommandFailed, as the runner typed it.
+		return nil, listErr
+	}
+	seen := map[string]bool{}
+	//: one key per line: section.subsection.variable, the variable last.
+	for key := range strings.SplitSeq(keys, "\n") {
+		rest, isFilter := strings.CutPrefix(key, "filter.")
+		cut := strings.LastIndexByte(rest, '.')
+		//: a filter driver's command keys only.
+		if !isFilter || cut <= 0 || seen[rest[:cut]] {
+			continue
+		}
+		name := rest[:cut]
+		//: git -c splits at the first '=': such a name cannot be addressed.
+		if strings.Contains(name, "=") {
+			//: CommandFailed, naming the problem and not the name.
+			return nil, errs.Wrap(corevcs.CommandFailed, errs.WrapParams{},
+				errs.String("problem", "a filter driver name holds '=', which git -c cannot address"))
+		}
+		seen[name] = true
+		guard = append(guard, "-c", "filter."+name+".clean=", "-c", "filter."+name+".process=")
+	}
+	//: the overrides, or none.
+	return guard, nil
 }

@@ -105,13 +105,21 @@ func dotted(prefix, key string) string {
 	}
 }
 
-// render returns one non-group attribute's value as display text.
+// render returns one non-group attribute's value as display text, cut to
+// limit like every other text Attrs hands out: a timestamp or a long duration
+// is as much a text as a string is.
 func (r *Redactor) render(attr *corelogger.AttrValue, limit int) string {
+	//: formatted, then scrubbed and cut by the one function that bounds text.
+	return r.Text(r.format(attr, limit), limit)
+}
+
+// format returns one non-group attribute's value as text, uncut.
+func (r *Redactor) format(attr *corelogger.AttrValue, limit int) string {
 	value := attr.Value
 	switch value.Kind() {
 	case corelogger.KindString:
-		//: its URLs lose their credentials, then it is cut.
-		return r.Text(value.String(), limit)
+		//: the string itself: render scrubs and cuts it.
+		return value.String()
 	case corelogger.KindInt64:
 		//: base ten.
 		return strconv.FormatInt(value.Int64(), decimal)

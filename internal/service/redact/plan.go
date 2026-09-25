@@ -156,6 +156,20 @@ func (r *Redactor) below(element reflect.Type, seen map[reflect.Type]*plan) *pla
 // structs the way encoding/json does. embedded guards against an embedding
 // cycle.
 func (r *Redactor) fields(p *plan, t reflect.Type, seen map[reflect.Type]*plan, embedded map[reflect.Type]bool) {
+	r.collect(p, t, seen, embedded, 0, map[string]int{})
+}
+
+// collect adds the fields of t, found depth embeddings below the struct being
+// planned, to p. depthOf records how deep each member name was first found.
+//
+// encoding/json writes, for one name, the field found at the SHALLOWEST depth,
+// whatever the declaration order — so a deeper promoted field never replaces a
+// shallower member's plan, and a shallower field replaces a deeper one's, even
+// a field that declares nothing (its value is the one written, and a deeper
+// plan would be applied to the wrong value). Two fields at one depth are
+// ambiguous: encoding/json writes neither, or the tagged one; the plan keeps
+// the stricter of the two, so a secret is never lost to a tie.
+func (r *Redactor) collect(p *plan, t reflect.Type, seen map[reflect.Type]*plan, embedded map[reflect.Type]bool, depth int, depthOf map[string]int) {
 	//: every field, in declaration order.
 	for field := range t.Fields() {
 		name, promoted, visible := jsonName(field)
@@ -163,25 +177,49 @@ func (r *Redactor) fields(p *plan, t reflect.Type, seen map[reflect.Type]*plan, 
 		if !visible {
 			continue
 		}
-		//: an embedded struct without a name: its fields are this object's.
+		//: an embedded struct without a name: its fields are this object's,
+		//: one level deeper.
 		if promoted {
-			r.promote(p, field.Type, seen, embedded)
+			r.promote(p, field.Type, seen, embedded, depth+1, depthOf)
 			continue
 		}
+		found, taken := depthOf[name]
+		//: a shallower field of that name is the one written.
+		if taken && found < depth {
+			continue
+		}
+		var member *plan
 		//: secret by declaration: the whole member is replaced.
 		if r.declared(field) {
-			p.members[name] = &plan{secret: true}
+			member = &plan{secret: true}
+		} else {
+			//: a member whose own type declares something below it.
+			member = r.build(field.Type, seen)
+		}
+		//: a tie keeps the stricter plan.
+		if taken && found == depth {
+			//: a secret already planned stays secret.
+			if current := p.members[name]; current != nil && current.secret {
+				continue
+			}
+			//: otherwise the new plan only when it hides something.
+			if member != nil && member.secret {
+				p.members[name] = member
+			}
 			continue
 		}
-		//: a member whose own type declares something below it.
-		if sub := r.build(field.Type, seen); sub != nil {
-			p.members[name] = sub
+		depthOf[name] = depth
+		//: the shallowest field so far: its plan, or none.
+		if member != nil {
+			p.members[name] = member
+		} else {
+			delete(p.members, name)
 		}
 	}
 }
 
-// promote adds the fields of an embedded struct to p.
-func (r *Redactor) promote(p *plan, embedded reflect.Type, seen map[reflect.Type]*plan, visited map[reflect.Type]bool) {
+// promote adds the fields of an embedded struct to p, one depth further.
+func (r *Redactor) promote(p *plan, embedded reflect.Type, seen map[reflect.Type]*plan, visited map[reflect.Type]bool, depth int, depthOf map[string]int) {
 	//: through the pointer, as encoding/json does.
 	if embedded.Kind() == reflect.Pointer {
 		embedded = embedded.Elem()
@@ -191,7 +229,7 @@ func (r *Redactor) promote(p *plan, embedded reflect.Type, seen map[reflect.Type
 		return
 	}
 	visited[embedded] = true
-	r.fields(p, embedded, seen, visited)
+	r.collect(p, embedded, seen, visited, depth, depthOf)
 }
 
 // jsonName returns the member name encoding/json writes field under, whether

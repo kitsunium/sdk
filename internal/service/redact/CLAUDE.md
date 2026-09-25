@@ -66,6 +66,14 @@ attribute shape. Code range `0.3.73.*`.
 - **A malformed document is refused, not shown as a fragment.** A partial copy
   of something that does not parse cannot be trusted to have had its secrets
   recognised.
+- **A plan follows encoding/json's dominance rule.** For one member name the
+  shallowest field is the one written, whatever the declaration order, so a
+  deeper promoted field never replaces a shallower member's plan and a
+  shallower one replaces a deeper one's; two fields at one depth keep the
+  stricter plan, so a tie never loses a secret — `TestTheShallowestFieldDecides`.
+- **Every text `Attrs` hands out is cut**, a timestamp or a number as much as a
+  string — `TestAttrsBoundEveryKind`; `TestDeepNestingStaysWithinTheBound` pins
+  the copier against a document that is all structure.
 - **`Attrs` is an iterator** so the caller bounds the COUNT: a record carrying a
   group of ten thousand attributes costs exactly what is ranged over. A group
   whose dotted key is a secret's is ONE redacted pair.

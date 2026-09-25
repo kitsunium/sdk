@@ -71,8 +71,8 @@ func emptyOrUnreadable(peekErr error) error {
 		//: DocumentEmpty.
 		return DocumentEmpty
 	}
-	//: the transport failed before the body began.
-	return errs.Wrap(DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, peekErr.Error()))
+	//: the transport failed before the body began: its type, never its text.
+	return errs.Wrap(DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(peekErr)))
 }
 
 // isJSONMediaType reports whether a Content-Type header declares JSON.

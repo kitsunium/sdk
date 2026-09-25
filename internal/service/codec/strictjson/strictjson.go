@@ -29,6 +29,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"io"
+	"math"
 	"reflect"
 
 	jsonv2 "encoding/json/v2"
@@ -106,7 +107,13 @@ func checkArguments(v any, maxBytes int64) error {
 // body — so it is reported as DocumentTooLarge rather than as a failed read;
 // nil recognises none.
 func decode(r io.Reader, v any, maxBytes int64, oversize func(error) bool) error {
-	counted := &boundedReader{source: r, remaining: maxBytes + 1}
+	//: one byte past the bound shows a document that does not fit — unless
+	//: the bound is already the largest there is.
+	budget := maxBytes
+	if budget < math.MaxInt64 {
+		budget++
+	}
+	counted := &boundedReader{source: r, remaining: budget}
 	decodeErr := jsonv2.UnmarshalRead(counted, v, jsonv2.RejectUnknownMembers(true))
 	//: the verdict of the reader first: a document that did not fit, or did
 	//: not arrive, makes whatever the decoder concluded an artefact.

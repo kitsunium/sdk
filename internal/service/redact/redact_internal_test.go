@@ -3,6 +3,7 @@ package redact
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -95,5 +96,30 @@ func Test_Redactor_planOf(t *testing.T) {
 	}
 	if NewRedactor(Config{}).planOf(reflect.TypeFor[json.RawMessage]()) != nil {
 		t.Error("a type that writes its own JSON is walked")
+	}
+}
+
+// TestDeepNestingStaysWithinTheBound pins the copier's accounting against a
+// document that is all structure: every container opened reserves its closer,
+// and a value is only started with room for the smallest cut one, so no depth
+// and no bound makes the output longer than the bound.
+func TestDeepNestingStaysWithinTheBound(t *testing.T) {
+	t.Parallel()
+	r := NewRedactor(Config{})
+	//: depths well past what any bound can hold.
+	for depth := 1; depth <= 64; depth += 9 {
+		document := strings.Repeat("[", depth) + `"x"` + strings.Repeat("]", depth)
+		//: every bound from below the floor to past the document.
+		for limit := 1; limit <= 2*depth+8; limit++ {
+			out, err := r.redact([]byte(document), nil, limit)
+			//: a well-formed document is never refused.
+			if err != nil {
+				t.Fatalf("depth %d, bound %d: %v", depth, limit, err)
+			}
+			//: never longer than the bound it was given.
+			if len(out.JSON) > bound(limit) {
+				t.Errorf("depth %d, bound %d: %d bytes: %s", depth, limit, len(out.JSON), out.JSON)
+			}
+		}
 	}
 }

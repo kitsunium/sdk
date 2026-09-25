@@ -194,6 +194,15 @@ its time, whether the tree is modified — in three hardened invocations:
 - **`status` is where `core.fsmonitor` fires.** Measured against a planted
   payload: a raw `git status` executed it twice, the hardened one never —
   `TestHeadRefusesRepositoryControlledExecution`.
+- **`status` also runs filters.** A tracked file whose stat changed goes
+  through its clean (or long-running process) filter, a command a
+  `.git/config` names. `filterGuard` lists the configured drivers — reading
+  the configuration runs nothing — and empties each one's `clean` and
+  `process` with `-c`, which git reads as no filter; a driver name holding `=`
+  cannot be addressed by `-c` and is refused. Measured: without the guard the
+  planted filter ran, with it never — `TestHeadRunsNoFilterTheRepositoryConfigures`.
+- **A cancelled context is not "no repository".** A failed `rev-parse` under a
+  context already done is returned as it is, never probed on that context.
 - **`--no-optional-locks`** keeps a read-only question from taking the index
   lock a concurrent `git commit` in the same tree needs.
 - **A status that fails is an error, not "clean".** "Clean" is a claim git
