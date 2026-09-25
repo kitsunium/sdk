@@ -19,7 +19,7 @@ Public façade: `pkg/v1/server`.
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |
-| `options.go` | `Option` / `GroupOption` |
+| `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes` |
 | `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
 | `packet.go` | the pooled `corenet.Packet` implementation |
 | `packet_listen.go` | datagram socket construction; family validation; ceilings |
@@ -30,6 +30,7 @@ Public façade: `pkg/v1/server`.
 | `multireader_mmsghdr_linux.go` | the cited `struct mmsghdr` layout |
 | `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
 | `http_adapter.go` | the `net/http` adapter (ADR 0029 D3) |
+| `http_bounds.go` | `httpBounds` — the header phase's own deadline and the header size cap, kept out of `core/net`'s protocol-neutral `Timeouts`/`Limits`; each unset value keeps the adapter's earlier behaviour (the read timeout for the header phase, net/http's 1 MiB cap) |
 | `conn_waiter.go` | `connWaiter` — the completion channel and the hijack flag one `ServeConn` blocks on |
 | `http_listener.go` | the channel-fed bridge listener |
 | `reuseport_{linux,bsd,other}.go` | the cited `SO_REUSEPORT` constant per family |

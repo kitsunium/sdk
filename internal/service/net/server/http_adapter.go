@@ -33,6 +33,9 @@ type httpAdapter struct {
 	// socket, not the pooled wrapper that carries them, because it type-asserts
 	// on *tls.Conn to populate Request.TLS.
 	timeouts corenet.TimeoutsValue
+	// bounds are the HTTP-only options — the header phase's own deadline and
+	// the header size cap — set at Start with the timeouts above.
+	bounds httpBounds
 	// start guarantees the serving goroutine is launched at most once.
 	start sync.Once
 	// mu guards waiters AND the lifecycle fields below. They are written by the
@@ -225,9 +228,12 @@ func (a *httpAdapter) launch(raw stdnet.Conn) {
 		WriteTimeout: a.timeouts.Write.Duration(),
 		IdleTimeout:  a.timeouts.Idle.Duration(),
 		//: the header phase is the one a slowloris stalls, and net/http only
-		//: bounds it separately; falling back to the read budget means a group
-		//: that set one is defended without having to know that.
-		ReadHeaderTimeout: a.timeouts.Read.Duration(),
+		//: bounds it separately; its own option wins, and falling back to the
+		//: read budget means a group that set only that one is still defended
+		//: without having to know the phase exists.
+		ReadHeaderTimeout: a.bounds.headerTimeout(a.timeouts.Read.Duration()),
+		//: zero is net/http's own default (1 MiB); a caller's cap replaces it.
+		MaxHeaderBytes: a.bounds.headerBytes(),
 		//: every request on this listener derives from a context carrying the
 		//: drain signal, which is the only way a handler holding a connection
 		//: open indefinitely can learn that the server is shutting down. A

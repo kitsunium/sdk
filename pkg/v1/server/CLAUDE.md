@@ -23,8 +23,17 @@ in the dimension that motivated the domain, whatever else it gained.
 | `Group` | listeners sharing one handler, chain and policy |
 | `Conn` | one accepted connection; **embeds `net.Conn`** |
 | `Handler`, `HandlerFunc`, `Middleware`, `Chain` | the handler shape |
+| `PacketGroup`, `Packet`, `PacketHandler`, `PacketHandlerFunc`, `PacketMiddleware`, `ChainPacket` | the datagram half: one handler per packet, the same chain shape |
 | `State`, `ListenerState`, `Phase`, `Phase*` | lifecycle reporting |
-| `Listen`, `TLS`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout`, `ReadBufferSize` | group options |
+| `Listen`, `Adopt` | where a group listens: an address it binds, or a socket a supervisor passed (`LISTEN_FDNAMES`) — a missing one is `SocketAdoptFailed`, never a silent bind |
+| `TLS` | TLS, or mutual TLS when the identity requires a client certificate |
+| `ReadTimeout`, `WriteTimeout`, `IdleTimeout` | per-operation bounds, refreshed per read/write (per request on an HTTP group) |
+| `HandshakeTimeout` | the TLS negotiation; unset falls back to a domain default, never to unbounded |
+| `ReadHeaderTimeout` | HTTP groups only: the header phase's own bound; unset keeps `ReadTimeout` there, as before |
+| `MaxHeaderBytes` | HTTP groups only: the header size cap, answered 431; unset keeps net/http's 1 MiB default |
+| `MaxConns` | the group's concurrent-connection ceiling, shared across its listeners; zero is no ceiling |
+| `Shards` | listeners per address through `SO_REUSEPORT`; zero is one per core; a platform that cannot shard reports it in `State` |
+| `ReadBufferSize`, `MaxPacketSize`, `BatchSize` | the per-connection scratch buffer; the datagram size cap and batch |
 | `WithDrainTimeout` | server option |
 | `DrainSignal` | the shutdown signal a handler holding a connection open watches |
 | `ListenFailed` … `ConnLimitReached` | sentinels |
@@ -81,11 +90,11 @@ bazel test --config=race //pkg/v1/server:server_test
 cd pkg && GOWORK=off go test -race -cover ./v1/server/...
 # expected: ~59% for the facade itself, ~83% for sse/.
 #
-# The facade's figure is not a gap. Seven forwarders here (HandshakeTimeout,
-# MaxPacketSize, BatchSize, ChainPacket, MaxConns, Shards, Adopt) are one-line
-# passthroughs whose behaviour is pinned in
-# //internal/service/net/server:server_test, where the option can actually be
-# observed; exercising them again through this package would assert that Go
+# The facade's figure is not a gap. Nine forwarders here (HandshakeTimeout,
+# ReadHeaderTimeout, MaxHeaderBytes, MaxPacketSize, BatchSize, ChainPacket,
+# MaxConns, Shards, Adopt) are one-line passthroughs whose behaviour is pinned
+# in //internal/service/net/server:server_test, where the option can actually
+# be observed; exercising them again through this package would assert that Go
 # calls the function it was told to. Everything with behaviour of its own —
 # New, Chain, DrainSignal, the sentinels — is covered here.
 ```
