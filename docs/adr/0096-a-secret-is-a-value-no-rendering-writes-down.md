@@ -127,6 +127,17 @@ passed where a name belonged.
   is `RECORD_UNREADABLE`, never guessed at. The file store refuses at
   construction with `UnsupportedPlatform` wherever `vfs.NewOS` does — today every
   platform outside the Unix family — before creating the directory.
+- **The key a sealed file store opens with** comes from `KeyFile(path)`: the
+  file holds exactly 32 RAW bytes, and anything else — base64 text, a trailing
+  newline, a short file — is `KEY_FILE_INVALID` (`0.3.68.8`), never reshaped,
+  because a key reshaped to fit is another key and the store it sealed would
+  read as corrupt. An absent file is created on first use: crypto/rand bytes in
+  a flushed 0600 temporary beside it, PUBLISHED with a hard link that the
+  kernel refuses when the name exists, so processes racing on first use cannot
+  both win — the loser reads the winner's file and every caller returns the
+  same key; the directory is made 0700 when absent and flushed after the link.
+  An existing file with a group or world bit is refused as the store's
+  directory is (`INVALID_CONFIG`), and the same platform gate applies.
 
 ### 5. A keyring is the versions of one secret seen as keys
 
@@ -193,8 +204,8 @@ re-reads and finds nothing due.
   that a Vault or KMS connector can implement later without the reading code
   changing.
 - Two ranges are claimed: `0.2.37.*` with seven codes (the port's verdicts) and
-  `0.3.68.*` with seven (the engines'), recorded in `codeRangeOwners` in this
-  change.
+  `0.3.68.*` with eight (the engines' and the key file's), recorded in
+  `codeRangeOwners` in this change.
 - The file store and the keyring read the store on every call. A keyring over
   the file store therefore reads one small file per `Open`; caching a version
   would need a cache invalidated by a `Put` in another process, which the port
@@ -258,7 +269,11 @@ shape.
   concurrent writer, cross-instance writer serialisation, and every
   `RECORD_UNREADABLE` path; the environment store's mapping, `_FILE`
   convention and refusals; the keyring across two rotations and a prune; the
-  rotator on a `ManualClock`, `Run` included, and through a `Locker`.
+  rotator on a `ManualClock`, `Run` included, and through a `Locker`; sixteen
+  concurrent first uses of one `KeyFile` path returning one key, with the file
+  0600, the directory 0700 and no temporary left, every reshaped content
+  refused unchanged and unrepeated, and a sealed store reopened under the key
+  read back.
 - `pkg/v1/secret`: `config.Load` into a `Value`, printed, dumped, logged through
   the SDK logger, and a keyring across rotations, through public names only.
 - `pkg/v1/logger/slogbridge`: slog's text and JSON handlers and the bridge.

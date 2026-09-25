@@ -21,6 +21,7 @@ Code range: `0.3.68.*` (ADR 0096).
 | `file.go`, `file_config.go`, `file_record.go`, `fileguard_*.go` | `NewFile` / `FileConfig` — the directory store |
 | `keyring.go` | `Keyring` / `NewKeyring` — seal, open, sign, verify over versions |
 | `rotator.go` | `Rotator` / `NewRotator` / `RotatorConfig` / `PolicySpec` / `Random` |
+| `keyfile.go` | `KeyFile` — the machine-local key for a sealed file store |
 | `codes.go` / `errors.go` | `0.3.68.*` and `wrapAs` |
 
 ## Decisions worth not relitigating
@@ -54,6 +55,15 @@ Code range: `0.3.68.*` (ADR 0096).
   with two labels makes its AEAD key and its MAC key two keys. `Open`/`Verify`
   collapse every box-shaped failure into one verdict and pass only
   `StoreUnavailable` through (`verdictOr`).
+- **KeyFile**: exactly 32 RAW bytes — no encoding, no line ending — and
+  anything else is `KEY_FILE_INVALID`, never truncated, padded or decoded. An
+  absent file is written to a `.keyfile-*.tmp` beside it (0600, flushed) and
+  published with `os.Link`, which fails on an existing name: the loser of a
+  first-use race reads the winner's file, so concurrent callers agree on one
+  key. The directory is made 0700 when absent and flushed after the link. An
+  existing file with a group/world bit is `INVALID_CONFIG` (the store
+  directory's rule). The same platform gate as the file store. Errors carry the
+  operation, never the path, the key or a refused file's content.
 - **Rotator**: every `PolicySpec` field required (`Keep` ≥ 2); `Random(n)`
   refuses n < 16 at call time; a rotation whose prune failed returns the new
   version AND the error; `OnRotate` runs after every lock is released; `Run`
@@ -79,6 +89,8 @@ Code range: `0.3.68.*` (ADR 0096).
 | `SignatureInvalid` `0.3.68.5` | `Keyring.Verify`, every signature-shaped failure |
 | `KeyMaterialInvalid` `0.3.68.6` | a keyring version is not one `crypto.Key` long |
 | `GenerateFailed` `0.3.68.7` | the policy's generator failed or returned nothing |
+| `KeyFileInvalid` `0.3.68.8` | a key file that is not a regular file of exactly 32 raw bytes |
+| `KeyFile(path) (crypto.Key, error)` | the machine-local key |
 
 ## Tests
 

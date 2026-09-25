@@ -35,6 +35,17 @@ A [Store](<#Store>) holds versions numbered from 1, never reused, newest first:
 
 A name is 1 to 63 characters of a\-z, 0\-9 and '\-', starting and ending with a letter or a digit \([ValidateName](<#ValidateName>)\) — one grammar that survives every filesystem and maps one\-to\-one onto an environment variable.
 
+### A machine\\\-local key for the file store
+
+[KeyFile](<#KeyFile>) returns the key held in a file, creating it on first use:
+
+```
+key, err := secret.KeyFile("/var/lib/app/store.key") // 32 raw bytes, 0600
+store, err := secret.NewFile(secret.FileConfig{Dir: "/var/lib/app/secrets", Key: key})
+```
+
+The file holds exactly 32 RAW bytes and nothing else is accepted — not base64, not a trailing newline — because a key reshaped to fit is another key. An absent file is created from crypto/rand and published with a hard link, so processes racing on first use all return the one key that won; a file any other account can read is refused, as the store's directory is.
+
 ### Keyring and rotation
 
 ```
@@ -60,6 +71,7 @@ It ships no Vault, KMS or cloud secret\-manager client: those are [Store](<#Stor
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func KeyFile\(path string\) \(key crypto.Key, err error\)](<#KeyFile>)
 - [func Random\(n int\) func\(\) \(Value, error\)](<#Random>)
 - [func ValidateName\(name string\) error](<#ValidateName>)
 - [type EnvConfig](<#EnvConfig>)
@@ -136,11 +148,25 @@ var (
     KeyMaterialInvalid = svcsecret.KeyMaterialInvalid
     // GenerateFailed is returned when a rotation's generator failed.
     GenerateFailed = svcsecret.GenerateFailed
+    // KeyFileInvalid is returned by KeyFile for a file that exists and does not
+    // hold exactly one key of raw bytes.
+    KeyFileInvalid = svcsecret.KeyFileInvalid
 )
 ```
 
+<a name="KeyFile"></a>
+## func [KeyFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L246>)
+
+```go
+func KeyFile(path string) (key crypto.Key, err error)
+```
+
+KeyFile returns the crypto.Key held in the file at path — exactly crypto.KeyLen raw bytes — creating the file with a fresh random key on first use: 0600, its directory 0700 when it has to be made, published atomically so that concurrent first uses all return the same key.
+
+It refuses content that is not exactly one key with [KeyFileInvalid](<#NotFound>), an existing file other accounts can read with [InvalidConfig](<#NotFound>), and — where the file store refuses, every platform outside the Unix family, because a mode is not an access list there — proc.UnsupportedPlatform. No error carries the key or a refused file's content.
+
 <a name="Random"></a>
-## func [Random](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L221>)
+## func [Random](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L253>)
 
 ```go
 func Random(n int) func() (Value, error)
@@ -149,7 +175,7 @@ func Random(n int) func() (Value, error)
 Random returns a generator of n bytes from crypto/rand; a keyring's versions need n = 32. Below 16 bytes the generator refuses every call.
 
 <a name="ValidateName"></a>
-## func [ValidateName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L180>)
+## func [ValidateName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L197>)
 
 ```go
 func ValidateName(name string) error
@@ -158,7 +184,7 @@ func ValidateName(name string) error
 ValidateName reports whether name is a secret name, returning [InvalidName](<#NotFound>) when it is not. Every store calls it; a caller may too, to refuse a name at the edge of its own input.
 
 <a name="EnvConfig"></a>
-## type [EnvConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L108>)
+## type [EnvConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L122>)
 
 EnvConfig parameterises [NewEnv](<#NewEnv>).
 
@@ -167,7 +193,7 @@ type EnvConfig = svcsecret.EnvConfig
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L111>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L125>)
 
 FileConfig parameterises [NewFile](<#NewFile>).
 
@@ -176,7 +202,7 @@ type FileConfig = svcsecret.FileConfig
 ```
 
 <a name="Keyring"></a>
-## type [Keyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L115>)
+## type [Keyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L129>)
 
 Keyring sees the versions of one secret as keys: the newest seals and signs, every kept version opens and verifies.
 
@@ -185,7 +211,7 @@ type Keyring = svcsecret.Keyring
 ```
 
 <a name="NewKeyring"></a>
-### func [NewKeyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L208>)
+### func [NewKeyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L225>)
 
 ```go
 func NewKeyring(store Store, name string) (keyring *Keyring, err error)
@@ -194,7 +220,7 @@ func NewKeyring(store Store, name string) (keyring *Keyring, err error)
 NewKeyring returns the keyring over the versions of name in store.
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L105>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L119>)
 
 MemoryConfig parameterises [NewMemory](<#NewMemory>).
 
@@ -203,7 +229,7 @@ type MemoryConfig = svcsecret.MemoryConfig
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L119>)
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L133>)
 
 Policy says how often a secret rotates, how many versions a rotation keeps, and how a new one is made.
 
@@ -212,7 +238,7 @@ type Policy = svcsecret.PolicySpec
 ```
 
 <a name="Rotator"></a>
-## type [Rotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L125>)
+## type [Rotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L139>)
 
 Rotator mints new versions of one secret according to a [Policy](<#Policy>).
 
@@ -221,7 +247,7 @@ type Rotator = svcsecret.Rotator
 ```
 
 <a name="NewRotator"></a>
-### func [NewRotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L214>)
+### func [NewRotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L231>)
 
 ```go
 func NewRotator(cfg RotatorConfig) (rotator *Rotator, err error)
@@ -230,7 +256,7 @@ func NewRotator(cfg RotatorConfig) (rotator *Rotator, err error)
 NewRotator returns a rotator for cfg.Name in cfg.Store. It starts nothing.
 
 <a name="RotatorConfig"></a>
-## type [RotatorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L122>)
+## type [RotatorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L136>)
 
 RotatorConfig parameterises [NewRotator](<#NewRotator>).
 
@@ -239,7 +265,7 @@ type RotatorConfig = svcsecret.RotatorConfig
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L98>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L112>)
 
 Store keeps named secrets as numbered versions. It is frozen at five methods; a new capability arrives as a sibling interface.
 
@@ -248,7 +274,7 @@ type Store = coresecret.Store
 ```
 
 <a name="NewEnv"></a>
-### func [NewEnv](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L193>)
+### func [NewEnv](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L210>)
 
 ```go
 func NewEnv(cfg EnvConfig) (store Store, err error)
@@ -257,7 +283,7 @@ func NewEnv(cfg EnvConfig) (store Store, err error)
 NewEnv returns a read\-only Store over the process environment, honouring the NAME\_FILE convention. It refuses a prefix no shell could export.
 
 <a name="NewFile"></a>
-### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L202>)
+### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L219>)
 
 ```go
 func NewFile(cfg FileConfig) (store Store, err error)
@@ -266,7 +292,7 @@ func NewFile(cfg FileConfig) (store Store, err error)
 NewFile returns a Store that keeps its versions in a directory it owns, sealed at rest when cfg.Key is set. It refuses a directory other accounts can read, and returns proc.UnsupportedPlatform where atomic publication or the file lock is unavailable. The store also implements io.Closer.
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L186>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L203>)
 
 ```go
 func NewMemory(cfg MemoryConfig) Store
@@ -275,7 +301,7 @@ func NewMemory(cfg MemoryConfig) Store
 NewMemory returns a Store that keeps its versions in this process's memory.
 
 <a name="Value"></a>
-## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L94>)
+## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L108>)
 
 Value is an immutable secret that renders as [Redacted](<#Redacted>) in every rendering; only Reveal and RevealString hand its bytes back.
 
@@ -284,7 +310,7 @@ type Value = coresecret.Value
 ```
 
 <a name="FromString"></a>
-### func [FromString](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L172>)
+### func [FromString](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L189>)
 
 ```go
 func FromString(text string) Value
@@ -293,7 +319,7 @@ func FromString(text string) Value
 FromString returns a Value holding text.
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L166>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L183>)
 
 ```go
 func New(raw []byte) Value
@@ -302,7 +328,7 @@ func New(raw []byte) Value
 New returns a Value holding a copy of raw.
 
 <a name="Versioned"></a>
-## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L102>)
+## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L116>)
 
 Versioned is one version of one secret: name, number, value, and when the store recorded it.
 

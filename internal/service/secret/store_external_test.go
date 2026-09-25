@@ -242,3 +242,8 @@ func fieldText(err error) string {
 	}
 	return builder.String()
 }
+
+// fromText is coresecret.FromString, spelled short for the table cases.
+func fromText(text string) coresecret.Value {
+	return coresecret.FromString(text)
+}

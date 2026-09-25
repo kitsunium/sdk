@@ -18,9 +18,10 @@ forwarding constructors. No logic lives here.
 | `NewMemory` / `MemoryConfig` | in-process store |
 | `NewEnv` / `EnvConfig` | read-only environment store, `NAME_FILE` convention |
 | `NewFile` / `FileConfig` | directory store, optional sealing, `io.Closer` |
+| `KeyFile(path) (crypto.Key, error)` | the machine-local key for `FileConfig.Key`: 32 raw bytes, created on first use (0600, directory 0700) and published by hard link so concurrent first uses agree on one key |
 | `Keyring`, `NewKeyring` | versions as keys |
 | `Policy`, `Random`, `Rotator`, `RotatorConfig`, `NewRotator` | rotation |
-| `NotFound` … `GenerateFailed` | the fourteen sentinels of both layers |
+| `NotFound` … `KeyFileInvalid` | the fifteen sentinels of both layers |
 
 ## Why-this-shape
 

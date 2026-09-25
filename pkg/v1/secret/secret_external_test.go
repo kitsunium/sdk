@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/config"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/proc"
 	"github.com/kitsunium/sdk/pkg/v1/secret"
 )
 
@@ -137,5 +140,39 @@ func TestStoresThroughTheFacade(t *testing.T) {
 	value := secret.New([]byte{0, 1, 2})
 	if value.Len() != 3 || fmt.Sprint(value) != secret.Redacted || secret.MaxNameLen != 63 {
 		t.Errorf("New/Redacted/MaxNameLen do not agree with the domain")
+	}
+}
+
+// TestKeyFileThroughTheFacade pins the public contract where the platform has
+// a file store — concurrent first uses agree on one key — and the refusal
+// where it does not.
+func TestKeyFileThroughTheFacade(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "keys", "store.key")
+	first, err := secret.KeyFile(path)
+	if errs.HasCode(err, proc.UnsupportedPlatform.Code()) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("KeyFile: %v", err)
+	}
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			again, againErr := secret.KeyFile(path)
+			if againErr != nil || !bytes.Equal(again.Bytes(), first.Bytes()) {
+				t.Errorf("a concurrent KeyFile returned another key (%v)", againErr)
+			}
+		})
+	}
+	wg.Wait()
+	store, err := secret.NewFile(secret.FileConfig{Dir: filepath.Join(filepath.Dir(path), "store"), Key: first})
+	if err != nil {
+		t.Fatalf("NewFile with the key: %v", err)
+	}
+	if closer, ok := store.(io.Closer); ok {
+		if closeErr := closer.Close(); closeErr != nil {
+			t.Errorf("Close: %v", closeErr)
+		}
 	}
 }

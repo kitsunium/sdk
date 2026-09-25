@@ -76,6 +76,16 @@ var (
 	GenerateFailed = errs.Define(CodeGenerateFailed, "GENERATE_FAILED",
 		"A new secret could not be generated",
 		"service/secret: the rotation policy's generator returned an error or an empty value; the current version is unchanged")
+
+	// KeyFileInvalid is returned by KeyFile for a file that exists and does not
+	// hold one key: a directory or a device where a file belongs, or content
+	// that is not exactly one crypto.Key long. It is never repaired — a key
+	// truncated or padded to fit is a different key, and a store sealed under
+	// the original would then read as corrupt.
+	KeyFileInvalid = errs.Define(CodeKeyFileInvalid, "KEY_FILE_INVALID",
+		"The key file does not hold a key",
+		"service/secret: the key file is not a regular file or is not exactly 32 raw bytes; the content is never repeated",
+		errs.WithExitCode(exitConfig))
 )
 
 // wrapAs returns the given sentinel as the error origin — its code, reason and

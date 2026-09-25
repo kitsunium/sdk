@@ -50,6 +50,19 @@
 // a letter or a digit ([ValidateName]) — one grammar that survives every
 // filesystem and maps one-to-one onto an environment variable.
 //
+// # A machine-local key for the file store
+//
+// [KeyFile] returns the key held in a file, creating it on first use:
+//
+//	key, err := secret.KeyFile("/var/lib/app/store.key") // 32 raw bytes, 0600
+//	store, err := secret.NewFile(secret.FileConfig{Dir: "/var/lib/app/secrets", Key: key})
+//
+// The file holds exactly 32 RAW bytes and nothing else is accepted — not base64,
+// not a trailing newline — because a key reshaped to fit is another key. An
+// absent file is created from crypto/rand and published with a hard link, so
+// processes racing on first use all return the one key that won; a file any
+// other account can read is refused, as the store's directory is.
+//
 // # Keyring and rotation
 //
 //	store, _ := secret.NewFile(secret.FileConfig{Dir: "/var/lib/app/secrets", Key: kek})
@@ -81,6 +94,7 @@ package secret
 import (
 	coresecret "github.com/kitsunium/sdk/internal/core/secret"
 	svcsecret "github.com/kitsunium/sdk/internal/service/secret"
+	"github.com/kitsunium/sdk/pkg/v1/crypto"
 )
 
 // Redacted is the placeholder every rendering of a [Value] writes.
@@ -160,6 +174,9 @@ var (
 	KeyMaterialInvalid = svcsecret.KeyMaterialInvalid
 	// GenerateFailed is returned when a rotation's generator failed.
 	GenerateFailed = svcsecret.GenerateFailed
+	// KeyFileInvalid is returned by KeyFile for a file that exists and does not
+	// hold exactly one key of raw bytes.
+	KeyFileInvalid = svcsecret.KeyFileInvalid
 )
 
 // New returns a Value holding a copy of raw.
@@ -214,6 +231,21 @@ func NewKeyring(store Store, name string) (keyring *Keyring, err error) {
 func NewRotator(cfg RotatorConfig) (rotator *Rotator, err error) {
 	//: delegate to the service constructor.
 	return svcsecret.NewRotator(cfg)
+}
+
+// KeyFile returns the crypto.Key held in the file at path — exactly
+// crypto.KeyLen raw bytes — creating the file with a fresh random key on first
+// use: 0600, its directory 0700 when it has to be made, published atomically so
+// that concurrent first uses all return the same key.
+//
+// It refuses content that is not exactly one key with [KeyFileInvalid], an
+// existing file other accounts can read with [InvalidConfig], and — where the
+// file store refuses, every platform outside the Unix family, because a mode
+// is not an access list there — proc.UnsupportedPlatform. No error carries the
+// key or a refused file's content.
+func KeyFile(path string) (key crypto.Key, err error) {
+	//: delegate to the service implementation.
+	return svcsecret.KeyFile(path)
 }
 
 // Random returns a generator of n bytes from crypto/rand; a keyring's versions

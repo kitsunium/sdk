@@ -2146,6 +2146,10 @@ codes:
     const: CodeGenerateFailed
     hex: "0x00_03_44_07"
     package: internal/service/secret
+  - code: "0.3.68.8"
+    const: CodeKeyFileInvalid
+    hex: "0x00_03_44_08"
+    package: internal/service/secret
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

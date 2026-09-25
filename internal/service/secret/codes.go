@@ -35,3 +35,7 @@ const CodeKeyMaterialInvalid errs.Code = 0x00_03_44_06 // 0.3.68.6
 // CodeGenerateFailed identifies a rotation whose policy could not produce a
 // new secret: the generator returned an error or an empty value.
 const CodeGenerateFailed errs.Code = 0x00_03_44_07 // 0.3.68.7
+
+// CodeKeyFileInvalid identifies a key file that exists and does not hold one
+// key: not a regular file, or not exactly one crypto.Key long.
+const CodeKeyFileInvalid errs.Code = 0x00_03_44_08 // 0.3.68.8
