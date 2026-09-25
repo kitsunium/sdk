@@ -111,3 +111,25 @@ discovers it in an incident, not because it needs work: the run it happens on
 is a run that ends in a refusal at start-up, and the eight allocations are the
 growth of the report slice, not the walk. Every extra key is one map lookup
 that misses.
+
+## ADR 0097 — secret-aware loading and the provenance report
+
+Measured on a different box from the table above, so only the DELTAS carry
+over: Apple M1 Pro, darwin/arm64, go1.27.1, `-count=5`, median, on the tree
+this section was added with. "Before" is the same tree with the ADR 0097 files
+stashed.
+
+| Benchmark | before | after | What changed |
+|---|---:|---:|---|
+| `LoadWithoutSchema` | 1 688 ns · 1 010 B · 16 allocs | 1 708 ns · 1 075 B · 17 allocs | the layers slice a traced load reads; the secret walk is memoised per TYPE |
+| `LoadSchema` | 3 612 ns · 1 460 B · 32 allocs | 3 625 ns · 1 524 B · 33 allocs | the same slice; a schema resolves its secret keys at construction |
+| `LoadSchemaWithOrigins` | — | 4 794 ns · 2 872 B · 51 allocs | the report: one origin per leaf key, each attributed to its last layer |
+
+A schemaless `Load` must know which keys hold a `secret.Value` to bypass the
+environment's JSON coercion for them, and that is a reflection walk over the
+target type. Walked per load, it DOUBLED the load — 3.1 µs and 34 allocations,
+measured before the memo went in — so the answer is memoised per type in a
+`sync.Map`, the one piece of package state in the loader, holding one entry per
+configuration type a program declares. The report itself costs 1.2 µs and 18
+allocations over `LoadSchema`, on a start-up path that runs once; it is not
+paid by a caller who does not ask for origins.

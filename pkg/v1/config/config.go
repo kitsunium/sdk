@@ -95,6 +95,31 @@
 // HTTP body is the same value here. The schema describes the SHAPE (which keys,
 // required or not, and what they default to); the constraints on a VALUE stay
 // where they already are.
+//
+// # Where each value came from
+//
+// [LoadWithOrigins] and [LoadSchemaWithOrigins] are the same loads, and they
+// also return one [Origin] per leaf key of the target, sorted: the layer that
+// supplied its final value — "default", "file", "env", or a kind a source
+// names through [Describer] — and the detail an operator acts on, such as the
+// variable "APP_DATA_DIR" or the file "/etc/app.json". A key no layer supplied
+// has an empty Layer.
+//
+//	origins, err := config.LoadSchemaWithOrigins(&c, schema,
+//	    config.FileSource("json", "/etc/app.json"),
+//	    config.EnvSource("APP"),
+//	)
+//	for _, o := range origins {
+//	    fmt.Printf("%-20s %-8s %s\n", o.Key, o.Layer, o.Detail) // never the value
+//	}
+//
+// An origin never carries a value. A key whose field holds a secret.Value
+// (pkg/v1/secret) is marked Secret, so a --show-config rendering knows to mask
+// what it prints beside it — and such a field is filled from the environment's
+// RAW text: the JSON coercion that turns "8080" into an int would turn a
+// numeric secret like "1e3" into 1000, so it is bypassed for secrets, on every
+// entry point, traced or not. No refusal in this package ever repeats a value,
+// a secret's least of all.
 package config
 
 import (
@@ -103,6 +128,19 @@ import (
 	"github.com/kitsunium/sdk/internal/core/codec"
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
 	svcconfig "github.com/kitsunium/sdk/internal/service/config"
+)
+
+// The layer names a traced load reports.
+const (
+	// LayerDefault is a schema default.
+	LayerDefault string = coreconfig.LayerDefault
+	// LayerFile is a FileSource; the detail is the path.
+	LayerFile string = coreconfig.LayerFile
+	// LayerEnv is an EnvSource; the detail is the variable.
+	LayerEnv string = coreconfig.LayerEnv
+	// LayerSource is a Source that does not describe itself; the detail is
+	// its position in the sources given to the load, counting from 0.
+	LayerSource string = coreconfig.LayerSource
 )
 
 // Source is the public alias for a configuration layer producer.
@@ -117,6 +155,16 @@ type Watcher = coreconfig.Watcher
 // Default is the public alias for one declared key and the typed value it
 // takes when NO source supplied it. A defaulted key is never also required.
 type Default = coreconfig.DeclaredValue
+
+// Origin is the public alias for one key's provenance in a traced load: the
+// layer that supplied its final value, the detail an operator acts on, and
+// whether the key holds a secret. It never carries the value.
+type Origin = coreconfig.OriginValue
+
+// Describer is the public alias for the optional sibling of [Source] through
+// which a source names its layer and, per key, the detail behind it.
+// EnvSource, FileSource and Schema.Source implement it.
+type Describer = coreconfig.Describer
 
 // Schema is the public alias for a compiled configuration shape: the default
 // layer it contributes, the keys it requires, the vocabulary it accepts, and
@@ -184,6 +232,21 @@ func NewSchema[T any](spec SchemaSpec[T]) (schema *Schema[T], err error) {
 func LoadSchema[T any](target *T, schema *Schema[T], sources ...Source) error {
 	//: delegate to the service loader.
 	return svcconfig.LoadSchema(target, schema, sources...)
+}
+
+// LoadWithOrigins is [Load], and it also returns one [Origin] per leaf key of
+// T, sorted by key: which layer supplied the key's final value and the detail
+// behind it — never the value itself. On a failure no origin is returned.
+func LoadWithOrigins[T any](target *T, sources ...Source) (origins []Origin, err error) {
+	//: delegate to the service loader.
+	return svcconfig.LoadWithOrigins(target, sources...)
+}
+
+// LoadSchemaWithOrigins is [LoadSchema] with the origins [LoadWithOrigins]
+// returns; a key the schema defaulted is reported as [LayerDefault].
+func LoadSchemaWithOrigins[T any](target *T, schema *Schema[T], sources ...Source) (origins []Origin, err error) {
+	//: delegate to the service loader.
+	return svcconfig.LoadSchemaWithOrigins(target, schema, sources...)
 }
 
 // EnvSource returns a Source reading "PREFIX_KEY" env vars (empty prefix = all).

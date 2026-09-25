@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0013](0013-sdk-crypto-domain.md) (the AEAD the keyring seals with, and the redacting `Key` precedent), [ADR 0014](0014-sdk-transform-crypto-ports-config-topology.md) (MAC and KDF ports), [ADR 0045](0045-sdk-session-domain.md) (the redacting `ID` and the sealed file store this follows), [ADR 0052](0052-sdk-lock-domain.md) (the file locker that serialises writers), [ADR 0056](0056-sdk-vfs-domain.md) (atomic publication), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock a rotator is tested on), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (every refused zero value below), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the frozen `Store`), [ADR 0032](0032-logger-slog-bridge.md) (why the value has no `LogValue`), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the two ranges)
+- **Related**: [ADR 0013](0013-sdk-crypto-domain.md) (the AEAD the keyring seals with, and the redacting `Key` precedent), [ADR 0014](0014-sdk-transform-crypto-ports-config-topology.md) (MAC and KDF ports), [ADR 0045](0045-sdk-session-domain.md) (the redacting `ID` and the sealed file store this follows), [ADR 0052](0052-sdk-lock-domain.md) (the file locker that serialises writers), [ADR 0056](0056-sdk-vfs-domain.md) (atomic publication), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock a rotator is tested on), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (every refused zero value below), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the frozen `Store`), [ADR 0032](0032-logger-slog-bridge.md) (why the value has no `LogValue`), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the two ranges), [ADR 0097](0097-config-provenance-and-secret-fields.md) (the configuration half: a secret field is marked in a traced load, and loaded from the environment as written)
 
 ## Context
 
@@ -215,7 +215,8 @@ shape.
 - **A `LogValue` method.** Refused by ADR 0032, and unnecessary: see Decision 1.
 - **Accepting a JSON number as a secret.** Rejected: see Decision 2. A secret
   that genuinely is all digits is written as a string — quoted in a file — and
-  decodes exactly.
+  decodes exactly; from the environment, ADR 0097 bypasses the coercion for a
+  secret field, so it arrives as written there too.
 - **One file per version** in the file store. Rejected: a prune would be several
   unlinks that a crash can interrupt half-way, and numbering a new version would
   need a directory scan under the lock. One document per secret makes every

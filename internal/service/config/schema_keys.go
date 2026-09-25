@@ -12,6 +12,8 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+
+	coresecret "github.com/kitsunium/sdk/internal/core/secret"
 )
 
 // keySeparator is the one level-separator of the key grammar. It is the same
@@ -40,6 +42,11 @@ const expectedKeys int = 16
 // nests a few levels, and the guard holds one entry per level.
 const expectedDepth int = 8
 
+// maxContainerDepth bounds how many pointer, slice, array and map layers
+// holdsSecret peels. No real field nests eight containers deep, and a type
+// that contains itself would otherwise be peeled forever.
+const maxContainerDepth int = 8
+
 // keyKind tells apart the two things an addressable key can be. The
 // distinction only matters for the unknown-key pass: it must descend into a
 // table and must NOT descend into a leaf, because a leaf's members are not
@@ -63,6 +70,10 @@ const (
 var (
 	jsonUnmarshalerType = reflect.TypeFor[json.Unmarshaler]()
 	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
+	// secretValueType is the one type that makes a key secret (ADR 0097): a
+	// field of it is reported Secret in a traced load, and the environment's
+	// JSON coercion is bypassed for it so a secret arrives exactly as written.
+	secretValueType = reflect.TypeFor[coresecret.Value]()
 )
 
 // splitKey parses a declared key into its segments, reporting whether the
@@ -163,52 +174,68 @@ func lookupKey(level map[string]any, segments []string) bool {
 	return exists
 }
 
-// collectKeys resolves every dotted key the target type can be addressed by,
-// in the json vocabulary the loader decodes through, and says of each whether
-// it is a leaf or a table. It is what turns a typo in a declared key into a
-// construction failure instead of a default that silently never applies — the
-// quietest way a configuration can be wrong — and what lets the unknown-key
-// pass stop descending where the type stops naming things.
+// collectVocabulary resolves every dotted key the target type can be
+// addressed by, in the json vocabulary the loader decodes through, and says of
+// each whether it is a leaf or a table. It is what turns a typo in a declared
+// key into a construction failure instead of a default that silently never
+// applies — the quietest way a configuration can be wrong — and what lets the
+// unknown-key pass stop descending where the type stops naming things.
 //
-// The walk stops at a type that decodes itself (see jsonUnmarshalerType) and at
-// a type it has already entered, so a self-referential struct terminates. A key
-// inside a recursive type therefore cannot be declared; that is a stated limit,
-// not an oversight.
-func collectKeys(typ reflect.Type) map[string]keyKind {
-	//: one shared result: the walk appends, never merges.
-	keys := make(map[string]keyKind, expectedKeys)
-	//: track the struct types on the current path so a cycle terminates.
-	visiting := make(map[reflect.Type]bool, expectedDepth)
+// The same walk also returns the keys whose field holds a core/secret.Value —
+// directly, or as the element of a pointer, a slice, an array or a map — so
+// the loader's idea of "a secret key" can never disagree with its idea of "a
+// key" (ADR 0097).
+//
+// The walk stops at a type that decodes itself (see jsonUnmarshalerType) and
+// at a type it has already entered, so a self-referential struct terminates.
+// A key inside a recursive type therefore cannot be declared; that is a
+// stated limit, not an oversight.
+func collectVocabulary(typ reflect.Type) (keys map[string]keyKind, secrets map[string]bool) {
+	walk := keyWalk{
+		keys:     make(map[string]keyKind, expectedKeys),
+		secrets:  make(map[string]bool, 0),
+		visiting: make(map[reflect.Type]bool, expectedDepth),
+	}
 	//: walk from the root, whose base path is the empty prefix.
-	walkKeys(typ, "", keys, visiting)
-	//: every addressable key.
-	return keys
+	walk.walkKeys(typ, "")
+	//: every addressable key, and the secret ones among them.
+	return walk.keys, walk.secrets
 }
 
-// walkKeys adds every key reachable below base into keys.
-func walkKeys(typ reflect.Type, base string, keys map[string]keyKind, visiting map[reflect.Type]bool) {
+// keyWalk carries one walk's results and its recursion guard.
+type keyWalk struct {
+	// keys is the vocabulary, each key marked leaf or table.
+	keys map[string]keyKind
+	// secrets holds every key whose field holds a secret.
+	secrets map[string]bool
+	// visiting holds the struct types on the current path, so a cycle ends.
+	visiting map[reflect.Type]bool
+}
+
+// walkKeys adds every key reachable below base.
+func (w keyWalk) walkKeys(typ reflect.Type, base string) {
 	//: a pointer to a struct addresses the same members as the struct.
 	target, _ := derefStruct(typ)
 	//: only a struct has members to name, and a type already on the path
 	//: would recurse without end — both mean "nothing to add here".
-	if target.Kind() != reflect.Struct || visiting[target] {
+	if target.Kind() != reflect.Struct || w.visiting[target] {
 		//: stop.
 		return
 	}
 	//: mark for the subtree and unmark on the way out, so a diamond (two
 	//: fields of the same type) is still fully walked on both branches.
-	visiting[target] = true
+	w.visiting[target] = true
 	//: leaving this type's subtree.
-	defer delete(visiting, target)
+	defer delete(w.visiting, target)
 	//: every field contributes its own key, and possibly a subtree.
 	for field := range target.Fields() {
 		//: resolve and record this one.
-		walkField(field, base, keys, visiting)
+		w.walkField(field, base)
 	}
 }
 
 // walkField records one field's key, and descends when the decoder would.
-func walkField(field reflect.StructField, base string, keys map[string]keyKind, visiting map[reflect.Type]bool) {
+func (w keyWalk) walkField(field reflect.StructField, base string) {
 	//: an unexported field never decodes — EXCEPT an embedded struct, whose
 	//: exported members encoding/json promotes into the outer type whether or
 	//: not the embedded type itself is exported. Measured, not assumed: an
@@ -230,7 +257,7 @@ func walkField(field reflect.StructField, base string, keys map[string]keyKind, 
 	//: and its subtree is walked under the same base.
 	if field.Anonymous && !hasJSONName(field) {
 		//: promote the embedded members to this level.
-		walkKeys(field.Type, base, keys, visiting)
+		w.walkKeys(field.Type, base)
 		//: the embedded field itself is not addressable.
 		return
 	}
@@ -239,11 +266,15 @@ func walkField(field reflect.StructField, base string, keys map[string]keyKind, 
 	//: a table is a key whose members are keys too; everything else is a leaf.
 	table := descends(field.Type)
 	//: record it — a default may target the field as a whole either way.
-	keys[path] = kindOf(table)
+	w.keys[path] = kindOf(table)
+	//: a field holding a secret, however it holds one.
+	if holdsSecret(field.Type) {
+		w.secrets[path] = true
+	}
 	//: descend only into a struct the decoder itself will descend into.
 	if table {
 		//: the members below carry their own keys.
-		walkKeys(field.Type, path, keys, visiting)
+		w.walkKeys(field.Type, path)
 	}
 }
 
@@ -362,4 +393,30 @@ func derefStruct(typ reflect.Type) (target reflect.Type, deref bool) {
 	}
 	//: already the target.
 	return typ, false
+}
+
+// holdsSecret reports whether a field of typ holds a core/secret.Value —
+// itself, or through pointer, slice, array or map elements. A field of
+// []secret.Value is a secret key: its value is secrets.
+//
+// The peeling is bounded by maxContainerDepth, because a container type can
+// contain itself — `type Tree map[string]Tree` is a legitimate configuration
+// shape — and an unbounded peel of one would never return.
+func holdsSecret(typ reflect.Type) bool {
+	//: peel the containers until a type that is not one, or the bound.
+	for range maxContainerDepth {
+		//: the containers whose element is what the field really holds.
+		switch typ.Kind() {
+		//: a pointer, a slice, an array or a map: look at the element.
+		case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+			typ = typ.Elem()
+		//: anything else is the held type itself.
+		default:
+			//: a secret, or not.
+			return typ == secretValueType
+		}
+	}
+	//: a container nested past any real configuration — or one that contains
+	//: itself — holds no secret this walk can name.
+	return false
 }

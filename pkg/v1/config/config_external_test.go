@@ -5,6 +5,7 @@ import (
 
 	"github.com/kitsunium/sdk/pkg/v1/config"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/secret"
 )
 
 type conf struct {
@@ -138,4 +139,49 @@ type mapLayer map[string]any
 func (m mapLayer) Load() (values map[string]any, err error) {
 	//: the caller's own map.
 	return m, nil
+}
+
+// secretConf is a consumer's configuration with a secret beside a port.
+type secretConf struct {
+	Port  int          `json:"port"`
+	Token secret.Value `json:"token"`
+}
+
+// TestOriginsThroughTheFacade pins the traced load through public names: the
+// layer and the variable behind each key, the secret marked, the numeric
+// secret decoded exactly as written, and no value anywhere in the report.
+func TestOriginsThroughTheFacade(t *testing.T) {
+	// No t.Parallel: t.Setenv mutates a process-wide variable.
+	t.Setenv("FACADEORIGIN_PORT", "8080")
+	t.Setenv("FACADEORIGIN_TOKEN", "12345678901234567890123")
+	var c secretConf
+	origins, err := config.LoadWithOrigins(&c, config.EnvSource("FACADEORIGIN"))
+	if err != nil {
+		t.Fatalf("LoadWithOrigins: %v", err)
+	}
+	if c.Port != 8080 || c.Token.RevealString() != "12345678901234567890123" {
+		t.Fatalf("decoded port %d and a token of %d bytes", c.Port, c.Token.Len())
+	}
+	want := []config.Origin{
+		{Key: "port", Layer: config.LayerEnv, Detail: "FACADEORIGIN_PORT"},
+		{Key: "token", Layer: config.LayerEnv, Detail: "FACADEORIGIN_TOKEN", Secret: true},
+	}
+	if len(origins) != len(want) {
+		t.Fatalf("origins = %+v, want %+v", origins, want)
+	}
+	for index := range want {
+		if origins[index] != want[index] {
+			t.Errorf("origins[%d] = %+v, want %+v", index, origins[index], want[index])
+		}
+	}
+	describer, ok := config.FileSource("json", "/etc/app.json").(config.Describer)
+	if !ok {
+		t.Fatal("FileSource does not implement Describer")
+	}
+	if layer, detail := describer.Describe("port"); layer != config.LayerFile || detail != "/etc/app.json" {
+		t.Errorf("FileSource Describe = (%q, %q)", layer, detail)
+	}
+	if config.LayerDefault != "default" || config.LayerSource != "source" {
+		t.Error("the layer names drifted from the documented strings")
+	}
 }

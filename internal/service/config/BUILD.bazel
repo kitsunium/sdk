@@ -9,6 +9,7 @@ go_library(
         "file_source.go",
         "load.go",
         "merge.go",
+        "origins.go",
         "poll_watcher.go",
         "schema.go",
         "schema_defaults.go",
@@ -27,6 +28,7 @@ go_library(
     deps = [
         "//internal/core/codec",
         "//internal/core/config",
+        "//internal/core/secret",
         "//internal/core/validation",
         "//internal/kernel/errs",
         "//internal/service/validation",
@@ -52,6 +54,7 @@ go_test(
         "load_external_test.go",
         "load_internal_test.go",
         "merge_internal_test.go",
+        "origins_external_test.go",
         "poll_watcher_external_test.go",
         "poll_watcher_internal_test.go",
         "schema_bench_test.go",
@@ -64,6 +67,7 @@ go_test(
     deps = [
         "//internal/core/codec",
         "//internal/core/config",
+        "//internal/core/secret",
         "//internal/core/validation",
         "//internal/kernel/errs",
         "//internal/service/codec/json",

@@ -4,8 +4,10 @@
 
 Declares the **configuration port** — layered config from multiple `Source`s, an
 optional `Validator` the decoded struct implements, a `Watcher` for change
-notification, and the `DeclaredValue` a schema uses to say what a key holds when
-nobody supplied it. A core sibling admitted by **ADR 0028** (closes the Phase-B
+notification, the `DeclaredValue` a schema uses to say what a key holds when
+nobody supplied it, and the provenance pair — the `OriginValue` a traced load
+reports per key and the `Describer` sibling a `Source` implements to say where
+its values come from (ADR 0097). A core sibling admitted by **ADR 0028** (closes the Phase-B
 wave), extended in place by **ADR 0061** (the schema). Concrete sources (env,
 file), the merge+decode loader, the schema compiler and the cross-OS poll
 watcher live in `internal/service/config`; this package owns only the contract,
@@ -21,6 +23,7 @@ Code range: `0.2.10.*` (ADR 0028 + ADR 0061).
 | `validator.go` | `Validator` (`Validate() error`) — optional, implemented by the decoded struct |
 | `watcher.go` | `Watcher` (`Watch(ctx, onChange) error`) |
 | `schema.go` | `DeclaredValue` (`Key` + `Value`) — one key and what it takes when NO source supplied it (ADR 0061) |
+| `origin.go` | `OriginValue` (`Key` / `Layer` / `Detail` / `Secret`) — which layer supplied a key's final value, never the value; `Describer` (`Describe(key) (layer, detail)`) — the ADR 0039 sibling of the frozen `Source`; `LayerDefault` / `LayerFile` / `LayerEnv` / `LayerSource` (ADR 0097) |
 | `codes.go` / `errors.go` | `0.2.10.*` (CONFIG_SOURCE_FAILED, CONFIG_DECODE_FAILED, CONFIG_VALIDATION_FAILED, CONFIG_WATCH_FAILED, CONFIG_SCHEMA_INVALID, CONFIG_KEY_MISSING, CONFIG_UNKNOWN_KEY) |
 
 ## Conventions

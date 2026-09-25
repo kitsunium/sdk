@@ -4,25 +4,27 @@
 
 Concrete configuration sources (env, file), the generic merge+decode+validate
 `Load[T]`, the compiled **schema** (`NewSchemaValue` + `LoadSchema` — ADR 0061),
-and a cross-OS poll `Watcher` implementing `core/config`. File parsing dispatches
+the traced loads (`LoadWithOrigins` + `LoadSchemaWithOrigins` — ADR 0097), and a
+cross-OS poll `Watcher` implementing `core/config`. File parsing dispatches
 through the codec registry (blank-import the format). Stdlib-only, cross-OS.
-ADR 0028 + ADR 0061. Emits the core sentinels `0.2.10.*`.
+ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 
 ## Contents
 
 | File | Surface |
 |---|---|
-| `env_source.go` | `EnvSource(prefix)` — `PREFIX_KEY` env vars, whole-document-JSON-coerced values |
-| `file_source.go` | `FileSource(format, path)` — codec-dispatched file parse |
+| `env_source.go` | `EnvSource(prefix)` — `PREFIX_KEY` env vars, whole-document-JSON-coerced values; `Describe` names the variable, and `lookup` hands the loader a variable's RAW text for a secret field |
+| `file_source.go` | `FileSource(format, path)` — codec-dispatched file parse; `Describe` names the path |
 | `merge.go` | `deepMerge` — recursive layer merge (later wins; an array REPLACES, it is never merged) + `cloneNested` / `cloneArray` — a deep copy sharing no table and no array, a nil array kept nil |
-| `load.go` | `Load[T]` / `LoadSchema[T]` — merge + key pass + JSON round-trip decode + constraints + Validate |
+| `load.go` | `Load[T]` / `LoadSchema[T]` — merge + key pass + JSON round-trip decode + constraints + Validate; the merge keeps its layers, and `restoreRawSecrets` undoes the environment's coercion for a `secret.Value` field |
+| `origins.go` | `LoadWithOrigins[T]` / `LoadSchemaWithOrigins[T]` — the same pipeline, plus one `core/config.OriginValue` per leaf key, attributed to the last layer that supplied it (ADR 0097) |
 | `schema.go` | `SchemaValue[T]` + `NewSchemaValue` + `Check` + `Source` — the compiled schema |
 | `schema_spec.go` | `SchemaSpec[T]` — the declaration (`Required` / `Defaults` / `AllowUnknownKeys` / `Rule`) |
 | `schema_defaults.go` | construction-time resolution: the default layer, the required keys, and every refusal |
-| `schema_keys.go` | the dotted key grammar and its resolution against the target type (leaf vs table) |
+| `schema_keys.go` | the dotted key grammar and its resolution against the target type (leaf vs table), and — in the same walk — the keys whose field holds a `secret.Value` |
 | `schema_presence.go` | the LOAD-time key pass: missing required keys + unknown keys, over the merged map |
 | `schema_reject.go` | how a refusal is spelled — keys and rules, never a value |
-| `schema_source.go` | the default layer seen as an ordinary `Source` — a fresh deep copy on every `Load`, arrays and the tables inside them included, so a caller's edit never reaches the compiled schema |
+| `schema_source.go` | the default layer seen as an ordinary `Source` — a fresh deep copy on every `Load`, arrays and the tables inside them included, so a caller's edit never reaches the compiled schema; `Describe` answers `"default"` |
 | `poll_watcher.go` | `PollWatcher(path, interval)` — mtime+size poll (cross-OS) |
 | `wrap.go` | `wrapAs(sentinel, cause)` — sentinel origin-wins + cause field |
 | `BENCH.md` | the numbers, and one optimisation profiled, recorded and refused |
@@ -60,6 +62,18 @@ ADR 0028 + ADR 0061. Emits the core sentinels `0.2.10.*`.
 - **`NewSchemaValue` compiles; `LoadSchema` checks.** Everything decidable at
   construction is refused there — measured at 40 µs / 116 allocs versus 884 ns
   for the per-load key pass (`BENCH.md`).
+- **A secret field reads the environment's RAW text** (ADR 0097). The coercion
+  that makes `8080` an int makes `1e3` a thousand and truncates a twenty-digit
+  token, and `secret.Value` refuses a JSON number for that reason; so for a
+  top-level secret key whose last supplier is an `EnvSource`, the merged value
+  is replaced by the variable's raw text before the decode — on every entry
+  point. The secret set is resolved at schema construction, or once per target
+  type for a schemaless load (`secretKeysByType`, a `sync.Map`): walked per load
+  it doubled `Load` (`BENCH.md` §ADR 0097).
+- **An origin never carries a value**, and a `Describer`'s detail must not
+  either. A key is attributed to the LAST layer holding it; an undescribed
+  source is `"source"` with its position; a key nobody supplied has an empty
+  layer.
 
 ## Do NOT
 
