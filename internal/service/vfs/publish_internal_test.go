@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	corevfs "github.com/kitsunium/sdk/internal/core/vfs"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -129,10 +130,20 @@ func brittleOps(disk *osFS, failAt step, failRemove bool) atomicOps {
 // newDiskFS builds a disk filesystem over a fresh temporary directory and
 // hands back both the concrete value and the real path, so a test can inspect
 // the tree from OUTSIDE the abstraction it is checking.
+//
+// Where the platform has no disk filesystem to give — ADR 0018, osguard_other.go
+// — the refusal is ASSERTED first and the case then skips: every sabotage here
+// needs a filesystem that exists, and on that platform none does by design.
 func newDiskFS(t *testing.T) (disk *osFS, dir string) {
 	t.Helper()
 	dir = t.TempDir()
 	filesystem, newErr := NewOS(dir)
+	if !platformNative {
+		if !errors.Is(newErr, coreproc.UnsupportedPlatform) || filesystem != nil {
+			t.Fatalf("NewOS(%q) = (%v, %v) on a platform without the disk mechanics, want (nil, UnsupportedPlatform)", dir, filesystem, newErr)
+		}
+		t.Skip("NewOS refuses this platform by design (no flushable directory handle, no ACL from a mode — osguard_other.go); the refusal is asserted above, and there is no disk filesystem to sabotage")
+	}
 	if newErr != nil {
 		t.Fatalf("NewOS(%q) = %v, want a filesystem", dir, newErr)
 	}

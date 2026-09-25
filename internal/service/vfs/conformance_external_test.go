@@ -3,8 +3,10 @@ package vfs_test
 import (
 	"errors"
 	"io/fs"
+	"runtime"
 	"testing"
 
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	corevfs "github.com/kitsunium/sdk/internal/core/vfs"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcvfs "github.com/kitsunium/sdk/internal/service/vfs"
@@ -26,6 +28,12 @@ var implementations = []factory{
 	{name: "disk", make: func(t *testing.T) corevfs.FullFS {
 		t.Helper()
 		filesystem, err := svcvfs.NewOS(t.TempDir())
+		//: where the disk mechanics are missing the refusal is the contract
+		//: (ADR 0018): it is ASSERTED, and only then is the case skipped,
+		//: since there is no disk filesystem left to compare the memory one to.
+		if !nativePlatforms[runtime.GOOS] {
+			refusedByDesign(t, filesystem, err)
+		}
 		if err != nil {
 			t.Fatalf("NewOS = %v, want a filesystem", err)
 		}
@@ -35,6 +43,19 @@ var implementations = []factory{
 		t.Helper()
 		return svcvfs.NewMem()
 	}},
+}
+
+// refusedByDesign asserts the typed refusal NewOS gives on a platform without
+// the disk mechanics, and then skips the calling case — which needs a disk
+// filesystem that, on that platform, does not exist by design (ADR 0018,
+// osguard_other.go: no flushable directory handle, and a mode that is not an
+// ACL). Anything but that refusal fails.
+func refusedByDesign(t *testing.T, filesystem corevfs.FullFS, err error) {
+	t.Helper()
+	if !errors.Is(err, coreproc.UnsupportedPlatform) || filesystem != nil {
+		t.Fatalf("NewOS on %s = (%v, %v), want (nil, UnsupportedPlatform)", runtime.GOOS, filesystem, err)
+	}
+	t.Skipf("NewOS refuses %s by design (asserted above): there is no disk filesystem to run this case on", runtime.GOOS)
 }
 
 // eachImplementation runs body against every filesystem.
