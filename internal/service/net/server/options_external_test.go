@@ -11,6 +11,7 @@ import (
 	stdnet "net"
 	"os"
 	"os/exec"
+	"runtime"
 	"testing"
 	"time"
 
@@ -506,20 +507,34 @@ func TestReadTimeout(t *testing.T) {
 // opens a connection, sends a request and then never reads the answer leaves the
 // handler blocked in Write once the socket buffers fill, with no read in flight
 // for the read budget to bound.
+//
+// The handler writes until a write FAILS, in chunks, up to a ceiling no buffer
+// reaches. It used to write one 8 MiB payload on the premise that it was "far
+// more than any socket buffer", and on Windows it was not: loopback there
+// absorbed all 8 MiB — the peer's receive window auto-tunes well past it — the
+// write completed, and a bound that was in effect read as one that was not.
+// How much a kernel buffers is its own business; what the bound promises is
+// that the write that finally blocks ends, so the test writes until one does.
 func TestWriteTimeout(t *testing.T) {
 	t.Parallel()
+	const (
+		// chunk is one write; each gets its own deadline, as each would in a
+		// handler that streams.
+		chunk int = 1 << 20
+		// ceiling is how much the handler would write if nothing stopped it:
+		// a gibibyte, far past what any kernel buffers for a peer that reads
+		// nothing, so reaching it can only mean the bound never fired.
+		ceiling int = 1 << 30
+	)
 	type tc struct {
 		// name describes the case.
 		name string
 		// budget is the configured write bound; zero leaves writes unbounded.
 		budget time.Duration
-		// payload is how many bytes the handler tries to write.
-		payload int
 	}
 	tests := []tc{
-		//: far more than any socket buffer, so the write genuinely blocks.
-		{name: "a bounded write to a peer that never reads", budget: readBudget, payload: 8 << 20},
-		{name: "a tighter bound", budget: 100 * time.Millisecond, payload: 8 << 20},
+		{name: "a bounded write to a peer that never reads", budget: readBudget},
+		{name: "a tighter bound", budget: 100 * time.Millisecond},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -530,9 +545,17 @@ func TestWriteTimeout(t *testing.T) {
 			server.Listen("tcp", "127.0.0.1:0"),
 			server.WriteTimeout(c.budget),
 		).HandleFunc(func(_ context.Context, conn corenet.Conn) error {
-			_, err := conn.Write(make([]byte, c.payload))
-			outcome <- err
-			return err
+			block := make([]byte, chunk)
+			//: until the buffers are full and a write has to wait for a peer
+			//: that never reads — which only the bound can end.
+			for written := 0; written < ceiling; written += chunk {
+				if _, err := conn.Write(block); err != nil {
+					outcome <- err
+					return err
+				}
+			}
+			outcome <- nil
+			return nil
 		})
 		if err := srv.Start(t.Context()); err != nil {
 			t.Fatalf("start: %v", err)
@@ -550,8 +573,8 @@ func TestWriteTimeout(t *testing.T) {
 			//: the bound is what ends it; without one the handler would still
 			//: be blocked when the test times out.
 			if err == nil {
-				t.Fatalf("a %d-byte write to a peer that never read completed — "+
-					"the write bound is not in effect", c.payload)
+				t.Fatalf("%d bytes written to a peer that never read — "+
+					"the write bound is not in effect", ceiling)
 			}
 		case <-time.After(10 * time.Second):
 			t.Fatalf("the handler is still blocked in Write long after its %v budget", c.budget)
@@ -1210,7 +1233,12 @@ func TestAdopt(t *testing.T) {
 			"LISTEN_FDNAMES="+c.fdNames,
 			refuseChildEnv+"="+c.requested,
 		)
-		if c.listenFDs != "" {
+		//: Windows can hand a child no descriptor beyond the three standard
+		//: ones — os/exec answers ExtraFiles with "not supported by windows" —
+		//: and has no socket activation to read one with: sdlisten refuses there
+		//: with UNSUPPORTED_PLATFORM before it looks at LISTEN_FDS. So on Windows
+		//: the child gets the environment alone, and must still refuse.
+		if c.listenFDs != "" && runtime.GOOS != "windows" {
 			ln := listenTCP(t)
 			file, err := ln.File()
 			if err != nil {
@@ -1247,6 +1275,13 @@ func TestAdopt(t *testing.T) {
 // rather than a test that skips itself on every ordinary run.
 func TestAdopt_ServesTheInheritedSocket(t *testing.T) {
 	t.Parallel()
+	//: the fixture itself cannot exist on Windows: it needs a child holding an
+	//: inherited socket at descriptor 3, and os/exec's ExtraFiles answers
+	//: "not supported by windows". Adoption there is refused outright, which
+	//: TestAdopt asserts through the same child on every platform.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows cannot hand a child an inherited socket (exec.Cmd.ExtraFiles is unsupported there), so there is no adopted socket to serve; TestAdopt asserts that adoption is refused instead")
+	}
 	type tc struct {
 		// name describes the case.
 		name string

@@ -180,6 +180,14 @@ func TestMiddlewaresWrapOutermostFirst(t *testing.T) {
 			Use(mws...).
 			HandleFunc(func(_ context.Context, conn server.Conn) error {
 				order <- "handler"
+				//: consume the request before answering. A socket closed with
+				//: unread bytes in its receive buffer is RESET rather than shut
+				//: down, and on Windows the reset discards a reply the peer has
+				//: not read yet — so "ok" arrived as "an established connection
+				//: was aborted" whenever the engine's close outran the client.
+				if _, rerr := bufio.NewReader(conn).ReadString('\n'); rerr != nil {
+					return rerr
+				}
 				_, err := io.WriteString(conn, "ok\n")
 				return err
 			})
