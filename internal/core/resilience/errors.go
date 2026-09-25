@@ -13,6 +13,24 @@ const exitUnavailable int = 75
 // with a configuration it cannot honour will never succeed.
 const exitConfig int = 78
 
+// The HTTP statuses the rejections carry, so errs.HTTPStatusOf answers a
+// framework mapping errors to responses with the status that tells a client
+// what to do — instead of a 500, which tells it the server is broken. The
+// verdicts that are not rejections — RetryExhausted, FallbackFailed,
+// PolicyMisconfigured — carry none: what failed there is the operation or the
+// wiring, and neither is a status this domain can know.
+const (
+	// httpTooManyRequests is 429: slow down, and the Retry-After a framework
+	// adds is the client's to honour.
+	httpTooManyRequests int = 429
+	// httpUnavailable is 503: this dependency cannot take the call right now;
+	// the same call later may succeed.
+	httpUnavailable int = 503
+	// httpGatewayTimeout is 504: the call was made and its answer did not
+	// arrive in time.
+	httpGatewayTimeout int = 504
+)
+
 var (
 	// RetryExhausted wraps the final attempt's error after the retry budget ran out.
 	RetryExhausted = errs.Define(CodeRetryExhausted, "RETRY_EXHAUSTED",
@@ -24,19 +42,19 @@ var (
 	CircuitOpen = errs.Define(CodeCircuitOpen, "CIRCUIT_OPEN",
 		"The circuit breaker is open; the call was rejected",
 		"service/resilience: breaker in Open state — downstream presumed unhealthy",
-		errs.WithExitCode(exitUnavailable))
+		errs.WithExitCode(exitUnavailable), errs.WithHTTPStatus(httpUnavailable))
 
 	// RateLimited is returned when no token was available (or the wait was cancelled).
 	RateLimited = errs.Define(CodeRateLimited, "RATE_LIMITED",
 		"The call was rejected by the rate limiter",
 		"service/resilience: no rate-limit token available",
-		errs.WithExitCode(exitUnavailable))
+		errs.WithExitCode(exitUnavailable), errs.WithHTTPStatus(httpTooManyRequests))
 
 	// BulkheadFull is returned when every concurrency slot is occupied.
 	BulkheadFull = errs.Define(CodeBulkheadFull, "BULKHEAD_FULL",
 		"The call was rejected because the bulkhead is full",
 		"service/resilience: all bulkhead concurrency slots occupied",
-		errs.WithExitCode(exitUnavailable))
+		errs.WithExitCode(exitUnavailable), errs.WithHTTPStatus(httpUnavailable))
 
 	// PolicyMisconfigured is returned by every call to a policy that was built
 	// with a configuration it cannot honour, in place of running the operation.
@@ -51,7 +69,7 @@ var (
 	TimeoutExceeded = errs.Define(CodeTimeoutExceeded, "TIMEOUT_EXCEEDED",
 		"The operation exceeded its timeout",
 		"service/resilience: operation did not complete before the deadline",
-		errs.WithExitCode(exitUnavailable))
+		errs.WithExitCode(exitUnavailable), errs.WithHTTPStatus(httpGatewayTimeout))
 
 	// FallbackFailed is returned when the primary operation AND the fallback
 	// both failed. It is the policy's own outcome rather than either half's

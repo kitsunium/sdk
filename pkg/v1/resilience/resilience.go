@@ -130,13 +130,18 @@ type HedgeConfig = svcres.HedgeConfig
 var (
 	// RetryExhausted is returned when the retry budget is spent.
 	RetryExhausted = coreres.RetryExhausted
-	// CircuitOpen is returned when the breaker rejects a call fast.
+	// CircuitOpen is returned when the breaker rejects a call fast. It carries
+	// HTTP 503 (errs.HTTPStatusOf): the dependency cannot take the call now.
 	CircuitOpen = coreres.CircuitOpen
-	// RateLimited is returned when no rate-limit token is available.
+	// RateLimited is returned when no rate-limit token is available. It
+	// carries HTTP 429: the client should slow down.
 	RateLimited = coreres.RateLimited
-	// BulkheadFull is returned when every concurrency slot is occupied.
+	// BulkheadFull is returned when every concurrency slot is occupied. It
+	// carries HTTP 503.
 	BulkheadFull = coreres.BulkheadFull
-	// TimeoutExceeded is returned when an operation outruns its deadline.
+	// TimeoutExceeded is returned when an operation outruns its deadline. It
+	// carries HTTP 504: the call was made and its answer did not arrive in
+	// time.
 	TimeoutExceeded = coreres.TimeoutExceeded
 	// FallbackFailed is returned when the primary operation AND its fallback
 	// both failed. Both messages travel as the "primary" and "fallback"
