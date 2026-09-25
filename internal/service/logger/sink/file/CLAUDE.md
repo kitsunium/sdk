@@ -42,7 +42,14 @@ POSIX. Rotation is intentionally out of scope (compose with a future
 - **Default permission 0600.** `defaultFilePerm` restricts reads to the
   owning UID so diagnostic content (attr values, wrapped `Private`
   fields that consumers log via the Source chain) is never world-readable.
-  Operators that need group/other access `chmod` explicitly.
+  Operators that need group/other access `chmod` explicitly. **On Unix.**
+  Windows has no permission bits: `os` maps a mode to
+  `FILE_ATTRIBUTE_READONLY` alone, so `0600` reaches the file as "writable"
+  (read back as `0666`), and who may read it is decided by the ACL the file
+  inherits from its directory. A log under a directory that grants `Users`
+  read — `%ProgramData%` does — is readable by every local account. See the
+  table below; the closure is a security descriptor at creation
+  (`CreateFileW` with `SECURITY_ATTRIBUTES`), not done here.
 
 ### Which platform gets which protection
 
@@ -52,7 +59,7 @@ is `refuseSymlink`, present everywhere; `O_NOFOLLOW` is the kernel half.
 | Platform | `syscall.O_NOFOLLOW` in go1.27.1 | Protection at the open |
 |---|---|---|
 | every `//go:build unix` GOOS — `linux` (13 arches), `darwin`, `freebsd`, `openbsd`, `netbsd`, `dragonfly`, `android`, `ios`, `aix`, `solaris`, `illumos` | present on all **39** GOOS/GOARCH pairs the `unix` tag selects | `Lstat` **+** `O_NOFOLLOW` — the TOCTOU window between them is closed |
-| `windows`, `plan9`, `js/wasm` | absent | `Lstat` **only** — a link planted between the check and the open **is followed** |
+| `windows`, `plan9`, `js/wasm` | absent | `Lstat` **only** — a link planted between the check and the open **is followed**; on Windows the `0600` mode excludes no account either (the file inherits its directory's ACL) |
 | `wasip1` | present (`0400`), but it is a `path_open` lookupflag, not a kernel flag | `Lstat` only, **by choice** — the refusal would belong to the WASI host and no lane here runs one |
 
 Measured, not assumed: compiling `const _ = syscall.O_NOFOLLOW` as a
@@ -131,4 +138,9 @@ bazel test --config=race //internal/service/logger/sink/file:file_test
 The Bazel lane is Linux only, and Linux had `O_NOFOLLOW` before this package
 did. The off-Linux proof is `e2e-cross`, which runs
 `go test -count=1 -short ./logger/sink/file` on macos-15, freebsd 15.0,
-openbsd 7.9 and netbsd 10.1 (and skips `SERVICE_FILE_PKGS` on windows).
+openbsd 7.9 and netbsd 10.1, and on windows through the whole-suite step,
+which gates there since ADR 0095. On Windows `TestNew_DefaultFilePermIs0600`
+asserts the one bit the mode reaches (`0666`, not read-only) and says why.
+A test that opens a sink closes it in `t.Cleanup` even on the paths that
+return early: Windows cannot remove an open file, so a leaked sink failed
+`t.TempDir`'s cleanup there.

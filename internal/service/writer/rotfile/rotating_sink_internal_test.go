@@ -32,6 +32,11 @@ func newSink(t *testing.T, cfg Config) *rotatingSink {
 	if !ok {
 		t.Fatalf("newRotatingSink returned %T, want *rotatingSink", base)
 	}
+	//: released however the case ends — a Fatal, a skip, or before its own
+	//: Close. A sink left open keeps its file, which Windows will not delete,
+	//: and t.TempDir's cleanup then failed the case over a leaked descriptor.
+	//: closeQuiet tolerates the second Close of a case that closed it itself.
+	t.Cleanup(func() { closeQuiet(t, s) })
 	return s
 }
 

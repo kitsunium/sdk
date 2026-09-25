@@ -51,7 +51,12 @@ sink is reproduced here and, critically, **re-run on every reopen**.
   netbsd — ADR 0082 §D4).
 - **0600 everywhere.** The active file, every rotated `.N`, and every `.N.gz`
   sibling are forced to `0600`. The gzip sibling is created with an explicit
-  `0600` rather than inheriting gzip's default permissions.
+  `0600` rather than inheriting gzip's default permissions. **On Unix.**
+  Windows has no permission bits: `os` maps a mode to
+  `FILE_ATTRIBUTE_READONLY` alone, so `0600` reaches each file as "writable"
+  (read back as `0666`) and who may read it is the ACL it inherits from its
+  directory. The closure — a security descriptor at creation — is not done here
+  (see `service/logger/sink/file`, which carries the same gap).
 
 ### Which platform gets which protection
 
@@ -61,7 +66,7 @@ Protection is **not uniform**, and this table says where it is not. `Lstat` is
 | Platform | `syscall.O_NOFOLLOW` in go1.27.1 | Protection at the open |
 |---|---|---|
 | every `//go:build unix` GOOS — `linux` (13 arches), `darwin`, `freebsd`, `openbsd`, `netbsd`, `dragonfly`, `android`, `ios`, `aix`, `solaris`, `illumos` | present on all **39** GOOS/GOARCH pairs the `unix` tag selects | `Lstat` **+** `O_NOFOLLOW` — the TOCTOU window between them is closed |
-| `windows`, `plan9`, `js/wasm` | absent | `Lstat` **only** — a link planted between the check and the open **is followed** |
+| `windows`, `plan9`, `js/wasm` | absent | `Lstat` **only** — a link planted between the check and the open **is followed**; on Windows the `0600` mode excludes no account either (each file inherits its directory's ACL) |
 | `wasip1` | present (`0400`), but it is a `path_open` lookupflag, not a kernel flag | `Lstat` only, **by choice** — the refusal would belong to the WASI host and no lane here runs one |
 
 Measured, not assumed: compiling `const _ = syscall.O_NOFOLLOW` as a *library*
@@ -164,11 +169,16 @@ a passing row: the parent counts planted rows and fails at zero rather than
 going green on an empty table.
 
 `./writer/rotfile` runs on real kernels in `.github/workflows/e2e-cross.yml`
-(`SERVICE_FILE_PKGS`): linux, macos-15, freebsd, openbsd, netbsd. It is skipped
-on the windows lane (the suite asserts 0600 and chmod-freezes directories,
-neither of which means anything under ACLs), and **dragonfly has no lane at
-all** — it gets `O_NOFOLLOW` by build tag and by cross-compile, never by
-execution.
+(`SERVICE_FILE_PKGS`): linux, macos-15, freebsd, openbsd, netbsd — and on
+windows through the whole-suite step, which gates there since ADR 0095. Two
+things differ on Windows and the suite says which: `assertPerm0600` asserts the
+one bit a mode reaches there (`0666`, not read-only), and the failure branches
+injected by `freezeDirReadOnly` skip, naming why — `chmod` cannot freeze a
+directory under ACLs, so the fixture cannot exist; the branches are the same
+code on every platform and run on every Unix lane. `newSink` closes its sink in
+`t.Cleanup`, because a case that ended early used to leave the file open, and
+Windows will not delete an open file. **dragonfly has no lane at all** — it gets
+`O_NOFOLLOW` by build tag and by cross-compile, never by execution.
 
 ## Do NOT
 
