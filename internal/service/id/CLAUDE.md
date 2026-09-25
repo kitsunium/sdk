@@ -117,8 +117,18 @@ not on the first or last `_`. A prefix may legitimately contain underscores
 ever mints v7, but refusing to label a v4 that already exists in a caller's
 database would defeat the one job that function has.
 
+A KSUID's leading characters are **not its timestamp**. The rendering is base
+62 of the whole 160-bit value, and one second's payloads span 2^128 values —
+about 0.002 of a unit in the fourth digit — so where that span straddles a
+multiple of 62^23 (roughly one second in five hundred), two identifiers issued
+in the same second lead with different digits, in either order. The string
+sorts by time only ACROSS seconds. `Test_ksuidGen_New` reads the second back
+with `ParseKSUID` for that reason; its four-character comparison failed on a
+macOS run with thirteen "regressions", every pair from the same second.
+
 ## Do NOT
 
+- Order KSUIDs from one second by their leading characters — see above.
 - Add an `init()`. Use the package-level `var = id.Register(...)`.
 - Claim zero-alloc: string rendering allocates by design.
 - Register a `typeid` generator with a default prefix — see above.

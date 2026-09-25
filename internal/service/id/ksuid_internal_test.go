@@ -36,7 +36,15 @@ func Test_ksuidGen_Scheme(t *testing.T) {
 
 // Test_ksuidGen_New pins the rendered shape and the ordering property. Like a
 // ULID, a KSUID is chosen over a random identifier precisely because it sorts
-// by time as a plain string — so the prefix comparison is the whole point.
+// by time as a plain string — so the ordering check is the whole point.
+//
+// It reads the issued second back rather than comparing leading characters.
+// The rendering is base 62 of the WHOLE 160-bit value, so its first digits are
+// not the timestamp alone: where the 2^128 values one second's payloads span
+// straddle a multiple of 62^23 (about one second in five hundred), two
+// identifiers issued in the SAME second lead with different digits, in either
+// order. A four-character comparison failed on exactly that — thirteen
+// "regressions" in a batch of 256, every pair decoding to the same second.
 func Test_ksuidGen_New(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -52,6 +60,7 @@ func Test_ksuidGen_New(t *testing.T) {
 		t.Helper()
 		seen := make(map[string]struct{}, c.count)
 		var prev string
+		var prevIssued time.Time
 		for range c.count {
 			got, err := ksuidGen{}.New()
 			if err != nil {
@@ -71,15 +80,23 @@ func Test_ksuidGen_New(t *testing.T) {
 			}
 			seen[got] = struct{}{}
 
-			//: the whole string must be non-decreasing within a second and
-			//: strictly increasing across one. Comparing the full rendering is
-			//: safe here — only the leading digits carry the timestamp, and the
-			//: random tail cannot pull a later id below an earlier one because
-			//: the encoding is fixed-width and order-preserving.
-			if prev != "" && got[:4] < prev[:4] {
-				t.Errorf("the time prefix regressed: %q then %q", prev, got)
+			issued, _, perr := ParseKSUID(got)
+			//: the identifier reads back to the second it was issued in.
+			if perr != nil {
+				t.Fatalf("ParseKSUID(%q) = %v", got, perr)
 			}
-			prev = got
+			//: the issued second never goes backwards,
+			if issued.Before(prevIssued) {
+				t.Errorf("the issued second regressed: %q (%v) then %q (%v)", prev, prevIssued, got, issued)
+			}
+			//: and a later second sorts later as a plain string — the encoding
+			//: is fixed-width and order-preserving, so the payload cannot pull
+			//: an identifier below one from an earlier second. Within one
+			//: second the order is the payload's, which is random.
+			if prev != "" && issued.After(prevIssued) && got <= prev {
+				t.Errorf("an identifier from a later second sorted first: %q then %q", prev, got)
+			}
+			prev, prevIssued = got, issued
 		}
 	}
 	for _, c := range tests {
