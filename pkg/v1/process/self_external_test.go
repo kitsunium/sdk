@@ -9,12 +9,16 @@ import (
 )
 
 // TestSelfDescribesThisProcess pins the facade over the snapshot: the figures
-// are this process's, on every platform, with nothing to handle.
+// are this process's, on every platform, with nothing to handle. The heap's
+// own figures are the service's to pin (stats_external_test.go, after a
+// collection): read cold, a platform may not give them — the contract says a
+// figure it cannot give is zero, and linux/386 once read a zero heap here. The
+// memory the runtime maps is never zero in a running process.
 func TestSelfDescribesThisProcess(t *testing.T) {
 	t.Parallel()
 	stats := process.Self()
-	if stats.PID != os.Getpid() || stats.Goroutines < 1 || stats.HeapBytes == 0 {
-		t.Errorf("Self() = pid %d, %d goroutines, heap %d; want this process", stats.PID, stats.Goroutines, stats.HeapBytes)
+	if stats.PID != os.Getpid() || stats.Goroutines < 1 || stats.MemoryBytes == 0 {
+		t.Errorf("Self() = pid %d, %d goroutines, %d bytes mapped; want this process", stats.PID, stats.Goroutines, stats.MemoryBytes)
 	}
 	if stats.Uptime < 0 || stats.Started.After(stats.At) {
 		t.Errorf("Self() started %v at %v", stats.Started, stats.At)
