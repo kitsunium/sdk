@@ -118,6 +118,34 @@ jobs:
           fi
           exit $fail
 
+      # Every package, not only the platform-sensitive ones. ADR 0018 kept the
+      # pure-Go packages on the Linux lane because they "behave identically
+      # everywhere"; their TESTS did not — on macOS a Unix socket path past the
+      # 104-byte sun_path, a temporary directory under a link (ADR 0094). The
+      # whole suite takes about two minutes there and gates. On Windows it runs
+      # as an inventory, not a gate, until its first clean run makes it one: the
+      # suite has never run there, and what it finds is recorded in ADR 0094.
+      - name: Unit tests — every package on ${{ matrix.name }}
+        # !cancelled(): the inventory runs even when the platform-sensitive gate
+        # above failed — that gate still fails the job, the inventory still reports.
+        if: ${{ !cancelled() && matrix.name != 'linux' }}
+        continue-on-error: ${{ matrix.name == 'windows' }}
+        # A test that hangs on a kernel it never ran on must not eat the job.
+        timeout-minutes: 12
+        shell: bash
+        env:
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          set -uo pipefail
+          fail=0
+          for mod in internal/kernel internal/core internal/service pkg . e2e; do
+            echo "::group::$mod"
+            (cd "$mod" && go test -count=1 -short ./...) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
+            echo "::endgroup::"
+          done
+          exit $fail
+
       - name: E2E conformance — whole public API on ${{ matrix.name }}
         shell: bash
         env:

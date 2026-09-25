@@ -58,7 +58,7 @@ sink is reproduced here and, critically, **re-run on every reopen**.
 Protection is **not uniform**, and this table says where it is not. `Lstat` is
 `refuseSymlink`, present everywhere; `O_NOFOLLOW` is the kernel half.
 
-| Platform | `syscall.O_NOFOLLOW` in go1.27.0 | Protection at the open |
+| Platform | `syscall.O_NOFOLLOW` in go1.27.1 | Protection at the open |
 |---|---|---|
 | every `//go:build unix` GOOS — `linux` (13 arches), `darwin`, `freebsd`, `openbsd`, `netbsd`, `dragonfly`, `android`, `ios`, `aix`, `solaris`, `illumos` | present on all **39** GOOS/GOARCH pairs the `unix` tag selects | `Lstat` **+** `O_NOFOLLOW` — the TOCTOU window between them is closed |
 | `windows`, `plan9`, `js/wasm` | absent | `Lstat` **only** — a link planted between the check and the open **is followed** |
@@ -67,7 +67,7 @@ Protection is **not uniform**, and this table says where it is not. `Lstat` is
 Measured, not assumed: compiling `const _ = syscall.O_NOFOLLOW` as a *library*
 package (never linked, so cgo/PIE link rules cannot mask the question) for all
 **47** pairs of `go tool dist list` under the toolchain this repo resolves
-(`go1.27.0`, `$(go env GOROOT)/src/syscall/zerrors_<goos>_<goarch>.go`). 39 are
+(`go1.27.1`, `$(go env GOROOT)/src/syscall/zerrors_<goos>_<goarch>.go`). 39 are
 selected by `unix` and every one of them compiles the constant; the remaining 8
 are `js/wasm`, `plan9/{386,amd64,arm}`, `windows/{386,amd64,arm64}` and
 `wasip1/wasm` — the three rows of the second and third lines above.

@@ -165,7 +165,7 @@ func Test_Server_bindShards(t *testing.T) {
 		t.Helper()
 		addr := c.addr
 		if c.unixSocket {
-			addr = t.TempDir() + "/shard.sock"
+			addr = socketDir(t) + "/shard.sock"
 		}
 		srv := newTestServer(t)
 		group := &StreamGroup{name: "api", limits: corenet.LimitsValue{Shards: c.shards}}
@@ -614,7 +614,7 @@ func Test_Server_adoptStreamSockets(t *testing.T) {
 		t.Helper()
 		table := make(map[string][]*os.File, len(c.published))
 		for _, name := range c.published {
-			file, _ := adoptableListenerFile(t)
+			file := listenerFile(t)
 			releaseOnCleanup(t, file)
 			table[name] = []*os.File{file}
 		}
@@ -688,7 +688,7 @@ func Test_Server_adoptPacketSockets(t *testing.T) {
 		t.Helper()
 		table := make(map[string][]*os.File, len(c.published))
 		for _, name := range c.published {
-			file, _ := adoptablePacketFile(t)
+			file := packetFile(t)
 			releaseOnCleanup(t, file)
 			table[name] = []*os.File{file}
 		}

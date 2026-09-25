@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk
 
-go 1.27
+go 1.27.1
 
 // The root umbrella module also hosts the opt-in, vendor-dependent integrations
 // under third-party/* (ADR 0012). The AWS SDK requires below live HERE, not in

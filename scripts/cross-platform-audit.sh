@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================================
-# cross-platform-audit.sh — answers, per Go package, "does it build on every
-# target platform we support?" YES/NO, and prints a matrix.
+# cross-platform-audit.sh — answers, per Go package, "does it build, and do its
+# tests compile, on every target platform we support?" YES/NO, and prints a
+# matrix.
 #
 # It cross-compiles every package in every SDK module against the full GOOS
 # matrix (no cgo, pure build — the proc syscalls are stdlib `syscall`, so a
-# clean `go build` is a faithful portability signal). A package that fails on a
-# platform either (a) references a syscall/constant absent on that GOOS, or
-# (b) lacks a build-tagged fallback. Both are gaps to close so the package
+# clean `go build` is a faithful portability signal), then `go vet`s it, which
+# type-checks the _test.go files `go build` never compiles (ADR 0094). A
+# package that fails on a platform either (a) references a syscall/constant
+# absent on that GOOS, (b) lacks a build-tagged fallback, or (c) has a test that
+# calls a helper only one GOOS defines. All are gaps to close so the package
 # behaves uniformly everywhere.
 #
 # Usage:  bash scripts/cross-platform-audit.sh [--quiet]
@@ -22,7 +25,7 @@ cd "$ROOT"
 # GOOS/GOARCH targets. linux+darwin are primary; the BSDs + windows are the
 # portability frontier the SDK must not silently drop.
 PLATFORMS=(
-  linux/amd64 linux/arm64
+  linux/amd64 linux/arm64 linux/386 linux/arm
   darwin/arm64
   windows/amd64
   freebsd/amd64 openbsd/amd64 netbsd/amd64 dragonfly/amd64
@@ -48,9 +51,16 @@ for mod in "${MODULES[@]}"; do
   for pkg in "${pkgs[@]}"; do
     [[ -z "$pkg" ]] && continue
     ALL_PKGS+=("$pkg")
+    # A package made of tests alone (the kernel's zero-alloc gate) gives `go
+    # build` nothing to compile — CI's `go build ./...` skips it — and `go vet`
+    # still type-checks its tests.
+    dir=$(cd "$mod" && GOWORK=off go list -f '{{.Dir}}' "$pkg" 2>/dev/null)
+    build=false
+    for f in "$dir"/*.go; do [[ "$f" == *_test.go ]] || { build=true; break; }; done
     for plat in "${PLATFORMS[@]}"; do
       os="${plat%/*}"; arch="${plat#*/}"
-      if out=$(cd "$mod" && GOWORK=off GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build "$pkg" 2>&1); then
+      if out=$(cd "$mod" && { ! $build || GOWORK=off GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build "$pkg" 2>&1; } &&
+        GOWORK=off GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go vet "$pkg" 2>&1); then
         results["$pkg|$plat"]=OK
       else
         results["$pkg|$plat"]=FAIL
@@ -65,7 +75,7 @@ printf '\n# Cross-platform build matrix\n\n'
 printf '| package |'
 for plat in "${PLATFORMS[@]}"; do printf ' %s |' "${plat#*/} ${plat%/*}"; done
 printf '\n|---|'
-for _ in "${PLATFORMS[@]}"; do printf '---|'; done
+for _ in "${PLATFORMS[@]}"; do printf -- '---|'; done
 printf '\n'
 
 fail_total=0

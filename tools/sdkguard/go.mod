@@ -1,3 +1,3 @@
 module github.com/kitsunium/sdk/tools/sdkguard
 
-go 1.27
+go 1.27.1

@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package file_test — what the other default writer costs, and how much of that
 // is this package rather than the filesystem underneath it.
 //
@@ -17,12 +19,13 @@
 //
 // A row that carries no filesystem label is not measuring a file.
 //
-// The file name carries the `_linux` suffix, and it is load-bearing rather than
-// decorative: `syscall.Statfs` and its magic numbers are Linux, and so is the
-// `O_NOFOLLOW` the sink opens with on this platform. e2e-cross.yml CROSS-COMPILES
-// test binaries for every supported GOOS, so a file that assumes Linux has to
-// say so in its name or it breaks the Windows build. The writer itself is
-// cross-platform; this measurement of it is not.
+// The `//go:build linux` line is load-bearing: `syscall.Statfs` and its magic
+// numbers are Linux, and so is the `O_NOFOLLOW` the sink opens with on this
+// platform. The `_linux` in the file name is not a constraint — a name implies
+// one only when, `.go` and `_test` stripped, it ends in `_GOOS`, `_GOARCH` or
+// `_GOOS_GOARCH`, and this one ends in `_bench` — so without the line this file
+// compiled on every GOOS and broke the Windows build of the package's tests.
+// The writer itself is cross-platform; this measurement of it is not.
 package file_test
 
 import (
