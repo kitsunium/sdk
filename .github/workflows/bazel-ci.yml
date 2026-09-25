@@ -328,10 +328,11 @@ jobs:
 
   # Cross-platform build matrix — folded in from the former standalone
   # cross-platform.yml so the SDK has ONE per-PR CI workflow, not two. Enforces
-  # the invariant that every package BUILDS on every supported GOOS (a
-  # platform-specific low-level call must never silently drop a package). Pure
-  # `go build` per module across the matrix — no Bazel (Bazel is Linux-only), so
-  # it runs as a sibling job, not inside the bazel job. Local equivalent:
+  # the invariant that every package BUILDS, and its tests COMPILE, on every
+  # supported GOOS (a platform-specific low-level call must never silently drop a
+  # package, nor a test only one GOOS can compile — ADR 0094). `go build` then
+  # `go vet` per module across the matrix — no Bazel (Bazel is Linux-only), so it
+  # runs as a sibling job, not inside the bazel job. Local equivalent:
   # `bash scripts/cross-platform-audit.sh`.
   cross-build:
     name: cross-build ${{ matrix.target.goos }}/${{ matrix.target.goarch }}
@@ -364,8 +365,10 @@ jobs:
           go-version-file: pkg/go.mod
 
       # Each module is built standalone (GOWORK=off) so its own go.mod + replace
-      # directives resolve; CGO disabled so the cross-build is hermetic.
-      - name: cross-build every module
+      # directives resolve; CGO disabled so the cross-build is hermetic. `go
+      # build` never compiles a _test.go; `go vet` type-checks them, so a test
+      # calling a helper that one GOOS alone defines fails here (ADR 0094).
+      - name: cross-build every module, tests included
         env:
           GOOS: ${{ matrix.target.goos }}
           GOARCH: ${{ matrix.target.goarch }}
@@ -376,10 +379,10 @@ jobs:
           fail=0
           for mod in internal/kernel internal/core internal/service pkg . e2e; do
             echo "::group::$mod ($GOOS/$GOARCH)"
-            if (cd "$mod" && go build ./...); then
+            if (cd "$mod" && go build ./... && go vet ./...); then
               echo "ok"
             else
-              echo "::error::$mod fails to build on $GOOS/$GOARCH"
+              echo "::error::$mod fails to build, or its tests to compile, on $GOOS/$GOARCH"
               fail=1
             fi
             echo "::endgroup::"

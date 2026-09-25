@@ -11,6 +11,7 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate) and `sdk-release.yml` 
 |---|---|---|
 | `bazel-ci.yml` | push to `main`, PRs | Primary SDK CI — drift check + build + test + coverage via Bazel 9 |
 | `sdk-release.yml` | `workflow_run` after `SDK CI (Bazel)` success on `main`, plus manual `workflow_dispatch` | Impact-driven patch tags `pkg/vX.Y.Z` (ADR 0007; the `pkg/<major>/` prefix went away with the bare module path — ADR 0017). Reads majors from `scripts/release/compute-bumps.sh` and pushes via `scripts/release/cut-tags.sh`. First release is held unless dispatched manually (`--allow-bootstrap`, ADR 0009). The `Release-bump` trailer that sizes a minor is read over the whole range since the last release, not from the checked-out HEAD — a cancelled CI run yields no release, so the trailer-bearing commit is often not HEAD by the time one fires (ADR 0085). |
+| `e2e-cross.yml` | push to any branch, manual `workflow_dispatch` | The runtime bar on real kernels (ADR 0018): the platform-sensitive packages on Linux, macOS, Windows and the three BSDs, then — on macOS and Windows — every package (`go test -short ./...` per module, ADR 0094). The macOS run gates; the Windows run is an inventory (`continue-on-error`) until it is clean. |
 | `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). |
 | `docker-images.yml` | weekly + push to `.devcontainer/images/**` | Template-inherited; two-tier base+main image build |
 | `publish-features.yml` | push to `.devcontainer/features/**` | Template-inherited; publishes OCI feature artifacts |
@@ -19,7 +20,7 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate) and `sdk-release.yml` 
 ## bazel-ci.yml (the SDK lane)
 
 Four jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
-nor Go), `cross-build` (every module COMPILES on every supported GOOS/GOARCH)
+nor Go), `cross-build` (every module COMPILES, tests included, on every supported GOOS/GOARCH)
 and `test-386` (the 32-bit RUNTIME). The last two run raw `go` rather than
 Bazel, for the reason stated under Do NOT below: Bazel here builds for the host
 only, so a platform it cannot reach is covered by the toolchain that can, or by
@@ -81,10 +82,12 @@ runs it`.
 
 ### cross-build (the build bar) and test-386 (the runtime bar)
 
-`cross-build` runs `go build ./...` per module across eleven GOOS/GOARCH cells,
-including linux/386 and linux/arm, so a platform-specific low-level call can
-never silently drop a package (ADR 0018's build bar; local equivalent
-`bash scripts/cross-platform-audit.sh`).
+`cross-build` runs `go build ./...` then `go vet ./...` per module across ten
+GOOS/GOARCH cells, including linux/386 and linux/arm, so a platform-specific
+low-level call can never silently drop a package (ADR 0018's build bar; local
+equivalent `bash scripts/cross-platform-audit.sh`, which needs bash 4). `go
+build` never compiles a `_test.go`; `go vet` type-checks it, so a test calling a
+helper only one GOOS defines fails the cells it breaks (ADR 0094).
 
 `test-386` RUNS the four workspace modules' tests on linux/386. Compiling and
 behaving are different questions, and the gap between them is where a 64-bit
