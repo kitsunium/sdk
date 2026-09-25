@@ -11,7 +11,7 @@ The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at f
 
 | Major | Purpose | State |
 |---|---|---|
-| `v1/` | Stable public API — **54 packages** (50 top-level + the nested `logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`), grouped in the root `README.md`: observability (`logger`, `metrics`, `trace`, `health`), application plumbing (`config`, `lifecycle`, `cli`, `events`, `queue`, `scheduler`, `cache`, `clock`, `resilience`, `lock`, `id`), network and web (`server` + `sse`/`websocket`, `client`, `tlsid`, `view`, `i18n`, `mail`), data and security (`codec`, `errs`, `crypto` + the six scheme facades, `token`, `secret`, `session`, `authz`, `validation`, `sql`, `vfs`), and process/platform/distribution (`proc` + the seven OS facades, `memlimit`, `git`, `selfupdate`, `entitlement`, `gate`) | Shipping |
+| `v1/` | Stable public API — **55 packages** (51 top-level + the nested `logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`), grouped in the root `README.md`: observability (`logger`, `metrics`, `trace`, `health`), application plumbing (`config`, `lifecycle`, `cli`, `events`, `queue`, `scheduler`, `cache`, `clock`, `resilience`, `lock`, `id`), network and web (`server` + `sse`/`websocket`, `client`, `tlsid`, `view`, `i18n`, `mail`), data and security (`codec`, `errs`, `crypto` + the six scheme facades, `token`, `secret`, `session`, `authz`, `validation`, `sql`, `vfs`, `redact`), and process/platform/distribution (`proc` + the seven OS facades, `memlimit`, `git`, `selfupdate`, `entitlement`, `gate`) | Shipping |
 
 ## Versioning policy
 

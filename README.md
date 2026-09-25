@@ -59,6 +59,7 @@ are grouped below by the job they do, and each links to its own generated
 | [`validation`](./pkg/v1/validation) | Constraints, located violations (`user.addresses[2].zip`), collect-all by default. A message names the rule and the bound but **never the value** — a security property with its own test. |
 | [`sql`](./pkg/v1/sql) | Ports above `database/sql`, deliberately never an ORM, and **no driver**. A unit of work receives an `Executor` with no Commit and no Rollback, so a callee ending its caller's transaction is a sentence with no spelling. |
 | [`vfs`](./pkg/v1/vfs) | Reading is `io/fs` **unchanged** (`FS` is a type alias, so `fs.WalkDir` applies with no adapter); writing is four verbs; publication is `rename(2)`-atomic — measured at 0 torn reads out of 600. |
+| [`redact`](./pkg/v1/redact) | Values, JSON documents, text and log attributes shown with their secrets replaced — a name that says it is one, a field declared secret, a URL's credentials — within an **exact** byte bound, never touching the input. What it does not recognise is stated, because it is a display filter and not an access control. |
 
 ### Process, platform and distribution
 

@@ -109,6 +109,7 @@ filegroup(
         "//internal/service/net/tlsid:audit_srcs",
         "//internal/service/net/websocket:audit_srcs",
         "//internal/service/queue:audit_srcs",
+        "//internal/service/redact:audit_srcs",
         "//internal/service/resilience:audit_srcs",
         "//internal/service/scheduler:audit_srcs",
         "//internal/service/secret:audit_srcs",

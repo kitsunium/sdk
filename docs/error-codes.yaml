@@ -2154,6 +2154,14 @@ codes:
     const: CodeKeyFileInvalid
     hex: "0x00_03_44_08"
     package: internal/service/secret
+  - code: "0.3.73.1"
+    const: CodeDocumentInvalid
+    hex: "0x00_03_49_01"
+    package: internal/service/redact
+  - code: "0.3.73.2"
+    const: CodeValueUnencodable
+    hex: "0x00_03_49_02"
+    package: internal/service/redact
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
