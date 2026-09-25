@@ -29,6 +29,12 @@ const jsonQuote byte = '"'
 // configuration struct, a log line, an error, a JSON dump — without being
 // written down on the way.
 //
+// Immutable means the BYTES: nothing reachable from a Value changes them, so
+// copies share them safely. The two decoders assign a new Value to the
+// variable they are given — exactly as time.Time's UnmarshalJSON assigns a new
+// Time — which replaces what the variable holds and changes no bytes any other
+// copy holds; that is what lets a configuration loader fill a Value field.
+//
 //   - EVERY rendering writes [Redacted]: String, GoString, Format (so %v, %+v,
 //     %#v, %s and %q alike), MarshalJSON, MarshalText. A configuration dumped
 //     for a --show-config flag, a struct printed while debugging and a value

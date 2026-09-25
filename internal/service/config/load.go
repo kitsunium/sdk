@@ -100,13 +100,13 @@ func LoadSchema[T any](target *T, schema *SchemaValue[T], sources ...coreconfig.
 // entry point runs, so a schema can never change the ORDER of the other steps
 // — only whether the steps it owns happen at all. It returns the layers it
 // merged, in merge order, so a traced load can say which one supplied a key.
-func loadInto[T any](target *T, schema *SchemaValue[T], sources []coreconfig.Source) (layers []layerValue, err error) {
+func loadInto[T any](target *T, schema *SchemaValue[T], sources []coreconfig.Source) (loaded mergedLayers, err error) {
 	//: the default layer under every source, later winning.
 	merged, layers, mergeErr := mergeLayers(schema, sources)
 	//: a source that could not be read aborts before anything is decoded.
 	if mergeErr != nil {
 		//: surface CONFIG_SOURCE_FAILED.
-		return nil, mergeErr
+		return mergedLayers{}, mergeErr
 	}
 	//: a secret field is filled from the environment's RAW text, never from
 	//: its JSON coercion, which would have re-spelled a numeric secret.
@@ -116,21 +116,30 @@ func loadInto[T any](target *T, schema *SchemaValue[T], sources []coreconfig.Sou
 		//: every missing requirement and every stranger, in one error.
 		if keyErr := schema.checkKeys(merged); keyErr != nil {
 			//: surface CONFIG_KEY_MISSING and/or CONFIG_UNKNOWN_KEY.
-			return nil, keyErr
+			return mergedLayers{}, keyErr
 		}
 	}
 	//: decode the merged map into the target via a JSON round-trip.
 	if decodeErr := decodeInto(merged, target); decodeErr != nil {
 		//: surface CONFIG_DECODE_FAILED.
-		return nil, decodeErr
+		return mergedLayers{}, decodeErr
 	}
 	//: the VALUE questions, then the target's own self-check.
 	if checkErr := checkDecoded(target, schema); checkErr != nil {
 		//: surface CONFIG_VALIDATION_FAILED.
-		return nil, checkErr
+		return mergedLayers{}, checkErr
 	}
-	//: loaded; the layers are the traced load's to read.
-	return layers, nil
+	//: loaded; the layers and their fold are the traced load's to read.
+	return mergedLayers{layers: layers, merged: merged}, nil
+}
+
+// mergedLayers is what a load folded: every layer in order, and the map they
+// folded into — the one a traced load checks a key's final presence in.
+type mergedLayers struct {
+	// layers is every layer, in merge order.
+	layers []layerValue
+	// merged is the fold the decode read.
+	merged map[string]any
 }
 
 // layerValue is one layer a load merged: what it supplied, and who.
@@ -191,9 +200,10 @@ func mergeLayers[T any](schema *SchemaValue[T], sources []coreconfig.Source) (me
 // one entry per configuration type a program declares, which is a handful.
 var secretKeysByType sync.Map
 
-// secretKeysOf returns the keys of T whose field holds a secret: compiled once
-// into a schema, or walked once per type for a load that has none.
-func secretKeysOf[T any](schema *SchemaValue[T]) map[string]bool {
+// secretKeysOf returns the keys of T whose field holds a secret, and how:
+// compiled once into a schema, or walked once per type for a load that has
+// none.
+func secretKeysOf[T any](schema *SchemaValue[T]) map[string]secretHold {
 	//: a schema resolved them at construction.
 	if schema != nil {
 		//: no walk per load.
@@ -203,7 +213,7 @@ func secretKeysOf[T any](schema *SchemaValue[T]) map[string]bool {
 	//: a type already walked by an earlier load.
 	if cached, found := secretKeysByType.Load(typ); found {
 		//: the memo only ever stores this shape, so the assertion holds.
-		if secrets, ok := cached.(map[string]bool); ok {
+		if secrets, ok := cached.(map[string]secretHold); ok {
 			//: no walk.
 			return secrets
 		}
@@ -215,12 +225,14 @@ func secretKeysOf[T any](schema *SchemaValue[T]) map[string]bool {
 	return secrets
 }
 
-// restoreRawSecrets replaces, for every secret key an ENVIRONMENT layer
+// restoreRawSecrets replaces, for every DIRECT secret key an ENVIRONMENT layer
 // supplied last, the JSON-coerced value in the merged map with the variable's
-// raw text.
+// raw text. A field holding secrets inside a slice or a map is left alone: its
+// variable holds a JSON document — ["a","b"] — whose coerced form is exactly
+// what its decode needs, and whose elements were written as strings.
 //
-// The coercion is right for a port and wrong for a password: "12345" becomes
-// an int64 and survives, but "1e3" becomes 1000, "0.10" becomes 0.1 and a
+// The coercion is right for a port and wrong for a secret: `12345` becomes an
+// int64 and survives, but `1e3` becomes 1000, `0.10` becomes 0.1 and a
 // twenty-digit token becomes a float64 that has lost its tail — a secret the
 // operator never wrote, decoded without an error. core/secret.Value refuses a
 // JSON number for exactly that reason, so without this step a numeric secret
@@ -228,11 +240,12 @@ func secretKeysOf[T any](schema *SchemaValue[T]) map[string]bool {
 // operator typed it. Only a top-level key can be one variable; a secret nested
 // in a table the environment supplied as JSON was written as JSON, quotes and
 // all, and is decoded as written.
-func restoreRawSecrets(merged map[string]any, layers []layerValue, secrets map[string]bool) {
+func restoreRawSecrets(merged map[string]any, layers []layerValue, secrets map[string]secretHold) {
 	//: every secret key; the rest of the map is untouched.
-	for key := range secrets {
-		//: a nested key cannot be one variable.
-		if strings.Contains(key, keySeparator) {
+	for key, hold := range secrets {
+		//: a collection of secrets, or a key nested in a table, is not one
+		//: variable holding one secret.
+		if hold != secretDirect || strings.Contains(key, keySeparator) {
 			continue
 		}
 		env, supplied := lastSupplier(layers, key)

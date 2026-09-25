@@ -28,7 +28,8 @@
 // explicit slice (including os.Environ()) to inherit deliberately.
 //
 // Spec.Path may be a bare name. "go" is searched in the PATH the CHILD will
-// see — the PATH entry of Spec.Env when it has one, the parent's otherwise —
+// see — the PATH entry of Spec.Env whenever it names one, even empty, the
+// parent's only when it names none —
 // with os/exec's rules: the first executable in PATH order wins, and a match
 // found only through a relative entry ("." or an empty one) is refused with
 // exec.ErrDot, which the returned SpawnFailed wraps (errors.Is answers). A path

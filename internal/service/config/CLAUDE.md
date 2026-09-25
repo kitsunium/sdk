@@ -65,15 +65,18 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 - **A secret field reads the environment's RAW text** (ADR 0097). The coercion
   that makes `8080` an int makes `1e3` a thousand and truncates a twenty-digit
   token, and `secret.Value` refuses a JSON number for that reason; so for a
-  top-level secret key whose last supplier is an `EnvSource`, the merged value
-  is replaced by the variable's raw text before the decode — on every entry
-  point. The secret set is resolved at schema construction, or once per target
+  top-level DIRECT secret key (`secretDirect`: a `secret.Value` or a pointer to
+  one) whose last supplier is an `EnvSource`, the merged value is replaced by
+  the variable's raw text before the decode — on every entry point. A slice or
+  a map of secrets (`secretNested`) keeps its coerced JSON document, which is
+  what its decode needs. The secret set is resolved at schema construction, or once per target
   type for a schemaless load (`secretKeysByType`, a `sync.Map`): walked per load
   it doubled `Load` (`BENCH.md` §ADR 0097).
 - **An origin never carries a value**, and a `Describer`'s detail must not
-  either. A key is attributed to the LAST layer holding it; an undescribed
-  source is `"source"` with its position; a key nobody supplied has an empty
-  layer.
+  either. A key present in the merged fold is attributed to the LAST layer
+  holding it; a key absent from the fold — never supplied, or erased when a
+  later layer replaced one of its tables with a scalar or a null — has an empty
+  layer; an undescribed source is `"source"` with its position.
 
 ## Do NOT
 

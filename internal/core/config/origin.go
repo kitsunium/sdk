@@ -29,8 +29,10 @@ type OriginValue struct {
 	// Key is the operator's key in the dotted grammar — "database.dsn".
 	Key string
 	// Layer names the kind of layer that supplied the final value: one of the
-	// Layer* constants, or the kind a [Describer] reports. It is EMPTY when no
-	// layer supplied the key: the field holds its Go zero value.
+	// Layer* constants, or the kind a [Describer] reports. It is EMPTY when the
+	// key is absent from the merged layers — no layer supplied it, or a later
+	// layer erased it by replacing one of its tables with a scalar or a null —
+	// and the field then holds its Go zero value.
 	Layer string
 	// Detail is what an operator acts on: the variable that set the key, the
 	// file that holds it. Empty when the layer has nothing more to say.

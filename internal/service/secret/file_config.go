@@ -83,6 +83,38 @@ func (c FileConfig) clockOrSystem() clock.Timed {
 	return c.Clock
 }
 
+// checkHeldRoot re-checks the directory the store HOLDS, through its handle,
+// and proves the path still names it.
+//
+// prepareDir judged a PATH; vfs.NewOS then opened the path again, and the lock
+// domain resolves it on every acquisition. Anyone able to swap the path
+// between those resolutions — a writable parent — could hand the store a
+// directory nobody checked, or split its records from its locks. So the mode
+// is judged again on the opened handle, which cannot be swapped, and the path
+// must still resolve to that same directory, so the locker's lock files land
+// beside the records they serialise. What remains open is a swap AFTER
+// construction, which is the lock domain's own exposure: its chain audit
+// refuses an indirection at a parent any account can write (ADR 0083).
+func checkHeldRoot(root fs.FS, dir string) error {
+	held, heldErr := fs.Stat(root, ".")
+	//: the handle cannot be inspected, or holds something other than a
+	//: directory other accounts cannot read.
+	if heldErr != nil || !held.IsDir() || held.Mode().Perm()&otherAccountBits != 0 {
+		//: InvalidConfig, naming the clause.
+		return wrapAs(InvalidConfig, nil, errs.String("setting", "Dir"),
+			errs.String("problem", "the directory opened is not an owner-only directory"))
+	}
+	named, namedErr := os.Stat(dir)
+	//: the path now names another directory, or nothing.
+	if namedErr != nil || !os.SameFile(held, named) {
+		//: InvalidConfig: the path moved while the store was opening it.
+		return wrapAs(InvalidConfig, nil, errs.String("setting", "Dir"),
+			errs.String("problem", "the directory changed while the store was opening it"))
+	}
+	//: one directory, owner-only, named by the path.
+	return nil
+}
+
 // prepareDir creates dir 0700 when it is absent and checks it when it is not.
 // The check is the point: an existing directory another account can read is
 // refused, never narrowed.

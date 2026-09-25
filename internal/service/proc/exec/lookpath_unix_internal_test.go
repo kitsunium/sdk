@@ -100,6 +100,13 @@ func Test_resolveSpec(t *testing.T) {
 			"./bin/tool", nil, nil,
 		},
 		{
+			"an explicitly empty PATH in Spec.Env searches nothing — not the parent's",
+			coreproc.Spec{Path: "kprobe-parent", Env: []string{"PATH="}},
+			"",
+			nil,
+			osexec.ErrNotFound,
+		},
+		{
 			"a name found nowhere",
 			coreproc.Spec{Path: "kprobe-missing", Env: []string{"PATH=" + envDir}},
 			"", nil, osexec.ErrNotFound,

@@ -44,12 +44,12 @@ func resolveSpec(spec coreproc.Spec) (resolved coreproc.Spec, err error) {
 		//: unchanged.
 		return spec, nil
 	}
-	path, lookErr := lookPath(spec.Path, searchPathOf(spec.Env), spec.Env)
+	searchPath, fromSpec := searchPathOf(spec.Env)
+	path, lookErr := lookPath(spec.Path, searchPath, spec.Env)
 	//: not found, or found only through a relative PATH entry.
 	if lookErr != nil {
 		//: SPAWN_FAILED, with os/exec's own sentinel in the chain.
-		return spec, wrapSpawn(lookErr, errs.String("path", spec.Path),
-			errs.Bool("from_spec_env", envValue(spec.Env, pathVariable) != ""))
+		return spec, wrapSpawn(lookErr, errs.String("path", spec.Path), errs.Bool("from_spec_env", fromSpec))
 	}
 	//: argv[0] keeps the name the caller wrote.
 	if len(spec.Args) == 0 {
@@ -60,32 +60,34 @@ func resolveSpec(spec coreproc.Spec) (resolved coreproc.Spec, err error) {
 	return spec, nil
 }
 
-// searchPathOf returns the PATH a bare name is searched in: the child's own
-// when its environment names one, the parent's otherwise.
-func searchPathOf(env []string) string {
+// searchPathOf returns the PATH a bare name is searched in, and whether it is
+// the child's own: Spec.Env's PATH whenever Spec.Env NAMES one — an explicitly
+// empty `PATH=` included, which searches nothing, because that is the PATH the
+// child runs with and falling back would run a program the caller's
+// environment excluded — and the parent's only when Spec.Env names none.
+func searchPathOf(env []string) (searchPath string, fromSpec bool) {
 	//: the child's PATH is the one the program would have seen.
-	if value := envValue(env, pathVariable); value != "" {
-		//: from Spec.Env.
-		return value
+	if value, named := envValue(env, pathVariable); named {
+		//: from Spec.Env, even empty.
+		return value, true
 	}
 	//: the parent's, as os/exec.Command searches.
-	return os.Getenv(pathVariable)
+	return os.Getenv(pathVariable), false
 }
 
 // envValue returns the last value of key in env, compared as the platform
-// compares variable names.
-func envValue(env []string, key string) string {
-	value := ""
+// compares variable names, and whether env names key at all.
+func envValue(env []string, key string) (value string, named bool) {
 	//: the last entry wins, as os/exec reads a duplicated key.
 	for _, entry := range env {
 		name, entryValue, found := strings.Cut(entry, "=")
 		//: a match under this platform's rule for variable names.
 		if found && sameVariable(name, key) {
-			value = entryValue
+			value, named = entryValue, true
 		}
 	}
-	//: empty when the key is absent.
-	return value
+	//: the value, and whether there was one to read.
+	return value, named
 }
 
 // lookPath searches name in every directory of searchPath, in order, and

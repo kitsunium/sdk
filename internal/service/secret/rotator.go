@@ -382,7 +382,7 @@ func (r *Rotator) generate() (value coresecret.Value, err error) {
 	//: the generator's own failure, kept as the cause.
 	if genErr != nil {
 		//: an SDK verdict from the generator (Random's) is kept as it is.
-		if typed, isSDK := errors.AsType[*errs.Error](genErr); isSDK && typed != nil {
+		if _, typed := errs.CodeOf(genErr); typed {
 			//: InvalidConfig or GenerateFailed, unchanged.
 			return coresecret.Value{}, genErr
 		}

@@ -26,8 +26,8 @@ type compiledKeys struct {
 	required []requiredKey
 	// known is the target type's whole addressable vocabulary.
 	known map[string]keyKind
-	// secrets is every key whose field holds a core/secret.Value.
-	secrets map[string]bool
+	// secrets is every key whose field holds a core/secret.Value, and how.
+	secrets map[string]secretHold
 }
 
 // compileKeys resolves a declaration's keys against T, refusing every one that

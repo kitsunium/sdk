@@ -31,7 +31,8 @@ Code range: `0.3.68.*` (ADR 0096).
   line ending (`\n` or `\r\n`) is removed from a file; an empty variable is
   unset; an empty or >64 KiB file is refused; an unreadable file is the
   retryable `StoreUnavailable` (a volume may not be mounted yet). A name whose
-  variable ends in `_FILE` is refused by this store. No refusal repeats a value
+  variable ends in `_FILE` is refused by this store. `Names` skips an empty
+  variable, in either form, since `Get` treats it as unset. No refusal repeats a value
   or a path — the VARIABLE names travel.
 - **File store: one JSON document per secret**, the whole history, so a `Put`
   or a `Prune` is ONE `vfs.WriteAtomic`. The directory is created 0700 and an
@@ -46,6 +47,11 @@ Code range: `0.3.68.*` (ADR 0096).
 - **Writers take the lock domain's file locker, readers take nothing**: the
   rename is the synchronisation. A cancelled wait for the lock returns the
   context's own error; the release runs on `context.WithoutCancel`.
+- **The directory is judged twice**: by path in `prepareDir`, then — after
+  `vfs.NewOS` and the locker have resolved the path again — on the HELD root's
+  handle, whose mode must still be owner-only and which `os.SameFile` must
+  still match the path (`checkHeldRoot`). A path swapped between the check and
+  the open is refused rather than served.
 - **The platform gate is decided before the directory is created**
   (`fileguard_*.go`, the same tag set as `vfs`'s `osguard_*.go`).
 - **Keyring box**: `0x01 | uint32 BE version | crypto box`; signature

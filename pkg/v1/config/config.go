@@ -102,8 +102,9 @@
 // also return one [Origin] per leaf key of the target, sorted: the layer that
 // supplied its final value — "default", "file", "env", or a kind a source
 // names through [Describer] — and the detail an operator acts on, such as the
-// variable "APP_DATA_DIR" or the file "/etc/app.json". A key no layer supplied
-// has an empty Layer.
+// variable "APP_DATA_DIR" or the file "/etc/app.json". A key absent from the
+// merged layers has an empty Layer — no layer supplied it, or a later layer
+// erased it by replacing one of its tables with a scalar or a null.
 //
 //	origins, err := config.LoadSchemaWithOrigins(&c, schema,
 //	    config.FileSource("json", "/etc/app.json"),

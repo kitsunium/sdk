@@ -169,13 +169,15 @@ func TestEnvStoreIsReadOnly(t *testing.T) {
 }
 
 // TestEnvStoreNamesAndItsOwnGrammar pins Names — both forms, one name each,
-// nothing it could not Get — and the one clause this store adds to the name
-// grammar.
+// nothing it could not Get, so no empty variable in either form — and the one
+// clause this store adds to the name grammar.
 func TestEnvStoreNamesAndItsOwnGrammar(t *testing.T) {
 	t.Setenv(envPrefix+"_ALPHA", "a")
 	t.Setenv(envPrefix+"_BETA_KEY_FILE", writeSecretFile(t, "b"))
 	t.Setenv(envPrefix+"_GAMMA", "c")
 	t.Setenv(envPrefix+"_GAMMA_FILE", "")
+	t.Setenv(envPrefix+"_DELTA", "")
+	t.Setenv(envPrefix+"_EPSILON_FILE", "")
 	t.Setenv(envPrefix+"_lower", "not a name this store can serve")
 	t.Setenv(envPrefix+"_TRAILING_", "maps to a name ending in '-'")
 	t.Setenv(envPrefix, "the bare prefix")
@@ -189,6 +191,10 @@ func TestEnvStoreNamesAndItsOwnGrammar(t *testing.T) {
 	}
 	if _, err := store.Get(t.Context(), "beta-key"); err != nil {
 		t.Errorf("Get(beta-key) through its _FILE form: %v", err)
+	}
+	//: an empty variable is unset for Get, so Names must not have listed it.
+	if _, err := store.Get(t.Context(), "delta"); !errs.HasCode(err, coresecret.CodeNotFound) {
+		t.Errorf("Get(delta) with an empty variable = %v, want NotFound", err)
 	}
 	//: a name whose variable ends in _FILE cannot be told from the file form.
 	if _, err := store.Get(t.Context(), "tls-file"); !errs.HasCode(err, coresecret.CodeInvalidName) {

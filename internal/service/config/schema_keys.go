@@ -47,6 +47,22 @@ const expectedDepth int = 8
 // that contains itself would otherwise be peeled forever.
 const maxContainerDepth int = 8
 
+// secretHold says how a key's field holds a core/secret.Value, which decides
+// two different things: whether a traced load reports the key Secret (either
+// hold), and whether the loader may hand the field the environment's raw text
+// (only a DIRECT hold — a slice or a map of secrets is a JSON document on the
+// wire, and replacing it with one string would fail its decode).
+type secretHold uint8
+
+const (
+	// secretNone is a field that holds no secret.
+	secretNone secretHold = iota
+	// secretDirect is a secret.Value, or a pointer to one: one string.
+	secretDirect
+	// secretNested is secrets inside a slice, an array or a map.
+	secretNested
+)
+
 // keyKind tells apart the two things an addressable key can be. The
 // distinction only matters for the unknown-key pass: it must descend into a
 // table and must NOT descend into a leaf, because a leaf's members are not
@@ -181,19 +197,19 @@ func lookupKey(level map[string]any, segments []string) bool {
 // applies — the quietest way a configuration can be wrong — and what lets the
 // unknown-key pass stop descending where the type stops naming things.
 //
-// The same walk also returns the keys whose field holds a core/secret.Value —
-// directly, or as the element of a pointer, a slice, an array or a map — so
-// the loader's idea of "a secret key" can never disagree with its idea of "a
-// key" (ADR 0097).
+// The same walk also returns the keys whose field holds a core/secret.Value,
+// and how — directly, or inside a slice, an array or a map — so the loader's
+// idea of "a secret key" can never disagree with its idea of "a key"
+// (ADR 0097).
 //
 // The walk stops at a type that decodes itself (see jsonUnmarshalerType) and
 // at a type it has already entered, so a self-referential struct terminates.
 // A key inside a recursive type therefore cannot be declared; that is a
 // stated limit, not an oversight.
-func collectVocabulary(typ reflect.Type) (keys map[string]keyKind, secrets map[string]bool) {
+func collectVocabulary(typ reflect.Type) (keys map[string]keyKind, secrets map[string]secretHold) {
 	walk := keyWalk{
 		keys:     make(map[string]keyKind, expectedKeys),
-		secrets:  make(map[string]bool, 0),
+		secrets:  make(map[string]secretHold, 0),
 		visiting: make(map[reflect.Type]bool, expectedDepth),
 	}
 	//: walk from the root, whose base path is the empty prefix.
@@ -206,8 +222,8 @@ func collectVocabulary(typ reflect.Type) (keys map[string]keyKind, secrets map[s
 type keyWalk struct {
 	// keys is the vocabulary, each key marked leaf or table.
 	keys map[string]keyKind
-	// secrets holds every key whose field holds a secret.
-	secrets map[string]bool
+	// secrets holds every key whose field holds a secret, and how.
+	secrets map[string]secretHold
 	// visiting holds the struct types on the current path, so a cycle ends.
 	visiting map[reflect.Type]bool
 }
@@ -268,8 +284,8 @@ func (w keyWalk) walkField(field reflect.StructField, base string) {
 	//: record it — a default may target the field as a whole either way.
 	w.keys[path] = kindOf(table)
 	//: a field holding a secret, however it holds one.
-	if holdsSecret(field.Type) {
-		w.secrets[path] = true
+	if hold := secretHoldOf(field.Type); hold != secretNone {
+		w.secrets[path] = hold
 	}
 	//: descend only into a struct the decoder itself will descend into.
 	if table {
@@ -395,28 +411,37 @@ func derefStruct(typ reflect.Type) (target reflect.Type, deref bool) {
 	return typ, false
 }
 
-// holdsSecret reports whether a field of typ holds a core/secret.Value —
-// itself, or through pointer, slice, array or map elements. A field of
-// []secret.Value is a secret key: its value is secrets.
+// secretHoldOf reports how a field of typ holds a core/secret.Value: directly
+// (through pointers only), nested inside a slice, an array or a map, or not at
+// all. A field of []secret.Value is a secret key — its value is secrets — but
+// not a direct one.
 //
 // The peeling is bounded by maxContainerDepth, because a container type can
 // contain itself — `type Tree map[string]Tree` is a legitimate configuration
 // shape — and an unbounded peel of one would never return.
-func holdsSecret(typ reflect.Type) bool {
+func secretHoldOf(typ reflect.Type) secretHold {
+	hold := secretDirect
 	//: peel the containers until a type that is not one, or the bound.
 	for range maxContainerDepth {
 		//: the containers whose element is what the field really holds.
 		switch typ.Kind() {
-		//: a pointer, a slice, an array or a map: look at the element.
-		case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+		//: a pointer changes nothing about how the value travels.
+		case reflect.Pointer:
 			typ = typ.Elem()
+		//: a collection makes the value a JSON document of secrets.
+		case reflect.Slice, reflect.Array, reflect.Map:
+			typ, hold = typ.Elem(), secretNested
 		//: anything else is the held type itself.
 		default:
-			//: a secret, or not.
-			return typ == secretValueType
+			//: a secret, held as peeled — or none.
+			if typ == secretValueType {
+				return hold
+			}
+			//: not a secret.
+			return secretNone
 		}
 	}
 	//: a container nested past any real configuration — or one that contains
 	//: itself — holds no secret this walk can name.
-	return false
+	return secretNone
 }

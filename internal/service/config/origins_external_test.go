@@ -217,3 +217,61 @@ func TestSourcesDescribeThemselves(t *testing.T) {
 		t.Errorf("LoadSchemaWithOrigins(nil schema) = %v, want CONFIG_SCHEMA_INVALID", err)
 	}
 }
+
+// collectionConf holds secrets inside a slice and a map.
+type collectionConf struct {
+	Tokens []coresecret.Value          `json:"tokens"`
+	Keys   map[string]coresecret.Value `json:"keys"`
+}
+
+// TestSecretCollectionsLoadFromTheEnvironment pins that a field holding
+// secrets inside a slice or a map is marked Secret but NOT given the raw
+// variable text: its variable holds a JSON document, and the coerced document
+// is what its decode needs.
+func TestSecretCollectionsLoadFromTheEnvironment(t *testing.T) {
+	t.Setenv(originEnvPrefix+"_TOKENS", `["first","second"]`)
+	t.Setenv(originEnvPrefix+"_KEYS", `{"signing":"k1"}`)
+	var conf collectionConf
+	origins, err := cfg.LoadWithOrigins(&conf, cfg.EnvSource(originEnvPrefix))
+	if err != nil {
+		t.Fatalf("LoadWithOrigins: %v", err)
+	}
+	if len(conf.Tokens) != 2 || conf.Tokens[1].RevealString() != "second" || conf.Keys["signing"].RevealString() != "k1" {
+		t.Fatalf("decoded %d tokens and %d keys", len(conf.Tokens), len(conf.Keys))
+	}
+	for _, origin := range origins {
+		if !origin.Secret || origin.Layer != coreconfig.LayerEnv {
+			t.Errorf("origin %+v, want a secret from the environment", origin)
+		}
+	}
+}
+
+// TestAnErasedTableIsNotAttributedToTheDefaults pins the attribution of a key
+// whose table a later layer replaced with null: the field holds its zero, so
+// the key is unset — not reported as the default the null erased.
+func TestAnErasedTableIsNotAttributedToTheDefaults(t *testing.T) {
+	t.Parallel()
+	schema, err := cfg.NewSchemaValue(cfg.SchemaSpec[tracedConf]{
+		Defaults: []coreconfig.DeclaredValue{{Key: "database.max_conns", Value: 16}},
+	})
+	if err != nil {
+		t.Fatalf("NewSchemaValue: %v", err)
+	}
+	var conf tracedConf
+	origins, err := cfg.LoadSchemaWithOrigins(&conf, schema, staticSource{m: map[string]any{"database": nil}})
+	if err != nil {
+		t.Fatalf("LoadSchemaWithOrigins: %v", err)
+	}
+	got := originIndex(origins)["database.max_conns"]
+	if got.Layer != "" || conf.Database.MaxConns != 0 {
+		t.Fatalf("an erased default: origin %+v and value %d, want unset and 0", got, conf.Database.MaxConns)
+	}
+	//: and a table that is merged, not erased, keeps its default's origin.
+	origins, err = cfg.LoadSchemaWithOrigins(&conf, schema, staticSource{m: map[string]any{"database": map[string]any{}}})
+	if err != nil {
+		t.Fatalf("LoadSchemaWithOrigins: %v", err)
+	}
+	if got := originIndex(origins)["database.max_conns"]; got.Layer != coreconfig.LayerDefault {
+		t.Fatalf("a merged table: origin %+v, want the default", got)
+	}
+}

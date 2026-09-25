@@ -100,6 +100,12 @@ func NewFile(cfg FileConfig) (store coresecret.Store, err error) {
 		return nil, errors.Join(wrapAs(InvalidConfig, lockErr, errs.String("setting", "Dir"),
 			errs.String("problem", "the lock domain refused it")), closeRoot(root))
 	}
+	//: the directory checked by path, the directory held, and the directory
+	//: the locker names must be ONE directory — see checkHeldRoot.
+	if heldErr := checkHeldRoot(root, cfg.Dir); heldErr != nil {
+		//: close what was opened; its own failure joins the verdict.
+		return nil, errors.Join(heldErr, closeRoot(root))
+	}
 	//: a working store.
 	return &fileStore{
 		root:   root,

@@ -38,9 +38,9 @@ type SchemaValue[T any] struct {
 	// known is the target type's whole vocabulary, with each key marked leaf
 	// or table. The unknown-key pass walks the merged map against it.
 	known map[string]keyKind
-	// secrets is every key whose field holds a core/secret.Value, resolved
-	// once here so a load pays no walk for it (ADR 0097).
-	secrets map[string]bool
+	// secrets is every key whose field holds a core/secret.Value, and how,
+	// resolved once here so a load pays no walk for it (ADR 0097).
+	secrets map[string]secretHold
 	// strict refuses a key outside `known`. It is the INVERSE of the spec's
 	// AllowUnknownKeys so that the zero value of the spec is the strict one.
 	strict bool

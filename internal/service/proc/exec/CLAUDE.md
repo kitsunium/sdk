@@ -51,8 +51,9 @@ process that already exists.
   so `resolveSpec` runs before either spawn path (the trampoline execs the
   target itself). A value with a separator is a path and is left as written.
   A bare name is searched in the PATH the CHILD will see: `Spec.Env`'s last
-  `PATH=` entry when it has one, the parent's otherwise — including a nil
-  `Spec.Env`, whose child environment is empty. The first executable in PATH
+  `PATH=` entry whenever it names one — an explicitly empty `PATH=` searches
+  nothing rather than falling back — and the parent's only when it names none,
+  including a nil `Spec.Env`, whose child environment is empty. The first executable in PATH
   order wins; a match through a relative entry (`.` or empty) is refused with
   `exec.ErrDot` rather than skipped, as os/exec refuses it, because skipping
   would run a different program from the one the order selects.

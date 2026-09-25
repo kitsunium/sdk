@@ -238,12 +238,14 @@ func (e envStore) Names(_ context.Context) (names []string, err error) {
 }
 
 // nameOf maps one environ entry back to the secret name it supplies, reporting
-// false for an entry this store would never read.
+// false for an entry this store would never read — including an EMPTY one,
+// which Get treats as unset, so that Names never lists a secret Get cannot
+// return.
 func (e envStore) nameOf(entry string) (name string, ok bool) {
-	key, _, _ := strings.Cut(entry, "=")
+	key, value, _ := strings.Cut(entry, "=")
 	rest, inNamespace := strings.CutPrefix(key, e.prefix)
-	//: outside the namespace, or the bare prefix itself.
-	if !inNamespace || rest == "" {
+	//: outside the namespace, the bare prefix itself, or an empty value.
+	if !inNamespace || rest == "" || value == "" {
 		//: not a secret of this store.
 		return "", false
 	}

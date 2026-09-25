@@ -20,14 +20,16 @@ import (
 // position — and the DETAIL an operator acts on: the variable that set the
 // key ("APP_DATA_DIR"), the file that holds it. It never carries the value,
 // and a key whose field holds a core/secret.Value is marked Secret, so a
-// --show-config rendering knows to mask whatever it prints beside it. A key no
-// layer supplied is reported with an empty Layer: its field holds its zero.
+// --show-config rendering knows to mask whatever it prints beside it. A key
+// absent from the merged layers — no layer supplied it, or a later one erased
+// it by replacing one of its tables with a scalar or a null — is reported with
+// an empty Layer: its field holds its zero.
 //
 // The load itself is exactly [Load]'s — same order, same verdicts — and on a
 // failure no origin is returned: a configuration that did not load has no
 // provenance worth reading.
 func LoadWithOrigins[T any](target *T, sources ...coreconfig.Source) (origins []coreconfig.OriginValue, err error) {
-	layers, loadErr := loadInto(target, nil, sources)
+	loaded, loadErr := loadInto(target, nil, sources)
 	//: nothing loaded, nothing to attribute.
 	if loadErr != nil {
 		//: Load's own verdict.
@@ -35,7 +37,7 @@ func LoadWithOrigins[T any](target *T, sources ...coreconfig.Source) (origins []
 	}
 	known, secrets := collectVocabulary(reflect.TypeFor[T]())
 	//: one origin per leaf key of T.
-	return originsOf(known, secrets, layers), nil
+	return originsOf(known, secrets, loaded), nil
 }
 
 // LoadSchemaWithOrigins is [LoadSchema] with the origins [LoadWithOrigins]
@@ -47,19 +49,19 @@ func LoadSchemaWithOrigins[T any](target *T, schema *SchemaValue[T], sources ...
 		//: refused before any source is read.
 		return nil, rejectSchema("", "the schema is nil; build one with NewSchema")
 	}
-	layers, loadErr := loadInto(target, schema, sources)
+	loaded, loadErr := loadInto(target, schema, sources)
 	//: nothing loaded, nothing to attribute.
 	if loadErr != nil {
 		//: LoadSchema's own verdict.
 		return nil, loadErr
 	}
 	//: the schema resolved the vocabulary and the secrets at construction.
-	return originsOf(schema.known, schema.secrets, layers), nil
+	return originsOf(schema.known, schema.secrets, loaded), nil
 }
 
 // originsOf attributes every leaf key of the vocabulary to the LAST layer that
 // supplied it — the layer whose value the merge kept — in key order.
-func originsOf(known map[string]keyKind, secrets map[string]bool, layers []layerValue) []coreconfig.OriginValue {
+func originsOf(known map[string]keyKind, secrets map[string]secretHold, loaded mergedLayers) []coreconfig.OriginValue {
 	keys := slices.Sorted(maps.Keys(known))
 	origins := make([]coreconfig.OriginValue, 0, len(keys))
 	//: a table is not a value; its members are reported instead.
@@ -68,27 +70,37 @@ func originsOf(known map[string]keyKind, secrets map[string]bool, layers []layer
 		if known[key] != keyLeaf {
 			continue
 		}
-		origin := coreconfig.OriginValue{Key: key, Secret: secrets[key]}
-		origin.Layer, origin.Detail = attribute(layers, key)
-		origins = append(origins, origin)
+		layer, detail := attribute(loaded, key)
+		origins = append(origins, coreconfig.OriginValue{
+			Key: key, Layer: layer, Detail: detail, Secret: secrets[key] != secretNone,
+		})
 	}
 	//: sorted, so two loads of one deployment report identically.
 	return origins
 }
 
-// attribute finds the last layer holding key and asks it to describe itself.
-// Both answers are empty when no layer holds the key.
-func attribute(layers []layerValue, key string) (layer, detail string) {
+// attribute names the layer that supplied key's final value and asks it to
+// describe itself. Both answers are empty when the key is absent from the
+// merged fold — never supplied, or supplied and then erased by a later layer
+// that replaced one of its tables with a scalar or a null: the field then
+// holds its zero, and the layer that first supplied the key did not decide it.
+func attribute(loaded mergedLayers, key string) (layer, detail string) {
 	segments := strings.Split(key, keySeparator)
-	//: the last layer holding the key is the one the merge kept.
-	for _, candidate := range slices.Backward(layers) {
+	//: absent from the fold: the decoder filled nothing, whoever once did.
+	if !lookupKey(loaded.merged, segments) {
+		//: unset.
+		return "", ""
+	}
+	//: present in the fold, so the last layer holding it is the one the merge
+	//: kept — a later layer that erased an ancestor would have removed it.
+	for _, candidate := range slices.Backward(loaded.layers) {
 		//: an explicit null counts as supplied, as it does for Required.
 		if lookupKey(candidate.values, segments) {
 			//: this layer's own account of itself.
 			return describeLayer(candidate, key)
 		}
 	}
-	//: no layer supplied the key.
+	//: unreachable while the fold is built from these layers.
 	return "", ""
 }
 

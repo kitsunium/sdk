@@ -7,11 +7,14 @@ optional `Validator` the decoded struct implements, a `Watcher` for change
 notification, the `DeclaredValue` a schema uses to say what a key holds when
 nobody supplied it, and the provenance pair — the `OriginValue` a traced load
 reports per key and the `Describer` sibling a `Source` implements to say where
-its values come from (ADR 0097). A core sibling admitted by **ADR 0028** (closes the Phase-B
-wave), extended in place by **ADR 0061** (the schema). Concrete sources (env,
-file), the merge+decode loader, the schema compiler and the cross-OS poll
-watcher live in `internal/service/config`; this package owns only the contract,
-the one domain value, and the typed failure sentinels.
+its values come from (ADR 0097). A core sibling admitted by **ADR 0028** (closes
+the Phase-B wave), extended in place by **ADR 0061** (the schema) and **ADR
+0097** (provenance). Concrete sources (env, file), the merge+decode loader, the
+schema compiler and the cross-OS poll watcher live in `internal/service/config`;
+this package owns only the contracts (the three ports and the `Describer`
+sibling, which must sit beside the `Source` it extends so a third-party source
+can implement it), the two domain values (`DeclaredValue`, `OriginValue`) and
+the typed failure sentinels.
 
 Code range: `0.2.10.*` (ADR 0028 + ADR 0061).
 

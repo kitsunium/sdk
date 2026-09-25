@@ -194,7 +194,7 @@ two replicas sharing a file store can both find a rotation due and both perform
 it — nothing breaks, both versions are kept keys — and with it, the second
 re-reads and finds nothing due.
 
-## Consequences
+## Consequences / Semantics
 
 - Downstream code can hold a secret in a configuration struct, print it, dump
   it and log it without writing it down, and `config.Load` fills it from a

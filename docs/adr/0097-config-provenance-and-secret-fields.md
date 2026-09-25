@@ -46,9 +46,12 @@ type Origin struct { // core/config.OriginValue
 a caller who does not ask for provenance does not pay for the report, and a
 schemaless load stays spellable. A key is attributed to the LAST layer that
 supplied it — the one whose value the merge kept — and an explicit `null`
-counts as supplied, as it does for `Required` (ADR 0061). A key no layer
-supplied has an empty `Layer`: its field holds its Go zero. Tables are not
-reported; their members are. On a failed load no origin is returned.
+counts as supplied, as it does for `Required` (ADR 0061). A key absent from the
+merged fold has an empty `Layer`: no layer supplied it, or a later layer erased
+it by replacing one of its tables with a scalar or a `null` — either way its
+field holds its Go zero, and the layer that first supplied it did not decide
+that. Tables are not reported; their members are. On a failed load no origin is
+returned.
 
 ### 2. A source describes itself through a sibling, not a widened port
 
@@ -82,9 +85,13 @@ the same type walk ADR 0061's vocabulary uses, so "a secret key" and "a key" can
 never disagree; a schema resolves it once at construction, and a schemaless load
 walks each target type once and memoises the answer.
 
-For a secret key that the ENVIRONMENT supplied last, the loader replaces the
-coerced value with the variable's raw text before the decode, on every entry
-point, traced or not. `12345`, `1e3`, `true`, `null` and a twenty-three-digit
+For a DIRECT secret key — a `secret.Value` field, or a pointer to one — that
+the ENVIRONMENT supplied last, the loader replaces the coerced value with the
+variable's raw text before the decode, on every entry point, traced or not. A
+field holding secrets inside a slice or a map is marked `Secret` but keeps the
+coerced value: its variable holds a JSON document, `["a","b"]`, whose decoded
+form is what the field's decode needs, and whose elements were written as
+strings. `12345`, `1e3`, `true`, `null` and a twenty-three-digit
 token all arrive exactly as written. Only a top-level key can be one variable; a
 secret nested inside a table the environment supplied as JSON was written as
 JSON, quotes included, and decodes as written. Everything else about the
@@ -98,7 +105,7 @@ names nothing it was given, and `CONFIG_DECODE_FAILED` carries it unchanged. A
 test asserts that the refused digits appear in neither the message, the private
 text, nor any field.
 
-## Consequences
+## Consequences / Semantics
 
 - A framework shows every setting with its origin by calling
   `LoadSchemaWithOrigins` and rendering the report, masking the `Secret` ones —

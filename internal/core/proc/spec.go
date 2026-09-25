@@ -18,8 +18,9 @@ type Spec struct {
 	// Path is the executable to run. Required. A value containing a path
 	// separator is a file path, taken as written (a relative one is resolved
 	// against Dir). A bare name — "go", "sh" — is searched in the PATH the
-	// CHILD will see: the PATH entry of Env when it carries one, the parent's
-	// otherwise (including when Env is nil). os/exec's rules apply: the first
+	// CHILD will see: the PATH entry of Env whenever Env names one (an
+	// explicitly empty PATH= searches nothing), the parent's only when Env
+	// names none (including when Env is nil). os/exec's rules apply: the first
 	// executable in PATH order wins, and a match found only through a relative
 	// entry ("." or an empty one) is refused with exec.ErrDot.
 	Path string

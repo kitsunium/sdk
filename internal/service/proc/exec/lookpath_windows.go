@@ -19,20 +19,16 @@ const pathExtVariable string = "PATHEXT"
 // defaultPathExt is what os/exec.LookPath uses when PATHEXT is unset.
 const defaultPathExt string = ".com;.exe;.bat;.cmd"
 
-// candidates is every spelling name could have in dir: name itself when it
-// already carries one of the PATHEXT extensions, else name with each of them,
-// in PATHEXT order.
+// candidates is every spelling name could have in dir, in os/exec.LookPath's
+// order: name itself first when it already carries an extension, then name
+// with each PATHEXT extension, in PATHEXT order.
 func candidates(dir, name string, env []string) []string {
 	exts := pathExts(env)
-	//: an explicit extension the platform runs is taken as written.
-	for _, ext := range exts {
-		//: "go.exe", not "go.exe.exe".
-		if strings.EqualFold(filepath.Ext(name), ext) {
-			//: the one spelling.
-			return []string{filepath.Join(dir, name)}
-		}
+	out := make([]string, 0, len(exts)+1)
+	//: "go.exe" is tried as written before "go.exe.exe" is.
+	if filepath.Ext(name) != "" {
+		out = append(out, filepath.Join(dir, name))
 	}
-	out := make([]string, 0, len(exts))
 	//: each runnable extension, in the order PATHEXT gives.
 	for _, ext := range exts {
 		out = append(out, filepath.Join(dir, name+ext))
@@ -44,8 +40,8 @@ func candidates(dir, name string, env []string) []string {
 // pathExts is the PATHEXT list the child would see, else the parent's, else
 // os/exec's default.
 func pathExts(env []string) []string {
-	value := envValue(env, pathExtVariable)
-	//: the child's environment names none.
+	value, _ := envValue(env, pathExtVariable)
+	//: the child's environment names none, or names it empty.
 	if value == "" {
 		value = os.Getenv(pathExtVariable)
 	}
