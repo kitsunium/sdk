@@ -1,0 +1,47 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "strictjson",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "reader.go",
+        "request.go",
+        "strictjson.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/codec/strictjson",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":strictjson",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "strictjson_test",
+    srcs = [
+        "request_external_test.go",
+        "strictjson_external_test.go",
+        "strictjson_internal_test.go",
+    ],
+    embed = [":strictjson"],
+    deps = ["//internal/kernel/errs"],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

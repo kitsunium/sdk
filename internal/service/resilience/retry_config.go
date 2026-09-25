@@ -1,11 +1,21 @@
 // Package resilience — retry policy configuration.
 package resilience
 
-import "time"
+import (
+	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/clock"
+)
 
 // RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a
-// Multiplier of 1 or below defaults to 2; a zero MaxDelay means no cap; a nil
-// Retryable replays every error; a zero Jitter backs off deterministically.
+// Multiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no
+// cap; a nil Retryable replays every error; a zero Jitter backs off
+// deterministically; a nil Clock waits on the wall clock.
+//
+// BaseDelay, MaxDelay, Multiplier and Jitter are the four fields of
+// BackoffValue, under the same names and with the same meaning: NewRetry builds its curve
+// from them, so a loop that retries on its own terms and a Retry policy
+// configured alike wait alike.
 type RetryConfig struct {
 	MaxAttempts int
 	BaseDelay   time.Duration
@@ -41,4 +51,12 @@ type RetryConfig struct {
 	// ceiling to raise: the backoff grows geometrically and the jitter widens
 	// whatever it reaches, bounded only by what a time.Duration can represent.
 	Jitter float64
+	// Clock is what the backoff waits on. Nil means clock.System.
+	//
+	// It exists so a test drives the whole retry loop with a ManualClock —
+	// advancing past each backoff instead of sleeping through it, and asserting
+	// the exact wait rather than a wall-clock tolerance. The breaker and the
+	// rate limiter have taken a clock since they shipped; the retry, which is
+	// the one policy here that actually WAITS, did not.
+	Clock clock.Timed
 }

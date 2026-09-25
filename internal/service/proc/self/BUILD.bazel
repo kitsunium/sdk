@@ -1,0 +1,38 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "self",
+    srcs = [
+        "build.go",
+        "cputime_other.go",
+        "cputime_unix.go",
+        "stats.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/self",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = ["@org_golang_x_mod//module"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":self",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "self_test",
+    srcs = [
+        "build_external_test.go",
+        "stats_external_test.go",
+        "stats_internal_test.go",
+    ],
+    embed = [":self"],
+)

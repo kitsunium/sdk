@@ -4,10 +4,10 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **54 packages**: 50 at the top level, plus four nested ones
-(`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`). They
-are grouped below by the job they do, and each links to its own generated
-`README.md`.
+`pkg/v1` ships **55 packages**: 50 at the top level, plus five nested ones
+(`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`,
+`codec/strictjson`). They are grouped below by the job they do, and each links
+to its own generated `README.md`.
 
 ### Observability
 
@@ -26,11 +26,11 @@ are grouped below by the job they do, and each links to its own generated
 | [`lifecycle`](./pkg/v1/lifecycle) | Ordered bring-up, reverse teardown. A partial start is unwound before `Start` returns, through the same path an ordinary `Stop` uses; the shutdown budget is **per component**, so the first thing that will not finish cannot spend everyone else's. |
 | [`cli`](./pkg/v1/cli) | Sub-commands, generated help and a typed exit status on the stdlib `flag`, with zero dependencies. `flag.ExitOnError` is refused by name — nothing here can end your process. |
 | [`events`](./pkg/v1/events) | In-process **synchronous** bus keyed on the event's concrete Go type. Not a queue: no durability, no retry, no dead-letter path, and deliberately no async mode. |
-| [`queue`](./pkg/v1/queue) | The asynchronous, durable counterpart. At-least-once, and the consequence is in the type: `Deliveries` counts from 1 and `HandlerIsIdempotent` is refused at its zero value. The durable broker's whole state is a directory and every transition is one `rename(2)`. |
+| [`queue`](./pkg/v1/queue) | The asynchronous, durable counterpart. At-least-once, and the consequence is in the type: `Deliveries` counts from 1 and `HandlerIsIdempotent` is refused at its zero value. The durable broker's whole state is a directory and every transition is one `rename(2)`. An idle consumer sleeps until a publication, a retry falling due or a lapsed lease wakes it, so the poll only bounds what another process publishes. |
 | [`scheduler`](./pkg/v1/scheduler) | Five-field POSIX cron + fixed intervals. DST, missed deadlines and overlap are decided and documented rather than emergent. |
 | [`cache`](./pkg/v1/cache) | The LRU+TTL primitive **and** the domain above it: invalidation by tag, stampede protection, L1/L2 chaining. Stampede protection stops at the process boundary, and says so. |
 | [`clock`](./pkg/v1/clock) | The time port — `Clock` / `Waiter` / `Timed`, plus `System` and a `ManualClock` a test drives by hand. Every SDK `Clock` field takes one, so a timeout, a cron cadence or a lease expiry is asserted exactly, with no sleeping. |
-| [`resilience`](./pkg/v1/resilience) | Retry, circuit breaker, rate limit, bulkhead, timeout, fallback, hedging — composable `Runner` policies. A policy's zero value is a safe default or an explicit refusal, never an inert policy. |
+| [`resilience`](./pkg/v1/resilience) | Retry, circuit breaker, rate limit — one bucket, or one per caller with the set of callers bounded — bulkhead, timeout, fallback, hedging: composable `Runner` policies. The backoff curve is public and never wraps negative, and the retry waits on a clock a test can move. A policy's zero value is a safe default or an explicit refusal, never an inert policy. |
 | [`lock`](./pkg/v1/lock) | Named exclusive leases over one process or one machine, with fencing tokens. What it does **not** guarantee is stated as loudly: the SDK can only issue a fence; where the resource cannot compare it, exclusion is not guaranteed against a GC pause. |
 | [`id`](./pkg/v1/id) | UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID. |
 
@@ -49,7 +49,7 @@ are grouped below by the job they do, and each links to its own generated
 
 | Package | What it does |
 |---|---|
-| [`codec`](./pkg/v1/codec) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. |
+| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. |
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
 | [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/hash), [`sign`](./pkg/v1/sign), [`mac`](./pkg/v1/mac), [`kdf`](./pkg/v1/kdf), [`agree`](./pkg/v1/agree), [`password`](./pkg/v1/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |
@@ -59,14 +59,15 @@ are grouped below by the job they do, and each links to its own generated
 | [`validation`](./pkg/v1/validation) | Constraints, located violations (`user.addresses[2].zip`), collect-all by default. A message names the rule and the bound but **never the value** — a security property with its own test. |
 | [`sql`](./pkg/v1/sql) | Ports above `database/sql`, deliberately never an ORM, and **no driver**. A unit of work receives an `Executor` with no Commit and no Rollback, so a callee ending its caller's transaction is a sentence with no spelling. |
 | [`vfs`](./pkg/v1/vfs) | Reading is `io/fs` **unchanged** (`FS` is a type alias, so `fs.WalkDir` applies with no adapter); writing is four verbs; publication is `rename(2)`-atomic — measured at 0 torn reads out of 600. |
+| [`redact`](./pkg/v1/redact) | Values, JSON documents, text and log attributes shown with their secrets replaced — a name that says it is one, a field declared secret, a URL's credentials — within an **exact** byte bound, never touching the input. What it does not recognise is stated, because it is a display filter and not an access control. |
 
 ### Process, platform and distribution
 
 | Package | What it does |
 |---|---|
-| [`proc`](./pkg/v1/proc) + [`process`](./pkg/v1/process), [`signal`](./pkg/v1/signal), [`reaper`](./pkg/v1/reaper), [`rlimit`](./pkg/v1/rlimit), [`cgroup`](./pkg/v1/cgroup), [`sdnotify`](./pkg/v1/sdnotify), [`sdlisten`](./pkg/v1/sdlisten) | OS process supervision: spawn, signals, subreaping, resource limits, cgroups, systemd. Uniform typed `UnsupportedPlatform` where a kernel offers no native mechanism. |
+| [`proc`](./pkg/v1/proc) + [`process`](./pkg/v1/process), [`signal`](./pkg/v1/signal), [`reaper`](./pkg/v1/reaper), [`rlimit`](./pkg/v1/rlimit), [`cgroup`](./pkg/v1/cgroup), [`sdnotify`](./pkg/v1/sdnotify), [`sdlisten`](./pkg/v1/sdlisten) | OS process supervision: spawn, signals, subreaping, resource limits, cgroups, systemd. Uniform typed `UnsupportedPlatform` where a kernel offers no native mechanism. `process` also reads the process itself: its runtime state and the build it came from, a module's release, commit and local directory kept apart. |
 | [`memlimit`](./pkg/v1/memlimit) | Reads the cgroup cap that already bounds **this** process — which the Go runtime does not — so a service in a 512 MiB container gets a soft limit instead of a SIGKILL. |
-| [`git`](./pkg/v1/git) | What a branch changed, as a value that can say it does not know: "nothing changed" and "I could not tell" are opposite instructions, so the resolver degrades rather than answering with an empty set. |
+| [`git`](./pkg/v1/git) | What a branch changed, as a value that can say it does not know: "nothing changed" and "I could not tell" are opposite instructions, so the resolver degrades rather than answering with an empty set. And what a working tree is at — its commit, that commit's time, whether a tracked file differs — through the same hardened invocations. |
 | [`selfupdate`](./pkg/v1/selfupdate) | Signature **then** digest **then** disk. Comparing an archive against a checksum file fetched beside it verifies nothing; a build with no vendor key installs nothing. |
 | [`entitlement`](./pkg/v1/entitlement) | Vendor-signed roster → grant, with an offline cache, an anti-rollback ratchet and a CI seat. Bring your own `Identity`: three methods, and none of them says "ssh". |
 | [`gate`](./pkg/v1/gate) | May this invocation run? A policy value and a pure decision — it verifies nothing, upgrades nothing and never ends a process. |

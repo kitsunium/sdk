@@ -54,7 +54,7 @@ func NewRateLimiter(cfg RateLimiterConfig) coreres.Runner {
 	//:
 	//: A rate arrives non-finite by ordinary arithmetic, not by a caller
 	//: typing it: budget/window is +Inf for a zero window, and 0.0/0.0 is NaN.
-	if math.IsNaN(cfg.Rate) || math.IsInf(cfg.Rate, 0) || cfg.Rate <= 0 {
+	if !usableRate(cfg.Rate) {
 		//: fail closed, and say why.
 		return newMisconfigured("ratelimit", "Rate")
 	}
@@ -65,15 +65,37 @@ func NewRateLimiter(cfg RateLimiterConfig) coreres.Runner {
 		//: production default.
 		clk = clock.System
 	}
+	//: one bucket, full, so the first call is admitted.
+	return newTokenBucket(clk, cfg.Rate, bucketSize(cfg.Burst))
+}
+
+// usableRate reports whether rate is a finite positive number of tokens per
+// second — the only kind a bucket can refill at without failing open or
+// closed. NewRateLimiter's comment says why each of the other shapes is fatal.
+func usableRate(rate float64) bool {
+	//: finiteness, not just sign: NaN and ±Inf both pass a bare `> 0` test
+	//: or fail it for the wrong reason.
+	return !math.IsNaN(rate) && !math.IsInf(rate, 0) && rate > 0
+}
+
+// bucketSize resolves a burst to the bucket capacity, clamping a non-positive
+// one to a single token — the obvious floor: admit at least one call.
+func bucketSize(burst int) float64 {
 	//: a non-positive burst still allows a single token.
-	burst := float64(cfg.Burst)
-	//: clamp a non-positive burst to one token.
-	if cfg.Burst < 1 {
+	if burst < 1 {
 		//: minimum bucket of one token.
-		burst = oneToken
+		return oneToken
 	}
+	//: the caller's capacity.
+	return float64(burst)
+}
+
+// newTokenBucket returns a full bucket refilling at rate tokens per second up
+// to burst, reading time from clk. It is the one constructor both the single
+// limiter and every key of the keyed limiter go through.
+func newTokenBucket(clk clock.Clock, rate, burst float64) *tokenBucket {
 	//: start full so the first call is admitted.
-	return &tokenBucket{clk: clk, rate: cfg.Rate, burst: burst, tokens: burst, last: clk.Now()}
+	return &tokenBucket{clk: clk, rate: rate, burst: burst, tokens: burst, last: clk.Now()}
 }
 
 // Run admits op if a token is available, else rejects with RateLimited.

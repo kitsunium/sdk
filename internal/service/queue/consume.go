@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
@@ -65,6 +66,9 @@ func Consume(ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig) e
 // pump is one worker: lease, process, acknowledge, repeat. It returns only
 // when its context ends or the storage refuses.
 func pump(ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig) error {
+	//: a broker that can wake its consumers is asked once; one that cannot
+	//: is polled, exactly as before the capability existed.
+	waker, wakes := broker.(corequeue.Waker)
 	//: until the consumer is stopped or the medium gives up.
 	for {
 		//: checked first, so a cancelled consumer never leases a message it
@@ -72,6 +76,12 @@ func pump(ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig) erro
 		if ctx.Err() != nil {
 			//: a stopped consumer, not a failed one.
 			return nil
+		}
+		var signal <-chan struct{}
+		//: taken BEFORE the Receive: a publication landing between an empty
+		//: Receive and the wait closes this channel, so it is not missed.
+		if wakes {
+			signal = waker.Wake().Signal
 		}
 		batch, receiveErr := broker.Receive(ctx, cfg.BatchSize)
 		//: a cancelled Receive is the stop, not a storage failure.
@@ -82,8 +92,9 @@ func pump(ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig) erro
 		}
 		//: an empty queue is not an error and not a busy loop.
 		if len(batch) == 0 {
-			//: waits through the clock, never time.Sleep, and wakes on cancel.
-			if !idle(ctx, cfg) {
+			//: waits through the clock, never time.Sleep, and wakes on cancel,
+			//: on a publication, or when something the broker holds is due.
+			if !idle(ctx, cfg, signal, idleFor(cfg.PollInterval, waker, wakes)) {
 				//: cancelled while waiting.
 				return nil
 			}
@@ -99,15 +110,47 @@ func pump(ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig) erro
 	}
 }
 
-// idle waits out the poll interval and reports whether the worker should
-// carry on.
-func idle(ctx context.Context, cfg ConsumerConfig) bool {
+// idleFor returns how long a worker that just found the queue empty may
+// sleep: the poll interval, shortened to the moment the broker says a message
+// it already holds becomes receivable — read AFTER the empty Receive, so it
+// reflects what that Receive saw.
+func idleFor(poll time.Duration, waker corequeue.Waker, wakes bool) time.Duration {
+	//: a broker that cannot say is polled at the configured cadence.
+	if !wakes {
+		//: the poll interval, unchanged.
+		return poll
+	}
+	next := waker.Wake()
+	//: nothing becomes receivable on its own: only an event or the poll.
+	if !next.Scheduled || next.In >= poll {
+		//: the poll bounds what the broker cannot see, such as another
+		//: process's publication.
+		return poll
+	}
+	//: due already, or sooner than the poll; never negative.
+	return max(next.In, 0)
+}
+
+// idle waits for the first of: the caller's cancellation, the broker's wake
+// signal, or wait elapsing on the consumer's clock. It reports whether the
+// worker should carry on.
+//
+// A nil signal — a broker without the Waker capability — blocks forever in the
+// select and leaves the plain poll it always was.
+func idle(ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, wait time.Duration) bool {
+	//: a timer rather than After, so a wake that wins releases it at once
+	//: instead of leaving it armed until it fires.
+	timer := cfg.Clock.NewTimer(wait)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		//: stop.
 		return false
-	case <-cfg.Clock.After(cfg.PollInterval):
-		//: ask again.
+	case <-signal:
+		//: something was published or handed back: ask again now.
+		return true
+	case <-timer.C():
+		//: the poll elapsed, or something became due: ask again.
 		return true
 	}
 }

@@ -28,6 +28,15 @@ Sixteen wire-format codecs covering 24 registered Format names, one Go package e
 
 The `PP` slots above are authoritative — verified against each `codes.go`. New codecs claim a fresh slot in ADR 0005's registry (or its ADR 0006 extension) before being added.
 
+`strictjson/` sits in this tree and is deliberately NOT a codec (ADR 0102): it
+registers no Format and implements no `core/codec.Codec`, because what it adds —
+a per-call byte bound, the refusal of unknown and case-variant members, of
+duplicate names and of trailing data, and errors that never quote the input —
+is a decoding POLICY for documents somebody else wrote, not a wire format. It is
+built on `encoding/json/v2`, owns `0.3.72.*`, and is reached through its own
+facade `pkg/v1/codec/strictjson`, so a server that only needs it does not link
+the sixteen codecs `pkg/v1/codec` blank-imports. `json/` is unchanged.
+
 ## File layout (per codec)
 
 ```

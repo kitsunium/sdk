@@ -2154,6 +2154,46 @@ codes:
     const: CodeKeyFileInvalid
     hex: "0x00_03_44_08"
     package: internal/service/secret
+  - code: "0.3.72.1"
+    const: CodeDocumentTooLarge
+    hex: "0x00_03_48_01"
+    package: internal/service/codec/strictjson
+  - code: "0.3.72.2"
+    const: CodeDocumentEmpty
+    hex: "0x00_03_48_02"
+    package: internal/service/codec/strictjson
+  - code: "0.3.72.3"
+    const: CodeDocumentMalformed
+    hex: "0x00_03_48_03"
+    package: internal/service/codec/strictjson
+  - code: "0.3.72.4"
+    const: CodeMemberUnknown
+    hex: "0x00_03_48_04"
+    package: internal/service/codec/strictjson
+  - code: "0.3.72.5"
+    const: CodeValueMismatched
+    hex: "0x00_03_48_05"
+    package: internal/service/codec/strictjson
+  - code: "0.3.72.6"
+    const: CodeMediaTypeUnsupported
+    hex: "0x00_03_48_06"
+    package: internal/service/codec/strictjson
+  - code: "0.3.72.7"
+    const: CodeDocumentUnreadable
+    hex: "0x00_03_48_07"
+    package: internal/service/codec/strictjson
+  - code: "0.3.72.8"
+    const: CodeDecodeMisconfigured
+    hex: "0x00_03_48_08"
+    package: internal/service/codec/strictjson
+  - code: "0.3.73.1"
+    const: CodeDocumentInvalid
+    hex: "0x00_03_49_01"
+    package: internal/service/redact
+  - code: "0.3.73.2"
+    const: CodeValueUnencodable
+    hex: "0x00_03_49_02"
+    package: internal/service/redact
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

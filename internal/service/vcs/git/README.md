@@ -10,6 +10,7 @@ consumers import the facade, not this package.
 func Resolve(ctx context.Context, cfg Config) corevcs.ResolutionValue
 func GitDir(ctx context.Context, root string) (string, error)
 func ShowFile(ctx context.Context, repoRoot, sha, relPath string) (string, error)
+func Head(ctx context.Context, dir string) (HeadValue, error)
 ```
 
 - `Resolve` computes what the branch changed. It returns **no error**: see below.
@@ -17,6 +18,9 @@ func ShowFile(ctx context.Context, repoRoot, sha, relPath string) (string, error
   It follows a `gitdir:` pointer file, so linked worktrees and submodules work.
 - `ShowFile` reads a blob at a commit. A path absent at that commit is an error,
   which is what lets a caller tell "deleted" from "emptied".
+- `Head` reports what a working tree is at: HEAD's commit, its committer date
+  (read from the raw commit object, never through `git log`), and whether a
+  TRACKED file differs from it. Not cached.
 
 ## Resolve degrades, it does not fail
 

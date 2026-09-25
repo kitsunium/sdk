@@ -65,6 +65,9 @@ type memoryBroker struct {
 	// O(1) and bounds the heap by the leases taken within one visibility
 	// timeout rather than by the queue's depth.
 	expiry *heap.Heap[leaseExpiry]
+	// wake is what an idle consumer of this broker waits on: closed by a
+	// Publish and by a Nack that hands a message back.
+	wake *wakeSignal
 	// nonce prefixes every receipt this broker mints.
 	nonce string
 	// ready holds the queued records, ordered by visibleAt then seq.
@@ -103,6 +106,7 @@ func NewMemory(cfg MemoryConfig) (broker corequeue.Broker, err error) {
 		policy:   cfg.Policy.Normalized(),
 		clk:      clockOrSystem(cfg.Clock),
 		nonce:    nonce,
+		wake:     newWakeSignal(),
 		inflight: map[corequeue.ReceiptValue]*memRecord{},
 		//: earliest deadline first, so the reclaim scan meets the most
 		//: overdue lease and stops at the first one still held.
@@ -137,6 +141,9 @@ func (b *memoryBroker) Publish(
 		enqueuedAt: now, visibleAt: now, seq: b.seq,
 	}
 	b.insertReady(record)
+	//: every idle consumer of this broker looks again now, rather than at its
+	//: next poll.
+	b.wake.fire()
 	//: accepted; in this broker "accepted" means "in a map", which is the
 	//: whole difference from NewFile.
 	//
@@ -270,6 +277,8 @@ func (b *memoryBroker) Nack(
 	}
 	record.visibleAt = now.Add(b.policy.RetryDelay)
 	b.insertReady(record)
+	//: an idle consumer re-reads when to look, which now includes VisibleAt.
+	b.wake.fire()
 	//: queued again, eligible at VisibleAt.
 	return corequeue.NackValue{Deliveries: record.deliveries, VisibleAt: record.visibleAt}, nil
 }
@@ -314,6 +323,32 @@ func (b *memoryBroker) Extend(
 	b.expiry.Push(leaseExpiry{at: record.expiresAt, receipt: record.receipt})
 	//: a NEW receipt; the old one names nothing from here on.
 	return corequeue.LeaseValue{Receipt: record.receipt, ExpiresAt: record.expiresAt}, nil
+}
+
+// Wake reports what an idle consumer should wait on: the signal the next
+// Publish or Nack closes, and how long until the earliest message this broker
+// holds becomes receivable on its own — the head of the ready list, whose
+// retry delay is ending, or the earliest lease, whose holder may have died.
+//
+// Both are read from the structures Receive itself uses, under the same lock,
+// so the answer is never staler than the call. The expiry heap may still hold
+// an entry an Ack has made stale; that only wakes a consumer early, to a
+// Receive that discards it.
+func (b *memoryBroker) Wake() corequeue.WakeValue {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	signal, _ := b.wake.current()
+	var due time.Time
+	//: the ready list is in visibility order, so its head is the earliest.
+	if len(b.ready) > 0 {
+		due = b.ready[0].visibleAt
+	}
+	//: a min-heap's top is the earliest lease deadline.
+	if lapse, held := b.expiry.Peek(); held && (due.IsZero() || lapse.at.Before(due)) {
+		due = lapse.at
+	}
+	//: measured on this broker's clock, now.
+	return wakeValue(signal, due, b.clk.Now())
 }
 
 // DeadLetters returns up to max abandoned messages, oldest first, and removes

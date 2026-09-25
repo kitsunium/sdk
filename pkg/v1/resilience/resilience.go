@@ -97,6 +97,47 @@
 // attempt that fails before Delay elapses ends the call with that error, since
 // replaying a failure is [NewRetry]'s job, and composing NewRetry(NewHedge(op))
 // is how you get both.
+//
+// # Limiting per caller
+//
+// [NewRateLimiter] is one bucket for every caller, which is right for a
+// dependency and wrong for an endpoint: one client guessing passwords empties
+// it and locks everybody out. [NewKeyedRateLimiter] keeps a bucket per key —
+// the authenticated user, the client's address — so one client is refused and
+// the others are not:
+//
+//	limiter := resilience.NewKeyedRateLimiter(resilience.KeyedRateLimiterConfig{
+//	    Rate: 1, Burst: 5,                  // per key
+//	    Key:  func(ctx context.Context) string { return clientOf(ctx) },
+//	    MaxKeys:     10_000,                // keys held at once, least recently used forgotten
+//	    IdleTimeout: 10 * time.Minute,      // a key left alone this long starts over full
+//	})
+//
+// The set of keys is bounded because the keys come from outside: a stream of
+// distinct addresses would otherwise grow the process without limit. Both
+// bounds are enforced on the calling goroutine — there is no sweeper. Key,
+// MaxKeys and IdleTimeout have no defaults and are refused at zero, since each
+// zero has a reading that disarms the limiter while every call keeps
+// succeeding. A key pushed out by capacity comes back with a full bucket, so
+// size MaxKeys above the number of clients active within IdleTimeout.
+//
+// # Backing off on your own terms
+//
+// [Backoff] is the curve [NewRetry] waits between attempts, published for the
+// loops that retry on their own terms — a supervised goroutine restarting
+// after a failure, an outbox rescheduling a delivery:
+//
+//	wait := resilience.Backoff{BaseDelay: time.Second, MaxDelay: time.Minute}.Delay(failures)
+//
+// Delay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1
+// or below doubles, and the growth stops at the ceiling — or at the longest
+// time.Duration — instead of wrapping negative, however large n is.
+//
+// # Driving the retry with a test clock
+//
+// [RetryConfig].Clock is the time source the retry backs off on. Leave it nil
+// in production; in a test, hand it a ManualClock from pkg/v1/clock and move
+// it past each backoff instead of sleeping through it.
 package resilience
 
 import (
@@ -127,6 +168,15 @@ type FallbackConfig = svcres.FallbackConfig
 // HedgeConfig is the public alias for the hedging policy configuration.
 type HedgeConfig = svcres.HedgeConfig
 
+// KeyedRateLimiterConfig is the public alias for the keyed rate-limiter
+// configuration: a token bucket per key, bounded in number and forgotten when
+// idle.
+type KeyedRateLimiterConfig = svcres.KeyedRateLimiterConfig
+
+// Backoff is the public alias for the exponential backoff curve NewRetry waits
+// between attempts, for a loop that backs off on its own terms.
+type Backoff = svcres.BackoffValue
+
 var (
 	// RetryExhausted is returned when the retry budget is spent.
 	RetryExhausted = coreres.RetryExhausted
@@ -152,7 +202,8 @@ var (
 	// with a configuration it cannot honour — a non-positive RateLimiterConfig
 	// .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback,
 	// an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or
-	// MaxInFlight. The operation is not run. Unlike the sentinels above it is
+	// MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an
+	// IdleTimeout. The operation is not run. Unlike the sentinels above it is
 	// permanent, not transient: the fix is at the construction site, never a
 	// retry (ADR 0031).
 	PolicyMisconfigured = coreres.PolicyMisconfigured
@@ -178,6 +229,19 @@ func NewCircuitBreaker(cfg BreakerConfig) Runner {
 func NewRateLimiter(cfg RateLimiterConfig) Runner {
 	//: delegate to the service constructor.
 	return svcres.NewRateLimiter(cfg)
+}
+
+// NewKeyedRateLimiter returns a Runner holding one token bucket per key — the
+// key cfg.Key names for each call's context — so a caller who empties its
+// bucket is refused while every other caller is not. At most cfg.MaxKeys keys
+// are held, the least recently used forgotten first, and a key unused for
+// cfg.IdleTimeout is forgotten too; a forgotten key starts over with a full
+// bucket. A non-finite or non-positive cfg.Rate, a nil cfg.Key and a
+// non-positive cfg.MaxKeys or cfg.IdleTimeout are each refused: every call
+// returns PolicyMisconfigured, naming the field.
+func NewKeyedRateLimiter(cfg KeyedRateLimiterConfig) Runner {
+	//: delegate to the service constructor.
+	return svcres.NewKeyedRateLimiter(cfg)
 }
 
 // NewBulkhead returns a bounded-concurrency Runner (reject mode).

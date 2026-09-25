@@ -17,6 +17,7 @@ Implements the `core/vcs` contract by shelling out to the **git binary** (ADR
 | `config.go` | `Config` — where the repository is, and the caller's file filter |
 | `gitdir.go` | `GitDir`, memoized per root and re-validated on every call |
 | `show.go` | `ShowFile` — a blob at a commit, or the two refusals |
+| `head.go` | `Head` + `HeadValue` — HEAD's commit, its committer date, tracked changes; `committerTime` reads the raw commit object (ADR 0100) |
 
 ## Why-this-shape
 
@@ -175,6 +176,45 @@ resolve and for a path that is not in it: without the commit probe an
 unreachable SHA would be reported as a missing file, and a caller would retry
 with other paths forever. git's stderr is never parsed — its wording is
 localised and unversioned.
+
+### `Head` reads three facts and trusts none of them to `git log`
+
+`Head` answers what a build description asks of a local module — the commit,
+its time, whether the tree is modified — in three hardened invocations:
+`rev-parse --verify HEAD^{commit}`, `cat-file commit <sha>`, and
+`--no-optional-locks status --porcelain --untracked-files=no`.
+
+- **The time comes from the raw commit object.** `git log --format=%cI` is the
+  obvious spelling and the wrong one here: `log` honours `log.showSignature`,
+  and a hostile `.git/config` pairing it with `gpg.program` hands the planted
+  program a signature to "verify". `cat-file commit` prints bytes and verifies
+  nothing; `committerTime` reads the committer line's last two fields after the
+  email's closing bracket, in the offset they were recorded with — what `%cI`
+  would have printed.
+- **`status` is where `core.fsmonitor` fires.** Measured against a planted
+  payload: a raw `git status` executed it twice, the hardened one never —
+  `TestHeadRefusesRepositoryControlledExecution`.
+- **`status` also runs filters.** A tracked file whose stat changed goes
+  through its clean (or long-running process) filter, a command a
+  `.git/config` names. `filterGuard` lists the configured drivers — reading
+  the configuration runs nothing — and empties each one's `clean` and
+  `process` with `-c`, which git reads as no filter; a driver name holding `=`
+  cannot be addressed by `-c` and is refused. Measured: without the guard the
+  planted filter ran, with it never — `TestHeadRunsNoFilterTheRepositoryConfigures`.
+- **A cancelled context is not "no repository".** A failed `rev-parse` under a
+  context already done is returned as it is, never probed on that context.
+- **`--no-optional-locks`** keeps a read-only question from taking the index
+  lock a concurrent `git commit` in the same tree needs.
+- **A status that fails is an error, not "clean".** "Clean" is a claim git
+  refused to make.
+- **Modified counts tracked files.** An untracked file is not part of what the
+  commit describes; Go's own `vcs.modified` counts it, and the facade says so.
+- **What the hardening does NOT cover.** A clean filter planted in
+  `.git/config` and bound by `.gitattributes` runs whenever git must re-hash a
+  tracked file whose size did not change — measured once during the hardened
+  `status`, seven times during a `diff`. That is the same exposure `Resolve`'s
+  diff already has; closing it needs the driver names before the invocation and
+  belongs to the shared runner (ADR 0100 §Deferred).
 
 ## Do NOT
 

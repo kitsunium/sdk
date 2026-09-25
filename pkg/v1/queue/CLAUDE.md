@@ -12,7 +12,7 @@ consumer engine.
 |---|---|
 | Ports | `Broker` (frozen at four methods), `Handler` (func port) |
 | Values | `Message`, `Delivery`, `Lease`, `Receipt`, `Nack`, `Policy`, `DeadLetter` |
-| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender` — reached by type assertion |
+| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`) — reached by type assertion |
 | Configs | `FileConfig`, `MemoryConfig`, `ConsumerConfig` |
 | Constructors | `NewFile`, `NewMemory` |
 | Engine | `Consume` |
@@ -35,6 +35,13 @@ consumer engine.
   `ConsumerConfig.HandlerIsIdempotent`, and "removed at acknowledgement, never
   at read" — because a reader who assumes exactly-once writes a handler that
   double-charges a card, and no amount of stating it once has ever been enough.
+
+- **`PollInterval` is a bound, not a cadence, over a `Waker`** (ADR 0104).
+  Both brokers wake an idle `Consume` on a Publish or a Nack in this process
+  and at the instant a retry or a lapsed lease becomes due; the poll is left
+  with another process's publication. The package doc shows a five-second
+  poll for that reason, and the constant keeps its 100 ms so a zero means what
+  it always meant for a broker that cannot wake anyone.
 
 ## Do NOT
 

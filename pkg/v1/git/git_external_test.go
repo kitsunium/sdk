@@ -238,3 +238,29 @@ func initRepoWith(t *testing.T, name, content string) string {
 	//: The repository root the case reads back from.
 	return root
 }
+
+// TestHeadThroughTheFacade pins Head from the public surface: a clean
+// one-commit tree reports its revision and a commit time, a tracked edit makes
+// it modified, and a directory outside any repository is refused with the one
+// code a caller can act on by going without.
+func TestHeadThroughTheFacade(t *testing.T) {
+	t.Parallel()
+	root := initRepo(t)
+	clean, err := git.Head(t.Context(), root)
+	if err != nil {
+		t.Fatalf("Head() = %v, want nil", err)
+	}
+	if len(clean.Revision) < 40 || clean.Time.IsZero() || clean.Modified {
+		t.Fatalf("Head() = %+v, want a full revision, a commit time and a clean tree", clean)
+	}
+	if err := os.WriteFile(filepath.Join(root, "seed.go"), []byte("package p\n\nvar edited int\n"), 0o600); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	dirty, err := git.Head(t.Context(), root)
+	if err != nil || !dirty.Modified || dirty.Revision != clean.Revision {
+		t.Fatalf("Head() after an edit = %+v, %v; want the same revision, modified", dirty, err)
+	}
+	if _, err := git.Head(t.Context(), t.TempDir()); !errs.HasCode(err, git.CodeRepositoryUnresolved) {
+		t.Errorf("Head() outside a repository = %v, want CodeRepositoryUnresolved", err)
+	}
+}

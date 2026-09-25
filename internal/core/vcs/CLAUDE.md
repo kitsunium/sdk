@@ -22,7 +22,10 @@ Code range `0.2.33.*` (`0x00_02_21_*`), owned solely by this package.
   computing one. It does NOT model repositories, commits, refs or history: there
   is exactly one implementation, and a contract broader than it would describe
   nothing real. ADR 0076 §Alternatives records what a fuller VCS abstraction
-  would have cost.
+  would have cost. When a caller needed a working tree's head commit (ADR 0100)
+  it became a query of the ENGINE — `service/vcs/git.Head` and its
+  `HeadValue` — and this package did not grow: a second implementation of
+  `ChangedSet` would have no reason to produce it (ADR 0074).
 - **`ResolutionValue` is a value, not `(ChangedSet, error)`.** Degrading is not
   failing. A resolver that cannot be trusted must never answer with an empty
   set, because "nothing changed" and "I could not tell what changed" are

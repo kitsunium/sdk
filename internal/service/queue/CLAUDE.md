@@ -20,7 +20,8 @@ pull loop that runs handlers on goroutines it owns).
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
 | `file_dead.go` | `Nack`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
-| `consume.go` | `Consume`, the pull loop, the panic guard |
+| `consume.go` | `Consume`, the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
+| `wake.go` | `wakeSignal` (the broadcast both brokers close on Publish and Nack, and the durable broker's recorded due instant), `wakeValue`, `earliest`, and `fileWakes` — the process-wide, weakly-held table that makes every durable broker over one directory share one signal |
 | `consume_config.go` | `ConsumerConfig`, the idempotence assertion, the clamps |
 | `codes.go` / `errors.go` | the four `0.3.53.*` codes and their sentinels |
 
@@ -169,6 +170,41 @@ a codebase where somebody promised it.
 `Parallelism`, `BatchSize` and `PollInterval` are all CLAMPED, because each has
 one sensible reading at zero and none of them is dangerous.
 
+## Waking an idle consumer (ADR 0104)
+
+`Consume` used to find work only by polling, so latency and idle cost were one
+knob: a downstream framework ran a dozen consumers at 50 ms and paid ~3 % of a
+core for nothing. Both brokers now implement `core/queue.Waker`, an ADR 0039
+sibling — `Broker` keeps its four methods — and `Consume` waits on it.
+
+- **A signal, closed and replaced.** `Publish` and `Nack` close the channel
+  every idle worker holds; closing is what makes it a broadcast, where a send
+  would wake one receiver or nobody. A worker takes the channel BEFORE its
+  `Receive`, so a publication landing between an empty `Receive` and the wait
+  has already closed it — there is no lost wake-up window.
+- **A due instant, because nothing happens when a retry becomes due.** A
+  nacked message turns visible `RetryDelay` later and a dead consumer's lease
+  lapses `VisibilityTimeout` later; no call marks either moment, so no signal
+  can. `Wake().In` says how long until the earliest one, and the worker sleeps
+  `min(PollInterval, In)`. The memory broker reads it from its ready list and
+  its expiry heap under its lock; the durable broker cannot read a directory
+  without a `Receive`, so each `Receive` RECORDS what its two scans stopped
+  on — they already stop at the first future instant — and `Wake` reads the
+  record. It can only be stale early (another process took the message, a
+  lease was extended), which costs one empty `Receive`.
+- **In is a duration, not an instant.** The broker and the consumer each take
+  a clock, and nothing forces them to be one. A duration read on the broker's
+  clock is waited on the consumer's; an instant compared across two clocks
+  that disagree could be permanently in the past and spin the loop.
+- **The durable signal belongs to the directory.** Two brokers over one `Dir`
+  are one queue, so the signal is looked up in a process-wide table keyed by
+  the directory resolved through its links, held WEAKLY with a
+  `runtime.AddCleanup` that drops the entry once no broker references it. A
+  publication from another process closes nothing; that is what the poll is
+  for, and it is why `PollInterval` stays and becomes a bound.
+- **Still no timer and no goroutine in a broker.** The wait is the consumer's;
+  the broker only answers.
+
 ## Where this package departs from `service/events`, and why
 
 `events` joins its `ListenerFailed` verdict beside the listener's cause,
@@ -224,7 +260,12 @@ the code.
   to prove `Close` does it without one.
 - Flush on `Ack`, `Nack` or `Receive`. See above; it buys nothing.
 - Add a sweeper goroutine, a timer, or a background reclaim. Expiry is noticed
-  by whoever looks next, in both brokers, deliberately.
+  by whoever looks next, in both brokers, deliberately. `Wake` does not change
+  that: it tells the consumer WHEN to look, and the look is still a `Receive`.
+- Send on the wake channel instead of closing it, or close it before the
+  state it announces is visible. A send wakes one worker or none; a close
+  before `Nack`'s rename wakes a worker into a directory that does not show
+  the message yet.
 - Take a lock in the file broker. `rename(2)` is the exclusion, and ADR 0052
   measured why a `flock` would not be.
 - Optimise `Publish/file`'s 41 allocations. They sit next to 3 ms of `fsync`;

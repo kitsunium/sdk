@@ -32,25 +32,43 @@ func (b *fileBroker) Receive(
 		return nil, ctx.Err()
 	}
 	now := b.clk.Now().UnixNano()
+	lapse, reclaimErr := b.reclaim(now)
 	//: BEFORE anything is handed out.
-	if reclaimErr := b.reclaim(now); reclaimErr != nil {
+	if reclaimErr != nil {
 		//: QueueBackendFailed — the medium refused mid-recovery.
 		return nil, reclaimErr
 	}
+	batch, visible, leaseErr := b.leaseVisible(now, max)
+	//: the medium refused while leasing.
+	if leaseErr != nil {
+		//: QueueBackendFailed.
+		return nil, leaseErr
+	}
+	var leased int64
+	//: a lease taken now lapses at now + VisibilityTimeout if its holder
+	//: dies, and that is when an idle consumer should look again.
+	if len(batch) > 0 {
+		leased = now + int64(b.policy.VisibilityTimeout)
+	}
+	//: both scans stopped at the first future instant, which is exactly the
+	//: earliest moment anything changes on its own.
+	b.wake.record(earliest(lapse, visible, leased))
 	//: whatever is visible, oldest first.
-	return b.leaseVisible(now, max)
+	return batch, nil
 }
 
 // leaseVisible walks the queued messages in visibility order and leases up to
-// max of them.
+// max of them. It also returns the instant, in Unix nanoseconds, at which the
+// next queued message becomes visible — now itself when it stopped on a full
+// batch with more behind it, zero when nothing else is queued.
 func (b *fileBroker) leaseVisible(
 	now int64, max int,
-) (batch []corequeue.DeliveryValue, err error) {
+) (batch []corequeue.DeliveryValue, next int64, err error) {
 	entries, listErr := b.entriesOf(dirReady)
 	//: the medium refused.
 	if listErr != nil {
 		//: QueueBackendFailed.
-		return nil, listErr
+		return nil, 0, listErr
 	}
 	//: nil until something is eligible, so an empty poll allocates nothing.
 	var out []corequeue.DeliveryValue
@@ -64,15 +82,23 @@ func (b *fileBroker) leaseVisible(
 		if !ok {
 			continue
 		}
-		//: the first one that is not yet visible means none of the rest are.
+		//: the first one that is not yet visible means none of the rest are —
+		//: and its instant is when the next one will be.
 		if name.At > now {
-			break
+			//: stop here; nothing later is visible either.
+			return out, name.At, nil
+		}
+		//: the batch is full and this message is visible: somebody should look
+		//: again at once.
+		if len(out) == max {
+			//: a consumer loop that is not busy picks it up immediately.
+			return out, now, nil
 		}
 		delivery, leased, leaseErr := b.takeLease(name, entry.Name(), now)
 		//: the medium refused for a reason that is not "somebody beat us".
 		if leaseErr != nil {
 			//: QueueBackendFailed.
-			return nil, leaseErr
+			return nil, 0, leaseErr
 		}
 		//: another consumer won the rename; that is not a failure, it is the
 		//: exclusion mechanism working.
@@ -80,13 +106,9 @@ func (b *fileBroker) leaseVisible(
 			continue
 		}
 		out = append(out, delivery)
-		//: the caller asked for a bounded batch.
-		if len(out) == max {
-			break
-		}
 	}
-	//: whatever this consumer won.
-	return out, nil
+	//: whatever this consumer won, with nothing left queued behind it.
+	return out, 0, nil
 }
 
 // takeLease moves one queued message into flight and reads it back.
@@ -147,7 +169,8 @@ func (b *fileBroker) readLeased(
 }
 
 // reclaim returns every lapsed lease to the queue, or to the dead-letter
-// store when it has no attempts left.
+// store when it has no attempts left, and returns the deadline, in Unix
+// nanoseconds, of the earliest lease still held — zero when none is.
 //
 // It is what makes the domain's headline promise true: a consumer that is
 // SIGKILLed never acknowledges and never nacks, so its message is recovered
@@ -155,12 +178,12 @@ func (b *fileBroker) readLeased(
 // dead-lettered by the SAME comparison a nack uses — otherwise the poison
 // message that killed the process would be redelivered forever, killing every
 // consumer that touched it.
-func (b *fileBroker) reclaim(now int64) error {
+func (b *fileBroker) reclaim(now int64) (next int64, err error) {
 	entries, listErr := b.entriesOf(dirInflight)
 	//: the medium refused.
 	if listErr != nil {
 		//: QueueBackendFailed.
-		return listErr
+		return 0, listErr
 	}
 	//: in lease-deadline order, for the same reason the ready scan is in
 	//: visibility order.
@@ -170,19 +193,21 @@ func (b *fileBroker) reclaim(now int64) error {
 		if !ok {
 			continue
 		}
-		//: the first lease that is still held means every remaining one is.
+		//: the first lease that is still held means every remaining one is,
+		//: and it is the next one that can lapse.
 		if name.At > now {
-			break
+			//: nothing else to reclaim.
+			return name.At, nil
 		}
 		//: whichever consumer gets here first wins the rename; the others get
 		//: ENOENT and move on.
 		if recoverErr := b.recoverOne(name, entry.Name(), now); recoverErr != nil {
 			//: QueueBackendFailed.
-			return recoverErr
+			return 0, recoverErr
 		}
 	}
-	//: every lapsed lease is now queued again or abandoned.
-	return nil
+	//: every lapsed lease is now queued again or abandoned, and none is held.
+	return 0, nil
 }
 
 // recoverOne decides what becomes of one lapsed lease.

@@ -1,0 +1,30 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "redact",
+    srcs = ["redact.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/redact",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/kernel/errs",
+        "//internal/service/redact",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":redact",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "redact_test",
+    srcs = ["redact_external_test.go"],
+    deps = [
+        ":redact",
+        "//pkg/v1/errs",
+        "//pkg/v1/logger",
+    ],
+)

@@ -1,0 +1,55 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "redact",
+    srcs = [
+        "attrs.go",
+        "codes.go",
+        "errors.go",
+        "json.go",
+        "plan.go",
+        "redact.go",
+        "text.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/redact",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/logger",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":redact",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "redact_test",
+    srcs = [
+        "attrs_external_test.go",
+        "redact_external_test.go",
+        "redact_internal_test.go",
+    ],
+    embed = [":redact"],
+    deps = [
+        "//internal/core/logger",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

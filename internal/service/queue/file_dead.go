@@ -64,6 +64,9 @@ func (b *fileBroker) Nack(
 		//: LeaseExpired or QueueBackendFailed.
 		return corequeue.NackValue{}, b.classifyMissing("rename", held, renameErr)
 	}
+	//: AFTER the rename, so a consumer woken here and reading the directory
+	//: sees the message and records when it becomes visible.
+	b.wake.fire()
 	//: queued again, eligible at VisibleAt.
 	return corequeue.NackValue{
 		Deliveries: name.Deliveries, VisibleAt: time.Unix(0, requeued.At),

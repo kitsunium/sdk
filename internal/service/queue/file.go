@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -55,7 +56,12 @@ type fileBroker struct {
 	// for the state transitions.
 	publisher corevfs.AtomicWriter
 	clk       clock.Clock
-	policy    corequeue.PolicyValue
+	// wake is shared by every broker over the same directory in this
+	// process — they are one queue — so a publication through any of them
+	// wakes the consumers of all. A publication from another process closes
+	// nothing; the consumer's poll finds it.
+	wake   *wakeSignal
+	policy corequeue.PolicyValue
 }
 
 // NewFile returns a broker whose messages survive the process that published
@@ -114,9 +120,30 @@ func NewFile(cfg FileConfig) (broker corequeue.Broker, err error) {
 	}
 	//: usable.
 	return &fileBroker{
-		root: root, publisher: publisher,
+		root: root, publisher: publisher, wake: fileWakes.forDir(cfg.Dir),
 		policy: cfg.Policy.Normalized(), clk: clockOrSystem(cfg.Clock),
 	}, nil
+}
+
+// Wake reports what an idle consumer should wait on: the signal the next
+// Publish or Nack through any broker over this directory in this process
+// closes, and how long until the earliest message the last Receive saw
+// becomes receivable on its own.
+//
+// That instant is only as fresh as the last Receive in this process, because
+// the directory is the state and reading it is what Receive does — Wake reads
+// nothing. It can be stale in the harmless direction only: a message another
+// process took, or a lease since extended, wakes a consumer early to an empty
+// Receive, which reads the names again and records a fresh instant.
+func (b *fileBroker) Wake() corequeue.WakeValue {
+	signal, due := b.wake.current()
+	var at time.Time
+	//: zero is "nothing scheduled", not the epoch.
+	if due != 0 {
+		at = time.Unix(0, due)
+	}
+	//: measured on this broker's clock, now.
+	return wakeValue(signal, at, b.clk.Now())
 }
 
 // Close releases the broker's directory descriptors: its own root, and the
@@ -183,6 +210,9 @@ func (b *fileBroker) Publish(
 		//: QueueBackendFailed — vfs guarantees nothing was published.
 		return corequeue.MessageValue{}, backendFailed("publish", dirReady, writeErr)
 	}
+	//: every idle consumer over this directory in this process looks again
+	//: now, rather than at its next poll.
+	b.wake.fire()
 	//: accepted, and on the device. The returned Payload is the CALLER'S
 	//: slice: they already hold those bytes, and a copy would serve no reader.
 	return corequeue.MessageValue{ID: name.ID(), Payload: payload, EnqueuedAt: now}, nil

@@ -11,6 +11,7 @@ go_library(
         "message.go",
         "policy.go",
         "queue.go",
+        "wake.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/queue",
     visibility = [

@@ -2,7 +2,9 @@
 
 Public facade for the SDK's keystone process-spawn primitive (ADR 0016). Start a
 child under explicit credentials, in its own process group/session, and get a
-handle that waits, signals (leader or group), and stops the group gracefully.
+handle that waits, signals (leader or group), and stops the group gracefully —
+and, since ADR 0100, read the running process itself: its runtime state and
+the build it came from.
 
 ## Why this shape
 
@@ -33,6 +35,20 @@ handle that waits, signals (leader or group), and stops the group gracefully.
   package doc comment in `process.go` (Rule 10). Edit the doc comment, then
   `make docs-readme` (or run the `//go:generate` line). Maintainer rationale
   (this file) stays in `CLAUDE.md`.
+
+## The process itself (ADR 0100)
+
+`Self()`, `Build()` and `ParseBuild()` delegate to `internal/service/proc/self`,
+and `Stats` / `Distribution` / `BuildInfo` / `Module` alias its values — the
+facade's rule is unchanged: aliases and one-line delegations, no new named
+types. They read the process the package runs in, on every platform, and none
+of them can fail: `Stats.CPUEstimated` says when `CPUTime` is the runtime's
+estimate rather than the kernel's count, and `Build` reports `false` for a
+binary without build information.
+
+A `Module` keeps apart what a recorded version conflates: a release
+(`Version`), a commit (`Revision`, `Time`) and a local directory (`Local`,
+`Dir`). What that directory holds NOW is `pkg/v1/git`'s `Head`.
 
 ## Do / Do-not
 

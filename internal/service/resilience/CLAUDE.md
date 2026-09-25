@@ -12,9 +12,11 @@ ADR 0026.
 
 | File | Policy | Notes |
 |---|---|---|
-| `retry.go` / `retry_config.go` | retry | capped exponential backoff, ctx-aware sleep, `RetryExhausted` |
+| `retry.go` / `retry_config.go` | retry | capped exponential backoff (the `BackoffValue` curve), ctx-aware sleep on the injected `Clock`, `RetryExhausted` |
+| `backoff.go` | — | `BackoffValue` + `Delay(attempt)` — the public curve (ADR 0103): `grow` (pure, bounded, never negative) and `widen` (jitter); `retryRunner.backoff`/`jittered` delegate to them |
+| `keyed_ratelimit.go` / `keyed_ratelimit_config.go` | keyed rate-limit | one `tokenBucket` per `Key(ctx)`, at most `MaxKeys` (LRU), forgotten after `IdleTimeout` (sliding), no sweeper; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0031, ADR 0103) |
 | `breaker.go` / `breaker_config.go` / `breaker_state.go` | circuit-breaker | Closed→Open→HalfOpen (injectable clock), `CircuitOpen` |
-| `ratelimit.go` / `ratelimit_config.go` | rate-limit | token bucket (reject mode), `RateLimited`; non-positive `Rate` refused (ADR 0031) |
+| `ratelimit.go` / `ratelimit_config.go` | rate-limit | token bucket (reject mode), `RateLimited`; non-positive `Rate` refused (ADR 0031); `usableRate`/`bucketSize`/`newTokenBucket` shared with the keyed limiter |
 | `bulkhead.go` | bulkhead | buffered-channel semaphore (reject mode), `BulkheadFull` |
 | `timeout.go` | timeout | `context.WithTimeout`, `TimeoutExceeded`; non-positive `d` refused (ADR 0031) |
 | `fallback.go` / `fallback_config.go` | fallback | secondary `Operation` on primary failure; `FallbackFailed` carries BOTH errors; nil `Fallback` refused (ADR 0031) |
@@ -27,7 +29,9 @@ ADR 0026.
 
 - **No `errs.Define` here** — service emits the `core/resilience` sentinels via
   `wrapAs` (origin-wins keeps the policy code even when the cause is an *errs.Error).
-- **Injectable clock** (breaker/ratelimit) for deterministic tests.
+- **Injectable clock** (breaker/ratelimit/keyed ratelimit read it; retry WAITS
+  on it — `RetryConfig.Clock` is a `clock.Timed`, so a test drives every backoff
+  with a `ManualClock` instead of sleeping).
 - **No constructor returns an inert policy** (ADR 0031). A non-positive knob is
   either clamped to a working floor — `MaxAttempts`→1, `Multiplier`→2,
   `FailureThreshold`→5, `OpenDuration`→30s, `Burst`→1, bulkhead limit→1 — or,
@@ -43,6 +47,46 @@ ADR 0026.
   count nor the success path, so it cannot trip an Open nor close a HalfOpen.
 - **Reject mode** for bulkhead/ratelimit in v1 (no queuing/waiting — deferred).
 - Cross-OS: 100 % portable (context/time/sync/atomic).
+
+## Backoff — one curve, published
+
+`BackoffValue.Delay(n)` (`resilience.Backoff` in the facade) is the curve `NewRetry` has always waited: `BaseDelay ×
+Multiplier^(n−1)`, held at `MaxDelay`, widened by `Jitter`. It is public
+because the loops that back off on their own terms — a supervised goroutine, an
+outbox, a failed state transition — each wrote their own copy of it, three in
+one downstream framework alone. `RetryConfig` keeps its four fields; the runner
+builds the curve from them, so the two cannot drift.
+
+Publishing it closed a defect in the copy that was here. The growth was a
+`float64` converted to a `time.Duration` unchecked; past 2^63 ns that
+conversion is implementation-defined and on amd64 yields `math.MinInt64`, a
+negative wait a timer fires at once — so attempt 35 of a one-second retry
+stopped backing off, and a `MaxDelay` did not help because a negative duration
+is below every ceiling. `grow` compares against the bound in the float domain
+BEFORE converting, and stops multiplying as soon as the bound is reached, so
+`Delay(math.MaxInt)` costs a few dozen multiplications. The multiplier's NaN,
+which slipped past `<= 1`, now doubles like every other non-growing value.
+`TestBackoffNeverWrapsNegative` pins both on every architecture.
+
+## Keyed rate limit — a bucket per caller, bounded
+
+`NewKeyedRateLimiter` exists because one bucket for everyone is right for a
+dependency and wrong for an endpoint: one client guessing passwords empties it
+and locks every other user out. The keys come from outside, so their number is
+bounded (`MaxKeys`, least recently used forgotten) and idle ones are forgotten
+(`IdleTimeout`, sliding). Both are enforced on the calling goroutine under one
+mutex; the bucket itself is charged after the lock is released, so two keys
+never contend beyond the lookup.
+
+An idle key is forgotten on its OWN next call, not only when some other new key
+triggers the eviction scan — the downstream copy this replaces did the latter,
+which made "is this key's bucket reset?" depend on unrelated traffic. The
+observable difference is small (an idle bucket refills to its burst anyway),
+and it is exactly zero when `IdleTimeout` is at least `Burst / Rate`, which the
+config comment tells the caller to choose.
+
+What it does not protect against is stated in the config: a flood of NEW keys
+pushes active ones out, and a key pushed out comes back with a full bucket.
 
 ## Fallback — which error survives a double failure
 

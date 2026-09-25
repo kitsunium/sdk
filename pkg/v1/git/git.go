@@ -1,6 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/git .
 
-// Package git answers what a branch changed, by shelling out to the git binary.
+// Package git answers what a branch changed and what a working tree is at, by
+// shelling out to the git binary.
 //
 // It is the thin public facade over internal/service/vcs/git: the value types
 // are aliases of the core vcs types and the functions delegate straight to the
@@ -57,6 +58,23 @@
 // records every entry under BOTH the root you gave and the one git reports, so
 // either answers and a query costs exactly what it did before. An indirection
 // anywhere else in a path you query is still lexical and still does not match.
+//
+// # What a working tree is at
+//
+// Head answers the question a build description asks about a local module:
+// which commit its working tree is on, when that commit was made, and whether
+// tracked files differ from it.
+//
+//	head, err := git.Head(ctx, "/path/to/module")
+//	if err != nil {
+//		// no repository, no git, or no commit yet: go without.
+//	}
+//	fmt.Println(head.Revision, head.Time, head.Modified)
+//
+// Modified counts TRACKED files only, staged or not; an untracked file does
+// not make a tree modified. That is narrower than the vcs.modified stamp Go
+// writes into a binary, which counts untracked files too. Nothing is cached,
+// because modified is the one fact here that changes without a commit.
 //
 // # Running against a repository you do not control
 //
@@ -121,6 +139,12 @@ type Config = svcgit.Config
 // every file.
 type Include = svcgit.IncludeFunc
 
+// HeadState is what a working tree is at: the commit HEAD names, its
+// committer date in the offset it was recorded with, and whether a tracked
+// file differs from it. It aliases the service type — the vcs port models no
+// commit, so this is one engine's value (ADR 0074).
+type HeadState = svcgit.HeadValue
+
 // Resolve computes the changed set for the repository containing cfg.Root,
 // returning a degraded Resolution rather than an error when it cannot be
 // trusted. Check Resolution.Degraded before reading Set.
@@ -144,6 +168,20 @@ func Resolve(ctx context.Context, cfg Config) Resolution {
 func GitDir(ctx context.Context, root string) (gitDir string, err error) {
 	//: delegate verbatim to the service implementation.
 	return svcgit.GitDir(ctx, root)
+}
+
+// Head reports what the working tree containing dir is at: its head commit,
+// that commit's time, and whether tracked files differ from it.
+//
+// A dir outside any repository — or absent, or on a machine without git — is
+// CodeRepositoryUnresolved. A repository whose HEAD names no commit yet, a
+// bare repository and a failed read are CodeCommandFailed. The three git
+// commands it runs are hardened like every other one here, and the commit
+// time is read from the raw commit object rather than through `git log`, so a
+// planted signature program has nothing to verify.
+func Head(ctx context.Context, dir string) (head HeadState, err error) {
+	//: delegate verbatim to the service implementation.
+	return svcgit.Head(ctx, dir)
 }
 
 // ShowFile returns the content of relPath at commit sha, verbatim.
