@@ -8,6 +8,8 @@ go_library(
         "codes.go",
         "consume.go",
         "consume_config.go",
+        "dirtrust_posix.go",
+        "dirtrust_windows.go",
         "errors.go",
         "file.go",
         "file_config.go",
@@ -32,7 +34,12 @@ go_library(
         "//internal/kernel/errs",
         "//internal/kernel/heap",
         "//internal/service/vfs",
-    ],
+    ] + select({
+        "@rules_go//go/platform:windows": [
+            "//internal/service/lock",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 alias(
@@ -52,12 +59,14 @@ go_test(
         "consume_external_test.go",
         "death_external_test.go",
         "file_layout_external_test.go",
+        "file_layout_windows_test.go",
         "harness_external_test.go",
         "order_external_test.go",
         "queue_bench_test.go",
     ],
     deps = [
         ":queue",
+        "//internal/core/proc",
         "//internal/core/queue",
         "//internal/kernel/clock",
         "//internal/kernel/errs",

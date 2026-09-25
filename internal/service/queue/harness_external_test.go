@@ -2,11 +2,14 @@ package queue_test
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 	svcqueue "github.com/kitsunium/sdk/internal/service/queue"
 )
@@ -55,11 +58,40 @@ func makeMemory(t *testing.T, clk clock.Clock, policy corequeue.PolicyValue) cor
 // makeFile builds the durable broker over a per-test temporary directory.
 func makeFile(t *testing.T, clk clock.Clock, policy corequeue.PolicyValue) corequeue.Broker {
 	t.Helper()
-	broker, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: t.TempDir(), Policy: policy, Clock: clk})
+	return requireFileBroker(t, svcqueue.FileConfig{Dir: t.TempDir(), Policy: policy, Clock: clk})
+}
+
+// requireFileBroker builds a durable broker and fails the test when it cannot —
+// except on Windows, where the refusal IS the contract.
+//
+// The durable broker publishes through internal/service/vfs, and vfs refuses
+// Windows by design (ADR 0018, ADR 0056: no flushable directory handle, and a
+// mode that is not an ACL). So NewFile there returns UNSUPPORTED_PLATFORM once
+// the directory rules pass — which, on a directory this suite makes, they must:
+// a QUEUE_DIRECTORY_UNUSABLE here is the false verdict the first Windows run
+// found on every case. That refusal is ASSERTED, and then the case skips, since
+// the broker it needs does not exist there.
+func requireFileBroker(t *testing.T, cfg svcqueue.FileConfig) corequeue.Broker {
+	t.Helper()
+	broker, err := svcqueue.NewFile(cfg)
+	//: the platform refusal, asserted before anything is skipped.
+	if runtime.GOOS == "windows" {
+		refusedOnWindows(t, broker, err)
+	}
 	if err != nil {
 		t.Fatalf("NewFile() = %v, want nil", err)
 	}
 	return broker
+}
+
+// refusedOnWindows asserts the durable broker's Windows answer — the platform
+// refusal, no broker — and then skips the calling case.
+func refusedOnWindows(t *testing.T, broker corequeue.Broker, err error) {
+	t.Helper()
+	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) || broker != nil {
+		t.Fatalf("NewFile on windows = (%v, %v), want (nil, UNSUPPORTED_PLATFORM) — the directory rules passed and vfs refused", broker, err)
+	}
+	t.Skip("the durable broker publishes through internal/service/vfs, which refuses windows by design (ADR 0018, ADR 0056); that refusal is asserted above, and this case needs a broker that exists")
 }
 
 // defaultPolicy is the policy every case starts from.

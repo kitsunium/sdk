@@ -2,12 +2,15 @@ package queue_test
 
 import (
 	"context"
+	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/proc"
 	"github.com/kitsunium/sdk/pkg/v1/queue"
 )
 
@@ -129,6 +132,16 @@ func facadeBroker(t *testing.T, kind string) queue.Broker {
 	t.Helper()
 	if kind == "file" {
 		broker, err := queue.NewFile(queue.FileConfig{Dir: t.TempDir(), Policy: facadePolicy()})
+		//: the durable broker's Windows answer is the platform refusal — its
+		//: atomic publisher, vfs, has no Windows backend — and a consumer
+		//: matches it through the public names alone. Asserted, then skipped:
+		//: the case needs a broker that does not exist there.
+		if runtime.GOOS == "windows" {
+			if !errors.Is(err, proc.UnsupportedPlatform) || broker != nil {
+				t.Fatalf("NewFile on windows = (%v, %v), want (nil, proc.UnsupportedPlatform)", broker, err)
+			}
+			t.Skip("the durable broker is refused on windows by design (its atomic publisher has no windows backend); the refusal is asserted above")
+		}
 		if err != nil {
 			t.Fatalf("NewFile() = %v, want nil", err)
 		}

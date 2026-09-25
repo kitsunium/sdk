@@ -159,11 +159,7 @@ func deathPolicy() corequeue.PolicyValue {
 // deathBroker builds the parent's broker on the REAL clock.
 func deathBroker(t *testing.T, dir string) corequeue.Broker {
 	t.Helper()
-	broker, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: dir, Policy: deathPolicy()})
-	if err != nil {
-		t.Fatalf("NewFile() = %v, want nil", err)
-	}
-	return broker
+	return requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: deathPolicy()})
 }
 
 // startVictim launches this test binary again, in a child process, running

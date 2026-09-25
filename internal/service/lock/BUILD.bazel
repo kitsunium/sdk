@@ -8,6 +8,7 @@ go_library(
         "chain.go",
         "codes.go",
         "config.go",
+        "dacl_shared_windows.go",
         "dacl_tokens_windows.go",
         "dacl_windows.go",
         "dirsafety_posix.go",

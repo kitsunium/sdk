@@ -179,7 +179,7 @@ var (
 ```
 
 <a name="Consume"></a>
-## func [Consume](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L290>)
+## func [Consume](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L293>)
 
 ```go
 func Consume(ctx context.Context, broker Broker, cfg ConsumerConfig) error
@@ -201,7 +201,7 @@ type Broker = corequeue.Broker
 ```
 
 <a name="NewFile"></a>
-### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L266>)
+### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L269>)
 
 ```go
 func NewFile(cfg FileConfig) (broker Broker, err error)
@@ -209,7 +209,7 @@ func NewFile(cfg FileConfig) (broker Broker, err error)
 
 NewFile returns the durable broker: its whole state is the directory in cfg.Dir, so it survives the process that published into it and two brokers over one directory are one queue.
 
-It refuses at construction — never at first use — a policy it cannot honour, a directory it cannot use safely, and a platform with no atomic replace or no flushable directory handle.
+It refuses at construction — never at first use — a policy it cannot honour, a directory it cannot use safely, and a platform with no atomic replace or no flushable directory handle. Windows is such a platform: after the directory checks — which read its access control lists there — NewFile returns the SDK's UNSUPPORTED\_PLATFORM, matched with errors.Is\(err, proc.UnsupportedPlatform\).
 
 The broker holds two directory descriptors and additionally implements io.Closer, which releases them — reached by type assertion, as the session file store's is, so Broker grows no method:
 
@@ -220,7 +220,7 @@ if closer, ok := broker.(io.Closer); ok { defer closer.Close() }
 The messages stay on disk; every call after Close fails.
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L276>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L279>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (broker Broker, err error)

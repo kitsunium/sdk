@@ -92,6 +92,7 @@ process pass the gate and then block on a `flock` its own process holds.
 | `nofollow_unix.go` / `nofollow_windows.go` / `nofollow_other.go` | the same split again — `O_NOFOLLOW`, `FILE_FLAG_OPEN_REPARSE_POINT` + the handle check, and the plain open |
 | `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule on Unix, a DACL rule on Windows, and `plantable` — "could anybody create an entry here?", the same question asked of a different directory |
 | `dacl_windows.go` | Windows' answer to that question: `GetNamedSecurityInfoW` + `GetAce` from `advapi32`, and the cost estimate that deferred it three times, re-checked (ADR 0084) |
+| `dacl_shared_windows.go` | the same reader EXPORTED — `GrantsAnyone` and the rights it takes (`ReplaceRights`, `ContentRights`, `RightAddFile`, …) — because `internal/service/queue` asks the same question of its own directories, and a second reader would be a second place to get eight ACE shapes wrong (ADR 0095) |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
 
 ## Platform matrix (ADR 0018)
@@ -347,6 +348,9 @@ re-`Define`d here.
 - **Run the POSIX directory rule on Windows.** It refuses every directory, and
   `prepareDir` only checks directories it did not create — so the symptom is a
   program that starts once on a fresh machine and never again.
+- **Fork the DACL reader for another package.** `GrantsAnyone` exists so
+  there is one: `internal/service/queue` calls it with masks of its own. A new
+  question is a new pair of masks, not a new walk.
 - **Make the DACL check refuse on an API failure.** It fails OPEN on purpose:
   this code cannot be iterated locally, a wrong refusal costs a locker that
   never builds on a safe directory, and a wrong acceptance leaves the platform
