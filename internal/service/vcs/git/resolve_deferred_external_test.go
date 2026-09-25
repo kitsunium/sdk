@@ -70,6 +70,55 @@ func TestResolveAnswersThroughTheRootTheCallerGave(t *testing.T) {
 	}
 }
 
+// TestResolveAnswersUnderTheTemporaryDirectorysOwnSpelling pins the spelling a
+// caller does not choose at all: the one the operating system hands it for a
+// temporary directory, with no link planted by anybody.
+//
+// On a Windows CI runner that spelling is an 8.3 short name
+// (`C:\Users\RUNNER~1\…`) while git answers `--show-toplevel` with the long
+// one, `/`-separated (`C:/Users/runneradmin/…`). The root was kept in git's
+// form while every recorded path went through filepath.Join, so the rewrite to
+// the caller's spelling — a prefix match on that root — never matched, and a
+// resolution that was neither degraded nor empty answered false for the file
+// that had just been edited. pkg/v1/git's filter test found it on its first
+// Windows run. On macOS the same test crosses the /var -> /private/var link;
+// on Linux the two spellings coincide and it is the ordinary case.
+func TestResolveAnswersUnderTheTemporaryDirectorysOwnSpelling(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	runGit(t, root, "init", "-b", "main")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test")
+	writeRepoFile(t, root, "pkg/a.go", "package p\n\nfunc A() int { return 1 }\n")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-m", "base")
+	runGit(t, root, "checkout", "-b", "feature")
+	writeRepoFile(t, root, "pkg/a.go", "package p\n\nfunc A() int { return 1 }\n\nfunc B() int { return 2 }\n")
+	runGit(t, root, "commit", "-am", "edit")
+
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", root, err)
+	}
+	res := gitpkg.Resolve(t.Context(), gitpkg.Config{Root: root})
+	if res.Degraded() {
+		t.Fatalf("Resolve on the temporary directory degraded: %s", res.Reason)
+	}
+	//: the caller's spelling, and the fully resolved one — both must answer.
+	for _, spelling := range []string{root, resolved} {
+		file := filepath.Join(spelling, "pkg", "a.go")
+		if !res.Set.ContainsFile(file) {
+			t.Errorf("ContainsFile(%s) = false; the file was edited on this branch", file)
+		}
+		if !res.Set.ContainsLine(file, 5) {
+			t.Errorf("ContainsLine(%s, 5) = false; line 5 is the added one", file)
+		}
+		if !res.Set.ContainsDir(filepath.Join(spelling, "pkg")) {
+			t.Errorf("ContainsDir(%s) = false; it encloses the edited file", filepath.Join(spelling, "pkg"))
+		}
+	}
+}
+
 // TestResolveFallsThroughAPrunedOriginHEAD pins the state every clone taken
 // before an upstream renamed its default branch is in: refs/remotes/origin/HEAD
 // still points at refs/remotes/origin/master, which no longer exists.
