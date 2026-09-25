@@ -2,6 +2,7 @@ package secret_test
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	coresecret "github.com/kitsunium/sdk/internal/core/secret"
@@ -193,5 +194,70 @@ func TestKeyringRefusals(t *testing.T) {
 	}
 	if _, signErr := keyring.Sign(t.Context(), []byte("x")); !errs.HasCode(signErr, svcsecret.CodeKeyMaterialInvalid) {
 		t.Errorf("Sign under a password = %v, want KeyMaterialInvalid", signErr)
+	}
+}
+
+// outageStore is a Store whose backend is down: every call answers the
+// retryable StoreUnavailable.
+type outageStore struct{}
+
+// Get reports the outage.
+func (outageStore) Get(context.Context, string) (coresecret.VersionValue, error) {
+	return coresecret.VersionValue{}, coresecret.StoreUnavailable
+}
+
+// Versions reports the outage.
+func (outageStore) Versions(context.Context, string) ([]coresecret.VersionValue, error) {
+	return nil, coresecret.StoreUnavailable
+}
+
+// Put reports the outage.
+func (outageStore) Put(context.Context, string, coresecret.Value) (coresecret.VersionValue, error) {
+	return coresecret.VersionValue{}, coresecret.StoreUnavailable
+}
+
+// Prune reports the outage.
+func (outageStore) Prune(context.Context, string, int) error {
+	return coresecret.StoreUnavailable
+}
+
+// Names reports the outage.
+func (outageStore) Names(context.Context) ([]string, error) {
+	return nil, coresecret.StoreUnavailable
+}
+
+// TestKeyringReportsAStoreOutageAsItself pins the one distinction Open and
+// Verify make: a store that could not be READ is reported as the retryable
+// StoreUnavailable, never folded into the non-oracle verdict — "retry" and
+// "reject the box" are different responses, and a caller that rejected every
+// session during a store outage would log everybody out.
+func TestKeyringReportsAStoreOutageAsItself(t *testing.T) {
+	t.Parallel()
+	_, healthy := keyringFixture(t)
+	box, err := healthy.Seal(t.Context(), []byte("payload"), nil)
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	signature, err := healthy.Sign(t.Context(), []byte("message"))
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	down, err := svcsecret.NewKeyring(outageStore{}, "session-key")
+	if err != nil {
+		t.Fatalf("NewKeyring: %v", err)
+	}
+	if _, openErr := down.Open(t.Context(), box, nil); !errs.HasCode(openErr, coresecret.CodeStoreUnavailable) {
+		t.Errorf("Open during an outage = %v, want STORE_UNAVAILABLE", openErr)
+	}
+	if verifyErr := down.Verify(t.Context(), []byte("message"), signature); !errs.HasCode(verifyErr, coresecret.CodeStoreUnavailable) {
+		t.Errorf("Verify during an outage = %v, want STORE_UNAVAILABLE", verifyErr)
+	}
+	if _, sealErr := down.Seal(t.Context(), []byte("x"), nil); !errs.HasCode(sealErr, coresecret.CodeStoreUnavailable) {
+		t.Errorf("Seal during an outage = %v, want STORE_UNAVAILABLE", sealErr)
+	}
+	//: a malformed box is still the non-oracle verdict, outage or not: it is
+	//: judged before the store is asked.
+	if _, openErr := down.Open(t.Context(), []byte{0x01}, nil); !errs.HasCode(openErr, svcsecret.CodeSealInvalid) {
+		t.Errorf("Open of a malformed box during an outage = %v, want SEAL_INVALID", openErr)
 	}
 }
