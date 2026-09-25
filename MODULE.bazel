@@ -22,7 +22,7 @@ go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
 
 # The root go.mod advertises Go 1.27 (major.minor); rules_go expects a
 # literal patch-version string for the SDK download, so we pin explicitly.
-go_sdk.download(version = "1.27.0")
+go_sdk.download(version = "1.27.1")
 
 # ── Go dependencies ────────────────────────────────────────────────────
 # `go_deps.from_file(go_work=...)` imports every direct + indirect

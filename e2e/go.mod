@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk/e2e
 
-go 1.27
+go 1.27.1
 
 replace github.com/kitsunium/sdk/pkg => ../pkg
 

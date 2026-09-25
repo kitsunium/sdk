@@ -10,7 +10,7 @@
 //
 // The capability class is "the pinned toolchain's syscall package defines
 // O_NOFOLLOW", and `unix` is the class the toolchain itself declares. Measured
-// on go1.27.0 — the toolchain this repo resolves — by compiling `const _ =
+// on go1.27.1 — the toolchain this repo resolves — by compiling `const _ =
 // syscall.O_NOFOLLOW` as a LIBRARY package (never linked, so cgo and PIE link
 // rules cannot mask the only question being asked) for all 47 GOOS/GOARCH
 // pairs in `go tool dist list`. All 39 pairs the `unix` tag selects have it:
@@ -38,7 +38,7 @@
 //
 // wasip1 is deliberately NOT here although it defines O_NOFOLLOW = 0400: it is
 // not a kernel flag there but a lookupflag, `path_open` called without
-// LOOKUP_SYMLINK_FOLLOW (go1.27.0 src/syscall/fs_wasip1.go:574), so the
+// LOOKUP_SYMLINK_FOLLOW (go1.27.1 src/syscall/fs_wasip1.go:574), so the
 // refusal belongs to whichever WASI host happens to run the module. No lane in
 // this repository runs one, so claiming the protection there would be a claim
 // nothing here can check. It takes the fallback and the CLAUDE.md table says

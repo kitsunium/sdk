@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk/pkg
 
-go 1.27
+go 1.27.1
 
 require (
 	github.com/kitsunium/sdk/internal/core v0.1.16
