@@ -217,10 +217,12 @@ func TestNewMultiFanOut(t *testing.T) {
 func closeLogger(t *testing.T, lg logger.Logger) {
 	t.Helper()
 	closer, ok := lg.(io.Closer)
+	//: every NewMulti Logger exposes the release.
 	if !ok {
 		t.Fatalf("a NewMulti Logger (%T) does not implement io.Closer", lg)
 	}
 	t.Cleanup(func() {
+		//: released without error.
 		if err := closer.Close(); err != nil {
 			t.Errorf("closing the logger's writers: %v", err)
 		}
@@ -242,6 +244,7 @@ func TestANewMultiLoggerReleasesItsFilesOnClose(t *testing.T) {
 		logger.WriterSpec{Name: "file", Config: logger.FileConfig{Path: plain}},
 		logger.WriterSpec{Name: "rotfile", Config: logger.RotFileConfig{Path: rotated, MaxBytes: 1 << 20}},
 	)
+	//: both writers open.
 	if err != nil {
 		t.Fatalf("NewMulti: %v", err)
 	}
@@ -253,15 +256,18 @@ func TestANewMultiLoggerReleasesItsFilesOnClose(t *testing.T) {
 	}
 	logger.Info(t.Context(), lg, "still-open")
 	closer := lg.(io.Closer)
+	//: the owner's Close releases them,
 	if cerr := closer.Close(); cerr != nil {
 		t.Fatalf("Close = %v, want nil", cerr)
 	}
+	//: and a second Close repeats that answer.
 	if cerr := closer.Close(); cerr != nil {
 		t.Fatalf("a second Close = %v, want the first answer, nil", cerr)
 	}
 	//: the records reached both files before the release.
 	for _, path := range []string{plain, rotated} {
 		data, rerr := os.ReadFile(path)
+		//: each file holds both records.
 		if rerr != nil || !strings.Contains(string(data), "before-close") || !strings.Contains(string(data), "still-open") {
 			t.Errorf("%s = %q (%v), want both records", filepath.Base(path), data, rerr)
 		}

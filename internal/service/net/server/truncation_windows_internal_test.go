@@ -31,12 +31,18 @@ func Test_datagramTruncated_readsTheErrnoThroughNetsWrapping(t *testing.T) {
 		{name: "a closed socket", err: stdnet.ErrClosed},
 		{name: "no error at all", err: nil},
 	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: the errno is found through every wrapper, and only that errno.
+		if got := datagramTruncated(c.err); got != c.want {
+			t.Fatalf("datagramTruncated(%v) = %v, want %v", c.err, got, c.want)
+		}
+	}
+	//: one subtest per shape of error.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if got := datagramTruncated(c.err); got != c.want {
-				t.Fatalf("datagramTruncated(%v) = %v, want %v", c.err, got, c.want)
-			}
+			runCase(t, c)
 		})
 	}
 }
@@ -50,14 +56,17 @@ func Test_portableReader_reportsATruncatedDatagramAsOversized(t *testing.T) {
 	slots := newSlots(1, ceiling)
 	reader := &portableReader{pc: truncatingConn{}}
 	n, err := reader.readBatch(slots)
+	//: the errno became a datagram, not an error the read loop would skip.
 	if err != nil || n != 1 {
 		t.Fatalf("readBatch = (%d, %v), want one oversized datagram and no error", n, err)
 	}
+	//: filled past the ceiling, which is how dispatch recognises oversize.
 	if slots[0].n <= ceiling {
 		t.Fatalf("the slot holds %d bytes, want more than the %d-byte ceiling so dispatch drops it", slots[0].n, ceiling)
 	}
 	srv := New()
 	srv.dispatch(slots[:n], &packet{group: "g"}, nil, ceiling)
+	//: and the drop is counted, which is what Windows used to lose.
 	if got := srv.oversized.Load(); got != 1 {
 		t.Fatalf("oversized = %d, want 1 — the drop was not counted", got)
 	}

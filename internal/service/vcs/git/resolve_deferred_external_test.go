@@ -97,22 +97,27 @@ func TestResolveAnswersUnderTheTemporaryDirectorysOwnSpelling(t *testing.T) {
 	runGit(t, root, "commit", "-am", "edit")
 
 	resolved, err := filepath.EvalSymlinks(root)
+	//: the temporary directory's fully resolved spelling.
 	if err != nil {
 		t.Fatalf("EvalSymlinks(%s): %v", root, err)
 	}
 	res := gitpkg.Resolve(t.Context(), gitpkg.Config{Root: root})
+	//: the resolver answered, rather than degrading.
 	if res.Degraded() {
 		t.Fatalf("Resolve on the temporary directory degraded: %s", res.Reason)
 	}
 	//: the caller's spelling, and the fully resolved one — both must answer.
 	for _, spelling := range []string{root, resolved} {
 		file := filepath.Join(spelling, "pkg", "a.go")
+		//: the edited file is in the set,
 		if !res.Set.ContainsFile(file) {
 			t.Errorf("ContainsFile(%s) = false; the file was edited on this branch", file)
 		}
+		//: its added line too,
 		if !res.Set.ContainsLine(file, 5) {
 			t.Errorf("ContainsLine(%s, 5) = false; line 5 is the added one", file)
 		}
+		//: and the directory that encloses it.
 		if !res.Set.ContainsDir(filepath.Join(spelling, "pkg")) {
 			t.Errorf("ContainsDir(%s) = false; it encloses the edited file", filepath.Join(spelling, "pkg"))
 		}

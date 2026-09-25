@@ -177,6 +177,7 @@ func TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			//: a row planted with mode bits has no fixture on Windows.
 			if tc.modeBits && runtime.GOOS == "windows" {
 				t.Skip("windows has no permission bits to plant this state with; TestAWindowsStateDirectoryIsCheckedWhoeverMadeIt plants it through the DACL")
 			}
@@ -213,11 +214,13 @@ func TestTheDurableBrokerCreatesItsStatesOwnerOnlyAndReopensThem(t *testing.T) {
 		//: then vfs refuses the platform: that refusal, not a verdict on the
 		//: directories the broker made, is what must come back.
 		if runtime.GOOS == "windows" {
+			//: the platform's refusal, by its typed code.
 			if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
 				t.Fatalf("NewFile() on construction %d on windows = %v, want UNSUPPORTED_PLATFORM", attempt+1, err)
 			}
 			continue
 		}
+		//: elsewhere the broker builds, the second time over its own states.
 		if err != nil {
 			t.Fatalf("NewFile() on construction %d = %v, want nil", attempt+1, err)
 		}

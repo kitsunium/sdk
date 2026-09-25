@@ -186,11 +186,13 @@ func TestPacketGroup_HandleFunc(t *testing.T) {
 		//: round-trip through, and the engine says so by name rather than
 		//: letting the bind fail as if an operator could fix it.
 		if c.unixSocket && runtime.GOOS == "windows" {
+			//: refused by the typed code.
 			if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
 				t.Fatalf("start with a unixgram listener on windows = %v, want UNSUPPORTED_PLATFORM", err)
 			}
 			return
 		}
+		//: everywhere else the group starts.
 		if err != nil {
 			t.Fatalf("start: %v", err)
 		}

@@ -32,13 +32,16 @@ func shell() string {
 func TestStartSupervisesAChildOnWindows(t *testing.T) {
 	t.Parallel()
 	p, err := process.Start(t.Context(), process.Spec{Path: shell(), Args: []string{"cmd", "/c", "exit 7"}})
+	//: the backend spawns, rather than refusing the platform.
 	if err != nil {
 		t.Fatalf("Start on windows = %v, want a supervised child", err)
 	}
 	exit, werr := p.Wait()
+	//: the child is reaped through the handle.
 	if werr != nil {
 		t.Fatalf("Wait = %v", werr)
 	}
+	//: and its own exit code comes back.
 	if exit.Code != 7 {
 		t.Fatalf("exit code = %d, want 7", exit.Code)
 	}
@@ -49,24 +52,31 @@ func TestStartSupervisesAChildOnWindows(t *testing.T) {
 // refused, never spawned with the request silently dropped.
 func TestStartRefusesAUnixOnlyFieldOnWindows(t *testing.T) {
 	t.Parallel()
-	umask := 0o077
-	tests := []struct {
+	type tc struct {
 		name string
 		spec process.Spec
-	}{
-		{name: "a umask", spec: process.Spec{Path: shell(), Args: []string{"cmd", "/c", "exit 0"}, Umask: &umask}},
+	}
+	tests := []tc{
+		{name: "a umask", spec: process.Spec{Path: shell(), Args: []string{"cmd", "/c", "exit 0"}, Umask: new(0o077)}},
 		{name: "POSIX credentials", spec: process.Spec{Path: shell(), Args: []string{"cmd", "/c", "exit 0"}, User: "nobody"}},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		p, err := process.Start(t.Context(), c.spec)
+		//: the typed floor, not a spawn with the field dropped.
+		if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+			t.Fatalf("Start with %s on windows = %v, want UNSUPPORTED_PLATFORM", c.name, err)
+		}
+		//: and nothing was started behind the refusal.
+		if p != nil {
+			t.Fatal("a refused Start still returned a process")
+		}
+	}
+	//: one subtest per Unix-only field.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			p, err := process.Start(t.Context(), tt.spec)
-			if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
-				t.Fatalf("Start with %s on windows = %v, want UNSUPPORTED_PLATFORM", tt.name, err)
-			}
-			if p != nil {
-				t.Fatal("a refused Start still returned a process")
-			}
+			runCase(t, c)
 		})
 	}
 }

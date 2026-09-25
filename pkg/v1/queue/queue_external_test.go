@@ -137,6 +137,7 @@ func facadeBroker(t *testing.T, kind string) queue.Broker {
 		//: matches it through the public names alone. Asserted, then skipped:
 		//: the case needs a broker that does not exist there.
 		if runtime.GOOS == "windows" {
+			//: the platform's refusal through the public names, and no broker.
 			if !errors.Is(err, proc.UnsupportedPlatform) || broker != nil {
 				t.Fatalf("NewFile on windows = (%v, %v), want (nil, proc.UnsupportedPlatform)", broker, err)
 			}

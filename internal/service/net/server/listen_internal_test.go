@@ -201,6 +201,7 @@ func Test_resolveShards(t *testing.T) {
 		//: on a platform without the option every multi-shard request degrades,
 		//: so the expectation is conditional rather than absolute.
 		wantCount, wantDegraded := c.want, c.degraded
+		//: without SO_REUSEPORT a shardable network gets one listener.
 		if !reusePort && shardable(c.network) {
 			wantCount, wantDegraded = 1, c.requested > 1
 		}
@@ -215,7 +216,9 @@ func Test_resolveShards(t *testing.T) {
 			t.Fatalf("degraded=%v but reason=%q — the report contradicts itself", degraded, reason)
 		}
 	}
+	//: both answers to the platform question, on every host,
 	for _, reusePort := range []bool{true, false} {
+		//: for every row.
 		for _, c := range tests {
 			t.Run(fmt.Sprintf("%s/reuseport=%v", c.name, reusePort), func(t *testing.T) {
 				t.Parallel()
@@ -227,6 +230,7 @@ func Test_resolveShards(t *testing.T) {
 	for _, c := range tests {
 		gotCount, gotDegraded, gotReason := resolveShards(c.requested, c.network)
 		wantCount, wantDegraded, wantReason := shardsFor(c.requested, c.network, reusePortSupported())
+		//: the platform's answer, exactly.
 		if gotCount != wantCount || gotDegraded != wantDegraded || gotReason != wantReason {
 			t.Errorf("resolveShards(%d, %q) = (%d, %v, %q), want the platform's (%d, %v, %q)",
 				c.requested, c.network, gotCount, gotDegraded, gotReason, wantCount, wantDegraded, wantReason)

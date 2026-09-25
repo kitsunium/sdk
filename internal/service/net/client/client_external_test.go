@@ -567,6 +567,7 @@ func TestClient_Get_IsObserved(t *testing.T) {
 			if record.Path != c.path {
 				t.Errorf("the record carries path %q, want %q", record.Path, c.path)
 			}
+			//: at least the latency the upstream imposed — a coarse clock cannot make it zero.
 			if record.Duration < latency {
 				t.Errorf("the record carries %v, less than the %v the upstream took to answer", record.Duration, latency)
 			}

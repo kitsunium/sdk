@@ -136,15 +136,18 @@ func TestAWindowsTargetRefusesTheReplacementBeforeDownloadingAnything(t *testing
 		getter := &recordingGetter{}
 		svc := NewUpdaterWithDeps("v1.0.0", testSource, getter, untouchedFS(t), &mockCopier{})
 		svc.goos = c.goos
+		//: a vendor key when the row has one; without it, the key is refused first.
 		if c.keyed {
 			svc = svc.WithVendorKey(pub)
 		}
 
 		err := svc.downloadAndReplace("v2.0.0")
 
+		//: the row's refusal, by its code.
 		if !errs.HasCode(err, c.want) {
 			t.Fatalf("downloadAndReplace on a %s target = %v, want code %v", c.goos, err, c.want)
 		}
+		//: fetched only where the platform can replace.
 		if fetched := getter.urls(); (len(fetched) > 0) != c.wantFetches {
 			t.Fatalf("fetched %v, want fetches=%v", fetched, c.wantFetches)
 		}
@@ -153,6 +156,7 @@ func TestAWindowsTargetRefusesTheReplacementBeforeDownloadingAnything(t *testing
 			t.Errorf("errors.Is(%v, UnsupportedPlatform) = false, want true", err)
 		}
 	}
+	//: one subtest per target.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -184,12 +188,15 @@ func TestUpgradeOnAWindowsTargetChecksAndThenStops(t *testing.T) {
 
 	info, err := svc.Upgrade()
 
+	//: the platform's refusal, after the check.
 	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
 		t.Fatalf("Upgrade on a windows target = %v, want UNSUPPORTED_PLATFORM", err)
 	}
+	//: the check still reports the newer release,
 	if !info.Available || info.LatestVersion != "v2.0.0" {
 		t.Errorf("Upgrade reported %+v, want the newer release it found", info)
 	}
+	//: and only the release metadata was fetched.
 	if fetched := getter.urls(); len(fetched) != 1 {
 		t.Errorf("fetched %v, want the release metadata alone", fetched)
 	}

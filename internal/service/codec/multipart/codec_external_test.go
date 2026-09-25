@@ -950,10 +950,12 @@ func TestEncodedHeadersReparseWithTheStdlib(t *testing.T) {
 			//: ENCODER wrote — failed on one platform only. What the codec's own
 			//: decoder makes of a path is TestAFileNameKeepsOnlyItsLastPathElementOnEveryOS.
 			_, disposition, derr := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+			//: the stdlib parses the disposition the encoder wrote.
 			if derr != nil {
 				t.Errorf("%s: part %d: the stdlib cannot parse the disposition: %v", tc.name, i, derr)
 			}
 			fileName := disposition["filename"]
+			//: and every field comes back as sent, the filename verbatim.
 			if part.FormName() != want.formName || fileName != want.fileName || string(body) != want.body {
 				t.Errorf("%s: part %d: read back (%q, %q, %q), want (%q, %q, %q)", tc.name, i,
 					part.FormName(), fileName, body, want.formName, want.fileName, want.body)
@@ -1011,20 +1013,25 @@ func TestAFileNameKeepsOnlyItsLastPathElementOnEveryOS(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		data, err := multipart.New().Marshal(multipart.PartValue{Name: "upload", FileName: c.sent, Data: []byte("x")})
+		//: the encoder accepts the name as given.
 		if err != nil {
 			t.Fatalf("Marshal(FileName %q) err=%v", c.sent, err)
 		}
 		var got multipart.FormValue
+		//: the codec's own decoder reads the body back.
 		if uerr := multipart.New().Unmarshal(data, &got); uerr != nil {
 			t.Fatalf("Unmarshal err=%v", uerr)
 		}
+		//: one part in, one part out.
 		if len(got.Parts) != 1 {
 			t.Fatalf("decoded %d parts, want 1", len(got.Parts))
 		}
+		//: the last path element survives, whichever separator the sender used.
 		if got.Parts[0].FileName != c.want {
 			t.Errorf("FileName sent as %q decoded as %q, want %q", c.sent, got.Parts[0].FileName, c.want)
 		}
 	}
+	//: one subtest per spelling of the name.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

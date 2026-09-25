@@ -138,7 +138,9 @@ func newDiskFS(t *testing.T) (disk *osFS, dir string) {
 	t.Helper()
 	dir = t.TempDir()
 	filesystem, newErr := NewOS(dir)
+	//: a platform without the disk mechanics has no filesystem to sabotage:
 	if !platformNative {
+		//: it refuses by the typed sentinel, with nothing behind it.
 		if !errors.Is(newErr, coreproc.UnsupportedPlatform) || filesystem != nil {
 			t.Fatalf("NewOS(%q) = (%v, %v) on a platform without the disk mechanics, want (nil, UnsupportedPlatform)", dir, filesystem, newErr)
 		}

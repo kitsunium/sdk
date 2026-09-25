@@ -20,12 +20,13 @@ import (
 // TestRelayOnWindows pins both halves through the public names.
 func TestRelayOnWindows(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	type tc struct {
 		name   string
 		target signal.Target
 		queued bool
 		want   errs.Code
-	}{
+	}
+	tests := []tc{
 		//: 0 is the caller's own group and -1 every process it may signal: a
 		//: mis-computed Target must never fan out that wide, on any platform.
 		{name: "the reserved target 0 is refused before delivery", target: 0, queued: true, want: coreproc.CodeRelayFailed},
@@ -33,24 +34,33 @@ func TestRelayOnWindows(t *testing.T) {
 		//: nothing queued, nothing delivered — a clean drain is nil.
 		{name: "a clean drain delivers nothing and returns nil", target: 1 << 30},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		src := make(chan signal.Signal, 1)
+		//: a signal waiting is what makes Relay try to deliver at all.
+		if c.queued {
+			src <- signal.Signal(syscall.SIGTERM)
+		}
+		close(src)
+		err := signal.Relay(src, c.target)
+		//: the clean drain: nothing to deliver, nothing to report.
+		if c.want == 0 {
+			//: nil, exactly.
+			if err != nil {
+				t.Fatalf("Relay = %v, want nil", err)
+			}
+			return
+		}
+		//: the refusal, by its code.
+		if !errs.HasCode(err, c.want) {
+			t.Fatalf("Relay(target=%d) = %v, want code %v", c.target, err, c.want)
+		}
+	}
+	//: one subtest per target.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			src := make(chan signal.Signal, 1)
-			if tt.queued {
-				src <- signal.Signal(syscall.SIGTERM)
-			}
-			close(src)
-			err := signal.Relay(src, tt.target)
-			if tt.want == 0 {
-				if err != nil {
-					t.Fatalf("Relay = %v, want nil", err)
-				}
-				return
-			}
-			if !errs.HasCode(err, tt.want) {
-				t.Fatalf("Relay(target=%d) = %v, want code %v", tt.target, err, tt.want)
-			}
+			runCase(t, c)
 		})
 	}
 }

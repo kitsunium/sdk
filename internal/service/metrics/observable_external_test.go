@@ -196,6 +196,7 @@ func TestDeltaCollectConsumesTheWindow(t *testing.T) {
 		m.Gauge("in_flight").Set(4)
 		clk.Advance(time.Second)
 		middle := m.Collect()
+		//: the gauge reads what was last set.
 		if got := middle.Gauges["in_flight"].Points[0].Value; got != 4 {
 			t.Errorf("the gauge reads %v, want 4", got)
 		}
@@ -219,12 +220,15 @@ func TestDeltaCollectConsumesTheWindow(t *testing.T) {
 		//: delta starts where the previous collection ended; cumulative keeps
 		//: the instant the meter was built, forever.
 		wantStart := windowOrigin
+		//: a delta window opens where the previous collection closed.
 		if c.startMoves {
 			wantStart = middle.Time
 		}
+		//: the second window starts where its temporality says.
 		if !second.StartTime.Equal(wantStart) {
 			t.Errorf("the second window starts at %v, want %v", second.StartTime, wantStart)
 		}
+		//: and ends at the manual clock's reading, never the host's.
 		if !second.Time.Equal(windowOrigin.Add(2 * time.Second)) {
 			t.Errorf("the second window ends at %v, want the clock's %v", second.Time, windowOrigin.Add(2*time.Second))
 		}

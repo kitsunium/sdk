@@ -88,6 +88,7 @@ func requireFileBroker(t *testing.T, cfg svcqueue.FileConfig) corequeue.Broker {
 // refusal, no broker — and then skips the calling case.
 func refusedOnWindows(t *testing.T, broker corequeue.Broker, err error) {
 	t.Helper()
+	//: the platform's refusal and no broker — anything else is the rules refusing a directory they should pass.
 	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) || broker != nil {
 		t.Fatalf("NewFile on windows = (%v, %v), want (nil, UNSUPPORTED_PLATFORM) — the directory rules passed and vfs refused", broker, err)
 	}

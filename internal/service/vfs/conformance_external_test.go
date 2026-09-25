@@ -52,6 +52,7 @@ var implementations = []factory{
 // ACL). Anything but that refusal fails.
 func refusedByDesign(t *testing.T, filesystem corevfs.FullFS, err error) {
 	t.Helper()
+	//: the typed refusal, and no filesystem behind it.
 	if !errors.Is(err, coreproc.UnsupportedPlatform) || filesystem != nil {
 		t.Fatalf("NewOS on %s = (%v, %v), want (nil, UnsupportedPlatform)", runtime.GOOS, filesystem, err)
 	}

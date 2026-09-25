@@ -131,6 +131,7 @@ func Test_journaldFactory_Open_defaultDialer(t *testing.T) {
 			//: to prove otherwise: the refusal IS the contract there.
 			if !unixDatagrams {
 				sink, err := (&journaldFactory{}).Open(Config{SocketPath: filepath.Join(t.TempDir(), "j.sock")})
+				//: the typed refusal, and no sink.
 				if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) || sink != nil {
 					t.Fatalf("%s: Open with the default dialer = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", tc.name, sink, err)
 				}

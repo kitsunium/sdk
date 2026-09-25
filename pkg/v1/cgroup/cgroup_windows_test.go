@@ -20,14 +20,17 @@ import (
 // names on the real kernel.
 func TestAJobObjectThroughTheFacade(t *testing.T) {
 	t.Parallel()
+	//: Job Objects ship with every supported Windows.
 	if !cgroup.Available() {
 		t.Fatal("Available() = false on windows, want true: Job Objects ship with every supported release")
 	}
 	g, err := cgroup.Create("sdk-facade-windows")
+	//: a Job Object stands behind the Group.
 	if err != nil || g == nil {
 		t.Fatalf("Create = (%v, %v), want a Job Object", g, err)
 	}
 	defer func() {
+		//: released when the test ends.
 		if derr := g.Delete(); derr != nil {
 			t.Errorf("Delete = %v, want nil", derr)
 		}
@@ -36,9 +39,11 @@ func TestAJobObjectThroughTheFacade(t *testing.T) {
 	if merr := g.SetMemoryMax(256 << 20); merr != nil {
 		t.Fatalf("SetMemoryMax(256 MiB) = %v", merr)
 	}
+	//: and a limit of -1 clears it.
 	if merr := g.SetMemoryMax(-1); merr != nil {
 		t.Fatalf("SetMemoryMax(-1) = %v", merr)
 	}
+	//: the process count applies too.
 	if perr := g.SetPidsMax(64); perr != nil {
 		t.Fatalf("SetPidsMax(64) = %v", perr)
 	}
@@ -48,6 +53,7 @@ func TestAJobObjectThroughTheFacade(t *testing.T) {
 		"Freeze":   g.Freeze(),
 		"Thaw":     g.Thaw(),
 	} {
+		//: each refused by its typed code.
 		if !errs.HasCode(uerr, coreproc.CodeUnsupportedPlatform) {
 			t.Errorf("%s on a Job Object = %v, want UNSUPPORTED_PLATFORM", op, uerr)
 		}

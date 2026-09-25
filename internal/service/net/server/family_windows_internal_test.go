@@ -25,16 +25,19 @@ import (
 func TestWindowsHasNoUnixDatagramOrSeqpacketSocket(t *testing.T) {
 	t.Parallel()
 	dir := socketDir(t)
+	//: the kernel itself has no unix datagram socket,
 	if pc, err := stdnet.ListenPacket("unixgram", filepath.Join(dir, "dgram.sock")); err == nil {
 		swallowErr(pc.Close())
 		t.Fatal("a unixgram socket opened on windows — AF_UNIX has datagrams now, and platformLacks must stop refusing them")
 	}
+	//: nor a unix seqpacket one.
 	if ln, err := stdnet.Listen("unixpacket", filepath.Join(dir, "seq.sock")); err == nil {
 		swallowErr(ln.Close())
 		t.Fatal("a unixpacket socket opened on windows — AF_UNIX has seqpacket now, and platformLacks must stop refusing it")
 	}
 	//: and the stream family the engine does serve here really is served.
 	ln, err := stdnet.Listen("unix", filepath.Join(dir, "stream.sock"))
+	//: served, so the refusals above are about the family, not AF_UNIX.
 	if err != nil {
 		t.Fatalf("a unix stream socket did not open on windows: %v", err)
 	}
@@ -55,6 +58,7 @@ func Test_familyUnavailable_refusesBeforeTheOSIsAsked(t *testing.T) {
 		{name: "a unix datagram socket on the datagram engine", network: "unixgram", bind: func(t *testing.T, addr corenet.AddressValue) (bool, error) {
 			t.Helper()
 			pc, err := listenPacket(t.Context(), addr)
+			//: a socket that should not exist is still released.
 			if pc != nil {
 				swallowErr(pc.Close())
 			}
@@ -63,6 +67,7 @@ func Test_familyUnavailable_refusesBeforeTheOSIsAsked(t *testing.T) {
 		{name: "a unix seqpacket socket on the stream engine", network: "unixpacket", bind: func(t *testing.T, addr corenet.AddressValue) (bool, error) {
 			t.Helper()
 			ln, err := listen(t.Context(), addr, corenet.IdentityValue{}, false, false)
+			//: a listener that should not exist is still released.
 			if ln != nil {
 				swallowErr(ln.Close())
 			}
@@ -73,16 +78,20 @@ func Test_familyUnavailable_refusesBeforeTheOSIsAsked(t *testing.T) {
 		t.Helper()
 		path := filepath.Join(socketDir(t), "refused.sock")
 		bound, err := c.bind(t, corenet.AddressValue{Network: c.network, Addr: path})
+		//: the platform's refusal, by its typed code,
 		if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
 			t.Fatalf("%s = %v, want UNSUPPORTED_PLATFORM", c.network, err)
 		}
+		//: with nothing bound behind it,
 		if bound {
 			t.Error("a refused family still handed back a socket")
 		}
+		//: and nothing on disk: the kernel was never asked.
 		if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
 			t.Errorf("the refusal left %s behind (%v) — the kernel was asked after all", path, statErr)
 		}
 	}
+	//: one subtest per refused family.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

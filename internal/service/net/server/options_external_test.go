@@ -549,6 +549,7 @@ func TestWriteTimeout(t *testing.T) {
 			//: until the buffers are full and a write has to wait for a peer
 			//: that never reads — which only the bound can end.
 			for written := 0; written < ceiling; written += chunk {
+				//: the first write the bound cuts short ends the handler, with its error.
 				if _, err := conn.Write(block); err != nil {
 					outcome <- err
 					return err

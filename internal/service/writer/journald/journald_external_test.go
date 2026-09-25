@@ -104,6 +104,7 @@ func Test_journaldSink_UnixgramRoundtrip(t *testing.T) {
 			//: the default dialer there by name, and that is what is asserted.
 			if runtime.GOOS == "windows" {
 				sink, oerr := writer.Open("journald", journald.Config{SocketPath: filepath.Join(t.TempDir(), "j.sock")})
+				//: the typed refusal, and no sink.
 				if !errs.HasCode(oerr, coreproc.CodeUnsupportedPlatform) || sink != nil {
 					t.Fatalf("%s: writer.Open on windows = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", tc.name, sink, oerr)
 				}
