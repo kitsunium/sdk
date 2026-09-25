@@ -12,6 +12,7 @@ import (
 	corecodec "github.com/kitsunium/sdk/internal/core/codec"
 	corewriter "github.com/kitsunium/sdk/internal/core/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svclogger "github.com/kitsunium/sdk/internal/service/logger"
 )
 
 // Format is the typed wire-format identifier accepted by FromConfig. It is a
@@ -31,6 +32,9 @@ type Format = corecodec.Format
 // blob is undecodable, the topology has no writers, a writer Name is unknown, or
 // a writer rejects its options. The error is redacted: it names only the writer
 // and the failure kind, never a decoded credential or option value.
+//
+// Like NewMulti's, the returned Logger owns the writers it opened — the caller
+// never held them — and implements io.Closer to release them, once.
 func FromConfig(format Format, raw []byte) (lg Logger, err error) {
 	//: decode the blob into a TopologyConfig via the consumer-registered codec.
 	topo, dErr := decodeTopology(format, raw)
@@ -52,11 +56,18 @@ func FromConfig(format Format, raw []byte) (lg Logger, err error) {
 		return nil, rErr
 	}
 	//: route through NewWithSink so the same encoder + version stamping applies.
-	return NewWithSink(SinkConfig{
+	built, bErr := NewWithSink(SinkConfig{
 		Sink:     sink,
 		Encoder:  TextEncoder(),
 		MinLevel: parseLevel(topo.Level),
 	})
+	//: the only failure left is NewWithSink's own validation.
+	if bErr != nil {
+		//: forwarded unchanged.
+		return nil, bErr
+	}
+	//: the Logger owns what resolveSinks opened: nobody else holds it.
+	return svclogger.Owning(built, sink), nil
 }
 
 // decodeTopology unmarshals raw into a Topology using the codec registered under

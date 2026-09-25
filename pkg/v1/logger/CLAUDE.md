@@ -14,7 +14,8 @@ logger.go      — Logger / Attr / Level aliases, 4 Level constants, Config stru
 sink.go        — Sink / Record / Encoder aliases, SinkConfig struct, NewWithSink,
                  Multi fan-out helper, ConsoleStderr|ConsoleStdout, TextEncoder
                  (ConsoleConfig{} / StreamStderr is the zero value — ADR 0030)
-writer.go      — WriterName / *Config aliases, WriterSpec, NewMulti (named writers)
+writer.go      — WriterName / *Config aliases, WriterSpec, NewMulti (named writers;
+                 the Logger it returns owns them and is an io.Closer)
 fromconfig.go  — Format alias, FromConfig (build a Logger from a config blob),
                  + parseLevel / decode / resolve helpers (ADR 0014 §D5)
 topology.go    — TopologyConfig DTO (Level + Writers)
@@ -130,6 +131,21 @@ ADR 0039 never came into play.
   - Raw go build: `go build -ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=v0.1.0" ./...`
   - Under Bazel: `--stamp` + `x_defs` + `tools/workspace_status.sh` (which prints `STABLE_VERSION`). Both pipelines write into the same `Version` symbol.
 - **Hot path.** `Build(lg, lv).Str(...).Int(...).Send(ctx, msg)` runs through a `sync.Pool`-backed builder owned by `svclogger`; steady-state per-call cost is **one** heap allocation per emit once the pool is warm — the pool recycles the builder and its attrs scratchpad, but the handler clones that scratchpad on every `Send`, so one slice escapes. `Build` trades the variadic-slice allocation for the handler's clone; prefer it for ergonomics, NOT as an allocation-free guarantee. `LogAttrs` is the slice-overload that avoids the variadic-slice allocation in `Logger.Log(... Attr)`. Numbers in `BENCH.md`; the contract is pinned by `TestV116BuildSendAllocatesOnePerEmit` in `builder_integration_test.go` (`//go:build !race`, so it runs only in the race-off alloc lane — root `CLAUDE.md` rule 12). That guard measures **depth** — one sink — and says nothing about **width**, which is how a fan-out that heap-allocated once per record went unnoticed: `Multi` opened a per-`Write` error slate sized `len(branches)`, and a capacity that is not a constant escapes the compiler's implicit stack budget at three branches, so a third destination silently cost an extra allocation on every healthy emit. `TestFanoutWidthAddsNoAllocation` in `fanout_integration_test.go` now pins the other half, differentially against the width-1 baseline rather than against a hardcoded count. Callers MUST NOT use a `Builder` after `Send` — it returns to the recycler.
+- **A NewMulti Logger owns its writers and releases them on Close** (ADR 0095).
+  `NewMulti` opens every writer through the registry, so the caller never holds
+  a `Sink` it could close; the Logger was the only thing referring to them and
+  had no `Close`, so they lived until a collection ran their finalizers — a
+  descriptor (and, for an async writer, a goroutine) per rebuild, and on
+  Windows a log file nothing could delete or rotate while the process ran. The
+  first Windows run of the suite found it as `t.TempDir` cleanups failing on
+  `TestNewMulti`, `TestDefaultMulti` and `TestNewMultiRotFileRotates`. The
+  returned Logger now implements `io.Closer` (`svclogger.Owning`): `Close`
+  drains and closes every writer, once; a Logger derived with `With` /
+  `WithGroup` owns none of them and closing it releases nothing.
+  `FromConfig` opens its writers the same way and returns an owning Logger too.
+  `NewWithSink` is unchanged — its caller built the `Sink` and still owns it.
+  `TestANewMultiLoggerReleasesItsFilesOnClose` removes the files after `Close`,
+  which Windows refuses while any handle is open.
 - **Error codes use range 1.1.0.*** per ADR 0005:
   - `1.1.0.1` `CodeWriterRequired` / `WriterRequired`
   - `1.1.0.2` `CodeSinkConfigRequired` / `SinkConfigRequired`

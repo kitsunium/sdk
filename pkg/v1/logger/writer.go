@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	corewriter "github.com/kitsunium/sdk/internal/core/writer"
+	svclogger "github.com/kitsunium/sdk/internal/service/logger"
 )
 
 // StreamStderr targets os.Stderr (the zero value); StreamStdout targets stdout.
@@ -88,6 +89,18 @@ type WriterSpec = corewriter.Spec
 // for the AWS writers. An unresolved Name returns the registry's
 // WriterUnknownName; an empty specs list returns WriterSpecInvalid.
 //
+// The returned Logger OWNS the writers NewMulti opened — the caller never held
+// them — and implements io.Closer to release them: Close drains what an
+// asynchronous writer still holds and closes every writer, once, whatever the
+// number of calls. Loggers derived with With or WithGroup share the writers and
+// own none of them; closing one releases nothing. Until Close, the writers live
+// as long as the Logger does, and a file one opened cannot be deleted or
+// rotated by another program on Windows:
+//
+//	lg, err := logger.NewMulti(logger.LevelInfo, specs...)
+//	if err != nil { … }
+//	defer lg.(io.Closer).Close()
+//
 //	import (
 //	    "github.com/kitsunium/sdk/pkg/v1/logger"
 //	    _ "github.com/kitsunium/sdk/pkg/v1/logger/writer" // console + file
@@ -137,9 +150,10 @@ func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error) {
 		}
 		branches = append(branches, sink)
 	}
+	fanout := Multi(branches...)
 	//: route through NewWithSink so the same encoder + version stamping applies.
 	lg, err = NewWithSink(SinkConfig{
-		Sink:     Multi(branches...),
+		Sink:     fanout,
 		Encoder:  TextEncoder(),
 		MinLevel: min,
 	})
@@ -148,6 +162,7 @@ func NewMulti(min Level, specs ...WriterSpec) (lg Logger, err error) {
 		//: roll them all back before surfacing the construction error.
 		return nil, rollback(err)
 	}
-	//: success — the returned Logger now owns the branches via Multi.
-	return lg, nil
+	//: success — and the Logger OWNS the branches, since nobody else holds
+	//: them: its Close is the only way they are ever released.
+	return svclogger.Owning(lg, fanout), nil
 }

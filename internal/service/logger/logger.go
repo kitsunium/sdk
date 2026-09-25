@@ -27,6 +27,11 @@ type loggerImpl struct {
 	// state a Logger built by New is in, since this layer deliberately does
 	// not know which propagation the application uses (ADR 0062).
 	trace corelogger.TraceContextSource
+	// owned is what this Logger releases on Close: the writers a constructor
+	// opened FOR it, which nobody else holds (see Owning). Nil for every
+	// Logger over a sink its caller owns, and for every Logger derived with
+	// With or WithGroup — they share the writers and own none of them.
+	owned *onceCloser
 }
 
 // New wraps a core.Handler inside a core.Logger with no trace correlation.

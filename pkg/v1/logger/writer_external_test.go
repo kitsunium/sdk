@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,8 +97,9 @@ func TestNewMulti(t *testing.T) {
 		//: the happy arm must build a logger; the unknown-name arm must error.
 		if c.wantOK {
 			if err != nil || lg == nil {
-				t.Errorf("%s: err=%v lg=%v want nil+logger", c.name, err, lg)
+				t.Fatalf("%s: err=%v lg=%v want nil+logger", c.name, err, lg)
 			}
+			closeLogger(t, lg)
 			return
 		}
 		//: remaining arm — unresolved name yields a non-nil error.
@@ -149,6 +151,7 @@ func TestDefaultMulti(t *testing.T) {
 		if err != nil || lg == nil {
 			t.Fatalf("%s: err=%v lg=%v want nil+logger", c.name, err, lg)
 		}
+		closeLogger(t, lg)
 		//: the file branch must actually receive an emitted record.
 		logger.Info(t.Context(), lg, "default-multi-marker")
 		data, rErr := os.ReadFile(path)
@@ -187,6 +190,7 @@ func TestNewMultiFanOut(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: NewMulti: %v", c.name, err)
 		}
+		closeLogger(t, lg)
 		logger.Info(t.Context(), lg, "fan-out-marker")
 		//: the fan-out is correct iff EVERY branch file carries the record.
 		for _, p := range paths {
@@ -203,6 +207,71 @@ func TestNewMultiFanOut(t *testing.T) {
 			runCase(t, c)
 		})
 	}
+}
+
+// closeLogger releases, when the test ends, the writers a NewMulti Logger
+// opened — before t.TempDir removes the directory they write into. Windows
+// will not delete a file that is still open, and these Loggers used to have no
+// way to let go of theirs: t.TempDir's cleanup failed with "the process cannot
+// access the file" whenever no garbage collection had run first.
+func closeLogger(t *testing.T, lg logger.Logger) {
+	t.Helper()
+	closer, ok := lg.(io.Closer)
+	if !ok {
+		t.Fatalf("a NewMulti Logger (%T) does not implement io.Closer", lg)
+	}
+	t.Cleanup(func() {
+		if err := closer.Close(); err != nil {
+			t.Errorf("closing the logger's writers: %v", err)
+		}
+	})
+}
+
+// TestANewMultiLoggerReleasesItsFilesOnClose pins what Close is FOR: once it
+// returns, the files the Logger's writers opened are nobody's, so they can be
+// removed — which on Windows is refused while any handle is open, and which is
+// exactly what t.TempDir's cleanup failed at before these Loggers could be
+// closed. A second Close is harmless, a derived Logger owns nothing, and a
+// record logged after Close is dropped rather than panicking.
+func TestANewMultiLoggerReleasesItsFilesOnClose(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plain.log")
+	rotated := filepath.Join(dir, "rotated.log")
+	lg, err := logger.NewMulti(logger.LevelInfo,
+		logger.WriterSpec{Name: "file", Config: logger.FileConfig{Path: plain}},
+		logger.WriterSpec{Name: "rotfile", Config: logger.RotFileConfig{Path: rotated, MaxBytes: 1 << 20}},
+	)
+	if err != nil {
+		t.Fatalf("NewMulti: %v", err)
+	}
+	child := lg.With(logger.String("scope", "child"))
+	logger.Info(t.Context(), child, "before-close")
+	//: a derived Logger owns none of the writers, so closing it keeps them open.
+	if cerr := child.(io.Closer).Close(); cerr != nil {
+		t.Fatalf("closing a derived Logger = %v, want nil", cerr)
+	}
+	logger.Info(t.Context(), lg, "still-open")
+	closer := lg.(io.Closer)
+	if cerr := closer.Close(); cerr != nil {
+		t.Fatalf("Close = %v, want nil", cerr)
+	}
+	if cerr := closer.Close(); cerr != nil {
+		t.Fatalf("a second Close = %v, want the first answer, nil", cerr)
+	}
+	//: the records reached both files before the release.
+	for _, path := range []string{plain, rotated} {
+		data, rerr := os.ReadFile(path)
+		if rerr != nil || !strings.Contains(string(data), "before-close") || !strings.Contains(string(data), "still-open") {
+			t.Errorf("%s = %q (%v), want both records", filepath.Base(path), data, rerr)
+		}
+		//: and the file is nobody's now: removable on every platform.
+		if rerr := os.Remove(path); rerr != nil {
+			t.Errorf("removing %s after Close = %v — the Logger still holds it", filepath.Base(path), rerr)
+		}
+	}
+	//: a record after Close goes nowhere, and says nothing.
+	logger.Info(t.Context(), lg, "after-close")
 }
 
 func TestNewMultiClosesOpenedSinksOnError(t *testing.T) {
@@ -294,6 +363,7 @@ func TestNewMultiRotFileRotates(t *testing.T) {
 		if err != nil || lg == nil {
 			t.Fatalf("NewMulti(rotfile) err=%v lg=%v, want nil and a logger", err, lg)
 		}
+		closeLogger(t, lg)
 		//: emit well past MaxBytes (each record far exceeds the cap) so the
 		//: sink is forced through several rotations.
 		for range c.records {
