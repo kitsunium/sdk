@@ -3,11 +3,10 @@ package resilience
 
 import (
 	"context"
-	"math"
-	"math/rand/v2"
 	"time"
 
 	coreres "github.com/kitsunium/sdk/internal/core/resilience"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
 const (
@@ -40,20 +39,18 @@ func NewRetry(cfg RetryConfig) coreres.Runner {
 		//: a non-positive budget still runs once.
 		cfg.MaxAttempts = minAttempts
 	}
-	//: a sub-1 multiplier would shrink the delay — default to doubling.
-	if cfg.Multiplier < defaultMultiplier && cfg.Multiplier <= 1 {
-		//: standard exponential doubling.
-		cfg.Multiplier = defaultMultiplier
-	}
-	//: NaN FIRST: Go's min/max propagate it, so min(max(NaN, 0), 1) is NaN, and
-	//: NaN <= 0 is false — it would sail past every later guard into a
-	//: float-to-int conversion Go leaves implementation-defined.
-	if math.IsNaN(cfg.Jitter) {
-		//: an unspecifiable width is no width.
-		cfg.Jitter = noJitter
-	}
-	//: a jitter wider than the delay is a different policy; clamp into [0, 1].
-	cfg.Jitter = min(max(cfg.Jitter, noJitter), maxJitter)
+	//: a sub-1 multiplier would shrink the delay, and a NaN one would poison
+	//: every product — both default to doubling, through the same
+	//: normalisation the public BackoffValue applies.
+	cfg.Multiplier = normalMultiplier(cfg.Multiplier)
+	//: NaN FIRST, inside normalJitter: Go's min/max propagate it, so
+	//: min(max(NaN, 0), 1) is NaN, and NaN <= 0 is false — it would sail past
+	//: every later guard into a float-to-int conversion Go leaves
+	//: implementation-defined. A jitter wider than the delay is a different
+	//: policy, so the rest is clamped into [0, 1].
+	cfg.Jitter = normalJitter(cfg.Jitter)
+	//: resolved once, so every wait reads the same clock.
+	cfg.Clock = timedOrSystem(cfg.Clock)
 	//: stateless config holder — safe to share.
 	return &retryRunner{cfg: cfg}
 }
@@ -95,10 +92,12 @@ func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 	return wrapAs(coreres.RetryExhausted, lastErr)
 }
 
-// wait sleeps the backoff for the given attempt, returning ctx.Err on cancel.
+// wait sleeps the backoff for the given attempt on the configured clock,
+// returning ctx.Err on cancel.
 func (r *retryRunner) wait(ctx context.Context, attempt int) error {
-	//: a deadline-aware sleep: whichever fires first wins.
-	timer := time.NewTimer(r.jittered(r.backoff(attempt)))
+	//: a deadline-aware sleep on the injected clock, so a test drives the
+	//: whole backoff with a ManualClock instead of sleeping through it.
+	timer := timedOrSystem(r.cfg.Clock).NewTimer(r.jittered(r.backoff(attempt)))
 	//: always release the timer.
 	defer timer.Stop()
 	//: race the backoff timer against context cancellation.
@@ -106,28 +105,19 @@ func (r *retryRunner) wait(ctx context.Context, attempt int) error {
 	case <-ctx.Done():
 		//: cancelled before the delay elapsed.
 		return ctx.Err()
-	case <-timer.C:
+	case <-timer.C():
 		//: the backoff elapsed normally.
 		return nil
 	}
 }
 
 // backoff computes the capped exponential delay for attempt (1-based growth).
+// It is the public BackoffValue's curve, built from this policy's four fields, so
+// the two cannot drift apart.
 func (r *retryRunner) backoff(attempt int) time.Duration {
-	//: start from the base delay as a float for the geometric growth.
-	delay := float64(r.cfg.BaseDelay)
-	//: multiply once per prior attempt.
-	for range attempt - 1 {
-		//: geometric growth by the configured multiplier.
-		delay *= r.cfg.Multiplier
-	}
-	//: apply the optional ceiling.
-	if r.cfg.MaxDelay > 0 && time.Duration(delay) > r.cfg.MaxDelay {
-		//: clamp to the configured maximum.
-		return r.cfg.MaxDelay
-	}
-	//: the grown (uncapped) delay.
-	return time.Duration(delay)
+	//: the multiplier NewRetry already normalised is normalised again here,
+	//: which is idempotent and covers a runner built without NewRetry.
+	return grow(r.cfg.BaseDelay, r.cfg.MaxDelay, normalMultiplier(r.cfg.Multiplier), attempt)
 }
 
 // jittered widens delay by a uniform random fraction of itself, or returns it
@@ -138,31 +128,18 @@ func (r *retryRunner) backoff(attempt int) time.Duration {
 // claims, and a suite that cannot assert the first without the second can
 // assert neither precisely.
 func (r *retryRunner) jittered(delay time.Duration) time.Duration {
-	//: the zero value is the deterministic backoff this policy always had.
-	//: NewRetry normalises NaN, so this comparison is total.
-	if r.cfg.Jitter <= noJitter || delay <= 0 {
-		//: unchanged.
-		return delay
-	}
-	//: Jitter is clamped into [0, 1], so the product never exceeds delay and the
-	//: conversion is always in range.
-	width := int64(float64(delay) * r.cfg.Jitter)
-	//: A widened wait must stay REPRESENTABLE. delay+width wraps negative past
-	//: MaxInt64, and time.NewTimer fires a negative duration immediately — so
-	//: the overflow would abolish the backoff at exactly the attempt where it is
-	//: longest, which is the worst possible moment to stop waiting.
-	if headroom := math.MaxInt64 - int64(delay); width > headroom {
-		//: spread across what is left rather than past the end of the type.
-		width = headroom
-	}
-	//: rand.Int64N panics on a non-positive bound, which a sub-nanosecond
-	//: delay, a rounded-to-zero width or an exhausted headroom reaches.
-	if width <= 0 {
-		//: unchanged.
-		return delay
-	}
+	//: NewRetry normalises NaN and clamps the range; normalJitter repeats it
+	//: for a runner built without NewRetry.
+	return widen(delay, normalJitter(r.cfg.Jitter))
+}
 
-	//: uniform in [delay, delay+width) — additive, so the average wait keeps
-	//: growing with the attempt rather than being pulled back toward zero.
-	return delay + time.Duration(rand.Int64N(width))
+// timedOrSystem resolves a nil clock to the wall clock.
+func timedOrSystem(clk clock.Timed) clock.Timed {
+	//: nil is the caller with no opinion, which is the production case.
+	if clk == nil {
+		//: the wall clock.
+		return clock.System
+	}
+	//: the caller's own, usually a ManualClock in a test.
+	return clk
 }

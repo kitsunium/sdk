@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "resilience",
     srcs = [
+        "backoff.go",
         "breaker.go",
         "breaker_config.go",
         "breaker_state.go",
@@ -15,6 +16,8 @@ go_library(
         "hedge_config.go",
         "hedge_outcome.go",
         "hedge_race.go",
+        "keyed_ratelimit.go",
+        "keyed_ratelimit_config.go",
         "misconfigured.go",
         "ratelimit.go",
         "ratelimit_config.go",
@@ -48,6 +51,8 @@ alias(
 go_test(
     name = "resilience_test",
     srcs = [
+        "backoff_external_test.go",
+        "backoff_internal_test.go",
         "breaker_external_test.go",
         "breaker_internal_test.go",
         "bulkhead_external_test.go",
@@ -56,9 +61,12 @@ go_test(
         "fallback_internal_test.go",
         "hedge_external_test.go",
         "hedge_internal_test.go",
+        "keyed_ratelimit_external_test.go",
+        "keyed_ratelimit_internal_test.go",
         "misconfigured_internal_test.go",
         "ratelimit_external_test.go",
         "ratelimit_internal_test.go",
+        "retry_clock_external_test.go",
         "retry_external_test.go",
         "retry_internal_test.go",
         "retryable_internal_test.go",
@@ -69,6 +77,7 @@ go_test(
     embed = [":resilience"],
     deps = [
         "//internal/core/resilience",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
 )

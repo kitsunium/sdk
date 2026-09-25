@@ -3,9 +3,10 @@
 ## Purpose
 
 Public facade for the SDK reliability policies (ADR 0026). Aliases the
-`Operation`/`Runner` port + `*Config` types, re-exports the seven constructors
-(`NewRetry`/`NewCircuitBreaker`/`NewRateLimiter`/`NewBulkhead`/`NewTimeout`/
-`NewFallback`/`NewHedge`) and the outcome sentinels. Stdlib-only → dep-light;
+`Operation`/`Runner` port + `*Config` types and `Backoff`, re-exports the eight
+constructors (`NewRetry`/`NewCircuitBreaker`/`NewRateLimiter`/
+`NewKeyedRateLimiter`/`NewBulkhead`/`NewTimeout`/`NewFallback`/`NewHedge`) and
+the outcome sentinels. Stdlib-only → dep-light;
 cross-OS portable.
 
 ## Surface
@@ -19,6 +20,11 @@ cross-OS portable.
 | `HedgeConfig.Idempotent` | **mandatory** `bool` — the caller's in-code assertion that duplicating the operation is safe; false refuses the policy |
 | `NewRetry` / `NewCircuitBreaker` / `NewRateLimiter` / `NewBulkhead` / `NewTimeout` / `NewFallback` / `NewHedge` | constructors |
 | `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `FallbackFailed` | sentinels (`errs.HasReason`/`HasCode`), all `EX_TEMPFAIL`; the four REJECTIONS carry the HTTP status a framework answers with through `errs.HTTPStatusOf` — `RateLimited` 429, `CircuitOpen` and `BulkheadFull` 503, `TimeoutExceeded` 504 — and `RetryExhausted` / `FallbackFailed` carry none (500), since what failed there is the operation; `FallbackFailed` carries the `primary` + `fallback` messages as fields |
+| `RetryConfig.Clock` | `clock.Timed` the backoff waits on — nil is the wall clock; a `ManualClock` from `pkg/v1/clock` drives a retry without sleeping (ADR 0103) |
+| `KeyedRateLimiterConfig` | alias onto `service/resilience` — `Rate`/`Burst` per key, `Key func(ctx) string`, `MaxKeys`, `IdleTimeout`, `Clock`; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0103) |
+| `Backoff` | alias onto `service/resilience` — `BaseDelay`/`MaxDelay`/`Multiplier`/`Jitter` + `Delay(attempt)`, the curve `NewRetry` waits, never negative (ADR 0103) |
+| `NewRetry` / `NewCircuitBreaker` / `NewRateLimiter` / `NewKeyedRateLimiter` / `NewBulkhead` / `NewTimeout` / `NewFallback` / `NewHedge` | constructors |
+| `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `FallbackFailed` | sentinels (`errs.HasReason`/`HasCode`), all `EX_TEMPFAIL`; `FallbackFailed` carries the `primary` + `fallback` messages as fields |
 | `PolicyMisconfigured` | sentinel for a policy that cannot honour its config — **permanent**, `EX_CONFIG`, never retry (ADR 0031) |
 
 ## Conventions

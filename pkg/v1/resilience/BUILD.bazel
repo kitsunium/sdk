@@ -22,11 +22,13 @@ alias(
 go_test(
     name = "resilience_test",
     srcs = [
+        "keyed_external_test.go",
         "resilience_bench_test.go",
         "resilience_external_test.go",
     ],
     deps = [
         ":resilience",
+        "//pkg/v1/clock",
         "//pkg/v1/errs",
     ],
 )
