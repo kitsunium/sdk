@@ -44,9 +44,12 @@ const (
 // It is the reader NewFileLocker's directory rules run on, unchanged: every
 // discretionary ACE shape decoded, denials subtracted in list order, a NULL
 // DACL read as the full grant it is. observed names the grant found
-// ("S-1-1-0=0x40"), or — with granted false — the Win32 status that kept a
-// verdict from being reached. The reader fails OPEN (ADR 0084 §D5), so a
-// caller that cannot accept "no verdict" silently must check observed.
+// ("S-1-1-0=0x40"), or — with granted false — what kept a verdict from being
+// reached: the Win32 status ("GetNamedSecurityInfoW=5"), a path that is not
+// one, or the entry the walk could not fetch ("GetAce#3"). It is EMPTY only
+// when the list was read to the end and grants nothing asked about. The reader
+// itself fails open (ADR 0084 §D5); what a caller does with "no verdict" is
+// the caller's decision — the lock accepts and logs, the queue refuses.
 func GrantsAnyone(dir string, onDirectory, onFilesWithin uint32) (granted bool, observed string) {
 	//: the one reader, as the lock directory's own rules call it.
 	return dirGrantsAnyone(dir, onDirectory, onFilesWithin)

@@ -94,8 +94,16 @@ the DACL, read by the one reader this repository has — `lock.GrantsAnyone`
 
 A permission refusal names what it was read from in an `observed` field — the
 mode on Unix, the entry on Windows (`S-1-1-0=0x40`), where there is no mode to
-look at. The reader fails OPEN, as lock's does, and
-logs when it could not read the list at all.
+look at. A list the reader could not read, or read only in part, is refused as
+`why=unverifiable` with the reader's status in `observed`
+(`GetNamedSecurityInfoW=5`, `GetAce#3`). That is the one place the queue parts
+from the lock, which accepts the same case and logs it (ADR 0084 §D5): a lock
+directory wrongly accepted costs the hardening, a queue directory wrongly
+accepted is a planted message a consumer acts on — and the queue refused every
+Windows directory before this rule, so the refusal takes away nothing that
+worked (ADR 0095). `TestAWindowsDirectoryNobodyCouldInspectIsRefused` pins the
+verdict, `TestAWindowsQueueDirectoryWhoseListCannotBeReadIsRefused` a real list
+nobody may read (READ_CONTROL denied to Everyone and to OWNER RIGHTS).
 
 Two consequences, stated rather than discovered:
 

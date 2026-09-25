@@ -34,7 +34,6 @@ package queue
 
 import (
 	"io/fs"
-	"log"
 	"path/filepath"
 	"syscall"
 
@@ -52,7 +51,7 @@ const stateRights uint32 = svclock.RightAddFile | svclock.RightAddSubdirectory |
 func rootWritableByAnyone(dir string, _ fs.FileInfo) (why, observed string, unusable bool) {
 	granted, observed := svclock.GrantsAnyone(filepath.Clean(dir), svclock.ReplaceRights, 0)
 	//: the verdict, or an inspection that could not run.
-	return dirVerdict(dir, granted, observed)
+	return dirVerdict(granted, observed)
 }
 
 // stateWritableByAnyone reports whether an identifier meaning anybody can put
@@ -61,28 +60,34 @@ func rootWritableByAnyone(dir string, _ fs.FileInfo) (why, observed string, unus
 func stateWritableByAnyone(dir string, _ fs.FileInfo) (why, observed string, unusable bool) {
 	granted, observed := svclock.GrantsAnyone(filepath.Clean(dir), stateRights, svclock.ContentRights)
 	//: the verdict, or an inspection that could not run.
-	return dirVerdict(dir, granted, observed)
+	return dirVerdict(granted, observed)
 }
 
 // dirVerdict turns the reader's answer into this package's refusal.
 //
-// It fails OPEN on an inspection that could not run, as lock does and for its
-// reason — a wrong refusal costs a caller a broker on a directory that is safe
-// (ADR 0084 §D5) — and SAYS so, since an acceptance with no verdict behind it
-// is not the same fact as one with a verdict, and the return value cannot tell
-// them apart.
-func dirVerdict(dir string, granted bool, found string) (why, observed string, unusable bool) {
+// It fails CLOSED on an inspection that could not run — the list unreadable,
+// or read only in part — where lock, asking the same reader, fails open (ADR
+// 0084 §D5). The asymmetry that decides D5 runs the other way here. A lock
+// directory wrongly accepted costs the hardening, and a squatter can at worst
+// hold the lock; a queue directory wrongly accepted is one a stranger may plant
+// a message in, which a consumer then acts on. And before this rule the queue
+// refused EVERY directory on Windows, so refusing one whose list nobody could
+// read takes away nothing that worked. The Unix rule has no such case: reading
+// a mode cannot fail.
+func dirVerdict(granted bool, found string) (why, observed string, unusable bool) {
 	//: an identifier meaning anybody holds a right the rule forbids.
 	if granted {
 		//: "world-writable" is the fact on either platform; observed says
 		//: which identifier and which rights, since there is no mode to read.
 		return "world-writable", found, true
 	}
-	//: the DACL could not be read at all: accepted, and recorded.
+	//: no verdict: the reader names what stopped it, and "could not look"
+	//: is not "looked, and nobody may write".
 	if found != "" {
-		log.Printf("cannot read the queue directory's access control list at %s (%s); it is accepted unchecked, so a directory any account can write would not be refused", dir, found)
+		//: refused, carrying the Win32 status or the entry the walk stopped at.
+		return "unverifiable", found, true
 	}
-	//: acceptable.
+	//: read to the end, and nobody meaning anybody holds a forbidden right.
 	return "", "", false
 }
 
