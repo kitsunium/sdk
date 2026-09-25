@@ -126,6 +126,16 @@ var (
 		"The mail server refused the message",
 		"service/mail: MAIL FROM, RCPT TO or DATA was answered with a failure reply; the command and the server's reply travel as log-only fields",
 		errs.WithExitCode(exitTempFail))
+
+	// InvalidURL is returned by ParseURL for a URL it cannot read. It names the
+	// clause that failed and NEVER the URL: an SMTP URL carries the password
+	// in its userinfo, and every part of it — the host, the port, a parameter
+	// name — is quoted by no refusal, because a URL that failed to parse is
+	// exactly the one whose parts are not where they should be.
+	InvalidURL = errs.Define(CodeInvalidURL, "INVALID_URL",
+		"The SMTP URL is not usable as written",
+		"service/mail: ParseURL refused the URL; the problem field names the clause, and the URL itself is never repeated because it carries the password",
+		errs.WithExitCode(exitConfig))
 )
 
 // wrapAs returns the given mail sentinel as the error origin — its code,

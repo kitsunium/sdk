@@ -38,6 +38,14 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		//: propagate the typed INVALID_SPEC verbatim.
 		return nil, vErr
 	}
+	//: a bare name is searched in the child's PATH with PATHEXT, as
+	//: CreateProcess given an application name does not search at all.
+	spec, err = resolveSpec(spec)
+	//: not found, or found only through a relative PATH entry.
+	if err != nil {
+		//: SPAWN_FAILED carrying os/exec's ErrNotFound or ErrDot.
+		return nil, err
+	}
 	//: reject the Unix-only fields with no Windows equivalent before spawning, so
 	//: no requested confinement/credential is silently dropped.
 	if uErr := checkUnsupportedSpec(spec); uErr != nil {

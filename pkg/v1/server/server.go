@@ -235,7 +235,8 @@ func TLS(id tlsid.Identity) GroupOption {
 // a deadline set at accept time would be a budget for the connection's whole
 // life, which a peer trickling one byte at a time stays comfortably inside. On
 // a group serving an http.Handler the same value becomes net/http's own
-// ReadTimeout and ReadHeaderTimeout, so it is refreshed per request there.
+// ReadTimeout — and its ReadHeaderTimeout too, unless [ReadHeaderTimeout] sets
+// the header phase apart — so it is refreshed per request there.
 func ReadTimeout(d time.Duration) GroupOption {
 	//: forwarded unchanged.
 	return svcserver.ReadTimeout(d)

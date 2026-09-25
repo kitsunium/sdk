@@ -305,3 +305,10 @@ func TestDecodesItselfIsAPropertyNotAList(t *testing.T) {
 		t.Error("a plain struct was treated as a leaf")
 	}
 }
+
+// collectKeys is the vocabulary half of collectVocabulary, which is all these
+// cases and the benchmarks read.
+func collectKeys(typ reflect.Type) map[string]keyKind {
+	keys, _ := collectVocabulary(typ)
+	return keys
+}

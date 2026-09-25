@@ -60,7 +60,7 @@ It is not a framework. A firewall, voters wired onto routes, a role catalogue, "
 
 Every refusal is [PermissionDenied](<#PermissionDenied>), with the same code, the same HTTP 403 and the same sentence — "Access to the requested resource is denied" — whether the request was explicitly denied, matched no rule at all, or could not be evaluated. A message that explained itself would be a description of the policy set handed to the party the policy exists to keep out: "you are not an admin" names the role model, "missing attribute department" names the next value to forge.
 
-The diagnosis is not lost, it is moved: errs.PrivateOf and errs.FieldsOf carry the outcome, the subject, the action, the resource and the underlying code. Neither may go on the wire — see pkg/v1/errs. A caller that must distinguish an evaluation fault from a refusal for alerting calls the [Policy](<#Policy>) itself and reads the \(decision, error\) pair; [Check](<#Check>) flattens them deliberately.
+The diagnosis is not lost, it is moved: errs.PrivateOf and errs.FieldsOf carry the outcome, the subject, the action, the resource and the underlying code — each field read with its Key and StringValue methods, under the keys "outcome", "subject", "action", "resource" and "cause\_code". Neither may go on the wire — see pkg/v1/errs. A caller that must distinguish an evaluation fault from a refusal for alerting calls the [Policy](<#Policy>) itself and reads the \(decision, error\) pair; [Check](<#Check>) flattens them deliberately.
 
 ## Index
 
@@ -181,7 +181,7 @@ var (
 ```
 
 <a name="Check"></a>
-## func [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L247>)
+## func [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L248>)
 
 ```go
 func Check(ctx context.Context, policy Policy, request Request) error
@@ -190,7 +190,7 @@ func Check(ctx context.Context, policy Policy, request Request) error
 Check evaluates policy and reports the verdict as an error: nil when permitted, [PermissionDenied](<#PermissionDenied>) otherwise. It is the closure — the one place where "nobody said Allow" becomes a refusal — and a nil policy refuses.
 
 <a name="Attr"></a>
-## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L166>)
+## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L167>)
 
 Attr is the public alias for one typed, named fact attached to a [Request](<#Request>).
 
@@ -199,7 +199,7 @@ type Attr = coreauthz.AttrValue
 ```
 
 <a name="AttrBool"></a>
-### func [AttrBool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L231>)
+### func [AttrBool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L232>)
 
 ```go
 func AttrBool(key string, value bool) Attr
@@ -208,7 +208,7 @@ func AttrBool(key string, value bool) Attr
 AttrBool builds a flag attribute. Present\-and\-false is a different fact from absent, and this is how the first one is stated.
 
 <a name="AttrInt64"></a>
-### func [AttrInt64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L224>)
+### func [AttrInt64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L225>)
 
 ```go
 func AttrInt64(key string, value int64) Attr
@@ -217,7 +217,7 @@ func AttrInt64(key string, value int64) Attr
 AttrInt64 builds a whole\-number attribute. Times travel as Unix seconds.
 
 <a name="AttrString"></a>
-### func [AttrString](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L218>)
+### func [AttrString](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L219>)
 
 ```go
 func AttrString(key, value string) Attr
@@ -226,7 +226,7 @@ func AttrString(key, value string) Attr
 AttrString builds a text attribute.
 
 <a name="AttrStrings"></a>
-### func [AttrStrings](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L239>)
+### func [AttrStrings](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L240>)
 
 ```go
 func AttrStrings(key string, values ...string) Attr
@@ -235,7 +235,7 @@ func AttrStrings(key string, values ...string) Attr
 AttrStrings builds a set attribute — roles, groups, scopes. Passing no values states that the subject holds none, which is NOT the same as omitting the attribute: the first abstains, the second refuses.
 
 <a name="AttrKind"></a>
-## type [AttrKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L171>)
+## type [AttrKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L172>)
 
 AttrKind is the public alias for the type an [Attr](<#Attr>) carries. The kind is part of the attribute's identity: a text rule against a number MISMATCHES, it does not compare false.
 
@@ -244,7 +244,7 @@ type AttrKind = coreauthz.AttrKind
 ```
 
 <a name="Condition"></a>
-## type [Condition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L160>)
+## type [Condition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L161>)
 
 Condition is the public alias for an attribute predicate. Returning an error means "could not be evaluated", which is absorbing everywhere.
 
@@ -253,7 +253,7 @@ type Condition = coreauthz.Condition
 ```
 
 <a name="AllOf"></a>
-### func [AllOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L321>)
+### func [AllOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L322>)
 
 ```go
 func AllOf(conditions ...Condition) (condition Condition, err error)
@@ -262,7 +262,7 @@ func AllOf(conditions ...Condition) (condition Condition, err error)
 AllOf holds when every condition holds. Every branch is evaluated, so the answer is order\-independent and a failure anywhere is reported.
 
 <a name="AnyOf"></a>
-### func [AnyOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L329>)
+### func [AnyOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L330>)
 
 ```go
 func AnyOf(conditions ...Condition) (condition Condition, err error)
@@ -271,7 +271,7 @@ func AnyOf(conditions ...Condition) (condition Condition, err error)
 AnyOf holds when at least one condition holds — but an unevaluable branch is still absorbing, so a request cannot satisfy the rule by omitting the attribute one of its branches names.
 
 <a name="AttrAtLeast"></a>
-### func [AttrAtLeast](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L291>)
+### func [AttrAtLeast](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L292>)
 
 ```go
 func AttrAtLeast(key string, lo int64) (condition Condition, err error)
@@ -280,7 +280,7 @@ func AttrAtLeast(key string, lo int64) (condition Condition, err error)
 AttrAtLeast holds when the request carries key as a number at least lo.
 
 <a name="AttrContains"></a>
-### func [AttrContains](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L297>)
+### func [AttrContains](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L298>)
 
 ```go
 func AttrContains(key, want string) (condition Condition, err error)
@@ -289,7 +289,7 @@ func AttrContains(key, want string) (condition Condition, err error)
 AttrContains holds when the request carries key as a set containing want.
 
 <a name="AttrEquals"></a>
-### func [AttrEquals](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L278>)
+### func [AttrEquals](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L279>)
 
 ```go
 func AttrEquals(key, want string) (condition Condition, err error)
@@ -298,7 +298,7 @@ func AttrEquals(key, want string) (condition Condition, err error)
 AttrEquals holds when the request carries key as text equal to want, and FAILS when the attribute is absent or is not text.
 
 <a name="AttrIsTrue"></a>
-### func [AttrIsTrue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L285>)
+### func [AttrIsTrue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L286>)
 
 ```go
 func AttrIsTrue(key string) (condition Condition, err error)
@@ -307,7 +307,7 @@ func AttrIsTrue(key string) (condition Condition, err error)
 AttrIsTrue holds when the request carries key as a flag that is set. Present and false does not hold; absent fails.
 
 <a name="AttrMatchesSubject"></a>
-### func [AttrMatchesSubject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L305>)
+### func [AttrMatchesSubject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L306>)
 
 ```go
 func AttrMatchesSubject(key string) (condition Condition, err error)
@@ -316,7 +316,7 @@ func AttrMatchesSubject(key string) (condition Condition, err error)
 AttrMatchesSubject holds when the request carries key as text equal to the subject — the ownership rule. An anonymous request owns nothing, so an empty subject never matches, not even an empty owner.
 
 <a name="MustCondition"></a>
-### func [MustCondition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L343>)
+### func [MustCondition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L344>)
 
 ```go
 func MustCondition(condition Condition, err error) Condition
@@ -325,7 +325,7 @@ func MustCondition(condition Condition, err error) Condition
 MustCondition unwraps a condition constructor for a package\-level var, panicking on error. Same contract as [Must](<#Must>).
 
 <a name="Not"></a>
-### func [Not](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L314>)
+### func [Not](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L315>)
 
 ```go
 func Not(inner Condition) (condition Condition, err error)
@@ -334,7 +334,7 @@ func Not(inner Condition) (condition Condition, err error)
 Not inverts a condition's answer and PROPAGATES its failure unchanged. An attribute the request does not carry therefore stays unevaluable instead of becoming "true", which is the single sharpest form of the absent\-attribute trap.
 
 <a name="Decision"></a>
-## type [Decision](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L152>)
+## type [Decision](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L153>)
 
 Decision is the public alias for the three\-valued verdict: [Allow](<#Abstain>), [Deny](<#Abstain>) or [Abstain](<#Abstain>). Its zero value is [Abstain](<#Abstain>).
 
@@ -343,7 +343,7 @@ type Decision = coreauthz.Decision
 ```
 
 <a name="Grant"></a>
-## type [Grant](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L178>)
+## type [Grant](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L179>)
 
 Grant is the public alias for one role and the permissions it confers.
 
@@ -352,7 +352,7 @@ type Grant = svcauthz.GrantValue
 ```
 
 <a name="Permission"></a>
-## type [Permission](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L175>)
+## type [Permission](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L176>)
 
 Permission is the public alias for one \(action, resource\) pair a role confers. Resource is the KIND of thing; instance facts belong in attributes.
 
@@ -361,7 +361,7 @@ type Permission = svcauthz.PermissionValue
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L156>)
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L157>)
 
 Policy is the public alias for the authorization port. It is a func type, so it can never grow a method and break a downstream implementer \(ADR 0039\).
 
@@ -370,7 +370,7 @@ type Policy = coreauthz.Policy
 ```
 
 <a name="DenyOverrides"></a>
-### func [DenyOverrides](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L256>)
+### func [DenyOverrides](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L257>)
 
 ```go
 func DenyOverrides(policies ...Policy) Policy
@@ -379,7 +379,7 @@ func DenyOverrides(policies ...Policy) Policy
 DenyOverrides composes policies: a [Deny](<#Abstain>) from any member wins, an [Allow](<#Abstain>) requires at least one grant and no refusal, and everything else abstains. Every member is evaluated — only a refusal short\-circuits — so the result does not depend on the order the policies were listed in.
 
 <a name="Must"></a>
-### func [Must](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L336>)
+### func [Must](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L337>)
 
 ```go
 func Must(policy Policy, err error) Policy
@@ -388,7 +388,7 @@ func Must(policy Policy, err error) Policy
 Must unwraps a policy constructor for a package\-level var, panicking on error. Use it on wiring written in code, never on data read at run time.
 
 <a name="NewABAC"></a>
-### func [NewABAC](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L271>)
+### func [NewABAC](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L272>)
 
 ```go
 func NewABAC(rules ...Rule) (policy Policy, err error)
@@ -397,7 +397,7 @@ func NewABAC(rules ...Rule) (policy Policy, err error)
 NewABAC builds an attribute\-based policy over a fixed rule set, folded by the same deny\-overrides algorithm the policy set is.
 
 <a name="NewRBAC"></a>
-### func [NewRBAC](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L264>)
+### func [NewRBAC](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L265>)
 
 ```go
 func NewRBAC(cfg RBACConfig) (policy Policy, err error)
@@ -406,7 +406,7 @@ func NewRBAC(cfg RBACConfig) (policy Policy, err error)
 NewRBAC builds a role\-based policy over a fixed grant table. It answers [Allow](<#Abstain>) or [Abstain](<#Abstain>) and never [Deny](<#Abstain>) for an ungranted request — see the package docs for why that is what makes it composable.
 
 <a name="RBACConfig"></a>
-## type [RBACConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L181>)
+## type [RBACConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L182>)
 
 RBACConfig is the public alias for [NewRBAC](<#NewRBAC>)'s parameters.
 
@@ -415,7 +415,7 @@ type RBACConfig = svcauthz.RBACConfig
 ```
 
 <a name="Request"></a>
-## type [Request](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L163>)
+## type [Request](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L164>)
 
 Request is the public alias for the immutable question a policy answers.
 
@@ -424,7 +424,7 @@ type Request = coreauthz.RequestValue
 ```
 
 <a name="NewRequest"></a>
-### func [NewRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L212>)
+### func [NewRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L213>)
 
 ```go
 func NewRequest(subject, action, resource string, attrs ...Attr) Request
@@ -433,7 +433,7 @@ func NewRequest(subject, action, resource string, attrs ...Attr) Request
 NewRequest builds the immutable question. Attributes are indexed by key, last one wins, and one with an empty key or the zero kind is dropped — so every attribute a rule can find is one it can use.
 
 <a name="Rule"></a>
-## type [Rule](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L185>)
+## type [Rule](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/authz/authz.go#L186>)
 
 Rule is the public alias for one attribute rule: what it is about, what it decides, and when it fires.
 

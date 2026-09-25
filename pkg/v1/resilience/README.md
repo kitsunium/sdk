@@ -92,13 +92,18 @@ The second hazard is load. A dependency that has gone slow makes every in\-fligh
 var (
     // RetryExhausted is returned when the retry budget is spent.
     RetryExhausted = coreres.RetryExhausted
-    // CircuitOpen is returned when the breaker rejects a call fast.
+    // CircuitOpen is returned when the breaker rejects a call fast. It carries
+    // HTTP 503 (errs.HTTPStatusOf): the dependency cannot take the call now.
     CircuitOpen = coreres.CircuitOpen
-    // RateLimited is returned when no rate-limit token is available.
+    // RateLimited is returned when no rate-limit token is available. It
+    // carries HTTP 429: the client should slow down.
     RateLimited = coreres.RateLimited
-    // BulkheadFull is returned when every concurrency slot is occupied.
+    // BulkheadFull is returned when every concurrency slot is occupied. It
+    // carries HTTP 503.
     BulkheadFull = coreres.BulkheadFull
-    // TimeoutExceeded is returned when an operation outruns its deadline.
+    // TimeoutExceeded is returned when an operation outruns its deadline. It
+    // carries HTTP 504: the call was made and its answer did not arrive in
+    // time.
     TimeoutExceeded = coreres.TimeoutExceeded
     // FallbackFailed is returned when the primary operation AND its fallback
     // both failed. Both messages travel as the "primary" and "fallback"
@@ -180,7 +185,7 @@ type Runner = coreres.Runner
 ```
 
 <a name="NewBulkhead"></a>
-### func [NewBulkhead](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L179>)
+### func [NewBulkhead](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L184>)
 
 ```go
 func NewBulkhead(maxConcurrent int) Runner
@@ -189,7 +194,7 @@ func NewBulkhead(maxConcurrent int) Runner
 NewBulkhead returns a bounded\-concurrency Runner \(reject mode\).
 
 <a name="NewCircuitBreaker"></a>
-### func [NewCircuitBreaker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L165>)
+### func [NewCircuitBreaker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L170>)
 
 ```go
 func NewCircuitBreaker(cfg BreakerConfig) Runner
@@ -198,7 +203,7 @@ func NewCircuitBreaker(cfg BreakerConfig) Runner
 NewCircuitBreaker returns a circuit\-breaker Runner. An error rejected by cfg.Retryable is returned verbatim and left out of the state machine.
 
 <a name="NewFallback"></a>
-### func [NewFallback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L196>)
+### func [NewFallback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L201>)
 
 ```go
 func NewFallback(cfg FallbackConfig) Runner
@@ -207,7 +212,7 @@ func NewFallback(cfg FallbackConfig) Runner
 NewFallback returns a Runner that runs cfg.Fallback when the guarded Operation fails, reporting success when it works. When both fail the result is FallbackFailed, carrying both messages — unless the context was cancelled, which is reported as ctx.Err\(\). A nil cfg.Fallback is refused.
 
 <a name="NewHedge"></a>
-### func [NewHedge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L211>)
+### func [NewHedge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L216>)
 
 ```go
 func NewHedge(cfg HedgeConfig) Runner
@@ -218,7 +223,7 @@ NewHedge returns a tail\-latency Runner that DUPLICATES an Operation still outst
 Each copy runs on a goroutine of its own, so a panic in one is recovered there and re\-raised by Run on the caller's goroutine with the ORIGINAL value — a recover comparing against http.ErrAbortHandler still matches — but with the stack of the re\-raise site; the copy's own stack is the price of not ending the process. A losing copy's late panic is recovered and dropped.
 
 <a name="NewRateLimiter"></a>
-### func [NewRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L173>)
+### func [NewRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L178>)
 
 ```go
 func NewRateLimiter(cfg RateLimiterConfig) Runner
@@ -227,7 +232,7 @@ func NewRateLimiter(cfg RateLimiterConfig) Runner
 NewRateLimiter returns a token\-bucket rate\-limiter Runner. A non\-positive cfg.Rate is refused: every call returns PolicyMisconfigured without running the operation, because any rate chosen for the caller would be a guess.
 
 <a name="NewRetry"></a>
-### func [NewRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L158>)
+### func [NewRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L163>)
 
 ```go
 func NewRetry(cfg RetryConfig) Runner
@@ -236,7 +241,7 @@ func NewRetry(cfg RetryConfig) Runner
 NewRetry returns a retry\-with\-backoff Runner. An error rejected by cfg.Retryable ends the loop at once and is returned verbatim.
 
 <a name="NewTimeout"></a>
-### func [NewTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L187>)
+### func [NewTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L192>)
 
 ```go
 func NewTimeout(d time.Duration) Runner

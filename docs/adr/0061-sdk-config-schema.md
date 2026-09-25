@@ -1,6 +1,6 @@
 # ADR 0061 — Configuration schema: required keys, typed defaults, and a closed vocabulary
 
-- **Status**: Accepted
+- **Status**: Accepted. **§Deferred "Marking a key secret so a `--show-config` redacts it" is CLOSED by [ADR 0097](0097-config-provenance-and-secret-fields.md)** — a key is secret by its field's TYPE, `secret.Value`, and `LoadSchemaWithOrigins` reports it so.
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0028](0028-sdk-config-domain.md) (the `config` domain this extends — no new domain, no new `PP` range), [ADR 0046](0046-sdk-validation-domain.md) (the constraint engine this FEEDS from, and does not duplicate), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal — used three times here), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port is not widened — `Validator` is neither widened nor bypassed), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence used, and named), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (codes and range ownership)

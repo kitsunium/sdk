@@ -17,7 +17,7 @@ Code range: `0.2.8.*` (ADR 0026).
 |---|---|
 | `resilience.go` | `Operation func(ctx) error` + `Runner interface { Run(ctx, op) error }` |
 | `codes.go` | `Code*` constants — range 0.2.8.* |
-| `errors.go` | `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `PolicyMisconfigured` / `FallbackFailed` (`errs.Define`) |
+| `errors.go` | `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `PolicyMisconfigured` / `FallbackFailed` (`errs.Define`); the rejections carry their HTTP status — `RateLimited` 429, `CircuitOpen` / `BulkheadFull` 503, `TimeoutExceeded` 504 — so `errs.HTTPStatusOf` does not answer 500 for a call a policy refused |
 
 ## Conventions
 

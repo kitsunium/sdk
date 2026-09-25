@@ -18,7 +18,7 @@ cross-OS portable.
 | `RetryConfig.Jitter` | `float64` — widens each backoff by `[0, Jitter)` of itself, ADDED, clamped into `[0, 1]`. **0 is the deterministic backoff**, so an existing caller's timing is unchanged. Applied after the `MaxDelay` cap, so **when one is configured** a wait's ceiling is `MaxDelay * (1 + Jitter)`; a zero `MaxDelay` is no cap, so there is none to raise (ADR 0026) |
 | `HedgeConfig.Idempotent` | **mandatory** `bool` — the caller's in-code assertion that duplicating the operation is safe; false refuses the policy |
 | `NewRetry` / `NewCircuitBreaker` / `NewRateLimiter` / `NewBulkhead` / `NewTimeout` / `NewFallback` / `NewHedge` | constructors |
-| `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `FallbackFailed` | sentinels (`errs.HasReason`/`HasCode`), all `EX_TEMPFAIL`; `FallbackFailed` carries the `primary` + `fallback` messages as fields |
+| `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `FallbackFailed` | sentinels (`errs.HasReason`/`HasCode`), all `EX_TEMPFAIL`; the four REJECTIONS carry the HTTP status a framework answers with through `errs.HTTPStatusOf` — `RateLimited` 429, `CircuitOpen` and `BulkheadFull` 503, `TimeoutExceeded` 504 — and `RetryExhausted` / `FallbackFailed` carry none (500), since what failed there is the operation; `FallbackFailed` carries the `primary` + `fallback` messages as fields |
 | `PolicyMisconfigured` | sentinel for a policy that cannot honour its config — **permanent**, `EX_CONFIG`, never retry (ADR 0031) |
 
 ## Conventions

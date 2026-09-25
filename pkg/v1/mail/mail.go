@@ -84,6 +84,25 @@
 // sends the password in the clear whenever the server is called localhost, and
 // in a container that is every relay one hop away.
 //
+// # A configuration from one URL, and a password nothing prints
+//
+// [ParseURL] reads the form a deployment hands over in one variable:
+//
+//	cfg, err := mail.ParseURL(os.Getenv("SMTP_URL"))
+//	// smtp://user:pass@relay.example:587?tls=starttls|implicit|none
+//	// smtps://user:pass@relay.example        (implicit TLS, port 465)
+//
+// smtp:// is STARTTLS unless the tls parameter says otherwise, smtps:// is
+// implicit TLS and may only say so again, and a plaintext session is spelled
+// tls=none. The port defaults by mode (587, 465, 25). The result is checked as
+// [NewSMTP] checks it, so credentials with tls=none fail here with
+// [AuthInsecure]. A refusal is [InvalidURL] with a clause, and it never quotes
+// the URL — its userinfo is the password.
+//
+// An [SMTPConfig] never renders its password: every fmt verb (it implements
+// Format), String, GoString and its JSON write "<redacted>" where the password
+// is, and the empty string where none is set.
+//
 // # What this package does NOT promise
 //
 // A nil error from [Transport.Send] means the next hop ACCEPTED the message.
@@ -250,7 +269,19 @@ var (
 	// SendRefused is returned when MAIL, RCPT or DATA was answered with a
 	// failure reply. The server's own text travels as a log-only field.
 	SendRefused = svcmail.SendRefused
+	// InvalidURL is returned by [ParseURL] for a URL it cannot read. It names
+	// the clause and never the URL, which carries the password.
+	InvalidURL = svcmail.InvalidURL
 )
+
+// ParseURL reads smtp://user:password@host:port?tls=starttls|implicit|none, or
+// smtps://…, into an [SMTPConfig] that [NewSMTP] accepts; see the package
+// documentation for the grammar and its defaults. On a refusal it returns the
+// zero SMTPConfig and an error that never quotes the URL.
+func ParseURL(raw string) (cfg SMTPConfig, err error) {
+	//: delegate to the service parser.
+	return svcmail.ParseURL(raw)
+}
 
 // NewSMTP returns a transport that delivers over SMTP, refusing at construction
 // any configuration it could not honour — an unset TLS mode, an out-of-range

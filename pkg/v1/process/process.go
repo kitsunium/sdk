@@ -21,11 +21,19 @@
 //	Spec.Umask                     UMask=        (applied via trampoline)
 //	Spec.Rlimits                   Limit*=       (applied via trampoline)
 //
-// # Environment
+// # Environment, and finding the executable
 //
 // A nil Spec.Env yields an empty environment — the child never silently inherits
 // the supervisor's, so a spawned service starts from a known state. Pass an
 // explicit slice (including os.Environ()) to inherit deliberately.
+//
+// Spec.Path may be a bare name. "go" is searched in the PATH the CHILD will
+// see — the PATH entry of Spec.Env whenever it names one, even empty, the
+// parent's only when it names none —
+// with os/exec's rules: the first executable in PATH order wins, and a match
+// found only through a relative entry ("." or an empty one) is refused with
+// exec.ErrDot, which the returned SpawnFailed wraps (errors.Is answers). A path
+// with a separator is taken as written.
 //
 // # Standard streams
 //
@@ -78,17 +86,16 @@
 // OOMScoreAdj are applied post-start on the live pid and surface a typed error if
 // the host refuses.
 //
-// # Platform notes
+// # Platforms
 //
-// On Windows, Start spawns through CreateProcess and supervises the child the
-// same way: exit codes, stdio capture, Setpgid as a new console process group,
-// a group-aware Stop, and the Rlimits that have a Job Object analogue (address
-// space and data as the memory cap, NProc as the process count). The Spec fields
-// that are Unix concepts — credentials (User, Group, Groups), Umask, Nice,
-// OOMScoreAdj, ExtraFiles — are refused there with UnsupportedPlatform rather
-// than dropped, and an Rlimit with no analogue with UnknownResource. On the
-// remaining non-Unix targets (plan9, js, wasip1) Start returns
-// UnsupportedPlatform; the package compiles everywhere.
+// Unix gets everything above. Windows spawns too, through CreateProcess: stdio
+// wiring, Setpgid (a new console process group), Spec.Rlimits (enforced by a
+// Job Object) and the PATH search (with PATHEXT) all work, while the fields
+// with no Windows meaning at this layer — User/Group/Groups, Umask, Nice,
+// OOMScoreAdj, ExtraFiles, CgroupPath — are refused with UnsupportedPlatform
+// rather than dropped. There, SignalGroup reaches the leader only and Stop's
+// escalation is TerminateProcess. Every other platform returns
+// UnsupportedPlatform from Start; the package compiles everywhere.
 package process
 
 import (
@@ -125,8 +132,10 @@ type Limit = coreproc.LimitValue
 
 // Start spawns the process described by spec and returns a live Process handle.
 // It delegates to internal/service/proc/exec; ctx is honoured up to the
-// fork/exec boundary. On a platform with no spawn backend (neither Unix nor
-// Windows) it returns UnsupportedPlatform.
+// fork/exec boundary. A bare Spec.Path is searched in the child's PATH (see
+// the package documentation). On Windows the Unix-only Spec fields are refused
+// with UnsupportedPlatform; on platforms that are neither Unix nor Windows,
+// Start itself returns UnsupportedPlatform.
 func Start(ctx context.Context, spec Spec) (proc Process, err error) {
 	//: the facade adds no behaviour — delegate straight to the service spawn.
 	return svcexec.Start(ctx, spec)

@@ -88,10 +88,11 @@
 //
 // The diagnosis is not lost, it is moved: errs.PrivateOf and errs.FieldsOf
 // carry the outcome, the subject, the action, the resource and the underlying
-// code. Neither may go on the wire — see pkg/v1/errs. A caller that must
-// distinguish an evaluation fault from a refusal for alerting calls the
-// [Policy] itself and reads the (decision, error) pair; [Check] flattens them
-// deliberately.
+// code — each field read with its Key and StringValue methods, under the keys
+// "outcome", "subject", "action", "resource" and "cause_code". Neither may go
+// on the wire — see pkg/v1/errs. A caller that must distinguish an evaluation
+// fault from a refusal for alerting calls the [Policy] itself and reads the
+// (decision, error) pair; [Check] flattens them deliberately.
 package authz
 
 import (

@@ -4,7 +4,7 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **53 packages**: 49 at the top level, plus four nested ones
+`pkg/v1` ships **54 packages**: 50 at the top level, plus four nested ones
 (`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`). They
 are grouped below by the job they do, and each links to its own generated
 `README.md`.
@@ -53,6 +53,7 @@ are grouped below by the job they do, and each links to its own generated
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
 | [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/hash), [`sign`](./pkg/v1/sign), [`mac`](./pkg/v1/mac), [`kdf`](./pkg/v1/kdf), [`agree`](./pkg/v1/agree), [`password`](./pkg/v1/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |
+| [`secret`](./pkg/v1/secret) | A secret is a value no rendering writes down: `secret.Value` prints `<redacted>` under every fmt verb, JSON, text and slog, reveals its bytes only through `Reveal`, and decodes from a configuration string like any field. Versioned stores — memory, the environment with the Docker/Kubernetes `NAME_FILE` convention, a 0700 directory of atomically published records sealed with AES-256-GCM — a `Keyring` whose boxes name the version that sealed them so a rotation never breaks what came before it, and a `Rotator` that keeps at least two. |
 | [`session`](./pkg/v1/session) | Server-side sessions. `Regenerate` is the only call that binds a subject and always mints a new identifier, so session fixation is prevented by the **absence** of any other spelling rather than by remembering a step. |
 | [`authz`](./pkg/v1/authz) | RBAC + ABAC with no policy DSL — a condition is a Go func. **Abstention is a third verdict** and the zero value, because folding "no opinion" into a grant is a hole and into a refusal is an outage. |
 | [`validation`](./pkg/v1/validation) | Constraints, located violations (`user.addresses[2].zip`), collect-all by default. A message names the rule and the bound but **never the value** — a security property with its own test. |

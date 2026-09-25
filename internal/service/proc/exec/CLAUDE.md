@@ -23,7 +23,10 @@ process that already exists.
 |---|---|---|
 | `exec.go` | all | package doc + `validateSpec` (empty Path ⇒ `InvalidSpec`) |
 | `exec_unix.go` | `unix` | `Start`: validate → check limits → resolve creds → `SysProcAttr` → `os.StartProcess` through `childwait.Spawn` (`forkClaimed`) → post-start attrs; `teardown` on attr failure |
-| `exec_other.go` | `!unix` | `Start` ⇒ `UnsupportedPlatform` (compiles everywhere) |
+| `exec_other.go` | `!unix && !windows` | `Start` ⇒ `UnsupportedPlatform` (compiles everywhere) |
+| `exec_windows.go`, `handle_windows.go`, `joblimits_windows.go`, `cgroup_placement_windows.go` | `windows` | the CreateProcess backend: stdio, a console process group for `Setpgid`, rlimits through a Job Object; the Unix-only fields refused with `UnsupportedPlatform` |
+| `lookpath.go` | `unix \|\| windows` | `resolveSpec`: a bare `Spec.Path` searched in the CHILD's PATH (Spec.Env's, else the parent's), os/exec's rules — first executable wins, a relative match is `exec.ErrDot`, none is `exec.ErrNotFound`, both wrapped in `SpawnFailed`; argv[0] keeps the name as written |
+| `lookpath_unix.go` / `lookpath_windows.go` | per OS | the candidate spellings (PATHEXT on Windows), what "executable" means (an execute bit / the extension), and how variable names compare (case-insensitive on Windows) |
 | `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, once-only reap through `collectExit` (claim first, own wait, `Reclaim` on ECHILD), exit translation (`exitValue`), stdio-copier join |
 | `stdio_unix.go` | `unix` | `buildStdio`: wires `Spec.Stdio` (inherit/null/capture) to `ProcAttr.Files`; capture pipes + copier goroutines joined by `Wait` (100% delivery, no leak) |
 | `creds_unix.go` | `unix` | `Spec.User/Group/Groups` → `syscall.Credential` via `os/user` |
@@ -40,8 +43,20 @@ process that already exists.
 - **Environment.** `Spec.Env == nil` spawns with an **empty** environment, never
   the supervisor's — the port's known-state guarantee. A non-nil slice is used
   verbatim (pass `os.Environ()` to inherit deliberately).
-- **argv.** Empty `Spec.Args` defaults argv to `[Path]`; otherwise `Args` is the
-  full argv (including argv[0]).
+- **argv.** Empty `Spec.Args` defaults argv to `[Path]` — the name as the
+  caller wrote it, not the resolved file; otherwise `Args` is the full argv
+  (including argv[0]).
+- **Finding the executable.** `os.StartProcess` does not search PATH — a bare
+  `go` is a file in the current directory to execve, and fails with ENOENT —
+  so `resolveSpec` runs before either spawn path (the trampoline execs the
+  target itself). A value with a separator is a path and is left as written.
+  A bare name is searched in the PATH the CHILD will see: `Spec.Env`'s last
+  `PATH=` entry whenever it names one — an explicitly empty `PATH=` searches
+  nothing rather than falling back — and the parent's only when it names none,
+  including a nil `Spec.Env`, whose child environment is empty. The first executable in PATH
+  order wins; a match through a relative entry (`.` or empty) is refused with
+  `exec.ErrDot` rather than skipped, as os/exec refuses it, because skipping
+  would run a different program from the one the order selects.
 - **Topology.** `Setpgid` makes the child a process-group leader (its pid is the
   pgid), so `SignalGroup`/`Stop` reach forked grandchildren. `Setsid` starts a
   new session detached from the controlling tty.

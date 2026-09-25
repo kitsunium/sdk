@@ -1,6 +1,6 @@
 # ADR 0028 — Configuration domain (`config`)
 
-- **Status**: Accepted
+- **Status**: Accepted. **§Deferred "Secret redaction on decoded values + a `Secret` field type" is CLOSED by [ADR 0097](0097-config-provenance-and-secret-fields.md)** — the field type is `secret.Value` ([ADR 0096](0096-a-secret-is-a-value-no-rendering-writes-down.md)), and a traced load marks every key that holds one.
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0024 (Phase-B wave — this ADR closes it), ADR 0003 (codec — file parsing dispatch), ADR 0018 (portability), ADR 0016 (no-registry sibling precedent)

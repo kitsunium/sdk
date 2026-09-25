@@ -66,6 +66,40 @@ func IdleTimeout(d time.Duration) GroupOption {
 	}
 }
 
+// ReadHeaderTimeout bounds the HEADER phase of an HTTP request on its own: the
+// request line and the header fields must arrive within d of the connection
+// becoming ready for a request, however long the read timeout lets the body
+// take.
+//
+// The header phase is the one a slowloris attack stalls — a few bytes a
+// second, never finishing a line — and it is also the phase a legitimate
+// client completes in milliseconds, so it deserves a far shorter bound than a
+// read timeout sized for an upload. Unset (or non-positive) keeps what the
+// group did before this option existed: the header phase is bounded by the
+// read timeout. It has no effect on a group that does not serve HTTP.
+func ReadHeaderTimeout(d time.Duration) GroupOption {
+	//: the option is applied by the constructor, in declaration order.
+	return func(g *StreamGroup) {
+		g.http.readHeaderTimeout = d
+	}
+}
+
+// MaxHeaderBytes caps how many bytes net/http reads for one request's line and
+// header fields. A request over the cap is answered 431 Request Header Fields
+// Too Large and never reaches the handler.
+//
+// Unset (or non-positive) keeps net/http's own default, 1 MiB
+// (http.DefaultMaxHeaderBytes) — which was applying silently before this
+// option existed. net/http reads a small fixed allowance past the cap before
+// refusing, so the refusal happens a few kilobytes after n, not at the byte.
+// It has no effect on a group that does not serve HTTP.
+func MaxHeaderBytes(n int) GroupOption {
+	//: the option is applied by the constructor, in declaration order.
+	return func(g *StreamGroup) {
+		g.http.maxHeaderBytes = n
+	}
+}
+
 // HandshakeTimeout bounds the TLS negotiation on a group's listeners.
 //
 // Unset does NOT mean unbounded here, unlike the other three: the handshake is

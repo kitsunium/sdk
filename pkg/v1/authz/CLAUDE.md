@@ -49,7 +49,9 @@ comment; maintainer rationale stays here.
 
 - **Render `errs.PrivateOf` or `errs.FieldsOf` on the wire.** They carry the
   subject, the action, the resource and the failing rule's code — the whole
-  reason the public sentence says nothing.
+  reason the public sentence says nothing. Both are public in `pkg/v1/errs` —
+  a field reads with `Key()` / `StringValue()` — so an operator's tooling reads
+  them without an internal import, and must still keep them off the wire.
 - **Test a verdict with `!= Deny`.** It is true for `Abstain`, so it authorizes
   every request no policy recognised. `Decision.Granted()` exists for this.
 - **Cache a decision.** The full check is ~210 ns and allocates nothing (see

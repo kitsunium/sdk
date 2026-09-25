@@ -33,6 +33,14 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		//: propagate the typed INVALID_SPEC verbatim.
 		return nil, vErr
 	}
+	//: a bare name is searched in the child's PATH, before either spawn path
+	//: — fork/exec and the trampoline both need a file, not a name.
+	spec, err = resolveSpec(spec)
+	//: not found, or found only through a relative PATH entry.
+	if err != nil {
+		//: SPAWN_FAILED carrying os/exec's ErrNotFound or ErrDot.
+		return nil, err
+	}
 	//: reject unhonourable umask/rlimit fields up front rather than dropping them.
 	if lErr := checkLimits(spec); lErr != nil {
 		//: propagate the typed UNKNOWN_RESOURCE / RLIMIT_FAILED verbatim.

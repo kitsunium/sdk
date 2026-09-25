@@ -26,14 +26,17 @@ type compiledKeys struct {
 	required []requiredKey
 	// known is the target type's whole addressable vocabulary.
 	known map[string]keyKind
+	// secrets is every key whose field holds a core/secret.Value, and how.
+	secrets map[string]secretHold
 }
 
 // compileKeys resolves a declaration's keys against T, refusing every one that
 // could not work. Defaults are resolved first so the requirement check can see
 // the whole defaulted set and refuse the pair that contradicts.
 func compileKeys[T any](spec SchemaSpec[T]) (compiled compiledKeys, err error) {
-	//: the addressable keys of the target type, in the operator's vocabulary.
-	known := collectKeys(reflect.TypeFor[T]())
+	//: the addressable keys of the target type, in the operator's vocabulary,
+	//: and the secret ones among them.
+	known, secrets := collectVocabulary(reflect.TypeFor[T]())
 	//: the default layer, refusing what cannot travel or cannot be addressed.
 	layer, declared, layerErr := buildDefaultLayer(spec.Defaults, known)
 	//: a bad default stops here, at construction.
@@ -49,7 +52,7 @@ func compileKeys[T any](spec SchemaSpec[T]) (compiled compiledKeys, err error) {
 		return compiledKeys{}, requiredErr
 	}
 	//: everything the compiled schema needs.
-	return compiledKeys{defaults: layer, declared: declared, required: required, known: known}, nil
+	return compiledKeys{defaults: layer, declared: declared, required: required, known: known, secrets: secrets}, nil
 }
 
 // buildDefaultLayer turns the declared defaults into the nested layer the merge

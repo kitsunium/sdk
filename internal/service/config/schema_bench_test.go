@@ -133,6 +133,25 @@ func BenchmarkLoadSchema(b *testing.B) {
 	}
 }
 
+// BenchmarkLoadSchemaWithOrigins is BenchmarkLoadSchema plus the provenance
+// report (ADR 0097): the difference is the attribution of every leaf key to
+// the layer that supplied it.
+func BenchmarkLoadSchemaWithOrigins(b *testing.B) {
+	schema, err := NewSchemaValue[benchConf](benchSpec())
+	if err != nil {
+		b.Fatalf("NewSchemaValue: %v", err)
+	}
+	layer := benchLayer()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		var conf benchConf
+		if _, loadErr := LoadSchemaWithOrigins(&conf, schema, layer); loadErr != nil {
+			b.Fatalf("LoadSchemaWithOrigins: %v", loadErr)
+		}
+	}
+}
+
 // BenchmarkLoadSchemaAllowUnknown isolates the unknown-key walk by removing it:
 // the same load with the check opted out. The difference IS the walk.
 func BenchmarkLoadSchemaAllowUnknown(b *testing.B) {
@@ -160,7 +179,7 @@ func BenchmarkCheckKeys(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewSchemaValue: %v", err)
 	}
-	merged, mergeErr := mergeLayers(schema, []coreconfig.Source{benchLayer()})
+	merged, _, mergeErr := mergeLayers(schema, []coreconfig.Source{benchLayer()})
 	if mergeErr != nil {
 		b.Fatalf("mergeLayers: %v", mergeErr)
 	}

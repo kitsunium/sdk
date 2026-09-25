@@ -48,3 +48,10 @@ func (s fileSource) Load() (values map[string]any, err error) {
 	//: the parsed layer.
 	return out, nil
 }
+
+// Describe implements core/config.Describer: the layer is a file and the
+// detail is its path, for every key it supplied.
+func (s fileSource) Describe(_ string) (layer, detail string) {
+	//: one path answers for the whole document.
+	return coreconfig.LayerFile, s.path
+}

@@ -22,9 +22,11 @@ Code range: `0.3.61.*`.
 | `smtp.go` | the SMTP transport: prepare, dial, negotiate, authenticate, send |
 | `session.go` | one open SMTP conversation — the client and the policy that governs it |
 | `smtpconfig.go` | `SMTPConfig`, `TLSMode`, and the refusals at construction |
+| `smtpconfig_render.go` | `String` / `GoString` / `Format` / `MarshalJSON` on `SMTPConfig` — every rendering writes `<redacted>` for a set password, through a method-less mirror struct whose conversion stops compiling if the two field sets diverge |
+| `smtpurl.go` | `ParseURL` — `smtp://…?tls=starttls\|implicit\|none` / `smtps://…` into a config `validate` accepts; a refusal is `INVALID_URL` with a clause and never the URL |
 | `smtp_compliance.go` | the compile-time port conformance assertions |
 | `memory.go` | the in-memory transport — a DOUBLE, because it composes |
-| `codes.go` / `errors.go` | the nine `0.3.61.*` codes, their sentinels, and `wrapAs` |
+| `codes.go` / `errors.go` | the ten `0.3.61.*` codes (`INVALID_URL` is `0.3.61.10`), their sentinels, and `wrapAs` |
 | `BENCH.md` | composition cost, cost per MiB of attachment, and the one measured optimisation |
 
 ## The MIME structure is a function of the populated fields

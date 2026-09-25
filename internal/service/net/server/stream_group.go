@@ -29,6 +29,11 @@ type StreamGroup struct {
 	// httpAdapter is set when the group serves an http.Handler, so the engine
 	// can shut the embedded http.Server down with the rest of the group.
 	httpAdapter *httpAdapter
+	// http holds the bounds only an HTTP group has: the header phase's own
+	// deadline and the header size cap. They live here rather than in
+	// core/net's Timeouts and Limits, which describe every protocol a group
+	// can serve, and "a request header" is not a word in most of them.
+	http httpBounds
 	// limiter caps concurrent connections; nil when the group has no ceiling.
 	limiter *connLimiter
 	// adopt names inherited sockets to take over instead of binding.
@@ -91,6 +96,7 @@ func (g *StreamGroup) resolved() corenet.ConnHandler {
 	//: accept loop exists to read them.
 	if g.httpAdapter != nil {
 		g.httpAdapter.timeouts = g.timeouts
+		g.httpAdapter.bounds = g.http
 	}
 	//: composed once at Start rather than per connection, so the middleware
 	//: chain costs nothing on the hot path.

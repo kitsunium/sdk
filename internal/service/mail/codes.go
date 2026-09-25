@@ -42,3 +42,8 @@ const CodeAuthFailed errs.Code = 0x00_03_3D_08 // 0.3.61.8
 // CodeSendRefused identifies a MAIL, RCPT or DATA command the server answered
 // with a failure reply.
 const CodeSendRefused errs.Code = 0x00_03_3D_09 // 0.3.61.9
+
+// CodeInvalidURL identifies an SMTP URL ParseURL could not read: not a URL, a
+// scheme other than smtp or smtps, a path, a fragment, an unknown or repeated
+// parameter, a tls mode it does not know, no host, or a port out of range.
+const CodeInvalidURL errs.Code = 0x00_03_3D_0A // 0.3.61.10

@@ -15,6 +15,20 @@ handle that waits, signals (leader or group), and stops the group gracefully.
   (`SIGTERM`/`SIGKILL`/`SIGINT`/`SIGHUP`/`SIGQUIT`) and the most-used resource
   sentinels, so callers drive `Stop`/`SignalGroup` and build `Spec.Rlimits`
   without importing `internal/core/proc` (which they cannot — it is internal).
+- **Stdio re-exports** (`stdio.go`): `StdioMode` and `StdioInherit` /
+  `StdioNull` / `StdioCapture`, so a consumer sets `Spec.Stdio` — and captures
+  a child's output into any `io.Writer` — with public names only.
+  `TestCaptureAndBareNamesThroughTheFacade` is that consumer.
+
+## Surface
+
+| Symbol | Notes |
+|---|---|
+| `Spec`, `Process`, `ExitResult`, `Signal`, `Resource`, `Limit` | aliases of the `internal/core/proc` port |
+| `StdioMode`, `StdioInherit` / `StdioNull` / `StdioCapture` | `Spec.Stdio`; capture delivers every byte before `Wait` returns |
+| `SIGTERM` / `SIGKILL` / `SIGINT` / `SIGHUP` / `SIGQUIT` | typed `Signal` constants |
+| `ResourceNoFile` / `ResourceCore` / `ResourceCPU` / `ResourceAS` | the common `Spec.Rlimits` keys |
+| `Start`, `MustStart` | spawn; a bare `Spec.Path` is searched in the child's PATH (Spec.Env's, else the parent's), `exec.ErrDot`/`ErrNotFound` wrapped in `SpawnFailed` |
 - **README is generated.** `README.md` is produced by `gomarkdoc` from the
   package doc comment in `process.go` (Rule 10). Edit the doc comment, then
   `make docs-readme` (or run the `//go:generate` line). Maintainer rationale
@@ -45,12 +59,14 @@ with no spawn backend); the handle surfaces `WaitFailed`,
 
 ## Platform
 
-Unix and Windows supervise. Windows spawns through CreateProcess
-(`internal/service/proc/exec/exec_windows.go`) and refuses the Unix-only Spec
-fields — credentials, `Umask`, `Nice`, `OOMScoreAdj`, `ExtraFiles` — with
-`UnsupportedPlatform` rather than dropping them; an `Rlimit` with no Job Object
-analogue is `UnknownResource`. On the remaining targets (plan9, js, wasip1)
-`Start` returns `UnsupportedPlatform`; the package compiles on every GOOS.
+Unix gets every field. Windows spawns too (`internal/service/proc/exec/exec_windows.go`):
+stdio, `Setpgid` as a new console process group, `Spec.Rlimits` through a Job
+Object, and the PATH search with PATHEXT; `User`/`Group`/`Groups`, `Umask`,
+`Nice`, `OOMScoreAdj`, `ExtraFiles` and `CgroupPath` are refused with
+`UnsupportedPlatform` rather than dropped, `SignalGroup` reaches the leader
+only, and `Stop` escalates with TerminateProcess. Every other GOOS gets
+`UnsupportedPlatform` from `Start` (`process_other_test.go`, gated
+`!unix && !windows`); the package compiles everywhere.
 
 The facade suite follows the same split: `process_other_test.go`
 (`!unix && !windows`) asserts the refusal where there is no backend,

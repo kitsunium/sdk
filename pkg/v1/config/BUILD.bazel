@@ -26,6 +26,7 @@ go_test(
     deps = [
         ":config",
         "//pkg/v1/errs",
+        "//pkg/v1/secret",
     ],
 )
 

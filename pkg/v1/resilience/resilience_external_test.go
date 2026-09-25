@@ -152,3 +152,88 @@ func TestFallbackOverHedge(t *testing.T) {
 		})
 	}
 }
+
+// TestRejectionsCarryTheirHTTPStatus pins what a framework mapping errors to
+// responses reads through errs.HTTPStatusOf: a rejection says what a client
+// should do — 429 slow down, 503 try later, 504 the answer did not come —
+// where a bare 500 would say the server is broken. Each case produces the
+// verdict through a real policy, not by naming the sentinel.
+//
+// Goroutine lifecycle: the bulkhead case starts exactly one goroutine to hold
+// the only slot, and joins it on its done channel before the case returns.
+func TestRejectionsCarryTheirHTTPStatus(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		reject func(t *testing.T) error
+		want   int
+	}
+	tests := []tc{
+		{"a rate limiter out of tokens", func(t *testing.T) error {
+			limiter := resilience.NewRateLimiter(resilience.RateLimiterConfig{Rate: 0.001, Burst: 1})
+			if err := limiter.Run(t.Context(), noop); err != nil {
+				t.Fatalf("the first call spent the burst and failed: %v", err)
+			}
+			return limiter.Run(t.Context(), noop)
+		}, 429},
+		{"a full bulkhead", func(t *testing.T) error {
+			bulkhead := resilience.NewBulkhead(1)
+			entered, release := make(chan struct{}), make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				done <- bulkhead.Run(t.Context(), func(context.Context) error {
+					close(entered)
+					<-release
+					return nil
+				})
+			}()
+			<-entered
+			err := bulkhead.Run(t.Context(), noop)
+			close(release)
+			if holderErr := <-done; holderErr != nil {
+				t.Fatalf("the slot holder failed: %v", holderErr)
+			}
+			return err
+		}, 503},
+		{"an open circuit", func(t *testing.T) error {
+			breaker := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 1, OpenDuration: time.Hour})
+			if err := breaker.Run(t.Context(), func(context.Context) error { return errBoom }); !errors.Is(err, errBoom) {
+				t.Fatalf("the tripping call = %v, want the operation's own error", err)
+			}
+			return breaker.Run(t.Context(), noop)
+		}, 503},
+		{"an operation past its timeout", func(t *testing.T) error {
+			return resilience.NewTimeout(time.Millisecond).Run(t.Context(), func(ctx context.Context) error {
+				<-ctx.Done()
+				return ctx.Err()
+			})
+		}, 504},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		err := c.reject(t)
+		if err == nil {
+			t.Fatalf("%s: the policy admitted the call", c.name)
+		}
+		if got := errs.HTTPStatusOf(err); got != c.want {
+			t.Errorf("%s: HTTPStatusOf(%v) = %d, want %d", c.name, err, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+	//: the verdicts that are not rejections keep the 500 a failure is.
+	for _, sentinel := range []error{resilience.RetryExhausted, resilience.FallbackFailed, resilience.PolicyMisconfigured} {
+		if got := errs.HTTPStatusOf(sentinel); got != 500 {
+			t.Errorf("HTTPStatusOf(%v) = %d, want 500", sentinel, got)
+		}
+	}
+}
+
+// noop is an operation that succeeds at once.
+func noop(context.Context) error {
+	return nil
+}

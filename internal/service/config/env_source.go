@@ -68,6 +68,43 @@ func (s envSource) Load() (values map[string]any, err error) {
 	return out, nil
 }
 
+// Describe implements core/config.Describer: the layer is the environment and
+// the detail is the VARIABLE that supplied key — for a nested key, the one
+// that supplied its top-level table. It is the variable Load read: the same
+// match, and the last matching entry wins exactly as it does in Load.
+//
+// The value is never read into the answer; the name is what an operator types.
+func (s envSource) Describe(key string) (layer, detail string) {
+	top, _, _ := strings.Cut(key, ".")
+	variable, _, found := s.lookup(top)
+	//: the environment changed since the load, or the key never came from
+	//: here — say which variable WOULD carry it.
+	if !found {
+		//: the canonical spelling under this prefix.
+		return coreconfig.LayerEnv, matchPrefix(s.prefix) + strings.ToUpper(top)
+	}
+	//: the variable that set the key.
+	return coreconfig.LayerEnv, variable
+}
+
+// lookup finds the environment variable that supplies the top-level key under
+// this source's prefix, with its RAW value — before any JSON coercion. When
+// several variables map to one key (APP_PORT and APP_port), the last one in
+// the environment wins, which is the one Load stored.
+func (s envSource) lookup(key string) (variable, raw string, found bool) {
+	match := matchPrefix(s.prefix)
+	//: every entry, in the order Load folds them.
+	for _, kv := range os.Environ() {
+		name, val, ok := strings.Cut(kv, "=")
+		//: a match is exactly what Load would have stored under key.
+		if ok && strings.HasPrefix(name, match) && strings.EqualFold(strings.TrimPrefix(name, match), key) {
+			variable, raw, found = name, val, true
+		}
+	}
+	//: the last match, or none.
+	return variable, raw, found
+}
+
 // matchPrefix turns a caller-supplied prefix into the string every environment
 // key must start with.
 //

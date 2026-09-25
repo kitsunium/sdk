@@ -63,6 +63,20 @@ There is deliberately no opportunistic mode. A transport that encrypts when the 
 
 Credentials never travel unencrypted. [TLSDisabled](<#TLSDisabled>) with a Username is refused at construction, and an unencrypted session is refused again before the AUTH command — which is not redundant, because net/smtp's own PlainAuth sends the password in the clear whenever the server is called localhost, and in a container that is every relay one hop away.
 
+### A configuration from one URL, and a password nothing prints
+
+[ParseURL](<#ParseURL>) reads the form a deployment hands over in one variable:
+
+```
+cfg, err := mail.ParseURL(os.Getenv("SMTP_URL"))
+// smtp://user:pass@relay.example:587?tls=starttls|implicit|none
+// smtps://user:pass@relay.example        (implicit TLS, port 465)
+```
+
+smtp:// is STARTTLS unless the tls parameter says otherwise, smtps:// is implicit TLS and may only say so again, and a plaintext session is spelled tls=none. The port defaults by mode \(587, 465, 25\). The result is checked as [NewSMTP](<#NewSMTP>) checks it, so credentials with tls=none fail here with [AuthInsecure](<#HeaderInjection>). A refusal is [InvalidURL](<#HeaderInjection>) with a clause, and it never quotes the URL — its userinfo is the password.
+
+An [SMTPConfig](<#SMTPConfig>) never renders its password: every fmt verb \(it implements Format\), String, GoString and its JSON write "\<redacted\>" where the password is, and the empty string where none is set.
+
 ### What this package does NOT promise
 
 A nil error from \[Transport.Send\] means the next hop ACCEPTED the message. It is not delivery: SMTP accepts responsibility hop by hop \(RFC 5321 §6.1\), and the hop that eventually refuses says so in a bounce, hours later, to the envelope's return path.
@@ -100,6 +114,7 @@ sent := box.Sent()                // envelope + composed the RFC 5322 wire form
 - [type Message](<#Message>)
 - [type Outbox](<#Outbox>)
 - [type SMTPConfig](<#SMTPConfig>)
+  - [func ParseURL\(raw string\) \(cfg SMTPConfig, err error\)](<#ParseURL>)
 - [type TLSMode](<#TLSMode>)
 - [type Transport](<#Transport>)
   - [func NewSMTP\(cfg SMTPConfig\) \(transport Transport, err error\)](<#NewSMTP>)
@@ -167,11 +182,14 @@ var (
     // SendRefused is returned when MAIL, RCPT or DATA was answered with a
     // failure reply. The server's own text travels as a log-only field.
     SendRefused = svcmail.SendRefused
+    // InvalidURL is returned by [ParseURL] for a URL it cannot read. It names
+    // the clause and never the URL, which carries the password.
+    InvalidURL = svcmail.InvalidURL
 )
 ```
 
 <a name="Compose"></a>
-## func [Compose](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L291>)
+## func [Compose](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L322>)
 
 ```go
 func Compose(msg Message) (raw []byte, err error)
@@ -180,7 +198,7 @@ func Compose(msg Message) (raw []byte, err error)
 Compose renders msg to the RFC 5322 wire form using the system clock and crypto/rand. It is the one\-line form of [NewComposer](<#NewComposer>).
 
 <a name="Validate"></a>
-## func [Validate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L302>)
+## func [Validate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L333>)
 
 ```go
 func Validate(msg Message) error
@@ -191,7 +209,7 @@ Validate reports whether msg can be composed and sent, returning the first typed
 It is exported so a caller can reject a message at the edge — where a form was submitted — rather than at the transport, and get the same verdict either way.
 
 <a name="Address"></a>
-## type [Address](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L146>)
+## type [Address](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L165>)
 
 Address is the public alias for one RFC 5322 mailbox.
 
@@ -200,7 +218,7 @@ type Address = coremail.AddressValue
 ```
 
 <a name="Attachment"></a>
-## type [Attachment](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L150>)
+## type [Attachment](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L169>)
 
 Attachment is the public alias for one file or inline part. A non\-empty ContentID makes it inline.
 
@@ -209,7 +227,7 @@ type Attachment = coremail.AttachmentValue
 ```
 
 <a name="BatchSender"></a>
-## type [BatchSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L172>)
+## type [BatchSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L191>)
 
 BatchSender is the public alias for the sibling that sends several messages over one session.
 
@@ -218,7 +236,7 @@ type BatchSender = coremail.BatchSender
 ```
 
 <a name="Composer"></a>
-## type [Composer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L194>)
+## type [Composer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L213>)
 
 Composer is the public alias for the type that turns a [Message](<#Message>) into the RFC 5322 wire form without sending anything.
 
@@ -227,7 +245,7 @@ type Composer = svcmail.Composer
 ```
 
 <a name="NewComposer"></a>
-### func [NewComposer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L284>)
+### func [NewComposer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L315>)
 
 ```go
 func NewComposer(cfg ComposerConfig) *Composer
@@ -238,7 +256,7 @@ NewComposer returns a composer that renders a [Message](<#Message>) to the RFC 5
 A [ComposerConfig](<#ComposerConfig>) with a fixed clock and a fixed randomness source makes composition byte\-deterministic.
 
 <a name="ComposerConfig"></a>
-## type [ComposerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L190>)
+## type [ComposerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L209>)
 
 ComposerConfig is the public alias for the composer's optional clock and randomness source. Both clamp rather than refuse.
 
@@ -247,7 +265,7 @@ type ComposerConfig = svcmail.ComposerConfig
 ```
 
 <a name="Delivery"></a>
-## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L163>)
+## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L182>)
 
 Delivery is the public alias for one record of what a transport put on the wire: the envelope, and the composed bytes.
 
@@ -256,7 +274,7 @@ type Delivery = coremail.DeliveryValue
 ```
 
 <a name="Envelope"></a>
-## type [Envelope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L159>)
+## type [Envelope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L178>)
 
 Envelope is the public alias for the SMTP envelope: one MAIL FROM and every RCPT TO, Bcc included.
 
@@ -265,7 +283,7 @@ type Envelope = coremail.EnvelopeValue
 ```
 
 <a name="FullTransport"></a>
-## type [FullTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L180>)
+## type [FullTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L199>)
 
 FullTransport is the public alias for the union [NewMemory](<#NewMemory>) returns. A parameter should still ask for the narrowest thing it uses.
 
@@ -274,7 +292,7 @@ type FullTransport = coremail.FullTransport
 ```
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L273>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L304>)
 
 ```go
 func NewMemory() FullTransport
@@ -285,7 +303,7 @@ NewMemory returns a transport that composes every message and records the result
 It takes no arguments on purpose: every knob it could offer is one a test has to set before it can assert anything, and the value of a double is that it costs one line.
 
 <a name="HeaderField"></a>
-## type [HeaderField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L155>)
+## type [HeaderField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L174>)
 
 HeaderField is the public alias for one additional header. It is a slice element rather than a map entry so a composed message is deterministic and so a field may legitimately repeat.
 
@@ -294,7 +312,7 @@ type HeaderField = coremail.HeaderFieldValue
 ```
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L143>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L162>)
 
 Message is the public alias for one mail, as a value.
 
@@ -303,7 +321,7 @@ type Message = coremail.MessageValue
 ```
 
 <a name="Outbox"></a>
-## type [Outbox](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L176>)
+## type [Outbox](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L195>)
 
 Outbox is the public alias for the sibling that exposes what was sent. Only the in\-memory transport implements it.
 
@@ -312,7 +330,7 @@ type Outbox = coremail.Outbox
 ```
 
 <a name="SMTPConfig"></a>
-## type [SMTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L183>)
+## type [SMTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L202>)
 
 SMTPConfig is the public alias for the SMTP transport's configuration.
 
@@ -320,8 +338,17 @@ SMTPConfig is the public alias for the SMTP transport's configuration.
 type SMTPConfig = svcmail.SMTPConfig
 ```
 
+<a name="ParseURL"></a>
+### func [ParseURL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L281>)
+
+```go
+func ParseURL(raw string) (cfg SMTPConfig, err error)
+```
+
+ParseURL reads smtp://user:password@host:port?tls=starttls|implicit|none, or smtps://…, into an [SMTPConfig](<#SMTPConfig>) that [NewSMTP](<#NewSMTP>) accepts; see the package documentation for the grammar and its defaults. On a refusal it returns the zero SMTPConfig and an error that never quotes the URL.
+
 <a name="TLSMode"></a>
-## type [TLSMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L186>)
+## type [TLSMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L205>)
 
 TLSMode is the public alias for the encryption mode. Its zero value is refused.
 
@@ -356,7 +383,7 @@ const TLSUnset TLSMode = svcmail.TLSUnset
 ```
 
 <a name="Transport"></a>
-## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L168>)
+## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L187>)
 
 Transport is the public alias for the frozen port. A new capability arrives as a sibling interface reached by type assertion, never as a second method \(ADR 0039\).
 
@@ -365,7 +392,7 @@ type Transport = coremail.Transport
 ```
 
 <a name="NewSMTP"></a>
-### func [NewSMTP](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L261>)
+### func [NewSMTP](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L292>)
 
 ```go
 func NewSMTP(cfg SMTPConfig) (transport Transport, err error)
