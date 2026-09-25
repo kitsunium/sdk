@@ -6,10 +6,17 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
 )
+
+// windowOrigin is the instant the manual clock starts at wherever a window's
+// endpoints are asserted: fixed, so an endpoint is compared with an exact value
+// rather than with another reading of a clock whose resolution varies by OS.
+var windowOrigin = time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 
 // TestObservableIsReadOncePerCollection pins the defining property of an
 // asynchronous instrument: its value is produced by a callback at COLLECTION
@@ -132,6 +139,16 @@ func TestObservableHonoursTheCardinalityBound(t *testing.T) {
 // advances to the previous end. Getting this backwards is not a rounding error:
 // a backend fed repeated cumulative values as if they were deltas double-counts
 // every observation for as long as the process lives.
+//
+// The meter reads a MANUAL clock that moves between collections. On the system
+// clock this test asserted that time had passed between two collections a few
+// microseconds apart, and on Windows it had not: consecutive readings there
+// share one clock tick, the delta window [start, end] closed at the instant it
+// opened, and "the start moved" read false. The meter was right — a delta
+// window that begins where the last one ended is exactly the contract, zero
+// length included — so the clock the test depended on is now the one it
+// injects, and the assertion is the stronger one: the start is the previous
+// collection's end, not merely something else.
 func TestDeltaCollectConsumesTheWindow(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -153,7 +170,8 @@ func TestDeltaCollectConsumesTheWindow(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		m := svcmetrics.NewMeterWithConfig(svcmetrics.MeterConfig{Temporality: c.temporality})
+		clk := clock.NewManualClock(windowOrigin)
+		m := svcmetrics.NewMeterWithConfig(svcmetrics.MeterConfig{Temporality: c.temporality, Clock: clk})
 		m.Counter("requests").Add(3)
 		hist := m.Histogram("latency", []float64{1})
 		hist.Record(0.5)
@@ -176,10 +194,13 @@ func TestDeltaCollectConsumesTheWindow(t *testing.T) {
 		//: a gauge has NO temporality at all, which is the model rather than
 		//: an omission — a sampled reading covers no window.
 		m.Gauge("in_flight").Set(4)
-		if got := m.Collect().Gauges["in_flight"].Points[0].Value; got != 4 {
+		clk.Advance(time.Second)
+		middle := m.Collect()
+		if got := middle.Gauges["in_flight"].Points[0].Value; got != 4 {
 			t.Errorf("the gauge reads %v, want 4", got)
 		}
 
+		clk.Advance(time.Second)
 		second := m.Collect()
 		if got := second.Sums["requests"].Points[0].Value; got != c.wantSecond {
 			t.Errorf("the second sum reads %d, want %d", got, c.wantSecond)
@@ -194,6 +215,18 @@ func TestDeltaCollectConsumesTheWindow(t *testing.T) {
 		moved := !second.StartTime.Equal(first.StartTime)
 		if moved != c.startMoves {
 			t.Errorf("the window start moved = %v, want %v", moved, c.startMoves)
+		}
+		//: delta starts where the previous collection ended; cumulative keeps
+		//: the instant the meter was built, forever.
+		wantStart := windowOrigin
+		if c.startMoves {
+			wantStart = middle.Time
+		}
+		if !second.StartTime.Equal(wantStart) {
+			t.Errorf("the second window starts at %v, want %v", second.StartTime, wantStart)
+		}
+		if !second.Time.Equal(windowOrigin.Add(2 * time.Second)) {
+			t.Errorf("the second window ends at %v, want the clock's %v", second.Time, windowOrigin.Add(2*time.Second))
 		}
 	}
 	for _, c := range tests {

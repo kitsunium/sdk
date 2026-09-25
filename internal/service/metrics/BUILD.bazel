@@ -75,6 +75,7 @@ go_test(
     embed = [":metrics"],
     deps = [
         "//internal/core/metrics",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
 )

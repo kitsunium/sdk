@@ -4,7 +4,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/metrics"
 )
 
@@ -244,9 +246,17 @@ func TestFacadeTemporality(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		m := metrics.NewMeterWithConfig(metrics.MeterConfig{Temporality: c.temporality})
+		//: a manual clock that MOVES between the two collections. On the
+		//: system clock this read "the start did not move" on Windows, where two
+		//: collections microseconds apart share one clock tick — a delta window
+		//: that opens where the last one closed is the contract even at zero
+		//: length, so the dependence was the test's and the clock is now its own.
+		origin := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+		clk := clock.NewManualClock(origin)
+		m := metrics.NewMeterWithConfig(metrics.MeterConfig{Temporality: c.temporality, Clock: clk})
 		m.Counter("requests").Add(3)
 
+		clk.Advance(time.Second)
 		first := m.Collect()
 		if got := first.Sums["requests"].Temporality; got != c.want {
 			t.Errorf("the snapshot reports temporality %v, want %v", got, c.want)
@@ -255,6 +265,7 @@ func TestFacadeTemporality(t *testing.T) {
 			t.Errorf("the first collection reads %d, want 3", got)
 		}
 
+		clk.Advance(time.Second)
 		second := m.Collect()
 		if got := second.Sums["requests"].Points[0].Value; got != c.wantSecond {
 			t.Errorf("the second collection reads %d, want %d", got, c.wantSecond)
@@ -264,6 +275,10 @@ func TestFacadeTemporality(t *testing.T) {
 		moved := !second.StartTime.Equal(first.StartTime)
 		if moved != c.startMoves {
 			t.Errorf("the window start moved = %v, want %v", moved, c.startMoves)
+		}
+		//: and it moved to exactly where the first window ended.
+		if c.startMoves && !second.StartTime.Equal(first.Time) {
+			t.Errorf("the second window starts at %v, want the first's end %v", second.StartTime, first.Time)
 		}
 		//: and the window always closes at or after it opens.
 		if second.Time.Before(second.StartTime) {
